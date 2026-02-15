@@ -10,6 +10,7 @@ import { getCorrelationAnalyzer } from './correlation-analyzer';
 import type { CorrelationAnalyzer } from './correlation-analyzer';
 import { PriceMatrix } from './price-matrix';
 import type { PriceMatrixConfig } from './price-matrix';
+import { LRUQueue } from './lru-queue';
 
 // =============================================================================
 // P2-FIX 3.1: Use pure static defaults instead of fragile require() pattern
@@ -88,177 +89,9 @@ const CACHE_DEFAULTS = {
 
 const logger = createLogger('hierarchical-cache');
 
-// ===========================================================================
-// T1.4: O(1) LRU Queue Implementation using Doubly-Linked List
-// ===========================================================================
-
-/**
- * T1.4: Node in the doubly-linked list for LRU tracking.
- * Each node holds a key and pointers to prev/next nodes.
- */
-interface LRUNode {
-  key: string;
-  prev: LRUNode | null;
-  next: LRUNode | null;
-}
-
-/**
- * T1.4: O(1) LRU Queue using doubly-linked list + Map.
- *
- * Operations:
- * - touch(key): Move key to end (most recently used) - O(1)
- * - add(key): Add new key to end - O(1)
- * - evictOldest(): Remove and return oldest key - O(1)
- * - remove(key): Remove specific key - O(1)
- * - has(key): Check if key exists - O(1)
- * - size: Get current size - O(1)
- *
- * Previous array-based implementation:
- * - indexOf: O(n)
- * - splice: O(n)
- *
- * This implementation eliminates the O(n) overhead.
- */
-export class LRUQueue {
-  /** Map from key to node for O(1) lookup */
-  private nodeMap: Map<string, LRUNode> = new Map();
-  /** Sentinel head node (oldest) */
-  private head: LRUNode;
-  /** Sentinel tail node (newest) */
-  private tail: LRUNode;
-
-  constructor() {
-    // Initialize sentinel nodes (simplifies edge case handling)
-    this.head = { key: '__HEAD__', prev: null, next: null };
-    this.tail = { key: '__TAIL__', prev: null, next: null };
-    this.head.next = this.tail;
-    this.tail.prev = this.head;
-  }
-
-  /**
-   * Get current queue size.
-   */
-  get size(): number {
-    return this.nodeMap.size;
-  }
-
-  /**
-   * Check if key exists in queue.
-   */
-  has(key: string): boolean {
-    return this.nodeMap.has(key);
-  }
-
-  /**
-   * Add new key to end of queue (most recently used).
-   * If key already exists, moves it to end.
-   */
-  add(key: string): void {
-    if (this.nodeMap.has(key)) {
-      // Key exists, just touch it
-      this.touch(key);
-      return;
-    }
-
-    // Create new node
-    const node: LRUNode = { key, prev: null, next: null };
-
-    // Insert before tail (at the end)
-    this.insertBeforeTail(node);
-
-    // Add to map
-    this.nodeMap.set(key, node);
-  }
-
-  /**
-   * Move existing key to end of queue (most recently used).
-   * O(1) operation.
-   */
-  touch(key: string): void {
-    const node = this.nodeMap.get(key);
-    if (!node) return;
-
-    // Remove from current position
-    this.removeNode(node);
-
-    // Insert at end
-    this.insertBeforeTail(node);
-  }
-
-  /**
-   * Remove and return the oldest key (from head).
-   * Returns null if queue is empty.
-   */
-  evictOldest(): string | null {
-    // Oldest is the node after head sentinel
-    const oldest = this.head.next;
-    if (!oldest || oldest === this.tail) {
-      return null; // Queue is empty
-    }
-
-    // Remove from list
-    this.removeNode(oldest);
-
-    // Remove from map
-    this.nodeMap.delete(oldest.key);
-
-    return oldest.key;
-  }
-
-  /**
-   * Remove a specific key from queue.
-   */
-  remove(key: string): boolean {
-    const node = this.nodeMap.get(key);
-    if (!node) return false;
-
-    this.removeNode(node);
-    this.nodeMap.delete(key);
-    return true;
-  }
-
-  /**
-   * Clear all entries.
-   */
-  clear(): void {
-    this.nodeMap.clear();
-    this.head.next = this.tail;
-    this.tail.prev = this.head;
-  }
-
-  /**
-   * Get all keys in order (oldest first).
-   * Mainly for debugging/testing.
-   */
-  keys(): string[] {
-    const result: string[] = [];
-    let current = this.head.next;
-    while (current && current !== this.tail) {
-      result.push(current.key);
-      current = current.next;
-    }
-    return result;
-  }
-
-  // Private helper: Remove node from its current position
-  private removeNode(node: LRUNode): void {
-    const prev = node.prev;
-    const next = node.next;
-    if (prev) prev.next = next;
-    if (next) next.prev = prev;
-    node.prev = null;
-    node.next = null;
-  }
-
-  // Private helper: Insert node before tail (at the "newest" end)
-  private insertBeforeTail(node: LRUNode): void {
-    const prev = this.tail.prev;
-    node.prev = prev;
-    node.next = this.tail;
-    if (prev) prev.next = node;
-    this.tail.prev = node;
-  }
-}
+// Fix #29: LRUQueue extracted to ./lru-queue.ts for reuse.
+// Re-exported here for backward compatibility with existing imports.
+export { LRUQueue } from './lru-queue';
 
 /**
  * Task 2.2.2: Predictive warming configuration
@@ -322,16 +155,47 @@ export class HierarchicalCache {
    */
   private redisPromise: Promise<import('../redis').RedisClient> | null = null;
 
-  // PHASE1-TASK30: L1 Cache implementation choice
-  // Legacy: Map-based L1 cache
+  // ===========================================================================
+  // L1 Cache: Dual Map + PriceMatrix Architecture (Fix #23 documentation)
+  //
+  // DESIGN RATIONALE: Both structures serve complementary purposes and are
+  // intentionally maintained in parallel:
+  //
+  // - l1Metadata (Map<string, CacheEntry>): Stores full cache metadata including
+  //   the actual value, TTL, access count, last access time, and size. This is
+  //   the SOURCE OF TRUTH for cache reads (see getFromL1: `metadata?.value ?? null`).
+  //   Required because PriceMatrix only stores numeric prices, not arbitrary
+  //   values or metadata.
+  //
+  // - priceMatrix (PriceMatrix): Stores numeric prices in SharedArrayBuffer for
+  //   sub-microsecond cross-worker thread access via Atomics. Used for the L1
+  //   fast-path when `usePriceMatrix=true`. Worker threads can read prices
+  //   directly without IPC overhead.
+  //
+  // The dual write (both Map and PriceMatrix) in setInL1() ensures:
+  // 1. Workers get zero-copy price access via SharedArrayBuffer
+  // 2. Main thread gets full metadata (TTL, access stats, non-price values)
+  // 3. LRU eviction and size tracking operate on the Map
+  //
+  // DO NOT remove either structure — they serve different access patterns.
+  // @see ADR-005: Hierarchical Cache Strategy
+  // ===========================================================================
+
+  /**
+   * L1 metadata map: stores full CacheEntry including value, TTL, access stats.
+   * Source of truth for cache reads. Used alongside PriceMatrix.
+   */
   private l1Metadata: Map<string, CacheEntry> = new Map();
   private l1MaxEntries: number;
-  // T1.4: Replaced array-based LRU queue with O(1) LRU queue
-  // Previous: private l1EvictionQueue: string[] = []; // O(n) indexOf/splice
-  // New: O(1) operations for all LRU operations
+  // T1.4: O(1) LRU queue (replaces O(n) array-based implementation)
   private l1EvictionQueue: LRUQueue = new LRUQueue();
+  // Fix #11: Incremental L1 size tracking (replaces O(n) iteration in getCurrentL1Size)
+  private l1CurrentSize: number = 0;
 
-  // PHASE1-TASK30: PriceMatrix-based L1 cache (new implementation)
+  /**
+   * L1 PriceMatrix: stores numeric prices in SharedArrayBuffer for zero-copy
+   * cross-worker access. Complements l1Metadata for the fast-path.
+   */
   private priceMatrix: PriceMatrix | null = null;
   private usePriceMatrix: boolean = false;
 
@@ -390,9 +254,9 @@ export class HierarchicalCache {
 
     this.config = {
       l1Enabled: config.l1Enabled !== false,
-      l1Size: config.l1Size || CACHE_DEFAULTS.defaultL1SizeMb,
+      l1Size: config.l1Size ?? CACHE_DEFAULTS.defaultL1SizeMb,
       l2Enabled: config.l2Enabled !== false,
-      l2Ttl: config.l2Ttl || CACHE_DEFAULTS.defaultL2TtlSeconds,
+      l2Ttl: config.l2Ttl ?? CACHE_DEFAULTS.defaultL2TtlSeconds,
       l3Enabled: l3Default,
       // T2.10: L3 max size defaults to 10000 (0 = unlimited for backwards compat)
       l3MaxSize: config.l3MaxSize ?? 10000,
@@ -421,10 +285,10 @@ export class HierarchicalCache {
     // PHASE1-TASK30: Initialize PriceMatrix if enabled
     if (this.usePriceMatrix && this.config.l1Enabled) {
       const priceMatrixConfig: Partial<PriceMatrixConfig> = {
-        // Calculate max pairs based on L1 size (12 bytes per entry in PriceMatrix)
-        maxPairs: Math.floor(this.config.l1Size * 1024 * 1024 / 12),
+        // Calculate max pairs based on L1 size (16 bytes per entry in PriceMatrix with sequence counter)
+        maxPairs: Math.floor(this.config.l1Size * 1024 * 1024 / 16),
         // Reserve 10% for dynamic pairs
-        reserveSlots: Math.floor(this.config.l1Size * 1024 * 1024 / 12 * 0.1),
+        reserveSlots: Math.floor(this.config.l1Size * 1024 * 1024 / 16 * 0.1),
         strictMode: false,
         enableAtomics: true
       };
@@ -658,6 +522,8 @@ export class HierarchicalCache {
         this.l1Metadata.clear();
         // T1.4: Use LRUQueue.clear() instead of reassigning to empty array
         this.l1EvictionQueue.clear();
+        // Fix #11: Reset incremental size tracking
+        this.l1CurrentSize = 0;
         // PHASE1-TASK33: Clear PriceMatrix if enabled
         if (this.usePriceMatrix && this.priceMatrix) {
           this.priceMatrix.clear();
@@ -877,6 +743,14 @@ export class HierarchicalCache {
         ttl
       };
 
+      // Fix #11: Adjust incremental size tracking (handle update vs new entry)
+      const existingEntry = this.l1Metadata.get(key);
+      if (existingEntry) {
+        this.l1CurrentSize += size - existingEntry.size;
+      } else {
+        this.l1CurrentSize += size;
+      }
+
       this.l1Metadata.set(key, entry);
       this.l1EvictionQueue.add(key);
       return;
@@ -899,6 +773,14 @@ export class HierarchicalCache {
       ttl
     };
 
+    // Fix #11: Adjust incremental size tracking (handle update vs new entry)
+    const existingEntry = this.l1Metadata.get(key);
+    if (existingEntry) {
+      this.l1CurrentSize += size - existingEntry.size;
+    } else {
+      this.l1CurrentSize += size;
+    }
+
     this.l1Metadata.set(key, entry);
 
     // T1.4: Add to LRU queue using O(1) add operation
@@ -912,6 +794,11 @@ export class HierarchicalCache {
    * Clears both Map metadata and PriceMatrix data.
    */
   private invalidateL1(key: string): void {
+    // Fix #11: Read size BEFORE delete for incremental tracking
+    const entry = this.l1Metadata.get(key);
+    if (entry) {
+      this.l1CurrentSize -= entry.size;
+    }
     this.l1Metadata.delete(key);
     // T1.4: O(1) remove instead of O(n) indexOf + O(n) splice
     this.l1EvictionQueue.remove(key);
@@ -939,17 +826,22 @@ export class HierarchicalCache {
     // New: O(1) doubly-linked list removal
     const key = this.l1EvictionQueue.evictOldest();
     if (key) {
+      // Fix #11: Read size BEFORE delete for incremental tracking
+      const entry = this.l1Metadata.get(key);
+      if (entry) {
+        this.l1CurrentSize -= entry.size;
+      }
       this.l1Metadata.delete(key);
       this.stats.l1.evictions++;
     }
   }
 
+  /**
+   * Fix #11: O(1) L1 size query using incremental tracking.
+   * Previously iterated ALL entries O(n) on every call.
+   */
   private getCurrentL1Size(): number {
-    let total = 0;
-    for (const entry of this.l1Metadata.values()) {
-      total += entry.size;
-    }
-    return total;
+    return this.l1CurrentSize;
   }
 
   // L2 Cache Implementation (Redis)
@@ -980,7 +872,7 @@ export class HierarchicalCache {
       // This avoids the double-serialization bug where redis.set() would stringify
       // and then getFromL2() would try to parse the already-parsed object.
       const serialized = JSON.stringify(value);
-      const ttlSeconds = ttl || this.config.l2Ttl;
+      const ttlSeconds = ttl ?? this.config.l2Ttl;
       await redis.setex(redisKey, ttlSeconds, serialized);
     } catch (error) {
       logger.error('L2 cache set error', { error, key });

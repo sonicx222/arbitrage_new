@@ -179,7 +179,6 @@ export function createMockPriceDataManager() {
       byChain: new Map(),
       timestamp: Date.now(),
     }),
-    createSnapshot: jest.fn().mockReturnValue([]),
     cleanup: jest.fn(),
     clear: jest.fn(),
   };

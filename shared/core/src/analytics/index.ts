@@ -31,15 +31,21 @@ export type {
 export {
   MLOpportunityScorer,
   getMLOpportunityScorer,
-  resetMLOpportunityScorer
+  resetMLOpportunityScorer,
+  toOrderflowSignal
 } from './ml-opportunity-scorer';
 export type {
   MLPrediction,
   MLScorerConfig,
   OpportunityScoreInput,
   OpportunityWithMomentum,
+  OpportunityWithOrderflow,
+  OpportunityWithAllSignals,
   EnhancedScore,
-  ScorerStats
+  EnhancedScoreWithOrderflow,
+  ScorerStats,
+  OrderflowSignal,
+  OrderflowPredictionInput
 } from './ml-opportunity-scorer';
 
 // Whale Activity Tracker (T3.12)
@@ -65,6 +71,7 @@ export {
   resetLiquidityDepthAnalyzer
 } from './liquidity-depth-analyzer';
 export type {
+  AmmType,
   LiquidityDepthConfig,
   PoolLiquidity,
   LiquidityLevel,
@@ -94,6 +101,9 @@ export {
   PerformanceAnalyticsEngine
 } from './performance-analytics';
 export type {
+  TradeRecord,
+  PerformanceReport,
+  PerformanceMetrics,
   StrategyPerformance,
   AssetPerformance,
   TimePerformance,
@@ -106,6 +116,7 @@ export {
   ProfessionalQualityMonitor
 } from './professional-quality-monitor';
 export type {
+  DetectionResult,
   ProfessionalQualityScore,
   QualityMetrics,
   QualityMonitorDeps,

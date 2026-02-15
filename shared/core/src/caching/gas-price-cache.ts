@@ -353,7 +353,7 @@ export class GasPriceCache {
 
     // Return fallback
     return {
-      priceUsd: FALLBACK_NATIVE_PRICES[chain.toLowerCase()] || 1000,
+      priceUsd: FALLBACK_NATIVE_PRICES[chain.toLowerCase()] ?? 1000,
       lastUpdated: Date.now(),
       isFallback: true
     };
@@ -537,12 +537,16 @@ export class GasPriceCache {
       // Fetch fee data (EIP-1559 compatible)
       const feeData = await provider.getFeeData();
 
-      const gasPriceWei = feeData.gasPrice || BigInt(0);
-      const maxFeePerGasWei = feeData.maxFeePerGas || undefined;
-      const maxPriorityFeePerGasWei = feeData.maxPriorityFeePerGas || undefined;
+      const gasPriceWei = feeData.gasPrice ?? BigInt(0);
+      const maxFeePerGasWei = feeData.maxFeePerGas ?? undefined;
+      const maxPriorityFeePerGasWei = feeData.maxPriorityFeePerGas ?? undefined;
 
       // Convert to gwei for display
-      const gasPriceGwei = Number(gasPriceWei) / 1e9;
+      // Fix #10: Guard against BigInt→Number overflow for values > 2^53
+      let gasPriceGwei = Number(gasPriceWei) / 1e9;
+      if (!Number.isFinite(gasPriceGwei)) {
+        gasPriceGwei = 0; // Graceful fallback — will use fallback gas price
+      }
 
       this.gasPrices.set(chainLower, {
         gasPriceWei,
@@ -599,7 +603,7 @@ export class GasPriceCache {
       // Initialize native prices with fallbacks
       if (!this.nativePrices.has(chainLower)) {
         this.nativePrices.set(chainLower, {
-          priceUsd: FALLBACK_NATIVE_PRICES[chainLower] || 1000,
+          priceUsd: FALLBACK_NATIVE_PRICES[chainLower] ?? 1000,
           lastUpdated: Date.now(),
           isFallback: true
         });
@@ -608,7 +612,7 @@ export class GasPriceCache {
   }
 
   private createFallbackGasPrice(chain: string): GasPriceData {
-    const fallbackGwei = FALLBACK_GAS_PRICES[chain.toLowerCase()] || 50;
+    const fallbackGwei = FALLBACK_GAS_PRICES[chain.toLowerCase()] ?? 50;
     // Convert gwei to wei: multiply by 1e9
     // Note: gwei values are typically whole numbers or simple decimals (e.g., 50, 25, 0.25)
     // so precision loss is minimal. For critical calculations, use ethers.parseUnits.
@@ -639,6 +643,8 @@ export class GasPriceCache {
         this.logger.error('Error in gas price refresh timer', { error });
       }
     }, this.config.refreshIntervalMs);
+    // Don't let refresh timer prevent process exit
+    this.refreshTimer.unref();
   }
 }
 

@@ -74,7 +74,7 @@ export class BridgeRouterFactory {
     const stargateRouter = new StargateRouter(config.providers);
     this.routers.set('stargate', stargateRouter);
 
-    // Future: Add more routers (hop, across, celer, native)
+    // Future: Add more routers (across, wormhole, connext, hyperlane, native)
   }
 
   /**
@@ -96,9 +96,11 @@ export class BridgeRouterFactory {
   }
 
   /**
-   * Find the best router for a specific route
+   * Find a router that supports the given route.
+   * Returns the first matching router, not necessarily the optimal one.
+   * For multi-factor optimal bridge selection, use selectOptimalBridge() from bridge-config.
    */
-  findBestRouter(
+  findSupportedRouter(
     sourceChain: string,
     destChain: string,
     token: string
@@ -130,6 +132,21 @@ export class BridgeRouterFactory {
     }
 
     return results;
+  }
+
+  /**
+   * Dispose all routers and release resources.
+   *
+   * Stops cleanup timers and other background resources held by router implementations.
+   * Must be called during engine shutdown to prevent resource leaks.
+   */
+  async dispose(): Promise<void> {
+    for (const router of this.routers.values()) {
+      if ('dispose' in router && typeof (router as any).dispose === 'function') {
+        await (router as any).dispose();
+      }
+    }
+    this.routers.clear();
   }
 }
 

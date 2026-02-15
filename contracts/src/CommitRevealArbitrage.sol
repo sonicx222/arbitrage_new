@@ -72,19 +72,12 @@ import "./base/BaseFlashArbitrage.sol";
  *   errors or insufficient funds for repayment.
  * Using these token types will result in failed transactions and wasted gas.
  *
- * ## Known Limitations
+ * ## Griefing Protection
  *
- * **Front-Running Griefing**: An attacker can observe a commit transaction in the
- * mempool and front-run it with the same commitment hash. This causes the original
- * committer's transaction to revert. However, the attacker cannot steal profits
- * because only the original committer (tracked in `committers` mapping) can reveal.
- *
- * **Mitigation**: This is a griefing attack (DoS) not a theft attack. Consider using
- * private mempools (Flashbots, Eden, etc.) for high-value commits to avoid front-running.
- *
- * **Why Not Fixed**: Including msg.sender in the commitment hash would prevent this,
- * but adds complexity and gas cost. Current design prioritizes simplicity for the
- * common case (no attackers), with private mempool as escape hatch.
+ * Commitment hashes include msg.sender to prevent front-running griefing attacks.
+ * An attacker observing a commit tx in the mempool cannot replicate the same hash
+ * because each sender produces a unique hash for the same parameters (+2000 gas per commit).
+ * The reveal() function recomputes the hash with msg.sender for validation.
  */
 contract CommitRevealArbitrage is BaseFlashArbitrage {
     using SafeERC20 for IERC20;
@@ -403,8 +396,8 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         nonReentrant
         whenNotPaused
     {
-        // 1. Calculate commitment hash and retrieve commit block
-        bytes32 commitmentHash = keccak256(abi.encode(params));
+        // 1. Calculate commitment hash (includes msg.sender to prevent griefing)
+        bytes32 commitmentHash = keccak256(abi.encodePacked(msg.sender, abi.encode(params)));
         uint256 commitBlock = commitments[commitmentHash];
 
         // 2. Validate commitment exists, not revealed, caller authorized

@@ -22,14 +22,14 @@ This document provides a snapshot of the current arbitrage trading system archit
 |---------|---------------|---------------|------|-------------|
 | **Coordinator** | 3000 | 3000 | Core | Orchestrates all services, manages leader election |
 | **Partition Asia-Fast** | 3001 | 3011 | Detector | P1: BSC, Polygon, Avalanche, Fantom (Unified Detector) |
-| **Partition L2-Turbo** | 3001 | 3012 | Detector | P2: Arbitrum, Optimism, Base (Unified Detector) |
-| **Partition High-Value** | 3001 | 3013 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
-| **Partition Solana** | 3001 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
-| **Execution Engine** | 3001 | 3015 | Core | Trade execution and MEV protection |
+| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base (Unified Detector) |
+| **Partition High-Value** | 3003 | 3013 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
+| **Partition Solana** | 3004 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
+| **Execution Engine** | 3005 | 3015 | Core | Trade execution and MEV protection |
 | **Cross-Chain Detector** | 3006 | 3016 | Detector | Cross-chain arbitrage opportunities |
-| **Unified Detector (Mempool)** | 3007 | 3007 | Detector | **P1-004 FIX**: Multi-chain detector running mempool partition (pre-block arbitrage via bloXroute BDN). Implements ADR-003 partitioned architecture. |
+| **Mempool Detector** | 3007 | 3007 | Detector | MempoolDetectorService: Pre-block arbitrage detection via bloXroute BDN (ADR-003) |
 
-**Note**: All partition services use internal port 3001 (configurable via `HEALTH_CHECK_PORT`), mapped to unique external ports (3011-3016) in docker-compose. The services run the Unified Detector (`@arbitrage/unified-detector`) with different `PARTITION_ID` configurations.
+**Note**: Each partition service uses a unique internal port (P1:3001, P2:3002, P3:3003, P4:3004, configurable via `HEALTH_CHECK_PORT`). Port assignments are the single source of truth in `shared/constants/service-ports.json`.
 
 ---
 
@@ -75,19 +75,23 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 | Stream | Purpose | Producers | Consumers |
 |--------|---------|-----------|-----------|
-| `stream:price-updates:{partition}` | Real-time price data | Partition Detectors | Cross-Chain Detector, Execution Engine |
-| `stream:swap-events:{partition}` | DEX swap events | Partition Detectors | Analytics, Quality Monitor |
-| `stream:opportunities:{partition}` | Arbitrage opportunities | Partition Detectors | Execution Engine |
+| `stream:price-updates` | Real-time price data | Partition Detectors | Cross-Chain Detector, Execution Engine |
+| `stream:swap-events` | DEX swap events | Partition Detectors | Analytics, Quality Monitor |
+| `stream:opportunities` | Arbitrage opportunities | Partition Detectors | Execution Engine |
 | `stream:whale-alerts` | Large trade notifications | All Detectors | Alert Service |
+| `stream:volume-aggregates` | Volume aggregation data | Partition Detectors | Coordinator |
+| `stream:health` | Service health data | All Services | Coordinator |
+| `stream:execution-requests` | Forwarded opportunities | Coordinator | Execution Engine |
+| `stream:pending-opportunities` | Mempool pending txs | Mempool Detector | Execution Engine |
+| `stream:circuit-breaker` | Circuit breaker events | Execution Engine | All Services |
 | `stream:system-failover` | Failover coordination | CrossRegionHealthManager | All Services |
-| `stream:coordinator-commands` | Service orchestration | Coordinator | All Services |
 
 ### Consumer Groups
 
 | Group | Members | Purpose |
 |-------|---------|---------|
 | `execution-engine-group` | Execution Engine | Processes opportunities |
-| `cross-chain-group` | Cross-Chain Detector | Processes price updates |
+| `cross-chain-detector-group` | Cross-Chain Detector | Processes price updates |
 | `analytics-group` | Quality Monitor | Processes events for analytics |
 
 ---

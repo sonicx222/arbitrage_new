@@ -123,6 +123,47 @@ export const MEMPOOL_CONFIG = {
       pollIntervalMs: 50,
       expectedLatencyMs: 50,
     },
+    // FIX #26: Add missing chain settings (avalanche, fantom, zksync, linea, solana)
+    avalanche: {
+      enabled: false, // C-Chain mempool via RPC subscription
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Avalanche C-Chain block time ~2s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    fantom: {
+      enabled: false, // Fantom mempool via RPC subscription
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Fantom block time ~1s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    zksync: {
+      enabled: false, // zkSync Era sequencer makes mempool less useful
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** zkSync Era block time ~1-5s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    linea: {
+      enabled: false, // Linea sequencer-based
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Linea block time ~2-5s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    solana: {
+      enabled: false, // Solana requires different transaction handling
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Solana block time ~400ms */
+      pollIntervalMs: 25,
+      expectedLatencyMs: 10,
+    },
   } as Record<string, {
     enabled: boolean;
     feedType: 'bloxroute' | 'rpc' | 'eden' | 'flashbots';
@@ -367,6 +408,9 @@ export const CHAIN_NAME_TO_ID: Record<string, number> = {
   base: 8453,
   avalanche: 43114,
   fantom: 250,
+  zksync: 324,
+  linea: 59144,
+  solana: 101,
   // Add aliases
   mainnet: 1,
   eth: 1,
@@ -389,6 +433,9 @@ export const CHAIN_ID_TO_NAME: Record<number, string> = {
   8453: 'base',
   43114: 'avalanche',
   250: 'fantom',
+  324: 'zksync',
+  59144: 'linea',
+  101: 'solana',
 };
 
 /**

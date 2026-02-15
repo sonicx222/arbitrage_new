@@ -396,18 +396,45 @@ export class PairActivityTracker {
     }
 
     // Find and remove the oldest 10% of pairs
+    // Uses O(N*k) partial selection instead of O(N log N) full sort
     const toRemove = Math.max(1, Math.floor(this.config.maxPairs * 0.1));
-    const pairsByTime = Array.from(this.pairs.entries())
-      .sort((a, b) => a[1].lastUpdateTime - b[1].lastUpdateTime);
+    const oldest = this.findOldestN(this.pairs, toRemove, (state) => state.lastUpdateTime);
 
-    for (let i = 0; i < toRemove && i < pairsByTime.length; i++) {
-      this.pairs.delete(pairsByTime[i][0]);
+    for (const key of oldest) {
+      this.pairs.delete(key);
     }
 
     logger.debug('Evicted LRU pairs', {
       evicted: toRemove,
       remaining: this.pairs.size
     });
+  }
+
+  /**
+   * Find the N entries with the smallest timestamps in a single pass.
+   * O(N*k) where k = n, much better than O(N log N) sort when k << N.
+   */
+  private findOldestN<V>(
+    map: Map<string, V>,
+    n: number,
+    getTime: (value: V) => number
+  ): string[] {
+    const oldest: Array<{ key: string; time: number }> = [];
+
+    for (const [key, value] of map) {
+      const time = getTime(value);
+      if (oldest.length < n) {
+        oldest.push({ key, time });
+        if (oldest.length === n) {
+          oldest.sort((a, b) => b.time - a.time);
+        }
+      } else if (time < oldest[0].time) {
+        oldest[0] = { key, time };
+        oldest.sort((a, b) => b.time - a.time);
+      }
+    }
+
+    return oldest.map(e => e.key);
   }
 
   /**

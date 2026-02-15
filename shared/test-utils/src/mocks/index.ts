@@ -30,11 +30,14 @@ export type {
   CoreMocksOptions,
 } from './partition-service.mock';
 
-// Shared mock factories (PerfLogger, ExecutionStateManager)
+// Shared mock factories (PerfLogger, ExecutionStateManager, RedisClient)
 export {
   createMockPerfLogger,
   createMockExecutionStateManager,
+  createMockRedisClient,
 } from './mock-factories';
+
+export type { MockRedisClient } from './mock-factories';
 
 // Provider mocks (ethers.js)
 export {

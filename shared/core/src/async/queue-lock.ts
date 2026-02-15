@@ -1,7 +1,6 @@
 /**
  * FIX 9.1: Queue-Based Lock Pattern
  *
- * Extracted from AsyncMutex and NonceManager for code reuse.
  * Provides a simple, race-condition-free lock implementation using a queue.
  *
  * The key insight is the "always queue first" pattern:
@@ -10,7 +9,6 @@
  * 3. On release, the lock is handed directly to the next waiter
  * 4. This prevents TOCTOU race conditions between checking and acquiring
  *
- * @see shared/core/src/async/async-mutex.ts - Uses this pattern
  * @see shared/core/src/nonce-manager.ts - Uses this pattern
  */
 
@@ -33,7 +31,7 @@ export interface QueueLockStats {
 /**
  * Simple queue-based lock for mutual exclusion.
  *
- * This is a lower-level building block used by AsyncMutex.
+ * This is a lower-level building block for mutual exclusion.
  * For most use cases, prefer AsyncMutex directly.
  *
  * Usage:
@@ -70,6 +68,7 @@ export class QueueLock {
    */
   async acquire(): Promise<void> {
     const startTime = Date.now();
+    let hadContention = false;
 
     // Always queue first - this is the key to preventing race conditions
     return new Promise<void>((resolve) => {
@@ -87,13 +86,18 @@ export class QueueLock {
         if (this.locked) {
           this.stats.contentionCount++;
           this.stats.waitingCount++;
+          hadContention = true;
         }
       }
     }).then(() => {
-      // Track wait time if we had to wait
+      // Track wait time and decrement waitingCount for contended callers
       const waitTime = Date.now() - startTime;
       if (waitTime > 0) {
         this.stats.totalWaitTimeMs += waitTime;
+      }
+      // Fix #23: Always decrement waitingCount for callers that were in the
+      // contention path, even if waitTime rounds to 0 (sub-millisecond waits)
+      if (hadContention) {
         this.stats.waitingCount = Math.max(0, this.stats.waitingCount - 1);
       }
     });
@@ -122,6 +126,11 @@ export class QueueLock {
    * handed directly to the next waiter (lock stays held during handoff).
    */
   release(): void {
+    // P1-FIX: Guard against double-release. When no waiters, first release sets
+    // locked=false; second call returns early. The handoff path (waiters exist)
+    // keeps locked=true during handoff, so this guard doesn't interfere.
+    if (!this.locked) return;
+
     // Wake up next waiter if any
     const nextWaiter = this.waitQueue.shift();
     if (nextWaiter) {

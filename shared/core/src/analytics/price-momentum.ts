@@ -234,8 +234,8 @@ export class PriceMomentumTracker {
       emaMedium: state.emaMedium,
       emaLong: state.emaLong,
       averageVolume,
-      minPrice: Math.min(...prices),
-      maxPrice: Math.max(...prices)
+      minPrice: prices.reduce((a, b) => a < b ? a : b, prices[0]),
+      maxPrice: prices.reduce((a, b) => a > b ? a : b, prices[0])
     };
   }
 
@@ -361,12 +361,12 @@ export class PriceMomentumTracker {
     }
 
     // Find and remove the oldest 10% of pairs (at least 1)
+    // Uses O(N*k) partial selection instead of O(N log N) full sort
     const toRemove = Math.max(1, Math.floor(maxPairs * 0.1));
-    const pairsByAccess = Array.from(this.pairs.entries())
-      .sort((a, b) => a[1].lastAccessTime - b[1].lastAccessTime);
+    const oldest = this.findOldestN(this.pairs, toRemove, (state) => state.lastAccessTime);
 
-    for (let i = 0; i < toRemove && i < pairsByAccess.length; i++) {
-      this.pairs.delete(pairsByAccess[i][0]);
+    for (const key of oldest) {
+      this.pairs.delete(key);
     }
 
     logger.debug('Evicted LRU pairs due to max limit', {
@@ -374,6 +374,34 @@ export class PriceMomentumTracker {
       remaining: this.pairs.size,
       maxPairs
     });
+  }
+
+  /**
+   * Find the N entries with the smallest timestamps in a single pass.
+   * O(N*k) where k = n, much better than O(N log N) sort when k << N.
+   */
+  private findOldestN<V>(
+    map: Map<string, V>,
+    n: number,
+    getTime: (value: V) => number
+  ): string[] {
+    const oldest: Array<{ key: string; time: number }> = [];
+
+    for (const [key, value] of map) {
+      const time = getTime(value);
+      if (oldest.length < n) {
+        oldest.push({ key, time });
+        if (oldest.length === n) {
+          // Sort descending so oldest[0] is the newest of the oldest set
+          oldest.sort((a, b) => b.time - a.time);
+        }
+      } else if (time < oldest[0].time) {
+        oldest[0] = { key, time };
+        oldest.sort((a, b) => b.time - a.time);
+      }
+    }
+
+    return oldest.map(e => e.key);
   }
 
   /**
@@ -433,13 +461,13 @@ export class PriceMomentumTracker {
   }
 
   /**
-   * Calculate standard deviation.
+   * Calculate sample standard deviation (Bessel's correction: N-1).
    */
   private calculateStdDev(values: number[], mean?: number): number {
     if (values.length < 2) return 0;
     const avg = mean ?? this.calculateMean(values);
     const squaredDiffs = values.map(v => Math.pow(v - avg, 2));
-    const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / values.length;
+    const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / (values.length - 1);
     return Math.sqrt(variance);
   }
 

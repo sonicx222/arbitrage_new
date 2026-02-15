@@ -27,14 +27,18 @@ const mockLogger: Logger = {
   error: jest.fn(),
 };
 
-const mockProvider: IFlashLoanProvider = {
+const mockProvider = {
   protocol: 'aave_v3' as const,
   chain: 'ethereum',
   poolAddress: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', // Aave V3 Ethereum Pool
-  getFeeInfo: jest.fn() as any,
-  getMaxLoan: jest.fn() as any,
-  supportsAsset: jest.fn() as any,
-};
+  isAvailable: jest.fn<any>().mockReturnValue(true),
+  getCapabilities: jest.fn<any>().mockReturnValue({ supportsMultiHop: true, supportsMultiAsset: false, maxLoanAmount: 0n, supportedTokens: [], status: 'fully_supported' }),
+  calculateFee: jest.fn<any>().mockReturnValue({ feeBps: 9, feeAmount: 0n, protocol: 'aave_v3' }),
+  buildCalldata: jest.fn<any>().mockReturnValue('0x'),
+  buildTransaction: jest.fn<any>().mockReturnValue({}),
+  estimateGas: jest.fn<any>().mockResolvedValue(300000n),
+  validate: jest.fn<any>().mockReturnValue({ valid: true }),
+} as unknown as IFlashLoanProvider;
 
 const mockAsset = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC
 
@@ -48,16 +52,15 @@ function createMockContext(rpcProvider?: ethers.JsonRpcProvider): StrategyContex
   return {
     wallets: new Map([['ethereum', mockWallet]]),
     providers,
-  };
+  } as unknown as StrategyContext;
 }
 
 function createMockRpcProvider(balance: bigint): ethers.JsonRpcProvider {
-  const mockProvider = {
-    call: jest.fn().mockResolvedValue(
-      ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [balance])
-    ),
+  const encoded = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [balance]);
+  const mockRpcProvider = {
+    call: jest.fn<any>().mockResolvedValue(encoded),
   } as unknown as ethers.JsonRpcProvider;
-  return mockProvider;
+  return mockRpcProvider;
 }
 
 // =============================================================================
@@ -100,7 +103,7 @@ describe('FlashLoanLiquidityValidator', () => {
       const result = await validator.checkLiquidity(mockProvider, mockAsset, amount, ctx);
 
       expect(result).toBe(true);
-      expect(rpcProvider.call).toHaveBeenCalledOnce();
+      expect(rpcProvider.call).toHaveBeenCalledTimes(1);
       expect(mockLogger.debug).toHaveBeenCalledWith(
         '[LiquidityValidator] On-chain check complete',
         expect.objectContaining({
@@ -143,12 +146,12 @@ describe('FlashLoanLiquidityValidator', () => {
       // First call - should hit RPC
       const result1 = await validator.checkLiquidity(mockProvider, mockAsset, amount, ctx);
       expect(result1).toBe(true);
-      expect(rpcProvider.call).toHaveBeenCalledOnce();
+      expect(rpcProvider.call).toHaveBeenCalledTimes(1);
 
       // Second call - should use cache
       const result2 = await validator.checkLiquidity(mockProvider, mockAsset, amount, ctx);
       expect(result2).toBe(true);
-      expect(rpcProvider.call).toHaveBeenCalledOnce(); // Still only one call
+      expect(rpcProvider.call).toHaveBeenCalledTimes(1); // Still only one call
       expect(mockLogger.debug).toHaveBeenCalledWith(
         '[LiquidityValidator] Cache hit',
         expect.any(Object)
@@ -168,7 +171,7 @@ describe('FlashLoanLiquidityValidator', () => {
 
       // First call
       await v.checkLiquidity(mockProvider, mockAsset, amount, ctx);
-      expect(rpcProvider.call).toHaveBeenCalledOnce();
+      expect(rpcProvider.call).toHaveBeenCalledTimes(1);
 
       // Wait for cache to expire
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -195,7 +198,7 @@ describe('FlashLoanLiquidityValidator', () => {
       expect(result2).toBe(true);
       expect(result3).toBe(true);
       // Should only call RPC once due to request coalescing
-      expect(rpcProvider.call).toHaveBeenCalledOnce();
+      expect(rpcProvider.call).toHaveBeenCalledTimes(1);
     });
 
     it('should return true (graceful fallback) when RPC provider unavailable', async () => {
@@ -213,7 +216,7 @@ describe('FlashLoanLiquidityValidator', () => {
 
     it('should return true (graceful fallback) on RPC timeout', async () => {
       const rpcProvider = {
-        call: vi.fn().mockImplementation(
+        call: jest.fn().mockImplementation(
           () => new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Timeout')), 10);
           })
@@ -239,7 +242,7 @@ describe('FlashLoanLiquidityValidator', () => {
 
     it('should return true (graceful fallback) on RPC error', async () => {
       const rpcProvider = {
-        call: vi.fn().mockRejectedValue(new Error('RPC error')),
+        call: jest.fn<any>().mockRejectedValue(new Error('RPC error')),
       } as unknown as ethers.JsonRpcProvider;
 
       const ctx = createMockContext(rpcProvider);

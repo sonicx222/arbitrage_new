@@ -7,10 +7,13 @@
  * - Multi-level price impact calculation
  * - Optimal trade size recommendation
  *
- * Note: DEX AMMs don't have traditional order books, so we simulate
- * depth levels using the constant product formula (x * y = k).
+ * Supported AMM models:
+ * - Constant Product (x * y = k) — Uniswap V2 style (default)
+ * - Concentrated Liquidity — Uniswap V3 style (single-tick approximation)
+ * - StableSwap — Curve style (Newton's method for StableSwap invariant)
  *
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding T3.15
+ * @see .agent-reports/analytics-deep-analysis.md - Finding #26
  */
 
 import { createLogger } from '../logger';
@@ -42,6 +45,14 @@ function floatToBigInt18(value: number): bigint {
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * AMM model type for swap output calculation.
+ * - 'constant_product': Uniswap V2 style (x * y = k)
+ * - 'concentrated': Uniswap V3 style (concentrated liquidity, single-tick approximation)
+ * - 'stable_swap': Curve style (StableSwap invariant with amplification parameter)
+ */
+export type AmmType = 'constant_product' | 'concentrated' | 'stable_swap';
 
 /**
  * Configuration for liquidity depth analysis.
@@ -78,6 +89,18 @@ export interface PoolLiquidity {
   /** Current price (token1/token0) */
   price: number;
   timestamp: number;
+  /** AMM model type. Defaults to 'constant_product' if not specified. */
+  ammType?: AmmType;
+  // --- V3 Concentrated Liquidity fields ---
+  /** sqrt(price) in Q64.96 format (Uniswap V3 convention) */
+  sqrtPriceX96?: bigint;
+  /** Active liquidity at current tick */
+  liquidity?: bigint;
+  /** Tick spacing for fee tier (1, 10, 60, 200) */
+  tickSpacing?: number;
+  // --- Curve StableSwap fields ---
+  /** Curve amplification parameter A (typically 100-2000) */
+  amplificationParameter?: number;
 }
 
 /**
@@ -304,15 +327,16 @@ export class LiquidityDepthAnalyzer {
       ? inputAmountUsd
       : inputAmountUsd / price;
 
-    // Calculate output using constant product formula
+    // Calculate output using the appropriate AMM model
     const reserveIn = direction === 'buy' ? pool.reserve0 : pool.reserve1;
     const reserveOut = direction === 'buy' ? pool.reserve1 : pool.reserve0;
 
-    const result = this.calculateSwapOutput(
+    const result = this.dispatchSwapCalculation(
+      pool,
       floatToBigInt18(inputAmount), // PRECISION-FIX: Use helper to avoid float precision loss
       reserveIn,
       reserveOut,
-      pool.feeBps
+      direction
     );
 
     const outputAmount = Number(result.amountOut) / 1e18;
@@ -441,7 +465,7 @@ export class LiquidityDepthAnalyzer {
       // PRECISION-FIX: Use helper to avoid float precision loss
       const tradeSizeBigInt = floatToBigInt18(tradeSize);
 
-      const result = this.calculateSwapOutput(tradeSizeBigInt, reserveIn, reserveOut, pool.feeBps);
+      const result = this.dispatchSwapCalculation(pool, tradeSizeBigInt, reserveIn, reserveOut, direction);
 
       const outputAmount = Number(result.amountOut) / 1e18;
       const effectiveRate = outputAmount / tradeSize;
@@ -462,6 +486,59 @@ export class LiquidityDepthAnalyzer {
     return levels;
   }
 
+  /**
+   * Dispatch swap calculation to the appropriate AMM model.
+   * Falls back to constant-product if V3/Curve data is missing.
+   */
+  private dispatchSwapCalculation(
+    pool: PoolLiquidity,
+    amountIn: bigint,
+    reserveIn: bigint,
+    reserveOut: bigint,
+    direction: 'buy' | 'sell'
+  ): { amountOut: bigint; priceImpact: number } {
+    const ammType = pool.ammType ?? 'constant_product';
+
+    switch (ammType) {
+      case 'concentrated': {
+        if (pool.sqrtPriceX96 == null || pool.liquidity == null) {
+          logger.debug('V3 pool missing sqrtPriceX96/liquidity, falling back to constant_product', {
+            poolAddress: pool.poolAddress
+          });
+          return this.calculateSwapOutput(amountIn, reserveIn, reserveOut, pool.feeBps);
+        }
+        return this.calculateV3SwapOutput(
+          amountIn,
+          pool.sqrtPriceX96,
+          pool.liquidity,
+          pool.feeBps,
+          direction
+        );
+      }
+      case 'stable_swap': {
+        if (pool.amplificationParameter == null || pool.amplificationParameter <= 0) {
+          logger.debug('StableSwap pool missing/invalid amplificationParameter, falling back to constant_product', {
+            poolAddress: pool.poolAddress
+          });
+          return this.calculateSwapOutput(amountIn, reserveIn, reserveOut, pool.feeBps);
+        }
+        return this.calculateStableSwapOutput(
+          amountIn,
+          reserveIn,
+          reserveOut,
+          pool.feeBps,
+          pool.amplificationParameter
+        );
+      }
+      case 'constant_product':
+      default:
+        return this.calculateSwapOutput(amountIn, reserveIn, reserveOut, pool.feeBps);
+    }
+  }
+
+  /**
+   * Constant product (x * y = k) swap calculation — Uniswap V2 style.
+   */
   private calculateSwapOutput(
     amountIn: bigint,
     reserveIn: bigint,
@@ -499,6 +576,218 @@ export class LiquidityDepthAnalyzer {
       : 1;
 
     return { amountOut, priceImpact: Math.max(0, priceImpact) };
+  }
+
+  /**
+   * V3 Concentrated Liquidity swap calculation (single-tick approximation).
+   *
+   * Models all active liquidity as concentrated at the current price.
+   * Within a single tick, V3 behaves as constant-product on virtual reserves:
+   *   virtualReserve0 = L * Q96 / sqrtPriceX96
+   *   virtualReserve1 = L * sqrtPriceX96 / Q96
+   *
+   * Higher L means deeper effective liquidity and lower slippage.
+   * This is accurate for small-to-medium trades that don't cross tick boundaries.
+   *
+   * @see https://uniswap.org/whitepaper-v3.pdf
+   */
+  private calculateV3SwapOutput(
+    amountIn: bigint,
+    sqrtPriceX96: bigint,
+    liquidity: bigint,
+    feeBps: number,
+    direction: 'buy' | 'sell'
+  ): { amountOut: bigint; priceImpact: number } {
+    if (amountIn <= 0n || sqrtPriceX96 <= 0n || liquidity <= 0n) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    const Q96 = 1n << 96n;
+
+    // Compute virtual reserves from concentrated liquidity parameters.
+    // In V3, the virtual reserves at the current tick are derived from L and sqrtPrice.
+    // These represent the effective depth available for trading within the tick range.
+    const virtualReserve0 = (liquidity * Q96) / sqrtPriceX96;
+    const virtualReserve1 = (liquidity * sqrtPriceX96) / Q96;
+
+    if (virtualReserve0 <= 0n || virtualReserve1 <= 0n) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    // Within a single tick, V3 is mathematically equivalent to constant-product
+    // on virtual reserves. Delegate to the proven constant-product formula.
+    const reserveIn = direction === 'buy' ? virtualReserve0 : virtualReserve1;
+    const reserveOut = direction === 'buy' ? virtualReserve1 : virtualReserve0;
+
+    return this.calculateSwapOutput(amountIn, reserveIn, reserveOut, feeBps);
+  }
+
+  /**
+   * Curve StableSwap swap calculation using Newton's method.
+   *
+   * The StableSwap invariant for n=2 tokens:
+   *   4A(x + y) + D = 4AD + D³/(4xy)
+   *
+   * Where:
+   * - A = amplification parameter (higher = tighter peg)
+   * - D = total deposit when balanced (x = y = D/2)
+   * - x, y = current reserves
+   *
+   * Steps:
+   * 1. Compute D from current reserves using Newton's method
+   * 2. Compute new y (output reserve) given new x = reserveIn + amountIn
+   * 3. amountOut = old_y - new_y
+   *
+   * At A=0: behaves like constant product (x*y = k)
+   * At A→∞: behaves like constant sum (x+y = k, zero slippage)
+   *
+   * @see https://curve.fi/files/stableswap-paper.pdf
+   */
+  private calculateStableSwapOutput(
+    amountIn: bigint,
+    reserveIn: bigint,
+    reserveOut: bigint,
+    feeBps: number,
+    amplificationParameter: number
+  ): { amountOut: bigint; priceImpact: number } {
+    if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    // Apply fee
+    const feeMultiplier = BigInt(10000 - feeBps);
+    const amountInWithFee = (amountIn * feeMultiplier) / 10000n;
+
+    const A = BigInt(amplificationParameter);
+    const n = 2n; // 2-token pool
+    const Ann = A * n * n; // A * n^n for n=2
+
+    // Step 1: Compute D (invariant) from current reserves
+    const D = this.computeStableSwapD(reserveIn, reserveOut, Ann);
+    if (D <= 0n) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    // Step 2: Compute new output reserve y given new input reserve
+    const newReserveIn = reserveIn + amountInWithFee;
+    const newReserveOut = this.computeStableSwapY(newReserveIn, D, Ann);
+    if (newReserveOut <= 0n || newReserveOut >= reserveOut) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    // Step 3: amountOut = old_y - new_y
+    const amountOut = reserveOut - newReserveOut;
+
+    // Calculate price impact
+    // Initial price for stableswap at balanced reserves ≈ 1:1
+    // Effective price = amountOut / amountIn
+    const initialPriceScaled = (reserveOut * PRECISION) / reserveIn;
+    const effectivePriceScaled = (amountOut * PRECISION) / amountIn;
+
+    const priceImpact = initialPriceScaled > 0n
+      ? Number(PRECISION - (effectivePriceScaled * PRECISION) / initialPriceScaled) / Number(PRECISION)
+      : 1;
+
+    return { amountOut, priceImpact: Math.max(0, priceImpact) };
+  }
+
+  /**
+   * Compute the StableSwap invariant D for a 2-token pool using Newton's method.
+   *
+   * Solves: Ann * S + D = Ann * D + D^3 / (4 * x * y)
+   * Where S = x + y
+   *
+   * Newton iteration:
+   *   D_next = (Ann * S + 2 * D_prod - D * (Ann - 1)) * D / ((Ann + 1) * D - (Ann - 1) * D + 3 * D_prod)
+   *   Simplified: D_next = (Ann * S + n * D_prod) * D / ((Ann - 1) * D + (n + 1) * D_prod)
+   *
+   * @param x - Reserve of token 0
+   * @param y - Reserve of token 1
+   * @param Ann - A * n^n (amplification * 4 for n=2)
+   * @returns D - the invariant value
+   */
+  private computeStableSwapD(x: bigint, y: bigint, Ann: bigint): bigint {
+    const S = x + y;
+    if (S === 0n) return 0n;
+
+    let D = S;
+    const n = 2n;
+
+    // Newton's method — converges in ~10 iterations for typical values
+    for (let i = 0; i < 256; i++) {
+      // D_prod = D^3 / (n^n * prod(reserves)) = D^3 / (4*x*y)
+      let D_prod = D;
+      D_prod = (D_prod * D) / (x * n);
+      D_prod = (D_prod * D) / (y * n);
+
+      const D_prev = D;
+
+      // D = (Ann * S + n * D_prod) * D / ((Ann - 1) * D + (n + 1) * D_prod)
+      const numerator = (Ann * S + n * D_prod) * D;
+      const denominator = (Ann - 1n) * D + (n + 1n) * D_prod;
+
+      if (denominator === 0n) return 0n;
+
+      D = numerator / denominator;
+
+      // Convergence check: |D - D_prev| <= 1
+      const diff = D > D_prev ? D - D_prev : D_prev - D;
+      if (diff <= 1n) {
+        return D;
+      }
+    }
+
+    // Didn't converge — return best estimate
+    logger.debug('StableSwap D computation did not converge');
+    return D;
+  }
+
+  /**
+   * Compute the output reserve y for a 2-token StableSwap pool using Newton's method.
+   *
+   * Given the new input reserve x and invariant D, find y such that:
+   *   Ann * (x + y) + D = Ann * D + D^3 / (4*x*y)
+   *
+   * Rearranged as f(y) = 0:
+   *   y^2 + (x + D/Ann - D) * y = D^3 / (4 * Ann * x)
+   *
+   * Newton iteration:
+   *   y_next = (y^2 + c) / (2*y + b - D)
+   *   where b = x + D/Ann, c = D^3 / (4*Ann*x)
+   */
+  private computeStableSwapY(x: bigint, D: bigint, Ann: bigint): bigint {
+    if (x <= 0n || D <= 0n || Ann <= 0n) return 0n;
+
+    const n = 2n;
+    // c = D^3 / (4 * Ann * x) — but we compute step by step to avoid overflow
+    let c = D;
+    c = (c * D) / (x * n);
+    c = (c * D) / (Ann * n);
+
+    // b = x + D/Ann
+    const b = x + D / Ann;
+
+    let y = D;
+
+    for (let i = 0; i < 256; i++) {
+      const y_prev = y;
+
+      // y = (y^2 + c) / (2*y + b - D)
+      const numerator = y * y + c;
+      const denominator = 2n * y + b - D;
+
+      if (denominator <= 0n) return 0n;
+
+      y = numerator / denominator;
+
+      const diff = y > y_prev ? y - y_prev : y_prev - y;
+      if (diff <= 1n) {
+        return y;
+      }
+    }
+
+    logger.debug('StableSwap Y computation did not converge');
+    return y;
   }
 
   private findOptimalTradeSize(levels: LiquidityLevel[]): number {
@@ -580,13 +869,13 @@ export class LiquidityDepthAnalyzer {
     }
 
     // Find and remove the oldest 10% of pools by timestamp
+    // Uses O(N*k) partial selection instead of O(N log N) full sort
     const toRemove = Math.max(1, Math.floor(this.config.maxTrackedPools * 0.1));
-    const poolsByAge = Array.from(this.pools.entries())
-      .sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const oldest = this.findOldestN(this.pools, toRemove, (pool) => pool.timestamp);
 
-    for (let i = 0; i < toRemove && i < poolsByAge.length; i++) {
-      this.pools.delete(poolsByAge[i][0]);
-      this.depthCache.delete(poolsByAge[i][0]);
+    for (const key of oldest) {
+      this.pools.delete(key);
+      this.depthCache.delete(key);
       this.stats.poolEvictions++;
     }
 
@@ -594,6 +883,33 @@ export class LiquidityDepthAnalyzer {
       evicted: toRemove,
       remaining: this.pools.size
     });
+  }
+
+  /**
+   * Find the N entries with the smallest timestamps in a single pass.
+   * O(N*k) where k = n, much better than O(N log N) sort when k << N.
+   */
+  private findOldestN<V>(
+    map: Map<string, V>,
+    n: number,
+    getTime: (value: V) => number
+  ): string[] {
+    const oldest: Array<{ key: string; time: number }> = [];
+
+    for (const [key, value] of map) {
+      const time = getTime(value);
+      if (oldest.length < n) {
+        oldest.push({ key, time });
+        if (oldest.length === n) {
+          oldest.sort((a, b) => b.time - a.time);
+        }
+      } else if (time < oldest[0].time) {
+        oldest[0] = { key, time };
+        oldest.sort((a, b) => b.time - a.time);
+      }
+    }
+
+    return oldest.map(e => e.key);
   }
 }
 

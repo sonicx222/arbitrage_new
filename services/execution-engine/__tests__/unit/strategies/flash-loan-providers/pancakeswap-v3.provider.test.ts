@@ -1,20 +1,25 @@
 /**
- * Integration Tests for PancakeSwap V3 Flash Loan Provider
+ * Unit Tests for PancakeSwap V3 Flash Loan Provider
  *
- * Task 2.1 (Day 3): Integration tests for PancakeSwap V3 implementation.
  * Tests provider with mock factory and pool contracts to verify:
  * - Pool discovery from factory
  * - Fee tier selection
  * - Transaction building
  * - Validation logic
  *
+ * NOTE: This is a unit test using mock contracts (MockPancakeV3Factory,
+ * MockPancakeV3Pool, MockJsonRpcProvider). Originally named as an
+ * "integration test" but all dependencies are mocked - no real contract
+ * interaction occurs. Moved from src/ to __tests__/unit/ per ADR-009.
+ *
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 2.1
+ * @see pancakeswap-v3.provider.ts
  */
 
 import { ethers } from 'ethers';
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
-import type { FlashLoanRequest } from './types';
+import { PancakeSwapV3FlashLoanProvider } from '../../../../src/strategies/flash-loan-providers/pancakeswap-v3.provider';
+import type { FlashLoanRequest } from '../../../../src/strategies/flash-loan-providers/types';
 
 // =============================================================================
 // Mock Contracts
@@ -111,7 +116,7 @@ class MockJsonRpcProvider {
 // Test Suite
 // =============================================================================
 
-describe('PancakeSwapV3FlashLoanProvider Integration Tests', () => {
+describe('PancakeSwapV3FlashLoanProvider', () => {
   // Test addresses
   const FACTORY_ADDRESS = '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865';
   const CONTRACT_ADDRESS = '0x1234567890123456789012345678901234567890';

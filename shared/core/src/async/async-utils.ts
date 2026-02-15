@@ -19,7 +19,7 @@
 
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
 // Re-export for backward compatibility with existing imports from this module
-import { TimeoutError } from '../../../types';
+import { TimeoutError } from '@arbitrage/types';
 export { TimeoutError };
 
 /**
@@ -37,6 +37,10 @@ export async function withTimeout<T>(
   timeoutMs: number,
   operationName?: string
 ): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new TypeError(`withTimeout: timeoutMs must be a non-negative finite number, got ${timeoutMs}`);
+  }
+
   let timeoutId: NodeJS.Timeout;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -155,6 +159,14 @@ export async function withRetry<T>(
   config: Partial<RetryConfig> = {}
 ): Promise<T> {
   const cfg = { ...DEFAULT_RETRY_CONFIG, ...config };
+
+  if (!Number.isFinite(cfg.maxAttempts) || cfg.maxAttempts < 1) {
+    throw new TypeError(`withRetry: maxAttempts must be a finite number >= 1, got ${cfg.maxAttempts}`);
+  }
+  if (!Number.isFinite(cfg.baseDelayMs) || cfg.baseDelayMs < 0) {
+    throw new TypeError(`withRetry: baseDelayMs must be a non-negative finite number, got ${cfg.baseDelayMs}`);
+  }
+
   let lastError: Error | undefined;
 
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
@@ -345,19 +357,36 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
 ): (...args: Parameters<T>) => Promise<ReturnType<T> | undefined> {
   let timeoutId: NodeJS.Timeout | null = null;
   let pendingPromise: Promise<ReturnType<T>> | null = null;
+  // P0-FIX: Track the resolve of the previous caller so we can settle it when debounced
+  let previousResolve: ((value: ReturnType<T> | undefined) => void) | null = null;
 
   return async (...args: Parameters<T>): Promise<ReturnType<T> | undefined> => {
     if (timeoutId) {
       clearTimeout(timeoutId);
+      // P0-FIX (Bug B): Settle the previously returned promise with undefined
+      // so it doesn't hang forever when the call is debounced (timer cleared)
+      if (previousResolve) {
+        previousResolve(undefined);
+        previousResolve = null;
+      }
     }
 
-    return new Promise((resolve) => {
+    return new Promise<ReturnType<T> | undefined>((resolve, reject) => {
+      previousResolve = resolve;
       timeoutId = setTimeout(async () => {
         timeoutId = null;
-        pendingPromise = fn(...args);
-        const result = await pendingPromise;
-        pendingPromise = null;
-        resolve(result);
+        previousResolve = null;
+        try {
+          pendingPromise = fn(...args);
+          const result = await pendingPromise;
+          pendingPromise = null;
+          resolve(result);
+        } catch (error) {
+          // P0-FIX (Bug A): Propagate errors to the caller instead of
+          // creating unhandled rejections and leaving the promise hanging
+          pendingPromise = null;
+          reject(error);
+        }
       }, delayMs);
     });
   };

@@ -271,7 +271,7 @@ describe('TimerHelpers', () => {
         // Advance past timeout
         jest.advanceTimersByTime(200);
 
-        await expect(promise).rejects.toThrow('Condition not met within 100ms');
+        await expect(promise).rejects.toThrow('Timeout waiting for condition after 100ms');
       });
     });
 

@@ -504,28 +504,6 @@ export { CorrelationAnalyzer, getCorrelationAnalyzer } from './caching/correlati
 export type { PairCorrelation as AnalyzerPairCorrelation, CorrelationStats as AnalyzerCorrelationStats } from './caching/correlation-analyzer';
 
 // =============================================================================
-// 3.1.1 Cache Optimization - Registration Strategies (Enhancement #4)
-// =============================================================================
-
-// Strategy Pattern for SharedKeyRegistry CAS optimization
-export type {
-  IRegistrationStrategy,
-  RegistrationResult,
-  RegistryStats,
-  RegistryFullError,
-  InvalidKeyError
-} from './caching/strategies';
-
-// Strategy Implementations
-export {
-  MainThreadStrategy,
-  WorkerThreadStrategy,
-  RegistryStrategyFactory
-} from './caching/strategies';
-
-export type { StrategyFactoryConfig } from './caching/strategies';
-
-// =============================================================================
 // 3.1.2 Cache Optimization - Predictive Warming (Enhancement #2)
 // =============================================================================
 
@@ -1561,7 +1539,7 @@ export type {
 } from './mev-protection';
 
 // =============================================================================
-// 11.5 Cross-Chain Bridge Router (Phase 3: ADR-014)
+// 11.5 Cross-Chain Bridge Router (Phase 3)
 // =============================================================================
 
 export {

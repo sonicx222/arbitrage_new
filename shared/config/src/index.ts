@@ -231,25 +231,28 @@ export { EVENT_CONFIG, EVENT_SIGNATURES } from './event-config';
 export { DETECTOR_CONFIG, DetectorChainConfig } from './detector-config';
 
 // =============================================================================
-// SERVICE CONFIGURATION
+// SERVICE CONFIGURATION (core service configs, flash loan providers, quoter)
 // =============================================================================
 export {
   SERVICE_CONFIGS,
   FLASH_LOAN_PROVIDERS,
   supportsFlashLoan,
-  BRIDGE_COSTS,
-  BridgeCostConfig,
-  getBridgeCost,
-  getAllBridgeOptions,
-  calculateBridgeCostUsd,
-  // Hot-path optimized versions (skip toLowerCase normalization)
-  getBridgeCostFast,
-  getAllBridgeOptionsFast,
-  // Phase 3: Dynamic bridge selection (multi-factor scoring)
-  selectOptimalBridge,
-  selectOptimalBridgeFast,
-  BridgeUrgency,
-  OptimalBridgeResult,
+  // Production configuration validation
+  validateProductionConfig,
+  // Tier 2 Enhancement: MultiPathQuoter contract addresses
+  MULTI_PATH_QUOTER_ADDRESSES,
+  hasMultiPathQuoter,
+  getMultiPathQuoterAddress,
+  // FIX (Issue 2.4): Chain execution support validation
+  SUPPORTED_EXECUTION_CHAINS,
+  isExecutionSupported,
+  getSupportedExecutionChains,
+} from './service-config';
+
+// =============================================================================
+// FLASH LOAN ABI & CONSTANTS
+// =============================================================================
+export {
   // Fix 1.1: Centralized flash loan constants
   AAVE_V3_FEE_BPS,
   BPS_DENOMINATOR,
@@ -266,22 +269,35 @@ export {
   SYNCSWAP_FLASH_ARBITRAGE_ABI,
   // Task 2.1: PancakeSwap V3 flash loan support
   PANCAKESWAP_FLASH_ARBITRAGE_ABI,
-  // Production configuration validation
-  validateProductionConfig,
-  // Tier 2 Enhancement: MultiPathQuoter contract addresses
-  // Enables batched quote fetching for 50-200ms latency reduction
-  MULTI_PATH_QUOTER_ADDRESSES,
-  hasMultiPathQuoter,
-  getMultiPathQuoterAddress,
-  // Task 2.3: Flash Loan Protocol Aggregator feature flag
+} from './flash-loan-abi';
+
+// =============================================================================
+// FEATURE FLAGS
+// =============================================================================
+export {
   FEATURE_FLAGS,
   FLASH_LOAN_AGGREGATOR_CONFIG,
   validateFeatureFlags,
-  // FIX (Issue 2.4): Chain execution support validation
-  SUPPORTED_EXECUTION_CHAINS,
-  isExecutionSupported,
-  getSupportedExecutionChains,
-} from './service-config';
+} from './feature-flags';
+
+// =============================================================================
+// BRIDGE CONFIGURATION
+// =============================================================================
+export {
+  BRIDGE_COSTS,
+  BridgeCostConfig,
+  getBridgeCost,
+  getAllBridgeOptions,
+  calculateBridgeCostUsd,
+  // Hot-path optimized versions (skip toLowerCase normalization)
+  getBridgeCostFast,
+  getAllBridgeOptionsFast,
+  // Phase 3: Dynamic bridge selection (multi-factor scoring)
+  selectOptimalBridge,
+  selectOptimalBridgeFast,
+  BridgeUrgency,
+  OptimalBridgeResult,
+} from './bridge-config';
 
 // =============================================================================
 // FLASH LOAN AVAILABILITY MATRIX (Interface Analysis Fix #2)
@@ -464,6 +480,19 @@ export {
   // Re-export zod for custom schema creation
   z,
 } from './schemas';
+
+// =============================================================================
+// WORKER POOL CONFIGURATION (Finding #14: Extract to @arbitrage/config)
+// =============================================================================
+export {
+  IS_FLY_IO,
+  IS_RAILWAY,
+  IS_RENDER,
+  IS_CONSTRAINED_HOST,
+  PLATFORM_NAME,
+  WORKER_POOL_CONFIG,
+  type WorkerPoolConfig,
+} from './worker-pool-config';
 
 // =============================================================================
 // STRING INTERNING (Performance optimization)

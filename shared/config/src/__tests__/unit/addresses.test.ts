@@ -364,11 +364,15 @@ describe('Address Validation Utilities', () => {
 });
 
 describe('Address Consistency', () => {
-  it('AAVE pools should match FLASH_LOAN_PROVIDERS in service-config', () => {
-    // This test ensures addresses stay in sync
-    // The canonical source is now addresses.ts
-    // Verification: We now import AAVE_V3_POOLS in service-config.ts, so this matches by definition
-    expect(true).toBe(true);
+  it('AAVE pools should have valid non-zero addresses for all configured chains', () => {
+    // FIX #22: Replace tautological assertion with real validation
+    // Verify that every AAVE_V3_POOLS entry has a valid Ethereum address
+    const chains = Object.keys(AAVE_V3_POOLS);
+    expect(chains.length).toBeGreaterThan(0);
+    for (const chain of chains) {
+      const pool = AAVE_V3_POOLS[chain];
+      expect(isValidEthereumAddress(pool)).toBe(true);
+    }
   });
 
   it('Native tokens should be valid for each chain type', () => {

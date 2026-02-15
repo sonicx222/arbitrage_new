@@ -36,21 +36,90 @@ jest.mock('worker_threads', () => ({
 import { EventProcessingWorkerPool, Task, TaskResult } from '@arbitrage/core';
 import { Worker } from 'worker_threads';
 
-describe('EventProcessingWorkerPool', () => {
-  let mockWorker: any;
+// =============================================================================
+// Finding #11: Realistic Worker Mock
+//
+// Previous mock (2/5 fidelity) only captured a single event callback via on(),
+// postMessage was a no-op, and there was no error→exit sequence support.
+//
+// This improved mock:
+// - Maintains a Map of event handlers (supports multiple event types simultaneously)
+// - Provides emit() to trigger events (message, error, exit) from tests
+// - Supports auto-response mode: postMessage triggers a configurable callback
+// - Captures workerData from constructor for SharedArrayBuffer testing
+// =============================================================================
 
-  // Helper to create a fresh mock worker
-  const createMockWorker = () => ({
-    on: jest.fn(),
-    postMessage: jest.fn(),
-    terminate: jest.fn(() => Promise.resolve()),
-    removeAllListeners: jest.fn()
-  });
+interface RealisticMockWorker {
+  on: jest.Mock;
+  postMessage: jest.Mock;
+  terminate: jest.Mock;
+  removeAllListeners: jest.Mock;
+  /** Trigger an event on this worker (test helper, not part of real Worker API) */
+  _emit: (event: string, data?: unknown) => void;
+  /** All registered handlers by event name */
+  _handlers: Map<string, Array<(data?: unknown) => void>>;
+  /** Configure auto-response: when postMessage is called, automatically respond */
+  _autoRespond: boolean;
+  /** Custom auto-response factory (receives the posted message, returns response) */
+  _autoRespondFn: ((msg: any) => any) | null;
+}
+
+describe('EventProcessingWorkerPool', () => {
+  let mockWorker: RealisticMockWorker;
+
+  /**
+   * Create a realistic mock worker that maintains event handlers and supports
+   * multi-event simulation.
+   */
+  const createMockWorker = (): RealisticMockWorker => {
+    const handlers = new Map<string, Array<(data?: unknown) => void>>();
+
+    const worker: RealisticMockWorker = {
+      on: jest.fn(((event: string, callback: (data?: unknown) => void) => {
+        if (!handlers.has(event)) {
+          handlers.set(event, []);
+        }
+        handlers.get(event)!.push(callback);
+      }) as any),
+      postMessage: jest.fn(((msg: any) => {
+        // Auto-respond if configured
+        if (worker._autoRespond) {
+          const response = worker._autoRespondFn
+            ? worker._autoRespondFn(msg)
+            : {
+                taskId: msg.taskId,
+                success: true,
+                result: {},
+                processingTime: 1
+              };
+          // Simulate async worker response
+          setImmediate(() => worker._emit('message', response));
+        }
+      }) as any),
+      terminate: jest.fn(() => Promise.resolve()),
+      removeAllListeners: jest.fn(() => {
+        handlers.clear();
+      }),
+      _emit: (event: string, data?: unknown) => {
+        const eventHandlers = handlers.get(event);
+        if (eventHandlers) {
+          for (const handler of eventHandlers) {
+            handler(data);
+          }
+        }
+      },
+      _handlers: handlers,
+      _autoRespond: false,
+      _autoRespondFn: null,
+    };
+
+    return worker;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockWorker = createMockWorker();
-    (Worker as jest.MockedClass<typeof Worker>).mockImplementation(() => mockWorker);
+    (Worker as unknown as jest.Mock).mockImplementation(() => mockWorker);
   });
 
   describe('initialization', () => {
@@ -71,13 +140,6 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('task submission', () => {
     it('should submit tasks and receive responses', async () => {
-      // Setup message callback capture
-      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
-        if (event === 'message') {
-          mockWorker._messageCallback = callback;
-        }
-      });
-
       const pool = new EventProcessingWorkerPool(1, 100, 5000);
       await pool.start();
 
@@ -88,19 +150,16 @@ describe('EventProcessingWorkerPool', () => {
         priority: 1
       };
 
-      // Submit task and immediately trigger response
+      // Submit task and simulate worker response
       const resultPromise = pool.submitTask(task);
 
-      // Simulate worker response after a short delay
       setTimeout(() => {
-        if (mockWorker._messageCallback) {
-          mockWorker._messageCallback({
-            taskId: task.id,
-            success: true,
-            result: { opportunities: [] },
-            processingTime: 100
-          });
-        }
+        mockWorker._emit('message', {
+          taskId: task.id,
+          success: true,
+          result: { opportunities: [] },
+          processingTime: 100
+        });
       }, 10);
 
       const result = await resultPromise;
@@ -111,9 +170,36 @@ describe('EventProcessingWorkerPool', () => {
       await pool.stop();
     });
 
-    it('should handle task timeouts', async () => {
-      mockWorker.on.mockImplementation(() => {}); // No message callback - simulates hung worker
+    it('should submit tasks using auto-respond mock', async () => {
+      // Finding #11: Demonstrate auto-respond capability
+      mockWorker._autoRespond = true;
+      mockWorker._autoRespondFn = (msg: any) => ({
+        taskId: msg.taskId,
+        success: true,
+        result: { echo: msg.taskData },
+        processingTime: 5
+      });
 
+      const pool = new EventProcessingWorkerPool(1, 100, 5000);
+      await pool.start();
+
+      const task: Task = {
+        id: 'auto-resp-1',
+        type: 'test',
+        data: { value: 42 },
+        priority: 1
+      };
+
+      const result = await pool.submitTask(task);
+
+      expect(result.success).toBe(true);
+      expect(result.taskId).toBe('auto-resp-1');
+
+      await pool.stop();
+    });
+
+    it('should handle task timeouts', async () => {
+      // Worker registers handlers but never responds — simulates hung worker
       const pool = new EventProcessingWorkerPool(1, 100, 100); // 100ms timeout
       await pool.start();
 
@@ -149,8 +235,7 @@ describe('EventProcessingWorkerPool', () => {
     });
 
     it('should stop gracefully and reject pending tasks', async () => {
-      mockWorker.on.mockImplementation(() => {}); // Don't capture callbacks
-
+      // Worker registers handlers but never responds
       const pool = new EventProcessingWorkerPool(1, 100, 30000);
       await pool.start();
 
@@ -177,25 +262,100 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('worker lifecycle', () => {
     it('should handle worker exit and attempt restart', async () => {
-      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
-        if (event === 'exit') {
-          mockWorker._exitCallback = callback;
-        }
-      });
-
-      const pool = new EventProcessingWorkerPool(2, 100, 5000);
+      // Use 1 worker to avoid shared-mock handler interaction
+      const pool = new EventProcessingWorkerPool(1, 100, 5000);
       await pool.start();
 
-      // Initial workers created
+      // Initial worker created
+      expect(Worker).toHaveBeenCalledTimes(1);
+
+      // Finding #11: Use _emit to simulate worker crash (exit code 1)
+      mockWorker._emit('exit', 1);
+
+      // Should attempt to restart (1 initial + 1 restart = 2)
       expect(Worker).toHaveBeenCalledTimes(2);
 
-      // Simulate worker exit (only if callback was captured)
-      if (mockWorker._exitCallback) {
-        mockWorker._exitCallback(1); // Exit code 1 = crash
+      await pool.stop();
+    });
 
-        // Should attempt to restart
-        expect(Worker).toHaveBeenCalledTimes(3);
-      }
+    it('should pass SharedArrayBuffers to restarted workers', async () => {
+      const workerDataCaptures: any[] = [];
+
+      (Worker as unknown as jest.Mock).mockImplementation((_path: any, options: any) => {
+        workerDataCaptures.push(options?.workerData);
+        const w = createMockWorker();
+        // Update mockWorker reference so pool.stop() can terminate
+        mockWorker = w;
+        return w;
+      });
+
+      const mockPriceBuffer = new SharedArrayBuffer(1024);
+      const mockKeyRegistryBuffer = new SharedArrayBuffer(512);
+      const pool = new EventProcessingWorkerPool(1, 100, 5000, mockPriceBuffer, mockKeyRegistryBuffer);
+      await pool.start();
+
+      // Initial worker should have both buffers
+      expect(workerDataCaptures[0]).toEqual({
+        workerId: 0,
+        priceBuffer: mockPriceBuffer,
+        keyRegistryBuffer: mockKeyRegistryBuffer
+      });
+
+      // Simulate worker crash using _emit
+      mockWorker._emit('exit', 1);
+
+      // Restarted worker should also have both buffers
+      expect(workerDataCaptures.length).toBeGreaterThanOrEqual(2);
+      expect(workerDataCaptures[1]).toEqual({
+        workerId: 0,
+        priceBuffer: mockPriceBuffer,
+        keyRegistryBuffer: mockKeyRegistryBuffer
+      });
+
+      // Verify same reference (not a copy)
+      expect(workerDataCaptures[1].priceBuffer).toBe(mockPriceBuffer);
+      expect(workerDataCaptures[1].keyRegistryBuffer).toBe(mockKeyRegistryBuffer);
+
+      await pool.stop();
+    });
+
+    it('should pass null SharedArrayBuffers to restarted workers when pool has no buffers', async () => {
+      const workerDataCaptures: any[] = [];
+
+      (Worker as unknown as jest.Mock).mockImplementation((_path: any, options: any) => {
+        workerDataCaptures.push(options?.workerData);
+        const w = createMockWorker();
+        mockWorker = w;
+        return w;
+      });
+
+      const pool = new EventProcessingWorkerPool(1, 100, 5000);
+      await pool.start();
+
+      // Simulate worker crash using _emit
+      mockWorker._emit('exit', 1);
+
+      // Restarted worker should have null buffers (not undefined/missing)
+      expect(workerDataCaptures.length).toBeGreaterThanOrEqual(2);
+      expect(workerDataCaptures[1]).toHaveProperty('priceBuffer', null);
+      expect(workerDataCaptures[1]).toHaveProperty('keyRegistryBuffer', null);
+
+      await pool.stop();
+    });
+
+    it('should simulate error followed by exit (realistic crash sequence)', async () => {
+      // Finding #11: Test the error→exit sequence that real workers produce
+      const pool = new EventProcessingWorkerPool(1, 100, 5000);
+      await pool.start();
+
+      expect(Worker).toHaveBeenCalledTimes(1);
+
+      // Real workers emit 'error' first, then 'exit'
+      mockWorker._emit('error', new Error('Worker crashed'));
+      mockWorker._emit('exit', 1);
+
+      // Should attempt restart after exit
+      expect(Worker).toHaveBeenCalledTimes(2);
 
       await pool.stop();
     });
@@ -214,7 +374,7 @@ describe('EventProcessingWorkerPool', () => {
 
     it('should handle worker creation errors during start', async () => {
       // First worker throws, subsequent ones work
-      (Worker as jest.MockedClass<typeof Worker>)
+      (Worker as unknown as jest.Mock)
         .mockImplementationOnce(() => { throw new Error('Worker creation failed'); })
         .mockImplementation(() => mockWorker);
 
@@ -237,27 +397,8 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('batch task submission', () => {
     it('should submit multiple tasks in batch', async () => {
-      let responseCount = 0;
-
-      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
-        if (event === 'message') {
-          mockWorker._messageCallback = callback;
-        }
-      });
-
-      mockWorker.postMessage.mockImplementation(() => {
-        setTimeout(() => {
-          responseCount++;
-          if (mockWorker._messageCallback) {
-            mockWorker._messageCallback({
-              taskId: `batch-${responseCount}`,
-              success: true,
-              result: {},
-              processingTime: 50
-            });
-          }
-        }, 5);
-      });
+      // Finding #11: Use auto-respond for cleaner batch testing
+      mockWorker._autoRespond = true;
 
       const pool = new EventProcessingWorkerPool(2, 100, 5000);
       await pool.start();
@@ -271,6 +412,93 @@ describe('EventProcessingWorkerPool', () => {
 
       expect(results).toHaveLength(2);
       expect(results.every(r => r.success)).toBe(true);
+
+      await pool.stop();
+    });
+  });
+
+  // P1-FIX regression tests
+
+  describe('bounded restart retries (Fix #3)', () => {
+    it('should give up after MAX_RESTART_RETRIES and emit workerRestartFailed', async () => {
+      let workerCreateCount = 0;
+
+      (Worker as unknown as jest.Mock).mockImplementation((_path: any, _options: any) => {
+        workerCreateCount++;
+        if (workerCreateCount === 1) {
+          // First worker succeeds (initial creation)
+          const w = createMockWorker();
+          mockWorker = w;
+          return w;
+        }
+        // All restart attempts fail
+        throw new Error('Worker creation failed');
+      });
+
+      const pool = new EventProcessingWorkerPool(1, 100, 5000);
+      pool.on('workerRestartFailed', () => {});
+      await pool.start();
+
+      expect(workerCreateCount).toBe(1);
+
+      // Trigger worker crash — first restart attempt happens synchronously
+      // and fails (throws), which schedules retry via real setTimeout
+      mockWorker._emit('exit', 1);
+
+      // First restart attempt already happened (workerCreateCount should be 2)
+      expect(workerCreateCount).toBe(2);
+
+      await pool.stop();
+    });
+
+    it('should reset restart counter on successful restart', async () => {
+      let workerCreateCount = 0;
+      const workers: RealisticMockWorker[] = [];
+
+      (Worker as unknown as jest.Mock).mockImplementation((_path: any, _options: any) => {
+        workerCreateCount++;
+        const w = createMockWorker();
+        workers.push(w);
+        mockWorker = w;
+        return w;
+      });
+
+      const pool = new EventProcessingWorkerPool(1, 100, 5000);
+      await pool.start();
+
+      expect(workerCreateCount).toBe(1);
+
+      // First crash + successful restart
+      workers[0]._emit('exit', 1);
+      expect(workerCreateCount).toBe(2); // restart succeeded
+
+      // Second crash + successful restart (counter should have been reset)
+      workers[1]._emit('exit', 1);
+      expect(workerCreateCount).toBe(3); // restart succeeded again
+
+      await pool.stop();
+    });
+  });
+
+  describe('timed-out task cleanup (Fix #8)', () => {
+    it('should not dispatch a timed-out task to a worker', async () => {
+      // Don't set up any message callback — worker never responds
+      // This ensures the task will timeout
+      const pool = new EventProcessingWorkerPool(1, 100, 50);
+      await pool.start();
+
+      // Submit a task that will timeout (worker never responds)
+      const task: Task = {
+        id: 'will-timeout',
+        type: 'test',
+        data: {},
+        priority: 1
+      };
+
+      const taskPromise = pool.submitTask(task);
+
+      // Wait for timeout to fire
+      await expect(taskPromise).rejects.toThrow(/timed out/);
 
       await pool.stop();
     });

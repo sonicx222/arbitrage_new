@@ -124,8 +124,8 @@ describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
       });
 
       it('should have fee defined', () => {
-        expect(typeof balancer!.fee).toBe('number');
-        expect(balancer!.fee).toBeGreaterThanOrEqual(0);
+        expect(typeof balancer!.feeBps).toBe('number');
+        expect(balancer!.feeBps).toBeGreaterThanOrEqual(0);
       });
     });
 
@@ -149,7 +149,7 @@ describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
       });
 
       it('should have lower fee for stablecoin pools (4 bps)', () => {
-        expect(curve!.fee).toBe(4);
+        expect(curve!.feeBps).toBe(4);
       });
     });
 
@@ -173,7 +173,7 @@ describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
       });
 
       it('should have fee defined', () => {
-        expect(typeof chronos!.fee).toBe('number');
+        expect(typeof chronos!.feeBps).toBe('number');
       });
     });
   });
@@ -199,8 +199,8 @@ describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
 
     it('should have all DEXs with fee property defined', () => {
       DEXES.arbitrum.forEach(dex => {
-        expect(typeof dex.fee).toBe('number');
-        expect(dex.fee).toBeGreaterThanOrEqual(0);
+        expect(typeof dex.feeBps).toBe('number');
+        expect(dex.feeBps).toBeGreaterThanOrEqual(0);
       });
     });
 
@@ -771,7 +771,7 @@ describe('Cross-Chain DEX Configuration Consistency', () => {
           expect(dex.factoryAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
           expect(dex.routerAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
         }
-        expect(typeof dex.fee).toBe('number');
+        expect(typeof dex.feeBps).toBe('number');
       });
     });
   });

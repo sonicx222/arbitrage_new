@@ -52,6 +52,13 @@ function createMockQualityRedis(): QualityMonitorRedis & {
       const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
       const matchingKeys = Array.from(storage.keys()).filter(k => regex.test(k));
       return Promise.resolve(matchingKeys);
+    }),
+
+    scan: jest.fn((cursor: string, pattern: string, _count: number) => {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      const matchingKeys = Array.from(storage.keys()).filter(k => regex.test(k));
+      // Return all keys in a single scan iteration (cursor '0' = done)
+      return Promise.resolve(['0', matchingKeys] as [string, string[]]);
     })
   };
 }

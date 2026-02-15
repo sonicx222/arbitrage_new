@@ -337,8 +337,8 @@ describe.each(CHAIN_TEST_DATA)(
 
           it('should have fee configured', () => {
             const dex = dexes.find(d => d.name === name);
-            expect(dex!.fee).toBeGreaterThanOrEqual(1);
-            expect(dex!.fee).toBeLessThanOrEqual(100);
+            expect(dex!.feeBps).toBeGreaterThanOrEqual(1);
+            expect(dex!.feeBps).toBeLessThanOrEqual(100);
           });
         }
       );

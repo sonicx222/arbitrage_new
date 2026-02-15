@@ -198,6 +198,17 @@ export class ReserveCache implements Resettable {
     reserve1: string,
     blockNumber: number
   ): void {
+    // Fix #16: Lightweight O(1) input validation for hot path
+    // Guard against corrupt/empty Sync event data without expensive parsing
+    if (!reserve0 || !reserve1) {
+      logger.warn('onSyncEvent: empty reserve string', { chainId, pairAddress });
+      return;
+    }
+    if (!(blockNumber > 0)) {
+      logger.warn('onSyncEvent: invalid blockNumber', { chainId, pairAddress, blockNumber });
+      return;
+    }
+
     const key = this.makeKey(chainId, pairAddress);
 
     const entry: CachedReserve = {

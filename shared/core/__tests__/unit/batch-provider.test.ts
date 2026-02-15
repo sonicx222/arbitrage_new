@@ -81,6 +81,7 @@ describe('BatchProvider', () => {
       maxBatchSize: 5,
       batchTimeoutMs: 100,
       enabled: true,
+      enableDeduplication: false, // Disable for tests that rely on distinct request counting
     });
   });
 
@@ -178,9 +179,9 @@ describe('BatchProvider', () => {
         promises.push(batchProvider.queueRequest('eth_blockNumber', []));
       }
 
-      // Should auto-flush immediately when batch size is reached
-      await Promise.resolve();
-      await Promise.resolve();
+      // Auto-flush fires when batch size is reached, but the flush is async.
+      // Run all pending timers and microtasks to ensure the flush completes.
+      await jest.runAllTimersAsync();
 
       const results = await Promise.all(promises);
       expect(results).toEqual(['r1', 'r2', 'r3', 'r4', 'r5']);
@@ -202,10 +203,8 @@ describe('BatchProvider', () => {
         batchProvider.queueRequest('eth_blockNumber', []),
       ];
 
-      // Advance timer to trigger timeout flush
-      jest.advanceTimersByTime(100);
-      await Promise.resolve();
-      await Promise.resolve();
+      // Run all pending timers (including the batch timeout) and microtasks
+      await jest.runAllTimersAsync();
 
       const results = await Promise.all(promises);
       expect(results).toEqual(['r1', 'r2']);

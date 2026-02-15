@@ -78,7 +78,8 @@ const createMockProvider = () => ({
  * Create mock wallet
  */
 const createMockWallet = () => ({
-  address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+  address: '0x742D35CC6634c0532925A3b844BC9E7595F0BEb0',
+  getAddress: jest.fn().mockResolvedValue('0x742D35CC6634c0532925A3b844BC9E7595F0BEb0'),
 });
 
 /**

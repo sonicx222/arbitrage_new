@@ -8,7 +8,7 @@
  * - Native bridges (Arbitrum, Optimism, Base)
  * - Future bridge integrations
  *
- * @see ADR-014: Cross-Chain Execution Design
+ * @see shared/core/src/bridge-router/ for implementation
  */
 
 import { ethers } from 'ethers';
@@ -18,9 +18,10 @@ import { ethers } from 'ethers';
 // =============================================================================
 
 /**
- * Supported bridge protocols
+ * Supported bridge protocols.
+ * @see shared/config/src/bridge-config.ts for route configuration, costs, and latencies
  */
-export type BridgeProtocol = 'stargate' | 'native' | 'hop' | 'across' | 'celer';
+export type BridgeProtocol = 'stargate' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
 
 /**
  * Bridge transaction status
@@ -105,7 +106,12 @@ export interface BridgeQuote {
   bridgeFee: string;
   /** LayerZero/native gas fee in wei */
   gasFee: string;
-  /** Total cost (bridgeFee + gasFee) in wei */
+  /**
+   * Total native gas cost in wei. Represents the LayerZero/relayer fee only.
+   * bridgeFee is already deducted from amountOut and is denominated in the bridged
+   * token, so it cannot be summed with this native-token value.
+   * @deprecated Prefer using gasFee directly for clarity. totalFee === gasFee.
+   */
   totalFee: string;
   /** Estimated delivery time in seconds */
   estimatedTimeSeconds: number;
@@ -115,6 +121,8 @@ export interface BridgeQuote {
   valid: boolean;
   /** Error message if not valid */
   error?: string;
+  /** Destination address for bridged tokens. Defaults to sender if not specified. */
+  recipient?: string;
 }
 
 /**
@@ -129,8 +137,6 @@ export interface BridgeExecuteRequest {
   provider: ethers.Provider;
   /** Pre-allocated nonce (from NonceManager) */
   nonce?: number;
-  /** Deadline timestamp (bridge fails if not initiated by this time) */
-  deadline?: number;
 }
 
 /**
@@ -328,7 +334,11 @@ export const BRIDGE_DEFAULTS = {
 };
 
 /**
- * Stargate chain IDs (LayerZero format)
+ * Stargate V1 LayerZero chain IDs.
+ * Note: zkSync and Linea are NOT supported by Stargate V1.
+ * Cross-chain opportunities involving these chains are detected
+ * but cannot be bridged via Stargate. Use Across or native bridges instead.
+ * @see shared/config/src/bridge-config.ts for alternative bridge routes
  */
 export const STARGATE_CHAIN_IDS: Record<string, number> = {
   ethereum: 101,
@@ -387,19 +397,22 @@ export const STARGATE_ROUTER_ADDRESSES: Record<string, string> = {
 };
 
 /**
- * Average bridge times in seconds per route
+ * Average bridge times in seconds per route (Stargate/LayerZero).
+ *
+ * These values should be kept in sync with bridge-config.ts route latencies.
+ * @see shared/config/src/bridge-config.ts
  */
 export const BRIDGE_TIMES: Record<string, number> = {
-  'ethereum-arbitrum': 600,    // ~10 minutes
-  'ethereum-optimism': 300,    // ~5 minutes
-  'ethereum-base': 300,        // ~5 minutes
+  'ethereum-arbitrum': 180,    // ~3 minutes (Stargate via LayerZero)
+  'ethereum-optimism': 180,    // ~3 minutes
+  'ethereum-base': 180,        // ~3 minutes
   'ethereum-polygon': 180,     // ~3 minutes
-  'arbitrum-ethereum': 600,    // ~10 minutes (includes challenge period)
-  'arbitrum-optimism': 120,    // ~2 minutes
-  'arbitrum-base': 120,        // ~2 minutes
-  'optimism-ethereum': 600,    // ~10 minutes
-  'optimism-arbitrum': 120,    // ~2 minutes
-  'base-ethereum': 600,        // ~10 minutes
-  'base-arbitrum': 120,        // ~2 minutes
-  default: 300,                // 5 minutes default
+  'arbitrum-ethereum': 180,    // ~3 minutes (Stargate, not native bridge)
+  'arbitrum-optimism': 90,     // ~1.5 minutes (L2-to-L2)
+  'arbitrum-base': 90,         // ~1.5 minutes (L2-to-L2)
+  'optimism-ethereum': 180,    // ~3 minutes
+  'optimism-arbitrum': 90,     // ~1.5 minutes (L2-to-L2)
+  'base-ethereum': 180,        // ~3 minutes
+  'base-arbitrum': 90,         // ~1.5 minutes (L2-to-L2)
+  default: 180,                // 3 minutes default
 };

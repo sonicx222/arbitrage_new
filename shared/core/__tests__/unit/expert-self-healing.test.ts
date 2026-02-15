@@ -32,10 +32,23 @@ jest.mock('../../src/redis', () => ({
   resetRedisInstance: jest.fn()
 }));
 
-// P2-FIX: Add Redis Streams mock
+// P2-FIX: Add Redis Streams mock with StreamConsumer class
 jest.mock('../../src/redis-streams', () => ({
   getRedisStreamsClient: jest.fn(() => Promise.resolve(mockStreamsClient)),
-  resetRedisStreamsInstance: jest.fn(() => Promise.resolve(undefined))
+  resetRedisStreamsInstance: jest.fn(() => Promise.resolve(undefined)),
+  StreamConsumer: jest.fn().mockImplementation(() => ({
+    start: jest.fn(),
+    stop: jest.fn(() => Promise.resolve()),
+    getStats: jest.fn(() => ({ messagesProcessed: 0, messagesFailed: 0, lastProcessedAt: null, isRunning: false, isPaused: false })),
+  })),
+  RedisStreamsClient: {
+    STREAMS: {
+      PRICE_UPDATES: 'stream:price-updates',
+      SWAP_EVENTS: 'stream:swap-events',
+      WHALE_ALERTS: 'stream:whale-alerts',
+      FAILURE_EVENTS: 'stream:failure-events',
+    },
+  },
 }));
 
 // P2-FIX: Corrected mock paths to match actual file locations

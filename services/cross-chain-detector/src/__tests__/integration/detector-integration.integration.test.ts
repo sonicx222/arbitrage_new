@@ -670,12 +670,12 @@ describe('CrossChainDetectorService Integration', () => {
       // Run cleanup (max age is 5 minutes)
       priceDataManager.cleanup();
 
-      const snapshot = priceDataManager.createSnapshot();
+      const snapshot = priceDataManager.createIndexedSnapshot();
 
       // Old pair should be removed
-      expect(snapshot.ethereum?.uniswap?.['UNISWAP_OLD_PAIR']).toBeUndefined();
+      expect(snapshot.raw.ethereum?.uniswap?.['UNISWAP_OLD_PAIR']).toBeUndefined();
       // New pair should remain
-      expect(snapshot.ethereum?.uniswap?.['UNISWAP_NEW_PAIR']).toBeDefined();
+      expect(snapshot.raw.ethereum?.uniswap?.['UNISWAP_NEW_PAIR']).toBeDefined();
     });
 
     it('should clear all data on clear()', () => {

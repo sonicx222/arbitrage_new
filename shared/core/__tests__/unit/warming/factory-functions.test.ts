@@ -22,7 +22,7 @@ describe('Factory Functions Tests', () => {
   beforeEach(() => {
     cache = new HierarchicalCache({
       l1Size: 64,
-      l2Enabled: true,
+      l2Enabled: false, // Disable L2 in unit tests to avoid Redis connection
     });
   });
 

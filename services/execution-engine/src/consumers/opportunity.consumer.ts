@@ -39,6 +39,7 @@ import type {
   ConsumerConfig,
 } from '../types';
 import { DEFAULT_CONSUMER_CONFIG, DLQ_STREAM } from '../types';
+import { createCancellableTimeout } from '../services/simulation/types';
 
 // REFACTOR 9.1: Import validation types and functions from extracted module
 import {
@@ -272,13 +273,24 @@ export class OpportunityConsumer {
       ackPromises.push(ackPromise);
     }
 
-    // Wait for all ACKs with configurable timeout
-    await Promise.race([
-      Promise.allSettled(ackPromises),
-      new Promise<void>((resolve) =>
-        setTimeout(resolve, this.config.shutdownAckTimeoutMs)
-      ),
-    ]);
+    // Wait for all ACKs with configurable timeout.
+    // Fix #8: Use createCancellableTimeout to prevent timer leak on shutdown.
+    // The raw setTimeout in Promise.race was not cancelled when allSettled resolved first.
+    const { promise: timeoutPromise, cancel } = createCancellableTimeout<PromiseSettledResult<void>[]>(
+      this.config.shutdownAckTimeoutMs,
+      `Shutdown ACK timeout after ${this.config.shutdownAckTimeoutMs}ms`
+    );
+
+    try {
+      await Promise.race([
+        Promise.allSettled(ackPromises),
+        timeoutPromise,
+      ]);
+    } catch {
+      // Timeout reached — acceptable during shutdown, ACKs are best-effort
+    } finally {
+      cancel();
+    }
   }
 
   // ===========================================================================

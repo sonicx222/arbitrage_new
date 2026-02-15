@@ -307,6 +307,10 @@ export class RedisStreamsClient {
     EXECUTION_REQUESTS: 'stream:execution-requests',
     // Task 1.3.3: Pending opportunities from mempool detection
     PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
+    // Circuit breaker state change events (ADR-018)
+    CIRCUIT_BREAKER: 'stream:circuit-breaker',
+    // System failover coordination events
+    SYSTEM_FAILOVER: 'stream:system-failover',
   } as const;
 
   /**
@@ -322,6 +326,8 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
     [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 5000, // Execution requests, critical for trading
     [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
+    [RedisStreamsClient.STREAMS.CIRCUIT_BREAKER]: 5000,        // Circuit breaker events, critical alerts
+    [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {

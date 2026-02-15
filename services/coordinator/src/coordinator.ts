@@ -623,11 +623,33 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.startOpportunityCleanup();
 
       // Start HTTP server
-      this.server = this.app.listen(serverPort, () => {
-        this.logger.info(`Coordinator dashboard available at http://localhost:${serverPort}`, {
-          isLeader: this.isLeader
+      // In production, bind to localhost if no auth is configured to prevent
+      // exposing admin endpoints (restart, alerts) on public interfaces
+      const isProduction = process.env.NODE_ENV === 'production';
+      const authConfigured = isAuthEnabled();
+      const bindHost = (isProduction && !authConfigured) ? '127.0.0.1' : undefined;
+
+      if (isProduction && !authConfigured) {
+        this.logger.warn(
+          'Production mode with no authentication configured — binding to 127.0.0.1 only. ' +
+          'Set JWT_SECRET or API_KEYS to bind on all interfaces.',
+          { port: serverPort }
+        );
+      }
+
+      const listenCallback = () => {
+        this.logger.info(`Coordinator dashboard available at http://${bindHost ?? 'localhost'}:${serverPort}`, {
+          isLeader: this.isLeader,
+          bindHost: bindHost ?? '0.0.0.0',
+          authEnabled: authConfigured,
         });
-      });
+      };
+
+      if (bindHost) {
+        this.server = this.app.listen(serverPort, bindHost, listenCallback);
+      } else {
+        this.server = this.app.listen(serverPort, listenCallback);
+      }
 
       // P2 FIX: Use proper Error type
       this.server.on('error', (error: Error) => {

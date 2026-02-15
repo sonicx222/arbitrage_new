@@ -977,9 +977,19 @@ export class CrossChainDetectorService {
       // FIX #3: Use intent.type (DEX name like 'uniswapV2') instead of intent.router (hex address)
       // for matching against p.dex (e.g., 'uniswap'). Hex addresses never contain DEX names.
       // Fall back to chain-only match if intent.type doesn't match any tracked DEX.
-      const affectedPrice = pricesForPair.find(p =>
-        p.chain === chainName && intent.type.toLowerCase().includes(p.dex.toLowerCase())
-      ) ?? pricesForPair.find(p => p.chain === chainName);
+      // PERF: Pre-lowercase intent.type once and use single-pass with fallback tracking
+      const intentTypeLower = intent.type.toLowerCase();
+      let affectedPrice: (typeof pricesForPair)[number] | undefined;
+      let chainFallback: (typeof pricesForPair)[number] | undefined;
+      for (const p of pricesForPair) {
+        if (p.chain !== chainName) continue;
+        if (intentTypeLower.includes(p.dex.toLowerCase())) {
+          affectedPrice = p;
+          break;
+        }
+        if (!chainFallback) chainFallback = p;
+      }
+      if (!affectedPrice) affectedPrice = chainFallback;
 
       if (!affectedPrice) {
         // Pending swap is on a DEX we're not tracking
@@ -1022,7 +1032,7 @@ export class CrossChainDetectorService {
       // P1-3 FIX: Normalize deadline to ms (same as handlePendingOpportunity) before computing time delta
       const normalizedDeadlineMs = intent.deadline < 1e10 ? intent.deadline * 1000 : intent.deadline;
       const timeToDeadlineSec = (normalizedDeadlineMs - Date.now()) / 1000;
-      const deadlineBoost = Math.min(timeToDeadlineSec / 300, 1.0); // Max boost at 5min deadline
+      const deadlineBoost = Math.max(0, Math.min(timeToDeadlineSec / 300, 1.0)); // Clamp [0, 1.0], max boost at 5min deadline
       const baseConfidence = 0.6 + (priceImpact * 10); // Higher impact = higher confidence
       const confidence = Math.min(baseConfidence * deadlineBoost, 0.95);
 

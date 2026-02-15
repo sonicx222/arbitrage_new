@@ -215,17 +215,24 @@ export class ConfigManager {
 
     // STRICT_CONFIG_VALIDATION Handling
     // If strict validation is explicitly disabled, accept missing configuration
+    // FIX #10: In production, NEVER allow relaxed mode — misconfiguration is too dangerous
     const strictEnv = process.env.STRICT_CONFIG_VALIDATION;
     const forceStrict = strictEnv === 'true' || strictEnv === '1';
     const forceRelaxed = strictEnv === 'false' || strictEnv === '0';
+    const isProduction = process.env.NODE_ENV === 'production'
+      || !!process.env.FLY_APP_NAME
+      || !!process.env.RAILWAY_ENVIRONMENT
+      || !!process.env.RENDER_SERVICE_NAME
+      || !!process.env.KOYEB_SERVICE_NAME;
 
-    // In development, require strict validation unless disabled
-    // In production, require strict validation unless disabled coverage
-    // Logic: If error exists, but relaxed mode is ON, move errors to warnings
-    if (errors.length > 0 && forceRelaxed) {
+    // Logic: If errors exist and relaxed mode is ON, move errors to warnings —
+    // BUT only in non-production environments. Production always enforces strict.
+    if (errors.length > 0 && forceRelaxed && !isProduction) {
       warnings.push(...errors.map(e => `[RELAXED] ${e}`));
       // Clear errors to pass validation
       errors.length = 0;
+    } else if (errors.length > 0 && forceRelaxed && isProduction) {
+      warnings.push('[IGNORED] STRICT_CONFIG_VALIDATION=false is not allowed in production');
     }
 
     return {

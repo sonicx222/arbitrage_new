@@ -123,6 +123,9 @@ export class HealthMonitoringManager {
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
   private stalePendingCleanupInterval: NodeJS.Timeout | null = null;
 
+  // Concurrency guards to prevent overlapping async callbacks
+  private isReporting = false;
+
   constructor(deps: HealthMonitoringDependencies) {
     this.deps = deps;
   }
@@ -166,6 +169,10 @@ export class HealthMonitoringManager {
    */
   private startHealthMonitoringInterval(): void {
     this.healthMonitoringInterval = setInterval(async () => {
+      // Concurrency guard: skip if previous callback is still running (e.g., Redis pressure)
+      if (this.isReporting) return;
+      this.isReporting = true;
+
       try {
         // Cleanup operations (non-blocking, fast)
         this.cleanupGasBaselines();
@@ -175,6 +182,8 @@ export class HealthMonitoringManager {
         await this.collectAndPublishHealth();
       } catch (error) {
         this.deps.logger.error('Execution engine health monitoring failed', { error });
+      } finally {
+        this.isReporting = false;
       }
     }, HEALTH_CHECK_INTERVAL_MS);
   }
@@ -292,6 +301,9 @@ export class HealthMonitoringManager {
 
       try {
         const cleanedCount = await opportunityConsumer.cleanupStalePendingMessages();
+        // Re-check isRunning after async op (TOCTOU fix: service may have
+        // transitioned to stopping during the await)
+        if (!this.deps.stateManager.isRunning()) return;
         if (cleanedCount > 0) {
           this.deps.logger.info('Cleaned up stale pending messages', {
             cleanedCount,
@@ -299,6 +311,8 @@ export class HealthMonitoringManager {
           });
         }
       } catch (error) {
+        // Silently swallow errors during shutdown to avoid accessing torn-down resources
+        if (!this.deps.stateManager.isRunning()) return;
         this.deps.logger.error('Failed to cleanup stale pending messages', {
           error: getErrorMessage(error),
         });

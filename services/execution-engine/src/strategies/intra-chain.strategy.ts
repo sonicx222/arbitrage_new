@@ -479,11 +479,33 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         : ethers.parseUnits('0.001', tokenDecimals);
 
       // Build swap path for commit-reveal v2.0.0 interface
+      // Calculate amountOutMin to pass BaseFlashArbitrage.sol:616 InsufficientSlippageProtection check
+      // (contract reverts when amountOutMin == 0)
+      let amountOutMin: bigint;
+      if (opportunity.buyPrice && opportunity.buyPrice > 0) {
+        // Compute expected output using buyPrice, then apply 0.5% slippage (50 BPS)
+        // buyPrice is float (tokenOut per tokenIn), amountIn is bigint in tokenIn's smallest unit
+        // Scale buyPrice to integer math: multiply by 1e8 for precision, then divide back
+        const PRICE_SCALE = 100_000_000n;
+        const scaledPrice = BigInt(Math.floor(opportunity.buyPrice * Number(PRICE_SCALE)));
+        const expectedOutput = amountIn * scaledPrice / PRICE_SCALE;
+        // Apply 0.5% slippage tolerance (50 BPS out of 10000)
+        amountOutMin = expectedOutput - (expectedOutput * 50n / 10000n);
+      } else {
+        // Fallback: use amountIn with 5% tolerance as conservative minimum
+        // This handles same-decimal token pairs and cases where buyPrice is unavailable
+        amountOutMin = amountIn * 95n / 100n;
+      }
+      // Safety: ensure amountOutMin is always > 0 to avoid contract revert
+      if (amountOutMin <= 0n) {
+        amountOutMin = 1n;
+      }
+
       const swapPath = [{
         router: routerAddress,
         tokenIn: opportunity.tokenIn || opportunity.token0 || '',
         tokenOut: opportunity.tokenOut || opportunity.token1 || '',
-        amountOutMin: 0n, // Will be calculated by contract
+        amountOutMin,
       }];
 
       const params: CommitRevealParams = {

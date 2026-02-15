@@ -12,24 +12,14 @@
  * Memory Layout (per pair):
  * - 8 bytes: price (Float64)
  * - 4 bytes: timestamp (Int32 - relative seconds from epoch, for Atomics compatibility)
- * Total: 12 bytes per pair
- * For 1000 pairs: ~12KB data + ~4KB index = ~16KB total
+ * - 4 bytes: sequence counter (Int32 - odd=write in progress, even=consistent)
+ * Total: 16 bytes per pair
+ * For 1000 pairs: ~16KB data + ~4KB index = ~20KB total
  *
- * Thread Safety Notes (P0-2):
- * ╔════════════════════════════════════════════════════════════════════════════╗
- * ║ ⚠️  TORN READ WARNING                                                      ║
- * ╠════════════════════════════════════════════════════════════════════════════╣
- * ║ Price and timestamp are NOT atomically updated together.                   ║
- * ║ A reader may see new price with old timestamp or vice versa.               ║
- * ╠════════════════════════════════════════════════════════════════════════════╣
- * ║ Method Selection Guide:                                                    ║
- * ║ • getPrice()                    - Standard read, slight inconsistency OK   ║
- * ║ • getPriceWithFreshnessCheck()  - Validates freshness, rejects stale data  ║
- * ║ • getPriceOnly()                - Fastest, no timestamp (hot-path)         ║
- * ╠════════════════════════════════════════════════════════════════════════════╣
- * ║ For critical trade decisions, use getPriceWithFreshnessCheck() which       ║
- * ║ validates data age and rejects potentially inconsistent reads.             ║
- * ╚════════════════════════════════════════════════════════════════════════════╝
+ * Thread Safety (Fix #7):
+ * Sequence counter protocol prevents torn reads:
+ * - Writer: increment seq to odd -> write price+timestamp -> set seq to even
+ * - Reader: read seq (retry if odd) -> read price+timestamp -> re-read seq (retry if changed)
  */
 
 import { createLogger } from '../logger';
@@ -210,24 +200,16 @@ export class PriceIndexMapper {
     this.indexToKey.clear();
     this.nextIndex = 0;
   }
-
-  /**
-   * Simple hash function for string keys.
-   * Uses FNV-1a algorithm for fast, well-distributed hashes.
-   */
-  private hashKey(key: string): number {
-    let hash = 2166136261; // FNV offset basis
-    for (let i = 0; i < key.length; i++) {
-      hash ^= key.charCodeAt(i);
-      hash = (hash * 16777619) >>> 0; // FNV prime, keep as uint32
-    }
-    return hash;
-  }
 }
 
 // =============================================================================
 // Price Matrix
 // =============================================================================
+
+// Fix #7: Bytes per pair constant (8 price + 4 timestamp + 4 sequence = 16)
+const BYTES_PER_PAIR = 16;
+// Fix #7: Max retries for sequence counter spin loop to prevent livelock
+const MAX_SEQ_RETRIES = 100;
 
 export class PriceMatrix implements Resettable {
   private config: PriceMatrixConfig;
@@ -237,6 +219,8 @@ export class PriceMatrix implements Resettable {
   private sharedBuffer: SharedArrayBuffer | null = null;
   private priceArray: Float64Array | null = null;
   private timestampArray: Int32Array | null = null; // Int32Array for Atomics compatibility
+  // Fix #7: Sequence counter array for torn read protection
+  private sequenceArray: Int32Array | null = null;
 
   // PHASE3-TASK43: Shared key registry for worker thread access
   private keyRegistry: SharedKeyRegistry | null = null;
@@ -245,6 +229,7 @@ export class PriceMatrix implements Resettable {
   // Fallback arrays if SharedArrayBuffer is not available
   private fallbackPrices: Float64Array | null = null;
   private fallbackTimestamps: Int32Array | null = null; // Int32Array for consistency
+  private fallbackSequences: Int32Array | null = null; // Fix #7: fallback sequence counters
   private useSharedMemory = false;
 
   // Cached DataView for atomic operations (avoids allocation per operation)
@@ -329,10 +314,10 @@ export class PriceMatrix implements Resettable {
     config: Partial<Pick<PriceMatrixConfig, 'maxPairs' | 'reserveSlots' | 'enableAtomics'>> = {}
   ): PriceMatrix {
     // Calculate total slots from buffer size
-    // Buffer layout: [Float64Array for prices][Int32Array for timestamps]
-    // Each entry: 8 bytes (price) + 4 bytes (timestamp) = 12 bytes total
+    // Fix #7: Buffer layout: [Float64 prices][Int32 timestamps][Int32 sequences]
+    // Each entry: 8 bytes (price) + 4 bytes (timestamp) + 4 bytes (sequence) = 16 bytes total
     const totalBytes = buffer.byteLength;
-    const totalSlots = Math.floor(totalBytes / 12);
+    const totalSlots = Math.floor(totalBytes / BYTES_PER_PAIR);
 
     if (totalSlots <= 0) {
       throw new Error('SharedArrayBuffer too small for PriceMatrix');
@@ -378,14 +363,18 @@ export class PriceMatrix implements Resettable {
     // Attach to existing SharedArrayBuffer
     instance.sharedBuffer = buffer;
     const priceBytes = totalSlots * 8;
+    const timestampBytes = totalSlots * 4;
     instance.priceArray = new Float64Array(buffer, 0, totalSlots);
     instance.timestampArray = new Int32Array(buffer, priceBytes, totalSlots);
+    // Fix #7: Sequence counter array after timestamps
+    instance.sequenceArray = new Int32Array(buffer, priceBytes + timestampBytes, totalSlots);
     instance.dataView = new DataView(buffer);
     instance.useSharedMemory = true;
 
     // No fallback arrays needed
     instance.fallbackPrices = null;
     instance.fallbackTimestamps = null;
+    instance.fallbackSequences = null;
 
     // PHASE3-TASK43: Attach to SharedKeyRegistry if provided
     if (keyRegistryBuffer) {
@@ -423,10 +412,11 @@ export class PriceMatrix implements Resettable {
 
   private initializeArrays(totalSlots: number): void {
     // Calculate buffer size
-    // Each slot: 8 bytes (Float64) + 4 bytes (Uint32) = 12 bytes
+    // Fix #7: Each slot: 8 bytes (Float64) + 4 bytes (Int32 timestamp) + 4 bytes (Int32 sequence) = 16 bytes
     const priceBytes = totalSlots * 8;
     const timestampBytes = totalSlots * 4;
-    const totalBytes = priceBytes + timestampBytes;
+    const sequenceBytes = totalSlots * 4;
+    const totalBytes = priceBytes + timestampBytes + sequenceBytes;
 
     try {
       // Try to use SharedArrayBuffer for true shared memory
@@ -434,6 +424,8 @@ export class PriceMatrix implements Resettable {
         this.sharedBuffer = new SharedArrayBuffer(totalBytes);
         this.priceArray = new Float64Array(this.sharedBuffer, 0, totalSlots);
         this.timestampArray = new Int32Array(this.sharedBuffer, priceBytes, totalSlots);
+        // Fix #7: Sequence counter array after timestamps
+        this.sequenceArray = new Int32Array(this.sharedBuffer, priceBytes + timestampBytes, totalSlots);
         this.dataView = new DataView(this.sharedBuffer); // Cache DataView for atomic ops
         this.useSharedMemory = true;
         logger.debug('Using SharedArrayBuffer for price storage');
@@ -445,6 +437,7 @@ export class PriceMatrix implements Resettable {
       logger.warn('SharedArrayBuffer not available, falling back to ArrayBuffer', { error });
       this.fallbackPrices = new Float64Array(totalSlots);
       this.fallbackTimestamps = new Int32Array(totalSlots);
+      this.fallbackSequences = new Int32Array(totalSlots);
       this.useSharedMemory = false;
     }
 
@@ -455,15 +448,19 @@ export class PriceMatrix implements Resettable {
   private clearArrays(): void {
     const prices = this.getPriceArray();
     const timestamps = this.getTimestampArray();
+    const sequences = this.getSequenceArray();
 
     for (let i = 0; i < prices.length; i++) {
       if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
         // Use Atomics for thread-safe writes (using cached DataView)
         this.dataView.setFloat64(i * 8, 0, true);
         Atomics.store(timestamps, i, 0);
+        // Fix #7: Clear sequence counters (0 = even = consistent)
+        Atomics.store(sequences, i, 0);
       } else {
         prices[i] = 0;
         timestamps[i] = 0;
+        sequences[i] = 0;
       }
     }
   }
@@ -478,6 +475,11 @@ export class PriceMatrix implements Resettable {
 
   private getTimestampArray(): Int32Array {
     return this.timestampArray ?? this.fallbackTimestamps!;
+  }
+
+  // Fix #7: Sequence counter array accessor
+  private getSequenceArray(): Int32Array {
+    return this.sequenceArray ?? this.fallbackSequences!;
   }
 
   // ===========================================================================
@@ -510,6 +512,13 @@ export class PriceMatrix implements Resettable {
       return false; // Ignore empty keys
     }
 
+    // Fix #6: Validate price is a finite non-negative number
+    // Use price < 0 (not <= 0) because HierarchicalCache.setInL1() defaults price to 0
+    // for non-price entries, so rejecting 0 would silently break non-price cache entries
+    if (!Number.isFinite(price) || price < 0) {
+      return false;
+    }
+
     // Check if we've reached maxPairs limit for new keys
     const isNewKey = !this.mapper.hasKey(key);
     if (isNewKey && this.writtenSlots.size >= this.config.maxPairs) {
@@ -529,18 +538,26 @@ export class PriceMatrix implements Resettable {
 
     const prices = this.getPriceArray();
     const timestamps = this.getTimestampArray();
+    const sequences = this.getSequenceArray();
 
     // P1-FIX: Write price to SharedArrayBuffer BEFORE registering key
     // This ensures workers cannot read uninitialized data (timestamp=0)
     // when they look up a newly registered key
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
-      // Atomic write using cached DataView for Float64
-      // Note: Price and timestamp are not atomically written together (torn write possible)
+      // Fix #7: Sequence counter protocol for atomic price+timestamp writes
+      // 1. Pre-increment sequence to odd (signals write in progress)
+      const seq = Atomics.add(sequences, index, 1) + 1; // seq is now odd
+      // 2. Write price and timestamp
       this.dataView.setFloat64(index * 8, price, true); // little-endian
       Atomics.store(timestamps, index, relativeTimestamp);
+      // 3. Post-increment sequence to even (signals write complete)
+      Atomics.store(sequences, index, seq + 1);
     } else {
+      // Fix #7: Non-atomic path still uses sequence counter for consistency
+      sequences[index]++; // odd
       prices[index] = price;
       timestamps[index] = relativeTimestamp;
+      sequences[index]++; // even
     }
 
     // Track that this slot has been written
@@ -601,15 +618,37 @@ export class PriceMatrix implements Resettable {
 
     const prices = this.getPriceArray();
     const timestamps = this.getTimestampArray();
+    const sequences = this.getSequenceArray();
 
-    let price: number;
-    let relativeTimestamp: number;
+    let price: number = 0;
+    let relativeTimestamp: number = 0;
 
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
-      // Atomic read using cached DataView for Float64
-      // Note: Price and timestamp are not atomically read together (torn read possible)
-      price = this.dataView.getFloat64(index * 8, true);
-      relativeTimestamp = Atomics.load(timestamps, index);
+      // Fix #7: Sequence counter protocol for consistent reads
+      // Retry if sequence is odd (write in progress) or changed after read
+      let retries = 0;
+      while (retries < MAX_SEQ_RETRIES) {
+        const seq1 = Atomics.load(sequences, index);
+        if (seq1 & 1) {
+          // Odd = write in progress, spin
+          retries++;
+          continue;
+        }
+        price = this.dataView.getFloat64(index * 8, true);
+        relativeTimestamp = Atomics.load(timestamps, index);
+        const seq2 = Atomics.load(sequences, index);
+        if (seq1 === seq2) {
+          // Consistent read — sequence didn't change
+          break;
+        }
+        // Sequence changed during read, retry
+        retries++;
+      }
+      if (retries >= MAX_SEQ_RETRIES) {
+        // Contention too high — return null rather than torn data
+        this.stats.misses++;
+        return null;
+      }
     } else {
       price = prices[index];
       relativeTimestamp = timestamps[index];
@@ -702,12 +741,30 @@ export class PriceMatrix implements Resettable {
       return null;
     }
 
-    this.stats.hits++;
-
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
-      return this.dataView.getFloat64(index * 8, true);
+      // Fix #7: Sequence counter protocol for consistent price-only reads
+      const sequences = this.getSequenceArray();
+      let retries = 0;
+      while (retries < MAX_SEQ_RETRIES) {
+        const seq1 = Atomics.load(sequences, index);
+        if (seq1 & 1) {
+          retries++;
+          continue;
+        }
+        const price = this.dataView.getFloat64(index * 8, true);
+        const seq2 = Atomics.load(sequences, index);
+        if (seq1 === seq2) {
+          this.stats.hits++;
+          return price;
+        }
+        retries++;
+      }
+      // Contention too high — count as miss, not hit
+      this.stats.misses++;
+      return null;
     }
 
+    this.stats.hits++;
     return this.getPriceArray()[index];
   }
 
@@ -730,13 +787,19 @@ export class PriceMatrix implements Resettable {
 
     const prices = this.getPriceArray();
     const timestamps = this.getTimestampArray();
+    const sequences = this.getSequenceArray();
 
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
+      // Fix #7: Use sequence protocol even for deletes
+      const seq = Atomics.add(sequences, index, 1) + 1;
       this.dataView.setFloat64(index * 8, 0, true);
       Atomics.store(timestamps, index, 0);
+      Atomics.store(sequences, index, seq + 1);
     } else {
+      sequences[index]++;
       prices[index] = 0;
       timestamps[index] = 0;
+      sequences[index]++;
     }
 
     // Remove from written slots
@@ -775,6 +838,9 @@ export class PriceMatrix implements Resettable {
     for (const update of updates) {
       if (!update.key) continue;
 
+      // Fix #6: Validate price in batch path (same as setPrice)
+      if (!Number.isFinite(update.price) || update.price < 0) continue;
+
       // Skip if at maxPairs limit for new keys
       if (!this.mapper.hasKey(update.key) && this.writtenSlots.size >= maxPairs) {
         continue;
@@ -797,19 +863,24 @@ export class PriceMatrix implements Resettable {
     // Phase 2: Batch write prices (single pass for cache locality)
     const prices = this.getPriceArray();
     const timestamps = this.getTimestampArray();
+    const sequences = this.getSequenceArray();
 
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
-      // Optimized SharedArrayBuffer path
+      // Optimized SharedArrayBuffer path with Fix #7 sequence counter protocol
       for (const { index, price, relativeTs } of resolved) {
+        const seq = Atomics.add(sequences, index, 1) + 1;
         this.dataView.setFloat64(index * 8, price, true);
         Atomics.store(timestamps, index, relativeTs);
+        Atomics.store(sequences, index, seq + 1);
         this.writtenSlots.add(index);
       }
     } else {
       // Fallback path
       for (const { index, price, relativeTs } of resolved) {
+        sequences[index]++;
         prices[index] = price;
         timestamps[index] = relativeTs;
+        sequences[index]++;
         this.writtenSlots.add(index);
       }
     }
@@ -926,7 +997,9 @@ export class PriceMatrix implements Resettable {
     const totalSlots = this.config.maxPairs + this.config.reserveSlots;
     const priceArrayBytes = totalSlots * 8;
     const timestampArrayBytes = totalSlots * 4;
-    const totalBytes = priceArrayBytes + timestampArrayBytes;
+    // Fix #7: Include sequence counter bytes in total
+    const sequenceArrayBytes = totalSlots * 4;
+    const totalBytes = priceArrayBytes + timestampArrayBytes + sequenceArrayBytes;
     const usedSlots = this.writtenSlots.size;
 
     return {
@@ -992,11 +1065,18 @@ export class PriceMatrix implements Resettable {
     if (this.timestampArray) {
       this.timestampArray.fill(0);
     }
+    // Fix #7: Clear sequence counters
+    if (this.sequenceArray) {
+      this.sequenceArray.fill(0);
+    }
     if (this.fallbackPrices) {
       this.fallbackPrices.fill(0);
     }
     if (this.fallbackTimestamps) {
       this.fallbackTimestamps.fill(0);
+    }
+    if (this.fallbackSequences) {
+      this.fallbackSequences.fill(0);
     }
 
     // Reset mapper to clear key-to-index mappings
@@ -1067,8 +1147,10 @@ export class PriceMatrix implements Resettable {
     // Clear arrays and cached views
     this.priceArray = null;
     this.timestampArray = null;
+    this.sequenceArray = null;
     this.fallbackPrices = null;
     this.fallbackTimestamps = null;
+    this.fallbackSequences = null;
     this.sharedBuffer = null;
     this.dataView = null;
 

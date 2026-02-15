@@ -24,6 +24,7 @@ import { MEV_CONFIG } from '@arbitrage/config';
 import type { ProviderServiceImpl } from '../services/provider.service';
 import type { MevInitializationResult, InitializationLogger } from './types';
 import { createDisabledMevResult } from './types';
+import { createCancellableTimeout } from '../services/simulation/types';
 
 /**
  * Timeout for individual provider initialization (prevents hanging).
@@ -111,6 +112,12 @@ export async function initializeMevProviders(
       return { chainName, success: false, skipped: true, reason: 'jito_not_supported' };
     }
 
+    // Fix 3: Use createCancellableTimeout to prevent timer leaks on early resolution
+    const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<never>(
+      PROVIDER_INIT_TIMEOUT_MS,
+      `MEV provider initialization timeout after ${PROVIDER_INIT_TIMEOUT_MS}ms`
+    );
+
     try {
       // Initialize with timeout to prevent hanging on unresponsive providers
       const mevProvider = await Promise.race([
@@ -119,12 +126,7 @@ export async function initializeMevProviders(
           provider,
           wallet,
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`MEV provider initialization timeout after ${PROVIDER_INIT_TIMEOUT_MS}ms`)),
-            PROVIDER_INIT_TIMEOUT_MS
-          )
-        ),
+        timeoutPromise,
       ]);
 
       // Verify provider is stored in factory cache (ADR-017 compliance)
@@ -150,6 +152,8 @@ export async function initializeMevProviders(
         error: standardizedError,
       });
       return { chainName, success: false, skipped: false, error: standardizedError };
+    } finally {
+      cancelTimeout(); // Always cancel to prevent timer leak
     }
   });
 

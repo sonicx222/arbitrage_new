@@ -19,7 +19,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { timingSafeEqual } from 'crypto';
+import { timingSafeEqual, createHash } from 'crypto';
 import type { CircuitBreakerStatus } from '../services/circuit-breaker';
 
 // =============================================================================
@@ -89,19 +89,11 @@ function extractApiKey(req: IncomingMessage): string | null {
  * @returns true if strings are equal
  */
 function timingSafeCompare(a: string, b: string): boolean {
-  // Convert strings to buffers for timingSafeEqual
-  const aBuffer = Buffer.from(a, 'utf8');
-  const bBuffer = Buffer.from(b, 'utf8');
-
-  // If lengths differ, we still need constant-time comparison
-  // to avoid leaking length information
-  if (aBuffer.length !== bBuffer.length) {
-    // Compare against self to maintain constant time, then return false
-    timingSafeEqual(aBuffer, aBuffer);
-    return false;
-  }
-
-  return timingSafeEqual(aBuffer, bBuffer);
+  // Hash both inputs with SHA-256 to normalize length before comparison.
+  // This prevents leaking key length via buffer size differences.
+  const aHash = createHash('sha256').update(a).digest();
+  const bHash = createHash('sha256').update(b).digest();
+  return timingSafeEqual(aHash, bHash);
 }
 
 /**

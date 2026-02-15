@@ -393,14 +393,15 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     for (const chain of Object.keys(config.contractAddresses)) {
       const routers = config.approvedRouters[chain];
       if (!routers || routers.length === 0) {
-        // Use console.warn since logger isn't available in constructor
-        // This is a startup-time validation, not a runtime log
-        console.warn(
-          `[CRITICAL] FlashLoanStrategy: Chain '${chain}' has contract address but no approved routers. ` +
-          `Router lookup will fall back to DEXES config. ` +
-          `MUST ensure those routers are approved in FlashLoanArbitrage contract via addApprovedRouter(), ` +
-          `otherwise ALL transactions will fail with ERR_UNAPPROVED_ROUTER. ` +
-          `Verify with: scripts/verify-router-approval.ts`
+        // Logger is available via super(logger) — use structured logging
+        this.logger.warn(
+          `Chain '${chain}' has contract address but no approved routers. ` +
+          `Router lookup will fall back to DEXES config.`,
+          {
+            chain,
+            hint: 'Ensure routers are approved in FlashLoanArbitrage contract via addApprovedRouter(). ' +
+              'Verify with: scripts/verify-router-approval.ts',
+          }
         );
       }
     }

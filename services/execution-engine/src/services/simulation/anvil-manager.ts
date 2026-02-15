@@ -25,7 +25,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { ethers } from 'ethers';
 // Fix 6.2: Import shared error message utility for consistent error handling
 // Fix 6.3: Import shared rolling average utility to eliminate duplication
-import { CHAIN_IDS, getSimulationErrorMessage, updateRollingAverage } from './types';
+import { CHAIN_IDS, getSimulationErrorMessage, updateRollingAverage, extractRevertReason } from './types';
 
 // =============================================================================
 // Types
@@ -373,7 +373,7 @@ export class AnvilForkManager {
 
       return {
         success: false,
-        revertReason: this.extractRevertReason(errorMessage),
+        revertReason: extractRevertReason(errorMessage),
         error: errorMessage,
         latencyMs: Date.now() - startTime,
       };
@@ -651,29 +651,6 @@ export class AnvilForkManager {
     if (this.state !== 'running' || !this.provider) {
       throw new Error('Anvil fork is not running');
     }
-  }
-
-  /**
-   * Extract revert reason from error message.
-   */
-  private extractRevertReason(errorMessage: string): string {
-    // Common patterns:
-    // "execution reverted: REASON"
-    // "VM Exception while processing transaction: revert REASON"
-    const patterns = [
-      /execution reverted:\s*(.+)/i,
-      /revert\s*(.+)/i,
-      /reason:\s*(.+)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = errorMessage.match(pattern);
-      if (match && match[1]) {
-        return match[1].trim();
-      }
-    }
-
-    return errorMessage;
   }
 
   /**

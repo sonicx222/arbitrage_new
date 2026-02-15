@@ -61,7 +61,7 @@ describe('PriceDataManager', () => {
 
       expect(manager).toBeDefined();
       expect(typeof manager.handlePriceUpdate).toBe('function');
-      expect(typeof manager.createSnapshot).toBe('function');
+      expect(typeof manager.createIndexedSnapshot).toBe('function');
       expect(typeof manager.getChains).toBe('function');
       expect(typeof manager.getPairCount).toBe('function');
       expect(typeof manager.cleanup).toBe('function');
@@ -83,10 +83,10 @@ describe('PriceDataManager', () => {
 
       manager.handlePriceUpdate(update);
 
-      const snapshot = manager.createSnapshot();
-      expect(snapshot.ethereum).toBeDefined();
-      expect(snapshot.ethereum.uniswap).toBeDefined();
-      expect(snapshot.ethereum.uniswap['WETH-USDC']).toEqual(update);
+      const snapshot = manager.createIndexedSnapshot();
+      expect(snapshot.raw.ethereum).toBeDefined();
+      expect(snapshot.raw.ethereum.uniswap).toBeDefined();
+      expect(snapshot.raw.ethereum.uniswap['WETH-USDC']).toEqual(update);
     });
 
     it('should create nested structure for new chains', () => {
@@ -120,8 +120,8 @@ describe('PriceDataManager', () => {
       manager.handlePriceUpdate(update1);
       manager.handlePriceUpdate(update2);
 
-      const snapshot = manager.createSnapshot();
-      expect(snapshot.ethereum.uniswap['WETH-USDC'].price).toBe(2550);
+      const snapshot = manager.createIndexedSnapshot();
+      expect(snapshot.raw.ethereum.uniswap['WETH-USDC'].price).toBe(2550);
     });
 
     it('should trigger cleanup at configured frequency', () => {
@@ -153,10 +153,10 @@ describe('PriceDataManager', () => {
         timestamp: now,
       }));
 
-      const snapshot = manager.createSnapshot();
-      expect(snapshot.ethereum?.uniswap?.['OLD-PAIR']).toBeUndefined();
-      expect(snapshot.ethereum.uniswap['NEW-PAIR-1']).toBeDefined();
-      expect(snapshot.ethereum.uniswap['NEW-PAIR-2']).toBeDefined();
+      const snapshot = manager.createIndexedSnapshot();
+      expect(snapshot.raw.ethereum?.uniswap?.['OLD-PAIR']).toBeUndefined();
+      expect(snapshot.raw.ethereum.uniswap['NEW-PAIR-1']).toBeDefined();
+      expect(snapshot.raw.ethereum.uniswap['NEW-PAIR-2']).toBeDefined();
     });
 
     it('should handle errors gracefully', () => {
@@ -169,40 +169,6 @@ describe('PriceDataManager', () => {
       manager.handlePriceUpdate(undefined as any);
 
       expect(logger.getLogs('error').length).toBeGreaterThan(0);
-    });
-  });
-
-  // ===========================================================================
-  // createSnapshot
-  // ===========================================================================
-
-  describe('createSnapshot', () => {
-    it('should create deep copy of price data', () => {
-      const manager = createPriceDataManager({
-        logger: asLogger(logger),
-      });
-
-      const update = createPriceUpdate();
-
-      manager.handlePriceUpdate(update);
-
-      const snapshot1 = manager.createSnapshot();
-      const snapshot2 = manager.createSnapshot();
-
-      // Modify snapshot1
-      snapshot1.ethereum.uniswap['WETH-USDC'].price = 9999;
-
-      // snapshot2 should not be affected
-      expect(snapshot2.ethereum.uniswap['WETH-USDC'].price).toBe(2500);
-    });
-
-    it('should return empty object when no data', () => {
-      const manager = createPriceDataManager({
-        logger: asLogger(logger),
-      });
-
-      const snapshot = manager.createSnapshot();
-      expect(snapshot).toEqual({});
     });
   });
 
@@ -312,9 +278,9 @@ describe('PriceDataManager', () => {
 
       manager.cleanup();
 
-      const snapshot = manager.createSnapshot();
-      expect(snapshot.ethereum?.uniswap?.['OLD-PAIR']).toBeUndefined();
-      expect(snapshot.ethereum.uniswap['NEW-PAIR']).toBeDefined();
+      const snapshot = manager.createIndexedSnapshot();
+      expect(snapshot.raw.ethereum?.uniswap?.['OLD-PAIR']).toBeUndefined();
+      expect(snapshot.raw.ethereum.uniswap['NEW-PAIR']).toBeDefined();
     });
 
     it('should remove empty dex objects', () => {
@@ -334,8 +300,8 @@ describe('PriceDataManager', () => {
 
       manager.cleanup();
 
-      const snapshot = manager.createSnapshot();
-      expect(snapshot.ethereum?.['empty-dex']).toBeUndefined();
+      const snapshot = manager.createIndexedSnapshot();
+      expect(snapshot.raw.ethereum?.['empty-dex']).toBeUndefined();
     });
 
     it('should remove empty chain objects', () => {
@@ -356,8 +322,8 @@ describe('PriceDataManager', () => {
 
       manager.cleanup();
 
-      const snapshot = manager.createSnapshot();
-      expect(snapshot['empty-chain']).toBeUndefined();
+      const snapshot = manager.createIndexedSnapshot();
+      expect(snapshot.raw['empty-chain']).toBeUndefined();
     });
   });
 
@@ -647,7 +613,7 @@ describe('PriceDataManager', () => {
 
       expect(manager.getChains()).toEqual([]);
       expect(manager.getPairCount()).toBe(0);
-      expect(manager.createSnapshot()).toEqual({});
+      expect(manager.createIndexedSnapshot().raw).toEqual({});
     });
 
     it('should log clear operation', () => {

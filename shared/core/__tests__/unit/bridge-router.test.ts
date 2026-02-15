@@ -10,7 +10,7 @@
  * - Auto-cleanup
  * - ERC20 approval flow
  *
- * @see ADR-014: Cross-Chain Execution Design
+ * @see shared/core/src/bridge-router/ for implementation
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -45,6 +45,28 @@ import {
 // =============================================================================
 // Test Utilities
 // =============================================================================
+
+/**
+ * Type-safe accessor for StargateRouter internals in tests.
+ * Reduces fragile (router as any) casts throughout the test file.
+ */
+function getRouterInternals(router: StargateRouter) {
+  return router as unknown as {
+    pendingBridges: Map<string, {
+      status: string;
+      sourceTxHash: string;
+      sourceChain: string;
+      destChain: string;
+      startTime: number;
+      destTxHash?: string;
+      amountReceived?: string;
+      error?: string;
+      failReason?: 'timeout' | 'execution_error' | 'unknown';
+    }>;
+    bridgesMutex: { runExclusive: <T>(fn: () => Promise<T>) => Promise<T> };
+    approvalMutexes: Map<string, unknown>;
+  };
+}
 
 /**
  * Create a mock ethers Provider
@@ -105,9 +127,9 @@ function createTestQuote(overrides: Partial<BridgeQuote> = {}): BridgeQuote {
     token: 'USDC',
     amountIn: '1000000000', // 1000 USDC (6 decimals)
     amountOut: '997000000', // After 0.06% fee and slippage
-    bridgeFee: '600000', // 0.06%
-    gasFee: '10000000000000000', // 0.01 ETH
-    totalFee: '10000600000',
+    bridgeFee: '600000', // 0.06% (token-denominated, already deducted from amountOut)
+    gasFee: '10000000000000000', // 0.01 ETH (native wei)
+    totalFee: '10000000000000000', // Same as gasFee (native wei only)
     estimatedTimeSeconds: 120,
     expiresAt: Date.now() + BRIDGE_DEFAULTS.quoteValidityMs,
     valid: true,
@@ -327,11 +349,11 @@ describe('StargateRouter', () => {
       // First we need to create a pending bridge entry
       // We'll use the internal access for testing
       const bridgeId = 'stargate-0xtest123';
-      const internalRouter = router as any;
+      const internals = getRouterInternals(router);
 
       // Manually add a pending bridge for testing
-      await internalRouter.bridgesMutex.runExclusive(async () => {
-        internalRouter.pendingBridges.set(bridgeId, {
+      await internals.bridgesMutex.runExclusive(async () => {
+        internals.pendingBridges.set(bridgeId, {
           status: 'bridging',
           sourceTxHash: '0xsourcehash',
           sourceChain: 'arbitrum',
@@ -354,11 +376,11 @@ describe('StargateRouter', () => {
   describe('markFailed', () => {
     it('should mark bridge as failed with error message', async () => {
       const bridgeId = 'stargate-0xtest456';
-      const internalRouter = router as any;
+      const internals = getRouterInternals(router);
 
       // Manually add a pending bridge
-      await internalRouter.bridgesMutex.runExclusive(async () => {
-        internalRouter.pendingBridges.set(bridgeId, {
+      await internals.bridgesMutex.runExclusive(async () => {
+        internals.pendingBridges.set(bridgeId, {
           status: 'bridging',
           sourceTxHash: '0xsourcehash',
           sourceChain: 'arbitrum',
@@ -383,19 +405,19 @@ describe('StargateRouter', () => {
 
   describe('cleanup', () => {
     it('should remove old pending bridges', async () => {
-      const internalRouter = router as any;
+      const internals = getRouterInternals(router);
 
       // Add old bridges
       const oldTime = Date.now() - 25 * 60 * 60 * 1000; // 25 hours ago
-      await internalRouter.bridgesMutex.runExclusive(async () => {
-        internalRouter.pendingBridges.set('old-bridge-1', {
+      await internals.bridgesMutex.runExclusive(async () => {
+        internals.pendingBridges.set('old-bridge-1', {
           status: 'bridging',
           sourceTxHash: '0x1',
           sourceChain: 'arbitrum',
           destChain: 'optimism',
           startTime: oldTime,
         });
-        internalRouter.pendingBridges.set('old-bridge-2', {
+        internals.pendingBridges.set('old-bridge-2', {
           status: 'completed',
           sourceTxHash: '0x2',
           sourceChain: 'arbitrum',
@@ -405,8 +427,8 @@ describe('StargateRouter', () => {
       });
 
       // Add a recent bridge
-      await internalRouter.bridgesMutex.runExclusive(async () => {
-        internalRouter.pendingBridges.set('recent-bridge', {
+      await internals.bridgesMutex.runExclusive(async () => {
+        internals.pendingBridges.set('recent-bridge', {
           status: 'bridging',
           sourceTxHash: '0x3',
           sourceChain: 'arbitrum',
@@ -430,52 +452,58 @@ describe('StargateRouter', () => {
   });
 
   describe('MAX_PENDING_BRIDGES enforcement', () => {
-    it('should evict oldest entry when max is reached', async () => {
-      const internalRouter = router as any;
+    it('should evict oldest entry when max is reached via execute()', async () => {
+      const internals = getRouterInternals(router);
       const MAX_PENDING = 1000;
 
-      // Fill to capacity
-      await internalRouter.bridgesMutex.runExclusive(async () => {
+      // Fill to capacity by adding entries directly (simulating previous executions)
+      await internals.bridgesMutex.runExclusive(async () => {
         for (let i = 0; i < MAX_PENDING; i++) {
-          internalRouter.pendingBridges.set(`bridge-${i}`, {
+          internals.pendingBridges.set(`stargate-0xbridge${i}`, {
             status: 'bridging',
-            sourceTxHash: `0x${i}`,
+            sourceTxHash: `0xbridge${i}`,
             sourceChain: 'arbitrum',
             destChain: 'optimism',
-            startTime: Date.now() + i, // Slightly different times
+            startTime: Date.now() + i,
           });
         }
       });
 
-      // Verify at max capacity
-      expect(internalRouter.pendingBridges.size).toBe(MAX_PENDING);
+      expect(internals.pendingBridges.size).toBe(MAX_PENDING);
 
-      // Adding one more should evict the oldest (first inserted)
-      await internalRouter.bridgesMutex.runExclusive(async () => {
-        if (internalRouter.pendingBridges.size >= MAX_PENDING) {
-          const oldestKey = internalRouter.pendingBridges.keys().next().value;
-          if (oldestKey) {
-            internalRouter.pendingBridges.delete(oldestKey);
-          }
-        }
-        internalRouter.pendingBridges.set('new-bridge', {
-          status: 'bridging',
-          sourceTxHash: '0xnew',
-          sourceChain: 'arbitrum',
-          destChain: 'optimism',
-          startTime: Date.now(),
-        });
+      // Execute one more bridge through the public execute() path
+      const mockEncodeFunctionData = jest.fn(() => '0xencodeddata');
+      const mockAllowance = jest.fn(() => Promise.resolve(ethers.MaxUint256));
+      jest.spyOn(ethers, 'Contract').mockReturnValue({
+        interface: { encodeFunctionData: mockEncodeFunctionData },
+        allowance: mockAllowance,
+        balanceOf: jest.fn(() => Promise.resolve(BigInt('2000000000'))),
+      } as any);
+
+      const mockWallet = createMockWallet(mockProvider);
+      // Mock getBalance for pre-flight check
+      (mockProvider.getBalance as jest.Mock<() => Promise<bigint>>).mockResolvedValue(
+        BigInt('1000000000000000000')
+      );
+      const quote = createTestQuote();
+
+      const result = await router.execute({
+        quote,
+        wallet: mockWallet,
+        provider: mockProvider,
       });
 
-      // Size should still be at max
-      expect(internalRouter.pendingBridges.size).toBe(MAX_PENDING);
+      expect(result.success).toBe(true);
+
+      // Size should still be at max (oldest evicted, new one added)
+      expect(internals.pendingBridges.size).toBe(MAX_PENDING);
 
       // New bridge should exist
-      const newStatus = await router.getStatus('new-bridge');
+      const newStatus = await router.getStatus(result.bridgeId!);
       expect(newStatus.status).toBe('bridging');
 
       // First bridge should be evicted
-      const firstStatus = await router.getStatus('bridge-0');
+      const firstStatus = await router.getStatus('stargate-0xbridge0');
       expect(firstStatus.error).toBe('Bridge not found');
     });
   });
@@ -498,11 +526,11 @@ describe('StargateRouter', () => {
 
     it('should handle concurrent status updates without race conditions', async () => {
       const bridgeId = 'concurrent-test-bridge';
-      const internalRouter = router as any;
+      const internals = getRouterInternals(router);
 
       // Add initial bridge
-      await internalRouter.bridgesMutex.runExclusive(async () => {
-        internalRouter.pendingBridges.set(bridgeId, {
+      await internals.bridgesMutex.runExclusive(async () => {
+        internals.pendingBridges.set(bridgeId, {
           status: 'bridging',
           sourceTxHash: '0xconcurrent',
           sourceChain: 'arbitrum',
@@ -528,14 +556,14 @@ describe('StargateRouter', () => {
     });
 
     it('should serialize mutex operations correctly', async () => {
-      const internalRouter = router as any;
+      const internals = getRouterInternals(router);
       const results: number[] = [];
 
       // Run multiple exclusive operations
       const operations: Promise<number>[] = [];
       for (let i = 0; i < 5; i++) {
         operations.push(
-          internalRouter.bridgesMutex.runExclusive(async () => {
+          internals.bridgesMutex.runExclusive(async () => {
             // Simulate some async work
             await new Promise(resolve => setImmediate(resolve));
             results.push(i);
@@ -627,6 +655,414 @@ describe('StargateRouter', () => {
 });
 
 // =============================================================================
+// Execute Success Path, Approval, and State Transition Tests (Fix #5)
+// =============================================================================
+
+describe('StargateRouter - execute success and approval', () => {
+  let router: StargateRouter;
+  let mockProvider: jest.Mocked<ethers.Provider>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+
+    mockProvider = createMockProvider();
+    const providers = new Map<string, ethers.Provider>();
+    providers.set('arbitrum', mockProvider);
+    providers.set('optimism', mockProvider);
+    providers.set('ethereum', mockProvider);
+
+    router = new StargateRouter(providers);
+  });
+
+  afterEach(() => {
+    router.dispose();
+    jest.useRealTimers();
+  });
+
+  // 5a: execute() success path for ERC20 (USDC)
+  it('should execute ERC20 bridge successfully and track pending bridge', async () => {
+    const mockEncodeFunctionData = jest.fn(() => '0xencodeddata');
+    const mockAllowance = jest.fn(() => Promise.resolve(ethers.MaxUint256));
+    const mockApprove = jest.fn(() => Promise.resolve({
+      wait: jest.fn(() => Promise.resolve({ status: 1, hash: '0xapprove' })),
+    }));
+
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      interface: { encodeFunctionData: mockEncodeFunctionData },
+      allowance: mockAllowance,
+      approve: mockApprove,
+      balanceOf: jest.fn(() => Promise.resolve(BigInt('2000000000'))), // Sufficient balance
+    } as any);
+
+    const mockWallet = createMockWallet(mockProvider);
+    const quote = createTestQuote();
+
+    const result = await router.execute({
+      quote,
+      wallet: mockWallet,
+      provider: mockProvider,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.sourceTxHash).toBeDefined();
+    expect(result.bridgeId).toBeDefined();
+    expect(result.bridgeId).toContain('stargate-');
+
+    // Verify pending bridge was tracked
+    const status = await router.getStatus(result.bridgeId!);
+    expect(status.status).toBe('bridging');
+    expect(status.sourceTxHash).toBe(result.sourceTxHash);
+  });
+
+  // 5b: execute() success path for ETH
+  it('should execute ETH bridge with amountIn + gasFee in tx.value', async () => {
+    const mockEncodeFunctionData = jest.fn(() => '0xencodeddata');
+
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      interface: { encodeFunctionData: mockEncodeFunctionData },
+    } as any);
+
+    const mockWallet = createMockWallet(mockProvider);
+    // Balance must cover amountIn (1 ETH) + gasFee (0.01 ETH) for pre-flight check
+    (mockProvider.getBalance as jest.Mock<() => Promise<bigint>>).mockResolvedValue(
+      BigInt('2000000000000000000') // 2 ETH
+    );
+    const ethQuote = createTestQuote({
+      token: 'ETH',
+      sourceChain: 'ethereum',
+      destChain: 'arbitrum',
+      amountIn: '1000000000000000000', // 1 ETH
+      gasFee: '10000000000000000', // 0.01 ETH
+      totalFee: '10000000000000000',
+    });
+
+    const result = await router.execute({
+      quote: ethQuote,
+      wallet: mockWallet,
+      provider: mockProvider,
+    });
+
+    expect(result.success).toBe(true);
+
+    // Verify tx.value includes amountIn + gasFee for ETH (Fix #1)
+    const sendTxCall = mockWallet.sendTransaction.mock.calls[0]?.[0] as any;
+    expect(sendTxCall).toBeDefined();
+    // value = amountIn + gasFee = 1 ETH + 0.01 ETH = 1.01 ETH
+    expect(sendTxCall.value).toBe(
+      BigInt('1000000000000000000') + BigInt('10000000000000000')
+    );
+
+    // Verify NO approval was called (ETH doesn't need ERC20 approval)
+    // ethers.Contract is mocked but approve should not be called for ETH
+  });
+
+  // 5c: ERC20 approval when allowance is sufficient
+  it('should skip approval when allowance is sufficient', async () => {
+    const mockEncodeFunctionData = jest.fn(() => '0xencodeddata');
+    const mockAllowance = jest.fn(() => Promise.resolve(ethers.MaxUint256)); // Already approved
+    const mockApprove = jest.fn();
+
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      interface: { encodeFunctionData: mockEncodeFunctionData },
+      allowance: mockAllowance,
+      approve: mockApprove,
+      balanceOf: jest.fn(() => Promise.resolve(BigInt('2000000000'))), // Sufficient balance
+    } as any);
+
+    const mockWallet = createMockWallet(mockProvider);
+    const quote = createTestQuote();
+
+    const result = await router.execute({
+      quote,
+      wallet: mockWallet,
+      provider: mockProvider,
+    });
+
+    expect(result.success).toBe(true);
+    // approve should NOT be called since allowance >= amount
+    expect(mockApprove).not.toHaveBeenCalled();
+  });
+
+  // 5d: ERC20 approval when allowance is insufficient (forceApprove pattern)
+  it('should use forceApprove pattern when allowance is non-zero but insufficient', async () => {
+    const mockEncodeFunctionData = jest.fn(() => '0xencodeddata');
+    // Current allowance is non-zero but less than needed
+    const mockAllowance = jest.fn(() => Promise.resolve(500n));
+    const approveCalls: bigint[] = [];
+    const mockApprove = jest.fn((spender: string, amount: bigint) => {
+      approveCalls.push(amount);
+      return Promise.resolve({
+        wait: jest.fn(() => Promise.resolve({ status: 1, hash: '0xapprove' })),
+      });
+    });
+
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      interface: { encodeFunctionData: mockEncodeFunctionData },
+      allowance: mockAllowance,
+      approve: mockApprove,
+      balanceOf: jest.fn(() => Promise.resolve(BigInt('2000000000'))), // Sufficient balance
+    } as any);
+
+    const mockWallet = createMockWallet(mockProvider);
+    const quote = createTestQuote();
+
+    const result = await router.execute({
+      quote,
+      wallet: mockWallet,
+      provider: mockProvider,
+    });
+
+    expect(result.success).toBe(true);
+    // forceApprove pattern: first approve(0), then approve(exactAmount)
+    expect(approveCalls.length).toBe(2);
+    expect(approveCalls[0]).toBe(0n); // Reset to 0 first
+    expect(approveCalls[1]).toBe(BigInt(quote.amountIn)); // Then exact amount
+  });
+
+  // 5e: Approval failure handling
+  it('should return failure when approval fails', async () => {
+    const mockEncodeFunctionData = jest.fn(() => '0xencodeddata');
+    const mockAllowance = jest.fn(() => Promise.resolve(0n)); // No existing allowance
+    const mockApprove = jest.fn(() => Promise.reject(new Error('Approval reverted')));
+
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      interface: { encodeFunctionData: mockEncodeFunctionData },
+      allowance: mockAllowance,
+      approve: mockApprove,
+      balanceOf: jest.fn(() => Promise.resolve(BigInt('2000000000'))), // Sufficient balance
+    } as any);
+
+    const mockWallet = createMockWallet(mockProvider);
+    const quote = createTestQuote();
+
+    const result = await router.execute({
+      quote,
+      wallet: mockWallet,
+      provider: mockProvider,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to approve');
+  });
+
+  // 5h: execute() pool ID not found
+  it('should return failure when pool ID not found for token', async () => {
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      interface: { encodeFunctionData: jest.fn(() => '0x') },
+    } as any);
+
+    const mockWallet = createMockWallet(mockProvider);
+    // Use a token that has no pool IDs for the given chains
+    const quote = createTestQuote({
+      token: 'USDT',
+      sourceChain: 'base', // USDT has no pool on base in STARGATE_POOL_IDS
+    });
+
+    const result = await router.execute({
+      quote,
+      wallet: mockWallet,
+      provider: mockProvider,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Pool ID not found');
+  });
+});
+
+// =============================================================================
+// State Transition and Timeout Recovery Tests (Fix #4, Fix #5f/5g)
+// =============================================================================
+
+describe('StargateRouter - state transitions', () => {
+  let router: StargateRouter;
+  let mockProvider: jest.Mocked<ethers.Provider>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+
+    mockProvider = createMockProvider();
+    const providers = new Map<string, ethers.Provider>();
+    providers.set('arbitrum', mockProvider);
+    providers.set('optimism', mockProvider);
+
+    router = new StargateRouter(providers);
+  });
+
+  afterEach(() => {
+    router.dispose();
+    jest.useRealTimers();
+  });
+
+  // 5f: State transition guards
+  it('should no-op when marking already-completed bridge as completed', async () => {
+    const bridgeId = 'stargate-0xcompleted';
+    const internals = getRouterInternals(router);
+
+    await internals.bridgesMutex.runExclusive(async () => {
+      internals.pendingBridges.set(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: '0xsrc',
+        sourceChain: 'arbitrum',
+        destChain: 'optimism',
+        startTime: Date.now(),
+      });
+    });
+
+    // First complete
+    await router.markCompleted(bridgeId, '0xdest1', '1000');
+    const status1 = await router.getStatus(bridgeId);
+    expect(status1.status).toBe('completed');
+    expect(status1.destTxHash).toBe('0xdest1');
+
+    // Second complete attempt - should be no-op (completed bridge can't be re-completed)
+    await router.markCompleted(bridgeId, '0xdest2', '2000');
+    const status2 = await router.getStatus(bridgeId);
+    expect(status2.status).toBe('completed');
+    expect(status2.destTxHash).toBe('0xdest1'); // Unchanged
+  });
+
+  it('should reject markCompleted on failed bridge with execution_error reason', async () => {
+    const bridgeId = 'stargate-0xexecfail';
+    const internals = getRouterInternals(router);
+
+    await internals.bridgesMutex.runExclusive(async () => {
+      internals.pendingBridges.set(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: '0xsrc',
+        sourceChain: 'arbitrum',
+        destChain: 'optimism',
+        startTime: Date.now(),
+      });
+    });
+
+    // Mark as failed with execution_error
+    await router.markFailed(bridgeId, 'Destination reverted');
+
+    const statusAfterFail = await router.getStatus(bridgeId);
+    expect(statusAfterFail.status).toBe('failed');
+
+    // Try to mark completed - should be rejected (non-timeout failure)
+    await router.markCompleted(bridgeId, '0xdest', '1000');
+    const statusAfterAttempt = await router.getStatus(bridgeId);
+    expect(statusAfterAttempt.status).toBe('failed'); // Still failed
+  });
+
+  it('should allow markCompleted on timeout-failed bridge (Fix #4 recovery)', async () => {
+    const bridgeId = 'stargate-0xtimeout';
+    const internals = getRouterInternals(router);
+
+    // Create bridge with old startTime that triggers timeout
+    const oldStartTime = Date.now() - (BRIDGE_DEFAULTS.maxBridgeWaitMs + 1000);
+    await internals.bridgesMutex.runExclusive(async () => {
+      internals.pendingBridges.set(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: '0xsrc',
+        sourceChain: 'arbitrum',
+        destChain: 'optimism',
+        startTime: oldStartTime,
+      });
+    });
+
+    // getStatus() should trigger timeout -> status = 'failed' with failReason = 'timeout'
+    const statusAfterTimeout = await router.getStatus(bridgeId);
+    expect(statusAfterTimeout.status).toBe('failed');
+    expect(statusAfterTimeout.error).toContain('timeout');
+
+    // Now markCompleted should succeed (timeout recovery)
+    await router.markCompleted(bridgeId, '0xdest_late', '999000');
+    const statusAfterRecovery = await router.getStatus(bridgeId);
+    expect(statusAfterRecovery.status).toBe('completed');
+    expect(statusAfterRecovery.destTxHash).toBe('0xdest_late');
+    expect(statusAfterRecovery.amountReceived).toBe('999000');
+  });
+
+  it('should no-op when marking already-failed bridge as failed', async () => {
+    const bridgeId = 'stargate-0xdoublefail';
+    const internals = getRouterInternals(router);
+
+    await internals.bridgesMutex.runExclusive(async () => {
+      internals.pendingBridges.set(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: '0xsrc',
+        sourceChain: 'arbitrum',
+        destChain: 'optimism',
+        startTime: Date.now(),
+      });
+    });
+
+    await router.markFailed(bridgeId, 'First failure');
+    const status1 = await router.getStatus(bridgeId);
+    expect(status1.status).toBe('failed');
+    expect(status1.error).toBe('First failure');
+
+    // Second markFailed should be rejected (already failed)
+    await router.markFailed(bridgeId, 'Second failure');
+    const status2 = await router.getStatus(bridgeId);
+    expect(status2.error).toBe('First failure'); // Unchanged
+  });
+
+  it('should reject markFailed on completed bridge', async () => {
+    const bridgeId = 'stargate-0xcompletedfail';
+    const internals = getRouterInternals(router);
+
+    await internals.bridgesMutex.runExclusive(async () => {
+      internals.pendingBridges.set(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: '0xsrc',
+        sourceChain: 'arbitrum',
+        destChain: 'optimism',
+        startTime: Date.now(),
+      });
+    });
+
+    await router.markCompleted(bridgeId, '0xdest', '1000');
+    const status1 = await router.getStatus(bridgeId);
+    expect(status1.status).toBe('completed');
+
+    // markFailed on completed bridge should be rejected
+    await router.markFailed(bridgeId, 'Late failure');
+    const status2 = await router.getStatus(bridgeId);
+    expect(status2.status).toBe('completed'); // Still completed
+  });
+
+  // 5g: getStatus() timeout + recovery
+  it('should timeout bridge and then allow recovery via markCompleted', async () => {
+    const bridgeId = 'stargate-0xtimeoutrecovery';
+    const internals = getRouterInternals(router);
+
+    // Create bridge that will timeout
+    const oldStartTime = Date.now() - (BRIDGE_DEFAULTS.maxBridgeWaitMs + 5000);
+    await internals.bridgesMutex.runExclusive(async () => {
+      internals.pendingBridges.set(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: '0xsrc',
+        sourceChain: 'arbitrum',
+        destChain: 'optimism',
+        startTime: oldStartTime,
+      });
+    });
+
+    // First call triggers timeout
+    const timeoutStatus = await router.getStatus(bridgeId);
+    expect(timeoutStatus.status).toBe('failed');
+    expect(timeoutStatus.error).toContain('timeout');
+
+    // Subsequent getStatus calls should return failed (cached)
+    const cachedStatus = await router.getStatus(bridgeId);
+    expect(cachedStatus.status).toBe('failed');
+
+    // markCompleted should succeed (Fix #4 recovery from timeout)
+    await router.markCompleted(bridgeId, '0xlate_dest', '950000');
+    const recoveredStatus = await router.getStatus(bridgeId);
+    expect(recoveredStatus.status).toBe('completed');
+    expect(recoveredStatus.destTxHash).toBe('0xlate_dest');
+    expect(recoveredStatus.amountReceived).toBe('950000');
+  });
+});
+
+// =============================================================================
 // Constants Export Tests
 // =============================================================================
 
@@ -671,7 +1107,7 @@ describe('Bridge Router Constants', () => {
     it('should have reasonable bridge times', () => {
       expect(BRIDGE_TIMES['ethereum-arbitrum']).toBeGreaterThan(0);
       expect(BRIDGE_TIMES['ethereum-arbitrum']).toBeLessThanOrEqual(3600); // Max 1 hour
-      expect(BRIDGE_TIMES.default).toBe(300); // 5 minutes default
+      expect(BRIDGE_TIMES.default).toBe(180); // 3 minutes default (synced with bridge-config.ts)
     });
   });
 

@@ -36,6 +36,17 @@ import { AsyncMutex } from '../async/async-mutex';
 
 const logger = createLogger('stargate-router');
 
+/** Timeout for on-chain transaction confirmations (2 minutes) */
+const TX_WAIT_TIMEOUT_MS = 120_000;
+
+/** Stargate V1 bridge fee: 0.06% of bridged amount */
+const STARGATE_BRIDGE_FEE_BPS = 6n;
+/** Basis points denominator for fee/slippage calculations */
+const BPS_DENOMINATOR = 10000n;
+/** Gas estimation buffer: 20% above estimate */
+const GAS_BUFFER_NUMERATOR = 120n;
+const GAS_BUFFER_DENOMINATOR = 100n;
+
 // =============================================================================
 // Token Address Constants (for approval checks)
 // =============================================================================
@@ -52,6 +63,7 @@ const STARGATE_TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
     polygon: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
     bsc: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
     avalanche: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+    fantom: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75',
   },
   USDT: {
     ethereum: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
@@ -104,6 +116,8 @@ interface PendingBridge {
   destTxHash?: string;
   amountReceived?: string;
   error?: string;
+  /** Reason for failure - enables recovery from timeout-failed bridges */
+  failReason?: 'timeout' | 'execution_error' | 'unknown';
 }
 
 /**
@@ -127,6 +141,7 @@ export class StargateRouter implements IBridgeRouter {
 
   private providers: Map<string, ethers.Provider> = new Map();
   private pendingBridges: Map<string, PendingBridge> = new Map();
+  private approvalMutexes: Map<string, AsyncMutex> = new Map();
 
   // RACE-CONDITION-FIX: Mutex for thread-safe pendingBridges access
   private readonly bridgesMutex = new AsyncMutex();
@@ -168,6 +183,34 @@ export class StargateRouter implements IBridgeRouter {
    */
   dispose(): void {
     this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
+    this.approvalMutexes.clear();
+  }
+
+  /**
+   * Race a promise against a timeout, ensuring the timer is always cleaned up
+   */
+  private async waitWithTimeout<T>(promise: Promise<T>, timeoutMs: number, description: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  }
+
+  /**
+   * Get or create a per-token approval mutex to prevent concurrent approval races
+   */
+  private getApprovalMutex(tokenAddress: string): AsyncMutex {
+    let mutex = this.approvalMutexes.get(tokenAddress);
+    if (!mutex) {
+      mutex = new AsyncMutex();
+      this.approvalMutexes.set(tokenAddress, mutex);
+    }
+    return mutex;
   }
 
   /**
@@ -185,40 +228,14 @@ export class StargateRouter implements IBridgeRouter {
 
     // Validate route
     if (!this.isRouteSupported(sourceChain, destChain, token)) {
-      return {
-        protocol: 'stargate',
-        sourceChain,
-        destChain,
-        token,
-        amountIn: amount,
-        amountOut: '0',
-        bridgeFee: '0',
-        gasFee: '0',
-        totalFee: '0',
-        estimatedTimeSeconds: 0,
-        expiresAt: Date.now(),
-        valid: false,
-        error: `Route not supported: ${sourceChain} -> ${destChain} for ${token}`,
-      };
+      return this.createInvalidQuote(sourceChain, destChain, token, amount,
+        `Route not supported: ${sourceChain} -> ${destChain} for ${token}`);
     }
 
     const provider = this.providers.get(sourceChain);
     if (!provider) {
-      return {
-        protocol: 'stargate',
-        sourceChain,
-        destChain,
-        token,
-        amountIn: amount,
-        amountOut: '0',
-        bridgeFee: '0',
-        gasFee: '0',
-        totalFee: '0',
-        estimatedTimeSeconds: 0,
-        expiresAt: Date.now(),
-        valid: false,
-        error: `No provider registered for chain: ${sourceChain}`,
-      };
+      return this.createInvalidQuote(sourceChain, destChain, token, amount,
+        `No provider registered for chain: ${sourceChain}`);
     }
 
     try {
@@ -245,13 +262,16 @@ export class StargateRouter implements IBridgeRouter {
 
       // Calculate fees (Stargate typically charges 0.06% + gas)
       const amountBigInt = BigInt(amount);
-      const bridgeFee = amountBigInt * 6n / 10000n; // 0.06%
+      const bridgeFee = amountBigInt * STARGATE_BRIDGE_FEE_BPS / BPS_DENOMINATOR;
       const gasFee = nativeFee;
-      const totalFee = bridgeFee + gasFee;
+      // totalFee represents native gas cost only (bridgeFee is already deducted from amountOut).
+      // bridgeFee is denominated in the bridged token (e.g., USDC 6 decimals) while gasFee
+      // is in native token wei (18 decimals). Summing them produces a meaningless value.
+      const totalFee = gasFee;
 
       // Calculate output with slippage
       const amountAfterFee = amountBigInt - bridgeFee;
-      const minAmountOut = amountAfterFee * BigInt(Math.floor((1 - slippage) * 10000)) / 10000n;
+      const minAmountOut = amountAfterFee * BigInt(Math.floor((1 - slippage) * Number(BPS_DENOMINATOR))) / BPS_DENOMINATOR;
 
       const estimatedTime = this.getEstimatedTime(sourceChain, destChain);
 
@@ -268,6 +288,7 @@ export class StargateRouter implements IBridgeRouter {
         estimatedTimeSeconds: estimatedTime,
         expiresAt: Date.now() + BRIDGE_DEFAULTS.quoteValidityMs,
         valid: true,
+        recipient: request.recipient || undefined,
       };
     } catch (error) {
       logger.error('Failed to get Stargate quote', {
@@ -277,21 +298,8 @@ export class StargateRouter implements IBridgeRouter {
         error: error instanceof Error ? error.message : String(error),
       });
 
-      return {
-        protocol: 'stargate',
-        sourceChain,
-        destChain,
-        token,
-        amountIn: amount,
-        amountOut: '0',
-        bridgeFee: '0',
-        gasFee: '0',
-        totalFee: '0',
-        estimatedTimeSeconds: 0,
-        expiresAt: Date.now(),
-        valid: false,
-        error: `Quote failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
+      return this.createInvalidQuote(sourceChain, destChain, token, amount,
+        `Quote failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -341,28 +349,62 @@ export class StargateRouter implements IBridgeRouter {
         };
       }
 
+      // Pre-flight balance check to fail fast instead of wasting gas
+      const provider = request.provider;
+      if (quote.token === 'ETH') {
+        const balance = await provider.getBalance(wallet.address);
+        const required = BigInt(quote.amountIn) + BigInt(quote.gasFee);
+        if (balance < required) {
+          return { success: false, error: `Insufficient ETH balance: have ${balance}, need ${required}` };
+        }
+      } else {
+        const tokenAddress = STARGATE_TOKEN_ADDRESSES[quote.token]?.[quote.sourceChain];
+        if (tokenAddress) {
+          const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+          const tokenBalance = await tokenContract.balanceOf(wallet.address);
+          if (BigInt(tokenBalance) < BigInt(quote.amountIn)) {
+            return { success: false, error: `Insufficient ${quote.token} balance` };
+          }
+          // Also check native balance for gas fee
+          const nativeBalance = await provider.getBalance(wallet.address);
+          if (nativeBalance < BigInt(quote.gasFee)) {
+            return { success: false, error: 'Insufficient native balance for gas fee' };
+          }
+        }
+      }
+
       // BUG-FIX: Check and request ERC20 approval if needed
       // (ETH doesn't need approval, only ERC20 tokens)
       if (quote.token !== 'ETH') {
         const tokenAddress = STARGATE_TOKEN_ADDRESSES[quote.token]?.[quote.sourceChain];
-        if (tokenAddress) {
-          const approved = await this.ensureApproval(
+        if (!tokenAddress) {
+          return {
+            success: false,
+            error: `Token address not configured for ${quote.token} on ${quote.sourceChain}`,
+          };
+        }
+        // Per-token mutex prevents concurrent approval races on the same token
+        const approvalMutex = this.getApprovalMutex(tokenAddress);
+        const approved = await approvalMutex.runExclusive(async () => {
+          return this.ensureApproval(
             wallet,
             tokenAddress,
             routerAddress,
             BigInt(quote.amountIn)
           );
-          if (!approved) {
-            return {
-              success: false,
-              error: `Failed to approve ${quote.token} for Stargate router`,
-            };
-          }
+        });
+        if (!approved) {
+          return {
+            success: false,
+            error: `Failed to approve ${quote.token} for Stargate router`,
+          };
         }
       }
 
       const dstChainId = STARGATE_CHAIN_IDS[quote.destChain];
-      const recipient = ethers.solidityPacked(['address'], [wallet.address]);
+      // Use quote recipient if specified, otherwise sender
+      const recipientAddress = quote.recipient || wallet.address;
+      const recipient = ethers.solidityPacked(['address'], [recipientAddress]);
 
       // LZ transaction params
       const lzTxParams = {
@@ -388,10 +430,14 @@ export class StargateRouter implements IBridgeRouter {
       ]);
 
       // Prepare transaction with proper gas
+      // ETH bridging requires msg.value = amountIn + LZ fee (bridge amount + relayer cost)
+      // ERC20 bridging requires msg.value = LZ fee only (tokens transferred via approval)
       const tx: ethers.TransactionRequest = {
         to: routerAddress,
         data: txData,
-        value: BigInt(quote.gasFee), // LayerZero fee
+        value: quote.token === 'ETH'
+          ? BigInt(quote.amountIn) + BigInt(quote.gasFee)  // ETH: bridge amount + LZ fee
+          : BigInt(quote.gasFee),                           // ERC20: LZ fee only
       };
 
       // Set nonce if provided (from NonceManager)
@@ -401,7 +447,7 @@ export class StargateRouter implements IBridgeRouter {
 
       // Estimate gas
       const gasEstimate = await wallet.estimateGas(tx);
-      tx.gasLimit = gasEstimate * 120n / 100n; // 20% buffer
+      tx.gasLimit = gasEstimate * GAS_BUFFER_NUMERATOR / GAS_BUFFER_DENOMINATOR; // 20% buffer
 
       // Send transaction
       logger.info('Executing Stargate bridge', {
@@ -412,7 +458,11 @@ export class StargateRouter implements IBridgeRouter {
       });
 
       const txResponse = await wallet.sendTransaction(tx);
-      const receipt = await txResponse.wait();
+      const receipt = await this.waitWithTimeout(
+        txResponse.wait(),
+        TX_WAIT_TIMEOUT_MS,
+        'Bridge transaction confirmation'
+      );
 
       if (!receipt) {
         return {
@@ -511,6 +561,7 @@ export class StargateRouter implements IBridgeRouter {
       if (elapsedMs > BRIDGE_DEFAULTS.maxBridgeWaitMs) {
         pending.status = 'failed';
         pending.error = 'Bridge timeout';
+        pending.failReason = 'timeout';
 
         return {
           status: 'failed' as BridgeStatus,
@@ -547,16 +598,21 @@ export class StargateRouter implements IBridgeRouter {
         return;
       }
 
-      // FIX: Only allow transition from 'bridging' to 'completed'
-      // This prevents the race condition where a timed-out (failed) bridge
-      // is marked as completed after the fact
+      // Only allow transition from 'bridging' to 'completed', with one exception:
+      // timeout-failed bridges can be recovered when the bridge actually completes
+      // after the timeout (funds arrive late but still arrive).
       if (pending.status !== 'bridging') {
-        logger.warn('Cannot mark completed: invalid state transition', {
-          bridgeId,
-          currentStatus: pending.status,
-          attemptedStatus: 'completed',
-        });
-        return;
+        if (pending.status === 'failed' && pending.failReason === 'timeout') {
+          logger.info('Recovering timeout-failed bridge', { bridgeId });
+          // Fall through to complete
+        } else {
+          logger.warn('Cannot mark completed: invalid state transition', {
+            bridgeId,
+            currentStatus: pending.status,
+            attemptedStatus: 'completed',
+          });
+          return;
+        }
       }
 
       pending.status = 'completed';
@@ -598,6 +654,7 @@ export class StargateRouter implements IBridgeRouter {
 
       pending.status = 'failed';
       pending.error = error;
+      pending.failReason = 'execution_error';
 
       logger.warn('Bridge failed', {
         bridgeId,
@@ -609,6 +666,30 @@ export class StargateRouter implements IBridgeRouter {
   // ===========================================================================
   // Private Helpers
   // ===========================================================================
+
+  /**
+   * Create an invalid quote response for error cases.
+   * Reduces duplication across validation/error paths in quote().
+   */
+  private createInvalidQuote(
+    sourceChain: string, destChain: string, token: string, amount: string, error: string
+  ): BridgeQuote {
+    return {
+      protocol: this.protocol,
+      sourceChain,
+      destChain,
+      token,
+      amountIn: amount,
+      amountOut: '0',
+      bridgeFee: '0',
+      gasFee: '0',
+      totalFee: '0',
+      estimatedTimeSeconds: 0,
+      expiresAt: Date.now(),
+      valid: false,
+      error,
+    };
+  }
 
   /**
    * Ensure ERC20 token approval for Stargate router
@@ -637,14 +718,27 @@ export class StargateRouter implements IBridgeRouter {
         return true;
       }
 
-      // Approve max uint256 to avoid repeated approvals
+      // USDT forceApprove pattern: USDT reverts on non-zero to non-zero allowance changes.
+      // Reset to 0 first if current allowance is non-zero, then approve exact amount needed.
       logger.info('Approving token for Stargate router', {
         token: tokenAddress,
         spender: spenderAddress,
+        currentAllowance: currentAllowance.toString(),
+        requiredAmount: amount.toString(),
       });
 
-      const approveTx = await token.approve(spenderAddress, ethers.MaxUint256);
-      const receipt = await approveTx.wait();
+      if (currentAllowance > 0n) {
+        const resetTx = await token.approve(spenderAddress, 0n);
+        await this.waitWithTimeout<ethers.TransactionReceipt | null>(
+          resetTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval reset confirmation'
+        );
+      }
+
+      // Approve exact amount needed (not MaxUint256) for better security
+      const approveTx = await token.approve(spenderAddress, amount);
+      const receipt = await this.waitWithTimeout(
+        approveTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval confirmation'
+      ) as ethers.TransactionReceipt | null;
 
       if (!receipt || receipt.status !== 1) {
         logger.error('Token approval failed', { token: tokenAddress });

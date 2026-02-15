@@ -14,7 +14,7 @@
  */
 
 import { clearIntervalSafe } from '@arbitrage/core';
-import type { RedisClient } from '@arbitrage/core';
+import type { RedisClient, ServiceLogger } from '@arbitrage/core';
 import type {
   Experiment,
   ExperimentStatus,
@@ -98,6 +98,7 @@ export class ABTestingFramework {
   private readonly redis: RedisClient;
   private readonly config: ABTestingConfig;
   private readonly metricsCollector: MetricsCollector;
+  private readonly logger?: ServiceLogger;
 
   // In-memory cache of active experiments for hot path
   private readonly activeExperiments: Map<string, Experiment> = new Map();
@@ -106,10 +107,11 @@ export class ABTestingFramework {
 
   private started = false;
 
-  constructor(redis: RedisClient, config: Partial<ABTestingConfig> = {}) {
+  constructor(redis: RedisClient, config: Partial<ABTestingConfig> = {}, logger?: ServiceLogger) {
     this.redis = redis;
     this.config = { ...DEFAULT_AB_TESTING_CONFIG, ...config };
-    this.metricsCollector = createMetricsCollector(redis, this.config);
+    this.logger = logger;
+    this.metricsCollector = createMetricsCollector(redis, this.config, logger);
   }
 
   // ===========================================================================
@@ -136,7 +138,9 @@ export class ABTestingFramework {
     // Start refresh timer
     this.experimentRefreshTimer = setInterval(() => {
       this.refreshActiveExperiments().catch((error) => {
-        console.error('Failed to refresh A/B experiments', { error });
+        if (this.logger) {
+          this.logger.error('Failed to refresh A/B experiments', { error: String(error) });
+        }
       });
     }, this.refreshIntervalMs);
 
@@ -572,7 +576,8 @@ export class ABTestingFramework {
  */
 export function createABTestingFramework(
   redis: RedisClient,
-  config?: Partial<ABTestingConfig>
+  config?: Partial<ABTestingConfig>,
+  logger?: ServiceLogger
 ): ABTestingFramework {
-  return new ABTestingFramework(redis, config);
+  return new ABTestingFramework(redis, config, logger);
 }

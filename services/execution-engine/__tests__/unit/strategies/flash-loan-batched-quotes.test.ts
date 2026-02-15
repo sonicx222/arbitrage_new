@@ -58,31 +58,33 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       wallets: new Map(),
     } as StrategyContext;
 
-    // Setup mock opportunity
+    // Setup mock opportunity - use uniswap_v3 (available on ethereum per DEXES config)
+    // tokenOut is USDC (intermediate token for 2-hop buy side)
     mockOpportunity = {
       id: 'test-opportunity-1',
       buyChain: 'ethereum',
-      buyDex: 'uniswap_v2',
+      buyDex: 'uniswap_v3',
       sellDex: 'sushiswap',
       tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-      tokenIntermediate: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-      tokenOut: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+      tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
       amountIn: '1000000000000000000', // 1 ETH
       buyPrice: 1.0,
       sellPrice: 1.01,
-      profit: 0.01,
-      gasEstimate: 500000n,
+      expectedProfit: 0.01,
+      gasEstimate: '500000',
       timestamp: Date.now(),
+      confidence: 0.9,
+      path: ['0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'],
     } as ArbitrageOpportunity;
 
-    // Create strategy instance
+    // Create strategy instance - use router addresses matching DEXES config
     strategy = new FlashLoanStrategy(mockLogger, {
       contractAddresses: {
         ethereum: '0x1234567890123456789012345678901234567890',
       },
       approvedRouters: {
         ethereum: [
-          '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Uniswap V2
+          '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3
           '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F', // SushiSwap
         ],
       },
@@ -352,12 +354,12 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       expect(requests[0]).toMatchObject({
         router: expect.any(String),
         tokenIn: mockOpportunity.tokenIn,
-        tokenOut: mockOpportunity.tokenIntermediate,
+        tokenOut: mockOpportunity.path![1],
         amountIn: BigInt(mockOpportunity.amountIn!),
       });
       expect(requests[1]).toMatchObject({
         router: expect.any(String),
-        tokenIn: mockOpportunity.tokenIntermediate,
+        tokenIn: mockOpportunity.path![1],
         tokenOut: mockOpportunity.tokenIn,
         amountIn: 0n, // Chained from previous
       });
@@ -374,7 +376,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
           invalidOpportunity,
           'ethereum'
         );
-      }).toThrow('No router found for DEX');
+      }).toThrow(/No router found for buyDex/);
     });
   });
 });

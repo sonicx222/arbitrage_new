@@ -41,7 +41,7 @@ describe('S2.1.2: Optimism DEX Configurations', () => {
     });
 
     it('should have fee of 30 basis points', () => {
-      expect(uniswap?.fee).toBe(30);
+      expect(uniswap?.feeBps).toBe(30);
     });
 
     it('should be assigned to optimism chain', () => {
@@ -65,7 +65,7 @@ describe('S2.1.2: Optimism DEX Configurations', () => {
     });
 
     it('should have fee configured', () => {
-      expect(velodrome?.fee).toBe(30);
+      expect(velodrome?.feeBps).toBe(30);
     });
   });
 

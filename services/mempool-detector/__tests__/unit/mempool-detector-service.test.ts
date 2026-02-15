@@ -77,6 +77,7 @@ const loadServiceWithMocks = async () => {
       resetRedisInstance: jest.fn().mockResolvedValue(undefined),
       resetRedisStreamsInstance: jest.fn().mockResolvedValue(undefined),
       RecordingLogger: jest.fn(() => mockLogger),
+      runServiceMain: jest.fn(),
     }));
 
     // Mock @arbitrage/config

@@ -51,12 +51,19 @@ export class SharedMemoryCache {
   private textEncoder = new TextEncoder();
   private textDecoder = new TextDecoder();
 
+  // Fix #2+#4: Key→offset map for O(1) lookups and accurate size tracking
+  private keyOffsetMap: Map<string, number> = new Map();
+
+  // Write cursor: always points to the end of the data area (next free byte).
+  // Avoids scanning the buffer to find insertion point, making tombstones safe.
+  private nextWriteOffset: number = SharedMemoryCache.METADATA_SIZE;
+
   constructor(config: Partial<SharedCacheConfig> = {}) {
     this.config = {
-      size: config.size || 256, // 256MB default
+      size: config.size ?? 64, // 64MB default (reduced from 256MB; no production callers)
       enableCompression: config.enableCompression || false,
       enableEncryption: config.enableEncryption || false,
-      maxKeyLength: config.maxKeyLength || SharedMemoryCache.MAX_KEY_LENGTH,
+      maxKeyLength: config.maxKeyLength ?? SharedMemoryCache.MAX_KEY_LENGTH,
       enableAtomicOperations: config.enableAtomicOperations !== false
     };
 
@@ -111,10 +118,10 @@ export class SharedMemoryCache {
     if (!this.validateKey(key)) return false;
 
     try {
-      const entryIndex = this.findEntryIndex(key);
-      if (entryIndex === -1) return false;
+      const entryOffset = this.findEntryOffset(key);
+      if (entryOffset === -1) return false;
 
-      return this.removeEntry(entryIndex);
+      return this.removeEntry(key, entryOffset);
     } catch (error) {
       logger.error('Shared cache delete error', { error, key });
       return false;
@@ -124,7 +131,8 @@ export class SharedMemoryCache {
   clear(): void {
     try {
       Atomics.store(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET, 0);
-      // Reset data area (optional - could be expensive)
+      this.keyOffsetMap.clear();
+      this.nextWriteOffset = SharedMemoryCache.METADATA_SIZE;
       logger.info('Shared memory cache cleared');
     } catch (error) {
       logger.error('Shared cache clear error', { error });
@@ -136,31 +144,11 @@ export class SharedMemoryCache {
   }
 
   size(): number {
-    return Atomics.load(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET);
+    return this.keyOffsetMap.size;
   }
 
   keys(): string[] {
-    const keys: string[] = [];
-    try {
-      const entryCount = Atomics.load(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET);
-      let offset = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
-
-      for (let i = 0; i < entryCount; i++) {
-        if (offset + SharedMemoryCache.ENTRY_HEADER_SIZE >= this.dataView.length) break;
-
-        const keyLen = this.readUint32(offset);
-        const key = this.readString(offset + 4, keyLen);
-
-        if (key) keys.push(key);
-
-        // Skip to next entry
-        const valueLen = this.readUint32(offset + 4 + keyLen);
-        offset += SharedMemoryCache.ENTRY_HEADER_SIZE + keyLen + valueLen;
-      }
-    } catch (error) {
-      logger.error('Shared cache keys error', { error });
-    }
-    return keys;
+    return Array.from(this.keyOffsetMap.keys());
   }
 
   stats(): any {
@@ -176,23 +164,12 @@ export class SharedMemoryCache {
 
   // Atomic operations for thread safety
   increment(key: string, delta: number = 1): number {
-    if (!this.config.enableAtomicOperations) {
-      const current = this.get(key) ?? 0;
-      const newValue = current + delta;
-      this.set(key, newValue);
-      return newValue;
-    }
-
-    // Use Atomics for thread-safe operations
-    const entry = this.findEntry(key);
-    if (!entry) {
-      this.set(key, delta);
-      return delta;
-    }
-
-    // For numbers, we can do atomic operations on the value
-    const valueView = new Int32Array(this.buffer, entry.valueOffset, 1);
-    return Atomics.add(valueView, 0, delta) + delta;
+    // Values are JSON-serialized, so raw Atomics.add on the buffer is not
+    // feasible. Use get/set for both atomic and non-atomic paths.
+    const current = this.get(key) ?? 0;
+    const newValue = current + delta;
+    this.set(key, newValue);
+    return newValue;
   }
 
   compareAndSet(key: string, expectedValue: any, newValue: any): boolean {
@@ -235,6 +212,10 @@ export class SharedMemoryCache {
     Atomics.store(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET, 0);
     Atomics.store(this.metadataView, SharedMemoryCache.MAX_ENTRIES_OFFSET, 10000); // Reasonable default
     Atomics.store(this.metadataView, SharedMemoryCache.DATA_START_OFFSET, SharedMemoryCache.METADATA_SIZE);
+
+    // Clear the key→offset map and reset write cursor
+    this.keyOffsetMap.clear();
+    this.nextWriteOffset = SharedMemoryCache.METADATA_SIZE;
   }
 
   private validateKey(key: string): boolean {
@@ -245,63 +226,49 @@ export class SharedMemoryCache {
   }
 
   private findEntry(key: string): SharedCacheEntry | null {
-    const entryCount = Atomics.load(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET);
-    let offset = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
+    // O(1) lookup via keyOffsetMap
+    const offset = this.keyOffsetMap.get(key);
+    if (offset === undefined) return null;
 
-    for (let i = 0; i < entryCount; i++) {
-      if (offset + SharedMemoryCache.ENTRY_HEADER_SIZE >= this.dataView.length) break;
-
-      const keyLen = this.readUint32(offset);
-      const entryKey = this.readString(offset + 4, keyLen);
-
-      if (entryKey === key) {
-        const valueLen = this.readUint32(offset + 4 + keyLen);
-        const timestamp = this.readUint64(offset + 8 + keyLen);
-        const flags = this.readUint32(offset + 16 + keyLen);
-        const ttl = this.readUint32(offset + 20 + keyLen);
-
-        return {
-          key: entryKey,
-          value: null, // Will be deserialized separately
-          timestamp: Number(timestamp),
-          ttl: ttl || undefined,
-          compressed: !!(flags & 1),
-          encrypted: !!(flags & 2),
-          size: keyLen + valueLen + SharedMemoryCache.ENTRY_HEADER_SIZE,
-          keyOffset: offset,
-          valueOffset: offset + SharedMemoryCache.ENTRY_HEADER_SIZE + keyLen,
-          valueLen
-        };
-      }
-
-      // Skip to next entry
-      const valueLen = this.readUint32(offset + 4 + keyLen);
-      offset += SharedMemoryCache.ENTRY_HEADER_SIZE + keyLen + valueLen;
+    const keyLen = this.readUint32(offset);
+    if (keyLen === 0) {
+      // Tombstoned — stale map entry; clean up and return null
+      this.keyOffsetMap.delete(key);
+      return null;
     }
 
-    return null;
+    const valueLen = this.readUint32(offset + 4);
+    const timestamp = this.readUint64(offset + 8);
+    const flags = this.readUint32(offset + 16);
+    const ttl = this.readUint32(offset + 20);
+
+    return {
+      key,
+      value: null, // Will be deserialized separately
+      timestamp: Number(timestamp),
+      ttl: ttl || undefined,
+      compressed: !!(flags & 1),
+      encrypted: !!(flags & 2),
+      size: keyLen + valueLen + SharedMemoryCache.ENTRY_HEADER_SIZE,
+      keyOffset: offset,
+      valueOffset: offset + SharedMemoryCache.ENTRY_HEADER_SIZE + keyLen,
+      valueLen
+    };
   }
 
-  private findEntryIndex(key: string): number {
-    const entryCount = Atomics.load(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET);
-    let offset = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
+  private findEntryOffset(key: string): number {
+    // O(1) lookup via keyOffsetMap; returns byte offset or -1
+    const offset = this.keyOffsetMap.get(key);
+    if (offset === undefined) return -1;
 
-    for (let i = 0; i < entryCount; i++) {
-      if (offset + SharedMemoryCache.ENTRY_HEADER_SIZE >= this.dataView.length) break;
-
-      const keyLen = this.readUint32(offset);
-      const entryKey = this.readString(offset + 4, keyLen);
-
-      if (entryKey === key) {
-        return i;
-      }
-
-      // Skip to next entry
-      const valueLen = this.readUint32(offset + 4 + keyLen);
-      offset += SharedMemoryCache.ENTRY_HEADER_SIZE + keyLen + valueLen;
+    // Verify not tombstoned
+    const keyLen = this.readUint32(offset);
+    if (keyLen === 0) {
+      this.keyOffsetMap.delete(key);
+      return -1;
     }
 
-    return -1;
+    return offset;
   }
 
   private createEntry(key: string, value: any, ttl?: number): boolean {
@@ -313,16 +280,9 @@ export class SharedMemoryCache {
       return false;
     }
 
-    // Find insertion point (end of data)
-    const offset = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
-    let dataOffset = offset;
-
-    // Find the end of existing data
-    for (let i = 0; i < entryCount; i++) {
-      const keyLen = this.readUint32(dataOffset);
-      const valueLen = this.readUint32(dataOffset + 4 + keyLen);
-      dataOffset += SharedMemoryCache.ENTRY_HEADER_SIZE + keyLen + valueLen;
-    }
+    // Use the tracked write cursor — always points to end of data.
+    // This avoids scanning the buffer which breaks with tombstoned entries.
+    let dataOffset = this.nextWriteOffset;
 
     // Serialize key and value
     const serializedKey = this.textEncoder.encode(key);
@@ -343,13 +303,19 @@ export class SharedMemoryCache {
     this.writeUint32(dataOffset + 4, serializedValue.length);
     this.writeUint64(dataOffset + 8, Date.now());
     this.writeUint32(dataOffset + 16, this.getFlags(value));
-    this.writeUint32(dataOffset + 20, ttl || 0);
+    this.writeUint32(dataOffset + 20, ttl ?? 0);
 
     // Write key
     this.view.set(serializedKey, dataOffset + SharedMemoryCache.ENTRY_HEADER_SIZE);
 
     // Write value
     this.view.set(serializedValue, dataOffset + SharedMemoryCache.ENTRY_HEADER_SIZE + serializedKey.length);
+
+    // Add to key→offset map
+    this.keyOffsetMap.set(key, dataOffset);
+
+    // Advance the write cursor past this entry
+    this.nextWriteOffset = dataOffset + totalSize;
 
     // Update entry count atomically
     Atomics.add(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET, 1);
@@ -358,22 +324,41 @@ export class SharedMemoryCache {
   }
 
   private updateEntry(key: string, value: any, ttl: number | undefined, existingEntry: any): boolean {
-    // For now, delete and recreate (could be optimized)
-    this.removeEntry(this.findEntryIndex(key));
+    // Tombstone old entry, then create new one at end of data
+    const offset = this.findEntryOffset(key);
+    if (offset !== -1) {
+      this.removeEntry(key, offset);
+    }
     return this.createEntry(key, value, ttl);
   }
 
-  private removeEntry(index: number): boolean {
-    if (index === -1) return false;
+  private removeEntry(key: string, offset: number): boolean {
+    if (offset === -1) return false;
 
-    // This is a simplified implementation
-    // In production, you'd need to handle compaction
+    // Tombstone the entry by setting keyLen to 0
+    this.writeUint32(offset, 0);
+
+    // Remove from the key→offset map
+    this.keyOffsetMap.delete(key);
+
+    // Decrement the entry count
     Atomics.sub(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET, 1);
     return true;
   }
 
+  // Fix #26: Numeric type flag (bit 2) for typed array fast-path
+  private static readonly FLAG_NUMERIC = 4;
+
   private serializeValue(value: any): Uint8Array | null {
     try {
+      // Fix #26: Fast path for numbers — use Float64 directly instead of JSON
+      if (typeof value === 'number') {
+        const buf = new Uint8Array(8);
+        const dv = new DataView(buf.buffer);
+        dv.setFloat64(0, value, true); // little-endian
+        return buf;
+      }
+
       let data = JSON.stringify(value);
       let flags = 0;
 
@@ -398,6 +383,16 @@ export class SharedMemoryCache {
 
   private deserializeValue(entry: any): any {
     try {
+      // Fix #26: Fast path for numeric entries — read Float64 directly
+      if ((entry.compressed === false && entry.encrypted === false) && entry.valueLen === 8) {
+        // Check the flags in the header for the numeric marker
+        const flags = this.readUint32(entry.keyOffset! + 16);
+        if (flags & SharedMemoryCache.FLAG_NUMERIC) {
+          const dv = new DataView(this.view.buffer, entry.valueOffset, 8);
+          return dv.getFloat64(0, true);
+        }
+      }
+
       let data = this.readString(entry.valueOffset, entry.valueLen);
 
       if (entry.encrypted && this.config.enableEncryption) {
@@ -425,6 +420,11 @@ export class SharedMemoryCache {
 
   private getFlags(value: any): number {
     let flags = 0;
+    // Fix #26: Numeric values use typed array fast-path, skip compression/encryption
+    if (typeof value === 'number') {
+      flags |= SharedMemoryCache.FLAG_NUMERIC;
+      return flags;
+    }
     if (this.config.enableCompression) flags |= 1;
     if (this.config.enableEncryption) flags |= 2;
     return flags;
@@ -465,22 +465,37 @@ export class SharedMemoryCache {
     return used / this.view.length;
   }
 
-  // Cleanup expired entries
+  // Cleanup expired entries — single-pass over keyOffsetMap
   cleanup(): void {
     const now = Date.now();
     let cleaned = 0;
-    const keys = this.keys();
+    const keysToDelete: string[] = [];
 
-    for (const key of keys) {
+    for (const [key, offset] of this.keyOffsetMap) {
       try {
-        const entry = this.findEntry(key);
-        if (entry && entry.ttl && now - entry.timestamp > entry.ttl * 1000) {
-          this.delete(key);
+        const keyLen = this.readUint32(offset);
+        if (keyLen === 0) {
+          // Stale tombstone in map — remove
+          keysToDelete.push(key);
+          continue;
+        }
+
+        const ttl = this.readUint32(offset + 20);
+        if (ttl === 0) continue; // No TTL — never expires
+
+        const timestamp = Number(this.readUint64(offset + 8));
+        if (now - timestamp > ttl * 1000) {
+          keysToDelete.push(key);
           cleaned++;
         }
       } catch (error) {
         logger.error('Error during key cleanup', { key, error });
       }
+    }
+
+    // Delete expired entries outside the iteration to avoid mutation during iteration
+    for (const key of keysToDelete) {
+      this.delete(key);
     }
 
     if (cleaned > 0) {
@@ -492,8 +507,9 @@ export class SharedMemoryCache {
   destroy(): void {
     logger.info('Destroying shared memory cache');
 
-    // Clear metadata
+    // Clear metadata and map
     this.clear();
+    this.keyOffsetMap.clear();
 
     // Note: SharedArrayBuffer cannot be explicitly freed in JavaScript
     // It will be garbage collected when no references remain
@@ -513,7 +529,7 @@ let defaultSharedCache: SharedMemoryCache | null = null;
 export function getSharedMemoryCache(): SharedMemoryCache {
   if (!defaultSharedCache) {
     defaultSharedCache = new SharedMemoryCache({
-      size: 512, // 512MB
+      size: 64, // 64MB (reduced from 512MB; no production callers)
       enableCompression: true,
       enableEncryption: false,
       enableAtomicOperations: true

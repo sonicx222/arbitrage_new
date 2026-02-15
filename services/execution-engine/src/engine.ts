@@ -520,7 +520,7 @@ export class ExecutionEngineService {
 
       // Task 3: Initialize A/B testing framework
       if (this.abTestingConfig.enabled) {
-        this.abTestingFramework = createABTestingFramework(this.redis, this.abTestingConfig);
+        this.abTestingFramework = createABTestingFramework(this.redis, this.abTestingConfig, this.logger);
         await this.abTestingFramework.start();
         this.logger.info('A/B testing framework initialized', {
           defaultTrafficSplit: this.abTestingConfig.defaultTrafficSplit,
@@ -637,6 +637,7 @@ export class ExecutionEngineService {
       // FIX 10.1: Clear pre-computed last gas prices
       this.lastGasPrices.clear();
       this.mevProviderFactory = null;
+      await this.bridgeRouterFactory?.dispose();
       this.bridgeRouterFactory = null;
 
       // Clear risk management components (Phase 3: Task 3.4.5)
@@ -784,7 +785,7 @@ export class ExecutionEngineService {
     if (!this.streamsClient) return;
 
     try {
-      await this.streamsClient.xadd('stream:circuit-breaker', {
+      await this.streamsClient.xadd(RedisStreamsClient.STREAMS.CIRCUIT_BREAKER, {
         service: 'execution-engine',
         instanceId: this.instanceId,
         previousState: event.previousState,

@@ -115,7 +115,7 @@ export interface RegistryHealth {
  */
 export class ServiceRegistry {
   private services = new Map<string, ServiceEntry>();
-  private isResetting = false;
+  private resetPromise: Promise<void> | null = null;
 
   /**
    * Register a service with the registry.
@@ -265,34 +265,46 @@ export class ServiceRegistry {
    *
    * Useful for test cleanup. Resets in reverse registration order
    * to handle dependencies correctly (dependent services first).
+   *
+   * Fix #17: Uses sequential loop instead of Promise.all() to honor reverse order.
+   * Fix #19: Concurrent callers wait for the in-progress reset instead of returning early.
    */
   async resetAll(): Promise<void> {
-    // Prevent concurrent resets
-    if (this.isResetting) {
-      logger.warn('resetAll() already in progress, skipping');
-      return;
+    // Fix #19: If a reset is already in progress, wait for it instead of skipping
+    if (this.resetPromise) {
+      logger.debug('resetAll() already in progress, waiting for completion');
+      return this.resetPromise;
     }
 
-    this.isResetting = true;
+    this.resetPromise = this.doResetAll();
+    try {
+      await this.resetPromise;
+    } finally {
+      this.resetPromise = null;
+    }
+  }
+
+  /**
+   * Internal implementation of resetAll.
+   * Resets services sequentially in reverse registration order.
+   */
+  private async doResetAll(): Promise<void> {
     const serviceNames = Array.from(this.services.keys()).reverse();
 
     logger.debug('Resetting all services', { count: serviceNames.length });
 
-    // Use Promise.allSettled to ensure all services are reset even if some fail
-    const results = await Promise.allSettled(
-      serviceNames.map((name) => this.reset(name))
-    );
-
-    // Log any failures
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        logger.warn(`Failed to reset service: ${serviceNames[index]}`, {
-          error: result.reason,
+    // Fix #17: Reset sequentially to honor reverse order (dependent services first)
+    for (const name of serviceNames) {
+      try {
+        await this.reset(name);
+      } catch (error) {
+        logger.warn(`Failed to reset service: ${name}`, {
+          error: error instanceof Error ? error.message : String(error),
         });
+        // Continue with remaining services
       }
-    });
+    }
 
-    this.isResetting = false;
     logger.debug('All services reset');
   }
 

@@ -139,8 +139,8 @@ describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
 
     it('should have all DEXs with fee property defined', () => {
       arbitrumDexes.forEach(dex => {
-        expect(typeof dex.fee).toBe('number');
-        expect(dex.fee).toBeGreaterThanOrEqual(0);
+        expect(typeof dex.feeBps).toBe('number');
+        expect(dex.feeBps).toBeGreaterThanOrEqual(0);
       });
     });
 

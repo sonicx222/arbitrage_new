@@ -18,8 +18,8 @@ import {
   resetSwapEventFilter
 } from '@arbitrage/core';
 
+import type { SwapEvent } from '@arbitrage/types';
 import type {
-  ValidatedSwapEvent as SwapEvent,
   SwapEventFilterConfig,
   FilterResult,
   VolumeAggregate,

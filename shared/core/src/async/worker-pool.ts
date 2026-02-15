@@ -6,41 +6,9 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import { createLogger } from '../logger';
 import { clearTimeoutSafe } from '../lifecycle-utils';
+import { WORKER_POOL_CONFIG, PLATFORM_NAME } from '@arbitrage/config';
 
 const logger = createLogger('worker-pool');
-
-// =============================================================================
-// P2-FIX: Platform-Aware Worker Pool Configuration
-// @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 5.3
-// =============================================================================
-
-/**
- * Detect if running on memory-constrained hosting platforms.
- * - Fly.io: 256MB free tier
- * - Railway: 512MB free tier
- * - Render: 512MB free tier
- */
-const IS_FLY_IO = process.env.FLY_APP_NAME !== undefined;
-const IS_RAILWAY = process.env.RAILWAY_ENVIRONMENT !== undefined;
-const IS_RENDER = process.env.RENDER_SERVICE_NAME !== undefined;
-const IS_CONSTRAINED_HOST = IS_FLY_IO || IS_RAILWAY || IS_RENDER ||
-  process.env.CONSTRAINED_MEMORY === 'true';
-
-/**
- * Platform-aware default configuration.
- *
- * Constrained hosts (256-512MB): 2 workers, 300 queue size
- * - Reduces memory footprint by ~20MB (2 fewer worker threads)
- * - Still provides parallelism for CPU-intensive tasks
- *
- * Standard hosts (1GB+): 4 workers, 1000 queue size
- * - Full parallelism for path finding and JSON parsing
- */
-const POOL_DEFAULTS = {
-  poolSize: IS_FLY_IO ? 2 : IS_CONSTRAINED_HOST ? 3 : 4,
-  maxQueueSize: IS_CONSTRAINED_HOST ? 300 : 1000,
-  taskTimeout: 30000,
-} as const;
 
 export interface Task {
   id: string;
@@ -252,6 +220,18 @@ export class EventProcessingWorkerPool extends EventEmitter {
   // PHASE3-TASK43: SharedArrayBuffer for key registry (key-to-index mapping)
   private keyRegistryBuffer: SharedArrayBuffer | null = null;
 
+  // Finding #16: Configurable worker script path for testability (DI principle)
+  private readonly workerPath: string;
+
+  // P1-FIX: Track cancelled/timed-out task IDs to skip during dispatch (O(1) lookup)
+  private cancelledTaskIds: Set<string> = new Set();
+
+  // P1-FIX: Track restart attempts per worker for bounded retry with exponential backoff
+  private workerRestartCounts: Map<number, number> = new Map();
+  private static readonly MAX_RESTART_RETRIES = 5;
+  private static readonly BASE_RESTART_DELAY_MS = 10000;
+  private static readonly MAX_RESTART_DELAY_MS = 300000; // 5 minutes
+
   // JSON parsing statistics (Phase 2)
   private jsonParsingStats: JsonParsingStats = {
     totalSingleParses: 0,
@@ -264,9 +244,12 @@ export class EventProcessingWorkerPool extends EventEmitter {
     totalBytesParsed: 0
   };
   // Rolling window for P99 calculation (last 100 parse times)
-  private parseTimeWindow: number[] = [];
-  private overheadWindow: number[] = [];
+  // Fix #27: Circular buffer avoids O(n) shift() on every update
+  private parseTimeWindow: number[];
+  private overheadWindow: number[];
   private readonly STATS_WINDOW_SIZE = 100;
+  private statsWindowPos = 0;
+  private statsWindowCount = 0;
   // Task ID counter for JSON parsing (atomic increment)
   private jsonTaskIdCounter = 0;
 
@@ -275,7 +258,8 @@ export class EventProcessingWorkerPool extends EventEmitter {
     maxQueueSize = 1000,
     taskTimeout = 30000, // 30 seconds
     priceBuffer: SharedArrayBuffer | null = null, // PHASE3-TASK41: Optional SharedArrayBuffer for price data
-    keyRegistryBuffer: SharedArrayBuffer | null = null // PHASE3-TASK43: Optional SharedArrayBuffer for key registry
+    keyRegistryBuffer: SharedArrayBuffer | null = null, // PHASE3-TASK43: Optional SharedArrayBuffer for key registry
+    workerPath?: string // Finding #16: Optional custom worker script path for testing
   ) {
     super();
     this.poolSize = poolSize;
@@ -283,6 +267,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
     this.taskTimeout = taskTimeout;
     this.priceBuffer = priceBuffer;
     this.keyRegistryBuffer = keyRegistryBuffer;
+    this.workerPath = workerPath ?? path.join(__dirname, 'event-processor-worker.js');
+    // Fix #27: Pre-allocate circular buffer arrays
+    this.parseTimeWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
+    this.overheadWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
   }
 
   async start(): Promise<void> {
@@ -292,7 +280,8 @@ export class EventProcessingWorkerPool extends EventEmitter {
 
     this.isRunning = true;
     this.initializeWorkers();
-    this.startTaskDispatcher();
+    // P1-FIX: Initial dispatch (event-driven, replaces startTaskDispatcher polling)
+    this.tryDispatch();
 
     logger.info('Worker pool started successfully');
   }
@@ -358,6 +347,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
     // Clear worker stats
     this.workerStats.clear();
 
+    // P1-FIX: Clear restart counters and cancelled task tracking on stop
+    this.workerRestartCounts.clear();
+    this.cancelledTaskIds.clear();
+
     logger.info('Worker pool stopped successfully');
   }
 
@@ -373,6 +366,8 @@ export class EventProcessingWorkerPool extends EventEmitter {
     return new Promise<TaskResult>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.activeTasks.delete(task.id);
+        // P1-FIX: Mark task as cancelled so dispatch loop skips it in the priority queue
+        this.cancelledTaskIds.add(task.id);
         reject(new Error(`Task ${task.id} timed out after ${this.taskTimeout}ms`) as any);
       }, this.taskTimeout);
 
@@ -385,6 +380,9 @@ export class EventProcessingWorkerPool extends EventEmitter {
 
       this.taskQueue.enqueue(task, task.priority);
       this.emit('taskQueued', task);
+
+      // P1-FIX: Trigger event-driven dispatch when task is enqueued
+      this.scheduleDispatch();
     });
   }
 
@@ -414,12 +412,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
   }
 
   private initializeWorkers(): void {
-    const workerPath = path.join(__dirname, 'event-processor-worker.js');
-
     for (let i = 0; i < this.poolSize; i++) {
       // PHASE3-TASK41: Pass SharedArrayBuffer to workers for zero-copy price access
       // PHASE3-TASK43: Pass key registry buffer for key-to-index mapping
-      const worker = new Worker(workerPath, {
+      const worker = new Worker(this.workerPath, {
         workerData: {
           workerId: i,
           priceBuffer: this.priceBuffer, // SharedArrayBuffer is transferable
@@ -454,63 +450,71 @@ export class EventProcessingWorkerPool extends EventEmitter {
   }
 
   private isDispatching = false;
+  // P1-FIX: dispatchTimer retained for cleanup in stop(), but no longer used for polling
   private dispatchTimer: NodeJS.Timeout | null = null;
+  private dispatchScheduled = false;
 
-  private startTaskDispatcher(): void {
-    if (this.dispatchTimer) {
-      clearTimeout(this.dispatchTimer);
-    }
-
-    const dispatch = async () => {
-      if (!this.isRunning) return;
-
-      // Prevent concurrent dispatching
-      if (this.isDispatching) {
-        this.scheduleNextDispatch();
-        return;
-      }
-
-      this.isDispatching = true;
-
-      try {
-        // Assign tasks to available workers
-        const availableWorkerIds = Array.from(this.availableWorkers);
-        let tasksAssigned = 0;
-
-        for (const workerId of availableWorkerIds) {
-          if (this.taskQueue.isEmpty()) break;
-          if (tasksAssigned >= availableWorkerIds.length) break; // One task per available worker
-
-          const task = this.taskQueue.dequeue();
-          if (task) {
-            this.assignTaskToWorker(workerId, task);
-            tasksAssigned++;
-          }
-        }
-      } catch (error) {
-        logger.error('Error in task dispatcher', { error });
-      } finally {
-        this.isDispatching = false;
-      }
-
-      // Schedule next dispatch if there are still tasks or workers become available
-      this.scheduleNextDispatch();
-    };
-
-    dispatch();
-  }
-
-  private scheduleNextDispatch(): void {
+  /**
+   * P1-FIX: Event-driven dispatch replaces 1ms polling.
+   * Called from submitTask() and handleWorkerMessage() instead of continuous setTimeout.
+   * Uses a while loop to drain all available work before returning.
+   * HOT-PATH: Minimize allocations — no new objects per dispatch cycle.
+   */
+  private tryDispatch(): void {
     if (!this.isRunning) return;
 
-    // Clear any existing timer
-    this.dispatchTimer = clearTimeoutSafe(this.dispatchTimer);
+    // Prevent concurrent dispatching — if already dispatching, schedule a follow-up
+    if (this.isDispatching) {
+      this.scheduleDispatch();
+      return;
+    }
 
-    // Schedule next dispatch with minimal delay
-    this.dispatchTimer = setTimeout(() => {
-      this.dispatchTimer = null;
-      this.startTaskDispatcher();
-    }, 1);
+    this.isDispatching = true;
+    this.dispatchScheduled = false;
+
+    try {
+      // Drain loop: keep dispatching while there are both tasks and available workers
+      while (!this.taskQueue.isEmpty() && this.availableWorkers.size > 0) {
+        const task = this.taskQueue.dequeue();
+        if (!task) break;
+
+        // P1-FIX: Skip timed-out/cancelled tasks that are still in the priority queue
+        if (this.cancelledTaskIds.has(task.id)) {
+          this.cancelledTaskIds.delete(task.id);
+          continue;
+        }
+
+        // Get next available worker (O(1) via Set iterator)
+        const workerIdIter = this.availableWorkers.values().next();
+        if (workerIdIter.done) {
+          // No workers available — re-enqueue the task and break
+          this.taskQueue.enqueue(task, task.priority);
+          break;
+        }
+        const workerId = workerIdIter.value;
+
+        this.assignTaskToWorker(workerId, task);
+      }
+    } catch (error) {
+      logger.error('Error in task dispatcher', { error });
+    } finally {
+      this.isDispatching = false;
+    }
+  }
+
+  /**
+   * P1-FIX: Schedule a dispatch via setImmediate to avoid re-entrancy.
+   * Coalesces multiple triggers into a single dispatch call.
+   */
+  private scheduleDispatch(): void {
+    if (!this.isRunning) return;
+    if (this.dispatchScheduled) return;
+
+    this.dispatchScheduled = true;
+    setImmediate(() => {
+      this.dispatchScheduled = false;
+      this.tryDispatch();
+    });
   }
 
   private assignTaskToWorker(workerId: number, task: Task): void {
@@ -581,6 +585,9 @@ export class EventProcessingWorkerPool extends EventEmitter {
 
     // Make worker available again
     this.availableWorkers.add(workerId);
+
+    // P1-FIX: Trigger event-driven dispatch when worker becomes available
+    this.scheduleDispatch();
   }
 
   private handleWorkerError(error: Error, workerId: number): void {
@@ -634,10 +641,28 @@ export class EventProcessingWorkerPool extends EventEmitter {
   }
 
   private async restartWorker(workerId: number): Promise<void> {
+    // P1-FIX: Bounded restart retries with exponential backoff
+    const restartCount = (this.workerRestartCounts.get(workerId) ?? 0) + 1;
+    this.workerRestartCounts.set(workerId, restartCount);
+
+    if (restartCount > EventProcessingWorkerPool.MAX_RESTART_RETRIES) {
+      logger.error(
+        `Worker ${workerId} exceeded max restart retries (${EventProcessingWorkerPool.MAX_RESTART_RETRIES}). ` +
+        `Giving up — manual intervention required.`
+      );
+      this.emit('workerRestartFailed', { workerId, attempts: restartCount - 1 });
+      return;
+    }
+
     try {
-      const workerPath = path.join(__dirname, 'event-processor-worker.js');
-      const worker = new Worker(workerPath, {
-        workerData: { workerId }
+      // P0-FIX: Pass SharedArrayBuffers to restarted workers (matching initializeWorkers)
+      // Without these, restarted workers cannot access L1 price matrix or key registry
+      const worker = new Worker(this.workerPath, {
+        workerData: {
+          workerId,
+          priceBuffer: this.priceBuffer,
+          keyRegistryBuffer: this.keyRegistryBuffer
+        }
       });
 
       // Set up event handlers
@@ -659,18 +684,28 @@ export class EventProcessingWorkerPool extends EventEmitter {
         uptime: Date.now()
       });
 
+      // P1-FIX: Reset restart counter on successful restart
+      this.workerRestartCounts.set(workerId, 0);
       logger.info(`Worker ${workerId} restarted successfully`);
 
-    } catch (error) {
-      logger.error(`Failed to restart worker ${workerId}:`, error);
+      // P1-FIX: Dispatch queued tasks to the restarted worker immediately
+      this.scheduleDispatch();
 
-      // If restart fails, schedule another attempt with backoff
+    } catch (error) {
+      logger.error(`Failed to restart worker ${workerId} (attempt ${restartCount}/${EventProcessingWorkerPool.MAX_RESTART_RETRIES}):`, error);
+
+      // P1-FIX: Exponential backoff capped at MAX_RESTART_DELAY_MS
+      const delay = Math.min(
+        EventProcessingWorkerPool.BASE_RESTART_DELAY_MS * Math.pow(2, restartCount - 1),
+        EventProcessingWorkerPool.MAX_RESTART_DELAY_MS
+      );
+      logger.info(`Scheduling restart retry for worker ${workerId} in ${delay}ms (attempt ${restartCount}/${EventProcessingWorkerPool.MAX_RESTART_RETRIES})`);
+
       setTimeout(() => {
         if (this.isRunning) {
-          logger.info(`Retrying restart for worker ${workerId}`);
           this.restartWorker(workerId);
         }
-      }, 10000); // 10 second backoff
+      }, delay);
     }
   }
 
@@ -826,9 +861,11 @@ export class EventProcessingWorkerPool extends EventEmitter {
     // This moves the expensive sort from hot-path to monitoring code path
     const stats = { ...this.jsonParsingStats };
 
-    if (this.parseTimeWindow.length > 0) {
+    if (this.statsWindowCount > 0) {
       // Calculate P99 on-demand (not on every parse)
-      const sorted = [...this.parseTimeWindow].sort((a, b) => a - b);
+      // Fix #27: Extract active elements from circular buffer for sorting
+      const active = this.parseTimeWindow.slice(0, this.statsWindowCount);
+      const sorted = active.sort((a, b) => a - b);
       const p99Index = Math.floor(sorted.length * 0.99);
       stats.p99ParseTimeUs = sorted[p99Index] ?? sorted[sorted.length - 1];
     }
@@ -851,8 +888,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
       avgOverheadMs: 0,
       totalBytesParsed: 0
     };
-    this.parseTimeWindow = [];
-    this.overheadWindow = [];
+    this.parseTimeWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
+    this.overheadWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
+    this.statsWindowPos = 0;
+    this.statsWindowCount = 0;
   }
 
   /**
@@ -863,19 +902,13 @@ export class EventProcessingWorkerPool extends EventEmitter {
     this.jsonParsingStats.totalStringsParsed++;
     this.jsonParsingStats.totalBytesParsed += result.byteLength;
 
-    // Update rolling windows
-    this.parseTimeWindow.push(result.parseTimeUs);
-    this.overheadWindow.push(overheadMs);
+    // Fix #27: Circular buffer write — O(1) instead of O(n) shift()
+    this.parseTimeWindow[this.statsWindowPos] = result.parseTimeUs;
+    this.overheadWindow[this.statsWindowPos] = overheadMs;
+    this.statsWindowPos = (this.statsWindowPos + 1) % this.STATS_WINDOW_SIZE;
+    if (this.statsWindowCount < this.STATS_WINDOW_SIZE) this.statsWindowCount++;
 
-    // Trim windows to max size
-    if (this.parseTimeWindow.length > this.STATS_WINDOW_SIZE) {
-      this.parseTimeWindow.shift();
-    }
-    if (this.overheadWindow.length > this.STATS_WINDOW_SIZE) {
-      this.overheadWindow.shift();
-    }
-
-    // Recalculate averages and P99
+    // Recalculate averages
     this.recalculateJsonStats();
   }
 
@@ -892,12 +925,6 @@ export class EventProcessingWorkerPool extends EventEmitter {
       ? result.totalParseTimeUs / result.successCount
       : 0;
 
-    // Update rolling windows with batch averages
-    if (result.successCount > 0) {
-      this.parseTimeWindow.push(avgParseTimePerString);
-    }
-    this.overheadWindow.push(overheadMs);
-
     // Sum up bytes from successful parses
     for (const r of result.results) {
       if ('byteLength' in r) {
@@ -905,13 +932,13 @@ export class EventProcessingWorkerPool extends EventEmitter {
       }
     }
 
-    // Trim windows
-    if (this.parseTimeWindow.length > this.STATS_WINDOW_SIZE) {
-      this.parseTimeWindow.shift();
+    // Fix #27: Circular buffer write — O(1) instead of O(n) shift()
+    if (result.successCount > 0) {
+      this.parseTimeWindow[this.statsWindowPos] = avgParseTimePerString;
     }
-    if (this.overheadWindow.length > this.STATS_WINDOW_SIZE) {
-      this.overheadWindow.shift();
-    }
+    this.overheadWindow[this.statsWindowPos] = overheadMs;
+    this.statsWindowPos = (this.statsWindowPos + 1) % this.STATS_WINDOW_SIZE;
+    if (this.statsWindowCount < this.STATS_WINDOW_SIZE) this.statsWindowCount++;
 
     this.recalculateJsonStats();
   }
@@ -926,16 +953,17 @@ export class EventProcessingWorkerPool extends EventEmitter {
    * New: O(n) reduce on every parse, O(n log n) sort only on stats request
    */
   private recalculateJsonStats(): void {
-    // Calculate averages only (O(n) - acceptable for rolling window)
-    if (this.parseTimeWindow.length > 0) {
-      this.jsonParsingStats.avgParseTimeUs =
-        this.parseTimeWindow.reduce((a, b) => a + b, 0) / this.parseTimeWindow.length;
+    // Fix #27: Calculate averages using manual loop over circular buffer (no allocation)
+    if (this.statsWindowCount > 0) {
+      let parseSum = 0;
+      let overheadSum = 0;
+      for (let i = 0; i < this.statsWindowCount; i++) {
+        parseSum += this.parseTimeWindow[i];
+        overheadSum += this.overheadWindow[i];
+      }
+      this.jsonParsingStats.avgParseTimeUs = parseSum / this.statsWindowCount;
+      this.jsonParsingStats.avgOverheadMs = overheadSum / this.statsWindowCount;
       // PERF-3 FIX: P99 calculation moved to getJsonParsingStats() (lazy)
-    }
-
-    if (this.overheadWindow.length > 0) {
-      this.jsonParsingStats.avgOverheadMs =
-        this.overheadWindow.reduce((a, b) => a + b, 0) / this.overheadWindow.length;
     }
   }
 }
@@ -972,13 +1000,13 @@ export function getWorkerPool(
   taskTimeout?: number
 ): EventProcessingWorkerPool {
   if (!workerPool) {
-    // P2-FIX: Use platform-aware defaults when not explicitly specified
-    const effectivePoolSize = poolSize ?? POOL_DEFAULTS.poolSize;
-    const effectiveQueueSize = maxQueueSize ?? POOL_DEFAULTS.maxQueueSize;
-    const effectiveTimeout = taskTimeout ?? POOL_DEFAULTS.taskTimeout;
+    // P2-FIX: Use platform-aware defaults from @arbitrage/config when not explicitly specified
+    const effectivePoolSize = poolSize ?? WORKER_POOL_CONFIG.poolSize;
+    const effectiveQueueSize = maxQueueSize ?? WORKER_POOL_CONFIG.maxQueueSize;
+    const effectiveTimeout = taskTimeout ?? WORKER_POOL_CONFIG.taskTimeout;
 
     logger.info('Creating worker pool with platform-aware configuration', {
-      platform: IS_FLY_IO ? 'fly.io' : IS_CONSTRAINED_HOST ? 'constrained' : 'standard',
+      platform: PLATFORM_NAME,
       poolSize: effectivePoolSize,
       maxQueueSize: effectiveQueueSize,
       taskTimeout: effectiveTimeout,

@@ -121,7 +121,8 @@ const createMockBridgeRouter = (overrides: {
   const defaultQuote = {
     valid: true,
     estimatedOutput: BigInt('1000000000'),
-    totalFee: BigInt('1000000000000000'), // 0.001 ETH
+    gasFee: BigInt('1000000000000000'), // 0.001 ETH (native wei)
+    totalFee: BigInt('1000000000000000'), // Same as gasFee (native wei only)
     expiresAt: Date.now() + 60000,
   };
 
@@ -148,7 +149,7 @@ const createMockBridgeRouter = (overrides: {
 };
 
 const createMockBridgeRouterFactory = (bridgeRouter: any = null) => ({
-  findBestRouter: jest.fn().mockReturnValue(bridgeRouter || createMockBridgeRouter()),
+  findSupportedRouter: jest.fn().mockReturnValue(bridgeRouter || createMockBridgeRouter()),
   getDefaultRouter: jest.fn().mockReturnValue(bridgeRouter || createMockBridgeRouter()),
   getRouter: jest.fn().mockReturnValue(bridgeRouter || createMockBridgeRouter()),
   getAvailableRouters: jest.fn().mockReturnValue(['stargate']),
@@ -288,7 +289,7 @@ describe('CrossChainStrategy - Bridge Router', () => {
   it('should fail when no bridge route is available', async () => {
     const ctx = createMockContext({
       bridgeRouterFactory: {
-        findBestRouter: jest.fn().mockReturnValue(null),
+        findSupportedRouter: jest.fn().mockReturnValue(null),
       } as any,
     });
     const opportunity = createMockOpportunity();
@@ -324,7 +325,8 @@ describe('CrossChainStrategy - Bridge Router', () => {
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
-        totalFee: BigInt('60000000000000000'), // 0.06 ETH = ~$210 at $3500/ETH
+        gasFee: BigInt('60000000000000000'), // 0.06 ETH = ~$210 at $3500/ETH
+        totalFee: BigInt('60000000000000000'),
         expiresAt: Date.now() + 60000,
       },
     });
@@ -403,6 +405,7 @@ describe('CrossChainStrategy - Quote Expiry', () => {
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
+        gasFee: BigInt('1000000000000000'),
         totalFee: BigInt('1000000000000000'),
         expiresAt: Date.now() - 1000, // Already expired
       },
@@ -583,6 +586,7 @@ describe('CrossChainStrategy - Bridge Execution', () => {
       quote: jest.fn().mockResolvedValue({
         valid: true,
         estimatedOutput: BigInt('1000000000'),
+        gasFee: BigInt('1000000000000000'),
         totalFee: BigInt('1000000000000000'),
         expiresAt: Date.now() + 60000,
       }),
@@ -619,6 +623,7 @@ describe('CrossChainStrategy - Bridge Execution', () => {
       quote: jest.fn().mockResolvedValue({
         valid: true,
         estimatedOutput: BigInt('1000000000'),
+        gasFee: BigInt('1000000000000000'),
         totalFee: BigInt('1000000000000000'),
         expiresAt: Date.now() + 60000,
       }),
@@ -711,6 +716,7 @@ describe('CrossChainStrategy - Nonce Management', () => {
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
+        gasFee: BigInt('1000000000000000'),
         totalFee: BigInt('1000000000000000'),
         expiresAt: expiredTime,
       },
@@ -766,12 +772,13 @@ describe('CrossChainStrategy - Bridge Fee Type Coercion', () => {
     mockStrategyMethods(strategy);
   });
 
-  it('should handle invalid totalFee string gracefully (BUG-FIX regression)', async () => {
+  it('should handle invalid gasFee string gracefully (BUG-FIX regression)', async () => {
     // Test the fix for BigInt() throwing on invalid strings
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
-        totalFee: 'invalid-not-a-number', // Invalid string that would crash BigInt()
+        gasFee: 'invalid-not-a-number', // Invalid string that would crash BigInt()
+        totalFee: 'invalid-not-a-number',
         expiresAt: Date.now() + 60000,
       },
     });
@@ -785,20 +792,21 @@ describe('CrossChainStrategy - Bridge Fee Type Coercion', () => {
     // Should return error instead of crashing
     expect(result.success).toBe(false);
     expect(result.error).toContain('[ERR_BRIDGE_QUOTE]');
-    expect(result.error).toContain('Invalid bridge fee format');
+    expect(result.error).toContain('Invalid bridge gasFee format');
     expect(mockLogger.error).toHaveBeenCalledWith(
-      'Invalid bridge fee format',
+      'Invalid bridge gasFee format',
       expect.objectContaining({
-        totalFee: 'invalid-not-a-number',
+        gasFee: 'invalid-not-a-number',
       })
     );
   });
 
-  it('should handle undefined totalFee gracefully (BUG-FIX regression)', async () => {
+  it('should handle undefined gasFee gracefully (BUG-FIX regression)', async () => {
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
-        totalFee: undefined, // Missing fee
+        gasFee: undefined, // Missing fee
+        totalFee: undefined,
         expiresAt: Date.now() + 60000,
       },
     });
@@ -815,12 +823,13 @@ describe('CrossChainStrategy - Bridge Fee Type Coercion', () => {
     // Either succeeds with 0 fee or fails for another reason, but should not crash
   });
 
-  it('should handle string totalFee correctly (normal case)', async () => {
+  it('should handle string gasFee correctly (normal case)', async () => {
     // Bridge APIs sometimes return fees as strings from JSON
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
-        totalFee: '1000000000000000', // 0.001 ETH as string
+        gasFee: '1000000000000000', // 0.001 ETH as string
+        totalFee: '1000000000000000',
         expiresAt: Date.now() + 60000,
       },
     });
@@ -894,7 +903,8 @@ describe('CrossChainStrategy - Successful Execution', () => {
     const mockRouter = createMockBridgeRouter({
       quote: {
         valid: true,
-        totalFee: BigInt('5000000000000000'), // 0.005 ETH
+        gasFee: BigInt('5000000000000000'), // 0.005 ETH
+        totalFee: BigInt('5000000000000000'),
         expiresAt: Date.now() + 60000,
       },
     });

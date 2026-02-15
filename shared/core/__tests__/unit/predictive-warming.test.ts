@@ -31,14 +31,6 @@ const mockRedis = {
   ping: jest.fn<any>(() => Promise.resolve('PONG'))
 };
 
-const mockLogger = {
-  info: jest.fn<any>(),
-  warn: jest.fn<any>(),
-  error: jest.fn<any>(),
-  debug: jest.fn<any>()
-};
-
-// Mock CorrelationAnalyzer
 const mockCorrelationAnalyzer = {
   recordPriceUpdate: jest.fn<any>(),
   getPairsToWarm: jest.fn<any>(() => []),
@@ -49,10 +41,20 @@ const mockCorrelationAnalyzer = {
   destroy: jest.fn<any>()
 };
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: () => mockLogger
-}));
+// Single shared logger instance returned by all createLogger() calls.
+// Defined as a plain object literal inside the jest.mock factory to avoid TDZ issues.
+// After module loading, we retrieve it via createLogger() to use in test assertions.
+jest.mock('../../src/logger', () => {
+  const sharedLogger = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  };
+  return {
+    createLogger: () => sharedLogger
+  };
+});
 
 // Mock redis
 jest.mock('../../src/redis', () => ({
@@ -72,6 +74,12 @@ import {
   createHierarchicalCache,
 } from '../../src/caching/hierarchical-cache';
 import type { PredictiveWarmingConfig } from '../../src/caching/hierarchical-cache';
+import { createLogger } from '../../src/logger';
+
+// Get reference to shared mock logger (same instance returned by jest.mock factory)
+const mockLogger = createLogger('test') as unknown as {
+  info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock;
+};
 
 describe('Predictive Cache Warming (Task 2.2.2)', () => {
   let cache: HierarchicalCache;

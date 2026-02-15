@@ -335,13 +335,13 @@ describe('PriceMatrix', () => {
   // Memory Management
   // ===========================================================================
   describe('Memory Management', () => {
-    it('should fit 1000 pairs within 16KB memory', () => {
+    it('should fit 1000 pairs within 20KB memory', () => {
       const memoryUsage = matrix.getMemoryUsage();
 
-      // 1000 pairs * (8 bytes price + 4 bytes timestamp) = 12KB base
+      // 1000 pairs * (8 bytes price + 4 bytes timestamp + 4 bytes sequence) = 16KB base
       // Plus overhead for index mapping
-      // Total should be < 16KB
-      expect(memoryUsage.totalBytes).toBeLessThan(16 * 1024);
+      // Total should be < 20KB (Fix #7: sequence counter adds 4 bytes/pair)
+      expect(memoryUsage.totalBytes).toBeLessThan(20 * 1024);
     });
 
     it('should report accurate memory usage', () => {

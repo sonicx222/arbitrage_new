@@ -67,6 +67,18 @@ describe('DetectorConnectionManager', () => {
     jest.clearAllMocks();
     (getRedisClient as jest.Mock).mockResolvedValue(mockRedis);
     (getRedisStreamsClient as jest.Mock).mockResolvedValue(mockStreamsClient);
+    // Restore mock implementations cleared by clearAllMocks
+    mockStreamsClient.createBatcher.mockReturnValue(mockBatcher);
+    mockStreamsClient.disconnect.mockResolvedValue(undefined);
+    mockRedis.disconnect.mockResolvedValue(undefined);
+    mockBatcher.flush.mockResolvedValue(undefined);
+    mockBatcher.destroy.mockResolvedValue(undefined);
+    mockBatcher.getStats.mockReturnValue({});
+    (SwapEventFilter as unknown as jest.Mock).mockImplementation(() => ({
+      onWhaleAlert: jest.fn(),
+      onVolumeAggregate: jest.fn(),
+      destroy: jest.fn(),
+    }));
   });
 
   describe('initializeDetectorConnections', () => {

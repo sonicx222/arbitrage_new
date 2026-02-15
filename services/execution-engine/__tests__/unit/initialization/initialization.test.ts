@@ -28,6 +28,12 @@ import type { InitializationLogger } from '../../../src/initialization/types';
 // Mock the entire @arbitrage/config module
 // NOTE: MEV_CONFIG.enabled defaults to false to match production (MEV_PROTECTION_ENABLED !== 'true')
 jest.mock('@arbitrage/config', () => ({
+  CHAINS: {
+    ethereum: { id: 1, name: 'Ethereum', rpcUrl: 'https://eth.example.com', nativeToken: 'ETH' },
+    polygon: { id: 137, name: 'Polygon', rpcUrl: 'https://polygon.example.com', nativeToken: 'MATIC' },
+    arbitrum: { id: 42161, name: 'Arbitrum', rpcUrl: 'https://arb.example.com', nativeToken: 'ETH' },
+    bsc: { id: 56, name: 'BSC', rpcUrl: 'https://bsc.example.com', nativeToken: 'BNB' },
+  },
   MEV_CONFIG: {
     enabled: false, // Matches production default (requires explicit MEV_PROTECTION_ENABLED=true)
     flashbotsAuthKey: 'test-key',

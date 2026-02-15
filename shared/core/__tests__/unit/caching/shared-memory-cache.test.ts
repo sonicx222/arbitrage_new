@@ -15,11 +15,6 @@
  * - TTL: entry expiration
  * - Factory/singleton functions
  * - destroy / cleanup lifecycle
- *
- * NOTE: The current SharedMemoryCache source has a known data layout mismatch
- * between createEntry (writes key at offset + ENTRY_HEADER_SIZE) and findEntry
- * (reads key at offset + 4). This causes findEntry to never match stored keys.
- * Tests below document the actual behavior resulting from this bug.
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -82,7 +77,7 @@ describeIfSAB('SharedMemoryCache', () => {
       const c = new SharedMemoryCache();
       expect(c).toBeInstanceOf(SharedMemoryCache);
       const s = c.stats();
-      expect(s.size).toBe(256); // default 256MB
+      expect(s.size).toBe(64); // default 64MB (Fix #17: reduced from 256MB)
       expect(s.compressionEnabled).toBe(false);
       expect(s.encryptionEnabled).toBe(false);
       expect(s.atomicOperationsEnabled).toBe(true);
@@ -188,11 +183,40 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(cache.get('key\0bad')).toBeNull();
     });
 
-    // Known issue: findEntry reads key from wrong offset (offset+4 instead
-    // of offset+ENTRY_HEADER_SIZE), so get() cannot locate stored entries.
-    it('should return null for stored keys due to layout mismatch in findEntry', () => {
+    it('should return stored string value after set', () => {
       cache.set('key1', 'hello');
-      expect(cache.get('key1')).toBeNull();
+      expect(cache.get('key1')).toBe('hello');
+    });
+
+    it('should return stored numeric value after set', () => {
+      cache.set('num', 42);
+      expect(cache.get('num')).toBe(42);
+    });
+
+    it('should return stored object value after set', () => {
+      cache.set('obj', { chain: 'bsc', price: 1.05 });
+      expect(cache.get('obj')).toEqual({ chain: 'bsc', price: 1.05 });
+    });
+
+    it('should return stored array value after set', () => {
+      cache.set('arr', [1, 2, 3]);
+      expect(cache.get('arr')).toEqual([1, 2, 3]);
+    });
+
+    it('should return stored boolean value after set', () => {
+      cache.set('flag', true);
+      expect(cache.get('flag')).toBe(true);
+    });
+
+    it('should return stored null value after set', () => {
+      cache.set('nullable', null);
+      expect(cache.get('nullable')).toBeNull();
+    });
+
+    it('should return updated value after overwrite', () => {
+      cache.set('key', 'first');
+      cache.set('key', 'second');
+      expect(cache.get('key')).toBe('second');
     });
   });
 
@@ -209,10 +233,15 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(cache.has('')).toBe(false);
     });
 
-    // Known issue: has() relies on findEntry which has the offset mismatch
-    it('should return false for stored keys due to findEntry layout mismatch', () => {
+    it('should return true for stored keys', () => {
       cache.set('present', 'yes');
-      expect(cache.has('present')).toBe(false);
+      expect(cache.has('present')).toBe(true);
+    });
+
+    it('should return false after key is deleted', () => {
+      cache.set('temp', 'value');
+      cache.delete('temp');
+      expect(cache.has('temp')).toBe(false);
     });
   });
 
@@ -229,10 +258,25 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(cache.delete('')).toBe(false);
     });
 
-    // Known issue: delete also relies on findEntryIndex which has same offset bug
-    it('should return false for stored key due to findEntryIndex layout mismatch', () => {
+    it('should return true and remove stored key', () => {
       cache.set('toDelete', 'value');
-      expect(cache.delete('toDelete')).toBe(false);
+      expect(cache.delete('toDelete')).toBe(true);
+      expect(cache.has('toDelete')).toBe(false);
+      expect(cache.get('toDelete')).toBeNull();
+    });
+
+    it('should decrement size after deletion', () => {
+      cache.set('a', 1);
+      cache.set('b', 2);
+      expect(cache.size()).toBe(2);
+      cache.delete('a');
+      expect(cache.size()).toBe(1);
+    });
+
+    it('should return false for already-deleted key', () => {
+      cache.set('once', 'value');
+      cache.delete('once');
+      expect(cache.delete('once')).toBe(false);
     });
   });
 
@@ -261,6 +305,13 @@ describeIfSAB('SharedMemoryCache', () => {
       cache.clear();
       expect(cache.size()).toBe(0);
     });
+
+    it('should make keys inaccessible after clear', () => {
+      cache.set('key', 'value');
+      cache.clear();
+      expect(cache.get('key')).toBeNull();
+      expect(cache.has('key')).toBe(false);
+    });
   });
 
   // ==========================================================================
@@ -286,11 +337,7 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(cache.size()).toBe(0);
     });
 
-    // set() for an existing key goes to createEntry path since findEntry cannot
-    // locate the existing entry (layout mismatch). The second createEntry call
-    // fails because the loop that finds end-of-data reads incorrect offsets,
-    // computing a data position beyond buffer bounds. So size stays at 1.
-    it('should not increment size for duplicate key set (createEntry offset calculation fails)', () => {
+    it('should not increment size for duplicate key set', () => {
       cache.set('key', 'first');
       cache.set('key', 'second');
       expect(cache.size()).toBe(1);
@@ -306,14 +353,21 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(cache.keys()).toEqual([]);
     });
 
-    // Known issue: keys() also reads key from wrong offset (offset + 4),
-    // so it reads garbage bytes instead of the actual key strings.
-    it('should return array with length matching entry count', () => {
+    it('should return correct key names', () => {
       cache.set('alpha', 1);
       cache.set('beta', 2);
       const keys = cache.keys();
-      // Keys are returned but won't match original key names due to layout mismatch
-      expect(keys.length).toBeLessThanOrEqual(2);
+      expect(keys.length).toBe(2);
+      expect(keys).toContain('alpha');
+      expect(keys).toContain('beta');
+    });
+
+    it('should not include deleted keys', () => {
+      cache.set('keep', 1);
+      cache.set('remove', 2);
+      cache.delete('remove');
+      const keys = cache.keys();
+      expect(keys).toEqual(['keep']);
     });
   });
 
@@ -372,10 +426,7 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(cache.size()).toBe(1);
     });
 
-    // Since findEntry cannot locate existing entries (layout bug), each
-    // increment call tries createEntry. The second call fails because the
-    // loop finding end-of-data computes incorrect offsets, so size stays 1.
-    it('should not create duplicate entries (second createEntry fails)', () => {
+    it('should not create duplicate entries on repeated increment', () => {
       cache.increment('counter', 1);
       cache.increment('counter', 1);
       expect(cache.size()).toBe(1);
@@ -392,24 +443,23 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(result).toBe(false);
     });
 
-    // get() returns null for all keys, so compareAndSet with expected=null succeeds
-    it('should succeed when expected value is null (matches get result)', () => {
+    it('should succeed when expected value is null and key does not exist', () => {
       const result = cache.compareAndSet('newkey', null, 'created');
       expect(result).toBe(true);
     });
 
-    // Even after setting a value, get returns null, so CAS with expected=null succeeds
-    it('should succeed with null expected even after set due to get returning null', () => {
-      cache.set('key', 'value');
-      const result = cache.compareAndSet('key', null, 'updated');
-      expect(result).toBe(true);
-    });
-
-    // CAS with non-null expected always fails because get always returns null
-    it('should fail with non-null expected due to get returning null', () => {
+    it('should succeed when expected value matches stored value', () => {
       cache.set('key', 'value');
       const result = cache.compareAndSet('key', 'value', 'new');
+      expect(result).toBe(true);
+      expect(cache.get('key')).toBe('new');
+    });
+
+    it('should fail when expected value does not match stored value', () => {
+      cache.set('key', 'value');
+      const result = cache.compareAndSet('key', 'wrong', 'new');
       expect(result).toBe(false);
+      expect(cache.get('key')).toBe('value');
     });
   });
 
@@ -437,6 +487,13 @@ describeIfSAB('SharedMemoryCache', () => {
     it('should fail when expected is non-null and key does not exist', () => {
       const result = nonAtomicCache.compareAndSet('missing', 'expected', 'new');
       expect(result).toBe(false);
+    });
+
+    it('should succeed when expected value matches stored value', () => {
+      nonAtomicCache.set('key', 'value');
+      const result = nonAtomicCache.compareAndSet('key', 'value', 'updated');
+      expect(result).toBe(true);
+      expect(nonAtomicCache.get('key')).toBe('updated');
     });
   });
 
@@ -466,6 +523,12 @@ describeIfSAB('SharedMemoryCache', () => {
       const result = nonAtomicCache.increment('counter');
       expect(result).toBe(1);
     });
+
+    it('should accumulate increments correctly', () => {
+      nonAtomicCache.increment('counter', 5);
+      const result = nonAtomicCache.increment('counter', 3);
+      expect(result).toBe(8);
+    });
   });
 
   // ==========================================================================
@@ -473,9 +536,12 @@ describeIfSAB('SharedMemoryCache', () => {
   // ==========================================================================
 
   describe('TTL', () => {
-    // get() returns null regardless of TTL due to findEntry layout mismatch,
-    // but the TTL expiration path is still exercised
-    it('should return null after TTL expires (same as before due to findEntry bug)', () => {
+    it('should return value before TTL expires', () => {
+      cache.set('ttl-key', 'temporary', 2); // 2 second TTL
+      expect(cache.get('ttl-key')).toBe('temporary');
+    });
+
+    it('should return null after TTL expires', () => {
       cache.set('ttl-key', 'temporary', 2); // 2 second TTL
       jest.advanceTimersByTime(3000);
       expect(cache.get('ttl-key')).toBeNull();
@@ -487,6 +553,12 @@ describeIfSAB('SharedMemoryCache', () => {
 
     it('should store entry without TTL (set returns true)', () => {
       expect(cache.set('permanent', 'forever')).toBe(true);
+    });
+
+    it('should not expire entries without TTL', () => {
+      cache.set('permanent', 'forever');
+      jest.advanceTimersByTime(100000);
+      expect(cache.get('permanent')).toBe('forever');
     });
   });
 
@@ -558,10 +630,30 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(() => cache.cleanup()).not.toThrow();
     });
 
-    it('should not throw after time passes with TTL entries', () => {
-      cache.set('expired', 'old', 1);
+    it('should remove expired entries', () => {
+      cache.set('expired', 'old', 1); // 1 second TTL
+      cache.set('alive', 'new', 60); // 60 second TTL
       jest.advanceTimersByTime(2000);
-      expect(() => cache.cleanup()).not.toThrow();
+      cache.cleanup();
+      expect(cache.has('expired')).toBe(false);
+      expect(cache.has('alive')).toBe(true);
+    });
+
+    it('should not remove entries without TTL', () => {
+      cache.set('permanent', 'forever');
+      jest.advanceTimersByTime(100000);
+      cache.cleanup();
+      expect(cache.has('permanent')).toBe(true);
+    });
+
+    it('should update size after cleanup', () => {
+      cache.set('expired1', 'old1', 1);
+      cache.set('expired2', 'old2', 1);
+      cache.set('alive', 'new');
+      expect(cache.size()).toBe(3);
+      jest.advanceTimersByTime(2000);
+      cache.cleanup();
+      expect(cache.size()).toBe(1);
     });
   });
 
@@ -602,6 +694,63 @@ describeIfSAB('SharedMemoryCache', () => {
         enableEncryption: true,
       });
       expect(encryptedCache.set('enc-key', { secret: 'classified' })).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Regression: multi-entry update must not corrupt other entries
+  // ==========================================================================
+
+  describe('multi-entry update regression', () => {
+    it('should not corrupt data when updating a non-last entry with multiple entries present', () => {
+      // Regression test for tombstone + write-cursor fix.
+      // Previously, updating "first" would tombstone it (keyLen=0) and the
+      // scan loop used keyLen to compute entry size, landing at the wrong
+      // offset for subsequent entries and corrupting their headers.
+      cache.set('first', 'aaa');
+      cache.set('second', 'bbb');
+      cache.set('third', 'ccc');
+
+      // Update the first entry — this tombstones old "first" and appends new
+      cache.set('first', 'updated');
+
+      expect(cache.get('first')).toBe('updated');
+      expect(cache.get('second')).toBe('bbb');
+      expect(cache.get('third')).toBe('ccc');
+      expect(cache.size()).toBe(3);
+    });
+
+    it('should handle multiple sequential updates to different keys', () => {
+      cache.set('a', 1);
+      cache.set('b', 2);
+      cache.set('c', 3);
+      cache.set('d', 4);
+
+      // Update non-last entries in various orders
+      cache.set('b', 20);
+      cache.set('a', 10);
+      cache.set('c', 30);
+
+      expect(cache.get('a')).toBe(10);
+      expect(cache.get('b')).toBe(20);
+      expect(cache.get('c')).toBe(30);
+      expect(cache.get('d')).toBe(4);
+      expect(cache.size()).toBe(4);
+    });
+
+    it('should handle delete then re-create of a key among multiple entries', () => {
+      cache.set('x', 'one');
+      cache.set('y', 'two');
+      cache.set('z', 'three');
+
+      cache.delete('y');
+      expect(cache.size()).toBe(2);
+
+      cache.set('y', 'revived');
+      expect(cache.get('x')).toBe('one');
+      expect(cache.get('y')).toBe('revived');
+      expect(cache.get('z')).toBe('three');
+      expect(cache.size()).toBe(3);
     });
   });
 

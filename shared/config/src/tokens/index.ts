@@ -290,7 +290,7 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
   MATIC: 1.00, WMATIC: 1.00,
   AVAX: 40, WAVAX: 40,
   FTM: 0.80, WFTM: 0.80,
-  SOL: 150, WSOL: 150, // Solana
+  SOL: 200, WSOL: 200, // Solana (aligned with NATIVE_TOKEN_PRICES.solana)
   // L2 tokens
   ARB: 1.50,
   OP: 3.00,
@@ -307,7 +307,7 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
   STETH: 3500, WSTETH: 4000, RETH: 3700, CBETH: 3600,
   stETH: 3500, wstETH: 4000, rETH: 3700, cbETH: 3600, // lowercase variants
   // Solana LSTs
-  mSOL: 160, jitoSOL: 160, BSOL: 155,
+  mSOL: 210, jitoSOL: 210, BSOL: 205,
   // DEX/Protocol tokens
   GMX: 40, CAKE: 3.00, JOE: 0.50, VELO: 0.15, AERO: 1.50,
   RAY: 2.00, ORCA: 3.00, JUP: 0.80,
@@ -579,7 +579,7 @@ const COMMON_TOKEN_DECIMALS: Record<string, number> = {
   usdt: 6,
   // 8-decimal tokens
   wbtc: 8,
-  btcb: 8,
+  btcb: 18,
   // 18-decimal tokens (most ERC-20 default)
   weth: 18,
   eth: 18,

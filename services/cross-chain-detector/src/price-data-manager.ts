@@ -48,15 +48,7 @@ export interface PriceDataManager {
   handlePriceUpdate(update: PriceUpdate): void;
 
   /**
-   * Create atomic snapshot of price data.
-   * @deprecated Use createIndexedSnapshot() for O(1) token pair lookups.
-   * This method is retained for backwards compatibility but incurs O(n²) cost.
-   */
-  createSnapshot(): PriceData;
-
-  /**
    * PERF-P1: Create indexed snapshot with O(1) token pair lookups.
-   * Use this instead of createSnapshot() for detection to avoid O(n²) iteration.
    */
   createIndexedSnapshot(): IndexedSnapshot;
 
@@ -260,32 +252,6 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
   }
 
   /**
-   * Create atomic snapshot of priceData for thread-safe detection.
-   * Prevents race conditions where priceData is modified during detection.
-   * @deprecated Use createIndexedSnapshot() for O(1) token pair lookups
-   */
-  function createSnapshot(): PriceData {
-    const snapshot: PriceData = {};
-
-    for (const chain of Object.keys(priceData)) {
-      snapshot[chain] = {};
-      for (const dex of Object.keys(priceData[chain])) {
-        snapshot[chain][dex] = {};
-        for (const pairKey of Object.keys(priceData[chain][dex])) {
-          // Deep copy the PriceUpdate object
-          // RACE-FIX: Check if original still exists (may have been deleted concurrently)
-          const original = priceData[chain][dex][pairKey];
-          if (original) {
-            snapshot[chain][dex][pairKey] = { ...original };
-          }
-        }
-      }
-    }
-
-    return snapshot;
-  }
-
-  /**
    * PERF-P1: Create indexed snapshot with O(1) token pair lookups.
    *
    * This builds a reverse index during snapshot creation so that detection
@@ -454,7 +420,6 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
 
   return {
     handlePriceUpdate,
-    createSnapshot,
     createIndexedSnapshot,
     getChains,
     getPairCount,

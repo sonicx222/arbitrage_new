@@ -65,6 +65,8 @@ describe('DetectorHealthMonitor', () => {
     jest.useFakeTimers();
     isRunning = true;
     isStopping = false;
+    // Restore mock implementations that clearAllMocks doesn't reset
+    mockRedis.updateServiceHealth.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -501,10 +503,8 @@ describe('DetectorHealthMonitor', () => {
       const monitor = createDetectorHealthMonitor(config, deps);
       monitor.start();
 
-      // Advance full interval to trigger health check
-      jest.advanceTimersByTime(1000);
-      await Promise.resolve();
-      await Promise.resolve(); // Extra flush for async completion
+      // Advance full interval and drain all async operations
+      await jest.advanceTimersByTimeAsync(1000);
 
       // Should have completed full cycle with all three checks passing
       expect(deps.getHealth).toHaveBeenCalled();
@@ -609,16 +609,13 @@ describe('DetectorHealthMonitor', () => {
       monitor.start();
 
       // First interval - error
-      jest.advanceTimersByTime(1000);
-      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(1000);
       expect(mockLogger.error).toHaveBeenCalledTimes(1);
 
       mockLogger.error.mockClear();
 
       // Second interval - success
-      jest.advanceTimersByTime(1000);
-      await Promise.resolve();
-      await Promise.resolve(); // Extra flush for async completion
+      await jest.advanceTimersByTimeAsync(1000);
       expect(deps.getHealth).toHaveBeenCalledTimes(2);
       expect(mockLogger.error).not.toHaveBeenCalled();
       expect(mockPerfLogger.logHealthCheck).toHaveBeenCalledWith(

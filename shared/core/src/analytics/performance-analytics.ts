@@ -89,13 +89,72 @@ export interface AttributionAnalysis {
   interactionContribution: number;
 }
 
+export interface TradeRecord {
+  id: string;
+  strategy: string;
+  asset: string;
+  side: 'buy' | 'sell' | 'long' | 'short';
+  entryTime: number;
+  exitTime: number;
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  realizedPnL: number;
+  fees: number;
+  slippage: number;
+  executionTime: number;
+  netPnL: number;
+  duration: number;
+  return: number;
+  timestamp: number;
+}
+
+type PerformancePeriod = PerformanceMetrics['period'];
+
+export interface PerformanceReport {
+  generatedAt: string;
+  period: PerformancePeriod;
+  summary: {
+    totalTrades: number;
+    totalPnL: number;
+    winRate: number;
+    sharpeRatio: number;
+    maxDrawdown: number;
+  };
+  riskMetrics: {
+    volatility: number;
+    valueAtRisk: number;
+    sortinoRatio: number;
+    calmarRatio: number;
+  };
+  efficiencyMetrics: {
+    profitFactor: number;
+    averageWin: number;
+    averageLoss: number;
+    averageTradeDuration: number;
+  };
+  alerts: Array<{
+    level: 'info' | 'warning' | 'critical';
+    message: string;
+    metric: string;
+    value: number;
+    threshold: number;
+  }>;
+  attribution: AttributionAnalysis;
+  benchmarks: BenchmarkComparison[];
+  strategyBreakdown: { [strategy: string]: StrategyPerformance };
+  assetBreakdown: { [asset: string]: AssetPerformance };
+  timeBreakdown: { [hour: number]: TimePerformance };
+}
+
 export class PerformanceAnalyticsEngine {
   private redis = getRedisClient();
-  private tradeHistory: any[] = [];
+  private tradeHistory: TradeRecord[] = [];
   private maxHistorySize = 10000; // Keep last 10k trades
+  private initialized: Promise<void>;
 
   constructor() {
-    this.initializeTradeHistory();
+    this.initialized = this.initializeTradeHistory();
   }
 
   // Record a completed trade
@@ -114,6 +173,8 @@ export class PerformanceAnalyticsEngine {
     slippage: number;
     executionTime: number; // in milliseconds
   }): Promise<void> {
+    await this.initialized;
+
     const tradeRecord = {
       ...trade,
       netPnL: trade.realizedPnL - trade.fees - trade.slippage,
@@ -152,6 +213,8 @@ export class PerformanceAnalyticsEngine {
     startDate?: number,
     endDate?: number
   ): Promise<PerformanceMetrics> {
+    await this.initialized;
+
     const now = Date.now();
     const periodStart = startDate || this.getPeriodStart(period, now);
     const periodEnd = endDate || now;
@@ -163,11 +226,34 @@ export class PerformanceAnalyticsEngine {
       return this.createEmptyMetrics(period, periodStart);
     }
 
-    // Calculate basic metrics
-    const winningTrades = trades.filter(t => t.netPnL > 0);
-    const losingTrades = trades.filter(t => t.netPnL < 0);
+    // Single-pass aggregation for basic metrics (replaces 8 separate O(N) passes)
+    let totalPnL = 0;
+    let totalWins = 0;
+    let totalLosses = 0;
+    let winCount = 0;
+    let loseCount = 0;
+    let largestWin = -Infinity;
+    let largestLoss = Infinity;
+    let totalDuration = 0;
 
-    const totalPnL = trades.reduce((sum, t) => sum + t.netPnL, 0);
+    for (const t of trades) {
+      totalPnL += t.netPnL;
+      totalDuration += t.duration;
+      if (t.netPnL > 0) {
+        winCount++;
+        totalWins += t.netPnL;
+        if (t.netPnL > largestWin) largestWin = t.netPnL;
+      } else if (t.netPnL < 0) {
+        loseCount++;
+        totalLosses += Math.abs(t.netPnL);
+        if (t.netPnL < largestLoss) largestLoss = t.netPnL;
+      }
+    }
+
+    // Fix edge cases for empty winner/loser sets
+    if (winCount === 0) largestWin = 0;
+    if (loseCount === 0) largestLoss = 0;
+
     const realizedPnL = totalPnL; // All trades are realized
 
     // Calculate returns for risk metrics
@@ -184,17 +270,11 @@ export class PerformanceAnalyticsEngine {
     const valueAtRisk = this.calculateVaR(returns, 0.95);
 
     // Efficiency metrics
-    const winRate = winningTrades.length / trades.length;
-    const totalWins = winningTrades.reduce((sum, t) => sum + t.netPnL, 0);
-    const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + t.netPnL, 0));
+    const winRate = winCount / trades.length;
     const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? 999 : 0;
 
-    const averageWin = winningTrades.length > 0 ? totalWins / winningTrades.length : 0;
-    const averageLoss = losingTrades.length > 0 ? totalLosses / losingTrades.length : 0;
-    const largestWin = winningTrades.length > 0 ? Math.max(...winningTrades.map(t => t.netPnL)) : 0;
-    const largestLoss = losingTrades.length > 0 ? Math.min(...losingTrades.map(t => t.netPnL)) : 0;
-
-    const totalDuration = trades.reduce((sum, t) => sum + t.duration, 0);
+    const averageWin = winCount > 0 ? totalWins / winCount : 0;
+    const averageLoss = loseCount > 0 ? totalLosses / loseCount : 0;
     const averageTradeDuration = trades.length > 0 ? totalDuration / trades.length : 0;
 
     // Performance attribution
@@ -213,8 +293,8 @@ export class PerformanceAnalyticsEngine {
       timestamp: now,
       period,
       totalTrades: trades.length,
-      winningTrades: winningTrades.length,
-      losingTrades: losingTrades.length,
+      winningTrades: winCount,
+      losingTrades: loseCount,
       totalPnL,
       realizedPnL,
       unrealizedPnL: 0, // No unrealized P&L for completed trades
@@ -367,7 +447,7 @@ export class PerformanceAnalyticsEngine {
   async generateReport(
     period: 'daily' | 'weekly' | 'monthly' = 'monthly',
     includeBenchmarks: string[] = ['BTC', 'ETH']
-  ): Promise<any> {
+  ): Promise<PerformanceReport> {
     const metrics = await this.calculateMetrics(period);
     const alerts = this.getPerformanceAlerts(metrics);
 
@@ -424,16 +504,16 @@ export class PerformanceAnalyticsEngine {
     }
   }
 
-  private async getTradesInPeriod(startDate: number, endDate: number): Promise<any[]> {
+  private async getTradesInPeriod(startDate: number, endDate: number): Promise<TradeRecord[]> {
     return this.tradeHistory.filter(trade =>
       trade.exitTime >= startDate && trade.exitTime <= endDate
     );
   }
 
-  private createEmptyMetrics(period: string, timestamp: number): PerformanceMetrics {
+  private createEmptyMetrics(period: PerformancePeriod, timestamp: number): PerformanceMetrics {
     return {
       timestamp,
-      period: period as any,
+      period,
       totalTrades: 0,
       winningTrades: 0,
       losingTrades: 0,
@@ -464,7 +544,7 @@ export class PerformanceAnalyticsEngine {
     };
   }
 
-  private calculateReturns(trades: any[]): number[] {
+  private calculateReturns(trades: TradeRecord[]): number[] {
     return trades.map(trade => trade.return);
   }
 
@@ -510,7 +590,7 @@ export class PerformanceAnalyticsEngine {
   private calculateCurrentDrawdown(cumulativeReturns: number[]): number {
     if (cumulativeReturns.length === 0) return 0;
 
-    const peak = Math.max(...cumulativeReturns);
+    const peak = cumulativeReturns.reduce((a, b) => a > b ? a : b, cumulativeReturns[0]);
     const current = cumulativeReturns[cumulativeReturns.length - 1];
 
     return Math.max(0, peak - current);
@@ -546,15 +626,17 @@ export class PerformanceAnalyticsEngine {
     return Math.abs(sortedReturns[index]); // VaR as positive value
   }
 
-  private calculateBeta(returns: number[]): number {
-    // Simplified beta calculation against a market proxy
-    // In practice, this would use actual market returns
-    const marketReturns = returns.map(() => Math.random() * 0.02 - 0.01); // Simulated market
-
-    const covariance = this.calculateCovariance(returns, marketReturns);
-    const marketVariance = this.calculateVariance(marketReturns);
-
-    return marketVariance > 0 ? covariance / marketVariance : 1;
+  /**
+   * Calculate beta (systematic risk) against a market benchmark.
+   *
+   * @known-limitation Returns a deterministic default of 1.0 (market-neutral)
+   * because real market benchmark data is not yet integrated. The Math.random()
+   * simulation that was here before produced non-deterministic, meaningless results.
+   * When real market data feeds are available, use calculateCovariance/calculateVariance
+   * with actual benchmark returns to compute a proper beta.
+   */
+  private calculateBeta(_returns: number[]): number {
+    return 1.0;
   }
 
   private calculateOmegaRatio(returns: number[]): number {
@@ -588,8 +670,8 @@ export class PerformanceAnalyticsEngine {
     return values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / values.length;
   }
 
-  private calculateStrategyPerformance(trades: any[]): { [strategy: string]: StrategyPerformance } {
-    const strategyStats: { [strategy: string]: any[] } = {};
+  private calculateStrategyPerformance(trades: TradeRecord[]): { [strategy: string]: StrategyPerformance } {
+    const strategyStats: { [strategy: string]: TradeRecord[] } = {};
 
     // Group trades by strategy
     for (const trade of trades) {
@@ -600,6 +682,7 @@ export class PerformanceAnalyticsEngine {
     }
 
     const result: { [strategy: string]: StrategyPerformance } = {};
+    const totalAbsPnL = trades.reduce((sum, t) => sum + Math.abs(t.netPnL), 0);
 
     for (const [strategy, strategyTrades] of Object.entries(strategyStats)) {
       const pnl = strategyTrades.reduce((sum, t) => sum + t.netPnL, 0);
@@ -616,15 +699,15 @@ export class PerformanceAnalyticsEngine {
         pnl,
         winRate,
         sharpeRatio,
-        contribution: pnl / Math.abs(trades.reduce((sum, t) => sum + Math.abs(t.netPnL), 0)) || 1
+        contribution: totalAbsPnL > 0 ? pnl / totalAbsPnL : 0
       };
     }
 
     return result;
   }
 
-  private calculateAssetPerformance(trades: any[]): { [asset: string]: AssetPerformance } {
-    const assetStats: { [asset: string]: any[] } = {};
+  private calculateAssetPerformance(trades: TradeRecord[]): { [asset: string]: AssetPerformance } {
+    const assetStats: { [asset: string]: TradeRecord[] } = {};
 
     // Group trades by asset
     for (const trade of trades) {
@@ -635,12 +718,13 @@ export class PerformanceAnalyticsEngine {
     }
 
     const result: { [asset: string]: AssetPerformance } = {};
+    const totalAbsPnL = trades.reduce((sum, t) => sum + Math.abs(t.netPnL), 0);
+    const totalPortfolioValue = trades.reduce((sum, t) => sum + Math.abs(t.quantity * t.entryPrice), 0);
 
     for (const [asset, assetTrades] of Object.entries(assetStats)) {
       const pnl = assetTrades.reduce((sum, t) => sum + t.netPnL, 0);
 
       // Calculate exposure (simplified)
-      const totalPortfolioValue = trades.reduce((sum, t) => sum + Math.abs(t.quantity * t.entryPrice), 0);
       const assetValue = assetTrades.reduce((sum, t) => sum + Math.abs(t.quantity * t.entryPrice), 0);
       const exposure = totalPortfolioValue > 0 ? assetValue / totalPortfolioValue : 0;
 
@@ -653,15 +737,15 @@ export class PerformanceAnalyticsEngine {
         pnl,
         exposure,
         sharpeRatio,
-        contribution: pnl / Math.abs(trades.reduce((sum, t) => sum + Math.abs(t.netPnL), 0)) || 1
+        contribution: totalAbsPnL > 0 ? pnl / totalAbsPnL : 0
       };
     }
 
     return result;
   }
 
-  private calculateTimePerformance(trades: any[]): { [hour: number]: TimePerformance } {
-    const hourStats: { [hour: number]: any[] } = {};
+  private calculateTimePerformance(trades: TradeRecord[]): { [hour: number]: TimePerformance } {
+    const hourStats: { [hour: number]: TradeRecord[] } = {};
 
     // Group trades by hour of day
     for (const trade of trades) {
@@ -691,8 +775,8 @@ export class PerformanceAnalyticsEngine {
     return result;
   }
 
-  private getPeriodStart(period: string, endTime: number): number {
-    const periods = {
+  private getPeriodStart(period: PerformancePeriod, endTime: number): number {
+    const periods: Record<PerformancePeriod, number> = {
       daily: 24 * 60 * 60 * 1000,
       weekly: 7 * 24 * 60 * 60 * 1000,
       monthly: 30 * 24 * 60 * 60 * 1000,
@@ -700,10 +784,10 @@ export class PerformanceAnalyticsEngine {
       yearly: 365 * 24 * 60 * 60 * 1000
     };
 
-    return endTime - periods[period as keyof typeof periods];
+    return endTime - periods[period];
   }
 
-  private async cacheMetrics(metrics: PerformanceMetrics, period: string, startDate: number, endDate: number): Promise<void> {
+  private async cacheMetrics(metrics: PerformanceMetrics, period: PerformancePeriod, startDate: number, endDate: number): Promise<void> {
     const redis = await this.redis;
     const key = `performance_metrics:${period}:${startDate}:${endDate}`;
     await redis.set(key, metrics, 3600); // 1 hour TTL

@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.8
-> **Last Updated:** 2026-02-04
+> **Document Version:** 2.9
+> **Last Updated:** 2026-02-14
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -199,12 +199,18 @@ The architecture combines two patterns:
 │  ├── Multi-Leg Path Finder (T3.11: 5-7 token cycle detection)                   │
 │  ├── Whale Activity Tracker (T3.12: Pattern detection & signals)                │
 │  ├── Liquidity Depth Analyzer (T3.15: Slippage prediction)                      │
-│  └── Correlation Analyzer (Predictive cache warming) ✅ NEW                     │
+│  ├── Price Momentum Tracker (T2.7: EMA/z-score/velocity signals)               │
+│  ├── Price Oracle (Centralized price source with stale detection)               │
+│  ├── Pair Activity Tracker (Volatility-based pair prioritization)               │
+│  ├── Swap Event Filter (Volume filtering, whale alerts, dedup)                  │
+│  ├── Correlation Analyzer (Predictive cache warming) ✅ NEW                     │
+│  └── ML Opportunity Scorer (T2.8: Multi-signal weighted scoring)               │
 │                                                                                  │
 │  LAYER 3: DECISION                                                               │
 │  ├── Opportunity Scorer (Profit/risk evaluation)                                │
 │  ├── MEV Risk Analyzer (Sandwich risk, tip recommendations) ✅ NEW              │
 │  ├── MEV Analyzer (Bot detection, avoidance)                                    │
+│  ├── Performance Analytics Engine (Strategy attribution & risk)                 │
 │  └── Execution Planner (Route optimization)                                     │
 │                                                                                  │
 │  LAYER 4: EXECUTION                                                              │
@@ -231,6 +237,7 @@ The architecture combines two patterns:
 │  ├── Hierarchical Cache (L1/L2/L3 + Predictive Warming) ✅ ENHANCED             │
 │  ├── Circuit Breaker (Execution protection) ✅ NEW                              │
 │  ├── MEV Provider Factory (Flashbots, Jito, L2 Sequencer) ✅ ENHANCED           │
+│  ├── Service Registry (Singleton lifecycle, health checks) ✅ NEW               │
 │  └── RPC Provider Pool (EVM + Solana)                                           │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -444,7 +451,25 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Redis Streams
 
 **Future Work**: See roadmap for Solana execution engine development plan.
 
-### 4.6 Bridge Recovery Service
+### 4.6 Bridge Router Module
+
+**Location**: `shared/core/src/bridge-router/`
+
+**Purpose**: Abstraction layer for cross-chain token bridges, providing a unified interface for quoting, executing, and tracking bridge transactions.
+
+**Key Components**:
+- `IBridgeRouter` — Interface all bridge implementations must satisfy (quote, execute, getStatus, healthCheck)
+- `StargateRouter` — Production implementation using Stargate V1 / LayerZero for cross-chain token transfers
+- `BridgeRouterFactory` — Creates and manages router instances; `findSupportedRouter()` selects a router for a given route
+- Types: `BridgeQuote`, `BridgeExecuteRequest`, `BridgeExecuteResult`, `BridgeStatusResult`
+
+**Supported Chains (Stargate V1)**: Ethereum, BSC, Arbitrum, Optimism, Base, Polygon, Avalanche, Fantom. Note: zkSync and Linea are **not** supported by Stargate V1 — use Across or native bridges for those chains.
+
+**Integration**: `CrossChainStrategy` in the execution engine uses `BridgeRouterFactory.findSupportedRouter()` to obtain a router, then calls `quote()` → `execute()` → `getStatus()` to complete bridge transactions. Bridge cost/selection data lives separately in `shared/config/src/bridge-config.ts`.
+
+**Concurrency**: Pending bridge state is protected by `AsyncMutex` to prevent race conditions on concurrent status updates. MAX_PENDING_BRIDGES (1000) prevents memory leaks with LRU eviction.
+
+### 4.7 Bridge Recovery Service
 
 **Purpose**: Ensures cross-chain arbitrage trades complete successfully even after service restarts or failures.
 
@@ -472,6 +497,75 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Redis Streams
 - Redis key pattern: `bridge:recovery:{opportunityId}`
 
 **Location**: Implemented in `services/execution-engine/src/strategies/cross-chain.strategy.ts` (lines 1091-1658)
+
+### 4.8 Service Registry
+
+**Purpose**: Centralized lifecycle management for singleton services (Redis clients, streams, caches).
+
+**Key Features**:
+- **Lazy Initialization**: Services created on first `get()` call, not at registration
+- **Thread-Safe**: Concurrent `get()` calls share the same init promise (no duplicate creation)
+- **Global Reset**: `resetAll()` cleans up all services in reverse registration order (for test isolation)
+- **Health Monitoring**: `getHealth()` runs per-service health checks, reports init times and errors
+- **Dependency Tracking**: Services declare dependencies for documentation/debugging
+
+**Usage Pattern**:
+```typescript
+import { getServiceRegistry } from '@arbitrage/core';
+const registry = getServiceRegistry();
+registry.register({ name: 'redis', factory: async () => createClient(), cleanup: async (c) => c.disconnect() });
+const redis = await registry.get('redis');  // lazy init
+await registry.resetAll();                   // test cleanup
+```
+
+**Location**: `shared/core/src/async/service-registry.ts`
+
+### 4.9 Analytics Module (`shared/core/src/analytics/`)
+
+**Purpose**: Price intelligence, market analysis, and strategy attribution for arbitrage detection and execution quality.
+
+**Module inventory** (10 files, ~214KB):
+
+| Component | File | Purpose | Singleton? |
+|-----------|------|---------|------------|
+| **PriceMomentumTracker** | `price-momentum.ts` | EMA (5/15/60), velocity, acceleration, z-score deviation, volume spike detection | Yes (`getPriceMomentumTracker`) |
+| **MLOpportunityScorer** | `ml-opportunity-scorer.ts` | Multi-signal weighted scoring: base score + momentum + orderflow signals | Yes (`getMLOpportunityScorer`) |
+| **WhaleActivityTracker** | `whale-activity-tracker.ts` | Wallet profiling, pattern detection (accumulation/distribution), pair-indexed activity summaries | Yes (`getWhaleActivityTracker`) |
+| **LiquidityDepthAnalyzer** | `liquidity-depth-analyzer.ts` | AMM pool depth analysis, slippage estimation (constant-product model) | Yes (`getLiquidityDepthAnalyzer`) |
+| **SwapEventFilter** | `swap-event-filter.ts` | Volume filtering, deduplication, whale alerts, USD estimation | Yes (`getSwapEventFilter`) |
+| **PerformanceAnalyticsEngine** | `performance-analytics.ts` | Trade recording, strategy attribution, risk metrics (Sharpe, Sortino, max drawdown) | No (class instance) |
+| **ProfessionalQualityMonitor** | `professional-quality-monitor.ts` | Detection quality scoring (AD-PQS), latency/precision tracking | No (class instance, `@experimental`) |
+| **PriceOracle** | `price-oracle.ts` | Centralized token price source with fallback prices, stale detection, batch queries | Yes (`getPriceOracle`) |
+| **PairActivityTracker** | `pair-activity-tracker.ts` | Volatility-based pair prioritization for adaptive polling frequency | Yes (`getPairActivityTracker`) |
+
+**Key design patterns**:
+- All trackers use **configurable singleton** pattern via `createConfigurableSingleton` (config applied on first call only)
+- **LRU eviction** with `findOldestN()` O(N*k) partial selection prevents unbounded memory growth
+- **Circular buffers** for time-series data (price history, volume windows)
+- **Secondary indexes** for O(1) lookups (e.g., whale tracker's `pairIndex: Map<pairKey:chain, Set<walletAddress>>`)
+
+**Data flow**:
+```
+Swap Events → SwapEventFilter → PriceOracle (USD estimation)
+                              → WhaleActivityTracker (pattern signals)
+                              → PriceMomentumTracker (EMA/velocity)
+                              → PairActivityTracker (volatility ranking)
+
+Detection → MLOpportunityScorer ← PriceMomentumTracker (momentum signal)
+                                ← WhaleActivityTracker (activity summary)
+                                ← LiquidityDepthAnalyzer (slippage estimate)
+
+Execution → PerformanceAnalyticsEngine (trade recording, attribution)
+```
+
+**Known limitations**:
+- LiquidityDepthAnalyzer supports only constant-product (x*y=k) AMM model; V3 concentrated liquidity and Curve stable pools not yet supported
+- ProfessionalQualityMonitor has 3 stub metric methods (`@experimental`)
+- PriceOracle USD estimation uses stablecoin heuristic (`@known-limitation`)
+
+**Key files**: `shared/core/src/analytics/`, barrel export at `shared/core/src/analytics/index.ts`
+
+**Related findings**: [`.agent-reports/analytics-deep-analysis.md`](../../.agent-reports/analytics-deep-analysis.md) — 32 findings, grade A (28 fixed)
 
 ---
 
@@ -1130,6 +1224,7 @@ The following Architecture Decision Records document key decisions:
 | 2.6 | 2026-02-04 | RPC/ML ADRs | Added ADR-024 (RPC rate limiting), ADR-025 (ML model lifecycle) - documenting existing implementations from RPC_PREDICTION_OPTIMIZATION_RESEARCH.md |
 | 2.7 | 2026-02-04 | Simulation Enhancements | Added Solana simulation (HeliusProvider), detector pre-validation (ADR-023), strategy simulation enhancements |
 | 2.8 | 2026-02-04 | Documentation Update | Added Mempool Detector service (port 3007), completed ADR references (all 27 ADRs), updated service count to 9 |
+| 2.9 | 2026-02-14 | Analytics Module | Added §4.8 Analytics Module documenting 9 analytics components, updated Layer 2/3 component hierarchy with PriceMomentum, PriceOracle, PairActivityTracker, SwapEventFilter, MLOpportunityScorer, PerformanceAnalyticsEngine |
 
 ---
 

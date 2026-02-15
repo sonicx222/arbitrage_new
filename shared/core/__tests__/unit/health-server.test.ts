@@ -4,13 +4,15 @@
  * Tests HTTP endpoints, health cache TTL behavior, auth token handling,
  * server timeouts, and error responses.
  *
+ * Moved from src/__tests__/unit/ to __tests__/unit/ per ADR-009 convention.
+ *
  * @see shared/core/src/partition-service-utils.ts
  */
 
 import http from 'http';
 import { EventEmitter } from 'events';
-import { createPartitionHealthServer } from '../../partition-service-utils';
-import type { PartitionServiceConfig, PartitionDetectorInterface } from '../../partition-service-utils';
+import { createPartitionHealthServer } from '../../src/partition-service-utils';
+import type { PartitionServiceConfig, PartitionDetectorInterface } from '../../src/partition-service-utils';
 
 // =============================================================================
 // Helpers

@@ -371,6 +371,18 @@ export class SwapEventFilter {
     return age < this.config.dedupWindowMs;
   }
 
+  /**
+   * Estimate USD value from raw swap amounts.
+   *
+   * @known-limitation This heuristic assumes one side of the swap is a stablecoin
+   * at $1 parity and that all token amounts use 18 decimals. This means:
+   * - Non-stablecoin pairs (e.g., ETH/WBTC) will have inaccurate USD estimates
+   * - Tokens with non-18 decimals (USDC=6, WBTC=8) will be wildly over/under-counted
+   * - The estimate is only suitable for coarse filtering (whale detection, dust filtering)
+   *
+   * For accurate USD estimation, callers should provide `event.usdValue` from a price
+   * oracle or use the PriceOracle module directly.
+   */
   private estimateUsdValue(event: SwapEvent): number {
     // Fallback estimation when usdValue is not provided
     // This is a simplified estimation - real implementation would use price oracles
@@ -537,8 +549,8 @@ export class SwapEventFilter {
         dex: bucket.dex,
         swapCount: bucket.swapCount,
         totalUsdVolume: bucket.totalUsdVolume,
-        minPrice: bucket.prices.length > 0 ? Math.min(...bucket.prices) : 0,
-        maxPrice: bucket.prices.length > 0 ? Math.max(...bucket.prices) : 0,
+        minPrice: bucket.prices.length > 0 ? bucket.prices.reduce((a, b) => a < b ? a : b, bucket.prices[0]) : 0,
+        maxPrice: bucket.prices.length > 0 ? bucket.prices.reduce((a, b) => a > b ? a : b, bucket.prices[0]) : 0,
         avgPrice: bucket.prices.length > 0
           ? bucket.prices.reduce((a, b) => a + b, 0) / bucket.prices.length
           : 0,

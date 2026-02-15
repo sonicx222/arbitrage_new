@@ -130,7 +130,7 @@ describe('Cross-Chain Detector Architecture Alignment', () => {
 
       // Load both classes
       const baseDetectorModule = await import('@arbitrage/core');
-      const BaseDetector = baseDetectorModule.BaseDetector;
+      const BaseDetector = (baseDetectorModule as any).BaseDetector;
 
       // Load cross-chain detector
       // Note: This import path is for the service, not shared/core

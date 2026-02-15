@@ -41,6 +41,10 @@ export function createAsyncSingleton<T>(
   // Store the promise, not the instance - this is key to preventing race conditions
   let instancePromise: Promise<T> | null = null;
   let instance: T | null = null;
+  // Fix #9: Version counter to detect reset-during-init race conditions.
+  // Incremented on every reset(). The factory .then() only writes to instance
+  // if the version hasn't changed since get() was called.
+  let version = 0;
   const singletonName = name || 'unnamed-singleton';
 
   return {
@@ -54,15 +58,32 @@ export function createAsyncSingleton<T>(
         return instancePromise;
       }
 
+      // Capture version at start of init to detect concurrent reset()
+      const initVersion = version;
+
       // Create and cache the promise immediately to prevent race conditions
       instancePromise = factory().then((result) => {
-        instance = result;
-        logger.debug(`Singleton initialized: ${singletonName}`);
+        // Fix #9: Only write instance if no reset() occurred during init
+        if (version === initVersion) {
+          instance = result;
+          logger.debug(`Singleton initialized: ${singletonName}`);
+        } else {
+          // A reset() happened while we were initializing. The result is stale.
+          // Run cleanup on the stale instance if cleanup function exists.
+          logger.debug(`Singleton init completed after reset, discarding stale instance: ${singletonName}`);
+          if (cleanup) {
+            cleanup(result).catch((err) => {
+              logger.error(`Cleanup of stale singleton failed: ${singletonName}`, { error: err });
+            });
+          }
+        }
         return result;
       }).catch((error) => {
-        // Clear the promise on failure so retry is possible
-        instancePromise = null;
-        instance = null;
+        // Only clear if no reset() happened (version unchanged)
+        if (version === initVersion) {
+          instancePromise = null;
+          instance = null;
+        }
         logger.error(`Singleton initialization failed: ${singletonName}`, { error });
         throw error;
       });
@@ -72,8 +93,23 @@ export function createAsyncSingleton<T>(
 
     /**
      * Reset the singleton, optionally calling cleanup on the existing instance.
+     * If initialization is in-flight, awaits it before cleanup to prevent
+     * the stale-instance-after-reset race condition.
      */
     async reset(): Promise<void> {
+      // Fix #9: Increment version to invalidate any in-flight factory .then()
+      version++;
+
+      // If there's a pending init, await it so cleanup can run on the result
+      const pendingPromise = instancePromise;
+      if (pendingPromise && !instance) {
+        try {
+          await pendingPromise;
+        } catch {
+          // Ignore init errors during reset
+        }
+      }
+
       if (instance && cleanup) {
         try {
           await cleanup(instance);
@@ -221,7 +257,11 @@ export function singleton<T>(): MethodDecorator {
 
     descriptor.value = async function (...args: any[]) {
       if (!instancePromise) {
-        instancePromise = originalMethod.apply(this, args);
+        const promise = originalMethod.apply(this, args);
+        instancePromise = promise;
+        // P1-FIX: Clear cached promise on rejection so retry is possible
+        // Matches createAsyncSingleton pattern at lines 62-65
+        promise.catch(() => { instancePromise = null; });
       }
       return instancePromise;
     };

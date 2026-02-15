@@ -69,7 +69,7 @@ export function createTestQuote(overrides: Partial<BridgeQuote> = {}): BridgeQuo
     amountOut: '997000000', // After 0.06% fee and slippage
     bridgeFee: '600000', // 0.06%
     gasFee: '10000000000000000', // 0.01 ETH
-    totalFee: '10000600000',
+    totalFee: '10000000000000000', // Same as gasFee (native wei only)
     estimatedTimeSeconds: 120,
     expiresAt: Date.now() + BRIDGE_DEFAULTS.quoteValidityMs,
     valid: true,

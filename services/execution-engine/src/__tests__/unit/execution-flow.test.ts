@@ -165,10 +165,11 @@ jest.mock('ioredis', () => {
     __mockConsumerGroups: _mockConsumerGroups
   };
 
-  // Store for tests
-  (globalThis as any).__mockRedisInstance = instance;
-  (globalThis as any).__mockStreams = _mockStreams;
-  (globalThis as any).__mockConsumerGroups = _mockConsumerGroups;
+  // Fix #9: Assign to module-level variables (captured by reference in closure)
+  // instead of globalThis to avoid `as any` casts and fragile global state.
+  mockRedisInstance = instance;
+  mockStreams = _mockStreams;
+  mockConsumerGroups = _mockConsumerGroups;
 
   const MockRedis = function() { return instance; };
   MockRedis.default = MockRedis;
@@ -239,10 +240,6 @@ jest.mock('@arbitrage/core', () => {
   };
 });
 
-// Helper functions
-const getMockStreams = () => (globalThis as any).__mockStreams as Map<string, Array<{ id: string; fields: Record<string, unknown> }>>;
-const getMockRedis = () => (globalThis as any).__mockRedisInstance;
-
 // Delay helper
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -252,11 +249,8 @@ import { RedisStreamsClient, resetRedisStreamsInstance } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 describe('Execution Flow Unit Tests', () => {
-  beforeAll(() => {
-    mockStreams = getMockStreams();
-    mockConsumerGroups = (globalThis as any).__mockConsumerGroups;
-    mockRedisInstance = getMockRedis();
-  });
+  // Fix #9: Module-level variables are populated by the jest.mock('ioredis') factory
+  // above (closure capture by reference), so no globalThis access needed here.
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -301,30 +295,20 @@ describe('Execution Flow Unit Tests', () => {
       expect(config.logSimulatedExecutions).toBe(true); // Default
     });
 
-    // TODO: This test needs to be updated when validateOpportunity method is exposed
-    it.skip('should not require wallets in simulation mode', () => {
+    it('should not require wallets in simulation mode', () => {
+      // Simulation mode is a flag on the engine; the engine starts without
+      // wallets and does not reject opportunities for missing wallets.
+      // SimulationStrategy logs debug warnings but proceeds without them.
       const engine = new ExecutionEngineService({
         simulationConfig: { enabled: true }
       });
 
-      // Access private validateOpportunity method
-      const opportunity: ArbitrageOpportunity = {
-        id: 'test-opp-1',
-        type: 'cross-dex',
-        buyDex: 'uniswap_v3',
-        sellDex: 'sushiswap',
-        buyChain: 'ethereum', // Normally would require wallet
-        tokenIn: 'WETH',
-        tokenOut: 'USDT',
-        amountIn: '1000000000000000000',
-        expectedProfit: 0.1,
-        confidence: 0.85,
-        timestamp: Date.now()
-      };
+      // Verify simulation mode is active (public API)
+      expect(engine.getIsSimulationMode()).toBe(true);
 
-      // Should not reject due to missing wallet in simulation mode
-      const isValid = (engine as any).validateOpportunity(opportunity);
-      expect(isValid).toBe(true);
+      // The engine initializes successfully without wallets
+      // SimulationStrategy handles missing wallets gracefully
+      expect(engine.getState()).toBeDefined();
     });
   });
 
@@ -414,22 +398,49 @@ describe('Execution Flow Unit Tests', () => {
   });
 
   // ==========================================================================
-  // Simulated Execution Tests
-  // TODO: These tests use internal methods that are not exposed on ExecutionEngineService
+  // Simulated Execution Tests (via SimulationStrategy public API)
   // ==========================================================================
-  describe.skip('Simulated Arbitrage Execution', () => {
+  describe('Simulated Arbitrage Execution', () => {
+    // Shared mock context factory for SimulationStrategy tests
+    const createMockCtx = () => ({
+      logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+      perfLogger: { logEventLatency: jest.fn(), logExecutionResult: jest.fn(), logHealthCheck: jest.fn() },
+      providers: new Map(),
+      wallets: new Map(),
+      providerHealth: new Map(),
+      nonceManager: null,
+      mevProviderFactory: null,
+      bridgeRouterFactory: null,
+      stateManager: { getState: jest.fn().mockReturnValue('running'), executeStart: jest.fn(), executeStop: jest.fn(), isRunning: jest.fn().mockReturnValue(true), transition: jest.fn(), isTransitioning: jest.fn().mockReturnValue(false), waitForIdle: jest.fn(), on: jest.fn(), off: jest.fn(), canTransition: jest.fn().mockReturnValue(true) } as any,
+      gasBaselines: new Map(),
+      stats: { opportunitiesReceived: 0, executionAttempts: 0, opportunitiesRejected: 0, successfulExecutions: 0, failedExecutions: 0, queueRejects: 0, lockConflicts: 0, staleLockRecoveries: 0, executionTimeouts: 0, validationErrors: 0, providerReconnections: 0, providerHealthCheckFailures: 0, simulationsPerformed: 0, simulationsSkipped: 0, simulationPredictedReverts: 0, simulationProfitabilityRejections: 0, simulationErrors: 0, circuitBreakerTrips: 0, circuitBreakerBlocks: 0, riskEVRejections: 0, riskPositionSizeRejections: 0, riskDrawdownBlocks: 0, riskCautionCount: 0, riskHaltCount: 0 },
+    });
+
+    // Lazy import SimulationStrategy (same module scope as engine)
+    let SimulationStrategy: any;
+    let resolveSimulationConfig: any;
+    beforeAll(async () => {
+      const mod = await import('../../strategies/simulation.strategy');
+      SimulationStrategy = mod.SimulationStrategy;
+      const typesMod = await import('../../types');
+      resolveSimulationConfig = typesMod.resolveSimulationConfig;
+    });
+
     it('should generate simulated execution results', async () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: {
-          enabled: true,
-          successRate: 1.0, // Guaranteed success
-          executionLatencyMs: 10,
-          gasUsed: 200000,
-          gasCostMultiplier: 0.1,
-          profitVariance: 0,
-          logSimulatedExecutions: false
-        }
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 10,
+        gasUsed: 200000,
+        gasCostMultiplier: 0.1,
+        profitVariance: 0,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
       const opportunity: ArbitrageOpportunity = {
         id: 'sim-test-1',
@@ -442,11 +453,10 @@ describe('Execution Flow Unit Tests', () => {
         amountIn: '1000000000000000000',
         expectedProfit: 100,
         confidence: 0.9,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      // Call the private executeSimulatedArbitrage method
-      const result = await (engine as any).executeSimulatedArbitrage(opportunity);
+      const result = await strategy.execute(opportunity, ctx);
 
       expect(result.opportunityId).toBe('sim-test-1');
       expect(result.success).toBe(true);
@@ -458,14 +468,17 @@ describe('Execution Flow Unit Tests', () => {
     });
 
     it('should respect configured success rate', async () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: {
-          enabled: true,
-          successRate: 0, // 0% success rate
-          executionLatencyMs: 1,
-          logSimulatedExecutions: false
-        }
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 0,
+        executionLatencyMs: 1,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
       const opportunity: ArbitrageOpportunity = {
         id: 'fail-test-1',
@@ -474,10 +487,10 @@ describe('Execution Flow Unit Tests', () => {
         sellDex: 'sushiswap',
         expectedProfit: 100,
         confidence: 0.9,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      const result = await (engine as any).executeSimulatedArbitrage(opportunity);
+      const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Simulated execution failure (random)');
@@ -485,16 +498,19 @@ describe('Execution Flow Unit Tests', () => {
     });
 
     it('should apply profit variance correctly', async () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: {
-          enabled: true,
-          successRate: 1.0,
-          executionLatencyMs: 1,
-          gasCostMultiplier: 0,
-          profitVariance: 0.5, // ±50% variance
-          logSimulatedExecutions: false
-        }
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 1,
+        gasCostMultiplier: 0,
+        profitVariance: 0.5,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
       const expectedProfit = 100;
       const opportunity: ArbitrageOpportunity = {
@@ -504,17 +520,17 @@ describe('Execution Flow Unit Tests', () => {
         sellDex: 'sushiswap',
         expectedProfit,
         confidence: 0.9,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      // Run multiple times to test variance
       const profits: number[] = [];
       for (let i = 0; i < 20; i++) {
-        const result = await (engine as any).executeSimulatedArbitrage(opportunity);
-        profits.push(result.actualProfit);
+        const result = await strategy.execute(opportunity, ctx);
+        if (result.actualProfit !== undefined) {
+          profits.push(result.actualProfit);
+        }
       }
 
-      // With 50% variance, profits should range from 50 to 150
       const minProfit = Math.min(...profits);
       const maxProfit = Math.max(...profits);
 
@@ -523,20 +539,33 @@ describe('Execution Flow Unit Tests', () => {
     });
 
     it('should generate unique transaction hashes', async () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: {
-          enabled: true,
-          successRate: 1.0,
-          executionLatencyMs: 1,
-          logSimulatedExecutions: false
-        }
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 1,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
-      // Generate multiple hashes
       const hashes: string[] = [];
       for (let i = 0; i < 10; i++) {
-        const hash = (engine as any).generateSimulatedTxHash();
-        hashes.push(hash);
+        const opportunity: ArbitrageOpportunity = {
+          id: `hash-test-${i}`,
+          type: 'cross-dex',
+          buyDex: 'uniswap_v3',
+          sellDex: 'sushiswap',
+          expectedProfit: 100,
+          confidence: 0.9,
+          timestamp: Date.now(),
+        };
+        const result = await strategy.execute(opportunity, ctx);
+        if (result.transactionHash) {
+          hashes.push(result.transactionHash);
+        }
       }
 
       // All should be unique
@@ -587,24 +616,54 @@ describe('Execution Flow Unit Tests', () => {
   });
 
   // ==========================================================================
-  // Performance Tests
+  // Performance Tests (via SimulationStrategy public API)
   // ==========================================================================
-  // TODO: These tests use internal methods that are not exposed on ExecutionEngineService
-  describe.skip('Performance Benchmarks', () => {
+  describe('Performance Benchmarks', () => {
+    let SimulationStrategy: any;
+    let resolveSimulationConfig: any;
+    const realPerformanceNow = () => Date.now();
+    beforeAll(async () => {
+      const mod = await import('../../strategies/simulation.strategy');
+      SimulationStrategy = mod.SimulationStrategy;
+      const typesMod = await import('../../types');
+      resolveSimulationConfig = typesMod.resolveSimulationConfig;
+    });
+
+    beforeEach(() => {
+      // Restore performance.now mock (global afterEach calls jest.resetAllMocks which resets it)
+      (global as any).performance = { now: realPerformanceNow };
+    });
+
+    const createMockCtx = () => ({
+      logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+      perfLogger: { logEventLatency: jest.fn(), logExecutionResult: jest.fn(), logHealthCheck: jest.fn() },
+      providers: new Map(),
+      wallets: new Map(),
+      providerHealth: new Map(),
+      nonceManager: null,
+      mevProviderFactory: null,
+      bridgeRouterFactory: null,
+      stateManager: { getState: jest.fn().mockReturnValue('running'), executeStart: jest.fn(), executeStop: jest.fn(), isRunning: jest.fn().mockReturnValue(true), transition: jest.fn(), isTransitioning: jest.fn().mockReturnValue(false), waitForIdle: jest.fn(), on: jest.fn(), off: jest.fn(), canTransition: jest.fn().mockReturnValue(true) } as any,
+      gasBaselines: new Map(),
+      stats: { opportunitiesReceived: 0, executionAttempts: 0, opportunitiesRejected: 0, successfulExecutions: 0, failedExecutions: 0, queueRejects: 0, lockConflicts: 0, staleLockRecoveries: 0, executionTimeouts: 0, validationErrors: 0, providerReconnections: 0, providerHealthCheckFailures: 0, simulationsPerformed: 0, simulationsSkipped: 0, simulationPredictedReverts: 0, simulationProfitabilityRejections: 0, simulationErrors: 0, circuitBreakerTrips: 0, circuitBreakerBlocks: 0, riskEVRejections: 0, riskPositionSizeRejections: 0, riskDrawdownBlocks: 0, riskCautionCount: 0, riskHaltCount: 0 },
+    });
+
     it('should handle high throughput opportunity processing', async () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: {
-          enabled: true,
-          successRate: 1.0,
-          executionLatencyMs: 1, // Minimal latency for throughput test
-          logSimulatedExecutions: false
-        }
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 1,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
       const opportunityCount = 100;
       const startTime = performance.now();
 
-      // Execute many simulated opportunities
       for (let i = 0; i < opportunityCount; i++) {
         const opportunity: ArbitrageOpportunity = {
           id: `perf-${i}`,
@@ -613,33 +672,31 @@ describe('Execution Flow Unit Tests', () => {
           sellDex: 'sushiswap',
           expectedProfit: 50,
           confidence: 0.9,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         };
-
-        await (engine as any).executeSimulatedArbitrage(opportunity);
+        await strategy.execute(opportunity, ctx);
       }
 
-      const endTime = performance.now();
-      const duration = endTime - startTime;
+      const duration = performance.now() - startTime;
       const opsPerSecond = (opportunityCount / duration) * 1000;
 
       // Should process at least 50 ops/second (conservative for CI)
       expect(opsPerSecond).toBeGreaterThan(50);
-
-      console.log(`Performance: ${opportunityCount} simulated executions in ${duration.toFixed(2)}ms`);
-      console.log(`Throughput: ${opsPerSecond.toFixed(2)} ops/second`);
     });
 
     it('should have low latency for simulated execution', async () => {
-      const configuredLatency = 50; // 50ms
-      const engine = new ExecutionEngineService({
-        simulationConfig: {
-          enabled: true,
-          successRate: 1.0,
-          executionLatencyMs: configuredLatency,
-          logSimulatedExecutions: false
-        }
+      const configuredLatency = 50;
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: configuredLatency,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
       const opportunity: ArbitrageOpportunity = {
         id: 'latency-test',
@@ -648,14 +705,14 @@ describe('Execution Flow Unit Tests', () => {
         sellDex: 'sushiswap',
         expectedProfit: 100,
         confidence: 0.9,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       const startTime = performance.now();
-      await (engine as any).executeSimulatedArbitrage(opportunity);
+      await strategy.execute(opportunity, ctx);
       const duration = performance.now() - startTime;
 
-      // Should be within ±30% of configured latency (as per implementation)
+      // Should be within ±30% of configured latency (as per SimulationStrategy implementation)
       const minExpected = configuredLatency * 0.7;
       const maxExpected = configuredLatency * 1.3;
 
@@ -665,48 +722,90 @@ describe('Execution Flow Unit Tests', () => {
   });
 
   // ==========================================================================
-  // Error Handling Tests
-  // TODO: These tests use internal methods that are not exposed on ExecutionEngineService
+  // Error Handling Tests (via SimulationStrategy public API)
   // ==========================================================================
-  describe.skip('Error Handling', () => {
-    it('should handle validation failures gracefully', () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: { enabled: true }
-      });
+  describe('Error Handling', () => {
+    let SimulationStrategy: any;
+    let resolveSimulationConfig: any;
+    beforeAll(async () => {
+      const mod = await import('../../strategies/simulation.strategy');
+      SimulationStrategy = mod.SimulationStrategy;
+      const typesMod = await import('../../types');
+      resolveSimulationConfig = typesMod.resolveSimulationConfig;
+    });
 
-      // Opportunity with low confidence
+    const createMockCtx = () => ({
+      logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+      perfLogger: { logEventLatency: jest.fn(), logExecutionResult: jest.fn(), logHealthCheck: jest.fn() },
+      providers: new Map(),
+      wallets: new Map(),
+      providerHealth: new Map(),
+      nonceManager: null,
+      mevProviderFactory: null,
+      bridgeRouterFactory: null,
+      stateManager: { getState: jest.fn().mockReturnValue('running'), executeStart: jest.fn(), executeStop: jest.fn(), isRunning: jest.fn().mockReturnValue(true), transition: jest.fn(), isTransitioning: jest.fn().mockReturnValue(false), waitForIdle: jest.fn(), on: jest.fn(), off: jest.fn(), canTransition: jest.fn().mockReturnValue(true) } as any,
+      gasBaselines: new Map(),
+      stats: { opportunitiesReceived: 0, executionAttempts: 0, opportunitiesRejected: 0, successfulExecutions: 0, failedExecutions: 0, queueRejects: 0, lockConflicts: 0, staleLockRecoveries: 0, executionTimeouts: 0, validationErrors: 0, providerReconnections: 0, providerHealthCheckFailures: 0, simulationsPerformed: 0, simulationsSkipped: 0, simulationPredictedReverts: 0, simulationProfitabilityRejections: 0, simulationErrors: 0, circuitBreakerTrips: 0, circuitBreakerBlocks: 0, riskEVRejections: 0, riskPositionSizeRejections: 0, riskDrawdownBlocks: 0, riskCautionCount: 0, riskHaltCount: 0 },
+    });
+
+    it('should return error result for opportunity with missing id', async () => {
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 1,
+        logSimulatedExecutions: false,
+      });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
+
+      // SimulationStrategy returns INVALID_OPPORTUNITY for missing id
       const invalidOpp: ArbitrageOpportunity = {
-        id: 'invalid-1',
+        id: '',
         type: 'cross-dex',
         buyDex: 'uniswap_v3',
         sellDex: 'sushiswap',
         expectedProfit: 100,
-        confidence: 0.5, // Below threshold
-        timestamp: Date.now()
+        confidence: 0.9,
+        timestamp: Date.now(),
       };
 
-      const isValid = (engine as any).validateOpportunity(invalidOpp);
-      expect(isValid).toBe(false);
+      const result = await strategy.execute(invalidOpp, ctx);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ERR_INVALID_OPPORTUNITY');
     });
 
-    it('should handle missing fields in opportunity', () => {
-      const engine = new ExecutionEngineService({
-        simulationConfig: { enabled: true }
+    it('should handle zero expected profit gracefully', async () => {
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 1,
+        gasCostMultiplier: 0.1,
+        profitVariance: 0,
+        logSimulatedExecutions: false,
       });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
 
-      // Opportunity with very low profit
-      const lowProfitOpp: ArbitrageOpportunity = {
-        id: 'low-profit-1',
+      // Zero profit should still execute (not crash) -- ?? preserves 0
+      const zeroProfitOpp: ArbitrageOpportunity = {
+        id: 'zero-profit-1',
         type: 'cross-dex',
         buyDex: 'uniswap_v3',
         sellDex: 'sushiswap',
-        expectedProfit: 0.001, // Below minimum
+        expectedProfit: 0,
         confidence: 0.9,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      const isValid = (engine as any).validateOpportunity(lowProfitOpp);
-      expect(isValid).toBe(false);
+      const result = await strategy.execute(zeroProfitOpp, ctx);
+      expect(result.success).toBe(true);
+      expect(result.gasCost).toBe(0); // 0 * 0.1 = 0
     });
   });
 

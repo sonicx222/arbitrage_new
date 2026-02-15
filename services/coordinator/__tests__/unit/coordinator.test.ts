@@ -38,6 +38,11 @@ jest.mock('@arbitrage/core', () => ({
     logEventLatency: jest.fn(),
     logHealthCheck: jest.fn()
   })),
+  IntervalManager: jest.fn().mockImplementation(() => ({
+    register: jest.fn(),
+    clearAll: jest.fn(),
+    getStats: jest.fn().mockReturnValue({}),
+  })),
   getRedisClient: jest.fn(() => Promise.resolve({
     setex: jest.fn(),
     get: jest.fn(),

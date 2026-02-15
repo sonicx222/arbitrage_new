@@ -44,7 +44,7 @@ export interface CoherencyConfig {
 
 export class CacheCoherencyManager {
   private config: CoherencyConfig;
-  private redis: any;
+  private redisPromise: Promise<any>;
   private nodeId: string;
   private nodes: Map<string, NodeInfo> = new Map();
   private vectorClock: Map<string, number> = new Map();
@@ -72,15 +72,15 @@ export class CacheCoherencyManager {
   constructor(nodeId: string, config: Partial<CoherencyConfig> = {}) {
     this.nodeId = nodeId;
     this.config = {
-      gossipInterval: config.gossipInterval || 1000, // 1 second
-      suspicionTimeout: config.suspicionTimeout || 5000, // 5 seconds
-      failureTimeout: config.failureTimeout || 15000, // 15 seconds
-      fanout: config.fanout || 3,
-      maxGossipMessageSize: config.maxGossipMessageSize || 1024 * 1024, // 1MB
+      gossipInterval: config.gossipInterval ?? 1000, // 1 second
+      suspicionTimeout: config.suspicionTimeout ?? 5000, // 5 seconds
+      failureTimeout: config.failureTimeout ?? 15000, // 15 seconds
+      fanout: config.fanout ?? 3,
+      maxGossipMessageSize: config.maxGossipMessageSize ?? 1024 * 1024, // 1MB
       enableConflictResolution: config.enableConflictResolution !== false
     };
 
-    this.redis = getRedisClient();
+    this.redisPromise = getRedisClient();
     this.conflictResolver = this.defaultConflictResolver.bind(this);
 
     this.initializeNode();
@@ -91,6 +91,11 @@ export class CacheCoherencyManager {
       gossipInterval: this.config.gossipInterval,
       fanout: this.config.fanout
     });
+  }
+
+  // Lazy getter that awaits the Redis client promise
+  private async getRedis(): Promise<any> {
+    return this.redisPromise;
   }
 
   // Public API
@@ -180,6 +185,8 @@ export class CacheCoherencyManager {
         logger.error('Gossip round failed', { error });
       }
     }, this.config.gossipInterval);
+    // Don't let gossip timer prevent process exit
+    this.gossipTimer.unref();
   }
 
   private async performGossipRound(): Promise<void> {
@@ -399,7 +406,8 @@ export class CacheCoherencyManager {
       // In a real implementation, this would send via network
       // For now, simulate with Redis pub/sub
       const channel = `gossip:${node.id}`;
-      await this.redis.publish(channel, JSON.stringify(message));
+      const redis = await this.getRedis();
+      await redis.publish(channel, JSON.stringify(message));
     } catch (error) {
       logger.error('Failed to send message to node', { error, nodeId: node.id });
     }

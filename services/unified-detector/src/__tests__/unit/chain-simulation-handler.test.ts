@@ -34,6 +34,7 @@ jest.mock('@arbitrage/core', () => {
   return {
     getChainSimulator: jest.fn(),
     stopChainSimulator: jest.fn(),
+    clearIntervalSafe: jest.fn().mockReturnValue(null),
   };
 });
 

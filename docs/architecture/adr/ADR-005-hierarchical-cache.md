@@ -12,10 +12,10 @@ The arbitrage detection system requires extremely fast access to price data:
 
 ### Current Implementation
 
-The system has a hierarchical cache ([shared/core/src/hierarchical-cache.ts](../../../shared/core/src/hierarchical-cache.ts)):
+The system has a hierarchical cache ([shared/core/src/caching/hierarchical-cache.ts](../../../shared/core/src/caching/hierarchical-cache.ts)):
 - **L1**: SharedArrayBuffer for cross-worker access
 - **L2**: Redis for distributed caching
-- **L3**: Persistent storage (in-memory simulation)
+- **L3**: In-memory Map (persistent storage not implemented; see Decision section)
 
 ### Problem Statement
 
@@ -61,7 +61,7 @@ class PriceMatrix {
   private indexMap: Map<string, number>;
 
   constructor(maxPairs: number = 1000) {
-    // 16 bytes per pair: 8 (price) + 4 (timestamp) + 4 (padding)
+    // 16 bytes per pair: 8 (price) + 4 (timestamp) + 4 (sequence counter)
     this.buffer = new SharedArrayBuffer(maxPairs * 16);
     this.prices = new Float64Array(this.buffer, 0, maxPairs);
     this.timestamps = new Uint32Array(this.buffer, maxPairs * 8, maxPairs);
@@ -69,34 +69,25 @@ class PriceMatrix {
   }
 
   // O(1) update - ~100 nanoseconds
-  updatePrice(chain: string, dex: string, pair: string, price: number): void {
-    const key = `${chain}:${dex}:${pair}`;
-    let index = this.indexMap.get(key);
-
-    if (index === undefined) {
-      index = this.indexMap.size;
-      this.indexMap.set(key, index);
-    }
-
-    // Atomic write for thread safety
-    Atomics.store(this.prices, index, price);
-    Atomics.store(this.timestamps, index, Math.floor(Date.now() / 1000));
+  // Actual API: setPrice(key, price, timestamp) -> boolean
+  setPrice(key: string, price: number, timestamp: number): boolean {
+    // Sequence counter protocol for torn read protection:
+    // 1. Pre-increment seq to odd (write in progress)
+    // 2. Write price + timestamp
+    // 3. Post-increment seq to even (write complete)
+    // ... (see price-matrix.ts for full implementation)
+    return true;
   }
 
   // O(1) read - ~50 nanoseconds
-  getPrice(chain: string, dex: string, pair: string): number | null {
-    const key = `${chain}:${dex}:${pair}`;
-    const index = this.indexMap.get(key);
-
-    if (index === undefined) return null;
-
-    const timestamp = Atomics.load(this.timestamps, index);
-    const age = Math.floor(Date.now() / 1000) - timestamp;
-
-    // Stale price check (>60 seconds)
-    if (age > 60) return null;
-
-    return Atomics.load(this.prices, index);
+  // Actual API: getPrice(key) -> PriceEntry | null
+  getPrice(key: string): PriceEntry | null {
+    // Sequence counter protocol for consistent reads:
+    // 1. Read seq (retry if odd = write in progress)
+    // 2. Read price + timestamp
+    // 3. Re-read seq (retry if changed)
+    // ... (see price-matrix.ts for full implementation)
+    return null;
   }
 
   // O(pairs) but parallelizable - for cross-chain detection
@@ -215,7 +206,7 @@ class PredictiveWarmer {
 
 ## References
 
-- [Current implementation](../../../shared/core/src/hierarchical-cache.ts)
+- [Current implementation](../../../shared/core/src/caching/hierarchical-cache.ts)
 - [Price Matrix implementation](../../../shared/core/src/caching/price-matrix.ts)
 - [ADR-022: Hot-Path Memory Optimization](./ADR-022-hot-path-memory-optimization.md) - Related optimizations
 - [SharedArrayBuffer MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)

@@ -84,8 +84,9 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         tokenIn: WETH,
         amountIn: '1000000000000000000', // 1 ETH
         buyPrice: 1.0,
-        profit: 0.02,
-        gasEstimate: 600000n,
+        expectedProfit: 0.02,
+        confidence: 0.9,
+        gasEstimate: '600000',
         timestamp: Date.now(),
         hops: [
           {
@@ -152,8 +153,9 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         tokenIn: WETH,
         amountIn: '1000000000000000000',
         buyPrice: 1.0,
-        profit: 0.02,
-        gasEstimate: 600000n,
+        expectedProfit: 0.02,
+        confidence: 0.9,
+        gasEstimate: '600000',
         timestamp: Date.now(),
         hops: [
           { dex: 'uniswap_v2', tokenOut: USDC, router: '0x...' },
@@ -179,8 +181,9 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         tokenIn: WETH,
         amountIn: '1000000000000000000',
         buyPrice: 1.0,
-        profit: 0.02,
-        gasEstimate: 600000n,
+        expectedProfit: 0.02,
+        confidence: 0.9,
+        gasEstimate: '600000',
         timestamp: Date.now(),
         hops: [
           { dex: 'nonexistent_dex', tokenOut: USDC }, // ❌ No router, invalid dex
@@ -224,15 +227,15 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       const mockOpportunity = {
         id: 'test-network-error',
         buyChain: 'ethereum',
-        buyDex: 'uniswap_v2',
+        buyDex: 'uniswap_v3',
         sellDex: 'sushiswap',
         tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-        tokenIntermediate: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         tokenOut: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
         amountIn: '1000000000000000000',
         buyPrice: 1.0,
         profit: 0.01,
-        gasEstimate: 500000n,
+        gasEstimate: '500000',
+        confidence: 0.9,
         timestamp: Date.now(),
       } as ArbitrageOpportunity;
 
@@ -358,7 +361,8 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         amountIn: '1000000000000000000',
         buyPrice: 1.0,
         profit: 0.01,
-        gasEstimate: 500000n,
+        gasEstimate: '500000',
+        confidence: 0.9,
         timestamp: Date.now(),
       } as ArbitrageOpportunity;
 
@@ -374,14 +378,15 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       const opportunityWithBadSellDex = {
         id: 'test-bad-sell-dex',
         buyChain: 'ethereum',
-        buyDex: 'uniswap_v2',
+        buyDex: 'uniswap_v3',
         sellDex: 'nonexistent_dex',
         tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
         tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         amountIn: '1000000000000000000',
         buyPrice: 1.0,
         profit: 0.01,
-        gasEstimate: 500000n,
+        gasEstimate: '500000',
+        confidence: 0.9,
         timestamp: Date.now(),
       } as ArbitrageOpportunity;
 

@@ -215,10 +215,25 @@ describe('flash-loan-availability', () => {
       expect(FLASH_LOAN_STATS.totalChains).toBe(Object.keys(FLASH_LOAN_AVAILABILITY).length);
     });
 
-    it('has protocol coverage values', () => {
-      expect(FLASH_LOAN_STATS.protocolCoverage.aave_v3).toBe(8);
-      expect(FLASH_LOAN_STATS.protocolCoverage.balancer_v2).toBe(6);
-      expect(FLASH_LOAN_STATS.protocolCoverage.syncswap).toBe(1);
+    it('has protocol coverage values computed from availability data', () => {
+      // FIX #17: Values are now dynamically computed — verify against actual availability
+      const allChains = Object.keys(FLASH_LOAN_AVAILABILITY);
+
+      // Verify each protocol count matches reality
+      const actualAaveCount = allChains.filter(c => FLASH_LOAN_AVAILABILITY[c]?.aave_v3).length;
+      const actualBalancerCount = allChains.filter(c => FLASH_LOAN_AVAILABILITY[c]?.balancer_v2).length;
+      const actualSyncswapCount = allChains.filter(c => FLASH_LOAN_AVAILABILITY[c]?.syncswap).length;
+
+      expect(FLASH_LOAN_STATS.protocolCoverage.aave_v3).toBe(actualAaveCount);
+      expect(FLASH_LOAN_STATS.protocolCoverage.balancer_v2).toBe(actualBalancerCount);
+      expect(FLASH_LOAN_STATS.protocolCoverage.syncswap).toBe(actualSyncswapCount);
+
+      // Sanity: Aave V3 has broadest coverage
+      expect(FLASH_LOAN_STATS.protocolCoverage.aave_v3).toBeGreaterThanOrEqual(8);
+      // Balancer on at least 6 chains
+      expect(FLASH_LOAN_STATS.protocolCoverage.balancer_v2).toBeGreaterThanOrEqual(6);
+      // SyncSwap on at least 1 chain
+      expect(FLASH_LOAN_STATS.protocolCoverage.syncswap).toBeGreaterThanOrEqual(1);
     });
   });
 });

@@ -344,6 +344,140 @@ describe('Concurrency Utilities', () => {
 });
 
 // =============================================================================
+// Error-Path Tests (Fix #18)
+// =============================================================================
+
+describe('Error Paths', () => {
+  describe('mapConcurrent() error handling', () => {
+    it('should propagate mapper rejection', async () => {
+      const items = [1, 2, 3];
+
+      await expect(
+        mapConcurrent(items, async (n) => {
+          if (n === 2) throw new Error('Item 2 failed');
+          return n;
+        }, 2)
+      ).rejects.toThrow('Item 2 failed');
+    });
+
+    it('should propagate synchronous throws from mapper', async () => {
+      const items = [1, 2, 3];
+
+      await expect(
+        mapConcurrent(items, async (n) => {
+          if (n === 1) throw new Error('Sync throw');
+          return n;
+        }, 1)
+      ).rejects.toThrow('Sync throw');
+    });
+
+    it('should handle empty items array', async () => {
+      const results = await mapConcurrent([], async (n: number) => n * 2, 2);
+      expect(results).toEqual([]);
+    });
+  });
+
+  describe('mapSequential() error handling', () => {
+    it('should propagate mapper rejection', async () => {
+      const items = [1, 2, 3];
+      const processed: number[] = [];
+
+      await expect(
+        mapSequential(items, async (n) => {
+          processed.push(n);
+          if (n === 2) throw new Error('Item 2 failed');
+          return n;
+        })
+      ).rejects.toThrow('Item 2 failed');
+
+      // Should have processed items up to and including the failing one
+      expect(processed).toEqual([1, 2]);
+    });
+
+    it('should handle empty items array', async () => {
+      const results = await mapSequential([], async (n: number) => n * 2);
+      expect(results).toEqual([]);
+    });
+  });
+
+  describe('throttleAsync() error handling', () => {
+    it('should propagate errors from throttled function', async () => {
+      const fn = jest.fn<() => Promise<string>>().mockRejectedValue(new Error('Throttle error'));
+      const throttled = throttleAsync(fn, 100);
+
+      await expect(throttled()).rejects.toThrow('Throttle error');
+    });
+
+    it('should allow retry after error', async () => {
+      const fn = jest.fn<() => Promise<string>>()
+        .mockRejectedValueOnce(new Error('First call fails'))
+        .mockResolvedValue('success');
+      const throttled = throttleAsync(fn, 10);
+
+      await expect(throttled()).rejects.toThrow('First call fails');
+
+      // After the error, pendingPromise is cleared, and after interval, should succeed
+      await sleep(20);
+      const result = await throttled();
+      expect(result).toBe('success');
+    });
+  });
+
+  describe('withTimeout() input validation', () => {
+    it('should reject negative timeout', async () => {
+      await expect(
+        withTimeout(Promise.resolve('ok'), -1)
+      ).rejects.toThrow(TypeError);
+    });
+
+    it('should reject NaN timeout', async () => {
+      await expect(
+        withTimeout(Promise.resolve('ok'), NaN)
+      ).rejects.toThrow(TypeError);
+    });
+
+    it('should reject Infinity timeout', async () => {
+      await expect(
+        withTimeout(Promise.resolve('ok'), Infinity)
+      ).rejects.toThrow(TypeError);
+    });
+
+    it('should accept zero timeout', async () => {
+      // Zero is a valid (if aggressive) timeout
+      await expect(
+        withTimeout(Promise.resolve('ok'), 0)
+      ).resolves.toBe('ok');
+    });
+  });
+
+  describe('withRetryAsync() input validation', () => {
+    it('should reject zero maxAttempts', async () => {
+      await expect(
+        withRetryAsync(async () => 'ok', { maxAttempts: 0 })
+      ).rejects.toThrow(TypeError);
+    });
+
+    it('should reject negative maxAttempts', async () => {
+      await expect(
+        withRetryAsync(async () => 'ok', { maxAttempts: -1 })
+      ).rejects.toThrow(TypeError);
+    });
+
+    it('should reject negative baseDelayMs', async () => {
+      await expect(
+        withRetryAsync(async () => 'ok', { baseDelayMs: -100 })
+      ).rejects.toThrow(TypeError);
+    });
+
+    it('should reject NaN maxAttempts', async () => {
+      await expect(
+        withRetryAsync(async () => 'ok', { maxAttempts: NaN })
+      ).rejects.toThrow(TypeError);
+    });
+  });
+});
+
+// =============================================================================
 // Debounce & Throttle Tests
 // =============================================================================
 
@@ -371,6 +505,72 @@ describe('Debounce & Throttle', () => {
       await sleep(100);
 
       expect(fn).toHaveBeenCalledWith('arg1', 'arg2');
+    });
+
+    it('should resolve debounced promises with undefined when superseded', async () => {
+      const fn = jest.fn<() => Promise<string>>().mockResolvedValue('result');
+      const debounced = debounceAsync(fn, 50);
+
+      const p1 = debounced();
+      const p2 = debounced();
+      const p3 = debounced();
+
+      // First two promises should resolve with undefined (debounced away)
+      await expect(p1).resolves.toBe(undefined);
+      await expect(p2).resolves.toBe(undefined);
+
+      // Last promise should resolve with actual result after delay
+      await sleep(100);
+      await expect(p3).resolves.toBe('result');
+
+      // Function should only have been called once
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reject with error when debounced function rejects', async () => {
+      const fn = jest.fn<() => Promise<string>>().mockRejectedValue(new Error('boom'));
+      const debounced = debounceAsync(fn, 50);
+
+      const p = debounced();
+      // Attach rejection handler before timer fires to avoid unhandled rejection
+      const assertion = expect(p).rejects.toThrow('boom');
+      await sleep(100);
+      await assertion;
+    });
+
+    it('should reject with error when debounced function throws synchronously', async () => {
+      const fn = jest.fn<() => Promise<string>>().mockImplementation(() => {
+        throw new Error('sync boom');
+      });
+      const debounced = debounceAsync(fn, 50);
+
+      const p = debounced();
+      // Attach rejection handler before timer fires to avoid unhandled rejection
+      const assertion = expect(p).rejects.toThrow('sync boom');
+      await sleep(100);
+      await assertion;
+    });
+
+    it('should handle rapid calls where all but last resolve with undefined', async () => {
+      const fn = jest.fn<() => Promise<number>>().mockResolvedValue(42);
+      const debounced = debounceAsync(fn, 20);
+
+      const promises: Promise<any>[] = [];
+      for (let i = 0; i < 10; i++) {
+        promises.push(debounced());
+      }
+
+      // First 9 should resolve with undefined
+      for (let i = 0; i < 9; i++) {
+        await expect(promises[i]).resolves.toBe(undefined);
+      }
+
+      // Last one gets the real result
+      await sleep(50);
+      await expect(promises[9]).resolves.toBe(42);
+
+      // Function called exactly once
+      expect(fn).toHaveBeenCalledTimes(1);
     });
   });
 

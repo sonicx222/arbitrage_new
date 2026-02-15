@@ -120,8 +120,8 @@ describe('S2.2.2: Coinbase Chain DEX Expansion (5 → 7)', () => {
       });
 
       it('should have fee defined (1 bp for dynamic fee pools)', () => {
-        expect(typeof maverick!.fee).toBe('number');
-        expect(maverick!.fee).toBe(1); // Maverick has very low base fee
+        expect(typeof maverick!.feeBps).toBe('number');
+        expect(maverick!.feeBps).toBe(1); // Maverick has very low base fee
       });
     });
 
@@ -146,8 +146,8 @@ describe('S2.2.2: Coinbase Chain DEX Expansion (5 → 7)', () => {
       });
 
       it('should have fee defined', () => {
-        expect(typeof alienbase!.fee).toBe('number');
-        expect(alienbase!.fee).toBe(30); // Standard 0.3% fee
+        expect(typeof alienbase!.feeBps).toBe('number');
+        expect(alienbase!.feeBps).toBe(30); // Standard 0.3% fee
       });
     });
   });
@@ -173,8 +173,8 @@ describe('S2.2.2: Coinbase Chain DEX Expansion (5 → 7)', () => {
 
     it('should have all DEXs with fee property defined', () => {
       DEXES.base.forEach(dex => {
-        expect(typeof dex.fee).toBe('number');
-        expect(dex.fee).toBeGreaterThanOrEqual(0);
+        expect(typeof dex.feeBps).toBe('number');
+        expect(dex.feeBps).toBeGreaterThanOrEqual(0);
       });
     });
 
@@ -857,12 +857,12 @@ describe('S2.2.2 Regression Tests', () => {
       const maverick = DEXES.base.find(d => d.name === 'maverick');
       const uniswap = DEXES.base.find(d => d.name === 'uniswap_v3');
 
-      expect(maverick!.fee).toBe(1);  // 1 bp = 0.01%
-      expect(uniswap!.fee).toBe(30);  // 30 bp = 0.30%
+      expect(maverick!.feeBps).toBe(1);  // 1 bp = 0.01%
+      expect(uniswap!.feeBps).toBe(30);  // 30 bp = 0.30%
 
       // Basis points should be integers
-      expect(Number.isInteger(maverick!.fee)).toBe(true);
-      expect(Number.isInteger(uniswap!.fee)).toBe(true);
+      expect(Number.isInteger(maverick!.feeBps)).toBe(true);
+      expect(Number.isInteger(uniswap!.feeBps)).toBe(true);
     });
 
     it('should convert to decimal percentage for calculations', () => {

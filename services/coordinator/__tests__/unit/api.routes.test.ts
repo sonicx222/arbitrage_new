@@ -57,7 +57,8 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
     totalVolumeUsd: 500000,
     volumeAggregatesProcessed: 200,
     activePairsTracked: 50,
-    priceUpdatesReceived: 5000
+    priceUpdatesReceived: 5000,
+    opportunitiesDropped: 0
   };
 
   const defaultServiceHealth = new Map<string, ServiceHealth>([

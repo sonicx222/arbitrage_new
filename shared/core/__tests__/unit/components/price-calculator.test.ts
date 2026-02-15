@@ -3,17 +3,27 @@
  *
  * Tests pure functions for price and profit calculations.
  * These tests verify the canonical formulas used across all detectors.
+ *
+ * Consolidated from:
+ * - shared/core/__tests__/unit/components/price-calculator.test.ts (canonical location)
+ * - shared/core/__tests__/unit/price-calculator.test.ts (merged, then deleted)
+ *
+ * @see components/price-calculator.ts
+ * @see ADR-009: Test Architecture
  */
 
 import {
   calculatePriceFromReserves,
+  calculatePriceFromBigIntReserves,
   safeBigIntDivision,
+  safeBigIntDivisionOrNull,
   invertPrice,
   calculateSpread,
   calculateSpreadSafe,
   calculateNetProfit,
   calculateProfitBetweenSources,
   getDefaultFee,
+  getMinProfitThreshold,
   resolveFee,
   basisPointsToDecimal,
   decimalToBasisPoints,
@@ -98,6 +108,73 @@ describe('PriceCalculator', () => {
     it('should handle large numerators', () => {
       const large = 10n ** 30n;
       expect(safeBigIntDivision(large, large)).toBeCloseTo(1, 10);
+    });
+
+    it('should handle very large BigInt values (> 2^53) without precision loss', () => {
+      const reserve0 = BigInt('1000000000000000000000000000'); // 10^27
+      const reserve1 = BigInt('500000000000000000000000000');  // 5e26
+      const result = safeBigIntDivision(reserve0, reserve1);
+      expect(result).toBe(2);
+    });
+
+    it('should preserve precision for realistic DeFi reserve values', () => {
+      const ethReserve = BigInt('10000000000000000000000'); // 10,000 ETH in wei
+      const usdcReserve = BigInt('30000000000000');         // 30,000,000 USDC (6 decimals)
+      const price = safeBigIntDivision(ethReserve, usdcReserve);
+      expect(price).toBeCloseTo(333333333.333, 0);
+    });
+
+    it('should handle small ratios accurately', () => {
+      const reserve0 = BigInt('1000000000000000000000000'); // 1M tokens
+      const reserve1 = BigInt('1001000000000000000000000'); // 1.001M tokens
+      const price = safeBigIntDivision(reserve0, reserve1);
+      expect(price).toBeCloseTo(0.999001, 5);
+    });
+
+    it('should handle extreme ratios without overflow', () => {
+      const bigReserve = BigInt('1000000000000000000000000000000'); // 10^30
+      const smallReserve = BigInt('1000000000000000000');           // 10^18
+      expect(safeBigIntDivision(bigReserve, smallReserve)).toBe(1e12);
+      expect(safeBigIntDivision(smallReserve, bigReserve)).toBe(1e-12);
+    });
+  });
+
+  // ==========================================================================
+  // safeBigIntDivisionOrNull
+  // ==========================================================================
+  describe('safeBigIntDivisionOrNull', () => {
+    it('should return null for zero denominator', () => {
+      expect(safeBigIntDivisionOrNull(100n, 0n)).toBeNull();
+    });
+
+    it('should return result for valid division', () => {
+      expect(safeBigIntDivisionOrNull(100n, 50n)).toBe(2);
+    });
+  });
+
+  // ==========================================================================
+  // calculatePriceFromBigIntReserves
+  // ==========================================================================
+  describe('calculatePriceFromBigIntReserves', () => {
+    it('should calculate price from BigInt reserves', () => {
+      const result = calculatePriceFromBigIntReserves(
+        BigInt('1000000000000000000000'),
+        BigInt('2000000000000000000000')
+      );
+      expect(result).toBe(0.5);
+    });
+
+    it('should return null for zero reserves', () => {
+      expect(calculatePriceFromBigIntReserves(0n, 100n)).toBeNull();
+      expect(calculatePriceFromBigIntReserves(100n, 0n)).toBeNull();
+      expect(calculatePriceFromBigIntReserves(0n, 0n)).toBeNull();
+    });
+
+    it('should handle large reserves that would overflow Number', () => {
+      const reserve0 = BigInt('9007199254740992000000000000'); // > 2^53
+      const reserve1 = BigInt('4503599627370496000000000000'); // > 2^52
+      const result = calculatePriceFromBigIntReserves(reserve0, reserve1);
+      expect(result).toBe(2);
     });
   });
 
@@ -252,6 +329,15 @@ describe('PriceCalculator', () => {
       expect(result.buySource).toBe('sushiswap'); // Lower price
       expect(result.sellSource).toBe('uniswap'); // Higher price
     });
+
+    it('should handle invalid prices gracefully', () => {
+      const result = calculateProfitBetweenSources(
+        { price: 0, fee: 0.003, source: 'dex1' },
+        { price: 100, fee: 0.003, source: 'dex2' }
+      );
+      expect(result.isProfitable).toBe(false);
+      expect(result.grossSpread).toBe(0);
+    });
   });
 
   // ==========================================================================
@@ -309,6 +395,28 @@ describe('PriceCalculator', () => {
   // Threshold Utilities
   // ==========================================================================
   describe('Threshold Utilities', () => {
+    describe('getMinProfitThreshold', () => {
+      it('should return Ethereum threshold (0.5%)', () => {
+        expect(getMinProfitThreshold('ethereum')).toBe(0.005);
+      });
+
+      it('should return Arbitrum threshold (0.2%)', () => {
+        expect(getMinProfitThreshold('arbitrum')).toBe(0.002);
+      });
+
+      it('should return Optimism threshold (0.2%)', () => {
+        expect(getMinProfitThreshold('optimism')).toBe(0.002);
+      });
+
+      it('should return BSC threshold (0.3%)', () => {
+        expect(getMinProfitThreshold('bsc')).toBe(0.003);
+      });
+
+      it('should return default threshold for unknown chain', () => {
+        expect(getMinProfitThreshold('unknown_chain')).toBe(0.003);
+      });
+    });
+
     describe('meetsThreshold', () => {
       it('should return true when profit meets threshold', () => {
         expect(meetsThreshold(0.005, 0.003)).toBe(true);

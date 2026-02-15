@@ -408,11 +408,12 @@ describe('ReserveCache', () => {
       expect(result!.reserve1).toBe('0');
     });
 
-    it('should handle block number 0', () => {
+    it('should reject block number 0 (Fix #16: invalid sync event)', () => {
+      // Block 0 is not a valid sync event block number
       cache.onSyncEvent('ethereum', '0x1234', '100', '200', 0);
 
       const result = cache.get('ethereum', '0x1234');
-      expect(result!.blockNumber).toBe(0);
+      expect(result).toBeUndefined();
     });
   });
 });

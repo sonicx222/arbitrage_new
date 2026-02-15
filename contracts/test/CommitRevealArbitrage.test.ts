@@ -42,6 +42,7 @@ describe('CommitRevealArbitrage', () => {
    * Helper function to create commitment hash
    */
   function createCommitmentHash(
+    sender: string,
     asset: string,
     amountIn: bigint,
     swapPath: any[],
@@ -53,7 +54,9 @@ describe('CommitRevealArbitrage', () => {
       ['tuple(address asset, uint256 amountIn, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline, bytes32 salt)'],
       [[asset, amountIn, swapPath, minProfit, deadline, salt]]
     );
-    return ethers.keccak256(encoded);
+    // Match Solidity: keccak256(abi.encodePacked(msg.sender, abi.encode(params)))
+    const packed = ethers.solidityPacked(['address', 'bytes'], [sender, encoded]);
+    return ethers.keccak256(packed);
   }
 
   /**
@@ -312,6 +315,7 @@ describe('CommitRevealArbitrage', () => {
         const salt = ethers.randomBytes(32);
 
         const commitmentHash = createCommitmentHash(
+          user.address,
           await weth.getAddress(),
           amountIn,
           swapPath,
@@ -421,6 +425,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -487,6 +492,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -535,6 +541,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -603,6 +610,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -666,6 +674,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -720,6 +729,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -766,6 +776,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -811,6 +822,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -856,6 +868,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -868,7 +881,8 @@ describe('CommitRevealArbitrage', () => {
       await commitRevealArbitrage.connect(user).commit(commitmentHash);
       await mineBlocks(1);
 
-      // Attacker tries to reveal
+      // Attacker tries to reveal — with msg.sender in the hash, the attacker's
+      // hash differs from the committed hash, so CommitmentNotFound fires first
       const revealParams = {
         asset: await weth.getAddress(),
         amountIn: amountIn,
@@ -880,7 +894,7 @@ describe('CommitRevealArbitrage', () => {
 
       await expect(
         commitRevealArbitrage.connect(attacker).reveal(revealParams)
-      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'UnauthorizedRevealer');
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
     });
 
     it('should revert on already revealed commitment', async () => {
@@ -918,6 +932,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -984,6 +999,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1035,6 +1051,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1080,6 +1097,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1124,6 +1142,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1173,6 +1192,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1252,6 +1272,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1328,6 +1349,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1410,6 +1432,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1469,6 +1492,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1520,6 +1544,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1555,6 +1580,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1599,6 +1625,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(), // Asset is WETH
         amountIn,
         swapPath, // But path starts with USDC
@@ -1643,6 +1670,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1693,6 +1721,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1759,6 +1788,7 @@ describe('CommitRevealArbitrage', () => {
       const minProfit = ethers.parseEther('0.1'); // Require 0.1 WETH profit (high)
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1825,6 +1855,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1892,6 +1923,7 @@ describe('CommitRevealArbitrage', () => {
 
       // User specifies higher minProfit than global
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -1954,6 +1986,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -2042,6 +2075,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
+        user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,

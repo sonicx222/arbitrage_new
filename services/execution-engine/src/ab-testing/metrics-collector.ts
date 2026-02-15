@@ -20,6 +20,12 @@ import type {
   ABTestingConfig,
 } from './types';
 
+/** Logger interface for MetricsCollector DI */
+interface MetricsLogger {
+  error(message: string, meta?: Record<string, unknown>): void;
+  warn?(message: string, meta?: Record<string, unknown>): void;
+}
+
 // =============================================================================
 // Metrics Keys
 // =============================================================================
@@ -47,6 +53,7 @@ function getMetricsKey(
 export class MetricsCollector {
   private readonly redis: RedisClient;
   private readonly config: ABTestingConfig;
+  private readonly logger?: MetricsLogger;
 
   // In-memory buffer for batching Redis writes
   private readonly buffer: Map<string, ExperimentMetrics> = new Map();
@@ -56,9 +63,10 @@ export class MetricsCollector {
   // RACE CONDITION FIX: Per-key locks to serialize updates
   private readonly pendingUpdates: Map<string, Promise<void>> = new Map();
 
-  constructor(redis: RedisClient, config: ABTestingConfig) {
+  constructor(redis: RedisClient, config: ABTestingConfig, logger?: MetricsLogger) {
     this.redis = redis;
     this.config = config;
+    this.logger = logger;
   }
 
   /**
@@ -345,7 +353,9 @@ export class MetricsCollector {
       await this.redis.set(key, metrics, this.config.metricsTtlSeconds);
     } catch (error) {
       // Log but don't throw - metrics are best effort
-      console.error('Failed to save A/B testing metrics', { key, error });
+      if (this.logger) {
+        this.logger.error('Failed to save A/B testing metrics', { key, error: String(error) });
+      }
     }
   }
 
@@ -356,7 +366,9 @@ export class MetricsCollector {
 
     this.flushTimer = setTimeout(() => {
       this.flush().catch((error) => {
-        console.error('Failed to flush A/B testing metrics', { error });
+        if (this.logger) {
+          this.logger.error('Failed to flush A/B testing metrics', { error: String(error) });
+        }
       });
     }, this.flushIntervalMs);
   }
@@ -371,7 +383,8 @@ export class MetricsCollector {
  */
 export function createMetricsCollector(
   redis: RedisClient,
-  config: ABTestingConfig
+  config: ABTestingConfig,
+  logger?: MetricsLogger
 ): MetricsCollector {
-  return new MetricsCollector(redis, config);
+  return new MetricsCollector(redis, config, logger);
 }

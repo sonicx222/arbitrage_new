@@ -9,7 +9,7 @@
  * NOTE: Relabeled from integration test - uses mocked @arbitrage/core,
  * mocked providers, and mocked wallets, so this is actually a unit test.
  *
- * @see ADR-014: Cross-Chain Execution Design
+ * @see shared/core/src/bridge-router/ for bridge router implementation
  * @see Phase 4: REST API Authentication
  */
 
@@ -56,6 +56,42 @@ import {
   AsyncMutex,
   type BridgeStatusResult,
 } from '@arbitrage/core';
+
+// =============================================================================
+// Test-Only Type Definitions
+// =============================================================================
+
+/**
+ * Test-visible interface for StargateRouter private internals.
+ *
+ * StargateRouter has private fields (pendingBridges, bridgesMutex) that tests
+ * need to manipulate for setup/verification. Rather than using untyped `as any`,
+ * this interface provides type-safe access for test code only.
+ *
+ * If StargateRouter ever exposes protected accessors for testing, this
+ * interface should be removed in favor of those.
+ */
+interface StargateRouterTestInternals {
+  pendingBridges: Map<string, {
+    status: 'pending' | 'bridging' | 'completed' | 'failed';
+    sourceTxHash: string;
+    sourceChain: string;
+    destChain: string;
+    startTime: number;
+    destTxHash?: string;
+    amountReceived?: string;
+    error?: string;
+  }>;
+  bridgesMutex: AsyncMutex;
+}
+
+/**
+ * Cast StargateRouter to expose test-visible internals.
+ * Use only in test setup/verification -- not in production code.
+ */
+function getTestInternals(router: StargateRouter): StargateRouterTestInternals {
+  return router as unknown as StargateRouterTestInternals;
+}
 
 // =============================================================================
 // Test Utilities
@@ -304,7 +340,7 @@ describe('Cross-Chain Execution Unit Tests', () => {
 
   describe('Bridge Status Tracking', () => {
     it('should track pending bridges with concurrent access safety', async () => {
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
       const bridgeId = 'test-bridge-123';
 
       // Simulate multiple concurrent status updates
@@ -332,7 +368,7 @@ describe('Cross-Chain Execution Unit Tests', () => {
 
     it('should handle bridge completion updates', async () => {
       const bridgeId = 'complete-test-bridge';
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
 
       // Add pending bridge
       await internalRouter.bridgesMutex.runExclusive(async () => {
@@ -356,7 +392,7 @@ describe('Cross-Chain Execution Unit Tests', () => {
 
     it('should handle bridge failure updates', async () => {
       const bridgeId = 'fail-test-bridge';
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
 
       // Add pending bridge
       await internalRouter.bridgesMutex.runExclusive(async () => {
@@ -380,7 +416,7 @@ describe('Cross-Chain Execution Unit Tests', () => {
 
   describe('Memory Management', () => {
     it('should cleanup old bridge entries', async () => {
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
 
       // Add old and new bridges
       const oldTime = Date.now() - 25 * 60 * 60 * 1000; // 25 hours ago
@@ -416,7 +452,7 @@ describe('Cross-Chain Execution Unit Tests', () => {
     });
 
     it('should enforce MAX_PENDING_BRIDGES limit', async () => {
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
       const MAX_PENDING = 1000;
 
       // Fill to capacity
@@ -492,13 +528,13 @@ describe('BridgeRouterFactory Unit Tests', () => {
   });
 
   it('should find best router for supported route', () => {
-    const router = factory.findBestRouter('ethereum', 'arbitrum', 'USDC');
+    const router = factory.findSupportedRouter('ethereum', 'arbitrum', 'USDC');
     expect(router).not.toBeNull();
     expect(router?.protocol).toBe('stargate');
   });
 
   it('should return null for unsupported route', () => {
-    const router = factory.findBestRouter('solana', 'ethereum', 'USDC');
+    const router = factory.findSupportedRouter('solana', 'ethereum', 'USDC');
     expect(router).toBeNull();
   });
 
@@ -656,7 +692,7 @@ describe('Phase 5: End-to-End Cross-Chain Flow', () => {
 
       // 2. Simulate bridge execution (add pending entry manually for testing)
       const bridgeId = 'e2e-test-bridge';
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
 
       await internalRouter.bridgesMutex.runExclusive(async () => {
         internalRouter.pendingBridges.set(bridgeId, {
@@ -684,7 +720,7 @@ describe('Phase 5: End-to-End Cross-Chain Flow', () => {
 
     it('should handle bridge failure gracefully', async () => {
       const bridgeId = 'e2e-fail-bridge';
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
 
       // Start bridge
       await internalRouter.bridgesMutex.runExclusive(async () => {
@@ -708,7 +744,7 @@ describe('Phase 5: End-to-End Cross-Chain Flow', () => {
 
   describe('Concurrent Bridge Operations', () => {
     it('should handle multiple bridges concurrently', async () => {
-      const internalRouter = router as any;
+      const internalRouter = getTestInternals(router);
       const bridgeCount = 10;
 
       // Create multiple bridges concurrently

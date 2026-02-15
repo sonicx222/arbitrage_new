@@ -87,8 +87,8 @@ describe('CrossChainSimulator', () => {
       const simulator = new CrossChainSimulator({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH'],
-        updateIntervalMs: 100,
-        volatility: 0.02, // 2% volatility to create opportunities
+        updateIntervalMs: 50,
+        volatility: 0.05, // 5% volatility to reliably create opportunities
         minProfitThreshold: 0.001, // 0.1% min profit
         bridgeCosts: customBridgeCosts,
       });
@@ -176,8 +176,8 @@ describe('CrossChainSimulator', () => {
       const simulator = new CrossChainSimulator({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH'],
-        updateIntervalMs: 100,
-        volatility: 0.02,
+        updateIntervalMs: 50,
+        volatility: 0.05,
         minProfitThreshold: 0.001,
         bridgeCosts: {
           'ethereum-arbitrum': {
@@ -211,8 +211,8 @@ describe('CrossChainSimulator', () => {
       const simulator = new CrossChainSimulator({
         chains: ['arbitrum', 'optimism'],
         tokens: ['WETH'],
-        updateIntervalMs: 100,
-        volatility: 0.02,
+        updateIntervalMs: 50,
+        volatility: 0.05,
         minProfitThreshold: 0.001,
         bridgeCosts: {
           'arbitrum-optimism': {
@@ -243,8 +243,8 @@ describe('CrossChainSimulator', () => {
       const simulator = new CrossChainSimulator({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH'],
-        updateIntervalMs: 100,
-        volatility: 0.02,
+        updateIntervalMs: 50,
+        volatility: 0.05,
         minProfitThreshold: 0.001,
         bridgeCosts: {
           'ethereum-arbitrum': {

@@ -253,21 +253,22 @@ export class CommitRevealService {
         };
       }
 
-      // 2. Compute commitment hash (must match Solidity keccak256(abi.encode(...)))
-      const commitmentHash = this.computeCommitmentHash(params);
-
-      // 3. Get wallet and contract
+      // 2. Get wallet (needed for commitment hash computation)
       const wallet = ctx.wallets.get(chain);
       if (!wallet) {
         return {
           success: false,
-          commitmentHash,
+          commitmentHash: '',
           txHash: '',
           commitBlock: 0,
           revealBlock: 0,
           error: `No wallet configured for chain: ${chain}`,
         };
       }
+
+      // 3. Compute commitment hash including sender address (anti-griefing, matches Solidity)
+      const senderAddress = await wallet.getAddress();
+      const commitmentHash = this.computeCommitmentHash(params, senderAddress);
 
       const contract = this.contractFactory.createContract(contractAddress, COMMIT_REVEAL_ABI, wallet);
 
@@ -372,21 +373,22 @@ export class CommitRevealService {
         };
       }
 
-      // 3. Profitability re-validation
-      // WARNING: Full quote-based validation is NOT yet implemented.
-      // The validateProfitability() method currently has no oracle/quote source
-      // to compare against, so it cannot meaningfully assess price changes
-      // during the 1-block commit delay. Until a simulation or quote service
-      // is injected, reveals proceed without profitability re-check.
-      // The minProfit threshold from the original detection provides baseline protection.
-      if (state.expectedProfit) {
-        this.logger.warn('Profitability re-validation not yet implemented — reveal proceeds without re-check', {
+      // 3. Profitability re-validation (gas-cost sanity check)
+      // Verifies that expected profit still exceeds estimated gas costs.
+      // Note: Does NOT re-quote swap prices (would require ISimulationService).
+      // The on-chain contract's minProfit check provides additional protection.
+      const isProfitable = await this.validateProfitability(state, chain, ctx);
+      if (!isProfitable) {
+        this.logger.warn('Reveal aborted — no longer profitable after gas estimation', {
           commitmentHash,
           chain,
           expectedProfit: state.expectedProfit,
           minProfit: state.params.minProfit.toString(),
-          hint: 'Inject a quote/simulation service to enable pre-reveal profitability validation',
         });
+        return {
+          success: false,
+          error: 'Reveal aborted: expected profit no longer exceeds gas costs',
+        };
       }
 
       // 4. Get contract
@@ -591,15 +593,17 @@ export class CommitRevealService {
   // ===========================================================================
 
   /**
-   * Compute commitment hash (matches Solidity implementation v2.0.0)
+   * Compute commitment hash (matches Solidity implementation v3.1.0)
    *
-   * Formula: keccak256(abi.encode(params))
+   * Formula: keccak256(abi.encodePacked(sender, abi.encode(params)))
    *
-   * ## v2.0.0 Breaking Change
-   * Encoding changed to include SwapStep[] array instead of single router.
-   * This means existing commitments from v1.0.0 will have different hashes and won't work.
+   * Includes sender address to prevent front-running griefing attacks where
+   * an attacker observes a commit tx and front-runs with the same hash.
+   *
+   * @param params Reveal parameters
+   * @param sender Wallet address of the committer (must match msg.sender on-chain)
    */
-  private computeCommitmentHash(params: CommitRevealParams): string {
+  private computeCommitmentHash(params: CommitRevealParams, sender: string): string {
     // Encode SwapStep array
     const swapPathEncoded = params.swapPath.map(step => [
       step.router,
@@ -608,24 +612,30 @@ export class CommitRevealService {
       step.amountOutMin
     ]);
 
+    const paramsEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
+      [
+        'address',  // asset
+        'uint256',  // amountIn
+        'tuple(address,address,address,uint256)[]',  // swapPath (array of SwapStep)
+        'uint256',  // minProfit
+        'uint256',  // deadline
+        'bytes32'   // salt
+      ],
+      [
+        params.asset,
+        params.amountIn,
+        swapPathEncoded,
+        params.minProfit,
+        params.deadline,
+        params.salt,
+      ]
+    );
+
+    // Match Solidity: keccak256(abi.encodePacked(msg.sender, abi.encode(params)))
     return ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        [
-          'address',  // asset
-          'uint256',  // amountIn
-          'tuple(address,address,address,uint256)[]',  // swapPath (array of SwapStep)
-          'uint256',  // minProfit
-          'uint256',  // deadline
-          'bytes32'   // salt
-        ],
-        [
-          params.asset,
-          params.amountIn,
-          swapPathEncoded,
-          params.minProfit,
-          params.deadline,
-          params.salt,
-        ]
+      ethers.solidityPacked(
+        ['address', 'bytes'],
+        [sender, paramsEncoded]
       )
     );
   }
@@ -879,27 +889,111 @@ export class CommitRevealService {
   /**
    * Validate profitability before reveal.
    *
-   * NOT YET IMPLEMENTED — requires a quote or simulation service to fetch
-   * fresh prices and compare against state.params.minProfit.
+   * Performs a gas-cost sanity check to ensure the expected profit still
+   * exceeds the on-chain minProfit plus estimated gas costs for the reveal
+   * transaction. This prevents submitting reveals that would succeed on-chain
+   * (minProfit met) but still result in a net loss after gas.
    *
-   * Implementation plan:
-   * 1. Inject ISimulationService or a quote provider via constructor
-   * 2. Simulate the swap path to get expected output
-   * 3. Compare expected output against minProfit + gas costs
-   * 4. Return false if expected profit < threshold
+   * Limitations:
+   * - Does NOT re-quote swap prices (would require ISimulationService injection).
+   *   The expectedProfit from commit-time is used as-is.
+   * - Falls back to true (proceed) if gas estimation fails, since the on-chain
+   *   contract still enforces minProfit as a safety net.
+   * - Assumes expectedProfit is denominated in the chain's native token (ETH/BNB/etc).
+   *   If expectedProfit is in USD or other units, the parseEther comparison will be
+   *   overly generous (large values always pass). The on-chain minProfit (in wei)
+   *   provides the authoritative check in that case.
    *
-   * Until implemented, the caller in reveal() logs a warning and proceeds
-   * without re-validation. The on-chain minProfit check in the contract
-   * provides baseline protection against executing at a loss.
+   * @param state - Stored commitment state with params and expectedProfit
+   * @param chain - Chain identifier for provider/gas lookup
+   * @param ctx - Strategy context with providers, gas baselines, etc.
+   * @returns true if reveal should proceed, false if unprofitable
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async validateProfitability(
-    _state: CommitmentState,
-    _chain: string,
-    _ctx: StrategyContext
+    state: CommitmentState,
+    chain: string,
+    ctx: StrategyContext
   ): Promise<boolean> {
-    // Not implemented — see JSDoc above for implementation plan
-    return true;
+    // If no expected profit was recorded at commit time, skip validation
+    // (the on-chain minProfit check is the only guard)
+    if (state.expectedProfit === undefined || state.expectedProfit === null) {
+      this.logger.debug('No expectedProfit recorded — skipping profitability validation', {
+        chain,
+        commitBlock: state.commitBlock,
+      });
+      return true;
+    }
+
+    const provider = ctx.providers.get(chain);
+    if (!provider) {
+      // Fix #11: Downgrade to debug — expected fallback when no provider available
+      this.logger.debug('No provider for gas estimation — proceeding with reveal', { chain });
+      return true;
+    }
+
+    try {
+      // Get current gas price: prefer cached lastGasPrices (O(1)) over RPC call
+      let gasPrice: bigint | undefined;
+
+      if (ctx.lastGasPrices) {
+        gasPrice = ctx.lastGasPrices.get(chain);
+      }
+
+      if (gasPrice === undefined) {
+        const feeData = await provider.getFeeData();
+        gasPrice = feeData.gasPrice ?? undefined;
+      }
+
+      if (gasPrice === undefined) {
+        // Fix #11: Downgrade to debug — expected fallback when gas price unavailable
+        this.logger.debug('Could not determine gas price — proceeding with reveal', { chain });
+        return true;
+      }
+
+      // Estimate gas for the reveal transaction.
+      // A reveal() call with flash loan + multi-hop swap typically uses ~300k-500k gas.
+      // Use a conservative estimate of 500,000 gas units.
+      const estimatedGasUnits = 500_000n;
+      const estimatedGasCostWei = gasPrice * estimatedGasUnits;
+
+      // Convert expectedProfit (denominated in ETH as a float) to wei for comparison
+      const expectedProfitWei = ethers.parseEther(state.expectedProfit.toString());
+
+      // The reveal is unprofitable if gas cost exceeds expected profit
+      // Use a 1.2x gas cost buffer to account for execution variance
+      const gasCostWithBuffer = (estimatedGasCostWei * 120n) / 100n;
+
+      if (expectedProfitWei <= gasCostWithBuffer) {
+        // Fix #11: Downgrade to debug — detailed gas numbers are diagnostic.
+        // The canonical abort event at the caller (line 381) remains logger.warn.
+        this.logger.debug('Reveal unprofitable after gas cost estimation', {
+          chain,
+          expectedProfitWei: expectedProfitWei.toString(),
+          estimatedGasCostWei: estimatedGasCostWei.toString(),
+          gasCostWithBuffer: gasCostWithBuffer.toString(),
+          gasPrice: gasPrice.toString(),
+          minProfit: state.params.minProfit.toString(),
+        });
+        return false;
+      }
+
+      this.logger.debug('Profitability validation passed', {
+        chain,
+        expectedProfitWei: expectedProfitWei.toString(),
+        estimatedGasCostWei: estimatedGasCostWei.toString(),
+        marginWei: (expectedProfitWei - gasCostWithBuffer).toString(),
+      });
+      return true;
+    } catch (error) {
+      // On any estimation error, fall back to proceeding with reveal.
+      // The on-chain minProfit check provides baseline protection.
+      // Fix #11: Downgrade to debug — expected error fallback, on-chain minProfit is the safety net
+      this.logger.debug('Gas estimation failed during profitability validation — proceeding with reveal', {
+        chain,
+        error: getErrorMessage(error),
+      });
+      return true;
+    }
   }
 
   /**

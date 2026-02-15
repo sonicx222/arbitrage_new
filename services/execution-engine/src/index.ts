@@ -40,8 +40,10 @@ let healthServer: Server | null = null;
 /**
  * Parse simulation configuration from environment variables.
  * Returns undefined if simulation is not enabled.
+ *
+ * Exported for unit testing -- not part of the public service API.
  */
-function getSimulationConfigFromEnv(): SimulationConfig | undefined {
+export function getSimulationConfigFromEnv(): SimulationConfig | undefined {
   const enabled = process.env.EXECUTION_SIMULATION_MODE === 'true';
 
   if (!enabled) {
@@ -68,7 +70,10 @@ function getSimulationConfigFromEnv(): SimulationConfig | undefined {
  * - CIRCUIT_BREAKER_COOLDOWN_MS: Cooldown period in ms (default: 300000 = 5 min)
  * - CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS: Max attempts in HALF_OPEN (default: 1)
  */
-function getCircuitBreakerConfigFromEnv() {
+/**
+ * Exported for unit testing -- not part of the public service API.
+ */
+export function getCircuitBreakerConfigFromEnv() {
   return {
     enabled: process.env.CIRCUIT_BREAKER_ENABLED !== 'false', // Default: true
     failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10),
@@ -83,7 +88,10 @@ function getCircuitBreakerConfigFromEnv() {
  * Uses shared getCrossRegionEnvConfig for common cross-region fields (S-6).
  * Execution-engine-specific fields (queue pause, standby flag) are parsed here.
  */
-function getStandbyConfigFromEnv() {
+/**
+ * Exported for unit testing -- not part of the public service API.
+ */
+export function getStandbyConfigFromEnv() {
   const isStandby = process.env.IS_STANDBY === 'true';
   const queuePausedOnStart = process.env.QUEUE_PAUSED_ON_START === 'true';
 

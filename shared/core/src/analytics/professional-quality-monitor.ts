@@ -97,6 +97,25 @@ export interface ProfessionalQualityScore {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 }
 
+export interface DetectionResult {
+  latency: number;
+  isTruePositive: boolean;
+  isFalsePositive: boolean;
+  isFalseNegative: boolean;
+  timestamp: number;
+  operationId: string;
+}
+
+/**
+ * Professional Quality Monitor - measures the AD-PQS score.
+ *
+ * @experimental Approximately 75% of the quality metrics gathered by this monitor
+ * are stub implementations returning hardcoded values. Specifically,
+ * `getDetectionAccuracyForPeriod`, `getSystemReliabilityForPeriod`, and
+ * `getOperationalConsistencyForPeriod` return static placeholder data.
+ * Only `getDetectionLatenciesForPeriod` aggregates real recorded data.
+ * Quality scores should be interpreted with this limitation in mind.
+ */
 export class ProfessionalQualityMonitor {
   private redis: QualityMonitorRedis | null = null;
   private redisPromise: Promise<QualityMonitorRedis> | null = null;
@@ -192,14 +211,7 @@ export class ProfessionalQualityMonitor {
   }
 
   // Record a detection operation result
-  async recordDetectionResult(result: {
-    latency: number;
-    isTruePositive: boolean;
-    isFalsePositive: boolean;
-    isFalseNegative: boolean;
-    timestamp: number;
-    operationId: string;
-  }): Promise<void> {
+  async recordDetectionResult(result: DetectionResult): Promise<void> {
     try {
       const redis = await this.getRedis();
       // P0-FIX: Use operationId in key to ensure uniqueness for concurrent calls
@@ -678,8 +690,13 @@ export class ProfessionalQualityMonitor {
     }
   }
 
-  private async getDetectionAccuracyForPeriod(period: { start: number; end: number }): Promise<QualityMetrics['detectionAccuracy']> {
-    // Simplified implementation - would aggregate actual detection results
+  /**
+   * @stub Returns hardcoded detection accuracy values.
+   * @experimental Needs integration with actual detection result aggregation
+   * to compute real precision/recall/F1 from recorded true/false positive data.
+   */
+  private async getDetectionAccuracyForPeriod(_period: { start: number; end: number }): Promise<QualityMetrics['detectionAccuracy']> {
+    logger.warn('getDetectionAccuracyForPeriod returning hardcoded stub values');
     return {
       precision: 0.96,
       recall: 0.92,
@@ -688,8 +705,13 @@ export class ProfessionalQualityMonitor {
     };
   }
 
-  private async getSystemReliabilityForPeriod(period: { start: number; end: number }): Promise<QualityMetrics['systemReliability']> {
-    // Simplified implementation - would aggregate actual system metrics
+  /**
+   * @stub Returns hardcoded system reliability values.
+   * @experimental Needs integration with actual system health recording
+   * to aggregate real uptime, availability, error rate, and recovery time.
+   */
+  private async getSystemReliabilityForPeriod(_period: { start: number; end: number }): Promise<QualityMetrics['systemReliability']> {
+    logger.warn('getSystemReliabilityForPeriod returning hardcoded stub values');
     return {
       uptime: 0.998,
       availability: 0.997,
@@ -698,8 +720,13 @@ export class ProfessionalQualityMonitor {
     };
   }
 
-  private async getOperationalConsistencyForPeriod(period: { start: number; end: number }): Promise<QualityMetrics['operationalConsistency']> {
-    // Simplified implementation - would aggregate actual operational metrics
+  /**
+   * @stub Returns hardcoded operational consistency values.
+   * @experimental Needs integration with actual operational metrics recording
+   * to aggregate real performance variance, throughput, memory, and load data.
+   */
+  private async getOperationalConsistencyForPeriod(_period: { start: number; end: number }): Promise<QualityMetrics['operationalConsistency']> {
+    logger.warn('getOperationalConsistencyForPeriod returning hardcoded stub values');
     return {
       performanceVariance: 0.08,
       throughputStability: 0.97,
@@ -708,7 +735,7 @@ export class ProfessionalQualityMonitor {
     };
   }
 
-  private async updateRollingMetrics(result: any): Promise<void> {
+  private async updateRollingMetrics(_result: DetectionResult): Promise<void> {
     // Update rolling averages and statistics
     // This would maintain running statistics for real-time monitoring
   }

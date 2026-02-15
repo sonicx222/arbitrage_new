@@ -1,7 +1,12 @@
 /**
  * Detector Integration Tests
  *
- * Tests for detector components working together in integration:
+ * NOTE: "Integration" in the file name refers to testing detector components
+ * composed together (component integration), NOT an integration test type.
+ * This is a unit test with mocked dependencies (Redis, streams, etc.),
+ * correctly placed in __tests__/unit/.
+ *
+ * Tests for detector components working together in composition:
  * - Initialization flow with all components
  * - Event processing through multiple components
  * - Factory integration with event routing

@@ -1,6 +1,10 @@
 /**
  * Factory Integration Service Tests
  *
+ * NOTE: "Integration" in the file name refers to the `FactoryIntegrationService`
+ * class name, NOT the test type. This is a unit test with mocked dependencies,
+ * correctly placed in __tests__/unit/.
+ *
  * Tests for factory subscription and dynamic pair discovery:
  * - Factory address set building (O(1) lookup)
  * - WebSocket adapter pattern with shutdown guards

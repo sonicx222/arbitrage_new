@@ -22,6 +22,7 @@ import {
   createAsyncSingleton,
   createSingleton,
   createConfigurableSingleton,
+  singleton,
 } from '../../../src/async/async-singleton';
 
 // =============================================================================
@@ -369,5 +370,89 @@ describe('createConfigurableSingleton', () => {
 
     expect(result.config).toBeUndefined();
     expect(factory).toHaveBeenCalledWith(undefined);
+  });
+});
+
+// =============================================================================
+// singleton() decorator — P1-FIX regression tests
+// =============================================================================
+
+describe('singleton() decorator', () => {
+  it('returns cached promise on success', async () => {
+    let callCount = 0;
+
+    class TestService {
+      @(singleton() as any)
+      async init(): Promise<string> {
+        callCount++;
+        return 'initialized';
+      }
+    }
+
+    const service = new TestService();
+    const result1 = await service.init();
+    const result2 = await service.init();
+
+    expect(result1).toBe('initialized');
+    expect(result2).toBe('initialized');
+    expect(callCount).toBe(1);
+  });
+
+  it('clears cache on rejection, allows retry', async () => {
+    let callCount = 0;
+
+    class TestService {
+      @(singleton() as any)
+      async init(): Promise<string> {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('transient failure');
+        }
+        return 'success';
+      }
+    }
+
+    const service = new TestService();
+
+    // First call fails
+    await expect(service.init()).rejects.toThrow('transient failure');
+    expect(callCount).toBe(1);
+
+    // Second call retries and succeeds (cache was cleared)
+    const result = await service.init();
+    expect(result).toBe('success');
+    expect(callCount).toBe(2);
+  });
+
+  it('shares rejection with concurrent callers, then allows retry', async () => {
+    let callCount = 0;
+
+    class TestService {
+      @(singleton() as any)
+      async init(): Promise<string> {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('fail');
+        }
+        return 'ok';
+      }
+    }
+
+    const service = new TestService();
+
+    // Three concurrent calls — all share the same rejected promise
+    const p1 = service.init();
+    const p2 = service.init();
+    const p3 = service.init();
+
+    await expect(p1).rejects.toThrow('fail');
+    await expect(p2).rejects.toThrow('fail');
+    await expect(p3).rejects.toThrow('fail');
+    expect(callCount).toBe(1);
+
+    // After rejection, cache is cleared — next call retries
+    const result = await service.init();
+    expect(result).toBe('ok');
+    expect(callCount).toBe(2);
   });
 });

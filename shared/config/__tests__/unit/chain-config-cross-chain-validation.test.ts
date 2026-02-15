@@ -594,8 +594,14 @@ describe('S3.2.4: Cross-Chain Detection Verification', () => {
       }
       console.log('========================================\n');
 
-      // Always passes - informational test
-      expect(true).toBe(true);
+      // FIX #22: Replace tautological assertion with real validation
+      // Every P1 chain pair must share at least 1 common token for cross-chain detection
+      for (let k = 0; k < chains.length; k++) {
+        for (let l = k + 1; l < chains.length; l++) {
+          const common = findCommonTokens(chains[k], chains[l]);
+          expect(common.length).toBeGreaterThan(0);
+        }
+      }
     });
   });
 

@@ -35,7 +35,32 @@ jest.mock('@arbitrage/config', () => ({
     linea: { id: 59144, name: 'Linea' },
     // P4: Solana-Native
     solana: { id: 101, name: 'Solana', isEVM: false }
-  }
+  },
+  getPartition: jest.fn().mockImplementation((partitionId) => {
+    const partitions: Record<string, any> = {
+      'asia-fast': { id: 'asia-fast', chains: ['bsc', 'polygon', 'avalanche', 'fantom'], region: 'asia-southeast1', name: 'P1: Asia-Fast' },
+      'l2-turbo': { id: 'l2-turbo', chains: ['arbitrum', 'optimism', 'base'], region: 'us-central1', name: 'P2: L2-Turbo' },
+      'high-value': { id: 'high-value', chains: ['ethereum', 'zksync', 'linea'], region: 'us-east1', name: 'P3: High-Value' },
+      'solana-native': { id: 'solana-native', chains: ['solana'], region: 'us-west1', name: 'P4: Solana-Native' },
+    };
+    return partitions[partitionId as string] ?? undefined;
+  }),
+  getChainsForPartition: jest.fn().mockImplementation((partitionId) => {
+    const partitions: Record<string, string[]> = {
+      'asia-fast': ['bsc', 'polygon', 'avalanche', 'fantom'],
+      'l2-turbo': ['arbitrum', 'optimism', 'base'],
+      'high-value': ['ethereum', 'zksync', 'linea'],
+      'solana-native': ['solana'],
+    };
+    return partitions[partitionId as string] ?? [];
+  }),
+  TESTNET_CHAINS: [] as string[],
+  PARTITION_IDS: {
+    ASIA_FAST: 'asia-fast',
+    L2_TURBO: 'l2-turbo',
+    HIGH_VALUE: 'high-value',
+    SOLANA_NATIVE: 'solana-native',
+  },
 }));
 
 // Import after mocks
@@ -672,6 +697,10 @@ describe('Partition Service Utilities', () => {
     });
 
     it('should return all 9 fields with correct types', () => {
+      // Clear any leaked env vars from other tests
+      delete process.env.POLYGON_RPC_URL;
+      delete process.env.POLYGON_WS_URL;
+
       process.env.REDIS_URL = 'redis://localhost:6379';
       process.env.PARTITION_CHAINS = 'bsc,polygon';
       process.env.HEALTH_CHECK_PORT = '3001';
@@ -799,7 +828,7 @@ describe('Partition Service Utilities', () => {
       try {
         expect(entry.partitionId).toBe('l2-turbo');
         expect(entry.chains).toEqual(['arbitrum', 'optimism', 'base']);
-        expect(entry.region).toBe('asia-southeast1');
+        expect(entry.region).toBe('us-central1');
         expect(processExitSpy).not.toHaveBeenCalled();
       } finally {
         entry.cleanupProcessHandlers();

@@ -258,7 +258,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
     }
 
-    const bridgeRouter = ctx.bridgeRouterFactory.findBestRouter(sourceChain, destChain, bridgeToken);
+    const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(sourceChain, destChain, bridgeToken);
 
     if (!bridgeRouter) {
       return createErrorResult(
@@ -351,8 +351,16 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
       }
 
-      // Step 1: Get bridge quote
-      const bridgeAmount = opportunity.amountIn || '0';
+      // Step 1: Validate bridge amount and get bridge quote
+      if (!opportunity.amountIn || opportunity.amountIn === '0') {
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Invalid amountIn: must be non-zero for bridge quote'),
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
+      }
+      const bridgeAmount = opportunity.amountIn;
       const bridgeQuote = await bridgeRouter.quote({
         sourceChain,
         destChain,
@@ -376,65 +384,55 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
       const expectedProfit = opportunity.expectedProfit ?? 0;
 
-      // Fix 2.2: Ensure totalFee is bigint with proper handling of all formats
-      // The bridge quote may return:
-      // - bigint: Direct BigInt value
-      // - string: Integer string like "123456" (from JSON serialization)
-      // - string: Float string like "123.45" (INVALID for BigInt, but some APIs return this)
-      // - number: JavaScript number
-      // - undefined/null: Missing value
-      let totalFeeBigInt: bigint;
+      // Use gasFee for profitability check. gasFee is cleanly native-token denominated (wei).
+      // totalFee === gasFee after the mixed-denomination fix (bridgeFee is already
+      // deducted from amountOut and is in the bridged token's decimals).
+      let gasFeeWei: bigint;
       try {
-        const rawFee = bridgeQuote.totalFee;
+        const rawGasFee = bridgeQuote.gasFee;
 
-        if (typeof rawFee === 'bigint') {
-          totalFeeBigInt = rawFee;
-        } else if (typeof rawFee === 'string') {
-          // Fix 2.2: Handle float strings by truncating to integer
-          // BigInt("123.45") throws SyntaxError, so we need to handle this case
-          if (rawFee.includes('.')) {
-            // Float string - truncate to integer (wei values shouldn't have decimals)
-            const floatValue = parseFloat(rawFee);
+        if (typeof rawGasFee === 'bigint') {
+          gasFeeWei = rawGasFee;
+        } else if (typeof rawGasFee === 'string') {
+          if (rawGasFee.includes('.')) {
+            const floatValue = parseFloat(rawGasFee);
             if (!Number.isFinite(floatValue)) {
-              throw new Error(`Non-finite float value: ${rawFee}`);
+              throw new Error(`Non-finite float value: ${rawGasFee}`);
             }
-            totalFeeBigInt = BigInt(Math.floor(floatValue));
-            this.logger.warn('[WARN_BRIDGE_FEE_FORMAT] Bridge fee was float string, truncated to integer', {
+            gasFeeWei = BigInt(Math.floor(floatValue));
+            this.logger.warn('[WARN_BRIDGE_FEE_FORMAT] Bridge gasFee was float string, truncated to integer', {
               opportunityId: opportunity.id,
-              original: rawFee,
-              converted: totalFeeBigInt.toString(),
+              original: rawGasFee,
+              converted: gasFeeWei.toString(),
             });
           } else {
-            // Integer string - direct conversion
-            totalFeeBigInt = BigInt(rawFee);
+            gasFeeWei = BigInt(rawGasFee);
           }
-        } else if (typeof rawFee === 'number') {
-          // JavaScript number - convert to BigInt (truncate if float)
-          if (!Number.isFinite(rawFee)) {
-            throw new Error(`Non-finite number value: ${rawFee}`);
+        } else if (typeof rawGasFee === 'number') {
+          if (!Number.isFinite(rawGasFee)) {
+            throw new Error(`Non-finite number value: ${rawGasFee}`);
           }
-          totalFeeBigInt = BigInt(Math.floor(rawFee));
+          gasFeeWei = BigInt(Math.floor(rawGasFee));
         } else {
-          // undefined, null, or other - default to 0
-          totalFeeBigInt = 0n;
+          gasFeeWei = 0n;
         }
       } catch (error) {
-        this.logger.error('Invalid bridge fee format', {
+        this.logger.error('Invalid bridge gasFee format', {
           opportunityId: opportunity.id,
-          totalFee: bridgeQuote.totalFee,
-          totalFeeType: typeof bridgeQuote.totalFee,
+          gasFee: bridgeQuote.gasFee,
+          gasFeeType: typeof bridgeQuote.gasFee,
           error: getErrorMessage(error),
         });
         return createErrorResult(
           opportunity.id,
-          formatExecutionError(ExecutionErrorCode.BRIDGE_QUOTE, `Invalid bridge fee format: ${bridgeQuote.totalFee}`),
+          formatExecutionError(ExecutionErrorCode.BRIDGE_QUOTE, `Invalid bridge gasFee format: ${bridgeQuote.gasFee}`),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
       }
 
       const bridgeProfitability = this.checkBridgeProfitability(
-        totalFeeBigInt,
+        gasFeeWei,
         expectedProfit,
         ethPriceUsd,
         { chain: sourceChain }
@@ -585,7 +583,6 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           wallet: sourceWallet,
           provider: sourceProvider,
           nonce: bridgeNonce,
-          deadline: Date.now() + BRIDGE_DEFAULTS.quoteValidityMs,
         }),
         'bridgeExecution'
       );
@@ -1558,7 +1555,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       return false;
     }
 
-    const bridgeRouter = ctx.bridgeRouterFactory.findBestRouter(
+    const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(
       state.sourceChain,
       state.destChain,
       state.bridgeToken

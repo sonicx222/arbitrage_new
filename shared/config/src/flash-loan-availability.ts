@@ -295,26 +295,45 @@ export class FlashLoanNotSupportedError extends Error {
 }
 
 /**
- * Flash loan protocol statistics (for monitoring and planning)
+ * Testnet chain identifiers used for statistics computation.
  */
-export const FLASH_LOAN_STATS = {
-  totalChains: Object.keys(FLASH_LOAN_AVAILABILITY).length,
-  mainnetChains: 10,
-  testnetChains: 4,
-  protocolCoverage: {
-    aave_v3: getSupportedProtocols('ethereum').includes('aave_v3') ? 8 : 0,
-    balancer_v2: getSupportedProtocols('ethereum').includes('balancer_v2') ? 6 : 0,
-    pancakeswap_v3: getSupportedProtocols('ethereum').includes('pancakeswap_v3')
-      ? 7
-      : 0,
-    syncswap: getSupportedProtocols('zksync').includes('syncswap') ? 1 : 0,
-  },
-  chainsWithMultipleProtocols: [
-    'ethereum',
-    'arbitrum',
-    'base',
-    'optimism',
-    'zksync',
-  ].length, // 5 chains
-  chainsWithNoProtocols: ['solana', 'solana-devnet'].length, // 2 chains (non-EVM)
-} as const;
+const TESTNET_CHAINS = new Set(['sepolia', 'arbitrum-sepolia', 'zksync-sepolia', 'solana-devnet']);
+
+/**
+ * Flash loan protocol statistics (for monitoring and planning)
+ *
+ * FIX #17/#18: Computed dynamically from FLASH_LOAN_AVAILABILITY instead of
+ * hardcoded values that drift when chains/protocols are added or removed.
+ */
+export const FLASH_LOAN_STATS = (() => {
+  const allChains = Object.keys(FLASH_LOAN_AVAILABILITY);
+  const mainnetChains = allChains.filter(c => !TESTNET_CHAINS.has(c));
+  const testnetChains = allChains.filter(c => TESTNET_CHAINS.has(c));
+
+  // Count how many chains support each protocol
+  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'syncswap'];
+  const protocolCoverage = {} as Record<FlashLoanProtocol, number>;
+  for (const protocol of protocols) {
+    protocolCoverage[protocol] = allChains.filter(
+      chain => FLASH_LOAN_AVAILABILITY[chain]?.[protocol]
+    ).length;
+  }
+
+  // Count chains with 2+ supported protocols
+  let chainsWithMultiple = 0;
+  let chainsWithNone = 0;
+  for (const chain of allChains) {
+    const count = getSupportedProtocols(chain).length;
+    if (count >= 2) chainsWithMultiple++;
+    if (count === 0) chainsWithNone++;
+  }
+
+  return {
+    totalChains: allChains.length,
+    mainnetChains: mainnetChains.length,
+    testnetChains: testnetChains.length,
+    protocolCoverage,
+    chainsWithMultipleProtocols: chainsWithMultiple,
+    chainsWithNoProtocols: chainsWithNone,
+  };
+})();

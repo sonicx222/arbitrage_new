@@ -159,6 +159,8 @@ const DEFAULT_CONFIG: WhaleTrackerConfig = {
 export class WhaleActivityTracker {
   private config: WhaleTrackerConfig;
   private wallets: Map<string, WalletProfile> = new Map();
+  /** Secondary index: "pairKey:chain" -> Set of wallet addresses that traded this pair */
+  private pairIndex: Map<string, Set<string>> = new Map();
   private signalHandlers: Array<(signal: WhaleSignal) => void> = [];
   private stats = {
     totalTransactionsTracked: 0,
@@ -230,31 +232,40 @@ export class WhaleActivityTracker {
 
     const superWhaleThreshold = this.config.whaleThresholdUsd * this.config.superWhaleMultiplier;
 
-    for (const profile of this.wallets.values()) {
-      for (const tx of profile.recentTransactions) {
-        if (tx.timestamp < cutoff) continue;
-        // BUG FIX: Use exact string matching instead of includes() to avoid partial matches
-        // e.g., "USDT" should not match "USDT2"
-        const matchesPair = tx.pairAddress === pairKey ||
-                           tx.tokenIn === pairKey ||
-                           tx.tokenOut === pairKey;
-        if (!matchesPair) continue;
-        if (tx.chain !== chain) continue;
+    // Use secondary pair index for O(W_pair * T) instead of O(W * T)
+    const indexKey = `${pairKey}:${chain}`;
+    const relevantWallets = this.pairIndex.get(indexKey);
 
-        if (tx.direction === 'buy') {
-          buyVolumeUsd += tx.usdValue;
-        } else {
-          sellVolumeUsd += tx.usdValue;
-        }
+    if (relevantWallets) {
+      for (const walletAddress of relevantWallets) {
+        const profile = this.wallets.get(walletAddress);
+        if (!profile) continue;
 
-        if (tx.usdValue >= superWhaleThreshold) {
-          superWhaleCount++;
-        }
-        whaleCount++;
+        for (const tx of profile.recentTransactions) {
+          if (tx.timestamp < cutoff) continue;
+          // BUG FIX: Use exact string matching instead of includes() to avoid partial matches
+          // e.g., "USDT" should not match "USDT2"
+          const matchesPair = tx.pairAddress === pairKey ||
+                             tx.tokenIn === pairKey ||
+                             tx.tokenOut === pairKey;
+          if (!matchesPair) continue;
+          if (tx.chain !== chain) continue;
 
-        if (tx.priceImpact > 0) {
-          totalPriceImpact += tx.priceImpact;
-          impactCount++;
+          if (tx.direction === 'buy') {
+            buyVolumeUsd += tx.usdValue;
+          } else {
+            sellVolumeUsd += tx.usdValue;
+          }
+
+          if (tx.usdValue >= superWhaleThreshold) {
+            superWhaleCount++;
+          }
+          whaleCount++;
+
+          if (tx.priceImpact > 0) {
+            totalPriceImpact += tx.priceImpact;
+            impactCount++;
+          }
         }
       }
     }
@@ -342,6 +353,7 @@ export class WhaleActivityTracker {
    */
   reset(): void {
     this.wallets.clear();
+    this.pairIndex.clear();
     this.stats = {
       totalTransactionsTracked: 0,
       totalSignalsGenerated: 0,
@@ -384,14 +396,32 @@ export class WhaleActivityTracker {
     const outCount = profile.frequentTokens.get(tx.tokenOut) ?? 0;
     profile.frequentTokens.set(tx.tokenOut, outCount + 1);
 
-    // Add to recent transactions (maintain limit)
+    // Add to recent transactions (amortized O(1) trim instead of O(N) shift)
     profile.recentTransactions.push(tx);
-    if (profile.recentTransactions.length > this.config.maxTransactionsPerWallet) {
-      profile.recentTransactions.shift();
+    if (profile.recentTransactions.length > this.config.maxTransactionsPerWallet * 2) {
+      profile.recentTransactions = profile.recentTransactions.slice(-this.config.maxTransactionsPerWallet);
     }
+
+    // Update secondary pair index for O(1) pair lookups
+    this.addToPairIndex(tx.pairAddress, tx.chain, profile.address);
+    this.addToPairIndex(tx.tokenIn, tx.chain, profile.address);
+    this.addToPairIndex(tx.tokenOut, tx.chain, profile.address);
 
     // Update pattern analysis
     profile.pattern = this.detectPattern(profile);
+  }
+
+  /**
+   * Add a wallet to the pair index for a given key and chain.
+   */
+  private addToPairIndex(key: string, chain: string, walletAddress: string): void {
+    const indexKey = `${key}:${chain}`;
+    let walletSet = this.pairIndex.get(indexKey);
+    if (!walletSet) {
+      walletSet = new Set();
+      this.pairIndex.set(indexKey, walletSet);
+    }
+    walletSet.add(walletAddress);
   }
 
   private detectPattern(profile: WalletProfile): WalletPattern {
@@ -542,12 +572,12 @@ export class WhaleActivityTracker {
     }
 
     // Find and remove the oldest 10% of wallets by lastSeen
+    // Uses O(N*k) partial selection instead of O(N log N) full sort
     const toRemove = Math.max(1, Math.floor(this.config.maxTrackedWallets * 0.1));
-    const walletsByAge = Array.from(this.wallets.entries())
-      .sort((a, b) => a[1].lastSeen - b[1].lastSeen);
+    const oldest = this.findOldestN(this.wallets, toRemove, (profile) => profile.lastSeen);
 
-    for (let i = 0; i < toRemove && i < walletsByAge.length; i++) {
-      this.wallets.delete(walletsByAge[i][0]);
+    for (const key of oldest) {
+      this.wallets.delete(key);
       this.stats.walletEvictions++;
     }
 
@@ -555,6 +585,33 @@ export class WhaleActivityTracker {
       evicted: toRemove,
       remaining: this.wallets.size
     });
+  }
+
+  /**
+   * Find the N entries with the smallest timestamps in a single pass.
+   * O(N*k) where k = n, much better than O(N log N) sort when k << N.
+   */
+  private findOldestN<V>(
+    map: Map<string, V>,
+    n: number,
+    getTime: (value: V) => number
+  ): string[] {
+    const oldest: Array<{ key: string; time: number }> = [];
+
+    for (const [key, value] of map) {
+      const time = getTime(value);
+      if (oldest.length < n) {
+        oldest.push({ key, time });
+        if (oldest.length === n) {
+          oldest.sort((a, b) => b.time - a.time);
+        }
+      } else if (time < oldest[0].time) {
+        oldest[0] = { key, time };
+        oldest.sort((a, b) => b.time - a.time);
+      }
+    }
+
+    return oldest.map(e => e.key);
   }
 }
 

@@ -463,7 +463,46 @@ export class PriceOracle {
    */
   async estimateUsdValue(symbol: string, amount: number, chain?: string): Promise<number> {
     const price = await this.getPrice(symbol, chain);
+    if (price.isStale) {
+      this.logger.warn('estimateUsdValue using stale price', {
+        symbol,
+        source: price.source,
+        price: price.price,
+        timestamp: price.timestamp
+      });
+    }
     return amount * price.price;
+  }
+
+  /**
+   * Estimate USD value with detailed metadata about the price used.
+   * Returns both the value and staleness/source information for callers
+   * that need to make decisions based on price quality.
+   *
+   * @param symbol - Token symbol
+   * @param amount - Token amount (in token units, not wei)
+   * @param chain - Optional chain identifier
+   * @returns Estimated USD value with metadata
+   */
+  async estimateUsdValueDetailed(symbol: string, amount: number, chain?: string): Promise<{
+    value: number;
+    isStale: boolean;
+    source: string;
+  }> {
+    const price = await this.getPrice(symbol, chain);
+    if (price.isStale) {
+      this.logger.warn('estimateUsdValueDetailed using stale price', {
+        symbol,
+        source: price.source,
+        price: price.price,
+        timestamp: price.timestamp
+      });
+    }
+    return {
+      value: amount * price.price,
+      isStale: price.isStale,
+      source: price.source
+    };
   }
 
   /**

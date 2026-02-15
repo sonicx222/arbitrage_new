@@ -49,7 +49,7 @@ export interface MutexStats {
  */
 export class AsyncMutex {
   private locked = false;
-  private waitQueue: Array<() => void> = [];
+  private waitQueue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
   private stats: MutexStats = {
     acquireCount: 0,
     contentionCount: 0,
@@ -72,8 +72,8 @@ export class AsyncMutex {
       this.stats.waitingCount++;
 
       // Wait for our turn
-      await new Promise<void>(resolve => {
-        this.waitQueue.push(resolve);
+      await new Promise<void>((resolve, reject) => {
+        this.waitQueue.push({ resolve, reject });
       });
 
       this.stats.waitingCount--;
@@ -98,7 +98,7 @@ export class AsyncMutex {
       if (next) {
         // Hand off lock directly to next waiter (lock stays held)
         // Use setImmediate to prevent stack overflow with many waiters
-        setImmediate(() => next());
+        setImmediate(() => next.resolve());
       } else {
         // No waiters, safe to release the lock
         this.locked = false;
@@ -130,7 +130,7 @@ export class AsyncMutex {
       const next = this.waitQueue.shift();
       if (next) {
         // Hand off lock directly to next waiter (lock stays held)
-        setImmediate(() => next());
+        setImmediate(() => next.resolve());
       } else {
         // No waiters, safe to release the lock
         this.locked = false;
@@ -188,6 +188,25 @@ export class AsyncMutex {
   }
 
   /**
+   * Cancel all waiters, rejecting their promises with the given error.
+   * Used by clearNamedMutex() to prevent stranded waiters.
+   *
+   * @param reason - Error to reject waiters with
+   * @returns The number of waiters that were cancelled
+   */
+  cancelWaiters(reason: Error): number {
+    const count = this.waitQueue.length;
+    const waiters = this.waitQueue.splice(0);
+    this.locked = false;
+    this.stats.isLocked = false;
+    this.stats.waitingCount = 0;
+    for (const waiter of waiters) {
+      waiter.reject(reason);
+    }
+    return count;
+  }
+
+  /**
    * Reset statistics.
    */
   resetStats(): void {
@@ -229,11 +248,11 @@ interface MutexEntry {
 
 const namedMutexes = new Map<string, MutexEntry>();
 
-/** Cleanup interval in milliseconds (default: 5 minutes) */
-const MUTEX_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+/** Cleanup interval in milliseconds (default: 5 minutes). Override via MUTEX_CLEANUP_INTERVAL_MS env var. */
+const MUTEX_CLEANUP_INTERVAL_MS = parseInt(process.env.MUTEX_CLEANUP_INTERVAL_MS ?? '', 10) || 5 * 60 * 1000;
 
-/** TTL for unused mutexes in milliseconds (default: 10 minutes) */
-const MUTEX_IDLE_TTL_MS = 10 * 60 * 1000;
+/** TTL for unused mutexes in milliseconds (default: 10 minutes). Override via MUTEX_IDLE_TTL_MS env var. */
+const MUTEX_IDLE_TTL_MS = parseInt(process.env.MUTEX_IDLE_TTL_MS ?? '', 10) || 10 * 60 * 1000;
 
 let cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -293,15 +312,24 @@ export function namedMutex(name: string): AsyncMutex {
 
 /**
  * Clear a named mutex (useful for testing).
+ * Rejects any stranded waiters with an error to prevent hanging promises.
  */
 export function clearNamedMutex(name: string): void {
-  namedMutexes.delete(name);
+  const entry = namedMutexes.get(name);
+  if (entry) {
+    entry.mutex.cancelWaiters(new Error(`Named mutex '${name}' was cleared while waiting`));
+    namedMutexes.delete(name);
+  }
 }
 
 /**
  * Clear all named mutexes (useful for testing).
+ * Rejects any stranded waiters with an error to prevent hanging promises.
  */
 export function clearAllNamedMutexes(): void {
+  for (const [name, entry] of namedMutexes.entries()) {
+    entry.mutex.cancelWaiters(new Error(`Named mutex '${name}' was cleared during clearAll`));
+  }
   namedMutexes.clear();
   if (cleanupIntervalId !== null) {
     clearInterval(cleanupIntervalId);

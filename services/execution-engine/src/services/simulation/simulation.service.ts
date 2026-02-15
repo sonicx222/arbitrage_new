@@ -9,6 +9,7 @@
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
  */
 
+import { createHash } from 'node:crypto';
 import { getErrorMessage, clearIntervalSafe } from '@arbitrage/core';
 import type { Logger } from '../../types';
 import {
@@ -767,12 +768,22 @@ export class SimulationService implements ISimulationService {
     // Fix 4.3: Use length-prefixed format for ALL fields to prevent collisions
     // Even though chain names are controlled internally, this makes the cache
     // key format completely collision-proof and consistent.
-    // Format: len:chain|len:from|len:to|len:data|len:value|len:block
+    // Format: len:chain|len:from|len:to|len:dataOrHash|len:value|len:block
+
+    // Fix #7: Hash large calldata to avoid oversized Map keys.
+    // Multi-hop swap calldata can exceed 2KB, creating expensive string keys.
+    // For data <= 128 chars, keep raw (avoids crypto overhead on small inputs).
+    // For data > 128 chars, use SHA-256 hash (~1us for 2KB) which is safe
+    // for the hot path and collision-resistant.
+    const dataKey = data.length > 128
+      ? `h:${createHash('sha256').update(data).digest('hex')}`
+      : data;
+
     return [
       `${chain.length}:${chain}`,
       `${from.length}:${from}`,
       `${to.length}:${to}`,
-      `${data.length}:${data}`,
+      `${dataKey.length}:${dataKey}`,
       `${value.length}:${value}`,
       `${block.length}:${block}`,
     ].join('|');

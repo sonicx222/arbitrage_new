@@ -363,7 +363,7 @@ describe('BridgeCostConfigSchema', () => {
     bridge: 'stargate',
     sourceChain: 'ethereum',
     targetChain: 'arbitrum',
-    feePercentage: 0.06,
+    feeBps: 6,
     minFeeUsd: 1,
     estimatedLatencySeconds: 180,
     reliability: 0.95,
@@ -378,22 +378,6 @@ describe('BridgeCostConfigSchema', () => {
     const result = BridgeCostConfigSchema.safeParse({
       ...validBridgeCost,
       reliability: 1.5,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject negative fee percentage', () => {
-    const result = BridgeCostConfigSchema.safeParse({
-      ...validBridgeCost,
-      feePercentage: -0.01,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject fee percentage over 100', () => {
-    const result = BridgeCostConfigSchema.safeParse({
-      ...validBridgeCost,
-      feePercentage: 101,
     });
     expect(result.success).toBe(false);
   });

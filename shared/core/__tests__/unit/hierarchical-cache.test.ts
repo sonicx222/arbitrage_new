@@ -39,9 +39,15 @@ const mockLogger = {
   debug: jest.fn<any>()
 };
 
-// Mock logger - use function that returns mockLogger
+// Mock logger - returns inline object to avoid TDZ issue with mockLogger
+// (jest.mock is hoisted, but module imports trigger createLogger before mockLogger is initialized)
 jest.mock('../../src/logger', () => ({
-  createLogger: () => mockLogger,
+  createLogger: () => ({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  }),
   getPerformanceLogger: () => ({
     startTimer: jest.fn(),
     endTimer: jest.fn(),
@@ -216,15 +222,23 @@ describe('HierarchicalCache', () => {
 
   describe('Advanced Features', () => {
     // P2-FIX: Test un-skipped - L1 cache enforces TTL on reads (lines 494-498 in hierarchical-cache.ts)
+    // Use L1-only cache to avoid L2 (Redis mock) re-promoting expired entries
     it('should respect TTL', async () => {
+      const l1OnlyCache = createHierarchicalCache({
+        l1Enabled: true,
+        l1Size: 64,
+        l2Enabled: false,
+        l3Enabled: false,
+      });
+
       const testKey = 'ttl:test';
       const testValue = 'ttl-value';
 
-      await cache.set(testKey, testValue, 0.1); // 0.1s = 100ms TTL
+      await l1OnlyCache.set(testKey, testValue, 0.1); // 0.1s = 100ms TTL
 
       await new Promise(resolve => setTimeout(resolve, 150)); // Wait 150ms (50% margin)
 
-      const result = await cache.get(testKey);
+      const result = await l1OnlyCache.get(testKey);
       expect(result).toBeNull();
     });
 

@@ -22,6 +22,10 @@ import {
   getPairDiscoveryService,
   resetPairDiscoveryService
 } from '@arbitrage/core';
+import type { Dex, FeeBasisPoints } from '@arbitrage/types';
+
+/** Helper to create typed FeeBasisPoints value */
+const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
 // =============================================================================
 // Mocks
@@ -61,7 +65,7 @@ const testDex = {
   chain: 'ethereum',
   factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  fee: 30,
+  feeBps: bps(30),
   enabled: true
 };
 
@@ -70,7 +74,7 @@ const testDexV2 = {
   chain: 'ethereum',
   factoryAddress: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
   routerAddress: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
-  fee: 30,
+  feeBps: bps(30),
   enabled: true
 };
 
@@ -525,7 +529,7 @@ describe('PairDiscoveryService', () => {
       chain: 'avalanche',
       factoryAddress: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
       routerAddress: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
-      fee: 30,
+      feeBps: bps(30),
       enabled: true
     };
 
@@ -534,7 +538,7 @@ describe('PairDiscoveryService', () => {
       chain: 'avalanche',
       factoryAddress: '0xefa94DE7a4656D787667C749f7E1223D71E9FD88',
       routerAddress: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
-      fee: 30,
+      feeBps: bps(30),
       enabled: true
     };
 
@@ -643,7 +647,7 @@ describe('PairDiscoveryService', () => {
       chain: 'avalanche',
       factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault
       routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8',
-      fee: 30,
+      feeBps: bps(30),
       enabled: false
     };
 
@@ -652,7 +656,7 @@ describe('PairDiscoveryService', () => {
       chain: 'avalanche',
       factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool
       routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12',
-      fee: 4,
+      feeBps: bps(4),
       enabled: false
     };
 
@@ -661,7 +665,7 @@ describe('PairDiscoveryService', () => {
       chain: 'arbitrum',
       factoryAddress: '0xb17b674D9c5CB2e441F8e196a2f048A81355d031',
       routerAddress: '0xF0d4c12A5768D806021F80a262B4d39d26C58b8D',
-      fee: 4,
+      feeBps: bps(4),
       enabled: true
     };
 

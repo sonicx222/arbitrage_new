@@ -419,7 +419,7 @@ export class ProviderServiceImpl implements IProviderService {
         this.logger.error(`Invalid private key format for ${chainName}`, {
           hint: 'Private key must be 64 hex characters (or 66 with 0x prefix)',
           envVar: `${chainName.toUpperCase()}_PRIVATE_KEY`,
-          keyLength: privateKey.length,
+          hasHexPrefix: privateKey.startsWith('0x'),
         });
         continue;
       }
