@@ -9,7 +9,11 @@
  * - Selection sort: O(1000 * 100) = 100,000 operations
  * - MinHeap: O(1000 * log(100)) = ~7,000 operations (14x faster)
  *
- * @see ARCHITECTURE_V2.md Section 4.2 (Data Structures)
+ * Note: For hot-path code, ADR-022 recommends inline implementations
+ * rather than class-based data structures. This module targets non-hot-path
+ * consumers (cleanup, analytics, ranking).
+ *
+ * @see ADR-022 (Hot-Path Performance Rules)
  */
 
 /**
@@ -28,7 +32,7 @@
  * const heap = new MinHeap<Opportunity>((a, b) => b.timestamp - a.timestamp);
  * for (const opp of opportunities) {
  *   heap.push(opp);
- *   if (heap.size() > 10) heap.pop(); // Remove oldest
+ *   if (heap.size > 10) heap.pop(); // Remove oldest
  * }
  */
 export class MinHeap<T> {
@@ -46,14 +50,14 @@ export class MinHeap<T> {
   /**
    * Number of elements in the heap.
    */
-  size(): number {
+  get size(): number {
     return this.heap.length;
   }
 
   /**
    * Check if heap is empty.
    */
-  isEmpty(): boolean {
+  get isEmpty(): boolean {
     return this.heap.length === 0;
   }
 
@@ -95,7 +99,7 @@ export class MinHeap<T> {
    */
   extractAll(): T[] {
     const result: T[] = [];
-    while (!this.isEmpty()) {
+    while (!this.isEmpty) {
       result.push(this.pop()!);
     }
     return result;
@@ -174,7 +178,7 @@ export function findKSmallest<T>(
 
   for (const item of items) {
     maxHeap.push(item);
-    if (maxHeap.size() > k) {
+    if (maxHeap.size > k) {
       maxHeap.pop(); // Remove largest
     }
   }
@@ -212,7 +216,7 @@ export function findKLargest<T>(
 
   for (const item of items) {
     minHeap.push(item);
-    if (minHeap.size() > k) {
+    if (minHeap.size > k) {
       minHeap.pop(); // Remove smallest
     }
   }

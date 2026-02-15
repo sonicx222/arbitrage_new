@@ -181,6 +181,8 @@ export class PriceMomentumTracker {
       this.evictLRUPairsIfNeeded();
 
       // Initialize new pair state
+      // Note: Uses inline circular buffer per ADR-022 (hot-path performance).
+      // Class-based CircularBuffer from data-structures/ is for non-hot-path use.
       state = {
         prices: new Array(this.config.windowSize),
         writeIndex: 0,

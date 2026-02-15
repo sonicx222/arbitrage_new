@@ -21,7 +21,6 @@
  * - O(1) average vs O(n) for generic CircularBuffer.reduce()
  * - Trade-off: Fixed to numbers only, no generic type support
  *
- * @see ARCHITECTURE_V2.md Section 4.2 (Data Structures)
  * @see R1 - Solana Arbitrage Detection Modules extraction
  */
 
@@ -71,9 +70,11 @@ export interface NumericRollingWindowStats {
 export class NumericRollingWindow {
   private readonly buffer: Float64Array;
   private readonly maxSize: number;
+  private readonly recalibrationInterval: number;
   private index = 0;
   private count = 0;
   private sum = 0;
+  private pushCount = 0;
 
   /**
    * Create a new NumericRollingWindow.
@@ -82,11 +83,12 @@ export class NumericRollingWindow {
    * @throws Error if maxSize is not positive
    */
   constructor(maxSize: number) {
-    if (maxSize <= 0) {
-      throw new Error('NumericRollingWindow maxSize must be positive');
+    if (!Number.isInteger(maxSize) || maxSize <= 0) {
+      throw new Error('NumericRollingWindow maxSize must be a positive integer');
     }
     this.maxSize = maxSize;
     this.buffer = new Float64Array(maxSize);
+    this.recalibrationInterval = maxSize * 100;
   }
 
   /**
@@ -115,6 +117,25 @@ export class NumericRollingWindow {
 
     // Move to next position (circular)
     this.index = (this.index + 1) % this.maxSize;
+
+    // Periodic recalibration to mitigate floating-point drift
+    this.pushCount++;
+    if (this.pushCount >= this.recalibrationInterval) {
+      this.recalibrateSum();
+      this.pushCount = 0;
+    }
+  }
+
+  /**
+   * Recompute sum from buffer contents to correct floating-point drift.
+   * Called periodically (every capacity * 100 pushes) to keep running sum accurate.
+   */
+  private recalibrateSum(): void {
+    let newSum = 0;
+    for (let i = 0; i < this.count; i++) {
+      newSum += this.buffer[i];
+    }
+    this.sum = newSum;
   }
 
   /**
@@ -172,6 +193,7 @@ export class NumericRollingWindow {
     this.index = 0;
     this.count = 0;
     this.sum = 0;
+    this.pushCount = 0;
   }
 
   /**

@@ -9,15 +9,23 @@
  * Features:
  * - O(1) push, shift, and size operations
  * - Memory-efficient: fixed allocation, no array resizing
- * - GC-friendly: explicit clear with slot nullification
+ * - GC-friendly: explicit clear with slot nullification (`clearOnRemove: true`,
+ *   the default). Set `clearOnRemove: false` for rolling windows where references
+ *   to overwritten items are acceptable (avoids per-slot nullification overhead).
  * - Rolling window support with countWhere predicate
+ *
+ * Note: For hot-path code, ADR-022 recommends inline implementations
+ * rather than class-based data structures. This module targets non-hot-path
+ * consumers (queue management, statistics).
  *
  * Used by:
  * - execution-engine/queue.service.ts (opportunity queue)
  * - execution-engine/simulation/types.ts (health scoring)
+ * - execution-engine/simulation/hot-fork-synchronizer.ts (block timestamps)
+ * - cross-chain-detector/bridge-predictor.ts (bridge latency tracking)
+ * - mempool-detector (pending transaction buffering)
+ * - bloxroute-feed.ts (latency tracking)
  * - Any service needing fixed-size rolling buffers
- *
- * @see ARCHITECTURE_V2.md Section 4.2 (Data Structures)
  */
 
 // =============================================================================
@@ -80,11 +88,11 @@ export class CircularBuffer<T> {
       ? { capacity: capacityOrConfig }
       : capacityOrConfig;
 
-    if (config.capacity <= 0) {
-      throw new Error('CircularBuffer capacity must be positive');
+    if (!Number.isInteger(config.capacity) || config.capacity <= 0) {
+      throw new Error('CircularBuffer capacity must be a positive integer');
     }
 
-    this.buffer = new Array(config.capacity);
+    this.buffer = new Array(config.capacity).fill(undefined);
     this.clearOnRemove = config.clearOnRemove ?? true;
   }
 

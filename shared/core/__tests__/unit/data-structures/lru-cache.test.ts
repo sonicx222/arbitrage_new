@@ -22,8 +22,8 @@ describe('LRUCache', () => {
     });
 
     it('should throw for non-positive maxSize', () => {
-      expect(() => new LRUCache<string, number>(0)).toThrow('LRUCache maxSize must be positive');
-      expect(() => new LRUCache<string, number>(-1)).toThrow('LRUCache maxSize must be positive');
+      expect(() => new LRUCache<string, number>(0)).toThrow('LRUCache maxSize must be a positive integer');
+      expect(() => new LRUCache<string, number>(-1)).toThrow('LRUCache maxSize must be a positive integer');
     });
   });
 
@@ -275,6 +275,92 @@ describe('LRUCache', () => {
       expect(cache.has('a')).toBe(true);
       expect(cache.has('b')).toBe(false);
       expect(cache.has('c')).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // delete() and clear() (Fix #8 regression tests)
+  // ==========================================================================
+
+  describe('delete', () => {
+    it('should delete an existing key and return true', () => {
+      const cache = new LRUCache<string, number>(5);
+      cache.set('a', 1);
+      cache.set('b', 2);
+
+      expect(cache.delete('a')).toBe(true);
+      expect(cache.has('a')).toBe(false);
+      expect(cache.size).toBe(1);
+    });
+
+    it('should return false for non-existent key', () => {
+      const cache = new LRUCache<string, number>(5);
+      cache.set('a', 1);
+
+      expect(cache.delete('missing')).toBe(false);
+      expect(cache.size).toBe(1);
+    });
+  });
+
+  describe('clear', () => {
+    it('should remove all entries', () => {
+      const cache = new LRUCache<string, number>(5);
+      cache.set('a', 1);
+      cache.set('b', 2);
+      cache.set('c', 3);
+
+      cache.clear();
+
+      expect(cache.size).toBe(0);
+      expect(cache.has('a')).toBe(false);
+      expect(cache.has('b')).toBe(false);
+      expect(cache.has('c')).toBe(false);
+    });
+
+    it('should allow reuse after clearing', () => {
+      const cache = new LRUCache<string, number>(3);
+      cache.set('a', 1);
+      cache.set('b', 2);
+      cache.clear();
+
+      cache.set('x', 10);
+      cache.set('y', 20);
+
+      expect(cache.size).toBe(2);
+      expect(cache.get('x')).toBe(10);
+      expect(cache.get('y')).toBe(20);
+    });
+  });
+
+  // ==========================================================================
+  // entries() and forEach() (Fix #22 test gaps)
+  // ==========================================================================
+
+  describe('entries and forEach', () => {
+    it('should return entries in LRU order', () => {
+      const cache = new LRUCache<string, number>(5);
+      cache.set('a', 1);
+      cache.set('b', 2);
+      cache.get('a'); // Move 'a' to end
+
+      const entries = cache.entries();
+      expect(entries).toEqual([['b', 2], ['a', 1]]);
+    });
+
+    it('should iterate with forEach in LRU order', () => {
+      const cache = new LRUCache<string, number>(5);
+      cache.set('a', 1);
+      cache.set('b', 2);
+
+      const collected: Array<{ key: string; value: number }> = [];
+      cache.forEach((value, key) => {
+        collected.push({ key, value });
+      });
+
+      expect(collected).toEqual([
+        { key: 'a', value: 1 },
+        { key: 'b', value: 2 },
+      ]);
     });
   });
 

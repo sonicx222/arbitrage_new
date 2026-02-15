@@ -16,11 +16,15 @@
  * it's deleted and re-inserted to move it to the end (most recently used).
  * Eviction removes the first item (least recently used).
  *
+ * Note: For hot-path code, ADR-022 recommends inline implementations
+ * rather than class-based data structures. This module targets non-hot-path
+ * consumers (caching, normalization).
+ *
  * Used by:
  * - partition-solana/arbitrage-detector.ts (token normalization cache)
+ * - cross-chain-price-tracker.ts (price point caching)
  * - Any service needing bounded memoization
  *
- * @see ARCHITECTURE_V2.md Section 4.2 (Data Structures)
  * @see R1 - Solana Arbitrage Detection Modules extraction
  */
 
@@ -72,8 +76,8 @@ export class LRUCache<K, V> {
    * @throws Error if maxSize is not positive
    */
   constructor(maxSize: number) {
-    if (maxSize <= 0) {
-      throw new Error('LRUCache maxSize must be positive');
+    if (!Number.isInteger(maxSize) || maxSize <= 0) {
+      throw new Error('LRUCache maxSize must be a positive integer');
     }
     this.maxSize = maxSize;
   }
@@ -137,9 +141,9 @@ export class LRUCache<K, V> {
       this.cache.delete(key);
     } else if (this.cache.size >= this.maxSize) {
       // Evict oldest (first entry)
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey !== undefined) {
-        this.cache.delete(firstKey);
+      const first = this.cache.keys().next();
+      if (!first.done) {
+        this.cache.delete(first.value);
       }
     }
     this.cache.set(key, value);
@@ -175,6 +179,13 @@ export class LRUCache<K, V> {
    */
   get size(): number {
     return this.cache.size;
+  }
+
+  /**
+   * Check if the cache is empty.
+   */
+  get isEmpty(): boolean {
+    return this.cache.size === 0;
   }
 
   /**

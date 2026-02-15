@@ -163,23 +163,34 @@
 
 ## Recommended Action Plan
 
-### Phase 1: Immediate (P1 — fix before next deployment)
-- [ ] **Fix #1:** Add NaN guard to `NumericRollingWindow.push()`: `if (Number.isNaN(value)) return;` (security-auditor, Score: 3.8)
-- [ ] **Fix #2:** Fix `LRUCache.get()` to use `has()` check instead of `value !== undefined` (bug-hunter + 4 agents, Score: 3.5)
-- [ ] **Fix #3:** Replace 4 duplicated `findOldestN` implementations with `findKSmallest` (architecture-auditor, Score: 3.8)
-- [ ] **Fix #4:** Replace `toArray()` with `forEach()` in hot-fork-synchronizer (perf-reviewer, Score: 3.5)
+### Phase 1: Immediate (P1 — fix before next deployment) — COMPLETE ✅
+- [x] **Fix #1:** Add NaN guard to `NumericRollingWindow.push()`: `if (Number.isNaN(value)) return;`
+- [x] **Fix #2:** Fix `LRUCache.get()` to use `has()` check instead of `value !== undefined`
+- [x] **Fix #3:** Replace 4 duplicated `findOldestN` implementations with `findKSmallest`
+- [x] **Fix #4:** Replace `toArray()` with `forEach()` in hot-fork-synchronizer
 
-### Phase 2: Next Sprint (P2 — coverage gaps and reliability)
-- [ ] **Fix #5:** Add floating-point drift mitigation (periodic sum recalibration) to NumericRollingWindow (Score: 3.2)
-- [ ] **Fix #6:** Validate constructor capacity is a positive integer (`Number.isInteger`) (Score: 3.0)
-- [ ] **Fix #7:** Fix LRUCache.set() eviction to use iterator `.done` check (Score: 2.5)
-- [ ] **Fix #8:** Add LRUCache delete()/clear() tests (Score: 3.0)
-- [ ] **Fix #10:** Add findKSmallest test with Map.entries() and tuple comparator (Score: 3.2)
-- [ ] **Fix #11:** Add pushOverwrite + countWhere combined test (Score: 3.0)
-- [ ] **Fix #9:** Fix @see references in JSDoc headers (Score: 2.5)
+### Phase 2: Next Sprint (P2 — coverage gaps and reliability) — COMPLETE ✅
+- [x] **Fix #5:** Add floating-point drift mitigation (periodic sum recalibration) to NumericRollingWindow
+- [x] **Fix #6:** Validate constructor capacity is a positive integer (`Number.isInteger`)
+- [x] **Fix #7:** Fix LRUCache.set() eviction to use iterator `.done` check
+- [x] **Fix #8:** Add LRUCache delete()/clear()/entries()/forEach() tests
+- [x] **Fix #10:** Add findKSmallest test with Map.entries() and tuple comparator
+- [x] **Fix #11:** Add pushOverwrite + countWhere combined test
+- [x] **Fix #9:** Fix @see references — removed wrong Section 4.2 refs, added ADR-022
 
-### Phase 3: Backlog (P3 — refactoring, benchmarks, docs)
-- [ ] **Fix #12:** Use `new Array(n).fill(undefined)` for packed V8 representation (Score: 2.5)
-- [ ] **Fix #13:** Standardize getter/method API surface across all 4 data structures (Score: 3.0)
-- [ ] **Fix #14:** Create dedicated benchmark suite for data structures (Score: 2.8)
-- [ ] **Fix #16-20:** Documentation updates (ADR-022 note, Used by comments, deep imports) (Score: 1.0-2.0)
+### Phase 3: Backlog (P3 — refactoring, benchmarks, docs) — COMPLETE ✅
+- [x] **Fix #12:** Use `new Array(n).fill(undefined)` for packed V8 representation
+- [x] **Fix #13:** Standardize getter/method API surface (MinHeap size/isEmpty → getters, LRUCache isEmpty added)
+- [x] **Fix #14:** Create dedicated benchmark suite (`shared/core/__tests__/performance/data-structures.perf.ts`)
+- [x] **Fix #16:** ADR-022 JSDoc notes added to all data-structure module headers
+- [x] **Fix #17:** ADR-022 inline comments in price-momentum.ts, pair-activity-tracker.ts
+- [x] **Fix #18:** Updated "Used by:" headers with complete consumer lists
+- [x] **Fix #19:** SKIPPED — false finding (deep import is correct per CLAUDE.md convention)
+- [x] **Fix #20:** Documented `clearOnRemove` reference retention behavior
+- [x] **Fix #21:** SKIPPED — micro-optimization, negligible impact
+- [x] **Fix #22:** Subsumed by Fix #8 (entries/forEach tests added)
+
+### Verification
+- **Typecheck:** Clean (`npm run typecheck` — no errors)
+- **Tests:** 130/130 passing (4 test suites, 8 new tests added)
+- **All 19 actionable findings resolved** (2 skipped as non-issues)
