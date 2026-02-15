@@ -98,6 +98,12 @@ function main(): void {
     // FIX P2-2: Check for selector collision
     if (selectorMap.has(selector)) {
       const existing = selectorMap.get(selector)!;
+      if (existing.signature === signature) {
+        // Same error defined in multiple contracts/libraries (e.g., BaseFlashArbitrage + SwapHelpers)
+        // Not a true collision — skip the duplicate
+        continue;
+      }
+      // TRUE collision: different error signatures produce the same 4-byte selector
       console.error(`\n❌ ERROR: Selector collision detected!`);
       console.error(`   Selector: ${selector}`);
       console.error(`   Error 1:  ${existing.signature}`);

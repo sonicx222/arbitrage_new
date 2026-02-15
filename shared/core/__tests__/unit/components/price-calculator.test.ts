@@ -22,11 +22,7 @@ import {
   calculateSpreadSafe,
   calculateNetProfit,
   calculateProfitBetweenSources,
-  getDefaultFee,
   getMinProfitThreshold,
-  resolveFee,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
   meetsThreshold,
   calculateConfidence,
   isValidPrice,
@@ -34,6 +30,13 @@ import {
   isValidFee,
   PriceCalculationError,
 } from '../../../src/components/price-calculator';
+
+import {
+  getDefaultFeeForDex as getDefaultFee,
+  resolveFeeValue as resolveFee,
+  basisPointsToDecimal,
+  decimalToBasisPoints,
+} from '../../../src/utils/fee-utils';
 
 describe('PriceCalculator', () => {
   // ==========================================================================
@@ -520,6 +523,69 @@ describe('PriceCalculator', () => {
         expect(isValidFee(NaN)).toBe(false);
         expect(isValidFee(Infinity)).toBe(false);
         expect(isValidFee(undefined as any)).toBe(false);
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Phase 3 Regression Tests
+  // ==========================================================================
+  describe('Phase 3 Regression Tests', () => {
+    describe('Fix #20: calculateSpreadSafe inlined validation', () => {
+      it('should return 0 for negative prices without throwing', () => {
+        expect(calculateSpreadSafe(-1, 100)).toBe(0);
+        expect(calculateSpreadSafe(100, -1)).toBe(0);
+        expect(calculateSpreadSafe(-1, -1)).toBe(0);
+      });
+
+      it('should return 0 for NaN and Infinity without throwing', () => {
+        expect(calculateSpreadSafe(NaN, 100)).toBe(0);
+        expect(calculateSpreadSafe(100, NaN)).toBe(0);
+        expect(calculateSpreadSafe(Infinity, 100)).toBe(0);
+        expect(calculateSpreadSafe(100, -Infinity)).toBe(0);
+      });
+
+      it('should match calculateSpread for valid inputs', () => {
+        // Ensure the inlined version produces identical results
+        expect(calculateSpreadSafe(100, 110)).toBeCloseTo(calculateSpread(100, 110), 10);
+        expect(calculateSpreadSafe(3500, 3535)).toBeCloseTo(calculateSpread(3500, 3535), 10);
+        expect(calculateSpreadSafe(0.001, 0.002)).toBeCloseTo(calculateSpread(0.001, 0.002), 10);
+      });
+    });
+
+    describe('Fix #25: BigInt precision guard', () => {
+      it('should return null for extremely large BigInt values that overflow Number', () => {
+        // 10^500 would overflow to Infinity when converted to Number
+        const huge = 10n ** 500n;
+        expect(safeBigIntDivisionOrNull(huge, 1n)).toBeNull();
+      });
+
+      it('should throw PriceCalculationError for non-finite result in safeBigIntDivision', () => {
+        const huge = 10n ** 500n;
+        expect(() => safeBigIntDivision(huge, 1n)).toThrow(PriceCalculationError);
+        expect(() => safeBigIntDivision(huge, 1n)).toThrow('Precision loss');
+      });
+
+      it('should return null from calculatePriceFromReserves for overflow reserves', () => {
+        const huge = (10n ** 500n).toString();
+        expect(calculatePriceFromReserves(huge, '1')).toBeNull();
+      });
+    });
+
+    describe('Fix #21: Fee utility API preservation', () => {
+      it('should export fee utilities from canonical source', () => {
+        // Verify the re-exported functions work correctly
+        expect(typeof getDefaultFee).toBe('function');
+        expect(typeof resolveFee).toBe('function');
+        expect(typeof basisPointsToDecimal).toBe('function');
+        expect(typeof decimalToBasisPoints).toBe('function');
+      });
+
+      it('should resolve fees correctly via re-exported functions', () => {
+        expect(resolveFee(0.001, 'uniswap')).toBe(0.001);
+        expect(resolveFee(undefined, 'curve')).toBe(0.0004);
+        expect(basisPointsToDecimal(30)).toBe(0.003);
+        expect(decimalToBasisPoints(0.003)).toBe(30);
       });
     });
   });

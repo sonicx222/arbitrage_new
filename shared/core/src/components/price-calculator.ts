@@ -15,17 +15,7 @@
  */
 
 // Fee utilities - import from canonical source
-import {
-  bpsToDecimal as canonicalBpsToDecimal,
-  decimalToBps as canonicalDecimalToBps,
-  v3TierToDecimal as canonicalV3TierToDecimal,
-  percentToDecimal as canonicalPercentToDecimal,
-  isValidFeeDecimal,
-  getDefaultFeeForDex,
-  resolveFeeValue,
-  FEE_CONSTANTS,
-  LOW_FEE_DEXES as CANONICAL_LOW_FEE_DEXES,
-} from '../utils/fee-utils';
+import { isValidFeeDecimal } from '../utils/fee-utils';
 
 // =============================================================================
 // Types
@@ -188,7 +178,14 @@ export function safeBigIntDivision(numerator: bigint, denominator: bigint): numb
   const scaledResult = (numerator * PRICE_PRECISION) / denominator;
 
   // Convert scaled result to number and divide by scale
-  return Number(scaledResult) / PRICE_PRECISION_NUMBER;
+  const result = Number(scaledResult) / PRICE_PRECISION_NUMBER;
+
+  // Guard against precision loss for BigInt > 2^53
+  if (!Number.isFinite(result)) {
+    throw new PriceCalculationError('Precision loss: result is not finite after BigInt conversion');
+  }
+
+  return result;
 }
 
 /**
@@ -205,7 +202,14 @@ export function safeBigIntDivisionOrNull(numerator: bigint, denominator: bigint)
   }
 
   const scaledResult = (numerator * PRICE_PRECISION) / denominator;
-  return Number(scaledResult) / PRICE_PRECISION_NUMBER;
+  const result = Number(scaledResult) / PRICE_PRECISION_NUMBER;
+
+  // Guard against precision loss for BigInt > 2^53
+  if (!Number.isFinite(result)) {
+    return null;
+  }
+
+  return result;
 }
 
 /**
@@ -257,16 +261,18 @@ export function calculateSpread(price1: number, price2: number): number {
  * Calculate price spread safely (returns 0 instead of throwing).
  * Use this for batch processing where some pairs may have invalid data.
  *
+ * HOT-PATH: Inlines validation checks to avoid try/catch overhead.
+ *
  * @param price1 - First price
  * @param price2 - Second price
  * @returns Spread as decimal, or 0 if invalid
  */
 export function calculateSpreadSafe(price1: number, price2: number): number {
-  try {
-    return calculateSpread(price1, price2);
-  } catch {
+  if (price1 <= 0 || price2 <= 0 || !isFinite(price1) || !isFinite(price2)) {
     return 0;
   }
+  const minPrice = Math.min(price1, price2);
+  return Math.abs(price1 - price2) / minPrice;
 }
 
 /**
@@ -357,84 +363,6 @@ export function calculateProfitBetweenSources(
     buySource: isBuyFrom1 ? source1.source : source2.source,
     sellSource: isBuyFrom1 ? source2.source : source1.source,
   };
-}
-
-// =============================================================================
-// Fee Utilities
-// =============================================================================
-
-/**
- * FIX 6.2: Fee Format Convention
- * ╔════════════════════════════════════════════════════════════════════════════╗
- * ║ STANDARD FEE FORMAT: DECIMAL (0.003 = 0.3%)                                ║
- * ╠════════════════════════════════════════════════════════════════════════════╣
- * ║ All internal calculations use decimal format:                              ║
- * ║   - 0.003 = 0.3% (standard Uniswap V2/V3 fee)                             ║
- * ║   - 0.0004 = 0.04% (low-fee pools like Curve)                             ║
- * ║   - 0.0005 = 0.05% (Uniswap V3 low fee tier)                              ║
- * ║   - 0.01 = 1% (high fee exotic pairs)                                     ║
- * ╠════════════════════════════════════════════════════════════════════════════╣
- * ║ External formats (convert at boundaries):                                  ║
- * ║   - Basis Points: 30 bps = 0.003 (use basisPointsToDecimal())             ║
- * ║   - Percentage: 0.3% = 0.003 (divide by 100)                              ║
- * ║   - Per-million: 3000 = 0.003 (Uniswap V3 style, divide by 1_000_000)     ║
- * ╚════════════════════════════════════════════════════════════════════════════╝
- */
-
-/**
- * Default fees by DEX type - now uses canonical constants.
- * @deprecated Use FEE_CONSTANTS from '@arbitrage/core' instead
- */
-const LOW_FEE_DEXES = CANONICAL_LOW_FEE_DEXES;
-const DEFAULT_AMM_FEE = FEE_CONSTANTS.DEFAULT; // 0.3% as decimal (30 bps)
-const DEFAULT_LOW_FEE = FEE_CONSTANTS.LOW_FEE; // 0.04% as decimal (4 bps)
-
-/**
- * Get default fee for a DEX.
- * @deprecated Use getDefaultFeeForDex from '@arbitrage/core' instead
- */
-export function getDefaultFee(dexName?: string): number {
-  return getDefaultFeeForDex(dexName);
-}
-
-/**
- * Resolve fee from multiple sources with fallback.
- * @deprecated Use resolveFeeValue from '@arbitrage/core' instead
- */
-export function resolveFee(explicitFee: number | undefined, dexName?: string): number {
-  return resolveFeeValue(explicitFee, dexName);
-}
-
-/**
- * Convert basis points to decimal fee.
- * @deprecated Use bpsToDecimal from '@arbitrage/core' instead
- */
-export function basisPointsToDecimal(basisPoints: number): number {
-  return canonicalBpsToDecimal(basisPoints);
-}
-
-/**
- * Convert decimal fee to basis points.
- * @deprecated Use decimalToBps from '@arbitrage/core' instead
- */
-export function decimalToBasisPoints(decimal: number): number {
-  return canonicalDecimalToBps(decimal);
-}
-
-/**
- * Convert Uniswap V3 per-million fee to decimal.
- * @deprecated Use v3TierToDecimal from '@arbitrage/core' instead
- */
-export function perMillionToDecimal(perMillion: number): number {
-  return canonicalV3TierToDecimal(perMillion);
-}
-
-/**
- * Convert percentage fee to decimal.
- * @deprecated Use percentToDecimal from '@arbitrage/core' instead
- */
-export function percentageToDecimal(percentage: number): number {
-  return canonicalPercentToDecimal(percentage);
 }
 
 // =============================================================================

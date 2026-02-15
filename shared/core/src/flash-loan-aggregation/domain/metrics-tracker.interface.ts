@@ -12,9 +12,8 @@
  * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Observer Pattern
  */
 
-import type { ProviderOutcome } from './models';
+import type { ProviderOutcome, FlashLoanProtocol } from './models';
 import type { IProviderInfo } from './provider-ranker.interface';
-import type { FlashLoanProtocol } from '../../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
 
 /**
  * Aggregated Metrics Summary

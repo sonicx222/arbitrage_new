@@ -2,7 +2,8 @@
 /**
  * Cross-platform Environment Setup Script
  *
- * Copies .env.local to .env for local development.
+ * Copies .env.example to .env for local development.
+ * If .env.local exists, it is used instead (local overrides).
  * Works on Windows, macOS, and Linux without error messages.
  *
  * Usage:
@@ -13,14 +14,23 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT_DIR = path.join(__dirname, '..');
-const SOURCE = path.join(ROOT_DIR, '.env.local');
+const ENV_LOCAL = path.join(ROOT_DIR, '.env.local');
+const ENV_EXAMPLE = path.join(ROOT_DIR, '.env.example');
 const TARGET = path.join(ROOT_DIR, '.env');
 
 function main() {
-  // Check if source file exists
-  if (!fs.existsSync(SOURCE)) {
-    console.error('Error: .env.local file not found!');
-    console.error('Please create a .env.local file with your configuration.');
+  // Prefer .env.local if it exists; fall back to .env.example
+  let source;
+  let sourceName;
+  if (fs.existsSync(ENV_LOCAL)) {
+    source = ENV_LOCAL;
+    sourceName = '.env.local';
+  } else if (fs.existsSync(ENV_EXAMPLE)) {
+    source = ENV_EXAMPLE;
+    sourceName = '.env.example';
+  } else {
+    console.error('Error: Neither .env.local nor .env.example found!');
+    console.error('Please create a .env.example file with your base configuration.');
     process.exit(1);
   }
 
@@ -29,25 +39,25 @@ function main() {
     console.log('.env file already exists.');
 
     // Compare contents
-    const sourceContent = fs.readFileSync(SOURCE, 'utf8');
+    const sourceContent = fs.readFileSync(source, 'utf8');
     const targetContent = fs.readFileSync(TARGET, 'utf8');
 
     if (sourceContent === targetContent) {
-      console.log('Files are identical. No changes needed.');
+      console.log(`Files are identical (source: ${sourceName}). No changes needed.`);
       return;
     }
 
-    console.log('Overwriting with latest .env.local content...');
+    console.log(`Overwriting with latest ${sourceName} content...`);
   } else {
-    console.log('Creating .env file from .env.local...');
+    console.log(`Creating .env file from ${sourceName}...`);
   }
 
   // Copy the file
   try {
-    fs.copyFileSync(SOURCE, TARGET);
+    fs.copyFileSync(source, TARGET);
     console.log('Done! Environment configured successfully.');
     console.log('');
-    console.log('📝 IMPORTANT: Environment File Priority');
+    console.log('IMPORTANT: Environment File Priority');
     console.log('   Priority Order (highest to lowest):');
     console.log('   1. .env.local (gitignored) - Your local overrides');
     console.log('   2. .env (created by this script) - Base config');

@@ -1158,12 +1158,6 @@ export {
   calculateNetProfit,
   calculateProfitBetweenSources,
 
-  // Fee utilities
-  getDefaultFee,
-  resolveFee,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
-
   // Threshold utilities
   meetsThreshold,
   calculateConfidence,
@@ -1181,6 +1175,14 @@ export {
   // Error class
   PriceCalculationError,
 } from './components/price-calculator';
+
+// Fee utilities - re-exported from canonical source (fee-utils.ts)
+export {
+  getDefaultFeeForDex as getDefaultFee,
+  resolveFeeValue as resolveFee,
+  basisPointsToDecimal,
+  decimalToBasisPoints,
+} from './utils/fee-utils';
 
 export type {
   ReserveInput,

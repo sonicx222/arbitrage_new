@@ -258,6 +258,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
     }
 
+    // TODO: Derive tradeSizeUsd from opportunity.amountIn + token price for better bridge scoring.
+    // Currently uses default ($1000/medium) because amountIn is in wei and requires a price oracle
+    // lookup to convert to USD, which is not available in this execution context.
     const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(sourceChain, destChain, bridgeToken);
 
     if (!bridgeRouter) {
@@ -1555,6 +1558,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       return false;
     }
 
+    // TODO: Pass tradeSizeUsd from recovery state for better bridge scoring.
+    // Recovery context lacks USD-denominated trade size.
     const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(
       state.sourceChain,
       state.destChain,

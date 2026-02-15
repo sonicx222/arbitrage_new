@@ -36,7 +36,8 @@ import {
   StreamBatcher
 } from '../redis-streams';
 import { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '../../../types';
-import { basisPointsToDecimal, meetsThreshold } from '../components/price-calculator';
+import { meetsThreshold } from '../components/price-calculator';
+import { basisPointsToDecimal } from '../utils/fee-utils';
 
 // =============================================================================
 // Constants

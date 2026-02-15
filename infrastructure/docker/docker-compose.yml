@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Redis for message queue and caching
   # Memory limit matches production config (docker-compose.partition.yml)

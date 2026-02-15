@@ -1,17 +1,21 @@
 /**
- * Stargate Bridge Router
+ * Stargate V2 Bridge Router
  *
- * Phase 3: Cross-Chain Execution via Stargate (LayerZero)
+ * Phase 3: Cross-Chain Execution via Stargate V2 (LayerZero V2)
  *
- * Implements cross-chain token transfers using Stargate protocol.
- * Stargate provides:
- * - Instant guaranteed finality
- * - Native asset transfers (not wrapped)
- * - Unified liquidity across chains
+ * Implements cross-chain token transfers using Stargate V2's OFT model.
+ * Key differences from V1:
+ * - Per-token StargatePool contracts (not a single Router)
+ * - quoteSend() / send() ABI (not quoteLayerZeroFee / swap)
+ * - V2 LayerZero endpoint IDs (30xxx series)
+ * - Bus (batched, cheaper) and Taxi (immediate) transfer modes
+ * - Dynamic fees (typically lower than V1's fixed 0.06%)
+ * - No pool IDs needed (addressed by per-token contracts)
  *
  * Supported chains: Ethereum, Arbitrum, Optimism, Base, Polygon, BSC, Avalanche
  *
- * @see https://stargateprotocol.gitbook.io/stargate/
+ * @see https://stargateprotocol.gitbook.io/stargate/v2/
+ * @see shared/config/src/bridge-config.ts for route cost data
  */
 
 import { ethers } from 'ethers';
@@ -25,70 +29,39 @@ import {
   BridgeStatusResult,
   BridgeStatus,
   BRIDGE_DEFAULTS,
-  STARGATE_CHAIN_IDS,
-  STARGATE_POOL_IDS,
-  STARGATE_ROUTER_ADDRESSES,
-  BRIDGE_TIMES,
 } from './types';
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../lifecycle-utils';
 import { AsyncMutex } from '../async/async-mutex';
 
-const logger = createLogger('stargate-router');
+const logger = createLogger('stargate-v2-router');
 
 /** Timeout for on-chain transaction confirmations (2 minutes) */
 const TX_WAIT_TIMEOUT_MS = 120_000;
 
-/** Stargate V1 bridge fee: 0.06% of bridged amount */
-const STARGATE_BRIDGE_FEE_BPS = 6n;
-/** Basis points denominator for fee/slippage calculations */
+/** Basis points denominator for slippage calculations */
 const BPS_DENOMINATOR = 10000n;
 /** Gas estimation buffer: 20% above estimate */
 const GAS_BUFFER_NUMERATOR = 120n;
 const GAS_BUFFER_DENOMINATOR = 100n;
 
 // =============================================================================
-// Token Address Constants (for approval checks)
+// Stargate V2 Pool ABI (OFT standard)
 // =============================================================================
 
 /**
- * Common token addresses per chain for Stargate bridging
+ * Stargate V2 uses per-token pool contracts following the OFT (Omnichain Fungible Token) standard.
+ * Each pool supports quoteSend() for fee estimation and send() for execution.
  */
-const STARGATE_TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
-  USDC: {
-    ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    optimism: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
-    base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    polygon: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-    bsc: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-    avalanche: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
-    fantom: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75',
-  },
-  USDT: {
-    ethereum: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    arbitrum: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
-    optimism: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
-    polygon: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-    bsc: '0x55d398326f99059fF775485246999027B3197955',
-    avalanche: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
-    fantom: '0x049d68029688eAbF473097a2fC38ef61633A3C7A',  // FIX: Added missing Fantom USDT
-  },
-};
+const STARGATE_V2_POOL_ABI = [
+  // quoteSend - fee estimation
+  'function quoteSend(tuple(uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD, bytes extraOptions, bytes composeMsg, bytes oftCmd) _sendParam, bool _payInLzToken) external view returns (tuple(uint256 nativeFee, uint256 lzTokenFee), tuple(uint256 amountSentLD, uint256 amountReceivedLD))',
 
-// =============================================================================
-// Stargate Router ABI (minimal required functions)
-// =============================================================================
-
-const STARGATE_ROUTER_ABI = [
-  // Quote functions
-  'function quoteLayerZeroFee(uint16 _dstChainId, uint8 _functionType, bytes calldata _toAddress, bytes calldata _transferAndCallPayload, tuple(uint256 dstGasForCall, uint256 dstNativeAmount, bytes dstNativeAddr) _lzTxParams) external view returns (uint256, uint256)',
-
-  // Swap function
-  'function swap(uint16 _dstChainId, uint256 _srcPoolId, uint256 _dstPoolId, address payable _refundAddress, uint256 _amountLD, uint256 _minAmountLD, tuple(uint256 dstGasForCall, uint256 dstNativeAmount, bytes dstNativeAddr) _lzTxParams, bytes calldata _to, bytes calldata _payload) external payable',
+  // send - execute bridge transfer
+  'function send(tuple(uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD, bytes extraOptions, bytes composeMsg, bytes oftCmd) _sendParam, tuple(uint256 nativeFee, uint256 lzTokenFee) _fee, address _refundAddress) external payable returns (tuple(bytes32 guid, uint64 nonce, tuple(uint256 nativeFee, uint256 lzTokenFee) fee), tuple(uint256 amountSentLD, uint256 amountReceivedLD))',
 
   // Events
-  'event Swap(uint16 chainId, uint256 dstPoolId, address from, uint256 amountSD, uint256 eqReward, uint256 eqFee, uint256 protocolFee, uint256 lpFee)',
+  'event OFTSent(bytes32 indexed guid, uint32 dstEid, address indexed fromAddress, uint256 amountSentLD, uint256 amountReceivedLD)',
 ];
 
 const ERC20_ABI = [
@@ -98,12 +71,109 @@ const ERC20_ABI = [
 ];
 
 // =============================================================================
-// Stargate Router Implementation
+// Stargate V2 Constants
 // =============================================================================
 
 /**
- * Stargate bridge router for cross-chain token transfers
+ * Stargate V2 pool contract addresses per token per chain.
+ * V2 uses per-token contracts (OFT model) instead of V1's single Router.
+ *
+ * Note: Addresses should be verified against Stargate V2 deployment records.
+ * Consider moving to config-driven approach for easier updates without code changes.
+ *
+ * @see https://stargateprotocol.gitbook.io/stargate/v2/deployments
  */
+export const STARGATE_V2_POOL_ADDRESSES: Record<string, Record<string, string>> = {
+  USDC: {
+    ethereum: '0xc026395860Db2d07ee33e05fE50ed7bD583189C7',
+    arbitrum: '0xe8CDF27AcD73a434D661C84887215F7598e7d0d3',
+    optimism: '0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0',
+    base: '0x27a16dc786820B16E5c9028b75B99F6f604b5d26',
+    polygon: '0x9Aa02D4Fae7F58b8E8f34c66E756cC734DAc7fe4',
+    bsc: '0x962Bd449E630b0d928f308Ce63f1A21F02576057',
+    avalanche: '0x5634c4a5FEd09819E3c46D86A965Dd9447d86e47',
+  },
+  USDT: {
+    ethereum: '0x933597a323Eb81cAe705C5bC29985172fd5A3973',
+    arbitrum: '0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0',
+    optimism: '0x19cFCE47eD54a88614648DC3f19A5980097007dD',
+    polygon: '0xd47b03ee6d86Cf251ee7860FB2ACf9f91B9fD4d7',
+    bsc: '0x138EB30f73BC423c6455C53df6D89CB01898b999',
+    avalanche: '0x12dC9256Acc9895B076f6638D628382881e62CeE',
+  },
+  ETH: {
+    ethereum: '0x77b2043768d28E9C9aB44E1aBfC95944bcE57931',
+    arbitrum: '0xA45B5130f36CDcA45667738e2a258AB09f4A27d7',
+    optimism: '0xe8CDF27AcD73a434D661C84887215F7598e7d0d3',
+    base: '0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C4',
+  },
+};
+
+/**
+ * V2 LayerZero endpoint IDs.
+ * V2 uses 30000 + V1 chain ID pattern.
+ */
+export const STARGATE_V2_ENDPOINT_IDS: Record<string, number> = {
+  ethereum: 30101,
+  bsc: 30102,
+  avalanche: 30106,
+  polygon: 30109,
+  arbitrum: 30110,
+  optimism: 30111,
+  base: 30184,
+};
+
+/**
+ * Token addresses per chain for V2 bridging.
+ * Reuses same ERC20 addresses as V1 (token addresses are protocol-independent).
+ */
+const STARGATE_V2_TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
+  USDC: {
+    ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    optimism: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
+    base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    polygon: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+    bsc: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+    avalanche: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+  },
+  USDT: {
+    ethereum: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    arbitrum: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+    optimism: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
+    polygon: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    bsc: '0x55d398326f99059fF775485246999027B3197955',
+    avalanche: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
+  },
+};
+
+/**
+ * Average bridge times in seconds for Stargate V2 routes.
+ * V2 uses optimized LZ V2 messaging, generally faster than V1.
+ *
+ * @see shared/config/src/bridge-config.ts for consistent latency data
+ */
+export const STARGATE_V2_BRIDGE_TIMES: Record<string, number> = {
+  'ethereum-arbitrum': 120,    // ~2 minutes (LZ V2 optimized)
+  'ethereum-optimism': 120,    // ~2 minutes
+  'ethereum-base': 120,        // ~2 minutes
+  'ethereum-polygon': 120,     // ~2 minutes
+  'ethereum-bsc': 120,         // ~2 minutes
+  'ethereum-avalanche': 120,   // ~2 minutes
+  'arbitrum-ethereum': 120,    // ~2 minutes
+  'arbitrum-optimism': 60,     // ~1 minute (L2-to-L2)
+  'arbitrum-base': 60,         // ~1 minute (L2-to-L2)
+  'optimism-ethereum': 120,    // ~2 minutes
+  'optimism-arbitrum': 60,     // ~1 minute (L2-to-L2)
+  'base-ethereum': 120,        // ~2 minutes
+  'base-arbitrum': 60,         // ~1 minute (L2-to-L2)
+  default: 120,                // 2 minutes default
+};
+
+// =============================================================================
+// Stargate V2 Router Implementation
+// =============================================================================
+
 /**
  * Pending bridge tracking entry
  */
@@ -130,11 +200,21 @@ const MAX_PENDING_BRIDGES = 1000;
  */
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-export class StargateRouter implements IBridgeRouter {
-  readonly protocol: BridgeProtocol = 'stargate';
+/**
+ * Stargate V2 bridge router using OFT (Omnichain Fungible Token) model.
+ *
+ * Key differences from StargateRouter (V1):
+ * - Uses per-token StargatePool contracts instead of a single Router
+ * - Calls quoteSend()/send() instead of quoteLayerZeroFee()/swap()
+ * - Uses V2 LZ endpoint IDs (30xxx) instead of V1 chain IDs (1xx)
+ * - Supports Bus (batched) and Taxi (immediate) transfer modes
+ * - Dynamic fees through OFT model (typically 3-4 bps vs V1's fixed 6 bps)
+ */
+export class StargateV2Router implements IBridgeRouter {
+  readonly protocol: BridgeProtocol = 'stargate-v2';
 
   readonly supportedSourceChains = [
-    'ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche', 'fantom'
+    'ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche'
   ];
 
   readonly supportedDestChains = this.supportedSourceChains;
@@ -143,24 +223,15 @@ export class StargateRouter implements IBridgeRouter {
   private pendingBridges: Map<string, PendingBridge> = new Map();
   private approvalMutexes: Map<string, AsyncMutex> = new Map();
 
-  // RACE-CONDITION-FIX: Mutex for thread-safe pendingBridges access
+  // Mutex for thread-safe pendingBridges access
   private readonly bridgesMutex = new AsyncMutex();
 
   // Auto-cleanup timer
   private cleanupTimer: NodeJS.Timeout | null = null;
 
-  // Optional callback for pool liquidity alerts
-  private onPoolAlert?: (alert: import('./types').PoolLiquidityAlert) => void;
-
-  constructor(
-    providers?: Map<string, ethers.Provider>,
-    options?: { onPoolAlert?: (alert: import('./types').PoolLiquidityAlert) => void }
-  ) {
+  constructor(providers?: Map<string, ethers.Provider>) {
     if (providers) {
       this.providers = providers;
-    }
-    if (options?.onPoolAlert) {
-      this.onPoolAlert = options.onPoolAlert;
     }
 
     // Start periodic cleanup to prevent memory leaks
@@ -230,10 +301,34 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Get quote for Stargate bridge
+   * Encode a recipient address to bytes32 (left-padded with zeros).
+   * Required by the OFT SendParam struct.
+   */
+  private addressToBytes32(address: string): string {
+    return ethers.zeroPadValue(address, 32);
+  }
+
+  /**
+   * Get the OFT command bytes for transfer mode selection.
+   * - Taxi (immediate): 0x01 - sends via dedicated LZ message
+   * - Bus (batched): 0x - batched for cost efficiency, adds latency
+   */
+  private getOftCmd(mode: 'bus' | 'taxi'): string {
+    return mode === 'taxi' ? '0x01' : '0x';
+  }
+
+  /**
+   * Get quote for Stargate V2 bridge via quoteSend().
+   *
+   * Calls the per-token pool contract's quoteSend() to get accurate V2 fees.
+   * Uses the OFT model where protocol fees are deducted from the transfer amount.
    */
   async quote(request: BridgeQuoteRequest): Promise<BridgeQuote> {
-    const { sourceChain, destChain, token, amount, slippage = BRIDGE_DEFAULTS.slippage } = request;
+    const {
+      sourceChain, destChain, token, amount,
+      slippage = BRIDGE_DEFAULTS.slippage,
+      transferMode = 'taxi',
+    } = request;
 
     // Validate route
     if (!this.isRouteSupported(sourceChain, destChain, token)) {
@@ -248,44 +343,45 @@ export class StargateRouter implements IBridgeRouter {
     }
 
     try {
-      const routerAddress = STARGATE_ROUTER_ADDRESSES[sourceChain];
-      const router = new ethers.Contract(routerAddress, STARGATE_ROUTER_ABI, provider);
+      const poolAddress = STARGATE_V2_POOL_ADDRESSES[token]?.[sourceChain];
+      const pool = new ethers.Contract(poolAddress, STARGATE_V2_POOL_ABI, provider);
 
-      const dstChainId = STARGATE_CHAIN_IDS[destChain];
-      const recipient = request.recipient || ethers.ZeroAddress;
+      const dstEid = STARGATE_V2_ENDPOINT_IDS[destChain];
+      const recipientAddress = request.recipient || ethers.ZeroAddress;
+      const amountBigInt = BigInt(amount);
 
-      // Quote LayerZero fee
-      const lzTxParams = {
-        dstGasForCall: 0n,
-        dstNativeAmount: 0n,
-        dstNativeAddr: '0x',
+      // Build SendParam struct
+      const sendParam = {
+        dstEid,
+        to: this.addressToBytes32(recipientAddress),
+        amountLD: amountBigInt,
+        minAmountLD: 0n, // Will be set after getting quote
+        extraOptions: '0x',
+        composeMsg: '0x',
+        oftCmd: this.getOftCmd(transferMode),
       };
 
-      const [nativeFee] = await router.quoteLayerZeroFee(
-        dstChainId,
-        1, // TYPE_SWAP_REMOTE
-        ethers.solidityPacked(['address'], [recipient]),
-        '0x',
-        lzTxParams
-      );
+      // Call quoteSend to get fees and expected output
+      const [messagingFee, oftReceipt] = await pool.quoteSend(sendParam, false);
 
-      // Calculate fees (Stargate typically charges 0.06% + gas)
-      const amountBigInt = BigInt(amount);
-      const bridgeFee = amountBigInt * STARGATE_BRIDGE_FEE_BPS / BPS_DENOMINATOR;
+      const nativeFee: bigint = messagingFee.nativeFee;
+      const amountSentLD: bigint = oftReceipt.amountSentLD;
+      const amountReceivedLD: bigint = oftReceipt.amountReceivedLD;
+
+      // bridgeFee = protocol fee deducted by OFT model
+      const bridgeFee = amountSentLD - amountReceivedLD;
+      // gasFee = LZ V2 messaging fee (paid in native token)
       const gasFee = nativeFee;
-      // totalFee represents native gas cost only (bridgeFee is already deducted from amountOut).
-      // bridgeFee is denominated in the bridged token (e.g., USDC 6 decimals) while gasFee
-      // is in native token wei (18 decimals). Summing them produces a meaningless value.
+      // totalFee = native gas cost only (bridgeFee is already deducted from amountOut)
       const totalFee = gasFee;
 
-      // Calculate output with slippage
-      const amountAfterFee = amountBigInt - bridgeFee;
-      const minAmountOut = amountAfterFee * BigInt(Math.floor((1 - slippage) * Number(BPS_DENOMINATOR))) / BPS_DENOMINATOR;
+      // Apply slippage to received amount
+      const minAmountOut = amountReceivedLD * BigInt(Math.floor((1 - slippage) * Number(BPS_DENOMINATOR))) / BPS_DENOMINATOR;
 
       const estimatedTime = this.getEstimatedTime(sourceChain, destChain);
 
       return {
-        protocol: 'stargate',
+        protocol: 'stargate-v2',
         sourceChain,
         destChain,
         token,
@@ -300,7 +396,7 @@ export class StargateRouter implements IBridgeRouter {
         recipient: request.recipient || undefined,
       };
     } catch (error) {
-      logger.error('Failed to get Stargate quote', {
+      logger.error('Failed to get Stargate V2 quote', {
         sourceChain,
         destChain,
         token,
@@ -313,52 +409,31 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Execute Stargate bridge transaction
+   * Execute Stargate V2 bridge transaction via pool.send().
    *
-   * BUG-FIX: Added ERC20 approval check before swap
-   * RACE-CONDITION-FIX: Added mutex-protected pendingBridges storage
+   * For ETH bridging, sends native ETH as msg.value (pool wraps internally).
+   * For ERC20 tokens, requires approval to the pool contract first.
    */
   async execute(request: BridgeExecuteRequest): Promise<BridgeExecuteResult> {
     const { quote, wallet, nonce } = request;
 
     if (!quote.valid) {
-      return {
-        success: false,
-        error: 'Invalid quote',
-      };
+      return { success: false, error: 'Invalid quote' };
     }
 
-    // Check quote expiry
     if (Date.now() > quote.expiresAt) {
-      return {
-        success: false,
-        error: 'Quote expired',
-      };
+      return { success: false, error: 'Quote expired' };
     }
 
-    const routerAddress = STARGATE_ROUTER_ADDRESSES[quote.sourceChain];
-    if (!routerAddress) {
-      return {
-        success: false,
-        error: `No router address for chain: ${quote.sourceChain}`,
-      };
+    const poolAddress = STARGATE_V2_POOL_ADDRESSES[quote.token]?.[quote.sourceChain];
+    if (!poolAddress) {
+      return { success: false, error: `No V2 pool address for ${quote.token} on ${quote.sourceChain}` };
     }
 
     try {
-      const router = new ethers.Contract(routerAddress, STARGATE_ROUTER_ABI, wallet);
+      const pool = new ethers.Contract(poolAddress, STARGATE_V2_POOL_ABI, wallet);
 
-      // Get pool IDs
-      const srcPoolId = STARGATE_POOL_IDS[quote.token]?.[quote.sourceChain];
-      const dstPoolId = STARGATE_POOL_IDS[quote.token]?.[quote.destChain];
-
-      if (!srcPoolId || !dstPoolId) {
-        return {
-          success: false,
-          error: `Pool ID not found for ${quote.token} on ${quote.sourceChain} or ${quote.destChain}`,
-        };
-      }
-
-      // Pre-flight balance check to fail fast instead of wasting gas
+      // Pre-flight balance check to fail fast
       const provider = request.provider;
       if (quote.token === 'ETH') {
         const balance = await provider.getBalance(wallet.address);
@@ -367,99 +442,92 @@ export class StargateRouter implements IBridgeRouter {
           return { success: false, error: `Insufficient ETH balance: have ${balance}, need ${required}` };
         }
       } else {
-        const tokenAddress = STARGATE_TOKEN_ADDRESSES[quote.token]?.[quote.sourceChain];
+        const tokenAddress = STARGATE_V2_TOKEN_ADDRESSES[quote.token]?.[quote.sourceChain];
         if (tokenAddress) {
           const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
           const tokenBalance = await tokenContract.balanceOf(wallet.address);
           if (BigInt(tokenBalance) < BigInt(quote.amountIn)) {
             return { success: false, error: `Insufficient ${quote.token} balance` };
           }
-          // Also check native balance for gas fee
+          // Also check native balance for LZ messaging fee
           const nativeBalance = await provider.getBalance(wallet.address);
           if (nativeBalance < BigInt(quote.gasFee)) {
-            return { success: false, error: 'Insufficient native balance for gas fee' };
+            return { success: false, error: 'Insufficient native balance for LZ fee' };
           }
         }
       }
 
-      // BUG-FIX: Check and request ERC20 approval if needed
-      // (ETH doesn't need approval, only ERC20 tokens)
+      // ERC20 approval to pool contract (skip for ETH)
       if (quote.token !== 'ETH') {
-        const tokenAddress = STARGATE_TOKEN_ADDRESSES[quote.token]?.[quote.sourceChain];
+        const tokenAddress = STARGATE_V2_TOKEN_ADDRESSES[quote.token]?.[quote.sourceChain];
         if (!tokenAddress) {
           return {
             success: false,
             error: `Token address not configured for ${quote.token} on ${quote.sourceChain}`,
           };
         }
-        // Per-token mutex prevents concurrent approval races on the same token
         const approvalMutex = this.getApprovalMutex(tokenAddress);
         const approved = await approvalMutex.runExclusive(async () => {
           return this.ensureApproval(
             wallet,
             tokenAddress,
-            routerAddress,
+            poolAddress,
             BigInt(quote.amountIn)
           );
         });
         if (!approved) {
           return {
             success: false,
-            error: `Failed to approve ${quote.token} for Stargate router`,
+            error: `Failed to approve ${quote.token} for Stargate V2 pool`,
           };
         }
       }
 
-      const dstChainId = STARGATE_CHAIN_IDS[quote.destChain];
-      // Use quote recipient if specified, otherwise sender
+      // Build SendParam for send()
+      const dstEid = STARGATE_V2_ENDPOINT_IDS[quote.destChain];
       const recipientAddress = quote.recipient || wallet.address;
-      const recipient = ethers.solidityPacked(['address'], [recipientAddress]);
 
-      // LZ transaction params
-      const lzTxParams = {
-        dstGasForCall: 0n,
-        dstNativeAmount: 0n,
-        dstNativeAddr: '0x',
+      const sendParam = {
+        dstEid,
+        to: this.addressToBytes32(recipientAddress),
+        amountLD: BigInt(quote.amountIn),
+        minAmountLD: BigInt(quote.amountOut),
+        extraOptions: '0x',
+        composeMsg: '0x',
+        oftCmd: this.getOftCmd('taxi'), // Default to taxi for execution
       };
 
-      // Calculate minimum amount with slippage
-      const minAmountLD = BigInt(quote.amountOut);
+      const messagingFee = {
+        nativeFee: BigInt(quote.gasFee),
+        lzTokenFee: 0n,
+      };
 
-      // Build transaction
-      const txData = router.interface.encodeFunctionData('swap', [
-        dstChainId,
-        srcPoolId,
-        dstPoolId,
+      // Encode the send() call
+      const txData = pool.interface.encodeFunctionData('send', [
+        sendParam,
+        messagingFee,
         wallet.address, // refund address
-        BigInt(quote.amountIn),
-        minAmountLD,
-        lzTxParams,
-        recipient,
-        '0x', // no payload
       ]);
 
-      // Prepare transaction with proper gas
-      // ETH bridging requires msg.value = amountIn + LZ fee (bridge amount + relayer cost)
-      // ERC20 bridging requires msg.value = LZ fee only (tokens transferred via approval)
+      // ETH bridging: msg.value = amountIn + LZ fee (pool wraps ETH)
+      // ERC20: msg.value = LZ fee only (tokens transferred via approval)
       const tx: ethers.TransactionRequest = {
-        to: routerAddress,
+        to: poolAddress,
         data: txData,
         value: quote.token === 'ETH'
-          ? BigInt(quote.amountIn) + BigInt(quote.gasFee)  // ETH: bridge amount + LZ fee
-          : BigInt(quote.gasFee),                           // ERC20: LZ fee only
+          ? BigInt(quote.amountIn) + BigInt(quote.gasFee)
+          : BigInt(quote.gasFee),
       };
 
-      // Set nonce if provided (from NonceManager)
       if (nonce !== undefined) {
         tx.nonce = nonce;
       }
 
-      // Estimate gas
+      // Estimate gas with buffer
       const gasEstimate = await wallet.estimateGas(tx);
-      tx.gasLimit = gasEstimate * GAS_BUFFER_NUMERATOR / GAS_BUFFER_DENOMINATOR; // 20% buffer
+      tx.gasLimit = gasEstimate * GAS_BUFFER_NUMERATOR / GAS_BUFFER_DENOMINATOR;
 
-      // Send transaction
-      logger.info('Executing Stargate bridge', {
+      logger.info('Executing Stargate V2 bridge', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
         token: quote.token,
@@ -474,20 +542,16 @@ export class StargateRouter implements IBridgeRouter {
       );
 
       if (!receipt) {
-        return {
-          success: false,
-          error: 'Transaction receipt not received',
-        };
+        return { success: false, error: 'Transaction receipt not received' };
       }
 
       // Generate bridge ID for tracking
-      const bridgeId = `stargate-${receipt.hash}`;
+      const bridgeId = `stargate-v2-${receipt.hash}`;
 
-      // RACE-CONDITION-FIX: Store pending bridge with mutex protection
+      // Store pending bridge with mutex protection
       await this.bridgesMutex.runExclusive(async () => {
         // Enforce max pending bridges to prevent memory leak
         if (this.pendingBridges.size >= MAX_PENDING_BRIDGES) {
-          // Remove oldest entry
           const oldestKey = this.pendingBridges.keys().next().value;
           if (oldestKey) {
             this.pendingBridges.delete(oldestKey);
@@ -503,7 +567,7 @@ export class StargateRouter implements IBridgeRouter {
         });
       });
 
-      logger.info('Stargate bridge initiated', {
+      logger.info('Stargate V2 bridge initiated', {
         bridgeId,
         sourceTxHash: receipt.hash,
         sourceChain: quote.sourceChain,
@@ -517,7 +581,7 @@ export class StargateRouter implements IBridgeRouter {
         gasUsed: receipt.gasUsed,
       };
     } catch (error) {
-      logger.error('Stargate bridge execution failed', {
+      logger.error('Stargate V2 bridge execution failed', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
         error: error instanceof Error ? error.message : String(error),
@@ -531,12 +595,8 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Get status of a bridge operation
-   *
-   * Note: Full status tracking would require LayerZero message tracking API.
-   * This implementation uses heuristics based on time and destination chain monitoring.
-   *
-   * RACE-CONDITION-FIX: Uses mutex for thread-safe access
+   * Get status of a bridge operation.
+   * Uses mutex for thread-safe access.
    */
   async getStatus(bridgeId: string): Promise<BridgeStatusResult> {
     return this.bridgesMutex.runExclusive(async () => {
@@ -551,7 +611,6 @@ export class StargateRouter implements IBridgeRouter {
         };
       }
 
-      // Check if enough time has passed for completion
       const elapsedMs = Date.now() - pending.startTime;
       const estimatedTimeMs = this.getEstimatedTime(pending.sourceChain, pending.destChain) * 1000;
 
@@ -566,7 +625,7 @@ export class StargateRouter implements IBridgeRouter {
         };
       }
 
-      // Still bridging - check if timeout
+      // Check if timeout
       if (elapsedMs > BRIDGE_DEFAULTS.maxBridgeWaitMs) {
         pending.status = 'failed';
         pending.error = 'Bridge timeout';
@@ -576,11 +635,10 @@ export class StargateRouter implements IBridgeRouter {
           status: 'failed' as BridgeStatus,
           sourceTxHash: pending.sourceTxHash,
           lastUpdated: Date.now(),
-          error: 'Bridge timeout - transaction may still complete',
+          error: 'Bridge timeout - LZ V2 message may still be delivered',
         };
       }
 
-      // Estimate completion
       const estimatedCompletion = pending.startTime + estimatedTimeMs;
 
       return {
@@ -593,11 +651,8 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Mark a bridge as completed (called externally when destination tx is detected)
-   *
-   * RACE-CONDITION-FIX: Uses mutex for thread-safe access
-   * STATE-TRANSITION-FIX: Only transitions from 'bridging' to 'completed'
-   * to prevent race condition where a timed-out bridge gets marked completed
+   * Mark a bridge as completed.
+   * Only transitions from 'bridging' to 'completed', with timeout recovery.
    */
   async markCompleted(bridgeId: string, destTxHash: string, amountReceived: string): Promise<void> {
     await this.bridgesMutex.runExclusive(async () => {
@@ -607,9 +662,6 @@ export class StargateRouter implements IBridgeRouter {
         return;
       }
 
-      // Only allow transition from 'bridging' to 'completed', with one exception:
-      // timeout-failed bridges can be recovered when the bridge actually completes
-      // after the timeout (funds arrive late but still arrive).
       if (pending.status !== 'bridging') {
         if (pending.status === 'failed' && pending.failReason === 'timeout') {
           logger.info('Recovering timeout-failed bridge', { bridgeId });
@@ -628,19 +680,13 @@ export class StargateRouter implements IBridgeRouter {
       pending.destTxHash = destTxHash;
       pending.amountReceived = amountReceived;
 
-      logger.info('Bridge completed', {
-        bridgeId,
-        destTxHash,
-        amountReceived,
-      });
+      logger.info('Bridge completed', { bridgeId, destTxHash, amountReceived });
     });
   }
 
   /**
-   * Mark a bridge as failed
-   *
-   * RACE-CONDITION-FIX: Uses mutex for thread-safe access
-   * STATE-TRANSITION-FIX: Only transitions from 'bridging' to 'failed'
+   * Mark a bridge as failed.
+   * Only transitions from 'bridging' to 'failed'.
    */
   async markFailed(bridgeId: string, error: string): Promise<void> {
     await this.bridgesMutex.runExclusive(async () => {
@@ -650,8 +696,6 @@ export class StargateRouter implements IBridgeRouter {
         return;
       }
 
-      // FIX: Only allow transition from 'bridging' to 'failed'
-      // Cannot fail a completed bridge or re-fail an already failed bridge
       if (pending.status !== 'bridging') {
         logger.warn('Cannot mark failed: invalid state transition', {
           bridgeId,
@@ -665,10 +709,7 @@ export class StargateRouter implements IBridgeRouter {
       pending.error = error;
       pending.failReason = 'execution_error';
 
-      logger.warn('Bridge failed', {
-        bridgeId,
-        error,
-      });
+      logger.warn('Bridge failed', { bridgeId, error });
     });
   }
 
@@ -678,7 +719,6 @@ export class StargateRouter implements IBridgeRouter {
 
   /**
    * Create an invalid quote response for error cases.
-   * Reduces duplication across validation/error paths in quote().
    */
   private createInvalidQuote(
     sourceChain: string, destChain: string, token: string, amount: string, error: string
@@ -701,9 +741,8 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Ensure ERC20 token approval for Stargate router
-   *
-   * BUG-FIX: Checks current allowance and only approves if needed
+   * Ensure ERC20 token approval for Stargate V2 pool.
+   * Uses forceApprove pattern for USDT compatibility.
    */
   private async ensureApproval(
     wallet: ethers.Wallet,
@@ -713,8 +752,6 @@ export class StargateRouter implements IBridgeRouter {
   ): Promise<boolean> {
     try {
       const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
-
-      // Check current allowance
       const currentAllowance = await token.allowance(wallet.address, spenderAddress);
 
       if (currentAllowance >= amount) {
@@ -727,9 +764,8 @@ export class StargateRouter implements IBridgeRouter {
         return true;
       }
 
-      // USDT forceApprove pattern: USDT reverts on non-zero to non-zero allowance changes.
-      // Reset to 0 first if current allowance is non-zero, then approve exact amount needed.
-      logger.info('Approving token for Stargate router', {
+      // USDT forceApprove pattern: reset to 0 first if non-zero
+      logger.info('Approving token for Stargate V2 pool', {
         token: tokenAddress,
         spender: spenderAddress,
         currentAllowance: currentAllowance.toString(),
@@ -743,7 +779,6 @@ export class StargateRouter implements IBridgeRouter {
         );
       }
 
-      // Approve exact amount needed (not MaxUint256) for better security
       const approveTx = await token.approve(spenderAddress, amount);
       const receipt = await this.waitWithTimeout(
         approveTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval confirmation'
@@ -770,22 +805,21 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Check if a route is supported
+   * Check if a route is supported.
+   * Validates chain support and V2 pool availability on both chains.
    */
   isRouteSupported(sourceChain: string, destChain: string, token: string): boolean {
-    // Same chain not supported
     if (sourceChain === destChain) {
       return false;
     }
 
-    // Check chains are supported
     if (!this.supportedSourceChains.includes(sourceChain) ||
         !this.supportedDestChains.includes(destChain)) {
       return false;
     }
 
-    // Check token has pool IDs on both chains
-    const tokenPools = STARGATE_POOL_IDS[token];
+    // Check token has V2 pool contracts on both chains
+    const tokenPools = STARGATE_V2_POOL_ADDRESSES[token];
     if (!tokenPools) {
       return false;
     }
@@ -798,51 +832,36 @@ export class StargateRouter implements IBridgeRouter {
    */
   getEstimatedTime(sourceChain: string, destChain: string): number {
     const routeKey = `${sourceChain}-${destChain}`;
-    return BRIDGE_TIMES[routeKey] ?? BRIDGE_TIMES.default;
+    return STARGATE_V2_BRIDGE_TIMES[routeKey] ?? STARGATE_V2_BRIDGE_TIMES.default;
   }
 
   /**
-   * Health check for Stargate.
-   * Validates provider connectivity and optionally checks V1 pool liquidity.
+   * Health check for Stargate V2.
+   * Validates provider connectivity.
    */
   async healthCheck(): Promise<{ healthy: boolean; message: string }> {
-    // Check if we have at least one provider
     if (this.providers.size === 0) {
-      return {
-        healthy: false,
-        message: 'No providers registered',
-      };
+      return { healthy: false, message: 'No providers registered' };
     }
 
     try {
       const testChain = this.supportedSourceChains.find(c => this.providers.has(c));
       if (!testChain) {
-        return {
-          healthy: false,
-          message: 'No providers available for supported chains',
-        };
+        return { healthy: false, message: 'No providers available for supported chains' };
       }
 
-      // Find another chain to test with
       const destChain = this.supportedDestChains.find(c => c !== testChain);
       if (!destChain) {
-        return {
-          healthy: true,
-          message: 'Stargate router operational (single chain only)',
-        };
+        return { healthy: true, message: 'Stargate V2 router operational (single chain only)' };
       }
 
       const provider = this.providers.get(testChain)!;
       await provider.getBlockNumber();
 
-      // Non-critical: Check V1 pool liquidity on one chain
-      const liquidityInfo = await this.checkPoolLiquidity(testChain);
-
-      const message = liquidityInfo
-        ? `Stargate router operational. ${this.providers.size} chains connected. ${liquidityInfo}`
-        : `Stargate router operational. ${this.providers.size} chains connected.`;
-
-      return { healthy: true, message };
+      return {
+        healthy: true,
+        message: `Stargate V2 router operational. ${this.providers.size} chains connected.`,
+      };
     } catch (error) {
       return {
         healthy: false,
@@ -852,77 +871,7 @@ export class StargateRouter implements IBridgeRouter {
   }
 
   /**
-   * Check V1 pool liquidity by querying USDC balance held by the router contract.
-   * Non-critical: returns info string on success, null on failure.
-   * Used as a degradation signal — declining balance indicates LP migration to V2.
-   */
-  private async checkPoolLiquidity(chain: string): Promise<string | null> {
-    try {
-      const provider = this.providers.get(chain);
-      const routerAddress = STARGATE_ROUTER_ADDRESSES[chain];
-      const usdcAddress = STARGATE_TOKEN_ADDRESSES.USDC?.[chain];
-
-      if (!provider || !routerAddress || !usdcAddress) {
-        return null;
-      }
-
-      const tokenContract = new ethers.Contract(usdcAddress, ERC20_ABI, provider);
-      const balance: bigint = await tokenContract.balanceOf(routerAddress);
-
-      // USDC has 6 decimals
-      const balanceUsd = Number(balance) / 1e6;
-
-      const WARNING_THRESHOLD = 10_000;
-      const CRITICAL_THRESHOLD = 1_000;
-
-      if (balanceUsd < WARNING_THRESHOLD) {
-        const severity = balanceUsd < CRITICAL_THRESHOLD ? 'critical' : 'warning';
-
-        logger.warn('Low V1 pool liquidity detected', {
-          chain,
-          token: 'USDC',
-          balanceUsd: Math.floor(balanceUsd),
-          severity,
-        });
-
-        // Invoke alert callback if configured (fire-and-forget, non-blocking)
-        if (this.onPoolAlert) {
-          try {
-            this.onPoolAlert({
-              protocol: 'stargate',
-              chain,
-              token: 'USDC',
-              balanceUsd: Math.floor(balanceUsd),
-              threshold: severity === 'critical' ? CRITICAL_THRESHOLD : WARNING_THRESHOLD,
-              severity,
-              timestamp: Date.now(),
-            });
-          } catch (callbackError) {
-            logger.debug('Pool alert callback error (non-critical)', {
-              error: callbackError instanceof Error ? callbackError.message : String(callbackError),
-            });
-          }
-        }
-
-        const label = severity === 'critical' ? 'CRITICAL' : 'LOW';
-        return `V1 USDC pool on ${chain}: $${Math.floor(balanceUsd).toLocaleString()} (${label})`;
-      }
-
-      return `V1 USDC pool on ${chain}: $${Math.floor(balanceUsd).toLocaleString()}`;
-    } catch (error) {
-      // Non-critical — don't fail health check if liquidity query fails
-      logger.debug('Pool liquidity check failed (non-critical)', {
-        chain,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Cleanup old pending bridges
-   *
-   * RACE-CONDITION-FIX: Now async with mutex protection
+   * Cleanup old pending bridges.
    */
   async cleanup(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<void> {
     await this.bridgesMutex.runExclusive(async () => {
@@ -951,11 +900,10 @@ export class StargateRouter implements IBridgeRouter {
 // =============================================================================
 
 /**
- * Create a Stargate router instance
+ * Create a Stargate V2 router instance
  */
-export function createStargateRouter(
-  providers?: Map<string, ethers.Provider>,
-  options?: { onPoolAlert?: (alert: import('./types').PoolLiquidityAlert) => void }
-): StargateRouter {
-  return new StargateRouter(providers, options);
+export function createStargateV2Router(
+  providers?: Map<string, ethers.Provider>
+): StargateV2Router {
+  return new StargateV2Router(providers);
 }

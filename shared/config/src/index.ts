@@ -286,6 +286,7 @@ export {
 export {
   BRIDGE_COSTS,
   BridgeCostConfig,
+  BridgeProtocolName,
   getBridgeCost,
   getAllBridgeOptions,
   calculateBridgeCostUsd,

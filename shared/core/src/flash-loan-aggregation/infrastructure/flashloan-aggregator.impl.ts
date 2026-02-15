@@ -22,7 +22,7 @@ import type {
 } from '../domain';
 import { ProviderSelection as ProviderSelectionImpl, ProviderScore } from '../domain';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { FlashLoanProtocol } from '../../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
+import type { FlashLoanProtocol } from '../domain/models';
 
 /**
  * Cached ranking entry

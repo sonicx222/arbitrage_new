@@ -48,6 +48,7 @@ export type {
 // Value Objects (Immutable Domain Concepts)
 // =============================================================================
 
+export type { FlashLoanProtocol } from './models';
 export {
   ProviderScore,
   LiquidityCheck,

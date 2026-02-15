@@ -8,6 +8,8 @@
  * Components:
  * - PriceCalculator: Pure functions for price/profit calculations
  * - PairRepository: In-memory pair storage with O(1) lookups
+ * - ArbitrageDetector: Pure detection logic for arbitrage opportunities
+ * - TokenUtils: Address normalization and token handling utilities
  *
  * @see .claude/plans/detection-refactoring-plan.md
  * @see .claude/plans/component-architecture-proposal.md
@@ -28,12 +30,6 @@ export {
   calculateSpreadSafe,
   calculateNetProfit,
   calculateProfitBetweenSources,
-
-  // Fee utilities
-  getDefaultFee,
-  resolveFee,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
 
   // Threshold utilities
   meetsThreshold,
@@ -145,3 +141,11 @@ export {
   addressInSet,
   intersectAddresses,
 } from './token-utils';
+
+// Fee utilities - re-exported from canonical source (fee-utils.ts)
+export {
+  getDefaultFeeForDex as getDefaultFee,
+  resolveFeeValue as resolveFee,
+  basisPointsToDecimal,
+  decimalToBasisPoints,
+} from '../utils/fee-utils';

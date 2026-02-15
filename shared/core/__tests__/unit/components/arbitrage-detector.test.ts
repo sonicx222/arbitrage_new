@@ -174,8 +174,35 @@ describe('ArbitrageDetector', () => {
 
       expect(result1.opportunity?.id).toBeDefined();
       expect(result2.opportunity?.id).toBeDefined();
-      // IDs should be unique even for same input (due to random suffix)
+      // IDs should be unique even for same input (due to counter suffix)
       expect(result1.opportunity?.id).not.toBe(result2.opportunity?.id);
+    });
+
+    it('should generate monotonically increasing counter in IDs (Fix #19)', () => {
+      // Fix #19: Counter-based ID generation replaces random suffix
+      const timestamp = 1700000000000;
+      const input1 = createDetectionInput(
+        { targetPrice: 2000 },
+        { targetPrice: 2100 },
+        { timestamp }
+      );
+      const input2 = createDetectionInput(
+        { targetPrice: 2000 },
+        { targetPrice: 2100 },
+        { timestamp }
+      );
+
+      const result1 = detectArbitrage(input1);
+      const result2 = detectArbitrage(input2);
+
+      // Extract counter suffix (last segment after the timestamp)
+      const id1Parts = result1.opportunity!.id.split('-');
+      const id2Parts = result2.opportunity!.id.split('-');
+      const counter1 = parseInt(id1Parts[id1Parts.length - 1], 10);
+      const counter2 = parseInt(id2Parts[id2Parts.length - 1], 10);
+
+      // Counter should be monotonically increasing
+      expect(counter2).toBeGreaterThan(counter1);
     });
 
     it('should handle invalid pair snapshots (zero reserves)', () => {

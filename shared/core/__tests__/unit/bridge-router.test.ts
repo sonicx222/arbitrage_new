@@ -30,6 +30,12 @@ jest.mock('../../src/logger', () => ({
   }),
 }));
 
+// Mock bridge-config selectOptimalBridge for findSupportedRouter scoring tests
+const mockSelectOptimalBridge = jest.fn();
+jest.mock('@arbitrage/config', () => ({
+  selectOptimalBridge: (...args: unknown[]) => mockSelectOptimalBridge(...args),
+}));
+
 // Import after mocking
 import {
   StargateRouter,
@@ -40,6 +46,9 @@ import {
   BRIDGE_TIMES,
   BRIDGE_DEFAULTS,
   BridgeQuote,
+  BridgeRouterFactory,
+  PoolLiquidityAlert,
+  BridgeHealthMetrics,
 } from '../../src/bridge-router';
 
 // =============================================================================
@@ -1117,5 +1126,595 @@ describe('Bridge Router Constants', () => {
       expect(BRIDGE_DEFAULTS.quoteValidityMs).toBe(5 * 60 * 1000); // 5 minutes
       expect(BRIDGE_DEFAULTS.maxBridgeWaitMs).toBe(15 * 60 * 1000); // 15 minutes
     });
+  });
+});
+
+// =============================================================================
+// Phase 4: Execution Metrics Tests
+// =============================================================================
+
+describe('BridgeRouterFactory - Execution Metrics', () => {
+  let factory: BridgeRouterFactory;
+  const mockProviders = new Map<string, any>([
+    ['ethereum', createMockProvider()],
+    ['arbitrum', createMockProvider()],
+  ]);
+
+  beforeEach(() => {
+    factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+    });
+  });
+
+  afterEach(() => {
+    factory.dispose();
+  });
+
+  it('should start with empty execution metrics', () => {
+    const metrics = factory.getExecutionMetrics();
+    expect(metrics.size).toBe(0);
+  });
+
+  it('should record quote success', () => {
+    factory.recordExecution('stargate', 'quote', true, 50);
+
+    const metrics = factory.getExecutionMetrics().get('stargate');
+    expect(metrics).toBeDefined();
+    expect(metrics!.quoteAttempts).toBe(1);
+    expect(metrics!.quoteSuccesses).toBe(1);
+    expect(metrics!.quoteFailures).toBe(0);
+  });
+
+  it('should record quote failure', () => {
+    factory.recordExecution('stargate', 'quote', false, 10);
+
+    const metrics = factory.getExecutionMetrics().get('stargate');
+    expect(metrics!.quoteAttempts).toBe(1);
+    expect(metrics!.quoteSuccesses).toBe(0);
+    expect(metrics!.quoteFailures).toBe(1);
+  });
+
+  it('should record execution success with latency', () => {
+    factory.recordExecution('across', 'execute', true, 150);
+
+    const metrics = factory.getExecutionMetrics().get('across');
+    expect(metrics).toBeDefined();
+    expect(metrics!.executeAttempts).toBe(1);
+    expect(metrics!.executeSuccesses).toBe(1);
+    expect(metrics!.executeFailures).toBe(0);
+    expect(metrics!.totalLatencyMs).toBe(150);
+  });
+
+  it('should record execution failure', () => {
+    factory.recordExecution('across', 'execute', false, 200);
+
+    const metrics = factory.getExecutionMetrics().get('across');
+    expect(metrics!.executeAttempts).toBe(1);
+    expect(metrics!.executeSuccesses).toBe(0);
+    expect(metrics!.executeFailures).toBe(1);
+    expect(metrics!.totalLatencyMs).toBe(200);
+  });
+
+  it('should track metrics per protocol independently', () => {
+    factory.recordExecution('stargate', 'quote', true, 30);
+    factory.recordExecution('across', 'quote', false, 20);
+    factory.recordExecution('stargate', 'execute', true, 100);
+
+    const stargateMetrics = factory.getExecutionMetrics().get('stargate');
+    const acrossMetrics = factory.getExecutionMetrics().get('across');
+
+    expect(stargateMetrics!.quoteSuccesses).toBe(1);
+    expect(stargateMetrics!.executeSuccesses).toBe(1);
+    expect(stargateMetrics!.totalLatencyMs).toBe(130);
+
+    expect(acrossMetrics!.quoteFailures).toBe(1);
+    expect(acrossMetrics!.executeAttempts).toBe(0);
+    expect(acrossMetrics!.totalLatencyMs).toBe(20);
+  });
+
+  it('should accumulate multiple operations', () => {
+    factory.recordExecution('stargate', 'quote', true, 10);
+    factory.recordExecution('stargate', 'quote', true, 20);
+    factory.recordExecution('stargate', 'quote', false, 5);
+    factory.recordExecution('stargate', 'execute', true, 100);
+    factory.recordExecution('stargate', 'execute', false, 200);
+
+    const metrics = factory.getExecutionMetrics().get('stargate')!;
+    expect(metrics.quoteAttempts).toBe(3);
+    expect(metrics.quoteSuccesses).toBe(2);
+    expect(metrics.quoteFailures).toBe(1);
+    expect(metrics.executeAttempts).toBe(2);
+    expect(metrics.executeSuccesses).toBe(1);
+    expect(metrics.executeFailures).toBe(1);
+    expect(metrics.totalLatencyMs).toBe(335);
+    expect(metrics.lastExecutionTime).toBeGreaterThan(0);
+  });
+
+  it('should set lastExecutionTime on each record', () => {
+    const before = Date.now();
+    factory.recordExecution('stargate', 'quote', true);
+    const after = Date.now();
+
+    const metrics = factory.getExecutionMetrics().get('stargate')!;
+    expect(metrics.lastExecutionTime).toBeGreaterThanOrEqual(before);
+    expect(metrics.lastExecutionTime).toBeLessThanOrEqual(after);
+  });
+});
+
+// =============================================================================
+// Phase 4: Protocol Disabling Tests
+// =============================================================================
+
+describe('BridgeRouterFactory - Protocol Disabling', () => {
+  const mockProviders = new Map<string, any>([
+    ['ethereum', createMockProvider()],
+    ['arbitrum', createMockProvider()],
+  ]);
+
+  it('should skip disabled protocols during construction', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+      disabledProtocols: ['across'],
+    });
+
+    const protocols = factory.getAvailableProtocols();
+    expect(protocols).toContain('stargate');
+    expect(protocols).toContain('stargate-v2');
+    expect(protocols).not.toContain('across');
+
+    factory.dispose();
+  });
+
+  it('should not include disabled protocols in getAvailableProtocols()', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+      disabledProtocols: ['stargate', 'across'],
+    });
+
+    const protocols = factory.getAvailableProtocols();
+    expect(protocols).toEqual(['stargate-v2']);
+
+    factory.dispose();
+  });
+
+  it('should report protocol as disabled via isProtocolDisabled()', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+      disabledProtocols: ['across'],
+    });
+
+    expect(factory.isProtocolDisabled('across')).toBe(true);
+    expect(factory.isProtocolDisabled('stargate')).toBe(false);
+
+    factory.dispose();
+  });
+
+  it('should throw when getting disabled protocol by name', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+      disabledProtocols: ['across'],
+    });
+
+    expect(() => factory.getRouter('across')).toThrow(
+      'Bridge router not available for protocol: across'
+    );
+
+    factory.dispose();
+  });
+
+  it('should work normally when disabledProtocols is empty array', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+      disabledProtocols: [],
+    });
+
+    const protocols = factory.getAvailableProtocols();
+    expect(protocols).toContain('stargate');
+    expect(protocols).toContain('across');
+    expect(protocols).toContain('stargate-v2');
+
+    factory.dispose();
+  });
+
+  it('should work normally when disabledProtocols is undefined', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+    });
+
+    const protocols = factory.getAvailableProtocols();
+    expect(protocols.length).toBeGreaterThanOrEqual(3);
+
+    factory.dispose();
+  });
+
+  it('should disable all protocols if all are in the list', () => {
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+      disabledProtocols: ['stargate', 'across', 'stargate-v2'],
+    });
+
+    expect(factory.getAvailableProtocols()).toEqual([]);
+
+    factory.dispose();
+  });
+});
+
+// =============================================================================
+// Phase 4: Pool Liquidity Alert Tests
+// =============================================================================
+
+describe('StargateRouter - Pool Liquidity Alerting', () => {
+  function mockBalanceOf(balanceUsdc: bigint): void {
+    jest.spyOn(ethers, 'Contract').mockReturnValue({
+      balanceOf: jest.fn(() => Promise.resolve(balanceUsdc)),
+    } as any);
+  }
+
+  it('should invoke onPoolAlert callback when balance is below warning threshold', async () => {
+    const alerts: PoolLiquidityAlert[] = [];
+    const mockProvider = createMockProvider();
+
+    // Mock balanceOf to return $5,000 USDC (5000 * 1e6)
+    mockBalanceOf(5000n * 1000000n);
+
+    const router = new StargateRouter(
+      new Map([['ethereum', mockProvider]]),
+      { onPoolAlert: (alert) => alerts.push(alert) }
+    );
+
+    await router.healthCheck();
+
+    expect(alerts.length).toBe(1);
+    expect(alerts[0].severity).toBe('warning');
+    expect(alerts[0].protocol).toBe('stargate');
+    expect(alerts[0].chain).toBe('ethereum');
+    expect(alerts[0].token).toBe('USDC');
+    expect(alerts[0].threshold).toBe(10_000);
+    expect(alerts[0].timestamp).toBeGreaterThan(0);
+
+    router.dispose();
+  });
+
+  it('should invoke onPoolAlert with critical severity when balance is very low', async () => {
+    const alerts: PoolLiquidityAlert[] = [];
+    const mockProvider = createMockProvider();
+
+    // Mock balanceOf to return $500 USDC
+    mockBalanceOf(500n * 1000000n);
+
+    const router = new StargateRouter(
+      new Map([['ethereum', mockProvider]]),
+      { onPoolAlert: (alert) => alerts.push(alert) }
+    );
+
+    await router.healthCheck();
+
+    expect(alerts.length).toBe(1);
+    expect(alerts[0].severity).toBe('critical');
+    expect(alerts[0].threshold).toBe(1_000);
+
+    router.dispose();
+  });
+
+  it('should not invoke callback when balance is healthy', async () => {
+    const onPoolAlert = jest.fn();
+    const mockProvider = createMockProvider();
+
+    // Mock balanceOf to return $100,000 USDC
+    mockBalanceOf(100000n * 1000000n);
+
+    const router = new StargateRouter(
+      new Map([['ethereum', mockProvider]]),
+      { onPoolAlert: onPoolAlert }
+    );
+
+    await router.healthCheck();
+
+    expect(onPoolAlert).not.toHaveBeenCalled();
+
+    router.dispose();
+  });
+
+  it('should handle callback errors gracefully without breaking health check', async () => {
+    const mockProvider = createMockProvider();
+
+    // Mock balanceOf to return $500 USDC (below critical)
+    mockBalanceOf(500n * 1000000n);
+
+    const router = new StargateRouter(
+      new Map([['ethereum', mockProvider]]),
+      { onPoolAlert: () => { throw new Error('callback error'); } }
+    );
+
+    // Should not throw — callback errors are caught
+    const result = await router.healthCheck();
+    expect(result.healthy).toBe(true);
+
+    router.dispose();
+  });
+
+  it('should work without callback configured', async () => {
+    const mockProvider = createMockProvider();
+
+    // Mock balanceOf to return low balance
+    mockBalanceOf(500n * 1000000n);
+
+    const router = new StargateRouter(
+      new Map([['ethereum', mockProvider]])
+    );
+
+    // Should work normally without callback
+    const result = await router.healthCheck();
+    expect(result.healthy).toBe(true);
+    expect(result.message).toContain('CRITICAL');
+
+    router.dispose();
+  });
+
+  it('should pass onPoolAlert from factory config to StargateRouter', async () => {
+    const alerts: PoolLiquidityAlert[] = [];
+    const mockProvider = createMockProvider();
+
+    // Mock balanceOf to return low balance ($5,000 USDC)
+    mockBalanceOf(5000n * 1000000n);
+
+    const factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: new Map([['ethereum', mockProvider]]),
+      onPoolAlert: (alert) => alerts.push(alert),
+    });
+
+    await factory.healthCheckAll();
+
+    // Alert should have been triggered through factory → router → callback
+    expect(alerts.length).toBeGreaterThanOrEqual(1);
+    expect(alerts[0].protocol).toBe('stargate');
+
+    factory.dispose();
+  });
+});
+
+// =============================================================================
+// Regression Tests: Fix #1 — healthCheckAll timeout/error isolation
+// =============================================================================
+
+describe('BridgeRouterFactory - healthCheckAll timeout and error isolation', () => {
+  let factory: BridgeRouterFactory;
+  const mockProviders = new Map<string, any>([
+    ['ethereum', createMockProvider()],
+    ['arbitrum', createMockProvider()],
+  ]);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+    });
+  });
+
+  afterEach(() => {
+    factory.dispose();
+  });
+
+  it('should handle router healthCheck throwing without blocking other routers', async () => {
+    // Make stargate's healthCheck throw
+    const stargateRouter = factory.getRouter('stargate');
+    jest.spyOn(stargateRouter, 'healthCheck').mockRejectedValue(new Error('RPC connection lost'));
+
+    const results = await factory.healthCheckAll();
+
+    // Stargate should be unhealthy with error message
+    expect(results.stargate.healthy).toBe(false);
+    expect(results.stargate.message).toContain('RPC connection lost');
+
+    // Across and stargate-v2 should still be checked (not blocked by stargate failure)
+    expect(results.across).toBeDefined();
+    expect(results['stargate-v2']).toBeDefined();
+  });
+
+  it('should timeout hanging healthCheck after 10 seconds', async () => {
+    // Make stargate's healthCheck hang forever
+    const stargateRouter = factory.getRouter('stargate');
+    jest.spyOn(stargateRouter, 'healthCheck').mockImplementation(
+      () => new Promise(() => {}) // Never resolves
+    );
+
+    // Use real timers for this test since we need actual timeout behavior
+    jest.useRealTimers();
+
+    // Override the timeout for faster test (mock the static constant)
+    // Since HEALTH_CHECK_TIMEOUT_MS is private static readonly, we access via prototype
+    const originalTimeout = (BridgeRouterFactory as any).HEALTH_CHECK_TIMEOUT_MS;
+    (BridgeRouterFactory as any).HEALTH_CHECK_TIMEOUT_MS = 100; // 100ms for test speed
+
+    try {
+      const results = await factory.healthCheckAll();
+
+      // Stargate should be unhealthy with timeout message
+      expect(results.stargate.healthy).toBe(false);
+      expect(results.stargate.message).toContain('timed out');
+
+      // Other routers should still be checked
+      expect(results.across).toBeDefined();
+      expect(results['stargate-v2']).toBeDefined();
+    } finally {
+      (BridgeRouterFactory as any).HEALTH_CHECK_TIMEOUT_MS = originalTimeout;
+      jest.useFakeTimers();
+    }
+  });
+
+  it('should accumulate health metrics across multiple healthCheckAll calls', async () => {
+    // First call — all healthy
+    await factory.healthCheckAll();
+
+    let metrics = factory.getHealthMetrics();
+    const stargateMetrics = metrics.get('stargate');
+    expect(stargateMetrics).toBeDefined();
+    expect(stargateMetrics!.totalChecks).toBe(1);
+    expect(stargateMetrics!.successfulChecks).toBe(1);
+    expect(stargateMetrics!.failedChecks).toBe(0);
+
+    // Second call — make stargate fail
+    const stargateRouter = factory.getRouter('stargate');
+    jest.spyOn(stargateRouter, 'healthCheck').mockRejectedValue(new Error('fail'));
+
+    await factory.healthCheckAll();
+
+    metrics = factory.getHealthMetrics();
+    const updatedMetrics = metrics.get('stargate');
+    expect(updatedMetrics!.totalChecks).toBe(2);
+    expect(updatedMetrics!.successfulChecks).toBe(1);
+    expect(updatedMetrics!.failedChecks).toBe(1);
+    expect(updatedMetrics!.lastHealthy).toBe(false);
+  });
+});
+
+// =============================================================================
+// Regression Tests: Fix #2 — getHealthMetrics defensive copy
+// =============================================================================
+
+describe('BridgeRouterFactory - getHealthMetrics defensive copy', () => {
+  let factory: BridgeRouterFactory;
+  const mockProviders = new Map<string, any>([
+    ['ethereum', createMockProvider()],
+    ['arbitrum', createMockProvider()],
+  ]);
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+    });
+    // Populate health metrics
+    await factory.healthCheckAll();
+  });
+
+  afterEach(() => {
+    factory.dispose();
+  });
+
+  it('should return a new Map that does not affect internal state when modified', async () => {
+    const metrics1 = factory.getHealthMetrics();
+    const originalSize = metrics1.size;
+
+    // Delete all entries from the returned map
+    metrics1.clear();
+    expect(metrics1.size).toBe(0);
+
+    // Internal state should be unchanged
+    const metrics2 = factory.getHealthMetrics();
+    expect(metrics2.size).toBe(originalSize);
+  });
+
+  it('should return value copies that do not affect internal state when mutated', async () => {
+    const metrics1 = factory.getHealthMetrics();
+    const stargateMetrics = metrics1.get('stargate');
+    expect(stargateMetrics).toBeDefined();
+
+    const originalTotalChecks = stargateMetrics!.totalChecks;
+
+    // Mutate the returned value
+    stargateMetrics!.totalChecks = 99999;
+
+    // Internal state should be unchanged
+    const metrics2 = factory.getHealthMetrics();
+    expect(metrics2.get('stargate')!.totalChecks).toBe(originalTotalChecks);
+  });
+});
+
+// =============================================================================
+// Regression Tests: Fix #3 — findSupportedRouter scoring fallbacks
+// =============================================================================
+
+describe('BridgeRouterFactory - findSupportedRouter scoring', () => {
+  let factory: BridgeRouterFactory;
+  const mockProviders = new Map<string, any>([
+    ['ethereum', createMockProvider()],
+    ['arbitrum', createMockProvider()],
+  ]);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSelectOptimalBridge.mockReset();
+    factory = new BridgeRouterFactory({
+      defaultProtocol: 'stargate',
+      providers: mockProviders,
+    });
+  });
+
+  afterEach(() => {
+    factory.dispose();
+  });
+
+  it('should fall back to first match when selectOptimalBridge returns undefined', () => {
+    mockSelectOptimalBridge.mockReturnValue(undefined);
+
+    // ethereum->arbitrum is supported by multiple routers (stargate, across, stargate-v2)
+    const result = factory.findSupportedRouter('ethereum', 'arbitrum', 'USDC');
+
+    expect(result).not.toBeNull();
+    // Should return first match (stargate, since it's added to the Map first)
+    expect(result!.protocol).toBe('stargate');
+  });
+
+  it('should fall back to first match when scoring returns unknown bridge', () => {
+    mockSelectOptimalBridge.mockReturnValue({
+      config: { bridge: 'wormhole' }, // Not in the matching set
+      score: 0.9,
+    });
+
+    const result = factory.findSupportedRouter('ethereum', 'arbitrum', 'USDC');
+
+    expect(result).not.toBeNull();
+    // Falls back to first match since wormhole isn't in the matching routers
+    expect(result!.protocol).toBe('stargate');
+  });
+
+  it('should use selectOptimalBridge result when bridge matches a router', () => {
+    mockSelectOptimalBridge.mockReturnValue({
+      config: { bridge: 'across' },
+      score: 0.95,
+    });
+
+    const result = factory.findSupportedRouter('ethereum', 'arbitrum', 'USDC');
+
+    expect(result).not.toBeNull();
+    expect(result!.protocol).toBe('across');
+  });
+
+  it('should be backward compatible with 3-arg calls', () => {
+    // 3-arg call (no tradeSizeUsd or urgency)
+    const result = factory.findSupportedRouter('ethereum', 'arbitrum', 'USDC');
+
+    expect(result).not.toBeNull();
+    // Should still work — defaults applied internally by selectOptimalBridge
+  });
+
+  it('should return null for unsupported routes', () => {
+    const result = factory.findSupportedRouter('solana', 'ethereum', 'USDC');
+    expect(result).toBeNull();
+    // selectOptimalBridge should not be called when no routers match
+    expect(mockSelectOptimalBridge).not.toHaveBeenCalled();
+  });
+
+  it('should not call selectOptimalBridge when only one router matches', () => {
+    // Use a route only supported by Across (zksync)
+    const result = factory.findSupportedRouter('ethereum', 'zksync', 'USDC');
+
+    // Only Across supports zksync
+    expect(result).not.toBeNull();
+    expect(result!.protocol).toBe('across');
+    // Should not invoke scoring for single match
+    expect(mockSelectOptimalBridge).not.toHaveBeenCalled();
   });
 });

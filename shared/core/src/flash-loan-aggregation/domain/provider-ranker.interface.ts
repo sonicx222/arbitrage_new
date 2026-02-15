@@ -10,8 +10,7 @@
  * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Strategy Pattern
  */
 
-import type { ProviderScore, AggregatorConfig } from './models';
-import type { FlashLoanProtocol } from '../../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
+import type { ProviderScore, AggregatorConfig, FlashLoanProtocol } from './models';
 
 /**
  * Provider Information for Ranking

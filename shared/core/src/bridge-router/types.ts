@@ -21,7 +21,7 @@ import { ethers } from 'ethers';
  * Supported bridge protocols.
  * @see shared/config/src/bridge-config.ts for route configuration, costs, and latencies
  */
-export type BridgeProtocol = 'stargate' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
+export type BridgeProtocol = 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
 
 /**
  * Bridge transaction status
@@ -84,6 +84,8 @@ export interface BridgeQuoteRequest {
   recipient?: string;
   /** Slippage tolerance (0-1, e.g., 0.005 for 0.5%) */
   slippage?: number;
+  /** Stargate V2 transfer mode: 'bus' (batched, cheaper) or 'taxi' (immediate) */
+  transferMode?: 'bus' | 'taxi';
 }
 
 /**
@@ -227,6 +229,77 @@ export interface IBridgeRouter {
    * Health check for the bridge service
    */
   healthCheck(): Promise<{ healthy: boolean; message: string }>;
+
+  /**
+   * Dispose resources held by the router (timers, connections, etc.).
+   * Called during engine shutdown to prevent resource leaks.
+   */
+  dispose(): void;
+}
+
+/**
+ * Per-bridge health metrics tracked by BridgeRouterFactory.
+ * Updated on each healthCheckAll() call.
+ */
+export interface BridgeHealthMetrics {
+  /** Total number of health checks performed */
+  totalChecks: number;
+  /** Number of successful (healthy) checks */
+  successfulChecks: number;
+  /** Number of failed (unhealthy) checks */
+  failedChecks: number;
+  /** Whether the last health check was healthy */
+  lastHealthy: boolean;
+  /** Timestamp of the last health check */
+  lastCheckTime: number;
+  /** Last health check message */
+  lastMessage: string;
+}
+
+/**
+ * Per-bridge execution metrics tracked by BridgeRouterFactory.
+ * Updated via recordExecution() calls from bridge operation consumers.
+ */
+export interface BridgeExecutionMetrics {
+  /** Total quote() attempts */
+  quoteAttempts: number;
+  /** Successful quote() calls (valid: true) */
+  quoteSuccesses: number;
+  /** Failed quote() calls (valid: false or exception) */
+  quoteFailures: number;
+  /** Total execute() attempts */
+  executeAttempts: number;
+  /** Successful execute() calls */
+  executeSuccesses: number;
+  /** Failed execute() calls */
+  executeFailures: number;
+  /** Cumulative latency in ms across all operations */
+  totalLatencyMs: number;
+  /** Timestamp of last recorded operation */
+  lastExecutionTime: number;
+}
+
+/**
+ * Pool liquidity alert emitted when pool balance crosses a threshold.
+ * Used for V1 Stargate pool degradation monitoring.
+ *
+ * @see StargateRouter.checkPoolLiquidity() for alert trigger logic
+ */
+export interface PoolLiquidityAlert {
+  /** Bridge protocol that detected low liquidity */
+  protocol: BridgeProtocol;
+  /** Chain where low liquidity was detected */
+  chain: string;
+  /** Token with low liquidity */
+  token: string;
+  /** Current balance in USD */
+  balanceUsd: number;
+  /** Threshold that was crossed (USD) */
+  threshold: number;
+  /** Alert severity: warning (< threshold) or critical (< threshold/10) */
+  severity: 'warning' | 'critical';
+  /** Alert timestamp (ms since epoch) */
+  timestamp: number;
 }
 
 // =============================================================================

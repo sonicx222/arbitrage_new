@@ -283,9 +283,15 @@ export function isReverseOrder(pair1Token0: string, pair2Token0: string): boolea
 /**
  * Sort tokens into canonical order (alphabetically by lowercase address).
  *
+ * NOTE: Sorts by lowercase comparison but returns original-case addresses.
+ * This is intentional — callers who need lowercase output should use
+ * `normalizeTokenOrder()` from arbitrage-detector.ts or apply
+ * `normalizeAddress()` to the results. The `getTokenPairKey()` function
+ * in this module always returns lowercase keys regardless.
+ *
  * @param tokenA - First token
  * @param tokenB - Second token
- * @returns Tuple of [lowerToken, higherToken]
+ * @returns Tuple of [lowerToken, higherToken] in original case
  */
 export function sortTokens(tokenA: string, tokenB: string): [string, string] {
   const a = normalizeAddress(tokenA);
@@ -411,8 +417,9 @@ export function isStablecoin(address: string, chain?: string): boolean {
 
     // Check common stablecoin addresses
     const stablecoins = ['USDC', 'USDT', 'DAI', 'BUSD'];
+    const tokenRecord = tokens as Record<string, string>;
     for (const symbol of stablecoins) {
-      if (symbol in tokens && addressEquals(normalized, (tokens as any)[symbol])) {
+      if (symbol in tokenRecord && addressEquals(normalized, tokenRecord[symbol])) {
         return true;
       }
     }

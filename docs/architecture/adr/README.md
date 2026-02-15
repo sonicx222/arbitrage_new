@@ -44,6 +44,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-028](./ADR-028-mev-share-integration.md) | MEV-Share Integration | Accepted | 2026-02-06 | 90% |
 | [ADR-029](./ADR-029-batched-quote-fetching.md) | Batched Quote Fetching via MultiPathQuoter | Accepted | 2026-02-06 | 92% |
 | [ADR-030](./ADR-030-pancakeswap-v3-flash-loans.md) | PancakeSwap V3 Flash Loan Integration & Multi-Protocol Architecture | Accepted | 2026-02-08 | 90% |
+| [ADR-031](./ADR-031-multi-bridge-strategy.md) | Multi-Bridge Selection Strategy | Accepted | 2026-02-15 | 92% |
 
 ## Decision Summary
 
@@ -217,6 +218,15 @@ An Architecture Decision Record captures an important architectural decision mad
     - Background replenishment at threshold
     - Configurable pool size (default: 5)
 
+### Cross-Chain Execution (Phase 5)
+
+27. **Multi-Bridge Selection Strategy** (ADR-031)
+    - BridgeRouterFactory manages Stargate V1, V2, and Across
+    - Automatic route scoring by latency, cost, reliability
+    - Per-bridge execution and health metrics
+    - V1 pool liquidity monitoring for migration signaling
+    - Protocol disabling for graceful V1 → V2 migration
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -287,3 +297,4 @@ XX% - Explanation of confidence factors
 | 2026-01-24 | ADR-020 | Added Flash Loan Integration decision |
 | 2026-02-04 | ADR-005 | Updated L3 cache description (clarified no MongoDB) |
 | 2026-02-04 | ADR-022 | Added Hot-Path Memory Optimization decision |
+| 2026-02-15 | ADR-031 | Added Multi-Bridge Selection Strategy decision |

@@ -11,7 +11,18 @@
  * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md
  */
 
-import type { FlashLoanProtocol } from '../../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
+/**
+ * Supported flash loan protocols.
+ *
+ * Defined locally to avoid rootDir violation from cross-package import.
+ * Must stay in sync with services/execution-engine/src/strategies/flash-loan-providers/types.ts.
+ */
+export type FlashLoanProtocol =
+  | 'aave_v3'
+  | 'balancer_v2'
+  | 'pancakeswap_v3'
+  | 'spookyswap'
+  | 'syncswap';
 
 // =============================================================================
 // Value Objects (Immutable Domain Concepts)

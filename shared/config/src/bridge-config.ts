@@ -22,8 +22,15 @@
  *
  * Note: These are baseline estimates. Production should use real-time API data.
  */
+/**
+ * Bridge protocol names for type-safe bridge cost configuration.
+ * Mirrors BridgeProtocol from @arbitrage/core bridge-router types.
+ * Defined locally to avoid circular dependency (config cannot import from core).
+ */
+export type BridgeProtocolName = 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
+
 export interface BridgeCostConfig {
-  bridge: string;
+  bridge: BridgeProtocolName;
   sourceChain: string;
   targetChain: string;
   /**
@@ -46,7 +53,7 @@ interface BridgeRoute {
 }
 
 interface BridgeRouteData {
-  bridge: string;
+  bridge: BridgeProtocolName;
   routes: BridgeRoute[];
 }
 
@@ -84,6 +91,31 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'base', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.97 },
     { src: 'zksync', dst: 'ethereum', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.96 },
     { src: 'linea', dst: 'ethereum', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.97 },
+  ]},
+  // Stargate V2 (LayerZero V2) - OFT model, lower fees than V1, Bus/Taxi modes
+  { bridge: 'stargate-v2', routes: [
+    { src: 'ethereum', dst: 'arbitrum', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'ethereum', dst: 'optimism', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'ethereum', dst: 'polygon', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'ethereum', dst: 'bsc', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'ethereum', dst: 'base', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'ethereum', dst: 'avalanche', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'optimism', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'base', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'polygon', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'avalanche', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'optimism', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'optimism', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'optimism', dst: 'base', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'base', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'base', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'base', dst: 'optimism', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'polygon', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'polygon', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'avalanche', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'avalanche', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'bsc', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
   ]},
   // Native bridges (L2 -> L1 are slower)
   { bridge: 'native', routes: [

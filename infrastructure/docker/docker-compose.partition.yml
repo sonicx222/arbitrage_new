@@ -53,8 +53,6 @@
 # @see ADR-003: Partitioned Chain Detectors
 # @see REFACTORING_ROADMAP.md Phase 2
 
-version: '3.8'
-
 # =============================================================================
 # FIX L8: Platform Compatibility Notes
 # =============================================================================

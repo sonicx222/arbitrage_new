@@ -24,7 +24,7 @@ import type {
   IProviderInfo,
   ProviderOutcome,
 } from '../domain';
-import type { FlashLoanProtocol } from '../../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
+import type { FlashLoanProtocol } from '../domain/models';
 
 /**
  * Provider-specific statistics

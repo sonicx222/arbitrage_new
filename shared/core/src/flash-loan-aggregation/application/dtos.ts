@@ -7,7 +7,7 @@
  * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Application Layer
  */
 
-import type { FlashLoanProtocol } from '../../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
+import type { FlashLoanProtocol } from '../domain/models';
 import type { ProviderSelection, LiquidityCheck, ProviderScore } from '../domain';
 
 // =============================================================================

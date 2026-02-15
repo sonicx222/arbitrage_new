@@ -18,7 +18,6 @@ import {
   calculateSpreadSafe,
   calculateNetProfit,
   calculateProfitBetweenSources,
-  resolveFee,
   meetsThreshold,
   calculateConfidence,
   invertPrice,
@@ -29,7 +28,16 @@ import {
   type ProfitCalculationResult,
 } from './price-calculator';
 
+import { resolveFeeValue as resolveFee } from '../utils/fee-utils';
+
 import type { PairSnapshot } from './pair-repository';
+
+/**
+ * Module-level counter for generating unique opportunity IDs.
+ * Combined with pair addresses + timestamp, collisions are impossible.
+ * JS numbers are precise up to 2^53, so this wraps safely.
+ */
+let _opCounter = 0;
 
 // =============================================================================
 // Types
@@ -68,7 +76,11 @@ export interface ArbitrageDetectionResult {
   opportunity?: ArbitrageOpportunityData;
   /** Reason if no opportunity was found */
   reason?: string;
-  /** Intermediate calculation results for debugging */
+  /**
+   * Intermediate calculation results for debugging only.
+   * WARNING: Contains pricing internals. Opportunity publishers should strip
+   * this field before external exposure (e.g., logging, API responses).
+   */
   calculations?: {
     price1: number;
     price2: number;
@@ -228,12 +240,9 @@ export function detectArbitrage(input: ArbitrageDetectionInput): ArbitrageDetect
   const rawConfidence = calculateConfidence(grossSpread, dataAge, chainConfig.expiryMs);
   const confidence = Number.isFinite(rawConfidence) ? rawConfidence : 0.5; // Default to 50% if invalid
 
-  // Generate unique ID with random suffix to prevent collisions
-  const randomSuffix = Math.random().toString(36).slice(2, 11);
-
   // Build opportunity
   const opportunity: ArbitrageOpportunityData = {
-    id: `${pair1.address}-${pair2.address}-${timestamp}-${randomSuffix}`,
+    id: `${pair1.address}-${pair2.address}-${timestamp}-${++_opCounter}`,
     type: pair1.dex === pair2.dex ? 'intra-dex' : 'cross-dex',
     chain,
     buyDex: buyFromPair1 ? pair1.dex : pair2.dex,
