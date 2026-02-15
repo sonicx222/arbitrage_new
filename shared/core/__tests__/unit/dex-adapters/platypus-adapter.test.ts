@@ -152,7 +152,7 @@ describe('PlatypusAdapter', () => {
 
       // After init, should be able to discover pools for supported tokens
       const pools = await adapter.discoverPools(testTokens.usdc, testTokens.usdt);
-      expect(pools.length).toBeGreaterThanOrEqual(0);
+      expect(pools).toHaveLength(1);
     });
 
     it('should handle initialization failure gracefully', async () => {
@@ -365,6 +365,59 @@ describe('PlatypusAdapter', () => {
 
       // Stablecoin swaps should have minimal price impact
       expect(quote!.priceImpact).toBeLessThan(0.01); // < 1%
+    });
+
+    // P1-14: Edge case tests for zero amounts
+    it('should handle zero amountIn gracefully', async () => {
+      // Mock quotePotentialSwap for zero input
+      const quoteResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint256'],
+        [0n, 0n]
+      );
+
+      (mockProvider.call as jest.Mock).mockResolvedValueOnce(quoteResult);
+
+      const quote = await adapter.getSwapQuote!(
+        PLATYPUS_ADDRESSES.avalanche.pool,
+        testTokens.usdc,
+        testTokens.usdt,
+        0n
+      );
+
+      // Should return valid quote with zero output, not throw
+      expect(quote).not.toBeNull();
+      expect(quote!.amountOut).toBe(0n);
+      expect(quote!.priceImpact).toBe(0); // grossOutput is 0, so priceImpact = 0
+    });
+
+    // P1-7: Regression test for cross-decimal price impact
+    it('should compute decimal-independent price impact', async () => {
+      // Simulate USDC (6 dec) -> DAI (18 dec) swap
+      // amountIn = 100 USDC (raw: 100_000_000)
+      // amountOut = ~99.9 DAI (raw: 99_900_000_000_000_000_000)
+      // feeAmount = ~0.1 DAI (raw: 100_000_000_000_000_000)
+      const quoteResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint256'],
+        [
+          BigInt('99900000000000000000'), // potentialOutcome in DAI (18 dec)
+          BigInt('100000000000000000'),   // haircut in DAI (18 dec)
+        ]
+      );
+
+      (mockProvider.call as jest.Mock).mockResolvedValueOnce(quoteResult);
+
+      const quote = await adapter.getSwapQuote!(
+        PLATYPUS_ADDRESSES.avalanche.pool,
+        testTokens.usdc,
+        testTokens.usdt, // pretend this is DAI with 18 dec for this test
+        BigInt('100000000') // 100 USDC (6 dec)
+      );
+
+      expect(quote).not.toBeNull();
+      // Price impact should be fee / grossOutput = 0.1/100 = 0.001 (0.1%)
+      // NOT the old broken value which compared raw 100e6 vs 99.9e18
+      expect(quote!.priceImpact).toBeCloseTo(0.001, 4);
+      expect(quote!.priceImpact).toBeLessThan(0.01); // Must be < 1%
     });
   });
 

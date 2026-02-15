@@ -89,12 +89,8 @@ import {
   type PairSnapshot,
   type ExtendedPair as DetectionExtendedPair,
 } from './detection';
-// REFACTOR: Import simulation handler for modular simulation logic
-import {
-  ChainSimulationHandler,
-  PairForSimulation,
-  SimulationCallbacks
-} from './simulation';
+// REFACTOR: Import simulation initializer for extracted simulation lifecycle
+import { SimulationInitializer } from './simulation-initializer';
 // R8 Refactor: Use extracted subscription and pair initialization modules
 import { createSubscriptionManager } from './subscription';
 import type { SubscriptionCallbacks, SubscriptionStats } from './subscription';
@@ -102,17 +98,9 @@ import { initializePairs as initializePairsFromModule } from './pair-initializer
 // FIX Config 3.1/3.2: Import utility functions and constants
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
 import {
-  parseIntEnvVar,
-  parseFloatEnvVar,
   validateFee,
 } from './types';
 import {
-  DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
-  MIN_SIMULATION_UPDATE_INTERVAL_MS,
-  MAX_SIMULATION_UPDATE_INTERVAL_MS,
-  DEFAULT_SIMULATION_VOLATILITY,
-  MIN_SIMULATION_VOLATILITY,
-  MAX_SIMULATION_VOLATILITY,
   // R8 Refactor: UNSTABLE_WEBSOCKET_CHAINS, DEFAULT_WS_CONNECTION_TIMEOUT_MS,
   // EXTENDED_WS_CONNECTION_TIMEOUT_MS moved to subscription-manager.ts
   WS_DISCONNECT_TIMEOUT_MS,
@@ -310,8 +298,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
   // Simulation mode support
   private readonly simulationMode: boolean;
-  // REFACTOR: Use ChainSimulationHandler instead of inline simulation code
-  private simulationHandler: ChainSimulationHandler | null = null;
+  // REFACTOR: Use SimulationInitializer for extracted simulation lifecycle
+  private simulationInitializer: SimulationInitializer | null = null;
 
   // Triangular/Quadrilateral arbitrage detection
   private triangularDetector: CrossDexTriangularArbitrage;
@@ -580,8 +568,9 @@ export class ChainDetectorInstance extends EventEmitter {
       this.status = 'connected';
       this.isRunning = true;
       this.emit('statusChange', this.status);
-      // REFACTOR: Start non-EVM simulation via extracted handler
-      await this.initializeNonEvmSimulationViaHandler();
+      // REFACTOR: Start non-EVM simulation via extracted initializer
+      this.simulationInitializer = this.createSimulationInitializer();
+      await this.simulationInitializer.initializeNonEvmSimulation();
       return;
     }
 
@@ -639,8 +628,9 @@ export class ChainDetectorInstance extends EventEmitter {
       });
 
       if (this.simulationMode) {
-        // REFACTOR: SIMULATION MODE via extracted handler
-        await this.initializeEvmSimulationViaHandler();
+        // REFACTOR: SIMULATION MODE via extracted initializer
+        this.simulationInitializer = this.createSimulationInitializer();
+        await this.simulationInitializer.initializeEvmSimulation();
       } else {
         // PRODUCTION MODE: Use real WebSocket and RPC connections
         // Initialize RPC provider
@@ -709,9 +699,11 @@ export class ChainDetectorInstance extends EventEmitter {
     this.isStopping = true;
     this.isRunning = false;
 
-    // REFACTOR: Stop simulation via extracted handler (handles both EVM and non-EVM)
-    // FIX Inconsistency 6.1: Await async stop for consistency
-    this.simulationHandler = await stopAndNullify(this.simulationHandler);
+    // REFACTOR: Stop simulation via extracted initializer (handles both EVM and non-EVM)
+    if (this.simulationInitializer) {
+      await this.simulationInitializer.stop();
+      this.simulationInitializer = null;
+    }
 
     // Task 2.1.3: Stop factory subscription service
     // P0-FIX 1.5: Await async stop to ensure cleanup completes before clearing pairs
@@ -786,193 +778,35 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // ===========================================================================
-  // Simulation Mode (REFACTORED to use ChainSimulationHandler)
+  // Simulation Mode (REFACTORED — delegated to SimulationInitializer)
   // ===========================================================================
 
   /**
-   * Initialize non-EVM simulation via the extracted ChainSimulationHandler.
-   * Replaces inline initializeNonEvmSimulation() for cleaner separation.
+   * Create a SimulationInitializer with all necessary dependencies.
+   * Called lazily when simulation mode is active (COLD path).
    */
-  private async initializeNonEvmSimulationViaHandler(): Promise<void> {
-    // Create handler instance
-    this.simulationHandler = new ChainSimulationHandler(this.chainId, this.logger);
-
-    // Get configured DEXes and tokens
-    const dexNames = this.dexes.map(d => d.name);
-    const tokenSymbols = this.tokens.map(t => t.symbol);
-
-    // FIX Config 3.1: Validate simulation env vars to prevent unsafe values (e.g., interval=1ms causing CPU overload)
-    const updateIntervalMs = parseIntEnvVar(
-      process.env.SIMULATION_UPDATE_INTERVAL_MS,
-      DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
-      MIN_SIMULATION_UPDATE_INTERVAL_MS,
-      MAX_SIMULATION_UPDATE_INTERVAL_MS
-    );
-    const volatility = parseFloatEnvVar(
-      process.env.SIMULATION_VOLATILITY,
-      DEFAULT_SIMULATION_VOLATILITY,
-      MIN_SIMULATION_VOLATILITY,
-      MAX_SIMULATION_VOLATILITY
-    );
-
-    // Initialize via handler with callbacks
-    await this.simulationHandler.initializeNonEvmSimulation(
-      {
-        chainId: this.chainId,
-        dexes: dexNames,
-        tokens: tokenSymbols,
-        updateIntervalMs,
-        volatility,
-        logger: this.logger
-      },
-      this.createSimulationCallbacks()
-    );
-  }
-
-  /**
-   * Initialize EVM simulation via the extracted ChainSimulationHandler.
-   * Replaces inline initializeSimulation() for cleaner separation.
-   */
-  private async initializeEvmSimulationViaHandler(): Promise<void> {
-    // Create handler instance
-    this.simulationHandler = new ChainSimulationHandler(this.chainId, this.logger);
-
-    // Build pairs for simulation from initialized pairs
-    const pairsForSimulation = this.buildPairsForSimulation();
-
-    if (pairsForSimulation.length === 0) {
-      this.logger.warn('No pairs available for simulation', { chainId: this.chainId });
-      return;
-    }
-
-    // Initialize via handler with callbacks
-    await this.simulationHandler.initializeEvmSimulation(
-      pairsForSimulation,
-      this.createSimulationCallbacks()
-    );
-  }
-
-  /**
-   * Build PairForSimulation array from initialized pairs.
-   * Used by EVM simulation to configure the ChainSimulator.
-   */
-  private buildPairsForSimulation(): PairForSimulation[] {
-    const pairsForSimulation: PairForSimulation[] = [];
-
-    for (const [pairKey, pair] of this.pairs) {
-      // Extract token symbols from pair key (format: dex_TOKEN0_TOKEN1)
-      const parts = pairKey.split('_');
-      if (parts.length < 3) continue;
-
-      const token0Symbol = parts[1];
-      const token1Symbol = parts[2];
-
-      // PERF-OPT: Use O(1) Map lookup instead of O(N) array.find()
-      const token0 = this.tokensByAddress.get(pair.token0.toLowerCase());
-      const token1 = this.tokensByAddress.get(pair.token1.toLowerCase());
-
-      pairsForSimulation.push({
-        key: pairKey,
-        address: pair.address,
-        dex: pair.dex,
-        token0Symbol,
-        token1Symbol,
-        token0Decimals: token0?.decimals ?? 18,
-        token1Decimals: token1?.decimals ?? 18,
-        fee: pair.fee ?? 0.003  // Default 0.3% fee
-      });
-    }
-
-    return pairsForSimulation;
-  }
-
-  /**
-   * Create simulation callbacks that update instance state.
-   * These callbacks bridge the ChainSimulationHandler to this instance's state.
-   */
-  private createSimulationCallbacks(): SimulationCallbacks {
-    return {
-      onPriceUpdate: (update: PriceUpdate) => {
-        this.emit('priceUpdate', update);
-      },
-
-      onOpportunity: (opportunity: ArbitrageOpportunity) => {
-        this.opportunitiesFound++;
-        this.emit('opportunity', opportunity);
-        this.logger.debug('Simulated opportunity detected', {
-          id: opportunity.id,
-          profit: `${(opportunity.profitPercentage ?? 0).toFixed(2)}%`
-        });
-      },
-
-      onBlockUpdate: (blockNumber: number) => {
+  private createSimulationInitializer(): SimulationInitializer {
+    return new SimulationInitializer({
+      chainId: this.chainId,
+      logger: this.logger,
+      dexes: this.dexes,
+      tokens: this.tokens,
+      pairs: this.pairs,
+      tokensByAddress: this.tokensByAddress,
+      pairsByAddress: this.pairsByAddress,
+      activityTracker: this.activityTracker,
+      snapshotManager: this.snapshotManager,
+      getReserveCache: () => this.reserveCache,
+      emit: (event, data) => this.emit(event, data),
+      emitPriceUpdate: (pair) => this.emitPriceUpdate(pair),
+      checkArbitrageOpportunity: (pair) => this.checkArbitrageOpportunity(pair),
+      onOpportunityFound: () => { this.opportunitiesFound++; },
+      onEventProcessed: () => { this.eventsProcessed++; },
+      onBlockUpdate: (blockNumber) => {
         this.lastBlockNumber = blockNumber;
         this.lastBlockTimestamp = Date.now();
       },
-
-      onEventProcessed: () => {
-        this.eventsProcessed++;
-      },
-
-      // EVM simulation: Handle sync events through pair state management
-      onSyncEvent: (event) => {
-        this.handleSimulatedSyncEvent(event);
-      }
-    };
-  }
-
-  /**
-   * Handle simulated Sync events from the ChainSimulationHandler.
-   * Aligned with production handleSyncEvent() to ensure consistent behavior:
-   * eventsProcessed, BigInt reserves, reserveCache, activityTracker, checkArbitrageOpportunity.
-   */
-  private handleSimulatedSyncEvent(event: { address: string; reserve0: string; reserve1: string; blockNumber: number }): void {
-    const pairAddress = event.address.toLowerCase();
-    const pair = this.pairsByAddress.get(pairAddress);
-
-    if (!pair) {
-      return; // Unknown pair, skip
-    }
-
-    try {
-      const { reserve0, reserve1, blockNumber } = event;
-
-      // P1-FIX: Parse BigInt reserves BEFORE recording activity (matches production order)
-      const reserve0BigInt = BigInt(reserve0);
-      const reserve1BigInt = BigInt(reserve1);
-
-      // P1-FIX: Update reserve cache (matches production handleSyncEvent)
-      if (this.reserveCache) {
-        this.reserveCache.onSyncEvent(this.chainId, pairAddress, reserve0, reserve1, blockNumber);
-      }
-
-      // P1-FIX: Record activity AFTER successful parsing (matches production order)
-      this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
-
-      // Update pair reserves with BigInt values (matches production direct property assignment)
-      pair.reserve0 = reserve0;
-      pair.reserve1 = reserve1;
-      pair.reserve0BigInt = reserve0BigInt;
-      pair.reserve1BigInt = reserve1BigInt;
-      pair.blockNumber = blockNumber;
-      pair.lastUpdate = Date.now();
-
-      // R3 Refactor: Delegate cache invalidation to SnapshotManager
-      // SnapshotManager handles version tracking and cache management internally
-      this.snapshotManager.invalidateCache();
-
-      // Note: eventsProcessed is incremented by onEventProcessed callback
-      // (called from ChainSimulationHandler.handleSimulatedSyncEvent before onSyncEvent)
-
-      // Calculate and emit price update
-      this.emitPriceUpdate(pair);
-
-      // P1-FIX: Check for arbitrage opportunities AFTER reserves are fully updated (matches production)
-      this.checkArbitrageOpportunity(pair);
-
-    } catch (error) {
-      this.logger.error('Error processing simulated sync event', { error, pairAddress });
-    }
+    });
   }
 
   // ===========================================================================

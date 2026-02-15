@@ -26,14 +26,14 @@ import {
   getPerformanceLogger,
   PerformanceLogger
 } from '../logger';
+import { NumericRollingWindow } from '../data-structures/numeric-rolling-window';
 import { AsyncMutex } from '../async/async-mutex';
 import { clearIntervalSafe } from '../lifecycle-utils';
 import { withTimeout } from '../async/async-utils';
 import { getRedisClient, RedisClient } from '../redis';
 import {
   getRedisStreamsClient,
-  RedisStreamsClient,
-  StreamBatcher
+  RedisStreamsClient
 } from '../redis-streams';
 import { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '../../../types';
 import { meetsThreshold } from '../components/price-calculator';
@@ -148,6 +148,9 @@ export interface SolanaDetectorConfig {
    * for consistency: thresholdDecimal = minProfitThreshold / 100.
    */
   minProfitThreshold?: number;
+
+  /** Opportunity expiry time in milliseconds (default: 1000) */
+  opportunityExpiryMs?: number;
 }
 
 /**
@@ -296,9 +299,13 @@ export class SolanaDetector extends EventEmitter {
   protected allRpcUrls: string[];
 
   // Redis clients
-  protected redis: RedisClient | null = null;
-  protected streamsClient: RedisStreamsClient | null = null;
-  protected priceUpdateBatcher: StreamBatcher<MessageEvent> | null = null;
+  protected redis: RedisClient | SolanaDetectorRedisClient | null = null;
+  protected streamsClient: RedisStreamsClient | SolanaDetectorStreamsClient | null = null;
+  protected priceUpdateBatcher: {
+    add(message: MessageEvent): void;
+    destroy(): Promise<void>;
+    getStats(): { currentQueueSize: number; batchesSent: number };
+  } | null = null;
 
   // Injected dependencies (for DI pattern in tests)
   protected injectedRedisClient?: SolanaDetectorRedisClient;
@@ -324,11 +331,11 @@ export class SolanaDetector extends EventEmitter {
   private stopPromise: Promise<void> | null = null;
 
   // Latency tracking for health metrics
-  protected recentLatencies: number[] = [];
   protected static readonly MAX_LATENCY_SAMPLES = 100;
   protected static readonly MAX_LATENCY_VALUE_MS = 30000; // Cap extreme values
   // S3.3.5 FIX: Timeout for slot updates to prevent indefinite hangs
   protected static readonly SLOT_UPDATE_TIMEOUT_MS = 10000; // 10 seconds
+  protected recentLatencies = new NumericRollingWindow(SolanaDetector.MAX_LATENCY_SAMPLES);
 
   // RACE CONDITION FIX: Mutex to prevent concurrent updateCurrentSlot execution
   private slotUpdateMutex = new AsyncMutex();
@@ -349,19 +356,29 @@ export class SolanaDetector extends EventEmitter {
     this.config = {
       rpcUrl: config.rpcUrl,
       wsUrl: config.wsUrl || this.deriveWsUrl(config.rpcUrl),
-      commitment: config.commitment || 'confirmed',
+      commitment: config.commitment ?? 'confirmed',
       rpcFallbackUrls: config.rpcFallbackUrls || [],
       wsFallbackUrls: config.wsFallbackUrls || [],
       healthCheckIntervalMs: config.healthCheckIntervalMs ?? 30000,
       connectionPoolSize: config.connectionPoolSize ?? 3,
       maxRetries: config.maxRetries ?? 3,
       retryDelayMs: config.retryDelayMs ?? 1000,
-      minProfitThreshold: config.minProfitThreshold ?? 0.3
+      minProfitThreshold: config.minProfitThreshold ?? 0.3,
+      opportunityExpiryMs: config.opportunityExpiryMs ?? 1000
     };
 
     // Set up logging
     this.logger = deps?.logger || createLogger('solana-detector');
     this.perfLogger = deps?.perfLogger || getPerformanceLogger('solana-detector');
+
+    // Warn on likely minProfitThreshold misconfiguration
+    // Solana uses percent form (0.3 = 0.3%), EVM uses decimal (0.003 = 0.3%)
+    if (this.config.minProfitThreshold > 0 && this.config.minProfitThreshold < 0.01) {
+      this.logger.warn('minProfitThreshold looks like decimal form; Solana expects percent form (e.g., 0.3 = 0.3%)', {
+        value: this.config.minProfitThreshold,
+        hint: `Did you mean ${this.config.minProfitThreshold * 100}?`,
+      });
+    }
 
     // Store injected Redis clients for DI pattern (used in tests)
     this.injectedRedisClient = deps?.redisClient;
@@ -595,7 +612,7 @@ export class SolanaDetector extends EventEmitter {
     this.poolsByTokenPair.clear();
 
     // Clear latency tracking
-    this.recentLatencies = [];
+    this.recentLatencies.clear();
   }
 
   // ===========================================================================
@@ -605,13 +622,13 @@ export class SolanaDetector extends EventEmitter {
   private async initializeRedis(): Promise<void> {
     // Use injected clients if available (DI pattern for tests), otherwise use singletons
     if (this.injectedRedisClient) {
-      this.redis = this.injectedRedisClient as any;
+      this.redis = this.injectedRedisClient;
     } else {
       this.redis = await getRedisClient();
     }
 
     if (this.injectedStreamsClient) {
-      this.streamsClient = this.injectedStreamsClient as any;
+      this.streamsClient = this.injectedStreamsClient;
     } else {
       this.streamsClient = await getRedisStreamsClient();
     }
@@ -741,14 +758,6 @@ export class SolanaDetector extends EventEmitter {
   }
 
   /**
-   * Get the current connection index (for subscription tracking).
-   * @internal
-   */
-  private getCurrentConnectionIndex(): number {
-    return this.connectionPool.currentIndex;
-  }
-
-  /**
    * Mark a connection as failed.
    */
   async markConnectionFailed(index: number): Promise<void> {
@@ -797,6 +806,9 @@ export class SolanaDetector extends EventEmitter {
       this.connectionPool.reconnectAttempts[index] = 0;
 
       this.logger.info('Connection reconnected successfully', { index });
+
+      // Re-subscribe any subscriptions that were on the replaced connection
+      await this.resubscribeConnectionPrograms(index);
     } catch (error) {
       // BUG FIX: Proper exponential backoff with attempt tracking
       const attempts = this.connectionPool.reconnectAttempts[index]++;
@@ -816,12 +828,85 @@ export class SolanaDetector extends EventEmitter {
     }
   }
 
+  /**
+   * Re-subscribe all programs that were on a replaced connection.
+   * Called after attemptReconnection successfully replaces a connection.
+   */
+  private async resubscribeConnectionPrograms(connectionIndex: number): Promise<void> {
+    // Find all subscriptions tracked on this connection index
+    const programIds: string[] = [];
+    for (const [programId, connIdx] of this.connectionPool.subscriptionConnections) {
+      if (connIdx === connectionIndex) {
+        programIds.push(programId);
+      }
+    }
+
+    if (programIds.length === 0) return;
+
+    this.logger.info('Resubscribing programs after connection replacement', {
+      connectionIndex,
+      programCount: programIds.length,
+    });
+
+    for (const programId of programIds) {
+      try {
+        await this.resubscribeProgram(programId, connectionIndex);
+      } catch (error) {
+        this.logger.error('Failed to resubscribe program after connection replacement', {
+          programId,
+          connectionIndex,
+          error,
+        });
+      }
+    }
+  }
+
+  /**
+   * Remove an old subscription and create a new one on the current connection at the given index.
+   */
+  private async resubscribeProgram(programId: string, connectionIndex: number): Promise<void> {
+    const oldSub = this.subscriptions.get(programId);
+    if (oldSub) {
+      // Try to remove old listener (may fail since connection was replaced — that's ok)
+      try {
+        const connection = this.connectionPool.connections[connectionIndex];
+        await connection.removeProgramAccountChangeListener(oldSub.subscriptionId);
+      } catch {
+        // Old connection was replaced; listener is already orphaned
+      }
+      this.subscriptions.delete(programId);
+      this.connectionPool.subscriptionConnections.delete(programId);
+    }
+
+    // Re-subscribe using the new connection at the same index
+    const connection = this.connectionPool.connections[connectionIndex];
+    const pubkey = new PublicKey(programId);
+
+    const subscriptionId = connection.onProgramAccountChange(
+      pubkey,
+      (accountInfo: { accountId: PublicKey; accountInfo: AccountInfo<Buffer> }, context: Context) => {
+        this.handleProgramAccountUpdate(programId, accountInfo, context);
+      },
+      this.config.commitment
+    );
+
+    this.subscriptions.set(programId, {
+      programId,
+      subscriptionId,
+    });
+    this.connectionPool.subscriptionConnections.set(programId, connectionIndex);
+
+    this.logger.info('Program resubscribed on new connection', {
+      programId,
+      connectionIndex,
+      subscriptionId,
+    });
+  }
+
   getConnectionMetrics(): ConnectionMetrics {
     const healthyCount = this.connectionPool.healthStatus.filter(h => h).length;
     const totalFailed = this.connectionPool.failedRequests.reduce((a, b) => a + b, 0);
-    const avgLatency = this.recentLatencies.length > 0
-      ? this.recentLatencies.reduce((a, b) => a + b, 0) / this.recentLatencies.length
-      : 0;
+    const avgLatency = this.recentLatencies.average();
 
     return {
       totalConnections: this.connectionPool.size,
@@ -970,6 +1055,16 @@ export class SolanaDetector extends EventEmitter {
       }
       this.poolsByTokenPair.get(pairKey)!.add(pool.address);
 
+      // Warn about unknown program IDs (preserves extensibility, does not reject)
+      const knownPrograms: readonly string[] = Object.values(SOLANA_DEX_PROGRAMS);
+      if (pool.programId && !knownPrograms.includes(pool.programId)) {
+        this.logger.warn('Pool added with unknown program ID', {
+          address: pool.address,
+          programId: pool.programId,
+          dex: pool.dex
+        });
+      }
+
       this.logger.debug('Pool added', {
         address: pool.address,
         dex: pool.dex,
@@ -1076,6 +1171,14 @@ export class SolanaDetector extends EventEmitter {
       throw new Error('Price update batcher not initialized');
     }
 
+    if (!Number.isFinite(update.price) || update.price <= 0) {
+      this.logger.warn('Invalid price update rejected', {
+        poolAddress: update.poolAddress,
+        price: update.price
+      });
+      return;
+    }
+
     const standardUpdate = this.toStandardPriceUpdate(update);
 
     const message: MessageEvent = {
@@ -1114,7 +1217,7 @@ export class SolanaDetector extends EventEmitter {
       this.logger.debug('getPendingUpdates called with no batcher initialized');
       return 0;
     }
-    return this.priceUpdateBatcher.getStats().currentQueueSize || 0;
+    return this.priceUpdateBatcher.getStats().currentQueueSize ?? 0;
   }
 
   getBatcherStats(): { pending: number; flushed: number } {
@@ -1125,8 +1228,8 @@ export class SolanaDetector extends EventEmitter {
     }
     const stats = this.priceUpdateBatcher.getStats();
     return {
-      pending: stats.currentQueueSize || 0,
-      flushed: stats.batchesSent || 0
+      pending: stats.currentQueueSize ?? 0,
+      flushed: stats.batchesSent ?? 0
     };
   }
 
@@ -1140,7 +1243,9 @@ export class SolanaDetector extends EventEmitter {
     // RACE CONDITION FIX: Snapshot the pools map and token pairs at the start
     // This prevents inconsistent reads if addPool/removePool is called during iteration
     const poolsSnapshot = new Map(this.pools);
-    const pairKeysSnapshot = Array.from(this.poolsByTokenPair.entries());
+    const pairKeysSnapshot = Array.from(this.poolsByTokenPair.entries()).map(
+      ([key, set]) => [key, new Set(set)] as [string, Set<string>]
+    );
 
     // Get all unique token pairs
     for (const [pairKey, poolAddresses] of pairKeysSnapshot) {
@@ -1207,9 +1312,17 @@ export class SolanaDetector extends EventEmitter {
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).slice(2, 11);
 
+    // Calculate dynamic confidence based on slot age
+    const slotAge = this.currentSlot - Math.max(
+      pool1.lastSlot ?? this.currentSlot,
+      pool2.lastSlot ?? this.currentSlot
+    );
+    const confidence = Math.min(0.95, Math.max(0.5, 1.0 - slotAge * 0.01));
+    const safeConfidence = Number.isFinite(confidence) ? confidence : 0.5;
+
     return {
       id: `solana-${buyPool.address}-${sellPool.address}-${timestamp}-${randomSuffix}`,
-      type: 'intra-dex',
+      type: buyPool.dex === sellPool.dex ? 'intra-dex' : 'cross-dex',
       chain: 'solana',
       buyDex: buyPool.dex,
       sellDex: sellPool.dex,
@@ -1221,9 +1334,9 @@ export class SolanaDetector extends EventEmitter {
       sellPrice: sellPool.price,
       profitPercentage: netProfit * 100,
       expectedProfit: netProfit,
-      confidence: 0.85, // Solana has fast finality
+      confidence: safeConfidence,
       timestamp,
-      expiresAt: timestamp + 1000, // 1 second expiry (Solana is fast)
+      expiresAt: timestamp + this.config.opportunityExpiryMs,
       gasEstimate: SOLANA_DEFAULT_GAS_ESTIMATE,
       status: 'pending'
     };
@@ -1279,7 +1392,7 @@ export class SolanaDetector extends EventEmitter {
 
         // Update Redis
         if (this.redis) {
-          await this.redis.updateServiceHealth('solana-detector', {
+          await this.redis.updateServiceHealth?.('solana-detector', {
             name: 'solana-detector',
             status: health.status,
             uptime: health.uptime,
@@ -1324,9 +1437,6 @@ export class SolanaDetector extends EventEmitter {
 
       // Track latency (ring buffer) - now race-safe under mutex
       this.recentLatencies.push(latency);
-      if (this.recentLatencies.length > SolanaDetector.MAX_LATENCY_SAMPLES) {
-        this.recentLatencies.shift();
-      }
     } catch (error) {
       this.logger.warn('Failed to update current slot', { error });
     } finally {
@@ -1339,7 +1449,7 @@ export class SolanaDetector extends EventEmitter {
   // ===========================================================================
 
   async handleRpcError(error: Error): Promise<void> {
-    const errorCode = (error as any).code;
+    const errorCode = (error as Error & { code?: number }).code;
 
     if (errorCode === 429) {
       this.logger.warn('RPC rate limit hit', { error: error.message });

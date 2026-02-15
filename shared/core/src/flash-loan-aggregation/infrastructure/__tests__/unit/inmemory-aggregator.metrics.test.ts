@@ -7,7 +7,8 @@
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { InMemoryAggregatorMetrics } from '../../inmemory-aggregator.metrics';
-import type { IProviderInfo, ProviderOutcome } from '../../../domain';
+import { ProviderOutcome } from '../../../domain';
+import type { IProviderInfo } from '../../../domain';
 
 describe('InMemoryAggregatorMetrics', () => {
   let metrics: InMemoryAggregatorMetrics;
@@ -93,11 +94,7 @@ describe('InMemoryAggregatorMetrics', () => {
     it('should record successful outcome', () => {
       metrics.recordSelection(mockProvider, 'Selected', Date.now());
 
-      const outcome: ProviderOutcome = {
-        protocol: 'aave_v3',
-        success: true,
-        executionLatencyMs: 150,
-      };
+      const outcome = ProviderOutcome.success('aave_v3', 150);
 
       metrics.recordOutcome(outcome);
 
@@ -109,12 +106,7 @@ describe('InMemoryAggregatorMetrics', () => {
     it('should record failed outcome', () => {
       metrics.recordSelection(mockProvider, 'Selected', Date.now());
 
-      const outcome: ProviderOutcome = {
-        protocol: 'aave_v3',
-        success: false,
-        executionLatencyMs: 100,
-        error: 'Insufficient liquidity',
-      };
+      const outcome = ProviderOutcome.failure('aave_v3', 100, 'Insufficient liquidity');
 
       metrics.recordOutcome(outcome);
 
@@ -123,14 +115,54 @@ describe('InMemoryAggregatorMetrics', () => {
       expect(health!.failureCount).toBe(1);
     });
 
-    it('should skip outcome if provider not yet selected', () => {
-      const outcome: ProviderOutcome = {
-        protocol: 'unknown_protocol' as any,
-        success: true,
-        executionLatencyMs: 150,
+    it('should update all chain entries when same protocol on multiple chains', () => {
+      const ethProvider: IProviderInfo = {
+        protocol: 'aave_v3',
+        chain: 'ethereum',
+        feeBps: 9,
+        isAvailable: true,
+        poolAddress: '0x111',
+      };
+      const arbProvider: IProviderInfo = {
+        protocol: 'aave_v3',
+        chain: 'arbitrum',
+        feeBps: 9,
+        isAvailable: true,
+        poolAddress: '0x222',
       };
 
-      // Should not throw
+      // Register both providers via selection
+      metrics.recordSelection(ethProvider, 'Selected', Date.now());
+      metrics.recordSelection(arbProvider, 'Selected', Date.now());
+
+      // Record outcome by protocol — should update both chain entries
+      const outcome = ProviderOutcome.success('aave_v3', 100);
+      metrics.recordOutcome(outcome);
+
+      const ethHealth = metrics.getProviderHealth(ethProvider);
+      const arbHealth = metrics.getProviderHealth(arbProvider);
+
+      expect(ethHealth!.successCount).toBe(1);
+      expect(arbHealth!.successCount).toBe(1);
+    });
+
+    it('should not update entries after resetMetrics clears protocolIndex', () => {
+      metrics.recordSelection(mockProvider, 'Selected', Date.now());
+      metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
+
+      metrics.resetMetrics();
+
+      // After reset, outcome should be a no-op (no stats exist)
+      metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
+
+      const health = metrics.getProviderHealth(mockProvider);
+      expect(health).toBeNull();
+    });
+
+    it('should skip outcome if provider not yet selected', () => {
+      const outcome = ProviderOutcome.success('spookyswap', 150);
+
+      // Should not throw (spookyswap was never selected)
       expect(() => metrics.recordOutcome(outcome)).not.toThrow();
     });
   });
@@ -146,11 +178,7 @@ describe('InMemoryAggregatorMetrics', () => {
       // Record 5 selections and outcomes (below minSamplesForScore of 10)
       for (let i = 0; i < 5; i++) {
         metrics.recordSelection(mockProvider, 'Selected', Date.now());
-        metrics.recordOutcome({
-          protocol: 'aave_v3',
-          success: true,
-          executionLatencyMs: 100,
-        });
+        metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
       }
 
       const score = await metrics.getReliabilityScore(mockProvider);
@@ -162,12 +190,11 @@ describe('InMemoryAggregatorMetrics', () => {
       // Record 10 selections: 8 success, 2 failures
       for (let i = 0; i < 10; i++) {
         metrics.recordSelection(mockProvider, 'Selected', Date.now());
-        metrics.recordOutcome({
-          protocol: 'aave_v3',
-          success: i < 8, // First 8 succeed
-          executionLatencyMs: 100,
-          error: i >= 8 ? 'Failed' : undefined,
-        });
+        if (i < 8) {
+          metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
+        } else {
+          metrics.recordOutcome(ProviderOutcome.failure('aave_v3', 100, 'Failed'));
+        }
       }
 
       const score = await metrics.getReliabilityScore(mockProvider);
@@ -178,12 +205,7 @@ describe('InMemoryAggregatorMetrics', () => {
     it('should return 0.0 for all failures', async () => {
       for (let i = 0; i < 10; i++) {
         metrics.recordSelection(mockProvider, 'Selected', Date.now());
-        metrics.recordOutcome({
-          protocol: 'aave_v3',
-          success: false,
-          executionLatencyMs: 100,
-          error: 'Failed',
-        });
+        metrics.recordOutcome(ProviderOutcome.failure('aave_v3', 100, 'Failed'));
       }
 
       const score = await metrics.getReliabilityScore(mockProvider);
@@ -194,11 +216,7 @@ describe('InMemoryAggregatorMetrics', () => {
     it('should return 1.0 for all successes', async () => {
       for (let i = 0; i < 10; i++) {
         metrics.recordSelection(mockProvider, 'Selected', Date.now());
-        metrics.recordOutcome({
-          protocol: 'aave_v3',
-          success: true,
-          executionLatencyMs: 100,
-        });
+        metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
       }
 
       const score = await metrics.getReliabilityScore(mockProvider);
@@ -228,11 +246,11 @@ describe('InMemoryAggregatorMetrics', () => {
     it('should calculate success rate', () => {
       for (let i = 0; i < 5; i++) {
         metrics.recordSelection(mockProvider, 'Selected', Date.now());
-        metrics.recordOutcome({
-          protocol: 'aave_v3',
-          success: i < 3, // 3 success, 2 failures
-          executionLatencyMs: 100,
-        });
+        if (i < 3) {
+          metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
+        } else {
+          metrics.recordOutcome(ProviderOutcome.failure('aave_v3', 100, 'Failed'));
+        }
       }
 
       const health = metrics.getProviderHealth(mockProvider);
@@ -313,11 +331,7 @@ describe('InMemoryAggregatorMetrics', () => {
   describe('getMetricsSummary', () => {
     it('should generate summary string', () => {
       metrics.recordSelection(mockProvider, 'Selected with liquidity', Date.now());
-      metrics.recordOutcome({
-        protocol: 'aave_v3',
-        success: true,
-        executionLatencyMs: 100,
-      });
+      metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
 
       const summary = metrics.getMetricsSummary();
 
@@ -329,11 +343,11 @@ describe('InMemoryAggregatorMetrics', () => {
     it('should format provider stats', () => {
       for (let i = 0; i < 10; i++) {
         metrics.recordSelection(mockProvider, 'Selected', Date.now());
-        metrics.recordOutcome({
-          protocol: 'aave_v3',
-          success: i < 8,
-          executionLatencyMs: 100,
-        });
+        if (i < 8) {
+          metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
+        } else {
+          metrics.recordOutcome(ProviderOutcome.failure('aave_v3', 100, 'Failed'));
+        }
       }
 
       const summary = metrics.getMetricsSummary();
@@ -346,11 +360,7 @@ describe('InMemoryAggregatorMetrics', () => {
   describe('resetMetrics', () => {
     it('should clear all metrics', () => {
       metrics.recordSelection(mockProvider, 'Selected', Date.now());
-      metrics.recordOutcome({
-        protocol: 'aave_v3',
-        success: true,
-        executionLatencyMs: 100,
-      });
+      metrics.recordOutcome(ProviderOutcome.success('aave_v3', 100));
 
       metrics.resetMetrics();
 
@@ -379,14 +389,16 @@ describe('InMemoryAggregatorMetrics', () => {
     });
 
     it('should handle concurrent provider tracking', () => {
+      // Use valid FlashLoanProtocol values to avoid `as any`
+      const protocols = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'spookyswap', 'syncswap'] as const;
       const providers: IProviderInfo[] = [];
       for (let i = 0; i < 10; i++) {
         providers.push({
-          protocol: `protocol_${i}` as any,
-          chain: 'ethereum',
+          protocol: protocols[i % protocols.length],
+          chain: `chain_${i}`,
           feeBps: 9 + i,
           isAvailable: true,
-          poolAddress: `0x${i}`,
+          poolAddress: `0x${i.toString(16).padStart(40, '0')}`,
         });
       }
 
@@ -399,7 +411,8 @@ describe('InMemoryAggregatorMetrics', () => {
       const aggregated = metrics.getAggregatedMetrics();
 
       expect(aggregated.totalSelections).toBe(100);
-      expect(aggregated.byProvider.size).toBe(10);
+      // byProvider aggregates by protocol (5 unique), not by (protocol, chain) pair
+      expect(aggregated.byProvider.size).toBe(5);
     });
   });
 });

@@ -171,7 +171,7 @@ describe('GmxAdapter', () => {
 
       // Adapter should have cached whitelisted tokens
       const pools = await adapter.discoverPools(testTokens.wavax, testTokens.usdc);
-      expect(pools.length).toBeGreaterThanOrEqual(0);
+      expect(pools).toHaveLength(1);
     });
 
     it('should handle initialization failure gracefully', async () => {
@@ -405,6 +405,85 @@ describe('GmxAdapter', () => {
       );
 
       expect(quote).toBeNull();
+    });
+
+    // P1-14: Edge case tests for zero amounts
+    it('should handle zero amountIn gracefully', async () => {
+      // Mock Reader.getAmountOut response for zero input
+      const amountOutResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint256'],
+        [0n, 0n]
+      );
+
+      (mockProvider.call as jest.Mock).mockResolvedValueOnce(amountOutResult);
+
+      const quote = await adapter.getSwapQuote!(
+        GMX_ADDRESSES.avalanche.vault,
+        testTokens.wavax,
+        testTokens.usdc,
+        0n
+      );
+
+      // Should return a valid quote with zero output, not throw
+      expect(quote).not.toBeNull();
+      expect(quote!.amountOut).toBe(0n);
+    });
+
+    // P1-3: Regression test for division by zero in estimateSwapQuote
+    it('should return null when maxPriceOut is zero (fallback path)', async () => {
+      // Create adapter without reader contract to force fallback path
+      const noReaderConfig = createTestConfig({
+        provider: mockProvider,
+        secondaryAddress: undefined,
+      });
+      const noReaderAdapter = new GmxAdapter(noReaderConfig);
+
+      // Setup init mocks
+      const countResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256'],
+        [2]
+      );
+      const token0 = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['address'],
+        [testTokens.wavax]
+      );
+      const token1 = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['address'],
+        [testTokens.usdc]
+      );
+
+      (mockProvider.call as jest.Mock)
+        .mockResolvedValueOnce(countResult)
+        .mockResolvedValueOnce(token0)
+        .mockResolvedValueOnce(token1);
+
+      await noReaderAdapter.initialize();
+
+      // Mock getMinPrice and getMaxPrice — maxPriceOut = 0 (oracle failure)
+      const minPriceResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256'],
+        [BigInt('30000000000000000000000000000000')] // $30 in 30-decimal GMX price format
+      );
+      const maxPriceZero = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256'],
+        [0n]
+      );
+
+      (mockProvider.call as jest.Mock)
+        .mockResolvedValueOnce(minPriceResult) // getMinPrice
+        .mockResolvedValueOnce(maxPriceZero); // getMaxPrice returns 0
+
+      const quote = await noReaderAdapter.getSwapQuote!(
+        GMX_ADDRESSES.avalanche.vault,
+        testTokens.wavax,
+        testTokens.usdc,
+        BigInt('1000000000000000000')
+      );
+
+      // Should return null, not throw division by zero
+      expect(quote).toBeNull();
+
+      await noReaderAdapter.destroy();
     });
   });
 

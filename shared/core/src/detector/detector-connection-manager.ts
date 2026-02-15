@@ -155,12 +155,16 @@ export async function disconnectDetectorConnections(
   const flushResults = await Promise.allSettled(flushPromises);
 
   // Log any flush failures
-  flushResults.forEach((result, index) => {
-    if (result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success)) {
-      const batcherName = batchers.filter(b => b.batcher)[index]?.name || 'unknown';
+  flushResults.forEach((result) => {
+    if (result.status === 'rejected') {
       logger.error('Error flushing batcher during disconnect', {
-        batcher: batcherName,
-        error: result.status === 'rejected' ? result.reason : (result.value as { error?: unknown }).error,
+        batcher: 'unknown',
+        error: result.reason,
+      });
+    } else if (!result.value.success) {
+      logger.error('Error flushing batcher during disconnect', {
+        batcher: result.value.name,
+        error: result.value.error,
       });
     }
   });

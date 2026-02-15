@@ -408,8 +408,11 @@ export class MempoolDetectorService extends EventEmitter {
     }
 
     // Disconnect all feeds
+    // FIX 6: Remove feed-level EventEmitter listeners before disconnect to prevent
+    // stale handlers firing during teardown (disconnect() emits 'disconnected')
     for (const [chainId, feed] of this.feeds) {
       try {
+        feed.removeAllListeners();
         feed.disconnect();
         this.logger.debug('Disconnected feed', { chainId });
       } catch (error) {

@@ -472,7 +472,24 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       }
 
       // P2-1 FIX: Use token-specific decimals instead of assuming 18 (USDC/USDT have 6)
-      const tokenIn = opportunity.tokenIn || opportunity.token0 || '';
+      // FIX 8: Use ?? instead of || for token fallbacks (preserves empty string if intentional)
+      const tokenIn = opportunity.tokenIn ?? opportunity.token0 ?? '';
+      const tokenOut = opportunity.tokenOut ?? opportunity.token1 ?? '';
+
+      // FIX 8: Defense-in-depth guard — if resolved tokens are empty despite early validation,
+      // fail fast rather than sending empty addresses to contract calls
+      if (!tokenIn || !tokenOut) {
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(
+            ExecutionErrorCode.INVALID_OPPORTUNITY,
+            `Resolved token address is empty (tokenIn: "${tokenIn}", tokenOut: "${tokenOut}")`
+          ),
+          chain,
+          opportunity.buyDex ?? 'unknown'
+        );
+      }
+
       const tokenDecimals = getTokenDecimals(chain, tokenIn);
       const minProfit = opportunity.expectedProfit
         ? ethers.parseUnits((opportunity.expectedProfit * 0.8).toFixed(tokenDecimals), tokenDecimals)
@@ -501,15 +518,16 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         amountOutMin = 1n;
       }
 
+      // FIX 8: Use already-resolved and validated tokenIn/tokenOut variables
       const swapPath = [{
         router: routerAddress,
-        tokenIn: opportunity.tokenIn || opportunity.token0 || '',
-        tokenOut: opportunity.tokenOut || opportunity.token1 || '',
+        tokenIn,
+        tokenOut,
         amountOutMin,
       }];
 
       const params: CommitRevealParams = {
-        asset: opportunity.tokenIn || opportunity.token0 || '',
+        asset: tokenIn,
         amountIn,
         swapPath,
         minProfit,

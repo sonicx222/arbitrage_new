@@ -44,8 +44,8 @@ import {
   type CommitResult,
   type RevealResult,
   type ContractFactory,
-} from '../../../services/commit-reveal.service';
-import type { Logger, StrategyContext } from '../../../types';
+} from '../../../src/services/commit-reveal.service';
+import type { Logger, StrategyContext } from '../../../src/types';
 import { createMockLogger } from '@arbitrage/test-utils';
 
 // =============================================================================

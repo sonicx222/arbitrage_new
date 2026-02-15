@@ -99,6 +99,14 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       const simulator = createMultiHopSimulator();
       let completed = false;
 
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No triangular opportunity detected within timeout'));
+        }
+      }, 10000);
+
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
         if (completed) return; // Prevent multiple done() calls
 
@@ -123,27 +131,34 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
           expect(opportunity.intermediateTokens!.length).toBe(2);
 
           completed = true;
+          clearTimeout(failTimeout);
           simulator.stop();
           done();
         }
       });
 
       simulator.start();
-
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!completed) {
-          simulator.stop();
-          done(new Error('No triangular opportunity detected within timeout'));
-        }
-      }, 10000);
     });
 
     it('should calculate profit after fees per hop', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No triangular opportunity detected'));
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return;
+
         if (opportunity.type === 'triangular') {
+          completed = true;
+          clearTimeout(failTimeout);
+
           // Triangular: 3 hops * 0.3% fee per hop = 0.9% total fees
           // Profit percentage should account for these fees
           const minFeesCost = 0.9; // 0.9% in fees minimum
@@ -161,18 +176,27 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        simulator.stop();
-        done(new Error('No triangular opportunity detected'));
-      }, 10000);
     });
 
     it('should include flash loan fee in expected profit', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No triangular opportunity detected'));
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return;
+
         if (opportunity.type === 'triangular') {
+          completed = true;
+          clearTimeout(failTimeout);
+
           expect(opportunity.flashLoanFee).toBeDefined();
           expect(opportunity.flashLoanFee).toBe(0.0009); // Aave V3: 0.09%
 
@@ -185,20 +209,29 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        simulator.stop();
-        done(new Error('No triangular opportunity detected'));
-      }, 10000);
     });
   });
 
   describe('Quadrilateral Opportunities (4-hop)', () => {
     it('should generate quadrilateral path with 4 unique tokens + circular return', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No quadrilateral opportunity detected within timeout'));
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return;
+
         if (opportunity.type === 'quadrilateral') {
+          completed = true;
+          clearTimeout(failTimeout);
+
           expect(opportunity.hops).toBe(4);
           expect(opportunity.path).toBeDefined();
           expect(opportunity.path!.length).toBe(5); // A -> B -> C -> D -> A
@@ -224,19 +257,27 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        simulator.stop();
-        done(new Error('No quadrilateral opportunity detected within timeout'));
-      }, 10000);
     });
 
     it('should calculate profit after more fees (4 hops)', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No quadrilateral opportunity detected'));
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return;
+
         if (opportunity.type === 'quadrilateral') {
+          completed = true;
+          clearTimeout(failTimeout);
+
           // Quadrilateral: 4 hops * 0.3% fee per hop = 1.2% total fees
           const minFeesCost = 1.2;
 
@@ -252,11 +293,6 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        simulator.stop();
-        done(new Error('No quadrilateral opportunity detected'));
-      }, 10000);
     });
   });
 
@@ -266,6 +302,18 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       let completed = false;
 
       const confidences: { type: string; confidence: number }[] = [];
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          if (confidences.length === 0) {
+            done(new Error('No opportunities detected'));
+          } else {
+            done(); // Pass if we got some data
+          }
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
         if (completed) return; // Prevent processing after done() is called
@@ -278,6 +326,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
         // Stop after collecting a few samples
         if (confidences.length >= 5) {
           completed = true;
+          clearTimeout(failTimeout);
           simulator.stop();
 
           // Multi-hop opportunities should have lower confidence
@@ -304,17 +353,6 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        if (!completed) {
-          simulator.stop();
-          if (confidences.length === 0) {
-            done(new Error('No opportunities detected'));
-          } else {
-            done(); // Pass if we got some data
-          }
-        }
-      }, 10000);
     });
   });
 
@@ -322,6 +360,14 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
     it('should have shorter expiry than intra-chain', (done) => {
       const simulator = createMultiHopSimulator();
       let completed = false;
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No opportunity detected'));
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
         if (completed) return; // Prevent multiple done() calls
@@ -337,21 +383,17 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
         }
 
         completed = true;
+        clearTimeout(failTimeout);
         simulator.stop();
         done();
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        simulator.stop();
-        done(new Error('No opportunity detected'));
-      }, 10000);
     });
   });
 
   describe('Path Generation Edge Cases', () => {
-    it('should not generate multi-hop with insufficient tokens', () => {
+    it('should not generate multi-hop with insufficient tokens', (done) => {
       // Only 2 unique tokens - cannot make triangular (needs 3)
       const pairs: SimulatedPairConfig[] = [
         {
@@ -387,6 +429,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       setTimeout(() => {
         simulator.stop();
         expect(multiHopCount).toBe(0);
+        done();
       }, 2000);
     });
 
@@ -396,6 +439,18 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       let opportunityTypes: string[] = [];
       let completed = false;
 
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          if (opportunityTypes.length === 0) {
+            done(new Error('No opportunities detected'));
+          } else {
+            done(); // Pass if we got some data
+          }
+        }
+      }, 10000);
+
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
         if (completed) return; // Prevent processing after done() is called
 
@@ -403,6 +458,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
 
         if (opportunityTypes.length >= 20) {
           completed = true;
+          clearTimeout(failTimeout);
           simulator.stop();
 
           // Should have variety (not all multi-hop)
@@ -423,24 +479,29 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        simulator.stop();
-        if (opportunityTypes.length === 0) {
-          done(new Error('No opportunities detected'));
-        } else {
-          done(); // Pass if we got some data
-        }
-      }, 10000);
     });
   });
 
   describe('Buy/Sell DEX Consistency', () => {
     it('should use same DEX for multi-hop (all hops on one DEX)', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
+
+      const failTimeout = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          simulator.stop();
+          done(new Error('No multi-hop opportunity detected'));
+        }
+      }, 10000);
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return;
+
         if (opportunity.type === 'triangular' || opportunity.type === 'quadrilateral') {
+          completed = true;
+          clearTimeout(failTimeout);
+
           // Multi-hop uses same DEX for all swaps
           expect(opportunity.buyDex).toBe(opportunity.sellDex);
 
@@ -450,11 +511,6 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
-
-      setTimeout(() => {
-        simulator.stop();
-        done(new Error('No multi-hop opportunity detected'));
-      }, 10000);
     });
   });
 });

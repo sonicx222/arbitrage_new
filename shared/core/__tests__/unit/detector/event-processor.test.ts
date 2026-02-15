@@ -165,6 +165,15 @@ describe('EventProcessor', () => {
       expect(parseBlockNumber('0x0')).toBe(0);
       expect(parseBlockNumber(0)).toBe(0);
     });
+
+    it('should parse decimal string block number', () => {
+      expect(parseBlockNumber('12345')).toBe(12345);
+      expect(parseBlockNumber('1000000')).toBe(1000000);
+    });
+
+    it('should handle uppercase hex prefix', () => {
+      expect(parseBlockNumber('0X1234')).toBe(0x1234);
+    });
   });
 
   // ==========================================================================
@@ -364,6 +373,53 @@ describe('EventProcessor', () => {
       const key1 = generatePairKey('uniswap_v2', '0xAAA', '0xBBB');
       const key2 = generatePairKey('uniswap_v2', '0xaaa', '0xbbb');
       expect(key1).not.toBe(key2);
+    });
+  });
+
+  // ==========================================================================
+  // Edge Case Tests (P3 Fix #21)
+  // ==========================================================================
+
+  describe('decodeSyncEventData edge cases', () => {
+    it('should throw on empty data string', () => {
+      expect(() => decodeSyncEventData('')).toThrow();
+    });
+
+    it('should throw on truncated hex data', () => {
+      // Valid hex prefix but too short to contain two uint112 values
+      expect(() => decodeSyncEventData('0x00000000')).toThrow();
+    });
+  });
+
+  describe('decodeSwapEventData edge cases', () => {
+    it('should throw on empty data string', () => {
+      expect(() => decodeSwapEventData('', [])).toThrow();
+    });
+
+    it('should handle topics with only 1 element', () => {
+      const result = decodeSwapEventData(encodedSwapData, ['0x0']);
+      expect(result.sender).toBe('0x0');
+      expect(result.recipient).toBe('0x0');
+    });
+
+    it('should handle topics with only 2 elements (no recipient)', () => {
+      const result = decodeSwapEventData(encodedSwapData, ['0x0', senderTopic]);
+      expect(result.sender).toBe('0xabcdef0123456789abcdef0123456789abcdef01');
+      expect(result.recipient).toBe('0x0');
+    });
+  });
+
+  describe('parseBlockNumber edge cases', () => {
+    it('should return NaN for non-numeric string', () => {
+      expect(parseBlockNumber('notanumber')).toBeNaN();
+    });
+
+    it('should handle empty string', () => {
+      expect(parseBlockNumber('')).toBeNaN();
+    });
+
+    it('should handle negative numbers', () => {
+      expect(parseBlockNumber(-1)).toBe(-1);
     });
   });
 

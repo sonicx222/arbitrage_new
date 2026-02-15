@@ -19,8 +19,8 @@ import {
   calculateRequiredSampleSize,
   estimateTimeToSignificance,
   shouldStopEarly,
-} from '../../ab-testing/statistical-analysis';
-import type { ComputedMetrics } from '../../ab-testing/types';
+} from '../../src/ab-testing/statistical-analysis';
+import type { ComputedMetrics } from '../../src/ab-testing/types';
 
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};

@@ -11,6 +11,8 @@ module.exports = {
     '^@arbitrage/core$': '<rootDir>/../../shared/core/src/index.ts',
     '^@arbitrage/types$': '<rootDir>/../../shared/types/index.ts',
     '^@arbitrage/config$': '<rootDir>/../../shared/config/index.ts',
+    '^@arbitrage/test-utils$': '<rootDir>/../../shared/test-utils/src',
+    '^@arbitrage/test-utils/(.*)$': '<rootDir>/../../shared/test-utils/src/$1',
   },
   setupFilesAfterEnv: ['<rootDir>/src/setupTests.ts'],
   testTimeout: 10000,

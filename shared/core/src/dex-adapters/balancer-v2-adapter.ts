@@ -25,6 +25,7 @@ import {
   SwapQuote,
   PoolType,
   BALANCER_VAULT_ABI,
+  withRpcTimeout,
 } from './types';
 
 // =============================================================================
@@ -56,6 +57,9 @@ interface PoolCache {
 
 const CACHE_TTL_MS = 60_000; // 1 minute cache for pool metadata
 const SUBGRAPH_TIMEOUT_MS = 10_000;
+
+/** Strict hex address pattern: 0x followed by exactly 40 hex chars (lowercase after normalization) */
+const HEX_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
 
 // Pool type mapping from Subgraph to internal types
 const POOL_TYPE_MAP: Record<string, PoolType> = {
@@ -201,6 +205,14 @@ export class BalancerV2Adapter implements DexAdapter {
   }
 
   private buildSubgraphQuery(token0: string, token1: string): string {
+    // FIX P0-1: Validate addresses are strict hex format to prevent GraphQL injection.
+    // Addresses are already lowercased by callers, so we only need to check the pattern.
+    if (!HEX_ADDRESS_PATTERN.test(token0) || !HEX_ADDRESS_PATTERN.test(token1)) {
+      throw new Error(
+        `Invalid token address format: ${token0.slice(0, 12)}..., ${token1.slice(0, 12)}...`
+      );
+    }
+
     // Query pools that contain both tokens
     // The subgraph uses tokensList which is an array of token addresses
     return `
@@ -239,7 +251,7 @@ export class BalancerV2Adapter implements DexAdapter {
       // Tokens like USDC/USDT have 6 decimals, WBTC has 8, etc.
       // Balancer subgraph returns balance as human-readable string for each token
       balances: pool.tokens.map((t) =>
-        ethers.parseUnits(t.balance || '0', t.decimals || 18)
+        ethers.parseUnits(t.balance || '0', t.decimals ?? 18)
       ),
       swapFee,
       poolType,
@@ -276,7 +288,7 @@ export class BalancerV2Adapter implements DexAdapter {
 
     try {
       // Call vault.getPoolTokens(poolId)
-      const result = await this.vaultContract.getPoolTokens(poolId);
+      const result = await withRpcTimeout(this.vaultContract.getPoolTokens(poolId));
 
       const tokens: string[] = result[0].map((t: string) => t.toLowerCase());
       const balances: bigint[] = result[1].map((b: bigint) => b);
@@ -309,9 +321,10 @@ export class BalancerV2Adapter implements DexAdapter {
       return null;
     }
 
-    // Get cached pool info
+    // FIX P1-4: Enforce CACHE_TTL_MS — stale pool metadata (wrong weights/fees)
+    // could cause incorrect swap calculations. Force rediscovery when cache expires.
     const cached = this.poolCache.get(poolId);
-    if (!cached) {
+    if (!cached || (Date.now() - cached.lastFetch > CACHE_TTL_MS)) {
       return null;
     }
 
@@ -357,18 +370,20 @@ export class BalancerV2Adapter implements DexAdapter {
       const amountInAfterFee = (amountIn * feeMultiplierBps) / 10000n;
 
       // NOTE: The following calculations require float math for Math.pow with fractional exponents.
-      // This is an unavoidable limitation without a BigNumber library supporting fractional powers.
-      // Precision loss is acceptable here as it's bounded by the ratio/power calculation.
+      // BigInt->Number conversion loses precision beyond 2^53, but the relative error (~10^-16)
+      // is negligible for ratio-based weighted pool math. A 10^21 balance (1000 ETH) converted
+      // to Number has at most ~100 wei error, which vanishes in the ratio calculation.
       const ratio =
         Number(balanceIn) / (Number(balanceIn) + Number(amountInAfterFee));
       const power = weightIn / weightOut;
       const outRatio = 1 - Math.pow(ratio, power);
 
-      // PRECISION-NOTE: Converting BigInt to Number for weighted pool math
-      // Large balances (>2^53) will lose precision, but this is inherent to the algorithm
       amountOut = BigInt(Math.floor(Number(balanceOut) * outRatio));
 
       // Price impact calculation
+      if (amountOut === 0n) {
+        return null;
+      }
       const spotPrice =
         (Number(balanceIn) / weightIn) / (Number(balanceOut) / weightOut);
       const executionPrice = Number(amountIn) / Number(amountOut);

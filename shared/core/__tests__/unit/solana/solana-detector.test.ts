@@ -954,6 +954,33 @@ describe('S3.3.1.6 - Price Update Publishing', () => {
     // Should not throw
     expect(true).toBe(true);
   });
+
+  test('should reject invalid price updates (NaN, 0, negative, Infinity)', async () => {
+    const config = createDefaultConfig();
+    detector = new SolanaDetector(config, deps);
+
+    await detector.start();
+
+    const basePriceUpdate: SolanaPriceUpdate = {
+      poolAddress: 'TestPoolAddress1234567890abcdef',
+      dex: 'raydium',
+      token0: 'So11111111111111111111111111111111111111112',
+      token1: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      reserve0: '1000000000000',
+      reserve1: '103450000000',
+      slot: 200000001,
+      timestamp: Date.now(),
+      price: 0, // will be overridden
+    };
+
+    const invalidPrices = [0, -1, NaN, Infinity, -Infinity];
+    for (const price of invalidPrices) {
+      await detector.publishPriceUpdate({ ...basePriceUpdate, price });
+    }
+
+    // None of the invalid prices should have been batched
+    expect(detector.getPendingUpdates()).toBe(0);
+  });
 });
 
 // =============================================================================
@@ -1162,7 +1189,7 @@ describe('S3.3.1.8 - Intra-Solana Arbitrage Detection', () => {
     const opportunities = await detector.checkArbitrage();
 
     expect(opportunities.length).toBeGreaterThan(0);
-    expect(opportunities[0].type).toBe('intra-dex');
+    expect(opportunities[0].type).toBe('cross-dex');
     expect(opportunities[0].chain).toBe('solana');
   });
 
@@ -1757,7 +1784,7 @@ describe('Deep Dive Regression: Arbitrage Detection Snapshot Pattern', () => {
 
     // Should detect 1 opportunity (1% - 0.55% fees = ~0.45% profit)
     expect(opportunities.length).toBe(1);
-    expect(opportunities[0].type).toBe('intra-dex');
+    expect(opportunities[0].type).toBe('cross-dex');
     expect(opportunities[0].chain).toBe('solana');
     expect(opportunities[0].buyPrice).toBe(150);
     expect(opportunities[0].sellPrice).toBe(151.5);

@@ -116,7 +116,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapter('balancer_v2', 'arbitrum');
       expect(retrieved).toBe(adapter);
@@ -132,7 +132,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new GmxAdapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapter('gmx', 'avalanche');
       expect(retrieved).toBe(adapter);
@@ -147,7 +147,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new PlatypusAdapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapter('platypus', 'avalanche');
       expect(retrieved).toBe(adapter);
@@ -162,7 +162,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter1 = new BalancerV2Adapter(config1);
-      registry.register(adapter1);
+      await registry.register(adapter1);
 
       const config2: AdapterConfig = {
         name: 'balancer_v2',
@@ -172,7 +172,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter2 = new BalancerV2Adapter(config2);
-      registry.register(adapter2);
+      await registry.register(adapter2);
 
       const retrieved = registry.getAdapter('balancer_v2', 'arbitrum');
       expect(retrieved).toBe(adapter2);
@@ -199,7 +199,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       // Should find with correct chain
       expect(registry.getAdapter('balancer_v2', 'ethereum')).toBe(adapter);
@@ -219,7 +219,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapterForDex(testDexConfig);
       expect(retrieved).toBe(adapter);
@@ -260,8 +260,8 @@ describe('AdapterRegistry', () => {
         provider: mockProvider,
       };
 
-      registry.register(new BalancerV2Adapter(balancerConfig));
-      registry.register(new GmxAdapter(gmxConfig));
+      await registry.register(new BalancerV2Adapter(balancerConfig));
+      await registry.register(new GmxAdapter(gmxConfig));
 
       const adapters = registry.listAdapters();
       expect(adapters).toHaveLength(2);
@@ -289,8 +289,8 @@ describe('AdapterRegistry', () => {
         provider: mockProvider,
       };
 
-      registry.register(new BalancerV2Adapter(arbitrumConfig));
-      registry.register(new GmxAdapter(avalancheConfig));
+      await registry.register(new BalancerV2Adapter(arbitrumConfig));
+      await registry.register(new GmxAdapter(avalancheConfig));
 
       const arbitrumAdapters = registry.listAdaptersByChain('arbitrum');
       expect(arbitrumAdapters).toHaveLength(1);
@@ -316,19 +316,17 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       expect(registry.getAdapter('balancer_v2', 'arbitrum')).toBe(adapter);
 
-      registry.unregister('balancer_v2', 'arbitrum');
+      await registry.unregister('balancer_v2', 'arbitrum');
 
       expect(registry.getAdapter('balancer_v2', 'arbitrum')).toBeNull();
     });
 
-    it('should not throw when unregistering non-existent adapter', () => {
-      expect(() => {
-        registry.unregister('unknown', 'unknown');
-      }).not.toThrow();
+    it('should not throw when unregistering non-existent adapter', async () => {
+      await expect(registry.unregister('unknown', 'unknown')).resolves.not.toThrow();
     });
   });
 
@@ -348,8 +346,8 @@ describe('AdapterRegistry', () => {
         provider: mockProvider,
       };
 
-      registry.register(new BalancerV2Adapter(config1));
-      registry.register(new GmxAdapter(config2));
+      await registry.register(new BalancerV2Adapter(config1));
+      await registry.register(new GmxAdapter(config2));
 
       expect(registry.listAdapters()).toHaveLength(2);
 
@@ -385,7 +383,7 @@ describe('AdapterRegistry', () => {
         primaryAddress: BALANCER_VAULT_ADDRESSES.arbitrum,
         provider: mockProvider,
       };
-      instance1.register(new BalancerV2Adapter(config));
+      await instance1.register(new BalancerV2Adapter(config));
 
       await resetAdapterRegistry();
 
@@ -411,7 +409,7 @@ describe('AdapterRegistry', () => {
 
       const adapter = new BalancerV2Adapter(config);
       await adapter.initialize();
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const pools = await registry.discoverPair(
         'arbitrum',
@@ -446,6 +444,121 @@ describe('AdapterRegistry', () => {
   });
 
   // ===========================================================================
+  // Health Check (P1-12)
+  // ===========================================================================
+
+  describe('checkHealth()', () => {
+    it('should return health status for all registered adapters', async () => {
+      const balancerConfig: AdapterConfig = {
+        name: 'balancer_v2',
+        chain: 'arbitrum',
+        primaryAddress: BALANCER_VAULT_ADDRESSES.arbitrum,
+        provider: mockProvider,
+      };
+
+      const gmxConfig: AdapterConfig = {
+        name: 'gmx',
+        chain: 'avalanche',
+        primaryAddress: GMX_ADDRESSES.avalanche.vault,
+        provider: mockProvider,
+      };
+
+      const balancerAdapter = new BalancerV2Adapter(balancerConfig);
+      await balancerAdapter.initialize();
+      await registry.register(balancerAdapter);
+
+      // GMX needs token enumeration mocks for init
+      const gmxProvider = createMockProvider();
+      const countResult = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [0]);
+      (gmxProvider.call as jest.Mock).mockResolvedValue(countResult);
+      const gmxAdapter = new GmxAdapter({ ...gmxConfig, provider: gmxProvider });
+      await gmxAdapter.initialize();
+      await registry.register(gmxAdapter);
+
+      const health = await registry.checkHealth();
+
+      expect(health.size).toBe(2);
+      expect(health.get('balancer_v2:arbitrum' as any)).toBe(true);
+      expect(health.get('gmx:avalanche' as any)).toBe(true);
+    });
+
+    it('should return false for unhealthy adapters', async () => {
+      const failingProvider = createMockProvider();
+      // Provider works for init but fails for health check later
+      let callCount = 0;
+      (failingProvider.getBlockNumber as jest.Mock).mockImplementation(() => {
+        callCount++;
+        // First call succeeds (initialization), subsequent calls fail (health check)
+        if (callCount <= 1) {
+          return Promise.resolve(12345678);
+        }
+        return Promise.reject(new Error('Connection refused'));
+      });
+
+      const config: AdapterConfig = {
+        name: 'balancer_v2',
+        chain: 'arbitrum',
+        primaryAddress: BALANCER_VAULT_ADDRESSES.arbitrum,
+        provider: failingProvider,
+      };
+
+      const adapter = new BalancerV2Adapter(config);
+      await adapter.initialize();
+      await registry.register(adapter);
+
+      const health = await registry.checkHealth();
+
+      expect(health.size).toBe(1);
+      expect(health.get('balancer_v2:arbitrum' as any)).toBe(false);
+    });
+
+    it('should return empty map when no adapters registered', async () => {
+      const health = await registry.checkHealth();
+      expect(health.size).toBe(0);
+    });
+
+    it('should handle mixed healthy and unhealthy adapters', async () => {
+      // Healthy adapter
+      const healthyConfig: AdapterConfig = {
+        name: 'balancer_v2',
+        chain: 'arbitrum',
+        primaryAddress: BALANCER_VAULT_ADDRESSES.arbitrum,
+        provider: mockProvider,
+      };
+      const healthyAdapter = new BalancerV2Adapter(healthyConfig);
+      await healthyAdapter.initialize();
+      await registry.register(healthyAdapter);
+
+      // Unhealthy adapter (provider fails after init)
+      const failingProvider = createMockProvider();
+      let initDone = false;
+      (failingProvider.getBlockNumber as jest.Mock).mockImplementation(() => {
+        if (!initDone) {
+          initDone = true;
+          return Promise.resolve(12345678);
+        }
+        return Promise.reject(new Error('Timeout'));
+      });
+
+      const unhealthyConfig: AdapterConfig = {
+        name: 'balancer_v2',
+        chain: 'ethereum',
+        primaryAddress: BALANCER_VAULT_ADDRESSES.ethereum,
+        provider: failingProvider,
+      };
+      const unhealthyAdapter = new BalancerV2Adapter(unhealthyConfig);
+      await unhealthyAdapter.initialize();
+      await registry.register(unhealthyAdapter);
+
+      const health = await registry.checkHealth();
+
+      expect(health.size).toBe(2);
+      expect(health.get('balancer_v2:arbitrum' as any)).toBe(true);
+      expect(health.get('balancer_v2:ethereum' as any)).toBe(false);
+    });
+  });
+
+  // ===========================================================================
   // Adapter Key Generation
   // ===========================================================================
 
@@ -459,7 +572,7 @@ describe('AdapterRegistry', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       // Should be case-insensitive
       const retrieved = registry.getAdapter('balancer_v2', 'arbitrum');

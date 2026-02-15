@@ -508,3 +508,8 @@ export {
   internTokenSymbolUpper,
   internDexName,
 } from './utils/string-interning';
+
+// =============================================================================
+// ENVIRONMENT VARIABLE PARSING UTILITIES
+// =============================================================================
+export { safeParseInt, safeParseFloat } from './utils/env-parsing';

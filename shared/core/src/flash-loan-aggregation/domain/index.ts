@@ -10,7 +10,6 @@
  * - Higher layers depend on these abstractions
  * - Implementations are in infrastructure layer
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 

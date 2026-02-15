@@ -94,19 +94,13 @@ import { CrossChainStrategy } from './strategies/cross-chain.strategy';
 import { SimulationStrategy } from './strategies/simulation.strategy';
 import { ExecutionStrategyFactory, createStrategyFactory } from './strategies/strategy-factory';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
-import type { ISimulationService, ISimulationProvider, SimulationProviderConfig } from './services/simulation/types';
-import { SimulationService } from './services/simulation/simulation.service';
-import { TenderlyProvider, createTenderlyProvider } from './services/simulation/tenderly-provider';
-import { AlchemySimulationProvider, createAlchemyProvider } from './services/simulation/alchemy-provider';
+import type { ISimulationService } from './services/simulation/types';
 import {
   createSimulationMetricsCollector,
   SimulationMetricsCollector,
   SimulationMetricsSnapshot,
 } from './services/simulation/simulation-metrics-collector';
-import {
-  createCircuitBreaker,
-  CircuitBreaker,
-  CircuitBreakerEvent,
+import type {
   CircuitBreakerStatus,
 } from './services/circuit-breaker';
 // P0 Refactoring: Health monitoring extracted from engine.ts
@@ -114,10 +108,18 @@ import {
   HealthMonitoringManager,
   createHealthMonitoringManager,
 } from './services/health-monitoring-manager';
-// Phase 2 components
-import { AnvilForkManager, createAnvilForkManager } from './services/simulation/anvil-manager';
-import { PendingStateSimulator, createPendingStateSimulator } from './services/simulation/pending-state-simulator';
-import { HotForkSynchronizer, createHotForkSynchronizer } from './services/simulation/hot-fork-synchronizer';
+// Finding #7: Circuit breaker management extracted from engine.ts
+import {
+  CircuitBreakerManager,
+  createCircuitBreakerManager,
+} from './services/circuit-breaker-manager';
+// Finding #7: Pending state simulation extracted from engine.ts
+import {
+  PendingStateManager,
+  createPendingStateManager,
+} from './services/pending-state-manager';
+// Finding #7: TX simulation init extracted from engine.ts
+import { initializeTxSimulationService } from './services/tx-simulation-initializer';
 // R2: Extracted risk management orchestrator
 import { RiskManagementOrchestrator, createRiskOrchestrator } from './risk';
 // Task 3: A/B Testing Framework
@@ -182,8 +184,8 @@ export class ExecutionEngineService {
   // Simulation metrics collector (Phase 1.1.3)
   private simulationMetricsCollector: SimulationMetricsCollector | null = null;
 
-  // Circuit breaker for execution protection (Phase 1.3.1)
-  private circuitBreaker: CircuitBreaker | null = null;
+  // Finding #7: Circuit breaker management extracted to dedicated manager
+  private cbManager: CircuitBreakerManager | null = null;
 
   // Phase 3: Capital Risk Management (Task 3.4.5)
   private drawdownBreaker: DrawdownCircuitBreaker | null = null;
@@ -198,10 +200,8 @@ export class ExecutionEngineService {
   private abTestingFramework: ABTestingFramework | null = null;
   private readonly abTestingConfig: Partial<ABTestingConfig>;
 
-  // Phase 2: Pending state simulation components
-  private anvilForkManager: AnvilForkManager | null = null;
-  private pendingStateSimulator: PendingStateSimulator | null = null;
-  private hotForkSynchronizer: HotForkSynchronizer | null = null;
+  // Finding #7: Pending state simulation extracted to dedicated manager
+  private pendingStateManager: PendingStateManager | null = null;
 
   // Infrastructure
   private readonly logger: Logger;
@@ -230,6 +230,11 @@ export class ExecutionEngineService {
   private activeExecutionCount = 0;
   private readonly maxConcurrentExecutions = 5; // Limit parallel executions
   private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
+
+  // FIX 5: Track circuit breaker re-enqueue attempts per opportunity to prevent
+  // infinite dequeue/re-enqueue loops when CB is in HALF_OPEN state
+  private readonly cbReenqueueCounts = new Map<string, number>();
+  private static readonly MAX_CB_REENQUEUE_ATTEMPTS = 3;
 
   // P1 FIX: Lock conflict tracking extracted to dedicated class
   // Tracks repeated lock conflicts to detect crashed lock holders
@@ -479,13 +484,25 @@ export class ExecutionEngineService {
       // Initialize execution strategies
       this.initializeStrategies();
 
-      // Initialize Phase 2 pending state simulation (if enabled and not in dev simulation mode)
+      // Finding #7: Initialize Phase 2 pending state simulation via extracted manager
       if (this.pendingStateConfig.enabled && !this.isSimulationMode) {
-        await this.initializePendingStateSimulation();
+        this.pendingStateManager = createPendingStateManager({
+          config: this.pendingStateConfig,
+          providerSource: this.providerService!,
+          logger: this.logger,
+        });
+        await this.pendingStateManager.initialize();
       }
 
-      // Initialize circuit breaker (Phase 1.3.1)
-      this.initializeCircuitBreaker();
+      // Finding #7: Initialize circuit breaker via extracted manager
+      this.cbManager = createCircuitBreakerManager({
+        config: this.circuitBreakerConfig,
+        logger: this.logger,
+        stats: this.stats,
+        instanceId: this.instanceId,
+        getStreamsClient: () => this.streamsClient,
+      });
+      this.cbManager.initialize();
 
       // FIX 1.1: Use initialization module for risk management
       // Initialize capital risk management (Phase 3: Task 3.4.5)
@@ -605,14 +622,17 @@ export class ExecutionEngineService {
       // Stop simulation metrics collector (Phase 1.1.3)
       this.simulationMetricsCollector = await stopAndNullify(this.simulationMetricsCollector);
 
-      // Stop circuit breaker (Phase 1.3.1)
-      this.circuitBreaker = await stopAndNullify(this.circuitBreaker);
+      // Finding #7: Circuit breaker manager has no async cleanup needed
+      this.cbManager = null;
 
       // Task 3: Stop A/B testing framework
       this.abTestingFramework = await stopAndNullify(this.abTestingFramework);
 
-      // Stop Phase 2 pending state components
-      await this.shutdownPendingStateSimulation();
+      // Finding #7: Shutdown pending state via extracted manager
+      if (this.pendingStateManager) {
+        await this.pendingStateManager.shutdown();
+        this.pendingStateManager = null;
+      }
 
       // Stop consumer
       this.opportunityConsumer = await stopAndNullify(this.opportunityConsumer);
@@ -648,6 +668,8 @@ export class ExecutionEngineService {
       this.gasBaselines.clear();
       // FIX 10.1: Clear pre-computed last gas prices
       this.lastGasPrices.clear();
+      // FIX 5: Clear CB re-enqueue tracking
+      this.cbReenqueueCounts.clear();
       this.mevProviderFactory = null;
       await this.bridgeRouterFactory?.dispose();
       this.bridgeRouterFactory = null;
@@ -715,330 +737,25 @@ export class ExecutionEngineService {
       simulationMode: this.isSimulationMode,
     });
 
-    // Initialize transaction simulation service (Phase 1.1) if not in dev simulation mode
-    // Note: Actual providers (Tenderly, Alchemy) require API keys from environment
-    if (!this.isSimulationMode) {
-      this.initializeTransactionSimulationService();
+    // Finding #7: Initialize tx simulation service via extracted function
+    if (!this.isSimulationMode && this.providerService) {
+      this.txSimulationService = initializeTxSimulationService(this.providerService, this.logger);
     }
   }
 
-  /**
-   * Initialize circuit breaker for execution protection (Phase 1.3.1)
-   *
-   * Creates a circuit breaker that:
-   * - Halts execution after consecutive failures (prevents capital drain)
-   * - Emits state change events to Redis Stream for monitoring
-   * - Uses configurable threshold and cooldown period
-   *
-   * @see services/circuit-breaker.ts for implementation details
-   */
-  private initializeCircuitBreaker(): void {
-    if (!this.circuitBreakerConfig.enabled) {
-      this.logger.info('Circuit breaker disabled by configuration');
-      return;
-    }
-
-    this.circuitBreaker = createCircuitBreaker({
-      logger: this.logger,
-      failureThreshold: this.circuitBreakerConfig.failureThreshold,
-      cooldownPeriodMs: this.circuitBreakerConfig.cooldownPeriodMs,
-      halfOpenMaxAttempts: this.circuitBreakerConfig.halfOpenMaxAttempts,
-      enabled: this.circuitBreakerConfig.enabled,
-      onStateChange: (event: CircuitBreakerEvent) => {
-        this.handleCircuitBreakerStateChange(event);
-      },
-    });
-
-    this.logger.info('Circuit breaker initialized', {
-      failureThreshold: this.circuitBreakerConfig.failureThreshold,
-      cooldownPeriodMs: this.circuitBreakerConfig.cooldownPeriodMs,
-      halfOpenMaxAttempts: this.circuitBreakerConfig.halfOpenMaxAttempts,
-    });
-  }
-
-  /**
-   * Handle circuit breaker state change events.
-   *
-   * Publishes events to Redis Stream for monitoring and alerting.
-   * Logs state transitions for operational visibility.
-   */
-  private handleCircuitBreakerStateChange(event: CircuitBreakerEvent): void {
-    // Log state change
-    if (event.newState === 'OPEN') {
-      this.logger.warn('Circuit breaker OPENED - halting executions', {
-        reason: event.reason,
-        consecutiveFailures: event.consecutiveFailures,
-        cooldownRemainingMs: event.cooldownRemainingMs,
-      });
-      this.stats.circuitBreakerTrips++;
-    } else if (event.newState === 'CLOSED') {
-      this.logger.info('Circuit breaker CLOSED - resuming executions', {
-        reason: event.reason,
-      });
-    } else if (event.newState === 'HALF_OPEN') {
-      this.logger.info('Circuit breaker HALF_OPEN - testing recovery', {
-        reason: event.reason,
-      });
-    }
-
-    // Publish event to Redis Stream for monitoring
-    this.publishCircuitBreakerEvent(event);
-  }
-
-  /**
-   * Publish circuit breaker event to Redis Stream.
-   *
-   * Events are published to stream:circuit-breaker for:
-   * - Monitoring dashboards
-   * - Alerting systems
-   * - Audit trail
-   */
-  private async publishCircuitBreakerEvent(event: CircuitBreakerEvent): Promise<void> {
-    if (!this.streamsClient) return;
-
-    try {
-      await this.streamsClient.xadd(RedisStreamsClient.STREAMS.CIRCUIT_BREAKER, {
-        service: 'execution-engine',
-        instanceId: this.instanceId,
-        previousState: event.previousState,
-        newState: event.newState,
-        reason: event.reason,
-        timestamp: event.timestamp,
-        consecutiveFailures: event.consecutiveFailures,
-        cooldownRemainingMs: event.cooldownRemainingMs,
-      });
-    } catch (error) {
-      this.logger.error('Failed to publish circuit breaker event', {
-        error: getErrorMessage(error),
-        event,
-      });
-    }
-  }
+  // Finding #7: initializeCircuitBreaker, handleCircuitBreakerStateChange,
+  // publishCircuitBreakerEvent extracted to CircuitBreakerManager
+  // @see services/circuit-breaker-manager.ts
 
   // FIX 1.1/9.3: Removed duplicate initializeRiskManagement() - now in initialization module
 
-  /**
-   * Initialize the transaction simulation service (Phase 1.1).
-   *
-   * Initializes simulation providers from environment variables:
-   * - TENDERLY_API_KEY, TENDERLY_ACCOUNT_SLUG, TENDERLY_PROJECT_SLUG
-   * - ALCHEMY_API_KEY (with chain-specific URLs)
-   *
-   * @see services/simulation/ for provider implementations.
-   */
-  private initializeTransactionSimulationService(): void {
-    const providers: ISimulationProvider[] = [];
-    const configuredChains = Array.from(this.providerService?.getProviders().keys() ?? []);
+  // Finding #7: initializeTransactionSimulationService extracted to
+  // tx-simulation-initializer.ts
+  // @see services/tx-simulation-initializer.ts
 
-    // Initialize Tenderly provider if configured
-    const tenderlyApiKey = process.env.TENDERLY_API_KEY;
-    const tenderlyAccountSlug = process.env.TENDERLY_ACCOUNT_SLUG;
-    const tenderlyProjectSlug = process.env.TENDERLY_PROJECT_SLUG;
-
-    if (tenderlyApiKey && tenderlyAccountSlug && tenderlyProjectSlug) {
-      try {
-        // Create Tenderly provider for each chain
-        for (const chain of configuredChains) {
-          const provider = this.providerService?.getProvider(chain);
-          if (provider) {
-            const tenderlyProvider = createTenderlyProvider({
-              type: 'tenderly',
-              chain,
-              provider,
-              enabled: true,
-              apiKey: tenderlyApiKey,
-              accountSlug: tenderlyAccountSlug,
-              projectSlug: tenderlyProjectSlug,
-            });
-            providers.push(tenderlyProvider);
-            this.logger.debug('Tenderly provider initialized', { chain });
-          }
-        }
-      } catch (error) {
-        this.logger.warn('Failed to initialize Tenderly provider', {
-          error: getErrorMessage(error),
-        });
-      }
-    }
-
-    // Initialize Alchemy provider if configured (fallback)
-    const alchemyApiKey = process.env.ALCHEMY_API_KEY;
-    if (alchemyApiKey && providers.length === 0) {
-      try {
-        for (const chain of configuredChains) {
-          const provider = this.providerService?.getProvider(chain);
-          if (provider) {
-            const alchemyProvider = createAlchemyProvider({
-              type: 'alchemy',
-              chain,
-              provider,
-              enabled: true,
-              apiKey: alchemyApiKey,
-            });
-            providers.push(alchemyProvider);
-            this.logger.debug('Alchemy provider initialized', { chain });
-          }
-        }
-      } catch (error) {
-        this.logger.warn('Failed to initialize Alchemy provider', {
-          error: getErrorMessage(error),
-        });
-      }
-    }
-
-    if (providers.length === 0) {
-      this.logger.info('Transaction simulation service not initialized - no providers configured', {
-        hint: 'Set TENDERLY_API_KEY/TENDERLY_ACCOUNT_SLUG/TENDERLY_PROJECT_SLUG or ALCHEMY_API_KEY',
-      });
-      return;
-    }
-
-    // Read config from environment with defaults
-    const minProfitForSimulation = parseInt(process.env.SIMULATION_MIN_PROFIT || '50', 10);
-    const timeCriticalThresholdMs = parseInt(process.env.SIMULATION_TIME_CRITICAL_MS || '2000', 10);
-
-    this.txSimulationService = new SimulationService({
-      providers,
-      logger: this.logger,
-      config: {
-        minProfitForSimulation,
-        bypassForTimeCritical: true,
-        timeCriticalThresholdMs,
-        useFallback: true,
-      },
-    });
-
-    this.logger.info('Transaction simulation service initialized', {
-      providerCount: providers.length,
-      chains: configuredChains,
-      minProfitForSimulation,
-      timeCriticalThresholdMs,
-    });
-  }
-
-  /**
-   * Initialize Phase 2 pending state simulation components.
-   *
-   * Creates and starts:
-   * - AnvilForkManager: Local Anvil fork for state simulation
-   * - PendingStateSimulator: Simulates pending swaps on the fork
-   * - HotForkSynchronizer: Keeps the fork in sync with mainnet
-   *
-   * @see implementation_plan_v3.md Phase 2
-   */
-  private async initializePendingStateSimulation(): Promise<void> {
-    if (!this.pendingStateConfig.rpcUrl) {
-      this.logger.warn('Phase 2 pending state simulation skipped - no RPC URL configured', {
-        hint: 'Set pendingStateConfig.rpcUrl to enable pending state simulation',
-      });
-      return;
-    }
-
-    try {
-      this.logger.info('Initializing Phase 2 pending state simulation', {
-        chain: this.pendingStateConfig.chain,
-        anvilPort: this.pendingStateConfig.anvilPort,
-        enableHotSync: this.pendingStateConfig.enableHotSync,
-        adaptiveSync: this.pendingStateConfig.adaptiveSync,
-      });
-
-      // Create Anvil fork manager
-      this.anvilForkManager = createAnvilForkManager({
-        rpcUrl: this.pendingStateConfig.rpcUrl,
-        chain: this.pendingStateConfig.chain ?? 'ethereum',
-        port: this.pendingStateConfig.anvilPort,
-        autoStart: false, // We'll start manually to handle errors
-      });
-
-      // Start the fork if autoStartAnvil is enabled
-      if (this.pendingStateConfig.autoStartAnvil) {
-        await this.anvilForkManager.startFork();
-        this.logger.info('Anvil fork started', {
-          port: this.pendingStateConfig.anvilPort,
-          state: this.anvilForkManager.getState(),
-        });
-      }
-
-      // Create pending state simulator
-      this.pendingStateSimulator = createPendingStateSimulator({
-        anvilManager: this.anvilForkManager,
-        timeoutMs: this.pendingStateConfig.simulationTimeoutMs,
-      });
-
-      // Create hot fork synchronizer if enabled
-      if (this.pendingStateConfig.enableHotSync && this.anvilForkManager.getState() === 'running') {
-        const sourceProvider = this.providerService?.getProvider(this.pendingStateConfig.chain ?? 'ethereum');
-        if (sourceProvider) {
-          this.hotForkSynchronizer = createHotForkSynchronizer({
-            anvilManager: this.anvilForkManager,
-            sourceProvider,
-            syncIntervalMs: this.pendingStateConfig.syncIntervalMs,
-            adaptiveSync: this.pendingStateConfig.adaptiveSync,
-            minSyncIntervalMs: this.pendingStateConfig.minSyncIntervalMs,
-            maxSyncIntervalMs: this.pendingStateConfig.maxSyncIntervalMs,
-            maxConsecutiveFailures: this.pendingStateConfig.maxConsecutiveFailures,
-            logger: {
-              // Use structured component field instead of template literals
-              // Template literals are evaluated on every call, creating overhead
-              error: (msg, meta) => this.logger.error(msg, { component: 'HotForkSync', ...meta }),
-              warn: (msg, meta) => this.logger.warn(msg, { component: 'HotForkSync', ...meta }),
-              info: (msg, meta) => this.logger.info(msg, { component: 'HotForkSync', ...meta }),
-              debug: (msg, meta) => this.logger.debug(msg, { component: 'HotForkSync', ...meta }),
-            },
-          });
-
-          await this.hotForkSynchronizer.start();
-          this.logger.info('Hot fork synchronizer started', {
-            syncIntervalMs: this.pendingStateConfig.syncIntervalMs,
-            adaptiveSync: this.pendingStateConfig.adaptiveSync,
-            minSyncIntervalMs: this.pendingStateConfig.minSyncIntervalMs,
-            maxSyncIntervalMs: this.pendingStateConfig.maxSyncIntervalMs,
-          });
-        }
-      }
-
-      this.logger.info('Phase 2 pending state simulation initialized successfully');
-
-    } catch (error) {
-      this.logger.error('Failed to initialize Phase 2 pending state simulation', {
-        error: getErrorMessage(error),
-      });
-      // Clean up partial initialization
-      await this.shutdownPendingStateSimulation();
-    }
-  }
-
-  /**
-   * Shutdown Phase 2 pending state simulation components.
-   */
-  private async shutdownPendingStateSimulation(): Promise<void> {
-    // Stop hot fork synchronizer
-    if (this.hotForkSynchronizer) {
-      try {
-        await this.hotForkSynchronizer.stop();
-      } catch (error) {
-        this.logger.warn('Error stopping hot fork synchronizer', {
-          error: getErrorMessage(error),
-        });
-      }
-      this.hotForkSynchronizer = null;
-    }
-
-    // Shutdown Anvil fork
-    if (this.anvilForkManager) {
-      try {
-        await this.anvilForkManager.shutdown();
-      } catch (error) {
-        this.logger.warn('Error shutting down Anvil fork', {
-          error: getErrorMessage(error),
-        });
-      }
-      this.anvilForkManager = null;
-    }
-
-    // Clear simulator reference
-    this.pendingStateSimulator = null;
-  }
+  // Finding #7: initializePendingStateSimulation, shutdownPendingStateSimulation
+  // extracted to PendingStateManager
+  // @see services/pending-state-manager.ts
 
   // ===========================================================================
   // Execution Processing
@@ -1089,6 +806,9 @@ export class ExecutionEngineService {
     this.isProcessingQueue = true;
 
     try {
+      // Finding #7: Get CB reference once per processing cycle (O(1) — manager returns direct ref)
+      const circuitBreaker = this.cbManager?.getCircuitBreaker() ?? null;
+
       // Process multiple items if under concurrency limit
       while (
         this.queueService.size() > 0 &&
@@ -1096,8 +816,8 @@ export class ExecutionEngineService {
       ) {
         // Fix 5.1: Check circuit breaker state BEFORE dequeue to avoid blocking
         // For OPEN state, we can skip without side effects
-        if (this.circuitBreaker) {
-          const cbState = this.circuitBreaker.getState();
+        if (circuitBreaker) {
+          const cbState = circuitBreaker.getState();
           if (cbState === 'OPEN') {
             // Circuit is fully open - block all executions
             // NOTE: Per-block debug logging removed - tracked via stats.circuitBreakerBlocks
@@ -1114,14 +834,31 @@ export class ExecutionEngineService {
 
         // Fix 5.1: Check canExecute() AFTER successful dequeue to avoid wasting
         // HALF_OPEN attempts on empty queue race conditions
-        if (this.circuitBreaker && !this.circuitBreaker.canExecute()) {
-          // Put the opportunity back at the front of the queue
-          // This avoids losing the opportunity when circuit breaker blocks
-          // NOTE: Per-block debug logging removed - tracked via stats.circuitBreakerBlocks
-          this.queueService.enqueue(opportunity);
-          this.stats.circuitBreakerBlocks++;
+        if (circuitBreaker && !circuitBreaker.canExecute()) {
+          // FIX 5: Track re-enqueue count to prevent infinite dequeue/re-enqueue loop
+          // when circuit breaker is in HALF_OPEN state. Without this limit, the
+          // setImmediate in .finally() triggers processQueueItems() again, creating
+          // a tight cycle until CB transitions.
+          const reenqueueCount = (this.cbReenqueueCounts.get(opportunity.id) ?? 0) + 1;
+          if (reenqueueCount >= ExecutionEngineService.MAX_CB_REENQUEUE_ATTEMPTS) {
+            // Drop opportunity after max re-enqueue attempts — stream will redeliver
+            this.cbReenqueueCounts.delete(opportunity.id);
+            this.logger.warn('Dropping opportunity after max CB re-enqueue attempts', {
+              opportunityId: opportunity.id,
+              attempts: reenqueueCount,
+            });
+            this.stats.circuitBreakerBlocks++;
+          } else {
+            // Re-enqueue with tracked count
+            this.cbReenqueueCounts.set(opportunity.id, reenqueueCount);
+            this.queueService.enqueue(opportunity);
+            this.stats.circuitBreakerBlocks++;
+          }
           break;
         }
+
+        // FIX 5: Clear re-enqueue tracking when opportunity proceeds to execution
+        this.cbReenqueueCounts.delete(opportunity.id);
 
         // Fix 5.2: Increment counter before async operation with bounds check
         this.activeExecutionCount++;
@@ -1484,11 +1221,11 @@ export class ExecutionEngineService {
       if (result.success) {
         this.stats.successfulExecutions++;
         // Record success with circuit breaker (resets consecutive failures)
-        this.circuitBreaker?.recordSuccess();
+        this.cbManager?.getCircuitBreaker()?.recordSuccess();
       } else {
         this.stats.failedExecutions++;
         // Record failure with circuit breaker (may trip circuit)
-        this.circuitBreaker?.recordFailure();
+        this.cbManager?.getCircuitBreaker()?.recordFailure();
       }
 
       this.perfLogger.logEventLatency('opportunity_execution', latencyMs, {
@@ -1499,7 +1236,7 @@ export class ExecutionEngineService {
     } catch (error) {
       this.stats.failedExecutions++;
       // Record failure with circuit breaker (may trip circuit)
-      this.circuitBreaker?.recordFailure();
+      this.cbManager?.getCircuitBreaker()?.recordFailure();
 
       // Record failure to risk management
       // R2: Use orchestrator when available for consistency
@@ -1548,8 +1285,8 @@ export class ExecutionEngineService {
       lastGasPrices: this.lastGasPrices,
       stats: this.stats,
       simulationService: this.txSimulationService ?? undefined,
-      // Phase 2: Pending state simulator for mempool-aware execution
-      pendingStateSimulator: this.pendingStateSimulator ?? undefined,
+      // Finding #7: Pending state simulator via extracted manager
+      pendingStateSimulator: this.pendingStateManager?.getSimulator() ?? undefined,
       // Phase 3: Batch providers for RPC request optimization
       batchProviders: this.providerService?.getBatchProviders(),
     };
@@ -1666,54 +1403,32 @@ export class ExecutionEngineService {
   }
 
   // ===========================================================================
-  // Circuit Breaker Getters (Phase 1.3.1)
+  // Circuit Breaker Getters (Finding #7: delegated to CircuitBreakerManager)
   // ===========================================================================
 
-  /**
-   * Get circuit breaker status snapshot.
-   *
-   * Returns null if circuit breaker is disabled.
-   */
+  /** Get circuit breaker status snapshot. Returns null if disabled. */
   getCircuitBreakerStatus(): CircuitBreakerStatus | null {
-    return this.circuitBreaker?.getStatus() ?? null;
+    return this.cbManager?.getStatus() ?? null;
   }
 
-  /**
-   * Check if circuit breaker is currently open (blocking executions).
-   */
+  /** Check if circuit breaker is currently open (blocking executions). */
   isCircuitBreakerOpen(): boolean {
-    return this.circuitBreaker?.isOpen() ?? false;
+    return this.cbManager?.isOpen() ?? false;
   }
 
-  /**
-   * Get circuit breaker configuration.
-   */
+  /** Get circuit breaker configuration. */
   getCircuitBreakerConfig(): Readonly<Required<CircuitBreakerConfig>> {
-    return this.circuitBreakerConfig;
+    return this.cbManager?.getConfig() ?? this.circuitBreakerConfig;
   }
 
-  /**
-   * Force close the circuit breaker (manual override).
-   *
-   * Use with caution - this bypasses the protection mechanism.
-   */
+  /** Force close the circuit breaker (manual override). */
   forceCloseCircuitBreaker(): void {
-    if (this.circuitBreaker) {
-      this.logger.warn('Manually force-closing circuit breaker');
-      this.circuitBreaker.forceClose();
-    }
+    this.cbManager?.forceClose();
   }
 
-  /**
-   * Force open the circuit breaker (manual override).
-   *
-   * Useful for emergency stops or maintenance.
-   */
+  /** Force open the circuit breaker (manual override). */
   forceOpenCircuitBreaker(reason = 'manual override'): void {
-    if (this.circuitBreaker) {
-      this.logger.warn('Manually force-opening circuit breaker', { reason });
-      this.circuitBreaker.forceOpen(reason);
-    }
+    this.cbManager?.forceOpen(reason);
   }
 
   // ===========================================================================

@@ -14,7 +14,7 @@
  * - Cache hit: <1ms
  * - Cache miss: <10ms (RPC call + timeout)
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Infrastructure Layer
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type {
@@ -26,6 +26,7 @@ import type {
 import { LiquidityCheck as LiquidityCheckImpl } from '../domain';
 // P2 Fix: Import ethers statically (not dynamically) for hot-path performance
 import { ethers } from 'ethers';
+import { calculateLiquidityScore, DEFAULT_LIQUIDITY_SCORE } from './liquidity-scoring';
 // I3 Fix: Import Logger type for structured logging
 import type { Logger } from '../../logger';
 
@@ -143,7 +144,8 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   }
 
   /**
-   * Estimate liquidity score from cached data
+   * Estimate liquidity score from cached data.
+   * Delegates to shared calculateLiquidityScore() for consistent thresholds.
    */
   async estimateLiquidityScore(
     provider: IProviderInfo,
@@ -154,25 +156,15 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
     const cached = this.cache.get(cacheKey);
 
     if (!cached || !cached.check.checkPerformed) {
-      // No data or last check failed - use conservative default (0.7 = adequate but unverified)
-      // Rationale: Better to slightly under-rank than select providers with
-      // insufficient liquidity that cause transaction failures
-      return 0.7;
+      return DEFAULT_LIQUIDITY_SCORE;
     }
 
-    // Score based on ratio of available to requested
     const requiredWithMargin = this.applySafetyMargin(amount);
-    const available = cached.check.availableLiquidity;
-
-    if (available >= requiredWithMargin * 2n) {
-      return 1.0; // Plenty (2x required)
-    } else if (available >= requiredWithMargin) {
-      return 0.9; // Adequate
-    } else if (available >= amount) {
-      return 0.7; // Just enough
-    } else {
-      return 0.3; // Insufficient
-    }
+    return calculateLiquidityScore(
+      cached.check.availableLiquidity,
+      requiredWithMargin,
+      amount
+    );
   }
 
   /**
@@ -226,11 +218,24 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
         return LiquidityCheckImpl.failure('No RPC provider available', 0);
       }
 
-      // Query on-chain liquidity with timeout
-      const liquidity = await Promise.race([
-        this.queryOnChainLiquidity(provider, asset, context.rpcProvider),
-        this.timeoutPromise(this.config.rpcTimeoutMs),
-      ]);
+      // Query on-chain liquidity with timeout (P0 fix: clean up timer on success)
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`Liquidity check timeout after ${this.config.rpcTimeoutMs}ms`)),
+          this.config.rpcTimeoutMs
+        );
+      });
+
+      let liquidity: bigint;
+      try {
+        liquidity = await Promise.race([
+          this.queryOnChainLiquidity(provider, asset, context.rpcProvider),
+          timeoutPromise,
+        ]);
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const latency = Date.now() - startTime;
       const requiredWithMargin = this.applySafetyMargin(amount);
@@ -258,7 +263,7 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       // M3 Fix: Record failure for circuit breaker
       this.recordFailure();
 
-      // Cache failure (with assumed-sufficient)
+      // Cache failure (with assumed-insufficient, conservative)
       const check = LiquidityCheckImpl.failure(errorMessage, latency);
       this.cache.set(this.makeCacheKey(provider, asset), {
         check,
@@ -436,11 +441,20 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   }
 
   /**
-   * Cleanup cache if size exceeds maximum
+   * Cleanup cache: remove expired entries (TTL sweep) and evict oldest if over size limit
    */
   private cleanupCacheIfNeeded(): void {
+    const now = Date.now();
+
+    // Phase 1: TTL sweep — remove expired entries
+    for (const [key, cached] of this.cache) {
+      if (now - cached.timestamp >= this.config.cacheTtlMs) {
+        this.cache.delete(key);
+      }
+    }
+
+    // Phase 2: Size eviction — remove oldest 20% if still over limit
     if (this.cache.size > this.config.maxCacheSize) {
-      // Remove oldest 20% of entries (simple LRU)
       const entries = Array.from(this.cache.entries());
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
 
@@ -451,21 +465,4 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
     }
   }
 
-  /**
-   * Timeout promise
-   */
-  private timeoutPromise(ms: number): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Liquidity check timeout after ${ms}ms`)), ms);
-    });
-  }
-}
-
-/**
- * Factory function
- */
-export function createOnChainLiquidityValidator(
-  config?: OnChainLiquidityValidatorConfig
-): OnChainLiquidityValidator {
-  return new OnChainLiquidityValidator(config);
 }

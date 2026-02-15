@@ -45,6 +45,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-029](./ADR-029-batched-quote-fetching.md) | Batched Quote Fetching via MultiPathQuoter | Accepted | 2026-02-06 | 92% |
 | [ADR-030](./ADR-030-pancakeswap-v3-flash-loans.md) | PancakeSwap V3 Flash Loan Integration & Multi-Protocol Architecture | Accepted | 2026-02-08 | 90% |
 | [ADR-031](./ADR-031-multi-bridge-strategy.md) | Multi-Bridge Selection Strategy | Accepted | 2026-02-15 | 92% |
+| [ADR-032](./ADR-032-flash-loan-provider-aggregation.md) | Flash Loan Provider Aggregation | Accepted | 2026-02-15 | 92% |
 
 ## Decision Summary
 
@@ -227,6 +228,16 @@ An Architecture Decision Record captures an important architectural decision mad
     - V1 pool liquidity monitoring for migration signaling
     - Protocol disabling for graceful V1 → V2 migration
 
+### Flash Loan Aggregation (Phase 5)
+
+28. **Flash Loan Provider Aggregation** (ADR-032)
+    - Clean Architecture / DDD for provider selection
+    - Weighted scoring: fees 50%, liquidity 30%, reliability 15%, latency 5%
+    - Pluggable ranking strategies (weighted, fee-optimized, reliability-first, adaptive)
+    - On-chain liquidity validation with caching and request coalescing
+    - Fallback routing on provider failure
+    - 194 tests across 6 test suites
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -298,3 +309,4 @@ XX% - Explanation of confidence factors
 | 2026-02-04 | ADR-005 | Updated L3 cache description (clarified no MongoDB) |
 | 2026-02-04 | ADR-022 | Added Hot-Path Memory Optimization decision |
 | 2026-02-15 | ADR-031 | Added Multi-Bridge Selection Strategy decision |
+| 2026-02-15 | ADR-032 | Added Flash Loan Provider Aggregation decision |

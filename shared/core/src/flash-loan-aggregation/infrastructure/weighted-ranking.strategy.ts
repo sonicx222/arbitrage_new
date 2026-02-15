@@ -12,7 +12,7 @@
  *
  * Performance Target: <2ms for up to 5 providers
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Strategy Pattern
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type {
@@ -24,6 +24,7 @@ import type {
   ProviderScore,
 } from '../domain';
 import { ProviderScore as ProviderScoreImpl } from '../domain';
+import { calculateLiquidityScore, DEFAULT_LIQUIDITY_SCORE } from './liquidity-scoring';
 
 /**
  * Weighted Ranking Strategy
@@ -76,9 +77,11 @@ export class WeightedRankingStrategy implements IProviderRanker {
 
     // M6 Fix: Wait for all scoring with timeout protection (10s)
     // If timeout, returns partial results (graceful degradation)
+    // P0 fix: Clean up timer to prevent leak when scoring completes before timeout
     const timeoutMs = 10000;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<Array<IRankedProvider | null>>((_, reject) => {
-      setTimeout(() => reject(new Error('Ranking timeout')), timeoutMs);
+      timeoutId = setTimeout(() => reject(new Error('Ranking timeout')), timeoutMs);
     });
 
     let results: Array<IRankedProvider | null>;
@@ -94,6 +97,8 @@ export class WeightedRankingStrategy implements IProviderRanker {
       results = settled
         .filter((r): r is PromiseFulfilledResult<IRankedProvider | null> => r.status === 'fulfilled')
         .map(r => r.value);
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     // Filter out failed scores and sort by total score (descending)
@@ -134,7 +139,7 @@ export class WeightedRankingStrategy implements IProviderRanker {
   ): Promise<ProviderScore> {
     // Calculate component scores
     const feeScore = this.calculateFeeScore(provider);
-    const liquidityScore = this.calculateLiquidityScore(provider, requestedAmount, context);
+    const liquidityScore = this.calculateLiquidityScoreForProvider(provider, requestedAmount, context);
     const reliabilityScore = this.calculateReliabilityScore(provider, context);
     const latencyScore = this.calculateLatencyScore(provider, context);
 
@@ -167,15 +172,9 @@ export class WeightedRankingStrategy implements IProviderRanker {
    * Calculate liquidity score (0-1)
    *
    * Uses cached estimates if available, else uses conservative default.
-   *
-   * Scoring:
-   * - Available >= 2x required: 1.0 (plenty)
-   * - Available >= 1.1x required: 0.9 (adequate with margin)
-   * - Available >= 1x required: 0.7 (just enough)
-   * - Available < 1x required: 0.3 (insufficient)
-   * - No data available: 0.7 (conservative - assume adequate but not plenty)
+   * Delegates to shared calculateLiquidityScore() for consistent thresholds.
    */
-  private calculateLiquidityScore(
+  private calculateLiquidityScoreForProvider(
     provider: IProviderInfo,
     requestedAmount: bigint,
     context: IRankingContext
@@ -183,25 +182,13 @@ export class WeightedRankingStrategy implements IProviderRanker {
     const estimate = context.liquidityEstimates.get(provider.protocol);
 
     if (!estimate) {
-      // No estimate - use conservative default (0.7 = adequate but unverified)
-      // Rationale: Better to slightly under-rank than select providers with
-      // insufficient liquidity that cause transaction failures
-      return 0.7;
+      return DEFAULT_LIQUIDITY_SCORE;
     }
 
     // Apply safety margin (10%) with ceiling division to round up (conservative)
-    // Example: 99 wei → (99 * 110 + 99) / 100 = 109 wei (not 108)
     const requiredWithMargin = (requestedAmount * 110n + 99n) / 100n;
 
-    if (estimate >= requiredWithMargin * 2n) {
-      return 1.0; // Plenty of liquidity (2x required)
-    } else if (estimate >= requiredWithMargin) {
-      return 0.9; // Adequate liquidity with margin
-    } else if (estimate >= requestedAmount) {
-      return 0.7; // Just enough (no safety margin)
-    } else {
-      return 0.3; // Insufficient
-    }
+    return calculateLiquidityScore(estimate, requiredWithMargin, requestedAmount);
   }
 
   /**
@@ -255,13 +242,4 @@ export class WeightedRankingStrategy implements IProviderRanker {
     const defaults = this.config.protocolLatencyDefaults ?? {};
     return defaults[provider.protocol] ?? defaults['default'] ?? 0.75;
   }
-}
-
-/**
- * Factory function to create weighted ranking strategy
- */
-export function createWeightedRankingStrategy(
-  config: AggregatorConfig
-): WeightedRankingStrategy {
-  return new WeightedRankingStrategy(config);
 }

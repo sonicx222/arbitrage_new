@@ -28,6 +28,5 @@ global.afterEach(() => {
   jest.resetAllMocks();
 });
 
-(global as any).performance = {
-  now: jest.fn().mockReturnValue(1000)
-};
+// FIX #23: Use shared performance mock (single source of truth)
+import '@arbitrage/test-utils/setup/performance-mock';

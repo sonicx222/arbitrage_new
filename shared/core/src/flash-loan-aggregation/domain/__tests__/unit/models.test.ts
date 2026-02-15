@@ -89,6 +89,21 @@ describe('ProviderScore', () => {
       const expectedTotal = 0.9 * 0.5 + 0.8 * 0.3 + 0.7 * 0.15 + 0.6 * 0.05;
       expect(score.totalScore).toBeCloseTo(expectedTotal, 5);
     });
+
+    it('should clamp totalScore to [0, 1] when weights sum > 1.0', () => {
+      // Weights that sum > 1.0 could produce totalScore > 1.0 without clamping
+      const weights = {
+        fees: 0.6,
+        liquidity: 0.5,
+        reliability: 0.3,
+        latency: 0.2,
+      };
+
+      const score = ProviderScore.fromComponents(1.0, 1.0, 1.0, 1.0, weights);
+
+      // Without clamp, total would be 1.6; with clamp, should be 1.0
+      expect(score.totalScore).toBe(1.0);
+    });
   });
 
   describe('explain', () => {
@@ -107,6 +122,14 @@ describe('ProviderScore', () => {
       const explanation = score.explain();
 
       expect(explanation).toContain('total score: 60%');
+    });
+
+    it('should not include categories at exactly 0.9 (boundary)', () => {
+      const score = new ProviderScore(0.9, 0.9, 0.9, 0.9, 0.9);
+      const explanation = score.explain();
+
+      // Exactly 0.9 should NOT be included (threshold is > 0.9, not >=)
+      expect(explanation).toContain('total score: 90%');
     });
   });
 });
@@ -173,6 +196,14 @@ describe('LiquidityCheck', () => {
       expect(check.availableLiquidity).toBe(800000n);
       expect(check.requiredLiquidity).toBe(900000n);
     });
+
+    it('should treat equal amounts as sufficient (boundary)', () => {
+      const check = LiquidityCheck.success(1000000n, 1000000n, 10);
+
+      expect(check.hasSufficientLiquidity).toBe(true);
+      expect(check.availableLiquidity).toBe(1000000n);
+      expect(check.requiredLiquidity).toBe(1000000n);
+    });
   });
 
   describe('failure', () => {
@@ -220,6 +251,13 @@ describe('LiquidityCheck', () => {
       const margin = check.getMarginPercent();
 
       expect(margin).toBe(100);
+    });
+
+    it('should return 0% for exact match', () => {
+      const check = LiquidityCheck.success(1000000n, 1000000n, 10);
+      const margin = check.getMarginPercent();
+
+      expect(margin).toBe(0);
     });
   });
 });
@@ -311,6 +349,20 @@ describe('ProviderSelection', () => {
       expect(selection.protocol).toBeNull();
       expect(selection.score).toBeNull();
       expect(selection.isSuccess).toBe(false);
+    });
+
+    it('should create failed selection with alternatives', () => {
+      const altScore = new ProviderScore(0.7, 0.6, 0.5, 0.4, 0.6);
+      const selection = ProviderSelection.failure(
+        'All providers failed validation',
+        15,
+        [{ protocol: 'aave_v3', score: altScore }]
+      );
+
+      expect(selection.protocol).toBeNull();
+      expect(selection.isSuccess).toBe(false);
+      expect(selection.rankedAlternatives).toHaveLength(1);
+      expect(selection.rankedAlternatives[0].protocol).toBe('aave_v3');
     });
   });
 
@@ -427,7 +479,7 @@ describe('AggregatorConfig', () => {
       expect(config.weights.liquidity).toBe(0.3);
       expect(config.weights.reliability).toBe(0.15);
       expect(config.weights.latency).toBe(0.05);
-      expect(config.maxProvidersToRank).toBe(5);
+      expect(config.maxProvidersToRank).toBe(3);
     });
   });
 
@@ -442,7 +494,7 @@ describe('AggregatorConfig', () => {
       expect(config.weights.fees).toBe(0.6);
       // Other values use defaults
       expect(config.rankingCacheTtlMs).toBe(30000);
-      expect(config.maxProvidersToRank).toBe(5);
+      expect(config.maxProvidersToRank).toBe(3);
     });
 
     it('should use all defaults if no overrides', () => {
@@ -451,6 +503,56 @@ describe('AggregatorConfig', () => {
 
       expect(config.liquidityCheckThresholdUsd).toBe(defaultConfig.liquidityCheckThresholdUsd);
       expect(config.weights.fees).toBe(defaultConfig.weights.fees);
+    });
+
+    it('should reject partial weight specification (M2 fix)', () => {
+      expect(() => AggregatorConfig.create({
+        weights: { fees: 0.8 } as any,
+      })).toThrow('ERR_PARTIAL_WEIGHTS');
+    });
+
+    it('should reject 2 of 4 weights', () => {
+      expect(() => AggregatorConfig.create({
+        weights: { fees: 0.6, liquidity: 0.4 } as any,
+      })).toThrow('ERR_PARTIAL_WEIGHTS');
+    });
+
+    it('should reject 3 of 4 weights', () => {
+      expect(() => AggregatorConfig.create({
+        weights: { fees: 0.5, liquidity: 0.3, reliability: 0.2 } as any,
+      })).toThrow('ERR_PARTIAL_WEIGHTS');
+    });
+  });
+
+  describe('constructor error paths', () => {
+    it('should reject non-positive liquidity cache TTL', () => {
+      expect(() => new AggregatorConfig(100000, 30000, 0,
+        { fees: 0.5, liquidity: 0.3, reliability: 0.15, latency: 0.05 }, 5)
+      ).toThrow('Invalid liquidity cache TTL');
+    });
+
+    it('should reject maxProvidersToRank less than 1', () => {
+      expect(() => new AggregatorConfig(100000, 30000, 300000,
+        { fees: 0.5, liquidity: 0.3, reliability: 0.15, latency: 0.05 }, 0)
+      ).toThrow('Invalid max providers');
+    });
+
+    it('should reject NaN weight value', () => {
+      expect(() => new AggregatorConfig(100000, 30000, 300000,
+        { fees: NaN, liquidity: 0.3, reliability: 0.15, latency: 0.05 }, 5)
+      ).toThrow('Invalid weight value');
+    });
+
+    it('should reject negative weight value', () => {
+      expect(() => new AggregatorConfig(100000, 30000, 300000,
+        { fees: -0.1, liquidity: 0.3, reliability: 0.15, latency: 0.05 }, 5)
+      ).toThrow('Invalid weight value');
+    });
+
+    it('should reject weight value greater than 1', () => {
+      expect(() => new AggregatorConfig(100000, 30000, 300000,
+        { fees: 1.5, liquidity: 0.3, reliability: 0.15, latency: 0.05 }, 5)
+      ).toThrow('Invalid weight value');
     });
   });
 });
@@ -520,6 +622,16 @@ describe('ProviderOutcome', () => {
       expect(outcome.executionLatencyMs).toBe(180);
       expect(outcome.error).toBe('Transaction reverted');
       expect(outcome.errorType).toBe('transient');
+    });
+
+    it('should default errorType to unknown', () => {
+      const outcome = ProviderOutcome.failure(
+        'aave_v3',
+        100,
+        'Some error'
+      );
+
+      expect(outcome.errorType).toBe('unknown');
     });
   });
 });

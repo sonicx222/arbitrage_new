@@ -29,6 +29,7 @@ import {
   SwapQuote,
   GMX_VAULT_ABI,
   GMX_READER_ABI,
+  withRpcTimeout,
 } from './types';
 
 // =============================================================================
@@ -121,14 +122,18 @@ export class GmxAdapter implements DexAdapter {
     }
 
     try {
-      const count = await this.vaultContract.whitelistedTokenCount();
+      const count = await withRpcTimeout(this.vaultContract.whitelistedTokenCount());
       const tokenCount = Number(count);
 
       this.logger.debug(`Loading ${tokenCount} whitelisted tokens`);
 
-      for (let i = 0; i < tokenCount; i++) {
-        const token = await this.vaultContract.whitelistedTokens(i);
-        this.whitelistedTokens.add(token.toLowerCase());
+      // FIX P1-6: Fetch all tokens in parallel instead of sequential RPC calls
+      const tokenPromises = Array.from({ length: tokenCount }, (_, i) =>
+        withRpcTimeout(this.vaultContract!.whitelistedTokens(i))
+      );
+      const tokens = await Promise.all(tokenPromises);
+      for (const token of tokens) {
+        this.whitelistedTokens.add((token as string).toLowerCase());
       }
     } catch (error) {
       this.logger.error('Failed to load whitelisted tokens', { error });
@@ -191,13 +196,13 @@ export class GmxAdapter implements DexAdapter {
 
     try {
       const tokens = Array.from(this.whitelistedTokens);
-      const balances: bigint[] = [];
 
-      // Fetch pool amounts for each whitelisted token
-      for (const token of tokens) {
-        const amount = await this.vaultContract.poolAmounts(token);
-        balances.push(BigInt(amount.toString()));
-      }
+      // FIX P1-6: Fetch all pool amounts in parallel instead of sequential RPC calls
+      const amountPromises = tokens.map((token) =>
+        withRpcTimeout(this.vaultContract!.poolAmounts(token))
+      );
+      const amounts = await Promise.all(amountPromises);
+      const balances: bigint[] = amounts.map((amount) => BigInt(amount.toString()));
 
       const blockNumber = await this.provider.getBlockNumber();
 
@@ -242,22 +247,25 @@ export class GmxAdapter implements DexAdapter {
     // Use Reader contract if available
     if (this.readerContract) {
       try {
-        const result = await this.readerContract.getAmountOut(
+        const result = await withRpcTimeout(this.readerContract.getAmountOut(
           this.primaryAddress,
           tokenIn,
           tokenOut,
           amountIn
-        );
+        ));
 
         const amountOut = BigInt(result[0].toString());
         const feeAmount = BigInt(result[1].toString());
 
-        // Calculate price impact (simplified)
         const effectivePrice =
           amountOut > 0n ? Number(amountIn) / Number(amountOut) : 0;
 
-        // GMX has relatively low price impact due to oracle-based pricing
-        const priceImpact = 0.001; // 0.1% estimate
+        // GMX uses oracle-based pricing so there's no AMM curve impact.
+        // Price impact is effectively the fee ratio: fee / grossOutput.
+        const grossOutput = amountOut + feeAmount;
+        const priceImpact = grossOutput > 0n
+          ? Number(feeAmount) / Number(grossOutput)
+          : 0;
 
         return {
           amountOut,
@@ -287,24 +295,38 @@ export class GmxAdapter implements DexAdapter {
     try {
       // Get min/max prices
       const [minPriceIn, maxPriceOut] = await Promise.all([
-        this.vaultContract.getMinPrice(tokenIn),
-        this.vaultContract.getMaxPrice(tokenOut),
+        withRpcTimeout(this.vaultContract.getMinPrice(tokenIn)),
+        withRpcTimeout(this.vaultContract.getMaxPrice(tokenOut)),
       ]);
+
+      // FIX P1-3: Guard against division by zero when maxPriceOut is 0
+      // This can happen if the token is not priced or there's an oracle failure.
+      const maxPriceOutBn = BigInt(maxPriceOut.toString());
+      if (maxPriceOutBn === 0n) {
+        this.logger.warn('maxPriceOut is zero, cannot estimate swap', { tokenOut });
+        return null;
+      }
 
       // Calculate output (simplified)
       // amountOut = amountIn * priceIn / priceOut * (1 - fee)
       const feeMultiplier = BigInt(10000 - GMX_SWAP_FEE_BASIS_POINTS);
       const valueIn = amountIn * BigInt(minPriceIn.toString());
-      const amountOutRaw = valueIn / BigInt(maxPriceOut.toString());
+      const amountOutRaw = valueIn / maxPriceOutBn;
       const amountOut = (amountOutRaw * feeMultiplier) / BigInt(10000);
 
       const feeAmount = (amountIn * BigInt(GMX_SWAP_FEE_BASIS_POINTS)) / BigInt(10000);
       const effectivePrice =
         amountOut > 0n ? Number(amountIn) / Number(amountOut) : 0;
 
+      // Price impact in the fallback path is the fee rate since GMX uses oracle pricing
+      const grossOutputEst = amountOut + feeAmount;
+      const priceImpactEst = grossOutputEst > 0n
+        ? Number(feeAmount) / Number(grossOutputEst)
+        : 0;
+
       return {
         amountOut,
-        priceImpact: 0.001,
+        priceImpact: priceImpactEst,
         feeAmount,
         effectivePrice,
       };

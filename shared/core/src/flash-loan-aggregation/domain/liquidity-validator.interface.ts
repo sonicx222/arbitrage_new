@@ -8,7 +8,7 @@
  * - checkLiquidity() with cache hit: <1ms
  * - checkLiquidity() with cache miss: <10ms (RPC call)
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type { LiquidityCheck } from './models';
@@ -75,8 +75,8 @@ export interface ILiquidityValidator {
    * - Request coalescing: Prevent duplicate checks
    *
    * Graceful Degradation:
-   * - On RPC failure: Return LiquidityCheck.failure() with assumed-sufficient
-   * - On timeout: Return LiquidityCheck.failure() with assumed-sufficient
+   * - On RPC failure: Return LiquidityCheck.failure() with assumed-insufficient (conservative)
+   * - On timeout: Return LiquidityCheck.failure() with assumed-insufficient (conservative)
    * - Logs warnings for debugging
    *
    * @param provider - Provider to check

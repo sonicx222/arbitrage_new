@@ -457,7 +457,7 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
   });
 
   describe('Registry operations', () => {
-    it('should register and retrieve Balancer V2 adapter', () => {
+    it('should register and retrieve Balancer V2 adapter', async () => {
       const config: AdapterConfig = {
         name: 'balancer_v2',
         chain: 'arbitrum',
@@ -466,13 +466,13 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapter('balancer_v2', 'arbitrum');
       expect(retrieved).toBe(adapter);
     });
 
-    it('should register and retrieve GMX adapter', () => {
+    it('should register and retrieve GMX adapter', async () => {
       const config: AdapterConfig = {
         name: 'gmx',
         chain: 'avalanche',
@@ -482,13 +482,13 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
       };
 
       const adapter = new GmxAdapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapter('gmx', 'avalanche');
       expect(retrieved).toBe(adapter);
     });
 
-    it('should register and retrieve Platypus adapter', () => {
+    it('should register and retrieve Platypus adapter', async () => {
       const config: AdapterConfig = {
         name: 'platypus',
         chain: 'avalanche',
@@ -497,13 +497,13 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
       };
 
       const adapter = new PlatypusAdapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const retrieved = registry.getAdapter('platypus', 'avalanche');
       expect(retrieved).toBe(adapter);
     });
 
-    it('should list all registered adapters', () => {
+    it('should list all registered adapters', async () => {
       const balancerConfig: AdapterConfig = {
         name: 'balancer_v2',
         chain: 'arbitrum',
@@ -525,15 +525,15 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
         provider: mockProvider
       };
 
-      registry.register(new BalancerV2Adapter(balancerConfig));
-      registry.register(new GmxAdapter(gmxConfig));
-      registry.register(new PlatypusAdapter(platypusConfig));
+      await registry.register(new BalancerV2Adapter(balancerConfig));
+      await registry.register(new GmxAdapter(gmxConfig));
+      await registry.register(new PlatypusAdapter(platypusConfig));
 
       const adapters = registry.listAdapters();
       expect(adapters).toHaveLength(3);
     });
 
-    it('should list adapters by chain', () => {
+    it('should list adapters by chain', async () => {
       const arbitrumConfig: AdapterConfig = {
         name: 'balancer_v2',
         chain: 'arbitrum',
@@ -555,9 +555,9 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
         provider: mockProvider
       };
 
-      registry.register(new BalancerV2Adapter(arbitrumConfig));
-      registry.register(new GmxAdapter(avalancheGmxConfig));
-      registry.register(new PlatypusAdapter(avalanchePlatypusConfig));
+      await registry.register(new BalancerV2Adapter(arbitrumConfig));
+      await registry.register(new GmxAdapter(avalancheGmxConfig));
+      await registry.register(new PlatypusAdapter(avalanchePlatypusConfig));
 
       const arbitrumAdapters = registry.listAdaptersByChain('arbitrum');
       expect(arbitrumAdapters).toHaveLength(1);
@@ -569,7 +569,7 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
   });
 
   describe('Registry with Dex config lookup', () => {
-    it('should find adapter for Dex config object', () => {
+    it('should find adapter for Dex config object', async () => {
       const config: AdapterConfig = {
         name: 'balancer_v2',
         chain: 'arbitrum',
@@ -578,7 +578,7 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
       };
 
       const adapter = new BalancerV2Adapter(config);
-      registry.register(adapter);
+      await registry.register(adapter);
 
       const dexConfig = {
         name: 'balancer_v2',
@@ -628,7 +628,7 @@ describe('Phase 1.5: Adapter Registry Unit Tests', () => {
         provider: mockProvider
       };
 
-      globalRegistry.register(new BalancerV2Adapter(config));
+      await globalRegistry.register(new BalancerV2Adapter(config));
       expect(globalRegistry.listAdapters()).toHaveLength(1);
 
       await resetAdapterRegistry();
@@ -731,7 +731,7 @@ describe('End-to-End: Adapter Lifecycle', () => {
     expect(await adapter.isHealthy()).toBe(true);
 
     // 3. Register with registry
-    registry.register(adapter);
+    await registry.register(adapter);
     expect(registry.getAdapter('balancer_v2', 'arbitrum')).toBe(adapter);
 
     // 4. Discover pools
@@ -770,9 +770,9 @@ describe('End-to-End: Adapter Lifecycle', () => {
     };
 
     // Register all
-    registry.register(new BalancerV2Adapter(balancerConfig));
-    registry.register(new GmxAdapter(gmxConfig));
-    registry.register(new BalancerV2Adapter(beethovenConfig));
+    await registry.register(new BalancerV2Adapter(balancerConfig));
+    await registry.register(new GmxAdapter(gmxConfig));
+    await registry.register(new BalancerV2Adapter(beethovenConfig));
 
     // Verify retrieval
     expect(registry.getAdapter('balancer_v2', 'arbitrum')).not.toBeNull();

@@ -731,6 +731,13 @@ describe('Partition Service Utilities', () => {
     });
 
     it('should return undefined for unset optional env vars', () => {
+      // Explicitly clear env vars that may leak from global test setup (setupTestEnv)
+      delete process.env.REDIS_URL;
+      delete process.env.PARTITION_CHAINS;
+      delete process.env.HEALTH_CHECK_PORT;
+      delete process.env.INSTANCE_ID;
+      delete process.env.REGION_ID;
+
       const config = parsePartitionEnvironmentConfig(['bsc']);
 
       expect(config.redisUrl).toBeUndefined();
@@ -781,9 +788,35 @@ describe('Partition Service Utilities', () => {
     let processExitSpy: jest.SpiedFunction<typeof process.exit>;
     const originalEnv = process.env;
 
+    // Import mocked functions to re-establish implementations after resetMocks clears them
+    const { getPartition, getChainsForPartition } =
+      jest.requireMock<typeof import('@arbitrage/config')>('@arbitrage/config');
+
+    const MOCK_PARTITIONS: Record<string, any> = {
+      'asia-fast': { id: 'asia-fast', chains: ['bsc', 'polygon', 'avalanche', 'fantom'], region: 'asia-southeast1', name: 'P1: Asia-Fast' },
+      'l2-turbo': { id: 'l2-turbo', chains: ['arbitrum', 'optimism', 'base'], region: 'us-central1', name: 'P2: L2-Turbo' },
+      'high-value': { id: 'high-value', chains: ['ethereum', 'zksync', 'linea'], region: 'us-east1', name: 'P3: High-Value' },
+      'solana-native': { id: 'solana-native', chains: ['solana'], region: 'us-west1', name: 'P4: Solana-Native' },
+    };
+
+    const MOCK_PARTITION_CHAINS: Record<string, string[]> = {
+      'asia-fast': ['bsc', 'polygon', 'avalanche', 'fantom'],
+      'l2-turbo': ['arbitrum', 'optimism', 'base'],
+      'high-value': ['ethereum', 'zksync', 'linea'],
+      'solana-native': ['solana'],
+    };
+
     beforeEach(() => {
       process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
       processExitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+
+      // Re-establish mock implementations cleared by resetMocks: true
+      (getPartition as jest.Mock).mockImplementation(
+        (...args: unknown[]) => MOCK_PARTITIONS[args[0] as string] ?? undefined
+      );
+      (getChainsForPartition as jest.Mock).mockImplementation(
+        (...args: unknown[]) => MOCK_PARTITION_CHAINS[args[0] as string] ?? []
+      );
     });
 
     afterEach(() => {

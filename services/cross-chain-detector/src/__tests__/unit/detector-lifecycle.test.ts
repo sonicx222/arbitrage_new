@@ -620,12 +620,12 @@ describe('CrossChainDetectorService', () => {
   // ===========================================================================
 
   describe('detectWhaleInducedOpportunities()', () => {
-    // Access private method
+    // Access private method via extracted WhaleAnalyzer
     const callDetectWhale = (
       svc: any,
       whaleTx: any,
       summary: any
-    ) => svc.detectWhaleInducedOpportunities(whaleTx, summary);
+    ) => svc.whaleAnalyzer.detectWhaleInducedOpportunities(whaleTx, summary);
 
     const now = Date.now();
 

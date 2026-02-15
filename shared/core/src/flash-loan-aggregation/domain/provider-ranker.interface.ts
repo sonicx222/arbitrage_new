@@ -7,7 +7,7 @@
  * Performance Target:
  * - rankProviders(): <2ms (ranks up to 5 providers)
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Strategy Pattern
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type { ProviderScore, AggregatorConfig, FlashLoanProtocol } from './models';

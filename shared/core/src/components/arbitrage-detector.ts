@@ -392,7 +392,7 @@ export function adjustPriceForTokenOrder(
 function extractChainFromDex(dex: string): string | null {
   // Common DEX prefixes
   const chainPrefixes = [
-    'ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bsc', 'avalanche', 'solana'
+    'ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bsc', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
   ];
 
   const dexLower = dex.toLowerCase();
@@ -416,6 +416,12 @@ function extractChainFromDex(dex: string): string | null {
     traderjoe: 'avalanche',
     raydium: 'solana',
     orca: 'solana',
+    spookyswap: 'fantom',
+    spiritswap: 'fantom',
+    syncswap: 'zksync',
+    mute: 'zksync',
+    velocore: 'linea',
+    horizondex: 'linea',
   };
 
   return dexToChain[dexLower] || null;
@@ -523,7 +529,8 @@ const MIN_CROSS_CHAIN_PROFIT = 0.003; // 0.3%
 export function calculateCrossChainArbitrage(
   chainPrices: ChainPriceData[],
   bridgeCost: number,
-  minProfitPct: number = MIN_CROSS_CHAIN_PROFIT
+  minProfitPct: number = MIN_CROSS_CHAIN_PROFIT,
+  maxAgeMs?: number
 ): CrossChainOpportunityResult | null {
   if (chainPrices.length < 2) {
     return null;
@@ -547,7 +554,7 @@ export function calculateCrossChainArbitrage(
   }
 
   // Calculate confidence based on price difference and data freshness
-  const confidence = calculateCrossChainConfidence(lowestPrice, highestPrice);
+  const confidence = calculateCrossChainConfidence(lowestPrice, highestPrice, maxAgeMs);
 
   return {
     token: lowestPrice.pairKey || 'UNKNOWN',
@@ -576,13 +583,13 @@ export function calculateCrossChainArbitrage(
  */
 function calculateCrossChainConfidence(
   lowPrice: ChainPriceData,
-  highPrice: ChainPriceData
+  highPrice: ChainPriceData,
+  maxAgeMs = 10000
 ): number {
   // Base confidence on price difference
   let confidence = Math.min(highPrice.price / lowPrice.price - 1, 0.5) * 2;
 
-  // Apply freshness penalty (maxAgeMs = 10 seconds)
-  const maxAgeMs = 10000;
+  // Apply freshness penalty
   const ageMs = Date.now() - lowPrice.timestamp;
   const freshnessScore = Math.max(0.5, 1.0 - ageMs / maxAgeMs);
   confidence *= freshnessScore;

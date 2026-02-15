@@ -27,6 +27,7 @@ import {
   PoolReserves,
   SwapQuote,
   PLATYPUS_POOL_ABI,
+  withRpcTimeout,
 } from './types';
 
 // =============================================================================
@@ -110,7 +111,7 @@ export class PlatypusAdapter implements DexAdapter {
     }
 
     try {
-      const tokens = await this.poolContract.getTokenAddresses();
+      const tokens = await withRpcTimeout(this.poolContract.getTokenAddresses());
       for (const token of tokens) {
         this.supportedTokens.add(token.toLowerCase());
       }
@@ -176,13 +177,13 @@ export class PlatypusAdapter implements DexAdapter {
 
     try {
       const tokens = Array.from(this.supportedTokens);
-      const balances: bigint[] = [];
 
-      // Fetch cash (available liquidity) for each token
-      for (const token of tokens) {
-        const cash = await this.poolContract.getCash(token);
-        balances.push(BigInt(cash.toString()));
-      }
+      // FIX P1-6: Fetch all token cash in parallel instead of sequential RPC calls
+      const cashPromises = tokens.map((token) =>
+        withRpcTimeout(this.poolContract!.getCash(token))
+      );
+      const cashResults = await Promise.all(cashPromises);
+      const balances: bigint[] = cashResults.map((cash) => BigInt(cash.toString()));
 
       const blockNumber = await this.provider.getBlockNumber();
 
@@ -226,22 +227,24 @@ export class PlatypusAdapter implements DexAdapter {
 
     try {
       // Use quotePotentialSwap for accurate quote
-      const result = await this.poolContract.quotePotentialSwap(
+      const result = await withRpcTimeout(this.poolContract.quotePotentialSwap(
         tokenIn,
         tokenOut,
         amountIn
-      );
+      ));
 
       const amountOut = BigInt(result[0].toString()); // potentialOutcome
       const feeAmount = BigInt(result[1].toString()); // haircut (fee)
 
-      // Calculate price impact
-      // For stablecoins, price impact is typically very low
-      const expectedOut = amountIn; // 1:1 for stables
-      const priceImpact =
-        expectedOut > 0n
-          ? Math.abs(Number(expectedOut - amountOut)) / Number(expectedOut)
-          : 0;
+      // FIX P1-7: Calculate price impact using fee-to-gross-output ratio.
+      // The old code assumed `expectedOut = amountIn` (1:1 at raw level), which is
+      // incorrect for cross-decimal stable pairs (e.g., USDC 6 dec -> DAI 18 dec).
+      // Both amountOut and feeAmount are in tokenOut's decimals, so their ratio
+      // is decimal-independent and works correctly for all stable pairs.
+      const grossOutput = amountOut + feeAmount;
+      const priceImpact = grossOutput > 0n
+        ? Number(feeAmount) / Number(grossOutput)
+        : 0;
 
       const effectivePrice =
         amountOut > 0n ? Number(amountIn) / Number(amountOut) : 0;
