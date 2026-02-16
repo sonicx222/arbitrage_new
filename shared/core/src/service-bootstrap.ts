@@ -273,7 +273,7 @@ export function createSimpleHealthServer(config: SimpleHealthServerConfig): Serv
   });
 
   server.listen(port, () => {
-    logger.info(`${serviceName} health server listening on port ${port}`);
+    logger.debug(`${serviceName} health server listening on port ${port}`);
   });
 
   server.on('error', (error: NodeJS.ErrnoException) => {

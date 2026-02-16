@@ -15,12 +15,13 @@
  * @see ADR-002 - Redis Streams architecture
  */
 
-import type {
-  PriceUpdate,
-  ArbitrageOpportunity,
-  SwapEvent,
-  MessageEvent,
-} from '../../../types/src';
+import {
+  RedisStreams,
+  type PriceUpdate,
+  type ArbitrageOpportunity,
+  type SwapEvent,
+  type MessageEvent,
+} from '@arbitrage/types';
 import { RedisStreamsClient, type StreamBatcher } from '../redis-streams';
 import type { RedisClient } from '../redis';
 import type { ServiceLogger } from '../logging/types';
@@ -63,19 +64,19 @@ export interface PublishingBatcherConfig {
  */
 export const STANDARD_BATCHER_CONFIGS: Record<string, PublishingBatcherConfig> = {
   priceUpdates: {
-    stream: 'stream:price-updates',
+    stream: RedisStreams.PRICE_UPDATES,
     maxBatchSize: 50,
     maxWaitMs: 100, // Flush every 100ms for latency-sensitive price data
     name: 'priceUpdateBatcher',
   },
   swapEvents: {
-    stream: 'stream:swap-events',
+    stream: RedisStreams.SWAP_EVENTS,
     maxBatchSize: 100,
     maxWaitMs: 500, // Less time-sensitive
     name: 'swapEventBatcher',
   },
   whaleAlerts: {
-    stream: 'stream:whale-alerts',
+    stream: RedisStreams.WHALE_ALERTS,
     maxBatchSize: 10,
     maxWaitMs: 50, // Whale alerts are time-sensitive
     name: 'whaleAlertBatcher',

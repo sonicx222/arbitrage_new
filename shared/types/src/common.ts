@@ -6,13 +6,13 @@
 
 /**
  * Minimal logger interface for dependency injection.
- * Compatible with Pino, Winston, and test mocks.
+ * Compatible with Pino and test mocks.
  */
 export interface ILogger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
+  info: (message: string, meta?: Record<string, unknown>) => void;
+  error: (message: string, meta?: Record<string, unknown>) => void;
+  warn: (message: string, meta?: Record<string, unknown>) => void;
+  debug: (message: string, meta?: Record<string, unknown>) => void;
 }
 
 /**
@@ -34,15 +34,18 @@ export interface PerformanceSnapshot {
  */
 export interface ValidationResult<T = void> {
   valid: boolean;
-  errors: ValidationError[];
+  errors: ValidationFieldError[];
   warnings: ValidationWarning[];
   data?: T;
 }
 
 /**
- * Validation error details.
+ * Validation error details for a specific field.
+ *
+ * Named `ValidationFieldError` to avoid collision with the `ValidationError`
+ * class (extends ArbitrageError) also exported from @arbitrage/types.
  */
-export interface ValidationError {
+export interface ValidationFieldError {
   field: string;
   message: string;
   code: string;

@@ -35,39 +35,27 @@ import {
   getRedisStreamsClient,
   RedisStreamsClient
 } from '../redis-streams';
-import { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '../../../types';
+import type { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '@arbitrage/types';
 import { meetsThreshold } from '../components/price-calculator';
 import { basisPointsToDecimal } from '../utils/fee-utils';
+import {
+  SOLANA_DEFAULT_GAS_ESTIMATE,
+  type SolanaDetectorLogger
+} from './solana-types';
 
-// =============================================================================
-// Constants
-// =============================================================================
-
-/**
- * Default gas estimate for Solana DEX swaps.
- * Solana uses compute units (CU) instead of gas. Typical DEX swap: 200,000-400,000 CU.
- * With priority fee of ~0.0001 SOL per CU, estimated cost is ~0.02-0.04 SOL.
- */
-const SOLANA_DEFAULT_GAS_ESTIMATE = '300000';
+// Re-export for backward compatibility (barrel exports reference solana-detector)
+export type { SolanaDetectorLogger };
 
 // =============================================================================
 // Type Definitions
 // =============================================================================
 
 /**
- * Logger interface for SolanaDetector.
- * Allows injecting mock loggers for testing.
- */
-export interface SolanaDetectorLogger {
-  info: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
-
-/**
  * Performance logger interface for SolanaDetector.
- * Minimal interface for testing dependency injection.
+ * Uses `any` for status/metadata parameters to remain compatible with the
+ * PerformanceLogger union type in SolanaDetectorDeps.
+ * TODO: Consolidate with SolanaDetectorPerfLogger in solana-types.ts when
+ * PerformanceLogger is updated to use Record<string, unknown> parameter types.
  */
 export interface SolanaDetectorPerfLogger {
   logHealthCheck: (service: string, status: any) => void;
@@ -278,6 +266,9 @@ export const SOLANA_DEX_PROGRAMS = {
   // Lifinity
   LIFINITY: '2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c'
 } as const;
+
+/** Module-level Set for O(1) known-program lookups (Fix 10). */
+const knownProgramsSet: ReadonlySet<string> = new Set(Object.values(SOLANA_DEX_PROGRAMS));
 
 // =============================================================================
 // SolanaDetector Class
@@ -550,6 +541,9 @@ export class SolanaDetector extends EventEmitter {
 
     this.emit('stopped', { chain: 'solana' });
     this.logger.info('SolanaDetector stopped');
+
+    // Remove all event listeners to prevent leaks (after 'stopped' event is emitted)
+    this.removeAllListeners();
   }
 
   isRunning(): boolean {
@@ -1056,8 +1050,7 @@ export class SolanaDetector extends EventEmitter {
       this.poolsByTokenPair.get(pairKey)!.add(pool.address);
 
       // Warn about unknown program IDs (preserves extensibility, does not reject)
-      const knownPrograms: readonly string[] = Object.values(SOLANA_DEX_PROGRAMS);
-      if (pool.programId && !knownPrograms.includes(pool.programId)) {
+      if (pool.programId && !knownProgramsSet.has(pool.programId)) {
         this.logger.warn('Pool added with unknown program ID', {
           address: pool.address,
           programId: pool.programId,
@@ -1135,6 +1128,12 @@ export class SolanaDetector extends EventEmitter {
     poolAddress: string,
     update: { price: number; reserve0: string; reserve1: string; slot: number }
   ): Promise<void> {
+    // Reject invalid prices before acquiring mutex
+    if (!Number.isFinite(update.price) || update.price <= 0) {
+      this.logger.warn('Invalid price rejected in updatePoolPrice', { poolAddress, price: update.price });
+      return;
+    }
+
     await this.poolUpdateMutex.runExclusive(async () => {
       const pool = this.pools.get(poolAddress);
       if (!pool) {
@@ -1157,9 +1156,9 @@ export class SolanaDetector extends EventEmitter {
   }
 
   private getTokenPairKey(token0: string, token1: string): string {
-    // Normalize by sorting alphabetically
-    const sorted = [token0.toLowerCase(), token1.toLowerCase()].sort();
-    return `${sorted[0]}_${sorted[1]}`;
+    // Solana addresses are base58 (case-sensitive) — no toLowerCase needed.
+    // Direct comparison also avoids array allocation + sort.
+    return token0 < token1 ? `${token0}_${token1}` : `${token1}_${token0}`;
   }
 
   // ===========================================================================
@@ -1313,10 +1312,10 @@ export class SolanaDetector extends EventEmitter {
     const randomSuffix = Math.random().toString(36).slice(2, 11);
 
     // Calculate dynamic confidence based on slot age
-    const slotAge = this.currentSlot - Math.max(
+    const slotAge = Math.max(0, this.currentSlot - Math.max(
       pool1.lastSlot ?? this.currentSlot,
       pool2.lastSlot ?? this.currentSlot
-    );
+    ));
     const confidence = Math.min(0.95, Math.max(0.5, 1.0 - slotAge * 0.01));
     const safeConfidence = Number.isFinite(confidence) ? confidence : 0.5;
 

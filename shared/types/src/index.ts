@@ -587,14 +587,18 @@ export function parseGasEstimate(value: string | number | bigint | undefined): b
     return 0n;
   }
   if (typeof value === 'bigint') {
-    return value;
+    return value < 0n ? 0n : value;
   }
   if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0) {
+      return 0n;
+    }
     return BigInt(Math.floor(value));
   }
   // string case
   try {
-    return BigInt(value);
+    const result = BigInt(value);
+    return result < 0n ? 0n : result;
   } catch {
     return 0n;
   }
@@ -611,3 +615,9 @@ export * from './test-support';
 // =============================================================================
 
 export * from './chains';
+
+// =============================================================================
+// Event Types & Stream Constants (P2-1-FIX centralized event registry)
+// =============================================================================
+
+export * from './events';

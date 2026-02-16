@@ -19,6 +19,7 @@ const {
   checkDockerContainer,
   checkTcpConnection,
   loadPids,
+  processExists,
   getRedisMemoryConfig,
   deleteRedisMemoryConfig, // FIX #15: Clean stale Redis config
   ROOT_DIR,
@@ -153,50 +154,6 @@ function formatStatus(status, optional = false) {
   } else {
     return `${colors.red}Not running${colors.reset}`;
   }
-}
-
-/**
- * Remove stale PIDs from .local-services.pid and return only live entries.
- * @param {Object<string, number|string>} pids
- * @param {Array<{name: string, type?: string, port?: number}>} services
- * @returns {Promise<Object<string, number>>}
- */
-async function pruneStalePids(pids, services = []) {
-  const servicesByName = new Map(services.map((service) => [service.name, service]));
-  const live = {};
-  let staleCount = 0;
-
-  for (const [name, rawPid] of Object.entries(pids)) {
-    const pid = Number(rawPid);
-    if (!Number.isInteger(pid) || pid <= 0) {
-      staleCount++;
-      continue;
-    }
-
-    if (await processExists(pid)) {
-      const service = servicesByName.get(name);
-      if (service?.type === 'node' && typeof service.port === 'number') {
-        if (!await checkLocalPortOpen(service.port)) {
-          staleCount++;
-          continue;
-        }
-      }
-      live[name] = pid;
-    } else {
-      staleCount++;
-    }
-  }
-
-  if (staleCount > 0) {
-    if (Object.keys(live).length === 0) {
-      deletePidFile();
-    } else {
-      savePids(live);
-    }
-    logger.warning(`Removed ${staleCount} stale PID entr${staleCount === 1 ? 'y' : 'ies'} from .local-services.pid`);
-  }
-
-  return live;
 }
 
 // =============================================================================

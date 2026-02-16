@@ -4,6 +4,8 @@
  * Provides factory functions for creating BridgeQuote test fixtures.
  * Reduces duplication in bridge-router and cross-chain tests.
  *
+ * Uses the canonical BridgeQuote type from @arbitrage/core bridge-router types.
+ *
  * @example
  * ```typescript
  * import { createBridgeQuote, BridgeQuoteBuilder } from '@arbitrage/test-utils';
@@ -14,7 +16,7 @@
  * // With overrides
  * const customQuote = createBridgeQuote({
  *   sourceChain: 'ethereum',
- *   targetChain: 'arbitrum',
+ *   destChain: 'arbitrum',
  *   amountOut: '1000000000000000000',
  * });
  *
@@ -28,38 +30,46 @@
  */
 
 // =============================================================================
-// Types
+// Types - Using canonical BridgeQuote from @arbitrage/core
 // =============================================================================
 
+/**
+ * BridgeQuote matching the canonical type from shared/core/src/bridge-router/types.ts.
+ * Re-defined here to avoid a hard dependency on @arbitrage/core (which would create
+ * a build-order issue since test-utils is used during core's own tests).
+ */
 export interface BridgeQuote {
-  /** Source chain identifier */
+  /** Bridge protocol used */
+  protocol: 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
+  /** Source chain */
   sourceChain: string;
-  /** Target chain identifier */
-  targetChain: string;
-  /** Source token address */
-  sourceToken: string;
-  /** Target token address */
-  targetToken: string;
-  /** Input amount in wei/smallest unit */
+  /** Destination chain */
+  destChain: string;
+  /** Token being bridged */
+  token: string;
+  /** Input amount in wei */
   amountIn: string;
-  /** Output amount in wei/smallest unit */
+  /** Expected output amount in wei (after fees) */
   amountOut: string;
-  /** Bridge protocol name */
-  bridgeProtocol: string;
-  /** Estimated bridge fee in native token */
+  /** Bridge fee in wei */
   bridgeFee: string;
-  /** Estimated gas cost for the bridge transaction */
-  estimatedGas: string;
-  /** Estimated time to complete bridge in seconds */
+  /** LayerZero/native gas fee in wei */
+  gasFee: string;
+  /**
+   * Total native gas cost in wei.
+   * @deprecated Prefer using gasFee directly for clarity. totalFee === gasFee.
+   */
+  totalFee: string;
+  /** Estimated delivery time in seconds */
   estimatedTimeSeconds: number;
-  /** Timestamp when quote was generated */
-  timestamp: number;
   /** Quote expiry timestamp */
   expiresAt: number;
-  /** Optional: Route details for multi-hop bridges */
-  route?: string[];
-  /** Optional: Slippage tolerance as decimal (0.01 = 1%) */
-  slippageTolerance?: number;
+  /** Quote validity (true if route is available) */
+  valid: boolean;
+  /** Error message if not valid */
+  error?: string;
+  /** Destination address for bridged tokens */
+  recipient?: string;
 }
 
 export interface BridgeQuoteOverrides extends Partial<BridgeQuote> {}
@@ -89,26 +99,26 @@ export function getBridgeQuoteCounter(): number {
 // =============================================================================
 
 /**
- * Create a bridge quote with sensible defaults.
+ * Create a bridge quote with sensible defaults matching the canonical type.
  */
 export function createBridgeQuote(overrides: BridgeQuoteOverrides = {}): BridgeQuote {
   quoteCounter++;
   const now = Date.now();
+  const gasFee = overrides.gasFee ?? '2000000000000000'; // 0.002 ETH
 
   return {
+    protocol: 'stargate',
     sourceChain: 'ethereum',
-    targetChain: 'arbitrum',
-    sourceToken: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH on Ethereum
-    targetToken: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH on Arbitrum
+    destChain: 'arbitrum',
+    token: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
     amountIn: '1000000000000000000', // 1 ETH
     amountOut: '998000000000000000', // 0.998 ETH (0.2% fee)
-    bridgeProtocol: 'stargate',
     bridgeFee: '2000000000000000', // 0.002 ETH
-    estimatedGas: '150000',
+    gasFee,
+    totalFee: gasFee, // totalFee === gasFee per canonical type
     estimatedTimeSeconds: 600, // 10 minutes
-    timestamp: now,
     expiresAt: now + 300000, // 5 minutes validity
-    slippageTolerance: 0.005, // 0.5%
+    valid: true,
     ...overrides,
   };
 }
@@ -139,49 +149,45 @@ export class BridgeQuoteBuilder {
 
   fromEthereum(): this {
     this.quote.sourceChain = 'ethereum';
-    this.quote.sourceToken = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+    this.quote.token = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
     return this;
   }
 
   fromArbitrum(): this {
     this.quote.sourceChain = 'arbitrum';
-    this.quote.sourceToken = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+    this.quote.token = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
     return this;
   }
 
   fromBsc(): this {
     this.quote.sourceChain = 'bsc';
-    this.quote.sourceToken = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
+    this.quote.token = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
     return this;
   }
 
   fromPolygon(): this {
     this.quote.sourceChain = 'polygon';
-    this.quote.sourceToken = '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270';
+    this.quote.token = '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270';
     return this;
   }
 
   toEthereum(): this {
-    this.quote.targetChain = 'ethereum';
-    this.quote.targetToken = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+    this.quote.destChain = 'ethereum';
     return this;
   }
 
   toArbitrum(): this {
-    this.quote.targetChain = 'arbitrum';
-    this.quote.targetToken = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+    this.quote.destChain = 'arbitrum';
     return this;
   }
 
   toBsc(): this {
-    this.quote.targetChain = 'bsc';
-    this.quote.targetToken = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
+    this.quote.destChain = 'bsc';
     return this;
   }
 
   toPolygon(): this {
-    this.quote.targetChain = 'polygon';
-    this.quote.targetToken = '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270';
+    this.quote.destChain = 'polygon';
     return this;
   }
 
@@ -197,18 +203,35 @@ export class BridgeQuoteBuilder {
     return this;
   }
 
-  withBridge(protocol: string): this {
-    this.quote.bridgeProtocol = protocol;
+  withBridge(protocol: BridgeQuote['protocol']): this {
+    this.quote.protocol = protocol;
     return this;
   }
 
-  withFee(fee: string): this {
-    this.quote.bridgeFee = fee;
+  withFee(bridgeFee: string): this {
+    this.quote.bridgeFee = bridgeFee;
+    return this;
+  }
+
+  withGasFee(gasFee: string): this {
+    this.quote.gasFee = gasFee;
+    this.quote.totalFee = gasFee;
     return this;
   }
 
   withEstimatedTime(seconds: number): this {
     this.quote.estimatedTimeSeconds = seconds;
+    return this;
+  }
+
+  withRecipient(recipient: string): this {
+    this.quote.recipient = recipient;
+    return this;
+  }
+
+  invalid(error: string): this {
+    this.quote.valid = false;
+    this.quote.error = error;
     return this;
   }
 
@@ -219,16 +242,6 @@ export class BridgeQuoteBuilder {
 
   expiringIn(ms: number): this {
     this.quote.expiresAt = Date.now() + ms;
-    return this;
-  }
-
-  withSlippage(tolerance: number): this {
-    this.quote.slippageTolerance = tolerance;
-    return this;
-  }
-
-  withRoute(route: string[]): this {
-    this.quote.route = route;
     return this;
   }
 
@@ -275,11 +288,10 @@ export function createEthToArbQuote(amountIn = '1000000000000000000'): BridgeQuo
 export function createL2ToL2Quote(amountIn = '1000000000000000000'): BridgeQuote {
   return createBridgeQuote({
     sourceChain: 'arbitrum',
-    targetChain: 'optimism',
-    sourceToken: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-    targetToken: '0x4200000000000000000000000000000000000006',
+    destChain: 'optimism',
+    token: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
     amountIn,
-    bridgeProtocol: 'hop',
+    protocol: 'across',
     estimatedTimeSeconds: 1200, // 20 minutes for L2-L2
   });
 }
@@ -289,6 +301,13 @@ export function createL2ToL2Quote(amountIn = '1000000000000000000'): BridgeQuote
  */
 export function createExpiredQuote(): BridgeQuote {
   return new BridgeQuoteBuilder().expired().build();
+}
+
+/**
+ * Create an invalid quote (for testing error handling).
+ */
+export function createInvalidQuote(error = 'Route not available'): BridgeQuote {
+  return new BridgeQuoteBuilder().invalid(error).build();
 }
 
 /**

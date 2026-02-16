@@ -23,7 +23,7 @@
  * expect(mockLogger.getErrors()).toHaveLength(0);
  * ```
  *
- * @see docs/logger_implementation_plan.md
+ * @see docs/architecture/adr/ADR-015-pino-logger-migration.md
  */
 
 import type { ILogger, IPerformanceLogger, LogLevel, LogMeta } from './types';
@@ -300,7 +300,7 @@ export class RecordingPerformanceLogger extends RecordingLogger implements IPerf
   startTimer(operation: string): void {
     this.timers.set(operation, {
       start: Date.now(),
-      count: (this.timers.get(operation)?.count || 0) + 1,
+      count: (this.timers.get(operation)?.count ?? 0) + 1,
     });
   }
 
@@ -348,7 +348,7 @@ export class RecordingPerformanceLogger extends RecordingLogger implements IPerf
     opportunityId: string;
     success: boolean;
     actualProfit?: number;
-    gasUsed?: string;
+    gasUsed?: number;
     transactionHash?: string;
     error?: string;
   }): void {

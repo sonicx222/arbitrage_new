@@ -15,7 +15,7 @@
  * @see .claude/plans/component-architecture-proposal.md
  */
 
-import type { Pair } from '../../../types/src';
+import type { Pair } from '@arbitrage/types';
 // HOT-PATH: Import cached token pair key utility to avoid string allocation
 import { getTokenPairKeyCached } from './token-utils';
 

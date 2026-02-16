@@ -5,17 +5,14 @@
  * - AaveV3FlashLoanProvider: Aave V3 flash loan provider
  * - BalancerV2FlashLoanProvider: Balancer V2 flash loan provider (0% fee)
  * - UnsupportedFlashLoanProvider: Placeholder for unimplemented protocols
- * - FlashLoanProviderFactory: Provider creation and caching
  *
  * @see services/execution-engine/src/strategies/flash-loan-providers/
  */
 
 import { ethers } from 'ethers';
-import { createMockLogger } from '@arbitrage/test-utils';
 import { AaveV3FlashLoanProvider } from '../../../src/strategies/flash-loan-providers/aave-v3.provider';
 import { BalancerV2FlashLoanProvider } from '../../../src/strategies/flash-loan-providers/balancer-v2.provider';
 import { UnsupportedFlashLoanProvider } from '../../../src/strategies/flash-loan-providers/unsupported.provider';
-import { FlashLoanProviderFactory } from '../../../src/strategies/flash-loan-providers/provider-factory';
 import type {
   FlashLoanRequest,
   FlashLoanSwapStep,
@@ -375,120 +372,6 @@ describe('UnsupportedFlashLoanProvider', () => {
       await expect(
         provider.estimateGas(createValidRequest({ chain: 'fantom' }), mockProvider),
       ).rejects.toThrow(/not yet implemented/);
-    });
-  });
-});
-
-// =============================================================================
-// FlashLoanProviderFactory
-// =============================================================================
-
-describe('FlashLoanProviderFactory', () => {
-  let factory: FlashLoanProviderFactory;
-  let mockLogger: ReturnType<typeof createMockLogger>;
-
-  beforeEach(() => {
-    mockLogger = createMockLogger();
-    factory = new FlashLoanProviderFactory(mockLogger, {
-      contractAddresses: {
-        ethereum: VALID_CONTRACT_ADDRESS,
-        polygon: VALID_CONTRACT_ADDRESS,
-      },
-      approvedRouters: {
-        ethereum: [VALID_ROUTER_ADDRESS],
-        polygon: [VALID_ROUTER_ADDRESS],
-      },
-    });
-  });
-
-  describe('constructor', () => {
-    it('should create factory without warnings when contracts are configured', () => {
-      expect(factory).toBeDefined();
-      expect(mockLogger.warn).not.toHaveBeenCalledWith(
-        expect.stringContaining('No FlashLoanArbitrage'),
-      );
-    });
-
-    it('should warn when no contract addresses are configured', () => {
-      new FlashLoanProviderFactory(mockLogger, {
-        contractAddresses: {},
-        approvedRouters: {},
-      });
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('No FlashLoanArbitrage'),
-      );
-    });
-  });
-
-  describe('getProvider', () => {
-    it('should return undefined for unconfigured chain', () => {
-      const provider = factory.getProvider('solana');
-      // Solana may or may not be in FLASH_LOAN_PROVIDERS config
-      // If not configured, returns undefined
-      if (provider === undefined) {
-        expect(provider).toBeUndefined();
-      }
-    });
-
-    it('should cache providers for repeated calls', () => {
-      const first = factory.getProvider('ethereum');
-      const second = factory.getProvider('ethereum');
-
-      // Both should be the same object reference (cached)
-      expect(first).toBe(second);
-    });
-  });
-
-  describe('clearCache', () => {
-    it('should clear cached providers', () => {
-      // Access a provider to cache it
-      factory.getProvider('ethereum');
-
-      factory.clearCache();
-
-      // After clearing, a new provider instance should be created
-      // (we can't easily test identity, but the method shouldn't throw)
-      expect(() => factory.clearCache()).not.toThrow();
-    });
-  });
-
-  describe('getAllConfiguredChains', () => {
-    it('should return all chains from FLASH_LOAN_PROVIDERS config', () => {
-      const chains = factory.getAllConfiguredChains();
-      expect(Array.isArray(chains)).toBe(true);
-      expect(chains.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('getProtocol', () => {
-    it('should return protocol for a configured chain', () => {
-      const protocol = factory.getProtocol('ethereum');
-      // Ethereum should have aave_v3 configured
-      if (protocol) {
-        expect(['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'syncswap']).toContain(protocol);
-      }
-    });
-
-    it('should return undefined for unconfigured chain', () => {
-      const protocol = factory.getProtocol('nonexistent-chain');
-      expect(protocol).toBeUndefined();
-    });
-  });
-
-  describe('getSupportSummary', () => {
-    it('should return a summary object with chain status information', () => {
-      const summary = factory.getSupportSummary();
-      expect(typeof summary).toBe('object');
-
-      // Check that each entry has the expected shape
-      for (const [chain, info] of Object.entries(summary)) {
-        expect(info).toHaveProperty('protocol');
-        expect(info).toHaveProperty('status');
-        expect(info).toHaveProperty('hasContract');
-        expect(typeof info.protocol).toBe('string');
-        expect(typeof info.hasContract).toBe('boolean');
-      }
     });
   });
 });

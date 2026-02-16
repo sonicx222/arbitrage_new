@@ -20,9 +20,7 @@ let healthServer: Server | null = null;
 
 async function main() {
   try {
-    logger.info('Starting Cross-Chain Detector Service', {
-      healthCheckPort: HEALTH_CHECK_PORT
-    });
+    logger.info(`Starting Cross-Chain Detector Service on port ${HEALTH_CHECK_PORT}`);
 
     const detector = new CrossChainDetectorService();
 

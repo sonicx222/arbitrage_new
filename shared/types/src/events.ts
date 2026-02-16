@@ -13,20 +13,32 @@ export const RedisStreams = {
   // Core event streams
   PRICE_UPDATES: 'stream:price-updates',
   SWAP_EVENTS: 'stream:swap-events',
-  ARBITRAGE_OPPORTUNITIES: 'stream:arbitrage-opportunities',
-  WHALE_TRANSACTIONS: 'stream:whale-transactions',
+  OPPORTUNITIES: 'stream:opportunities',
+  WHALE_ALERTS: 'stream:whale-alerts',
 
   // Service coordination streams
   SERVICE_HEALTH: 'stream:service-health',
   SERVICE_EVENTS: 'stream:service-events',
   COORDINATOR_EVENTS: 'stream:coordinator-events',
+  HEALTH: 'stream:health',
+  HEALTH_ALERTS: 'stream:health-alerts',
 
   // Execution streams
   EXECUTION_REQUESTS: 'stream:execution-requests',
   EXECUTION_RESULTS: 'stream:execution-results',
 
+  // Mempool & detection streams
+  PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
+  VOLUME_AGGREGATES: 'stream:volume-aggregates',
+
+  // System coordination streams
+  CIRCUIT_BREAKER: 'stream:circuit-breaker',
+  SYSTEM_FAILOVER: 'stream:system-failover',
+  SYSTEM_COMMANDS: 'stream:system-commands',
+
   // Dead letter queue
   DEAD_LETTER_QUEUE: 'stream:dlq',
+  FORWARDING_DLQ: 'stream:forwarding-dlq',
 } as const;
 
 export type RedisStreamName = typeof RedisStreams[keyof typeof RedisStreams];

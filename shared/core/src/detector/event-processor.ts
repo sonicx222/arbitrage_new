@@ -14,7 +14,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { Pair, PriceUpdate, SwapEvent } from '../../../types/src';
+import type { Pair, PriceUpdate, SwapEvent } from '@arbitrage/types';
 
 // =============================================================================
 // Pre-compiled ABI Type Constants (Hot Path Optimization)

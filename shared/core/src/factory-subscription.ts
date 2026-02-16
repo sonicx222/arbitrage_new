@@ -520,7 +520,7 @@ export class FactorySubscriptionService {
 
       // Update stats
       this.stats.pairsCreated++;
-      this.stats.eventsByType[factory.type] = (this.stats.eventsByType[factory.type] || 0) + 1;
+      this.stats.eventsByType[factory.type] = (this.stats.eventsByType[factory.type] ?? 0) + 1;
 
       // Emit to callbacks
       this.emitPairCreatedEvent(event);
@@ -589,7 +589,7 @@ export class FactorySubscriptionService {
 
     // Update stats
     this.stats.pairsCreated++;
-    this.stats.eventsByType['balancer_v2'] = (this.stats.eventsByType['balancer_v2'] || 0) + 1;
+    this.stats.eventsByType['balancer_v2'] = (this.stats.eventsByType['balancer_v2'] ?? 0) + 1;
 
     // Emit complete event
     this.emitPairCreatedEvent(completeEvent);

@@ -63,11 +63,11 @@ export function createObjectCache<K extends object, V>() {
      * Useful for lazy computation patterns.
      */
     getOrCompute(key: K, compute: () => V): V {
-      let value = cache.get(key);
-      if (value === undefined) {
-        value = compute();
-        cache.set(key, value);
+      if (cache.has(key)) {
+        return cache.get(key) as V;
       }
+      const value = compute();
+      cache.set(key, value);
       return value;
     },
 
@@ -75,11 +75,11 @@ export function createObjectCache<K extends object, V>() {
      * Get or compute async.
      */
     async getOrComputeAsync(key: K, compute: () => Promise<V>): Promise<V> {
-      let value = cache.get(key);
-      if (value === undefined) {
-        value = await compute();
-        cache.set(key, value);
+      if (cache.has(key)) {
+        return cache.get(key) as V;
       }
+      const value = await compute();
+      cache.set(key, value);
       return value;
     },
   };
@@ -88,6 +88,17 @@ export function createObjectCache<K extends object, V>() {
 // =============================================================================
 // Fast Memoization
 // =============================================================================
+
+/**
+ * Evict the oldest entry from a Map (FIFO order).
+ * Shared by memoize() and memoizeAsync() to avoid duplication.
+ */
+function evictOldest<V>(cache: Map<string, V>): void {
+  const firstKey = cache.keys().next().value;
+  if (firstKey !== undefined) {
+    cache.delete(firstKey);
+  }
+}
 
 /**
  * Create a memoized version of a single-argument function.
@@ -107,22 +118,18 @@ export function memoize<T, R>(
 
   return (arg: T): R => {
     const key = keyExtractor(arg);
-    let result = cache.get(key);
 
-    if (result === undefined) {
-      result = fn(arg);
-
-      // Evict oldest if at capacity (FIFO)
-      if (cache.size >= maxSize) {
-        const firstKey = cache.keys().next().value;
-        if (firstKey !== undefined) {
-          cache.delete(firstKey);
-        }
-      }
-
-      cache.set(key, result);
+    if (cache.has(key)) {
+      return cache.get(key) as R;
     }
 
+    const result = fn(arg);
+
+    if (cache.size >= maxSize) {
+      evictOldest(cache);
+    }
+
+    cache.set(key, result);
     return result;
   };
 }
@@ -141,28 +148,25 @@ export function memoizeAsync<T, R>(
 
   return (arg: T): Promise<R> => {
     const key = keyExtractor(arg);
-    let promise = cache.get(key);
 
-    if (promise === undefined) {
-      promise = fn(arg);
-
-      // Evict oldest if at capacity (FIFO)
-      if (cache.size >= maxSize) {
-        const firstKey = cache.keys().next().value;
-        if (firstKey !== undefined) {
-          cache.delete(firstKey);
-        }
-      }
-
-      cache.set(key, promise);
-
-      // Clean up on rejection to allow retry
-      promise.catch(() => {
-        if (cache.get(key) === promise) {
-          cache.delete(key);
-        }
-      });
+    if (cache.has(key)) {
+      return cache.get(key) as Promise<R>;
     }
+
+    const promise = fn(arg);
+
+    if (cache.size >= maxSize) {
+      evictOldest(cache);
+    }
+
+    cache.set(key, promise);
+
+    // Clean up on rejection to allow retry
+    promise.catch(() => {
+      if (cache.get(key) === promise) {
+        cache.delete(key);
+      }
+    });
 
     return promise;
   };
@@ -188,8 +192,12 @@ export async function processBatches<T, R>(
   const results: R[] = [];
 
   for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchResults = await Promise.all(batch.map(processor));
+    const end = Math.min(i + batchSize, items.length);
+    const promises: Promise<R>[] = [];
+    for (let j = i; j < end; j++) {
+      promises.push(processor(items[j]));
+    }
+    const batchResults = await Promise.all(promises);
     results.push(...batchResults);
   }
 
@@ -209,14 +217,14 @@ export async function processWithRateLimit<T, R>(
   let lastTime = 0;
 
   for (const item of items) {
-    const now = Date.now();
+    const now = performance.now();
     const elapsed = now - lastTime;
 
     if (elapsed < minDelayMs && lastTime > 0) {
       await sleep(minDelayMs - elapsed);
     }
 
-    lastTime = Date.now();
+    lastTime = performance.now();
     results.push(await processor(item));
   }
 
@@ -343,13 +351,18 @@ export function lazy<T>(initializer: () => T): () => T {
 /**
  * Create a lazily-initialized async value.
  * Handles concurrent access by sharing the initialization promise.
+ * On rejection, clears the cached promise to allow retry on next call.
  */
 export function lazyAsync<T>(initializer: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | undefined;
 
   return () => {
     if (promise === undefined) {
-      promise = initializer();
+      promise = initializer().catch((err) => {
+        // Clear cached promise so next call retries initialization
+        promise = undefined;
+        throw err;
+      });
     }
     return promise;
   };

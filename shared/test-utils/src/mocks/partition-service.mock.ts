@@ -25,22 +25,31 @@ import { EventEmitter } from 'events';
 // =============================================================================
 
 export interface MockLogger {
-  info: jest.Mock;
+  fatal: jest.Mock;
   error: jest.Mock;
   warn: jest.Mock;
+  info: jest.Mock;
   debug: jest.Mock;
+  trace: jest.Mock;
+  child: jest.Mock;
 }
 
 /**
  * Creates a mock logger with jest.fn() implementations for all log methods.
  */
 export function createMockLogger(): MockLogger {
-  return {
-    info: jest.fn(),
+  const logger: MockLogger = {
+    fatal: jest.fn(),
     error: jest.fn(),
     warn: jest.fn(),
+    info: jest.fn(),
     debug: jest.fn(),
+    trace: jest.fn(),
+    child: jest.fn(),
   };
+  // child() returns a new mock logger with the same interface
+  logger.child.mockReturnValue(logger);
+  return logger;
 }
 
 // =============================================================================

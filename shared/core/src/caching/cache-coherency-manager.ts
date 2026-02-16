@@ -451,7 +451,7 @@ export class CacheCoherencyManager {
     this.vectorClockLock = true;
 
     try {
-      const current = this.vectorClock.get(nodeId) || 0;
+      const current = this.vectorClock.get(nodeId) ?? 0;
       const newValue = current + 1;
       this.vectorClock.set(nodeId, newValue);
 
@@ -467,7 +467,7 @@ export class CacheCoherencyManager {
   private mergeVectorClock(remoteClock: Map<string, number>): void {
     const now = Date.now();
     for (const [nodeId, version] of remoteClock.entries()) {
-      const localVersion = this.vectorClock.get(nodeId) || 0;
+      const localVersion = this.vectorClock.get(nodeId) ?? 0;
       if (version > localVersion) {
         this.vectorClock.set(nodeId, version);
         // P1-14 FIX: Track when this entry was last updated

@@ -221,6 +221,11 @@ export function toOrderflowSignal(prediction: OrderflowPrediction): OrderflowSig
  * - Uses SynchronizedStats for accurate metrics tracking (Fix 4.1, 5.2)
  * - Pre-allocated Float64Array with bounds validation (Fix 4.2, Perf 10.1)
  * - Optimized pending prediction tracking (Fix 4.4, Perf 10.3)
+ *
+ * P2-3 note: Model persistence is not yet implemented for OrderflowPredictor.
+ * ADR-025 specifies an `orderflow-predictor/` model directory, but this class
+ * does not currently save/load model weights. LSTMPredictor has persistence.
+ * Implementing persistence here would follow the same pattern as predictor.ts.
  */
 export class OrderflowPredictor {
   private model: tf.LayersModel | null = null;
@@ -251,6 +256,9 @@ export class OrderflowPredictor {
   // Perf 10.1: Pre-allocated buffer for predictions with bounds validation
   private readonly inputBuffer: Float64Array;
   private readonly INPUT_BUFFER_SIZE = ORDERFLOW_FEATURE_COUNT;
+
+  // P0-2 fix: Monotonic counter for unique pending prediction keys in batch mode
+  private pendingPredictionCounter = 0;
 
   constructor(
     config: OrderflowPredictorConfig = {},
@@ -395,10 +403,9 @@ export class OrderflowPredictor {
       // Fix 4.2: Prepare input with bounds checking
       this.fillInputBuffer(normalizedFeatures);
 
-      // Perf 10.1: Create tensor from pre-filled buffer
-      // Note: tf.tensor2d with shape requires conversion to regular array
-      // Use tf.tensor with reshape for typed arrays to avoid allocation
-      const inputTensor = tf.tensor(Array.from(this.inputBuffer), [1, this.INPUT_BUFFER_SIZE]);
+      // P2-6 fix: Pass Float64Array directly to tf.tensor instead of
+      // allocating a new array with Array.from(), preserving pre-allocation benefit.
+      const inputTensor = tf.tensor(this.inputBuffer, [1, this.INPUT_BUFFER_SIZE]);
 
       try {
         const output = this.model.predict(inputTensor) as tf.Tensor;
@@ -722,6 +729,7 @@ export class OrderflowPredictor {
     this.trainingHistory = [];
     this.pendingPredictions.clear();
     this.oldestPendingTimestamp = Infinity;
+    this.pendingPredictionCounter = 0;
     this.isTrained = false;
     this.stats.reset();
   }
@@ -894,7 +902,12 @@ export class OrderflowPredictor {
             maxIndex === 0 ? 'bullish' :
             maxIndex === 2 ? 'bearish' : 'neutral';
 
-          const confidence = maxScore;
+          // P0-2 fix: Apply softmax normalization matching predict() behavior.
+          // Previously used raw maxScore which is unbounded; softmax produces [0,1].
+          const expScores = directionScores.map(s => Math.exp(s));
+          const sumExp = expScores.reduce((a, b) => a + b, 0);
+          const confidence = sumExp > 0 ? expScores[maxIndex] / sumExp : 0.33;
+
           const pressure = Math.max(-1, Math.min(1, result[3]));
           const volatility = Math.max(0, Math.min(1, result[4]));
           const whaleImpact = Math.max(0, Math.min(1, result[5]));
@@ -910,8 +923,22 @@ export class OrderflowPredictor {
             features: featurePairs[idx].features // Use original features, not normalized
           };
 
-          // Track for accuracy validation
-          this.pendingPredictions.set(prediction.timestamp + idx, prediction);
+          // P0-2 fix: Apply same confidence threshold as predict() before storing
+          if (confidence >= this.config.confidenceThreshold) {
+            this.stats.increment('highConfidencePredictions');
+            // Use monotonic counter to generate unique keys for batch items.
+            // addPendingPrediction uses prediction.timestamp as Map key, and
+            // batch items share the same Date.now(). Adding a sub-ms counter
+            // offset ensures unique keys while preserving approximate time ordering.
+            const uniqueKey = prediction.timestamp + (this.pendingPredictionCounter++ * 0.001);
+            this.pendingPredictions.set(uniqueKey, prediction);
+            if (uniqueKey < this.oldestPendingTimestamp) {
+              this.oldestPendingTimestamp = uniqueKey;
+            }
+            if (this.pendingPredictions.size > 1000) {
+              this.cleanupOldestPendingPredictions(100);
+            }
+          }
 
           return prediction;
         });

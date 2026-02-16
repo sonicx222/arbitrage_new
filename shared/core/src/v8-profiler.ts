@@ -12,8 +12,8 @@
  * await profiler.generateFlameGraph(profile, 'output/flamegraph.svg');
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { mkdir, writeFile } from 'fs/promises';
 
 export interface ProfileResult {
   title: string;
@@ -31,15 +31,11 @@ export class V8Profiler {
   private profiler: any = null;
   private outputDir: string;
   private sampleInterval: number;
+  private outputDirReady = false;
 
   constructor(options: ProfileOptions = {}) {
     this.outputDir = options.outputDir || join(process.cwd(), '.profiler-output');
     this.sampleInterval = options.sampleInterval || 1000; // 1ms default
-
-    // Ensure output directory exists
-    if (!existsSync(this.outputDir)) {
-      mkdirSync(this.outputDir, { recursive: true });
-    }
 
     // Try to load v8-profiler-next
     try {
@@ -48,6 +44,15 @@ export class V8Profiler {
     } catch (err) {
       console.warn('⚠ v8-profiler-next not available. Install with: npm install --save-dev v8-profiler-next');
     }
+  }
+
+  /**
+   * Ensure the output directory exists (lazy init, called before file writes).
+   */
+  private async ensureOutputDir(): Promise<void> {
+    if (this.outputDirReady) return;
+    await mkdir(this.outputDir, { recursive: true });
+    this.outputDirReady = true;
   }
 
   /**
@@ -83,7 +88,7 @@ export class V8Profiler {
     const startTime = profile.startTime;
     const endTime = profile.endTime;
     const duration = endTime - startTime;
-    const samples = profile.samples?.length || 0;
+    const samples = profile.samples?.length ?? 0;
 
     console.log(`✓ Stopped profiling: ${profile.title || 'profile'} (duration: ${duration}μs, samples: ${samples})`);
 
@@ -103,20 +108,24 @@ export class V8Profiler {
       filename = `${profileResult.title}-${Date.now()}.cpuprofile`;
     }
 
+    await this.ensureOutputDir();
     const filepath = join(this.outputDir, filename);
 
     return new Promise((resolve, reject) => {
-      profileResult.profile.export((error: Error | null, result: string) => {
+      profileResult.profile.export(async (error: Error | null, result: string) => {
         if (error) {
           reject(error);
           return;
         }
 
-        writeFileSync(filepath, result, 'utf8');
-        profileResult.profile.delete();
-
-        console.log(`✓ Exported profile: ${filepath}`);
-        resolve(filepath);
+        try {
+          await writeFile(filepath, result, 'utf8');
+          profileResult.profile.delete();
+          console.log(`✓ Exported profile: ${filepath}`);
+          resolve(filepath);
+        } catch (writeError) {
+          reject(writeError);
+        }
       });
     });
   }
@@ -198,7 +207,8 @@ export class V8Profiler {
 </body>
 </html>`;
 
-    writeFileSync(outputPath, htmlContent, 'utf8');
+    await this.ensureOutputDir();
+    await writeFile(outputPath, htmlContent, 'utf8');
     console.log(`✓ Generated flame graph HTML: ${outputPath}`);
     console.log(`  View profile: open ${cpuprofilePath} in Chrome DevTools or Speedscope`);
 

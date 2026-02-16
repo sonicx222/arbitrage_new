@@ -254,11 +254,19 @@ export class OrderflowFeatureExtractor {
     const whaleSwapCount1h = this.extractWhaleCount(pairKey, chain);
     const whaleNetDirection = this.extractWhaleDirection(pairKey, chain);
 
-    // Extract time patterns
-    const date = new Date(currentTimestamp);
-    const hourOfDay = date.getUTCHours();
-    const dayOfWeek = date.getUTCDay();
-    const hourWithMinutes = hourOfDay + date.getUTCMinutes() / 60;
+    // P3-2 fix: Extract time patterns from timestamp using arithmetic
+    // instead of allocating a Date object on every call. The UTC time
+    // components can be derived from the Unix timestamp directly.
+    const MS_PER_MINUTE = 60_000;
+    const MS_PER_HOUR = 3_600_000;
+    const MS_PER_DAY = 86_400_000;
+    // Epoch (1970-01-01) was a Thursday (day 4), so adjust for getUTCDay() equivalence
+    const daysSinceEpoch = Math.floor(currentTimestamp / MS_PER_DAY);
+    const dayOfWeek = (daysSinceEpoch + 4) % 7; // 0=Sunday, matches Date.getUTCDay()
+    const msInDay = ((currentTimestamp % MS_PER_DAY) + MS_PER_DAY) % MS_PER_DAY; // handle negative timestamps
+    const hourOfDay = Math.floor(msInDay / MS_PER_HOUR);
+    const minuteOfHour = Math.floor((msInDay % MS_PER_HOUR) / MS_PER_MINUTE);
+    const hourWithMinutes = hourOfDay + minuteOfHour / 60;
     const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
 
     const isUsMarketOpen = isWeekday &&
@@ -311,7 +319,10 @@ export class OrderflowFeatureExtractor {
     this.featureBuffer[8] = features.nearestLiquidationLevel;
     this.featureBuffer[9] = features.openInterestChange24h;
 
-    return this.featureBuffer;
+    // P0-1 fix: Return a copy to prevent shared buffer aliasing.
+    // The internal featureBuffer is reused across calls, so returning it
+    // directly would cause callers holding references to see stale data.
+    return new Float64Array(this.featureBuffer);
   }
 
   /**
@@ -397,7 +408,8 @@ export class OrderflowFeatureExtractor {
     this.normalizedBuffer[7] = normalized.recentSwapMomentum;
     this.normalizedBuffer[8] = normalized.nearestLiquidationLevel;
     this.normalizedBuffer[9] = normalized.openInterestChange24h;
-    return this.normalizedBuffer;
+    // P0-1 fix: Return a copy to prevent shared buffer aliasing
+    return new Float64Array(this.normalizedBuffer);
   }
 
   /**

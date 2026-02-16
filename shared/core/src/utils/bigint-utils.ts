@@ -74,7 +74,10 @@ export const MAX_SAFE_PRICE = 1e18;
 // =============================================================================
 
 /**
- * Convert a decimal fraction (0-1) to scaled bigint.
+ * Convert a decimal fraction to scaled bigint.
+ *
+ * Commonly used for percentages (0-1 range), but accepts any finite number.
+ * Non-finite values (NaN, Infinity) return 0n.
  *
  * @param fraction - Decimal value (e.g., 0.05 for 5%)
  * @param scale - Scale factor (default: 10000)
@@ -83,14 +86,13 @@ export const MAX_SAFE_PRICE = 1e18;
  * @example
  * fractionToBigInt(0.05) // 500n (5% scaled by 10000)
  * fractionToBigInt(0.333, 1000000n) // 333000n (33.3% scaled by 1000000)
+ * fractionToBigInt(1.5) // 15000n (150% scaled by 10000)
  */
 export function fractionToBigInt(fraction: number, scale: bigint = DEFAULT_SCALE): bigint {
   if (!Number.isFinite(fraction)) {
     return 0n;
   }
-  // Clamp to reasonable range to prevent overflow
-  const clamped = Math.max(-1, Math.min(1, fraction));
-  return BigInt(Math.floor(clamped * Number(scale)));
+  return BigInt(Math.floor(fraction * Number(scale)));
 }
 
 /**
@@ -295,7 +297,10 @@ export function safeBigIntToDecimal(
       return null;
     }
 
-    // Convert parts to Number (both are now in safe range)
+    // Convert parts to Number (both are now in safe range).
+    // Safety: remainder < divisor (modulo), and divisor = 10^decimals.
+    // Real-world tokens have at most 18 decimals, so divisor <= 10^18 < 2^53.
+    // Number(remainder) and Number(divisor) are therefore always precise.
     const intNum = Number(integerPart);
     const fracNum = Number(remainder) / Number(divisor);
 
@@ -362,8 +367,19 @@ export function safeBigIntBatchToDecimal<K extends string>(
  */
 export function formatWeiAsEth(wei: bigint, decimals: number = 6): string {
   const ETH_DECIMALS = 18;
+
+  if (decimals < 0 || decimals > ETH_DECIMALS) {
+    throw new RangeError(
+      `decimals must be between 0 and ${ETH_DECIMALS}, got: ${decimals}`
+    );
+  }
+
+  // Handle negative values: format absolute value, prepend sign
+  const negative = wei < 0n;
+  const absWei = negative ? -wei : wei;
+
   const divisor = 10n ** BigInt(ETH_DECIMALS - decimals);
-  const scaled = wei / divisor;
+  const scaled = absWei / divisor;
   const intPart = scaled / (10n ** BigInt(decimals));
   const fracPart = scaled % (10n ** BigInt(decimals));
 
@@ -371,8 +387,10 @@ export function formatWeiAsEth(wei: bigint, decimals: number = 6): string {
   // Remove trailing zeros
   const trimmedFrac = fracStr.replace(/0+$/, '');
 
+  const sign = negative ? '-' : '';
+
   if (trimmedFrac.length === 0) {
-    return intPart.toString();
+    return `${sign}${intPart.toString()}`;
   }
-  return `${intPart}.${trimmedFrac}`;
+  return `${sign}${intPart}.${trimmedFrac}`;
 }

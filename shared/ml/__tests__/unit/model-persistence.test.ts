@@ -169,10 +169,9 @@ describe('model-persistence', () => {
         await persistence.saveModel(mockModel as any, metadata);
       });
 
-      // SKIP: This test has issues with file path handling on Windows
-      // The mock creates files but path normalization differs between
-      // the mock and the persistence class on Windows
-      it.skip('should load model from disk', async () => {
+      // P1-3 fix: Un-skipped — with atomicSaves: false and async I/O,
+      // the path normalization issue is resolved.
+      it('should load model from disk', async () => {
         const result = await persistence.loadModel('test-model');
 
         expect(result.success).toBe(true);
@@ -221,18 +220,19 @@ describe('model-persistence', () => {
     });
 
     describe('modelExists', () => {
-      // SKIP: This test has issues with file path handling on Windows
-      // The mock creates files but path normalization differs between
-      // the mock and the persistence class on Windows
-      it.skip('should return true for existing model', async () => {
+      // P1-3 fix: Tests now use await since modelExists is async.
+      // The Windows path issue was caused by file:// URL normalization
+      // in the mock save. With atomicSaves: false, the mock writes files
+      // directly and modelExists can find them.
+      it('should return true for existing model', async () => {
         const metadata = createTestMetadata();
         await persistence.saveModel(mockModel as any, metadata);
 
-        expect(persistence.modelExists('test-model')).toBe(true);
+        expect(await persistence.modelExists('test-model')).toBe(true);
       });
 
-      it('should return false for non-existent model', () => {
-        expect(persistence.modelExists('non-existent')).toBe(false);
+      it('should return false for non-existent model', async () => {
+        expect(await persistence.modelExists('non-existent')).toBe(false);
       });
     });
 
@@ -246,7 +246,7 @@ describe('model-persistence', () => {
         const result = await persistence.deleteModel('test-model');
 
         expect(result).toBe(true);
-        expect(persistence.modelExists('test-model')).toBe(false);
+        expect(await persistence.modelExists('test-model')).toBe(false);
       });
 
       it('should return false for non-existent model', async () => {
@@ -260,16 +260,95 @@ describe('model-persistence', () => {
         await persistence.saveModel(mockModel as any, createTestMetadata('model-1'));
         await persistence.saveModel(mockModel as any, createTestMetadata('model-2'));
 
-        const models = persistence.listModels();
+        const models = await persistence.listModels();
 
         expect(models).toContain('model-1');
         expect(models).toContain('model-2');
       });
 
-      it('should return empty array when no models', () => {
-        const models = persistence.listModels();
+      it('should return empty array when no models', async () => {
+        const models = await persistence.listModels();
         expect(models).toEqual([]);
       });
+    });
+  });
+
+  // P2-11: Tests for version management and atomic save
+  describe('version management', () => {
+    it('should archive versions when keepVersions is enabled', async () => {
+      const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: false, keepVersions: true, maxVersions: 3 });
+
+      const metadata = createTestMetadata('versioned-model');
+      await p.saveModel(mockModel as any, metadata);
+
+      // Version directory should be created
+      const versionDir = path.join(tempDir, 'versioned-model', 'v1');
+      expect(fs.existsSync(versionDir)).toBe(true);
+
+      // metadata.json should be copied to version directory
+      const versionMetadata = path.join(versionDir, 'metadata.json');
+      expect(fs.existsSync(versionMetadata)).toBe(true);
+    });
+
+    it('should clean old versions beyond maxVersions', async () => {
+      const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: false, keepVersions: true, maxVersions: 2 });
+
+      // Save 3 versions
+      for (let v = 1; v <= 3; v++) {
+        const metadata = createTestMetadata('multi-version');
+        metadata.version = v;
+        await p.saveModel(mockModel as any, metadata);
+      }
+
+      // Only most recent 2 versions should remain
+      const modelDir = path.join(tempDir, 'multi-version');
+      const entries = fs.readdirSync(modelDir, { withFileTypes: true });
+      const versionDirs = entries
+        .filter(e => e.isDirectory() && e.name.startsWith('v'))
+        .map(e => e.name);
+
+      expect(versionDirs.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should save and load with atomic saves enabled', async () => {
+      const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: true });
+      const metadata = createTestMetadata('atomic-model');
+
+      const result = await p.saveModel(mockModel as any, metadata);
+
+      expect(result.success).toBe(true);
+      // Temp directory should be cleaned up
+      const atomicTempDir = path.join(tempDir, 'atomic-model', '.temp');
+      expect(fs.existsSync(atomicTempDir)).toBe(false);
+    });
+
+    it('should handle model integrity verification (P1-2)', async () => {
+      const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: false });
+      const metadata = createTestMetadata('integrity-model');
+
+      const saveResult = await p.saveModel(mockModel as any, metadata);
+      expect(saveResult.success).toBe(true);
+
+      // Verify metadata has hash
+      const metadataPath = path.join(tempDir, 'integrity-model', 'metadata.json');
+      const savedMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+      expect(savedMetadata.modelHash).toBeDefined();
+      expect(typeof savedMetadata.modelHash).toBe('string');
+      expect(savedMetadata.modelHash.length).toBe(64); // SHA-256 hex length
+    });
+
+    it('should reject invalid modelId with path traversal characters', async () => {
+      const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: false });
+      const metadata = createTestMetadata('../../etc');
+
+      await expect(p.saveModel(mockModel as any, metadata)).rejects.toThrow('Invalid modelId');
+    });
+
+    it('should reject empty modelId', () => {
+      const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: false });
+      const metadata = createTestMetadata('');
+
+      expect(p.saveModel(mockModel as any, metadata)).rejects.toThrow('Invalid modelId');
     });
   });
 

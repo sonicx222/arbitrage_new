@@ -137,10 +137,24 @@ export const FEE_CONSTANTS = {
 } as const;
 
 // Individual exports for backward compatibility
+//
+// NOTE: These legacy names predate the V3_LOWEST (0.01%) tier being added.
+// The naming shifted by one tier but was kept for backward compatibility:
+//   "LOW"    (legacy) → V3_LOWEST  = 0.0001 (0.01%, tier 100)
+//   "MEDIUM" (legacy) → V3_LOW     = 0.0005 (0.05%, tier 500)
+//   "HIGH"   (legacy) → V3_MEDIUM  = 0.003  (0.30%, tier 3000)
+//
+// Prefer FEE_CONSTANTS.V3_LOWEST / V3_LOW / V3_MEDIUM / V3_HIGH for clarity.
+
+/** @deprecated Use FEE_CONSTANTS.UNISWAP_V2 (0.003 = 0.30%) */
 export const FEE_UNISWAP_V2_DECIMAL = FEE_CONSTANTS.UNISWAP_V2;
+/** @deprecated Use FEE_CONSTANTS.V3_LOWEST — despite the name, this is 0.0001 (0.01%, tier 100) */
 export const FEE_UNISWAP_V3_LOW_DECIMAL = FEE_CONSTANTS.V3_LOWEST;
+/** @deprecated Use FEE_CONSTANTS.V3_LOW — despite the name, this is 0.0005 (0.05%, tier 500) */
 export const FEE_UNISWAP_V3_MEDIUM_DECIMAL = FEE_CONSTANTS.V3_LOW;
+/** @deprecated Use FEE_CONSTANTS.V3_MEDIUM — despite the name, this is 0.003 (0.30%, tier 3000) */
 export const FEE_UNISWAP_V3_HIGH_DECIMAL = FEE_CONSTANTS.V3_MEDIUM;
+/** @deprecated Use FEE_CONSTANTS.DEFAULT (0.003 = 0.30%) */
 export const FEE_DEFAULT_DECIMAL = FEE_CONSTANTS.DEFAULT;
 
 /**
@@ -394,7 +408,11 @@ export function resolveFeeValue(
   explicitFee: number | undefined,
   dexName?: string
 ): FeeDecimal {
-  // Use ?? to correctly handle fee: 0 (promotional fees)
+  // Guard against NaN: NaN ?? default returns NaN since NaN is not null/undefined.
+  // Use ?? to correctly handle fee: 0 (promotional fees).
+  if (explicitFee !== undefined && !isValidFeeDecimal(explicitFee)) {
+    return getDefaultFeeForDex(dexName);
+  }
   return (explicitFee ?? getDefaultFeeForDex(dexName)) as FeeDecimal;
 }
 

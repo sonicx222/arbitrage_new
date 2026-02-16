@@ -217,8 +217,8 @@ export function parseRaydiumClmmPriceUpdate(
   }
 
   // Use state decimals if available, fallback to provided
-  const decimals0 = state.mintDecimals0 || token0Decimals;
-  const decimals1 = state.mintDecimals1 || token1Decimals;
+  const decimals0 = state.mintDecimals0 ?? token0Decimals;
+  const decimals1 = state.mintDecimals1 ?? token1Decimals;
 
   // Calculate price from sqrtPriceX64
   const price = calculateClmmPriceFromSqrt(state.sqrtPriceX64, decimals0, decimals1);

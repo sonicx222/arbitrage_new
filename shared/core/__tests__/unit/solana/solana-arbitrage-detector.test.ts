@@ -8,14 +8,23 @@
 import { createSolanaArbitrageDetector, type SolanaArbitrageDetectorModule } from '../../../src/solana/solana-arbitrage-detector';
 import { createMockLogger, createTestPool } from './solana-test-helpers';
 
-// Mock dependencies
+// Mock dependencies — factories register the mocks; implementations are set
+// in beforeEach to survive resetMocks: true from root jest config.
 jest.mock('../../../src/components/price-calculator', () => ({
-  meetsThreshold: jest.fn((netProfit: number, threshold: number) => netProfit >= threshold)
+  meetsThreshold: jest.fn()
 }));
 
 jest.mock('../../../src/utils/fee-utils', () => ({
-  basisPointsToDecimal: jest.fn((bps: number) => bps / 10000)
+  basisPointsToDecimal: jest.fn()
 }));
+
+// Get references to mocked functions for re-implementation in beforeEach
+const { meetsThreshold } = jest.requireMock<{ meetsThreshold: jest.Mock }>(
+  '../../../src/components/price-calculator'
+);
+const { basisPointsToDecimal } = jest.requireMock<{ basisPointsToDecimal: jest.Mock }>(
+  '../../../src/utils/fee-utils'
+);
 
 describe('SolanaArbitrageDetector', () => {
   let detector: SolanaArbitrageDetectorModule;
@@ -29,6 +38,14 @@ describe('SolanaArbitrageDetector', () => {
   };
 
   beforeEach(() => {
+    // Re-set mock implementations (resetMocks: true clears these between tests)
+    meetsThreshold.mockImplementation(
+      (netProfit: number, threshold: number) => netProfit >= threshold
+    );
+    basisPointsToDecimal.mockImplementation(
+      (bps: number) => bps / 10000
+    );
+
     logger = createMockLogger();
     getCurrentSlot = jest.fn().mockReturnValue(200000010);
     getPoolsSnapshot = jest.fn().mockReturnValue({
@@ -75,12 +92,12 @@ describe('SolanaArbitrageDetector', () => {
       const pool2 = createTestPool({
         address: 'Pool2Addr1111111111111111111111111111111111',
         dex: 'orca',
-        price: 101,
+        price: 102,
         fee: 30, // 0.30%
         lastSlot: 200000008
       });
 
-      // 1% gross diff, 0.55% fees -> 0.45% net profit > 0.3% threshold
+      // 2% gross diff, 0.55% fees -> 1.45% net profit > 0.5% profit floor > 0.3% threshold
       getPoolsSnapshot.mockReturnValue({
         pools: new Map([
           [pool1.address, pool1],
@@ -93,7 +110,7 @@ describe('SolanaArbitrageDetector', () => {
       expect(result).toHaveLength(1);
       expect(result[0].chain).toBe('solana');
       expect(result[0].buyPrice).toBe(100);
-      expect(result[0].sellPrice).toBe(101);
+      expect(result[0].sellPrice).toBe(102);
       expect(result[0].buyDex).toBe('raydium');
       expect(result[0].sellDex).toBe('orca');
     });
@@ -142,6 +159,95 @@ describe('SolanaArbitrageDetector', () => {
 
       const result = await detector.checkArbitrage();
       expect(result).toEqual([]);
+    });
+
+    it('should reject opportunities below minimum net profit floor (Fix 6)', async () => {
+      const pool1 = createTestPool({
+        address: 'Pool1Addr1111111111111111111111111111111111',
+        dex: 'raydium',
+        price: 100,
+        fee: 25, // 0.25%
+        lastSlot: 200000009
+      });
+      const pool2 = createTestPool({
+        address: 'Pool2Addr1111111111111111111111111111111111',
+        dex: 'orca',
+        price: 101, // 1% gross - 0.55% fees = 0.45% net < 0.5% floor
+        fee: 30, // 0.30%
+        lastSlot: 200000008
+      });
+
+      getPoolsSnapshot.mockReturnValue({
+        pools: new Map([
+          [pool1.address, pool1],
+          [pool2.address, pool2]
+        ]),
+        pairEntries: [['SOL_USDC', new Set([pool1.address, pool2.address])]]
+      });
+
+      const result = await detector.checkArbitrage();
+      expect(result).toEqual([]);
+    });
+
+    it('should reject pools with stale slot data (Fix 9)', async () => {
+      getCurrentSlot.mockReturnValue(200000050);
+      const pool1 = createTestPool({
+        address: 'Pool1Addr1111111111111111111111111111111111',
+        price: 100,
+        fee: 10,
+        lastSlot: 200000010 // age = 40 > maxSlotAge (10)
+      });
+      const pool2 = createTestPool({
+        address: 'Pool2Addr1111111111111111111111111111111111',
+        dex: 'orca',
+        price: 105,
+        fee: 10,
+        lastSlot: 200000010
+      });
+
+      getPoolsSnapshot.mockReturnValue({
+        pools: new Map([
+          [pool1.address, pool1],
+          [pool2.address, pool2]
+        ]),
+        pairEntries: [['SOL_USDC', new Set([pool1.address, pool2.address])]]
+      });
+
+      const result = await detector.checkArbitrage();
+      expect(result).toEqual([]);
+    });
+
+    it('should allow configurable maxSlotAge', async () => {
+      getCurrentSlot.mockReturnValue(200000050);
+      const customDetector = createSolanaArbitrageDetector(
+        { ...defaultConfig, maxSlotAge: 100 },
+        { logger, getPoolsSnapshot, getCurrentSlot }
+      );
+
+      const pool1 = createTestPool({
+        address: 'Pool1Addr1111111111111111111111111111111111',
+        price: 100,
+        fee: 10,
+        lastSlot: 200000010 // age = 40 < maxSlotAge (100)
+      });
+      const pool2 = createTestPool({
+        address: 'Pool2Addr1111111111111111111111111111111111',
+        dex: 'orca',
+        price: 105,
+        fee: 10,
+        lastSlot: 200000010
+      });
+
+      getPoolsSnapshot.mockReturnValue({
+        pools: new Map([
+          [pool1.address, pool1],
+          [pool2.address, pool2]
+        ]),
+        pairEntries: [['SOL_USDC', new Set([pool1.address, pool2.address])]]
+      });
+
+      const result = await customDetector.checkArbitrage();
+      expect(result).toHaveLength(1);
     });
   });
 
@@ -255,6 +361,17 @@ describe('SolanaArbitrageDetector', () => {
   // =========================================================================
 
   describe('confidence calculation', () => {
+    // Confidence tests use maxSlotAge: Infinity to bypass stale-data rejection,
+    // since these tests focus on confidence scoring math, not staleness filtering.
+    let confidenceDetector: SolanaArbitrageDetectorModule;
+
+    beforeEach(() => {
+      confidenceDetector = createSolanaArbitrageDetector(
+        { ...defaultConfig, maxSlotAge: Infinity },
+        { logger, getPoolsSnapshot, getCurrentSlot }
+      );
+    });
+
     function createSnapshotWithSlots(slot1: number, slot2: number) {
       const pool1 = createTestPool({
         address: 'Pool1Addr1111111111111111111111111111111111',
@@ -283,7 +400,7 @@ describe('SolanaArbitrageDetector', () => {
       getCurrentSlot.mockReturnValue(200000010);
       createSnapshotWithSlots(200000010, 200000010);
 
-      const result = await detector.checkArbitrage();
+      const result = await confidenceDetector.checkArbitrage();
       expect(result[0].confidence).toBeCloseTo(0.95); // capped at 0.95
     });
 
@@ -291,7 +408,7 @@ describe('SolanaArbitrageDetector', () => {
       getCurrentSlot.mockReturnValue(200000050);
       createSnapshotWithSlots(200000010, 200000020);
 
-      const result = await detector.checkArbitrage();
+      const result = await confidenceDetector.checkArbitrage();
       // slotAge = 200000050 - max(200000010, 200000020) = 30
       // confidence = min(0.95, max(0.5, 1.0 - 30 * 0.01)) = 0.7
       expect(result[0].confidence).toBeCloseTo(0.7);
@@ -301,7 +418,7 @@ describe('SolanaArbitrageDetector', () => {
       getCurrentSlot.mockReturnValue(200000200);
       createSnapshotWithSlots(200000010, 200000010);
 
-      const result = await detector.checkArbitrage();
+      const result = await confidenceDetector.checkArbitrage();
       // slotAge = 190, confidence = max(0.5, 1.0 - 190 * 0.01) = max(0.5, -0.9) = 0.5
       expect(result[0].confidence).toBe(0.5);
     });
@@ -310,8 +427,8 @@ describe('SolanaArbitrageDetector', () => {
       getCurrentSlot.mockReturnValue(200000010);
       createSnapshotWithSlots(undefined as unknown as number, undefined as unknown as number);
 
-      const result = await detector.checkArbitrage();
-      // lastSlot defaults to currentSlot, so slotAge = 0 -> confidence = 0.95
+      const result = await confidenceDetector.checkArbitrage();
+      // lastSlot defaults to currentSlot for confidence, so slotAge = 0 -> confidence = 0.95
       expect(result[0].confidence).toBeCloseTo(0.95);
     });
   });

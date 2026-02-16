@@ -9,23 +9,12 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
+// P3-3/P3-4: Use shared mock helpers to reduce duplication
+import { type MockWhaleActivitySummary, createMockWhaleActivitySummary, createDefaultInput } from './__helpers__/mock-orderflow';
+
 // =============================================================================
 // Test Setup - Mock whale activity tracker
 // =============================================================================
-
-// Mock WhaleActivitySummary from core
-interface MockWhaleActivitySummary {
-  pairKey: string;
-  chain: string;
-  windowMs: number;
-  buyVolumeUsd: number;
-  sellVolumeUsd: number;
-  netFlowUsd: number;
-  whaleCount: number;
-  superWhaleCount: number;
-  dominantDirection: 'bullish' | 'bearish' | 'neutral';
-  avgPriceImpact: number;
-}
 
 // Create mock whale tracker
 const mockWhaleTracker = {
@@ -59,47 +48,7 @@ import type {
   OrderflowExtractorConfig
 } from '../../src/orderflow-features';
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-function createMockWhaleActivitySummary(
-  overrides: Partial<MockWhaleActivitySummary> = {}
-): MockWhaleActivitySummary {
-  return {
-    pairKey: 'WETH-USDC',
-    chain: 'ethereum',
-    windowMs: 3600000,
-    buyVolumeUsd: 500000,
-    sellVolumeUsd: 300000,
-    netFlowUsd: 200000,
-    whaleCount: 15,
-    superWhaleCount: 2,
-    dominantDirection: 'bullish',
-    avgPriceImpact: 0.05,
-    ...overrides
-  };
-}
-
-function createDefaultInput(
-  overrides: Partial<OrderflowFeatureInput> = {}
-): OrderflowFeatureInput {
-  return {
-    pairKey: 'WETH-USDC',
-    chain: 'ethereum',
-    currentTimestamp: Date.now(),
-    poolReserves: {
-      reserve0: 1000000n,
-      reserve1: 500000n
-    },
-    recentSwaps: [],
-    liquidationData: {
-      nearestLiquidationLevel: 0,
-      openInterestChange24h: 0
-    },
-    ...overrides
-  };
-}
+// P3-3: Helpers now imported from __helpers__/mock-orderflow.ts
 
 // =============================================================================
 // OrderflowFeatureExtractor Tests

@@ -5,6 +5,7 @@
  */
 
 import { PublicKey } from '@solana/web3.js';
+import { MIN_SAFE_PRICE } from '../../../utils/bigint-utils';
 
 /**
  * Read a u128 (16-byte unsigned integer) from buffer in little-endian order.
@@ -39,11 +40,9 @@ export function readPubkey(buffer: Buffer, offset: number): string {
  * @returns The inverse price, or null if calculation would result in invalid value
  */
 export function safeInversePrice(price: number): number | null {
-  // Minimum price threshold to avoid Infinity in inverse
-  // Number.MIN_VALUE is ~5e-324, so we use a reasonable floor
-  const MIN_PRICE_THRESHOLD = 1e-15;
-
-  if (price < MIN_PRICE_THRESHOLD) {
+  // Use MIN_SAFE_PRICE from bigint-utils (single source of truth for price bounds).
+  // At 1e-18: 1/price = 1e18, which is within Number's safe range.
+  if (price < MIN_SAFE_PRICE) {
     return null;
   }
 
@@ -73,11 +72,14 @@ export function calculateClmmPriceFromSqrt(
   token0Decimals: number,
   token1Decimals: number
 ): number {
-  if (sqrtPriceX64 === BigInt(0)) return 0;
+  if (sqrtPriceX64 === 0n) return 0;
 
-  // Convert to number and calculate
-  // sqrtPrice = sqrtPriceX64 / 2^64
-  const sqrtPrice = Number(sqrtPriceX64) / Math.pow(2, 64);
+  // Split into integer and fractional parts relative to 2^64 to preserve precision.
+  // Direct Number(sqrtPriceX64) loses precision for values > 2^53.
+  const TWO_64 = 1n << 64n;
+  const intPart = sqrtPriceX64 / TWO_64;
+  const fracPart = sqrtPriceX64 % TWO_64;
+  const sqrtPrice = Number(intPart) + Number(fracPart) / Number(TWO_64);
 
   // price = sqrtPrice^2
   const rawPrice = sqrtPrice * sqrtPrice;

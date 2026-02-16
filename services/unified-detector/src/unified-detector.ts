@@ -218,7 +218,7 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
     const result = await this.stateManager.executeStart(async () => {
       this.startTime = Date.now();
 
-      this.logger.info('Starting UnifiedChainDetector', {
+      this.logger.debug('Starting UnifiedChainDetector', {
         partitionId: this.config.partitionId,
         chains: this.config.chains,
         instanceId: this.config.instanceId,
@@ -302,7 +302,7 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
 
       this.metricsCollector.start();
 
-      this.logger.info('UnifiedChainDetector started successfully', {
+      this.logger.debug('UnifiedChainDetector started', {
         chainsStarted: startResult.chainsStarted,
         chainsFailed: startResult.chainsFailed,
       });

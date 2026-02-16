@@ -21,7 +21,7 @@ import {
   getEnsemblePredictionCombiner,
   resetEnsemblePredictionCombiner,
 } from '../../src/ensemble-combiner';
-import type { PredictionResult } from '../../src/predictor';
+import type { PredictionResult } from '../../src/predictor-types';
 import type { OrderflowPrediction } from '../../src/orderflow-predictor';
 
 // =============================================================================

@@ -226,9 +226,8 @@ export class SimulatedPriceGenerator {
       const priceUpdate = createPriceUpdate({
         dex,
         chain,
-        pair,
-        price0: currentPrice,
-        price1: 1 / currentPrice,
+        pairKey: pair,
+        price: currentPrice,
         timestamp: startTimestamp + i * intervalMs,
         blockNumber: startBlock + i,
       });
@@ -312,9 +311,8 @@ export class SimulatedPriceGenerator {
         const priceUpdate = createPriceUpdate({
           dex: dexConfig.name,
           chain: dexConfig.chain,
-          pair,
-          price0: dexPrice,
-          price1: 1 / dexPrice,
+          pairKey: pair,
+          price: dexPrice,
           timestamp,
           blockNumber: startBlock + i,
         });
@@ -358,8 +356,8 @@ export class SimulatedPriceGenerator {
         const price = dexPrices[i];
         priceMap.set(dexName, price);
 
-        if (price.price0 < minPrice) minPrice = price.price0;
-        if (price.price0 > maxPrice) maxPrice = price.price0;
+        if (price.price < minPrice) minPrice = price.price;
+        if (price.price > maxPrice) maxPrice = price.price;
       }
 
       const maxSpread = minPrice > 0 ? ((maxPrice - minPrice) / minPrice) * 100 : 0;
@@ -411,16 +409,15 @@ export class SimulatedPriceGenerator {
 
       prices.push({
         ...createPriceUpdate({
-          dex, chain, pair,
-          price0: price,
-          price1: 1 / price,
+          dex, chain, pairKey: pair,
+          price: price,
           timestamp: startTimestamp + i * 1000,
           blockNumber: startBlock + i,
         }),
         index: i,
         isArbitragePoint: false,
         isWhaleMove: false,
-        changePercent: i === 0 ? 0 : percentChange(prices[i - 1].price0, price),
+        changePercent: i === 0 ? 0 : percentChange(prices[i - 1].price, price),
       });
     }
 
@@ -428,16 +425,15 @@ export class SimulatedPriceGenerator {
     const spikePrice = basePrice * (1 + spikeMagnitude);
     prices.push({
       ...createPriceUpdate({
-        dex, chain, pair,
-        price0: spikePrice,
-        price1: 1 / spikePrice,
+        dex, chain, pairKey: pair,
+        price: spikePrice,
         timestamp: startTimestamp + 5 * 1000,
         blockNumber: startBlock + 5,
       }),
       index: 5,
       isArbitragePoint: true,
       isWhaleMove: true,
-      changePercent: percentChange(prices[4].price0, spikePrice),
+      changePercent: percentChange(prices[4].price, spikePrice),
     });
 
     // Recovery period
@@ -452,16 +448,15 @@ export class SimulatedPriceGenerator {
 
       prices.push({
         ...createPriceUpdate({
-          dex, chain, pair,
-          price0: price,
-          price1: 1 / price,
+          dex, chain, pairKey: pair,
+          price: price,
           timestamp: startTimestamp + (6 + i) * 1000,
           blockNumber: startBlock + 6 + i,
         }),
         index: 6 + i,
         isArbitragePoint: false,
         isWhaleMove: false,
-        changePercent: percentChange(prices[5 + i].price0, price),
+        changePercent: percentChange(prices[5 + i].price, price),
       });
     }
 
@@ -494,9 +489,8 @@ export class SimulatedPriceGenerator {
       ...createPriceUpdate({
         dex: firstChain.dex,
         chain: firstChain.chain,
-        pair,
-        price0: basePrice,
-        price1: 1 / basePrice,
+        pairKey: pair,
+        price: basePrice,
         timestamp,
         blockNumber,
       }),
@@ -516,9 +510,8 @@ export class SimulatedPriceGenerator {
         ...createPriceUpdate({
           dex: chainConfig.dex,
           chain: chainConfig.chain,
-          pair,
-          price0: price,
-          price1: 1 / price,
+          pairKey: pair,
+          price: price,
           timestamp: timestamp + (i * 50), // Slight timestamp offset
           blockNumber,
         }),
@@ -597,8 +590,7 @@ export function generateArbitrageTestData(config: {
     ...createPriceUpdate({
       dex: dex1,
       chain,
-      price0: basePrice,
-      price1: 1 / basePrice,
+      price: basePrice,
       timestamp,
       blockNumber,
     }),
@@ -613,8 +605,7 @@ export function generateArbitrageTestData(config: {
     ...createPriceUpdate({
       dex: dex2,
       chain,
-      price0: highPriceValue,
-      price1: 1 / highPriceValue,
+      price: highPriceValue,
       timestamp,
       blockNumber,
     }),

@@ -381,6 +381,24 @@ describe('Fee Utilities', () => {
       expect(resolveFeeValue(0, 'uniswap')).toBe(0);
       expect(resolveFeeValue(0, 'curve')).toBe(0);
     });
+
+    it('should fall back to default for NaN fee', () => {
+      expect(resolveFeeValue(NaN, 'uniswap')).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(resolveFeeValue(NaN, 'curve')).toBe(FEE_CONSTANTS.LOW_FEE);
+    });
+
+    it('should fall back to default for Infinity fee', () => {
+      expect(resolveFeeValue(Infinity, 'uniswap')).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(resolveFeeValue(-Infinity, 'curve')).toBe(FEE_CONSTANTS.LOW_FEE);
+    });
+
+    it('should fall back to default for negative fee', () => {
+      expect(resolveFeeValue(-0.01, 'uniswap')).toBe(FEE_CONSTANTS.DEFAULT);
+    });
+
+    it('should fall back to default for fee >= 1 (100%)', () => {
+      expect(resolveFeeValue(1.5, 'uniswap')).toBe(FEE_CONSTANTS.DEFAULT);
+    });
   });
 
   // ===========================================================================

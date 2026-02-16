@@ -3,22 +3,13 @@
  *
  * Provides builder pattern and factory functions for creating
  * PriceUpdate test data with sensible defaults.
+ *
+ * Uses the canonical PriceUpdate type from @arbitrage/types.
  */
 
-export interface PriceUpdate {
-  dex: string;
-  chain: string;
-  pair: string;
-  pairAddress: string;
-  token0: string;
-  token1: string;
-  price0: number;
-  price1: number;
-  timestamp: number;
-  blockNumber: number;
-  reserve0?: string;
-  reserve1?: string;
-}
+import type { PriceUpdate } from '@arbitrage/types';
+
+export type { PriceUpdate };
 
 export interface PriceUpdateOverrides extends Partial<PriceUpdate> {}
 
@@ -29,25 +20,29 @@ function generateAddress(prefix: string, id: number): string {
 }
 
 /**
- * Create a PriceUpdate with defaults
+ * Create a PriceUpdate with defaults matching the canonical type.
  */
 export function createPriceUpdate(overrides: PriceUpdateOverrides = {}): PriceUpdate {
   priceCounter++;
   const id = priceCounter;
 
+  const price = overrides.price ?? 2000; // ETH price in USDC
+
   return {
     dex: overrides.dex ?? 'uniswap_v3',
     chain: overrides.chain ?? 'ethereum',
-    pair: overrides.pair ?? 'WETH/USDC',
+    pairKey: overrides.pairKey ?? 'WETH/USDC',
     pairAddress: overrides.pairAddress ?? generateAddress('price', id),
     token0: overrides.token0 ?? '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
     token1: overrides.token1 ?? '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-    price0: overrides.price0 ?? 2000, // ETH price in USDC
-    price1: overrides.price1 ?? 0.0005, // USDC price in ETH
+    price: price,
+    reserve0: overrides.reserve0 ?? '1000000000000000000000', // 1000 ETH
+    reserve1: overrides.reserve1 ?? '2000000000000', // 2,000,000 USDC (6 decimals)
     timestamp: overrides.timestamp ?? Date.now(),
     blockNumber: overrides.blockNumber ?? 18500000 + id,
-    reserve0: overrides.reserve0,
-    reserve1: overrides.reserve1
+    latency: overrides.latency ?? 50,
+    feeDecimal: overrides.feeDecimal,
+    fee: overrides.fee,
   };
 }
 
@@ -67,14 +62,13 @@ export class PriceUpdateBuilder {
     return this;
   }
 
-  forPair(pair: string): this {
-    this.overrides.pair = pair;
+  forPair(pairKey: string): this {
+    this.overrides.pairKey = pairKey;
     return this;
   }
 
-  withPrice(price0: number, price1?: number): this {
-    this.overrides.price0 = price0;
-    this.overrides.price1 = price1 ?? 1 / price0;
+  withPrice(price: number): this {
+    this.overrides.price = price;
     return this;
   }
 
@@ -86,6 +80,16 @@ export class PriceUpdateBuilder {
   withReserves(reserve0: string, reserve1: string): this {
     this.overrides.reserve0 = reserve0;
     this.overrides.reserve1 = reserve1;
+    return this;
+  }
+
+  withLatency(latency: number): this {
+    this.overrides.latency = latency;
+    return this;
+  }
+
+  withFeeDecimal(feeDecimal: number): this {
+    this.overrides.feeDecimal = feeDecimal as PriceUpdate['feeDecimal'];
     return this;
   }
 

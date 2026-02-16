@@ -100,6 +100,7 @@ import { initializePairs as initializePairsFromModule } from './pair-initializer
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
 import {
   validateFee,
+  parseIntEnvVar,
 } from './types';
 import {
   // R8 Refactor: UNSTABLE_WEBSOCKET_CHAINS, DEFAULT_WS_CONNECTION_TIMEOUT_MS,
@@ -423,7 +424,7 @@ export class ChainDetectorInstance extends EventEmitter {
     // Check for simulation mode
     this.simulationMode = isSimulationMode();
     if (this.simulationMode) {
-      this.logger.info('Running in SIMULATION MODE - no real blockchain connections', {
+      this.logger.debug('Running in SIMULATION MODE - no real blockchain connections', {
         chainId: this.chainId
       });
     }
@@ -468,7 +469,7 @@ export class ChainDetectorInstance extends EventEmitter {
         ttlMs: RESERVE_CACHE_TTL_MS,
         enableMetrics: true,
       });
-      this.logger.info('Reserve cache enabled for chain', {
+      this.logger.debug('Reserve cache enabled for chain', {
         chainId: this.chainId,
         maxEntries: RESERVE_CACHE_MAX_ENTRIES,
         ttlMs: RESERVE_CACHE_TTL_MS,
@@ -498,7 +499,7 @@ export class ChainDetectorInstance extends EventEmitter {
         usePriceMatrix: true, // Use PriceMatrix for L1
         enableTimingMetrics: false // Disable in production
       });
-      this.logger.info('Hierarchical price cache enabled', {
+      this.logger.debug('Hierarchical price cache enabled', {
         chainId: this.chainId,
         l1Size: 64,
         usePriceMatrix: true
@@ -556,7 +557,7 @@ export class ChainDetectorInstance extends EventEmitter {
     // Check if this is a non-EVM chain in simulation mode
     const isNonEvmChain = !isEvmChain(this.chainId);
 
-    this.logger.info('Starting ChainDetectorInstance', {
+    this.logger.debug('Starting ChainDetectorInstance', {
       chainId: this.chainId,
       partitionId: this.partitionId,
       dexes: this.dexes.length,
@@ -653,10 +654,7 @@ export class ChainDetectorInstance extends EventEmitter {
       this.reconnectAttempts = 0;
       this.emit('statusChange', this.status);
 
-      this.logger.info('ChainDetectorInstance started', {
-        pairsMonitored: this.pairs.size,
-        mode: this.simulationMode ? 'SIMULATION' : 'PRODUCTION'
-      });
+      this.logger.info(`Chain ${this.chainId} started (${this.pairs.size} pairs, ${this.simulationMode ? 'simulation' : 'production'})`);
 
     } catch (error) {
       this.status = 'error';
@@ -897,7 +895,7 @@ export class ChainDetectorInstance extends EventEmitter {
     this.pairsByTokens = result.pairsByTokens;
     this.pairAddressesCache = result.pairAddressesCache;
 
-    this.logger.info(`Initialized ${this.pairs.size} pairs for monitoring`, {
+    this.logger.debug(`Initialized ${this.pairs.size} pairs for monitoring`, {
       tokenPairGroups: this.pairsByTokens.size
     });
   }

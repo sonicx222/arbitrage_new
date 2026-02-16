@@ -952,7 +952,7 @@ export class CrossDexTriangularArbitrage {
     } catch {
       // Fallback to static estimates if cache fails
       // Uses shared constants for consistency across detectors
-      const baseCost = FALLBACK_GAS_COSTS_ETH[chain] || 0.001;
+      const baseCost = FALLBACK_GAS_COSTS_ETH[chain] ?? 0.001;
       return baseCost * (1 + steps * FALLBACK_GAS_SCALING_PER_STEP);
     }
   }

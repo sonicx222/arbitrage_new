@@ -211,10 +211,10 @@ export class SolanaPriceFeed extends EventEmitter {
     this.config = {
       rpcUrl: config.rpcUrl,
       wsUrl: config.wsUrl || this.deriveWsUrl(config.rpcUrl),
-      commitment: config.commitment || 'confirmed',
-      maxPoolSubscriptions: config.maxPoolSubscriptions || 100,
-      priceStaleThresholdMs: config.priceStaleThresholdMs || 10000,
-      emitUnchangedPrices: config.emitUnchangedPrices || false,
+      commitment: config.commitment ?? 'confirmed',
+      maxPoolSubscriptions: config.maxPoolSubscriptions ?? 100,
+      priceStaleThresholdMs: config.priceStaleThresholdMs ?? 10000,
+      emitUnchangedPrices: config.emitUnchangedPrices ?? false,
       minPriceChangeThreshold: config.minPriceChangeThreshold ?? 0.000001
     };
 
@@ -353,6 +353,9 @@ export class SolanaPriceFeed extends EventEmitter {
 
     this.emit('disconnected');
     this.stopping = false;
+
+    // Remove all event listeners to prevent leaks
+    this.removeAllListeners();
 
     this.logger.info('SolanaPriceFeed stopped');
   }

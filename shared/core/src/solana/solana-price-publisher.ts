@@ -8,7 +8,7 @@
  * @see ADR-014: Modular Detector Components
  */
 
-import type { PriceUpdate, MessageEvent } from '../../../types';
+import type { PriceUpdate, MessageEvent } from '@arbitrage/types';
 import type {
   SolanaDetectorLogger,
   SolanaPriceUpdate,

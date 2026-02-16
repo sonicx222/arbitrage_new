@@ -18,7 +18,7 @@ import type { SwapEventFilter } from '../analytics/swap-event-filter';
 import type { ServiceLogger } from '../logging';
 import type { PairDiscoveryService } from '../pair-discovery';
 import type { PairCacheService } from '../caching/pair-cache';
-import type { Dex, Token, Pair } from '../../../types/src';
+import type { Dex, Token, Pair } from '@arbitrage/types';
 
 /**
  * Configuration for detector connection initialization.

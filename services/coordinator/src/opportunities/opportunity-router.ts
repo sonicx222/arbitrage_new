@@ -10,7 +10,7 @@
  * @see R2 - Coordinator Subsystems extraction
  */
 
-import type { ArbitrageOpportunity } from '@arbitrage/types';
+import { RedisStreams, type ArbitrageOpportunity } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 
@@ -90,13 +90,13 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   opportunityTtlMs: 60000,
   duplicateWindowMs: 5000,
   instanceId: 'coordinator',
-  executionRequestsStream: 'stream:execution-requests',
+  executionRequestsStream: RedisStreams.EXECUTION_REQUESTS,
   minProfitPercentage: -100,
   maxProfitPercentage: 10000,
   // P1-7 FIX: Retry and DLQ defaults
   maxRetries: 3,
   retryBaseDelayMs: 10,
-  dlqStream: 'stream:forwarding-dlq',
+  dlqStream: RedisStreams.FORWARDING_DLQ,
 };
 
 /**

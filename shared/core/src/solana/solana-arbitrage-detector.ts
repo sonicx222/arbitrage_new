@@ -11,7 +11,7 @@
  * @see ADR-014: Modular Detector Components
  */
 
-import type { ArbitrageOpportunity } from '../../../types';
+import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { meetsThreshold } from '../components/price-calculator';
 import { basisPointsToDecimal } from '../utils/fee-utils';
 import type { SolanaDetectorLogger, SolanaPool } from './solana-types';
@@ -30,6 +30,14 @@ export interface ArbitrageDetectorConfig {
   minProfitThreshold: number;
   /** Opportunity expiry in milliseconds. */
   opportunityExpiryMs: number;
+  /** Maximum slot age before pool data is considered stale (default: 10, ~4s at 400ms/slot). */
+  maxSlotAge?: number;
+  /**
+   * Minimum net profit ratio floor (default: 0.005 = 0.5%).
+   * Ensures opportunities cover Solana tx costs (~5000 lamports base + priority fee).
+   * TODO: Replace with absolute profit check when trade amounts are available in this module.
+   */
+  minNetProfitFloor?: number;
 }
 
 export interface ArbitrageDetectorDeps {
@@ -60,11 +68,23 @@ export function createSolanaArbitrageDetector(
   // Convert percent threshold to decimal once
   const thresholdDecimal = config.minProfitThreshold / 100;
 
+  /** Maximum slot age before pool data is considered stale (~4 seconds at 400ms/slot). */
+  const MAX_SLOT_AGE = config.maxSlotAge ?? 10;
+
+  /** Minimum net profit ratio floor to cover Solana tx costs. */
+  const MIN_NET_PROFIT_FLOOR = config.minNetProfitFloor ?? 0.005;
+
   function calculateArbitrageOpportunity(
     pool1: SolanaPool,
     pool2: SolanaPool
   ): ArbitrageOpportunity | null {
     if (!pool1.price || !pool2.price) return null;
+
+    // Reject stale pool data (Fix 9)
+    const currentSlot = deps.getCurrentSlot();
+    const pool1Age = currentSlot - (pool1.lastSlot ?? 0);
+    const pool2Age = currentSlot - (pool2.lastSlot ?? 0);
+    if (pool1Age > MAX_SLOT_AGE || pool2Age > MAX_SLOT_AGE) return null;
 
     const minPrice = Math.min(pool1.price, pool2.price);
     const maxPrice = Math.max(pool1.price, pool2.price);
@@ -80,18 +100,22 @@ export function createSolanaArbitrageDetector(
       return null;
     }
 
+    // Minimum absolute profit floor to ensure tx costs are covered (Fix 6)
+    if (netProfit < MIN_NET_PROFIT_FLOOR) {
+      return null;
+    }
+
     const buyPool = pool1.price < pool2.price ? pool1 : pool2;
     const sellPool = pool1.price < pool2.price ? pool2 : pool1;
 
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).slice(2, 11);
 
-    // Dynamic confidence based on slot age
-    const currentSlot = deps.getCurrentSlot();
-    const slotAge = currentSlot - Math.max(
+    // Dynamic confidence based on slot age (reuses currentSlot from stale-data check above)
+    const slotAge = Math.max(0, currentSlot - Math.max(
       pool1.lastSlot ?? currentSlot,
       pool2.lastSlot ?? currentSlot
-    );
+    ));
     const confidence = Math.min(0.95, Math.max(0.5, 1.0 - slotAge * 0.01));
     const safeConfidence = Number.isFinite(confidence) ? confidence : 0.5;
 

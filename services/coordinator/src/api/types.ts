@@ -129,7 +129,7 @@ export interface CoordinatorStateProvider {
  * Use `object` instead of `unknown` for meta because:
  * - Meta should always be a key-value structure (not primitives)
  * - Provides better type safety for structured logging
- * - Consistent with winston/pino logger signatures
+ * - Consistent with Pino logger signatures
  */
 export interface MinimalLogger {
   info: (message: string, meta?: object) => void;

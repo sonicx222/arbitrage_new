@@ -9,7 +9,7 @@
  *
  * Performance: ~120,000 ops/sec (6x faster than Winston)
  *
- * @see docs/logger_implementation_plan.md
+ * @see docs/architecture/adr/ADR-015-pino-logger-migration.md
  */
 
 import pino, { Logger as PinoLoggerType, LoggerOptions } from 'pino';
@@ -51,19 +51,130 @@ const serializers: LoggerOptions['serializers'] = {
 };
 
 /**
- * Recursively format an object to handle BigInt values.
+ * Maximum recursion depth for formatLogObject to prevent stack overflow
+ * on deeply nested structures.
  */
-function formatLogObject(obj: Record<string, unknown>): Record<string, unknown> {
+const MAX_FORMAT_DEPTH = 10;
+
+/**
+ * Check whether a value tree contains any BigInt values.
+ * Used as a fast-path: if no BigInt exists, formatLogObject can return
+ * the original object unchanged (zero allocation).
+ *
+ * Protected against circular references and excessive depth.
+ */
+function needsFormatting(value: unknown, seen?: WeakSet<object>, depth?: number): boolean {
+  if (typeof value === 'bigint') return true;
+  if (!value || typeof value !== 'object') return false;
+
+  const currentDepth = depth ?? 0;
+  // Pessimistic: if we can't scan deeper, assume formatting may be needed
+  // to avoid undetected BigInt values crashing Pino's JSON serializer
+  if (currentDepth >= MAX_FORMAT_DEPTH) return true;
+
+  const currentSeen = seen ?? new WeakSet<object>();
+  const obj = value as object;
+  if (currentSeen.has(obj)) return false;
+  currentSeen.add(obj);
+
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      if (needsFormatting(obj[i], currentSeen, currentDepth + 1)) return true;
+    }
+    return false;
+  }
+
+  for (const key of Object.keys(obj)) {
+    if (needsFormatting((obj as Record<string, unknown>)[key], currentSeen, currentDepth + 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * Format a single value, converting BigInt to string and recursing into
+ * objects and arrays. Protected against circular references and depth overflow.
+ */
+function formatValue(value: unknown, seen: WeakSet<object>, depth: number): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const obj = value as object;
+
+  // Circular reference guard
+  if (seen.has(obj)) {
+    return '[Circular]';
+  }
+
+  // Depth guard
+  if (depth >= MAX_FORMAT_DEPTH) {
+    return '[Max Depth]';
+  }
+
+  seen.add(obj);
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    const result = new Array(obj.length);
+    for (let i = 0; i < obj.length; i++) {
+      result[i] = formatValue(obj[i], seen, depth + 1);
+    }
+    return result;
+  }
+
+  // Skip Date and other built-in objects — pass through unchanged
+  if (obj instanceof Date || obj instanceof RegExp) {
+    return obj;
+  }
+
+  // Handle plain objects
+  const formatted: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+    formatted[key] = formatValue(val, seen, depth + 1);
+  }
+  return formatted;
+}
+
+/**
+ * Recursively format an object to handle BigInt values.
+ *
+ * Features:
+ * - Fast-path: returns original object if no BigInt values exist (zero allocation)
+ * - Array support: converts BigInt items inside arrays
+ * - Circular reference protection: returns "[Circular]" marker
+ * - Depth limiting: returns "[Max Depth]" beyond MAX_FORMAT_DEPTH levels
+ *
+ * @param obj - The log object to format
+ * @param seen - WeakSet tracking visited objects (for circular reference detection)
+ * @param depth - Current recursion depth
+ */
+export function formatLogObject(
+  obj: Record<string, unknown>,
+  seen?: WeakSet<object>,
+  depth?: number,
+): Record<string, unknown> {
+  // Fast-path: if no BigInt values exist anywhere, return unchanged (Fix D)
+  if (!needsFormatting(obj)) {
+    return obj;
+  }
+
+  const currentSeen = seen ?? new WeakSet<object>();
+  const currentDepth = depth ?? 0;
+
+  // Depth guard for the top-level call
+  if (currentDepth >= MAX_FORMAT_DEPTH) {
+    return { _truncated: '[Max Depth]' };
+  }
+
+  // Mark this object as seen
+  currentSeen.add(obj);
+
   const formatted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === 'bigint') {
-      formatted[key] = value.toString();
-    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
-      // Recursively handle nested objects
-      formatted[key] = formatLogObject(value as Record<string, unknown>);
-    } else {
-      formatted[key] = value;
-    }
+    formatted[key] = formatValue(value, currentSeen, currentDepth + 1);
   }
   return formatted;
 }
@@ -191,7 +302,8 @@ export function createPinoLogger(config: string | LoggerConfig): ILogger {
   const logLevel = level || (process.env.LOG_LEVEL as LogLevel) || 'info';
 
   // Determine if pretty printing should be enabled
-  const usePretty = pretty ?? process.env.NODE_ENV === 'development';
+  // LOG_FORMAT=json forces JSON output even in development (used by startup script to parse child output)
+  const usePretty = pretty ?? (process.env.LOG_FORMAT !== 'json' && process.env.NODE_ENV === 'development');
 
   // Build Pino options
   const options: LoggerOptions = {
@@ -204,6 +316,22 @@ export function createPinoLogger(config: string | LoggerConfig): ILogger {
       service: name,
       pid: process.pid,
     },
+    // Redact sensitive fields from log output (API keys, secrets)
+    redact: {
+      paths: [
+        'url', '*.url',
+        'wsUrl', '*.wsUrl',
+        'rpcUrl', '*.rpcUrl',
+        'endpoint', '*.endpoint',
+        'apiKey', '*.apiKey',
+        'privateKey', '*.privateKey',
+        'secret', '*.secret',
+        'password', '*.password',
+        'authorization', '*.authorization',
+        'token', '*.token',
+      ],
+      censor: '[REDACTED]',
+    },
   };
 
   // Add transport for pretty printing in development
@@ -212,8 +340,8 @@ export function createPinoLogger(config: string | LoggerConfig): ILogger {
       target: 'pino-pretty',
       options: {
         colorize: true,
-        translateTime: 'SYS:standard',
-        ignore: 'pid,hostname',
+        translateTime: 'HH:MM:ss',
+        ignore: 'pid,hostname,service',
       },
     };
   }
@@ -271,7 +399,7 @@ export class PinoPerformanceLogger implements IPerformanceLogger {
   startTimer(operation: string): void {
     this.timers.set(operation, {
       start: Date.now(),
-      count: (this.timers.get(operation)?.count || 0) + 1,
+      count: (this.timers.get(operation)?.count ?? 0) + 1,
     });
   }
 
@@ -322,7 +450,7 @@ export class PinoPerformanceLogger implements IPerformanceLogger {
     opportunityId: string;
     success: boolean;
     actualProfit?: number;
-    gasUsed?: string;
+    gasUsed?: number;
     transactionHash?: string;
     error?: string;
   }): void {

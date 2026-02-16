@@ -59,7 +59,7 @@ import {
   initializeBridgeRouter,
   resetInitializationState,
 } from './initialization';
-import type { ArbitrageOpportunity, ServiceHealth } from '@arbitrage/types';
+import { RedisStreams, type ArbitrageOpportunity, type ServiceHealth } from '@arbitrage/types';
 
 // Internal modules
 import {
@@ -1347,7 +1347,7 @@ export class ExecutionEngineService {
     if (!this.streamsClient) return;
 
     try {
-      await this.streamsClient.xadd('stream:execution-results', result);
+      await this.streamsClient.xadd(RedisStreams.EXECUTION_RESULTS, result);
     } catch (error) {
       this.logger.error('Failed to publish execution result', { error });
     }

@@ -284,7 +284,9 @@ export class PriceMatrix implements Resettable {
         this.keyRegistry = new SharedKeyRegistry({
           maxKeys: this.config.maxPairs + this.config.reserveSlots
         });
-        logger.debug('SharedKeyRegistry initialized for worker access');
+        if (logger.isLevelEnabled?.('debug') ?? false) {
+          logger.debug('SharedKeyRegistry initialized for worker access');
+        }
       } catch (error) {
         logger.warn('Failed to initialize SharedKeyRegistry', { error });
         this.keyRegistry = null;
@@ -384,7 +386,9 @@ export class PriceMatrix implements Resettable {
           keyRegistryBuffer
         );
         instance.isWorkerMode = true; // Mark as worker mode
-        logger.debug('Worker attached to SharedKeyRegistry');
+        if (logger.isLevelEnabled?.('debug') ?? false) {
+          logger.debug('Worker attached to SharedKeyRegistry');
+        }
       } catch (error) {
         logger.warn('Failed to attach SharedKeyRegistry in worker', { error });
         instance.keyRegistry = null;
@@ -395,13 +399,15 @@ export class PriceMatrix implements Resettable {
       instance.isWorkerMode = false;
     }
 
-    logger.debug('PriceMatrix created from SharedArrayBuffer', {
-      maxPairs: instance.config.maxPairs,
-      totalSlots,
-      bufferSize: totalBytes,
-      hasKeyRegistry: instance.keyRegistry !== null,
-      isWorkerMode: instance.isWorkerMode
-    });
+    if (logger.isLevelEnabled?.('debug') ?? false) {
+      logger.debug('PriceMatrix created from SharedArrayBuffer', {
+        maxPairs: instance.config.maxPairs,
+        totalSlots,
+        bufferSize: totalBytes,
+        hasKeyRegistry: instance.keyRegistry !== null,
+        isWorkerMode: instance.isWorkerMode
+      });
+    }
 
     return instance;
   }
@@ -428,7 +434,9 @@ export class PriceMatrix implements Resettable {
         this.sequenceArray = new Int32Array(this.sharedBuffer, priceBytes + timestampBytes, totalSlots);
         this.dataView = new DataView(this.sharedBuffer); // Cache DataView for atomic ops
         this.useSharedMemory = true;
-        logger.debug('Using SharedArrayBuffer for price storage');
+        if (logger.isLevelEnabled?.('debug') ?? false) {
+          logger.debug('Using SharedArrayBuffer for price storage');
+        }
       } else {
         throw new Error('SharedArrayBuffer not available');
       }

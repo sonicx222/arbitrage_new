@@ -18,6 +18,7 @@ import {
   fractionToBigInt,
   bigIntToFraction,
   applyFraction,
+  formatWeiAsEth,
 } from '../../src/utils/bigint-utils';
 
 // =============================================================================
@@ -226,6 +227,17 @@ describe('fractionToBigInt and bigIntToFraction', () => {
   it('should handle Infinity input', () => {
     expect(fractionToBigInt(Infinity)).toBe(0n);
   });
+
+  it('should handle fractions > 1 without clamping (P2 fix)', () => {
+    // 150% profit should produce 15000n with default scale 10000
+    expect(fractionToBigInt(1.5)).toBe(15000n);
+    expect(fractionToBigInt(2.0)).toBe(20000n);
+  });
+
+  it('should handle negative fractions', () => {
+    expect(fractionToBigInt(-0.05)).toBe(-500n);
+    expect(fractionToBigInt(-1.5)).toBe(-15000n);
+  });
 });
 
 describe('applyFraction', () => {
@@ -239,5 +251,56 @@ describe('applyFraction', () => {
   it('should handle zero fraction', () => {
     const oneEth = BigInt('1000000000000000000');
     expect(applyFraction(oneEth, 0)).toBe(0n);
+  });
+});
+
+// =============================================================================
+// formatWeiAsEth Tests
+// =============================================================================
+
+describe('formatWeiAsEth', () => {
+  it('should format 1.5 ETH correctly', () => {
+    expect(formatWeiAsEth(1500000000000000000n)).toBe('1.5');
+  });
+
+  it('should format 1 ETH as integer string', () => {
+    expect(formatWeiAsEth(1000000000000000000n)).toBe('1');
+  });
+
+  it('should format with custom decimal places', () => {
+    expect(formatWeiAsEth(1234567890000000000n, 4)).toBe('1.2345');
+  });
+
+  it('should format zero', () => {
+    expect(formatWeiAsEth(0n)).toBe('0');
+  });
+
+  it('should format small amounts', () => {
+    // 0.001 ETH
+    expect(formatWeiAsEth(1000000000000000n)).toBe('0.001');
+  });
+
+  it('should format negative values', () => {
+    expect(formatWeiAsEth(-1500000000000000000n)).toBe('-1.5');
+    expect(formatWeiAsEth(-1000000000000000000n)).toBe('-1');
+  });
+
+  it('should handle negative zero as positive', () => {
+    expect(formatWeiAsEth(0n)).toBe('0');
+  });
+
+  it('should throw RangeError for decimals > 18', () => {
+    expect(() => formatWeiAsEth(1000000000000000000n, 19)).toThrow(RangeError);
+    expect(() => formatWeiAsEth(1000000000000000000n, 19)).toThrow(
+      'decimals must be between 0 and 18'
+    );
+  });
+
+  it('should throw RangeError for negative decimals', () => {
+    expect(() => formatWeiAsEth(1000000000000000000n, -1)).toThrow(RangeError);
+  });
+
+  it('should handle 0 decimal places', () => {
+    expect(formatWeiAsEth(1500000000000000000n, 0)).toBe('1');
   });
 });

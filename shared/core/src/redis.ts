@@ -1159,8 +1159,8 @@ export class RedisClient {
     const category = COMMAND_CATEGORIES[cmd] || 'other';
 
     // Update counters
-    this.commandStats.byCommand[cmd] = (this.commandStats.byCommand[cmd] || 0) + count;
-    this.commandStats.byCategory[category] = (this.commandStats.byCategory[category] || 0) + count;
+    this.commandStats.byCommand[cmd] = (this.commandStats.byCommand[cmd] ?? 0) + count;
+    this.commandStats.byCategory[category] = (this.commandStats.byCategory[category] ?? 0) + count;
     this.commandStats.totalCommands += count;
     this.commandStats.lastCommandAt = now;
 

@@ -1,8 +1,8 @@
 /**
  * Logger Type Definitions
  *
- * Defines the ILogger interface that decouples the codebase from any specific
- * logging library (Winston, Pino, etc.). This enables:
+ * Defines the ILogger interface that decouples the codebase from the
+ * logging library implementation (Pino). This enables:
  * 1. Easy library swapping without code changes
  * 2. Dependency injection for testability
  * 3. Type-safe logging across the codebase
@@ -10,7 +10,7 @@
  * P0-FIX: Added ServiceLogger interface to consolidate duplicate logger interfaces
  * (BaseDetectorLogger, FactorySubscriptionLogger) into a single shared type.
  *
- * @see docs/logger_implementation_plan.md
+ * @see docs/architecture/adr/ADR-015-pino-logger-migration.md
  */
 
 /**
@@ -57,7 +57,7 @@ export interface ServiceLogger {
 /**
  * Core logger interface.
  *
- * All logging implementations (Pino, Winston, RecordingLogger, NullLogger)
+ * All logging implementations (Pino, RecordingLogger, NullLogger)
  * must implement this interface. This is the ONLY type that should be used
  * for logger parameters in class constructors (DI pattern).
  *
@@ -176,7 +176,7 @@ export interface IPerformanceLogger extends ILogger {
     opportunityId: string;
     success: boolean;
     actualProfit?: number;
-    gasUsed?: string;
+    gasUsed?: number;
     transactionHash?: string;
     error?: string;
   }): void;

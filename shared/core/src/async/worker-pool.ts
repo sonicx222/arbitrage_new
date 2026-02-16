@@ -5,6 +5,7 @@ import { Worker } from 'worker_threads';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import { createLogger } from '../logger';
 import { clearTimeoutSafe } from '../lifecycle-utils';
 import { WORKER_POOL_CONFIG, PLATFORM_NAME } from '@arbitrage/config';
@@ -20,7 +21,7 @@ const logger = createLogger('worker-pool');
  * Dist runtime (__dirname = shared/core/dist/async):
  * - worker script is expected at shared/core/dist/event-processor-worker.js
  */
-function resolveWorkerScriptPath(): string {
+async function resolveWorkerScriptPath(): Promise<string> {
   const candidates = [
     path.join(__dirname, 'event-processor-worker.js'),
     path.join(__dirname, '..', 'event-processor-worker.js'),
@@ -29,8 +30,11 @@ function resolveWorkerScriptPath(): string {
   ];
 
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
+    try {
+      await fsPromises.access(candidate);
       return candidate;
+    } catch {
+      // File doesn't exist at this path, try next candidate
     }
   }
 
@@ -250,7 +254,8 @@ export class EventProcessingWorkerPool extends EventEmitter {
   private keyRegistryBuffer: SharedArrayBuffer | null = null;
 
   // Finding #16: Configurable worker script path for testability (DI principle)
-  private readonly workerPath: string;
+  // Not readonly: resolved lazily in start() when not provided via constructor
+  private workerPath: string;
 
   // P1-FIX: Track cancelled/timed-out task IDs to skip during dispatch (O(1) lookup)
   private cancelledTaskIds: Set<string> = new Set();
@@ -296,7 +301,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     this.taskTimeout = taskTimeout;
     this.priceBuffer = priceBuffer;
     this.keyRegistryBuffer = keyRegistryBuffer;
-    this.workerPath = workerPath ?? resolveWorkerScriptPath();
+    this.workerPath = workerPath ?? '';
     // Fix #27: Pre-allocate circular buffer arrays
     this.parseTimeWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
     this.overheadWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
@@ -305,7 +310,14 @@ export class EventProcessingWorkerPool extends EventEmitter {
   async start(): Promise<void> {
     if (this.isRunning) return;
 
-    if (!fs.existsSync(this.workerPath)) {
+    // Resolve worker path asynchronously if not provided via constructor
+    if (!this.workerPath) {
+      this.workerPath = await resolveWorkerScriptPath();
+    }
+
+    try {
+      await fsPromises.access(this.workerPath);
+    } catch {
       throw new Error(
         `Worker script not found at ${this.workerPath}. ` +
         'Build shared/core first (npm run build) or provide a valid workerPath.'

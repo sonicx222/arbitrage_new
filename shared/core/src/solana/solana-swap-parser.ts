@@ -18,7 +18,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { SwapEvent } from '../../../types';
+import type { SwapEvent } from '@arbitrage/types';
 import { createLogger } from '../logger';
 
 const logger = createLogger('solana-swap-parser');
@@ -181,6 +181,8 @@ export interface ParserStats {
 export class SolanaSwapParser extends EventEmitter {
   private config: SwapParserConfig;
   private stats: ParserStats;
+  /** Pre-computed Set for O(1) enabledDexes lookup (Fix 12). */
+  private enabledDexesSet: ReadonlySet<string>;
 
   constructor(config: Partial<SwapParserConfig> = {}) {
     super();
@@ -201,6 +203,9 @@ export class SolanaSwapParser extends EventEmitter {
 
     // Validate config
     this.validateConfig(this.config);
+
+    // Build Set for O(1) lookup
+    this.enabledDexesSet = new Set(this.config.enabledDexes);
 
     // Initialize stats
     this.stats = {
@@ -237,6 +242,8 @@ export class SolanaSwapParser extends EventEmitter {
     const newConfig = { ...this.config, ...updates };
     this.validateConfig(newConfig);
     this.config = newConfig;
+    // Rebuild Set when config changes
+    this.enabledDexesSet = new Set(this.config.enabledDexes);
     logger.info('SwapParser config updated', { config: this.config });
   }
 
@@ -267,7 +274,7 @@ export class SolanaSwapParser extends EventEmitter {
    * Check if a DEX is enabled for parsing.
    */
   isDexEnabled(dex: string): boolean {
-    return this.config.enabledDexes.includes(dex) && !DISABLED_DEXES.has(dex);
+    return this.enabledDexesSet.has(dex) && !DISABLED_DEXES.has(dex);
   }
 
   /**
@@ -316,34 +323,33 @@ export class SolanaSwapParser extends EventEmitter {
     return instruction.data[0] === SWAP_DISCRIMINATORS.RAYDIUM_AMM_SWAP;
   }
 
+  /**
+   * Compare first 8 bytes of instruction data against an Anchor discriminator
+   * without allocating a new Buffer via slice().
+   */
+  private matchesDiscriminator(data: Buffer, discriminator: Buffer): boolean {
+    if (data.length < 8) return false;
+    return data.compare(discriminator, 0, 8, 0, 8) === 0;
+  }
+
   private isRaydiumClmmSwap(instruction: SolanaInstruction): boolean {
-    if (instruction.data.length < 8) return false;
-    // Check Anchor discriminator
-    return instruction.data.slice(0, 8).equals(SWAP_DISCRIMINATORS.RAYDIUM_CLMM_SWAP);
+    return this.matchesDiscriminator(instruction.data, SWAP_DISCRIMINATORS.RAYDIUM_CLMM_SWAP);
   }
 
   private isOrcaWhirlpoolSwap(instruction: SolanaInstruction): boolean {
-    if (instruction.data.length < 8) return false;
-    // Check Anchor discriminator
-    return instruction.data.slice(0, 8).equals(SWAP_DISCRIMINATORS.ORCA_WHIRLPOOL_SWAP);
+    return this.matchesDiscriminator(instruction.data, SWAP_DISCRIMINATORS.ORCA_WHIRLPOOL_SWAP);
   }
 
   private isMeteoraDlmmSwap(instruction: SolanaInstruction): boolean {
-    if (instruction.data.length < 8) return false;
-    // Check Anchor discriminator
-    return instruction.data.slice(0, 8).equals(SWAP_DISCRIMINATORS.METEORA_DLMM_SWAP);
+    return this.matchesDiscriminator(instruction.data, SWAP_DISCRIMINATORS.METEORA_DLMM_SWAP);
   }
 
   private isPhoenixTrade(instruction: SolanaInstruction): boolean {
-    if (instruction.data.length < 8) return false;
-    // Phoenix V1: Check Anchor discriminator for Swap instruction
-    return instruction.data.slice(0, 8).equals(SWAP_DISCRIMINATORS.PHOENIX_SWAP);
+    return this.matchesDiscriminator(instruction.data, SWAP_DISCRIMINATORS.PHOENIX_SWAP);
   }
 
   private isLifinitySwap(instruction: SolanaInstruction): boolean {
-    if (instruction.data.length < 8) return false;
-    // Check Anchor discriminator
-    return instruction.data.slice(0, 8).equals(SWAP_DISCRIMINATORS.LIFINITY_SWAP);
+    return this.matchesDiscriminator(instruction.data, SWAP_DISCRIMINATORS.LIFINITY_SWAP);
   }
 
   // ===========================================================================
@@ -384,7 +390,7 @@ export class SolanaSwapParser extends EventEmitter {
           this.stats.totalSwapsDetected++;
 
           const dex = swap.dex;
-          this.stats.swapsByDex[dex] = (this.stats.swapsByDex[dex] || 0) + 1;
+          this.stats.swapsByDex[dex] = (this.stats.swapsByDex[dex] ?? 0) + 1;
 
           this.emit('swap', swap);
         }

@@ -52,7 +52,7 @@ async function stopInMemoryRedis() {
 
   // Safety net: also kill any process still listening on the configured Redis port.
   // This handles orphaned child redis-server processes when the parent launcher is gone.
-  const redisPort = config.port || 6379;
+  const redisPort = config.port ?? 6379;
   const lingeringPids = await findProcessesByPort(redisPort);
   for (const pid of lingeringPids) {
     if (pid === process.pid) continue;

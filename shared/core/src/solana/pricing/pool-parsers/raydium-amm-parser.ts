@@ -199,9 +199,14 @@ export function parseRaydiumAmmState(
  * @returns Price (token1 per token0), or 0 if baseReserve is 0
  */
 export function calculateAmmPrice(state: RaydiumAmmPoolState): number {
-  if (state.baseReserve === BigInt(0)) return 0;
+  if (state.baseReserve === 0n) return 0;
 
-  const rawPrice = Number(state.quoteReserve) / Number(state.baseReserve);
+  // Use BigInt-safe arithmetic to preserve precision for large reserves.
+  // Scale numerator to 15 decimal places before dividing, then convert to Number.
+  const PRECISION = BigInt(1e15);
+  const scaledPrice = (state.quoteReserve * PRECISION) / state.baseReserve;
+  const rawPrice = Number(scaledPrice) / 1e15;
+
   const decimalAdjustment = Math.pow(10, state.baseDecimals - state.quoteDecimals);
 
   return rawPrice * decimalAdjustment;

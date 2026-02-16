@@ -83,7 +83,7 @@
     }
   },
   "scripts": {
-    "build": "tsc || true",
+    "build": "tsc",
     "test": "jest",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix"
@@ -92,15 +92,14 @@
     "@solana/web3.js": "^1.95.0",
     "ioredis": "^5.4.1",
     "pino": "^9.6.0",
-    "pino-pretty": "^13.0.0",
-    "redis": "^4.7.0",
-    "winston": "^3.14.2"
+    "redis": "^4.7.0"
   },
   "peerDependencies": {
     "ethers": "^6.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
+    "pino-pretty": "^13.0.0",
     "@types/node": "^22.5.4",
     "ethers": "^6.16.0",
     "jest": "^29.7.0",

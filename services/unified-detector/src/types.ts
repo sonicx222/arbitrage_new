@@ -27,7 +27,7 @@ import {
 
 /**
  * Logger interface for dependency injection.
- * Compatible with winston, pino, and @arbitrage/core createLogger.
+ * Compatible with Pino and @arbitrage/core createLogger.
  */
 export interface Logger {
   info: (message: string, meta?: object) => void;

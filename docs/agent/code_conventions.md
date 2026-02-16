@@ -9,16 +9,22 @@
 ## Type Safety
 
 ### Logger Type
-Always use the exported `Logger` type instead of `any`:
+For **new code**, use the `ILogger` interface from the logging module:
 
 ```typescript
 // ❌ Bad
 protected logger: any;
 
-// ✅ Good
+// ✅ Best (new code) — strict types via ILogger
+import type { ILogger } from './logging';
+protected logger: ILogger;
+
+// ✅ Acceptable (existing code) — Logger facade still works
 import { Logger } from './logger';
 protected logger: Logger;
 ```
+
+> **Note:** The `Logger` type from `./logger` is a backward-compatible facade with permissive (`any`) meta parameters. `ILogger` from `./logging` provides stricter type safety via `Record<string, unknown>` metadata. Prefer `ILogger` for all new code; existing code using `Logger` does not need to be migrated.
 
 ### Nullable Types
 Use proper nullable types instead of `as any` casts:

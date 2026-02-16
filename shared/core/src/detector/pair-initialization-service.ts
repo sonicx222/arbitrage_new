@@ -12,7 +12,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { Dex, Token, Pair } from '../../../types/src';
+import type { Dex, Token, Pair } from '@arbitrage/types';
 import type { PairDiscoveryService } from '../pair-discovery';
 import type { PairCacheService } from '../caching/pair-cache';
 import type { ServiceLogger } from '../logging';

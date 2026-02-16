@@ -200,7 +200,7 @@ function createHealthServer(engine: ExecutionEngineService): Server {
   });
 
   server.listen(HEALTH_CHECK_PORT, () => {
-    logger.info(`Health server listening on port ${HEALTH_CHECK_PORT}`);
+    logger.debug(`Health server listening on port ${HEALTH_CHECK_PORT}`);
   });
 
   return server;
@@ -212,7 +212,8 @@ async function main() {
     const standbyConfig = getStandbyConfigFromEnv();
     const circuitBreakerConfig = getCircuitBreakerConfigFromEnv();
 
-    logger.info('Starting Execution Engine Service', {
+    logger.info(`Starting Execution Engine Service on port ${HEALTH_CHECK_PORT}`);
+    logger.debug('Execution engine startup config', {
       simulationMode: simulationConfig?.enabled ?? false,
       isStandby: standbyConfig.isStandby,
       queuePausedOnStart: standbyConfig.queuePausedOnStart,
@@ -322,13 +323,7 @@ async function main() {
       },
     });
 
-    logger.info('Execution Engine Service is running', {
-      isStandby: standbyConfig.isStandby,
-      simulationMode: engine.getIsSimulationMode(),
-      queuePaused: engine.isQueuePaused(),
-      regionId: standbyConfig.regionId,
-      instanceId
-    });
+    logger.info('Execution Engine Service is running');
 
   } catch (error) {
     logger.error('Failed to start Execution Engine Service', { error });

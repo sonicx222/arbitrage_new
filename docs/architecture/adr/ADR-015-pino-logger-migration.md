@@ -278,6 +278,6 @@ interface IPerformanceLogger extends ILogger {
 ## References
 
 - [Pino Documentation](https://getpino.io/)
-- [Logger Implementation Plan](../../logger_implementation_plan.md)
+- [ADR-015: Pino Logger Migration](./ADR-015-pino-logger-migration.md)
 - [ADR-009: Test Architecture](./ADR-009-test-architecture.md)
 - [Pino Benchmarks](https://github.com/pinojs/pino/blob/master/docs/benchmarks.md)

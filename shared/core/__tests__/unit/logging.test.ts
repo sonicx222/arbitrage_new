@@ -16,6 +16,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 // Import logging module
 import {
   createPinoLogger,
+  formatLogObject,
   getLogger,
   resetLoggerCache,
   resetPerformanceLoggerCache,
@@ -256,6 +257,49 @@ describe('Logging Module', () => {
 
       expect(logger1).toBe(logger2);
     });
+
+    it('should call logEventLatency without error', () => {
+      const logger = getPinoPerformanceLogger('invoke-test');
+      expect(() => logger.logEventLatency('test-op', 42, { extra: 'data' })).not.toThrow();
+    });
+
+    it('should call logArbitrageOpportunity without error', () => {
+      const logger = getPinoPerformanceLogger('invoke-test');
+      expect(() => logger.logArbitrageOpportunity({
+        id: 'opp-1',
+        type: 'two-hop',
+        expectedProfit: 50,
+        confidence: 0.9,
+        buyDex: 'uniswap',
+        sellDex: 'sushiswap',
+      })).not.toThrow();
+    });
+
+    it('should call logExecutionResult without error', () => {
+      const logger = getPinoPerformanceLogger('invoke-test');
+      expect(() => logger.logExecutionResult({
+        opportunityId: 'opp-1',
+        success: true,
+        actualProfit: 45,
+        gasUsed: 150000,
+        transactionHash: '0xabc',
+      })).not.toThrow();
+    });
+
+    it('should call logHealthCheck without error', () => {
+      const logger = getPinoPerformanceLogger('invoke-test');
+      expect(() => logger.logHealthCheck('test-service', {
+        status: 'healthy',
+        memoryUsage: 50,
+        cpuUsage: 30,
+        uptime: 3600,
+      })).not.toThrow();
+    });
+
+    it('should call logMetrics without error', () => {
+      const logger = getPinoPerformanceLogger('invoke-test');
+      expect(() => logger.logMetrics({ ops: 1000, latency: 5 })).not.toThrow();
+    });
   });
 
   describe('RecordingPerformanceLogger', () => {
@@ -290,7 +334,7 @@ describe('Logging Module', () => {
         opportunityId: 'opp-123',
         success: true,
         actualProfit: 95,
-        gasUsed: '150000',
+        gasUsed: 150000,
         transactionHash: '0xabc123',
       });
 
@@ -308,6 +352,93 @@ describe('Logging Module', () => {
       });
 
       expect(logger.hasLogMatching('info', 'Health check')).toBe(true);
+    });
+  });
+
+  describe('formatLogObject', () => {
+    it('should return same reference for object with no BigInt (fast-path)', () => {
+      const obj = { a: 1, b: 'hello', c: true };
+      const result = formatLogObject(obj);
+      expect(result).toBe(obj);
+    });
+
+    it('should return same reference for empty object (fast-path)', () => {
+      const obj = {};
+      const result = formatLogObject(obj);
+      expect(result).toBe(obj);
+    });
+
+    it('should convert BigInt scalar to string', () => {
+      const obj = { amount: BigInt(12345) };
+      const result = formatLogObject(obj);
+      expect(result).toEqual({ amount: '12345' });
+    });
+
+    it('should convert nested BigInt to string', () => {
+      const obj = { outer: { inner: BigInt(999) } };
+      const result = formatLogObject(obj);
+      expect(result).toEqual({ outer: { inner: '999' } });
+    });
+
+    it('should convert BigInt values inside arrays', () => {
+      const obj = { values: [BigInt(1), BigInt(2), BigInt(3)] };
+      const result = formatLogObject(obj);
+      expect(result).toEqual({ values: ['1', '2', '3'] });
+    });
+
+    it('should handle mixed array (BigInt + string + number)', () => {
+      const obj = { mixed: [BigInt(42), 'hello', 100, null] };
+      const result = formatLogObject(obj);
+      expect(result).toEqual({ mixed: ['42', 'hello', 100, null] });
+    });
+
+    it('should handle circular references without crashing', () => {
+      const obj: Record<string, unknown> = { name: 'root', value: BigInt(1) };
+      obj.self = obj;
+      const result = formatLogObject(obj);
+      expect(result.name).toBe('root');
+      expect(result.value).toBe('1');
+      expect(result.self).toBe('[Circular]');
+    });
+
+    it('should return [Max Depth] marker for deeply nested structures', () => {
+      // Build a deeply nested object with BigInt at the bottom to trigger formatting
+      let current: Record<string, unknown> = { leaf: BigInt(1) };
+      for (let i = 0; i < 15; i++) {
+        current = { nested: current };
+      }
+      const result = formatLogObject(current);
+      // At some depth, the formatter should stop and return [Max Depth]
+      let node: unknown = result;
+      let foundMaxDepth = false;
+      for (let i = 0; i < 20; i++) {
+        if (node === '[Max Depth]') {
+          foundMaxDepth = true;
+          break;
+        }
+        if (node && typeof node === 'object' && !Array.isArray(node)) {
+          node = (node as Record<string, unknown>).nested ?? (node as Record<string, unknown>).leaf;
+        } else {
+          break;
+        }
+      }
+      expect(foundMaxDepth).toBe(true);
+    });
+
+    it('should pass through null and undefined values unchanged', () => {
+      const obj = { a: null, b: undefined, c: BigInt(5) };
+      const result = formatLogObject(obj);
+      expect(result.a).toBeNull();
+      expect(result.b).toBeUndefined();
+      expect(result.c).toBe('5');
+    });
+
+    it('should pass through Date objects unchanged', () => {
+      const date = new Date('2025-01-01');
+      const obj = { timestamp: date, amount: BigInt(100) };
+      const result = formatLogObject(obj);
+      expect(result.timestamp).toBe(date);
+      expect(result.amount).toBe('100');
     });
   });
 

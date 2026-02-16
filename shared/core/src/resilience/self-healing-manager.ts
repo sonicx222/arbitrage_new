@@ -8,7 +8,7 @@ import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 import { dualPublish as dualPublishUtil } from './dual-publish';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
 // P3-2 FIX: Import unified ServiceHealth from shared types
-import type { ServiceHealth } from '../../../types';
+import type { ServiceHealth } from '@arbitrage/types';
 
 // P2-28 NOTE: Using require() intentionally for synchronous config loading.
 // The project compiles to CommonJS ("module": "commonjs" in tsconfig.json),
@@ -54,7 +54,7 @@ export interface ServiceDefinition {
 
 // P3-2 FIX: ServiceHealth interface now imported from @arbitrage/types
 // Re-export for backwards compatibility
-export type { ServiceHealth } from '../../../types';
+export type { ServiceHealth } from '@arbitrage/types';
 
 export interface RecoveryStrategy {
   name: string;

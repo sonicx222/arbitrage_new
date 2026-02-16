@@ -516,7 +516,7 @@ export class MultiLegPathFinder {
     const pools = this.getPoolsForPath(state.tokens, state.dexes, closingPool, ctx);
     const confidence = this.calculateConfidence(allSteps, pools);
 
-    if (confidence < (this.config.minConfidence || 0)) {
+    if (confidence < (this.config.minConfidence ?? 0)) {
       return null;
     }
 
@@ -764,7 +764,7 @@ export class MultiLegPathFinder {
     } catch {
       // Fallback to static estimates if cache fails
       // Uses shared constants for consistency across detectors
-      const baseCost = FALLBACK_GAS_COSTS_ETH[chain] || 0.001;
+      const baseCost = FALLBACK_GAS_COSTS_ETH[chain] ?? 0.001;
       return baseCost * (1 + numSteps * FALLBACK_GAS_SCALING_PER_STEP);
     }
   }
@@ -800,7 +800,7 @@ export class MultiLegPathFinder {
         const maxStepSlippage = Math.max(...opp.steps.map(s => s.slippage));
         if (maxStepSlippage > this.slippageConfig.maxSlippage) return false;
 
-        if (opp.confidence < (this.config.minConfidence || 0)) return false;
+        if (opp.confidence < (this.config.minConfidence ?? 0)) return false;
 
         return true;
       })
@@ -957,9 +957,9 @@ export class MultiLegPathFinder {
         // Update local stats from worker result
         if (result.result.stats) {
           this.stats.totalCalls++;
-          this.stats.totalPathsExplored += result.result.stats.pathsExplored || 0;
-          this.stats.totalOpportunitiesFound += result.result.opportunities?.length || 0;
-          this.stats.totalProcessingTimeMs += result.result.stats.processingTimeMs || 0;
+          this.stats.totalPathsExplored += result.result.stats.pathsExplored ?? 0;
+          this.stats.totalOpportunitiesFound += result.result.opportunities?.length ?? 0;
+          this.stats.totalProcessingTimeMs += result.result.stats.processingTimeMs ?? 0;
         }
 
         return result.result.opportunities || [];

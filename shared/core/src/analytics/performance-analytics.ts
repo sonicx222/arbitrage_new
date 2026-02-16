@@ -803,7 +803,7 @@ export class PerformanceAnalyticsEngine {
 
     // Scale by time period
     const days = (endDate - startDate) / (24 * 60 * 60 * 1000);
-    const baseReturn = benchmarkReturns[benchmark] || 0.03;
+    const baseReturn = benchmarkReturns[benchmark] ?? 0.03;
 
     return baseReturn * (days / 365); // Annualized to period
   }

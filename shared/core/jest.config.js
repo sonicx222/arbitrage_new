@@ -29,6 +29,8 @@ module.exports = {
     '^@arbitrage/config/(.*)$': '<rootDir>/../config/src/$1',
     '^@arbitrage/types$': '<rootDir>/../types/src',
     '^@arbitrage/types/(.*)$': '<rootDir>/../types/src/$1',
+    '^@arbitrage/unified-detector$': '<rootDir>/../../services/unified-detector/src',
+    '^@arbitrage/unified-detector/(.*)$': '<rootDir>/../../services/unified-detector/src/$1',
   },
   collectCoverageFrom: [
     'src/**/*.ts',

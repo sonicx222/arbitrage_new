@@ -92,6 +92,11 @@ export const CHAIN_ALIASES: Readonly<Record<string, ChainId>> = {
   'binance-smart-chain': 'bsc',
 } as const;
 
+/** Pre-computed lowercase alias map for O(1) case-insensitive lookup */
+const LOWERCASE_ALIASES: Readonly<Record<string, ChainId>> = Object.fromEntries(
+  Object.entries(CHAIN_ALIASES).map(([k, v]) => [k.toLowerCase(), v])
+) as Record<string, ChainId>;
+
 /**
  * Normalize chain identifier to canonical form
  *
@@ -110,26 +115,67 @@ export const CHAIN_ALIASES: Readonly<Record<string, ChainId>> = {
  * ```
  */
 export function normalizeChainId(chain: string): ChainId {
-  // Try exact match first
+  // Try exact match against canonical IDs first (O(1) Set lookup)
   if (isCanonicalChainId(chain)) {
-    return chain as ChainId;
+    return chain;
   }
 
-  // Try case-insensitive lookup in aliases
-  const lowerChain = chain.toLowerCase();
-  const alias = CHAIN_ALIASES[lowerChain];
+  // Case-insensitive lookup using pre-computed lowercase alias map
+  const alias = LOWERCASE_ALIASES[chain.toLowerCase()];
   if (alias) {
     return alias;
-  }
-
-  // Try exact alias match (preserves case from CHAIN_ALIASES)
-  if (chain in CHAIN_ALIASES) {
-    return CHAIN_ALIASES[chain];
   }
 
   // Return input if not recognized (avoid throwing for robustness)
   return chain as ChainId;
 }
+
+/** Module-level Set for O(1) testnet lookup */
+const TESTNET_IDS: ReadonlySet<string> = new Set([
+  'sepolia',
+  'arbitrum-sepolia',
+  'base-sepolia',
+  'zksync-sepolia',
+  'solana-devnet',
+]);
+
+/** Module-level static arrays to avoid per-call allocation */
+const MAINNET_CHAINS: readonly MainnetChainId[] = [
+  'ethereum', 'polygon', 'arbitrum', 'base', 'optimism',
+  'bsc', 'avalanche', 'fantom', 'zksync', 'linea', 'solana',
+];
+const TESTNET_CHAINS: readonly TestnetChainId[] = [
+  'sepolia', 'arbitrum-sepolia', 'base-sepolia', 'zksync-sepolia', 'solana-devnet',
+];
+const EVM_CHAINS: readonly EVMChainId[] = [
+  'ethereum', 'polygon', 'arbitrum', 'base', 'optimism',
+  'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+  'sepolia', 'arbitrum-sepolia', 'base-sepolia', 'zksync-sepolia',
+];
+const ALL_CHAINS: readonly ChainId[] = [...MAINNET_CHAINS, ...TESTNET_CHAINS];
+
+/** Module-level Set for O(1) canonical ID lookup (no per-call allocation) */
+const CANONICAL_IDS: ReadonlySet<string> = new Set([
+  // Mainnets
+  'ethereum',
+  'polygon',
+  'arbitrum',
+  'base',
+  'optimism',
+  'bsc',
+  'avalanche',
+  'fantom',
+  'zksync',
+  'linea',
+  // Non-EVM
+  'solana',
+  // Testnets
+  'sepolia',
+  'arbitrum-sepolia',
+  'base-sepolia',
+  'zksync-sepolia',
+  'solana-devnet',
+]);
 
 /**
  * Check if a string is a canonical chain ID (not an alias)
@@ -138,29 +184,7 @@ export function normalizeChainId(chain: string): ChainId {
  * @returns true if canonical ChainId, false if alias or unknown
  */
 export function isCanonicalChainId(chain: string): chain is ChainId {
-  const canonicalIds: readonly string[] = [
-    // Mainnets
-    'ethereum',
-    'polygon',
-    'arbitrum',
-    'base',
-    'optimism',
-    'bsc',
-    'avalanche',
-    'fantom',
-    'zksync',
-    'linea',
-    // Non-EVM
-    'solana',
-    // Testnets
-    'sepolia',
-    'arbitrum-sepolia',
-    'base-sepolia',
-    'zksync-sepolia',
-    'solana-devnet',
-  ];
-
-  return canonicalIds.includes(chain);
+  return CANONICAL_IDS.has(chain);
 }
 
 /**
@@ -222,14 +246,7 @@ export function isEVMChain(chain: string): chain is EVMChainId {
  */
 export function isTestnet(chain: string): chain is TestnetChainId {
   const normalized = normalizeChainId(chain);
-  const testnets: readonly string[] = [
-    'sepolia',
-    'arbitrum-sepolia',
-    'base-sepolia',
-    'zksync-sepolia',
-    'solana-devnet',
-  ];
-  return testnets.includes(normalized);
+  return TESTNET_IDS.has(normalized);
 }
 
 /**
@@ -246,64 +263,28 @@ export function isMainnet(chain: string): chain is MainnetChainId {
  * Get all mainnet chain IDs
  */
 export function getMainnetChains(): readonly MainnetChainId[] {
-  return [
-    'ethereum',
-    'polygon',
-    'arbitrum',
-    'base',
-    'optimism',
-    'bsc',
-    'avalanche',
-    'fantom',
-    'zksync',
-    'linea',
-    'solana',
-  ];
+  return MAINNET_CHAINS;
 }
 
 /**
  * Get all testnet chain IDs
  */
 export function getTestnetChains(): readonly TestnetChainId[] {
-  return [
-    'sepolia',
-    'arbitrum-sepolia',
-    'base-sepolia',
-    'zksync-sepolia',
-    'solana-devnet',
-  ];
+  return TESTNET_CHAINS;
 }
 
 /**
  * Get all EVM chain IDs (mainnet + testnet)
  */
 export function getEVMChains(): readonly EVMChainId[] {
-  return [
-    'ethereum',
-    'polygon',
-    'arbitrum',
-    'base',
-    'optimism',
-    'bsc',
-    'avalanche',
-    'fantom',
-    'zksync',
-    'linea',
-    'sepolia',
-    'arbitrum-sepolia',
-    'base-sepolia',
-    'zksync-sepolia',
-  ];
+  return EVM_CHAINS;
 }
 
 /**
  * Get all chain IDs (mainnet + testnet, EVM + non-EVM)
  */
 export function getAllChains(): readonly ChainId[] {
-  return [
-    ...getMainnetChains(),
-    ...getTestnetChains(),
-  ];
+  return ALL_CHAINS;
 }
 
 /**

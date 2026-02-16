@@ -18,8 +18,9 @@
  */
 
 import { createLogger } from '@arbitrage/core';
-import type { PredictionResult } from './predictor';
+import type { PredictionResult } from './predictor-types';
 import type { OrderflowPrediction } from './orderflow-predictor';
+import { DirectionMapper } from './direction-types';
 
 const logger = createLogger('ensemble-combiner');
 
@@ -104,7 +105,7 @@ const DEFAULT_CONFIG: Required<EnsembleCombinerConfig> = {
  * Combines LSTM and Orderflow predictions into a single enhanced prediction.
  */
 export class EnsemblePredictionCombiner {
-  private readonly config: Required<EnsembleCombinerConfig>;
+  private config: Required<EnsembleCombinerConfig>;
   private stats = {
     totalCombinations: 0,
     directionsAlignedCount: 0,
@@ -119,15 +120,19 @@ export class EnsemblePredictionCombiner {
   constructor(config: EnsembleCombinerConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
-    // Validate weights sum approximately to 1
+    // P2-4 fix: Validate weights sum approximately to 1.
+    // Normalize into local variables to avoid mutating the readonly config.
     const totalWeight = this.config.lstmWeight + this.config.orderflowWeight;
     if (Math.abs(totalWeight - 1) > 0.01) {
       logger.warn('LSTM and orderflow weights do not sum to 1, normalizing', {
         lstmWeight: this.config.lstmWeight,
         orderflowWeight: this.config.orderflowWeight,
       });
-      this.config.lstmWeight /= totalWeight;
-      this.config.orderflowWeight /= totalWeight;
+      this.config = {
+        ...this.config,
+        lstmWeight: this.config.lstmWeight / totalWeight,
+        orderflowWeight: this.config.orderflowWeight / totalWeight,
+      };
     }
   }
 
@@ -186,13 +191,14 @@ export class EnsemblePredictionCombiner {
    * Get combiner statistics.
    */
   getStats(): EnsembleCombinerStats {
-    const count = this.stats.totalCombinations || 1;
+    // P2-10 fix: Use explicit guard instead of || 1 which silently swallows 0.
+    const count = this.stats.totalCombinations;
     return {
-      totalCombinations: this.stats.totalCombinations,
+      totalCombinations: count,
       directionsAlignedCount: this.stats.directionsAlignedCount,
       directionsOpposedCount: this.stats.directionsOpposedCount,
-      avgCombinedConfidence: this.stats.totalCombinedConfidence / count,
-      avgAlignmentBonus: this.stats.totalAlignmentBonus / count,
+      avgCombinedConfidence: count > 0 ? this.stats.totalCombinedConfidence / count : 0,
+      avgAlignmentBonus: count > 0 ? this.stats.totalAlignmentBonus / count : 0,
       lstmOnlyCount: this.stats.lstmOnlyCount,
       orderflowOnlyCount: this.stats.orderflowOnlyCount,
       bothPresentCount: this.stats.bothPresentCount,
@@ -344,19 +350,13 @@ export class EnsemblePredictionCombiner {
   }
 
   /**
-   * Map orderflow direction to price direction.
+   * P2-1 fix: Map orderflow direction to price direction using DirectionMapper.
+   * Previously duplicated the mapping manually; now delegates to the canonical mapper.
    */
   private mapOrderflowDirection(
     orderflowDirection: 'bullish' | 'bearish' | 'neutral'
   ): 'up' | 'down' | 'sideways' {
-    switch (orderflowDirection) {
-      case 'bullish':
-        return 'up';
-      case 'bearish':
-        return 'down';
-      case 'neutral':
-        return 'sideways';
-    }
+    return DirectionMapper.getInstance().marketToPrice(orderflowDirection);
   }
 
   /**

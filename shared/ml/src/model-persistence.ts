@@ -15,6 +15,8 @@
 
 import * as tf from '@tensorflow/tfjs';
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import { createLogger } from '@arbitrage/core';
 
@@ -46,6 +48,8 @@ export interface ModelMetadata {
   custom?: Record<string, unknown>;
   /** Timestamp when metadata was saved */
   savedAt: number;
+  /** P1-2: SHA-256 hash of model.json for integrity verification */
+  modelHash?: string;
 }
 
 /**
@@ -164,7 +168,11 @@ export class ModelPersistence {
         const tempModelPath = `file://${path.join(tempDir, 'model.json')}`;
         await model.save(tempModelPath);
 
-        // Save metadata to temp
+        // P1-2: Compute hash of saved model for integrity verification
+        const tempModelFilePath = path.join(tempDir, 'model.json');
+        metadata.modelHash = await this.computeFileHash(tempModelFilePath);
+
+        // Save metadata to temp (now includes hash)
         const tempMetadataPath = path.join(tempDir, 'metadata.json');
         await this.writeJsonFile(tempMetadataPath, metadata);
 
@@ -173,6 +181,10 @@ export class ModelPersistence {
       } else {
         // Direct save
         await model.save(`file://${modelPath}`);
+
+        // P1-2: Compute hash of saved model for integrity verification
+        metadata.modelHash = await this.computeFileHash(modelPath);
+
         await this.writeJsonFile(metadataPath, metadata);
       }
 
@@ -231,7 +243,7 @@ export class ModelPersistence {
 
     try {
       // Check if model exists
-      if (!this.fileExists(modelPath)) {
+      if (!(await this.fileExists(modelPath))) {
         logger.warn('Model not found', { modelId, modelPath });
         return {
           success: false,
@@ -246,14 +258,38 @@ export class ModelPersistence {
 
       // Load metadata
       let metadata: ModelMetadata | null = null;
-      if (this.fileExists(metadataPath)) {
-        metadata = await this.readJsonFile<ModelMetadata>(metadataPath);
+      if (await this.fileExists(metadataPath)) {
+        const rawMetadata = await this.readJsonFile<ModelMetadata>(metadataPath);
+        // P1-2: Validate metadata before trusting it
+        metadata = this.validateMetadata(rawMetadata) ? rawMetadata : null;
+        if (!metadata) {
+          logger.warn('Model metadata failed validation', { modelId });
+        }
+      }
+
+      // P1-2: Verify model integrity if hash is available in metadata
+      if (metadata?.modelHash) {
+        const currentHash = await this.computeFileHash(modelPath);
+        if (currentHash !== metadata.modelHash) {
+          logger.error('Model integrity check failed — file may be tampered', {
+            modelId,
+            expectedHash: metadata.modelHash,
+            actualHash: currentHash,
+          });
+          return {
+            success: false,
+            model: null,
+            metadata,
+            error: new Error(`Model integrity check failed for: ${modelId}`)
+          };
+        }
       }
 
       logger.info('Model loaded successfully', {
         modelId,
         version: metadata?.version,
-        path: modelDir
+        path: modelDir,
+        integrityVerified: !!metadata?.modelHash,
       });
 
       return {
@@ -287,7 +323,7 @@ export class ModelPersistence {
     const metadataPath = path.join(this.getModelDir(modelId), 'metadata.json');
 
     try {
-      if (!this.fileExists(metadataPath)) {
+      if (!(await this.fileExists(metadataPath))) {
         return null;
       }
       return await this.readJsonFile<ModelMetadata>(metadataPath);
@@ -310,7 +346,7 @@ export class ModelPersistence {
    * @param modelId - Model identifier
    * @returns True if model exists
    */
-  modelExists(modelId: string): boolean {
+  async modelExists(modelId: string): Promise<boolean> {
     const modelPath = path.join(this.getModelDir(modelId), 'model.json');
     return this.fileExists(modelPath);
   }
@@ -325,8 +361,8 @@ export class ModelPersistence {
     const modelDir = this.getModelDir(modelId);
 
     try {
-      if (fs.existsSync(modelDir)) {
-        fs.rmSync(modelDir, { recursive: true, force: true });
+      if (await this.fileExists(modelDir)) {
+        await fsp.rm(modelDir, { recursive: true, force: true });
         logger.info('Model deleted', { modelId });
         return true;
       }
@@ -345,13 +381,13 @@ export class ModelPersistence {
    *
    * @returns Array of model IDs
    */
-  listModels(): string[] {
+  async listModels(): Promise<string[]> {
     try {
-      if (!fs.existsSync(this.config.baseDir)) {
+      if (!(await this.fileExists(this.config.baseDir))) {
         return [];
       }
 
-      const entries = fs.readdirSync(this.config.baseDir, { withFileTypes: true });
+      const entries = await fsp.readdir(this.config.baseDir, { withFileTypes: true });
       return entries
         .filter(entry => entry.isDirectory())
         .filter(entry => !entry.name.startsWith('.'))
@@ -369,30 +405,69 @@ export class ModelPersistence {
   // ===========================================================================
 
   private getModelDir(modelId: string): string {
-    return path.join(this.config.baseDir, modelId);
+    // P1-1 fix: Sanitize modelId to prevent path traversal attacks.
+    // Only allow alphanumeric, hyphens, and underscores.
+    const sanitized = modelId.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (sanitized !== modelId || sanitized.length === 0) {
+      throw new Error(`Invalid modelId: "${modelId}" — only alphanumeric, hyphens, and underscores allowed`);
+    }
+    return path.join(this.config.baseDir, sanitized);
   }
 
   private getVersionDir(modelId: string, version: number): string {
     return path.join(this.config.baseDir, modelId, `v${version}`);
   }
 
-  private async ensureDir(dir: string): Promise<void> {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+  /**
+   * P1-2: Compute SHA-256 hash of a file for integrity verification.
+   */
+  private async computeFileHash(filePath: string): Promise<string> {
+    const content = await fsp.readFile(filePath);
+    return crypto.createHash('sha256').update(content).digest('hex');
   }
 
-  private fileExists(filePath: string): boolean {
-    return fs.existsSync(filePath);
+  /**
+   * P1-2: Validate metadata fields to catch tampering or corruption.
+   * Returns false if metadata has suspicious or invalid values.
+   */
+  private validateMetadata(metadata: ModelMetadata): boolean {
+    // Required fields must exist and be correct types
+    if (!metadata.modelId || typeof metadata.modelId !== 'string') return false;
+    if (!metadata.modelType || typeof metadata.modelType !== 'string') return false;
+    if (typeof metadata.version !== 'number' || metadata.version < 0) return false;
+    if (typeof metadata.accuracy !== 'number' || metadata.accuracy < 0 || metadata.accuracy > 1) return false;
+    if (typeof metadata.isTrained !== 'boolean') return false;
+
+    // Timestamps must be in the past (not future-dated to bypass staleness checks)
+    const now = Date.now();
+    const fiveMinuteFuture = now + 5 * 60 * 1000; // Allow small clock skew
+    if (typeof metadata.savedAt !== 'number' || metadata.savedAt > fiveMinuteFuture) return false;
+    if (typeof metadata.lastTrainingTime !== 'number' || metadata.lastTrainingTime > fiveMinuteFuture) return false;
+
+    return true;
+  }
+
+  // P1-7 fix: All I/O methods now use async fs.promises to avoid blocking the event loop.
+  private async ensureDir(dir: string): Promise<void> {
+    await fsp.mkdir(dir, { recursive: true });
+  }
+
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fsp.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async writeJsonFile(filePath: string, data: unknown): Promise<void> {
     const json = JSON.stringify(data, null, 2);
-    fs.writeFileSync(filePath, json, 'utf8');
+    await fsp.writeFile(filePath, json, 'utf8');
   }
 
   private async readJsonFile<T>(filePath: string): Promise<T> {
-    const content = fs.readFileSync(filePath, 'utf8');
+    const content = await fsp.readFile(filePath, 'utf8');
     return JSON.parse(content) as T;
   }
 
@@ -406,21 +481,21 @@ export class ModelPersistence {
    * On Windows, it's atomic if destination doesn't exist.
    */
   private async atomicMove(srcDir: string, destDir: string): Promise<void> {
-    const files = fs.readdirSync(srcDir);
+    const files = await fsp.readdir(srcDir);
 
     for (const file of files) {
       const srcPath = path.join(srcDir, file);
       const destPath = path.join(destDir, file);
 
       // Remove existing file if present (required for atomic rename on Windows)
-      if (fs.existsSync(destPath)) {
-        fs.unlinkSync(destPath);
+      if (await this.fileExists(destPath)) {
+        await fsp.unlink(destPath);
       }
 
       try {
-        // FIX 4.1: Use renameSync for true atomic move (single syscall)
+        // FIX 4.1: Use rename for true atomic move (single syscall)
         // This is atomic on same filesystem, fails on cross-filesystem
-        fs.renameSync(srcPath, destPath);
+        await fsp.rename(srcPath, destPath);
       } catch (renameError) {
         // Fall back to copy-then-delete for cross-filesystem moves
         // This is NOT atomic, but necessary for cross-device scenarios
@@ -428,8 +503,8 @@ export class ModelPersistence {
         if (err.code === 'EXDEV') {
           // Cross-device move - must copy then delete
           logger.debug('Cross-device move detected, falling back to copy', { srcPath, destPath });
-          fs.copyFileSync(srcPath, destPath);
-          fs.unlinkSync(srcPath);
+          await fsp.copyFile(srcPath, destPath);
+          await fsp.unlink(srcPath);
         } else {
           throw renameError;
         }
@@ -437,7 +512,7 @@ export class ModelPersistence {
     }
 
     // Remove temp directory (should be empty now)
-    fs.rmSync(srcDir, { recursive: true, force: true });
+    await fsp.rm(srcDir, { recursive: true, force: true });
   }
 
   private async archiveVersion(modelId: string, version: number): Promise<void> {
@@ -452,8 +527,8 @@ export class ModelPersistence {
       for (const file of files) {
         const srcPath = path.join(modelDir, file);
         const destPath = path.join(versionDir, file);
-        if (fs.existsSync(srcPath)) {
-          fs.copyFileSync(srcPath, destPath);
+        if (await this.fileExists(srcPath)) {
+          await fsp.copyFile(srcPath, destPath);
         }
       }
 
@@ -472,7 +547,7 @@ export class ModelPersistence {
     const modelDir = this.getModelDir(modelId);
 
     try {
-      const entries = fs.readdirSync(modelDir, { withFileTypes: true });
+      const entries = await fsp.readdir(modelDir, { withFileTypes: true });
       const versionDirs = entries
         .filter(e => e.isDirectory() && e.name.startsWith('v'))
         .map(e => ({
@@ -485,7 +560,7 @@ export class ModelPersistence {
       // Remove versions beyond maxVersions
       for (let i = this.config.maxVersions; i < versionDirs.length; i++) {
         const versionPath = path.join(modelDir, versionDirs[i].name);
-        fs.rmSync(versionPath, { recursive: true, force: true });
+        await fsp.rm(versionPath, { recursive: true, force: true });
       }
     } catch (error) {
       logger.warn('Failed to clean old versions', {

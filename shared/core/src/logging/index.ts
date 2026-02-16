@@ -11,7 +11,7 @@
  * - RecordingLogger - Captures logs for assertions
  * - NullLogger - Silently discards logs
  *
- * @see docs/logger_implementation_plan.md
+ * @see docs/architecture/adr/ADR-015-pino-logger-migration.md
  */
 
 // Types
@@ -27,6 +27,7 @@ export type {
 // Pino implementation (production)
 export {
   createPinoLogger,
+  formatLogObject,
   getLogger,
   getPinoPerformanceLogger,
   PinoPerformanceLogger,

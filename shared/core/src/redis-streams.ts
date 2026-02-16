@@ -470,11 +470,13 @@ export class RedisStreamsClient {
         let effectiveBlock = options.block;
 
         if (maxBlockMs > 0 && (options.block === 0 || options.block > maxBlockMs)) {
-          this.logger.debug('XREAD block time capped', {
-            requested: options.block,
-            capped: maxBlockMs,
-            streamName
-          });
+          if (this.logger.isLevelEnabled?.('debug') ?? false) {
+            this.logger.debug('XREAD block time capped', {
+              requested: options.block,
+              capped: maxBlockMs,
+              streamName
+            });
+          }
           effectiveBlock = maxBlockMs;
         }
         args.push('BLOCK', effectiveBlock);
@@ -515,10 +517,12 @@ export class RedisStreamsClient {
     } catch (error: any) {
       // Ignore "group already exists" error
       if (error.message?.includes('BUSYGROUP')) {
-        this.logger.debug('Consumer group already exists', {
-          stream: config.streamName,
-          group: config.groupName
-        });
+        if (this.logger.isLevelEnabled?.('debug') ?? false) {
+          this.logger.debug('Consumer group already exists', {
+            stream: config.streamName,
+            group: config.groupName
+          });
+        }
         return;
       }
       throw error;
@@ -543,12 +547,14 @@ export class RedisStreamsClient {
         let effectiveBlock = options.block;
 
         if (maxBlockMs > 0 && (options.block === 0 || options.block > maxBlockMs)) {
-          this.logger.debug('XREADGROUP block time capped', {
-            requested: options.block,
-            capped: maxBlockMs,
-            stream: config.streamName,
-            group: config.groupName
-          });
+          if (this.logger.isLevelEnabled?.('debug') ?? false) {
+            this.logger.debug('XREADGROUP block time capped', {
+              requested: options.block,
+              capped: maxBlockMs,
+              stream: config.streamName,
+              group: config.groupName
+            });
+          }
           effectiveBlock = maxBlockMs;
         }
         args.push('BLOCK', effectiveBlock);
@@ -609,7 +615,9 @@ export class RedisStreamsClient {
     } catch (error: any) {
       // ERR no such key - stream doesn't exist yet (common during startup)
       if (error.message?.includes('no such key') || error.message?.includes('ERR')) {
-        this.logger.debug('Stream does not exist yet', { streamName });
+        if (this.logger.isLevelEnabled?.('debug') ?? false) {
+          this.logger.debug('Stream does not exist yet', { streamName });
+        }
         return {
           length: 0,
           radixTreeKeys: 0,
@@ -649,7 +657,9 @@ export class RedisStreamsClient {
       // NOGROUP - consumer group doesn't exist yet (common during startup)
       // ERR no such key - stream doesn't exist yet
       if (error.message?.includes('NOGROUP') || error.message?.includes('no such key')) {
-        this.logger.debug('Consumer group or stream does not exist yet', { streamName, groupName });
+        if (this.logger.isLevelEnabled?.('debug') ?? false) {
+          this.logger.debug('Consumer group or stream does not exist yet', { streamName, groupName });
+        }
         return {
           total: 0,
           smallestId: '',
@@ -839,7 +849,7 @@ export class RedisStreamsClient {
 
 /**
  * FIX 6.1: Minimal logger interface for StreamConsumer.
- * Compatible with winston, pino, and test mock loggers.
+ * Compatible with Pino and test mock loggers.
  * Uses Record<string, unknown> for type safety and consistency with ILogger.
  *
  * Fix 6.2: This interface only requires `error()` to support minimal error-only loggers.

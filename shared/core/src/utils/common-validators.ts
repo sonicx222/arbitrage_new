@@ -33,24 +33,24 @@ export function isNonEmptyString(value: unknown): value is string {
 }
 
 /**
- * Type guard for positive numbers (> 0).
+ * Type guard for positive finite numbers (> 0, excludes Infinity).
  */
 export function isPositiveNumber(value: unknown): value is number {
-  return typeof value === 'number' && !isNaN(value) && value > 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 /**
- * Type guard for non-negative numbers (>= 0).
+ * Type guard for non-negative finite numbers (>= 0, excludes Infinity).
  */
 export function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === 'number' && !isNaN(value) && value >= 0;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 /**
  * Type guard for finite numbers (not NaN, not Infinity).
  */
 export function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && isFinite(value);
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**
@@ -67,7 +67,7 @@ export function isFiniteNumber(value: unknown): value is number {
  * ```
  */
 export function isValidPrice(value: unknown): value is number {
-  return typeof value === 'number' && isFinite(value) && value > 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 /**

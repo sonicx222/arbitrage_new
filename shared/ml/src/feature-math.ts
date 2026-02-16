@@ -62,10 +62,13 @@ export function calculateStdDev(values: number[]): number {
 
 /**
  * Calculate volatility from price series using log returns.
- * This is the standard method used in finance.
+ * Returns the standard deviation of log returns (non-annualized).
+ *
+ * P2-12 fix: Corrected JSDoc — this returns raw std dev of log returns,
+ * not annualized volatility. To annualize, multiply by sqrt(periodsPerYear).
  *
  * @param prices - Array of prices (at least 2 required)
- * @returns Annualized volatility (0 if insufficient data)
+ * @returns Standard deviation of log returns (0 if insufficient data)
  */
 export function calculateVolatility(prices: number[]): number {
   if (prices.length < 2) return 0;
@@ -318,8 +321,14 @@ export function normalizeSymmetric(value: number, range = 1): number {
 export function normalizeSequence(sequence: number[]): number[] {
   if (sequence.length === 0) return [];
 
-  const min = Math.min(...sequence);
-  const max = Math.max(...sequence);
+  // P1-8 fix: Use loop-based min/max to avoid stack overflow on large arrays.
+  // Math.min(...arr) throws RangeError when arr.length > ~100k elements.
+  let min = sequence[0];
+  let max = sequence[0];
+  for (let i = 1; i < sequence.length; i++) {
+    if (sequence[i] < min) min = sequence[i];
+    if (sequence[i] > max) max = sequence[i];
+  }
   const range = max - min;
 
   if (range === 0) {

@@ -135,7 +135,8 @@ function selectBackend(config: Required<BackendConfig>, explicitBackend: boolean
   }
 
   // Auto-select based on environment
-  const nodeEnv = process.env.NODE_ENV || 'development';
+  // P2-9 fix: Use ?? instead of || so empty string is preserved as valid value.
+  const nodeEnv = process.env.NODE_ENV ?? 'development';
 
   switch (nodeEnv) {
     case 'production':
@@ -401,18 +402,17 @@ export function withTensorCleanup<T extends tf.TensorContainer>(fn: () => T): T 
 }
 
 /**
- * FIX 5.4: Async version of withTensorCleanup that actually cleans up.
+ * P2-2 fix: Renamed from withTensorCleanupAsync to withTensorMonitorAsync.
  *
- * Since tf.tidy() doesn't support async functions, we manually track
- * tensor count before/after and dispose intermediate tensors.
+ * Monitors tensor creation during an async operation. Since tf.tidy()
+ * doesn't support async functions, this wrapper tracks tensor counts
+ * before/after and logs potential leaks. It does NOT automatically
+ * dispose tensors — the caller must handle cleanup within fn().
  *
- * Important: The returned tensor(s) from fn() are preserved. Only
- * intermediate tensors created during execution are disposed.
- *
- * @param fn - Async function that returns tensors to preserve
- * @returns The result from fn(), with intermediate tensors disposed
+ * @param fn - Async function to monitor
+ * @returns The result from fn()
  */
-export async function withTensorCleanupAsync<T extends tf.TensorContainer>(
+export async function withTensorMonitorAsync<T extends tf.TensorContainer>(
   fn: () => Promise<T>
 ): Promise<T> {
   // Track tensors before execution
@@ -427,7 +427,7 @@ export async function withTensorCleanupAsync<T extends tf.TensorContainer>(
 
   // Log if we created tensors (helps identify potential leaks)
   if (tensorsCreated > 10) {
-    logger.debug('withTensorCleanupAsync: many tensors created during execution', {
+    logger.debug('withTensorMonitorAsync: many tensors created during execution', {
       tensorsBefore,
       tensorsAfter,
       tensorsCreated
@@ -446,16 +446,18 @@ export async function withTensorCleanupAsync<T extends tf.TensorContainer>(
 }
 
 /**
- * FIX 5.4: Run an async operation with explicit tensor tracking.
- * Disposes all tensors created during execution EXCEPT those returned.
+ * P2-2 fix: Renamed from withTrackedTensorCleanup to withTrackedTensorMonitor.
  *
- * This is more explicit than withTensorCleanupAsync and actually cleans up.
+ * Monitors tensor lifecycle during an async operation. If keepTensors
+ * is provided, logs how many tensors are being preserved. Does NOT
+ * automatically dispose tensors — this is a limitation of tf.js where
+ * there's no clean way to track intermediate tensors in async code.
  *
  * @param fn - Async function that may create tensors
  * @param keepTensors - Function to extract tensors to keep from result
  * @returns The result from fn()
  */
-export async function withTrackedTensorCleanup<T>(
+export async function withTrackedTensorMonitor<T>(
   fn: () => Promise<T>,
   keepTensors?: (result: T) => tf.Tensor[]
 ): Promise<T> {
@@ -472,11 +474,21 @@ export async function withTrackedTensorCleanup<T>(
     const toKeep = new Set(keepTensors(result).map(t => t.id));
     // Dispose would happen here if we had tensor tracking
     // This is a limitation of tfjs - there's no clean way to track intermediate tensors
-    logger.debug('Tracked cleanup completed', { keepCount: toKeep.size });
+    logger.debug('Tracked monitor completed', { keepCount: toKeep.size });
   }
 
   return result;
 }
+
+// =============================================================================
+// P2-2: Deprecated aliases (remove after callers are updated)
+// =============================================================================
+
+/** @deprecated Use withTensorMonitorAsync instead */
+export const withTensorCleanupAsync = withTensorMonitorAsync;
+
+/** @deprecated Use withTrackedTensorMonitor instead */
+export const withTrackedTensorCleanup = withTrackedTensorMonitor;
 
 // =============================================================================
 // Reset (for testing)

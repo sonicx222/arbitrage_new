@@ -607,7 +607,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   server.maxConnections = 100;
 
   server.listen(port, bindAddress, () => {
-    logger.info(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
+    logger.debug(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
   });
 
   // CRITICAL-FIX: Handle fatal server errors appropriately
@@ -1108,7 +1108,8 @@ export function createPartitionServiceRunner(
 
     const startupStartTime = Date.now();
 
-    logger.info(`Starting ${config.serviceName}`, {
+    logger.info(`Starting ${config.serviceName} (${detectorConfig.chains.length} chains, port ${detectorConfig.healthCheckPort})`);
+    logger.debug(`${config.serviceName} startup config`, {
       partitionId: config.partitionId,
       chains: detectorConfig.chains,
       region: config.region,
@@ -1135,10 +1136,13 @@ export function createPartitionServiceRunner(
       const startupDurationMs = Date.now() - startupStartTime;
       const memoryUsage = process.memoryUsage();
 
-      logger.info(`${config.serviceName} started successfully`, {
+      const chains = detector.getChains();
+      const healthyChains = detector.getHealthyChains();
+      logger.info(`${config.serviceName} started: ${healthyChains.length}/${chains.length} chains healthy, ${(startupDurationMs / 1000).toFixed(1)}s`);
+      logger.debug(`${config.serviceName} startup details`, {
         partitionId: detector.getPartitionId(),
-        chains: detector.getChains(),
-        healthyChains: detector.getHealthyChains(),
+        chains,
+        healthyChains,
         startupDurationMs,
         memoryUsageMB: Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100,
         rssMemoryMB: Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100,

@@ -470,7 +470,7 @@ export class PrometheusExporter implements IMetricsExporter {
             dataPoints: [
               {
                 ...dataPoint,
-                asInt: Math.floor(metric.value || 0),
+                asInt: Math.floor(metric.value ?? 0),
               },
             ],
             aggregationTemporality: 2, // CUMULATIVE
@@ -485,7 +485,7 @@ export class PrometheusExporter implements IMetricsExporter {
             dataPoints: [
               {
                 ...dataPoint,
-                asDouble: metric.value || 0,
+                asDouble: metric.value ?? 0,
               },
             ],
           },
@@ -499,12 +499,12 @@ export class PrometheusExporter implements IMetricsExporter {
             dataPoints: [
               {
                 ...dataPoint,
-                count: metric.distribution?.count || 0,
-                sum: metric.distribution?.sum || 0,
+                count: metric.distribution?.count ?? 0,
+                sum: metric.distribution?.sum ?? 0,
                 quantileValues: [
-                  { quantile: 0.5, value: metric.distribution?.p50 || 0 },
-                  { quantile: 0.95, value: metric.distribution?.p95 || 0 },
-                  { quantile: 0.99, value: metric.distribution?.p99 || 0 },
+                  { quantile: 0.5, value: metric.distribution?.p50 ?? 0 },
+                  { quantile: 0.95, value: metric.distribution?.p95 ?? 0 },
+                  { quantile: 0.99, value: metric.distribution?.p99 ?? 0 },
                 ],
               },
             ],

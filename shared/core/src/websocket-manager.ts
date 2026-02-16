@@ -286,10 +286,12 @@ export class WebSocketManager {
     this.stalenessThresholdMs = config.stalenessThresholdMs ??
       getChainStalenessThreshold(this.chainId);
 
-    this.logger.debug('Staleness threshold configured', {
-      chainId: this.chainId,
-      stalenessThresholdMs: this.stalenessThresholdMs
-    });
+    if (this.logger.isLevelEnabled?.('debug') ?? false) {
+      this.logger.debug('Staleness threshold configured', {
+        chainId: this.chainId,
+        stalenessThresholdMs: this.stalenessThresholdMs
+      });
+    }
 
     // S3.3: Initialize health scorer for intelligent fallback selection
     this.healthScorer = getProviderHealthScorer();
@@ -444,7 +446,9 @@ export class WebSocketManager {
 
       // Skip excluded providers
       if (this.isProviderExcluded(nextUrl)) {
-        this.logger.debug(`Skipping excluded provider ${nextIndex}: ${nextUrl}`);
+        if (this.logger.isLevelEnabled?.('debug') ?? false) {
+          this.logger.debug(`Skipping excluded provider ${nextIndex}: ${nextUrl}`);
+        }
         continue;
       }
 
@@ -510,10 +514,12 @@ export class WebSocketManager {
    */
   setWorkerParsingThreshold(bytes: number): void {
     this.workerParsingThresholdBytes = Math.max(0, bytes);
-    this.logger.debug('Worker parsing threshold changed', {
-      chainId: this.chainId,
-      thresholdBytes: this.workerParsingThresholdBytes
-    });
+    if (this.logger.isLevelEnabled?.('debug') ?? false) {
+      this.logger.debug('Worker parsing threshold changed', {
+        chainId: this.chainId,
+        thresholdBytes: this.workerParsingThresholdBytes
+      });
+    }
   }
 
   /**
@@ -814,7 +820,9 @@ export class WebSocketManager {
       this.sendSubscription(fullSubscription);
     }
 
-    this.logger.debug(`Added subscription`, { id, method: subscription.method });
+    if (this.logger.isLevelEnabled?.('debug') ?? false) {
+      this.logger.debug(`Added subscription`, { id, method: subscription.method });
+    }
     return id;
   }
 
@@ -822,7 +830,9 @@ export class WebSocketManager {
     const subscription = this.subscriptions.get(subscriptionId);
     if (subscription) {
       this.subscriptions.delete(subscriptionId);
-      this.logger.debug(`Removed subscription`, { id: subscriptionId });
+      if (this.logger.isLevelEnabled?.('debug') ?? false) {
+        this.logger.debug(`Removed subscription`, { id: subscriptionId });
+      }
     }
   }
 
@@ -1013,7 +1023,9 @@ export class WebSocketManager {
     // RACE-1 FIX: Set flag IMMEDIATELY (synchronously) before any async operations
     // This closes the race window where multiple calls could pass the check above
     this.workerPoolStarting = true;
-    this.logger.debug('Starting worker pool for JSON parsing', { chainId: this.chainId });
+    if (this.logger.isLevelEnabled?.('debug') ?? false) {
+      this.logger.debug('Starting worker pool for JSON parsing', { chainId: this.chainId });
+    }
 
     // Non-blocking pool startup
     this.workerPool!.start()
@@ -1121,7 +1133,9 @@ export class WebSocketManager {
         this.recordRequestForBudget(subscription.method);
       }
 
-      this.logger.debug(`Sent subscription`, { id: subscription.id, method: subscription.method });
+      if (this.logger.isLevelEnabled?.('debug') ?? false) {
+        this.logger.debug(`Sent subscription`, { id: subscription.id, method: subscription.method });
+      }
     } catch (error) {
       this.logger.error('Failed to send subscription', { error, subscription });
     }
@@ -1194,7 +1208,9 @@ export class WebSocketManager {
           this.recordRequestForBudget(method);
         }
 
-        this.logger.debug('Sent RPC request', { id, method });
+        if (this.logger.isLevelEnabled?.('debug') ?? false) {
+          this.logger.debug('Sent RPC request', { id, method });
+        }
       } catch (error) {
         // Clean up on send failure
         clearTimeout(timeout);
@@ -1409,10 +1425,12 @@ export class WebSocketManager {
       return null;
     } catch (error) {
       // Log but don't throw - proactive detection is best-effort
-      this.logger.debug('Proactive gap detection failed (falling back to passive)', {
-        chainId: this.chainId,
-        error: error instanceof Error ? error.message : String(error)
-      });
+      if (this.logger.isLevelEnabled?.('debug') ?? false) {
+        this.logger.debug('Proactive gap detection failed (falling back to passive)', {
+          chainId: this.chainId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
       return null;
     }
   }
@@ -1538,7 +1556,9 @@ export class WebSocketManager {
     // Check if exclusion has expired
     if (Date.now() > exclusion.until) {
       this.excludedProviders.delete(url);
-      this.logger.debug('Provider exclusion expired', { url, chainId: this.chainId });
+      if (this.logger.isLevelEnabled?.('debug') ?? false) {
+        this.logger.debug('Provider exclusion expired', { url, chainId: this.chainId });
+      }
       return false;
     }
 

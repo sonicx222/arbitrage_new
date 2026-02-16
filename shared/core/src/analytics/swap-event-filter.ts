@@ -14,7 +14,7 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  */
 
-import { SwapEvent } from '../../../types';
+import type { SwapEvent } from '@arbitrage/types';
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../lifecycle-utils';
 

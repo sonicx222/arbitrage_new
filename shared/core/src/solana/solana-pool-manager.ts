@@ -58,12 +58,13 @@ export function createSolanaPoolManager(deps: PoolManagerDeps): SolanaPoolManage
   const poolsByTokenPair = new Map<string, Set<string>>();
   const poolUpdateMutex = new AsyncMutex();
 
-  // Known programs for validation warnings
-  const knownPrograms: readonly string[] = Object.values(SOLANA_DEX_PROGRAMS);
+  // Known programs for validation warnings (Set for O(1) lookup)
+  const knownProgramsSet: ReadonlySet<string> = new Set(Object.values(SOLANA_DEX_PROGRAMS));
 
   function getTokenPairKey(token0: string, token1: string): string {
-    const sorted = [token0.toLowerCase(), token1.toLowerCase()].sort();
-    return `${sorted[0]}_${sorted[1]}`;
+    // Solana addresses are base58 (case-sensitive) — no toLowerCase needed.
+    // Direct comparison also avoids array allocation + sort.
+    return token0 < token1 ? `${token0}_${token1}` : `${token1}_${token0}`;
   }
 
   async function addPool(pool: SolanaPool): Promise<void> {
@@ -84,7 +85,7 @@ export function createSolanaPoolManager(deps: PoolManagerDeps): SolanaPoolManage
       poolsByTokenPair.get(pairKey)!.add(pool.address);
 
       // Warn about unknown program IDs
-      if (pool.programId && !knownPrograms.includes(pool.programId)) {
+      if (pool.programId && !knownProgramsSet.has(pool.programId)) {
         logger.warn('Pool added with unknown program ID', {
           address: pool.address,
           programId: pool.programId,
@@ -162,6 +163,12 @@ export function createSolanaPoolManager(deps: PoolManagerDeps): SolanaPoolManage
     poolAddress: string,
     update: { price: number; reserve0: string; reserve1: string; slot: number }
   ): Promise<void> {
+    // Reject invalid prices before acquiring mutex
+    if (!Number.isFinite(update.price) || update.price <= 0) {
+      logger.warn('Invalid price rejected in updatePoolPrice', { poolAddress, price: update.price });
+      return;
+    }
+
     await poolUpdateMutex.runExclusive(async () => {
       const pool = pools.get(poolAddress);
       if (!pool) {

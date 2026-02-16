@@ -58,8 +58,9 @@ import {
   getTensorFlowInfo,
   disposeAllTensors,
   withTensorCleanup,
-  withTensorCleanupAsync,
-  withTrackedTensorCleanup,
+  // P2-2: Use new names (deprecated aliases still work)
+  withTensorMonitorAsync,
+  withTrackedTensorMonitor,
   resetTensorFlowBackend
 } from '../../src/tf-backend';
 
@@ -225,20 +226,20 @@ describe('tf-backend', () => {
       expect(result).toBe(42);
     });
 
-    it('withTensorCleanupAsync should execute async function', async () => {
+    it('withTensorMonitorAsync should execute async function', async () => {
       const fn = jest.fn(async () => 42);
-      const result = await withTensorCleanupAsync(fn as any);
+      const result = await withTensorMonitorAsync(fn as any);
 
       expect(fn).toHaveBeenCalled();
       expect(result).toBe(42);
     });
 
-    it('withTrackedTensorCleanup should execute and optionally track tensors', async () => {
+    it('withTrackedTensorMonitor should execute and optionally track tensors', async () => {
       const mockTensor = { id: 1 };
       const fn = jest.fn(async () => ({ tensor: mockTensor }));
       const keepTensors = jest.fn((result: any) => [result.tensor]);
 
-      const result = await withTrackedTensorCleanup(fn as any, keepTensors as any);
+      const result = await withTrackedTensorMonitor(fn as any, keepTensors as any);
 
       expect(fn).toHaveBeenCalled();
       expect(result).toEqual({ tensor: mockTensor });

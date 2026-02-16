@@ -101,6 +101,7 @@ function main(): void {
       if (existing.signature === signature) {
         // Same error defined in multiple contracts/libraries (e.g., BaseFlashArbitrage + SwapHelpers)
         // Not a true collision — skip the duplicate
+        console.log(`  (skipped duplicate: ${error.name})`);
         continue;
       }
       // TRUE collision: different error signatures produce the same 4-byte selector

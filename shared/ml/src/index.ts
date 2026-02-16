@@ -4,7 +4,10 @@
  * ML-based price prediction and pattern recognition for arbitrage trading.
  *
  * Modules:
- * - predictor.ts: LSTM price predictor and pattern recognizer
+ * - lstm-predictor.ts: LSTM price predictor (P3-1 split from predictor.ts)
+ * - pattern-recognizer.ts: Pattern recognizer (P3-1 split from predictor.ts)
+ * - predictor-types.ts: Shared prediction types (P3-1 split from predictor.ts)
+ * - predictor.ts: Re-export hub for backward compatibility
  * - orderflow-features.ts: Feature engineering for orderflow signals (T4.3.1)
  * - orderflow-predictor.ts: Orderflow pattern predictor (T4.3.2)
  * - direction-types.ts: Unified direction type system (Fix 6.1/9.1)
@@ -30,8 +33,12 @@ export {
   getTensorFlowInfo,
   disposeAllTensors,
   withTensorCleanup,
+  // P2-2: Renamed for clarity (these monitor but don't clean up)
+  withTensorMonitorAsync,
+  withTrackedTensorMonitor,
+  // P2-2: Deprecated aliases for backwards compatibility
   withTensorCleanupAsync,
-  withTrackedTensorCleanup, // FIX 5.4
+  withTrackedTensorCleanup,
   resetTensorFlowBackend
 } from './tf-backend';
 
@@ -130,33 +137,44 @@ export type {
 } from './model-persistence';
 
 // =============================================================================
-// Price Prediction Engine (LSTM)
+// Prediction Types (P3-1 split)
 // =============================================================================
 
-export {
-  // Classes
-  LSTMPredictor,
-  PatternRecognizer,
-  // Singleton factories
-  getLSTMPredictor,
-  getPatternRecognizer,
-  // Reset functions for testing
-  resetLSTMPredictor,
-  resetPatternRecognizer,
-  resetAllMLSingletons
-} from './predictor';
-
 export type {
-  // Data types
   PriceHistory,
   PredictionResult,
   PatternResult,
   TrainingData,
   PredictionContext,
-  // Configuration types
-  LSTMPredictorConfig,
-  PatternRecognizerConfig
-} from './predictor';
+  PredictionHistoryEntry,
+} from './predictor-types';
+
+// =============================================================================
+// LSTM Price Predictor (P3-1 split)
+// =============================================================================
+
+export {
+  LSTMPredictor,
+  getLSTMPredictor,
+  resetLSTMPredictor,
+} from './lstm-predictor';
+
+export type { LSTMPredictorConfig } from './lstm-predictor';
+
+// =============================================================================
+// Pattern Recognizer (P3-1 split)
+// =============================================================================
+
+export {
+  PatternRecognizer,
+  getPatternRecognizer,
+  resetPatternRecognizer,
+} from './pattern-recognizer';
+
+export type { PatternRecognizerConfig } from './pattern-recognizer';
+
+// Aggregated reset (imports both singletons)
+export { resetAllMLSingletons } from './predictor';
 
 // =============================================================================
 // Orderflow Feature Engineering (T4.3.1)

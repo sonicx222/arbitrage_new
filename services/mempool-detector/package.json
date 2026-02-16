@@ -18,7 +18,6 @@
     "@arbitrage/config": "*",
     "@arbitrage/types": "*",
     "ethers": "^6.16.0",
-    "winston": "^3.14.2",
     "ioredis": "^5.4.1",
     "ws": "^8.18.0"
   },

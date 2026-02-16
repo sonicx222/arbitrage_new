@@ -153,7 +153,7 @@ export function normalizeTokenPair(tokenPair: string): string | null {
 
 /**
  * Minimal logger interface for dependency injection.
- * Compatible with Winston logger and testing mocks.
+ * Compatible with Pino logger and testing mocks.
  *
  * Phase 3: Now aliases ILogger from @arbitrage/types for consistency.
  */
