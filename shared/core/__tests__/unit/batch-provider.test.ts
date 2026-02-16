@@ -468,8 +468,7 @@ describe('BatchProvider', () => {
   });
 
   describe('deduplication', () => {
-    // Skip: Deduplication timing is complex with fake timers
-    it.skip('should deduplicate identical requests when enabled', async () => {
+    it('should deduplicate identical requests when enabled', async () => {
       const dedupProvider = new BatchProvider(mockProvider, {
         enableDeduplication: true,
         batchTimeoutMs: 100,
@@ -492,6 +491,98 @@ describe('BatchProvider', () => {
       // Should only have sent one request
       const stats = dedupProvider.getStats();
       expect(stats.totalDeduplicated).toBe(2); // 2 deduplicated out of 3
+
+      await dedupProvider.shutdown();
+    });
+
+    it('should propagate errors to all deduplicated requests', async () => {
+      const dedupProvider = new BatchProvider(mockProvider, {
+        enableDeduplication: true,
+        batchTimeoutMs: 100,
+        maxBatchSize: 10,
+      });
+
+      // Use 2 unique + 1 duplicate so the batch path (fetch) is used
+      mockFetch.mockResolvedValueOnce(createMockFetchResponse([
+        { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'execution reverted' } },
+        { jsonrpc: '2.0', id: 2, result: '0xok' },
+      ]));
+
+      const promise1 = dedupProvider.queueRequest('eth_call', [{ to: '0xA' }, 'latest']);
+      const promise2 = dedupProvider.queueRequest('eth_call', [{ to: '0xB' }, 'latest']);
+      const promise3 = dedupProvider.queueRequest('eth_call', [{ to: '0xA' }, 'latest']); // dup of promise1
+
+      // Use allSettled to capture rejections before Jest's unhandled rejection handler fires
+      const settledPromise = Promise.allSettled([promise1, promise2, promise3]);
+
+      await jest.runAllTimersAsync();
+
+      const results = await settledPromise;
+
+      // Primary (promise1) and duplicate (promise3) should both get the error
+      expect(results[0].status).toBe('rejected');
+      expect((results[0] as PromiseRejectedResult).reason.message).toContain('execution reverted');
+      expect(results[2].status).toBe('rejected');
+      expect((results[2] as PromiseRejectedResult).reason.message).toContain('execution reverted');
+      // Non-duplicate (promise2) should succeed
+      expect(results[1].status).toBe('fulfilled');
+      expect((results[1] as PromiseFulfilledResult<string>).value).toBe('0xok');
+
+      await dedupProvider.shutdown();
+    });
+
+    it('should deduplicate within batch and resolve via batch path', async () => {
+      const dedupProvider = new BatchProvider(mockProvider, {
+        enableDeduplication: true,
+        batchTimeoutMs: 100,
+        maxBatchSize: 10,
+      });
+
+      // Queue 2 unique requests + 1 duplicate of the first
+      // pendingBatch gets 2 unique entries, sent as batch via fetch
+      mockFetch.mockResolvedValueOnce(createMockFetchResponse([
+        { jsonrpc: '2.0', id: 1, result: '0xbalance_a' },
+        { jsonrpc: '2.0', id: 2, result: '0xbalance_b' },
+      ]));
+
+      const promise1 = dedupProvider.queueRequest('eth_getBalance', ['0xaddrA', 'latest']);
+      const promise2 = dedupProvider.queueRequest('eth_getBalance', ['0xaddrB', 'latest']);
+      const promise3 = dedupProvider.queueRequest('eth_getBalance', ['0xaddrA', 'latest']); // dup of promise1
+
+      await jest.runAllTimersAsync();
+
+      const results = await Promise.all([promise1, promise2, promise3]);
+      expect(results).toEqual(['0xbalance_a', '0xbalance_b', '0xbalance_a']);
+
+      const stats = dedupProvider.getStats();
+      expect(stats.totalDeduplicated).toBe(1);
+      expect(stats.totalRequestsBatched).toBe(2); // Only 2 unique sent
+
+      await dedupProvider.shutdown();
+    });
+
+    it('should not deduplicate requests with different params', async () => {
+      const dedupProvider = new BatchProvider(mockProvider, {
+        enableDeduplication: true,
+        batchTimeoutMs: 100,
+        maxBatchSize: 10,
+      });
+
+      mockFetch.mockResolvedValueOnce(createMockFetchResponse([
+        { jsonrpc: '2.0', id: 1, result: '0xbalance_a' },
+        { jsonrpc: '2.0', id: 2, result: '0xbalance_b' },
+      ]));
+
+      const promise1 = dedupProvider.queueRequest('eth_getBalance', ['0xaddrA', 'latest']);
+      const promise2 = dedupProvider.queueRequest('eth_getBalance', ['0xaddrB', 'latest']);
+
+      await jest.runAllTimersAsync();
+
+      const results = await Promise.all([promise1, promise2]);
+      expect(results).toEqual(['0xbalance_a', '0xbalance_b']);
+
+      const stats = dedupProvider.getStats();
+      expect(stats.totalDeduplicated).toBe(0);
 
       await dedupProvider.shutdown();
     });

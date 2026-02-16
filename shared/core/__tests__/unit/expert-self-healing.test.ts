@@ -12,7 +12,8 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import {
   ExpertSelfHealingManager,
   FailureSeverity,
-  RecoveryStrategy
+  // P1-14 FIX: Import renamed enum (was RecoveryStrategy, now RecoveryStrategyEnum)
+  RecoveryStrategyEnum as RecoveryStrategy
 } from '@arbitrage/core';
 import { getRedisClient, resetRedisInstance } from '@arbitrage/core';
 
@@ -52,9 +53,10 @@ jest.mock('../../src/redis-streams', () => ({
 }));
 
 // P2-FIX: Corrected mock paths to match actual file locations
+// P1-15 FIX: Changed getCircuitBreaker to getBreaker to match actual CircuitBreakerRegistry API
 jest.mock('../../src/resilience/circuit-breaker', () => ({
   getCircuitBreakerRegistry: jest.fn(() => ({
-    getCircuitBreaker: jest.fn(() => ({
+    getBreaker: jest.fn(() => ({
       forceOpen: jest.fn(() => Promise.resolve(true))
     }))
   }))

@@ -343,6 +343,15 @@ export function tryCatchSync<T>(
 // Error Classification
 // =============================================================================
 
+// P2-29 FIX: Hoisted to module scope to avoid re-creating Set on every call
+const RETRYABLE_ERROR_CODES = new Set([
+  ErrorCode.CONNECTION_TIMEOUT,
+  ErrorCode.RPC_TIMEOUT,
+  ErrorCode.RPC_RATE_LIMITED,
+  ErrorCode.REDIS_CONNECTION_ERROR,
+  ErrorCode.RECONNECTION_FAILED
+]);
+
 /**
  * Check if an error is retryable.
  */
@@ -352,15 +361,7 @@ export function isRetryableError(error: Error): boolean {
   }
 
   if (error instanceof ArbitrageError) {
-    // Retryable error codes
-    const retryableCodes = new Set([
-      ErrorCode.CONNECTION_TIMEOUT,
-      ErrorCode.RPC_TIMEOUT,
-      ErrorCode.RPC_RATE_LIMITED,
-      ErrorCode.REDIS_CONNECTION_ERROR,
-      ErrorCode.RECONNECTION_FAILED
-    ]);
-    return retryableCodes.has(error.code);
+    return RETRYABLE_ERROR_CODES.has(error.code);
   }
 
   // Check for common retryable error patterns
@@ -532,12 +533,17 @@ export class ErrorAggregator {
    * Get error count by severity.
    */
   countBySeverity(): Record<ErrorSeverity, number> {
-    return {
-      [ErrorSeverity.INFO]: this.getBySeverity(ErrorSeverity.INFO).length,
-      [ErrorSeverity.WARNING]: this.getBySeverity(ErrorSeverity.WARNING).length,
-      [ErrorSeverity.ERROR]: this.getBySeverity(ErrorSeverity.ERROR).length,
-      [ErrorSeverity.CRITICAL]: this.getBySeverity(ErrorSeverity.CRITICAL).length
+    // P2-18 FIX: Single-pass counting instead of 4 separate filter passes
+    const counts = {
+      [ErrorSeverity.INFO]: 0,
+      [ErrorSeverity.WARNING]: 0,
+      [ErrorSeverity.ERROR]: 0,
+      [ErrorSeverity.CRITICAL]: 0
     };
+    for (const error of this.errors) {
+      counts[error.severity]++;
+    }
+    return counts;
   }
 
   /**

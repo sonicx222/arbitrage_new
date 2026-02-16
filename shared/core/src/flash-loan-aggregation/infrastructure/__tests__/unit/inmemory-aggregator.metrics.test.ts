@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from '@jest/globals';
 import { InMemoryAggregatorMetrics } from '../../inmemory-aggregator.metrics';
 import { ProviderOutcome } from '../../../domain';
 import type { IProviderInfo } from '../../../domain';
+import { createProvider, AAVE_PROVIDER } from '../test-providers';
 
 describe('InMemoryAggregatorMetrics', () => {
   let metrics: InMemoryAggregatorMetrics;
@@ -58,10 +59,37 @@ describe('InMemoryAggregatorMetrics', () => {
       expect(aggregated.selectionsWithLiquidityCheck).toBe(1);
     });
 
-    it('should count fallbacks', () => {
+    it('should count explicit fallback triggers', () => {
       const startTime = Date.now();
 
-      metrics.recordSelection(null, 'No provider available (fallback)', startTime);
+      metrics.recordSelection(null, 'fallback to secondary', startTime);
+
+      const aggregated = metrics.getAggregatedMetrics();
+      expect(aggregated.fallbacksTriggered).toBe(1);
+    });
+
+    it('should NOT count "No providers available" as fallback (F13)', () => {
+      const startTime = Date.now();
+
+      metrics.recordSelection(null, 'No providers available', startTime);
+
+      const aggregated = metrics.getAggregatedMetrics();
+      expect(aggregated.fallbacksTriggered).toBe(0);
+    });
+
+    it('should NOT count "All providers failed validation" as fallback (F13)', () => {
+      const startTime = Date.now();
+
+      metrics.recordSelection(null, 'All providers failed validation', startTime);
+
+      const aggregated = metrics.getAggregatedMetrics();
+      expect(aggregated.fallbacksTriggered).toBe(0);
+    });
+
+    it('should count reason containing "fallback" as fallback (F13)', () => {
+      const startTime = Date.now();
+
+      metrics.recordSelection(mockProvider, 'Using fallback provider', startTime);
 
       const aggregated = metrics.getAggregatedMetrics();
       expect(aggregated.fallbacksTriggered).toBe(1);
@@ -115,7 +143,7 @@ describe('InMemoryAggregatorMetrics', () => {
       expect(health!.failureCount).toBe(1);
     });
 
-    it('should update all chain entries when same protocol on multiple chains', () => {
+    it('should update only matching chain entry when chain is provided', () => {
       const ethProvider: IProviderInfo = {
         protocol: 'aave_v3',
         chain: 'ethereum',
@@ -135,7 +163,38 @@ describe('InMemoryAggregatorMetrics', () => {
       metrics.recordSelection(ethProvider, 'Selected', Date.now());
       metrics.recordSelection(arbProvider, 'Selected', Date.now());
 
-      // Record outcome by protocol — should update both chain entries
+      // Record outcome with chain specified — should only update ethereum entry
+      const outcome = ProviderOutcome.success('aave_v3', 100, 'ethereum');
+      metrics.recordOutcome(outcome);
+
+      const ethHealth = metrics.getProviderHealth(ethProvider);
+      const arbHealth = metrics.getProviderHealth(arbProvider);
+
+      expect(ethHealth!.successCount).toBe(1);
+      expect(arbHealth!.successCount).toBe(0);
+    });
+
+    it('should update all chain entries when chain is NOT provided (backward compat)', () => {
+      const ethProvider: IProviderInfo = {
+        protocol: 'aave_v3',
+        chain: 'ethereum',
+        feeBps: 9,
+        isAvailable: true,
+        poolAddress: '0x111',
+      };
+      const arbProvider: IProviderInfo = {
+        protocol: 'aave_v3',
+        chain: 'arbitrum',
+        feeBps: 9,
+        isAvailable: true,
+        poolAddress: '0x222',
+      };
+
+      // Register both providers via selection
+      metrics.recordSelection(ethProvider, 'Selected', Date.now());
+      metrics.recordSelection(arbProvider, 'Selected', Date.now());
+
+      // Record outcome WITHOUT chain — should update both chain entries
       const outcome = ProviderOutcome.success('aave_v3', 100);
       metrics.recordOutcome(outcome);
 
@@ -413,6 +472,95 @@ describe('InMemoryAggregatorMetrics', () => {
       expect(aggregated.totalSelections).toBe(100);
       // byProvider aggregates by protocol (5 unique), not by (protocol, chain) pair
       expect(aggregated.byProvider.size).toBe(5);
+    });
+  });
+
+  describe('CircularBuffer wrap-around behavior (F23)', () => {
+    it('should reflect only recent entries after buffer wraps', () => {
+      // Use small buffer (5 samples) to trigger wrap-around quickly
+      const smallMetrics = new InMemoryAggregatorMetrics({ maxLatencySamples: 5 });
+      const provider: IProviderInfo = {
+        protocol: 'aave_v3',
+        chain: 'ethereum',
+        feeBps: 9,
+        isAvailable: true,
+        poolAddress: '0xaaa',
+      };
+
+      // Record 5 selections with high latency (100ms each)
+      for (let i = 0; i < 5; i++) {
+        smallMetrics.recordSelection(provider, 'Selected', Date.now() - 100);
+      }
+
+      const healthBefore = smallMetrics.getProviderHealth(provider);
+      // Average should be around 100ms (allowing for Date.now() variance)
+      expect(healthBefore!.avgLatencyMs).toBeGreaterThanOrEqual(95);
+
+      // Record 5 more selections with low latency (1ms each) -> wraps the buffer
+      for (let i = 0; i < 5; i++) {
+        smallMetrics.recordSelection(provider, 'Selected', Date.now() - 1);
+      }
+
+      const healthAfter = smallMetrics.getProviderHealth(provider);
+      // After wrap-around, average should reflect ONLY the recent low-latency entries
+      // The old 100ms entries should have been overwritten
+      expect(healthAfter!.avgLatencyMs).toBeLessThan(20);
+      expect(healthAfter!.timesSelected).toBe(10); // Total count is still 10
+    });
+
+    it('should correctly report P95 after wrap-around', () => {
+      const smallMetrics = new InMemoryAggregatorMetrics({ maxLatencySamples: 10 });
+      const provider: IProviderInfo = {
+        protocol: 'balancer_v2',
+        chain: 'ethereum',
+        feeBps: 0,
+        isAvailable: true,
+        poolAddress: '0xbbb',
+      };
+
+      // Fill buffer: 10 entries with 200ms latency
+      for (let i = 0; i < 10; i++) {
+        smallMetrics.recordSelection(provider, 'Selected', Date.now() - 200);
+      }
+
+      const metricsBefore = smallMetrics.getAggregatedMetrics();
+      expect(metricsBefore.p95SelectionLatencyMs).toBeGreaterThanOrEqual(195);
+
+      // Overwrite all with 5ms latency
+      for (let i = 0; i < 10; i++) {
+        smallMetrics.recordSelection(provider, 'Selected', Date.now() - 5);
+      }
+
+      const metricsAfter = smallMetrics.getAggregatedMetrics();
+      // P95 should now reflect the new low-latency data
+      expect(metricsAfter.p95SelectionLatencyMs).toBeLessThan(30);
+    });
+
+    it('should handle partial wrap-around correctly', () => {
+      const smallMetrics = new InMemoryAggregatorMetrics({ maxLatencySamples: 5 });
+      const provider: IProviderInfo = {
+        protocol: 'syncswap',
+        chain: 'zksync',
+        feeBps: 30,
+        isAvailable: true,
+        poolAddress: '0xccc',
+      };
+
+      // Fill buffer completely with 50ms latencies
+      for (let i = 0; i < 5; i++) {
+        smallMetrics.recordSelection(provider, 'Selected', Date.now() - 50);
+      }
+
+      // Overwrite only 2 entries with 10ms latencies (partial wrap)
+      for (let i = 0; i < 2; i++) {
+        smallMetrics.recordSelection(provider, 'Selected', Date.now() - 10);
+      }
+
+      const health = smallMetrics.getProviderHealth(provider);
+      // Buffer should have: [10ms, 10ms, 50ms, 50ms, 50ms] (approx)
+      // Average ~= (10+10+50+50+50)/5 = 34ms
+      expect(health!.avgLatencyMs).toBeGreaterThan(20);
+      expect(health!.avgLatencyMs).toBeLessThan(55);
     });
   });
 });

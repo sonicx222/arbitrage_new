@@ -12,7 +12,7 @@ Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading
 # Monorepo Structure
 
 ```
-services/          9 microservices (coordinator, 4 partitions, execution, cross-chain, mempool, unified-detector)
+services/          8 microservices (coordinator, 4 partitions, execution, cross-chain, unified-detector) + mempool (orphaned, not wired into dev tooling)
 shared/            7 shared packages (types, config, core, ml, security, test-utils, constants)
 contracts/         Smart contracts (Hardhat project)
   src/             Source contracts (base/, interfaces/, mocks/)
@@ -22,7 +22,7 @@ infrastructure/    Docker, deployment configs
 docs/              Architecture, ADRs, strategies, conventions
 ```
 
-**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Mempool)
+**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector, deprecated)
 
 **Path Aliases:**
 - `@arbitrage/types` - shared/types
@@ -64,7 +64,7 @@ cd contracts && npx hardhat compile                 # Compile only
 ```bash
 npm run dev:redis          # Start Redis via Docker
 npm run dev:redis:memory   # In-memory Redis (no Docker)
-npm run dev:all            # All 9 services with hot reload
+npm run dev:all            # 6 core services with hot reload (coord, P1-P3, cross-chain, execution)
 npm run dev:minimal        # Coordinator + P1 + Execution only
 npm run dev:status         # Check running services
 npm run dev:stop           # Stop all services

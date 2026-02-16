@@ -137,7 +137,7 @@ export const RISK_CONFIG = {
     defaultWinProbability: 0.5,
     maxOutcomesPerKey: 1000,
     outcomeRelevanceWindowMs: 604800000, // 7 days
-    persistToRedis: true,
+    persistToRedis: true,  // NOTE: Designed but not yet implemented (DEFERRED)
   },
 
   totalCapital: 10000000000000000000n, // 10 ETH default
@@ -262,8 +262,15 @@ Both circuit breakers work together:
 
 ### Neutral
 
-- **State persistence**: Currently in-memory; can add Redis persistence
+- **State persistence**: Currently in-memory only; Redis persistence is DEFERRED (see below)
 - **Multi-instance**: Each instance has own state (by design)
+
+> **Note (2026-02-16):** Redis persistence for probability data (`persistToRedis` config)
+> is documented but **not yet implemented**. The `RISK_CONFIG.probability.persistToRedis`
+> defaults to `true` but the `ExecutionProbabilityTracker` ignores this flag — all data
+> remains in-memory and is lost on restart. This is acceptable for initial deployment
+> but should be implemented for production longevity. The `redisKeyPrefix` and schema
+> are designed but not wired up.
 
 ## Alternatives Considered
 

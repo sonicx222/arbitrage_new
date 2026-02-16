@@ -51,3 +51,7 @@ export {
   calculateLiquidityScore,
   DEFAULT_LIQUIDITY_SCORE,
 } from './liquidity-scoring';
+
+export { withTimeout } from './with-timeout';
+
+export { CoalescingMap } from './coalescing-map';

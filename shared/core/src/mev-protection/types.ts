@@ -97,7 +97,7 @@ export interface MevProviderConfig {
    * Default: true (MEV-Share enabled for value capture)
    * Set to false to use standard Flashbots without rebates.
    *
-   * @see ADR-028 MEV-Share Integration
+   * @see https://docs.flashbots.net/flashbots-mev-share/overview
    */
   useMevShare?: boolean;
 }
@@ -365,14 +365,6 @@ export const CHAIN_MEV_FALLBACK_STRATEGIES: Record<string, MevStrategy[]> = {
   // Solana - Jito is primary, standard fallback
   solana: ['jito', 'standard'],
 };
-
-/**
- * Get fallback MEV strategies for a chain.
- * Returns ordered list of strategies to try, primary first.
- */
-export function getMevFallbackStrategies(chain: string): MevStrategy[] {
-  return CHAIN_MEV_FALLBACK_STRATEGIES[chain] || ['standard'];
-}
 
 /**
  * Default configuration values

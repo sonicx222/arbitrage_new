@@ -3,9 +3,10 @@
 // Updated 2025-01-10: Added Redis Streams health monitoring (ADR-002, S1.1.5)
 
 import { createLogger } from '../logger';
+import { ServiceHealth as RedisServiceHealth } from '@arbitrage/types';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
-import { getCircuitBreakerRegistry } from '../resilience/circuit-breaker';
+import { getCircuitBreakerRegistry, CircuitBreakerStats } from '../resilience/circuit-breaker';
 import { getDeadLetterQueue } from '../resilience/dead-letter-queue';
 import { getGracefulDegradationManager } from '../resilience/graceful-degradation';
 import { checkRecoverySystemHealth } from '../resilience/error-recovery';
@@ -157,9 +158,12 @@ export interface ServiceHealth {
   lastSeen: number;
 }
 
+/**
+ * P2 FIX #17: Removed phantom `database: boolean` field.
+ * System is Redis-only per ARCHITECTURE_V2.md Section 7.1.
+ */
 export interface InfrastructureHealth {
   redis: boolean;
-  database: boolean;
   messageQueue: boolean;
   streams: StreamHealthSummary | null; // Redis Streams health (ADR-002, S1.1.5)
   externalAPIs: Record<string, boolean>;
@@ -172,68 +176,131 @@ export interface PerformanceHealth {
   latency: number;
 }
 
+/** DLQ stats shape from DeadLetterQueue.getStats() */
+export interface DlqStats {
+  totalOperations: number;
+  byPriority: Record<string, number>;
+  byService: Record<string, number>;
+  byTag: Record<string, number>;
+  oldestOperation: number;
+  newestOperation: number;
+  averageRetries: number;
+}
+
+/** Recovery health shape from checkRecoverySystemHealth() */
+export interface RecoveryHealthStatus {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  components: Record<string, boolean>;
+  lastRecoveryAttempt?: number;
+}
+
+/**
+ * P2 FIX #22: Properly typed resilience health (removed `any` from 3/4 fields).
+ */
 export interface ResilienceHealth {
-  circuitBreakers: Record<string, any>;
-  deadLetterQueue: any;
-  gracefulDegradation: any;
-  errorRecovery: any;
+  circuitBreakers: Record<string, CircuitBreakerStats>;
+  deadLetterQueue: DlqStats;
+  gracefulDegradation: Record<string, unknown>;
+  errorRecovery: RecoveryHealthStatus;
+}
+
+/**
+ * P1 FIX #1: Dependency injection interface for testability.
+ * All fields are optional — production code uses the global singletons as defaults.
+ */
+export interface EnhancedHealthMonitorDeps {
+  redis?: ReturnType<typeof getRedisClient>;
+  streamsClient?: RedisStreamsClient | null;
+  circuitBreakers?: ReturnType<typeof getCircuitBreakerRegistry>;
+  dlq?: ReturnType<typeof getDeadLetterQueue>;
+  degradationManager?: ReturnType<typeof getGracefulDegradationManager>;
+  streamHealthMonitor?: { getSummary: () => Promise<StreamHealthSummary> };
+  recoveryHealthChecker?: () => Promise<any>;
 }
 
 export class EnhancedHealthMonitor {
-  private redis = getRedisClient();
-  // P1-17 FIX: Add Redis Streams client for ADR-002 compliance
+  private redis: ReturnType<typeof getRedisClient>;
   private streamsClient: RedisStreamsClient | null = null;
-  private circuitBreakers = getCircuitBreakerRegistry();
-  private dlq = getDeadLetterQueue();
-  private degradationManager = getGracefulDegradationManager();
+  private circuitBreakers: ReturnType<typeof getCircuitBreakerRegistry>;
+  private dlq: ReturnType<typeof getDeadLetterQueue>;
+  private degradationManager: ReturnType<typeof getGracefulDegradationManager>;
+  private streamHealthMonitor?: { getSummary: () => Promise<StreamHealthSummary> };
+  private recoveryHealthChecker: () => Promise<any>;
   private alertRules: AlertRule[] = [];
   private lastAlerts: Map<string, number> = new Map();
   private metricsBuffer: HealthMetric[] = [];
-  private thresholds: HealthThreshold[] = [];
+  // P2 FIX #13: Map for O(1) threshold lookup (was array with .find())
+  private thresholds: Map<string, HealthThreshold> = new Map();
   private monitoringTimer?: NodeJS.Timeout;
+  // P1 FIX #3: Re-entry guard to prevent infinite recursion via check_services action
+  private isPerformingHealthCheck = false;
+  // P1 FIX #4: Track previous CPU usage for delta calculation
+  private lastCpuUsage: { user: number; system: number } | null = null;
+  private lastCpuCheckTime = 0;
+  // P1 FIX #5: Track streams initialization state
+  private streamsInitialized = false;
+  private streamsInitializing: Promise<void> | null = null;
 
-  constructor() {
+  /**
+   * P1 FIX #1: Constructor accepts optional deps for DI-based testing.
+   */
+  constructor(deps?: EnhancedHealthMonitorDeps) {
+    this.redis = deps?.redis ?? getRedisClient();
+    this.circuitBreakers = deps?.circuitBreakers ?? getCircuitBreakerRegistry();
+    this.dlq = deps?.dlq ?? getDeadLetterQueue();
+    this.degradationManager = deps?.degradationManager ?? getGracefulDegradationManager();
+    this.streamHealthMonitor = deps?.streamHealthMonitor;
+    this.recoveryHealthChecker = deps?.recoveryHealthChecker ?? checkRecoverySystemHealth;
+
+    // If a streams client is injected, mark as already initialized
+    if (deps?.streamsClient !== undefined) {
+      this.streamsClient = deps.streamsClient;
+      this.streamsInitialized = true;
+    }
+
     this.initializeDefaultRules();
     this.initializeDefaultThresholds();
-    // P1-17 FIX: Initialize streams client asynchronously
-    this.initializeStreamsClient();
   }
 
   /**
-   * P1-17 FIX: Initialize Redis Streams client for dual-publish pattern.
+   * P1 FIX #5: Lazy initialization of Redis Streams client.
+   * Called on first use from dualPublish() to avoid unhandled async in constructor.
    */
-  private async initializeStreamsClient(): Promise<void> {
-    try {
-      this.streamsClient = await getRedisStreamsClient();
-    } catch (error) {
-      logger.warn('Failed to initialize Redis Streams client, will use Pub/Sub only', { error });
+  private async ensureStreamsInitialized(): Promise<void> {
+    if (this.streamsInitialized) return;
+    if (this.streamsInitializing) {
+      await this.streamsInitializing;
+      return;
     }
+    this.streamsInitializing = (async () => {
+      try {
+        this.streamsClient = await getRedisStreamsClient();
+      } catch (error) {
+        logger.warn('Failed to initialize Redis Streams client', { error });
+      } finally {
+        this.streamsInitialized = true;
+        this.streamsInitializing = null;
+      }
+    })();
+    await this.streamsInitializing;
   }
 
   /**
-   * P1-17 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
-   * and Pub/Sub (secondary/fallback) for backwards compatibility.
+   * Publish to Redis Streams (ADR-002 compliant).
+   * P1 FIX #2: Removed Pub/Sub fallback per ADR-002 Phase 4 migration.
+   * P1 FIX #5: Uses lazy initialization for streams client.
    */
-  private async dualPublish(
+  private async publishToStream(
     streamName: string,
-    pubsubChannel: string,
     message: Record<string, any>
   ): Promise<void> {
-    // Primary: Redis Streams (ADR-002 compliant)
+    await this.ensureStreamsInitialized();
     if (this.streamsClient) {
       try {
         await this.streamsClient.xadd(streamName, message);
       } catch (error) {
         logger.error('Failed to publish to Redis Stream', { error, streamName });
       }
-    }
-
-    // Secondary: Pub/Sub (backwards compatibility)
-    try {
-      const redis = await this.redis;
-      await redis.publish(pubsubChannel, message as any);
-    } catch (error) {
-      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
     }
   }
 
@@ -287,7 +354,7 @@ export class EnhancedHealthMonitor {
     // Determine overall health
     const allComponents = [
       ...Object.values(services).map(s => s.status),
-      infrastructure.redis && infrastructure.database && infrastructure.messageQueue ? 'healthy' : 'unhealthy',
+      infrastructure.redis && infrastructure.messageQueue ? 'healthy' : 'unhealthy',
       performance.memoryUsage < 0.9 && performance.cpuUsage < 0.8 ? 'healthy' : 'warning',
       resilience.errorRecovery.status === 'healthy' ? 'healthy' : 'warning'
     ];
@@ -316,7 +383,7 @@ export class EnhancedHealthMonitor {
 
   // Add custom threshold
   addThreshold(threshold: HealthThreshold): void {
-    this.thresholds.push(threshold);
+    this.thresholds.set(threshold.metric, threshold);
   }
 
   private initializeDefaultRules(): void {
@@ -443,6 +510,18 @@ export class EnhancedHealthMonitor {
   }
 
   private async performHealthCheck(): Promise<void> {
+    // P1 FIX #3: Re-entry guard prevents infinite recursion
+    // when check_services action triggers another performHealthCheck()
+    if (this.isPerformingHealthCheck) return;
+    this.isPerformingHealthCheck = true;
+    try {
+      await this.performHealthCheckInner();
+    } finally {
+      this.isPerformingHealthCheck = false;
+    }
+  }
+
+  private async performHealthCheckInner(): Promise<void> {
     const health = await this.getSystemHealth();
 
     // Record health metrics
@@ -476,14 +555,14 @@ export class EnhancedHealthMonitor {
     const services: Record<string, ServiceHealth> = {};
 
     for (const [serviceName, healthData] of Object.entries(allHealth)) {
-      const health = healthData as any;
+      // P3 FIX #29: Removed `as any` — healthData is already typed as ServiceHealth
       services[serviceName] = {
         name: serviceName,
-        status: this.determineServiceStatus(health),
-        uptime: health.uptime ?? 0,
-        responseTime: health.lastHeartbeat ? Date.now() - health.lastHeartbeat : 0,
+        status: this.determineServiceStatus(healthData),
+        uptime: healthData.uptime ?? 0,
+        responseTime: healthData.lastHeartbeat ? Date.now() - healthData.lastHeartbeat : 0,
         errorRate: 0, // Would need error tracking
-        lastSeen: health.lastHeartbeat ?? 0
+        lastSeen: healthData.lastHeartbeat ?? 0
       };
     }
 
@@ -491,9 +570,9 @@ export class EnhancedHealthMonitor {
   }
 
   private async checkInfrastructureHealth(): Promise<InfrastructureHealth> {
+    // P2 FIX #17: Removed phantom `database: true` — system is Redis-only
     const infrastructure: InfrastructureHealth = {
       redis: false,
-      database: true, // Assume healthy for now
       messageQueue: false,
       streams: null, // Redis Streams health (ADR-002, S1.1.5)
       externalAPIs: {}
@@ -512,7 +591,7 @@ export class EnhancedHealthMonitor {
 
     // Check Redis Streams health (ADR-002, S1.1.5)
     try {
-      const streamMonitor = getStreamHealthMonitor();
+      const streamMonitor = this.streamHealthMonitor ?? getStreamHealthMonitor();
       infrastructure.streams = await streamMonitor.getSummary();
     } catch (error) {
       logger.warn('Failed to get stream health', { error });
@@ -522,13 +601,34 @@ export class EnhancedHealthMonitor {
     return infrastructure;
   }
 
+  /**
+   * P1 FIX #4: CPU usage is computed as a delta percentage (0-1) between
+   * successive calls, not cumulative seconds. process.cpuUsage() returns
+   * cumulative microseconds since process start; we compute the ratio of
+   * CPU time used in the interval vs wall-clock time elapsed.
+   */
   private async checkPerformanceHealth(): Promise<PerformanceHealth> {
     const memUsage = process.memoryUsage();
-    const cpuUsage = process.cpuUsage();
+    const currentCpu = process.cpuUsage();
+    const now = Date.now();
+
+    let cpuPercent = 0;
+    if (this.lastCpuUsage && this.lastCpuCheckTime > 0) {
+      const userDelta = currentCpu.user - this.lastCpuUsage.user;
+      const systemDelta = currentCpu.system - this.lastCpuUsage.system;
+      const wallTimeMicros = (now - this.lastCpuCheckTime) * 1000; // ms -> μs
+      if (wallTimeMicros > 0) {
+        cpuPercent = (userDelta + systemDelta) / wallTimeMicros;
+        cpuPercent = Math.min(1, Math.max(0, cpuPercent));
+      }
+    }
+
+    this.lastCpuUsage = currentCpu;
+    this.lastCpuCheckTime = now;
 
     return {
       memoryUsage: memUsage.heapUsed / memUsage.heapTotal,
-      cpuUsage: (cpuUsage.user + cpuUsage.system) / 1000000, // Convert to seconds
+      cpuUsage: cpuPercent,
       throughput: 0, // Would need request tracking
       latency: 0 // Would need response time tracking
     };
@@ -538,7 +638,7 @@ export class EnhancedHealthMonitor {
     const circuitBreakerStats = this.circuitBreakers.getAllStats();
     const dlqStats = await this.dlq.getStats();
     const degradationStates = this.degradationManager.getAllDegradationStates();
-    const recoveryHealth = await checkRecoverySystemHealth();
+    const recoveryHealth = await this.recoveryHealthChecker();
 
     return {
       circuitBreakers: circuitBreakerStats,
@@ -548,7 +648,10 @@ export class EnhancedHealthMonitor {
     };
   }
 
-  private determineServiceStatus(health: any): 'healthy' | 'degraded' | 'unhealthy' {
+  /**
+   * P3 FIX #29: Properly typed parameter (was `any`).
+   */
+  private determineServiceStatus(health: RedisServiceHealth | null): 'healthy' | 'degraded' | 'unhealthy' {
     if (!health) return 'unhealthy';
 
     const timeSinceLastHeartbeat = Date.now() - (health.lastHeartbeat ?? 0);
@@ -617,7 +720,8 @@ export class EnhancedHealthMonitor {
 
   private checkThresholds(metrics: HealthMetric[]): void {
     for (const metric of metrics) {
-      const threshold = this.thresholds.find(t => t.metric === metric.name);
+      // P2 FIX #13: O(1) lookup via Map instead of O(n) Array.find()
+      const threshold = this.thresholds.get(metric.name);
       if (!threshold) continue;
 
       const isCritical = threshold.direction === 'above'
@@ -657,24 +761,24 @@ export class EnhancedHealthMonitor {
     }
 
     // P1-17 FIX: Use dual-publish pattern (Streams + Pub/Sub)
-    // Publish alert for other services
+    // P3 FIX #30: Publish alert metadata only (not full SystemHealth)
+    // to avoid leaking infrastructure details if Redis is compromised
     const alertMessage = {
       type: 'health_alert',
       data: {
         rule: rule.name,
         severity: rule.severity,
         message: rule.message,
-        health
+        overallStatus: health.overall,
+        degradedServices: Object.entries(health.services)
+          .filter(([, s]) => s.status !== 'healthy')
+          .map(([name]) => name)
       },
       timestamp: Date.now(),
       source: 'enhanced-health-monitor'
     };
 
-    await this.dualPublish(
-      'stream:health-alerts',  // Primary: Redis Streams
-      'health-alerts',  // Secondary: Pub/Sub
-      alertMessage
-    );
+    await this.publishToStream('stream:health-alerts', alertMessage);
   }
 
   private async executeAlertAction(action: string, rule: AlertRule, health: SystemHealth): Promise<void> {
@@ -737,11 +841,7 @@ export class EnhancedHealthMonitor {
           timestamp: Date.now(),
           source: 'enhanced-health-monitor'
         };
-        await this.dualPublish(
-          'stream:system-commands',
-          'system-commands',
-          cacheMessage
-        );
+        await this.publishToStream('stream:system-commands', cacheMessage);
         break;
 
       default:
@@ -783,8 +883,15 @@ export async function getCurrentSystemHealth(): Promise<SystemHealth> {
   return await getEnhancedHealthMonitor().getSystemHealth();
 }
 
-// Auto-start health monitoring for main process
-if (typeof process !== 'undefined' && process.mainModule) {
-  const monitor = getEnhancedHealthMonitor();
-  monitor.start();
+/**
+ * P1 FIX #10: Reset the singleton instance (for testing).
+ * Stops monitoring and clears the global reference.
+ */
+export function resetEnhancedHealthMonitor(): void {
+  if (globalHealthMonitor) {
+    globalHealthMonitor.stop();
+    globalHealthMonitor = null;
+  }
 }
+// P1 FIX #7: Removed dead process.mainModule auto-start block.
+// process.mainModule is deprecated since Node.js 14 and undefined in ES modules.

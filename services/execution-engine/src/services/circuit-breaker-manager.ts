@@ -178,8 +178,8 @@ export class CircuitBreakerManager {
       });
     }
 
-    // Publish event to Redis Stream for monitoring
-    this.publishEvent(event);
+    // Publish event to Redis Stream for monitoring (fire-and-forget, internally error-handled)
+    void this.publishEvent(event);
   }
 
   /**

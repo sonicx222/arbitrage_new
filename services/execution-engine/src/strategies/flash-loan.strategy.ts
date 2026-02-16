@@ -54,6 +54,8 @@ import {
   // Task 2.1: PancakeSwap V3 integration
   getPancakeSwapV3Factory,
   hasPancakeSwapV3,
+  // F9: Configurable cache TTLs for flash loan aggregator
+  FLASH_LOAN_AGGREGATOR_CONFIG,
 } from '@arbitrage/config';
 import {
   getErrorMessage,
@@ -475,18 +477,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         minSamplesForScore: 10,
       });
 
-      // Create aggregator config from strategy config
+      // F9: Read cache TTLs from centralized config (env var overridable)
       const aggregatorConfig = {
-        liquidityCheckThresholdUsd: 100000, // $100K
-        rankingCacheTtlMs: 30000, // 30s
-        liquidityCacheTtlMs: 300000, // 5min
-        weights: config.aggregatorWeights ?? {
-          fees: 0.5,
-          liquidity: 0.3,
-          reliability: 0.15,
-          latency: 0.05,
-        },
-        maxProvidersToRank: config.maxProvidersToRank ?? 3,
+        liquidityCheckThresholdUsd: FLASH_LOAN_AGGREGATOR_CONFIG.liquidityCheckThresholdUsd,
+        rankingCacheTtlMs: FLASH_LOAN_AGGREGATOR_CONFIG.rankingCacheTtlMs,
+        liquidityCacheTtlMs: FLASH_LOAN_AGGREGATOR_CONFIG.liquidityCacheTtlMs,
+        weights: config.aggregatorWeights ?? FLASH_LOAN_AGGREGATOR_CONFIG.weights,
+        maxProvidersToRank: config.maxProvidersToRank ?? FLASH_LOAN_AGGREGATOR_CONFIG.maxProvidersToRank,
       };
 
       // Create ranking strategy
@@ -495,7 +492,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // Create liquidity validator (only if enabled)
       const validator = config.enableLiquidityValidation !== false
         ? new OnChainLiquidityValidator({
-            cacheTtlMs: 300000, // 5 minutes
+            cacheTtlMs: FLASH_LOAN_AGGREGATOR_CONFIG.liquidityCacheTtlMs,
             safetyMargin: 1.1, // 10% buffer
             rpcTimeoutMs: 5000,
             maxCacheSize: 500,

@@ -241,6 +241,188 @@ describe('StreamHealthMonitor', () => {
   });
 });
 
+describe('StreamHealthMonitor Lifecycle', () => {
+  let monitor: StreamHealthMonitor;
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+  });
+
+  afterEach(async () => {
+    if (monitor) {
+      await monitor.stop();
+    }
+  });
+
+  describe('start()', () => {
+    it('should initialize streams client on start', async () => {
+      monitor = new StreamHealthMonitor({
+        logger: mockLogger,
+        streamsClient: mockStreamsClient as any
+      });
+
+      await monitor.start(60000);
+
+      // Verify client is initialized by making a health check
+      const health = await monitor.checkStreamHealth();
+      expect(health).toBeDefined();
+      expect(mockStreamsClient.ping).toHaveBeenCalled();
+    });
+
+    it('should log start with interval info', async () => {
+      monitor = new StreamHealthMonitor({
+        logger: mockLogger,
+        streamsClient: mockStreamsClient as any
+      });
+
+      await monitor.start(5000);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Stream health monitoring started',
+        expect.objectContaining({ intervalMs: 5000 })
+      );
+    });
+  });
+
+  describe('stop() clears state for restart (P2 #16)', () => {
+    it('should clear alert handlers on stop', async () => {
+      monitor = new StreamHealthMonitor({
+        logger: mockLogger,
+        streamsClient: mockStreamsClient as any
+      });
+
+      const alertHandler = jest.fn();
+      monitor.onAlert(alertHandler);
+
+      await monitor.stop();
+
+      // After stop, re-initialize and trigger alert — old handler should NOT fire
+      mockStreamsClient.ping.mockResolvedValueOnce(false);
+      await monitor.checkStreamHealth();
+
+      expect(alertHandler).not.toHaveBeenCalled();
+    });
+
+    it('should reset initialized state on stop allowing re-init', async () => {
+      monitor = new StreamHealthMonitor({
+        logger: mockLogger,
+        streamsClient: mockStreamsClient as any
+      });
+
+      // Start initializes the client
+      await monitor.start(60000);
+      await monitor.stop();
+
+      // After stop, a new checkStreamHealth should re-initialize
+      const health = await monitor.checkStreamHealth();
+      expect(health).toBeDefined();
+    });
+  });
+});
+
+describe('StreamHealthMonitor Concurrent Init', () => {
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+  });
+
+  it('should handle concurrent ensureInitialized calls safely', async () => {
+    const monitor = new StreamHealthMonitor({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any
+    });
+
+    // Fire multiple concurrent health checks which each call ensureInitialized
+    const results = await Promise.all([
+      monitor.checkStreamHealth(),
+      monitor.checkStreamHealth(),
+      monitor.checkStreamHealth()
+    ]);
+
+    // All should resolve successfully (no double-init errors)
+    for (const result of results) {
+      expect(result).toBeDefined();
+      expect(result.timestamp).toBeGreaterThan(0);
+    }
+
+    await monitor.stop();
+  });
+});
+
+describe('StreamHealthMonitor Alert Deduplication', () => {
+  let monitor: StreamHealthMonitor;
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    monitor = new StreamHealthMonitor({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any
+    });
+  });
+
+  afterEach(async () => {
+    await monitor.stop();
+  });
+
+  it('should deduplicate identical alerts within cooldown period', async () => {
+    const alertHandler = jest.fn();
+    monitor.onAlert(alertHandler);
+    // Set a long cooldown so second call is within it
+    monitor.setAlertCooldown(60000);
+
+    // Trigger critical lag twice
+    mockStreamsClient.xpending.mockResolvedValue({
+      total: 5000,
+      smallestId: '1234-0',
+      largestId: '1234-4999',
+      consumers: [{ name: 'consumer-1', pending: 5000 }]
+    });
+
+    await monitor.checkStreamHealth();
+    const firstCallCount = alertHandler.mock.calls.length;
+
+    await monitor.checkStreamHealth();
+    const secondCallCount = alertHandler.mock.calls.length;
+
+    // Second check should NOT produce additional alerts (dedup suppresses them)
+    expect(secondCallCount).toBe(firstCallCount);
+  });
+
+  it('should allow same alert after cooldown expires', async () => {
+    const alertHandler = jest.fn();
+    monitor.onAlert(alertHandler);
+    // Set a very short cooldown
+    monitor.setAlertCooldown(1);
+
+    mockStreamsClient.ping.mockResolvedValue(false);
+
+    await monitor.checkStreamHealth();
+    const firstCallCount = alertHandler.mock.calls.length;
+    expect(firstCallCount).toBeGreaterThan(0);
+
+    // Wait for cooldown to expire
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    mockStreamsClient.ping.mockResolvedValue(false);
+    await monitor.checkStreamHealth();
+
+    // After cooldown, same alert should fire again
+    expect(alertHandler.mock.calls.length).toBeGreaterThan(firstCallCount);
+  });
+});
+
 describe('StreamHealthStatus Types', () => {
   it('should have correct status types', () => {
     const statuses: StreamHealthStatus[] = ['healthy', 'warning', 'critical', 'unknown'];

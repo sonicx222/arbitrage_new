@@ -62,6 +62,16 @@ function getCurrentDateUTC(): string {
 }
 
 /**
+ * FIX P3-14: Compute the next UTC midnight timestamp from a given time.
+ * Used for O(1) daily reset check instead of TTL-based string comparison.
+ */
+function computeNextMidnightUTC(now: number): number {
+  const date = new Date(now);
+  date.setUTCHours(24, 0, 0, 0); // Next midnight
+  return date.getTime();
+}
+
+/**
  * Create initial state
  */
 function createInitialState(totalCapital: bigint): DrawdownState {
@@ -96,9 +106,10 @@ export class DrawdownCircuitBreaker {
     totalHaltTimeMs: number;
     lastHaltEndTime: number | null;
   };
-  // FIX 10.4: Cache daily reset check to avoid expensive ISO string creation on every call
-  private cachedDateExpiry = 0;
-  private static readonly DATE_CACHE_TTL_MS = 60000; // Check every 60s max
+  // FIX P3-13: Track last force reset for audit/rate-limiting monitoring
+  private lastForceResetTime: number | null = null;
+  // FIX P3-14: Pre-computed next midnight timestamp for O(1) daily reset check
+  private nextMidnightMs = 0;
 
   constructor(config: Partial<DrawdownConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -107,6 +118,8 @@ export class DrawdownCircuitBreaker {
     this.validateConfig();
 
     this.state = createInitialState(this.config.totalCapital);
+    // FIX P3-14: Initialize next midnight for O(1) daily reset check
+    this.nextMidnightMs = computeNextMidnightUTC(Date.now());
     this.stats = {
       totalTrades: 0,
       totalWins: 0,
@@ -173,6 +186,18 @@ export class DrawdownCircuitBreaker {
         allowed: true,
         state: this.state.state,
         sizeMultiplier: 1.0,
+      };
+    }
+
+    // FIX P1-3: Block trading when totalCapital is not configured.
+    // Previously, totalCapital=0n silently disabled all drawdown protection
+    // while isTradingAllowed() still returned {allowed: true, sizeMultiplier: 1.0}.
+    if (this.config.totalCapital === 0n) {
+      return {
+        allowed: false,
+        state: this.state.state,
+        sizeMultiplier: 0,
+        reason: 'Capital not configured (totalCapital is 0) - call updateCapital() before trading',
       };
     }
 
@@ -304,17 +329,33 @@ export class DrawdownCircuitBreaker {
   /**
    * Force reset to NORMAL state (for testing or emergency).
    * WARNING: This bypasses all safety checks.
+   *
+   * FIX P3-13: Added audit logging with previous state details and
+   * rate-limit tracking (lastForceResetTime) for monitoring.
    */
   forceReset(): void {
-    logger.warn('Force reset triggered - bypassing all safety checks');
+    const previousState = this.state.state;
+    const previousDailyPnL = this.state.dailyPnL;
+    const previousDrawdown = this.state.currentDrawdown;
+
+    logger.warn('Force reset triggered - bypassing all safety checks', {
+      previousState,
+      previousDailyPnL: previousDailyPnL.toString(),
+      previousDrawdown: `${(previousDrawdown * 100).toFixed(4)}%`,
+      consecutiveLosses: this.state.consecutiveLosses,
+      timeSinceLastForceReset: this.lastForceResetTime
+        ? `${Math.floor((Date.now() - this.lastForceResetTime) / 1000)}s ago`
+        : 'never',
+    });
 
     if (this.state.state === 'HALT' && this.state.haltStartTime) {
       this.stats.totalHaltTimeMs += Date.now() - this.state.haltStartTime;
     }
 
+    this.lastForceResetTime = Date.now();
     this.state = createInitialState(this.config.totalCapital);
-    // FIX 10.4: Clear the date cache on reset to ensure fresh check
-    this.cachedDateExpiry = 0;
+    // FIX P3-14: Reset midnight cache to ensure fresh check
+    this.nextMidnightMs = 0;
   }
 
   /**
@@ -338,11 +379,13 @@ export class DrawdownCircuitBreaker {
   }
 
   /**
-   * Get current state (read-only copy)
+   * Get current state (read-only reference).
+   * FIX P3-21: Returns direct readonly reference instead of spread copy
+   * to reduce GC pressure from monitoring calls.
    */
   getState(): Readonly<DrawdownState> {
     this.checkDailyReset();
-    return { ...this.state };
+    return this.state;
   }
 
   /**
@@ -350,8 +393,9 @@ export class DrawdownCircuitBreaker {
    */
   getStats(): DrawdownStats {
     const capital = this.config.totalCapital;
+    // FIX P3-20: Consistent 8-decimal precision
     const dailyPnLFraction = capital > 0n
-      ? Number(this.state.dailyPnL * 10000n / capital) / 10000
+      ? Number(this.state.dailyPnL * 100000000n / capital) / 100000000
       : 0;
 
     return {
@@ -383,18 +427,22 @@ export class DrawdownCircuitBreaker {
 
   /**
    * Check if we've crossed into a new UTC day and reset if so.
-   * FIX 10.4: Uses caching to avoid expensive ISO string creation on every call.
+   *
+   * FIX P3-14: Uses pre-computed next-midnight timestamp for O(1) comparison
+   * instead of TTL-based cache with ISO string creation. Eliminates the
+   * 60-second stale window that could delay state transitions at midnight.
    */
   private checkDailyReset(): void {
     const now = Date.now();
-    // Skip expensive date check if we recently checked (within TTL)
-    if (now < this.cachedDateExpiry) {
+    // O(1) comparison against pre-computed midnight — no string allocation
+    if (now < this.nextMidnightMs) {
       return;
     }
-    // Update cache expiry for next check
-    this.cachedDateExpiry = now + DrawdownCircuitBreaker.DATE_CACHE_TTL_MS;
 
+    // We've crossed midnight — compute next midnight and reset daily state
+    this.nextMidnightMs = computeNextMidnightUTC(now);
     const currentDate = getCurrentDateUTC();
+
     if (currentDate !== this.state.currentDateUTC) {
       logger.info('Daily reset triggered', {
         previousDate: this.state.currentDateUTC,
@@ -428,9 +476,10 @@ export class DrawdownCircuitBreaker {
       this.state.peakCapital = currentCapital;
       this.state.currentDrawdown = 0;
     } else if (this.state.peakCapital > 0n) {
-      // Calculate drawdown from peak
+      // FIX P3-20: Increased precision from 4 decimals (10000) to 8 decimals (100000000)
+      // for consistency with EV calculator and to reduce 0.01% gap at threshold boundaries.
       const drawdownWei = this.state.peakCapital - currentCapital;
-      this.state.currentDrawdown = Number(drawdownWei * 10000n / this.state.peakCapital) / 10000;
+      this.state.currentDrawdown = Number(drawdownWei * 100000000n / this.state.peakCapital) / 100000000;
     }
 
     // Update max drawdown
@@ -447,16 +496,26 @@ export class DrawdownCircuitBreaker {
       return; // Cannot evaluate without capital
     }
 
+    // FIX P3-20: Increased precision from 4 decimals to 8 decimals
     const dailyLossFraction = this.state.dailyPnL < 0n
-      ? Number(-this.state.dailyPnL * 10000n / this.config.totalCapital) / 10000
+      ? Number(-this.state.dailyPnL * 100000000n / this.config.totalCapital) / 100000000
       : 0;
 
     switch (this.state.state) {
       case 'NORMAL':
-        // Check for CAUTION transition
+        // Check for CAUTION transition (daily loss threshold OR consecutive losses)
         if (dailyLossFraction >= this.config.cautionThreshold) {
           this.transitionTo('CAUTION');
           this.stats.cautionCount++;
+        } else if (this.state.consecutiveLosses >= this.config.maxConsecutiveLosses) {
+          // FIX P2-4: Consecutive loss check was only in CAUTION state, allowing
+          // unlimited small consecutive losses in NORMAL if below cautionThreshold.
+          this.transitionTo('CAUTION');
+          this.stats.cautionCount++;
+          logger.warn('CAUTION triggered by consecutive losses in NORMAL state', {
+            consecutiveLosses: this.state.consecutiveLosses,
+            maxAllowed: this.config.maxConsecutiveLosses,
+          });
         }
         break;
 

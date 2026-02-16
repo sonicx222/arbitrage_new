@@ -827,19 +827,18 @@ describe('DrawdownCircuitBreaker', () => {
       expect(state.consecutiveWins).toBeLessThanOrEqual(1);
     });
 
-    it('should handle very small losses that don\'t trigger threshold', () => {
+    it('should escalate to HALT on consecutive small losses (FIX P2-4)', () => {
       // 1000 tiny losses of 0.00001 ETH each = 0.01 ETH total = 0.01%
+      // Daily PnL is well below 3% threshold, but consecutive losses trigger escalation:
+      //   Trade 5: NORMAL → CAUTION (5 consecutive losses >= maxConsecutiveLosses)
+      //   Trade 6: CAUTION → HALT (6 consecutive losses >= maxConsecutiveLosses)
       for (let i = 0; i < 1000; i++) {
         breaker.recordTradeResult(createLosingTrade(ONE_ETH / 100000n));
       }
 
-      // Still NORMAL (well below 3%)
       const state = breaker.getState();
-      // Note: With 1000 consecutive losses, might hit maxConsecutiveLosses first
-      // Actually, the transition from NORMAL to CAUTION doesn't consider consecutive losses
-      // Only CAUTION -> HALT considers consecutive losses
-      // So after 1000 losses of 0.00001 ETH = 0.01 ETH = 0.01%, still NORMAL
-      expect(state.state).toBe('NORMAL');
+      // FIX P2-4: Consecutive losses now escalate through CAUTION → HALT
+      expect(state.state).toBe('HALT');
     });
 
     it('should properly handle state reading during operations', () => {
@@ -1100,19 +1099,21 @@ describe('State Persistence Scenarios', () => {
   it('should maintain state across multiple operations', () => {
     const breaker = new DrawdownCircuitBreaker(createMockConfig());
 
-    // Build up losses over time
+    // Build up 5 consecutive losses of 0.5 ETH each (2.5% total, below 3% threshold)
+    // FIX P2-4: 5 consecutive losses now triggers CAUTION even below dailyPnL threshold,
+    // because maxConsecutiveLosses=5 is also checked in NORMAL state.
     for (let i = 0; i < 5; i++) {
       breaker.recordTradeResult(createLosingTrade(ONE_ETH / 2n)); // 0.5 ETH each
     }
 
-    // Total loss: 2.5 ETH (2.5%) - still NORMAL
-    expect(breaker.getState().state).toBe('NORMAL');
+    // Total loss: 2.5 ETH (2.5%) but 5 consecutive losses triggers CAUTION
+    expect(breaker.getState().state).toBe('CAUTION');
     expect(breaker.getState().dailyPnL).toBe(-25n * ONE_ETH / 10n);
 
-    // One more loss pushes over 3%
-    breaker.recordTradeResult(createLosingTrade(ONE_ETH)); // +1 ETH = 3.5%
+    // One more loss pushes over 5% (maxDailyLoss) -> HALT
+    breaker.recordTradeResult(createLosingTrade(3n * ONE_ETH)); // +3 ETH = 5.5%
 
-    expect(breaker.getState().state).toBe('CAUTION');
+    expect(breaker.getState().state).toBe('HALT');
 
     resetDrawdownCircuitBreaker();
   });

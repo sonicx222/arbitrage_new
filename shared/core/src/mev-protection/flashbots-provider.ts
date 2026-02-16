@@ -97,6 +97,15 @@ export class FlashbotsProvider extends BaseMevProvider {
   }
 
   /**
+   * Dispose of provider resources.
+   * Clears signature cache and resets metrics.
+   */
+  override dispose(): void {
+    this.signatureCache.clear();
+    super.dispose();
+  }
+
+  /**
    * Check if MEV protection is available and enabled
    */
   isEnabled(): boolean {
@@ -380,8 +389,12 @@ export class FlashbotsProvider extends BaseMevProvider {
 
   /**
    * Submit bundle to Flashbots relay using eth_sendBundle
+   *
+   * Protected to allow MevShareProvider to submit directly via Flashbots
+   * relay when MEV-Share fails, without going through sendProtectedTransaction
+   * (which would double-count totalSubmissions metrics).
    */
-  private async submitBundle(
+  protected async submitBundle(
     signedTransactions: string[],
     blockNumber: number
   ): Promise<{
@@ -390,8 +403,8 @@ export class FlashbotsProvider extends BaseMevProvider {
     bundleHash?: string;
     error?: string;
   }> {
-    const maxRetries = this.config.maxRetries || MEV_DEFAULTS.maxRetries;
-    const timeout = this.config.submissionTimeoutMs || MEV_DEFAULTS.submissionTimeoutMs;
+    const maxRetries = this.config.maxRetries ?? MEV_DEFAULTS.maxRetries;
+    const timeout = this.config.submissionTimeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs;
 
     // Try multiple blocks for inclusion
     const blocksToTry = [blockNumber, blockNumber + 1, blockNumber + 2];
@@ -557,20 +570,25 @@ export class FlashbotsProvider extends BaseMevProvider {
    *
    * PERFORMANCE-FIX: Uses async signature with caching to avoid
    * blocking the event loop on the hot path.
+   *
+   * @param body - JSON-RPC request body
+   * @param timeoutMs - Optional timeout override
+   * @param url - Optional URL override (used by MevShareProvider for MEV-Share endpoint)
    */
-  private async sendRelayRequest(
+  protected async sendRelayRequest(
     body: object,
-    timeoutMs?: number
+    timeoutMs?: number,
+    url?: string
   ): Promise<any> {
     const bodyString = JSON.stringify(body);
     const headers = await this.getAuthHeaders(bodyString);
 
     const controller = new AbortController();
-    const timeout = timeoutMs || MEV_DEFAULTS.submissionTimeoutMs;
+    const timeout = timeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs;
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const response = await fetch(this.relayUrl, {
+      const response = await fetch(url ?? this.relayUrl, {
         method: 'POST',
         headers,
         body: bodyString,

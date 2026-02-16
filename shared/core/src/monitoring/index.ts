@@ -14,8 +14,22 @@
 export {
   EnhancedHealthMonitor,
   getEnhancedHealthMonitor,
+  resetEnhancedHealthMonitor,
   recordHealthMetric,
   getCurrentSystemHealth
+} from './enhanced-health-monitor';
+export type {
+  EnhancedHealthMonitorDeps,
+  HealthMetric,
+  HealthThreshold,
+  AlertRule,
+  SystemHealth,
+  ServiceHealth,
+  InfrastructureHealth,
+  PerformanceHealth,
+  ResilienceHealth,
+  DlqStats,
+  RecoveryHealthStatus
 } from './enhanced-health-monitor';
 
 // Stream Health Monitor

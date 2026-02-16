@@ -16,13 +16,11 @@ import { ethers } from 'ethers';
 
 /**
  * Supported flash loan protocols
+ *
+ * Imported from @arbitrage/types (canonical source of truth).
  */
-export type FlashLoanProtocol =
-  | 'aave_v3'
-  | 'balancer_v2'
-  | 'pancakeswap_v3'
-  | 'spookyswap'
-  | 'syncswap';
+import type { FlashLoanProtocol } from '@arbitrage/types';
+export type { FlashLoanProtocol } from '@arbitrage/types';
 
 /**
  * Protocol support status

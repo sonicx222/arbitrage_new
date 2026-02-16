@@ -28,15 +28,12 @@ function assertNonNegativeMs(value: number, label: string): void {
 /**
  * Supported flash loan protocols.
  *
- * Defined locally to avoid rootDir violation from cross-package import.
- * Must stay in sync with services/execution-engine/src/strategies/flash-loan-providers/types.ts.
+ * Imported from @arbitrage/types (canonical source of truth).
+ *
+ * @see @arbitrage/types FlashLoanProtocol
  */
-export type FlashLoanProtocol =
-  | 'aave_v3'
-  | 'balancer_v2'
-  | 'pancakeswap_v3'
-  | 'spookyswap'
-  | 'syncswap';
+import type { FlashLoanProtocol } from '@arbitrage/types';
+export type { FlashLoanProtocol } from '@arbitrage/types';
 
 // =============================================================================
 // Value Objects (Immutable Domain Concepts)
@@ -451,7 +448,8 @@ export class ProviderOutcome {
     public readonly success: boolean,
     public readonly executionLatencyMs: number,
     public readonly error?: string,
-    public readonly errorType?: 'insufficient_liquidity' | 'high_fees' | 'transient' | 'permanent' | 'unknown'
+    public readonly errorType?: 'insufficient_liquidity' | 'high_fees' | 'transient' | 'permanent' | 'unknown',
+    public readonly chain?: string
   ) {
     assertNonNegativeMs(executionLatencyMs, 'execution latency');
 
@@ -461,8 +459,8 @@ export class ProviderOutcome {
   /**
    * Create successful outcome
    */
-  static success(protocol: FlashLoanProtocol, latencyMs: number): ProviderOutcome {
-    return new ProviderOutcome(protocol, true, latencyMs);
+  static success(protocol: FlashLoanProtocol, latencyMs: number, chain?: string): ProviderOutcome {
+    return new ProviderOutcome(protocol, true, latencyMs, undefined, undefined, chain);
   }
 
   /**
@@ -472,8 +470,9 @@ export class ProviderOutcome {
     protocol: FlashLoanProtocol,
     latencyMs: number,
     error: string,
-    errorType: ProviderOutcome['errorType'] = 'unknown'
+    errorType: ProviderOutcome['errorType'] = 'unknown',
+    chain?: string
   ): ProviderOutcome {
-    return new ProviderOutcome(protocol, false, latencyMs, error, errorType);
+    return new ProviderOutcome(protocol, false, latencyMs, error, errorType, chain);
   }
 }

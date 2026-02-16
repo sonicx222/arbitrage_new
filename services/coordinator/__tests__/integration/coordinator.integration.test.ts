@@ -402,7 +402,7 @@ describe('CoordinatorService Integration', () => {
       expect(response.status).toBe(200);
 
       const data = await response.json() as { status: string; isLeader: boolean; instanceId: string };
-      expect(data.status).toBe('ok');
+      expect(data.status).toBe('healthy');
       expect(data.isLeader).toBeDefined();
       expect(data.instanceId).toBeDefined();
     });

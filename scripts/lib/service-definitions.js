@@ -68,7 +68,7 @@ function buildServiceDefinitions(PORTS) {
       port: PORTS.P1_ASIA_FAST,
       healthEndpoint: '/health',
       delay: P1_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P1_ASIA_FAST },
+      env: { HEALTH_CHECK_PORT: PORTS.P1_ASIA_FAST, PARTITION_ID: 'asia-fast' },
       type: 'node',
       enabled: true
     },
@@ -78,7 +78,7 @@ function buildServiceDefinitions(PORTS) {
       port: PORTS.P2_L2_TURBO,
       healthEndpoint: '/health',
       delay: P2_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P2_L2_TURBO },
+      env: { HEALTH_CHECK_PORT: PORTS.P2_L2_TURBO, PARTITION_ID: 'l2-turbo' },
       type: 'node',
       enabled: true
     },
@@ -88,7 +88,7 @@ function buildServiceDefinitions(PORTS) {
       port: PORTS.P3_HIGH_VALUE,
       healthEndpoint: '/health',
       delay: P3_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P3_HIGH_VALUE },
+      env: { HEALTH_CHECK_PORT: PORTS.P3_HIGH_VALUE, PARTITION_ID: 'high-value' },
       type: 'node',
       enabled: true
     },

@@ -50,6 +50,11 @@ const IS_CONSTRAINED_HOST = IS_FLY_IO ||
 const isConstrainedHost = (): boolean => IS_CONSTRAINED_HOST;
 const isFlyIo = (): boolean => IS_FLY_IO;
 
+// FIX #13: Allow env var override for local dev (reduces SharedArrayBuffer memory pressure)
+// With 4 partitions + cross-chain, each allocating ~64MB, total can exceed ~670MB before Node heap.
+const _envL1 = parseInt(process.env.CACHE_L1_SIZE_MB ?? '', 10);
+const ENV_L1_SIZE_MB = Number.isInteger(_envL1) && _envL1 > 0 ? _envL1 : null;
+
 /**
  * Cache default configuration values.
  * These can be overridden via the CacheConfig parameter in constructor.
@@ -65,8 +70,9 @@ const CACHE_DEFAULTS = {
    * P1-PHASE1: Reduced from 64MB to 16MB on Fly.io for ~48MB savings.
    * 16MB is sufficient for ~16,000 pairs with 1KB average entry size.
    * P3-FIX: Uses cached constants instead of function calls.
+   * FIX #13: CACHE_L1_SIZE_MB env var takes precedence over platform detection.
    */
-  defaultL1SizeMb: IS_FLY_IO ? 16 : IS_CONSTRAINED_HOST ? 32 : 64,
+  defaultL1SizeMb: ENV_L1_SIZE_MB ?? (IS_FLY_IO ? 16 : IS_CONSTRAINED_HOST ? 32 : 64),
   /** Default L2 (Redis) TTL in seconds */
   defaultL2TtlSeconds: 300,
   /** Time in ms after which unused entries can be demoted */

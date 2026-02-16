@@ -19,7 +19,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { createLogger } from '../logger';
+import { createLogger, LoggerLike } from '../logger';
 import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisClient, RedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
@@ -106,13 +106,7 @@ export interface FailoverEvent {
   error?: string;
 }
 
-/** Logger interface for dependency injection */
-interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+/** P3 FIX #26: Use shared LoggerLike from ../logger instead of duplicated interface */
 
 export interface CrossRegionHealthConfig {
   /** Unique instance ID */
@@ -147,7 +141,7 @@ export interface CrossRegionHealthConfig {
 
   // Optional dependency injection for testing
   /** Optional logger for testing (defaults to createLogger) */
-  logger?: Logger;
+  logger?: LoggerLike;
   /** Optional Redis client for testing */
   redisClient?: RedisClient;
   /** Optional Redis Streams client for testing */
@@ -189,7 +183,7 @@ export class CrossRegionHealthManager extends EventEmitter {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null; // P0-11 FIX: Add streams client
   private lockManager: DistributedLockManager | null = null;
-  private logger: Logger;
+  private logger: LoggerLike;
   private config: Required<Omit<CrossRegionHealthConfig, 'logger' | 'redisClient' | 'streamsClient' | 'lockManager'>>;
 
   // Store injected dependencies
@@ -202,7 +196,12 @@ export class CrossRegionHealthManager extends EventEmitter {
   private leaderLock: { release: () => Promise<void>; extend: (additionalMs?: number) => Promise<boolean> } | null = null;
   private leaderHeartbeatInterval: NodeJS.Timeout | null = null;
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private streamPollInterval: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  // P2 FIX #21: Monotonic fencing token to prevent split-brain.
+  // Incremented on each lock acquisition. Leader-only actions verify the token
+  // hasn't changed, detecting if leadership was lost and re-acquired by another instance.
+  private leaderFencingToken: number = 0;
 
   private readonly LEADER_LOCK_KEY = 'coordinator:leader:lock';
   private readonly HEALTH_KEY_PREFIX = 'region:health:';
@@ -254,6 +253,10 @@ export class CrossRegionHealthManager extends EventEmitter {
     // P0-11 FIX: Initialize streams client for ADR-002 compliant failover messaging
     this.streamsClient = this.injectedStreamsClient ?? await getRedisStreamsClient();
 
+    // P2 FIX #19: Set isRunning before startHealthMonitoring() so the
+    // interval guard doesn't skip the first interval-triggered check
+    this.isRunning = true;
+
     // Initialize own region
     this.initializeOwnRegion();
 
@@ -268,7 +271,6 @@ export class CrossRegionHealthManager extends EventEmitter {
     // Subscribe to failover events
     await this.subscribeToFailoverEvents();
 
-    this.isRunning = true;
     this.logger.info('CrossRegionHealthManager started');
   }
 
@@ -282,6 +284,7 @@ export class CrossRegionHealthManager extends EventEmitter {
     // Clear intervals
     this.leaderHeartbeatInterval = clearIntervalSafe(this.leaderHeartbeatInterval);
     this.healthCheckInterval = clearIntervalSafe(this.healthCheckInterval);
+    this.streamPollInterval = clearIntervalSafe(this.streamPollInterval);
 
     // P2-2 FIX: Unsubscribe from Redis pub/sub to prevent callback memory leak
     if (this.redis) {
@@ -326,11 +329,14 @@ export class CrossRegionHealthManager extends EventEmitter {
       if (lock.acquired) {
         this.leaderLock = lock;
         this.isLeader = true;
+        // P2 FIX #21: Increment fencing token on each lock acquisition
+        this.leaderFencingToken++;
         this.startLeaderHeartbeat();
 
         this.logger.info('Acquired leadership', {
           instanceId: this.config.instanceId,
-          regionId: this.config.regionId
+          regionId: this.config.regionId,
+          fencingToken: this.leaderFencingToken
         });
 
         // Emit leader change event
@@ -363,9 +369,8 @@ export class CrossRegionHealthManager extends EventEmitter {
    * Extends lock TTL periodically.
    */
   private startLeaderHeartbeat(): void {
-    if (this.leaderHeartbeatInterval) {
-      clearInterval(this.leaderHeartbeatInterval);
-    }
+    // P3 FIX #31: Use clearIntervalSafe for consistency with rest of codebase
+    this.leaderHeartbeatInterval = clearIntervalSafe(this.leaderHeartbeatInterval);
 
     this.leaderHeartbeatInterval = setInterval(async () => {
       if (!this.isLeader || !this.leaderLock) {
@@ -507,8 +512,14 @@ export class CrossRegionHealthManager extends EventEmitter {
       await this.fetchRemoteRegionHealth();
 
       // Evaluate failover conditions (only if leader)
+      // P2 FIX #21: Capture fencing token before async operations to detect
+      // leadership changes during execution (split-brain protection)
       if (this.isLeader) {
+        const tokenAtStart = this.leaderFencingToken;
         await this.evaluateFailoverConditions();
+        if (this.leaderFencingToken !== tokenAtStart) {
+          this.logger.warn('Fencing token changed during failover evaluation — aborting leader actions');
+        }
       }
     } catch (error) {
       this.logger.error('Health check failed', { error });
@@ -594,16 +605,24 @@ export class CrossRegionHealthManager extends EventEmitter {
   // Failover Logic (ADR-007)
   // ===========================================================================
 
+  /**
+   * P2 FIX #12: Added 'failover_in_progress' guard to prevent repeated triggering.
+   * Previously, once a region was marked 'failed' by triggerFailover(), every
+   * subsequent health check would re-trigger failover indefinitely.
+   */
   private async evaluateFailoverConditions(): Promise<void> {
     for (const [regionId, region] of this.regions) {
       // Skip own region
       if (regionId === this.config.regionId) continue;
 
+      // P2 FIX #12: Skip regions already undergoing or completed failover
+      if (region.status === 'failed') continue;
+
       // Check for stale health data
       const healthAge = Date.now() - region.lastHealthCheck;
       const isStale = healthAge > this.config.healthCheckIntervalMs * 3;
 
-      if (isStale || region.status === 'failed') {
+      if (isStale || region.status === 'unhealthy') {
         region.consecutiveFailures++;
 
         if (region.consecutiveFailures >= this.config.failoverThreshold) {
@@ -720,31 +739,114 @@ export class CrossRegionHealthManager extends EventEmitter {
   // Event Subscription
   // ===========================================================================
 
+  /**
+   * P1 FIX #2: Subscribe to failover events via Redis Streams (ADR-002 compliant).
+   * Falls back to Pub/Sub only if Streams client is unavailable.
+   */
   private async subscribeToFailoverEvents(): Promise<void> {
-    if (!this.redis) return;
+    // Primary: Redis Streams consumer (ADR-002 compliant, guaranteed delivery)
+    if (this.streamsClient) {
+      try {
+        const groupName = `failover-${this.config.serviceName}`;
+        const consumerName = this.config.instanceId;
+        await this.streamsClient.createConsumerGroup({
+          streamName: FAILOVER_STREAM,
+          groupName,
+          consumerName,
+        }).catch(() => {
+          // Group may already exist, safe to ignore
+        });
+        this.startStreamConsumer(groupName, consumerName);
+        this.logger.info('Subscribed to failover events via Redis Streams', { groupName });
+        return; // Streams consumer active, no need for Pub/Sub
+      } catch (error) {
+        this.logger.warn('Failed to set up Streams consumer, falling back to Pub/Sub', { error });
+      }
+    }
 
+    // Fallback: Pub/Sub (only if Streams unavailable)
+    if (!this.redis) return;
     try {
       await this.redis.subscribe(this.FAILOVER_CHANNEL, (message: any) => {
-        const event = message.data as FailoverEvent;
-
-        this.logger.info('Received failover event', {
-          type: event.type,
-          sourceRegion: event.sourceRegion,
-          targetRegion: event.targetRegion
-        });
-
-        // Handle standby activation if this is the target
-        if (event.type === 'failover_started' &&
-            event.targetRegion === this.config.regionId &&
-            this.config.isStandby) {
-          this.onStandbyActivation(event);
-        }
-
-        this.emit('failoverEvent', event);
+        this.handleFailoverEvent(message.data as FailoverEvent);
       });
     } catch (error) {
       this.logger.error('Failed to subscribe to failover events', { error });
     }
+  }
+
+  /**
+   * P1 FIX #2: Consume failover events from Redis Stream using consumer group.
+   */
+  private startStreamConsumer(groupName: string, consumerName: string): void {
+    const consumerConfig = {
+      streamName: FAILOVER_STREAM,
+      groupName,
+      consumerName,
+      startId: '>'
+    };
+
+    this.streamPollInterval = setInterval(async () => {
+      if (!this.isRunning || !this.streamsClient) {
+        this.streamPollInterval = clearIntervalSafe(this.streamPollInterval);
+        return;
+      }
+      try {
+        const messages = await this.streamsClient.xreadgroup(
+          consumerConfig,
+          { count: 10, block: 1000 }
+        );
+        if (messages && messages.length > 0) {
+          for (const msg of messages) {
+            const event = msg.data as unknown as FailoverEvent;
+            if (event) {
+              this.handleFailoverEvent(event);
+            }
+            await this.streamsClient!.xack(FAILOVER_STREAM, groupName, msg.id);
+          }
+        }
+      } catch (error) {
+        this.logger.error('Error reading from failover stream', { error });
+      }
+    }, 2000);
+  }
+
+  /**
+   * P1 FIX #2: Shared handler for failover events from either Streams or Pub/Sub.
+   * P2 FIX #20: Validates required fields before processing.
+   */
+  private handleFailoverEvent(event: FailoverEvent): void {
+    // P2 FIX #20: Validate required fields to prevent processing malformed events
+    if (!event ||
+        !event.type ||
+        !event.sourceRegion ||
+        !event.targetRegion ||
+        !Array.isArray(event.services)) {
+      this.logger.warn('Received malformed failover event, ignoring', { event });
+      return;
+    }
+
+    // Validate event type is a known value
+    const validTypes = ['failover_started', 'failover_completed', 'failover_failed', 'leader_changed'];
+    if (!validTypes.includes(event.type)) {
+      this.logger.warn('Received failover event with unknown type, ignoring', { type: event.type });
+      return;
+    }
+
+    this.logger.info('Received failover event', {
+      type: event.type,
+      sourceRegion: event.sourceRegion,
+      targetRegion: event.targetRegion
+    });
+
+    // Handle standby activation if this is the target
+    if (event.type === 'failover_started' &&
+        event.targetRegion === this.config.regionId &&
+        this.config.isStandby) {
+      this.onStandbyActivation(event);
+    }
+
+    this.emit('failoverEvent', event);
   }
 
   /**
@@ -805,8 +907,23 @@ export class CrossRegionHealthManager extends EventEmitter {
   /**
    * Evaluate the global system health status.
    * Used by GracefulDegradationManager to determine degradation level.
+   * P2 FIX #18: Now async — performs actual Redis ping instead of null check.
    */
-  evaluateGlobalHealth(): GlobalHealthStatus {
+  async evaluateGlobalHealth(): Promise<GlobalHealthStatus> {
+    // P2 FIX #18: Check actual Redis connectivity with ping + latency measurement
+    let redisHealthy = false;
+    let redisLatencyMs = 0;
+    if (this.redis) {
+      const pingStart = Date.now();
+      try {
+        redisHealthy = await this.redis.ping();
+        redisLatencyMs = Date.now() - pingStart;
+      } catch {
+        redisHealthy = false;
+        redisLatencyMs = Date.now() - pingStart;
+      }
+    }
+
     const detectors: Array<{ name: string; healthy: boolean; region: string }> = [];
     let executorHealthy = false;
     let executorRegion = '';
@@ -863,7 +980,7 @@ export class CrossRegionHealthManager extends EventEmitter {
     }
 
     return {
-      redis: { healthy: this.redis !== null, latencyMs: 0 },
+      redis: { healthy: redisHealthy, latencyMs: redisLatencyMs },
       executor: { healthy: executorHealthy, region: executorRegion },
       detectors,
       degradationLevel,

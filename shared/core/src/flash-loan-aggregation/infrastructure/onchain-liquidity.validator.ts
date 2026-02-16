@@ -29,6 +29,17 @@ import { ethers } from 'ethers';
 import { calculateLiquidityScore, DEFAULT_LIQUIDITY_SCORE } from './liquidity-scoring';
 // I3 Fix: Import Logger type for structured logging
 import type { Logger } from '../../logger';
+import { withTimeout } from './with-timeout';
+import { CoalescingMap } from './coalescing-map';
+
+/**
+ * Minimal interface for RPC providers that support eth_call.
+ * Avoids `as any` cast while keeping the validator decoupled from
+ * a specific ethers.js provider class.
+ */
+interface RpcCallable {
+  call(tx: { to: string; data: string }): Promise<string>;
+}
 
 /**
  * Cached liquidity entry
@@ -78,7 +89,8 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   private readonly config: Required<Omit<OnChainLiquidityValidatorConfig, 'logger'>>;
   private readonly logger?: Logger; // I3 Fix: Optional logger
   private readonly cache = new Map<string, CachedLiquidity>();
-  private readonly pendingChecks = new Map<string, Promise<LiquidityCheck>>();
+  /** R2: Uses CoalescingMap to deduplicate concurrent liquidity checks for same key */
+  private readonly pendingChecks = new CoalescingMap<string, LiquidityCheck>();
 
   /** M3 Fix: Circuit breaker state */
   private consecutiveFailures = 0;
@@ -122,25 +134,10 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       );
     }
 
-    // Request coalescing - atomic check-and-set to prevent race condition
-    let pending = this.pendingChecks.get(cacheKey);
-    if (!pending) {
-      // Create new promise and store atomically
-      pending = this.performLiquidityCheck(provider, asset, amount, context);
-      this.pendingChecks.set(cacheKey, pending);
-
-      // Cleanup on completion (regardless of success/failure)
-      // Use finally block attached to promise, not try/catch in caller
-      pending.finally(() => {
-        // Only delete if this is still the same promise (not replaced)
-        if (this.pendingChecks.get(cacheKey) === pending) {
-          this.pendingChecks.delete(cacheKey);
-        }
-      });
-    }
-
-    // Return the promise (either newly created or existing)
-    return pending;
+    // R2: Request coalescing via CoalescingMap - deduplicates concurrent checks
+    return this.pendingChecks.getOrCreate(cacheKey, () =>
+      this.performLiquidityCheck(provider, asset, amount, context)
+    );
   }
 
   /**
@@ -218,24 +215,13 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
         return LiquidityCheckImpl.failure('No RPC provider available', 0);
       }
 
-      // Query on-chain liquidity with timeout (P0 fix: clean up timer on success)
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error(`Liquidity check timeout after ${this.config.rpcTimeoutMs}ms`)),
-          this.config.rpcTimeoutMs
-        );
-      });
-
-      let liquidity: bigint;
-      try {
-        liquidity = await Promise.race([
-          this.queryOnChainLiquidity(provider, asset, context.rpcProvider),
-          timeoutPromise,
-        ]);
-      } finally {
-        clearTimeout(timeoutId);
-      }
+      // Query on-chain liquidity with timeout
+      // R1: Uses shared withTimeout utility for consistent cleanup
+      const liquidity = await withTimeout(
+        this.queryOnChainLiquidity(provider, asset, context.rpcProvider),
+        this.config.rpcTimeoutMs,
+        `Liquidity check timeout after ${this.config.rpcTimeoutMs}ms`
+      );
 
       const latency = Date.now() - startTime;
       const requiredWithMargin = this.applySafetyMargin(amount);
@@ -392,16 +378,18 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
     asset: string,
     rpcProvider: unknown
   ): Promise<bigint> {
-    // Validate RPC provider type
-    if (!rpcProvider || typeof (rpcProvider as any).call !== 'function') {
+    // Validate RPC provider type (F10: typed interface instead of `as any`)
+    if (!rpcProvider || typeof (rpcProvider as RpcCallable).call !== 'function') {
       throw new Error('Invalid RPC provider - missing call() method');
     }
+
+    const typedProvider = rpcProvider as RpcCallable;
 
     // Encode balanceOf call using cached interface (P2: no allocation overhead)
     const calldata = ERC20_INTERFACE.encodeFunctionData('balanceOf', [provider.poolAddress]);
 
     // Make RPC call
-    const result = await (rpcProvider as any).call({
+    const result = await typedProvider.call({
       to: asset,
       data: calldata,
     });

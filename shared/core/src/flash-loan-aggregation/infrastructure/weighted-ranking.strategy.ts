@@ -25,6 +25,7 @@ import type {
 } from '../domain';
 import { ProviderScore as ProviderScoreImpl } from '../domain';
 import { calculateLiquidityScore, DEFAULT_LIQUIDITY_SCORE } from './liquidity-scoring';
+import { withTimeout } from './with-timeout';
 
 /**
  * Weighted Ranking Strategy
@@ -77,19 +78,16 @@ export class WeightedRankingStrategy implements IProviderRanker {
 
     // M6 Fix: Wait for all scoring with timeout protection (10s)
     // If timeout, returns partial results (graceful degradation)
-    // P0 fix: Clean up timer to prevent leak when scoring completes before timeout
+    // R1: Uses shared withTimeout utility for consistent cleanup
     const timeoutMs = 10000;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<Array<IRankedProvider | null>>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('Ranking timeout')), timeoutMs);
-    });
 
     let results: Array<IRankedProvider | null>;
     try {
-      results = await Promise.race([
+      results = await withTimeout(
         Promise.all(scoringPromises),
-        timeoutPromise,
-      ]);
+        timeoutMs,
+        'Ranking timeout'
+      );
     } catch (timeoutError) {
       // Timeout occurred - collect partial results (settled promises only)
       // Use Promise.allSettled to get whatever completed before timeout
@@ -97,8 +95,6 @@ export class WeightedRankingStrategy implements IProviderRanker {
       results = settled
         .filter((r): r is PromiseFulfilledResult<IRankedProvider | null> => r.status === 'fulfilled')
         .map(r => r.value);
-    } finally {
-      clearTimeout(timeoutId);
     }
 
     // Filter out failed scores and sort by total score (descending)
@@ -132,11 +128,11 @@ export class WeightedRankingStrategy implements IProviderRanker {
   /**
    * Calculate total score for provider
    */
-  private async calculateScore(
+  private calculateScore(
     provider: IProviderInfo,
     requestedAmount: bigint,
     context: IRankingContext
-  ): Promise<ProviderScore> {
+  ): ProviderScore {
     // Calculate component scores
     const feeScore = this.calculateFeeScore(provider);
     const liquidityScore = this.calculateLiquidityScoreForProvider(provider, requestedAmount, context);
@@ -164,7 +160,7 @@ export class WeightedRankingStrategy implements IProviderRanker {
    */
   private calculateFeeScore(provider: IProviderInfo): number {
     const maxFeeBps = 100; // 1%
-    const normalizedFee = Math.min(provider.feeBps, maxFeeBps);
+    const normalizedFee = Math.min(Math.max(0, provider.feeBps), maxFeeBps);
     return 1.0 - (normalizedFee / maxFeeBps);
   }
 
@@ -227,8 +223,8 @@ export class WeightedRankingStrategy implements IProviderRanker {
     if (latencies && latencies.length > 0) {
       // Calculate P95 latency from historical data
       const sorted = [...latencies].sort((a, b) => a - b);
-      const p95Index = Math.floor(sorted.length * 0.95);
-      const p95Latency = sorted[p95Index] || sorted[sorted.length - 1];
+      const p95Index = Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1);
+      const p95Latency = sorted[p95Index] ?? sorted[sorted.length - 1];
 
       // Score based on P95 latency
       // <100ms = 1.0, 100-200ms = 0.9, 200-500ms = 0.8, >500ms = 0.7

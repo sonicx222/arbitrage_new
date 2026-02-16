@@ -200,7 +200,7 @@ export class BatchQuoteManager {
    * @param ctx - Strategy context
    * @returns BatchQuoterService instance or undefined
    */
-  getBatchQuoterService(
+  private getBatchQuoterService(
     chain: string,
     ctx: StrategyContext
   ): BatchQuoterService | undefined {
@@ -262,7 +262,7 @@ export class BatchQuoteManager {
    * @param chain - Chain identifier
    * @returns Array of quote requests
    */
-  buildQuoteRequestsFromOpportunity(
+  private buildQuoteRequestsFromOpportunity(
     opportunity: ArbitrageOpportunity,
     chain: string
   ): QuoteRequest[] {

@@ -429,7 +429,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.standbyActivationManager = new StandbyActivationManager({
       logger: this.logger,
       getLeadershipElection: () => this.leadershipElection,
-      getIsLeader: () => this.isLeader,
+      getIsLeader: () => this.getIsLeader(),
       getIsStandby: () => this.config.isStandby ?? false,
       getCanBecomeLeader: () => this.config.canBecomeLeader ?? true,
       instanceId: this.config.leaderElection.instanceId,

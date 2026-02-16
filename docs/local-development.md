@@ -60,7 +60,7 @@ npm run dev:execution:fast     # Terminal 3: Execution engine (port 3005)
 
 | Software | Version | Installation |
 |----------|---------|--------------|
-| Node.js | 18+ | [nodejs.org](https://nodejs.org) (LTS version) |
+| Node.js | 22+ | [nodejs.org](https://nodejs.org) (must match `engines` in package.json: `>=22.0.0`) |
 | npm | 9+ | Comes with Node.js |
 | Docker Desktop | Latest | [docker.com](https://docker.com/products/docker-desktop) (optional) |
 

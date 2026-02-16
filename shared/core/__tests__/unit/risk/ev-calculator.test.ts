@@ -99,7 +99,7 @@ describe('EVCalculator', () => {
       const partialConfig: Partial<EVConfig> = {
         minEVThreshold: 1000n,
       };
-      const calc = new EVCalculator(tracker, partialConfig as EVConfig);
+      const calc = new EVCalculator(tracker, partialConfig);
       expect(calc).toBeDefined();
       calc.destroy();
     });

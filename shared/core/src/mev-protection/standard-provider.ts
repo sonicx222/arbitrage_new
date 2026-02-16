@@ -54,23 +54,35 @@ export class StandardProvider extends BaseMevProvider {
    * Set up private RPC based on chain and configuration
    */
   private setupPrivateRpc(): void {
+    let url: string | undefined;
+
     switch (this.strategy) {
       case 'bloxroute':
         // BloXroute for BSC
         if (this.config.bloxrouteAuthHeader) {
-          this.privateRpcUrl = MEV_DEFAULTS.bloxrouteUrl;
+          url = MEV_DEFAULTS.bloxrouteUrl;
         }
         break;
 
       case 'fastlane':
         // Fastlane for Polygon
-        this.privateRpcUrl = MEV_DEFAULTS.fastlaneUrl;
+        url = MEV_DEFAULTS.fastlaneUrl;
         break;
 
       default:
         // No private RPC for standard chains
-        this.privateRpcUrl = undefined;
+        url = undefined;
     }
+
+    // P1-FIX: Validate HTTPS to prevent auth token leakage over plaintext.
+    // BloXroute auth headers and Fastlane requests must use TLS.
+    if (url && !url.startsWith('https://')) {
+      throw new Error(
+        `Private RPC URL must use HTTPS to protect auth credentials. Got: ${url.substring(0, 30)}...`
+      );
+    }
+
+    this.privateRpcUrl = url;
   }
 
   /**
@@ -255,16 +267,26 @@ export class StandardProvider extends BaseMevProvider {
         params: [signedTx],
       });
 
-      const response = await fetch(this.privateRpcUrl!, {
-        method: 'POST',
-        headers,
-        body,
-      });
+      // P0-FIX: Add AbortController with timeout to prevent indefinite hangs
+      // if BloXroute or Fastlane becomes unresponsive. Matches the pattern used
+      // by FlashbotsProvider, JitoProvider, and MevShareProvider.
+      const controller = new AbortController();
+      const fetchTimeout = this.config.submissionTimeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs;
+      const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
 
-      const result = await response.json() as {
-        error?: { message?: string };
-        result?: string;
-      };
+      let result: { error?: { message?: string }; result?: string };
+      try {
+        const response = await fetch(this.privateRpcUrl!, {
+          method: 'POST',
+          headers,
+          body,
+          signal: controller.signal,
+        });
+
+        result = await response.json() as typeof result;
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (result.error) {
         return this.createFailureResult(
@@ -430,7 +452,7 @@ export class StandardProvider extends BaseMevProvider {
   private async waitForTransaction(
     txHash: string
   ): Promise<ethers.TransactionReceipt | null> {
-    const timeout = this.config.submissionTimeoutMs || MEV_DEFAULTS.submissionTimeoutMs;
+    const timeout = this.config.submissionTimeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs;
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
@@ -466,25 +488,35 @@ export class StandardProvider extends BaseMevProvider {
         headers['Authorization'] = this.config.bloxrouteAuthHeader;
       }
 
-      const response = await fetch(this.privateRpcUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'eth_blockNumber',
-          params: [],
-        }),
-      });
+      // P0-FIX: Add AbortController with timeout (5s for health check).
+      // Prevents indefinite hangs if private RPC is unresponsive.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      if (response.ok) {
-        return { healthy: true, message: 'Private RPC is reachable' };
+      try {
+        const response = await fetch(this.privateRpcUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'eth_blockNumber',
+            params: [],
+          }),
+          signal: controller.signal,
+        });
+
+        if (response.ok) {
+          return { healthy: true, message: 'Private RPC is reachable' };
+        }
+
+        return {
+          healthy: false,
+          message: `Private RPC returned status ${response.status}`,
+        };
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      return {
-        healthy: false,
-        message: `Private RPC returned status ${response.status}`,
-      };
     } catch (error) {
       return {
         healthy: false,

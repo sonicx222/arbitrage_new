@@ -401,6 +401,10 @@ export class AdaptiveThresholdService {
    * Gradually moves multipliers back toward 1.0 (defaults) based on
    * time since last attack and configured decay rate.
    *
+   * Uses true exponential decay: gap(t) = gap(0) * (1 - rate)^t
+   * This ensures smooth, continuous convergence toward 1.0 without
+   * cliff effects that occur with linear decay when decayAmount >= 1.
+   *
    * @param adjustment - Current adjustment
    * @returns Adjustment with decay applied
    */
@@ -409,15 +413,16 @@ export class AdaptiveThresholdService {
     const timeSinceLastAttack = now - adjustment.lastAttackTimestamp;
     const daysSinceAttack = timeSinceLastAttack / (24 * 60 * 60 * 1000);
 
-    // Apply decay: move multipliers back toward 1.0
-    const decayAmount = this.config.decayRatePerDay * daysSinceAttack;
+    // Exponential decay: remaining gap shrinks by (1-rate) each day
+    // multiplier(t) = 1.0 - (1.0 - initial) * (1.0 - rate)^t
+    const retentionFactor = Math.pow(1.0 - this.config.decayRatePerDay, daysSinceAttack);
     const decayedProfitMultiplier = Math.min(
       1.0,
-      adjustment.profitMultiplier + decayAmount * (1.0 - adjustment.profitMultiplier)
+      1.0 - (1.0 - adjustment.profitMultiplier) * retentionFactor
     );
     const decayedSlippageMultiplier = Math.min(
       1.0,
-      adjustment.slippageMultiplier + decayAmount * (1.0 - adjustment.slippageMultiplier)
+      1.0 - (1.0 - adjustment.slippageMultiplier) * retentionFactor
     );
 
     return {

@@ -213,16 +213,18 @@ async function removePid(serviceName) {
  * Delete the PID file.
  */
 function deletePidFile() {
-  try {
-    if (fs.existsSync(PID_FILE)) {
-      fs.unlinkSync(PID_FILE);
+  // FIX #18: Only silently ignore ENOENT (race condition between existsSync and unlinkSync).
+  // Log warnings for permission errors and other unexpected failures.
+  for (const file of [PID_FILE, PID_LOCK_FILE]) {
+    try {
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.warn(`Warning: Could not delete ${path.basename(file)}: ${err.message}`);
+      }
     }
-    // Also clean up lock file
-    if (fs.existsSync(PID_LOCK_FILE)) {
-      fs.unlinkSync(PID_LOCK_FILE);
-    }
-  } catch {
-    // Ignore errors during cleanup
   }
 }
 

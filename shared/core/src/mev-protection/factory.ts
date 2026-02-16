@@ -18,6 +18,7 @@ import {
 import { FlashbotsProvider, createFlashbotsProvider } from './flashbots-provider';
 import { L2SequencerProvider, createL2SequencerProvider, isL2SequencerChain } from './l2-sequencer-provider';
 import { StandardProvider, createStandardProvider } from './standard-provider';
+import { createMevShareProvider } from './mev-share-provider';
 import { AsyncMutex } from '../async/async-mutex';
 import { createLogger } from '../logger';
 
@@ -102,8 +103,8 @@ export class MevProviderFactory {
       flashbotsAuthKey: config.flashbotsAuthKey,
       bloxrouteAuthHeader: config.bloxrouteAuthHeader,
       flashbotsRelayUrl: config.flashbotsRelayUrl || MEV_DEFAULTS.flashbotsRelayUrl,
-      submissionTimeoutMs: config.submissionTimeoutMs || MEV_DEFAULTS.submissionTimeoutMs,
-      maxRetries: config.maxRetries || MEV_DEFAULTS.maxRetries,
+      submissionTimeoutMs: config.submissionTimeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs,
+      maxRetries: config.maxRetries ?? MEV_DEFAULTS.maxRetries,
       fallbackToPublic: config.fallbackToPublic ?? MEV_DEFAULTS.fallbackToPublic,
       // Task 1.1: MEV-Share feature flag (default: true for value capture)
       useMevShare: config.useMevShare ?? true, // Default to enabled
@@ -253,7 +254,6 @@ export class MevProviderFactory {
         const useMevShare = config.useMevShare !== false;
 
         if (useMevShare && chain === 'ethereum') {
-          const { createMevShareProvider } = require('./mev-share-provider');
           return createMevShareProvider(config);
         }
         return createFlashbotsProvider(config);

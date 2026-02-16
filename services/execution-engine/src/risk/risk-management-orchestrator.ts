@@ -75,6 +75,8 @@ export interface RiskOrchestratorDeps {
   probabilityTracker: ExecutionProbabilityTracker | null;
   logger: Logger;
   stats: ExecutionStats;
+  /** FIX P2-11: Max concurrent in-flight trades to mitigate TOCTOU gap (default: 3) */
+  maxInFlightTrades?: number;
 }
 
 /**
@@ -87,6 +89,9 @@ export interface RiskOrchestratorDeps {
  *
  * Each check can independently reject a trade.
  * Position sizing is adjusted based on drawdown state (CAUTION/RECOVERY).
+ *
+ * FIX P2-11: Tracks in-flight trades to mitigate TOCTOU gap between
+ * risk assessment and trade execution completion.
  */
 export class RiskManagementOrchestrator {
   private readonly drawdownBreaker: DrawdownCircuitBreaker | null;
@@ -96,6 +101,13 @@ export class RiskManagementOrchestrator {
   private readonly logger: Logger;
   private readonly stats: ExecutionStats;
 
+  // FIX P2-11: In-flight trade tracking to mitigate TOCTOU gap.
+  // Between assess() returning "allowed" and recordOutcome() being called,
+  // multiple trades can be in-flight simultaneously, potentially exceeding
+  // drawdown limits before the breaker sees any results.
+  private inFlightCount = 0;
+  private readonly maxInFlightTrades: number;
+
   constructor(deps: RiskOrchestratorDeps) {
     this.drawdownBreaker = deps.drawdownBreaker;
     this.evCalculator = deps.evCalculator;
@@ -103,6 +115,7 @@ export class RiskManagementOrchestrator {
     this.probabilityTracker = deps.probabilityTracker;
     this.logger = deps.logger;
     this.stats = deps.stats;
+    this.maxInFlightTrades = deps.maxInFlightTrades ?? 3;
   }
 
   /**
@@ -117,6 +130,15 @@ export class RiskManagementOrchestrator {
    * @returns Decision with rejection reason or position sizing info
    */
   assess(input: RiskAssessmentInput): RiskDecision {
+    // FIX P2-11: Check in-flight trade limit to mitigate TOCTOU gap
+    if (this.inFlightCount >= this.maxInFlightTrades) {
+      return {
+        allowed: false,
+        rejectionReason: `Max in-flight trades (${this.maxInFlightTrades}) reached — wait for pending trades to complete`,
+        rejectionCode: 'DRAWDOWN_HALT',
+      };
+    }
+
     // Step 1: Check drawdown circuit breaker
     const drawdownResult = this.checkDrawdown();
     if (!drawdownResult.allowed) {
@@ -134,6 +156,11 @@ export class RiskManagementOrchestrator {
       evResult.evCalculation!,
       drawdownResult.drawdownCheck
     );
+
+    // FIX P2-11: Track in-flight trade when approved
+    if (positionResult.allowed) {
+      this.inFlightCount++;
+    }
 
     return positionResult;
   }
@@ -269,6 +296,13 @@ export class RiskManagementOrchestrator {
    *
    * @param outcome - Trade outcome data
    */
+  /**
+   * Get current in-flight trade count (for monitoring/testing).
+   */
+  getInFlightCount(): number {
+    return this.inFlightCount;
+  }
+
   recordOutcome(outcome: {
     chain: string;
     dex: string;
@@ -278,6 +312,11 @@ export class RiskManagementOrchestrator {
     gasCost?: number;
     gasPrice?: bigint;
   }): void {
+    // FIX P2-11: Decrement in-flight counter when trade completes
+    if (this.inFlightCount > 0) {
+      this.inFlightCount--;
+    }
+
     // FIX 2.1: Record to probability tracker for win rate learning
     // Uses properly injected probabilityTracker instead of unsafe `as any` cast
     if (this.probabilityTracker) {

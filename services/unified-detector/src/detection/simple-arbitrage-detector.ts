@@ -183,6 +183,14 @@ export class SimpleArbitrageDetector {
       return null;
     }
 
+    // FIX #22c: Filter unrealistic profit percentages.
+    // In simulation mode, reserve drift across DEXes creates artificially large spreads.
+    // In production, >500% indicates stale/erroneous price data (real arb is 0.1-5%).
+    // Sending absurd opportunities to the execution engine wastes resources.
+    if (netProfitPct > 5.0) {
+      return null;
+    }
+
     // Determine buy/sell sides based on prices
     const buyFromPair1 = price1 < price2;
     const buyPair = buyFromPair1 ? pair1 : pair2;

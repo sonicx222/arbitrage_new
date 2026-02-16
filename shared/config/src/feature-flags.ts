@@ -155,6 +155,20 @@ export const FLASH_LOAN_AGGREGATOR_CONFIG = {
    * @default 100000 ($100K)
    */
   liquidityCheckThresholdUsd: parseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_THRESHOLD_USD ?? '100000', 10),
+
+  /**
+   * Ranking cache TTL in milliseconds
+   * How long cached provider rankings remain valid before re-ranking
+   * @default 30000 (30 seconds)
+   */
+  rankingCacheTtlMs: parseInt(process.env.FLASH_LOAN_AGGREGATOR_RANKING_CACHE_TTL_MS ?? '30000', 10),
+
+  /**
+   * Liquidity cache TTL in milliseconds
+   * How long cached on-chain liquidity checks remain valid
+   * @default 300000 (5 minutes)
+   */
+  liquidityCacheTtlMs: parseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_CACHE_TTL_MS ?? '300000', 10),
 };
 
 /**
@@ -239,7 +253,7 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
     // FIX #11: Validate that aggregator weights sum to 1.0 (within tolerance)
     const { fees, liquidity, reliability, latency } = FLASH_LOAN_AGGREGATOR_CONFIG.weights;
     const weightSum = fees + liquidity + reliability + latency;
-    const WEIGHT_TOLERANCE = 0.001;
+    const WEIGHT_TOLERANCE = 0.01; // F8: Aligned with domain model tolerance (AggregatorConfig)
     if (Math.abs(weightSum - 1.0) > WEIGHT_TOLERANCE) {
       const weightMsg =
         `Flash Loan Aggregator weights do not sum to 1.0 (got ${weightSum.toFixed(4)}). ` +

@@ -12,6 +12,8 @@
  */
 
 import {
+  ISolanaMevProvider,
+  SolanaTransactionLike,
   MevStrategy,
   MevSubmissionResult,
   BundleSimulationResult,
@@ -44,8 +46,14 @@ export const JITO_DEFAULTS = {
 };
 
 /**
- * Jito tip accounts - one will be randomly selected for each bundle
- * These are the official Jito tip payment addresses
+ * Jito tip accounts — one will be randomly selected for each bundle.
+ *
+ * These are the official Jito tip payment addresses as of 2025.
+ * Prefer using JitoProviderConfig.tipAccounts for configurability —
+ * if Jito changes their tip accounts, the config path can be updated
+ * without a code change.
+ *
+ * @deprecated Use JitoProviderConfig.tipAccounts for new integrations.
  */
 export const JITO_TIP_ACCOUNTS = [
   '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
@@ -150,7 +158,7 @@ export interface SolanaTransaction {
  * Uses Jito Block Engine to submit private transaction bundles that are
  * included atomically without being visible in the public mempool.
  */
-export class JitoProvider {
+export class JitoProvider implements ISolanaMevProvider {
   readonly chain = 'solana';
   readonly strategy: MevStrategy = 'jito';
 
@@ -176,12 +184,20 @@ export class JitoProvider {
 
     this.config = config;
     this.jitoEndpoint = config.jitoEndpoint || JITO_DEFAULTS.mainnetEndpoint;
-    this.tipLamports = config.tipLamports || JITO_DEFAULTS.defaultTipLamports;
+    this.tipLamports = config.tipLamports ?? JITO_DEFAULTS.defaultTipLamports;
     // CONFIG-FIX: Use custom tip accounts if provided, otherwise use defaults
     this.tipAccounts = config.tipAccounts && config.tipAccounts.length > 0
       ? config.tipAccounts
       : JITO_TIP_ACCOUNTS;
     this.metricsManager = new MevMetricsManager();
+  }
+
+  /**
+   * Dispose of provider resources.
+   * Resets metrics state.
+   */
+  dispose(): void {
+    this.metricsManager.resetMetrics();
   }
 
   /**
@@ -195,7 +211,7 @@ export class JitoProvider {
    * Send a transaction with Jito MEV protection
    */
   async sendProtectedTransaction(
-    tx: SolanaTransaction,
+    tx: SolanaTransactionLike,
     options?: {
       tipLamports?: number;
       simulate?: boolean;
@@ -238,7 +254,7 @@ export class JitoProvider {
 
     try {
       // Get tip amount
-      const tipAmount = options?.tipLamports || this.tipLamports;
+      const tipAmount = options?.tipLamports ?? this.tipLamports;
 
       const base64Tx = Buffer.from(serializedTx).toString('base64');
 
@@ -311,7 +327,7 @@ export class JitoProvider {
    * Internally serializes and delegates to simulateTransactionFromBase64.
    */
   async simulateTransaction(
-    tx: SolanaTransaction
+    tx: SolanaTransactionLike
   ): Promise<BundleSimulationResult> {
     try {
       const serializedTx = tx.serialize();
@@ -433,7 +449,7 @@ export class JitoProvider {
     base64Transactions: string[],
     tipLamports: number
   ): Promise<{ success: boolean; bundleId?: string; error?: string }> {
-    const maxRetries = this.config.maxRetries || JITO_DEFAULTS.maxRetries;
+    const maxRetries = this.config.maxRetries ?? JITO_DEFAULTS.maxRetries;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -504,9 +520,9 @@ export class JitoProvider {
     bundleId: string
   ): Promise<{ included: boolean; signature?: string; slot?: number }> {
     const basePollInterval =
-      this.config.statusPollIntervalMs || JITO_DEFAULTS.statusPollIntervalMs;
+      this.config.statusPollIntervalMs ?? JITO_DEFAULTS.statusPollIntervalMs;
     const timeout =
-      this.config.statusPollTimeoutMs || JITO_DEFAULTS.statusPollTimeoutMs;
+      this.config.statusPollTimeoutMs ?? JITO_DEFAULTS.statusPollTimeoutMs;
     const startTime = Date.now();
 
     // PERF: Exponential backoff - start aggressive, back off over time
@@ -563,7 +579,7 @@ export class JitoProvider {
    */
   private async sendJitoRequest(body: object): Promise<any> {
     const timeout =
-      this.config.submissionTimeoutMs || JITO_DEFAULTS.submissionTimeoutMs;
+      this.config.submissionTimeoutMs ?? JITO_DEFAULTS.submissionTimeoutMs;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -580,18 +596,6 @@ export class JitoProvider {
     } finally {
       clearTimeout(timeoutId);
     }
-  }
-
-  /**
-   * Fallback to standard Solana transaction submission
-   */
-  private async fallbackToPublic(
-    tx: SolanaTransaction,
-    startTime: number,
-    reason: string
-  ): Promise<MevSubmissionResult> {
-    // Serialize and delegate to optimized method
-    return this.fallbackToPublicWithSerialized(tx.serialize(), startTime, reason);
   }
 
   /**
@@ -672,9 +676,9 @@ export class JitoProvider {
     signature: string
   ): Promise<{ confirmed: boolean; slot?: number }> {
     const timeout =
-      this.config.statusPollTimeoutMs || JITO_DEFAULTS.statusPollTimeoutMs;
+      this.config.statusPollTimeoutMs ?? JITO_DEFAULTS.statusPollTimeoutMs;
     const pollInterval =
-      this.config.statusPollIntervalMs || JITO_DEFAULTS.statusPollIntervalMs;
+      this.config.statusPollIntervalMs ?? JITO_DEFAULTS.statusPollIntervalMs;
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {

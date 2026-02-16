@@ -59,14 +59,15 @@ function getChainDefaultGasCost(chain: string): bigint {
   return CHAIN_DEFAULT_GAS_COSTS[normalizedChain] ?? CHAIN_DEFAULT_GAS_COSTS.default;
 }
 
+// FIX P2-6: Aligned DEFAULT_CONFIG with RISK_CONFIG values to prevent
+// divergent behavior when EVCalculator is instantiated directly vs via config.
 const DEFAULT_CONFIG: EVConfig = {
   minEVThreshold: 5000000000000000n, // 0.005 ETH (~$10 at $2000/ETH)
   minWinProbability: 0.3, // 30% minimum win probability
   maxLossPerTrade: 100000000000000000n, // 0.1 ETH
   useHistoricalGasCost: true,
-  // FIX 3.2: Default to L2-friendly gas cost (will be overridden per-chain)
-  defaultGasCost: 1000000000000000n, // 0.001 ETH (~$2.50)
-  defaultProfitEstimate: 50000000000000000n, // 0.05 ETH
+  defaultGasCost: 10000000000000000n, // 0.01 ETH — matches RISK_CONFIG.ev.defaultGasCost
+  defaultProfitEstimate: 20000000000000000n, // 0.02 ETH — matches RISK_CONFIG.ev.defaultProfitEstimate
 };
 
 // =============================================================================
@@ -161,15 +162,15 @@ export class EVCalculator {
     const expectedValue = expectedProfit - expectedGasCost;
 
     // Determine if should execute
-    const { shouldExecute, reason } = this.evaluateExecution(
+    const { shouldExecute, reason, rejectionCode } = this.evaluateExecution(
       expectedValue,
       winProbability,
       probResult.isDefault,
       gasCostEstimate
     );
 
-    // Update statistics
-    this.updateStats(shouldExecute, expectedValue, reason);
+    // Update statistics (FIX P3-15: uses structured rejectionCode)
+    this.updateStats(shouldExecute, expectedValue, rejectionCode);
 
     const result: EVCalculation = {
       expectedValue,
@@ -350,27 +351,41 @@ export class EVCalculator {
   // ---------------------------------------------------------------------------
 
   /**
+   * FIX P3-15: Rejection codes for structured classification.
+   * Replaces fragile string-matching in updateStats().
+   */
+  private static readonly REJECTION_MAX_LOSS = 'MAX_LOSS' as const;
+  private static readonly REJECTION_LOW_PROBABILITY = 'LOW_PROBABILITY' as const;
+  private static readonly REJECTION_LOW_EV = 'LOW_EV' as const;
+
+  /**
    * Evaluates whether an opportunity should be executed.
+   * FIX P3-15: Returns structured rejectionCode alongside reason string.
    */
   private evaluateExecution(
     expectedValue: bigint,
     winProbability: number,
     isDefaultProbability: boolean,
     potentialLoss: bigint
-  ): { shouldExecute: boolean; reason?: string } {
+  ): { shouldExecute: boolean; reason?: string; rejectionCode?: string } {
     // Check max loss per trade first (risk cap)
     if (potentialLoss > this.config.maxLossPerTrade) {
       return {
         shouldExecute: false,
+        rejectionCode: EVCalculator.REJECTION_MAX_LOSS,
         reason: `Potential loss (${potentialLoss.toString()}) exceeds max loss per trade (${this.config.maxLossPerTrade.toString()})`,
       };
     }
 
-    // Check win probability threshold (more important filter)
-    if (winProbability < this.config.minWinProbability && !isDefaultProbability) {
+    // Check win probability threshold
+    // FIX P1-1: Apply probability filter regardless of whether data is historical or default.
+    // Previously, default probabilities bypassed this check entirely, meaning after a restart
+    // (when all in-memory data is lost) the probability filter was silently disabled.
+    if (winProbability < this.config.minWinProbability) {
       return {
         shouldExecute: false,
-        reason: `Win probability (${(winProbability * 100).toFixed(1)}%) below minimum threshold (${(this.config.minWinProbability * 100).toFixed(1)}%)`,
+        rejectionCode: EVCalculator.REJECTION_LOW_PROBABILITY,
+        reason: `Win probability (${(winProbability * 100).toFixed(1)}%) below minimum threshold (${(this.config.minWinProbability * 100).toFixed(1)}%)${isDefaultProbability ? ' (using default probability)' : ''}`,
       };
     }
 
@@ -378,6 +393,7 @@ export class EVCalculator {
     if (expectedValue < this.config.minEVThreshold) {
       return {
         shouldExecute: false,
+        rejectionCode: EVCalculator.REJECTION_LOW_EV,
         reason: `EV (${expectedValue.toString()}) below threshold (${this.config.minEVThreshold.toString()})`,
       };
     }
@@ -391,11 +407,12 @@ export class EVCalculator {
 
   /**
    * Updates internal statistics after a calculation.
+   * FIX P3-15: Uses structured rejectionCode instead of fragile string matching.
    */
   private updateStats(
     shouldExecute: boolean,
     expectedValue: bigint,
-    reason?: string
+    rejectionCode?: string
   ): void {
     this.totalCalculations++;
     this.totalEV += expectedValue;
@@ -403,13 +420,17 @@ export class EVCalculator {
     if (shouldExecute) {
       this.approvedCount++;
       this.totalApprovedEV += expectedValue;
-    } else if (reason) {
-      if (reason.includes('max loss') || reason.includes('Potential loss')) {
-        this.rejectedMaxLoss++;
-      } else if (reason.includes('probability')) {
-        this.rejectedLowProbability++;
-      } else if (reason.includes('EV') || reason.includes('threshold')) {
-        this.rejectedLowEV++;
+    } else if (rejectionCode) {
+      switch (rejectionCode) {
+        case EVCalculator.REJECTION_MAX_LOSS:
+          this.rejectedMaxLoss++;
+          break;
+        case EVCalculator.REJECTION_LOW_PROBABILITY:
+          this.rejectedLowProbability++;
+          break;
+        case EVCalculator.REJECTION_LOW_EV:
+          this.rejectedLowEV++;
+          break;
       }
     }
   }

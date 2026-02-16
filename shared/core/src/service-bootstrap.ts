@@ -29,6 +29,9 @@ export interface ServiceShutdownConfig {
 
   /** Service name for log messages */
   serviceName: string;
+
+  /** FIX #7: Max time (ms) to wait for graceful shutdown before force-exiting (default: 10000) */
+  shutdownTimeoutMs?: number;
 }
 
 /**
@@ -121,7 +124,7 @@ export interface RunServiceMainConfig {
  * @returns Cleanup function to remove all registered handlers
  */
 export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShutdownCleanup {
-  const { logger, onShutdown, serviceName } = config;
+  const { logger, onShutdown, serviceName, shutdownTimeoutMs = 10000 } = config;
 
   let isShuttingDown = false;
 
@@ -134,10 +137,19 @@ export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShut
 
     logger.info(`Received ${signal}, shutting down ${serviceName} gracefully`);
 
+    // FIX #7: Force-exit timer to prevent hanging shutdown
+    const forceExitTimer = setTimeout(() => {
+      logger.error(`${serviceName} shutdown timed out after ${shutdownTimeoutMs}ms, forcing exit`);
+      process.exit(1);
+    }, shutdownTimeoutMs);
+    forceExitTimer.unref();
+
     try {
       await onShutdown();
+      clearTimeout(forceExitTimer);
       process.exit(0);
     } catch (error) {
+      clearTimeout(forceExitTimer);
       logger.error(`Error during ${serviceName} shutdown`, {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
@@ -328,18 +340,37 @@ export function runServiceMain(config: RunServiceMainConfig): void {
 }
 
 /**
- * Close an HTTP server with a promise wrapper.
+ * Close an HTTP server with a timeout to prevent hanging during shutdown.
  * Convenience utility for shutdown handlers.
  *
+ * Uses the safeResolve flag pattern (see partition-service-utils.ts) to avoid
+ * race conditions between server.close() callback and timeout.
+ *
  * @param server - HTTP server to close (null is safely handled)
- * @returns Promise that resolves when server is closed
+ * @param timeoutMs - Maximum time to wait for server close (default: 5000ms)
+ * @returns Promise that resolves when server is closed or timeout expires
  */
-export async function closeHealthServer(server: Server | null): Promise<void> {
+export async function closeHealthServer(server: Server | null, timeoutMs = 5000): Promise<void> {
   if (!server) {
     return;
   }
 
   await new Promise<void>((resolve) => {
-    server.close(() => resolve());
+    let resolved = false;
+    const safeResolve = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      safeResolve();
+    }, timeoutMs);
+
+    server.close(() => {
+      clearTimeout(timer);
+      safeResolve();
+    });
   });
 }

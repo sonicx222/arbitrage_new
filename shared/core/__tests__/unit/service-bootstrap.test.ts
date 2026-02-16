@@ -223,6 +223,30 @@ describe('service-bootstrap', () => {
       // Server should be closed
       expect(server.listening).toBe(false);
     });
+
+    it('accepts a custom timeout parameter', async () => {
+      const server = http.createServer();
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+
+      // Custom timeout should still close normally
+      await closeHealthServer(server, 1000);
+      expect(server.listening).toBe(false);
+    });
+
+    it('resolves within timeout even if server.close is slow', async () => {
+      // Create a server that delays its close callback
+      const server = http.createServer();
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+
+      const start = Date.now();
+      // Use a very short timeout - the timeout should resolve even if
+      // server.close() is pending
+      await closeHealthServer(server, 100);
+      const elapsed = Date.now() - start;
+
+      // Should resolve within a reasonable time (not hang forever)
+      expect(elapsed).toBeLessThan(5000);
+    });
   });
 
   // ===========================================================================

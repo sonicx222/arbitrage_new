@@ -32,14 +32,16 @@ import type {
 // Default Configuration
 // =============================================================================
 
+// FIX P2-6: Aligned DEFAULT_CONFIG with RISK_CONFIG.probability values to prevent
+// divergent behavior when tracker is instantiated directly vs via config.
 const DEFAULT_CONFIG: ExecutionProbabilityConfig = {
   minSamples: 10,
   defaultWinProbability: 0.5,
   maxOutcomesPerKey: 1000,
-  cleanupIntervalMs: 60000, // 1 minute
+  cleanupIntervalMs: 3600000, // 1 hour — matches RISK_CONFIG.probability.cleanupIntervalMs
   outcomeRelevanceWindowMs: 7 * 24 * 60 * 60 * 1000, // 7 days
 
-  // FIX 1.2/7.2: Redis persistence configuration
+  // Redis persistence configuration
   // ╔════════════════════════════════════════════════════════════════════════════╗
   // ║ REDIS PERSISTENCE STATUS: DEFERRED                                         ║
   // ╠════════════════════════════════════════════════════════════════════════════╣
@@ -60,8 +62,8 @@ const DEFAULT_CONFIG: ExecutionProbabilityConfig = {
   // ║   - On startup: load historical aggregates from Redis                      ║
   // ║   - See implementation_plan_v3.md Section 3.4.1 for full schema            ║
   // ╚════════════════════════════════════════════════════════════════════════════╝
-  redisKeyPrefix: 'risk:probability:',
-  persistToRedis: false,
+  redisKeyPrefix: 'risk:probabilities:', // matches RISK_CONFIG.probability.redisKeyPrefix
+  persistToRedis: false, // RISK_CONFIG defaults true, but feature is DEFERRED; keep false here
 };
 
 // =============================================================================
@@ -198,7 +200,7 @@ export class ExecutionProbabilityTracker {
 
     // Prune if necessary
     if (entry.outcomes.length > this.config.maxOutcomesPerKey) {
-      this.pruneOutcomes(entry);
+      this.pruneOutcomes(entry, outcome.chain, outcome.dex);
     }
 
     this.logger.debug('Outcome recorded', {
@@ -439,26 +441,27 @@ export class ExecutionProbabilityTracker {
    * Builds a cache key for (chain, dex, pathLength) combination.
    * P0-FIX 10.1: Uses key caching to avoid repeated string allocations in hot path.
    */
+  /**
+   * FIX P3-16: Uses single delimiter format for both cache key and value.
+   * Previously created TWO template literals per call (pipe-delimited for cache,
+   * colon-delimited for actual key), negating caching benefit.
+   */
   private buildKey(chain: string, dex: string, pathLength: number): string {
-    // Use array join with delimiter that's unlikely to appear in chain/dex names
-    const cacheKey = `${chain}|${dex}|${pathLength}`;
-    let key = this.keyCache.get(cacheKey);
-
-    if (!key) {
-      key = `${chain}:${dex}:${pathLength}`;
-
-      // Prevent unbounded cache growth
-      if (this.keyCache.size >= ExecutionProbabilityTracker.KEY_CACHE_MAX_SIZE) {
-        // Simple LRU: clear oldest half when full
-        const keysToDelete = Array.from(this.keyCache.keys()).slice(0, this.keyCache.size / 2);
-        for (const k of keysToDelete) {
-          this.keyCache.delete(k);
-        }
-      }
-
-      this.keyCache.set(cacheKey, key);
+    const key = `${chain}:${dex}:${pathLength}`;
+    if (this.keyCache.has(key)) {
+      return key;
     }
 
+    // Prevent unbounded cache growth
+    if (this.keyCache.size >= ExecutionProbabilityTracker.KEY_CACHE_MAX_SIZE) {
+      // Simple LRU: clear oldest half when full
+      const keysToDelete = Array.from(this.keyCache.keys()).slice(0, this.keyCache.size / 2);
+      for (const k of keysToDelete) {
+        this.keyCache.delete(k);
+      }
+    }
+
+    this.keyCache.set(key, key);
     return key;
   }
 
@@ -480,10 +483,20 @@ export class ExecutionProbabilityTracker {
   // Private: Pruning and Cleanup
   // ---------------------------------------------------------------------------
 
-  private pruneOutcomes(entry: OutcomesByKey): void {
+  /**
+   * FIX P2-9: Optimized pruneOutcomes with incremental aggregate updates.
+   * Previously called rebuildAggregates() (O(K) full rebuild) on every prune.
+   * Now decrements aggregates directly from removed values.
+   */
+  private pruneOutcomes(entry: OutcomesByKey, chain: string, dex: string): void {
     // Remove oldest 10% of outcomes
     const pruneCount = Math.floor(entry.outcomes.length * 0.1);
     const removed = entry.outcomes.splice(0, pruneCount);
+
+    // Track removed values for incremental aggregate update
+    let removedGasCost = 0n;
+    let removedProfit = 0n;
+    let removedSuccessCount = 0;
 
     // Recalculate statistics (both entry-level AND global)
     for (const outcome of removed) {
@@ -496,31 +509,65 @@ export class ExecutionProbabilityTracker {
         if (outcome.profit !== undefined) {
           entry.totalProfit -= outcome.profit;
           entry.successfulCount--;
+          removedProfit += outcome.profit;
+          removedSuccessCount++;
         }
       } else {
         entry.losses--;
         this.totalFailures--;
       }
       entry.totalGasCost -= outcome.gasCost;
+      removedGasCost += outcome.gasCost;
     }
 
-    // Update timestamps if needed (first outcome may have been pruned)
-    if (entry.outcomes.length > 0 && removed.length > 0) {
-      // Recalculate first timestamp from remaining outcomes
-      this.recalculateTimestampBounds();
-    }
-
-    // FIX 4.1: Rebuild aggregates after pruning to prevent stale data
-    // The chainAggregates and chainDexAggregates were not being updated,
-    // causing getAverageGasCost() and getAverageProfit() to return stale values.
+    // Update timestamps incrementally: O(K) over unique keys instead of O(N) over all outcomes.
+    // Only firstOutcomeTimestamp can change when pruning oldest entries.
     if (removed.length > 0) {
-      this.rebuildAggregates();
+      this.recalculateFirstTimestamp();
+    }
+
+    // Incrementally update aggregates instead of full rebuild
+    if (removed.length > 0) {
+      const chainKey = this.buildChainPrefix(chain);
+      const chainAgg = this.chainAggregates.get(chainKey);
+      if (chainAgg) {
+        chainAgg.totalGasCost -= removedGasCost;
+        chainAgg.count -= removed.length;
+      }
+
+      if (removedSuccessCount > 0) {
+        const chainDexKey = this.buildChainDexPrefix(chain, dex);
+        const chainDexAgg = this.chainDexAggregates.get(chainDexKey);
+        if (chainDexAgg) {
+          chainDexAgg.totalProfit -= removedProfit;
+          chainDexAgg.successCount -= removedSuccessCount;
+        }
+      }
+    }
+  }
+
+  /**
+   * FIX P2-9: Recalculates firstOutcomeTimestamp from first element of each entry.
+   * O(K) where K = unique keys, vs previous O(N) over all outcomes.
+   * Outcomes are stored chronologically (push to end), so entry.outcomes[0]
+   * is always the oldest outcome for that key.
+   */
+  private recalculateFirstTimestamp(): void {
+    this.firstOutcomeTimestamp = null;
+
+    for (const entry of this.outcomesByKey.values()) {
+      if (entry.outcomes.length > 0) {
+        const entryFirst = entry.outcomes[0].timestamp;
+        if (this.firstOutcomeTimestamp === null || entryFirst < this.firstOutcomeTimestamp) {
+          this.firstOutcomeTimestamp = entryFirst;
+        }
+      }
     }
   }
 
   /**
    * Recalculates first/last timestamp bounds from all outcomes.
-   * Called after pruning to ensure timestamp accuracy.
+   * Called after stale outcome cleanup which removes from arbitrary positions.
    */
   private recalculateTimestampBounds(): void {
     this.firstOutcomeTimestamp = null;

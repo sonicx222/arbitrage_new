@@ -18,14 +18,11 @@
 /**
  * Supported flash loan protocols (versioned names)
  *
- * Matches the FlashLoanProtocol type in execution-engine/flash-loan-providers/types.ts.
- * Only includes protocols with Solidity interfaces in contracts/src/interfaces/.
+ * Imported from @arbitrage/types (canonical source of truth).
+ * Now includes 'spookyswap' to match the other definitions.
  */
-export type FlashLoanProtocol =
-  | 'aave_v3'
-  | 'balancer_v2'
-  | 'pancakeswap_v3'
-  | 'syncswap';
+import type { FlashLoanProtocol } from '@arbitrage/types';
+export type { FlashLoanProtocol } from '@arbitrage/types';
 
 /**
  * Flash loan protocol availability per chain
@@ -49,6 +46,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2
     balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -56,6 +54,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
     balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
     pancakeswap_v3: false,
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -63,6 +62,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
     balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -70,6 +70,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
     balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -77,6 +78,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
     balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
     pancakeswap_v3: false,
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -84,6 +86,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false, // Aave V3 not deployed on BSC
     balancer_v2: false, // Balancer V2 not on BSC
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -91,6 +94,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
     balancer_v2: false, // Balancer V2 not on Avalanche
     pancakeswap_v3: false,
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -98,6 +102,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false, // Aave V3 not deployed on Fantom
     balancer_v2: true, // Balancer V2 Vault: 0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce
     pancakeswap_v3: false,
+    spookyswap: false, // SpookySwap exists on Fantom but flash loans not implemented
     syncswap: false,
   },
 
@@ -105,6 +110,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false, // Aave V3 not deployed on zkSync Era
     balancer_v2: false, // Balancer V2 not on zkSync Era
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB
+    spookyswap: false,
     syncswap: true, // SyncSwap Vault: 0x621425a1Ef6abE91058E9712575dcc4258F8d091
   },
 
@@ -112,6 +118,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false, // Aave V3 not deployed on Linea
     balancer_v2: false, // Balancer V2 not on Linea
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
     syncswap: false, // SyncSwap planned but not yet deployed
   },
 
@@ -123,6 +130,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false, // Aave is EVM-only
     balancer_v2: false, // Balancer is EVM-only
     pancakeswap_v3: false, // PancakeSwap is EVM-only
+    spookyswap: false, // SpookySwap is EVM-only
     syncswap: false, // SyncSwap is EVM-only
     // Note: Solana has native flash loan protocols (Solend, Port, Mango)
     // but they use different interfaces and are not covered by these contracts
@@ -136,6 +144,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951
     balancer_v2: false, // No testnet deployment
     pancakeswap_v3: false, // No testnet deployment
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -143,6 +152,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: true, // Aave V3 Pool: 0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff
     balancer_v2: false,
     pancakeswap_v3: false,
+    spookyswap: false,
     syncswap: false,
   },
 
@@ -150,6 +160,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false,
     balancer_v2: false,
     pancakeswap_v3: false,
+    spookyswap: false,
     syncswap: true, // SyncSwap Vault: 0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8 (Staging)
   },
 
@@ -157,6 +168,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     aave_v3: false,
     balancer_v2: false,
     pancakeswap_v3: false,
+    spookyswap: false,
     syncswap: false,
   },
 } as const;
@@ -311,7 +323,7 @@ export const FLASH_LOAN_STATS = (() => {
   const testnetChains = allChains.filter(c => TESTNET_CHAINS.has(c));
 
   // Count how many chains support each protocol
-  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'syncswap'];
+  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'spookyswap', 'syncswap'];
   const protocolCoverage = {} as Record<FlashLoanProtocol, number>;
   for (const protocol of protocols) {
     protocolCoverage[protocol] = allChains.filter(

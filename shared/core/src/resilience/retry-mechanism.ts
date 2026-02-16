@@ -250,7 +250,8 @@ export class RetryMechanism {
   }
 }
 
-// Pre-configured retry mechanisms for common use cases
+// P2-19 FIX: Pre-configured retry mechanisms now delegate to classifyError()
+// for consistent error classification across all retry paths.
 export class RetryPresets {
   static readonly NETWORK_CALL = new RetryMechanism({
     maxAttempts: 3,
@@ -258,13 +259,7 @@ export class RetryPresets {
     maxDelay: 10000,
     backoffMultiplier: 2,
     jitter: true,
-    retryCondition: (error) => {
-      // Retry network-related errors
-      return error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT' ||
-        error.code === 'ENOTFOUND' ||
-        (error.status && error.status >= 500);
-    }
+    retryCondition: (error) => classifyError(error) !== ErrorCategory.PERMANENT
   });
 
   static readonly DATABASE_OPERATION = new RetryMechanism({
@@ -273,13 +268,7 @@ export class RetryPresets {
     maxDelay: 5000,
     backoffMultiplier: 1.5,
     jitter: true,
-    retryCondition: (error) => {
-      // Retry database connection and temporary errors
-      return error.code === 'ECONNREFUSED' ||
-        error.code === 'ETIMEDOUT' ||
-        error.message?.includes('connection') ||
-        error.message?.includes('timeout');
-    }
+    retryCondition: (error) => classifyError(error) !== ErrorCategory.PERMANENT
   });
 
   static readonly EXTERNAL_API = new RetryMechanism({
@@ -288,14 +277,7 @@ export class RetryPresets {
     maxDelay: 15000,
     backoffMultiplier: 2,
     jitter: true,
-    retryCondition: (error) => {
-      // Retry API rate limits and temporary failures
-      return error.status === 429 || // Rate limited
-        error.status === 503 || // Service unavailable
-        error.status === 502 || // Bad gateway
-        error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT';
-    }
+    retryCondition: (error) => classifyError(error) !== ErrorCategory.PERMANENT
   });
 
   static readonly BLOCKCHAIN_RPC = new RetryMechanism({
@@ -304,13 +286,7 @@ export class RetryPresets {
     maxDelay: 30000,
     backoffMultiplier: 2,
     jitter: true,
-    retryCondition: (error) => {
-      // Retry RPC-specific errors
-      return error.code === -32005 || // Request rate exceeded
-        error.code === -32603 || // Internal error
-        error.message?.includes('timeout') ||
-        error.message?.includes('connection');
-    }
+    retryCondition: (error) => classifyError(error) !== ErrorCategory.PERMANENT
   });
 }
 

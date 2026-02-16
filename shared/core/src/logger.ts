@@ -8,6 +8,18 @@ const { combine, timestamp, printf, colorize, errors } = format;
 // P2-FIX: Export Logger type for consistent type usage across codebase
 export type Logger = winston.Logger;
 
+/**
+ * P3 FIX #26: Minimal logger interface for dependency injection.
+ * Use this instead of duplicating Logger interfaces in each file.
+ * Compatible with winston.Logger and simple test mocks.
+ */
+export interface LoggerLike {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
 // BigInt-safe JSON serializer
 function safeStringify(obj: any): string {
   return JSON.stringify(obj, (_, value) =>

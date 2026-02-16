@@ -7,6 +7,22 @@ export type FeeBasisPoints = number & { readonly __brand: 'FeeBasisPoints' };
 /** Fee as decimal (0.003 = 0.30%). Range: 0-1 */
 export type FeeDecimal = number & { readonly __brand: 'FeeDecimal' };
 
+/**
+ * Supported flash loan protocols.
+ *
+ * Canonical definition used across shared/core, shared/config, and execution-engine.
+ *
+ * @see shared/config/src/flash-loan-availability.ts - Availability matrix per chain
+ * @see services/execution-engine/src/strategies/flash-loan-providers/types.ts - Provider interfaces
+ * @see shared/core/src/flash-loan-aggregation/domain/models.ts - Aggregation domain
+ */
+export type FlashLoanProtocol =
+  | 'aave_v3'
+  | 'balancer_v2'
+  | 'pancakeswap_v3'
+  | 'spookyswap'
+  | 'syncswap';
+
 export interface Chain {
   id: number;
   name: string;

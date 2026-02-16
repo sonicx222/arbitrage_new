@@ -95,6 +95,67 @@ describe('KellyPositionSizer', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // FIX P2-7: validateConfig Error Path Tests
+  // ---------------------------------------------------------------------------
+
+  describe('validateConfig', () => {
+    it('should throw when kellyMultiplier is 0', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({ kellyMultiplier: 0 })))
+        .toThrow('kellyMultiplier must be between 0 (exclusive) and 1 (inclusive)');
+    });
+
+    it('should throw when kellyMultiplier is negative', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({ kellyMultiplier: -0.5 })))
+        .toThrow('kellyMultiplier must be between 0 (exclusive) and 1 (inclusive)');
+    });
+
+    it('should throw when kellyMultiplier exceeds 1', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({ kellyMultiplier: 1.5 })))
+        .toThrow('kellyMultiplier must be between 0 (exclusive) and 1 (inclusive)');
+    });
+
+    it('should throw when maxSingleTradeFraction is 0', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({ maxSingleTradeFraction: 0 })))
+        .toThrow('maxSingleTradeFraction must be between 0 (exclusive) and 1 (inclusive)');
+    });
+
+    it('should throw when maxSingleTradeFraction exceeds 1', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({ maxSingleTradeFraction: 1.1 })))
+        .toThrow('maxSingleTradeFraction must be between 0 (exclusive) and 1 (inclusive)');
+    });
+
+    it('should throw when minTradeFraction is negative', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({ minTradeFraction: -0.001 })))
+        .toThrow('minTradeFraction must be >= 0 and < maxSingleTradeFraction');
+    });
+
+    it('should throw when minTradeFraction >= maxSingleTradeFraction', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({
+        minTradeFraction: 0.02,
+        maxSingleTradeFraction: 0.02,
+      }))).toThrow('minTradeFraction must be >= 0 and < maxSingleTradeFraction');
+    });
+
+    it('should throw when minTradeFraction exceeds maxSingleTradeFraction', () => {
+      expect(() => new KellyPositionSizer(createMockConfig({
+        minTradeFraction: 0.05,
+        maxSingleTradeFraction: 0.02,
+      }))).toThrow('minTradeFraction must be >= 0 and < maxSingleTradeFraction');
+    });
+
+    it('should accept valid edge values', () => {
+      // kellyMultiplier = 1 (full Kelly), maxSingleTradeFraction = 1, minTradeFraction = 0
+      const edgeSizer = new KellyPositionSizer(createMockConfig({
+        kellyMultiplier: 1,
+        maxSingleTradeFraction: 1,
+        minTradeFraction: 0,
+      }));
+      expect(edgeSizer).toBeDefined();
+      edgeSizer.destroy();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Kelly Formula Tests
   // ---------------------------------------------------------------------------
 

@@ -137,8 +137,10 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
       this.selectionsWithLiquidityCheck++;
     }
 
-    // Track fallbacks
-    if (provider === null || reason.includes('fallback') || reason.includes('failed')) {
+    // F13: Only count explicit fallback triggers, not all failed selections
+    // "No providers available" and "All providers failed validation" are NOT fallbacks
+    // A fallback is when the system explicitly falls back to a secondary provider
+    if (reason.includes('fallback')) {
       this.fallbacksTriggered++;
     }
 
@@ -161,9 +163,19 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
       return;
     }
 
-    // Update all entries for this protocol (may span multiple chains)
+    // When chain is provided, only update the matching chain's stats.
+    // When chain is NOT provided, update all entries (backward compatible).
     const now = Date.now();
     for (const stats of statsEntries) {
+      if (outcome.chain && stats.protocol === outcome.protocol) {
+        // Chain-specific: only update if this stats entry matches the chain
+        const key = `${stats.protocol}-${outcome.chain}`;
+        const matchingStats = this.providerStats.get(key);
+        if (matchingStats !== stats) {
+          continue;
+        }
+      }
+
       if (outcome.success) {
         stats.successCount++;
         stats.lastSuccessTime = now;
@@ -238,11 +250,45 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
       readonly avgLatencyMs: number;
     }>();
 
+    // Merge stats across chains for same protocol (instead of overwriting)
+    const mergeAccumulator = new Map<FlashLoanProtocol, {
+      timesSelected: number;
+      successCount: number;
+      failureCount: number;
+      totalLatencySum: number;
+      totalLatencyCount: number;
+    }>();
+
     for (const [_, stats] of this.providerStats) {
-      byProvider.set(stats.protocol, {
-        timesSelected: stats.timesSelected,
-        successRate: this.calculateSuccessRate(stats),
-        avgLatencyMs: this.calculateAvgLatency(stats.selectionLatencies),
+      const existing = mergeAccumulator.get(stats.protocol);
+      const latencies = stats.selectionLatencies.toArray();
+      const latencySum = latencies.reduce((a, b) => a + b, 0);
+
+      if (existing) {
+        existing.timesSelected += stats.timesSelected;
+        existing.successCount += stats.successCount;
+        existing.failureCount += stats.failureCount;
+        existing.totalLatencySum += latencySum;
+        existing.totalLatencyCount += latencies.length;
+      } else {
+        mergeAccumulator.set(stats.protocol, {
+          timesSelected: stats.timesSelected,
+          successCount: stats.successCount,
+          failureCount: stats.failureCount,
+          totalLatencySum: latencySum,
+          totalLatencyCount: latencies.length,
+        });
+      }
+    }
+
+    for (const [protocol, merged] of mergeAccumulator) {
+      const total = merged.successCount + merged.failureCount;
+      byProvider.set(protocol, {
+        timesSelected: merged.timesSelected,
+        successRate: total > 0 ? merged.successCount / total : 1.0,
+        avgLatencyMs: merged.totalLatencyCount > 0
+          ? merged.totalLatencySum / merged.totalLatencyCount
+          : 0,
       });
     }
 
@@ -355,7 +401,7 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
   private calculateP95Latency(buffer: CircularBuffer): number {
     if (buffer.length === 0) return 0;
     const sorted = buffer.toArray().sort((a, b) => a - b);
-    const p95Index = Math.floor(sorted.length * 0.95);
-    return sorted[p95Index] || 0;
+    const p95Index = Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1);
+    return sorted[p95Index] ?? 0;
   }
 }

@@ -53,23 +53,66 @@ function execCommand(cmd) {
 // =============================================================================
 
 /**
- * Kill a process by PID (cross-platform).
+ * Kill a process and its entire process tree (cross-platform).
+ *
+ * On Windows: taskkill /F /T already kills the full tree.
+ * On Unix: Services are spawned with detached:true, creating new process groups.
+ *   Phase 1: SIGTERM to the process group (graceful shutdown).
+ *   Phase 2: SIGKILL to the process group if SIGTERM didn't work within timeout.
+ *   Fallback: SIGKILL to the individual PID (in case PGID kill fails, e.g. not group leader).
+ *
  * @param {number} pid - Process ID to kill
+ * @param {{ graceful?: boolean, gracefulTimeoutMs?: number }} [options] - Kill options
+ * @param {boolean} [options.graceful=true] - Attempt SIGTERM before SIGKILL
+ * @param {number} [options.gracefulTimeoutMs=3000] - Max wait for graceful shutdown
  * @returns {Promise<boolean>} - True if killed successfully
  */
-async function killProcess(pid) {
+async function killProcess(pid, options = {}) {
   // FIX M12: Validate PID is a positive integer before interpolating into shell command
   const safePid = parseInt(pid, 10);
   if (!Number.isInteger(safePid) || safePid <= 0) {
     return false;
   }
-  const cmd = isWindows()
-    ? `taskkill /PID ${safePid} /F /T 2>nul`
-    : `kill -9 ${safePid} 2>/dev/null`;
 
-  // Kill commands produce no stdout on success — use raw exec for error-based success check
+  const { graceful = true, gracefulTimeoutMs = 3000 } = options;
+
+  if (isWindows()) {
+    // taskkill /F /T already kills the process tree
+    return new Promise((resolve) => {
+      exec(`taskkill /PID ${safePid} /F /T 2>nul`, (error) => resolve(!error));
+    });
+  }
+
+  // Unix: Two-phase kill targeting the process group
+  // Services are spawned with detached:true so PID == PGID
+  if (graceful) {
+    // Phase 1: SIGTERM to process group (negative PID = process group)
+    await new Promise((resolve) => {
+      exec(`kill -15 -${safePid} 2>/dev/null`, () => resolve(undefined));
+    });
+
+    // Wait for graceful shutdown with polling
+    const pollInterval = 200;
+    const maxPolls = Math.ceil(gracefulTimeoutMs / pollInterval);
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise((r) => setTimeout(r, pollInterval));
+      if (!(await processExists(safePid))) {
+        return true;
+      }
+    }
+  }
+
+  // Phase 2: SIGKILL to process group (force kill entire tree)
+  const groupKilled = await new Promise((resolve) => {
+    exec(`kill -9 -${safePid} 2>/dev/null`, (error) => resolve(!error));
+  });
+  if (groupKilled) {
+    return true;
+  }
+
+  // Fallback: SIGKILL individual PID (in case it's not a process group leader)
   return new Promise((resolve) => {
-    exec(cmd, (error) => resolve(!error));
+    exec(`kill -9 ${safePid} 2>/dev/null`, (error) => resolve(!error));
   });
 }
 
@@ -121,6 +164,12 @@ async function findProcessesByPort(port) {
     const pids = new Set();
     output.split('\n').forEach(line => {
       const parts = line.trim().split(/\s+/);
+      // FIX #17: Validate port matches exactly — findstr :300 also matches :3000
+      // Netstat format: PROTO LOCAL_ADDR FOREIGN_ADDR STATE PID
+      // LOCAL_ADDR is like 0.0.0.0:3000 or [::]:3000
+      const localAddr = parts[1] || '';
+      const portMatch = localAddr.match(/:(\d+)$/);
+      if (!portMatch || parseInt(portMatch[1], 10) !== safePort) return;
       const pid = parseInt(parts[parts.length - 1], 10);
       if (!isNaN(pid) && pid > 0) {
         pids.add(pid);
@@ -128,8 +177,9 @@ async function findProcessesByPort(port) {
     });
     return Array.from(pids);
   }
-  // Unix: use lsof
-  const output = await execCommand(`lsof -t -i :${safePort} 2>/dev/null || true`);
+  // Unix: use lsof filtered to LISTEN state only
+  // Without -sTCP:LISTEN, lsof returns ALL connection states (ESTABLISHED, TIME_WAIT, etc.)
+  const output = await execCommand(`lsof -t -i :${safePort} -sTCP:LISTEN 2>/dev/null || true`);
   if (!output) return [];
   return output.split('\n')
     .map(p => parseInt(p, 10))
@@ -155,29 +205,38 @@ function parseProcessLines(output, lineParser) {
 
 /**
  * Find ghost node processes related to the project (cross-platform).
+ * Matches ts-node, tsx, and direct node processes running arbitrage services.
+ *
+ * Windows: Uses PowerShell Get-Process (wmic is deprecated since Windows 11 24H2).
+ * Unix: Uses ps aux with grep filtering.
+ *
  * @returns {Promise<Array<{pid: number, cmd: string}>>} - Array of ghost processes
  */
 async function findGhostNodeProcesses() {
   if (isWindows()) {
-    const output = await execCommand('wmic process where "name=\'node.exe\'" get processid,commandline /format:csv 2>nul');
+    // Use PowerShell instead of deprecated wmic
+    const psCmd = 'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name=\'node.exe\'\\" | Select-Object ProcessId,CommandLine | ForEach-Object { $_.ProcessId.ToString() + \'|\' + $_.CommandLine }" 2>nul';
+    const output = await execCommand(psCmd);
     if (!output) return [];
     return parseProcessLines(output, (line) => {
       // FIX P3-1: Tighten matching to prevent killing unrelated projects
       const hasArbitrage = line.includes('arbitrage');
       const hasTsNode = line.includes('ts-node');
+      const hasTsx = line.includes('tsx');
       const hasServices = line.includes('services') && line.includes('index.ts');
-      if (!hasArbitrage || !(hasTsNode || hasServices)) return null;
-      const parts = line.split(',');
-      if (parts.length < 3) return null;
+      if (!hasArbitrage || !(hasTsNode || hasTsx || hasServices)) return null;
+      const sepIdx = line.indexOf('|');
+      if (sepIdx < 0) return null;
       return {
-        pid: parseInt(parts[parts.length - 1], 10),
-        cmd: parts.slice(1, -1).join(',').substring(0, 80)
+        pid: parseInt(line.substring(0, sepIdx), 10),
+        cmd: line.substring(sepIdx + 1).substring(0, 80)
       };
     });
   }
   // Unix: use ps
   // FIX P3-1: Require "arbitrage" in command line to avoid matching unrelated projects
-  const output = await execCommand('ps aux 2>/dev/null | grep arbitrage | grep -E "ts-node|services/.*/src/index.ts" | grep -v grep || true');
+  // Also match tsx and direct node processes, not just ts-node
+  const output = await execCommand('ps aux 2>/dev/null | grep arbitrage | grep -E "ts-node|tsx|node.*services/.*/src/index" | grep -v grep || true');
   if (!output) return [];
   return parseProcessLines(output, (line) => {
     const parts = line.split(/\s+/);
@@ -190,15 +249,51 @@ async function findGhostNodeProcesses() {
 }
 
 /**
- * Kill ts-node processes related to arbitrage project (cross-platform).
+ * Kill ts-node/tsx/node processes related to arbitrage project (cross-platform).
  * FIX P3-1: Tightened matching to avoid killing unrelated projects.
+ * Matches: ts-node, tsx, and direct node processes running arbitrage services.
+ *
+ * Windows: Uses PowerShell (wmic deprecated since Windows 11 24H2).
+ * Unix: Uses pkill with broader pattern matching.
+ *
  * @returns {Promise<void>}
  */
 async function killTsNodeProcesses() {
-  const cmd = isWindows()
-    ? 'wmic process where "commandline like \'%ts-node%\' and commandline like \'%arbitrage%\' and name=\'node.exe\'" call terminate 2>nul'
-    : 'pkill -f "ts-node.*arbitrage" 2>/dev/null';
-  await execCommand(cmd);
+  if (isWindows()) {
+    // Use PowerShell instead of deprecated wmic
+    const psCmd = 'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name=\'node.exe\' AND commandline LIKE \'%arbitrage%\'\\" | Where-Object { $_.CommandLine -match \'ts-node|tsx|services.*index\\.ts\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul';
+    await execCommand(psCmd);
+  } else {
+    // Kill ts-node and tsx processes related to arbitrage
+    await execCommand('pkill -f "ts-node.*arbitrage" 2>/dev/null');
+    await execCommand('pkill -f "tsx.*arbitrage" 2>/dev/null');
+    // Also kill direct node processes running our service entry points
+    await execCommand('pkill -f "node.*arbitrage.*services/.*/src/index" 2>/dev/null');
+  }
+}
+
+/**
+ * FIX #10 + #9: Kill all services by PID in parallel.
+ * Extracted from stop-local.js and start-local.js to eliminate duplication.
+ * Uses Promise.all for parallel kills (Fix #9) in a shared function (Fix #10).
+ *
+ * @param {Object<string, number>} pids - Map of service name to PID
+ * @returns {Promise<Array<{ name: string, pid: number, killed: boolean, existed: boolean }>>}
+ */
+async function killAllPids(pids) {
+  const entries = Object.entries(pids);
+  if (entries.length === 0) return [];
+
+  return Promise.all(
+    entries.map(async ([name, pid]) => {
+      const existed = await processExists(pid);
+      if (!existed) {
+        return { name, pid, killed: false, existed: false };
+      }
+      const killed = await killProcess(pid);
+      return { name, pid, killed, existed: true };
+    })
+  );
 }
 
 // =============================================================================
@@ -211,6 +306,8 @@ module.exports = {
   killProcess,
   processExists,
   findProcessesByPort,
+  parseProcessLines,
   findGhostNodeProcesses,
-  killTsNodeProcesses
+  killTsNodeProcesses,
+  killAllPids
 };

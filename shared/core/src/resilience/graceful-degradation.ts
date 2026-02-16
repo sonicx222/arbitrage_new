@@ -7,6 +7,7 @@
 import { createLogger } from '../logger';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { dualPublish as dualPublishUtil } from './dual-publish';
 // S4.1.3-FIX: Import canonical DegradationLevel enum from cross-region-health (ADR-007)
 import { DegradationLevel } from '../monitoring/cross-region-health';
 
@@ -72,10 +73,13 @@ export class GracefulDegradationManager {
   // S4.1.3-FIX: Injectable capability tester for deterministic testing
   private capabilityTester?: (serviceName: string, capability: ServiceCapability) => Promise<boolean>;
 
+  // P1-10 FIX: Store initialization promise so dualPublish can await readiness
+  private initPromise: Promise<void>;
+
   constructor() {
     this.initializeDefaultDegradationLevels();
-    // P1-15 FIX: Initialize streams client asynchronously
-    this.initializeStreamsClient();
+    // P1-10 FIX: Store init promise so dualPublish can await readiness
+    this.initPromise = this.initializeStreamsClient();
   }
 
   /**
@@ -91,33 +95,17 @@ export class GracefulDegradationManager {
   }
 
   /**
-   * P1-15 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
-   * and Pub/Sub (secondary/fallback) for backwards compatibility.
-   *
-   * This follows the migration pattern from ADR-002 where we transition
-   * from Pub/Sub to Streams while maintaining backwards compatibility.
+   * P2-17 FIX: Delegates to shared dualPublishUtil to avoid code duplication.
+   * P1-10 FIX: Awaits initPromise to ensure streams client is ready.
    */
   private async dualPublish(
     streamName: string,
     pubsubChannel: string,
     message: Record<string, any>
   ): Promise<void> {
-    // Primary: Redis Streams (ADR-002 compliant)
-    if (this.streamsClient) {
-      try {
-        await this.streamsClient.xadd(streamName, message);
-      } catch (error) {
-        logger.error('Failed to publish to Redis Stream', { error, streamName });
-      }
-    }
-
-    // Secondary: Pub/Sub (backwards compatibility)
-    try {
-      const redis = await this.redis;
-      await redis.publish(pubsubChannel, message as any);
-    } catch (error) {
-      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
-    }
+    await this.initPromise;
+    const redis = await this.redis;
+    await dualPublishUtil(this.streamsClient, redis, streamName, pubsubChannel, message);
   }
 
   /**
@@ -278,7 +266,7 @@ export class GracefulDegradationManager {
     if (!capabilities) return null;
 
     const capability = capabilities.find(c => c.name === capabilityName);
-    return capability?.fallback || null;
+    return capability?.fallback ?? null;
   }
 
   // Force recovery (admin function)
@@ -454,23 +442,23 @@ export class GracefulDegradationManager {
         return await redis.ping();
 
       case 'web3_connection':
-        // S4.1.3-FIX: Removed Math.random() - in production, this should
-        // actually test the web3 connection. Return true to allow recovery
-        // attempts; the actual capability should be tested by the service.
-        logger.debug(`Testing web3_connection for ${serviceName}`);
-        return true; // Optimistic - let the service verify actual connectivity
+        // P2-24 FIX: Default to false — untested capabilities should not
+        // optimistically report as healthy. Services should register a
+        // capabilityTester via constructor for accurate probing.
+        logger.debug(`No probe available for web3_connection on ${serviceName}, assuming unavailable`);
+        return false;
 
       case 'ml_prediction':
-        // S4.1.3-FIX: Removed Math.random() - in production, this should
-        // actually test ML model availability
-        logger.debug(`Testing ml_prediction for ${serviceName}`);
-        return true; // Optimistic - let the service verify actual availability
+        // P2-24 FIX: Default to false — untested capabilities should not
+        // optimistically report as healthy.
+        logger.debug(`No probe available for ml_prediction on ${serviceName}, assuming unavailable`);
+        return false;
 
       default:
-        // S4.1.3-FIX: For unknown capabilities, return true to allow recovery.
-        // Services should register capability-specific testers for accurate testing.
-        logger.debug(`Testing unknown capability ${capability.name} for ${serviceName}`);
-        return true;
+        // P2-24 FIX: Unknown capabilities default to false. Services should
+        // register a capabilityTester for accurate testing.
+        logger.debug(`No probe available for unknown capability ${capability.name} on ${serviceName}`);
+        return false;
     }
   }
 

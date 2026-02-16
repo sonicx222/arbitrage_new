@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 import { OnChainLiquidityValidator } from '../../onchain-liquidity.validator';
 import { LiquidityCheck } from '../../../domain/models';
 import type { IProviderInfo, ILiquidityContext } from '../../../domain';
+import { AAVE_PROVIDER } from '../test-providers';
 
 describe('OnChainLiquidityValidator', () => {
   let validator: OnChainLiquidityValidator;
@@ -536,6 +537,138 @@ describe('OnChainLiquidityValidator', () => {
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
       }
+    });
+  });
+
+  describe('logger injection (F24)', () => {
+    it('should log circuit_breaker_opened via injected logger', async () => {
+      const mockLogger = {
+        info: jest.fn<(msg: string, meta?: object) => void>(),
+        warn: jest.fn<(msg: string, meta?: object) => void>(),
+        error: jest.fn<(msg: string, meta?: object) => void>(),
+        debug: jest.fn<(msg: string, meta?: object) => void>(),
+      };
+
+      const loggedValidator = new OnChainLiquidityValidator({
+        circuitBreakerThreshold: 3,
+        circuitBreakerCooldownMs: 1000,
+        rpcTimeoutMs: 5000,
+        logger: mockLogger as any,
+      });
+
+      mockCall.mockRejectedValue(new Error('RPC down'));
+      const context: ILiquidityContext = {
+        chain: 'ethereum',
+        rpcProvider: mockRpcProvider,
+      };
+
+      // 3 failures to open circuit
+      for (let i = 0; i < 3; i++) {
+        const provider: IProviderInfo = { ...aaveProvider, protocol: `p${i}` as any };
+        await loggedValidator.checkLiquidity(provider, `0x${i}eee`, BigInt(1e18), context);
+      }
+
+      // Should have logged circuit breaker OPENED
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Circuit breaker OPENED'),
+        expect.objectContaining({
+          component: 'OnChainLiquidityValidator',
+          event: 'circuit_breaker_opened',
+          state: 'OPEN',
+        })
+      );
+    });
+
+    it('should log circuit_breaker_closed on recovery via injected logger', async () => {
+      const mockLogger = {
+        info: jest.fn<(msg: string, meta?: object) => void>(),
+        warn: jest.fn<(msg: string, meta?: object) => void>(),
+        error: jest.fn<(msg: string, meta?: object) => void>(),
+        debug: jest.fn<(msg: string, meta?: object) => void>(),
+      };
+
+      const loggedValidator = new OnChainLiquidityValidator({
+        circuitBreakerThreshold: 3,
+        circuitBreakerCooldownMs: 100, // Short cooldown for test
+        rpcTimeoutMs: 5000,
+        logger: mockLogger as any,
+      });
+
+      const context: ILiquidityContext = {
+        chain: 'ethereum',
+        rpcProvider: mockRpcProvider,
+      };
+
+      // Trip the circuit breaker
+      mockCall.mockRejectedValue(new Error('RPC down'));
+      for (let i = 0; i < 3; i++) {
+        const provider: IProviderInfo = { ...aaveProvider, protocol: `p${i}` as any };
+        await loggedValidator.checkLiquidity(provider, `0x${i}fff`, BigInt(1e18), context);
+      }
+
+      // Wait for cooldown
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Successful retry should close circuit and log CLOSED
+      mockCall.mockResolvedValue(mockBalanceResult);
+      (mockLogger.info as jest.Mock).mockClear();
+
+      await loggedValidator.checkLiquidity(aaveProvider, tokenAddress, BigInt(1e18), context);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Circuit breaker CLOSED'),
+        expect.objectContaining({
+          component: 'OnChainLiquidityValidator',
+          event: 'circuit_breaker_closed',
+          state: 'CLOSED',
+        })
+      );
+    });
+
+    it('should log circuit_breaker_half_open when retrying after cooldown', async () => {
+      const mockLogger = {
+        info: jest.fn<(msg: string, meta?: object) => void>(),
+        warn: jest.fn<(msg: string, meta?: object) => void>(),
+        error: jest.fn<(msg: string, meta?: object) => void>(),
+        debug: jest.fn<(msg: string, meta?: object) => void>(),
+      };
+
+      const loggedValidator = new OnChainLiquidityValidator({
+        circuitBreakerThreshold: 3,
+        circuitBreakerCooldownMs: 100,
+        rpcTimeoutMs: 5000,
+        logger: mockLogger as any,
+      });
+
+      const context: ILiquidityContext = {
+        chain: 'ethereum',
+        rpcProvider: mockRpcProvider,
+      };
+
+      // Trip the circuit breaker
+      mockCall.mockRejectedValue(new Error('RPC down'));
+      for (let i = 0; i < 3; i++) {
+        const provider: IProviderInfo = { ...aaveProvider, protocol: `p${i}` as any };
+        await loggedValidator.checkLiquidity(provider, `0x${i}ggg`, BigInt(1e18), context);
+      }
+
+      // Wait for cooldown
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Retry attempt should log HALF-OPEN
+      (mockLogger.info as jest.Mock).mockClear();
+      mockCall.mockResolvedValue(mockBalanceResult);
+
+      await loggedValidator.checkLiquidity(aaveProvider, tokenAddress, BigInt(1e18), context);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Circuit breaker HALF-OPEN'),
+        expect.objectContaining({
+          component: 'OnChainLiquidityValidator',
+          event: 'circuit_breaker_half_open',
+          state: 'HALF-OPEN',
+        })
+      );
     });
   });
 

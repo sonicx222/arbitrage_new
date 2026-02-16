@@ -187,6 +187,7 @@ describe('flash-loan-availability', () => {
         aave_v3: true,
         balancer_v2: true,
         pancakeswap_v3: true,
+        spookyswap: false,
         syncswap: false,
       });
     });
@@ -202,6 +203,7 @@ describe('flash-loan-availability', () => {
       expect(solana?.aave_v3).toBe(false);
       expect(solana?.balancer_v2).toBe(false);
       expect(solana?.pancakeswap_v3).toBe(false);
+      expect(solana?.spookyswap).toBe(false);
       expect(solana?.syncswap).toBe(false);
     });
   });

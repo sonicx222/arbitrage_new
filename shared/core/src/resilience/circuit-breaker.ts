@@ -216,11 +216,21 @@ export class CircuitBreaker {
   }
 
   /**
-   * P2-2 FIX: Remove failures older than monitoring period
+   * P2-2 FIX: Remove failures older than monitoring period.
+   * Timestamps are appended in order, so oldest are always at the front.
+   * Uses a single splice to remove all expired entries in O(n) instead of
+   * per-element shift() which is O(k*n) when k entries are pruned.
    */
   private pruneOldFailures(): void {
     const cutoff = Date.now() - this.config.monitoringPeriod;
-    this.failureTimestamps = this.failureTimestamps.filter(ts => ts > cutoff);
+    // Binary-style scan from front: find first entry that's still valid
+    let firstValid = 0;
+    while (firstValid < this.failureTimestamps.length && this.failureTimestamps[firstValid] <= cutoff) {
+      firstValid++;
+    }
+    if (firstValid > 0) {
+      this.failureTimestamps.splice(0, firstValid);
+    }
   }
 
   /**
@@ -250,27 +260,35 @@ export class CircuitBreaker {
   }
 
   // Manual state control for testing/administration
-  forceOpen(): void {
+  forceOpen(reason?: string): void {
+    const previousState = this.state;
     this.state = CircuitState.OPEN;
     this.nextAttemptTime = Date.now() + this.config.recoveryTimeout;
     this.halfOpenInProgress = false;
 
-    // P0-2 FIX: Use structured logger
+    // P2-25 FIX: Audit logging with previous state and reason for manual override
     this.logger.warn('Circuit breaker manually opened', {
-      name: this.config.name
+      name: this.config.name,
+      previousState,
+      reason: reason ?? 'manual_override',
+      failures: this.failures,
+      windowFailures: this.failureTimestamps.length
     });
   }
 
-  forceClose(): void {
+  forceClose(reason?: string): void {
+    const previousState = this.state;
     this.state = CircuitState.CLOSED;
     this.failures = 0;
     this.successes = 0;
     this.halfOpenInProgress = false;
     this.failureTimestamps = [];
 
-    // P0-2 FIX: Use structured logger
+    // P2-25 FIX: Audit logging with previous state and reason for manual override
     this.logger.info('Circuit breaker manually closed', {
-      name: this.config.name
+      name: this.config.name,
+      previousState,
+      reason: reason ?? 'manual_override'
     });
   }
 

@@ -791,6 +791,20 @@ export class ChainSimulator extends EventEmitter {
       const newReserve1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - priceChange)));
       reserves.reserve1 = newReserve1 > 0n ? newReserve1 : 1n;
 
+      // FIX #22: Clamp reserve ratio to prevent unbounded drift.
+      // Without this, reserves drift over time causing price ratios like 1:1,000,000
+      // which produce absurd profit percentages. Real AMM pools maintain bounded ratios.
+      // FIX #22b: Tightened from 100:1 to 2:1. Each pair's ratio is independent, so
+      // two DEXes for the same token can diverge in opposite directions. At 100:1, the
+      // worst cross-DEX spread is 100 vs 0.01 = 10000x, producing trillions-% profits.
+      // At 2:1, worst case is 2.0 vs 0.5 = 4x = 300%, which is realistic for simulated data.
+      const ratio = Number(reserves.reserve0) / Number(reserves.reserve1);
+      const MAX_RATIO = 2; // Max 2:1 price ratio — keeps cross-DEX spreads realistic
+      if (ratio > MAX_RATIO || ratio < 1 / MAX_RATIO) {
+        // Reset reserve1 to bring ratio back to initial range
+        reserves.reserve1 = reserves.reserve0;
+      }
+
       // Emit Sync event
       this.emitSyncEvent(pair, reserves.reserve0, reserves.reserve1);
     }
@@ -898,7 +912,12 @@ export class ChainSimulator extends EventEmitter {
 
       // Calculate profit percentage (accounting for fees)
       const totalFees = buyPair.pair.fee + sellPair.pair.fee;
-      const grossProfit = (maxPrice - minPrice) / minPrice;
+      const rawGrossProfit = (maxPrice - minPrice) / minPrice;
+      // FIX #22: Clamp gross profit to realistic bounds (max 50%).
+      // Unbounded reserve drift causes price ratios to diverge astronomically,
+      // producing absurd profits like 35,357,931,307%. Real DEX arbitrage
+      // opportunities rarely exceed 5-10%.
+      const grossProfit = Math.min(rawGrossProfit, 0.5);
       const netProfit = grossProfit - totalFees;
 
       if (netProfit > 0.001) {  // Only emit if > 0.1% profit

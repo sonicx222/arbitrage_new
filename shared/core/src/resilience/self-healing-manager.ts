@@ -5,11 +5,15 @@ import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { dualPublish as dualPublishUtil } from './dual-publish';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
 // P3-2 FIX: Import unified ServiceHealth from shared types
 import type { ServiceHealth } from '../../../types';
 
-// P2-2-FIX: Import config with fallback for test environment
+// P2-28 NOTE: Using require() intentionally for synchronous config loading.
+// The project compiles to CommonJS ("module": "commonjs" in tsconfig.json),
+// so require() works correctly at runtime. Dynamic import() would break the
+// synchronous initialization needed by module-scope SELF_HEALING_DEFAULTS.
 let SYSTEM_CONSTANTS: typeof import('../../../config/src').SYSTEM_CONSTANTS | undefined;
 try {
   SYSTEM_CONSTANTS = require('../../../config/src').SYSTEM_CONSTANTS;
@@ -110,30 +114,15 @@ export class SelfHealingManager {
   }
 
   /**
-   * P1-16 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
-   * and Pub/Sub (secondary/fallback) for backwards compatibility.
+   * P2-17 FIX: Delegates to shared dualPublishUtil to avoid code duplication.
    */
   private async dualPublish(
     streamName: string,
     pubsubChannel: string,
     message: Record<string, any>
   ): Promise<void> {
-    // Primary: Redis Streams (ADR-002 compliant)
-    if (this.streamsClient) {
-      try {
-        await this.streamsClient.xadd(streamName, message);
-      } catch (error) {
-        logger.error('Failed to publish to Redis Stream', { error, streamName });
-      }
-    }
-
-    // Secondary: Pub/Sub (backwards compatibility)
-    try {
-      const redis = await this.redis;
-      await redis.publish(pubsubChannel, message as any);
-    } catch (error) {
-      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
-    }
+    const redis = await this.redis;
+    await dualPublishUtil(this.streamsClient, redis, streamName, pubsubChannel, message);
   }
 
   // Register a service for self-healing management
@@ -372,6 +361,9 @@ export class SelfHealingManager {
     });
 
     // Strategy 3: Dependency restart
+    // P1-8 FIX: Track in-flight dependency restarts to detect circular dependencies
+    const dependencyRestartStack = new Set<string>();
+
     this.addRecoveryStrategy({
       name: 'dependency_restart',
       priority: 80,
@@ -383,19 +375,34 @@ export class SelfHealingManager {
         const serviceDef = this.services.get(service.name);
         if (!serviceDef?.dependencies) return false;
 
-        logger.info(`Restarting dependencies for ${service.name}`, { dependencies: serviceDef.dependencies });
-
-        let success = true;
-        for (const dependency of serviceDef.dependencies) {
-          try {
-            await this.triggerRecovery(dependency);
-          } catch (error) {
-            logger.error(`Failed to restart dependency ${dependency}`, { error });
-            success = false;
-          }
+        // P1-8 FIX: Detect circular dependency chains (A -> B -> A)
+        if (dependencyRestartStack.has(service.name)) {
+          logger.warn('Circular dependency detected in dependency_restart, aborting', {
+            service: service.name,
+            restartChain: Array.from(dependencyRestartStack)
+          });
+          return false;
         }
 
-        return success;
+        dependencyRestartStack.add(service.name);
+
+        try {
+          logger.info(`Restarting dependencies for ${service.name}`, { dependencies: serviceDef.dependencies });
+
+          let success = true;
+          for (const dependency of serviceDef.dependencies) {
+            try {
+              await this.triggerRecovery(dependency);
+            } catch (error) {
+              logger.error(`Failed to restart dependency ${dependency}`, { error });
+              success = false;
+            }
+          }
+
+          return success;
+        } finally {
+          dependencyRestartStack.delete(service.name);
+        }
       }
     });
 
@@ -690,12 +697,33 @@ export class SelfHealingManager {
   }
 
   private handleHealthUpdate(update: any): void {
+    // P1-12 FIX: Validate health update payload from Redis Pub/Sub
+    if (!update || typeof update !== 'object') {
+      logger.warn('Invalid health update: not an object', { update });
+      return;
+    }
+
     // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
     const serviceName = update?.name ?? update?.service;
-    const existingHealth = this.serviceHealth.get(serviceName);
-    if (existingHealth) {
-      Object.assign(existingHealth, update);
+    if (!serviceName || typeof serviceName !== 'string') {
+      logger.warn('Invalid health update: missing service name', { update });
+      return;
     }
+
+    const existingHealth = this.serviceHealth.get(serviceName);
+    if (!existingHealth) {
+      return; // Unknown service, ignore
+    }
+
+    // P1-12 FIX: Only apply known/safe fields to prevent prototype pollution
+    const allowedFields = ['status', 'lastHeartbeat', 'consecutiveFailures', 'restartCount', 'uptime', 'memoryUsage', 'cpuUsage', 'error'];
+    const sanitized: Record<string, any> = {};
+    for (const field of allowedFields) {
+      if (field in update) {
+        sanitized[field] = update[field];
+      }
+    }
+    Object.assign(existingHealth, sanitized);
   }
 
   private async updateHealthInRedis(serviceName: string, health: ServiceHealth): Promise<void> {

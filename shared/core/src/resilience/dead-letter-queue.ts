@@ -4,6 +4,7 @@
 import { createLogger } from '../logger';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { dualPublish as dualPublishUtil } from './dual-publish';
 
 const logger = createLogger('dead-letter-queue');
 
@@ -49,17 +50,56 @@ export class DeadLetterQueue {
   private processingTimer?: NodeJS.Timeout;
   private isProcessing = false;
 
+  // P0-4 FIX: Operation handler registry for actual operation replay.
+  // Services register handlers at startup; processOperation looks up the handler
+  // by operation type instead of using simulated Math.random() processing.
+  private static operationHandlers = new Map<string, (op: FailedOperation) => Promise<void>>();
+
+  /**
+   * P0-4 FIX: Register an operation handler for a given operation type.
+   * Consuming services call this at startup to enable real DLQ replay:
+   *
+   * @example
+   * DeadLetterQueue.registerOperationHandler('price_update', async (op) => {
+   *   await priceService.processUpdate(op.payload);
+   * });
+   */
+  static registerOperationHandler(
+    operationType: string,
+    handler: (op: FailedOperation) => Promise<void>
+  ): void {
+    DeadLetterQueue.operationHandlers.set(operationType, handler);
+    logger.info('Registered DLQ operation handler', { operationType });
+  }
+
+  /**
+   * P0-4 FIX: Unregister an operation handler (for cleanup/testing).
+   */
+  static unregisterOperationHandler(operationType: string): void {
+    DeadLetterQueue.operationHandlers.delete(operationType);
+  }
+
+  // P1-6 FIX: Track scheduled retry timers so they can be cancelled on shutdown
+  private retryTimers = new Set<NodeJS.Timeout>();
+
+  // P1-10 FIX: Store initialization promise so callers can await streams readiness
+  private initPromise: Promise<void>;
+
+  // P1-13 FIX: Maximum payload size in bytes (1MB default)
+  private static readonly MAX_PAYLOAD_SIZE = 1024 * 1024;
+
   constructor(config: Partial<DLQConfig> = {}) {
+    // P1-5 FIX: Use ?? instead of || to preserve explicit 0 values
     this.config = {
-      maxSize: config.maxSize || 10000,
-      retentionPeriod: config.retentionPeriod || 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxSize: config.maxSize ?? 10000,
+      retentionPeriod: config.retentionPeriod ?? 7 * 24 * 60 * 60 * 1000, // 7 days
       retryEnabled: config.retryEnabled !== false,
-      retryDelay: config.retryDelay || 60000, // 1 minute
-      alertThreshold: config.alertThreshold || 1000,
-      batchSize: config.batchSize || 10
+      retryDelay: config.retryDelay ?? 60000, // 1 minute
+      alertThreshold: config.alertThreshold ?? 1000,
+      batchSize: config.batchSize ?? 10
     };
-    // P1-18 FIX: Initialize streams client asynchronously
-    this.initializeStreamsClient();
+    // P1-10 FIX: Store init promise so dualPublish can await readiness
+    this.initPromise = this.initializeStreamsClient();
   }
 
   /**
@@ -74,36 +114,39 @@ export class DeadLetterQueue {
   }
 
   /**
-   * P1-18 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
-   * and Pub/Sub (secondary/fallback) for backwards compatibility.
+   * P2-17 FIX: Delegates to shared dualPublishUtil to avoid code duplication.
+   * P1-10 FIX: Awaits initPromise to ensure streams client is ready.
    */
   private async dualPublish(
     streamName: string,
     pubsubChannel: string,
     message: Record<string, any>
   ): Promise<void> {
-    // Primary: Redis Streams (ADR-002 compliant)
-    if (this.streamsClient) {
-      try {
-        await this.streamsClient.xadd(streamName, message);
-      } catch (error) {
-        logger.error('Failed to publish to Redis Stream', { error, streamName });
-      }
-    }
-
-    // Secondary: Pub/Sub (backwards compatibility)
-    try {
-      const redis = await this.redis;
-      await redis.publish(pubsubChannel, message as any);
-    } catch (error) {
-      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
-    }
+    await this.initPromise;
+    const redis = await this.redis;
+    await dualPublishUtil(this.streamsClient, redis, streamName, pubsubChannel, message);
   }
 
   // Add a failed operation to the dead letter queue
   async enqueue(operation: Omit<FailedOperation, 'id' | 'timestamp'>): Promise<string> {
+    // P1-13 FIX: Truncate oversized payloads to prevent Redis memory exhaustion
+    const sanitizedOp = { ...operation };
+    const payloadJson = JSON.stringify(sanitizedOp.payload ?? '');
+    if (payloadJson.length > DeadLetterQueue.MAX_PAYLOAD_SIZE) {
+      logger.warn('DLQ payload truncated due to size limit', {
+        operation: sanitizedOp.operation,
+        originalSize: payloadJson.length,
+        maxSize: DeadLetterQueue.MAX_PAYLOAD_SIZE
+      });
+      sanitizedOp.payload = { _truncated: true, _originalSize: payloadJson.length };
+    }
+    // P1-13 FIX: Truncate error stack to prevent excessive storage
+    if (sanitizedOp.error?.stack && sanitizedOp.error.stack.length > 4096) {
+      sanitizedOp.error = { ...sanitizedOp.error, stack: sanitizedOp.error.stack.slice(0, 4096) + '\n... [truncated]' };
+    }
+
     const failedOp: FailedOperation = {
-      ...operation,
+      ...sanitizedOp,
       id: this.generateId(),
       timestamp: Date.now()
     };
@@ -243,7 +286,8 @@ export class DeadLetterQueue {
       operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else {
       // Get all operations (by timestamp)
-      const keys = await redis.keys('dlq:priority:*');
+      // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+      const keys = await this.scanKeys('dlq:priority:*');
       for (const key of keys) {
         const ids = await redis.zrange(key, offset, offset + limit - 1);
         operationIds.push(...ids);
@@ -290,7 +334,8 @@ export class DeadLetterQueue {
     }
 
     // Count by service
-    const serviceKeys = await redis.keys('dlq:service:*');
+    // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+    const serviceKeys = await this.scanKeys('dlq:service:*');
     for (const key of serviceKeys) {
       const service = key.replace('dlq:service:', '');
       const count = await redis.zcard(key);
@@ -298,27 +343,46 @@ export class DeadLetterQueue {
     }
 
     // Count by tag
-    const tagKeys = await redis.keys('dlq:tag:*');
+    // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+    const tagKeys = await this.scanKeys('dlq:tag:*');
     for (const key of tagKeys) {
       const tag = key.replace('dlq:tag:', '');
       const count = await redis.zcard(key);
       stats.byTag[tag] = count;
     }
 
-    // Get age statistics
+    // P2-26 FIX: Check ALL priority queues for age stats, not just critical
     if (stats.totalOperations > 0) {
-      const criticalOps = await redis.zrange('dlq:priority:critical', 0, -1, 'WITHSCORES');
-      if (criticalOps.length >= 2) {
-        stats.oldestOperation = parseInt(criticalOps[1]); // First score
-        stats.newestOperation = parseInt(criticalOps[criticalOps.length - 1]); // Last score
+      let oldest = Infinity;
+      let newest = 0;
+      for (const priority of priorities) {
+        const ops = await redis.zrange(`dlq:priority:${priority}`, 0, -1, 'WITHSCORES');
+        if (ops.length >= 2) {
+          const firstScore = parseInt(ops[1]);
+          const lastScore = parseInt(ops[ops.length - 1]);
+          if (firstScore < oldest) oldest = firstScore;
+          if (lastScore > newest) newest = lastScore;
+        }
       }
+      stats.oldestOperation = oldest === Infinity ? 0 : oldest;
+      stats.newestOperation = newest;
     }
 
     return stats;
   }
 
+  // P2-21 FIX: Track in-flight retries to prevent duplicate processing
+  private retryInFlight = new Set<string>();
+
   // Manually retry a specific operation
   async retryOperation(operationId: string): Promise<boolean> {
+    // P2-21 FIX: Idempotency guard — skip if already being retried
+    if (this.retryInFlight.has(operationId)) {
+      logger.warn('Operation already being retried, skipping duplicate', { operationId });
+      return false;
+    }
+
+    this.retryInFlight.add(operationId);
     try {
       const operation = await this.getOperation(operationId);
       if (!operation) {
@@ -342,6 +406,8 @@ export class DeadLetterQueue {
     } catch (error) {
       logger.error('Manual retry failed with error', { error, operationId });
       return false;
+    } finally {
+      this.retryInFlight.delete(operationId);
     }
   }
 
@@ -352,8 +418,8 @@ export class DeadLetterQueue {
 
     try {
       const redis = await this.redis;
-      // Find all DLQ keys
-      const keys = await redis.keys('dlq:*');
+      // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+      const keys = await this.scanKeys('dlq:*');
 
       for (const key of keys) {
         if (key.startsWith('dlq:') && !key.includes(':priority:') && !key.includes(':service:') && !key.includes(':tag:')) {
@@ -392,20 +458,43 @@ export class DeadLetterQueue {
     if (this.processingTimer) {
       clearInterval(this.processingTimer);
       this.processingTimer = undefined;
-      logger.info('DLQ auto-processing stopped');
     }
+    // P1-6 FIX: Cancel all pending retry timers to prevent post-shutdown execution
+    for (const timer of this.retryTimers) {
+      clearTimeout(timer);
+    }
+    this.retryTimers.clear();
+    logger.info('DLQ auto-processing stopped');
   }
 
   private generateId(): string {
-    return `dlq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `dlq_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
   }
 
+  /**
+   * P0-1 FIX: Non-blocking key enumeration using SCAN instead of KEYS.
+   * KEYS is O(n) and blocks the Redis event loop; SCAN iterates incrementally.
+   * @see shared/core/src/redis.ts:985-997 for the same pattern used in getAllServiceHealth()
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const redis = await this.redis;
+    const allKeys: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      allKeys.push(...keys);
+    } while (cursor !== '0');
+    return allKeys;
+  }
+
+  // P2-23 FIX: Sum zcard across the 4 known priority queues instead of SCAN
   private async getQueueSize(): Promise<number> {
     const redis = await this.redis;
-    const keys = await redis.keys('dlq:priority:*');
+    const priorities = ['critical', 'high', 'medium', 'low'];
     let total = 0;
-    for (const key of keys) {
-      total += await redis.zcard(key);
+    for (const priority of priorities) {
+      total += await redis.zcard(`dlq:priority:${priority}`);
     }
     return total;
   }
@@ -434,18 +523,27 @@ export class DeadLetterQueue {
     return await redis.get(`dlq:${id}`);
   }
 
+  // P0-4 FIX: Replaced simulateOperationProcessing with handler registry lookup.
+  // Services register real handlers via DeadLetterQueue.registerOperationHandler();
+  // if no handler is registered, the operation fails honestly instead of using Math.random().
   private async processOperation(operationId: string): Promise<{ success: boolean; retry: boolean }> {
     const operation = await this.getOperation(operationId);
     if (!operation) {
       return { success: false, retry: false };
     }
 
-    // This is where you would implement the actual retry logic
-    // For now, we'll simulate based on operation type
-    try {
-      // Simulate processing based on operation type
-      await this.simulateOperationProcessing(operation);
+    const handler = DeadLetterQueue.operationHandlers.get(operation.operation);
+    if (!handler) {
+      logger.warn('No operation handler registered for DLQ operation type, cannot process', {
+        operationType: operation.operation,
+        operationId: operation.id,
+        service: operation.service
+      });
+      return { success: false, retry: false };
+    }
 
+    try {
+      await handler(operation);
       return { success: true, retry: false };
     } catch (error) {
       operation.retryCount++;
@@ -453,25 +551,6 @@ export class DeadLetterQueue {
       const shouldRetry = operation.retryCount < operation.maxRetries && this.shouldRetry(operation, error);
       return { success: false, retry: shouldRetry };
     }
-  }
-
-  private async simulateOperationProcessing(operation: FailedOperation): Promise<void> {
-    // Simulate different failure rates based on operation type
-    const failureRate = {
-      'arbitrage_calculation': 0.1,
-      'price_update': 0.05,
-      'bridge_transaction': 0.2,
-      'health_check': 0.02
-    };
-
-    const rate = failureRate[operation.operation as keyof typeof failureRate] || 0.1;
-
-    if (Math.random() < rate) {
-      throw new Error(`Simulated failure for ${operation.operation}`);
-    }
-
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, Math.random() * 100));
   }
 
   private shouldRetry(operation: FailedOperation, error: any): boolean {
@@ -484,10 +563,12 @@ export class DeadLetterQueue {
   }
 
   private async scheduleRetry(operationId: string): Promise<void> {
-    // Schedule retry after delay
-    setTimeout(async () => {
+    // P1-6 FIX: Track the timer so it can be cancelled on shutdown
+    const timer = setTimeout(async () => {
+      this.retryTimers.delete(timer);
       await this.retryOperation(operationId);
     }, this.config.retryDelay);
+    this.retryTimers.add(timer);
   }
 
   private async removeOperation(operationId: string): Promise<void> {
@@ -508,8 +589,9 @@ export class DeadLetterQueue {
     const indexKeys: string[] = [];
     const patterns = ['dlq:priority:*', 'dlq:service:*', 'dlq:tag:*'];
 
+    // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
     for (const pattern of patterns) {
-      const keys = await redis.keys(pattern);
+      const keys = await this.scanKeys(pattern);
       for (const key of keys) {
         const exists = await redis.zscore(key, operationId);
         if (exists !== null) {

@@ -293,13 +293,13 @@ export class L2SequencerProvider extends BaseMevProvider {
       this.getFeeData(),
     ]);
 
-    // BUG-FIX: Use explicit check to avoid treating chainId 0 as undefined.
-    // While no L2 uses chainId 0, this pattern is more robust.
+    // chainId 0 is the fallback for unknown chains — let ethers fetch from network.
+    // All known L2 configs (arbitrum, optimism, base, zksync, linea) have real IDs.
     const preparedTx: ethers.TransactionRequest = {
       ...tx,
       from: this.config.wallet.address,
       nonce,
-      chainId: this.l2Config.chainId !== 0 ? this.l2Config.chainId : undefined,
+      chainId: this.l2Config.chainId || undefined,
     };
 
     if (this.l2Config.supportsEip1559) {
@@ -355,7 +355,7 @@ export class L2SequencerProvider extends BaseMevProvider {
     const timeout = Math.max(this.l2Config.blockTimeMs * 10, 10000);
     return Math.min(
       timeout,
-      this.config.submissionTimeoutMs || 30000
+      this.config.submissionTimeoutMs ?? 30000
     );
   }
 

@@ -17,6 +17,9 @@ import {
   validateConfigSync,
   getLocalChainPriorityFees,
 } from '../../src/mev-protection/mev-risk-analyzer';
+// Intentional direct import (not mocked): this test validates that
+// MEV_RISK_DEFAULTS stays synchronized with the centralized MEV_CONFIG.
+// Requires `npm run build:deps` so @arbitrage/config is available.
 import { MEV_CONFIG } from '@arbitrage/config';
 import { ethers } from 'ethers';
 
@@ -78,7 +81,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 150,
       });
 
-      const defaultAssessment = await await analyzer.assessRisk(context);
+      const defaultAssessment = await analyzer.assessRisk(context);
       const customAssessment = await customAnalyzer.assessRisk(context);
 
       // Default analyzer (threshold 100): 150 bps >= 100, triggers high_slippage_tolerance
@@ -104,7 +107,7 @@ describe('MevRiskAnalyzer', () => {
           poolLiquidityUsd: 10_000_000,
         });
 
-        const assessment = await await analyzer.assessRisk(context);
+        const assessment = await analyzer.assessRisk(context);
 
         expect(assessment.sandwichRisk).toBe(SandwichRiskLevel.LOW);
         expect(assessment.sandwichRiskScore).toBeLessThan(30);
@@ -117,7 +120,7 @@ describe('MevRiskAnalyzer', () => {
           slippageBps: 100, // 1%
         });
 
-        const assessment = await await analyzer.assessRisk(context);
+        const assessment = await analyzer.assessRisk(context);
 
         expect(assessment.sandwichRisk).toBe(SandwichRiskLevel.MEDIUM);
         expect(assessment.sandwichRiskScore).toBeGreaterThanOrEqual(30);
@@ -136,7 +139,7 @@ describe('MevRiskAnalyzer', () => {
           slippageBps: 100, // 1% - moderate slippage
         });
 
-        const assessment = await await analyzer.assessRisk(context);
+        const assessment = await analyzer.assessRisk(context);
 
         expect(assessment.sandwichRisk).toBe(SandwichRiskLevel.HIGH);
         expect(assessment.sandwichRiskScore).toBeGreaterThanOrEqual(70);
@@ -150,7 +153,7 @@ describe('MevRiskAnalyzer', () => {
           slippageBps: 300, // 3%
         });
 
-        const assessment = await await analyzer.assessRisk(context);
+        const assessment = await analyzer.assessRisk(context);
 
         expect(assessment.sandwichRisk).toBe(SandwichRiskLevel.CRITICAL);
         expect(assessment.sandwichRiskScore).toBeGreaterThanOrEqual(90);
@@ -281,7 +284,7 @@ describe('MevRiskAnalyzer', () => {
         expectedProfitUsd: 100,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // Tip should be a reasonable fraction of expected profit
       // (tip in gwei, so we check it's non-zero and sensible)
@@ -300,7 +303,7 @@ describe('MevRiskAnalyzer', () => {
         expectedProfitUsd: 0.01,   // Very small profit ($0.01)
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // Max fee = 0.01 * 0.1 * 1000 = 1 gwei
       // Without capping, high-risk Ethereum would be 2 * 3 = 6 gwei
@@ -315,7 +318,7 @@ describe('MevRiskAnalyzer', () => {
         poolLiquidityUsd: 100_000_000,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // Should use Ethereum minimum (typically 1-2 gwei)
       expect(assessment.recommendedPriorityFeeGwei).toBeGreaterThanOrEqual(1);
@@ -327,7 +330,7 @@ describe('MevRiskAnalyzer', () => {
         valueUsd: 1000,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // L2 tips are typically very low (cheap gas)
       expect(assessment.recommendedPriorityFeeGwei).toBeLessThan(1);
@@ -339,7 +342,7 @@ describe('MevRiskAnalyzer', () => {
         valueUsd: 1000,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // Solana uses tipLamports, not gwei
       expect(assessment.recommendedPriorityFeeGwei).toBe(0);
@@ -360,7 +363,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 200,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       expect(assessment.mempoolRecommendation).toBe(MempoolRecommendation.PRIVATE);
     });
@@ -373,7 +376,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 30,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       expect(assessment.mempoolRecommendation).toBe(MempoolRecommendation.PUBLIC);
     });
@@ -386,7 +389,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 100,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // Medium risk but valuable - better safe than sorry
       expect([MempoolRecommendation.PRIVATE, MempoolRecommendation.CONDITIONAL]).toContain(
@@ -401,7 +404,7 @@ describe('MevRiskAnalyzer', () => {
         poolLiquidityUsd: 500_000,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // L2s have sequencer protection, so public is usually fine
       expect([MempoolRecommendation.PUBLIC, MempoolRecommendation.CONDITIONAL]).toContain(
@@ -420,7 +423,7 @@ describe('MevRiskAnalyzer', () => {
 
       for (const { chain, expected } of contexts) {
         const context = createTransactionContext({ chain, valueUsd: 10000 });
-        const assessment = await await analyzer.assessRisk(context);
+        const assessment = await analyzer.assessRisk(context);
         expect(assessment.recommendedStrategy).toBe(expected);
       }
     });
@@ -433,7 +436,7 @@ describe('MevRiskAnalyzer', () => {
   describe('Assessment Output', () => {
     it('should return complete assessment object', async () => {
       const context = createTransactionContext();
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       expect(assessment).toHaveProperty('sandwichRisk');
       expect(assessment).toHaveProperty('sandwichRiskScore');
@@ -451,7 +454,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 200, // >= 200 bps = critical
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // 25% liquidity ratio triggers critical, 200 bps slippage triggers critical
       expect(assessment.riskFactors).toContain('critical_value_to_liquidity_ratio');
@@ -465,7 +468,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 100, // >= 100 bps (threshold) = high
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // 5% liquidity ratio triggers high, 100 bps slippage triggers high
       expect(assessment.riskFactors).toContain('high_value_to_liquidity_ratio');
@@ -478,7 +481,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 100,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // MEV exposure should be some fraction of value based on slippage
       expect(assessment.estimatedMevExposureUsd).toBeGreaterThan(0);
@@ -496,7 +499,7 @@ describe('MevRiskAnalyzer', () => {
         valueUsd: 0,
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       expect(assessment.sandwichRisk).toBe(SandwichRiskLevel.LOW);
       expect(assessment.sandwichRiskScore).toBe(0);
@@ -509,7 +512,7 @@ describe('MevRiskAnalyzer', () => {
         slippageBps: 200, // Add high slippage to push into critical
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       // With 10x value-to-liquidity + high slippage = CRITICAL
       expect(assessment.sandwichRisk).toBe(SandwichRiskLevel.CRITICAL);
@@ -521,7 +524,7 @@ describe('MevRiskAnalyzer', () => {
         chain: 'unknown_chain',
       });
 
-      const assessment = await await analyzer.assessRisk(context);
+      const assessment = await analyzer.assessRisk(context);
 
       expect(assessment).toBeDefined();
       expect(assessment.recommendedStrategy).toBe('standard');

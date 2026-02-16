@@ -34,7 +34,10 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
     ValidationMiddleware.validateHealthCheck,
     (req: Request, res: Response) => {
       const systemHealth = state.getSystemMetrics().systemHealth;
-      const status = systemHealth >= 50 ? 'ok' : 'degraded';
+      // FIX #24: Use 'healthy'/'degraded' to match other services.
+      // Coordinator used 'ok' while all others used 'healthy', breaking
+      // uniform monitoring (status === 'healthy' checks would miss coordinator).
+      const status = systemHealth >= 50 ? 'healthy' : 'degraded';
 
       // Minimal response for unauthenticated requests (load balancer probes)
       if (!(req as any).user) {

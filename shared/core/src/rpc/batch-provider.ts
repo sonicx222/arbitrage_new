@@ -2,7 +2,6 @@
  * JSON-RPC 2.0 Batch Provider
  *
  * Implements RPC request batching to reduce individual HTTP calls.
- * This is Phase 3 of the RPC Data Optimization Implementation Plan.
  *
  * Batchable Operations (Non-Hot-Path):
  * - eth_estimateGas: Gas estimation before execution
@@ -10,14 +9,17 @@
  * - eth_getTransactionReceipt: Post-execution confirmation
  *
  * NOT Batchable (Hot-Path):
- * - eth_call(getReserves): Handled by reserve cache (Phase 1)
+ * - eth_call(getReserves): Handled by reserve cache
  * - eth_sendRawTransaction: Time-critical execution
  *
- * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+ * @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
  */
 
 import { ethers } from 'ethers';
 import { clearTimeoutSafe } from '../lifecycle-utils';
+import { createLogger } from '../logger';
+
+const logger = createLogger('batch-provider');
 import {
   TokenBucketRateLimiter,
   type RateLimiterConfig,
@@ -68,7 +70,7 @@ interface PendingRequest {
  * Batch provider configuration.
  */
 export interface BatchProviderConfig {
-  /** Maximum batch size before auto-flush (default: 10) */
+  /** Maximum batch size before auto-flush (default: 20) */
   maxBatchSize?: number;
   /** Maximum time to wait before auto-flush in ms (default: 10) */
   batchTimeoutMs?: number;
@@ -76,14 +78,14 @@ export interface BatchProviderConfig {
   enabled?: boolean;
   /** Maximum queue size before rejecting new requests (default: 100) */
   maxQueueSize?: number;
-  /** Enable request deduplication within batch window (default: false) */
+  /** Enable request deduplication within batch window (default: true) */
   enableDeduplication?: boolean;
   /**
    * R3 Optimization: Enable per-chain rate limiting.
    * Uses token bucket algorithm to prevent 429 errors from RPC providers.
    * Hot-path methods (eth_sendRawTransaction) are exempt.
    * @default false (opt-in for backward compatibility)
-   * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R3
+   * @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
    */
   enableRateLimiting?: boolean;
   /**
@@ -152,7 +154,7 @@ export const NON_BATCHABLE_METHODS = new Set([
 /** Default configuration values */
 // R4 Optimization: Increased from 10 to 20 for 15-20% reduction in HTTP overhead
 // JSON-RPC batch protocol has minimal per-request overhead, larger batches are more efficient
-// @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R4
+// @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
 const DEFAULT_MAX_BATCH_SIZE = 20;
 const DEFAULT_BATCH_TIMEOUT_MS = 10;
 const DEFAULT_MAX_QUEUE_SIZE = 100;
@@ -183,6 +185,10 @@ export class BatchProvider {
   private readonly provider: ethers.JsonRpcProvider;
   private readonly config: Required<BatchProviderConfig>;
 
+  // Cached connection info from provider (avoids calling private _getConnection() per flush)
+  private readonly cachedUrl: string;
+  private readonly cachedHeaders: Record<string, string>;
+
   private pendingBatch: PendingRequest[] = [];
   private batchTimeout: NodeJS.Timeout | null = null;
   private nextId = 1;
@@ -209,20 +215,35 @@ export class BatchProvider {
 
   constructor(provider: ethers.JsonRpcProvider, config?: BatchProviderConfig) {
     this.provider = provider;
+
+    // Resolve rate limit config once so stored config matches actual limiter
+    const resolvedRateLimitConfig = config?.rateLimitConfig
+      ?? getRateLimitConfig(config?.chainOrProvider ?? 'default');
+
     this.config = {
       maxBatchSize: config?.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE,
       batchTimeoutMs: config?.batchTimeoutMs ?? DEFAULT_BATCH_TIMEOUT_MS,
       enabled: config?.enabled ?? true,
       maxQueueSize: config?.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE,
       // R1 Optimization: Enable deduplication by default to reduce 5-10% redundant RPC calls
-      // Deduplication tracks identical requests within a batch window and shares results
-      // @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R1
       enableDeduplication: config?.enableDeduplication ?? true,
       // R3 Optimization: Rate limiting (opt-in for backward compatibility)
       enableRateLimiting: config?.enableRateLimiting ?? false,
-      rateLimitConfig: config?.rateLimitConfig ?? { tokensPerSecond: 20, maxBurst: 40 },
+      rateLimitConfig: resolvedRateLimitConfig,
       chainOrProvider: config?.chainOrProvider ?? 'default',
     };
+
+    // Cache connection URL and headers at construction time.
+    // This avoids calling the private _getConnection() on every batch flush,
+    // reducing coupling to ethers internals.
+    const connection = this.provider._getConnection();
+    this.cachedUrl = connection.url;
+    this.cachedHeaders = { 'Content-Type': 'application/json' };
+    // Forward auth headers from provider's FetchRequest if present
+    const authHeader = this.extractAuthHeader(connection);
+    if (authHeader) {
+      this.cachedHeaders['Authorization'] = authHeader;
+    }
 
     if (this.config.enableDeduplication) {
       this.deduplicationMap = new Map();
@@ -230,8 +251,7 @@ export class BatchProvider {
 
     // R3 Optimization: Initialize rate limiter if enabled
     if (this.config.enableRateLimiting) {
-      const rateLimitConfig = config?.rateLimitConfig ?? getRateLimitConfig(this.config.chainOrProvider);
-      this.rateLimiter = new TokenBucketRateLimiter(rateLimitConfig);
+      this.rateLimiter = new TokenBucketRateLimiter(this.config.rateLimitConfig);
     }
   }
 
@@ -256,7 +276,6 @@ export class BatchProvider {
     }
 
     // R3 Optimization: Check rate limiter before processing (hot-path exempt methods bypass)
-    // @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R3
     if (this.rateLimiter && !isRateLimitExempt(method)) {
       if (!this.rateLimiter.tryAcquire()) {
         this.stats.totalRateLimited++;
@@ -313,7 +332,7 @@ export class BatchProvider {
         this.batchTimeout = setTimeout(() => {
           this.flushBatch().catch((error) => {
             // Log but don't throw - individual requests will be rejected
-            console.error('Batch flush error:', error);
+            logger.error('Batch flush error', { error });
           });
         }, this.config.batchTimeoutMs);
       }
@@ -322,7 +341,7 @@ export class BatchProvider {
       if (this.pendingBatch.length >= this.config.maxBatchSize) {
         this.flushBatch().catch((error) => {
           // Log but don't throw - individual requests will be rejected
-          console.error('Batch flush error:', error);
+          logger.error('Batch flush error', { error });
         });
       }
     });
@@ -343,8 +362,15 @@ export class BatchProvider {
     this.pendingBatch = [];
     this.stats.currentQueueSize = 0;
 
-    // Clear deduplication map
+    // FIX: Save dedup groups before clearing so we can propagate results
+    // to duplicate callers after the primary request resolves.
+    // Previously, the map was cleared here and duplicate promises were never
+    // resolved/rejected, causing permanent hangs for any deduplicated request.
+    let savedDedupGroups: Map<string, PendingRequest[]> | null = null;
     if (this.deduplicationMap) {
+      if (this.deduplicationMap.size > 0) {
+        savedDedupGroups = new Map(this.deduplicationMap);
+      }
       this.deduplicationMap.clear();
     }
 
@@ -359,10 +385,12 @@ export class BatchProvider {
       try {
         const result = await this.provider.send(request.method, request.params);
         request.resolve(result);
+        this.resolveDedupGroup(savedDedupGroups, request, result, null);
         this.stats.totalRequestsProcessed++;
-        this.stats.totalRequestsBypassed++; // Counted as bypassed since no actual batch
       } catch (error) {
-        request.reject(error instanceof Error ? error : new Error(String(error)));
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        request.reject(errorObj);
+        this.resolveDedupGroup(savedDedupGroups, request, undefined, errorObj);
         this.stats.totalBatchErrors++;
       }
       return;
@@ -390,16 +418,17 @@ export class BatchProvider {
       this.stats.totalRequestsBatched += batch.length;
       this.updateAverageBatchSize(batch.length);
 
-      // Resolve individual promises
-      this.resolveResponses(batch, batchRequest, responses);
+      // Resolve individual promises and propagate to dedup groups
+      this.resolveResponses(batch, batchRequest, responses, savedDedupGroups);
 
     } catch (error) {
-      // Batch-level error - reject all pending requests
+      // Batch-level error - reject all pending requests and their dedup groups
       this.stats.totalBatchErrors++;
       const errorObj = error instanceof Error ? error : new Error(String(error));
 
       for (const request of batch) {
         request.reject(errorObj);
+        this.resolveDedupGroup(savedDedupGroups, request, undefined, errorObj);
       }
     }
   }
@@ -626,11 +655,13 @@ export class BatchProvider {
 
   /**
    * Resolve individual promises from batch response.
+   * Also propagates results to deduplicated request groups.
    */
   private resolveResponses(
     batch: PendingRequest[],
     requests: JsonRpcRequest[],
-    responses: JsonRpcResponse[]
+    responses: JsonRpcResponse[],
+    dedupGroups: Map<string, PendingRequest[]> | null
   ): void {
     // Create ID to response map for efficient lookup
     const responseMap = new Map<number | string, JsonRpcResponse>();
@@ -645,19 +676,56 @@ export class BatchProvider {
       const response = responseMap.get(rpcRequest.id);
 
       if (!response) {
-        request.reject(new Error(`No response for request ID ${rpcRequest.id}`));
+        const error = new Error(`No response for request ID ${rpcRequest.id}`);
+        request.reject(error);
+        this.resolveDedupGroup(dedupGroups, request, undefined, error);
         continue;
       }
 
       if (response.error) {
-        request.reject(
-          new Error(`RPC error ${response.error.code}: ${response.error.message}`)
-        );
+        const error = new Error(`RPC error ${response.error.code}: ${response.error.message}`);
+        request.reject(error);
+        this.resolveDedupGroup(dedupGroups, request, undefined, error);
         continue;
       }
 
       request.resolve(response.result);
+      this.resolveDedupGroup(dedupGroups, request, response.result, null);
     }
+  }
+
+  /**
+   * Propagate a result or error to all duplicate requests in a dedup group.
+   *
+   * When deduplication is enabled, the first request for a given (method, params)
+   * goes into pendingBatch. Subsequent identical requests are stored only in the
+   * dedup group (index 1+). After the primary request resolves, this method
+   * resolves/rejects all the duplicates with the same outcome.
+   */
+  private resolveDedupGroup(
+    dedupGroups: Map<string, PendingRequest[]> | null,
+    primaryRequest: PendingRequest,
+    result: unknown,
+    error: Error | null
+  ): void {
+    if (!dedupGroups) return;
+
+    const key = this.getDeduplicationKey(primaryRequest.method, primaryRequest.params);
+    const group = dedupGroups.get(key);
+    if (!group) return;
+
+    // Index 0 is the primary request (already resolved/rejected by caller).
+    // Propagate to duplicates at index 1+.
+    for (let i = 1; i < group.length; i++) {
+      if (error) {
+        group[i].reject(error);
+      } else {
+        group[i].resolve(result);
+      }
+    }
+
+    // Remove from map so we don't double-process
+    dedupGroups.delete(key);
   }
 
   /**

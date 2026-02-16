@@ -391,6 +391,18 @@ export function validateRiskConfig(): void {
     errors.push('RISK_MIN_SAMPLES must be at least 1');
   }
 
+  // FIX P2-5: Cross-validate default probability against min win probability.
+  // If defaultWinProbability < minWinProbability, all new chain/DEX combos
+  // (and all combos after restart, since data is in-memory only) will be
+  // rejected by the EV calculator's probability filter.
+  if (probability.defaultWinProbability < ev.minWinProbability) {
+    errors.push(
+      `RISK_DEFAULT_WIN_PROBABILITY (${probability.defaultWinProbability}) must be >= ` +
+      `RISK_MIN_WIN_PROBABILITY (${ev.minWinProbability}). Otherwise all trades using ` +
+      `default probability (new chains, after restart) will be rejected.`
+    );
+  }
+
   if (errors.length > 0) {
     throw new Error(`Risk configuration validation failed:\n${errors.join('\n')}`);
   }

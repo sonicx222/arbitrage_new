@@ -518,5 +518,162 @@ describe('ProviderHealthScorer Budget Tracking', () => {
       expect(budget!.dailyUsedCU).toBe(26);
       expect(budget!.dailyRequestCount).toBe(1);
     });
+
+    it('should reset daily counters after 24 hours (P2 #24)', () => {
+      scorer.recordRequest('infura', 'eth_call'); // 26 CU
+      scorer.recordRequest('infura', 'eth_call'); // 26 CU
+
+      let budget = scorer.getProviderBudget('infura');
+      expect(budget!.dailyUsedCU).toBe(52);
+      expect(budget!.dailyRequestCount).toBe(2);
+
+      // Simulate 24+ hours passing by modifying lastDailyReset on internal state
+      const state = (scorer as any).providerBudgets.get('infura');
+      state.lastDailyReset = Date.now() - (25 * 60 * 60 * 1000); // 25 hours ago
+
+      // Next request should trigger daily reset first
+      scorer.recordRequest('infura', 'eth_call'); // 26 CU after reset
+
+      budget = scorer.getProviderBudget('infura');
+      expect(budget!.dailyUsedCU).toBe(26); // Reset + new request
+      expect(budget!.dailyRequestCount).toBe(1);
+      // Monthly totals should NOT reset
+      expect(budget!.monthlyUsedCU).toBe(78); // 52 + 26
+    });
+  });
+
+  describe('Monthly budget reset (P2 #24)', () => {
+    it('should reset monthly counters after 30 days', () => {
+      scorer.recordRequest('drpc', 'eth_call'); // 26 CU
+      scorer.recordRequest('drpc', 'eth_getLogs'); // 75 CU
+
+      let budget = scorer.getProviderBudget('drpc');
+      expect(budget!.monthlyUsedCU).toBe(101);
+      expect(budget!.monthlyRequestCount).toBe(2);
+
+      // Simulate 31 days passing
+      const state = (scorer as any).providerBudgets.get('drpc');
+      state.lastMonthlyReset = Date.now() - (31 * 24 * 60 * 60 * 1000);
+
+      // Next request should trigger monthly reset
+      scorer.recordRequest('drpc', 'eth_blockNumber'); // 10 CU after reset
+
+      budget = scorer.getProviderBudget('drpc');
+      expect(budget!.monthlyUsedCU).toBe(10); // Reset + new request
+      expect(budget!.monthlyRequestCount).toBe(1);
+    });
+
+    it('should NOT reset monthly counters before 30 days', () => {
+      scorer.recordRequest('ankr', 'eth_call');
+
+      const state = (scorer as any).providerBudgets.get('ankr');
+      state.lastMonthlyReset = Date.now() - (29 * 24 * 60 * 60 * 1000); // 29 days ago
+
+      scorer.recordRequest('ankr', 'eth_call');
+
+      const budget = scorer.getProviderBudget('ankr');
+      expect(budget!.monthlyUsedCU).toBe(52); // No reset, accumulates
+      expect(budget!.monthlyRequestCount).toBe(2);
+    });
+  });
+});
+
+// =============================================================================
+// METRICS DECAY TESTS (P2 #24)
+// Tests for the periodic metrics decay functionality
+// =============================================================================
+describe('ProviderHealthScorer Metrics Decay', () => {
+  it('should decay success and failure counts by decay factor', () => {
+    const scorer = new ProviderHealthScorer({ decayFactor: 0.5 });
+
+    // Record 100 successes and 50 failures
+    for (let i = 0; i < 100; i++) {
+      scorer.recordSuccess('wss://test.com', 'ethereum', 100);
+    }
+    for (let i = 0; i < 50; i++) {
+      scorer.recordFailure('wss://test.com', 'ethereum', 'error');
+    }
+
+    let metrics = scorer.getMetrics('wss://test.com', 'ethereum');
+    expect(metrics!.successCount).toBe(100);
+    expect(metrics!.failureCount).toBe(50);
+
+    // Trigger decay manually (decayMetrics is private, so use internal access)
+    (scorer as any).decayMetrics();
+
+    metrics = scorer.getMetrics('wss://test.com', 'ethereum');
+    expect(metrics!.successCount).toBe(50); // 100 * 0.5
+    expect(metrics!.failureCount).toBe(25); // 50 * 0.5
+
+    scorer.shutdown();
+  });
+
+  it('should decay rate limit and connection drop counts', () => {
+    const scorer = new ProviderHealthScorer({ decayFactor: 0.5 });
+
+    // Record rate limits and connection drops
+    for (let i = 0; i < 10; i++) {
+      scorer.recordRateLimit('wss://test.com', 'ethereum');
+    }
+    for (let i = 0; i < 8; i++) {
+      scorer.recordFailure('wss://test.com', 'ethereum', 'connection_drop');
+    }
+
+    let metrics = scorer.getMetrics('wss://test.com', 'ethereum');
+    expect(metrics!.rateLimitCount).toBe(10);
+    expect(metrics!.connectionDropCount).toBe(8);
+
+    (scorer as any).decayMetrics();
+
+    metrics = scorer.getMetrics('wss://test.com', 'ethereum');
+    expect(metrics!.rateLimitCount).toBe(5); // 10 * 0.5
+    expect(metrics!.connectionDropCount).toBe(4); // 8 * 0.5
+
+    scorer.shutdown();
+  });
+
+  it('should recalculate scores after decay', () => {
+    const scorer = new ProviderHealthScorer({ decayFactor: 0.5 });
+
+    // Create a provider with low success rate
+    for (let i = 0; i < 10; i++) {
+      scorer.recordSuccess('wss://test.com', 'ethereum', 100);
+    }
+    for (let i = 0; i < 90; i++) {
+      scorer.recordFailure('wss://test.com', 'ethereum', 'error');
+    }
+
+    const scoreBefore = scorer.getHealthScore('wss://test.com', 'ethereum');
+
+    // After decay, the ratio stays the same (both multiplied by same factor)
+    // but absolute counts are lower
+    (scorer as any).decayMetrics();
+
+    const scoreAfter = scorer.getHealthScore('wss://test.com', 'ethereum');
+
+    // Scores should be recalculated (success rate stays ~10% since both decay equally)
+    expect(typeof scoreAfter).toBe('number');
+    // Floor(10*0.5)=5, Floor(90*0.5)=45 -> success rate ~10%
+    expect(scoreAfter).toBeCloseTo(scoreBefore, 0);
+
+    scorer.shutdown();
+  });
+
+  it('should eventually decay counts to zero', () => {
+    const scorer = new ProviderHealthScorer({ decayFactor: 0.5 });
+
+    scorer.recordSuccess('wss://test.com', 'ethereum', 100);
+    scorer.recordFailure('wss://test.com', 'ethereum', 'error');
+
+    // Decay multiple times until counts reach zero
+    for (let i = 0; i < 10; i++) {
+      (scorer as any).decayMetrics();
+    }
+
+    const metrics = scorer.getMetrics('wss://test.com', 'ethereum');
+    expect(metrics!.successCount).toBe(0);
+    expect(metrics!.failureCount).toBe(0);
+
+    scorer.shutdown();
   });
 });

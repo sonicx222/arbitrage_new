@@ -50,6 +50,7 @@ module.exports = {
   findProcessesByPort: processManager.findProcessesByPort,
   findGhostNodeProcesses: processManager.findGhostNodeProcesses,
   killTsNodeProcesses: processManager.killTsNodeProcesses,
+  killAllPids: processManager.killAllPids,
 
   // Health checks (from health-checker.js)
   checkHealth: healthChecker.checkHealth,

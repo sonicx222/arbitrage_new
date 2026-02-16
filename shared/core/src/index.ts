@@ -316,7 +316,12 @@ export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './r
 
 export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './resilience/self-healing-manager';
 
-export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './resilience/expert-self-healing-manager';
+// P1-14 FIX: Rename to RecoveryStrategyEnum to avoid shadowing RecoveryStrategy interface
+// P2-22 FIX: Export resetExpertSelfHealingManager for test cleanup
+export { ExpertSelfHealingManager, getExpertSelfHealingManager, resetExpertSelfHealingManager, FailureSeverity, RecoveryStrategy as RecoveryStrategyEnum } from './resilience/expert-self-healing-manager';
+
+// P2-17 FIX: Shared dual-publish utility
+export { dualPublish } from './resilience/dual-publish';
 
 export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './resilience/error-recovery';
 

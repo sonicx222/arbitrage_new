@@ -23,6 +23,7 @@ import type {
 import { ProviderSelection as ProviderSelectionImpl, ProviderScore } from '../domain';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { FlashLoanProtocol } from '../domain/models';
+import { CoalescingMap } from './coalescing-map';
 
 /**
  * Cached ranking entry
@@ -38,6 +39,34 @@ interface CachedRanking {
 }
 
 /**
+ * Bucket an amount by order of magnitude for cache/coalescing key stability.
+ *
+ * Buckets:
+ * - < 1e15 (< 0.001 ETH)  → "dust"
+ * - < 1e18 (< 1 ETH)      → "small"
+ * - < 1e20 (< 100 ETH)    → "medium"
+ * - < 1e22 (< 10K ETH)    → "large"
+ * - >= 1e22                → "whale"
+ *
+ * ~5 buckets per chain keeps cache bounded.
+ */
+function getAmountBucket(amount: bigint): string {
+  if (amount < 1000000000000000n) return 'dust';       // < 1e15
+  if (amount < 1000000000000000000n) return 'small';    // < 1e18
+  if (amount < 100000000000000000000n) return 'medium';  // < 1e20
+  if (amount < 10000000000000000000000n) return 'large'; // < 1e22
+  return 'whale';
+}
+
+/**
+ * Build a compound ranking key from chain and amount bucket.
+ * Used by both ranking cache and request coalescing for consistency.
+ */
+function makeRankingKey(chain: string, amount: bigint): string {
+  return `${chain}:${getAmountBucket(amount)}`;
+}
+
+/**
  * Flash Loan Aggregator Implementation
  *
  * Orchestrates provider selection with ranking, validation, and caching.
@@ -46,10 +75,9 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
   private readonly rankingCache = new Map<string, CachedRanking>();
   /**
    * Pending ranking operations to prevent race condition (C2 fix).
-   * Maps chain → Promise<ranked providers> to coalesce concurrent requests.
-   * Similar pattern to onchain-liquidity.validator.ts:96-113
+   * R2: Uses CoalescingMap to deduplicate concurrent requests for same key.
    */
-  private readonly pendingRankings = new Map<string, Promise<ReadonlyArray<{ provider: IProviderInfo; score: any }>>>();
+  private readonly pendingRankings = new CoalescingMap<string, ReadonlyArray<{ provider: IProviderInfo; score: ProviderScore }>>();
 
   constructor(
     private readonly config: AggregatorConfig,
@@ -107,10 +135,12 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
     }
 
     // Get ranked providers (cached or fresh)
+    // F1: Thread asset (tokenIn) for liquidity estimate population
     const ranked = await this.getRankedProviders(
       chain,
       BigInt(opportunity.amountIn ?? '0'),
-      context
+      context,
+      opportunity.tokenIn
     );
 
     if (ranked.length === 0) {
@@ -129,8 +159,11 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
     for (const rankedProvider of ranked) {
       const provider = rankedProvider.provider;
 
-      // Check availability
-      if (!provider.isAvailable) {
+      // F6: Re-check provider availability against live state (defensive).
+      // Cached rankings may be up to 30s old; provider availability could change.
+      const liveProviders = this.availableProviders.get(chain);
+      const liveProvider = liveProviders?.find(p => p.protocol === provider.protocol);
+      if (!liveProvider?.isAvailable) {
         continue;
       }
 
@@ -253,7 +286,7 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
    */
   clearCaches(): void {
     this.rankingCache.clear();
-    this.pendingRankings.clear(); // C2 fix: Clear pending operations too
+    this.pendingRankings.clear(); // C2 fix: Clear pending coalescing map too
     this.liquidityValidator?.clearCache();
   }
 
@@ -266,42 +299,36 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
   private async getRankedProviders(
     chain: string,
     amount: bigint,
-    context: IOpportunityContext
-  ): Promise<ReadonlyArray<{ provider: IProviderInfo; score: any }>> {
-    // Check cache first
-    const cached = this.rankingCache.get(chain);
+    context: IOpportunityContext,
+    asset?: string
+  ): Promise<ReadonlyArray<{ provider: IProviderInfo; score: ProviderScore }>> {
+    // F3+F4: Use compound key (chain + amount bucket) for cache and coalescing
+    const key = makeRankingKey(chain, amount);
+
+    // Check cache first (F3: compound key includes amount bucket)
+    const cached = this.rankingCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.config.rankingCacheTtlMs) {
       return cached.providers;
     }
 
-    // Request coalescing - atomic check-and-set to prevent race condition
-    let pending = this.pendingRankings.get(chain);
-    if (!pending) {
-      // Create new promise and store atomically
-      pending = this.performRanking(chain, amount, context);
-      this.pendingRankings.set(chain, pending);
-
-      // Cleanup on completion (regardless of success/failure)
-      pending.finally(() => {
-        // Only delete if this is still the same promise (not replaced)
-        if (this.pendingRankings.get(chain) === pending) {
-          this.pendingRankings.delete(chain);
-        }
-      });
-    }
-
-    // Return the promise (either newly created or existing)
-    return pending;
+    // R2: Request coalescing via CoalescingMap - deduplicates concurrent requests
+    // F4: compound key prevents different-amount requests from coalescing
+    return this.pendingRankings.getOrCreate(key, () =>
+      this.performRanking(chain, amount, context, asset)
+    );
   }
 
   /**
    * Perform actual ranking operation (extracted for request coalescing)
+   *
+   * F1: Accepts optional asset to populate liquidityEstimates via validator.
    */
   private async performRanking(
     chain: string,
     amount: bigint,
-    context: IOpportunityContext
-  ): Promise<ReadonlyArray<{ provider: IProviderInfo; score: any }>> {
+    context: IOpportunityContext,
+    asset?: string
+  ): Promise<ReadonlyArray<{ provider: IProviderInfo; score: ProviderScore }>> {
     // Get providers for chain
     const providers = this.availableProviders.get(chain) || [];
 
@@ -314,12 +341,59 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
       }
     }
 
+    // F1: Populate liquidity estimates when validator and asset are available.
+    // estimateLiquidityScore returns a 0-1 score; convert to a synthetic bigint
+    // that will reproduce the same score tier when the ranker processes it.
+    const liquidityEstimates = new Map<FlashLoanProtocol, bigint>();
+    if (this.liquidityValidator && asset && amount > 0n) {
+      for (const provider of providers) {
+        const score = await this.liquidityValidator.estimateLiquidityScore(
+          provider,
+          asset,
+          amount
+        );
+        // Convert score → synthetic liquidity bigint that preserves the tier.
+        // The ranker applies a 10% safety margin, so we derive values that
+        // land in the correct bracket of calculateLiquidityScore:
+        //   score >= 1.0 → 3x amount   → tier 1.0 (>= 2x requiredWithMargin)
+        //   score >= 0.9 → 1.5x amount → tier 0.9 (>= requiredWithMargin)
+        //   score >= 0.7 → 1x amount   → tier 0.7 (>= rawRequired)
+        //   score <  0.7 → amount / 2  → tier 0.3 (insufficient)
+        let syntheticLiquidity: bigint;
+        if (score >= 1.0) {
+          syntheticLiquidity = amount * 3n;
+        } else if (score >= 0.9) {
+          syntheticLiquidity = (amount * 3n) / 2n;
+        } else if (score >= 0.7) {
+          syntheticLiquidity = amount;
+        } else {
+          syntheticLiquidity = amount / 2n;
+        }
+        liquidityEstimates.set(provider.protocol, syntheticLiquidity);
+      }
+    }
+
+    // F12: Populate latencyHistory from metrics data
+    // Only aggregated metrics (avgLatencyMs) are available via IAggregatorMetrics,
+    // so create a synthetic array. latencyHistory has only 5% weight, so this is sufficient.
+    const latencyHistory = new Map<FlashLoanProtocol, number[]>();
+    if (this.metrics) {
+      for (const provider of providers) {
+        const health = this.metrics.getProviderHealth(provider);
+        if (health && health.avgLatencyMs > 0) {
+          // Create a synthetic sample array from the average latency
+          // Use a small array to give the ranker data to calculate P95 from
+          latencyHistory.set(provider.protocol, [health.avgLatencyMs]);
+        }
+      }
+    }
+
     // Build ranking context
     const rankingContext: IRankingContext = {
       chain,
       reliabilityScores,
-      latencyHistory: new Map(),
-      liquidityEstimates: new Map(),
+      latencyHistory,
+      liquidityEstimates,
     };
 
     // Rank providers
@@ -332,14 +406,15 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
       provider: r.provider,
     }));
 
-    // Cache results
-    this.rankingCache.set(chain, {
+    // F3: Cache results with compound key (chain + amount bucket)
+    const key = makeRankingKey(chain, amount);
+    this.rankingCache.set(key, {
       providers: cacheProviders,
       timestamp: Date.now(),
       chain,
     });
 
-    // Evict oldest entries if cache exceeds reasonable size (one entry per chain, ~11 chains max)
+    // Evict oldest entries if cache exceeds reasonable size
     this.cleanupRankingCacheIfNeeded();
 
     return ranked;

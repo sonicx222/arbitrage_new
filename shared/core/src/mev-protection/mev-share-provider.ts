@@ -7,7 +7,6 @@
  *
  * Falls back to standard Flashbots if MEV-Share unavailable.
  *
- * @see ADR-028 MEV-Share Integration
  * @see https://docs.flashbots.net/flashbots-mev-share/overview
  */
 
@@ -175,7 +174,7 @@ export class MevShareProvider extends FlashbotsProvider {
             mevShareResult.bundleHash!,
             [signedTx],
             targetBlock,
-            this.config.submissionTimeoutMs || MEV_DEFAULTS.submissionTimeoutMs
+            this.config.submissionTimeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs
           );
 
           if (inclusion.included) {
@@ -215,14 +214,45 @@ export class MevShareProvider extends FlashbotsProvider {
         // MEV-Share failed, fall through to standard Flashbots
       }
 
-      // Fallback to standard Flashbots submission (parent class)
-      const flashbotsResult = await super.sendProtectedTransaction(tx, options);
+      // Fallback to standard Flashbots bundle submission.
+      // Submit directly using already-prepared transaction instead of
+      // super.sendProtectedTransaction() which would double-count
+      // totalSubmissions and redundantly re-prepare/re-sign/re-simulate.
+      const bundleResult = await this.submitBundle([signedTx], targetBlock);
 
-      // Return standard Flashbots result with MEV-Share metadata
-      return {
-        ...flashbotsResult,
-        usedMevShare: false, // Standard Flashbots was used
-      };
+      if (bundleResult.success) {
+        const flashbotsInclusion = await this.waitForInclusion(
+          bundleResult.bundleHash!,
+          [signedTx],
+          targetBlock,
+          this.config.submissionTimeoutMs ?? MEV_DEFAULTS.submissionTimeoutMs
+        );
+
+        if (flashbotsInclusion.included) {
+          await this.batchUpdateMetrics({
+            successfulSubmissions: 1,
+            bundlesIncluded: 1,
+          }, startTime);
+
+          return {
+            ...this.createSuccessResult(
+              startTime,
+              flashbotsInclusion.transactionHash!,
+              targetBlock,
+              bundleResult.bundleHash,
+              false
+            ),
+            usedMevShare: false,
+          };
+        }
+      }
+
+      // Both MEV-Share and Flashbots failed — fallback to public mempool
+      return this.fallbackToPublicWithRebate(
+        preparedTx,
+        startTime,
+        bundleResult.error ?? 'Flashbots bundle not included after MEV-Share failure'
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return this.fallbackToPublicWithRebate(preparedTx || tx, startTime, errorMessage);
@@ -297,7 +327,7 @@ export class MevShareProvider extends FlashbotsProvider {
 
   /**
    * Send request to MEV-Share endpoint with authentication.
-   * Uses parent's sendRelayRequest but with MEV-Share URL.
+   * Delegates to parent's sendRelayRequest with MEV-Share URL.
    *
    * @param body - Request body
    * @param timeoutMs - Optional timeout
@@ -307,25 +337,7 @@ export class MevShareProvider extends FlashbotsProvider {
     body: object,
     timeoutMs?: number
   ): Promise<any> {
-    const bodyString = JSON.stringify(body);
-    const headers = await this.getAuthHeaders(bodyString);
-
-    const controller = new AbortController();
-    const timeout = timeoutMs || MEV_DEFAULTS.submissionTimeoutMs;
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    try {
-      const response = await fetch(this.mevShareRelayUrl, {
-        method: 'POST',
-        headers,
-        body: bodyString,
-        signal: controller.signal,
-      });
-
-      return await response.json();
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    return this.sendRelayRequest(body, timeoutMs, this.mevShareRelayUrl);
   }
 
   /**

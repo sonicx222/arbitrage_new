@@ -7,22 +7,14 @@
  * @see S1.1.5: Add Stream health monitoring
  */
 
-import { createLogger } from '../logger';
+import { createLogger, LoggerLike } from '../logger';
 import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
-
-/** Logger interface for dependency injection */
-interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
 
 /** Configuration options for StreamHealthMonitor */
 export interface StreamHealthMonitorConfig {
   /** Optional logger for testing (defaults to createLogger) */
-  logger?: Logger;
+  logger?: LoggerLike;
   /** Optional streams client for testing (defaults to getRedisStreamsClient) */
   streamsClient?: RedisStreamsClient;
 }
@@ -116,7 +108,7 @@ type AlertHandler = (alert: StreamAlert) => void;
 export class StreamHealthMonitor {
   private streamsClient: RedisStreamsClient | null = null;
   private injectedStreamsClient: RedisStreamsClient | null = null;
-  private logger: Logger;
+  private logger: LoggerLike;
   private monitoredStreams: Set<string> = new Set();
   private thresholds: StreamHealthThresholds;
   private alertHandlers: AlertHandler[] = [];
@@ -225,26 +217,42 @@ export class StreamHealthMonitor {
   /**
    * Cleanup old entries from maps to prevent memory leaks
    */
+  /**
+   * P3 FIX #32: Two-pass pattern for Map cleanup (collect keys first, then delete).
+   * Deleting during for...of iteration is spec-allowed but fragile.
+   */
   private cleanupOldEntries(): void {
     const now = Date.now();
+    const alertKeysToDelete: string[] = [];
+    const metricKeysToDelete: string[] = [];
 
-    // Cleanup old alert entries
-    for (const [key, timestamp] of this.lastAlerts.entries()) {
+    // Pass 1: Collect stale keys
+    for (const [key, timestamp] of this.lastAlerts) {
       if (now - timestamp > this.maxAlertAge) {
-        this.lastAlerts.delete(key);
+        alertKeysToDelete.push(key);
       }
     }
 
-    // Cleanup old metrics entries
-    for (const [key, metric] of this.lastMetrics.entries()) {
+    for (const [key, metric] of this.lastMetrics) {
       if (now - metric.timestamp > this.maxMetricsAge) {
-        this.lastMetrics.delete(key);
+        metricKeysToDelete.push(key);
       }
+    }
+
+    // Pass 2: Delete collected keys
+    for (const key of alertKeysToDelete) {
+      this.lastAlerts.delete(key);
+    }
+
+    for (const key of metricKeysToDelete) {
+      this.lastMetrics.delete(key);
     }
   }
 
   /**
-   * Stop health monitoring
+   * Stop health monitoring.
+   * P2 FIX #16: Also clears alertHandlers and resets init state so
+   * a subsequent start()/ensureInitialized() properly re-initializes.
    */
   async stop(): Promise<void> {
     this.monitoringInterval = clearIntervalSafe(this.monitoringInterval);
@@ -252,6 +260,13 @@ export class StreamHealthMonitor {
     // Clear maps to free memory
     this.lastAlerts.clear();
     this.lastMetrics.clear();
+
+    // P2 FIX #16: Clear alert handlers to prevent accumulation across stop/start cycles
+    this.alertHandlers.length = 0;
+
+    // P2 FIX #16: Reset init state so re-initialization happens on next use
+    this.initialized = false;
+    this.initializingPromise = null;
 
     this.logger.info('Stream health monitoring stopped');
   }

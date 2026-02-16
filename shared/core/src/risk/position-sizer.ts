@@ -275,6 +275,11 @@ export class KellyPositionSizer {
 
   /**
    * Calculates odds (profit/loss ratio) from BigInt values.
+   *
+   * FIX P1-2: Uses BigInt scaling to preserve precision before Number conversion.
+   * Previously converted each operand individually via Number(), losing precision
+   * for values above Number.MAX_SAFE_INTEGER (~9e15 wei = ~0.009 ETH).
+   * DeFi amounts routinely exceed this (10 ETH = 1e19 wei).
    */
   private calculateOdds(expectedProfit: bigint, expectedLoss: bigint): number {
     if (expectedLoss === 0n) {
@@ -286,9 +291,9 @@ export class KellyPositionSizer {
       return 0;
     }
 
-    // Convert BigInt to number for floating-point division
-    // This is safe because odds is a ratio, not absolute value
-    return Number(expectedProfit) / Number(expectedLoss);
+    // Compute ratio in BigInt space with 1e8 scale factor, then convert to Number
+    const scaleFactor = 100000000n; // 1e8
+    return Number(expectedProfit * scaleFactor / expectedLoss) / 100000000;
   }
 
   /**

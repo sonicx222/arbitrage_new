@@ -43,8 +43,12 @@ export abstract class BaseMevProvider implements IMevProvider {
   protected readonly config: MevProviderConfig;
 
   /**
-   * REFACTOR: Metrics management delegated to MevMetricsManager
-   * to share code with JitoProvider and ensure consistent behavior.
+   * Thread-safe metrics manager shared across the provider hierarchy.
+   *
+   * Protected so that subclasses (e.g., MevShareProvider) can access
+   * metrics directly for batch updates and rebate tracking. Prefer
+   * using the helper methods (incrementMetric, batchUpdateMetrics)
+   * for standard operations.
    */
   protected readonly metricsManager: MevMetricsManager;
 
@@ -85,6 +89,20 @@ export abstract class BaseMevProvider implements IMevProvider {
    * Check connection/health of the MEV provider
    */
   abstract healthCheck(): Promise<{ healthy: boolean; message: string }>;
+
+  // ===========================================================================
+  // Lifecycle
+  // ===========================================================================
+
+  /**
+   * Dispose of provider resources.
+   *
+   * Resets metrics and clears internal state. Override in subclasses
+   * to release additional resources (caches, timers, etc.).
+   */
+  dispose(): void {
+    this.metricsManager.resetMetrics();
+  }
 
   // ===========================================================================
   // Metrics Management (Thread-Safe via MevMetricsManager)

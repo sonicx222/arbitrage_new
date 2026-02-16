@@ -5,7 +5,7 @@ import { createLogger } from '../logger';
 import { getCircuitBreakerRegistry, CircuitBreakerError } from './circuit-breaker';
 import { getDeadLetterQueue, enqueueFailedOperation } from './dead-letter-queue';
 import { getGracefulDegradationManager, triggerDegradation } from './graceful-degradation';
-import { RetryMechanism, RetryPresets } from './retry-mechanism';
+// P0-3 FIX: Removed unused RetryMechanism/RetryPresets imports (simulated retry logic removed)
 import { getSelfHealingManager } from './self-healing-manager';
 
 const logger = createLogger('error-recovery');
@@ -28,6 +28,14 @@ export interface RecoveryResult {
   error?: Error;
 }
 
+// P3-34 FIX: Typed return for getRecoveryStats()
+export interface RecoveryStats {
+  deadLetterQueue: any;
+  circuitBreakers: any;
+  gracefulDegradation: any;
+  timestamp: number;
+}
+
 export interface RecoveryStrategy {
   name: string;
   priority: number;
@@ -37,11 +45,29 @@ export interface RecoveryStrategy {
 
 export class ErrorRecoveryOrchestrator {
   private strategies: RecoveryStrategy[] = [];
-  private circuitBreakers = getCircuitBreakerRegistry();
-  private dlq = getDeadLetterQueue();
-  private degradationManager = getGracefulDegradationManager();
-  // P3-1 FIX: Store promise since getSelfHealingManager is now async
-  private selfHealingManagerPromise = getSelfHealingManager();
+  // P1-11 FIX: Lazy initialization to avoid eagerly constructing all singletons
+  // on import. Singletons are created on first use via getters.
+  private _circuitBreakers?: ReturnType<typeof getCircuitBreakerRegistry>;
+  private _dlq?: ReturnType<typeof getDeadLetterQueue>;
+  private _degradationManager?: ReturnType<typeof getGracefulDegradationManager>;
+  private _selfHealingManagerPromise?: ReturnType<typeof getSelfHealingManager>;
+
+  private get circuitBreakers() {
+    if (!this._circuitBreakers) this._circuitBreakers = getCircuitBreakerRegistry();
+    return this._circuitBreakers;
+  }
+  private get dlq() {
+    if (!this._dlq) this._dlq = getDeadLetterQueue();
+    return this._dlq;
+  }
+  private get degradationManager() {
+    if (!this._degradationManager) this._degradationManager = getGracefulDegradationManager();
+    return this._degradationManager;
+  }
+  private get selfHealingManagerPromise() {
+    if (!this._selfHealingManagerPromise) this._selfHealingManagerPromise = getSelfHealingManager();
+    return this._selfHealingManagerPromise;
+  }
 
   constructor() {
     this.initializeDefaultStrategies();
@@ -107,8 +133,8 @@ export class ErrorRecoveryOrchestrator {
     this.strategies.sort((a, b) => b.priority - a.priority); // Higher priority first
   }
 
-  // Get recovery statistics
-  async getRecoveryStats(): Promise<any> {
+  // P3-34 FIX: Typed return value
+  async getRecoveryStats(): Promise<RecoveryStats> {
     const dlqStats = await this.dlq.getStats();
     const circuitBreakerStats = this.circuitBreakers.getAllStats();
     const degradationStates = this.degradationManager.getAllDegradationStates();
@@ -151,22 +177,16 @@ export class ErrorRecoveryOrchestrator {
         return retryableErrors.some(code => context.error.message.includes(code)) &&
           (context.attemptCount ?? 0) < 3;
       },
+      // P0-3 FIX: Removed Math.random() simulation. Without the original callable,
+      // the strategy cannot actually retry the operation. Return honest failure so
+      // the DLQ fallback (priority 10) correctly catches it as last resort.
       execute: async (context) => {
-        const retryMechanism = new RetryMechanism({
-          maxAttempts: 3,
-          initialDelay: 1000,
-          backoffMultiplier: 2,
-          retryCondition: (error) => {
-            const retryableErrors = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'];
-            return retryableErrors.some(code => error.message.includes(code));
-          }
+        // TODO: Accept original operation callable through RecoveryContext to enable actual retry
+        logger.warn('simple_retry strategy is not yet implemented — operation cannot be retried without the original callable', {
+          operation: context.operation,
+          service: context.service
         });
-
-        // This would typically wrap the actual operation
-        // For now, simulate retry logic
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        return { success: Math.random() > 0.5, strategy: 'simple_retry' };
+        return { success: false, strategy: 'simple_retry', nextAction: 'not_implemented' };
       }
     });
 
@@ -180,12 +200,16 @@ export class ErrorRecoveryOrchestrator {
           context.error.message.includes('too many requests') ||
           (context.error as any).status === 429;
       },
+      // P0-3 FIX: Removed Math.random() simulation. Without the original callable,
+      // the strategy cannot actually perform exponential backoff retry. Return honest
+      // failure so the DLQ fallback (priority 10) correctly catches it.
       execute: async (context) => {
-        const retryMechanism = RetryPresets.EXTERNAL_API;
-        // Simulate backoff retry
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        return { success: Math.random() > 0.3, strategy: 'exponential_backoff' };
+        // TODO: Accept original operation callable through RecoveryContext to enable actual retry
+        logger.warn('exponential_backoff strategy is not yet implemented — operation cannot be retried without the original callable', {
+          operation: context.operation,
+          service: context.service
+        });
+        return { success: false, strategy: 'exponential_backoff', nextAction: 'not_implemented' };
       }
     });
 
@@ -374,7 +398,7 @@ export function withErrorRecovery(options: {
 
 // Utility functions
 function generateCorrelationId(): string {
-  return `err_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `err_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 // Health check for recovery system

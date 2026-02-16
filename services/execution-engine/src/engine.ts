@@ -51,7 +51,7 @@ import {
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
-import { RISK_CONFIG } from '@arbitrage/config';
+import { RISK_CONFIG, FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
 import {
   initializeMevProviders,
@@ -92,6 +92,7 @@ import { QueueServiceImpl } from './services/queue.service';
 import { IntraChainStrategy } from './strategies/intra-chain.strategy';
 import { CrossChainStrategy } from './strategies/cross-chain.strategy';
 import { SimulationStrategy } from './strategies/simulation.strategy';
+import { FlashLoanStrategy } from './strategies/flash-loan.strategy';
 import { ExecutionStrategyFactory, createStrategyFactory } from './strategies/strategy-factory';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import type { ISimulationService } from './services/simulation/types';
@@ -731,6 +732,52 @@ export class ExecutionEngineService {
       crossChain: this.crossChainStrategy,
       intraChain: this.intraChainStrategy,
     });
+
+    // F2: Register FlashLoanStrategy when contract addresses are configured
+    // Contract addresses sourced from env vars (FLASH_LOAN_CONTRACT_<CHAIN>)
+    // Approved routers sourced from FLASH_LOAN_PROVIDERS.approvedRouters or DEXES config
+    const contractAddresses: Record<string, string> = {};
+    const approvedRouters: Record<string, string[]> = {};
+
+    for (const chain of Object.keys(FLASH_LOAN_PROVIDERS)) {
+      const envKey = `FLASH_LOAN_CONTRACT_${chain.toUpperCase()}`;
+      const address = process.env[envKey];
+      if (address) {
+        contractAddresses[chain] = address;
+
+        // Source approved routers: prefer explicit config, fallback to DEXES router addresses
+        const providerConfig = FLASH_LOAN_PROVIDERS[chain];
+        if (providerConfig.approvedRouters && providerConfig.approvedRouters.length > 0) {
+          approvedRouters[chain] = providerConfig.approvedRouters;
+        } else if (DEXES[chain]) {
+          approvedRouters[chain] = DEXES[chain]
+            .map(dex => dex.routerAddress)
+            .filter(Boolean);
+        }
+      }
+    }
+
+    if (Object.keys(contractAddresses).length > 0) {
+      try {
+        const flashLoanStrategy = new FlashLoanStrategy(this.logger, {
+          contractAddresses,
+          approvedRouters,
+          enableAggregator: FEATURE_FLAGS.useFlashLoanAggregator,
+        });
+        this.strategyFactory.registerFlashLoanStrategy(flashLoanStrategy);
+
+        this.logger.info('FlashLoanStrategy registered', {
+          chains: Object.keys(contractAddresses),
+          aggregatorEnabled: FEATURE_FLAGS.useFlashLoanAggregator,
+        });
+      } catch (error) {
+        this.logger.warn('Failed to initialize FlashLoanStrategy', {
+          error: getErrorMessage(error),
+        });
+      }
+    } else {
+      this.logger.debug('FlashLoanStrategy not registered - no contract addresses configured');
+    }
 
     this.logger.info('Strategy factory initialized', {
       registeredTypes: this.strategyFactory.getRegisteredTypes(),

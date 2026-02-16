@@ -305,7 +305,6 @@ export {
 // =============================================================================
 export {
   FLASH_LOAN_AVAILABILITY,
-  FlashLoanProtocol,
   getSupportedProtocols,
   isProtocolSupported,
   validateFlashLoanSupport,
@@ -313,6 +312,7 @@ export {
   FlashLoanNotSupportedError,
   FLASH_LOAN_STATS,
 } from './flash-loan-availability';
+export type { FlashLoanProtocol } from './flash-loan-availability';
 
 // =============================================================================
 // CROSS-CHAIN NORMALIZATION

@@ -9,150 +9,45 @@
  * - Private vs public mempool recommendation
  *
  * @module mev-protection/mev-risk-analyzer
+ * @see mev-risk-analyzer.types.ts for type definitions and defaults
+ * @see config-validator.ts for config synchronization utilities
  */
 
-import { CHAIN_MEV_STRATEGIES, MevStrategy } from './types';
+import { CHAIN_MEV_STRATEGIES } from './types';
+import type { MevStrategy } from './types';
 import type { AdaptiveThresholdService } from './adaptive-threshold.service';
 import { createAdaptiveThresholdService } from './adaptive-threshold.service';
+import {
+  SandwichRiskLevel,
+  MempoolRecommendation,
+  MEV_RISK_DEFAULTS,
+} from './mev-risk-analyzer.types';
+import type {
+  TransactionContext,
+  MevRiskAssessment,
+  MevRiskAnalyzerConfig,
+} from './mev-risk-analyzer.types';
 
-// =============================================================================
-// Types
-// =============================================================================
-
-/**
- * Sandwich attack risk levels
- */
-export enum SandwichRiskLevel {
-  /** Low risk - small transaction, high liquidity */
-  LOW = 'low',
-  /** Medium risk - moderate transaction size */
-  MEDIUM = 'medium',
-  /** High risk - large transaction or low liquidity */
-  HIGH = 'high',
-  /** Critical risk - very large or low liquidity, high slippage */
-  CRITICAL = 'critical',
-}
-
-/**
- * Mempool recommendation
- */
-export enum MempoolRecommendation {
-  /** Use public mempool - low risk */
-  PUBLIC = 'public',
-  /** Use private mempool - high risk */
-  PRIVATE = 'private',
-  /** Conditional - depends on other factors */
-  CONDITIONAL = 'conditional',
-}
-
-/**
- * Transaction context for risk analysis
- */
-export interface TransactionContext {
-  /** Chain identifier (e.g., 'ethereum', 'arbitrum') */
-  chain: string;
-  /** Transaction value in USD */
-  valueUsd: number;
-  /** Token symbol being traded (optional) */
-  tokenSymbol?: string;
-  /** DEX protocol (e.g., 'uniswap_v2', 'sushiswap') */
-  dexProtocol?: string;
-  /** Slippage tolerance in basis points (e.g., 50 = 0.5%) */
-  slippageBps: number;
-  /** Pool liquidity in USD (optional) */
-  poolLiquidityUsd?: number;
-  /** Whether trading a stable pair (e.g., USDC-USDT) */
-  isStablePair?: boolean;
-  /** Current gas price in wei (optional) */
-  gasPrice?: bigint;
-  /** Expected profit in USD (optional, for arbitrage) */
-  expectedProfitUsd?: number;
-}
-
-/**
- * MEV risk assessment result
- */
-export interface MevRiskAssessment {
-  /** Sandwich attack risk level */
-  sandwichRisk: SandwichRiskLevel;
-  /** Sandwich risk score (0-100) */
-  sandwichRiskScore: number;
-  /** Recommended priority fee in gwei (0 for Solana) */
-  recommendedPriorityFeeGwei: number;
-  /** Recommended tip in lamports (for Solana only) */
-  recommendedTipLamports?: number;
-  /** Mempool recommendation */
-  mempoolRecommendation: MempoolRecommendation;
-  /** Recommended MEV strategy for the chain */
-  recommendedStrategy: MevStrategy;
-  /** List of identified risk factors */
-  riskFactors: string[];
-  /** Estimated MEV exposure in USD */
-  estimatedMevExposureUsd: number;
-}
-
-/**
- * MEV Risk Analyzer configuration
- */
-export interface MevRiskAnalyzerConfig {
-  /** USD threshold for high-value transactions (default: 10000) */
-  highValueThresholdUsd?: number;
-  /** Slippage threshold for high sandwich risk in bps (default: 100 = 1%) */
-  sandwichRiskThresholdBps?: number;
-  /** Minimum liquidity ratio for safety (default: 0.01 = 1%) */
-  minLiquidityRatioForSafety?: number;
-  /** Base priority fee for Ethereum in gwei (default: 2) */
-  basePriorityFeeEthereumGwei?: number;
-  /** Base tip for Solana in lamports (default: 1000000 = 0.001 SOL) */
-  baseTipSolanaLamports?: number;
-}
-
-// =============================================================================
-// Defaults
-// =============================================================================
-
-/**
- * Default configuration values for MEV risk analysis
- */
-export const MEV_RISK_DEFAULTS = {
-  /** USD threshold for high-value transactions */
-  highValueThresholdUsd: 10000,
-  /** Slippage threshold for high sandwich risk in bps (1%) */
-  sandwichRiskThresholdBps: 100,
-  /** Minimum liquidity ratio for safety (1% of pool) */
-  minLiquidityRatioForSafety: 0.01,
-  /** Base priority fee for Ethereum in gwei */
-  basePriorityFeeEthereumGwei: 2,
-  /** Base tip for Solana in lamports (0.001 SOL) */
-  baseTipSolanaLamports: 1_000_000,
-  /** Risk score thresholds */
-  riskScoreThresholds: {
-    low: 30,
-    medium: 70,
-    high: 90,
-  },
-  /**
-   * Chain-specific base priority fees in gwei
-   *
-   * NOTE: These values are synchronized with MEV_CONFIG in shared/config.
-   * If you update these, also update shared/config/src/mev-config.ts
-   */
-  chainBasePriorityFees: {
-    ethereum: 2,
-    bsc: 3,
-    polygon: 30,
-    arbitrum: 0.01,
-    optimism: 0.01,
-    base: 0.01,
-    zksync: 0.01,
-    linea: 0.01,
-    avalanche: 25,  // Higher due to network congestion patterns
-    fantom: 100,    // Higher due to network characteristics
-    solana: 0,      // Solana uses lamports for tips, not gwei (use recommendedTipLamports)
-  } as Record<string, number>,
-  /** L2 chains with sequencer-based MEV protection */
-  l2ChainsWithSequencer: ['arbitrum', 'optimism', 'base', 'zksync', 'linea'],
-};
+// Re-export types and defaults for backward compatibility with existing consumers
+// that import directly from this module (e.g., test files)
+export {
+  SandwichRiskLevel,
+  MempoolRecommendation,
+  MEV_RISK_DEFAULTS,
+} from './mev-risk-analyzer.types';
+export type {
+  TransactionContext,
+  MevRiskAssessment,
+  MevRiskAnalyzerConfig,
+} from './mev-risk-analyzer.types';
+export {
+  validateConfigSync,
+  getLocalChainPriorityFees,
+} from './config-validator';
+export type {
+  ConfigSyncValidationResult,
+  ConfigMismatch,
+} from './config-validator';
 
 // =============================================================================
 // MEV Risk Analyzer
@@ -624,24 +519,24 @@ export class MevRiskAnalyzer {
 // =============================================================================
 
 /**
- * Create a MEV risk analyzer with optional configuration
- */
-/**
  * Create MEV Risk Analyzer with optional adaptive threshold service
  *
  * Task 3.2: Automatically creates AdaptiveThresholdService if feature flag enabled.
  * Imports MEV_CONFIG from @arbitrage/config to avoid configuration duplication.
+ *
+ * Uses require() for synchronous config loading. The project compiles to CommonJS
+ * ("module": "commonjs" in tsconfig.json), so require() works correctly at runtime.
  *
  * @param config - Optional MEV risk analyzer configuration
  * @returns Configured MevRiskAnalyzer instance
  */
 export function createMevRiskAnalyzer(config?: MevRiskAnalyzerConfig): MevRiskAnalyzer {
   // Task 3.2: Import MEV_CONFIG to get centralized configuration
-  // Import dynamically to avoid circular dependency
   let adaptiveService: AdaptiveThresholdService | undefined;
 
   try {
-    // Import MEV_CONFIG synchronously (shared package, always available at runtime)
+    // require() is intentional — synchronous loading for CommonJS target.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { MEV_CONFIG } = require('@arbitrage/config');
 
     if (MEV_CONFIG.adaptiveRiskScoring.enabled) {
@@ -656,7 +551,7 @@ export function createMevRiskAnalyzer(config?: MevRiskAnalyzerConfig): MevRiskAn
         retentionMs: MEV_CONFIG.adaptiveRiskScoring.retentionDays * 24 * 60 * 60 * 1000,
       });
     }
-  } catch (error) {
+  } catch {
     // Config not available (test environment) - fallback to env vars
     const adaptiveEnabled = process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true';
     if (adaptiveEnabled) {
@@ -665,108 +560,4 @@ export function createMevRiskAnalyzer(config?: MevRiskAnalyzerConfig): MevRiskAn
   }
 
   return new MevRiskAnalyzer(config, adaptiveService);
-}
-
-// =============================================================================
-// Config Synchronization Validation
-// =============================================================================
-
-/**
- * Validation result for config synchronization
- */
-export interface ConfigSyncValidationResult {
-  /** Whether configs are synchronized */
-  valid: boolean;
-  /** List of mismatches found */
-  mismatches: ConfigMismatch[];
-}
-
-/**
- * Details of a config mismatch
- */
-export interface ConfigMismatch {
-  chain: string;
-  field: string;
-  riskAnalyzerValue: number | string;
-  externalConfigValue?: number | string;
-  message: string;
-}
-
-/**
- * Validate that MEV_RISK_DEFAULTS is synchronized with external config
- *
- * This function should be called during application startup or in tests
- * to ensure configuration consistency.
- *
- * @param externalChainConfig - Chain configuration from MEV_CONFIG or similar
- * @returns Validation result with any mismatches found
- *
- * @example
- * ```typescript
- * import { validateConfigSync, MEV_RISK_DEFAULTS } from './mev-risk-analyzer';
- * import { MEV_CONFIG } from '@arbitrage/config';
- *
- * // Convert MEV_CONFIG to the expected format
- * const chainConfigs = Object.entries(MEV_CONFIG.chainSettings).map(([chain, settings]) => ({
- *   chain,
- *   priorityFeeGwei: settings.priorityFeeGwei,
- * }));
- *
- * const result = validateConfigSync(chainConfigs);
- * if (!result.valid) {
- *   console.warn('Config mismatch detected:', result.mismatches);
- * }
- * ```
- */
-export function validateConfigSync(
-  externalChainConfig: Array<{ chain: string; priorityFeeGwei: number }>
-): ConfigSyncValidationResult {
-  const mismatches: ConfigMismatch[] = [];
-
-  for (const { chain, priorityFeeGwei } of externalChainConfig) {
-    const localValue = MEV_RISK_DEFAULTS.chainBasePriorityFees[chain];
-
-    // Skip if chain is not in local config (external config may have more chains)
-    if (localValue === undefined) {
-      continue;
-    }
-
-    // Check for mismatch (allow small floating point differences)
-    if (Math.abs(localValue - priorityFeeGwei) > 0.001) {
-      mismatches.push({
-        chain,
-        field: 'priorityFeeGwei',
-        riskAnalyzerValue: localValue,
-        externalConfigValue: priorityFeeGwei,
-        message: `Chain "${chain}": MEV_RISK_DEFAULTS.chainBasePriorityFees[${chain}] = ${localValue}, but external config has ${priorityFeeGwei}`,
-      });
-    }
-  }
-
-  // Also check for chains in local config that aren't in external config
-  for (const chain of Object.keys(MEV_RISK_DEFAULTS.chainBasePriorityFees)) {
-    const externalEntry = externalChainConfig.find((c) => c.chain === chain);
-    if (!externalEntry) {
-      mismatches.push({
-        chain,
-        field: 'chain',
-        riskAnalyzerValue: MEV_RISK_DEFAULTS.chainBasePriorityFees[chain],
-        message: `Chain "${chain}" is in MEV_RISK_DEFAULTS but not in external config`,
-      });
-    }
-  }
-
-  return {
-    valid: mismatches.length === 0,
-    mismatches,
-  };
-}
-
-/**
- * Get all chains with their local priority fee defaults
- *
- * Useful for debugging or displaying config state.
- */
-export function getLocalChainPriorityFees(): Record<string, number> {
-  return { ...MEV_RISK_DEFAULTS.chainBasePriorityFees };
 }

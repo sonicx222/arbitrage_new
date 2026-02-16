@@ -265,6 +265,9 @@ export class ProviderHealthScorer {
   private providerBudgets: Map<string, ProviderBudgetState> = new Map();
   private budgetConfigs: Record<string, ProviderBudgetConfig> = DEFAULT_PROVIDER_BUDGETS;
 
+  /** P3 FIX #28: Cache best block per chain to avoid O(n) scan on every recordBlock() */
+  private bestBlockByChain: Map<string, number> = new Map();
+
   /**
    * Performance optimization: Cached date values to avoid repeated new Date() calls.
    * Refreshed every minute (sufficient for budget calculations).
@@ -310,11 +313,12 @@ export class ProviderHealthScorer {
   }
 
   /**
-   * Create empty metrics object
+   * Create empty metrics object.
+   * P1 FIX #8: Stores masked URL to prevent API key leakage in metrics/logs.
    */
   private createEmptyMetrics(url: string, chainId: string): ProviderHealthMetrics {
     return {
-      url,
+      url: this.maskUrl(url),
       chainId,
       avgLatencyMs: 0,
       p95LatencyMs: 0,
@@ -341,6 +345,49 @@ export class ProviderHealthScorer {
    */
   private makeKey(url: string, chainId: string): string {
     return `${chainId}:${url}`;
+  }
+
+  /**
+   * P1 FIX #8: Mask a provider URL to redact API keys before logging or storing.
+   * Replaces path segments that look like API keys (long hex/alphanumeric strings)
+   * with a truncated form, and redacts query-string auth tokens.
+   * Returns the original URL unchanged if there's nothing to mask.
+   *
+   * Examples:
+   *   wss://eth-mainnet.g.alchemy.com/v2/abcdef1234567890abcdef -> wss://eth-mainnet.g.alchemy.com/v2/abcde...
+   *   https://rpc.ankr.com/eth/abc123longkey -> https://rpc.ankr.com/eth/abc12...
+   *   wss://test.com -> wss://test.com (unchanged)
+   */
+  private maskUrl(url: string): string {
+    const keyPattern = /\/([a-zA-Z0-9_-]{12,})/g;
+    const authParamPattern = /[?&](key|token|secret|auth|api_key)=/i;
+
+    // Quick check: skip URL parsing if nothing to mask
+    if (!keyPattern.test(url) && !authParamPattern.test(url)) {
+      return url;
+    }
+
+    // Reset lastIndex after test()
+    keyPattern.lastIndex = 0;
+
+    try {
+      const parsed = new URL(url);
+      // Mask path segments that look like API keys (>12 chars alphanumeric/hex)
+      parsed.pathname = parsed.pathname.replace(
+        /\/([a-zA-Z0-9_-]{12,})/g,
+        (_, key) => `/${key.slice(0, 5)}...`
+      );
+      // Mask query-string auth tokens
+      for (const [key] of parsed.searchParams) {
+        if (/key|token|secret|auth|api/i.test(key)) {
+          parsed.searchParams.set(key, '***');
+        }
+      }
+      return parsed.toString();
+    } catch {
+      // If URL parsing fails, mask conservatively
+      return url.replace(/\/([a-zA-Z0-9_-]{12,})/g, (_, key) => `/${key.slice(0, 5)}...`);
+    }
   }
 
   /**
@@ -385,7 +432,7 @@ export class ProviderHealthScorer {
     this.updateScores(metrics);
 
     this.logger.debug('Recorded failure', {
-      url,
+      url: this.maskUrl(url),
       chainId,
       errorType,
       successRate: metrics.successRate
@@ -415,6 +462,12 @@ export class ProviderHealthScorer {
     metrics.lastBlockNumber = blockNumber;
     metrics.lastBlockTime = Date.now();
 
+    // P3 FIX #28: Update best block cache
+    const currentBest = this.bestBlockByChain.get(chainId) ?? 0;
+    if (blockNumber > currentBest) {
+      this.bestBlockByChain.set(chainId, blockNumber);
+    }
+
     // Calculate blocks behind (compare to best known for this chain)
     const bestBlock = this.getBestBlockForChain(chainId);
     metrics.blocksBehind = Math.max(0, bestBlock - blockNumber);
@@ -424,22 +477,17 @@ export class ProviderHealthScorer {
   }
 
   /**
-   * Get the best (highest) block number known for a chain
+   * Get the best (highest) block number known for a chain.
+   * P3 FIX #28: Uses cached value instead of O(n) scan.
    */
   private getBestBlockForChain(chainId: string): number {
-    let bestBlock = 0;
-
-    for (const [key, metrics] of this.metrics) {
-      if (metrics.chainId === chainId && metrics.lastBlockNumber > bestBlock) {
-        bestBlock = metrics.lastBlockNumber;
-      }
-    }
-
-    return bestBlock;
+    return this.bestBlockByChain.get(chainId) ?? 0;
   }
 
   /**
-   * Update latency statistics from samples
+   * Update latency statistics from samples.
+   * P2 FIX #11: Uses quickselect (O(n) average) instead of full sort (O(n log n)) to find P95.
+   * P2 FIX #15: Uses ?? instead of || for P95 fallback (0 is a valid latency).
    */
   private updateLatencyStats(metrics: ProviderHealthMetrics): void {
     const samples = metrics.latencySamples;
@@ -449,10 +497,41 @@ export class ProviderHealthScorer {
     const sum = samples.reduce((a, b) => a + b, 0);
     metrics.avgLatencyMs = sum / samples.length;
 
-    // Calculate P95
-    const sorted = [...samples].sort((a, b) => a - b);
-    const p95Index = Math.floor(sorted.length * 0.95);
-    metrics.p95LatencyMs = sorted[p95Index] || metrics.avgLatencyMs;
+    // Calculate P95 using quickselect (O(n) average vs O(n log n) full sort)
+    const p95Index = Math.floor(samples.length * 0.95);
+    metrics.p95LatencyMs = this.quickSelect(samples, p95Index) ?? metrics.avgLatencyMs;
+  }
+
+  /**
+   * P2 FIX #11: Quickselect algorithm to find the k-th smallest element in O(n) average.
+   * Operates on a copy to avoid mutating the original samples array.
+   */
+  private quickSelect(arr: number[], k: number): number {
+    if (arr.length === 0 || k >= arr.length) return 0;
+    if (arr.length === 1) return arr[0];
+
+    // Work on a shallow copy to avoid mutating latencySamples
+    const a = arr.slice();
+    let lo = 0;
+    let hi = a.length - 1;
+
+    while (lo < hi) {
+      const pivot = a[lo + ((hi - lo) >> 1)];
+      let i = lo;
+      let j = hi;
+      while (i <= j) {
+        while (a[i] < pivot) i++;
+        while (a[j] > pivot) j--;
+        if (i <= j) {
+          const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+          i++; j--;
+        }
+      }
+      if (k <= j) hi = j;
+      else if (k >= i) lo = i;
+      else break;
+    }
+    return a[k];
   }
 
   /**
@@ -547,7 +626,7 @@ export class ProviderHealthScorer {
 
     this.logger.debug('Selected best provider', {
       chainId,
-      selectedUrl: bestUrl,
+      selectedUrl: this.maskUrl(bestUrl),
       score: bestScore,
       candidateCount: candidates.length
     });
@@ -620,6 +699,7 @@ export class ProviderHealthScorer {
    */
   clear(): void {
     this.metrics.clear();
+    this.bestBlockByChain.clear();
   }
 
   /**
@@ -644,7 +724,8 @@ export class ProviderHealthScorer {
     if (now - this.lastDateCacheUpdate > ProviderHealthScorer.DATE_CACHE_TTL_MS) {
       const date = new Date();
       this.cachedUtcHour = date.getUTCHours();
-      this.cachedDayOfMonth = date.getDate();
+      // P2 FIX #14: Use getUTCDate() for consistent UTC-based budget calculations
+      this.cachedDayOfMonth = date.getUTCDate();
       this.lastDateCacheUpdate = now;
     }
   }
@@ -876,7 +957,7 @@ export class ProviderHealthScorer {
 
     this.logger.debug('Selected best provider with budget consideration', {
       chainId,
-      selectedUrl: bestUrl,
+      selectedUrl: this.maskUrl(bestUrl),
       score: bestScore,
       candidateCount: candidates.length
     });

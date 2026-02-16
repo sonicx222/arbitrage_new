@@ -211,6 +211,11 @@ The architecture combines two patterns:
 │  ├── MEV Risk Analyzer (Sandwich risk, tip recommendations) ✅ NEW              │
 │  ├── MEV Analyzer (Bot detection, avoidance)                                    │
 │  ├── Performance Analytics Engine (Strategy attribution & risk)                 │
+│  ├── Capital Risk Manager (ADR-021) ✅ NEW                                      │
+│  │   ├── ExecutionProbabilityTracker (Historical win rates per chain/DEX)       │
+│  │   ├── EVCalculator (Expected value filtering)                                │
+│  │   ├── KellyPositionSizer (Fractional Kelly position sizing)                  │
+│  │   └── DrawdownCircuitBreaker (NORMAL/CAUTION/HALT/RECOVERY state machine)   │
 │  └── Execution Planner (Route optimization)                                     │
 │                                                                                  │
 │  LAYER 4: EXECUTION                                                              │
@@ -1055,6 +1060,27 @@ SimulationService now routes requests based on chain:
 - `contracts/src/CommitRevealArbitrage.sol`
 - `services/execution-engine/src/strategies/flash-loan.strategy.ts`
 - `services/execution-engine/src/strategies/flash-loan-providers/`
+
+#### 10.6.1 Flash Loan Provider Aggregation (ADR-032) ✅ IMPLEMENTED
+
+**Problem**: With 5 flash loan protocols across 10+ chains, static provider assignment leads to suboptimal fee selection, missed fallback opportunities, and no adaptation to liquidity/reliability changes.
+
+**Solution**: Intelligent provider aggregation layer using Clean Architecture (DDD) at `shared/core/src/flash-loan-aggregation/`. Selects the optimal provider per opportunity based on weighted scoring (fees, liquidity, reliability, latency), validates on-chain liquidity for large trades, and caches rankings for performance.
+
+**Module Structure**:
+- `domain/` - Value objects (`AggregatorConfig`, `ProviderScore`, `ProviderSelection`), interfaces (`IFlashLoanAggregator`, `IProviderRanker`, `ILiquidityValidator`, `IAggregatorMetrics`)
+- `infrastructure/` - Implementations (`FlashLoanAggregatorImpl`, `WeightedRankingStrategy`, `OnChainLiquidityValidator`, `InMemoryAggregatorMetrics`)
+- `usecases/` - Application-level orchestration (`SelectProviderUseCase`)
+
+**Key Design Decisions**:
+- Weighted ranking with configurable weights (fees 50%, liquidity 30%, reliability 15%, latency 5%)
+- 30-second ranking cache with amount-bucketed keys for cache stability
+- On-chain liquidity validation via ERC20 `balanceOf` with circuit breaker (5 failures → 30s cooldown)
+- Request coalescing to prevent duplicate RPC calls
+
+**Configuration**: `FLASH_LOAN_AGGREGATOR_CONFIG` in `shared/config/src/feature-flags.ts`, enabled via `FEATURE_FLASH_LOAN_AGGREGATOR=true`.
+
+**ADR Reference**: `docs/architecture/adr/ADR-032-flash-loan-provider-aggregation.md`
 
 ### 10.7 Detector Pre-validation (Phase 4.1) ✅ NEW
 

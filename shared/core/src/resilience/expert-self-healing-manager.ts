@@ -86,6 +86,14 @@ export interface RecoveryAction {
   rollbackRequired?: boolean;
 }
 
+// P3-33 FIX: Typed return for getFailureStatistics()
+export interface FailureStatistics {
+  totalFailures: number;
+  failureByService: Record<string, number>;
+  failureBySeverity: Record<string, number>;
+  timeframe: number;
+}
+
 export interface ServiceHealthState {
   serviceName: string;
   healthScore: number; // 0-100
@@ -254,7 +262,7 @@ export class ExpertSelfHealingManager {
     context: any = {}
   ): Promise<void> {
     const failure: FailureEvent = {
-      id: `failure_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `failure_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       serviceName,
       component,
       error,
@@ -455,7 +463,10 @@ export class ExpertSelfHealingManager {
         break;
 
       case 'memory':
-        if (severity >= FailureSeverity.HIGH) {
+        // P0-2 FIX: Use includes() instead of >= for string enum comparison.
+        // Lexicographic >= is wrong: 'critical' < 'high' and 'low' > 'high',
+        // which inverts severity — CRITICAL wouldn't trigger but LOW would.
+        if ([FailureSeverity.HIGH, FailureSeverity.CRITICAL].includes(severity)) {
           return RecoveryStrategy.MEMORY_COMPACTION;
         }
         break;
@@ -495,7 +506,7 @@ export class ExpertSelfHealingManager {
     strategy: RecoveryStrategy
   ): Promise<void> {
     const action: RecoveryAction = {
-      id: `recovery_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `recovery_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       failureId: failure.id,
       strategy,
       status: 'pending',
@@ -932,13 +943,12 @@ export class ExpertSelfHealingManager {
 
   // Initialize default service states
   private initializeDefaultStates(): void {
-    // Default services to monitor
+    // P3-35 FIX: Updated to partition-based naming per ADR-003 partitioned detector architecture
     const defaultServices = [
-      'bsc-detector',
-      'ethereum-detector',
-      'arbitrum-detector',
-      'base-detector',
-      'polygon-detector',
+      'partition-asia-fast',
+      'partition-l2-turbo',
+      'partition-high-value',
+      'partition-solana',
       'cross-chain-detector',
       'execution-engine',
       'coordinator'
@@ -980,27 +990,27 @@ export class ExpertSelfHealingManager {
     };
   }
 
-  // Get failure statistics
-  getFailureStatistics(timeframe: number = 3600000): Promise<any> { // 1 hour default
+  // P3-33 FIX: Made async (removes Promise.resolve wrapper) and added typed return
+  async getFailureStatistics(timeframe: number = 3600000): Promise<FailureStatistics> {
     const cutoff = Date.now() - timeframe;
     const recentFailures = this.failureHistory.filter(f => f.timestamp >= cutoff);
 
     const failureByService = recentFailures.reduce((acc, f) => {
-      acc[f.serviceName] = (acc[f.serviceName] || 0) + 1;
+      acc[f.serviceName] = (acc[f.serviceName] ?? 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
     const failureBySeverity = recentFailures.reduce((acc, f) => {
-      acc[f.severity] = (acc[f.severity] || 0) + 1;
+      acc[f.severity] = (acc[f.severity] ?? 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
-    return Promise.resolve({
+    return {
       totalFailures: recentFailures.length,
       failureByService,
       failureBySeverity,
       timeframe
-    });
+    };
   }
 }
 
@@ -1013,4 +1023,15 @@ export async function getExpertSelfHealingManager(): Promise<ExpertSelfHealingMa
     await expertSelfHealingManager.start();
   }
   return expertSelfHealingManager;
+}
+
+/**
+ * P2-22 FIX: Reset singleton for test cleanup, matching pattern of other singletons
+ * (resetGracefulDegradationManager, resetRedisInstance, etc.)
+ */
+export async function resetExpertSelfHealingManager(): Promise<void> {
+  if (expertSelfHealingManager) {
+    await expertSelfHealingManager.stop();
+    expertSelfHealingManager = null;
+  }
 }

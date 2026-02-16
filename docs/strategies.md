@@ -199,9 +199,9 @@ Where:
 
 | Mechanism | Trigger | Action |
 |-----------|---------|--------|
-| **Daily Loss Limit** | Losses > 5% of capital | Pause trading 24h |
-| **Consecutive Failures** | 5 failed txns in row | Circuit breaker (ADR-018) |
-| **Max Exposure** | Single trade > 10% capital | Reject opportunity |
+| **Daily Loss Limit** | Losses > 5% of capital | Halt trading (1h cooldown + manual reset + recovery) |
+| **Consecutive Failures** | 5 failed txns in row | Circuit breaker escalation (CAUTION → HALT) |
+| **Max Exposure** | Single trade > 2% capital | Reject opportunity |
 | **Slippage Guard** | Slippage > 2% | Reject or reduce size |
 
 ### Expected Value Filter

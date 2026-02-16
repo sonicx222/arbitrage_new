@@ -20,7 +20,9 @@ const {
   checkDockerContainer,
   checkTcpConnection,
   loadPids,
+  processExists,         // FIX #15/#11: Check PID liveness
   getRedisMemoryConfig,
+  deleteRedisMemoryConfig, // FIX #15: Clean stale Redis config
   ROOT_DIR,
   PID_FILE
 } = require('./lib/utils');
@@ -56,6 +58,12 @@ async function checkRedisService(service) {
     if (isRunning) {
       return { running: true, status: 'In-memory server' };
     }
+    // FIX #15: Config exists but Redis not responding — check if PID is stale
+    const pidAlive = await processExists(redisConfig.pid);
+    if (!pidAlive) {
+      logger.warning(`Stale Redis config found (PID ${redisConfig.pid} no longer exists). Cleaning up...`);
+      deleteRedisMemoryConfig();
+    }
   }
 
   return { running: false };
@@ -79,6 +87,21 @@ async function getServiceStatus(service) {
 }
 
 /**
+ * FIX #14: Normalize health status strings to a consistent display.
+ * Different services report "ok", "healthy", "degraded", "unhealthy", "error".
+ * @param {string} status - Raw status string from health endpoint
+ * @returns {string} Normalized status string
+ */
+function normalizeHealthStatus(status) {
+  if (!status) return 'healthy';
+  const s = status.toLowerCase();
+  if (s === 'ok' || s === 'healthy') return 'healthy';
+  if (s === 'degraded') return 'degraded';
+  if (s === 'unhealthy' || s === 'error') return 'unhealthy';
+  return status; // Unknown status — show as-is
+}
+
+/**
  * Format status for display.
  * @param {Object} status - Status object
  * @param {boolean} optional - Whether service is optional
@@ -87,7 +110,9 @@ async function getServiceStatus(service) {
 function formatStatus(status, optional = false) {
   if (status.running) {
     const latency = status.latency ? ` (${status.latency}ms)` : '';
-    const detail = status.status ? ` - ${status.status}` : '';
+    // FIX #14: Normalize status string for consistent display
+    const normalized = normalizeHealthStatus(status.status);
+    const detail = normalized ? ` - ${normalized}` : '';
     return `${colors.green}Running${colors.reset}${detail}${latency}`;
   } else if (optional) {
     return `${colors.dim}Not running (optional)${colors.reset}`;
@@ -108,9 +133,21 @@ async function main() {
   const envFile = fs.existsSync(require('path').join(ROOT_DIR, '.env'));
   log(`Environment: ${envFile ? 'Configured (.env exists)' : 'Using defaults (.env.local)'}`, 'dim');
 
-  // Check simulation modes
-  const priceSimulation = process.env.SIMULATION_MODE === 'true';
-  const executionSimulation = process.env.EXECUTION_SIMULATION_MODE === 'true';
+  // Check simulation modes — prefer metadata file (persists across terminals) over env vars
+  // FIX #10: Read from persisted metadata for cross-session visibility
+  let priceSimulation = process.env.SIMULATION_MODE === 'true';
+  let executionSimulation = process.env.EXECUTION_SIMULATION_MODE === 'true';
+
+  const META_FILE = require('path').join(ROOT_DIR, '.local-services.meta');
+  try {
+    if (fs.existsSync(META_FILE)) {
+      const meta = JSON.parse(fs.readFileSync(META_FILE, 'utf8'));
+      priceSimulation = priceSimulation || meta.simulationMode;
+      executionSimulation = executionSimulation || meta.executionSimulationMode;
+    }
+  } catch {
+    // Fall back to env vars only
+  }
 
   if (priceSimulation || executionSimulation) {
     const modes = [];
@@ -169,11 +206,17 @@ async function main() {
   }
 
   // Load PIDs if available
+  // FIX #11: Cross-reference PIDs with process liveness to identify stale entries
   const pids = loadPids();
   if (Object.keys(pids).length > 0) {
     log('\nProcess IDs:', 'dim');
     for (const [name, pid] of Object.entries(pids)) {
-      log(`  ${name}: ${pid}`, 'dim');
+      const alive = await processExists(pid);
+      if (alive) {
+        log(`  ${name}: ${pid}`, 'dim');
+      } else {
+        log(`  ${name}: ${pid} ${colors.red}(stale - process not running)${colors.reset}`, 'dim');
+      }
     }
   }
 

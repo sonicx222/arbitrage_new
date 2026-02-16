@@ -75,14 +75,20 @@ interface MockLockHandle {
   extend: () => Promise<boolean>;
 }
 
+// P1 FIX #6: Create a shared mock lock handle so tests can access and override its methods.
+// Previously, acquireLock returned an inline object, making it impossible for tests to
+// mock the lock handle's extend() method (the test was mocking mockLockManager.extendLock
+// which the real code never calls — it calls leaderLock.extend() instead).
+const createMockLockHandle = (): MockLockHandle => ({
+  acquired: true,
+  key: 'test-lock-key',
+  release: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  extend: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
+});
+
 // Mock lock manager factory
-const createMockLockManager = () => ({
-  acquireLock: jest.fn<() => Promise<MockLockHandle>>().mockResolvedValue({
-    acquired: true,
-    key: 'test-lock-key',
-    release: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    extend: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
-  }),
+const createMockLockManager = (lockHandle: MockLockHandle) => ({
+  acquireLock: jest.fn<() => Promise<MockLockHandle>>().mockResolvedValue(lockHandle),
   extendLock: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
   releaseLock: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
 });
@@ -92,6 +98,7 @@ describe('CrossRegionHealthManager', () => {
   let mockLogger: ReturnType<typeof createMockLogger>;
   let mockRedis: ReturnType<typeof createMockRedisClient>;
   let mockStreams: ReturnType<typeof createMockStreamsClient>;
+  let mockLockHandle: MockLockHandle;
   let mockLockManager: ReturnType<typeof createMockLockManager>;
 
   // Base config without injected dependencies
@@ -125,7 +132,9 @@ describe('CrossRegionHealthManager', () => {
     mockLogger = createMockLogger();
     mockRedis = createMockRedisClient();
     mockStreams = createMockStreamsClient();
-    mockLockManager = createMockLockManager();
+    // P1 FIX #6: Create shared lock handle so tests can mock its extend() method
+    mockLockHandle = createMockLockHandle();
+    mockLockManager = createMockLockManager(mockLockHandle);
   });
 
   afterEach(async () => {
@@ -272,7 +281,7 @@ describe('CrossRegionHealthManager', () => {
       manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
-      const globalHealth = manager.evaluateGlobalHealth();
+      const globalHealth = await manager.evaluateGlobalHealth();
       expect(globalHealth).toBeDefined();
       expect(globalHealth.redis).toBeDefined();
       expect(typeof globalHealth.degradationLevel).toBe('number');
@@ -283,7 +292,7 @@ describe('CrossRegionHealthManager', () => {
       manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
-      const globalHealth = manager.evaluateGlobalHealth();
+      const globalHealth = await manager.evaluateGlobalHealth();
       // With default setup, no detectors are registered
       expect(globalHealth.detectors).toHaveLength(0);
     });
@@ -401,14 +410,14 @@ describe('CrossRegionHealthManager', () => {
       const lostHandler = jest.fn();
       manager.on('leadershipLost', lostHandler);
 
-      // Simulate lock extension failure
-      (mockLockManager.extendLock as Mock<() => Promise<boolean>>).mockResolvedValueOnce(false);
+      // P1 FIX #6: Mock the lock handle's extend() method (what the real code calls),
+      // not mockLockManager.extendLock (which is never called by the production code).
+      (mockLockHandle.extend as Mock<() => Promise<boolean>>).mockResolvedValueOnce(false);
 
-      // Wait for heartbeat interval
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Wait for heartbeat interval to fire
+      await new Promise(resolve => setTimeout(resolve, 200));
 
-      // May or may not have fired depending on timing
-      // This is a timing-sensitive test
+      expect(lostHandler).toHaveBeenCalled();
     });
 
     it('should emit activateStandby on failover', async () => {

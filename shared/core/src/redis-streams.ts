@@ -311,6 +311,10 @@ export class RedisStreamsClient {
     CIRCUIT_BREAKER: 'stream:circuit-breaker',
     // System failover coordination events
     SYSTEM_FAILOVER: 'stream:system-failover',
+    // P1 FIX #9: Health alerts from enhanced-health-monitor
+    HEALTH_ALERTS: 'stream:health-alerts',
+    // P1 FIX #9: System commands (cache clear, etc.) from enhanced-health-monitor
+    SYSTEM_COMMANDS: 'stream:system-commands',
   } as const;
 
   /**
@@ -328,6 +332,8 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
     [RedisStreamsClient.STREAMS.CIRCUIT_BREAKER]: 5000,        // Circuit breaker events, critical alerts
     [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume
+    [RedisStreamsClient.STREAMS.HEALTH_ALERTS]: 5000,            // P1 FIX #9: Health alerts, critical
+    [RedisStreamsClient.STREAMS.SYSTEM_COMMANDS]: 1000,          // P1 FIX #9: System commands, low volume
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
@@ -1068,8 +1074,17 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     return getRedisStreamsClient(url, password);
   }
 
-  const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
-  const redisPassword = password || process.env.REDIS_PASSWORD;
+  let redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
+  // FIX #23: Don't send password to in-memory Redis (see redis.ts for details)
+  // FIX #23b: Also strip password from URL — ioredis parses credentials from
+  // redis://:password@host:port URLs regardless of the explicit password option.
+  let redisPassword: string | undefined;
+  if (process.env.REDIS_MEMORY_MODE === 'true') {
+    redisPassword = undefined;
+    redisUrl = redisUrl.replace(/redis:\/\/:[^@]+@/, 'redis://');
+  } else {
+    redisPassword = password || process.env.REDIS_PASSWORD;
+  }
 
   initializingPromise = (async () => {
     try {

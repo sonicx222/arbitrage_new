@@ -64,6 +64,8 @@ async function cleanup() {
       const pids = await findProcessesByPort(svc.port);
       if (pids.length > 0) {
         logger.warning(`${svc.name} (port ${svc.port}) is occupied by PIDs: ${pids.join(', ')}`);
+        // FIX #16: Track whether all kills succeeded before reporting port status
+        let allKilled = true;
         for (const pid of pids) {
           log(`  Killing PID ${pid}...`, 'dim');
           const killed = await killProcess(pid);
@@ -71,9 +73,14 @@ async function cleanup() {
             logger.success(`  PID ${pid} killed.`);
           } else {
             logger.error(`  Failed to kill PID ${pid}.`);
+            allKilled = false;
           }
         }
-        logger.success(`  Port ${svc.port} released.`);
+        if (allKilled) {
+          logger.success(`  Port ${svc.port} released.`);
+        } else {
+          logger.warning(`  Port ${svc.port} may still be in use (some processes could not be killed).`);
+        }
       } else {
         log(`${svc.name} (port ${svc.port}) is already free.`, 'dim');
       }
@@ -121,8 +128,8 @@ async function cleanup() {
   try {
     deletePidFile();
     logger.success('PID file cleaned up.');
-  } catch {
-    log('No PID file to clean up.', 'dim');
+  } catch (err) {
+    console.warn('Warning: PID file cleanup failed:', err?.message ?? err);
   }
 
   logger.success('\nCleanup complete! Your local environment is now clean.');
