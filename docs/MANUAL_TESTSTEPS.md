@@ -1,357 +1,355 @@
-# Manual Testing Plan: Arbitrage System Local Development Verification
+# Manual Test Steps: Local Arbitrage System Verification
 
-## Overview
+## Purpose
 
-This document provides step-by-step manual testing procedures to verify the entire arbitrage system (detection, coordinator, Redis streams, execution) works correctly in local development.
+This guide verifies the local stack end-to-end against the current codebase, scripts, and environment behavior.
 
-## System Architecture
+It covers:
+- service startup and health
+- Redis stream activity
+- coordinator/execution integration
+- clean shutdown and reset
 
-| Service | Port | Health Endpoint | Purpose |
-|---------|------|-----------------|---------|
-| Coordinator | 3000 | `/api/health` | Dashboard, leader election, orchestration |
-| P1 Asia-Fast | 3001 | `/health` | BSC, Polygon, Avalanche, Fantom detection |
-| P2 L2-Turbo | 3002 | `/health` | Arbitrum, Optimism, Base detection |
-| P3 High-Value | 3003 | `/health` | Ethereum, zkSync, Linea detection |
-| P4 Solana (optional) | 3004 | `/health` | Solana detection |
-| Execution Engine | 3005 | `/health` | Trade execution |
-| Cross-Chain | 3006 | `/health` | Cross-chain arbitrage detection |
-| Unified Detector (deprecated) | 3007 | `/health` | Legacy single-detector mode |
+## Current Service Map (Source of Truth)
 
-## Redis Streams
+| Service | Port | Health Endpoint | Started by `dev:all` |
+|---------|------|-----------------|----------------------|
+| Redis | 6379 | TCP check (`redis-cli ping`) | No (start separately) |
+| Coordinator | 3000 | `/api/health` | Yes |
+| P1 Asia-Fast Detector | 3001 | `/health` | Yes |
+| P2 L2-Turbo Detector | 3002 | `/health` | Yes |
+| P3 High-Value Detector | 3003 | `/health` | Yes |
+| Execution Engine | 3005 | `/health` | Yes |
+| Cross-Chain Detector | 3006 | `/health` | Yes |
+| P4 Solana Detector (optional) | 3004 | `/health` | No |
+| Unified Detector (legacy optional) | 3007 | `/health` | No |
 
-| Stream | Purpose |
-|--------|---------|
-| `stream:health` | Service heartbeats |
-| `stream:opportunities` | Detected arbitrage opportunities |
-| `stream:execution-requests` | Forwarded to execution engine |
-| `stream:price-updates` | Price feed data |
-| `stream:swap-events` | Swap event data |
-| `stream:whale-alerts` | Large transaction alerts |
-| `stream:volume-aggregates` | Aggregated volume data |
-| `stream:pending-opportunities` | Pending mempool opportunities |
+Primary references:
+- `package.json`
+- `scripts/lib/service-definitions.js`
+- `shared/constants/service-ports.json`
+
+## Important Notes Before Testing
+
+1. Node requirement is `>=22` (from `package.json` `engines.node`).
+2. `npm run dev:all` loads values from `.env` (via `tsx --env-file=.env`).
+3. `npm run dev:status` loads `.env` then `.env.local` (with override).
+4. If you changed `.env.local`, run `npm run dev:setup` before `dev:all` so `.env` stays in sync.
+5. Status output may show `Running (degraded)` when the process is up but health endpoint is slow under load. This is expected and not the same as `Not running`.
+6. On Windows PowerShell, you can replace `curl -s` with `irm` (`Invoke-RestMethod`) for HTTP checks.
+
+## Redis Stream Names to Expect
+
+Core streams (from `shared/core/src/redis-streams.ts`):
+- `stream:health`
+- `stream:opportunities`
+- `stream:execution-requests`
+- `stream:price-updates`
+- `stream:swap-events`
+- `stream:whale-alerts`
+- `stream:volume-aggregates`
+- `stream:pending-opportunities`
+- `stream:circuit-breaker`
+- `stream:system-failover`
+
+Failure/DLQ streams used by coordinator/execution:
+- `stream:dead-letter-queue`
+- `stream:forwarding-dlq`
 
 ---
 
-## Phase 1: Environment Setup (5 min)
+## Phase 1: Prerequisites and Setup
 
-### 1.1 Verify Prerequisites
 ```bash
-node --version    # Should be 18+
-npm --version     # Should be 9+
+node --version
+npm --version
 ```
 
-### 1.2 Build Project
+Expected:
+- Node 22+
+
+Install and sync environment files:
+
 ```bash
 npm install
-npm run build
-npm run typecheck   # Should pass with no errors
+npm run dev:setup
 ```
 
-### 1.3 Configure Environment
+Optional preflight:
+
 ```bash
-npm run dev:setup   # Creates .env from .env.local
+npm run build
+npm run typecheck
 ```
 
 ---
 
-## Phase 2: Start Services (5 min)
+## Phase 2: Start Local Stack
 
-### 2.1 Start Redis
+### 2.1 Start Redis (choose one)
+
+In-memory Redis (no Docker required):
+
 ```bash
-# Option A: In-memory (no Docker required)
 npm run dev:redis:memory
+```
 
-# Option B: Docker
+Docker Redis:
+
+```bash
 npm run dev:redis
 ```
 
-**Expected:** Redis running on port 6379
+### 2.2 Start Services
 
-### 2.2 Start All Services with Simulation
+Recommended for manual testing (foreground with hot reload):
+
 ```bash
-# Option A: Use built-in simulation scripts (recommended)
-npm run dev:simulate:full
-
-# Option B: Set environment variables manually
-# Windows (cmd):
-set SIMULATION_MODE=true && set EXECUTION_SIMULATION_MODE=true && npm run dev:all
-
-# Linux/Mac:
-SIMULATION_MODE=true EXECUTION_SIMULATION_MODE=true npm run dev:all
-
-# Option C: Add to .env.local file:
-# SIMULATION_MODE=true
-# EXECUTION_SIMULATION_MODE=true
-# Then run: npm run dev:all
+npm run dev:all
 ```
 
-**Expected:** All 6 core services start, logs show "Starting..."
+Alternative managed startup (detached, includes build):
 
-### 2.3 Verify Startup
+```bash
+npm run dev:simulate:full
+```
+
+Notes:
+- `dev:all` starts 6 core services (Coordinator + P1/P2/P3 + Cross-Chain + Execution).
+- `dev:all` does not start Redis.
+
+---
+
+## Phase 3: Verify Startup and Health
+
+In a separate terminal:
+
 ```bash
 npm run dev:status
 ```
 
-**Expected Output:**
-```
-Service Status:
-  Redis                  (port 6379)   Running
-  Coordinator            (port 3000)   Running - healthy
-  P1 Asia-Fast Detector  (port 3001)   Running - healthy
-  P2 L2-Turbo Detector   (port 3002)   Running - healthy
-  P3 High-Value Detector (port 3003)   Running - healthy
-  Cross-Chain Detector   (port 3006)   Running - healthy
-  Execution Engine       (port 3005)   Running - healthy
-```
+Expected:
+- Redis: `Running`
+- Core services: `Running` or `Running (degraded)` during heavy startup/load
+- Optional services may show `Not running (optional)`
 
----
+### 3.1 Quick HTTP health checks
 
-## Phase 3: Health Check Verification (5 min)
-
-### 3.1 Coordinator Health
 ```bash
-curl http://localhost:3000/api/health
+curl -s http://localhost:3000/api/health
+curl -s http://localhost:3001/health
+curl -s http://localhost:3002/health
+curl -s http://localhost:3003/health
+curl -s http://localhost:3005/health
+curl -s http://localhost:3006/health
 ```
 
-**Expected Response:**
+PowerShell equivalent:
+
+```powershell
+irm http://localhost:3000/api/health
+irm http://localhost:3001/health
+irm http://localhost:3002/health
+irm http://localhost:3003/health
+irm http://localhost:3005/health
+irm http://localhost:3006/health
+```
+
+Coordinator (`/api/health`) currently returns a minimal shape for unauthenticated requests:
+
 ```json
 {
-  "status": "healthy",
-  "isLeader": true,
-  "services": {"healthy": 6, "degraded": 0, "unhealthy": 0},
-  "metrics": {"systemHealth": 100}
+  "status": "ok",
+  "systemHealth": 100,
+  "timestamp": 1234567890
 }
 ```
 
-### 3.2 Execution Engine Health
-```bash
-curl http://localhost:3005/health
-```
-
-**Expected Response:**
-```json
-{
-  "service": "execution-engine",
-  "status": "healthy",
-  "simulationMode": true,
-  "queueSize": 0
-}
-```
-
-### 3.3 Dashboard Visual Check
-Open browser: http://localhost:3000
-
-**Verify:**
-- System health shows green/100%
-- All 6 services listed as healthy
-- Leader status shows "LEADER"
+Execution health (`/health`) should include:
+- `service: "execution-engine"`
+- `status` (`healthy` or `degraded`)
+- `simulationMode`
 
 ---
 
-## Phase 4: Redis Streams Verification (10 min)
+## Phase 4: Dashboard and API Checks
 
-### 4.1 Connect to Redis
+Open:
+
+`http://localhost:3000`
+
+Verify:
+- dashboard loads
+- metrics update over time
+- service cards reflect current state
+
+### 4.1 Coordinator API checks
+
+In default local dev (`NODE_ENV=development` and no JWT/API keys configured), read APIs are available:
+
 ```bash
-# For in-memory Redis (if redis-cli available)
+curl -s http://localhost:3000/api/metrics
+curl -s http://localhost:3000/api/services
+curl -s http://localhost:3000/api/leader
+```
+
+If you configured `JWT_SECRET` or `API_KEYS`, include auth headers accordingly.
+
+---
+
+## Phase 5: Redis Streams Verification
+
+### 5.1 Connect to Redis CLI
+
+Local/in-memory:
+
+```bash
 redis-cli -h 127.0.0.1 -p 6379
+```
 
-# For Docker Redis
+If `redis-cli` is unavailable on Windows, use Docker Redis (`npm run dev:redis`) and run `docker exec -it arbitrage-redis redis-cli` instead.
+
+Docker:
+
+```bash
 docker exec -it arbitrage-redis redis-cli
 ```
 
-### 4.2 Verify Streams Exist
-```
-KEYS stream:*
+### 5.2 List streams (use SCAN, not KEYS)
+
+```redis
+SCAN 0 MATCH stream:* COUNT 200
 ```
 
-**Expected:** At least `stream:health`, `stream:price-updates`
+Expected:
+- at least `stream:health` and `stream:price-updates`
 
-### 4.3 Check Stream Activity
-```
+### 5.3 Validate stream activity
+
+```redis
 XLEN stream:health
-# Wait 10 seconds
-XLEN stream:health
-```
-
-**Expected:** Count increases (health heartbeats)
-
-### 4.4 View Health Messages
-```
-XREVRANGE stream:health + - COUNT 3
-```
-
-**Expected:** Messages with service names, status, timestamps
-
-### 4.5 Check Consumer Groups
-```
-XINFO GROUPS stream:health
-XINFO GROUPS stream:opportunities
-```
-
-**Expected:** `coordinator-group` exists with 1+ consumers
-
----
-
-## Phase 5: Detection Flow Testing (10 min)
-
-### 5.1 Verify Price Updates (Simulation Mode)
-```
 XLEN stream:price-updates
-# Wait 5 seconds
-XLEN stream:price-updates
-```
-
-**Expected:** Count increases with simulated prices
-
-### 5.2 View Simulated Prices
-```
-XREVRANGE stream:price-updates + - COUNT 3
-```
-
-**Expected:** Price data with chain, dex, pairKey, price fields
-
-### 5.3 Check for Opportunities
-```
 XLEN stream:opportunities
 ```
 
-**Expected:** May be > 0 if simulation generated arbitrage scenarios
+Wait 10-20 seconds and run again. Expected:
+- `stream:health` and `stream:price-updates` should increase
+- `stream:opportunities` can be zero or non-zero depending on timing and filters
 
-### 5.4 Verify Coordinator Receives Data
-```bash
-curl http://localhost:3000/api/metrics
+### 5.4 Check recent messages
+
+```redis
+XREVRANGE stream:health + - COUNT 3
+XREVRANGE stream:price-updates + - COUNT 3
 ```
 
-**Expected:** `priceUpdatesReceived` > 0, `totalSwapEvents` growing
+### 5.5 Check consumer groups
 
----
-
-## Phase 6: Coordinator & Leader Election (5 min)
-
-### 6.1 Verify Leader Status
-```bash
-# Windows:
-curl http://localhost:3000/api/health | findstr isLeader
-
-# Linux/Mac:
-curl http://localhost:3000/api/health | grep isLeader
-
-# Or view full response:
-curl -s http://localhost:3000/api/health | python -m json.tool
-```
-
-**Expected:** `"isLeader": true`
-
-### 6.2 Check Leader Lock in Redis
-```
-GET coordinator:leader:lock
-TTL coordinator:leader:lock
-```
-
-**Expected:** Lock value contains instance ID, TTL between 20-30 seconds
-
-### 6.3 Verify Service Registration
-```bash
-curl http://localhost:3000/api/services
-```
-
-**Expected:** All 6 services listed as healthy
-
----
-
-## Phase 7: Execution Engine Testing (5 min)
-
-### 7.1 Verify Simulation Mode Active
-```bash
-# Windows:
-curl http://localhost:3005/health | findstr simulationMode
-
-# Linux/Mac:
-curl http://localhost:3005/health | grep simulationMode
-```
-
-**Expected:** `"simulationMode": true`
-
-### 7.2 Check Circuit Breaker
-```bash
-curl http://localhost:3005/circuit-breaker
-```
-
-**Expected:** `"state": "CLOSED"`, `"failures": 0`
-
-### 7.3 Check Execution Stats
-```bash
-curl http://localhost:3005/stats
-```
-
-**Expected:** Stats object with executionAttempts, successfulExecutions
-
-### 7.4 Check Execution Requests Stream
-```
-XLEN stream:execution-requests
+```redis
+XINFO GROUPS stream:health
 XINFO GROUPS stream:execution-requests
 ```
 
-**Expected:** Consumer group `execution-engine-group` exists
+Expected groups:
+- `coordinator-group` on coordinator-consumed streams
+- `execution-engine-group` on `stream:execution-requests`
 
 ---
 
-## Phase 8: End-to-End Flow Verification (10 min)
-
-### 8.1 Complete Flow Test
-Wait 60 seconds after startup with simulation mode, then:
+## Phase 6: Execution Engine API Checks
 
 ```bash
-# 1. Check price data flowing
-curl http://localhost:3000/api/metrics
-
-# 2. Check streams have data
-redis-cli XLEN stream:price-updates
-redis-cli XLEN stream:health
-
-# 3. Check coordinator processing
-curl http://localhost:3000/api/health
+curl -s http://localhost:3005/health
+curl -s http://localhost:3005/stats
+curl -s http://localhost:3005/circuit-breaker
 ```
 
-### 8.2 Dashboard Verification
-Refresh http://localhost:3000 and verify:
-- Metrics updating (opportunity count, price updates)
-- Services all healthy
-- No error alerts
+PowerShell equivalent:
 
-### 8.3 Graceful Shutdown Test
-Press `Ctrl+C` in the `dev:all` terminal
+```powershell
+irm http://localhost:3005/health
+irm http://localhost:3005/stats
+irm http://localhost:3005/circuit-breaker
+```
 
-**Verify:**
-- Services log "shutting down gracefully"
-- `npm run dev:status` shows services stopped
-- `GET coordinator:leader:lock` returns `(nil)`
+Expected:
+- health endpoint responds with service status and simulation flag
+- stats endpoint returns execution stats object
+- circuit breaker endpoint responds with breaker state data
 
 ---
 
-## Troubleshooting Quick Reference
+## Phase 7: End-to-End Behavior Check
 
-| Issue | Check | Fix |
-|-------|-------|-----|
-| Redis won't connect | Port 6379 in use? | `npm run dev:cleanup` |
-| Services won't start | Build errors? | `npm run build` |
-| No stream messages | Redis running? | `npm run dev:status` |
-| Leader not elected | Stale lock? | `DEL coordinator:leader:lock` |
-| Circuit breaker open | Failures > 5? | Restart execution engine |
+After 60 seconds of runtime:
 
-### Complete Reset
+1. `npm run dev:status` still shows core services running.
+2. `/api/metrics` shows movement (for example price updates and processed counters).
+3. Redis stream lengths continue increasing for health and price updates.
+
+Quick checks:
+
+```bash
+curl -s http://localhost:3000/api/metrics
+redis-cli XLEN stream:health
+redis-cli XLEN stream:price-updates
+redis-cli XLEN stream:execution-requests
+```
+
+Docker Redis equivalent:
+
+```bash
+docker exec -it arbitrage-redis redis-cli XLEN stream:health
+docker exec -it arbitrage-redis redis-cli XLEN stream:price-updates
+docker exec -it arbitrage-redis redis-cli XLEN stream:execution-requests
+```
+
+---
+
+## Phase 8: Shutdown and Cleanup
+
+### If started with `dev:all`
+
+- press `Ctrl+C` in the `dev:all` terminal
+
+### If started with managed scripts (`dev:start` / `dev:simulate:*`)
+
+```bash
+npm run dev:stop
+```
+
+Then verify:
+
+```bash
+npm run dev:status
+```
+
+Expected:
+- core services reported as not running
+
+---
+
+## Troubleshooting
+
+| Issue | Likely Cause | Fix |
+|------|--------------|-----|
+| `dev:status` says down, terminal looks up | health endpoint timed out or env mismatch | rerun status after warmup; run `npm run dev:setup` to sync `.env` and `.env.local` |
+| Services fail immediately on `dev:all` | port conflict or config issue | `npm run dev:cleanup` then retry |
+| Redis stream checks empty | Redis not running | start Redis first (`dev:redis` or `dev:redis:memory`) |
+| Wrong ports in status checks | `.env` and `.env.local` differ | run `npm run dev:setup` |
+
+### Full local reset
+
 ```bash
 npm run dev:stop
 npm run dev:cleanup
+node -e "try{require('fs').unlinkSync('.redis-memory-config.json')}catch{}"
+npm run dev:setup
+```
 
-# Windows:
-del .redis-memory-config.json
+Then restart:
 
-# Linux/Mac:
-rm -f .redis-memory-config.json
-
-# Then rebuild and restart:
-npm run build:clean
+```bash
 npm run dev:redis:memory
 npm run dev:all
 ```
@@ -360,21 +358,23 @@ npm run dev:all
 
 ## Success Criteria
 
-- [ ] All 6 core services start and show healthy status (Coordinator, P1-P3, Cross-Chain, Execution)
-- [ ] Redis streams created and receiving messages
-- [ ] Health heartbeats appearing in `stream:health`
-- [ ] Price updates appearing in `stream:price-updates` (simulation mode)
-- [ ] Coordinator is leader with valid lock
-- [ ] Dashboard displays system metrics
-- [ ] Graceful shutdown releases resources
+- [ ] Redis running and reachable
+- [ ] All 6 core services started
+- [ ] `npm run dev:status` reports core services as `Running` or `Running (degraded)`
+- [ ] Coordinator dashboard reachable at `http://localhost:3000`
+- [ ] `stream:health` and `stream:price-updates` actively receiving messages
+- [ ] Consumer groups exist for coordinator and execution engine flows
+- [ ] Execution engine health/stats/circuit-breaker endpoints respond
+- [ ] Shutdown leaves no stale local service processes
 
-> **Note:** Optional services (P4 Solana, Unified Detector) are not started by `dev:all`
+## Related Files
 
-## Critical Files
-
-- `package.json` - npm scripts
-- `shared/constants/service-ports.json` - **Port configuration (single source of truth)**
-- `shared/core/src/redis-streams.ts` - Stream definitions
-- `services/coordinator/src/coordinator.ts` - Coordinator logic
-- `scripts/lib/services-config.js` - Service startup configuration
-- `docs/local-development.md` - Full documentation
+- `package.json`
+- `scripts/status-local.js`
+- `scripts/start-local.js`
+- `scripts/stop-local.js`
+- `scripts/cleanup-services.js`
+- `scripts/lib/services-config.js`
+- `shared/core/src/redis-streams.ts`
+- `shared/constants/service-ports.json`
+- `docs/local-development.md`

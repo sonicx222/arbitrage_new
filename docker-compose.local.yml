@@ -1,18 +1,17 @@
 # =============================================================================
-# Local Development Docker Compose (Optimized for M1 Mac)
+# Local Development Docker Compose (Cross-Platform)
 # =============================================================================
 # This compose file is designed for easy local development and testing.
 #
 # Usage:
-#   npm run dev:docker:up     # Start all containers
-#   npm run dev:docker:down   # Stop all containers
-#   npm run dev:docker:logs   # View logs
+#   npm run dev:redis         # Start Redis only
+#   npm run dev:redis:ui      # Start Redis + Redis Commander
+#   npm run dev:redis:down    # Stop local Redis
+#   npm run dev:redis:logs    # View Redis logs
 #
 # Or directly:
-#   docker-compose -f docker-compose.local.yml up -d
+#   docker compose -f docker-compose.local.yml up -d redis
 # =============================================================================
-
-version: '3.8'
 
 services:
   # ---------------------------------------------------------------------------
@@ -20,7 +19,6 @@ services:
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    platform: linux/arm64  # Optimized for M1 Mac
     container_name: arbitrage-redis
     ports:
       - "127.0.0.1:6379:6379"
@@ -41,7 +39,6 @@ services:
   # ---------------------------------------------------------------------------
   redis-commander:
     image: rediscommander/redis-commander:latest
-    platform: linux/arm64
     container_name: arbitrage-redis-ui
     environment:
       - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-localdev}

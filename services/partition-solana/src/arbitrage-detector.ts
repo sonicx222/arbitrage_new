@@ -111,8 +111,8 @@ const LIQUID_STAKING_TOKENS = new Set([
 /** Regex for validating Solana addresses */
 const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-/** Regex for test/mock addresses (allows 1-64 char alphanumeric with hyphens) */
-const TEST_ADDRESS_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+/** Regex for test/mock addresses (allows 1-64 char alphanumeric with hyphens/underscores) */
+const TEST_ADDRESS_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
 /** Default fee in basis points used when adapting a UnifiedPriceUpdate with no fee field */
 const DEFAULT_ADAPTED_FEE_BPS = 30;

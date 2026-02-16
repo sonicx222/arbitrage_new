@@ -1292,6 +1292,13 @@ let redisInstance: RedisClient | null = null;
 let redisInstancePromise: Promise<RedisClient> | null = null;
 let initializationError: Error | null = null;
 
+function resolveRedisPassword(password?: string): string | undefined {
+  const raw = password ?? process.env.REDIS_PASSWORD;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function getRedisClient(url?: string, password?: string): Promise<RedisClient> {
   // If already initialized successfully, return immediately
   if (redisInstance) {
@@ -1325,22 +1332,8 @@ export async function getRedisClient(url?: string, password?: string): Promise<R
   // Start new initialization
   redisInstancePromise = (async (): Promise<RedisClient> => {
     try {
-      let redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
-      // FIX #23: Don't send password to in-memory Redis server.
-      // In-memory Redis (redis-memory-server) has no auth configured, but .env
-      // sets REDIS_PASSWORD=localdev for Docker Redis. Sending a password to a
-      // server without auth causes "[WARN] default user does not require a password"
-      // on every connection (12 warnings across 6 services × 2 clients each).
-      // Skip password when REDIS_MEMORY_MODE is set (in-memory server running).
-      // FIX #23b: Also strip password from URL — ioredis parses credentials from
-      // redis://:password@host:port URLs regardless of the explicit password option.
-      let redisPassword: string | undefined;
-      if (process.env.REDIS_MEMORY_MODE === 'true') {
-        redisPassword = undefined;
-        redisUrl = redisUrl.replace(/redis:\/\/:[^@]+@/, 'redis://');
-      } else {
-        redisPassword = password || process.env.REDIS_PASSWORD;
-      }
+      const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
+      const redisPassword = password || process.env.REDIS_PASSWORD;
 
       const instance = new RedisClient(redisUrl, redisPassword);
 
@@ -1379,15 +1372,7 @@ export function getRedisClientSync(): RedisClient | null {
 // Health check for Redis connectivity
 export async function checkRedisHealth(url?: string, password?: string): Promise<boolean> {
   try {
-    let redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
-    let redisPassword: string | undefined;
-    if (process.env.REDIS_MEMORY_MODE === 'true') {
-      redisPassword = undefined;
-      redisUrl = redisUrl.replace(/redis:\/\/:[^@]+@/, 'redis://');
-    } else {
-      redisPassword = password || process.env.REDIS_PASSWORD;
-    }
-    const client = new RedisClient(redisUrl, redisPassword);
+    const client = new RedisClient(url || process.env.REDIS_URL || 'redis://localhost:6379', password || process.env.REDIS_PASSWORD);
     const isHealthy = await client.ping();
     await client.disconnect(); // Clean up test client
     return isHealthy;

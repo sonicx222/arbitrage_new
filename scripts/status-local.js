@@ -16,15 +16,12 @@ const {
   log,     // Keep for backward compatibility where needed
   colors,
   checkHealth,
-  checkRedis,
   checkDockerContainer,
   checkTcpConnection,
   loadPids,
-  processExists,         // FIX #15/#11: Check PID liveness
   getRedisMemoryConfig,
   deleteRedisMemoryConfig, // FIX #15: Clean stale Redis config
   ROOT_DIR,
-  PID_FILE
 } = require('./lib/utils');
 
 const { getStatusServices, PORTS, checkAndPrintDeprecations } = require('./lib/services-config');
@@ -70,6 +67,19 @@ async function checkRedisService(service) {
 }
 
 /**
+ * Check if a local service port is accepting TCP connections.
+ * Tries localhost and IPv4 loopback for cross-platform compatibility.
+ *
+ * @param {number} port - Port number
+ * @returns {Promise<boolean>}
+ */
+async function checkLocalPortOpen(port) {
+  if (await checkTcpConnection('localhost', port)) return true;
+  if (await checkTcpConnection('127.0.0.1', port)) return true;
+  return false;
+}
+
+/**
  * Get status for a service.
  * @param {Object} service - Service configuration
  * @returns {Promise<{running: boolean, status?: string, latency?: number}>}
@@ -80,8 +90,26 @@ async function getServiceStatus(service) {
   } else if (service.type === 'docker') {
     return await checkDockerContainer(service.container);
   } else if (service.type === 'node') {
-    // P3-3: Use constant instead of hardcoded timeout
-    return await checkHealth(service.port, service.healthEndpoint, STATUS_CHECK_TIMEOUT_MS);
+    // First try HTTP health endpoint.
+    // If health is slow/unhealthy but port is open, treat as running with degraded health.
+    const health = await checkHealth(service.port, service.healthEndpoint, STATUS_CHECK_TIMEOUT_MS);
+    if (health.running) {
+      return { ...health, healthy: true };
+    }
+
+    // Fallback: process may be running but health endpoint can timeout under load.
+    const portOpen = await checkLocalPortOpen(service.port);
+    if (portOpen) {
+      const healthHint = health.status ? `health: ${health.status}` : 'health check timeout';
+      return {
+        running: true,
+        healthy: false,
+        status: healthHint,
+        latency: health.latency
+      };
+    }
+
+    return { running: false, healthy: false };
   }
   return { running: false };
 }
@@ -108,6 +136,12 @@ function normalizeHealthStatus(status) {
  * @returns {string}
  */
 function formatStatus(status, optional = false) {
+  if (status.running && status.healthy === false) {
+    const latency = status.latency ? ` (${status.latency}ms)` : '';
+    const detail = status.status ? ` - ${status.status}` : '';
+    return `${colors.yellow}Running (degraded)${colors.reset}${detail}${latency}`;
+  }
+
   if (status.running) {
     const latency = status.latency ? ` (${status.latency}ms)` : '';
     // FIX #14: Normalize status string for consistent display
@@ -119,6 +153,50 @@ function formatStatus(status, optional = false) {
   } else {
     return `${colors.red}Not running${colors.reset}`;
   }
+}
+
+/**
+ * Remove stale PIDs from .local-services.pid and return only live entries.
+ * @param {Object<string, number|string>} pids
+ * @param {Array<{name: string, type?: string, port?: number}>} services
+ * @returns {Promise<Object<string, number>>}
+ */
+async function pruneStalePids(pids, services = []) {
+  const servicesByName = new Map(services.map((service) => [service.name, service]));
+  const live = {};
+  let staleCount = 0;
+
+  for (const [name, rawPid] of Object.entries(pids)) {
+    const pid = Number(rawPid);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      staleCount++;
+      continue;
+    }
+
+    if (await processExists(pid)) {
+      const service = servicesByName.get(name);
+      if (service?.type === 'node' && typeof service.port === 'number') {
+        if (!await checkLocalPortOpen(service.port)) {
+          staleCount++;
+          continue;
+        }
+      }
+      live[name] = pid;
+    } else {
+      staleCount++;
+    }
+  }
+
+  if (staleCount > 0) {
+    if (Object.keys(live).length === 0) {
+      deletePidFile();
+    } else {
+      savePids(live);
+    }
+    logger.warning(`Removed ${staleCount} stale PID entr${staleCount === 1 ? 'y' : 'ies'} from .local-services.pid`);
+  }
+
+  return live;
 }
 
 // =============================================================================
@@ -158,13 +236,19 @@ async function main() {
   console.log('');
 
   // Get services to check
-  const SERVICES = getStatusServices();
+  const SERVICES = getStatusServices()
+    .slice()
+    .sort((a, b) => {
+      if (a.port !== b.port) return a.port - b.port;
+      return a.name.localeCompare(b.name);
+    });
 
   // Check each service
   log('Service Status:', 'cyan');
   console.log('-'.repeat(60));
 
   let allRunning = true;
+  let allHealthy = true;
   let criticalDown = false;
 
   // Run all health checks in parallel for performance
@@ -187,15 +271,22 @@ async function main() {
         criticalDown = true;
       }
     }
+
+    if (status.running && status.healthy === false && !service.optional) {
+      allHealthy = false;
+    }
   }
 
   console.log('-'.repeat(60));
 
   // Summary (Task #5: Use semantic logger methods)
   console.log('');
-  if (allRunning) {
+  if (allRunning && allHealthy) {
     logger.success('All services are running!');
     logger.info(`Dashboard: http://localhost:${PORTS.COORDINATOR}`);
+  } else if (allRunning && !allHealthy) {
+    logger.warning('All services are running, but some health checks are degraded/slow.');
+    logger.info('Increase status timeout if needed: scripts/lib/constants.js -> STATUS_CHECK_TIMEOUT_MS');
   } else if (criticalDown) {
     logger.error('Redis is not running. Start it with one of:');
     logger.warning('  npm run dev:redis         # Docker (requires Docker Hub access)');
@@ -206,7 +297,6 @@ async function main() {
   }
 
   // Load PIDs if available
-  // FIX #11: Cross-reference PIDs with process liveness to identify stale entries
   const pids = loadPids();
   if (Object.keys(pids).length > 0) {
     log('\nProcess IDs:', 'dim');

@@ -126,17 +126,6 @@ function buildServiceDefinitions(PORTS) {
       type: 'node',
       enabled: false,
       optional: true
-    },
-    {
-      name: 'P4 Solana Detector',
-      script: 'services/partition-solana/src/index.ts',
-      port: PORTS.P4_SOLANA,
-      healthEndpoint: '/health',
-      delay: P4_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P4_SOLANA },
-      type: 'node',
-      enabled: false,
-      optional: true
     }
   ];
 

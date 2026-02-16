@@ -78,6 +78,10 @@ interface TaskMessage {
   taskData: any;
 }
 
+// Reuse one path finder per worker process to avoid expensive per-task reinitialization.
+let workerMultiLegPathFinder: any = null;
+let workerMultiLegPathFinderConfigHash: string | null = null;
+
 // Task processing functions
 interface ArbitrageResult {
   pairKey: string;
@@ -311,11 +315,19 @@ async function processMultiLegPathFinding(data: any): Promise<any> {
 
   // Dynamic import to avoid circular dependencies
   const { MultiLegPathFinder } = await import('./multi-leg-path-finder');
+  const requestedConfig = config || {};
+  const requestedConfigHash = JSON.stringify(requestedConfig);
 
-  const pathFinder = new MultiLegPathFinder(config || {});
+  if (!workerMultiLegPathFinder) {
+    workerMultiLegPathFinder = new MultiLegPathFinder(requestedConfig);
+    workerMultiLegPathFinderConfigHash = requestedConfigHash;
+  } else if (workerMultiLegPathFinderConfigHash !== requestedConfigHash) {
+    workerMultiLegPathFinder.updateConfig(requestedConfig);
+    workerMultiLegPathFinderConfigHash = requestedConfigHash;
+  }
 
   const startTime = Date.now();
-  const opportunities = await pathFinder.findMultiLegOpportunities(
+  const opportunities = await workerMultiLegPathFinder.findMultiLegOpportunities(
     chain,
     pools,
     baseTokens,
@@ -323,7 +335,7 @@ async function processMultiLegPathFinding(data: any): Promise<any> {
   );
   const processingTimeMs = Date.now() - startTime;
 
-  const stats = pathFinder.getStats();
+  const stats = workerMultiLegPathFinder.getStats();
 
   return {
     opportunities,

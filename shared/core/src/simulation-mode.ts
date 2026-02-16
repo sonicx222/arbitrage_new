@@ -909,6 +909,7 @@ export class ChainSimulator extends EventEmitter {
       }
 
       if (!buyPair || !sellPair || buyPair === sellPair) continue;
+      if (buyPair.pair.dex === sellPair.pair.dex) continue;
 
       // Calculate profit percentage (accounting for fees)
       const totalFees = buyPair.pair.fee + sellPair.pair.fee;
@@ -1125,14 +1126,21 @@ export class ChainSimulator extends EventEmitter {
     const estimatedGasCost = 10 + Math.random() * 30; // Higher gas for multi-hop
     const flashLoanFee = 0.0009;
 
+    const uniqueDexes = Array.from(new Set(this.config.pairs.map(p => p.dex)));
+    if (uniqueDexes.length < 2) {
+      return;
+    }
+    const buyDex = uniqueDexes[0];
+    const sellDex = uniqueDexes[1];
+
     const opportunity: SimulatedOpportunity = {
       id: `sim-${this.config.chainId}-${type}-${++this.opportunityId}`,
       type,
       chain: this.config.chainId,
       buyChain: this.config.chainId,
       sellChain: this.config.chainId,
-      buyDex: this.config.pairs[0]?.dex || 'unknown',
-      sellDex: this.config.pairs[0]?.dex || 'unknown',
+      buyDex,
+      sellDex,
       tokenPair: `${path[0]}/${path[1]}`,
       buyPrice: 1,
       sellPrice: 1 + netProfit,

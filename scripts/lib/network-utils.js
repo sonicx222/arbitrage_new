@@ -86,7 +86,9 @@ function isPortInUse(port) {
       resolve(false);
     });
 
-    server.listen(port);
+    // Bind to loopback explicitly to avoid false negatives when another process
+    // listens only on IPv4/IPv6 and Node picks a different default family.
+    server.listen(port, '127.0.0.1');
   });
 }
 

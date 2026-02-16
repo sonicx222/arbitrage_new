@@ -504,7 +504,18 @@ export function getReserveCache(config?: Partial<ReserveCacheConfig>): ReserveCa
       ttlMs: reserveCacheInstance['config'].ttlMs,
     });
   } else if (config) {
-    logger.warn('getReserveCache called with config but instance already exists. Config ignored.');
+    const existingConfig = reserveCacheInstance['config'] as ReserveCacheConfig;
+    const hasConflictingValue = Object.entries(config).some(([key, value]) => (
+      value !== undefined &&
+      existingConfig[key as keyof ReserveCacheConfig] !== value
+    ));
+
+    if (hasConflictingValue) {
+      logger.warn('getReserveCache called with conflicting config after singleton init. Config ignored.', {
+        requestedConfig: config,
+        activeConfig: existingConfig
+      });
+    }
   }
 
   return reserveCacheInstance;

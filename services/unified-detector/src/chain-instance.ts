@@ -55,6 +55,7 @@ import {
   bpsToDecimal,
   disconnectWithTimeout,
   stopAndNullify,
+  getErrorMessage,
 } from '@arbitrage/core';
 
 import {
@@ -119,6 +120,13 @@ import {
   RESERVE_CACHE_TTL_MS,
   RESERVE_CACHE_MAX_ENTRIES,
 } from './constants';
+
+const MULTI_LEG_TIMEOUT_MS = parseIntEnvVar(
+  process.env.MULTI_LEG_TIMEOUT_MS,
+  5000,
+  1000,
+  20000
+);
 
 // =============================================================================
 // Types
@@ -587,7 +595,7 @@ export class ChainDetectorInstance extends EventEmitter {
         minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage ?? 0.005,
         maxPathLength: 7,
         minPathLength: 5,
-        timeoutMs: 3000
+        timeoutMs: MULTI_LEG_TIMEOUT_MS
       });
 
       // Initialize swap event filter for whale detection
@@ -1690,13 +1698,20 @@ export class ChainDetectorInstance extends EventEmitter {
     const tokenOut = opp.path[opp.path.length - 1] || opp.path[0]; // Should be same as path[0] for cycles
     // P1 FIX: Use ?? instead of || for numeric values (0 is valid, not missing)
     const amountIn = firstStep?.amountIn ?? 0;
+    const buyDex = opp.steps[0]?.dex || '';
+    const sellDex = opp.steps[opp.steps.length - 1]?.dex || '';
+
+    // Drop same-entry/exit DEX cycles in local detector output to reduce simulation noise.
+    if (!buyDex || !sellDex || buyDex === sellDex) {
+      return;
+    }
 
     const opportunity: ArbitrageOpportunity = {
       id: opp.id,
       type,
       chain: this.chainId,
-      buyDex: opp.steps[0]?.dex || '',
-      sellDex: opp.steps[opp.steps.length - 1]?.dex || '',
+      buyDex,
+      sellDex,
       token0: opp.path[0],
       token1: opp.path[1],
       // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
@@ -1770,7 +1785,10 @@ export class ChainDetectorInstance extends EventEmitter {
         await this.emitPathOpportunity(opp, 'multi-leg');
       }
     } catch (error) {
-      this.logger.error('Multi-leg path finding failed', { error });
+      this.logger.error('Multi-leg path finding failed', {
+        chainId: this.chainId,
+        error: getErrorMessage(error)
+      });
     }
   }
 

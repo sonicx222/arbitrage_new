@@ -19,6 +19,7 @@ const {
   isWindows,
   checkRedis,
   checkHealth,
+  getRedisMemoryConfig,
   updatePid,
   removePid,
   loadPids,    // FIX #6: Needed by interrupt handler to find PID of currently-starting service
@@ -107,7 +108,7 @@ function pipeStreamToLog(stream, serviceName, color, filter) {
 // Service Startup
 // =============================================================================
 
-async function startService(service) {
+async function startService(service, runtimeEnvOverrides = {}) {
   logService(service.name, `Starting on port ${service.port}...`, 'yellow');
 
   // FIX H4: Filter sensitive env vars before passing to child processes.
@@ -123,6 +124,7 @@ async function startService(service) {
   }
   const env = {
     ...filteredEnv,
+    ...runtimeEnvOverrides,
     ...service.env,
     NODE_ENV: 'development',
     LOG_LEVEL: process.env.LOG_LEVEL ?? 'info'
@@ -381,10 +383,18 @@ async function main() {
     process.exit(1);
   }
 
-  // FIX #23: Set REDIS_MEMORY_MODE for child processes when using in-memory Redis.
-  // This prevents services from sending a password to a passwordless Redis server.
-  if (redisType === 'memory') {
-    process.env.REDIS_MEMORY_MODE = 'true';
+  // If using in-memory Redis, force child services to use a passwordless local URL.
+  // This avoids noisy AUTH warnings when REDIS_PASSWORD exists in .env for Docker mode.
+  const runtimeEnvOverrides = {};
+  const redisStatus = await checkRedis();
+  if (redisStatus.running && redisStatus.type === 'memory') {
+    const memoryConfig = getRedisMemoryConfig();
+    const redisHost = memoryConfig?.host || '127.0.0.1';
+    const redisPort = memoryConfig?.port || PORTS.REDIS;
+    runtimeEnvOverrides.REDIS_URL = `redis://${redisHost}:${redisPort}`;
+    runtimeEnvOverrides.REDIS_PASSWORD = '';
+    runtimeEnvOverrides.REDIS_IN_MEMORY = 'true';
+    logger.info(`Using in-memory Redis override for child services: ${runtimeEnvOverrides.REDIS_URL}`);
   }
 
   // Start services
@@ -395,8 +405,7 @@ async function main() {
     // FIX #6: Track currently-starting service for interrupt cleanup
     currentlyStarting = { name: service.name };
     try {
-      const pid = await startService(service);
-      currentlyStarting = null;
+      const pid = await startService(service, runtimeEnvOverrides);
       startedPids.push({ name: service.name, pid });
       // Small delay between services
       await new Promise(r => setTimeout(r, SERVICE_START_DELAY_MS));
