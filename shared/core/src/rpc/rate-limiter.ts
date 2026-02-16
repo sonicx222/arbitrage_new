@@ -9,7 +9,7 @@
  * - Hot-path exempt: `eth_sendRawTransaction` bypasses rate limiting
  * - Non-blocking: Returns immediately with availability status
  *
- * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R3
+ * @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
  */
 
 import { createLogger } from '../logger';
@@ -200,7 +200,8 @@ export function isRateLimitExempt(method: string): boolean {
 
 /**
  * Default rate limits by provider tier.
- * Based on documented provider limits from RPC_PREDICTION_OPTIMIZATION_RESEARCH.md.
+ * Based on documented provider limits.
+ * @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
  */
 export const DEFAULT_RATE_LIMITS: Record<string, RateLimiterConfig> = {
   // Primary: dRPC (40-100 RPS)
@@ -226,14 +227,15 @@ export const DEFAULT_RATE_LIMITS: Record<string, RateLimiterConfig> = {
 export function getRateLimitConfig(providerName: string): RateLimiterConfig {
   const normalizedName = providerName.toLowerCase();
 
-  // Check for known providers
+  // Check for known providers (skip 'default' — it's the fallback below)
   for (const [key, config] of Object.entries(DEFAULT_RATE_LIMITS)) {
+    if (key === 'default') continue;
     if (normalizedName.includes(key)) {
       return { ...config, identifier: providerName };
     }
   }
 
-  // Return default config
+  // Return default config for unknown providers
   return { ...DEFAULT_RATE_LIMITS.default, identifier: providerName };
 }
 

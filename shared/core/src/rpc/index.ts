@@ -5,8 +5,7 @@
  * - BatchProvider: JSON-RPC 2.0 batch request support
  * - Rate Limiter: Token bucket rate limiting for RPC providers
  *
- * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
- * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - R1, R3, R4
+ * @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
  */
 
 export {

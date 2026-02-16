@@ -256,6 +256,6 @@ const batchProvider = new BatchProvider(provider, {
 
 Monitor throttle rates:
 ```typescript
-const stats = batchProvider.getRateLimiterStats();
-console.log(`Throttle rate: ${(stats.throttleRate * 100).toFixed(2)}%`);
+const stats = batchProvider.getStats();
+console.log(`Rate limited requests: ${stats.totalRateLimited}`);
 ```

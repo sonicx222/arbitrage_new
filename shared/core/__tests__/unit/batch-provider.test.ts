@@ -1,15 +1,16 @@
 /**
  * Batch Provider Tests
  *
- * Tests for Phase 3: RPC Request Batching
  * Validates:
  * - Request batching and auto-flush
  * - Batch size limits
  * - Timeout-based flushing
  * - Error handling per request
  * - Statistics tracking
+ * - Deduplication
+ * - Rate limiting integration
  *
- * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+ * @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -23,11 +24,12 @@ import {
   BatchProviderConfig,
 } from '../../src/rpc/batch-provider';
 
-// Type for mock fetch response
+// Type for mock fetch response (mirrors globalThis.Response interface)
 interface MockFetchResponse {
   ok: boolean;
-  status?: number;
-  statusText?: string;
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
   json: () => Promise<unknown>;
 }
 
@@ -36,6 +38,7 @@ const createMockFetchResponse = (data: unknown, ok = true): MockFetchResponse =>
   ok,
   status: ok ? 200 : 500,
   statusText: ok ? 'OK' : 'Internal Server Error',
+  headers: { 'content-type': 'application/json' },
   json: async () => data,
 });
 
@@ -229,19 +232,23 @@ describe('BatchProvider', () => {
       await expect(promise2).rejects.toThrow('RPC error -32000: execution reverted');
     });
 
-    // Skip: Complex async error handling with fake timers is flaky
-    it.skip('should handle batch-level HTTP error', async () => {
+    it('should handle batch-level HTTP error', async () => {
       mockFetch.mockResolvedValueOnce(createMockFetchResponse(null, false));
 
       // Queue 2 requests to go through batch path
       const promise1 = batchProvider.queueRequest('eth_call', [{ to: '0x123' }]);
       const promise2 = batchProvider.queueRequest('eth_call', [{ to: '0x456' }]);
 
-      // Wait for async operations
+      // Use allSettled to capture rejections before Jest's unhandled rejection handler
+      const settledPromise = Promise.allSettled([promise1, promise2]);
+
       await jest.runAllTimersAsync();
 
-      await expect(promise1).rejects.toThrow('HTTP error: 500 Internal Server Error');
-      await expect(promise2).rejects.toThrow('HTTP error: 500 Internal Server Error');
+      const results = await settledPromise;
+      expect(results[0].status).toBe('rejected');
+      expect((results[0] as PromiseRejectedResult).reason.message).toContain('HTTP error: 500');
+      expect(results[1].status).toBe('rejected');
+      expect((results[1] as PromiseRejectedResult).reason.message).toContain('HTTP error: 500');
 
       const stats = batchProvider.getStats();
       expect(stats.totalBatchErrors).toBe(1);
@@ -272,24 +279,30 @@ describe('BatchProvider', () => {
       ).rejects.toThrow('BatchProvider is shutting down');
     });
 
-    // Skip: Queue full behavior depends on flush timing which is complex with fake timers
-    it.skip('should reject when queue is full', async () => {
-      // Create provider with tiny queue and deferred flush
+    it('should reject when queue is full', async () => {
       const smallQueueProvider = new BatchProvider(mockProvider, {
-        maxBatchSize: 100, // High batch size so it doesn't auto-flush
-        batchTimeoutMs: 100000, // Very long timeout so it doesn't timeout-flush
+        maxBatchSize: 100,
+        batchTimeoutMs: 100000,
         maxQueueSize: 2,
       });
 
-      // Queue 2 requests (fills queue) - don't await them
+      // Mock flushBatch to be a no-op so the queue stays full after the
+      // forced flush attempt inside queueRequest's queue-full handler.
+      jest.spyOn(smallQueueProvider as any, 'flushBatch').mockResolvedValue(undefined);
+
+      // Queue 2 requests (fills queue) — don't await them
       void smallQueueProvider.queueRequest('eth_call', [{ to: '0x1' }]);
       void smallQueueProvider.queueRequest('eth_call', [{ to: '0x2' }]);
 
-      // Third request should fail synchronously (queue full check happens before queueing)
+      // Third request: queue full, flush is no-op, still full → throws
       await expect(
         smallQueueProvider.queueRequest('eth_call', [{ to: '0x3' }])
       ).rejects.toThrow('BatchProvider queue full');
 
+      // Cleanup: restore flushBatch, clear pending to avoid shutdown errors
+      (smallQueueProvider as any).flushBatch.mockRestore();
+      (smallQueueProvider as any).pendingBatch = [];
+      (smallQueueProvider as any).deduplicationMap?.clear();
       await smallQueueProvider.shutdown();
     });
   });
@@ -312,7 +325,7 @@ describe('BatchProvider', () => {
       }));
 
       const stats = batchProvider.getStats();
-      expect(stats.totalRequestsProcessed).toBeGreaterThan(0);
+      expect(stats.totalRequestsProcessed).toBeGreaterThanOrEqual(3);
     });
 
     it('should reset statistics', () => {
@@ -433,6 +446,28 @@ describe('BatchProvider', () => {
       expect(results[0]).toBe(21000n);
       expect(results[1]).toBeInstanceOf(Error);
       expect((results[1] as Error).message).toContain('gas required exceeds allowance');
+    });
+  });
+
+  describe('out-of-order responses', () => {
+    it('should handle out-of-order batch responses via responseMap lookup', async () => {
+      // Responses arrive shuffled relative to request IDs
+      mockFetch.mockResolvedValueOnce(createMockFetchResponse([
+        { jsonrpc: '2.0', id: 3, result: 'r3' },
+        { jsonrpc: '2.0', id: 1, result: 'r1' },
+        { jsonrpc: '2.0', id: 2, result: 'r2' },
+      ]));
+
+      const promise1 = batchProvider.queueRequest('eth_call', [{ to: '0x1' }]);
+      const promise2 = batchProvider.queueRequest('eth_call', [{ to: '0x2' }]);
+      const promise3 = batchProvider.queueRequest('eth_call', [{ to: '0x3' }]);
+
+      await jest.runAllTimersAsync();
+
+      // Each request should get its correct response despite shuffled order
+      await expect(promise1).resolves.toBe('r1');
+      await expect(promise2).resolves.toBe('r2');
+      await expect(promise3).resolves.toBe('r3');
     });
   });
 
@@ -585,6 +620,105 @@ describe('BatchProvider', () => {
       expect(stats.totalDeduplicated).toBe(0);
 
       await dedupProvider.shutdown();
+    });
+  });
+
+  describe('rate limiting integration', () => {
+    it('should allow requests when rate limiter has tokens', async () => {
+      const rateLimitedProvider = new BatchProvider(mockProvider, {
+        enableRateLimiting: true,
+        rateLimitConfig: { tokensPerSecond: 100, maxBurst: 100 },
+        batchTimeoutMs: 100,
+      });
+
+      mockProviderSend.mockResolvedValueOnce('0xresult');
+
+      const promise = rateLimitedProvider.queueRequest('eth_blockNumber', []);
+      await jest.runAllTimersAsync();
+
+      await expect(promise).resolves.toBe('0xresult');
+
+      await rateLimitedProvider.shutdown();
+    });
+
+    it('should throw when rate limited', async () => {
+      const rateLimitedProvider = new BatchProvider(mockProvider, {
+        enableRateLimiting: true,
+        rateLimitConfig: { tokensPerSecond: 1, maxBurst: 1 },
+        batchTimeoutMs: 100,
+      });
+
+      mockProviderSend.mockResolvedValue('0xresult');
+
+      // First request consumes the only token, enters the batch queue
+      const p1 = rateLimitedProvider.queueRequest('eth_blockNumber', []);
+
+      // Second request: no tokens left → rate limited immediately
+      await expect(
+        rateLimitedProvider.queueRequest('eth_blockNumber', [])
+      ).rejects.toThrow('Rate limited');
+
+      // Flush and await first request
+      await jest.runAllTimersAsync();
+      await p1;
+
+      const stats = rateLimitedProvider.getStats();
+      expect(stats.totalRateLimited).toBe(1);
+
+      await rateLimitedProvider.shutdown();
+    });
+
+    it('should bypass rate limiting for exempt methods', async () => {
+      const rateLimitedProvider = new BatchProvider(mockProvider, {
+        enableRateLimiting: true,
+        rateLimitConfig: { tokensPerSecond: 1, maxBurst: 1 },
+        batchTimeoutMs: 100,
+      });
+
+      mockProviderSend.mockResolvedValue('0xresult');
+
+      // Exhaust the only token with a batchable method
+      const p1 = rateLimitedProvider.queueRequest('eth_blockNumber', []);
+      await jest.runAllTimersAsync();
+      await p1;
+
+      // Exempt method (eth_sendRawTransaction) bypasses rate limiter
+      mockProviderSend.mockResolvedValueOnce('0xtxhash');
+      const result = await rateLimitedProvider.queueRequest('eth_sendRawTransaction', ['0xsignedtx']);
+      expect(result).toBe('0xtxhash');
+
+      const stats = rateLimitedProvider.getStats();
+      expect(stats.totalRateLimited).toBe(0);
+
+      await rateLimitedProvider.shutdown();
+    });
+
+    it('should track totalRateLimited stat across multiple rejections', async () => {
+      const rateLimitedProvider = new BatchProvider(mockProvider, {
+        enableRateLimiting: true,
+        rateLimitConfig: { tokensPerSecond: 1, maxBurst: 2 },
+        batchTimeoutMs: 100,
+      });
+
+      mockProviderSend.mockResolvedValue('0xresult');
+
+      // Use both tokens
+      const p1 = rateLimitedProvider.queueRequest('eth_blockNumber', []);
+      const p2 = rateLimitedProvider.queueRequest('eth_blockNumber', []);
+      await jest.runAllTimersAsync();
+      await Promise.all([p1, p2]);
+
+      // Next 3 should be rate limited
+      for (let i = 0; i < 3; i++) {
+        await expect(
+          rateLimitedProvider.queueRequest('eth_blockNumber', [])
+        ).rejects.toThrow('Rate limited');
+      }
+
+      const stats = rateLimitedProvider.getStats();
+      expect(stats.totalRateLimited).toBe(3);
+
+      await rateLimitedProvider.shutdown();
     });
   });
 

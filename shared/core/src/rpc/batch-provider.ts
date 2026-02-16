@@ -617,25 +617,15 @@ export class BatchProvider {
    * Send batch request to the RPC endpoint.
    *
    * Note: ethers.JsonRpcProvider doesn't natively support batch requests,
-   * so we use fetch directly with the provider's URL.
-   *
-   * PERF-2 FIX: Removed unnecessary getNetwork() call that added async overhead
-   * on every batch flush. The URL is obtained synchronously from _getConnection().
+   * so we use fetch directly with the provider's cached URL.
+   * Auth headers from the provider's connection are forwarded automatically.
    */
   private async sendBatchRequest(
     batchRequest: JsonRpcRequest[]
   ): Promise<JsonRpcResponse[]> {
-    // PERF-2 FIX: Get URL synchronously (removed async getNetwork() call)
-    // _getConnection() returns the URL without network discovery overhead
-    const connection = this.provider._getConnection();
-    const url = connection.url;
-
-    // Send batch request
-    const response = await fetch(url, {
+    const response = await fetch(this.cachedUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: this.cachedHeaders,
       body: JSON.stringify(batchRequest),
     });
 
@@ -651,6 +641,19 @@ export class BatchProvider {
     }
 
     return results;
+  }
+
+  /**
+   * Extract Authorization header from an ethers FetchRequest connection, if present.
+   */
+  private extractAuthHeader(connection: unknown): string | null {
+    // ethers v6 FetchRequest exposes getHeader() for accessing request headers
+    if (connection && typeof connection === 'object' && 'getHeader' in connection) {
+      const conn = connection as { getHeader: (name: string) => string | undefined };
+      const auth = conn.getHeader('Authorization');
+      if (auth) return auth;
+    }
+    return null;
   }
 
   /**

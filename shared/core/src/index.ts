@@ -1467,19 +1467,28 @@ export type { NonceManagerConfig } from './nonce-manager';
 // 11.3 RPC & Provider Infrastructure
 // =============================================================================
 
-// Phase 3: RPC Request Batching
-// @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+// RPC Batching and Rate Limiting
+// @see docs/architecture/adr/ADR-024-rpc-rate-limiting.md
 export {
   BatchProvider,
   createBatchProvider,
   BATCHABLE_METHODS,
-  NON_BATCHABLE_METHODS
+  NON_BATCHABLE_METHODS,
+  TokenBucketRateLimiter,
+  RateLimiterManager,
+  getRateLimiterManager,
+  resetRateLimiterManager,
+  getRateLimitConfig,
+  isRateLimitExempt,
+  DEFAULT_RATE_LIMITS,
 } from './rpc';
 export type {
   BatchProviderConfig,
   BatchProviderStats,
   JsonRpcRequest,
-  JsonRpcResponse
+  JsonRpcResponse,
+  RateLimiterConfig,
+  RateLimiterStats,
 } from './rpc';
 
 // =============================================================================
