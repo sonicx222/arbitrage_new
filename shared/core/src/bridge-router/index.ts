@@ -39,6 +39,17 @@ export {
   BRIDGE_TIMES,
 } from './types';
 
+// Abstract base class and shared constants
+export {
+  AbstractBridgeRouter,
+  TX_WAIT_TIMEOUT_MS,
+  BPS_DENOMINATOR,
+  GAS_BUFFER_NUMERATOR,
+  GAS_BUFFER_DENOMINATOR,
+  ERC20_ABI,
+} from './abstract-bridge-router';
+export type { PendingBridge } from './abstract-bridge-router';
+
 // Stargate implementation
 export {
   StargateRouter,

@@ -43,15 +43,15 @@ Models stored in filesystem (not database) for:
 
 ```
 ./models/
-├── lstm-predictor/
-│   ├── model.json           # Model architecture
-│   ├── model.weights.bin    # Model weights
-│   ├── metadata.json        # Training metadata
-│   └── v1/                  # Archived version
+├── lstm-predictor/              # Implemented
+│   ├── model.json               # Model architecture
+│   ├── model.weights.bin        # Model weights
+│   ├── metadata.json            # Training metadata
+│   └── v1/                      # Archived version
 │       ├── model.json
 │       ├── model.weights.bin
 │       └── metadata.json
-└── orderflow-predictor/
+└── orderflow-predictor/         # Planned, not yet implemented
     ├── model.json
     ├── model.weights.bin
     └── metadata.json
@@ -105,15 +105,22 @@ private async warmupModel(): Promise<void> {
 
 **Rationale**: TensorFlow.js compiles operations on first use. Warmup moves compilation to startup (controlled time) so first real prediction gets compiled code path.
 
-## Implementation
+## Implementation Status
+
+| Component | Persistence | Notes |
+|-----------|------------|-------|
+| **LSTMPredictor** | Implemented | Save/load via ModelPersistence, staleness detection, version archiving |
+| **OrderflowPredictor** | Not implemented | No save/load methods; retrains from scratch on restart |
+| **EnsembleCombiner** | N/A | Stateless combiner, no model weights to persist |
 
 ### File Structure
 
 ```
 shared/ml/src/
 ├── model-persistence.ts     # Save/load utilities
-├── predictor.ts             # LSTM predictor with persistence
-├── orderflow-predictor.ts   # Orderflow predictor with persistence
+├── lstm-predictor.ts        # LSTM predictor with persistence (split from predictor.ts)
+├── predictor.ts             # Re-export hub for backward compatibility
+├── orderflow-predictor.ts   # Orderflow predictor (persistence planned, not implemented)
 └── ensemble-combiner.ts     # Combines predictor outputs
 ```
 
@@ -162,7 +169,7 @@ interface ModelMetadata {
 }
 ```
 
-#### LSTMPredictor Integration (predictor.ts:216-351)
+#### LSTMPredictor Integration (lstm-predictor.ts:181-318)
 
 ```typescript
 async initialize(): Promise<void> {

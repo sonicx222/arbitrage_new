@@ -12,7 +12,7 @@
  * const wallet = createMockWallet(provider);
  * ```
  *
- * @see docs/refactoring-roadmap.md - P0-TEST
+ * @see ADR-009: Test Architecture
  */
 
 import { ethers } from 'ethers';

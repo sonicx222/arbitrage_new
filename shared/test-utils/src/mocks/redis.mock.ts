@@ -4,7 +4,7 @@
  * Single source of truth for Redis mocking across all tests.
  * Supports both regular Redis operations and Redis Streams.
  *
- * @see docs/TEST_ARCHITECTURE.md
+ * @see ADR-009: Test Architecture
  */
 
 import { jest } from '@jest/globals';
@@ -272,6 +272,211 @@ export class RedisMock {
     this.trackOperation('rpop', [key]);
     const list = (this.data.get(key) as string[]) || [];
     return list.pop() ?? null;
+  }
+
+  // =========================================================================
+  // Sorted Set Operations
+  // =========================================================================
+
+  async zadd(key: string, ...args: (string | number)[]): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('zadd', [key, ...args]);
+    this.checkFailure('zadd');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    let added = 0;
+    for (let i = 0; i < args.length; i += 2) {
+      const score = Number(args[i]);
+      const member = String(args[i + 1]);
+      const existing = sorted.findIndex(e => e.member === member);
+      if (existing >= 0) {
+        sorted[existing].score = score;
+      } else {
+        sorted.push({ score, member });
+        added++;
+      }
+    }
+    sorted.sort((a, b) => a.score - b.score);
+    this.data.set(key, sorted);
+    return added;
+  }
+
+  async zrange(key: string, start: number, stop: number, ...args: string[]): Promise<string[]> {
+    await this.simulateLatency();
+    this.trackOperation('zrange', [key, start, stop, ...args]);
+    this.checkFailure('zrange');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    const end = stop < 0 ? sorted.length + stop + 1 : stop + 1;
+    const slice = sorted.slice(start, end);
+    if (args.includes('WITHSCORES')) {
+      const result: string[] = [];
+      for (const entry of slice) {
+        result.push(entry.member, String(entry.score));
+      }
+      return result;
+    }
+    return slice.map(e => e.member);
+  }
+
+  async zrangebyscore(key: string, min: string | number, max: string | number): Promise<string[]> {
+    await this.simulateLatency();
+    this.trackOperation('zrangebyscore', [key, min, max]);
+    this.checkFailure('zrangebyscore');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    const minScore = min === '-inf' ? -Infinity : Number(min);
+    const maxScore = max === '+inf' ? Infinity : Number(max);
+    return sorted.filter(e => e.score >= minScore && e.score <= maxScore).map(e => e.member);
+  }
+
+  async zrem(key: string, ...members: string[]): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('zrem', [key, ...members]);
+    this.checkFailure('zrem');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    let removed = 0;
+    const memberSet = new Set(members);
+    const remaining = sorted.filter(e => {
+      if (memberSet.has(e.member)) { removed++; return false; }
+      return true;
+    });
+    this.data.set(key, remaining);
+    return removed;
+  }
+
+  async zscore(key: string, member: string): Promise<string | null> {
+    await this.simulateLatency();
+    this.trackOperation('zscore', [key, member]);
+    this.checkFailure('zscore');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    const entry = sorted.find(e => e.member === member);
+    return entry ? String(entry.score) : null;
+  }
+
+  async zcard(key: string): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('zcard', [key]);
+    this.checkFailure('zcard');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    return sorted.length;
+  }
+
+  async zcount(key: string, min: string | number, max: string | number): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('zcount', [key, min, max]);
+    this.checkFailure('zcount');
+    const sorted = (this.data.get(key) as Array<{ score: number; member: string }>) || [];
+    const minScore = min === '-inf' ? -Infinity : Number(min);
+    const maxScore = max === '+inf' ? Infinity : Number(max);
+    return sorted.filter(e => e.score >= minScore && e.score <= maxScore).length;
+  }
+
+  // =========================================================================
+  // Atomic Counter Operations
+  // =========================================================================
+
+  async incr(key: string): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('incr', [key]);
+    this.checkFailure('incr');
+    const current = Number(this.data.get(key) ?? 0);
+    const next = current + 1;
+    this.data.set(key, String(next));
+    return next;
+  }
+
+  async incrby(key: string, increment: number): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('incrby', [key, increment]);
+    this.checkFailure('incrby');
+    const current = Number(this.data.get(key) ?? 0);
+    const next = current + increment;
+    this.data.set(key, String(next));
+    return next;
+  }
+
+  async decr(key: string): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('decr', [key]);
+    this.checkFailure('decr');
+    const current = Number(this.data.get(key) ?? 0);
+    const next = current - 1;
+    this.data.set(key, String(next));
+    return next;
+  }
+
+  async decrby(key: string, decrement: number): Promise<number> {
+    await this.simulateLatency();
+    this.trackOperation('decrby', [key, decrement]);
+    this.checkFailure('decrby');
+    const current = Number(this.data.get(key) ?? 0);
+    const next = current - decrement;
+    this.data.set(key, String(next));
+    return next;
+  }
+
+  // =========================================================================
+  // Multi-key Operations
+  // =========================================================================
+
+  async mget(...keys: string[]): Promise<(string | null)[]> {
+    await this.simulateLatency();
+    this.trackOperation('mget', keys);
+    this.checkFailure('mget');
+    return keys.map(key => {
+      const value = this.data.get(key);
+      return value !== undefined ? String(value) : null;
+    });
+  }
+
+  async mset(...keyValues: string[]): Promise<'OK'> {
+    await this.simulateLatency();
+    this.trackOperation('mset', keyValues);
+    this.checkFailure('mset');
+    for (let i = 0; i < keyValues.length; i += 2) {
+      this.data.set(keyValues[i], keyValues[i + 1]);
+    }
+    return 'OK';
+  }
+
+  // =========================================================================
+  // Scan (Cursor-Based Iteration)
+  // =========================================================================
+
+  async scan(cursor: string, ...args: string[]): Promise<[string, string[]]> {
+    await this.simulateLatency();
+    this.trackOperation('scan', [cursor, ...args]);
+    this.checkFailure('scan');
+    let pattern = '*';
+    let count = 10;
+    for (let i = 0; i < args.length; i += 2) {
+      if (args[i].toUpperCase() === 'MATCH') pattern = args[i + 1];
+      if (args[i].toUpperCase() === 'COUNT') count = Number(args[i + 1]);
+    }
+    const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+    const allKeys = Array.from(this.data.keys()).filter(key => regex.test(key));
+    const offset = Number(cursor);
+    const batch = allKeys.slice(offset, offset + count);
+    const nextCursor = offset + count >= allKeys.length ? '0' : String(offset + count);
+    return [nextCursor, batch];
+  }
+
+  // =========================================================================
+  // Transaction Pipeline (Multi/Exec)
+  // =========================================================================
+
+  multi(): RedisMockMulti {
+    this.trackOperation('multi', []);
+    return new RedisMockMulti(this);
+  }
+
+  // =========================================================================
+  // Eval (Lua Script Emulation)
+  // =========================================================================
+
+  async eval(...args: unknown[]): Promise<unknown> {
+    await this.simulateLatency();
+    this.trackOperation('eval', args);
+    this.checkFailure('eval');
+    return null;
   }
 
   // =========================================================================
@@ -600,6 +805,55 @@ export class RedisMock {
         timestamp: Date.now()
       });
     }
+  }
+}
+
+// =========================================================================
+// Multi/Exec Transaction Pipeline
+// =========================================================================
+
+class RedisMockMulti {
+  private commands: Array<{ method: string; args: unknown[] }> = [];
+  private redis: RedisMock;
+
+  constructor(redis: RedisMock) {
+    this.redis = redis;
+  }
+
+  get(...args: unknown[]): this { this.commands.push({ method: 'get', args }); return this; }
+  set(...args: unknown[]): this { this.commands.push({ method: 'set', args }); return this; }
+  del(...args: unknown[]): this { this.commands.push({ method: 'del', args }); return this; }
+  incr(...args: unknown[]): this { this.commands.push({ method: 'incr', args }); return this; }
+  incrby(...args: unknown[]): this { this.commands.push({ method: 'incrby', args }); return this; }
+  hset(...args: unknown[]): this { this.commands.push({ method: 'hset', args }); return this; }
+  hget(...args: unknown[]): this { this.commands.push({ method: 'hget', args }); return this; }
+  zadd(...args: unknown[]): this { this.commands.push({ method: 'zadd', args }); return this; }
+  zrem(...args: unknown[]): this { this.commands.push({ method: 'zrem', args }); return this; }
+  expire(...args: unknown[]): this { this.commands.push({ method: 'expire', args }); return this; }
+  xadd(...args: unknown[]): this { this.commands.push({ method: 'xadd', args }); return this; }
+
+  async exec(): Promise<unknown[]> {
+    const results: unknown[] = [];
+    for (const cmd of this.commands) {
+      try {
+        const method = (this.redis as any)[cmd.method];
+        if (typeof method === 'function') {
+          const result = await method.apply(this.redis, cmd.args);
+          results.push(result);
+        } else {
+          results.push(null);
+        }
+      } catch (error) {
+        results.push(error);
+      }
+    }
+    this.commands = [];
+    return results;
+  }
+
+  async discard(): Promise<'OK'> {
+    this.commands = [];
+    return 'OK';
   }
 }
 

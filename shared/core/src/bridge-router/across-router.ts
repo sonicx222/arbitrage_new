@@ -18,30 +18,22 @@
 
 import { ethers } from 'ethers';
 import {
-  IBridgeRouter,
   BridgeProtocol,
   BridgeQuoteRequest,
   BridgeQuote,
   BridgeExecuteRequest,
   BridgeExecuteResult,
-  BridgeStatusResult,
-  BridgeStatus,
   BRIDGE_DEFAULTS,
 } from './types';
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { AsyncMutex } from '../async/async-mutex';
-
-const logger = createLogger('across-router');
-
-/** Timeout for on-chain transaction confirmations (2 minutes) */
-const TX_WAIT_TIMEOUT_MS = 120_000;
-
-/** Basis points denominator for fee/slippage calculations */
-const BPS_DENOMINATOR = 10000n;
-/** Gas estimation buffer: 20% above estimate */
-const GAS_BUFFER_NUMERATOR = 120n;
-const GAS_BUFFER_DENOMINATOR = 100n;
+import {
+  AbstractBridgeRouter,
+  TX_WAIT_TIMEOUT_MS,
+  BPS_DENOMINATOR,
+  GAS_BUFFER_NUMERATOR,
+  GAS_BUFFER_DENOMINATOR,
+  ERC20_ABI,
+} from './abstract-bridge-router';
 
 /** Default fill deadline for Across deposits (5 hours from now) */
 const FILL_DEADLINE_SECONDS = 18000;
@@ -56,12 +48,6 @@ const ACROSS_SPOKEPOOL_ABI = [
 
   // Events
   'event V3FundsDeposited(address inputToken, address outputToken, uint256 inputAmount, uint256 outputAmount, uint256 indexed destinationChainId, uint32 indexed depositId, uint32 quoteTimestamp, uint32 fillDeadline, uint32 exclusivityDeadline, address indexed depositor, address recipient, address exclusiveRelayer, bytes message)',
-];
-
-const ERC20_ABI = [
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-  'function balanceOf(address account) external view returns (uint256)',
 ];
 
 // =============================================================================
@@ -183,42 +169,16 @@ export const ACROSS_BRIDGE_TIMES: Record<string, number> = {
 // =============================================================================
 
 /**
- * Pending bridge tracking entry
- */
-interface PendingBridge {
-  status: BridgeStatus;
-  sourceTxHash: string;
-  sourceChain: string;
-  destChain: string;
-  startTime: number;
-  destTxHash?: string;
-  amountReceived?: string;
-  error?: string;
-  /** Reason for failure - enables recovery from timeout-failed bridges */
-  failReason?: 'timeout' | 'execution_error' | 'unknown';
-}
-
-/**
- * Maximum pending bridges to track (prevents memory leak)
- */
-const MAX_PENDING_BRIDGES = 1000;
-
-/**
- * Auto-cleanup interval for old bridges (1 hour)
- */
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
-
-/**
  * Across bridge router for cross-chain token transfers via SpokePool contracts.
  *
- * Key differences from StargateRouter:
- * - Uses SpokePool.depositV3() instead of Router.swap()
- * - No on-chain quote function; fees calculated from route config
- * - Uses standard EVM chain IDs, not LayerZero chain IDs
- * - Supports zkSync and Linea
- * - WETH bridging uses msg.value (SpokePool wraps ETH internally)
+ * Extends AbstractBridgeRouter with Across-specific:
+ * - SpokePool.depositV3() execution
+ * - Per-route fee calculation from config (no on-chain quote)
+ * - Standard EVM chain IDs (not LayerZero chain IDs)
+ * - WETH bridging via msg.value (SpokePool wraps ETH internally)
+ * - zkSync and Linea support
  */
-export class AcrossRouter implements IBridgeRouter {
+export class AcrossRouter extends AbstractBridgeRouter {
   readonly protocol: BridgeProtocol = 'across';
 
   readonly supportedSourceChains = [
@@ -227,85 +187,16 @@ export class AcrossRouter implements IBridgeRouter {
 
   readonly supportedDestChains = this.supportedSourceChains;
 
-  private providers: Map<string, ethers.Provider> = new Map();
-  private pendingBridges: Map<string, PendingBridge> = new Map();
-  private approvalMutexes: Map<string, AsyncMutex> = new Map();
-
-  // Mutex for thread-safe pendingBridges access
-  private readonly bridgesMutex = new AsyncMutex();
-
-  // Auto-cleanup timer
-  private cleanupTimer: NodeJS.Timeout | null = null;
-
   constructor(providers?: Map<string, ethers.Provider>) {
-    if (providers) {
-      this.providers = providers;
-    }
-
-    // Start periodic cleanup to prevent memory leaks
-    this.startAutoCleanup();
+    super(createLogger('across-router'), providers);
   }
 
-  /**
-   * Start automatic cleanup of old pending bridges
-   */
-  private startAutoCleanup(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-    }
-
-    this.cleanupTimer = setInterval(() => {
-      this.cleanup(24 * 60 * 60 * 1000).catch(err => {
-        logger.error('Auto-cleanup failed', { error: err instanceof Error ? err.message : String(err) });
-      });
-    }, CLEANUP_INTERVAL_MS);
-
-    // Don't keep the process alive just for cleanup
-    if (this.cleanupTimer.unref) {
-      this.cleanupTimer.unref();
-    }
+  protected override getTimeoutMessage(): string {
+    return 'Bridge timeout - relayer may still fill the deposit';
   }
 
-  /**
-   * Stop the router and cleanup resources
-   */
-  dispose(): void {
-    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
-    this.approvalMutexes.clear();
-  }
-
-  /**
-   * Race a promise against a timeout, ensuring the timer is always cleaned up
-   */
-  private async waitWithTimeout<T>(promise: Promise<T>, timeoutMs: number, description: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
-    });
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      clearTimeout(timer!);
-    }
-  }
-
-  /**
-   * Get or create a per-token approval mutex to prevent concurrent approval races
-   */
-  private getApprovalMutex(tokenAddress: string): AsyncMutex {
-    let mutex = this.approvalMutexes.get(tokenAddress);
-    if (!mutex) {
-      mutex = new AsyncMutex();
-      this.approvalMutexes.set(tokenAddress, mutex);
-    }
-    return mutex;
-  }
-
-  /**
-   * Register a provider for a chain
-   */
-  registerProvider(chain: string, provider: ethers.Provider): void {
-    this.providers.set(chain, provider);
+  protected override getRouterName(): string {
+    return 'Across router';
   }
 
   /**
@@ -364,7 +255,7 @@ export class AcrossRouter implements IBridgeRouter {
         recipient: request.recipient || undefined,
       };
     } catch (error) {
-      logger.error('Failed to get Across quote', {
+      this.logger.error('Failed to get Across quote', {
         sourceChain,
         destChain,
         token,
@@ -483,7 +374,7 @@ export class AcrossRouter implements IBridgeRouter {
       const gasEstimate = await wallet.estimateGas(tx);
       tx.gasLimit = gasEstimate * GAS_BUFFER_NUMERATOR / GAS_BUFFER_DENOMINATOR;
 
-      logger.info('Executing Across bridge', {
+      this.logger.info('Executing Across bridge', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
         token: quote.token,
@@ -504,26 +395,15 @@ export class AcrossRouter implements IBridgeRouter {
       // Generate bridge ID for tracking
       const bridgeId = `across-${receipt.hash}`;
 
-      // Store pending bridge with mutex protection
-      await this.bridgesMutex.runExclusive(async () => {
-        // Enforce max pending bridges to prevent memory leak
-        if (this.pendingBridges.size >= MAX_PENDING_BRIDGES) {
-          const oldestKey = this.pendingBridges.keys().next().value;
-          if (oldestKey) {
-            this.pendingBridges.delete(oldestKey);
-          }
-        }
-
-        this.pendingBridges.set(bridgeId, {
-          status: 'bridging',
-          sourceTxHash: receipt.hash,
-          sourceChain: quote.sourceChain,
-          destChain: quote.destChain,
-          startTime: Date.now(),
-        });
+      await this.storePendingBridge(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: receipt.hash,
+        sourceChain: quote.sourceChain,
+        destChain: quote.destChain,
+        startTime: Date.now(),
       });
 
-      logger.info('Across bridge initiated', {
+      this.logger.info('Across bridge initiated', {
         bridgeId,
         sourceTxHash: receipt.hash,
         sourceChain: quote.sourceChain,
@@ -537,7 +417,7 @@ export class AcrossRouter implements IBridgeRouter {
         gasUsed: receipt.gasUsed,
       };
     } catch (error) {
-      logger.error('Across bridge execution failed', {
+      this.logger.error('Across bridge execution failed', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
         error: error instanceof Error ? error.message : String(error),
@@ -547,219 +427,6 @@ export class AcrossRouter implements IBridgeRouter {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
-    }
-  }
-
-  /**
-   * Get status of a bridge operation.
-   *
-   * Uses mutex for thread-safe access.
-   */
-  async getStatus(bridgeId: string): Promise<BridgeStatusResult> {
-    return this.bridgesMutex.runExclusive(async () => {
-      const pending = this.pendingBridges.get(bridgeId);
-
-      if (!pending) {
-        return {
-          status: 'failed' as BridgeStatus,
-          sourceTxHash: '',
-          lastUpdated: Date.now(),
-          error: 'Bridge not found',
-        };
-      }
-
-      const elapsedMs = Date.now() - pending.startTime;
-      const estimatedTimeMs = this.getEstimatedTime(pending.sourceChain, pending.destChain) * 1000;
-
-      if (pending.status === 'completed' || pending.status === 'failed') {
-        return {
-          status: pending.status,
-          sourceTxHash: pending.sourceTxHash,
-          destTxHash: pending.destTxHash,
-          amountReceived: pending.amountReceived,
-          lastUpdated: Date.now(),
-          error: pending.error,
-        };
-      }
-
-      // Check if timeout
-      if (elapsedMs > BRIDGE_DEFAULTS.maxBridgeWaitMs) {
-        pending.status = 'failed';
-        pending.error = 'Bridge timeout';
-        pending.failReason = 'timeout';
-
-        return {
-          status: 'failed' as BridgeStatus,
-          sourceTxHash: pending.sourceTxHash,
-          lastUpdated: Date.now(),
-          error: 'Bridge timeout - relayer may still fill the deposit',
-        };
-      }
-
-      const estimatedCompletion = pending.startTime + estimatedTimeMs;
-
-      return {
-        status: 'bridging' as BridgeStatus,
-        sourceTxHash: pending.sourceTxHash,
-        lastUpdated: Date.now(),
-        estimatedCompletion,
-      };
-    });
-  }
-
-  /**
-   * Mark a bridge as completed.
-   *
-   * Only transitions from 'bridging' to 'completed', with timeout recovery.
-   */
-  async markCompleted(bridgeId: string, destTxHash: string, amountReceived: string): Promise<void> {
-    await this.bridgesMutex.runExclusive(async () => {
-      const pending = this.pendingBridges.get(bridgeId);
-      if (!pending) {
-        logger.warn('Cannot mark completed: bridge not found', { bridgeId });
-        return;
-      }
-
-      if (pending.status !== 'bridging') {
-        if (pending.status === 'failed' && pending.failReason === 'timeout') {
-          logger.info('Recovering timeout-failed bridge', { bridgeId });
-          // Fall through to complete
-        } else {
-          logger.warn('Cannot mark completed: invalid state transition', {
-            bridgeId,
-            currentStatus: pending.status,
-            attemptedStatus: 'completed',
-          });
-          return;
-        }
-      }
-
-      pending.status = 'completed';
-      pending.destTxHash = destTxHash;
-      pending.amountReceived = amountReceived;
-
-      logger.info('Bridge completed', { bridgeId, destTxHash, amountReceived });
-    });
-  }
-
-  /**
-   * Mark a bridge as failed.
-   *
-   * Only transitions from 'bridging' to 'failed'.
-   */
-  async markFailed(bridgeId: string, error: string): Promise<void> {
-    await this.bridgesMutex.runExclusive(async () => {
-      const pending = this.pendingBridges.get(bridgeId);
-      if (!pending) {
-        logger.warn('Cannot mark failed: bridge not found', { bridgeId });
-        return;
-      }
-
-      if (pending.status !== 'bridging') {
-        logger.warn('Cannot mark failed: invalid state transition', {
-          bridgeId,
-          currentStatus: pending.status,
-          attemptedStatus: 'failed',
-        });
-        return;
-      }
-
-      pending.status = 'failed';
-      pending.error = error;
-      pending.failReason = 'execution_error';
-
-      logger.warn('Bridge failed', { bridgeId, error });
-    });
-  }
-
-  // ===========================================================================
-  // Private Helpers
-  // ===========================================================================
-
-  /**
-   * Create an invalid quote response for error cases.
-   */
-  private createInvalidQuote(
-    sourceChain: string, destChain: string, token: string, amount: string, error: string
-  ): BridgeQuote {
-    return {
-      protocol: this.protocol,
-      sourceChain,
-      destChain,
-      token,
-      amountIn: amount,
-      amountOut: '0',
-      bridgeFee: '0',
-      gasFee: '0',
-      totalFee: '0',
-      estimatedTimeSeconds: 0,
-      expiresAt: Date.now(),
-      valid: false,
-      error,
-    };
-  }
-
-  /**
-   * Ensure ERC20 token approval for Across SpokePool.
-   * Uses forceApprove pattern for USDT compatibility.
-   */
-  private async ensureApproval(
-    wallet: ethers.Wallet,
-    tokenAddress: string,
-    spenderAddress: string,
-    amount: bigint
-  ): Promise<boolean> {
-    try {
-      const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
-      const currentAllowance = await token.allowance(wallet.address, spenderAddress);
-
-      if (currentAllowance >= amount) {
-        logger.debug('Sufficient allowance already exists', {
-          token: tokenAddress,
-          spender: spenderAddress,
-          allowance: currentAllowance.toString(),
-          required: amount.toString(),
-        });
-        return true;
-      }
-
-      // USDT forceApprove pattern: reset to 0 first if non-zero
-      logger.info('Approving token for Across SpokePool', {
-        token: tokenAddress,
-        spender: spenderAddress,
-        currentAllowance: currentAllowance.toString(),
-        requiredAmount: amount.toString(),
-      });
-
-      if (currentAllowance > 0n) {
-        const resetTx = await token.approve(spenderAddress, 0n);
-        await this.waitWithTimeout<ethers.TransactionReceipt | null>(
-          resetTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval reset confirmation'
-        );
-      }
-
-      const approveTx = await token.approve(spenderAddress, amount);
-      const receipt = await this.waitWithTimeout(
-        approveTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval confirmation'
-      ) as ethers.TransactionReceipt | null;
-
-      if (!receipt || receipt.status !== 1) {
-        logger.error('Token approval failed', { token: tokenAddress });
-        return false;
-      }
-
-      logger.info('Token approval successful', {
-        token: tokenAddress,
-        txHash: receipt.hash,
-      });
-
-      return true;
-    } catch (error) {
-      logger.error('Token approval error', {
-        token: tokenAddress,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
     }
   }
 
@@ -792,65 +459,6 @@ export class AcrossRouter implements IBridgeRouter {
   getEstimatedTime(sourceChain: string, destChain: string): number {
     const routeKey = `${sourceChain}-${destChain}`;
     return ACROSS_BRIDGE_TIMES[routeKey] ?? ACROSS_BRIDGE_TIMES.default;
-  }
-
-  /**
-   * Health check for Across Protocol.
-   * Validates provider connectivity.
-   */
-  async healthCheck(): Promise<{ healthy: boolean; message: string }> {
-    if (this.providers.size === 0) {
-      return { healthy: false, message: 'No providers registered' };
-    }
-
-    try {
-      const testChain = this.supportedSourceChains.find(c => this.providers.has(c));
-      if (!testChain) {
-        return { healthy: false, message: 'No providers available for supported chains' };
-      }
-
-      const destChain = this.supportedDestChains.find(c => c !== testChain);
-      if (!destChain) {
-        return { healthy: true, message: 'Across router operational (single chain only)' };
-      }
-
-      const provider = this.providers.get(testChain)!;
-      await provider.getBlockNumber();
-
-      return {
-        healthy: true,
-        message: `Across router operational. ${this.providers.size} chains connected.`,
-      };
-    } catch (error) {
-      return {
-        healthy: false,
-        message: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-
-  /**
-   * Cleanup old pending bridges.
-   */
-  async cleanup(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<void> {
-    await this.bridgesMutex.runExclusive(async () => {
-      const cutoff = Date.now() - maxAgeMs;
-      let cleanedCount = 0;
-
-      for (const [bridgeId, bridge] of this.pendingBridges.entries()) {
-        if (bridge.startTime < cutoff) {
-          this.pendingBridges.delete(bridgeId);
-          cleanedCount++;
-        }
-      }
-
-      if (cleanedCount > 0) {
-        logger.debug('Cleaned up old bridge entries', {
-          cleanedCount,
-          remaining: this.pendingBridges.size,
-        });
-      }
-    });
   }
 }
 

@@ -9,14 +9,7 @@
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
-jest.mock('../../../src/logger', () => ({
-  createLogger: () => ({
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  }),
-}));
+jest.mock('../../../src/logger');
 
 import {
   createAsyncSingleton,

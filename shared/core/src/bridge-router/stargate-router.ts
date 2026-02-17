@@ -16,36 +16,30 @@
 
 import { ethers } from 'ethers';
 import {
-  IBridgeRouter,
   BridgeProtocol,
   BridgeQuoteRequest,
   BridgeQuote,
   BridgeExecuteRequest,
   BridgeExecuteResult,
-  BridgeStatusResult,
-  BridgeStatus,
   BRIDGE_DEFAULTS,
   STARGATE_CHAIN_IDS,
   STARGATE_POOL_IDS,
   STARGATE_ROUTER_ADDRESSES,
   BRIDGE_TIMES,
 } from './types';
+import type { PoolLiquidityAlert } from './types';
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { AsyncMutex } from '../async/async-mutex';
-
-const logger = createLogger('stargate-router');
-
-/** Timeout for on-chain transaction confirmations (2 minutes) */
-const TX_WAIT_TIMEOUT_MS = 120_000;
+import {
+  AbstractBridgeRouter,
+  TX_WAIT_TIMEOUT_MS,
+  BPS_DENOMINATOR,
+  GAS_BUFFER_NUMERATOR,
+  GAS_BUFFER_DENOMINATOR,
+  ERC20_ABI,
+} from './abstract-bridge-router';
 
 /** Stargate V1 bridge fee: 0.06% of bridged amount */
 const STARGATE_BRIDGE_FEE_BPS = 6n;
-/** Basis points denominator for fee/slippage calculations */
-const BPS_DENOMINATOR = 10000n;
-/** Gas estimation buffer: 20% above estimate */
-const GAS_BUFFER_NUMERATOR = 120n;
-const GAS_BUFFER_DENOMINATOR = 100n;
 
 // =============================================================================
 // Token Address Constants (for approval checks)
@@ -91,46 +85,20 @@ const STARGATE_ROUTER_ABI = [
   'event Swap(uint16 chainId, uint256 dstPoolId, address from, uint256 amountSD, uint256 eqReward, uint256 eqFee, uint256 protocolFee, uint256 lpFee)',
 ];
 
-const ERC20_ABI = [
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-  'function balanceOf(address account) external view returns (uint256)',
-];
-
 // =============================================================================
 // Stargate Router Implementation
 // =============================================================================
 
 /**
- * Stargate bridge router for cross-chain token transfers
+ * Stargate bridge router for cross-chain token transfers.
+ *
+ * Extends AbstractBridgeRouter with Stargate V1-specific:
+ * - quoteLayerZeroFee() / swap() ABI
+ * - Pool ID-based routing (srcPoolId/dstPoolId)
+ * - Pool liquidity monitoring in healthCheck()
+ * - onPoolAlert callback for low-liquidity alerts
  */
-/**
- * Pending bridge tracking entry
- */
-interface PendingBridge {
-  status: BridgeStatus;
-  sourceTxHash: string;
-  sourceChain: string;
-  destChain: string;
-  startTime: number;
-  destTxHash?: string;
-  amountReceived?: string;
-  error?: string;
-  /** Reason for failure - enables recovery from timeout-failed bridges */
-  failReason?: 'timeout' | 'execution_error' | 'unknown';
-}
-
-/**
- * Maximum pending bridges to track (prevents memory leak)
- */
-const MAX_PENDING_BRIDGES = 1000;
-
-/**
- * Auto-cleanup interval for old bridges (1 hour)
- */
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
-
-export class StargateRouter implements IBridgeRouter {
+export class StargateRouter extends AbstractBridgeRouter {
   readonly protocol: BridgeProtocol = 'stargate';
 
   readonly supportedSourceChains = [
@@ -139,94 +107,25 @@ export class StargateRouter implements IBridgeRouter {
 
   readonly supportedDestChains = this.supportedSourceChains;
 
-  private providers: Map<string, ethers.Provider> = new Map();
-  private pendingBridges: Map<string, PendingBridge> = new Map();
-  private approvalMutexes: Map<string, AsyncMutex> = new Map();
-
-  // RACE-CONDITION-FIX: Mutex for thread-safe pendingBridges access
-  private readonly bridgesMutex = new AsyncMutex();
-
-  // Auto-cleanup timer
-  private cleanupTimer: NodeJS.Timeout | null = null;
-
   // Optional callback for pool liquidity alerts
-  private onPoolAlert?: (alert: import('./types').PoolLiquidityAlert) => void;
+  private onPoolAlert?: (alert: PoolLiquidityAlert) => void;
 
   constructor(
     providers?: Map<string, ethers.Provider>,
-    options?: { onPoolAlert?: (alert: import('./types').PoolLiquidityAlert) => void }
+    options?: { onPoolAlert?: (alert: PoolLiquidityAlert) => void }
   ) {
-    if (providers) {
-      this.providers = providers;
-    }
+    super(createLogger('stargate-router'), providers);
     if (options?.onPoolAlert) {
       this.onPoolAlert = options.onPoolAlert;
     }
-
-    // Start periodic cleanup to prevent memory leaks
-    this.startAutoCleanup();
   }
 
-  /**
-   * Start automatic cleanup of old pending bridges
-   */
-  private startAutoCleanup(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-    }
-
-    this.cleanupTimer = setInterval(() => {
-      this.cleanup(24 * 60 * 60 * 1000).catch(err => {
-        logger.error('Auto-cleanup failed', { error: err instanceof Error ? err.message : String(err) });
-      });
-    }, CLEANUP_INTERVAL_MS);
-
-    // Don't keep the process alive just for cleanup
-    if (this.cleanupTimer.unref) {
-      this.cleanupTimer.unref();
-    }
+  protected override getTimeoutMessage(): string {
+    return 'Bridge timeout - transaction may still complete';
   }
 
-  /**
-   * Stop the router and cleanup resources
-   */
-  dispose(): void {
-    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
-    this.approvalMutexes.clear();
-  }
-
-  /**
-   * Race a promise against a timeout, ensuring the timer is always cleaned up
-   */
-  private async waitWithTimeout<T>(promise: Promise<T>, timeoutMs: number, description: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
-    });
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      clearTimeout(timer!);
-    }
-  }
-
-  /**
-   * Get or create a per-token approval mutex to prevent concurrent approval races
-   */
-  private getApprovalMutex(tokenAddress: string): AsyncMutex {
-    let mutex = this.approvalMutexes.get(tokenAddress);
-    if (!mutex) {
-      mutex = new AsyncMutex();
-      this.approvalMutexes.set(tokenAddress, mutex);
-    }
-    return mutex;
-  }
-
-  /**
-   * Register a provider for a chain
-   */
-  registerProvider(chain: string, provider: ethers.Provider): void {
-    this.providers.set(chain, provider);
+  protected override getRouterName(): string {
+    return 'Stargate router';
   }
 
   /**
@@ -300,7 +199,7 @@ export class StargateRouter implements IBridgeRouter {
         recipient: request.recipient || undefined,
       };
     } catch (error) {
-      logger.error('Failed to get Stargate quote', {
+      this.logger.error('Failed to get Stargate quote', {
         sourceChain,
         destChain,
         token,
@@ -459,7 +358,7 @@ export class StargateRouter implements IBridgeRouter {
       tx.gasLimit = gasEstimate * GAS_BUFFER_NUMERATOR / GAS_BUFFER_DENOMINATOR; // 20% buffer
 
       // Send transaction
-      logger.info('Executing Stargate bridge', {
+      this.logger.info('Executing Stargate bridge', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
         token: quote.token,
@@ -480,30 +379,18 @@ export class StargateRouter implements IBridgeRouter {
         };
       }
 
-      // Generate bridge ID for tracking
+      // Generate bridge ID and store pending bridge
       const bridgeId = `stargate-${receipt.hash}`;
 
-      // RACE-CONDITION-FIX: Store pending bridge with mutex protection
-      await this.bridgesMutex.runExclusive(async () => {
-        // Enforce max pending bridges to prevent memory leak
-        if (this.pendingBridges.size >= MAX_PENDING_BRIDGES) {
-          // Remove oldest entry
-          const oldestKey = this.pendingBridges.keys().next().value;
-          if (oldestKey) {
-            this.pendingBridges.delete(oldestKey);
-          }
-        }
-
-        this.pendingBridges.set(bridgeId, {
-          status: 'bridging',
-          sourceTxHash: receipt.hash,
-          sourceChain: quote.sourceChain,
-          destChain: quote.destChain,
-          startTime: Date.now(),
-        });
+      await this.storePendingBridge(bridgeId, {
+        status: 'bridging',
+        sourceTxHash: receipt.hash,
+        sourceChain: quote.sourceChain,
+        destChain: quote.destChain,
+        startTime: Date.now(),
       });
 
-      logger.info('Stargate bridge initiated', {
+      this.logger.info('Stargate bridge initiated', {
         bridgeId,
         sourceTxHash: receipt.hash,
         sourceChain: quote.sourceChain,
@@ -517,7 +404,7 @@ export class StargateRouter implements IBridgeRouter {
         gasUsed: receipt.gasUsed,
       };
     } catch (error) {
-      logger.error('Stargate bridge execution failed', {
+      this.logger.error('Stargate bridge execution failed', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
         error: error instanceof Error ? error.message : String(error),
@@ -527,245 +414,6 @@ export class StargateRouter implements IBridgeRouter {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
-    }
-  }
-
-  /**
-   * Get status of a bridge operation
-   *
-   * Note: Full status tracking would require LayerZero message tracking API.
-   * This implementation uses heuristics based on time and destination chain monitoring.
-   *
-   * RACE-CONDITION-FIX: Uses mutex for thread-safe access
-   */
-  async getStatus(bridgeId: string): Promise<BridgeStatusResult> {
-    return this.bridgesMutex.runExclusive(async () => {
-      const pending = this.pendingBridges.get(bridgeId);
-
-      if (!pending) {
-        return {
-          status: 'failed' as BridgeStatus,
-          sourceTxHash: '',
-          lastUpdated: Date.now(),
-          error: 'Bridge not found',
-        };
-      }
-
-      // Check if enough time has passed for completion
-      const elapsedMs = Date.now() - pending.startTime;
-      const estimatedTimeMs = this.getEstimatedTime(pending.sourceChain, pending.destChain) * 1000;
-
-      if (pending.status === 'completed' || pending.status === 'failed') {
-        return {
-          status: pending.status,
-          sourceTxHash: pending.sourceTxHash,
-          destTxHash: pending.destTxHash,
-          amountReceived: pending.amountReceived,
-          lastUpdated: Date.now(),
-          error: pending.error,
-        };
-      }
-
-      // Still bridging - check if timeout
-      if (elapsedMs > BRIDGE_DEFAULTS.maxBridgeWaitMs) {
-        pending.status = 'failed';
-        pending.error = 'Bridge timeout';
-        pending.failReason = 'timeout';
-
-        return {
-          status: 'failed' as BridgeStatus,
-          sourceTxHash: pending.sourceTxHash,
-          lastUpdated: Date.now(),
-          error: 'Bridge timeout - transaction may still complete',
-        };
-      }
-
-      // Estimate completion
-      const estimatedCompletion = pending.startTime + estimatedTimeMs;
-
-      return {
-        status: 'bridging' as BridgeStatus,
-        sourceTxHash: pending.sourceTxHash,
-        lastUpdated: Date.now(),
-        estimatedCompletion,
-      };
-    });
-  }
-
-  /**
-   * Mark a bridge as completed (called externally when destination tx is detected)
-   *
-   * RACE-CONDITION-FIX: Uses mutex for thread-safe access
-   * STATE-TRANSITION-FIX: Only transitions from 'bridging' to 'completed'
-   * to prevent race condition where a timed-out bridge gets marked completed
-   */
-  async markCompleted(bridgeId: string, destTxHash: string, amountReceived: string): Promise<void> {
-    await this.bridgesMutex.runExclusive(async () => {
-      const pending = this.pendingBridges.get(bridgeId);
-      if (!pending) {
-        logger.warn('Cannot mark completed: bridge not found', { bridgeId });
-        return;
-      }
-
-      // Only allow transition from 'bridging' to 'completed', with one exception:
-      // timeout-failed bridges can be recovered when the bridge actually completes
-      // after the timeout (funds arrive late but still arrive).
-      if (pending.status !== 'bridging') {
-        if (pending.status === 'failed' && pending.failReason === 'timeout') {
-          logger.info('Recovering timeout-failed bridge', { bridgeId });
-          // Fall through to complete
-        } else {
-          logger.warn('Cannot mark completed: invalid state transition', {
-            bridgeId,
-            currentStatus: pending.status,
-            attemptedStatus: 'completed',
-          });
-          return;
-        }
-      }
-
-      pending.status = 'completed';
-      pending.destTxHash = destTxHash;
-      pending.amountReceived = amountReceived;
-
-      logger.info('Bridge completed', {
-        bridgeId,
-        destTxHash,
-        amountReceived,
-      });
-    });
-  }
-
-  /**
-   * Mark a bridge as failed
-   *
-   * RACE-CONDITION-FIX: Uses mutex for thread-safe access
-   * STATE-TRANSITION-FIX: Only transitions from 'bridging' to 'failed'
-   */
-  async markFailed(bridgeId: string, error: string): Promise<void> {
-    await this.bridgesMutex.runExclusive(async () => {
-      const pending = this.pendingBridges.get(bridgeId);
-      if (!pending) {
-        logger.warn('Cannot mark failed: bridge not found', { bridgeId });
-        return;
-      }
-
-      // FIX: Only allow transition from 'bridging' to 'failed'
-      // Cannot fail a completed bridge or re-fail an already failed bridge
-      if (pending.status !== 'bridging') {
-        logger.warn('Cannot mark failed: invalid state transition', {
-          bridgeId,
-          currentStatus: pending.status,
-          attemptedStatus: 'failed',
-        });
-        return;
-      }
-
-      pending.status = 'failed';
-      pending.error = error;
-      pending.failReason = 'execution_error';
-
-      logger.warn('Bridge failed', {
-        bridgeId,
-        error,
-      });
-    });
-  }
-
-  // ===========================================================================
-  // Private Helpers
-  // ===========================================================================
-
-  /**
-   * Create an invalid quote response for error cases.
-   * Reduces duplication across validation/error paths in quote().
-   */
-  private createInvalidQuote(
-    sourceChain: string, destChain: string, token: string, amount: string, error: string
-  ): BridgeQuote {
-    return {
-      protocol: this.protocol,
-      sourceChain,
-      destChain,
-      token,
-      amountIn: amount,
-      amountOut: '0',
-      bridgeFee: '0',
-      gasFee: '0',
-      totalFee: '0',
-      estimatedTimeSeconds: 0,
-      expiresAt: Date.now(),
-      valid: false,
-      error,
-    };
-  }
-
-  /**
-   * Ensure ERC20 token approval for Stargate router
-   *
-   * BUG-FIX: Checks current allowance and only approves if needed
-   */
-  private async ensureApproval(
-    wallet: ethers.Wallet,
-    tokenAddress: string,
-    spenderAddress: string,
-    amount: bigint
-  ): Promise<boolean> {
-    try {
-      const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
-
-      // Check current allowance
-      const currentAllowance = await token.allowance(wallet.address, spenderAddress);
-
-      if (currentAllowance >= amount) {
-        logger.debug('Sufficient allowance already exists', {
-          token: tokenAddress,
-          spender: spenderAddress,
-          allowance: currentAllowance.toString(),
-          required: amount.toString(),
-        });
-        return true;
-      }
-
-      // USDT forceApprove pattern: USDT reverts on non-zero to non-zero allowance changes.
-      // Reset to 0 first if current allowance is non-zero, then approve exact amount needed.
-      logger.info('Approving token for Stargate router', {
-        token: tokenAddress,
-        spender: spenderAddress,
-        currentAllowance: currentAllowance.toString(),
-        requiredAmount: amount.toString(),
-      });
-
-      if (currentAllowance > 0n) {
-        const resetTx = await token.approve(spenderAddress, 0n);
-        await this.waitWithTimeout<ethers.TransactionReceipt | null>(
-          resetTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval reset confirmation'
-        );
-      }
-
-      // Approve exact amount needed (not MaxUint256) for better security
-      const approveTx = await token.approve(spenderAddress, amount);
-      const receipt = await this.waitWithTimeout(
-        approveTx.wait(), TX_WAIT_TIMEOUT_MS, 'Approval confirmation'
-      ) as ethers.TransactionReceipt | null;
-
-      if (!receipt || receipt.status !== 1) {
-        logger.error('Token approval failed', { token: tokenAddress });
-        return false;
-      }
-
-      logger.info('Token approval successful', {
-        token: tokenAddress,
-        txHash: receipt.hash,
-      });
-
-      return true;
-    } catch (error) {
-      logger.error('Token approval error', {
-        token: tokenAddress,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
     }
   }
 
@@ -803,33 +451,22 @@ export class StargateRouter implements IBridgeRouter {
 
   /**
    * Health check for Stargate.
-   * Validates provider connectivity and optionally checks V1 pool liquidity.
+   * Extends base health check with V1 pool liquidity monitoring.
    */
-  async healthCheck(): Promise<{ healthy: boolean; message: string }> {
-    // Check if we have at least one provider
+  override async healthCheck(): Promise<{ healthy: boolean; message: string }> {
     if (this.providers.size === 0) {
-      return {
-        healthy: false,
-        message: 'No providers registered',
-      };
+      return { healthy: false, message: 'No providers registered' };
     }
 
     try {
       const testChain = this.supportedSourceChains.find(c => this.providers.has(c));
       if (!testChain) {
-        return {
-          healthy: false,
-          message: 'No providers available for supported chains',
-        };
+        return { healthy: false, message: 'No providers available for supported chains' };
       }
 
-      // Find another chain to test with
       const destChain = this.supportedDestChains.find(c => c !== testChain);
       if (!destChain) {
-        return {
-          healthy: true,
-          message: 'Stargate router operational (single chain only)',
-        };
+        return { healthy: true, message: 'Stargate router operational (single chain only)' };
       }
 
       const provider = this.providers.get(testChain)!;
@@ -854,7 +491,7 @@ export class StargateRouter implements IBridgeRouter {
   /**
    * Check V1 pool liquidity by querying USDC balance held by the router contract.
    * Non-critical: returns info string on success, null on failure.
-   * Used as a degradation signal — declining balance indicates LP migration to V2.
+   * Used as a degradation signal -- declining balance indicates LP migration to V2.
    */
   private async checkPoolLiquidity(chain: string): Promise<string | null> {
     try {
@@ -878,7 +515,7 @@ export class StargateRouter implements IBridgeRouter {
       if (balanceUsd < WARNING_THRESHOLD) {
         const severity = balanceUsd < CRITICAL_THRESHOLD ? 'critical' : 'warning';
 
-        logger.warn('Low V1 pool liquidity detected', {
+        this.logger.warn('Low V1 pool liquidity detected', {
           chain,
           token: 'USDC',
           balanceUsd: Math.floor(balanceUsd),
@@ -898,7 +535,7 @@ export class StargateRouter implements IBridgeRouter {
               timestamp: Date.now(),
             });
           } catch (callbackError) {
-            logger.debug('Pool alert callback error (non-critical)', {
+            this.logger.debug('Pool alert callback error (non-critical)', {
               error: callbackError instanceof Error ? callbackError.message : String(callbackError),
             });
           }
@@ -910,39 +547,13 @@ export class StargateRouter implements IBridgeRouter {
 
       return `V1 USDC pool on ${chain}: $${Math.floor(balanceUsd).toLocaleString()}`;
     } catch (error) {
-      // Non-critical — don't fail health check if liquidity query fails
-      logger.debug('Pool liquidity check failed (non-critical)', {
+      // Non-critical -- don't fail health check if liquidity query fails
+      this.logger.debug('Pool liquidity check failed (non-critical)', {
         chain,
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
     }
-  }
-
-  /**
-   * Cleanup old pending bridges
-   *
-   * RACE-CONDITION-FIX: Now async with mutex protection
-   */
-  async cleanup(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<void> {
-    await this.bridgesMutex.runExclusive(async () => {
-      const cutoff = Date.now() - maxAgeMs;
-      let cleanedCount = 0;
-
-      for (const [bridgeId, bridge] of this.pendingBridges.entries()) {
-        if (bridge.startTime < cutoff) {
-          this.pendingBridges.delete(bridgeId);
-          cleanedCount++;
-        }
-      }
-
-      if (cleanedCount > 0) {
-        logger.debug('Cleaned up old bridge entries', {
-          cleanedCount,
-          remaining: this.pendingBridges.size,
-        });
-      }
-    });
   }
 }
 
@@ -955,7 +566,7 @@ export class StargateRouter implements IBridgeRouter {
  */
 export function createStargateRouter(
   providers?: Map<string, ethers.Provider>,
-  options?: { onPoolAlert?: (alert: import('./types').PoolLiquidityAlert) => void }
+  options?: { onPoolAlert?: (alert: PoolLiquidityAlert) => void }
 ): StargateRouter {
   return new StargateRouter(providers, options);
 }

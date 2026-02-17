@@ -24,14 +24,7 @@ import type { RetryLogger } from '../../../src/resilience/retry-mechanism';
 // Mock the logger used internally by retry-mechanism
 // =============================================================================
 
-jest.mock('../../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn(),
-  }),
-}));
+jest.mock('../../../src/logger');
 
 // =============================================================================
 // classifyError()

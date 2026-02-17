@@ -32,14 +32,7 @@ jest.mock('../../../src/redis', () => ({
   getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient)),
 }));
 
-jest.mock('../../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  })),
-}));
+jest.mock('../../../src/logger');
 
 jest.mock('../../../src/lifecycle-utils', () => ({
   clearIntervalSafe: jest.fn((interval: any) => {

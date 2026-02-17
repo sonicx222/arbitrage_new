@@ -3,7 +3,7 @@
  *
  * Centralized exports for all test data generators.
  *
- * @see docs/research/INTEGRATION_TEST_COVERAGE_REPORT.md Phase 3
+ * @see ADR-009: Test Architecture — Phase 3 generators
  */
 
 export {

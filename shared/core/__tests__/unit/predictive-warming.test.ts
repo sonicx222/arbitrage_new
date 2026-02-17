@@ -41,20 +41,8 @@ const mockCorrelationAnalyzer = {
   destroy: jest.fn<any>()
 };
 
-// Single shared logger instance returned by all createLogger() calls.
-// Defined as a plain object literal inside the jest.mock factory to avoid TDZ issues.
-// After module loading, we retrieve it via createLogger() to use in test assertions.
-jest.mock('../../src/logger', () => {
-  const sharedLogger = {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  };
-  return {
-    createLogger: () => sharedLogger
-  };
-});
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 // Mock redis
 jest.mock('../../src/redis', () => ({

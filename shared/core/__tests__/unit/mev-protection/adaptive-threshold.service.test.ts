@@ -6,14 +6,7 @@
  */
 
 // Mock logger to suppress console output
-jest.mock('../../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  })),
-}));
+jest.mock('../../../src/logger');
 
 // Mock Redis client
 const mockRedis = {

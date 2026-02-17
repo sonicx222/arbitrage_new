@@ -40,7 +40,7 @@
  * });
  * ```
  *
- * @see P2-1 from TEST_FRAMEWORK_P2_SPECS.md
+ * @see ADR-009: Test Architecture
  */
 
 // Import and re-export Resettable from @arbitrage/types for backwards compatibility

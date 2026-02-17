@@ -32,7 +32,7 @@
  * });
  * ```
  *
- * @see P2-TEST from refactoring-roadmap.md
+ * @see ADR-009: Test Architecture
  */
 
 type TimerMode = 'fake' | 'real' | 'modern' | 'legacy';

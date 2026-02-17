@@ -350,6 +350,64 @@ describe('model-persistence', () => {
 
       expect(p.saveModel(mockModel as any, metadata)).rejects.toThrow('Invalid modelId');
     });
+
+    it('should fall back to copy-then-delete when rename throws EXDEV', async () => {
+      // Mock fs.promises.rename to throw EXDEV (cross-device link error)
+      const fsp = fs.promises;
+      const originalRename = fsp.rename;
+      const renameSpy = jest.spyOn(fsp, 'rename').mockImplementation(
+        async (src: fs.PathLike, dest: fs.PathLike) => {
+          const err = new Error('EXDEV: cross-device link not permitted') as NodeJS.ErrnoException;
+          err.code = 'EXDEV';
+          throw err;
+        }
+      );
+
+      try {
+        const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: true });
+        const metadata = createTestMetadata('exdev-model');
+
+        const result = await p.saveModel(mockModel as any, metadata);
+
+        expect(result.success).toBe(true);
+        // Model files should exist at final location via copy fallback
+        const modelPath = path.join(tempDir, 'exdev-model', 'model.json');
+        expect(fs.existsSync(modelPath)).toBe(true);
+        // Metadata should also be copied
+        const metadataPath = path.join(tempDir, 'exdev-model', 'metadata.json');
+        expect(fs.existsSync(metadataPath)).toBe(true);
+        // Temp directory should be cleaned up
+        const atomicTempDir = path.join(tempDir, 'exdev-model', '.temp');
+        expect(fs.existsSync(atomicTempDir)).toBe(false);
+      } finally {
+        renameSpy.mockRestore();
+      }
+    });
+
+    it('should propagate non-EXDEV rename errors', async () => {
+      // Mock fs.promises.rename to throw a non-EXDEV error
+      const fsp = fs.promises;
+      const renameSpy = jest.spyOn(fsp, 'rename').mockImplementation(
+        async () => {
+          const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
+          err.code = 'EACCES';
+          throw err;
+        }
+      );
+
+      try {
+        const p = new ModelPersistence({ baseDir: tempDir, atomicSaves: true });
+        const metadata = createTestMetadata('eacces-model');
+
+        const result = await p.saveModel(mockModel as any, metadata);
+
+        // Should fail because non-EXDEV errors are not caught
+        expect(result.success).toBe(false);
+        expect(result.error?.message).toContain('EACCES');
+      } finally {
+        renameSpy.mockRestore();
+      }
+    });
   });
 
   describe('singleton factory', () => {

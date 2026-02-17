@@ -4,7 +4,7 @@
  * This file runs before each test file.
  * Configure in jest.config.js: setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/setup/jest-setup.ts']
  *
- * @see docs/TEST_ARCHITECTURE.md
+ * @see ADR-009: Test Architecture
  */
 
 // Polyfill for BigInt serialization in Jest workers

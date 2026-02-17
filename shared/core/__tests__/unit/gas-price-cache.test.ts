@@ -13,14 +13,8 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 
 // Mock logger as fallback (DI is preferred via deps parameter)
 // Note: This mock is needed for getGasPriceCache() singleton tests that don't support DI
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  })
-}));
+// Auto-resolves to src/__mocks__/logger.ts
+jest.mock('../../src/logger');
 
 // Mock ethers
 // Fix: Include AbiCoder mock to prevent import errors from event-processor.ts

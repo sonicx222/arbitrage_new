@@ -32,15 +32,8 @@ jest.mock('../../src/redis-streams', () => ({
   })
 }));
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: () => {},
-    error: () => {},
-    warn: () => {},
-    debug: () => {}
-  })
-}));
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 import {
   GracefulDegradationManager,

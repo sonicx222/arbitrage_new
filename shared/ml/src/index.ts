@@ -33,10 +33,10 @@ export {
   getTensorFlowInfo,
   disposeAllTensors,
   withTensorCleanup,
-  // P2-2: Renamed for clarity (these monitor but don't clean up)
+  // P2-2: Primary exports (renamed for clarity — these monitor but don't clean up)
   withTensorMonitorAsync,
   withTrackedTensorMonitor,
-  // P2-2: Deprecated aliases for backwards compatibility
+  // P2-2: Deprecated aliases kept for external consumers
   withTensorCleanupAsync,
   withTrackedTensorCleanup,
   resetTensorFlowBackend

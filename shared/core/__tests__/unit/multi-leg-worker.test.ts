@@ -11,19 +11,7 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 // Mock logger before importing modules
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  })),
-  getPerformanceLogger: jest.fn(() => ({
-    logEventLatency: jest.fn(),
-    logArbitrageOpportunity: jest.fn(),
-    logHealthCheck: jest.fn()
-  }))
-}));
+jest.mock('../../src/logger');
 
 // Mock worker_threads for main thread tests
 jest.mock('worker_threads', () => ({

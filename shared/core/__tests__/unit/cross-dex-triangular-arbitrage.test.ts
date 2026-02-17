@@ -22,14 +22,7 @@ import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 // Mocks (must be defined before importing the module under test)
 // ---------------------------------------------------------------------------
 
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  }),
-}));
+jest.mock('../../src/logger');
 
 jest.mock('../../src/caching/hierarchical-cache', () => ({
   getHierarchicalCache: () => ({

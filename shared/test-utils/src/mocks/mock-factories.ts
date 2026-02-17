@@ -48,6 +48,7 @@ export interface MockRedisClient {
   scan: jest.Mock;
   sadd: jest.Mock;
   smembers: jest.Mock;
+  updateServiceHealth: jest.Mock;
 }
 
 /**
@@ -97,6 +98,7 @@ export function createMockRedisClient(): MockRedisClient {
     scan: jest.fn<() => Promise<[string, string[]]>>().mockResolvedValue(['0', []]),
     sadd: jest.fn<() => Promise<number>>().mockResolvedValue(1),
     smembers: jest.fn<() => Promise<string[]>>().mockResolvedValue([]),
+    updateServiceHealth: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   };
 }
 

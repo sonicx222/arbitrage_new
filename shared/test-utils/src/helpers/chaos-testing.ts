@@ -9,7 +9,7 @@
  * - Network partition simulation
  * - Memory pressure conditions
  *
- * @see docs/reports/TEST_OPTIMIZATION_RESEARCH_REPORT.md
+ * @see ADR-009: Test Architecture
  */
 
 /**

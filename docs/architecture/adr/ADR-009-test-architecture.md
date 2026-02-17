@@ -1,7 +1,7 @@
 # ADR-009: Modern Test Architecture
 
 ## Status
-**Proposed** | 2026-01-15
+**Accepted** | 2026-01-15
 
 ## Context
 

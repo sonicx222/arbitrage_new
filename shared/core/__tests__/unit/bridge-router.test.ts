@@ -20,15 +20,8 @@ import { ethers } from 'ethers';
 // Mock Setup
 // =============================================================================
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  }),
-}));
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 // Mock bridge-config selectOptimalBridge for findSupportedRouter scoring tests
 const mockSelectOptimalBridge = jest.fn();

@@ -25,6 +25,7 @@ import {
   calculateVolatility,
   calculateTrend,
 } from './feature-math';
+import { SynchronizedStats } from './synchronized-stats';
 import type {
   PriceHistory,
   PredictionResult,
@@ -111,9 +112,10 @@ const DEFAULT_LSTM_CONFIG: Required<LSTMPredictorConfig> = {
  * - Graceful fallback to simple moving average
  * - Tensor memory management for hot-path efficiency
  *
- * P2-8 note: Stats tracking uses plain predictionHistory array, unlike
- * OrderflowPredictor which uses SynchronizedStats. Consider migrating
- * to SynchronizedStats for consistency when refactoring this class.
+ * P2-8: Stats tracking uses SynchronizedStats for consistency with
+ * OrderflowPredictor. The predictionHistory array is retained for
+ * training data (retrainOnRecentData) since SynchronizedStats only
+ * tracks numeric values, not full PredictionHistoryEntry objects.
  */
 export class LSTMPredictor {
   private model: tf.LayersModel | null = null;
@@ -121,6 +123,9 @@ export class LSTMPredictor {
   private lastTrainingTime = 0;
   private predictionHistory: PredictionHistoryEntry[] = [];
   private readonly config: Required<LSTMPredictorConfig>;
+
+  // P2-8: Synchronized stats for thread-safe accuracy and count tracking
+  private readonly stats: SynchronizedStats;
 
   // Fix 5.1: Atomic mutex for concurrent retrain prevention
   private readonly retrainingMutex: AsyncMutex;
@@ -153,6 +158,16 @@ export class LSTMPredictor {
 
     // Fix 5.1: Initialize atomic mutex
     this.retrainingMutex = new AsyncMutex();
+
+    // P2-8: Initialize synchronized stats for accuracy tracking
+    this.stats = new SynchronizedStats({
+      maxHistorySize: this.config.maxHistorySize,
+      initialCounters: {
+        predictions: 0,
+        accuratePredictions: 0,
+      },
+      initialAccumulators: {},
+    });
 
     // Initialize model asynchronously with ready promise pattern
     this.modelReady = this.initializeModel().catch(err => {
@@ -333,8 +348,9 @@ export class LSTMPredictor {
         modelType: 'lstm',
         version: this.modelVersion,
         lastTrainingTime: this.lastTrainingTime,
-        trainingSamplesCount: this.predictionHistory.length,
-        accuracy: this.calculateRecentAccuracy(),
+        // P2-8: Use SynchronizedStats counter for consistency
+        trainingSamplesCount: this.stats.getCounter('predictions'),
+        accuracy: this.getAccuracy(),
         isTrained: this.isTrained,
         savedAt: Date.now(),
       };
@@ -487,11 +503,12 @@ export class LSTMPredictor {
 
   async updateModel(actualPrice: number, predictedPrice: number, timestamp: number): Promise<void> {
     // Store prediction result for online learning
+    const error = actualPrice !== 0 ? Math.abs(actualPrice - predictedPrice) / actualPrice : 0;
     const entry: PredictionHistoryEntry = {
       timestamp,
       actual: actualPrice,
       predicted: predictedPrice,
-      error: actualPrice !== 0 ? Math.abs(actualPrice - predictedPrice) / actualPrice : 0
+      error
     };
     this.predictionHistory.push(entry);
 
@@ -500,8 +517,15 @@ export class LSTMPredictor {
       this.predictionHistory.shift();
     }
 
+    // P2-8: Track prediction errors in SynchronizedStats for accuracy calculation
+    this.stats.increment('predictions');
+    this.stats.recordValue('errors', error);
+    if (error < this.config.errorThreshold) {
+      this.stats.increment('accuratePredictions');
+    }
+
     // Check if retraining is needed
-    const recentAccuracy = this.calculateRecentAccuracy();
+    const recentAccuracy = this.getAccuracy();
     const timeSinceLastTrain = Date.now() - this.lastTrainingTime;
 
     // Fix 5.1: Use atomic mutex check instead of boolean flag
@@ -765,13 +789,28 @@ export class LSTMPredictor {
     return [mean, Number.isFinite(ratio) ? ratio : 1];
   }
 
+  /**
+   * P2-8: Get prediction accuracy using SynchronizedStats.
+   * Returns 1.0 when fewer than 10 predictions have been made.
+   * Uses the rolling error history to calculate accuracy over
+   * the most recent 50 predictions.
+   */
+  getAccuracy(): number {
+    const totalPredictions = this.stats.getCounter('predictions');
+    if (totalPredictions < 10) return 1.0;
+
+    return this.stats.getRecentAccuracy(
+      'errors',
+      (error) => error < this.config.errorThreshold,
+      50
+    );
+  }
+
+  /**
+   * @deprecated Use getAccuracy() instead. Kept for backward compatibility.
+   */
   private calculateRecentAccuracy(): number {
-    if (this.predictionHistory.length < 10) return 1.0;
-
-    const recent = this.predictionHistory.slice(-50);
-    const accurate = recent.filter(h => h.error < this.config.errorThreshold).length;
-
-    return accurate / recent.length;
+    return this.getAccuracy();
   }
 
   private fallbackPrediction(priceHistory: PriceHistory[], context: PredictionContext): PredictionResult {
@@ -820,8 +859,9 @@ export class LSTMPredictor {
     return {
       isTrained: this.isTrained,
       lastTrainingTime: this.lastTrainingTime,
-      predictionCount: this.predictionHistory.length,
-      recentAccuracy: this.calculateRecentAccuracy(),
+      // P2-8: Use SynchronizedStats counter for prediction count
+      predictionCount: this.stats.getCounter('predictions'),
+      recentAccuracy: this.getAccuracy(),
       isReady: this.isReady(),
       // Fix 5.1: Use mutex isLocked() instead of boolean flag
       isRetraining: this.retrainingMutex.isLocked(),
@@ -844,6 +884,7 @@ export class LSTMPredictor {
       this.model = null;
     }
     this.predictionHistory = [];
+    this.stats.reset();
     this.isTrained = false;
   }
 }

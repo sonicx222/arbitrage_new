@@ -47,33 +47,8 @@ const mockRedis = {
   ping: jest.fn<any>(() => Promise.resolve('PONG'))
 };
 
-const mockLogger = {
-  info: jest.fn<any>(),
-  warn: jest.fn<any>(),
-  error: jest.fn<any>(),
-  debug: jest.fn<any>()
-};
-
-// Mock logger - returns inline object to avoid TDZ issue with mockLogger
-// (jest.mock is hoisted, but module imports trigger createLogger before mockLogger is initialized)
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  }),
-  getPerformanceLogger: () => ({
-    startTimer: jest.fn(),
-    endTimer: jest.fn(),
-    logEventLatency: jest.fn(),
-    logArbitrageOpportunity: jest.fn(),
-    logExecutionResult: jest.fn(),
-    logError: jest.fn(),
-    logHealthCheck: jest.fn(),
-    logMetrics: jest.fn()
-  })
-}));
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 // Mock redis module - return mockRedis directly
 jest.mock('../../src/redis', () => ({

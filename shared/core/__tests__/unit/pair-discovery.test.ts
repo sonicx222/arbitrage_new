@@ -31,15 +31,8 @@ const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 // Mocks
 // =============================================================================
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn()
-  })
-}));
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 // Mock provider and contract factory
 const mockGetPool = jest.fn();

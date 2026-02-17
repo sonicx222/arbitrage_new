@@ -5,7 +5,7 @@
  * Automatically resets all registered singletons between tests
  * to ensure proper test isolation.
  *
- * @see docs/TEST_ARCHITECTURE.md
+ * @see ADR-009: Test Architecture
  */
 
 type ResetFunction = () => void | Promise<void>;

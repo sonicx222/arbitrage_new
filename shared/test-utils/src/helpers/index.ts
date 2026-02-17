@@ -7,7 +7,7 @@
  * - Test isolation helpers
  * - Test state management (beforeAll/beforeEach patterns)
  *
- * @see P2-TEST from refactoring-roadmap.md
+ * @see ADR-009: Test Architecture
  */
 
 export {

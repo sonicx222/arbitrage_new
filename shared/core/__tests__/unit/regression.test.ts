@@ -32,45 +32,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import type { Mock } from 'jest-mock';
-
-// =============================================================================
-// Mock Interfaces
-// =============================================================================
-
-interface MockRedisClient {
-  setNx: Mock<(key: string, value: string, ttl: number) => Promise<boolean>>;
-  get: Mock<(key: string) => Promise<unknown>>;
-  set: Mock<(key: string, value: unknown, ttl?: number) => Promise<string>>;
-  del: Mock<(key: string) => Promise<number>>;
-  expire: Mock<(key: string, ttl: number) => Promise<number>>;
-  eval: Mock<(script: string, keys: string[], args: string[]) => Promise<number>>;
-  exists: Mock<(key: string) => Promise<boolean>>;
-  ping: Mock<() => Promise<boolean>>;
-  subscribe: Mock<(channel: string) => Promise<void>>;
-  unsubscribe: Mock<(channel: string) => Promise<void>>;
-  on: Mock<(event: string, handler: Function) => void>;
-  removeListener: Mock<(event: string, handler: Function) => void>;
-  disconnect: Mock<() => Promise<void>>;
-  updateServiceHealth: Mock<(name: string, health: any) => Promise<void>>;
-}
-
-const createMockRedisClient = (): MockRedisClient => ({
-  setNx: jest.fn<(key: string, value: string, ttl: number) => Promise<boolean>>().mockResolvedValue(true),
-  get: jest.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null),
-  set: jest.fn<(key: string, value: unknown, ttl?: number) => Promise<string>>().mockResolvedValue('OK'),
-  del: jest.fn<(key: string) => Promise<number>>().mockResolvedValue(1),
-  expire: jest.fn<(key: string, ttl: number) => Promise<number>>().mockResolvedValue(1),
-  eval: jest.fn<(script: string, keys: string[], args: string[]) => Promise<number>>().mockResolvedValue(1),
-  exists: jest.fn<(key: string) => Promise<boolean>>().mockResolvedValue(false),
-  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-  subscribe: jest.fn<(channel: string) => Promise<void>>().mockResolvedValue(undefined),
-  unsubscribe: jest.fn<(channel: string) => Promise<void>>().mockResolvedValue(undefined),
-  on: jest.fn<(event: string, handler: Function) => void>(),
-  removeListener: jest.fn<(event: string, handler: Function) => void>(),
-  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  updateServiceHealth: jest.fn<(name: string, health: any) => Promise<void>>().mockResolvedValue(undefined)
-});
+import type { MockRedisClient } from '@arbitrage/test-utils/mocks/mock-factories';
+import { createMockRedisClient } from '@arbitrage/test-utils/mocks/mock-factories';
 
 let mockRedisClient: MockRedisClient;
 
@@ -80,20 +43,8 @@ jest.mock('../../src/redis', () => ({
   RedisClient: jest.fn()
 }));
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn()
-  })),
-  getPerformanceLogger: jest.fn(() => ({
-    logEventLatency: jest.fn(),
-    logArbitrageOpportunity: jest.fn(),
-    logHealthCheck: jest.fn()
-  }))
-}));
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 // =============================================================================
 // Singleton Race Condition Tests

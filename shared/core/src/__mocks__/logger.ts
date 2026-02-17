@@ -41,6 +41,10 @@ const mockPerformanceLogger = {
   logHealthCheck: jest.fn(),
   logOpportunityDetection: jest.fn(),
   logExecutionResult: jest.fn(),
+  logError: jest.fn(),
+  logMetrics: jest.fn(),
+  startTimer: jest.fn(() => jest.fn()),
+  endTimer: jest.fn(() => 0),
 };
 
 export const createLogger = jest.fn(() => mockLogger);

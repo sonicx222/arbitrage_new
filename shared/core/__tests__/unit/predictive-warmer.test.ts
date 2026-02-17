@@ -17,14 +17,7 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 // Mock logger before importing the module under test
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  }),
-}));
+jest.mock('../../src/logger');
 
 const mockCache = {
   get: jest.fn(),

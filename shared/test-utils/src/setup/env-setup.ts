@@ -4,7 +4,7 @@
  * Provides isolated environment variable management for tests.
  * Prevents environment leakage between test files.
  *
- * @see docs/TEST_ARCHITECTURE.md
+ * @see ADR-009: Test Architecture
  */
 
 // Store original environment
@@ -40,6 +40,14 @@ export interface TestEnvironment {
   POLYGON_WS_URL: string;
   AVALANCHE_RPC_URL: string;
   AVALANCHE_WS_URL: string;
+  FANTOM_RPC_URL: string;
+  FANTOM_WS_URL: string;
+  ZKSYNC_RPC_URL: string;
+  ZKSYNC_WS_URL: string;
+  LINEA_RPC_URL: string;
+  LINEA_WS_URL: string;
+  SOLANA_RPC_URL: string;
+  SOLANA_WS_URL: string;
 
   // Allow additional keys
   [key: string]: string;
@@ -74,7 +82,15 @@ const defaultTestEnv: TestEnvironment = {
   POLYGON_RPC_URL: 'https://polygon-rpc.test',
   POLYGON_WS_URL: 'wss://polygon-ws.test',
   AVALANCHE_RPC_URL: 'https://avalanche-c.test/rpc',
-  AVALANCHE_WS_URL: 'wss://avalanche-c.test/ws'
+  AVALANCHE_WS_URL: 'wss://avalanche-c.test/ws',
+  FANTOM_RPC_URL: 'https://fantom-rpc.test',
+  FANTOM_WS_URL: 'wss://fantom-ws.test',
+  ZKSYNC_RPC_URL: 'https://zksync-mainnet.test',
+  ZKSYNC_WS_URL: 'wss://zksync-mainnet.test/ws',
+  LINEA_RPC_URL: 'https://linea-mainnet.test',
+  LINEA_WS_URL: 'wss://linea-mainnet.test/ws',
+  SOLANA_RPC_URL: 'https://solana-mainnet.test',
+  SOLANA_WS_URL: 'wss://solana-mainnet.test/ws'
 };
 
 /**

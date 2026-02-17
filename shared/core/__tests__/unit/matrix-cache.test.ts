@@ -25,14 +25,7 @@
 import { MatrixPriceCache, getMatrixPriceCache } from '../../src/matrix-cache';
 
 // Mock the logger to suppress output during tests
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  }),
-}));
+jest.mock('../../src/logger');
 
 describe('MatrixPriceCache', () => {
   let cache: MatrixPriceCache;

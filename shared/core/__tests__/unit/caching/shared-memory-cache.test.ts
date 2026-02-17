@@ -19,14 +19,7 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-jest.mock('../../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  })),
-}));
+jest.mock('../../../src/logger');
 
 import {
   SharedMemoryCache,

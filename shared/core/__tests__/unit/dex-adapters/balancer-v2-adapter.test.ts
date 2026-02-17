@@ -26,14 +26,7 @@ import {
 // Mocks
 // =============================================================================
 
-jest.mock('../../../src/logger', () => ({
-  createLogger: () => ({
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  }),
-}));
+jest.mock('../../../src/logger');
 
 // Mock fetch for subgraph queries
 const mockFetch = jest.fn();

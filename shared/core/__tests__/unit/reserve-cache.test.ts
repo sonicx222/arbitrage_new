@@ -13,15 +13,8 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 // Mock Setup - Must be before any imports that might use these modules
 // =============================================================================
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  })
-}));
+// Mock logger (auto-resolves to src/__mocks__/logger.ts)
+jest.mock('../../src/logger');
 
 // =============================================================================
 // Imports - After mocks

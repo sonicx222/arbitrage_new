@@ -4,7 +4,7 @@
  * Provides builder pattern and factory functions for creating
  * SwapEvent test data with sensible defaults.
  *
- * @see docs/TEST_ARCHITECTURE.md
+ * @see ADR-009: Test Architecture
  */
 
 // Note: We define the interface here to avoid import cycles

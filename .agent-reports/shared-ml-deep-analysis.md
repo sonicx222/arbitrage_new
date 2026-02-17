@@ -15,7 +15,7 @@
   1. **P0-1**: `extractFeatures()` returns shared pre-allocated array — all `PredictionResult.features` point to same mutable buffer (silent data corruption)
   2. **P0-2**: `predictBatch()` uses raw model output as confidence instead of softmax normalization — inconsistent behavior between batch/single paths
   3. **P0-3**: 2 of 9 test suites (`predictor.test.ts`, `orderflow-predictor.test.ts`) are **conditionally skipped in CI** — the most complex ML code has ZERO regression protection
-- **Overall health grade**: **B-** (solid architecture, good defensive math, but shared-buffer bugs, CI coverage gaps, and security issues are serious)
+- **Overall health grade**: **B-** at time of analysis; **A** after fixes (27/27 items resolved — all phases complete)
 - **Agent agreement map**: 4 areas of multi-agent consensus (see Cross-Agent Insights)
 
 ---
@@ -152,34 +152,34 @@ private getModelDir(modelId: string): string {
 ## Recommended Action Plan
 
 ### Phase 1: Immediate (P0 — fix before any production use)
-- [ ] **P0-1**: Return `features.slice()` from `extractFeatures()` in `predictor.ts:739`. Return `new Float64Array(this.featureBuffer)` from `toFeatureVector()` and `normalizeToBuffer()` in `orderflow-features.ts:314,400`.
-- [ ] **P0-2**: Apply softmax normalization in `predictBatch()` at `orderflow-predictor.ts:897`. Add confidence threshold check for pending prediction storage. Fix timestamp collision (use counter, not `timestamp + idx`).
-- [ ] **P0-3**: Create lightweight TF.js mock for CI that enables running core prediction tests without real TF. Or use `@tensorflow/tfjs-core` CPU backend with shorter training (fewer epochs/samples) for CI.
-- [ ] **P1-1**: Add `modelId` sanitization in `model-persistence.ts:371` to prevent path traversal.
-- [ ] **P1-6**: Add `Number.isFinite()` check for `predictedPrice` in `predictor.ts:432`.
+- [x] **P0-1**: Return `features.slice()` from `extractFeatures()` in `predictor.ts:739`. Return `new Float64Array(this.featureBuffer)` from `toFeatureVector()` and `normalizeToBuffer()` in `orderflow-features.ts:314,400`.
+- [x] **P0-2**: Apply softmax normalization in `predictBatch()` at `orderflow-predictor.ts:897`. Add confidence threshold check for pending prediction storage. Fix timestamp collision (use counter, not `timestamp + idx`).
+- [x] **P0-3**: Create lightweight TF.js mock for CI that enables running core prediction tests without real TF. Or use `@tensorflow/tfjs-core` CPU backend with shorter training (fewer epochs/samples) for CI.
+- [x] **P1-1**: Add `modelId` sanitization in `model-persistence.ts:371` to prevent path traversal.
+- [x] **P1-6**: Add `Number.isFinite()` check for `predictedPrice` in `predictor.ts:432`.
 
 ### Phase 2: Next Sprint (P1 — reliability and coverage)
-- [ ] **P1-2**: Add SHA-256 hash of model files during save, verify on load. Add runtime metadata validation.
-- [ ] **P1-3**: Fix Windows path normalization in model-persistence tests to un-skip `loadModel` and `modelExists` tests.
-- [ ] **P1-4**: Add comprehensive test suite for `predictBatch()`.
-- [ ] **P1-5**: Replace duplicate private math in `predictor.ts` with imports from `feature-math.ts`.
-- [ ] **P1-7**: Replace sync I/O with `fs.promises` in `model-persistence.ts`.
-- [ ] **P1-8**: Replace `Math.min(...seq)` with loop-based min/max in `feature-math.ts` and `predictor.ts`.
+- [x] **P1-2**: Add SHA-256 hash of model files during save, verify on load. Add runtime metadata validation.
+- [x] **P1-3**: Fix Windows path normalization in model-persistence tests to un-skip `loadModel` and `modelExists` tests.
+- [x] **P1-4**: Add comprehensive test suite for `predictBatch()`.
+- [x] **P1-5**: Replace duplicate private math in `predictor.ts` with imports from `feature-math.ts`.
+- [x] **P1-7**: Replace sync I/O with `fs.promises` in `model-persistence.ts`.
+- [x] **P1-8**: Replace `Math.min(...seq)` with loop-based min/max in `feature-math.ts` and `predictor.ts`.
 
 ### Phase 3: Backlog (P2/P3 — maintenance, performance, consistency)
-- [ ] **P2-1**: Use `DirectionMapper` from `direction-types.ts` in ensemble-combiner.
-- [ ] **P2-2**: Rename `withTensorCleanupAsync`/`withTrackedTensorCleanup` to `monitorTensorCreation` or deprecate.
-- [ ] **P2-3**: Implement persistence for OrderflowPredictor (per ADR-025) or update ADR.
-- [ ] **P2-5**: Consolidate `PatternRecognizer` methods with `feature-math.ts`.
-- [ ] **P2-6**: Investigate `tf.tensor` accepting `Float64Array` directly without `Array.from()`.
-- [ ] **P2-8**: Migrate LSTMPredictor stats to `SynchronizedStats`.
-- [ ] **P2-9/P2-10**: Replace `||` with `??` for numeric/env defaults in `tf-backend.ts:138`, `ensemble-combiner.ts:189`, `predictor.ts:1065`.
-- [ ] **P2-11**: Add tests for version management and cross-device atomic move.
-- [ ] **P2-12**: Fix `calculateVolatility()` JSDoc (say "std dev of log returns", not "annualized").
-- [ ] **P3-1**: Split `predictor.ts` into `lstm-predictor.ts` and `pattern-recognizer.ts`.
-- [ ] **P3-3/P3-4**: Extract shared test helpers for mock factories and `@arbitrage/core` mock.
-- [ ] **P3-7**: Add `TF_FORCE_BACKEND`, `TF_ENABLE_NATIVE` to `.env.example`.
-- [ ] **P3-8**: Change training tests from `beforeEach` to `beforeAll` where model can be shared.
+- [x] **P2-1**: Use `DirectionMapper` from `direction-types.ts` in ensemble-combiner.
+- [x] **P2-2**: Rename `withTensorCleanupAsync`/`withTrackedTensorCleanup` to `monitorTensorCreation` or deprecate.
+- [x] **P2-3**: Implement persistence for OrderflowPredictor (per ADR-025) or update ADR.
+- [x] **P2-5**: Consolidate `PatternRecognizer` methods with `feature-math.ts`.
+- [x] **P2-6**: Investigate `tf.tensor` accepting `Float64Array` directly without `Array.from()`.
+- [x] **P2-8**: Migrate LSTMPredictor stats to `SynchronizedStats`.
+- [x] **P2-9/P2-10**: Replace `||` with `??` for numeric/env defaults in `tf-backend.ts:138`, `ensemble-combiner.ts:189`, `predictor.ts:1065`.
+- [x] **P2-11**: Add tests for version management and cross-device atomic move.
+- [x] **P2-12**: Fix `calculateVolatility()` JSDoc (say "std dev of log returns", not "annualized").
+- [x] **P3-1**: Split `predictor.ts` into `lstm-predictor.ts` and `pattern-recognizer.ts`.
+- [x] **P3-3/P3-4**: Extract shared test helpers for mock factories and `@arbitrage/core` mock.
+- [x] **P3-7**: Add `TF_FORCE_BACKEND`, `TF_ENABLE_NATIVE` to `.env.example`.
+- [x] **P3-8**: Change training tests from `beforeEach` to `beforeAll` where model can be shared.
 
 ---
 
