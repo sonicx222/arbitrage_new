@@ -82,7 +82,8 @@ describe('RedisStreams constants', () => {
     expect(RedisStreams.WHALE_ALERTS).toBe('stream:whale-alerts');
     expect(RedisStreams.EXECUTION_REQUESTS).toBe('stream:execution-requests');
     expect(RedisStreams.EXECUTION_RESULTS).toBe('stream:execution-results');
-    expect(RedisStreams.DEAD_LETTER_QUEUE).toBe('stream:dlq');
+    expect(RedisStreams.DEAD_LETTER_QUEUE).toBe('stream:dead-letter-queue');
+    expect(RedisStreams.DLQ_ALERTS).toBe('stream:dlq-alerts');
   });
 
   it('has system coordination streams', () => {

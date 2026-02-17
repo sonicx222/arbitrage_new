@@ -167,8 +167,8 @@ npm install
 npm run dev:setup
 
 # Or manually:
-# Unix/macOS: cp .env.local .env
-# Windows: copy .env.local .env
+# Unix/macOS: cp .env.example .env
+# Windows: copy .env.example .env
 ```
 
 The `.env.local` includes:
@@ -183,20 +183,14 @@ The system loads environment variables in this order (highest to lowest priority
 1. **`.env.local`** (gitignored) - Your local overrides
    - Never committed to git
    - Put sensitive values here (private keys, API tokens)
-   - Overrides everything else
+   - Loaded with `override: true`, so values here ALWAYS win
 
 2. **`.env`** - Base configuration
-   - Created by `npm run dev:setup` from `.env.local`
+   - Created by `npm run dev:setup` from `.env.example`
    - Can be committed (if no sensitive data)
    - Team-shared defaults
 
-3. **Environment variables** - System-level
-   - Set via shell:
-     - macOS/Linux: `export VAR=value`
-     - Windows PowerShell: `$env:VAR="value"`
-   - Highest priority if set
-
-4. **Code defaults** - Fallback values in code
+3. **Code defaults** - Fallback values in code
 
 **Example**:
 ```bash
@@ -253,7 +247,7 @@ The in-memory option uses `redis-memory-server` and is useful when:
 ```bash
 npm run dev:all
 ```
-This starts all 6 core services with color-coded output and hot reload.
+This starts all 7 services with color-coded output and hot reload.
 
 **Option B: Minimal Setup**
 ```bash
@@ -332,7 +326,7 @@ npm run dev:execution:fast        # Execution with hot reload
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev:all` | Start all 6 services with hot reload (color-coded) |
+| `npm run dev:all` | Start all 7 services with hot reload (color-coded) |
 | `npm run dev:minimal` | Start Coordinator + P1 + Execution only |
 
 ---
@@ -704,7 +698,7 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev:setup` | Copy .env.local to .env |
+| `npm run dev:setup` | Copy .env.example to .env |
 
 ### Redis Management
 
@@ -720,7 +714,7 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 
 | Command | Port | Description |
 |---------|------|-------------|
-| `npm run dev:all` | All | Start all 6 services with hot reload |
+| `npm run dev:all` | All | Start all 7 services with hot reload |
 | `npm run dev:minimal` | 3000,3001,3005 | Start Coordinator + P1 + Execution |
 | `npm run dev:coordinator:fast` | 3000 | Coordinator with hot reload |
 | `npm run dev:partition:asia:fast` | 3001 | P1 Asia-Fast with hot reload |

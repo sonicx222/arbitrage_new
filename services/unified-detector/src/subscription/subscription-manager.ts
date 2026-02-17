@@ -240,7 +240,7 @@ export class SubscriptionManager {
     };
 
     const wsManager = new WebSocketManager(wsConfig);
-    logger.info(`WebSocket configured with ${1 + (chainConfig.wsFallbackUrls?.length || 0)} URL(s)`);
+    logger.info(`WebSocket configured with ${1 + (chainConfig.wsFallbackUrls?.length ?? 0)} URL(s)`);
 
     // Set up WebSocket event handlers
     wsManager.on('message', (message) => {

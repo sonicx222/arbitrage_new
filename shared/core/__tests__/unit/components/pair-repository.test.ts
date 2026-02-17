@@ -9,7 +9,7 @@ import {
   createPairRepository,
   PairSnapshot,
 } from '../../../src/components/pair-repository';
-import type { Pair } from '../../../../types/src';
+import type { Pair, FeeDecimal } from '../../../../types/src';
 
 describe('PairRepository', () => {
   let repository: PairRepository;
@@ -21,6 +21,7 @@ describe('PairRepository', () => {
     token1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
     dex: 'uniswapv2',
     fee: 0.003,
+    feeDecimal: 0.003 as FeeDecimal,
     reserve0: '1000000000000000000000', // 1000 ETH
     reserve1: '3500000000000', // 3500000 USDC
     blockNumber: 12345678,
@@ -32,6 +33,7 @@ describe('PairRepository', () => {
     token1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
     dex: 'sushiswap',
     fee: 0.003,
+    feeDecimal: 0.003 as FeeDecimal,
     reserve0: '500000000000000000000', // 500 ETH
     reserve1: '1750000000000', // 1750000 USDC
     blockNumber: 12345679,
@@ -43,6 +45,7 @@ describe('PairRepository', () => {
     token1: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
     dex: 'uniswapv2',
     fee: 0.003,
+    feeDecimal: 0.003 as FeeDecimal,
     reserve0: '800000000000000000000', // 800 ETH
     reserve1: '2800000000000', // 2800000 USDT
     blockNumber: 12345680,
@@ -246,10 +249,11 @@ describe('PairRepository', () => {
         expect(repository.createSnapshot(pairZeroReserves)).toBeNull();
       });
 
-      it('should use default fee if pair.fee is undefined', () => {
+      it('should use default fee if pair.feeDecimal is undefined', () => {
         const pairNoFee: Pair = {
           ...pair1,
           fee: undefined,
+          feeDecimal: undefined,
         };
         const snapshot = repository.createSnapshot(pairNoFee);
         expect(snapshot!.fee).toBe(0.003); // Default fee
@@ -259,15 +263,17 @@ describe('PairRepository', () => {
         const pairNoFee: Pair = {
           ...pair1,
           fee: undefined,
+          feeDecimal: undefined,
         };
         const snapshot = repository.createSnapshot(pairNoFee, { defaultFee: 0.001 });
         expect(snapshot!.fee).toBe(0.001);
       });
 
-      it('should handle fee: 0 correctly (not use default)', () => {
+      it('should handle feeDecimal: 0 correctly (not use default)', () => {
         const pairZeroFee: Pair = {
           ...pair1,
           fee: 0,
+          feeDecimal: 0 as FeeDecimal,
         };
         const snapshot = repository.createSnapshot(pairZeroFee);
         expect(snapshot!.fee).toBe(0);

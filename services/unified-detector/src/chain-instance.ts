@@ -18,6 +18,7 @@ import {
   PerformanceLogger,
   RedisStreamsClient,
   WebSocketManager,
+  StreamBatcher,
   // P0-1 FIX: Use precision-safe price calculation
   calculatePriceFromBigIntReserves,
   // Simulation mode support
@@ -297,6 +298,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private isRunning: boolean = false;
   private isStopping: boolean = false;
+  /** Phase 0 instrumentation: timestamp of last WebSocket message received */
+  private lastWsReceivedAt: number = 0;
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -381,6 +384,10 @@ export class ChainDetectorInstance extends EventEmitter {
   // Does NOT replace hot-path pairsByAddress Map (still O(1) at ~50ns)
   private priceCache: HierarchicalCache | null = null;
   private usePriceCache: boolean = false;
+
+  // ADR-002: StreamBatcher for price updates — reduces Redis commands ~50x
+  // batcher.add() is O(1) synchronous, flush happens asynchronously
+  private priceUpdateBatcher: StreamBatcher<PriceUpdate> | null = null;
 
   constructor(config: ChainInstanceConfig) {
     super();
@@ -649,6 +656,13 @@ export class ChainDetectorInstance extends EventEmitter {
         await this.initializeWebSocketAndSubscribe();
       }
 
+      // ADR-002: Create StreamBatcher for price updates (~50x Redis command reduction)
+      // batcher.add() is O(1) synchronous — FASTER than previous async xaddWithLimit
+      this.priceUpdateBatcher = this.streamsClient.createBatcher<PriceUpdate>(
+        RedisStreamsClient.STREAMS.PRICE_UPDATES,
+        { maxBatchSize: 50, maxWaitMs: 10 }
+      );
+
       this.isRunning = true;
       this.status = 'connected';
       this.reconnectAttempts = 0;
@@ -704,6 +718,13 @@ export class ChainDetectorInstance extends EventEmitter {
     // Set stopping flag FIRST to prevent new event processing
     this.isStopping = true;
     this.isRunning = false;
+
+    // ADR-002: Flush and destroy batcher EARLY to ensure pending price updates
+    // are published before pairs/caches are cleared in subsequent cleanup steps
+    if (this.priceUpdateBatcher) {
+      await this.priceUpdateBatcher.destroy();
+      this.priceUpdateBatcher = null;
+    }
 
     // REFACTOR: Stop simulation via extracted initializer (handles both EVM and non-EVM)
     if (this.simulationInitializer) {
@@ -1113,6 +1134,9 @@ export class ChainDetectorInstance extends EventEmitter {
     // but before the WebSocket connection is fully disconnected
     if (this.isStopping || !this.isRunning) return;
 
+    // Phase 0 instrumentation: capture WebSocket receive timestamp
+    this.lastWsReceivedAt = Date.now();
+
     try {
       // Route message based on type
       if (message.method === 'eth_subscription') {
@@ -1379,7 +1403,12 @@ export class ChainDetectorInstance extends EventEmitter {
       blockNumber: pair.blockNumber,
       latency: 0, // Calculated by downstream consumers if needed
       // Include DEX-specific fee for accurate arbitrage calculations (S2.2.2 fix)
-      fee: pair.fee
+      fee: pair.fee,
+      // Phase 0 instrumentation: pipeline latency tracking
+      pipelineTimestamps: {
+        wsReceivedAt: this.lastWsReceivedAt,
+        publishedAt: Date.now(),
+      },
     };
 
     // Publish to Redis Streams
@@ -1406,16 +1435,20 @@ export class ChainDetectorInstance extends EventEmitter {
     this.emit('priceUpdate', priceUpdate);
   }
 
-  private async publishPriceUpdate(update: PriceUpdate): Promise<void> {
-    try {
-      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
-      // MAXLEN: 100,000 (configured in STREAM_MAX_LENGTHS)
-      await this.streamsClient.xaddWithLimit(
+  private publishPriceUpdate(update: PriceUpdate): void {
+    // ADR-002: Use StreamBatcher to reduce Redis commands ~50x
+    // batcher.add() is O(1) synchronous queue push — faster than async xaddWithLimit
+    // Flush happens asynchronously in background (maxBatchSize: 50, maxWaitMs: 10ms)
+    if (this.priceUpdateBatcher) {
+      this.priceUpdateBatcher.add(update);
+    } else {
+      // Fallback: direct publish if batcher not yet initialized (startup race)
+      this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
         update
-      );
-    } catch (error) {
-      this.logger.error('Failed to publish price update', { error });
+      ).catch(error => {
+        this.logger.error('Failed to publish price update', { error });
+      });
     }
   }
 

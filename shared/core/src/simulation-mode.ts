@@ -1,79 +1,61 @@
 /**
- * Simulation Mode Module
+ * Simulation Mode Module (Re-export Barrel)
  *
- * Generates simulated price feeds and arbitrage opportunities for local testing
- * without requiring real blockchain connections.
+ * This file preserves the original import path (`./simulation-mode`) for backward
+ * compatibility. All implementation has been split into focused sub-modules under
+ * `./simulation/`:
  *
- * Usage:
- *   Set SIMULATION_MODE=true in environment variables
+ * - types.ts: All type definitions (~200 lines)
+ * - constants.ts: Token prices, DEX mappings, chain pairs, bridge costs (~250 lines)
+ * - mode-utils.ts: Environment-based mode detection (~70 lines)
+ * - price-simulator.ts: Global price feed simulator (~190 lines)
+ * - chain-simulator.ts: Per-chain detector integration simulator (~360 lines)
+ * - cross-chain-simulator.ts: Cross-chain opportunity simulator (~300 lines)
  *
- * Features:
- *   - Simulated price feeds with realistic volatility
- *   - Artificial arbitrage opportunities for testing
- *   - Reserve-based pair simulation (mimics real DEX Sync events)
- *   - Chain-specific simulators for detector integration
- *   - No external dependencies required
- *
- * Implementation split into sub-modules under ./simulation/ for maintainability.
- * This file re-exports everything for backward compatibility.
- *
- * @see ADR-003: Partitioned Chain Detectors
  * @module simulation
+ * @see ADR-003: Partitioned Chain Detectors
  */
 
-// Re-export all types
-export type {
-  SimulatedPriceUpdate,
-  SimulationConfig,
-  SimulatedSyncEvent,
-  SimulatedOpportunityType,
-  SimulatedBridgeProtocol,
-  SimulatedOpportunity,
-  ChainSimulatorConfig,
-  SimulatedPairConfig,
-  BridgeCostConfig,
-  CrossChainSimulatorConfig,
-} from './simulation/index';
-
-// Re-export constants
+// Re-export everything from the simulation sub-module
 export {
-  DEFAULT_CONFIG,
-  BASE_PRICES,
-  getTokenPrice,
+  // Types (re-exported as types)
+  type SimulatedPriceUpdate,
+  type SimulationConfig,
+  type SimulatedSyncEvent,
+  type SimulatedOpportunityType,
+  type SimulatedBridgeProtocol,
+  type SimulatedOpportunity,
+  type ChainSimulatorConfig,
+  type SimulatedPairConfig,
+  type BridgeCostConfig,
+  type CrossChainSimulatorConfig,
+
+  // Constants
   CHAIN_SPECIFIC_PAIRS,
-  DEXES,
   DEFAULT_BRIDGE_COSTS,
-} from './simulation/index';
 
-// Backward-compatible alias used by core/src/index.ts
-export { DEFAULT_CONFIG as SIMULATION_CONFIG } from './simulation/constants';
-
-// Re-export mode utilities
-export {
+  // Mode utilities
   isSimulationMode,
   isExecutionSimulationMode,
   isHybridExecutionMode,
   getSimulationModeSummary,
-} from './simulation/index';
 
-// Re-export price simulator
-export {
+  // Price simulator
   PriceSimulator,
   getSimulator,
   resetSimulatorInstance,
-} from './simulation/index';
 
-// Re-export chain simulator
-export {
+  // Chain simulator
   ChainSimulator,
   getChainSimulator,
   stopChainSimulator,
   stopAllChainSimulators,
-} from './simulation/index';
 
-// Re-export cross-chain simulator
-export {
+  // Cross-chain simulator
   CrossChainSimulator,
   getCrossChainSimulator,
   stopCrossChainSimulator,
 } from './simulation/index';
+
+// Named re-export for backward compatibility
+export { DEFAULT_CONFIG as SIMULATION_CONFIG } from './simulation/constants';

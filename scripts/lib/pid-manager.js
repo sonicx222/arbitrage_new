@@ -147,7 +147,13 @@ function savePids(pids) {
   assertNotSymlink(PID_FILE);
   const tempFile = PID_FILE + '.tmp';
   fs.writeFileSync(tempFile, JSON.stringify(pids, null, 2));
-  fs.renameSync(tempFile, PID_FILE);
+  try {
+    fs.renameSync(tempFile, PID_FILE);
+  } catch (err) {
+    // Clean up temp file on rename failure (e.g., permissions, antivirus lock)
+    try { fs.unlinkSync(tempFile); } catch { /* ignore cleanup errors */ }
+    throw err;
+  }
 }
 
 /**

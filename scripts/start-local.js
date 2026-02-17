@@ -331,6 +331,11 @@ let currentlyStarting = null; // { name: string, pid: number } | null
 async function cleanupOnInterrupt() {
   if (interrupted) return; // Prevent double cleanup
   interrupted = true;
+
+  // Safety net: force exit if cleanup hangs (e.g., tasklist on Windows)
+  const forceExitTimer = setTimeout(() => process.exit(130), 10000);
+  forceExitTimer.unref(); // Don't keep process alive just for this timer
+
   logger.warning('\nInterrupted! Cleaning up started services...');
 
   // FIX #6 + FIX #4: Clean up the service that's currently starting (if any).

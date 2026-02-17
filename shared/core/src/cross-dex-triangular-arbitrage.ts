@@ -813,6 +813,7 @@ export class CrossDexTriangularArbitrage {
     // amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee)
     const numerator = amountInWithFee * reserveOutBigInt;
     const denominator = reserveInBigInt + amountInWithFee;
+    if (denominator === 0n) throw new Error('Zero denominator: pool has zero reserves');
     const amountOutBigInt = numerator / denominator;
 
     // T1.2: Calculate dynamic slippage based on trade size and pool liquidity

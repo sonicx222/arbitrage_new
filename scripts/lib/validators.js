@@ -59,44 +59,6 @@ function validatePort(port, context) {
   return port;
 }
 
-/**
- * Parse and validate a port from string or number input.
- * Handles environment variables which are always strings.
- *
- * @param {string | number} value - Port value to parse
- * @param {string} context - Context for error message
- * @throws {Error} If parsing fails or port is invalid
- * @returns {number} Validated port number
- *
- * @example
- * const port = parseAndValidatePort('3000', 'Coordinator');
- * // Returns: 3000
- *
- * parseAndValidatePort('invalid', 'Redis');
- * // Throws: Error: Invalid port for Redis...
- */
-function parseAndValidatePort(value, context) {
-  // If already a number, just validate
-  if (typeof value === 'number') {
-    return validatePort(value, context);
-  }
-
-  // Parse string to number
-  const port = parseInt(value, 10);
-
-  // Check if parsing succeeded
-  if (isNaN(port)) {
-    throw new Error(
-      `Invalid port for ${context}: cannot parse "${value}" as a number\n` +
-      `  Expected: A number between 1-65535\n` +
-      `  Fix: Check configuration for non-numeric port values`
-    );
-  }
-
-  // Validate the parsed port
-  return validatePort(port, context);
-}
-
 // =============================================================================
 // String Validation
 // =============================================================================
@@ -192,51 +154,17 @@ function validateEnum(value, allowedValues, fieldName) {
 }
 
 // =============================================================================
-// Path Validation
-// =============================================================================
-
-/**
- * Validate that a file path exists.
- *
- * @param {string} filePath - File path to validate
- * @param {string} fieldName - Field name for error message
- * @throws {Error} If file doesn't exist
- * @returns {string} The validated path
- */
-function validateFileExists(filePath, fieldName) {
-  const fs = require('fs');
-
-  if (typeof filePath !== 'string') {
-    throw new Error(`Invalid ${fieldName}: expected string path, got ${typeof filePath}`);
-  }
-
-  if (!fs.existsSync(filePath)) {
-    throw new Error(
-      `File not found for ${fieldName}\n` +
-      `  Path: ${filePath}\n` +
-      `  Fix: Ensure the file exists at the specified path`
-    );
-  }
-
-  return filePath;
-}
-
-// =============================================================================
 // Exports
 // =============================================================================
 
 module.exports = {
   // Port validation
   validatePort,
-  parseAndValidatePort,
 
   // String validation
   validateString,
   validateOptionalString,
 
   // Enum validation
-  validateEnum,
-
-  // Path validation
-  validateFileExists
+  validateEnum
 };

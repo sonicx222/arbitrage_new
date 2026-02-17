@@ -1,6 +1,23 @@
-// Dead Letter Queue for Failed Operations
-// Prevents data loss and enables manual recovery of failed operations
+/**
+ * Dead Letter Queue for Failed Operations (Redis-Key-Based)
+ *
+ * IMPORTANT: This module is a Redis-key/sorted-set-based operation retry and
+ * recovery system. It is NOT the Redis Stream-based dead letter queue used by
+ * StreamConsumerManager and OpportunityConsumer.
+ *
+ * - Uses Redis keys (`dlq:<id>`) and sorted sets (`dlq:priority:*`, `dlq:service:*`,
+ *   `dlq:tag:*`) for storing and indexing failed operations.
+ * - Publishes alerts on `RedisStreams.DLQ_ALERTS` when queue size exceeds thresholds.
+ *   This alert channel is intentionally separate from the stream-based DLQ
+ *   (`stream:dead-letter-queue` / `RedisStreams.DEAD_LETTER_QUEUE`).
+ *
+ * For the stream-based DLQ that handles failed Redis Stream messages, see:
+ * - `services/coordinator/src/streaming/stream-consumer-manager.ts`
+ * - `services/execution-engine/src/consumers/opportunity.consumer.ts`
+ * - `RedisStreams.DEAD_LETTER_QUEUE` in `@arbitrage/types` (events.ts)
+ */
 
+import { RedisStreams } from '@arbitrage/types';
 import { createLogger } from '../logger';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
@@ -42,6 +59,19 @@ export interface ProcessingResult {
   retryScheduled: number;
 }
 
+/**
+ * Redis-key-based dead letter queue for operation retry and recovery.
+ *
+ * This class stores failed operations in Redis keys and sorted sets for
+ * prioritized retry processing. It is NOT a Redis Stream consumer and is
+ * unrelated to `stream:dead-letter-queue` (the stream-based DLQ).
+ *
+ * The `RedisStreams.DLQ_ALERTS` channel used by {@link checkAlertThreshold} is
+ * for publishing threshold-exceeded alerts only.
+ *
+ * @see StreamConsumerManager for the stream-based DLQ (message processing failures)
+ * @see OpportunityConsumer for stream-based DLQ writes on validation failures
+ */
 export class DeadLetterQueue {
   private redis = getRedisClient();
   // P1-18 FIX: Add Redis Streams client for ADR-002 compliance
@@ -623,7 +653,7 @@ export class DeadLetterQueue {
       };
 
       await this.dualPublish(
-        'stream:dlq-alerts',  // Primary: Redis Streams
+        RedisStreams.DLQ_ALERTS,  // Primary: Redis Streams
         'dlq-alert',  // Secondary: Pub/Sub
         alertMessage
       );

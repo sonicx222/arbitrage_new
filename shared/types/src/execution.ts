@@ -13,8 +13,26 @@ export interface ExecutionResult {
   opportunityId: string;
   success: boolean;
   transactionHash?: string;
+  /**
+   * Actual profit realized from the execution, in native token units.
+   * Number type is intentional: post-execution profit is a monitoring metric
+   * derived from on-chain events, always within safe integer range.
+   */
   actualProfit?: number;
+  /**
+   * Gas units consumed by the transaction (not wei).
+   * Number type is intentional: EVM gas limits are capped at 30M (block gas limit),
+   * well within Number.MAX_SAFE_INTEGER. This is a post-execution metric from
+   * transaction receipts, not a pre-execution estimate.
+   * Contrast with ArbitrageOpportunity.gasEstimate (string) which is a pre-execution
+   * wei estimate for BigInt calculations.
+   */
   gasUsed?: number;
+  /**
+   * Estimated cost of gas in native token units (e.g., ETH).
+   * Number type is intentional: this is a derived monitoring value
+   * (gasUsed * gasPrice), used for profit/loss reporting.
+   */
   gasCost?: number;
   error?: string;
   timestamp: number;

@@ -251,6 +251,11 @@ log(colors.bold + colors.cyan + `
 ╚═══════════════════════════════════════════════╝
 ` + colors.reset);
 
-checkOverrides();
-checkLockfile();
-runAudit();
+const overridesOk = checkOverrides();
+const lockfileOk = checkLockfile();
+const auditOk = runAudit();
+
+if (!overridesOk || !lockfileOk) {
+  log('\nWARNING: Lockfile or override checks failed (see above).', colors.yellow);
+  if (!auditOk) process.exit(1);
+}

@@ -8,11 +8,9 @@
 const { describe, it, expect } = require('@jest/globals');
 const {
   validatePort,
-  parseAndValidatePort,
   validateString,
   validateOptionalString,
-  validateEnum,
-  validateFileExists
+  validateEnum
 } = require('../validators');
 
 describe('validators', () => {
@@ -43,27 +41,6 @@ describe('validators', () => {
 
     it('should include context in error message', () => {
       expect(() => validatePort(-1, 'Redis')).toThrow('Invalid port for Redis');
-    });
-  });
-
-  describe('parseAndValidatePort', () => {
-    it('should parse valid string ports', () => {
-      expect(parseAndValidatePort('3000', 'test')).toBe(3000);
-      expect(parseAndValidatePort('80', 'test')).toBe(80);
-    });
-
-    it('should pass through valid number ports', () => {
-      expect(parseAndValidatePort(3000, 'test')).toBe(3000);
-    });
-
-    it('should reject non-numeric strings', () => {
-      expect(() => parseAndValidatePort('abc', 'test')).toThrow('cannot parse');
-      expect(() => parseAndValidatePort('', 'test')).toThrow('cannot parse');
-    });
-
-    it('should reject out-of-range parsed ports', () => {
-      expect(() => parseAndValidatePort('99999', 'test')).toThrow('Invalid port');
-      expect(() => parseAndValidatePort('0', 'test')).toThrow('Invalid port');
     });
   });
 
@@ -131,23 +108,4 @@ describe('validators', () => {
     });
   });
 
-  describe('validateFileExists', () => {
-    it('should accept existing file path', () => {
-      // package.json is known to exist at project root
-      const result = validateFileExists(
-        require('path').join(__dirname, '..', '..', '..', 'package.json'),
-        'config'
-      );
-      expect(typeof result).toBe('string');
-    });
-
-    it('should reject non-existent file path', () => {
-      expect(() => validateFileExists('/nonexistent/path/file.txt', 'config'))
-        .toThrow('File not found');
-    });
-
-    it('should reject non-string path', () => {
-      expect(() => validateFileExists(123, 'config')).toThrow('expected string path');
-    });
-  });
 });

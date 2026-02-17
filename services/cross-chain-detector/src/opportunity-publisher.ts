@@ -253,6 +253,11 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
 
     const arbitrageOpp = toArbitrageOpportunity(opportunity);
 
+    // Phase 0 instrumentation: stamp detectedAt before publishing
+    const timestamps = arbitrageOpp.pipelineTimestamps ?? {};
+    timestamps.detectedAt = Date.now();
+    arbitrageOpp.pipelineTimestamps = timestamps;
+
     try {
       // FIX 2.2: Use xaddWithLimit to prevent unbounded stream growth
       // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts

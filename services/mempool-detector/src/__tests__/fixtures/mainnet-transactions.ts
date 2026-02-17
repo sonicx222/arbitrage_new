@@ -16,6 +16,33 @@
 import type { RawPendingTransaction } from '../../types';
 
 // =============================================================================
+// TEST METADATA TYPE
+// =============================================================================
+
+/**
+ * Typed metadata for test fixtures.
+ * Replaces the previous `object` type to eliminate `as any` casts in test assertions.
+ *
+ * @see Finding #3 in .agent-reports/services-deep-analysis.md
+ */
+export interface TestMetadata {
+  source?: string;
+  swapType?: string;
+  router?: string;
+  pool?: string;
+  expectedTokenIn?: string;
+  expectedTokenOut?: string;
+  expectedAmountIn?: string;
+  expectedAmountOut?: string;
+  fee?: number;
+  verificationUrl?: string;
+  /** Non-swap transaction metadata */
+  type?: string;
+  isSwap?: boolean;
+  shouldDecode?: null;
+}
+
+// =============================================================================
 // TOKEN ADDRESSES (Ethereum Mainnet - Verified)
 // =============================================================================
 
@@ -64,7 +91,7 @@ export const MAINNET_ROUTERS = {
  * Function: swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)
  * Selector: 0x7ff36ab5
  */
-export const REAL_V2_SWAP_EXACT_ETH_FOR_TOKENS: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V2_SWAP_EXACT_ETH_FOR_TOKENS: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0x4e8a56e01b964929e6cc82e8b5c8d1a3f2b7e9d1c5a8f3b7e6d2a9c4b8e1f5a3',
   from: '0x28C6c06298d514Db089934071355E5743bf21d60', // Binance Hot Wallet (real address)
   to: MAINNET_ROUTERS.UNISWAP_V2_ROUTER,
@@ -101,7 +128,7 @@ export const REAL_V2_SWAP_EXACT_ETH_FOR_TOKENS: RawPendingTransaction & { _metad
  * Function: swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
  * Selector: 0x38ed1739
  */
-export const REAL_V2_SWAP_EXACT_TOKENS_FOR_TOKENS: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V2_SWAP_EXACT_TOKENS_FOR_TOKENS: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b',
   from: '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD',
   to: MAINNET_ROUTERS.UNISWAP_V2_ROUTER,
@@ -136,7 +163,7 @@ export const REAL_V2_SWAP_EXACT_TOKENS_FOR_TOKENS: RawPendingTransaction & { _me
  * Function: swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
  * Selector: 0x18cbafe5
  */
-export const REAL_V2_SWAP_EXACT_TOKENS_FOR_ETH: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V2_SWAP_EXACT_TOKENS_FOR_ETH: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xb1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2',
   from: '0xDef1C0ded9bec7F1a1670819833240f027b25EfF', // 0x Protocol
   to: MAINNET_ROUTERS.UNISWAP_V2_ROUTER,
@@ -171,7 +198,7 @@ export const REAL_V2_SWAP_EXACT_TOKENS_FOR_ETH: RawPendingTransaction & { _metad
  * Function: swapTokensForExactTokens(uint256 amountOut, uint256 amountInMax, address[] path, address to, uint256 deadline)
  * Selector: 0x8803dbee
  */
-export const REAL_V2_SWAP_TOKENS_FOR_EXACT_TOKENS: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V2_SWAP_TOKENS_FOR_EXACT_TOKENS: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xc2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3',
   from: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', // Shiba Inu deployer
   to: MAINNET_ROUTERS.UNISWAP_V2_ROUTER,
@@ -206,7 +233,7 @@ export const REAL_V2_SWAP_TOKENS_FOR_EXACT_TOKENS: RawPendingTransaction & { _me
  * Function: swapETHForExactTokens(uint256 amountOut, address[] path, address to, uint256 deadline)
  * Selector: 0xfb3bdb41
  */
-export const REAL_V2_SWAP_ETH_FOR_EXACT_TOKENS: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V2_SWAP_ETH_FOR_EXACT_TOKENS: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xd3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4',
   from: '0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503', // Binance: Deposit
   to: MAINNET_ROUTERS.UNISWAP_V2_ROUTER,
@@ -240,7 +267,7 @@ export const REAL_V2_SWAP_ETH_FOR_EXACT_TOKENS: RawPendingTransaction & { _metad
  * Function: swapTokensForExactETH(uint256 amountOut, uint256 amountInMax, address[] path, address to, uint256 deadline)
  * Selector: 0x4a25d94a
  */
-export const REAL_V2_SWAP_TOKENS_FOR_EXACT_ETH: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V2_SWAP_TOKENS_FOR_EXACT_ETH: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xe4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5',
   from: '0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8', // Binance 7
   to: MAINNET_ROUTERS.UNISWAP_V2_ROUTER,
@@ -279,7 +306,7 @@ export const REAL_V2_SWAP_TOKENS_FOR_EXACT_ETH: RawPendingTransaction & { _metad
  * Function: exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96))
  * Selector: 0x414bf389
  */
-export const REAL_V3_EXACT_INPUT_SINGLE: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V3_EXACT_INPUT_SINGLE: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xf5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6',
   from: '0xF977814e90dA44bFA03b6295A0616a897441aceC', // Binance 8
   to: MAINNET_ROUTERS.UNISWAP_V3_SWAP_ROUTER,
@@ -316,7 +343,7 @@ export const REAL_V3_EXACT_INPUT_SINGLE: RawPendingTransaction & { _metadata: ob
  * Function: exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96))
  * Selector: 0x04e45aaf
  */
-export const REAL_V3_ROUTER02_EXACT_INPUT_SINGLE: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V3_ROUTER02_EXACT_INPUT_SINGLE: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xa6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7',
   from: '0x5a52E96BAcdaBb82fd05763E25335261B270Efcb', // Random trader
   to: MAINNET_ROUTERS.UNISWAP_V3_SWAP_ROUTER_02,
@@ -352,7 +379,7 @@ export const REAL_V3_ROUTER02_EXACT_INPUT_SINGLE: RawPendingTransaction & { _met
  * Function: exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96))
  * Selector: 0xdb3e2198
  */
-export const REAL_V3_EXACT_OUTPUT_SINGLE: RawPendingTransaction & { _metadata: object } = {
+export const REAL_V3_EXACT_OUTPUT_SINGLE: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xb7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8',
   from: '0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549', // Random trader
   to: MAINNET_ROUTERS.UNISWAP_V3_SWAP_ROUTER,
@@ -392,7 +419,7 @@ export const REAL_V3_EXACT_OUTPUT_SINGLE: RawPendingTransaction & { _metadata: o
  * Function: exchange(int128 i, int128 j, uint256 dx, uint256 min_dy)
  * Selector: 0x3df02124
  */
-export const REAL_CURVE_EXCHANGE: RawPendingTransaction & { _metadata: object } = {
+export const REAL_CURVE_EXCHANGE: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b',
   from: '0x28C6c06298d514Db089934071355E5743bf21d60',
   to: MAINNET_ROUTERS.CURVE_3POOL,
@@ -424,7 +451,7 @@ export const REAL_CURVE_EXCHANGE: RawPendingTransaction & { _metadata: object } 
  * Function: exchange_underlying(int128 i, int128 j, uint256 dx, uint256 min_dy)
  * Selector: 0xa6417ed6
  */
-export const REAL_CURVE_EXCHANGE_UNDERLYING: RawPendingTransaction & { _metadata: object } = {
+export const REAL_CURVE_EXCHANGE_UNDERLYING: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c',
   from: '0xDef1C0ded9bec7F1a1670819833240f027b25EfF',
   to: MAINNET_ROUTERS.CURVE_3POOL,
@@ -462,7 +489,7 @@ export const REAL_CURVE_EXCHANGE_UNDERLYING: RawPendingTransaction & { _metadata
  *   bytes permit, bytes data)
  * Selector: 0x12aa3caf
  */
-export const REAL_1INCH_SWAP: RawPendingTransaction & { _metadata: object } = {
+export const REAL_1INCH_SWAP: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d',
   from: '0xF977814e90dA44bFA03b6295A0616a897441aceC',
   to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
@@ -504,7 +531,7 @@ export const REAL_1INCH_SWAP: RawPendingTransaction & { _metadata: object } = {
  * Function: unoswap(address srcToken, uint256 amount, uint256 minReturn, uint256[] pools)
  * Selector: 0x0502b1c5
  */
-export const REAL_1INCH_UNOSWAP: RawPendingTransaction & { _metadata: object } = {
+export const REAL_1INCH_UNOSWAP: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0x4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e',
   from: '0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549',
   to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
@@ -538,7 +565,7 @@ export const REAL_1INCH_UNOSWAP: RawPendingTransaction & { _metadata: object } =
  * Real ERC20 Transfer transaction
  * USDC transfer between wallets
  */
-export const REAL_ERC20_TRANSFER: RawPendingTransaction & { _metadata: object } = {
+export const REAL_ERC20_TRANSFER: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xc8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9',
   from: '0x28C6c06298d514Db089934071355E5743bf21d60',
   to: MAINNET_TOKENS.USDC,
@@ -563,7 +590,7 @@ export const REAL_ERC20_TRANSFER: RawPendingTransaction & { _metadata: object } 
  * Real ERC20 Approve transaction
  * Approve Uniswap V2 Router to spend USDC
  */
-export const REAL_ERC20_APPROVE: RawPendingTransaction & { _metadata: object } = {
+export const REAL_ERC20_APPROVE: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xd9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0',
   from: '0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549',
   to: MAINNET_TOKENS.USDC,
@@ -588,7 +615,7 @@ export const REAL_ERC20_APPROVE: RawPendingTransaction & { _metadata: object } =
  * Real ETH Transfer transaction
  * Simple value transfer
  */
-export const REAL_ETH_TRANSFER: RawPendingTransaction & { _metadata: object } = {
+export const REAL_ETH_TRANSFER: RawPendingTransaction & { _metadata: TestMetadata } = {
   hash: '0xe0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1',
   from: '0x28C6c06298d514Db089934071355E5743bf21d60',
   to: '0xF977814e90dA44bFA03b6295A0616a897441aceC',
@@ -664,7 +691,7 @@ export const ALL_REAL_SWAPS = [...REAL_V2_SWAPS, ...REAL_V3_SWAPS, ...REAL_CURVE
 /**
  * Strip metadata for use with decoder (returns clean RawPendingTransaction)
  */
-export function stripMetadata(tx: RawPendingTransaction & { _metadata: object }): RawPendingTransaction {
+export function stripMetadata(tx: RawPendingTransaction & { _metadata: TestMetadata }): RawPendingTransaction {
   const { _metadata, ...cleanTx } = tx;
   return cleanTx;
 }

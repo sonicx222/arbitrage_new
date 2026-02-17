@@ -247,6 +247,11 @@ export class PublishingService {
       }
     }
 
+    // Phase 0 instrumentation: stamp detectedAt before publishing
+    const timestamps = opportunity.pipelineTimestamps ?? {};
+    timestamps.detectedAt = Date.now();
+    opportunity.pipelineTimestamps = timestamps;
+
     const message = this.createMessage('arbitrage-opportunity', opportunity);
 
     // Arbitrage opportunities are high-priority - publish directly (no batching)

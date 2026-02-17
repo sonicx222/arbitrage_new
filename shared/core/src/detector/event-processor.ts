@@ -161,6 +161,7 @@ export function buildExtendedPair(
     token0: pair.token0,
     token1: pair.token1,
     dex: pair.dex,
+    feeDecimal: pair.feeDecimal,
     fee: pair.fee,
     // Update with new values
     reserve0: syncData.reserve0,
@@ -201,6 +202,7 @@ export function buildPriceUpdate(
     timestamp: Date.now(),
     latency: 0,
     // Include DEX-specific fee for accurate arbitrage calculations
+    feeDecimal: pair.feeDecimal,
     fee: pair.fee
   };
 }

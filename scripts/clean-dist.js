@@ -7,28 +7,42 @@
 const fs = require('fs');
 const path = require('path');
 
-const rootDir = path.resolve(__dirname, '..');
+const { ROOT_DIR } = require('./lib/constants');
+const rootDir = ROOT_DIR;
 
-// Directories to clean
-const dirsToClean = [
-  'dist',
-  'shared/types/dist',
-  'shared/core/dist',
-  'shared/config/dist',
-  'shared/security/dist',
-  'shared/test-utils/dist',
-  'shared/ml/dist',
-  'services/coordinator/dist',
-  'services/execution-engine/dist',
-  'services/unified-detector/dist',
-  'services/partition-asia-fast/dist',
-  'services/partition-l2-turbo/dist',
-  'services/partition-high-value/dist',
-  'services/cross-chain-detector/dist',
-  'services/partition-solana/dist',
-  'services/mempool-detector/dist',
-  'infrastructure/redis/dist',
-];
+// Dynamically find all dist/ directories under known package roots.
+// This avoids a hardcoded list that falls out of sync when services are added or removed.
+function findDistDirs() {
+  const dirs = [];
+
+  // Root-level dist
+  if (fs.existsSync(path.join(rootDir, 'dist'))) {
+    dirs.push('dist');
+  }
+
+  // Scan shared/ and services/ for packages with dist/ directories
+  for (const parent of ['shared', 'services', 'infrastructure']) {
+    const parentDir = path.join(rootDir, parent);
+    if (!fs.existsSync(parentDir)) continue;
+    try {
+      const entries = fs.readdirSync(parentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name !== 'node_modules') {
+          const distPath = path.join(parent, entry.name, 'dist');
+          if (fs.existsSync(path.join(rootDir, distPath))) {
+            dirs.push(distPath);
+          }
+        }
+      }
+    } catch {
+      // Ignore errors scanning directories
+    }
+  }
+
+  return dirs;
+}
+
+const dirsToClean = findDistDirs();
 
 function rmdir(dir) {
   const fullPath = path.join(rootDir, dir);

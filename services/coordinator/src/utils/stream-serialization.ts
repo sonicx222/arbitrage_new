@@ -48,5 +48,9 @@ export function serializeOpportunityForStream(
     amountIn: opportunity.amountIn ?? '',
     forwardedBy: instanceId,
     forwardedAt: Date.now().toString(),
+    // Phase 0 instrumentation: serialize pipeline timestamps as JSON string
+    ...(opportunity.pipelineTimestamps
+      ? { pipelineTimestamps: JSON.stringify(opportunity.pipelineTimestamps) }
+      : {}),
   };
 }

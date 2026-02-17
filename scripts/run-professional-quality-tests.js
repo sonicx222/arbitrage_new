@@ -89,15 +89,15 @@ class ProfessionalQualityTestRunner {
         this.results.qualityMetrics
       );
 
-      // Generate report
-      saveReports(this.results, __dirname, path.join(__dirname, '..', 'test-results'));
-
-      // FIX C4: Set overallResult based on test results (was never set to PASSED)
+      // Set overallResult before saving reports so reports contain the correct value
       if (this.results.summary.failedTests === 0 && this.results.testResults.length > 0) {
         this.results.overallResult = 'PASSED';
       } else {
         this.results.overallResult = 'FAILED';
       }
+
+      // Generate report (after overallResult is set)
+      saveReports(this.results, __dirname, path.join(__dirname, '..', 'test-results'));
 
       // Save new baseline if tests passed
       if (this.results.overallResult === 'PASSED') {
@@ -173,11 +173,6 @@ class ProfessionalQualityTestRunner {
       skipped
     });
 
-    // Extract quality scores from output if available
-    const scoreMatch = output.match(/qualityScore["\s:]+(\d+)/i);
-    if (scoreMatch) {
-      this.results.qualityMetrics.finalScore = parseInt(scoreMatch[1]);
-    }
   }
 
   async saveBaseline() {

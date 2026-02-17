@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { renderTemplate } = require('./template-renderer');
+const { renderTemplate, escapeHtml } = require('./template-renderer');
 
 // =============================================================================
 // Report Generation
@@ -67,14 +67,14 @@ function buildTemplateData(results) {
     testsPerSecond: r.summary.executionTime > 0
       ? (r.summary.totalTests / (r.summary.executionTime / 1000)).toFixed(1)
       : '0.0',
-    recommendationsList: r.recommendations.map(rec => `<div class="recommendation">${rec}</div>`).join(''),
+    recommendationsList: r.recommendations.map(rec => `<div class="recommendation">${escapeHtml(rec)}</div>`).join(''),
     testResultsRows: r.testResults.map(tr => `
           <tr>
-              <td>${tr.suite}</td>
-              <td class="${tr.result === 'PASSED' ? 'passed' : 'failed'}">${tr.result}</td>
-              <td>${tr.passed ?? 0}</td>
-              <td>${tr.failed ?? 0}</td>
-              <td>${tr.skipped ?? 0}</td>
+              <td>${escapeHtml(tr.suite)}</td>
+              <td class="${tr.result === 'PASSED' ? 'passed' : 'failed'}">${escapeHtml(tr.result)}</td>
+              <td>${escapeHtml(String(tr.passed ?? 0))}</td>
+              <td>${escapeHtml(String(tr.failed ?? 0))}</td>
+              <td>${escapeHtml(String(tr.skipped ?? 0))}</td>
           </tr>
       `).join('')
   };

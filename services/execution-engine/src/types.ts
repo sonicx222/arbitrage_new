@@ -38,7 +38,7 @@ import {
 import { CHAINS } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
-import { TimeoutError } from '@arbitrage/types';
+import { TimeoutError, RedisStreams } from '@arbitrage/types';
 // Phase 3: Import consolidated types from @arbitrage/types
 import {
   ExecutionResult,
@@ -349,7 +349,7 @@ export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
  * Messages that fail validation are moved here for analysis.
  * @see ARCHITECTURE_V2.md Section 5.3 (Message Channels)
  */
-export const DLQ_STREAM = 'stream:dead-letter-queue';
+export const DLQ_STREAM = RedisStreams.DEAD_LETTER_QUEUE;
 
 // =============================================================================
 // Supported Chains (Fix BUG #3: Chain validation)

@@ -11,6 +11,7 @@
  */
 
 import { StreamRateLimiter, RateLimiterConfig } from './rate-limiter';
+import { RedisStreams } from '@arbitrage/types';
 
 /**
  * Minimal logger interface for dependency injection
@@ -84,7 +85,7 @@ export interface StreamConsumerManagerConfig {
  */
 const DEFAULT_CONFIG: Required<StreamConsumerManagerConfig> = {
   maxStreamErrors: 10,
-  dlqStream: 'stream:dead-letter-queue',
+  dlqStream: RedisStreams.DEAD_LETTER_QUEUE,
   rateLimiterConfig: {},
   instanceId: 'coordinator',
 };

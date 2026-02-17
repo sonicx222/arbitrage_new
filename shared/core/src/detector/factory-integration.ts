@@ -253,8 +253,8 @@ export class FactoryIntegrationService {
 
       // Look up DEX configuration to get fee (O(1) lookup via dexesByName map)
       const dexConfig = this.deps.dexesByName.get(event.dexName.toLowerCase());
-      // Use feeBps (new) with fallback to fee (deprecated) for backward compatibility
-      const feeBps = dexConfig?.feeBps ?? dexConfig?.fee ?? 30;
+      // feeBps is always present on Dex; fallback to 30 bps (0.30%) for unknown DEXes
+      const feeBps = dexConfig?.feeBps ?? 30;
       const fee = bpsToDecimal(feeBps);
 
       // Create pair object
@@ -264,6 +264,7 @@ export class FactoryIntegrationService {
         token0: event.token0,
         token1: event.token1,
         dex: event.dexName,
+        feeDecimal: fee,
         fee,
       };
 

@@ -82,7 +82,8 @@ export {
   StreamBatcher,
   StreamConsumer,
   getRedisStreamsClient,
-  resetRedisStreamsInstance
+  resetRedisStreamsInstance,
+  unwrapBatchMessages
 } from './redis-streams';
 export type {
   StreamMessage,

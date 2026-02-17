@@ -104,7 +104,10 @@ async function main() {
     log('\nPress Ctrl+C to stop the server.', 'yellow');
 
     // Handle shutdown
+    let shuttingDown = false;
     const cleanupAndExit = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       log('\n\nShutting down Redis...', 'yellow');
       try {
         await redisServer.stop();

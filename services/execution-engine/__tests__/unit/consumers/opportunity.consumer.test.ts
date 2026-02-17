@@ -16,7 +16,7 @@
 
 import { OpportunityConsumer, OpportunityConsumerConfig } from '../../../src/consumers/opportunity.consumer';
 import type { Logger, ExecutionStats, QueueService } from '../../../src/types';
-import { ValidationErrorCode } from '../../../src/types';
+import { ValidationErrorCode, DLQ_STREAM } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { validateMessageStructure, ValidationFailure, VALID_OPPORTUNITY_TYPES } from '../../../src/consumers/validation';
 
@@ -447,7 +447,7 @@ describe('OpportunityConsumer - Message Handling', () => {
     // Invalid type should be moved to DLQ
     expect(mockStats.validationErrors).toBe(1);
     expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
-      'stream:dead-letter-queue',
+      DLQ_STREAM,
       expect.any(Object)
     );
     expect(mockStreamsClient.xack).toHaveBeenCalled();
@@ -1321,7 +1321,7 @@ describe('OpportunityConsumer - DLQ Data Optimization', () => {
 
     // Verify DLQ was called
     expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
-      'stream:dead-letter-queue',
+      DLQ_STREAM,
       expect.objectContaining({
         opportunityId: 'test-id',
         opportunityType: 'invalid-type',
@@ -2121,5 +2121,118 @@ describe('String Timestamp Validation (expiresAt)', () => {
     });
 
     expect(result.valid).toBe(true);
+  });
+});
+
+// =============================================================================
+// Phase 0 Regression: Pipeline Timestamps Deserialization
+// =============================================================================
+
+describe('OpportunityConsumer - Pipeline Timestamps (Phase 0 Regression)', () => {
+  let consumer: OpportunityConsumer;
+  let mockLogger: Logger;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let mockQueueService: QueueService;
+  let mockStats: ExecutionStats;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    mockQueueService = createMockQueueService();
+    mockStats = createMockStats();
+
+    consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance-1',
+    });
+  });
+
+  it('should deserialize JSON string pipelineTimestamps from Redis flat map', async () => {
+    const timestamps = {
+      wsReceivedAt: 1700000000000,
+      publishedAt: 1700000000001,
+      consumedAt: 1700000000002,
+      coordinatorAt: 1700000000003,
+    };
+
+    const opportunity = {
+      ...createMockOpportunity(),
+      pipelineTimestamps: JSON.stringify(timestamps), // Arrives as string from Redis flat map
+    };
+    const message = { id: 'msg-ts-1', data: opportunity };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    // Should have been queued
+    expect(consumer.getPendingCount()).toBe(1);
+
+    // Verify the enqueued opportunity has deserialized timestamps
+    const enqueuedOpp = (mockQueueService.enqueue as jest.Mock).mock.calls[0][0] as ArbitrageOpportunity;
+    expect(enqueuedOpp.pipelineTimestamps).toBeDefined();
+    expect(typeof enqueuedOpp.pipelineTimestamps).toBe('object');
+    expect(enqueuedOpp.pipelineTimestamps!.wsReceivedAt).toBe(1700000000000);
+    expect(enqueuedOpp.pipelineTimestamps!.coordinatorAt).toBe(1700000000003);
+    // executionReceivedAt should be stamped
+    expect(enqueuedOpp.pipelineTimestamps!.executionReceivedAt).toBeGreaterThan(0);
+  });
+
+  it('should stamp executionReceivedAt even without existing timestamps', async () => {
+    const opportunity = createMockOpportunity();
+    // No pipelineTimestamps at all
+    const message = { id: 'msg-ts-2', data: opportunity };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(consumer.getPendingCount()).toBe(1);
+
+    const enqueuedOpp = (mockQueueService.enqueue as jest.Mock).mock.calls[0][0] as ArbitrageOpportunity;
+    expect(enqueuedOpp.pipelineTimestamps).toBeDefined();
+    expect(enqueuedOpp.pipelineTimestamps!.executionReceivedAt).toBeGreaterThan(0);
+  });
+
+  it('should handle invalid JSON string pipelineTimestamps gracefully', async () => {
+    const opportunity = {
+      ...createMockOpportunity(),
+      pipelineTimestamps: 'not-valid-json{{{',
+    };
+    const message = { id: 'msg-ts-3', data: opportunity };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    // Should still be queued (invalid JSON doesn't reject the opportunity)
+    expect(consumer.getPendingCount()).toBe(1);
+
+    const enqueuedOpp = (mockQueueService.enqueue as jest.Mock).mock.calls[0][0] as ArbitrageOpportunity;
+    // Should have executionReceivedAt even though original was invalid
+    expect(enqueuedOpp.pipelineTimestamps).toBeDefined();
+    expect(enqueuedOpp.pipelineTimestamps!.executionReceivedAt).toBeGreaterThan(0);
+    // Original invalid timestamps should have been cleared
+    expect(enqueuedOpp.pipelineTimestamps!.wsReceivedAt).toBeUndefined();
+  });
+
+  it('should preserve object pipelineTimestamps when not a string', async () => {
+    const timestamps = {
+      wsReceivedAt: 1700000000000,
+      publishedAt: 1700000000001,
+    };
+
+    const opportunity = {
+      ...createMockOpportunity(),
+      pipelineTimestamps: timestamps,
+    };
+    const message = { id: 'msg-ts-4', data: opportunity };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(consumer.getPendingCount()).toBe(1);
+
+    const enqueuedOpp = (mockQueueService.enqueue as jest.Mock).mock.calls[0][0] as ArbitrageOpportunity;
+    expect(enqueuedOpp.pipelineTimestamps!.wsReceivedAt).toBe(1700000000000);
+    expect(enqueuedOpp.pipelineTimestamps!.publishedAt).toBe(1700000000001);
+    expect(enqueuedOpp.pipelineTimestamps!.executionReceivedAt).toBeGreaterThan(0);
   });
 });

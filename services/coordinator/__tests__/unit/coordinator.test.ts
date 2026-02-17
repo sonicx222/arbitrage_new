@@ -463,7 +463,7 @@ describe('CoordinatorService Alert System', () => {
       const sendAlert = (type: string, service?: string) => {
         const alertKey = `${type}_${service || 'system'}`;
         const now = Date.now();
-        const lastAlert = alertCooldowns.get(alertKey) || 0;
+        const lastAlert = alertCooldowns.get(alertKey) ?? 0;
 
         if (now - lastAlert > cooldownMs) {
           alertCooldowns.set(alertKey, now);
@@ -493,7 +493,7 @@ describe('CoordinatorService Alert System', () => {
       // Set cooldown 6 minutes ago (expired)
       alertCooldowns.set(alertKey, Date.now() - 360000);
 
-      const lastAlert = alertCooldowns.get(alertKey) || 0;
+      const lastAlert = alertCooldowns.get(alertKey) ?? 0;
       const now = Date.now();
 
       expect(now - lastAlert > cooldownMs).toBe(true);

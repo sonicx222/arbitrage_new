@@ -37,7 +37,8 @@ export const RedisStreams = {
   SYSTEM_COMMANDS: 'stream:system-commands',
 
   // Dead letter queue
-  DEAD_LETTER_QUEUE: 'stream:dlq',
+  DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
+  DLQ_ALERTS: 'stream:dlq-alerts',
   FORWARDING_DLQ: 'stream:forwarding-dlq',
 } as const;
 

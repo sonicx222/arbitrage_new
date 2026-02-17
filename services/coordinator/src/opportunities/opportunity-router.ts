@@ -118,6 +118,8 @@ export class OpportunityRouter {
   private _totalExecutions = 0;
   // P1-7 FIX: Track dropped opportunities for monitoring
   private _opportunitiesDropped = 0;
+  // P1-8 FIX: Shutdown flag to cancel in-flight retry delays
+  private _shuttingDown = false;
 
   constructor(
     logger: OpportunityRouterLogger,
@@ -273,12 +275,23 @@ export class OpportunityRouter {
       return;
     }
 
+    // Phase 0 instrumentation: stamp coordinator timestamp before serialization
+    const timestamps = opportunity.pipelineTimestamps ?? {};
+    timestamps.coordinatorAt = Date.now();
+    opportunity.pipelineTimestamps = timestamps;
+
     // FIX #12: Use shared serialization utility (single source of truth)
     const messageData = serializeOpportunityForStream(opportunity, this.config.instanceId);
 
     // P1-7 FIX: Retry loop with exponential backoff
+    // P1-8 FIX: Check shutdown flag before each attempt
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
+      if (this._shuttingDown) {
+        this.logger.debug('Retry loop aborted due to shutdown', { id: opportunity.id, attempt });
+        this._opportunitiesDropped++;
+        return;
+      }
       try {
         await this.streamsClient.xadd(this.config.executionRequestsStream, messageData);
 
@@ -479,6 +492,15 @@ export class OpportunityRouter {
   }
 
   /**
+   * P1-8 FIX: Signal shutdown to cancel in-flight retry delays.
+   * This prevents forwardToExecutionEngine() from completing after the
+   * coordinator's stop() method has been called.
+   */
+  shutdown(): void {
+    this._shuttingDown = true;
+  }
+
+  /**
    * Reset all state (for testing)
    */
   reset(): void {
@@ -486,5 +508,6 @@ export class OpportunityRouter {
     this._totalOpportunities = 0;
     this._totalExecutions = 0;
     this._opportunitiesDropped = 0;
+    this._shuttingDown = false;
   }
 }

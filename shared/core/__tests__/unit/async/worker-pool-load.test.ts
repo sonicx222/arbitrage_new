@@ -20,7 +20,7 @@ import { jest, describe, it, expect, beforeEach, afterEach, beforeAll, afterAll 
 import * as path from 'path';
 
 // Mock logger before importing worker-pool
-jest.mock('../../src/logger', () => ({
+jest.mock('../../../src/logger', () => ({
   createLogger: jest.fn(() => ({
     info: jest.fn(),
     warn: jest.fn(),
@@ -41,9 +41,9 @@ import {
   EventProcessingWorkerPool,
   JsonParsingStats,
   Task
-} from '../../src/async/worker-pool';
+} from '../../../src/async/worker-pool';
 
-const TEST_WORKER_PATH = path.join(__dirname, '..', 'fixtures', 'test-worker.js');
+const TEST_WORKER_PATH = path.join(__dirname, '..', '..', 'fixtures', 'test-worker.js');
 
 describe('Worker Pool Load Tests', () => {
   // Skip these tests in CI - they require real workers

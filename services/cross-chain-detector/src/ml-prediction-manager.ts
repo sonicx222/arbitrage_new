@@ -72,6 +72,7 @@ export interface MLPredictionManager {
 const DEFAULT_PRICE_HISTORY_MAX_LENGTH = 100;
 const DEFAULT_MAX_PRICE_HISTORY_KEYS = 10000;
 const DEFAULT_PRICE_HISTORY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_CONCURRENT_PREDICTIONS = 6;
 
 // =============================================================================
 // Factory Function
@@ -396,17 +397,23 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
       return results;
     }
 
-    // Fetch all predictions in parallel
-    const predictionResults = await Promise.all(
-      keysToFetch.map(async ({ cacheKey, chain, pairKey, price }) => {
-        try {
-          const prediction = await getCachedPrediction(chain, pairKey, price);
-          return { cacheKey, prediction };
-        } catch {
-          return { cacheKey, prediction: null };
-        }
-      })
-    );
+    // Fetch predictions with bounded concurrency to prevent TF.js burst stalls
+    // during cold start or cache flush (Phase 2: Consolidated Enhancement Evaluation)
+    const predictionResults: Array<{ cacheKey: string; prediction: PredictionResult | null }> = [];
+    for (let i = 0; i < keysToFetch.length; i += MAX_CONCURRENT_PREDICTIONS) {
+      const chunk = keysToFetch.slice(i, i + MAX_CONCURRENT_PREDICTIONS);
+      const chunkResults = await Promise.all(
+        chunk.map(async ({ cacheKey, chain, pairKey, price }) => {
+          try {
+            const prediction = await getCachedPrediction(chain, pairKey, price);
+            return { cacheKey, prediction };
+          } catch {
+            return { cacheKey, prediction: null };
+          }
+        })
+      );
+      predictionResults.push(...chunkResults);
+    }
 
     // Batch-write all results synchronously after Promise.all completes
     for (const { cacheKey, prediction } of predictionResults) {

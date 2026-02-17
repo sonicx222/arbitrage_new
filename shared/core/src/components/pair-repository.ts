@@ -54,7 +54,7 @@ export interface ExtendedPair extends Pair {
  * Options for creating a PairSnapshot.
  */
 export interface SnapshotOptions {
-  /** Default fee if pair.fee is undefined */
+  /** Default fee if pair.feeDecimal is undefined */
   defaultFee?: number;
 }
 
@@ -292,8 +292,8 @@ export class PairRepository {
       token1: pair.token1,
       reserve0,
       reserve1,
-      // Use ?? to correctly handle fee: 0
-      fee: pair.fee ?? options?.defaultFee ?? DEFAULT_FEE,
+      // Use ?? to correctly handle fee: 0 (promotional pools)
+      fee: pair.feeDecimal ?? options?.defaultFee ?? DEFAULT_FEE,
       blockNumber: pair.blockNumber,
     };
   }

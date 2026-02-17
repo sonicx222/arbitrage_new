@@ -444,4 +444,63 @@ describe('RedisStreamsClient - Consumer Groups', () => {
       await batcher.destroy();
     });
   });
+
+  // ===========================================================================
+  // Phase 0 Regression: totalBatchFlushes counter
+  // ===========================================================================
+
+  describe('Phase 0 Regression: totalBatchFlushes counter', () => {
+    it('should increment totalBatchFlushes after each successful flush', async () => {
+      mockRedis.xadd.mockResolvedValue('1234-0');
+
+      const batcher = client.createBatcher('stream:test', {
+        maxBatchSize: 2,
+        maxWaitMs: 1000,
+      });
+
+      // Initial stats should have 0 commands
+      expect(batcher.getStats().totalBatchFlushes).toBe(0);
+
+      // Add 2 messages to trigger batch-size flush
+      batcher.add({ value: 1 });
+      batcher.add({ value: 2 });
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(batcher.getStats().totalBatchFlushes).toBe(1);
+      expect(batcher.getStats().batchesSent).toBe(1);
+
+      // Second batch
+      batcher.add({ value: 3 });
+      batcher.add({ value: 4 });
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(batcher.getStats().totalBatchFlushes).toBe(2);
+      expect(batcher.getStats().batchesSent).toBe(2);
+
+      await batcher.destroy();
+    });
+
+    it('should not increment totalBatchFlushes on failed flush', async () => {
+      mockRedis.xadd.mockRejectedValueOnce(new Error('Redis connection lost'));
+
+      const batcher = client.createBatcher('stream:test', {
+        maxBatchSize: 2,
+        maxWaitMs: 1000,
+      });
+
+      batcher.add({ value: 1 });
+      batcher.add({ value: 2 });
+
+      // Wait for auto-flush to trigger (and fail)
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const stats = batcher.getStats();
+      expect(stats.totalBatchFlushes).toBe(0);
+      expect(stats.batchesSent).toBe(0);
+      // Messages should be re-queued
+      expect(stats.currentQueueSize).toBe(2);
+
+      await batcher.destroy();
+    });
+  });
 });

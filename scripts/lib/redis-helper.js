@@ -32,6 +32,10 @@ const REDIS_MEMORY_CONFIG_FILE = path.join(ROOT_DIR, '.redis-memory-config.json'
  * @returns {Promise<{running: boolean, status?: string}>}
  */
 function checkDockerContainer(containerName) {
+  // Validate container name to prevent shell injection
+  if (!/^[a-zA-Z0-9_.-]+$/.test(containerName)) {
+    return Promise.resolve({ running: false });
+  }
   return new Promise((resolve) => {
     exec(`docker ps --filter "name=${containerName}" --format "{{.Status}}"`, (error, stdout) => {
       if (error || !stdout.trim()) {
@@ -109,8 +113,10 @@ function getRedisMemoryConfig() {
  * Delete Redis memory config file.
  */
 function deleteRedisMemoryConfig() {
-  if (fs.existsSync(REDIS_MEMORY_CONFIG_FILE)) {
+  try {
     fs.unlinkSync(REDIS_MEMORY_CONFIG_FILE);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
   }
 }
 

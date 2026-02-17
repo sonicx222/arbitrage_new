@@ -3,7 +3,7 @@
  * Cross-platform Environment Setup Script
  *
  * Copies .env.example to .env for local development.
- * If .env.local exists, it is used instead (local overrides).
+ * .env.local is loaded separately at runtime with override: true.
  * Works on Windows, macOS, and Linux without error messages.
  *
  * Usage:
@@ -13,48 +13,31 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT_DIR = path.join(__dirname, '..');
-const ENV_LOCAL = path.join(ROOT_DIR, '.env.local');
+const { ROOT_DIR } = require('./lib/constants');
 const ENV_EXAMPLE = path.join(ROOT_DIR, '.env.example');
 const TARGET = path.join(ROOT_DIR, '.env');
 
 function main() {
-  // Prefer .env.local if it exists; fall back to .env.example
-  let source;
-  let sourceName;
-  if (fs.existsSync(ENV_LOCAL)) {
-    source = ENV_LOCAL;
-    sourceName = '.env.local';
-  } else if (fs.existsSync(ENV_EXAMPLE)) {
-    source = ENV_EXAMPLE;
-    sourceName = '.env.example';
-  } else {
-    console.error('Error: Neither .env.local nor .env.example found!');
+  // Only copy .env.example -> .env (base config).
+  // .env.local is loaded separately at runtime with override: true by services-config.js.
+  // Copying .env.local -> .env would eliminate the layered override benefit.
+  if (!fs.existsSync(ENV_EXAMPLE)) {
+    console.error('Error: .env.example not found!');
     console.error('Please create a .env.example file with your base configuration.');
     process.exit(1);
   }
 
-  // Check if target already exists
+  // Skip if target already exists
   if (fs.existsSync(TARGET)) {
-    console.log('.env file already exists.');
-
-    // Compare contents
-    const sourceContent = fs.readFileSync(source, 'utf8');
-    const targetContent = fs.readFileSync(TARGET, 'utf8');
-
-    if (sourceContent === targetContent) {
-      console.log(`Files are identical (source: ${sourceName}). No changes needed.`);
-      return;
-    }
-
-    console.log(`Overwriting with latest ${sourceName} content...`);
-  } else {
-    console.log(`Creating .env file from ${sourceName}...`);
+    console.log('.env file already exists. No changes needed.');
+    console.log('(To reset, delete .env and re-run this script.)');
+    return;
   }
 
-  // Copy the file
+  // Copy .env.example -> .env
+  console.log('Creating .env file from .env.example...');
   try {
-    fs.copyFileSync(source, TARGET);
+    fs.copyFileSync(ENV_EXAMPLE, TARGET);
     console.log('Done! Environment configured successfully.');
     console.log('');
     console.log('IMPORTANT: Environment File Priority');

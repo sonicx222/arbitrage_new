@@ -106,10 +106,10 @@ function runDockerDown(command, args) {
 function stopDockerRedis() {
   const composeArgs = ['-f', DOCKER_COMPOSE_FILE, 'down'];
 
-  // Try docker-compose first (matches existing scripts), then docker compose.
+  // Try modern "docker compose" first, then legacy "docker-compose".
   const attempts = [
-    ['docker-compose', composeArgs],
-    ['docker', ['compose', ...composeArgs]]
+    ['docker', ['compose', ...composeArgs]],
+    ['docker-compose', composeArgs]
   ];
 
   for (const [cmd, args] of attempts) {

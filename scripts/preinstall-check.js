@@ -9,9 +9,13 @@
 const fs = require('fs');
 const path = require('path');
 
-// Use shared colors (Task #2: consolidate duplicate logging)
-// Note: preinstall-check.js has custom log() function that concatenates colors
+// Import colors from shared logger. The local log() function uses raw ANSI codes
+// (e.g., colors.bold + colors.yellow) which differs from logger's log(message, colorName).
 const { colors } = require('./lib/logger');
+
+function log(message, color = colors.reset) {
+  console.log(`${color}${message}${colors.reset}`);
+}
 
 // Known malicious package names (add to this list as needed)
 // Source: Various npm security advisories and security research
@@ -65,10 +69,6 @@ const EXPECTED_TOP_LEVEL = new Set([
   'eslint', 'fast-check', 'jest', 'lru-cache', 'redis-memory-server',
   'rimraf', 'supertest', 'ts-jest', 'ts-node', 'tsconfig-paths', 'tsx', 'typescript',
 ]);
-
-function log(message, color = colors.reset) {
-  console.log(`${color}${message}${colors.reset}`);
-}
 
 function checkPackageJson() {
   const packageJsonPath = path.join(process.cwd(), 'package.json');

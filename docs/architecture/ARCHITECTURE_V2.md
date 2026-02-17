@@ -605,11 +605,12 @@ Total Target: <100ms detection, <10s for bridge opportunities
 
 | Stream | Producer | Consumer | Volume | Retention |
 |--------|----------|----------|--------|-----------|
-| `stream:price-updates` | Detectors | Cross-Chain, Dashboard | ~50/sec | 1 hour |
+| `stream:price-updates` | Detectors | Cross-Chain, Coordinator | ~50/sec | 1 hour |
 | `stream:opportunities` | Analyzers | Coordinator | ~10/min | 24 hours |
 | `stream:execution-requests` | Coordinator | Execution Engine | ~10/min | 24 hours |
-| `stream:whale-alerts` | Detectors | All | ~5/hour | 24 hours |
-| `stream:volume-aggregates` | Detectors | Analyzer | ~20/min | 1 hour |
+| `stream:whale-alerts` | Detectors | Coordinator, All | ~5/hour | 24 hours |
+| `stream:swap-events` | Detectors | Coordinator | ~30/min | 1 hour |
+| `stream:volume-aggregates` | Detectors | Coordinator, Analyzer | ~20/min | 1 hour |
 | `stream:health` | All | Coordinator | ~10/min | 1 hour |
 | `stream:dead-letter-queue` | All | Ops/Monitoring | ~1/hour | 7 days |
 

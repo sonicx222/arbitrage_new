@@ -204,24 +204,6 @@ function parseProcessLines(output, lineParser) {
 }
 
 /**
- * Parse PowerShell JSON output for Win32_Process query results.
- * @param {string} jsonOutput - JSON from ConvertTo-Json
- * @returns {Array<{ProcessId?: number, CommandLine?: string}>}
- */
-function parsePowerShellProcessJson(jsonOutput) {
-  if (!jsonOutput) return [];
-
-  try {
-    const parsed = JSON.parse(jsonOutput);
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && typeof parsed === 'object') return [parsed];
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-/**
  * Find ghost node processes related to the project (cross-platform).
  * Matches ts-node, tsx, and direct node processes running arbitrage services.
  *

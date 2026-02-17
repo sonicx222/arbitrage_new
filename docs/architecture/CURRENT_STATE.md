@@ -16,7 +16,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ---
 
-## Service Inventory (9 Services)
+## Service Inventory (8 Services)
 
 | Service | Internal Port | External Port | Type | Description |
 |---------|---------------|---------------|------|-------------|
@@ -27,7 +27,8 @@ This document provides a snapshot of the current arbitrage trading system archit
 | **Partition Solana** | 3004 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3005 | 3015 | Core | Trade execution and MEV protection |
 | **Cross-Chain Detector** | 3006 | 3016 | Detector | Cross-chain arbitrage opportunities |
-| **Mempool Detector** | 3007 | 3007 | Detector | MempoolDetectorService: Pre-block arbitrage detection via bloXroute BDN (ADR-003) |
+
+> **Note:** `services/mempool-detector` (port 3007) exists in the repository but is orphaned — it is not wired into the dev tooling (`start-local.js`, `service-definitions.js`) and is not started by any `npm run dev:*` command.
 
 **Note**: Each partition service uses a unique internal port (P1:3001, P2:3002, P3:3003, P4:3004, configurable via `HEALTH_CHECK_PORT`). Port assignments are the single source of truth in `shared/constants/service-ports.json`.
 

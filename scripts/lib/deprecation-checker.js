@@ -105,24 +105,10 @@ function printWarnings(warnings) {
   console.warn('\u2550'.repeat(50) + '\n');
 }
 
-/**
- * Integration function for use in startup scripts.
- * Checks for deprecations and prints warnings.
- *
- * @param {string[]} serviceNames - Array of service names to check
- * @returns {boolean} - True if any deprecations were found
- */
-function checkAndWarn(serviceNames = []) {
-  const warnings = checkAllDeprecations(serviceNames);
-  printWarnings(warnings);
-  return warnings.length > 0;
-}
-
 module.exports = {
   DEPRECATED_PATTERNS,
   checkForDeprecatedServices,
   checkForDeprecatedEnvVars,
   checkAllDeprecations,
-  printWarnings,
-  checkAndWarn
+  printWarnings
 };

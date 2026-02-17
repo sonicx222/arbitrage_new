@@ -119,6 +119,47 @@ export async function publishToStream(
 }
 
 /**
+ * Set up Redis lifecycle hooks for integration tests.
+ *
+ * Call at the top of a `describe` block. Returns a getter for the Redis client
+ * (available after `beforeAll` runs). Registers:
+ * - `beforeAll`: create client via {@link createTestRedisClient}
+ * - `afterAll`: quit client
+ * - `beforeEach`: flushall (guarded by `status === 'ready'`)
+ *
+ * @example
+ * describe('my suite', () => {
+ *   const getRedis = setupRedisTestLifecycle();
+ *
+ *   it('works', async () => {
+ *     const redis = getRedis();
+ *     await redis.set('k', 'v');
+ *   });
+ * });
+ */
+export function setupRedisTestLifecycle(): () => Redis {
+  let redis: Redis;
+
+  beforeAll(async () => {
+    redis = await createTestRedisClient();
+  });
+
+  afterAll(async () => {
+    if (redis) {
+      await redis.quit();
+    }
+  });
+
+  beforeEach(async () => {
+    if (redis?.status === 'ready') {
+      await redis.flushall();
+    }
+  });
+
+  return () => redis;
+}
+
+/**
  * Create a consumer group for a stream (idempotent)
  */
 export async function ensureConsumerGroup(

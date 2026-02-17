@@ -1,9 +1,12 @@
 /**
- * S4.1.4 Integration Tests: Standby Service Deployment
+ * S4.1.4 Deployment Validation: Standby Service Deployment
  *
- * Tests for standby service deployment configurations including:
+ * Validates deployment configuration files (not runtime integration):
  * - Coordinator standby on GCP Cloud Run
  * - Executor backup on Render
+ *
+ * Reclassified from integration/ — these tests validate filesystem structure
+ * and config file content, not runtime component interactions.
  *
  * @see ADR-007: Cross-Region Failover Strategy
  * @see IMPLEMENTATION_PLAN.md Sprint 4, Task S4.1.4

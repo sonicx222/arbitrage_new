@@ -1333,7 +1333,7 @@ export async function getRedisClient(url?: string, password?: string): Promise<R
   redisInstancePromise = (async (): Promise<RedisClient> => {
     try {
       const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
-      const redisPassword = password || process.env.REDIS_PASSWORD;
+      const redisPassword = resolveRedisPassword(password);
 
       const instance = new RedisClient(redisUrl, redisPassword);
 
@@ -1372,10 +1372,13 @@ export function getRedisClientSync(): RedisClient | null {
 // Health check for Redis connectivity
 export async function checkRedisHealth(url?: string, password?: string): Promise<boolean> {
   try {
-    const client = new RedisClient(url || process.env.REDIS_URL || 'redis://localhost:6379', password || process.env.REDIS_PASSWORD);
-    const isHealthy = await client.ping();
-    await client.disconnect(); // Clean up test client
-    return isHealthy;
+    const client = new RedisClient(url || process.env.REDIS_URL || 'redis://localhost:6379', resolveRedisPassword(password));
+    try {
+      const isHealthy = await client.ping();
+      return isHealthy;
+    } finally {
+      await client.disconnect();
+    }
   } catch (error) {
     return false;
   }

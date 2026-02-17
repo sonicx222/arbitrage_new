@@ -42,6 +42,7 @@ import {
   RedisStreamsClient,
   ConsumerGroupConfig,
   ServiceStateManager,
+  unwrapBatchMessages,
 } from '@arbitrage/core';
 import { PriceUpdate, WhaleTransaction, PendingOpportunity } from '@arbitrage/types';
 // TYPE-CONSOLIDATION: Import shared Logger type instead of duplicating
@@ -85,6 +86,12 @@ export interface StreamConsumerConfig {
 
   /** FIX 3.2: Block timeout for XREADGROUP in ms (default: 1000) */
   blockTimeoutMs?: number;
+
+  /** P2-11 FIX: Minimum valid price for manipulation detection (default: 1e-12) */
+  minValidPrice?: number;
+
+  /** P2-11 FIX: Maximum valid price for manipulation detection (default: 1e12) */
+  maxValidPrice?: number;
 }
 
 /** Public interface for StreamConsumer */
@@ -118,6 +125,9 @@ const DEFAULT_PENDING_OPPORTUNITY_BATCH_SIZE = 20;
 // FIX: Use 1 second block timeout instead of infinite (0)
 // ADR-002 specifies 1000ms for low latency without hanging
 const DEFAULT_BLOCK_TIMEOUT_MS = 1000;
+// P2-11 FIX: Configurable price bounds for manipulation detection
+const DEFAULT_MIN_VALID_PRICE = 1e-12;
+const DEFAULT_MAX_VALID_PRICE = 1e12;
 
 // =============================================================================
 // Implementation
@@ -141,11 +151,18 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     whaleAlertsBatchSize = DEFAULT_WHALE_ALERTS_BATCH_SIZE,
     pendingOpportunityBatchSize = DEFAULT_PENDING_OPPORTUNITY_BATCH_SIZE,
     blockTimeoutMs = DEFAULT_BLOCK_TIMEOUT_MS, // FIX 3.2: Configurable block timeout
+    minValidPrice = DEFAULT_MIN_VALID_PRICE, // P2-11 FIX: Configurable price bounds
+    maxValidPrice = DEFAULT_MAX_VALID_PRICE,
   } = config;
 
   const emitter = new EventEmitter() as StreamConsumer;
   let pollInterval: NodeJS.Timeout | null = null;
   let isConsuming = false; // Concurrency guard
+
+  // ADR-022: Pre-build Map for O(1) consumer group lookup in hot poll loop
+  const consumerGroupMap = new Map<string, ConsumerGroupConfig>(
+    consumerGroups.map(cg => [cg.streamName, cg])
+  );
 
   // ===========================================================================
   // Validation
@@ -174,12 +191,9 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     }
 
     // SECURITY-FIX: Reject extreme prices that indicate potential manipulation
-    // - Prices < 1e-12 are unreasonably low (even for low-cap tokens)
-    // - Prices > 1e12 are unreasonably high (would be worth more than global GDP)
-    // These bounds catch obvious manipulation attempts without needing historical data
-    const MIN_VALID_PRICE = 1e-12;
-    const MAX_VALID_PRICE = 1e12;
-    if (update.price < MIN_VALID_PRICE || update.price > MAX_VALID_PRICE) {
+    // P2-11 FIX: Bounds are now configurable via StreamConsumerConfig
+    // Defaults: min=1e-12 (even low-cap tokens), max=1e12 (more than global GDP)
+    if (update.price < minValidPrice || update.price > maxValidPrice) {
       return false;
     }
 
@@ -347,11 +361,10 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     batchSize: number,
     validator: (data: T | null | undefined) => data is T,
     eventName: string,
-    errorLabel: string
+    errorLabel: string,
+    onValidated?: (data: T) => void
   ): Promise<void> {
-    const config = consumerGroups.find(
-      (c) => c.streamName === streamName
-    );
+    const config = consumerGroupMap.get(streamName);
     if (!config) return;
 
     try {
@@ -362,24 +375,39 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
       });
 
       for (const message of messages) {
-        const data = message.data as unknown as T;
-        if (!validator(data)) {
-          logger.warn(`Skipping invalid ${errorLabel} message`, { messageId: message.id });
-          await streamsClient.xack(config.streamName, config.groupName, message.id);
-          continue;
+        // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
+        // For non-batched messages, returns single-element array (backward compatible)
+        const items = unwrapBatchMessages<T>(message.data);
+        for (const data of items) {
+          if (!validator(data)) {
+            logger.warn(`Skipping invalid ${errorLabel} message`, { messageId: message.id });
+            continue;
+          }
+          if (onValidated) {
+            onValidated(data);
+          }
+          emitter.emit(eventName, data);
         }
-        emitter.emit(eventName, data);
+        // ACK per stream message (not per item) — one stream entry may contain a batch
         await streamsClient.xack(config.streamName, config.groupName, message.id);
       }
     } catch (error) {
-      if (!(error as Error).message?.includes('timeout')) {
-        logger.error(`Error consuming ${errorLabel} stream`, { error: (error as Error).message });
+      // P2-15 FIX: Check for timeout errors more robustly
+      // Redis XREADGROUP with BLOCK returns timeout errors when no data arrives;
+      // these are normal operation and should not be logged as errors.
+      const err = error as Error & { code?: string };
+      const isTimeout = err.code === 'TIMEOUT' ||
+        err.code === 'ERR_TIMEOUT' ||
+        err.message?.includes('timeout');
+      if (!isTimeout) {
+        logger.error(`Error consuming ${errorLabel} stream`, { error: err.message });
       }
     }
   }
 
   /**
    * Consume price updates from Redis Streams.
+   * Phase 0 instrumentation: stamps consumedAt on validated price updates.
    */
   async function consumePriceUpdates(): Promise<void> {
     return consumeStream<PriceUpdate>(
@@ -387,7 +415,13 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
       priceUpdatesBatchSize,
       validatePriceUpdate,
       'priceUpdate',
-      'price update'
+      'price update',
+      (update) => {
+        // Phase 0 instrumentation: stamp consumed timestamp
+        const timestamps = update.pipelineTimestamps ?? {};
+        timestamps.consumedAt = Date.now();
+        update.pipelineTimestamps = timestamps;
+      }
     );
   }
 

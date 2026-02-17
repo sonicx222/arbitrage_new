@@ -41,8 +41,10 @@ import {
   SimpleCircuitBreaker,
   disconnectWithTimeout,
   findKSmallest,
+  unwrapBatchMessages,
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
+import { RedisStreams } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
 import { safeParseInt } from '@arbitrage/config';
 import { serializeOpportunityForStream } from './utils/stream-serialization';
@@ -287,7 +289,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // Used by StreamConsumerManager for messages that fail parsing/handling.
   // P2 FIX #21 NOTE: OpportunityRouter uses a separate DLQ ('stream:forwarding-dlq')
   // for execution forwarding failures — different failure mode, different schema.
-  private static readonly DLQ_STREAM = 'stream:dead-letter-queue';
+  private static readonly DLQ_STREAM = RedisStreams.DEAD_LETTER_QUEUE;
 
   // P0-FIX 1.3: Pending message recovery configuration
   // Messages idle longer than this are considered orphaned and will be reclaimed
@@ -365,8 +367,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // FIX Config 3.2: Environment-aware alert cooldown
       // Development: 30 seconds (faster feedback cycle)
       // Production: 5 minutes (prevent alert spam)
+      // P2-12 FIX: Use ?? instead of || for env var — empty string is not a valid cooldown
       alertCooldownMs: config?.alertCooldownMs ?? safeParseInt(
-        process.env.ALERT_COOLDOWN_MS ||
+        process.env.ALERT_COOLDOWN_MS ??
         (process.env.NODE_ENV === 'development' ? '30000' : '300000'),
         300000
       )
@@ -705,6 +708,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.info('Stopping Coordinator Service');
       // REFACTOR: Removed isRunning = false - stateManager.executeStop() handles state
       // The stateManager transitions to 'stopping' immediately upon entering this callback
+
+      // P1-8 FIX: Signal opportunity router shutdown to cancel in-flight retry delays
+      this.opportunityRouter?.shutdown();
 
       // P1-8 FIX: Stop leadership election service (replaces releaseLeadership)
       // This handles leadership release and heartbeat cleanup internally
@@ -1344,22 +1350,37 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const data = message.data as Record<string, unknown>;
     if (!data) return;
 
-    // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
-    const rawUpdate = unwrapMessageData(data);
-    const chain = getString(rawUpdate, 'chain', 'unknown');
-    const dex = getString(rawUpdate, 'dex', 'unknown');
-    const pairKey = getString(rawUpdate, 'pairKey', '');
+    // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
+    // For non-batched messages, returns single-element array (backward compatible)
+    const items = unwrapBatchMessages<Record<string, unknown>>(data);
 
-    if (!pairKey) {
-      this.logger.debug('Skipping price update - missing pairKey', { messageId: message.id });
-      return;
+    let validCount = 0;
+    for (const item of items) {
+      // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
+      const rawUpdate = unwrapMessageData(item);
+      const chain = getString(rawUpdate, 'chain', 'unknown');
+      const dex = getString(rawUpdate, 'dex', 'unknown');
+      const pairKey = getString(rawUpdate, 'pairKey', '');
+
+      if (!pairKey) {
+        this.logger.debug('Skipping price update - missing pairKey', { messageId: message.id });
+        continue;
+      }
+
+      validCount++;
+      // Update metrics
+      this.systemMetrics.priceUpdatesReceived++;
+
+      // P3-005 FIX: Track active pairs with size limit enforcement
+      this.trackActivePair(pairKey, chain, dex);
     }
 
-    // Update metrics
-    this.systemMetrics.priceUpdatesReceived++;
-
-    // P3-005 FIX: Track active pairs with size limit enforcement
-    this.trackActivePair(pairKey, chain, dex);
+    if (validCount === 0 && items.length > 0) {
+      this.logger.debug('All items in batch filtered out (missing pairKey)', {
+        messageId: message.id,
+        batchSize: items.length,
+      });
+    }
 
     // P2-5: Do not reset stream errors from price updates.
     // Only the opportunity handler (primary data path) should reset errors.
@@ -1463,6 +1484,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     try {
+      // Phase 0 instrumentation: stamp coordinator timestamp before serialization
+      const timestamps = opportunity.pipelineTimestamps ?? {};
+      timestamps.coordinatorAt = Date.now();
+      opportunity.pipelineTimestamps = timestamps;
+
       // Publish to execution-requests stream for the execution engine to consume
       // FIX #12: Use shared serialization utility (single source of truth)
       await this.streamsClient.xadd(

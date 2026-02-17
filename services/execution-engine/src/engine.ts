@@ -397,13 +397,19 @@ export class ExecutionEngineService {
       // Initialize nonce manager
       // Tier 2 Enhancement: Explicit pool configuration for burst submissions
       // Pool pre-allocates nonces for 5-10ms latency reduction during bursts
+      // P1-5 FIX: Validate parseInt results to prevent NaN propagation
+      const parseEnvInt = (envVar: string, fallback: number, min = 1): number => {
+        const raw = parseInt(process.env[envVar] ?? String(fallback), 10);
+        return (!Number.isNaN(raw) && raw >= min) ? raw : fallback;
+      };
+
       this.nonceManager = getNonceManager({
         syncIntervalMs: 30000,
         pendingTimeoutMs: 300000,
-        maxPendingPerChain: parseInt(process.env.NONCE_MAX_PENDING || '10', 10),
+        maxPendingPerChain: parseEnvInt('NONCE_MAX_PENDING', 10),
         // Tier 2: Pre-allocation pool for instant nonce access during bursts
-        preAllocationPoolSize: parseInt(process.env.NONCE_POOL_SIZE || '5', 10),
-        poolReplenishThreshold: parseInt(process.env.NONCE_POOL_REPLENISH_THRESHOLD || '2', 10),
+        preAllocationPoolSize: parseEnvInt('NONCE_POOL_SIZE', 5),
+        poolReplenishThreshold: parseEnvInt('NONCE_POOL_REPLENISH_THRESHOLD', 2),
       });
 
       // Initialize provider service
@@ -416,9 +422,9 @@ export class ExecutionEngineService {
         stats: this.stats,
         enableBatching,
         batchConfig: enableBatching ? {
-          maxBatchSize: parseInt(process.env.RPC_BATCH_MAX_SIZE || '10', 10),
-          batchTimeoutMs: parseInt(process.env.RPC_BATCH_TIMEOUT_MS || '10', 10),
-          maxQueueSize: parseInt(process.env.RPC_BATCH_MAX_QUEUE || '100', 10),
+          maxBatchSize: parseEnvInt('RPC_BATCH_MAX_SIZE', 10),
+          batchTimeoutMs: parseEnvInt('RPC_BATCH_TIMEOUT_MS', 10),
+          maxQueueSize: parseEnvInt('RPC_BATCH_MAX_QUEUE', 100),
           enabled: true,
         } : undefined,
       });

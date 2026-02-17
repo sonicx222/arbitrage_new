@@ -266,6 +266,31 @@ describe('PublishingService', () => {
       );
       expect(mockStreamsClient.xadd).toHaveBeenCalled();
     });
+
+    it('should stamp detectedAt on opportunity before publishing', async () => {
+      const before = Date.now();
+      const opportunity = { id: 'opp-ts-1' } as any;
+
+      await service.publishArbitrageOpportunity(opportunity);
+
+      const after = Date.now();
+      expect(opportunity.pipelineTimestamps).toBeDefined();
+      expect(opportunity.pipelineTimestamps.detectedAt).toBeGreaterThanOrEqual(before);
+      expect(opportunity.pipelineTimestamps.detectedAt).toBeLessThanOrEqual(after);
+    });
+
+    it('should preserve existing pipelineTimestamps when stamping detectedAt', async () => {
+      const opportunity = {
+        id: 'opp-ts-2',
+        pipelineTimestamps: { wsReceivedAt: 1700000000000, publishedAt: 1700000000001 },
+      } as any;
+
+      await service.publishArbitrageOpportunity(opportunity);
+
+      expect(opportunity.pipelineTimestamps.wsReceivedAt).toBe(1700000000000);
+      expect(opportunity.pipelineTimestamps.publishedAt).toBe(1700000000001);
+      expect(opportunity.pipelineTimestamps.detectedAt).toBeDefined();
+    });
   });
 
   describe('publishWhaleAlert', () => {

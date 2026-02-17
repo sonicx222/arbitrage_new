@@ -18,9 +18,7 @@ const path = require('path');
 const { log, colors } = require('./lib/logger');
 
 // P3-3: Use shared constants
-const { LARGE_NODE_MODULES_THRESHOLD_BYTES } = require('./lib/constants');
-
-const ROOT_DIR = path.resolve(__dirname, '..');
+const { ROOT_DIR, LARGE_NODE_MODULES_THRESHOLD_BYTES } = require('./lib/constants');
 
 /**
  * Find files matching a pattern recursively

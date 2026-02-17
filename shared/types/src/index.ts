@@ -111,6 +111,26 @@ export interface PairFull {
   lastUpdate: number;
 }
 
+/**
+ * Pipeline latency tracking timestamps.
+ * Each stage adds its own timestamp; all fields optional.
+ * @see Phase 0 instrumentation in docs/reports/CONSOLIDATED_ENHANCEMENT_EVALUATION.md
+ */
+export interface PipelineTimestamps {
+  /** WebSocket message received by chain detector */
+  wsReceivedAt?: number;
+  /** Price update published to Redis stream */
+  publishedAt?: number;
+  /** Price update consumed from Redis stream */
+  consumedAt?: number;
+  /** Opportunity detected by detector */
+  detectedAt?: number;
+  /** Coordinator received and forwarded opportunity */
+  coordinatorAt?: number;
+  /** Execution engine received execution request */
+  executionReceivedAt?: number;
+}
+
 export interface PriceUpdate {
   pairKey: string;
   pairAddress?: string; // Optional pair contract address
@@ -128,6 +148,8 @@ export interface PriceUpdate {
   feeDecimal?: FeeDecimal;
   /** @deprecated Use `feeDecimal` instead */
   fee?: number;
+  /** Phase 0 instrumentation: pipeline latency tracking */
+  pipelineTimestamps?: PipelineTimestamps;
 }
 
 /**
@@ -161,13 +183,25 @@ export interface ArbitrageOpportunity {
   token1?: string;
   tokenIn?: string;
   tokenOut?: string;
+  /**
+   * Precise input amount as a wei string for BigInt compatibility.
+   * String type is intentional: wei amounts exceed Number.MAX_SAFE_INTEGER
+   * and must be parsed via BigInt(amountIn) for calculations.
+   * @see amountIn vs amount: amountIn is precise wei; amount is approximate USD/token estimate.
+   */
   amountIn?: string;
   buyPrice?: number;     // Price on buy DEX
   sellPrice?: number;    // Price on sell DEX
   expectedProfit?: number;
   estimatedProfit?: number;
   profitPercentage?: number;
-  gasEstimate?: string; // Wei as string for BigInt compatibility. Use parseGasEstimate() helper.
+  /**
+   * Estimated gas in wei as a string for BigInt/serialization compatibility.
+   * String type is intentional: gas estimates are serialized over Redis Streams
+   * and parsed via BigInt for on-chain gas limit calculations.
+   * Use parseGasEstimate() helper for safe conversion.
+   */
+  gasEstimate?: string;
   confidence: number;
   timestamp: number;
   blockNumber?: number;
@@ -190,10 +224,24 @@ export interface ArbitrageOpportunity {
   sourceDex?: string;
   targetDex?: string;
   tokenAddress?: string;
+  /**
+   * @deprecated Use `amountIn` instead for precise wei amounts.
+   * Approximate token or USD amount for quick estimation/filtering.
+   * Number type is intentional: this is a display/estimation value, not used
+   * in on-chain calculations. Safe integer range is sufficient.
+   */
   amount?: number;
   priceDifference?: number;
   percentageDifference?: number;
+  /**
+   * Estimated USD gas cost for the opportunity.
+   * Number type is intentional: this is a pre-calculated USD estimate
+   * used for profitability filtering, not a wei value.
+   * Contrast with gasEstimate (string) which is raw wei for on-chain use.
+   */
   gasCost?: number;
+  /** Phase 0 instrumentation: pipeline latency tracking */
+  pipelineTimestamps?: PipelineTimestamps;
   netProfit?: number;
 }
 
@@ -552,10 +600,20 @@ export interface BridgeLatencyData {
   token: string;
   amount: number;
   latency: number; // in seconds
-  cost: number; // in wei
+  /**
+   * Bridge cost in native token units (e.g., ETH, MATIC).
+   * Number type is intentional: bridge costs are small values in native token
+   * units used for profitability estimation, not raw wei amounts.
+   */
+  cost: number;
   success: boolean;
   timestamp: number;
   congestionLevel: number;
+  /**
+   * Gas price in gwei.
+   * Number type is intentional: gwei values are within safe integer range
+   * (typically 1-500 gwei). Used for cost estimation, not direct on-chain submission.
+   */
   gasPrice: number;
 }
 

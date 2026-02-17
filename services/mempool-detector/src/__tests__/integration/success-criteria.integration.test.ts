@@ -90,8 +90,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV2');
       expect(result!.router.toLowerCase()).toBe(MAINNET_ROUTERS.UNISWAP_V2_ROUTER.toLowerCase());
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
       expect(result!.path.length).toBe(2);
     });
 
@@ -103,9 +103,9 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV2');
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
-      expect(result!.amountIn.toString()).toBe((metadata as any).expectedAmountIn);
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
+      expect(result!.amountIn.toString()).toBe(metadata.expectedAmountIn!);
     });
 
     it('should decode real swapExactTokensForETH correctly', () => {
@@ -116,8 +116,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV2');
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should decode real swapTokensForExactTokens correctly', () => {
@@ -128,8 +128,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV2');
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should decode real swapETHForExactTokens correctly', () => {
@@ -140,8 +140,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV2');
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should decode real swapTokensForExactETH correctly', () => {
@@ -152,8 +152,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV2');
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should achieve >90% accuracy across all real V2 swap types', () => {
@@ -186,8 +186,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV3');
       expect(result!.router.toLowerCase()).toBe(MAINNET_ROUTERS.UNISWAP_V3_SWAP_ROUTER.toLowerCase());
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should decode real exactInputSingle (SwapRouter02) correctly', () => {
@@ -199,8 +199,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV3');
       expect(result!.router.toLowerCase()).toBe(MAINNET_ROUTERS.UNISWAP_V3_SWAP_ROUTER_02.toLowerCase());
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should decode real exactOutputSingle correctly', () => {
@@ -211,8 +211,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV3');
-      expect(result!.tokenIn.toLowerCase()).toBe((metadata as any).expectedTokenIn.toLowerCase());
-      expect(result!.tokenOut.toLowerCase()).toBe((metadata as any).expectedTokenOut.toLowerCase());
+      expect(result!.tokenIn.toLowerCase()).toBe(metadata.expectedTokenIn!.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(metadata.expectedTokenOut!.toLowerCase());
     });
 
     it('should achieve >90% accuracy across all real V3 swap types', () => {
@@ -243,12 +243,12 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
 
       for (const swapTx of ALL_REAL_SWAPS) {
         const tx = stripMetadata(swapTx);
-        const metadata = swapTx._metadata as any;
+        const metadata = swapTx._metadata;
         const result = registry.decode(tx, 1);
         const success = result !== null;
 
         results.push({
-          tx: metadata.swapType,
+          tx: metadata.swapType ?? 'unknown',
           success,
           type: result?.type ?? null,
         });
@@ -319,7 +319,7 @@ describe('Success Criteria: False Positive Rate (<20%) [Real Mainnet Data]', () 
 
         if (result !== null) {
           falsePositiveCount++;
-          console.log(`False positive: ${(nonSwapTx._metadata as any).type}`);
+          console.log(`False positive: ${nonSwapTx._metadata.type}`);
         }
       }
 

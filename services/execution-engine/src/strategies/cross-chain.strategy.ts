@@ -31,7 +31,7 @@
  */
 
 import { ethers } from 'ethers';
-import { ARBITRAGE_CONFIG, getNativeTokenPrice } from '@arbitrage/config';
+import { ARBITRAGE_CONFIG, getNativeTokenPrice, getTokenDecimals } from '@arbitrage/config';
 import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/core';
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -114,6 +114,42 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       return false;
     }
     return this.flashLoanProviderFactory.isFullySupported(destChain);
+  }
+
+  /**
+   * Estimate trade size in USD from a token amount (in wei) and token identity.
+   *
+   * Used for bridge route scoring instead of the default $1000 estimate.
+   * getDefaultPrice provides a static fallback price (no async needed),
+   * and getTokenDecimals resolves decimals by chain + symbol.
+   *
+   * Returns undefined when estimation isn't possible (unknown token, missing
+   * data), letting the caller fall back to the default.
+   *
+   * @param amountWei - Token amount in wei (string)
+   * @param tokenSymbol - Token symbol for price/decimal lookup (e.g., 'USDC', 'WETH')
+   * @param chain - Chain name for decimal resolution
+   */
+  private estimateTradeSizeUsd(
+    amountWei: string | undefined,
+    tokenSymbol: string | undefined,
+    chain: string,
+  ): number | undefined {
+    if (!amountWei || !tokenSymbol) return undefined;
+
+    try {
+      const priceUsd = getDefaultPrice(tokenSymbol);
+      if (priceUsd <= 0) return undefined;
+
+      const decimals = getTokenDecimals(chain, '', tokenSymbol);
+      const humanAmount = parseFloat(ethers.formatUnits(amountWei, decimals));
+
+      if (!Number.isFinite(humanAmount) || humanAmount <= 0) return undefined;
+
+      return humanAmount * priceUsd;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -258,10 +294,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
     }
 
-    // TODO: Derive tradeSizeUsd from opportunity.amountIn + token price for better bridge scoring.
-    // Currently uses default ($1000/medium) because amountIn is in wei and requires a price oracle
-    // lookup to convert to USD, which is not available in this execution context.
-    const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(sourceChain, destChain, bridgeToken);
+    // Estimate trade size in USD for bridge scoring (falls back to default $1000 if unavailable)
+    const tradeSizeUsd = this.estimateTradeSizeUsd(opportunity.amountIn, opportunity.tokenIn, sourceChain);
+    const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(sourceChain, destChain, bridgeToken, tradeSizeUsd);
 
     if (!bridgeRouter) {
       return createErrorResult(
@@ -1558,12 +1593,15 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       return false;
     }
 
-    // TODO: Pass tradeSizeUsd from recovery state for better bridge scoring.
-    // Recovery context lacks USD-denominated trade size.
+    // Estimate trade size from bridge amount (bridgeAmount is in bridgeToken units)
+    const recoveryTradeSizeUsd = this.estimateTradeSizeUsd(
+      state.bridgeAmount, state.bridgeToken, state.sourceChain
+    );
     const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(
       state.sourceChain,
       state.destChain,
-      state.bridgeToken
+      state.bridgeToken,
+      recoveryTradeSizeUsd
     );
 
     if (!bridgeRouter) {

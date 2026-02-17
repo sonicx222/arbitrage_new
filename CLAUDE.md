@@ -64,7 +64,7 @@ cd contracts && npx hardhat compile                 # Compile only
 ```bash
 npm run dev:redis          # Start Redis via Docker
 npm run dev:redis:memory   # In-memory Redis (no Docker)
-npm run dev:all            # 6 core services with hot reload (coord, P1-P3, cross-chain, execution)
+npm run dev:all            # 7 services with hot reload (coord, P1-P4, cross-chain, execution)
 npm run dev:minimal        # Coordinator + P1 + Execution only
 npm run dev:status         # Check running services
 npm run dev:stop           # Stop all services
@@ -74,7 +74,7 @@ npm run dev:stop           # Stop all services
 ```bash
 npm run generate:error-selectors   # Generate error selectors from ABI
 npm run validate:mev-setup          # Validate MEV config for all chains
-npm run verify:router-approval      # Verify on-chain router approvals
+npm run validate:routers             # Verify on-chain router approvals
 npm run lint:fix                    # Auto-fix linting
 ```
 

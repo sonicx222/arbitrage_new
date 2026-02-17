@@ -320,6 +320,31 @@ export class OpportunityConsumer {
 
     const opportunity = validation.opportunity;
 
+    // Phase 0 instrumentation: deserialize pipelineTimestamps if it arrived as a JSON string
+    // (coordinator serializes nested objects as JSON strings for Redis flat maps)
+    const rawTimestamps = (opportunity as unknown as Record<string, unknown>).pipelineTimestamps;
+    if (typeof rawTimestamps === 'string') {
+      try {
+        const parsed = JSON.parse(rawTimestamps);
+        // Whitelist known fields to prevent unexpected properties from leaking through
+        opportunity.pipelineTimestamps = {
+          ...(typeof parsed.wsReceivedAt === 'number' && { wsReceivedAt: parsed.wsReceivedAt }),
+          ...(typeof parsed.publishedAt === 'number' && { publishedAt: parsed.publishedAt }),
+          ...(typeof parsed.consumedAt === 'number' && { consumedAt: parsed.consumedAt }),
+          ...(typeof parsed.detectedAt === 'number' && { detectedAt: parsed.detectedAt }),
+          ...(typeof parsed.coordinatorAt === 'number' && { coordinatorAt: parsed.coordinatorAt }),
+          ...(typeof parsed.executionReceivedAt === 'number' && { executionReceivedAt: parsed.executionReceivedAt }),
+        };
+      } catch {
+        this.logger.warn('Failed to parse pipelineTimestamps JSON', { messageId: message.id });
+        opportunity.pipelineTimestamps = undefined;
+      }
+    }
+    // Phase 0 instrumentation: stamp execution received timestamp
+    const timestamps = opportunity.pipelineTimestamps ?? {};
+    timestamps.executionReceivedAt = Date.now();
+    opportunity.pipelineTimestamps = timestamps;
+
     // Handle the opportunity - returns true if successfully queued
     const wasQueued = this.handleArbitrageOpportunity(opportunity);
 

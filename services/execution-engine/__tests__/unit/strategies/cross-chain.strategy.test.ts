@@ -922,3 +922,152 @@ describe('CrossChainStrategy - Successful Execution', () => {
     }
   });
 });
+
+// =============================================================================
+// Test Suite: Bridge Recovery (Finding #6)
+// =============================================================================
+
+describe('CrossChainStrategy - Bridge Recovery', () => {
+  let strategy: CrossChainStrategy;
+  let mockLogger: Logger;
+  let mockRedis: any;
+
+  const createBridgeRecoveryState = (overrides: Record<string, unknown> = {}) => ({
+    opportunityId: 'recovery-opp-1',
+    bridgeId: 'bridge-id-1',
+    sourceTxHash: '0xsource123',
+    sourceChain: 'ethereum',
+    destChain: 'arbitrum',
+    bridgeToken: 'USDC',
+    bridgeAmount: '1000000000', // 1000 USDC
+    sellDex: 'sushiswap',
+    expectedProfit: 50,
+    tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    initiatedAt: Date.now() - 60000, // 1 minute ago
+    bridgeProtocol: 'stargate',
+    status: 'pending' as const,
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    strategy = new CrossChainStrategy(mockLogger);
+
+    // Mock Redis with scan and get methods for recovery
+    // scan returns [nextCursor, foundKeys] tuple
+    mockRedis = {
+      scan: jest.fn().mockResolvedValue(['0', []]),
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
+    };
+  });
+
+  it('should return 0 when bridgeRouterFactory is null', async () => {
+    const state = createBridgeRecoveryState();
+    mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-id-1']]);
+    mockRedis.get.mockResolvedValue(JSON.stringify(state));
+
+    const ctx = createMockContext({ bridgeRouterFactory: null });
+
+    const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
+
+    expect(recovered).toBe(0);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Cannot recover bridge - no bridge router factory',
+    );
+  });
+
+  it('should skip expired bridge states (>24h old)', async () => {
+    const expiredState = createBridgeRecoveryState({
+      initiatedAt: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago
+    });
+    mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-id-1']]);
+    mockRedis.get.mockResolvedValue(JSON.stringify(expiredState));
+
+    const ctx = createMockContext();
+
+    const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
+
+    expect(recovered).toBe(0);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Bridge recovery state expired',
+      expect.objectContaining({
+        bridgeId: 'bridge-id-1',
+      }),
+    );
+  });
+
+  it('should handle partial recovery (some succeed, some fail)', async () => {
+    const state1 = createBridgeRecoveryState({
+      bridgeId: 'bridge-1',
+      opportunityId: 'opp-1',
+    });
+    const state2 = createBridgeRecoveryState({
+      bridgeId: 'bridge-2',
+      opportunityId: 'opp-2',
+    });
+    mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-1', 'bridge:recovery:bridge-2']]);
+    mockRedis.get
+      .mockResolvedValueOnce(JSON.stringify(state1))
+      .mockResolvedValueOnce(JSON.stringify(state2));
+
+    // Mock the private recoverSingleBridge to simulate partial success
+    // The first call succeeds, the second fails
+    jest.spyOn(strategy as any, 'recoverSingleBridge')
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const ctx = createMockContext();
+
+    const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
+
+    expect(recovered).toBe(1); // Only 1 of 2 recovered
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Bridge recovery completed',
+      expect.objectContaining({
+        total: 2,
+        recovered: 1,
+      }),
+    );
+  });
+
+  it('should handle Redis scan returning no keys', async () => {
+    mockRedis.scan.mockResolvedValue(['0', []]);
+
+    const ctx = createMockContext();
+
+    const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
+
+    expect(recovered).toBe(0);
+  });
+
+  it('should handle Redis scan failure gracefully', async () => {
+    mockRedis.scan.mockRejectedValue(new Error('Redis connection lost'));
+
+    const ctx = createMockContext();
+
+    const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
+
+    expect(recovered).toBe(0);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Bridge recovery scan failed',
+      expect.objectContaining({
+        error: 'Redis connection lost',
+      }),
+    );
+  });
+
+  it('should handle invalid JSON in recovery state', async () => {
+    mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-corrupt']]);
+    mockRedis.get.mockResolvedValue('not-valid-json{{{');
+
+    const ctx = createMockContext();
+
+    const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
+
+    expect(recovered).toBe(0);
+  });
+});

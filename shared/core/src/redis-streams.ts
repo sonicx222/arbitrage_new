@@ -102,6 +102,7 @@ export interface BatcherConfig {
   maxBatchSize: number;    // Maximum messages before flush
   maxWaitMs: number;       // Maximum wait time before flush
   compress?: boolean;      // Whether to compress batched messages
+  maxQueueSize?: number;   // Maximum queued messages before dropping (default: unbounded)
 }
 
 export interface BatcherStats {
@@ -111,6 +112,7 @@ export interface BatcherStats {
   totalMessagesSent: number;    // Total messages sent (should equal totalMessagesQueued minus lost)
   compressionRatio: number;     // totalMessagesQueued / batchesSent (higher = better batching)
   averageBatchSize: number;     // totalMessagesSent / batchesSent
+  totalBatchFlushes: number;    // Total successful batch flush xadd calls
 }
 
 // =============================================================================
@@ -135,7 +137,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
     batchesSent: 0,
     totalMessagesSent: 0,
     compressionRatio: 1,
-    averageBatchSize: 0
+    averageBatchSize: 0,
+    totalBatchFlushes: 0
   };
 
   // P2-FIX: Use proper Logger type
@@ -149,6 +152,17 @@ export class StreamBatcher<T = Record<string, unknown>> {
   add(message: T): void {
     if (this.destroyed) {
       this.logger.warn('Attempted to add message to destroyed batcher', { streamName: this.streamName });
+      return;
+    }
+
+    // Enforce maxQueueSize to prevent unbounded memory growth during sustained Redis outages
+    const totalQueued = this.queue.length + this.pendingDuringFlush.length;
+    if (this.config.maxQueueSize != null && totalQueued >= this.config.maxQueueSize) {
+      this.logger.warn('Batcher queue full, dropping message', {
+        streamName: this.streamName,
+        queueSize: totalQueued,
+        maxQueueSize: this.config.maxQueueSize,
+      });
       return;
     }
 
@@ -224,6 +238,7 @@ export class StreamBatcher<T = Record<string, unknown>> {
       await this.client.xadd(this.streamName, batchedMessage);
 
       // Update stats
+      this.stats.totalBatchFlushes++;
       this.stats.batchesSent++;
       this.stats.totalMessagesSent += batch.length;
       this.stats.averageBatchSize = this.stats.totalMessagesSent / this.stats.batchesSent;
@@ -1059,6 +1074,56 @@ export class StreamConsumer {
 }
 
 // =============================================================================
+// Batch Unwrap Helper
+// =============================================================================
+
+/**
+ * Batch envelope shape produced by StreamBatcher.flush().
+ * Used by unwrapBatchMessages to detect batched vs non-batched messages.
+ */
+interface BatchEnvelope<T> {
+  type: 'batch';
+  count: number;
+  messages: T[];
+  timestamp: number;
+}
+
+/**
+ * Check if data is a batch envelope produced by StreamBatcher.
+ */
+function isBatchEnvelope<T>(data: unknown): data is BatchEnvelope<T> {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as Record<string, unknown>).type === 'batch' &&
+    Array.isArray((data as Record<string, unknown>).messages)
+  );
+}
+
+/**
+ * Unwrap batch envelopes from StreamBatcher into individual messages.
+ *
+ * When StreamBatcher flushes, it produces a batch envelope:
+ *   { type: 'batch', count: N, messages: T[], timestamp: number }
+ *
+ * Consumers need to detect this and iterate over individual messages
+ * instead of treating the batch envelope as a single message.
+ *
+ * This helper transparently handles both batched and non-batched messages:
+ * - Batch envelope → returns data.messages (array of T)
+ * - Non-batched message → returns [data as T] (single-element array)
+ *
+ * @param data - Raw message data from Redis stream (may be batch or single)
+ * @returns Array of individual messages
+ */
+export function unwrapBatchMessages<T>(data: unknown): T[] {
+  if (isBatchEnvelope<T>(data)) {
+    return data.messages;
+  }
+  return [data as T];
+}
+
+// =============================================================================
 // Singleton Factory
 // =============================================================================
 
@@ -1100,7 +1165,7 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     redisPassword = undefined;
     redisUrl = redisUrl.replace(/redis:\/\/:[^@]+@/, 'redis://');
   } else {
-    redisPassword = password || process.env.REDIS_PASSWORD;
+    redisPassword = resolveRedisPassword(password);
   }
 
   initializingPromise = (async () => {
