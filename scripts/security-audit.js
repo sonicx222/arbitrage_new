@@ -10,9 +10,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// Use shared colors (Task #2: consolidate duplicate logging)
-// Note: security-audit.js has custom log() function that concatenates colors
-const { colors } = require('./lib/logger');
+const { logger, colors } = require('./lib/logger');
 
 // Known unfixable vulnerabilities (dev dependencies with no upstream fix)
 const KNOWN_UNFIXABLE = new Set([
@@ -73,12 +71,8 @@ const DEV_ONLY_PACKAGES = new Set([
   'hardhat-gas-reporter',
 ]);
 
-function log(message, color = colors.reset) {
-  console.log(`${color}${message}${colors.reset}`);
-}
-
 function runAudit() {
-  log('\n=== NPM Security Audit ===\n', colors.bold + colors.cyan);
+  logger.header('NPM Security Audit');
 
   try {
     // Run npm audit in JSON format (cross-platform)
@@ -125,58 +119,58 @@ function runAudit() {
 
     // Report production vulnerabilities (CRITICAL)
     if (production.length > 0) {
-      log('PRODUCTION VULNERABILITIES (Action Required):', colors.bold + colors.red);
+      console.log(`${colors.bold}${colors.red}PRODUCTION VULNERABILITIES (Action Required):${colors.reset}`);
       production.forEach(v => {
-        log(`  - ${v.name}: ${v.severity}`, colors.red);
+        logger.error(`  - ${v.name}: ${v.severity}`);
       });
-      log('');
+      console.log('');
     } else {
-      log('No production vulnerabilities found.', colors.green);
+      logger.success('No production vulnerabilities found.');
     }
 
     // Report dev-only vulnerabilities (Lower priority)
     if (devOnly.length > 0) {
-      log(`\nDev-only vulnerabilities: ${devOnly.length}`, colors.yellow);
-      log('  (These only affect development/testing, not production)', colors.yellow);
+      logger.warning(`\nDev-only vulnerabilities: ${devOnly.length}`);
+      logger.warning('  (These only affect development/testing, not production)');
     }
 
     // Report known unfixable
     if (knownUnfixable.length > 0) {
-      log(`\nKnown unfixable (waiting for upstream): ${knownUnfixable.length}`, colors.blue);
-      log('  (These are tracked and have no available fix yet)', colors.blue);
+      logger.info(`\nKnown unfixable (waiting for upstream): ${knownUnfixable.length}`);
+      logger.info('  (These are tracked and have no available fix yet)');
     }
 
     // Summary
     const total = production.length + devOnly.length + knownUnfixable.length;
-    log('\n=== Summary ===', colors.bold);
-    log(`Total vulnerabilities: ${total}`);
-    log(`  - Production (fix required): ${production.length}`, production.length > 0 ? colors.red : colors.green);
-    log(`  - Dev-only (lower risk): ${devOnly.length}`, colors.yellow);
-    log(`  - Known unfixable: ${knownUnfixable.length}`, colors.blue);
+    logger.header('Summary');
+    console.log(`Total vulnerabilities: ${total}`);
+    console.log(`  - Production (fix required): ${production.length > 0 ? colors.red : colors.green}${production.length}${colors.reset}`);
+    console.log(`  - Dev-only (lower risk): ${colors.yellow}${devOnly.length}${colors.reset}`);
+    console.log(`  - Known unfixable: ${knownUnfixable.length}`);
 
     // Exit with error if production vulnerabilities exist
     if (production.length > 0) {
-      log('\n SECURITY CHECK FAILED: Production vulnerabilities found!', colors.bold + colors.red);
+      console.log(`\n${colors.bold}${colors.red} SECURITY CHECK FAILED: Production vulnerabilities found!${colors.reset}`);
       process.exit(1);
     }
 
-    log('\n SECURITY CHECK PASSED', colors.bold + colors.green);
+    logger.success('\n SECURITY CHECK PASSED');
     return true;
 
   } catch (error) {
-    log(`Error running audit: ${error.message}`, colors.red);
+    logger.error(`Error running audit: ${error.message}`);
     process.exit(1);
   }
 }
 
 function checkLockfile() {
-  log('\n=== Lockfile Integrity Check ===\n', colors.bold + colors.cyan);
+  logger.header('Lockfile Integrity Check');
 
   const lockfilePath = path.join(process.cwd(), 'package-lock.json');
 
   if (!fs.existsSync(lockfilePath)) {
-    log('WARNING: package-lock.json not found!', colors.red);
-    log('Run "npm install" to generate lockfile.', colors.yellow);
+    logger.error('WARNING: package-lock.json not found!');
+    logger.warning('Run "npm install" to generate lockfile.');
     return false;
   }
 
@@ -185,10 +179,10 @@ function checkLockfile() {
 
     // Check lockfile version
     if (lockfile.lockfileVersion < 3) {
-      log(`WARNING: Lockfile version ${lockfile.lockfileVersion} is outdated.`, colors.yellow);
-      log('Consider running "npm install" to upgrade to v3.', colors.yellow);
+      logger.warning(`WARNING: Lockfile version ${lockfile.lockfileVersion} is outdated.`);
+      logger.warning('Consider running "npm install" to upgrade to v3.');
     } else {
-      log(`Lockfile version: ${lockfile.lockfileVersion}`, colors.green);
+      logger.success(`Lockfile version: ${lockfile.lockfileVersion}`);
     }
 
     // Check for http:// registries (insecure)
@@ -204,58 +198,58 @@ function checkLockfile() {
     checkPackages(lockfile.packages);
 
     if (insecureRegistries.length > 0) {
-      log(`WARNING: ${insecureRegistries.length} packages use insecure HTTP registry!`, colors.red);
-      insecureRegistries.slice(0, 5).forEach(name => log(`  - ${name}`, colors.red));
+      logger.error(`WARNING: ${insecureRegistries.length} packages use insecure HTTP registry!`);
+      insecureRegistries.slice(0, 5).forEach(name => logger.error(`  - ${name}`));
       if (insecureRegistries.length > 5) {
-        log(`  ... and ${insecureRegistries.length - 5} more`, colors.red);
+        logger.error(`  ... and ${insecureRegistries.length - 5} more`);
       }
       return false;
     }
 
-    log('Lockfile integrity: OK', colors.green);
+    logger.success('Lockfile integrity: OK');
     return true;
 
   } catch (error) {
-    log(`Error reading lockfile: ${error.message}`, colors.red);
+    logger.error(`Error reading lockfile: ${error.message}`);
     return false;
   }
 }
 
 function checkOverrides() {
-  log('\n=== Override Verification ===\n', colors.bold + colors.cyan);
+  logger.header('Override Verification');
 
   try {
     const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
     const overrides = packageJson.overrides || {};
 
-    log('Active overrides:', colors.cyan);
+    logger.info('Active overrides:');
     for (const [pkg, version] of Object.entries(overrides)) {
       if (typeof version === 'string') {
-        log(`  - ${pkg}: ${version}`, colors.green);
+        logger.success(`  - ${pkg}: ${version}`);
       } else {
-        log(`  - ${pkg}: (nested overrides)`, colors.green);
+        logger.success(`  - ${pkg}: (nested overrides)`);
       }
     }
 
     return true;
   } catch (error) {
-    log(`Error checking overrides: ${error.message}`, colors.red);
+    logger.error(`Error checking overrides: ${error.message}`);
     return false;
   }
 }
 
 // Main
-log(colors.bold + colors.cyan + `
+console.log(`${colors.bold}${colors.cyan}
 ╔═══════════════════════════════════════════════╗
 ║     NPM Security Audit - Arbitrage System     ║
 ╚═══════════════════════════════════════════════╝
-` + colors.reset);
+${colors.reset}`);
 
 const overridesOk = checkOverrides();
 const lockfileOk = checkLockfile();
 const auditOk = runAudit();
 
 if (!overridesOk || !lockfileOk) {
-  log('\nWARNING: Lockfile or override checks failed (see above).', colors.yellow);
+  logger.warning('\nWARNING: Lockfile or override checks failed (see above).');
   if (!auditOk) process.exit(1);
 }

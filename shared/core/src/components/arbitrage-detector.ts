@@ -22,7 +22,6 @@ import {
   calculateConfidence,
   invertPrice,
   isValidPrice,
-  getBlockTimeMs,
   calculatePriceDifferencePercent,
   type PriceSource,
   type ProfitCalculationResult,
@@ -218,22 +217,22 @@ export function detectArbitrage(input: ArbitrageDetectionInput): ArbitrageDetect
 
   // Determine chain for chain-specific calculations
   const chain = extractChainFromDex(pair1.dex) || 'ethereum';
-  const blockTimeMs = getBlockTimeMs(chain);
 
-  // FIX 4.2: Calculate confidence with data freshness, guarding against invalid values
-  // If blockNumber is in the future (data corruption/clock skew), use 0 age (fresh data)
-  // The Math.max ensures we never pass negative ages which could produce NaN
-  const calculateAge = (blockNumber: number | undefined): number => {
-    if (!blockNumber || blockNumber <= 0) return 0;
-    const estimatedTimestamp = blockNumber * blockTimeMs;
-    // Guard against future blocks (corruption) - treat as fresh data
-    if (estimatedTimestamp > timestamp) return 0;
-    return timestamp - estimatedTimestamp;
+  // FIX #2: Use lastUpdated timestamp for data freshness instead of blockNumber * blockTimeMs.
+  // The previous calculation was nonsensical: blockNumber is an absolute counter (e.g., 19M for
+  // Ethereum), so multiplying by blockTimeMs produces absurd values (~228B ms). Instead, use the
+  // pair's lastUpdated epoch timestamp which directly represents when data was last refreshed.
+  const calculateAge = (pair: typeof pair1): number => {
+    if (pair.lastUpdated && pair.lastUpdated > 0 && pair.lastUpdated <= timestamp) {
+      return timestamp - pair.lastUpdated;
+    }
+    // No valid timestamp available - treat as fresh data (age=0)
+    return 0;
   };
 
   const dataAge = Math.max(0, Math.max(
-    calculateAge(pair1.blockNumber),
-    calculateAge(pair2.blockNumber)
+    calculateAge(pair1),
+    calculateAge(pair2)
   ));
 
   // Guard against NaN/Infinity in confidence calculation

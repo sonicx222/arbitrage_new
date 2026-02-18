@@ -15,7 +15,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
+import { IncomingMessage, ServerResponse, Server } from 'http';
 import {
   createLogger,
   CircularBuffer,
@@ -23,6 +23,8 @@ import {
   resetRedisStreamsInstance,
   setupServiceShutdown,
   runServiceMain,
+  createSimpleHealthServer,
+  closeHealthServer,
   type Logger,
   type RedisStreamsClient,
   type StreamBatcher,
@@ -214,7 +216,7 @@ function createPendingOpportunity(intent: PendingSwapIntent): PendingOpportunity
  * const service = createMempoolDetectorService({
  *   instanceId: 'mempool-detector-1',
  *   chains: ['ethereum', 'bsc'],
- *   healthCheckPort: 3007,
+ *   healthCheckPort: 3008,
  * });
  *
  * service.on('pendingOpportunity', (opportunity) => {
@@ -398,14 +400,10 @@ export class MempoolDetectorService extends EventEmitter {
    * Cleanup all resources.
    */
   private async cleanup(): Promise<void> {
-    // Close health server
-    if (this.healthServer) {
-      await new Promise<void>((resolve) => {
-        this.healthServer!.close(() => resolve());
-      });
-      this.healthServer = null;
-      this.logger.debug('Health server closed');
-    }
+    // Close health server (with timeout via shared utility)
+    await closeHealthServer(this.healthServer);
+    this.healthServer = null;
+    this.logger.debug('Health server closed');
 
     // Disconnect all feeds
     // FIX 6: Remove feed-level EventEmitter listeners before disconnect to prevent
@@ -527,54 +525,37 @@ export class MempoolDetectorService extends EventEmitter {
 
   /**
    * FIX 1.1: Start HTTP health check server.
+   * Uses shared createSimpleHealthServer() utility from @arbitrage/core.
    */
   private startHealthServer(): void {
-    this.healthServer = createServer((req: IncomingMessage, res: ServerResponse) => {
-      if (req.url === '/health' || req.url === '/') {
+    this.healthServer = createSimpleHealthServer({
+      port: this.config.healthCheckPort,
+      serviceName: 'mempool-detector',
+      logger: this.logger,
+      description: 'Mempool Detector Service',
+      healthCheck: () => {
         const health = this.getHealth();
-        const statusCode = health.status === 'healthy' ? 200 :
-                          health.status === 'degraded' ? 200 : 503;
-
-        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(health));
-      } else if (req.url === '/ready') {
-        const ready = this.isRunning && this.feeds.size > 0;
-        res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ready,
-          instanceId: this.config.instanceId,
-          feedCount: this.feeds.size,
-        }));
-      } else if (req.url === '/stats') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          instanceId: this.config.instanceId,
-          stats: this.stats,
-          bufferStats: this.txBuffer.getStats(),
-          latencyBufferStats: this.latencyBuffer.getStats(),
-          batcherStats: this.streamBatcher?.getStats() ?? null,
-        }));
-      } else {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not found' }));
-      }
-    });
-
-    this.healthServer.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        this.logger.error('Health server port already in use', {
-          port: this.config.healthCheckPort,
-        });
-      } else {
-        this.logger.error('Health server error', { error: error.message });
-      }
-    });
-
-    this.healthServer.listen(this.config.healthCheckPort, () => {
-      this.logger.info('Health server listening', {
-        port: this.config.healthCheckPort,
-        endpoints: ['/health', '/ready', '/stats'],
-      });
+        // Spread all health data into the result; createSimpleHealthServer adds
+        // 'service' and 'timestamp' automatically, so we omit 'timestamp' to avoid duplication.
+        const { timestamp: _ts, ...healthData } = health;
+        return {
+          ...healthData,
+          statusCode: health.status === 'healthy' || health.status === 'degraded' ? 200 : 503,
+        };
+      },
+      readyCheck: () => this.isRunning && this.feeds.size > 0,
+      additionalRoutes: {
+        '/stats': (_req: IncomingMessage, res: ServerResponse) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            instanceId: this.config.instanceId,
+            stats: this.stats,
+            bufferStats: this.txBuffer.getStats(),
+            latencyBufferStats: this.latencyBuffer.getStats(),
+            batcherStats: this.streamBatcher?.getStats() ?? null,
+          }));
+        },
+      },
     });
   }
 

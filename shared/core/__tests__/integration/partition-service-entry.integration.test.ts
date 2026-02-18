@@ -27,6 +27,8 @@ import { createTestRedisClient, flushTestRedis } from '@arbitrage/test-utils';
 // =============================================================================
 
 // Mock @arbitrage/config to provide controlled partition data
+// Fix 12d: Added SOLANA_NATIVE to PARTITION_IDS and solana to CHAINS to match
+// the real config from shared/config/src/partition-ids.ts and chains.ts.
 jest.mock('@arbitrage/config', () => ({
   CHAINS: {
     bsc: { id: 56, name: 'BSC' },
@@ -37,6 +39,9 @@ jest.mock('@arbitrage/config', () => ({
     optimism: { id: 10, name: 'Optimism' },
     base: { id: 8453, name: 'Base' },
     ethereum: { id: 1, name: 'Ethereum' },
+    zksync: { id: 324, name: 'zkSync' },
+    linea: { id: 59144, name: 'Linea' },
+    solana: { id: 101, name: 'Solana' },
   },
   TESTNET_CHAINS: {},
   getPartition: jest.fn(),
@@ -45,6 +50,7 @@ jest.mock('@arbitrage/config', () => ({
     ASIA_FAST: 'asia-fast',
     L2_TURBO: 'l2-turbo',
     HIGH_VALUE: 'high-value',
+    SOLANA_NATIVE: 'solana-native',
   },
 }));
 

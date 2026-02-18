@@ -309,390 +309,293 @@ describe('Redis Subscription Memory Leak Regression Tests', () => {
 });
 
 // =============================================================================
-// Base Detector Stop Promise Race Tests
+// ServiceStateManager Stop/Start Mutex Regression Tests
+//
+// Finding #14 FIX: Replaced standalone promise-race patterns (lines 315-412)
+// with tests that import and exercise the REAL ServiceStateManager from
+// shared/core/src/service-state.ts, ensuring tests detect real regressions.
+//
+// @see service-state.ts — ServiceStateManager implementation
 // =============================================================================
 
-describe('Base Detector Stop Promise Race Regression Tests', () => {
-  it('should handle concurrent stop calls correctly', async () => {
-    // Simulate the stop promise pattern
-    let stopPromise: Promise<void> | null = null;
-    let isStopping = false;
-    let isRunning = true;
-    let cleanupCount = 0;
+describe('ServiceStateManager Stop Promise Race Regression Tests', () => {
+  let ServiceStateManagerClass: typeof import('../../src/service-state').ServiceStateManager;
+  let ServiceStateEnum: typeof import('../../src/service-state').ServiceState;
+  let createServiceStateFn: typeof import('../../src/service-state').createServiceState;
 
-    const performCleanup = async () => {
-      cleanupCount++;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    };
-
-    const stop = async (): Promise<void> => {
-      // If stop is already in progress, wait for it
-      if (stopPromise) {
-        return stopPromise;
-      }
-
-      // Guard against double stop
-      if (!isRunning && !isStopping) {
-        return;
-      }
-
-      // Set state BEFORE creating promise (the fix)
-      isStopping = true;
-      isRunning = false;
-      stopPromise = performCleanup();
-
-      try {
-        await stopPromise;
-      } finally {
-        isStopping = false;
-        stopPromise = null;
-      }
-    };
-
-    // Launch multiple concurrent stops
-    const promises = [stop(), stop(), stop(), stop(), stop()];
-    await Promise.all(promises);
-
-    // Cleanup should only happen once
-    expect(cleanupCount).toBe(1);
-    expect(isStopping).toBe(false);
-    expect(stopPromise).toBe(null);
+  beforeEach(async () => {
+    jest.resetModules();
+    mockRedisClient = createMockRedisClient();
+    const module = await import('../../src/service-state');
+    ServiceStateManagerClass = module.ServiceStateManager;
+    ServiceStateEnum = module.ServiceState;
+    createServiceStateFn = module.createServiceState;
   });
 
-  it('should allow start after stop completes', async () => {
-    let stopPromise: Promise<void> | null = null;
-    let isStopping = false;
-    let isRunning = false;
-
-    const stop = async (): Promise<void> => {
-      if (stopPromise) return stopPromise;
-      if (!isRunning && !isStopping) return;
-
-      isStopping = true;
-      isRunning = false;
-      stopPromise = new Promise(resolve => setTimeout(resolve, 50));
-
-      try {
-        await stopPromise;
-      } finally {
-        isStopping = false;
-        stopPromise = null;
-      }
-    };
-
-    const start = async (): Promise<void> => {
-      // Wait for pending stop (the fix)
-      if (stopPromise) {
-        await stopPromise;
-      }
-
-      if (isStopping) {
-        throw new Error('Cannot start while stopping');
-      }
-
-      if (isRunning) {
-        return;
-      }
-
-      isRunning = true;
-    };
-
-    // Start first
-    isRunning = true;
-
-    // Stop and immediately try to start
-    const stopP = stop();
-    const startP = start();
-
-    await Promise.all([stopP, startP]);
-
-    // Should be running after both complete
-    expect(isRunning).toBe(true);
-  });
-});
-
-// =============================================================================
-// Health Monitoring Shutdown Race Tests
-// =============================================================================
-
-describe('Health Monitoring Shutdown Race Regression Tests', () => {
-  it('should not run health check after shutdown starts', async () => {
-    let isStopping = false;
-    let isRunning = true;
-    let healthCheckRuns = 0;
-    let healthCheckAfterStop = 0;
-
-    const healthCheck = async () => {
-      // Guard at start (the fix)
-      if (isStopping || !isRunning) {
-        return;
-      }
-
-      healthCheckRuns++;
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Re-check after async operation (the fix)
-      if (isStopping || !isRunning) {
-        healthCheckAfterStop++;
-        return;
-      }
-    };
-
-    // Run several health checks
-    const checkPromises = [healthCheck(), healthCheck()];
-
-    // Stop in the middle
-    isStopping = true;
-    isRunning = false;
-
-    // More health checks after stop
-    checkPromises.push(healthCheck(), healthCheck());
-
-    await Promise.all(checkPromises);
-
-    // Only checks that started before stop should have run
-    expect(healthCheckRuns).toBe(2);
-    // Checks that ran async ops should have been cancelled
-    expect(healthCheckAfterStop).toBeLessThanOrEqual(2);
-  });
-
-  it('should capture redis reference before async operation', async () => {
-    let redis: MockRedisClient | null = mockRedisClient;
-    let updateCalls = 0;
-    let errorOccurred = false;
-
-    const healthCheck = async () => {
-      // Capture reference before async (the fix)
-      const redisRef = redis;
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Use captured reference
-      if (redisRef) {
-        try {
-          await redisRef.updateServiceHealth('test', {});
-          updateCalls++;
-        } catch {
-          errorOccurred = true;
-        }
-      }
-    };
-
-    // Start health check
-    const checkPromise = healthCheck();
-
-    // Null out redis during health check
-    redis = null;
-
-    await checkPromise;
-
-    // Should have completed without error because we captured the reference
-    expect(errorOccurred).toBe(false);
-    expect(updateCalls).toBe(1);
-  });
-});
-
-// =============================================================================
-// Promise.allSettled Cleanup Tests
-// =============================================================================
-
-describe('Promise.allSettled Cleanup Regression Tests', () => {
-  it('should cleanup all batchers even if one fails', async () => {
-    const cleanedUp: string[] = [];
-    const batchers = [
-      {
-        name: 'priceUpdate',
-        destroy: async () => {
-          cleanedUp.push('priceUpdate');
-        }
-      },
-      {
-        name: 'swapEvent',
-        destroy: async () => {
-          throw new Error('Cleanup failed');
-        }
-      },
-      {
-        name: 'whaleAlert',
-        destroy: async () => {
-          cleanedUp.push('whaleAlert');
-        }
-      }
-    ];
-
-    // Simulate Promise.allSettled cleanup pattern
-    const cleanupPromises = batchers.map(async ({ name, destroy }) => {
-      await destroy();
-      return name;
+  it('should handle concurrent stop calls via executeStop mutex', async () => {
+    const manager = createServiceStateFn({
+      serviceName: 'test-stop-race',
+      emitEvents: false,
     });
 
-    const results = await Promise.allSettled(cleanupPromises);
+    // Start the service first
+    await manager.executeStart(async () => {});
+    expect(manager.getState()).toBe(ServiceStateEnum.RUNNING);
 
-    // Check results
-    const successes = results.filter(r => r.status === 'fulfilled');
-    const failures = results.filter(r => r.status === 'rejected');
+    let cleanupCount = 0;
+    const stopFn = async () => {
+      cleanupCount++;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
 
-    expect(successes.length).toBe(2);
-    expect(failures.length).toBe(1);
-    expect(cleanedUp).toContain('priceUpdate');
-    expect(cleanedUp).toContain('whaleAlert');
+    // Launch multiple concurrent stops — only the first should execute
+    const results = await Promise.all([
+      manager.executeStop(stopFn),
+      manager.executeStop(stopFn),
+      manager.executeStop(stopFn),
+    ]);
+
+    // Only one stop should have succeeded (the first); others fail because
+    // the service is no longer in RUNNING state
+    const successes = results.filter(r => r.success);
+    expect(successes.length).toBe(1);
+    expect(manager.getState()).toBe(ServiceStateEnum.STOPPED);
   });
 
-  it('should run cleanup in parallel', async () => {
-    const startTimes: number[] = [];
-    const endTimes: number[] = [];
+  it('should allow start after stop completes via executeStart/executeStop', async () => {
+    const manager = createServiceStateFn({
+      serviceName: 'test-start-after-stop',
+      emitEvents: false,
+    });
 
-    const batchers = Array(3).fill(null).map((_, i) => ({
-      name: `batcher${i}`,
-      destroy: async () => {
-        startTimes.push(Date.now());
-        await new Promise(resolve => setTimeout(resolve, 50));
-        endTimes.push(Date.now());
-      }
-    }));
+    // Start
+    await manager.executeStart(async () => {});
+    expect(manager.getState()).toBe(ServiceStateEnum.RUNNING);
 
-    const start = Date.now();
-    await Promise.allSettled(batchers.map(b => b.destroy()));
-    const totalTime = Date.now() - start;
+    // Stop
+    await manager.executeStop(async () => {});
+    expect(manager.getState()).toBe(ServiceStateEnum.STOPPED);
 
-    // If running in parallel, total time should be ~50ms, not ~150ms
-    // Allow 200ms for CI environment stability
-    expect(totalTime).toBeLessThan(200);
+    // Start again — should succeed
+    const result = await manager.executeStart(async () => {});
+    expect(result.success).toBe(true);
+    expect(manager.getState()).toBe(ServiceStateEnum.RUNNING);
 
-    // All should have started at roughly the same time
-    const startSpread = Math.max(...startTimes) - Math.min(...startTimes);
-    expect(startSpread).toBeLessThan(20);
+    // Cleanup
+    await manager.executeStop(async () => {});
   });
 
-  it('should null references regardless of cleanup success', async () => {
-    let priceUpdateBatcher: any = { destroy: async () => { throw new Error('fail'); } };
-    let swapEventBatcher: any = { destroy: async () => {} };
-    let whaleAlertBatcher: any = null;
+  it('should reject start while service is in STOPPING state', async () => {
+    const manager = createServiceStateFn({
+      serviceName: 'test-start-during-stop',
+      emitEvents: false,
+    });
 
-    const batchers = [
-      { name: 'priceUpdate', batcher: priceUpdateBatcher },
-      { name: 'swapEvent', batcher: swapEventBatcher },
-      { name: 'whaleAlert', batcher: whaleAlertBatcher }
-    ];
+    await manager.executeStart(async () => {});
 
-    const cleanupPromises = batchers
-      .filter(({ batcher }) => batcher !== null)
-      .map(async ({ batcher }) => {
-        await batcher!.destroy();
-      });
+    // Start a slow stop
+    const stopPromise = manager.executeStop(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
 
-    await Promise.allSettled(cleanupPromises);
+    // Immediately try to start — should fail because state is STOPPING
+    const startResult = await manager.executeStart(async () => {});
+    expect(startResult.success).toBe(false);
 
-    // Always null out regardless of success (the pattern)
-    priceUpdateBatcher = null;
-    swapEventBatcher = null;
-    whaleAlertBatcher = null;
-
-    expect(priceUpdateBatcher).toBeNull();
-    expect(swapEventBatcher).toBeNull();
-    expect(whaleAlertBatcher).toBeNull();
+    await stopPromise;
+    expect(manager.getState()).toBe(ServiceStateEnum.STOPPED);
   });
 });
 
 // =============================================================================
-// Integration: Full Lifecycle Test
+// stopAndNullify and clearIntervalSafe/clearTimeoutSafe Regression Tests
+//
+// Finding #14 FIX: Replaced standalone Promise.allSettled patterns (lines 499-595)
+// with tests that import and exercise REAL lifecycle-utils from
+// shared/core/src/lifecycle-utils.ts.
+//
+// @see lifecycle-utils.ts — stopAndNullify, clearIntervalSafe, clearTimeoutSafe
 // =============================================================================
 
-describe('Full Lifecycle Integration Regression Tests', () => {
+import {
+  stopAndNullify,
+  clearIntervalSafe,
+  clearTimeoutSafe,
+} from '../../src/lifecycle-utils';
+
+describe('Lifecycle Utils Cleanup Regression Tests', () => {
+  describe('stopAndNullify', () => {
+    it('should call stop() and return null', async () => {
+      const stopMock = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+      const service = { stop: stopMock };
+
+      const result = await stopAndNullify(service);
+
+      expect(stopMock).toHaveBeenCalledTimes(1);
+      expect(result).toBeNull();
+    });
+
+    it('should return null without calling stop when ref is null', async () => {
+      const result = await stopAndNullify(null);
+      expect(result).toBeNull();
+    });
+
+    it('should propagate stop() errors', async () => {
+      const service = { stop: jest.fn<() => Promise<void>>().mockRejectedValue(new Error('stop failed')) };
+
+      await expect(stopAndNullify(service)).rejects.toThrow('stop failed');
+    });
+
+    it('should handle synchronous stop() methods', async () => {
+      const service = { stop: jest.fn<() => void>() };
+
+      const result = await stopAndNullify(service);
+
+      expect(service.stop).toHaveBeenCalled();
+      expect(result).toBeNull();
+    });
+
+    it('should cleanup multiple services with Promise.allSettled', async () => {
+      const services = [
+        { stop: jest.fn<() => Promise<void>>().mockResolvedValue(undefined) },
+        { stop: jest.fn<() => Promise<void>>().mockRejectedValue(new Error('fail')) },
+        { stop: jest.fn<() => Promise<void>>().mockResolvedValue(undefined) },
+      ];
+
+      const results = await Promise.allSettled(
+        services.map(s => stopAndNullify(s))
+      );
+
+      expect(results[0].status).toBe('fulfilled');
+      expect(results[1].status).toBe('rejected');
+      expect(results[2].status).toBe('fulfilled');
+
+      // All stop functions were called
+      for (const s of services) {
+        expect(s.stop).toHaveBeenCalledTimes(1);
+      }
+    });
+  });
+
+  describe('clearIntervalSafe', () => {
+    it('should clear interval and return null', () => {
+      const interval = setInterval(() => {}, 1000);
+      const result = clearIntervalSafe(interval);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when given null', () => {
+      const result = clearIntervalSafe(null);
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('clearTimeoutSafe', () => {
+    it('should clear timeout and return null', () => {
+      const timeout = setTimeout(() => {}, 1000);
+      const result = clearTimeoutSafe(timeout);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when given null', () => {
+      const result = clearTimeoutSafe(null);
+      expect(result).toBeNull();
+    });
+  });
+});
+
+// =============================================================================
+// ServiceStateManager Full Lifecycle Integration Regression Tests
+//
+// Finding #14 FIX: Replaced standalone start/stop lifecycle patterns (lines 601-697)
+// with tests that exercise the REAL ServiceStateManager full lifecycle,
+// including rapid cycling and state machine transitions.
+//
+// @see service-state.ts — ServiceStateManager implementation
+// =============================================================================
+
+describe('ServiceStateManager Full Lifecycle Regression Tests', () => {
+  let createServiceStateFn2: typeof import('../../src/service-state').createServiceState;
+  let ServiceStateEnum2: typeof import('../../src/service-state').ServiceState;
+
+  beforeEach(async () => {
+    jest.resetModules();
+    mockRedisClient = createMockRedisClient();
+    const module = await import('../../src/service-state');
+    createServiceStateFn2 = module.createServiceState;
+    ServiceStateEnum2 = module.ServiceState;
+  });
+
   it('should handle rapid start/stop cycles without race conditions', async () => {
-    let stopPromise: Promise<void> | null = null;
-    let isStopping = false;
-    let isRunning = false;
+    const manager = createServiceStateFn2({
+      serviceName: 'test-rapid-cycle',
+      emitEvents: false,
+    });
+
     let startCount = 0;
     let stopCount = 0;
 
-    const start = async (): Promise<boolean> => {
-      if (stopPromise) await stopPromise;
-      if (isStopping) return false;
-      if (isRunning) return false;
-
-      isRunning = true;
-      startCount++;
-      await new Promise(resolve => setTimeout(resolve, 10));
-      return true;
-    };
-
-    const stop = async (): Promise<void> => {
-      if (stopPromise) return stopPromise;
-      if (!isRunning && !isStopping) return;
-
-      isStopping = true;
-      isRunning = false;
-      stopPromise = (async () => {
-        stopCount++;
-        await new Promise(resolve => setTimeout(resolve, 10));
-      })();
-
-      try {
-        await stopPromise;
-      } finally {
-        isStopping = false;
-        stopPromise = null;
-      }
-    };
-
-    // Rapid cycles
     for (let i = 0; i < 5; i++) {
-      await start();
-      await stop();
+      const startResult = await manager.executeStart(async () => { startCount++; });
+      expect(startResult.success).toBe(true);
+      expect(manager.getState()).toBe(ServiceStateEnum2.RUNNING);
+
+      const stopResult = await manager.executeStop(async () => { stopCount++; });
+      expect(stopResult.success).toBe(true);
+      expect(manager.getState()).toBe(ServiceStateEnum2.STOPPED);
     }
 
     expect(startCount).toBe(5);
     expect(stopCount).toBe(5);
-    expect(isRunning).toBe(false);
-    expect(isStopping).toBe(false);
-    expect(stopPromise).toBeNull();
+    expect(manager.getState()).toBe(ServiceStateEnum2.STOPPED);
   });
 
-  it('should handle overlapping start/stop without deadlock', async () => {
-    let stopPromise: Promise<void> | null = null;
-    let isStopping = false;
-    let isRunning = false;
+  it('should reject double-start while already running', async () => {
+    const manager = createServiceStateFn2({
+      serviceName: 'test-double-start',
+      emitEvents: false,
+    });
 
-    const start = async (): Promise<boolean> => {
-      if (stopPromise) await stopPromise;
-      if (isStopping) return false;
-      if (isRunning) return false;
+    // First start succeeds
+    const result1 = await manager.executeStart(async () => {});
+    expect(result1.success).toBe(true);
 
-      isRunning = true;
-      await new Promise(resolve => setTimeout(resolve, 20));
-      return true;
-    };
+    // Second start fails (already running)
+    const result2 = await manager.executeStart(async () => {});
+    expect(result2.success).toBe(false);
 
-    const stop = async (): Promise<void> => {
-      if (stopPromise) return stopPromise;
-      if (!isRunning && !isStopping) return;
+    expect(manager.getState()).toBe(ServiceStateEnum2.RUNNING);
 
-      isStopping = true;
-      isRunning = false;
-      stopPromise = new Promise(resolve => setTimeout(resolve, 20));
+    // Cleanup
+    await manager.executeStop(async () => {});
+  });
 
-      try {
-        await stopPromise;
-      } finally {
-        isStopping = false;
-        stopPromise = null;
-      }
-    };
+  it('should reject double-stop while already stopped', async () => {
+    const manager = createServiceStateFn2({
+      serviceName: 'test-double-stop',
+      emitEvents: false,
+    });
 
-    // Start service
-    await start();
-    expect(isRunning).toBe(true);
+    // Not started — stop should fail
+    const result = await manager.executeStop(async () => {});
+    expect(result.success).toBe(false);
+  });
 
-    // Launch stop and start concurrently
-    const stopP = stop();
-    const startP = start(); // Should wait for stop
+  it('should transition through all states correctly', async () => {
+    const manager = createServiceStateFn2({
+      serviceName: 'test-state-transitions',
+      emitEvents: false,
+    });
 
-    await Promise.all([stopP, startP]);
+    expect(manager.getState()).toBe(ServiceStateEnum2.STOPPED);
 
-    // Should be running after both complete
-    expect(isRunning).toBe(true);
-    expect(isStopping).toBe(false);
+    await manager.executeStart(async () => {});
+    expect(manager.getState()).toBe(ServiceStateEnum2.RUNNING);
+
+    await manager.executeStop(async () => {});
+    expect(manager.getState()).toBe(ServiceStateEnum2.STOPPED);
   });
 });
 

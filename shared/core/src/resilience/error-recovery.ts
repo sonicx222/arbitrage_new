@@ -18,6 +18,8 @@ export interface RecoveryContext {
   metadata?: any;
   correlationId?: string;
   attemptCount?: number;
+  /** Optional callable to retry the failed operation. When provided, retry strategies will invoke it. */
+  retryFn?: () => Promise<unknown>;
 }
 
 export interface RecoveryResult {
@@ -177,16 +179,24 @@ export class ErrorRecoveryOrchestrator {
         return retryableErrors.some(code => context.error.message.includes(code)) &&
           (context.attemptCount ?? 0) < 3;
       },
-      // P0-3 FIX: Removed Math.random() simulation. Without the original callable,
-      // the strategy cannot actually retry the operation. Return honest failure so
-      // the DLQ fallback (priority 10) correctly catches it as last resort.
       execute: async (context) => {
-        // TODO: Accept original operation callable through RecoveryContext to enable actual retry
-        logger.warn('simple_retry strategy is not yet implemented — operation cannot be retried without the original callable', {
-          operation: context.operation,
-          service: context.service
-        });
-        return { success: false, strategy: 'simple_retry', nextAction: 'not_implemented' };
+        if (!context.retryFn) {
+          logger.warn('simple_retry: no retryFn provided, cannot retry operation', {
+            operation: context.operation,
+            service: context.service
+          });
+          return { success: false, strategy: 'simple_retry', nextAction: 'needs_retryFn' };
+        }
+        try {
+          await context.retryFn();
+          return { success: true, strategy: 'simple_retry' };
+        } catch (retryError) {
+          logger.warn('simple_retry failed', {
+            operation: context.operation,
+            error: (retryError as Error).message
+          });
+          return { success: false, strategy: 'simple_retry', error: retryError as Error };
+        }
       }
     });
 
@@ -200,16 +210,27 @@ export class ErrorRecoveryOrchestrator {
           context.error.message.includes('too many requests') ||
           (context.error as any).status === 429;
       },
-      // P0-3 FIX: Removed Math.random() simulation. Without the original callable,
-      // the strategy cannot actually perform exponential backoff retry. Return honest
-      // failure so the DLQ fallback (priority 10) correctly catches it.
       execute: async (context) => {
-        // TODO: Accept original operation callable through RecoveryContext to enable actual retry
-        logger.warn('exponential_backoff strategy is not yet implemented — operation cannot be retried without the original callable', {
-          operation: context.operation,
-          service: context.service
-        });
-        return { success: false, strategy: 'exponential_backoff', nextAction: 'not_implemented' };
+        if (!context.retryFn) {
+          logger.warn('exponential_backoff: no retryFn provided, cannot retry operation', {
+            operation: context.operation,
+            service: context.service
+          });
+          return { success: false, strategy: 'exponential_backoff', nextAction: 'needs_retryFn' };
+        }
+        const delay = Math.min(1000 * Math.pow(2, context.attemptCount ?? 0), 30000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        try {
+          await context.retryFn();
+          return { success: true, strategy: 'exponential_backoff' };
+        } catch (retryError) {
+          logger.warn('exponential_backoff retry failed', {
+            operation: context.operation,
+            attempt: context.attemptCount,
+            error: (retryError as Error).message
+          });
+          return { success: false, strategy: 'exponential_backoff', error: retryError as Error };
+        }
       }
     });
 

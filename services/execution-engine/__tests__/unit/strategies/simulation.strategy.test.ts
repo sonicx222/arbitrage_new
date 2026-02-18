@@ -16,35 +16,17 @@ import { SimulationStrategy } from '../../../src/strategies/simulation.strategy'
 import type { StrategyContext, Logger, ResolvedSimulationConfig } from '../../../src/types';
 import { ExecutionErrorCode } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import {
+  createMockStrategyLogger,
+  createMockStrategyOpportunity,
+} from '@arbitrage/test-utils';
 
 // =============================================================================
-// Mock Implementations
+// Mock Implementations (shared factories with local aliases)
 // =============================================================================
 
-const createMockLogger = (): Logger => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-});
-
-const createMockOpportunity = (
-  overrides: Partial<ArbitrageOpportunity> = {}
-): ArbitrageOpportunity => ({
-  id: 'test-opp-123',
-  type: 'simple',
-  buyChain: 'ethereum',
-  sellChain: 'ethereum',
-  buyDex: 'uniswap',
-  sellDex: 'sushiswap',
-  tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-  tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-  amountIn: '1000000000000000000',
-  expectedProfit: 100,
-  confidence: 0.95,
-  timestamp: Date.now() - 500,
-  ...overrides,
-});
+const createMockLogger = createMockStrategyLogger;
+const createMockOpportunity = createMockStrategyOpportunity;
 
 const createMockContext = (): StrategyContext => ({
   providers: new Map(),

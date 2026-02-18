@@ -115,6 +115,35 @@ export const FEATURE_FLAGS = {
    * @see services/execution-engine/src/services/commit-reveal.service.ts
    */
   useCommitRevealRedis: process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true',
+
+  /**
+   * Enable flash loans on destination chain for cross-chain arbitrage (FE-001).
+   *
+   * When enabled:
+   * - Cross-chain strategy checks if dest chain supports flash loans
+   * - If supported, executes sell via FlashLoanStrategy for atomic execution
+   * - Falls back to direct DEX swap if flash loan fails or isn't supported
+   * - Requires FlashLoanStrategy and FlashLoanProviderFactory to be initialized
+   *
+   * When disabled (default):
+   * - Cross-chain strategy always uses direct DEX swap on destination chain
+   * - Set FEATURE_DEST_CHAIN_FLASH_LOAN=true to enable
+   *
+   * Benefits:
+   * - Atomic execution on dest chain (reverts if unprofitable after bridge)
+   * - Larger positions without holding capital on dest chain
+   * - Protection against price movement during bridge delay
+   *
+   * Trade-offs:
+   * - Flash loan fee: ~0.09% on Aave V3, ~0.25-0.30% on other protocols
+   * - Requires FlashLoanArbitrage contract deployed on dest chain
+   * - Increased error handling complexity (bridge succeeded but flash loan failed)
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see docs/research/FUTURE_ENHANCEMENTS.md#FE-001
+   * @see services/execution-engine/src/strategies/cross-chain.strategy.ts
+   */
+  useDestChainFlashLoan: process.env.FEATURE_DEST_CHAIN_FLASH_LOAN === 'true',
 };
 
 /**
@@ -357,6 +386,40 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       logger.warn(message);
     } else {
       console.warn(`⚠️  WARNING: ${message}`);
+    }
+  }
+
+  // Validate destination chain flash loan feature (FE-001)
+  if (FEATURE_FLAGS.useDestChainFlashLoan) {
+    // Check if any flash loan contract addresses are configured
+    const configuredChains: string[] = [];
+    for (const chain of ['ethereum', 'arbitrum', 'base', 'polygon', 'optimism', 'avalanche', 'bsc', 'fantom', 'zksync', 'linea']) {
+      if (process.env[`FLASH_LOAN_CONTRACT_${chain.toUpperCase()}`]) {
+        configuredChains.push(chain);
+      }
+    }
+
+    if (configuredChains.length === 0) {
+      const message =
+        'FEATURE_DEST_CHAIN_FLASH_LOAN is enabled but no flash loan contract addresses are configured. ' +
+        'Destination chain flash loans will be unavailable (cross-chain strategy will use direct DEX swaps).';
+
+      const details = {
+        envVarsNeeded: 'FLASH_LOAN_CONTRACT_ETHEREUM, FLASH_LOAN_CONTRACT_ARBITRUM, etc.',
+      };
+
+      if (logger) {
+        logger.warn(message, details);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`, details);
+      }
+    } else {
+      const message = `Destination chain flash loans enabled for chains: ${configuredChains.join(', ')}`;
+      if (logger) {
+        logger.info(message, { chains: configuredChains });
+      } else {
+        console.info(`✅ ${message}`);
+      }
     }
   }
 }

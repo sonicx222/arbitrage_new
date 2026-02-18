@@ -99,7 +99,7 @@ const loadServiceWithMocks = async () => {
           },
         },
         service: {
-          port: 3007,
+          port: 3008,
           instanceId: 'test-mempool-detector',
           maxBufferSize: 10000,
           batchSize: 100,
@@ -269,7 +269,7 @@ describe('MempoolDetectorService', () => {
     it('should export default config', async () => {
       const { DEFAULT_CONFIG } = await loadServiceWithMocks();
       expect(DEFAULT_CONFIG).toBeDefined();
-      expect(DEFAULT_CONFIG.healthCheckPort).toBe(3007);
+      expect(DEFAULT_CONFIG.healthCheckPort).toBe(3008);
     });
   });
 

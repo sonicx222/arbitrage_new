@@ -733,47 +733,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
       }
 
-      // Prepare and execute sell transaction on destination chain using DEX router
-      //
-      // FUTURE ENHANCEMENT (FE-001): Flash loans on destination chain
-      // =================================================================
-      // Status: DEFERRED - Current direct DEX swap is sufficient for MVP
-      // Priority: Medium | Effort: 3 days | Depends on: FlashLoanProviderFactory
-      // Tracking: docs/FUTURE_ENHANCEMENTS.md#FE-001
-      //
-      // Current Implementation: Direct DEX swap after bridge completion.
-      //   - Pros: Simple, works immediately after bridge
-      //   - Cons: Requires capital on destination chain
-      //
-      // Proposed Enhancement: Flash loan on destination chain for sell transaction.
-      //
-      // Benefits:
-      // 1. Larger positions without holding capital on dest chain
-      // 2. Atomic execution (revert if unprofitable after bridge)
-      // 3. Reduced capital lockup during bridge waiting period
-      // 4. Protection against price movement during bridge delay
-      //
-      // Trade-offs:
-      // - Flash loan fee: ~0.09% on Aave V3, ~0.25-0.30% on other protocols
-      // - Requires FlashLoanArbitrage contract deployed on dest chain
-      // - Increased complexity in error handling (bridge succeeded but flash loan failed)
-      // - Cross-chain flash loans are NOT atomic (bridge completes before flash loan)
-      //
-      // Decision: Deferred until production metrics show capital constraints on dest chains.
-      // Rationale: Direct swaps are simpler and sufficient for current trade sizes.
-      // Current approach handles bridge completion + DEX swap atomically without flash loan overhead.
-      //
-      // Implementation Plan (when reconsidered):
-      // 1. Check if FlashLoanProviderFactory.isFullySupported(destChain)
-      // 2. If supported: use FlashLoanStrategy for sell
-      // 3. If not supported: fall back to direct swap (current behavior)
-      // 4. Add metrics to compare profitability: flash_loan_dest_chain vs direct_swap
-      //
-      // Review Triggers: Reconsider if:
-      // - Average dest chain capital < $10K and affecting trade sizes
-      // - Capital lockup during bridge wait becomes significant (>5 minutes average)
-      // - Flash loan fees drop below 0.05%
-      // =================================================================
+      // Execute sell transaction on destination chain
+      // FE-001: Supports flash loan execution (atomic, capital-efficient) with fallback to direct DEX swap
+      // @see docs/research/FUTURE_ENHANCEMENTS.md#FE-001
 
       // BUG-4.2-FIX: Create a "sell opportunity" with reversed tokens for destination swap
       // After bridging, we have bridgeToken (= tokenOut) on destination chain
@@ -874,255 +836,25 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
       }
 
-      // Standard DEX swap path (used when flash loans not supported or flash loan failed)
-      const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, destChain, ctx);
+      // CQ3: Standard DEX swap path delegated to private method
+      const dexSellResult = await this.executeDirectDexSell(
+        opportunity, sellOpportunity, bridgeToken, sellAmount,
+        destChain, destWallet, destValidation, sellNonce, bridgeResult, ctx
+      );
 
-      // Ensure token approval for DEX router before swap
-      // BUG-4.2-FIX: Use the bridged token (bridgeToken) for approval, not tokenIn
-      // The bridged token is what we're selling on the destination chain
-      if (bridgeToken && sellTx.to) {
-        try {
-          const amountToApprove = BigInt(sellAmount);
-          const approvalNeeded = await this.ensureTokenAllowance(
-            bridgeToken,               // BUG-4.2-FIX: Approve the token we're selling
-            sellTx.to as string,
-            amountToApprove,           // BUG-4.2-FIX: Use bridged amount, not original amountIn
-            destChain,
-            ctx
-          );
-          if (approvalNeeded) {
-            this.logger.info('Token approval granted for destination sell', {
-              opportunityId: opportunity.id,
-              token: bridgeToken,       // BUG-4.2-FIX: Log the correct token
-              amount: sellAmount,
-              router: sellTx.to,
-              destChain,
-            });
-          }
-        } catch (approvalError) {
-          this.logger.warn('Token approval failed, proceeding with sell attempt', {
-            opportunityId: opportunity.id,
-            token: bridgeToken,
-            error: getErrorMessage(approvalError),
-          });
-          // Continue anyway - approval might already exist or swap might still work
-        }
+      if (dexSellResult.errorResult) {
+        return dexSellResult.errorResult;
       }
 
-      // Apply gas settings for destination chain
-      const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
-      if (sellNonce !== undefined) {
-        sellTx.nonce = sellNonce;
-      }
+      sellReceipt = dexSellResult.sellReceipt;
+      sellTxHash = dexSellResult.sellTxHash;
+      usedMevProtection = dexSellResult.usedMevProtection;
 
-      // Bug 4.2 Fix: Verify destination provider health before sending sell transaction
-      // After bridge wait (potentially minutes), provider could have disconnected
-      const destProvider = ctx.providers.get(destChain);
-      if (destProvider) {
-        const isDestProviderHealthy = await this.isProviderHealthy(destProvider, destChain, ctx);
-        if (!isDestProviderHealthy) {
-          // Mark sell nonce as failed since we won't attempt the transaction
-          if (ctx.nonceManager && sellNonce !== undefined) {
-            ctx.nonceManager.failTransaction(destChain, sellNonce, 'Provider unhealthy');
-          }
-
-          this.logger.error('Destination provider unhealthy after bridge - sell not attempted', {
-            opportunityId: opportunity.id,
-            destChain,
-            bridgeTxHash: bridgeResult.sourceTxHash,
-          });
-
-          return createErrorResult(
-            opportunity.id,
-            formatExecutionError(
-              ExecutionErrorCode.NO_PROVIDER,
-              `Destination provider (${destChain}) unhealthy after bridge. Funds bridged but sell not executed.`
-            ),
-            destChain,
-            opportunity.sellDex || 'unknown',
-            bridgeResult.sourceTxHash
-          );
-        }
-      }
-
-      // Fix 9.3: Apply MEV protection to destination sell transaction
-      // This was previously missing, leaving sell transactions vulnerable to MEV attacks
-      const protectedSellTx = await this.applyMEVProtection(sellTx, destChain, ctx);
-
-      // Note: sellReceipt, sellTxHash, usedMevProtection declared above (Fix 7.2)
-
-      try {
-        // Fix 9.3: Check MEV eligibility for destination chain and use protected submission if available
-        const { shouldUseMev, mevProvider, chainSettings } = this.checkMevEligibility(
-          destChain,
-          ctx,
-          opportunity.expectedProfit
-        );
-
-        if (shouldUseMev && mevProvider) {
-          // Use MEV protected submission
-          this.logger.info('Using MEV protection for destination sell', {
-            opportunityId: opportunity.id,
-            destChain,
-            strategy: mevProvider.strategy,
-          });
-
-          const mevResult = await this.withTransactionTimeout(
-            () => mevProvider.sendProtectedTransaction(protectedSellTx, {
-              simulate: false, // Already validated via simulation earlier
-              priorityFeeGwei: chainSettings?.priorityFeeGwei,
-            }),
-            'mevProtectedDestinationSell'
-          );
-
-          if (!mevResult.success) {
-            throw new Error(`MEV protected submission failed: ${mevResult.error}`);
-          }
-
-          sellTxHash = mevResult.transactionHash;
-          usedMevProtection = true;
-
-          // Get receipt if available
-          if (sellTxHash && destValidation.provider) {
-            sellReceipt = await this.withTransactionTimeout(
-              () => destValidation.provider.getTransactionReceipt(sellTxHash!),
-              'getMevSellReceipt'
-            );
-          }
-
-          this.logger.info('MEV protected destination sell completed', {
-            opportunityId: opportunity.id,
-            destChain,
-            sellTxHash,
-            strategy: mevResult.strategy,
-            usedFallback: mevResult.usedFallback,
-          });
-        } else {
-          // Standard transaction submission (no MEV protection available/needed)
-          const sellTxResponse = await this.withTransactionTimeout(
-            () => destWallet.sendTransaction(protectedSellTx),
-            'destinationSell'
-          );
-
-          sellTxHash = sellTxResponse.hash;
-
-          sellReceipt = await this.withTransactionTimeout(
-            () => sellTxResponse.wait(),
-            'waitForSellReceipt'
-          );
-
-          this.logger.info('Destination sell executed (standard)', {
-            opportunityId: opportunity.id,
-            destChain,
-            sellTxHash,
-            gasUsed: sellReceipt?.gasUsed?.toString(),
-          });
-        }
-
-        // Confirm sell nonce
-        if (ctx.nonceManager && sellNonce !== undefined && sellTxHash) {
-          ctx.nonceManager.confirmTransaction(destChain, sellNonce, sellTxHash);
-        }
-      } catch (sellError) {
-        // Sell failed - bridge succeeded but profit not captured
-        if (ctx.nonceManager && sellNonce !== undefined) {
-          ctx.nonceManager.failTransaction(destChain, sellNonce, getErrorMessage(sellError));
-        }
-
-        this.logger.error('Destination sell failed', {
-          opportunityId: opportunity.id,
-          destChain,
-          bridgeTxHash: bridgeResult.sourceTxHash,
-          usedMevProtection,
-          error: getErrorMessage(sellError),
-        });
-
-        return createErrorResult(
-          opportunity.id,
-          formatExecutionError(ExecutionErrorCode.SELL_FAILED, `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`),
-          destChain,
-          opportunity.sellDex || 'unknown',
-          bridgeResult.sourceTxHash
-        );
-      }
-
-      // Step 6: Calculate final results
-      const executionTimeMs = Date.now() - startTime;
-
-      // Get source chain gas price for bridge cost calculation
-      const sourceGasPrice = await this.getOptimalGasPrice(sourceChain, ctx);
-
-      // Fix 3.3: Use chain-specific native token prices for accurate gas cost calculation
-      // Different chains have different native tokens (ETH, MATIC, BNB, etc.)
-      let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
-      let destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
-
-      // Bug 4.1 Fix: Validate native token prices are not zero or invalid
-      // If getNativeTokenPrice returns 0 (unsupported chain with suppressWarning),
-      // calculations would produce incorrect results (zero gas costs, inflated profits)
-      const DEFAULT_NATIVE_TOKEN_PRICE_USD = 2000; // Conservative ETH estimate as fallback
-      if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
-        this.logger.warn('Invalid source chain native token price, using fallback', {
-          opportunityId: opportunity.id,
-          sourceChain,
-          originalPrice: sourceNativeTokenPriceUsd,
-          fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
-        });
-        sourceNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
-      }
-      if (!Number.isFinite(destNativeTokenPriceUsd) || destNativeTokenPriceUsd <= 0) {
-        this.logger.warn('Invalid dest chain native token price, using fallback', {
-          opportunityId: opportunity.id,
-          destChain,
-          originalPrice: destNativeTokenPriceUsd,
-          fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
-        });
-        destNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
-      }
-
-      // Calculate bridge gas cost in source chain's native token, then convert to USD
-      const bridgeGasCostNative = bridgeResult.gasUsed
-        ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
-        : 0;
-      const bridgeGasCostUsd = bridgeGasCostNative * sourceNativeTokenPriceUsd;
-
-      // Calculate sell gas cost in destination chain's native token, then convert to USD
-      const sellGasCostNative = sellReceipt
-        ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice || destGasPrice)))
-        : 0;
-      const sellGasCostUsd = sellGasCostNative * destNativeTokenPriceUsd;
-
-      // Total gas cost in USD
-      const totalGasCostUsd = bridgeGasCostUsd + sellGasCostUsd;
-
-      // Calculate actual profit in USD (expected - bridge fees - gas costs)
-      const actualProfit = expectedProfit - bridgeFeeUsd - totalGasCostUsd;
-
-      this.logger.info('Cross-chain arbitrage completed', {
-        opportunityId: opportunity.id,
-        executionTimeMs,
-        bridgeFeeEth,
-        bridgeFeeUsd,
-        bridgeGasCostUsd,
-        sellGasCostUsd,
-        totalGasCostUsd,
-        sourceNativeTokenPriceUsd,
-        destNativeTokenPriceUsd,
-        expectedProfit,
-        actualProfit,
-      });
-
-      // Fix 6.2: Use createSuccessResult helper for consistency
-      return createSuccessResult(
-        opportunity.id,
-        sellTxHash || bridgeResult.sourceTxHash || '',
-        destChain, // Report final chain where sell occurred
-        opportunity.sellDex || 'unknown',
-        {
-          actualProfit,
-          gasUsed: sellReceipt ? Number(sellReceipt.gasUsed) : (bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined),
-          gasCost: totalGasCostUsd, // Gas cost in USD for consistency with actualProfit
-        }
+      // CQ3: Final profit calculation delegated to private method
+      return await this.calculateCrossChainResults(
+        opportunity, sourceChain, destChain, startTime, expectedProfit,
+        bridgeFeeEth, bridgeFeeUsd, bridgeResult, sellReceipt, sellTxHash,
+        usedDestFlashLoan, usedMevProtection, ctx
       );
 
     } catch (error) {
@@ -1140,6 +872,303 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         opportunity.buyDex || 'unknown'
       );
     }
+  }
+
+  // ===========================================================================
+  // CQ3: Extracted Sub-Methods for execute() Readability
+  // ===========================================================================
+
+  /**
+   * CQ3: Execute destination sell via standard DEX swap (non-flash-loan path).
+   *
+   * Handles: token approval, gas settings, provider health check, MEV protection,
+   * transaction submission, and nonce management.
+   *
+   * No new try-catch blocks are added here; the caller's try-catch handles errors.
+   * The sell transaction's try-catch is preserved as it was (for nonce cleanup).
+   */
+  private async executeDirectDexSell(
+    opportunity: ArbitrageOpportunity,
+    sellOpportunity: ArbitrageOpportunity,
+    bridgeToken: string,
+    sellAmount: string,
+    destChain: string,
+    destWallet: ethers.Wallet,
+    destValidation: { valid: true; wallet: ethers.Wallet; provider: ethers.JsonRpcProvider },
+    sellNonce: number | undefined,
+    bridgeResult: { sourceTxHash?: string; gasUsed?: bigint },
+    ctx: StrategyContext,
+  ): Promise<{
+    sellReceipt: ethers.TransactionReceipt | null;
+    sellTxHash: string | undefined;
+    usedMevProtection: boolean;
+    errorResult?: ExecutionResult;
+  }> {
+    let sellReceipt: ethers.TransactionReceipt | null = null;
+    let sellTxHash: string | undefined;
+    let usedMevProtection = false;
+
+    const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, destChain, ctx);
+
+    // Ensure token approval for DEX router before swap
+    if (bridgeToken && sellTx.to) {
+      try {
+        const amountToApprove = BigInt(sellAmount);
+        const approvalNeeded = await this.ensureTokenAllowance(
+          bridgeToken,
+          sellTx.to as string,
+          amountToApprove,
+          destChain,
+          ctx
+        );
+        if (approvalNeeded) {
+          this.logger.info('Token approval granted for destination sell', {
+            opportunityId: opportunity.id,
+            token: bridgeToken,
+            amount: sellAmount,
+            router: sellTx.to,
+            destChain,
+          });
+        }
+      } catch (approvalError) {
+        this.logger.warn('Token approval failed, proceeding with sell attempt', {
+          opportunityId: opportunity.id,
+          token: bridgeToken,
+          error: getErrorMessage(approvalError),
+        });
+      }
+    }
+
+    // Apply gas settings for destination chain
+    const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
+    if (sellNonce !== undefined) {
+      sellTx.nonce = sellNonce;
+    }
+
+    // Verify destination provider health before sending sell transaction
+    const destProvider = ctx.providers.get(destChain);
+    if (destProvider) {
+      const isDestProviderHealthy = await this.isProviderHealthy(destProvider, destChain, ctx);
+      if (!isDestProviderHealthy) {
+        if (ctx.nonceManager && sellNonce !== undefined) {
+          ctx.nonceManager.failTransaction(destChain, sellNonce, 'Provider unhealthy');
+        }
+
+        this.logger.error('Destination provider unhealthy after bridge - sell not attempted', {
+          opportunityId: opportunity.id,
+          destChain,
+          bridgeTxHash: bridgeResult.sourceTxHash,
+        });
+
+        return {
+          sellReceipt: null,
+          sellTxHash: undefined,
+          usedMevProtection: false,
+          errorResult: createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.NO_PROVIDER,
+              `Destination provider (${destChain}) unhealthy after bridge. Funds bridged but sell not executed.`
+            ),
+            destChain,
+            opportunity.sellDex || 'unknown',
+            bridgeResult.sourceTxHash
+          ),
+        };
+      }
+    }
+
+    // Apply MEV protection to destination sell transaction
+    const protectedSellTx = await this.applyMEVProtection(sellTx, destChain, ctx);
+
+    try {
+      const { shouldUseMev, mevProvider, chainSettings } = this.checkMevEligibility(
+        destChain,
+        ctx,
+        opportunity.expectedProfit
+      );
+
+      if (shouldUseMev && mevProvider) {
+        this.logger.info('Using MEV protection for destination sell', {
+          opportunityId: opportunity.id,
+          destChain,
+          strategy: mevProvider.strategy,
+        });
+
+        const mevResult = await this.withTransactionTimeout(
+          () => mevProvider.sendProtectedTransaction(protectedSellTx, {
+            simulate: false,
+            priorityFeeGwei: chainSettings?.priorityFeeGwei,
+          }),
+          'mevProtectedDestinationSell'
+        );
+
+        if (!mevResult.success) {
+          throw new Error(`MEV protected submission failed: ${mevResult.error}`);
+        }
+
+        sellTxHash = mevResult.transactionHash;
+        usedMevProtection = true;
+
+        if (sellTxHash && destValidation.provider) {
+          sellReceipt = await this.withTransactionTimeout(
+            () => destValidation.provider.getTransactionReceipt(sellTxHash!),
+            'getMevSellReceipt'
+          );
+        }
+
+        this.logger.info('MEV protected destination sell completed', {
+          opportunityId: opportunity.id,
+          destChain,
+          sellTxHash,
+          strategy: mevResult.strategy,
+          usedFallback: mevResult.usedFallback,
+        });
+      } else {
+        const sellTxResponse = await this.withTransactionTimeout(
+          () => destWallet.sendTransaction(protectedSellTx),
+          'destinationSell'
+        );
+
+        sellTxHash = sellTxResponse.hash;
+
+        sellReceipt = await this.withTransactionTimeout(
+          () => sellTxResponse.wait(),
+          'waitForSellReceipt'
+        );
+
+        this.logger.info('Destination sell executed (standard)', {
+          opportunityId: opportunity.id,
+          destChain,
+          sellTxHash,
+          gasUsed: sellReceipt?.gasUsed?.toString(),
+        });
+      }
+
+      // Confirm sell nonce
+      if (ctx.nonceManager && sellNonce !== undefined && sellTxHash) {
+        ctx.nonceManager.confirmTransaction(destChain, sellNonce, sellTxHash);
+      }
+    } catch (sellError) {
+      if (ctx.nonceManager && sellNonce !== undefined) {
+        ctx.nonceManager.failTransaction(destChain, sellNonce, getErrorMessage(sellError));
+      }
+
+      this.logger.error('Destination sell failed', {
+        opportunityId: opportunity.id,
+        destChain,
+        bridgeTxHash: bridgeResult.sourceTxHash,
+        usedMevProtection,
+        error: getErrorMessage(sellError),
+      });
+
+      return {
+        sellReceipt: null,
+        sellTxHash: undefined,
+        usedMevProtection,
+        errorResult: createErrorResult(
+          opportunity.id,
+          formatExecutionError(ExecutionErrorCode.SELL_FAILED, `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`),
+          destChain,
+          opportunity.sellDex || 'unknown',
+          bridgeResult.sourceTxHash
+        ),
+      };
+    }
+
+    return { sellReceipt, sellTxHash, usedMevProtection };
+  }
+
+  /**
+   * CQ3: Calculate final cross-chain arbitrage results (gas costs, profit).
+   *
+   * Extracted from execute() to reduce method length.
+   * No new try-catch — caller's catch block handles errors.
+   */
+  private async calculateCrossChainResults(
+    opportunity: ArbitrageOpportunity,
+    sourceChain: string,
+    destChain: string,
+    startTime: number,
+    expectedProfit: number,
+    bridgeFeeEth: number,
+    bridgeFeeUsd: number,
+    bridgeResult: { sourceTxHash?: string; gasUsed?: bigint },
+    sellReceipt: ethers.TransactionReceipt | null,
+    sellTxHash: string | undefined,
+    usedDestFlashLoan: boolean,
+    usedMevProtection: boolean,
+    ctx: StrategyContext,
+  ): Promise<ExecutionResult> {
+    const executionTimeMs = Date.now() - startTime;
+
+    const sourceGasPrice = await this.getOptimalGasPrice(sourceChain, ctx);
+    const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
+
+    let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
+    let destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
+
+    const DEFAULT_NATIVE_TOKEN_PRICE_USD = 2000;
+    if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
+      this.logger.warn('Invalid source chain native token price, using fallback', {
+        opportunityId: opportunity.id,
+        sourceChain,
+        originalPrice: sourceNativeTokenPriceUsd,
+        fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
+      });
+      sourceNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+    }
+    if (!Number.isFinite(destNativeTokenPriceUsd) || destNativeTokenPriceUsd <= 0) {
+      this.logger.warn('Invalid dest chain native token price, using fallback', {
+        opportunityId: opportunity.id,
+        destChain,
+        originalPrice: destNativeTokenPriceUsd,
+        fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
+      });
+      destNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+    }
+
+    const bridgeGasCostNative = bridgeResult.gasUsed
+      ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
+      : 0;
+    const bridgeGasCostUsd = bridgeGasCostNative * sourceNativeTokenPriceUsd;
+
+    const sellGasCostNative = sellReceipt
+      ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice || destGasPrice)))
+      : 0;
+    const sellGasCostUsd = sellGasCostNative * destNativeTokenPriceUsd;
+
+    const totalGasCostUsd = bridgeGasCostUsd + sellGasCostUsd;
+    const actualProfit = expectedProfit - bridgeFeeUsd - totalGasCostUsd;
+
+    this.logger.info('Cross-chain arbitrage completed', {
+      opportunityId: opportunity.id,
+      executionTimeMs,
+      bridgeFeeEth,
+      bridgeFeeUsd,
+      bridgeGasCostUsd,
+      sellGasCostUsd,
+      totalGasCostUsd,
+      sourceNativeTokenPriceUsd,
+      destNativeTokenPriceUsd,
+      expectedProfit,
+      actualProfit,
+      usedDestFlashLoan,
+      usedMevProtection,
+      sellExecutionMethod: usedDestFlashLoan ? 'flash_loan' : 'direct_swap',
+    });
+
+    return createSuccessResult(
+      opportunity.id,
+      sellTxHash || bridgeResult.sourceTxHash || '',
+      destChain,
+      opportunity.sellDex || 'unknown',
+      {
+        actualProfit,
+        gasUsed: sellReceipt ? Number(sellReceipt.gasUsed) : (bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined),
+        gasCost: totalGasCostUsd,
+      }
+    );
   }
 
   // ===========================================================================

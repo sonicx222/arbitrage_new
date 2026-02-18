@@ -13,8 +13,8 @@ module.exports = {
   // Root is this directory
   rootDir: '.',
 
-  // Test files are co-located in src/
-  testMatch: ['<rootDir>/src/**/*.test.ts'],
+  // Test files in both src/ (legacy co-located) and __tests__/ (canonical)
+  testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/__tests__/**/*.test.ts'],
 
   // Transform configuration with test-specific tsconfig
   transform: {

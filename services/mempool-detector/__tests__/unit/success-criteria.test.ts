@@ -45,7 +45,7 @@ import {
   REAL_ERC20_APPROVE,
   REAL_ETH_TRANSFER,
   stripMetadata,
-} from '../../src/__tests__/fixtures/mainnet-transactions';
+} from '../fixtures/mainnet-transactions';
 
 // =============================================================================
 // SUCCESS CRITERIA THRESHOLDS

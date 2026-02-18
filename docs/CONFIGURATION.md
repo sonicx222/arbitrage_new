@@ -80,9 +80,11 @@ Each chain requires HTTP and WebSocket endpoints:
 | Variable | Description | Default | ADR |
 |----------|-------------|---------|-----|
 | `FEATURE_BATCHED_QUOTER` | Enable batched quote fetching | `false` | ADR-029 |
+| `FEATURE_FLASH_LOAN_AGGREGATOR` | Enable dynamic flash loan provider selection | `true` | ADR-032 |
 | `FEATURE_COMMIT_REVEAL` | Enable commit-reveal MEV protection | `true` | Task 3.1 |
 | `FEATURE_COMMIT_REVEAL_REDIS` | Use Redis for commitment storage | `false` | Task 3.1 |
 | `COMMIT_REVEAL_VALIDATE_PROFIT` | Re-validate profit before reveal | `true` | Task 3.1 |
+| `FEATURE_DEST_CHAIN_FLASH_LOAN` | Enable flash loans on destination chain for cross-chain arbs | `false` | FE-001 |
 
 **Batched Quote Fetching** (ADR-029):
 - Reduces quote latency by 75-83% (150ms → 30-50ms)
@@ -132,6 +134,35 @@ Deploy with: `npx hardhat run scripts/deploy-commit-reveal.ts --network <chain>`
 **Important:** Verify that zero addresses (`0x0000...0000`) are not used in production. The system will detect and reject zero addresses at configuration time (Issue 1.2 fix).
 
 See [docs/TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md](TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md) for implementation details.
+
+**Flash Loan Provider Aggregation** (ADR-032):
+- Dynamically selects optimal flash loan provider via weighted ranking (fees, liquidity, reliability, latency)
+- Enabled by default (`FEATURE_FLASH_LOAN_AGGREGATOR` is opt-out)
+- Set `FEATURE_FLASH_LOAN_AGGREGATOR=false` to use hardcoded Aave V3 only
+- See [ADR-032: Flash Loan Provider Aggregation](architecture/adr/ADR-032-flash-loan-provider-aggregation.md)
+
+**Destination Chain Flash Loans** (FE-001):
+- Enables flash loan execution on the destination chain for cross-chain arbitrage sell transactions
+- After bridging, uses FlashLoanStrategy for atomic execution on dest chain
+- Falls back to direct DEX swap if flash loan fails or chain is unsupported
+- Requires flash loan contracts deployed and configured on destination chains
+- Set `FEATURE_DEST_CHAIN_FLASH_LOAN=true` to enable
+
+**Flash Loan Contract Configuration:**
+
+Deploy with: `npx hardhat run scripts/deploy-flash-loan.ts --network <chain>`
+
+| Variable | Chain | Example |
+|----------|-------|---------|
+| `FLASH_LOAN_CONTRACT_ETHEREUM` | Ethereum Mainnet | `0x...` |
+| `FLASH_LOAN_CONTRACT_ARBITRUM` | Arbitrum One | `0x...` |
+| `FLASH_LOAN_CONTRACT_BASE` | Base | `0x...` |
+| `FLASH_LOAN_CONTRACT_POLYGON` | Polygon | `0x...` |
+| `FLASH_LOAN_CONTRACT_OPTIMISM` | Optimism | `0x...` |
+| `FLASH_LOAN_CONTRACT_BSC` | BNB Smart Chain | `0x...` |
+| `FLASH_LOAN_CONTRACT_AVALANCHE` | Avalanche C-Chain | `0x...` |
+
+See [docs/research/FUTURE_ENHANCEMENTS.md](research/FUTURE_ENHANCEMENTS.md#FE-001) for FE-001 implementation details.
 
 ### External Services
 

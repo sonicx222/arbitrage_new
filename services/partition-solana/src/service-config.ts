@@ -5,6 +5,10 @@
  * unified detector config, and arbitrage config from environment
  * variables and the partition registry.
  *
+ * Standard partition config (serviceConfig, detectorConfig, chains, region)
+ * is now also handled by createPartitionEntry() from @arbitrage/core.
+ * The assembleSolanaConfig() function builds only the Solana-specific parts.
+ *
  * @see ADR-003: Partitioned Chain Detectors
  * @see IMPLEMENTATION_PLAN.md S3.1.6: Create P4 detector service
  */
@@ -34,11 +38,73 @@ export const P4_PARTITION_ID = PARTITION_IDS.SOLANA_NATIVE;
 export const P4_DEFAULT_PORT = PARTITION_PORTS[P4_PARTITION_ID] ?? 3004;
 
 // =============================================================================
-// Configuration Assembly
+// Solana-Specific Configuration Assembly
+// =============================================================================
+
+/**
+ * Assembles Solana-specific configuration objects for the P4 partition service.
+ *
+ * Standard partition configuration (serviceConfig, detectorConfig, chains, region)
+ * is handled by createPartitionEntry() from @arbitrage/core. This function
+ * only builds the Solana-specific parts: arbitrageConfig and rpcSelection.
+ *
+ * @param logger - Logger instance for validation/warning output
+ * @returns Solana-specific configuration objects
+ */
+export function assembleSolanaConfig(logger: ReturnType<typeof createLogger>): {
+  arbitrageConfig: SolanaArbitrageConfig;
+  rpcSelection: RpcSelection;
+} {
+  // Select RPC URL with priority
+  const rpcSelection = selectSolanaRpcUrl();
+  const SOLANA_RPC_URL = rpcSelection.url;
+
+  // Issue 3.3: FAIL startup if public RPC in production (P0-CRITICAL)
+  // Public RPC endpoints have aggressive rate limits that will cause detection failures.
+  // Using public RPC in production is a configuration error that must be fixed.
+  if (rpcSelection.isPublicEndpoint && process.env.NODE_ENV === 'production') {
+    exitWithConfigError('Public Solana RPC endpoint cannot be used in production', {
+      partitionId: P4_PARTITION_ID,
+      provider: rpcSelection.provider,
+      network: isDevnetMode() ? 'devnet' : 'mainnet',
+      hint: 'Set HELIUS_API_KEY or TRITON_API_KEY for production deployment. See README.md "Solana RPC Configuration" section.',
+    }, logger);
+  }
+
+  // Issue 3.1: Get profit threshold from partition config or environment
+  // Default aligns with IMPLEMENTATION_PLAN.md profit threshold guidance
+  const DEFAULT_MIN_PROFIT_THRESHOLD = 0.3; // 0.3% minimum profit
+
+  const arbitrageConfig: SolanaArbitrageConfig = {
+    // rpcUrl is optional in updated arbitrage-detector.ts (Issue 7.1)
+    // Include for backward compatibility with monitoring/logging
+    // P2-FIX #19: Store redacted URL to prevent API key leakage in logs/monitoring
+    rpcUrl: redactRpcUrl(SOLANA_RPC_URL),
+    minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD ?? String(DEFAULT_MIN_PROFIT_THRESHOLD)),
+    crossChainEnabled: process.env.CROSS_CHAIN_ENABLED !== 'false',
+    triangularEnabled: process.env.TRIANGULAR_ENABLED !== 'false',
+    maxTriangularDepth: parseInt(process.env.MAX_TRIANGULAR_DEPTH ?? '3', 10),
+    opportunityExpiryMs: parseInt(process.env.OPPORTUNITY_EXPIRY_MS ?? '1000', 10),
+    // Issue 1.3: Chain identifier for Solana
+    chainId: isDevnetMode() ? 'solana-devnet' : 'solana',
+  };
+
+  return {
+    arbitrageConfig,
+    rpcSelection,
+  };
+}
+
+// =============================================================================
+// Full Configuration Assembly (legacy + test compatibility)
 // =============================================================================
 
 /**
  * Assembles all configuration objects for the P4 partition service.
+ *
+ * NOTE: In the refactored index.ts, standard partition config is handled by
+ * createPartitionEntry(). This function is preserved for backward compatibility
+ * with existing service-config tests.
  *
  * @param logger - Logger instance for validation/warning output
  * @returns All configuration objects needed by the service orchestrator
@@ -84,39 +150,8 @@ export function assembleConfig(logger: ReturnType<typeof createLogger>): {
     healthCheckPort: parsePort(process.env.HEALTH_CHECK_PORT, P4_DEFAULT_PORT, logger)
   };
 
-  // Select RPC URL with priority
-  const rpcSelection = selectSolanaRpcUrl();
-  const SOLANA_RPC_URL = rpcSelection.url;
-
-  // Issue 3.3: FAIL startup if public RPC in production (P0-CRITICAL)
-  // Public RPC endpoints have aggressive rate limits that will cause detection failures.
-  // Using public RPC in production is a configuration error that must be fixed.
-  if (rpcSelection.isPublicEndpoint && process.env.NODE_ENV === 'production') {
-    exitWithConfigError('Public Solana RPC endpoint cannot be used in production', {
-      partitionId: P4_PARTITION_ID,
-      provider: rpcSelection.provider,
-      network: isDevnetMode() ? 'devnet' : 'mainnet',
-      hint: 'Set HELIUS_API_KEY or TRITON_API_KEY for production deployment. See README.md "Solana RPC Configuration" section.',
-    }, logger);
-  }
-
-  // Issue 3.1: Get profit threshold from partition config or environment
-  // Default aligns with IMPLEMENTATION_PLAN.md profit threshold guidance
-  const DEFAULT_MIN_PROFIT_THRESHOLD = 0.3; // 0.3% minimum profit
-
-  const arbitrageConfig: SolanaArbitrageConfig = {
-    // rpcUrl is optional in updated arbitrage-detector.ts (Issue 7.1)
-    // Include for backward compatibility with monitoring/logging
-    // P2-FIX #19: Store redacted URL to prevent API key leakage in logs/monitoring
-    rpcUrl: redactRpcUrl(SOLANA_RPC_URL),
-    minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD ?? String(DEFAULT_MIN_PROFIT_THRESHOLD)),
-    crossChainEnabled: process.env.CROSS_CHAIN_ENABLED !== 'false',
-    triangularEnabled: process.env.TRIANGULAR_ENABLED !== 'false',
-    maxTriangularDepth: parseInt(process.env.MAX_TRIANGULAR_DEPTH ?? '3', 10),
-    opportunityExpiryMs: parseInt(process.env.OPPORTUNITY_EXPIRY_MS ?? '1000', 10),
-    // Issue 1.3: Chain identifier for Solana
-    chainId: isDevnetMode() ? 'solana-devnet' : 'solana',
-  };
+  // Solana-specific config (RPC selection + arbitrage config)
+  const { arbitrageConfig, rpcSelection } = assembleSolanaConfig(logger);
 
   return {
     P4_CHAINS,

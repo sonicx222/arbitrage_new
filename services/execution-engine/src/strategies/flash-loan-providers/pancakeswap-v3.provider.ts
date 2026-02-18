@@ -16,6 +16,7 @@ import {
   getBpsDenominatorBigInt,
   PANCAKESWAP_FLASH_ARBITRAGE_ABI,
 } from '@arbitrage/config';
+import { getSwapDeadline } from '../base.strategy';
 import type {
   IFlashLoanProvider,
   FlashLoanProtocol,
@@ -345,8 +346,7 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
       step.amountOutMin,
     ]);
 
-    // Default deadline: 5 minutes from now
-    const deadline = Math.floor(Date.now() / 1000) + 300;
+    const deadline = getSwapDeadline();
 
     return ARBITRAGE_INTERFACE.encodeFunctionData('executeArbitrage', [
       request.poolAddress,

@@ -216,8 +216,8 @@ describe('REGRESSION: Vault Model DEX Configuration Consistency', () => {
       const chainDexes = DEXES[dex.chain] || [];
       const found = chainDexes.find((d: any) => d.name === dex.name);
 
-      expect(found?.fee).toBeGreaterThanOrEqual(0);
-      expect(found?.fee).toBeLessThanOrEqual(300); // Max 3% fee
+      expect(found?.feeBps).toBeGreaterThanOrEqual(0);
+      expect(found?.feeBps).toBeLessThanOrEqual(300); // Max 3% fee (300 bps)
     }
   });
 });

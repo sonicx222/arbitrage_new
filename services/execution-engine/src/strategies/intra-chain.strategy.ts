@@ -25,7 +25,7 @@ import { getErrorMessage, MevRiskAnalyzer, type TransactionContext } from '@arbi
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
 import { createErrorResult, createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';
-import { BaseExecutionStrategy } from './base.strategy';
+import { BaseExecutionStrategy, getSwapDeadline } from './base.strategy';
 import { CommitRevealService, type CommitRevealParams } from '../services/commit-reveal.service';
 
 /**
@@ -531,7 +531,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         amountIn,
         swapPath,
         minProfit,
-        deadline: Math.floor(Date.now() / 1000) + 300, // 5 minutes from now
+        deadline: getSwapDeadline(),
         salt: ethers.hexlify(ethers.randomBytes(32)), // Random 32-byte salt
       };
 

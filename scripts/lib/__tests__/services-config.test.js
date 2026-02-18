@@ -136,6 +136,74 @@ describe('ServicesConfig', () => {
     });
   });
 
+  describe('Helper Function Behavior', () => {
+    let config;
+
+    beforeEach(() => {
+      config = require('../services-config');
+    });
+
+    describe('getServiceByName', () => {
+      it('should return correct service for known name', () => {
+        const service = config.getServiceByName('Coordinator');
+        expect(service).toBeDefined();
+        expect(service.name).toBe('Coordinator');
+        expect(service.port).toBe(config.PORTS.COORDINATOR);
+      });
+
+      it('should return undefined for non-existent name', () => {
+        const service = config.getServiceByName('NonExistentService');
+        expect(service).toBeUndefined();
+      });
+    });
+
+    describe('getServiceByPort', () => {
+      it('should return correct service for coordinator port', () => {
+        const service = config.getServiceByPort(config.PORTS.COORDINATOR);
+        expect(service).toBeDefined();
+        expect(service.name).toBe('Coordinator');
+        expect(service.port).toBe(config.PORTS.COORDINATOR);
+      });
+
+      it('should return undefined for non-existent port', () => {
+        const service = config.getServiceByPort(99999);
+        expect(service).toBeUndefined();
+      });
+    });
+
+    describe('getStartupServices', () => {
+      it('should return only enabled core services by default', () => {
+        const services = config.getStartupServices();
+        expect(services.length).toBeGreaterThan(0);
+
+        // All returned services should be enabled
+        for (const service of services) {
+          expect(service.enabled).toBe(true);
+        }
+
+        // Should not include optional services
+        const optionalNames = config.OPTIONAL_SERVICES.map(s => s.name);
+        for (const service of services) {
+          expect(optionalNames).not.toContain(service.name);
+        }
+      });
+
+      it('should include optional services when flag is true', () => {
+        const services = config.getStartupServices(true);
+
+        // Should include at least one optional service
+        const optionalNames = config.OPTIONAL_SERVICES.map(s => s.name);
+        const includedOptional = services.filter(s => optionalNames.includes(s.name));
+        expect(includedOptional.length).toBe(config.OPTIONAL_SERVICES.length);
+
+        // Total should be core + optional
+        expect(services.length).toBe(
+          config.CORE_SERVICES.length + config.OPTIONAL_SERVICES.length
+        );
+      });
+    });
+  });
+
   describe('Port Configuration Validation (P1 Fix)', () => {
     it('should throw error on invalid port environment variable', () => {
       // Set invalid port

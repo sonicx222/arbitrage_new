@@ -19,76 +19,36 @@ import { FlashLoanStrategy, FlashLoanStrategyConfig } from '../../../src/strateg
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, Logger, ExecutionStats, ProviderHealth } from '../../../src/types';
 import { createInitialStats } from '../../../src/types';
+import {
+  createMockStrategyLogger,
+  createMockStrategyProvider,
+  createMockStrategyWallet,
+  createMockStrategyOpportunity,
+} from '@arbitrage/test-utils';
 
 // =============================================================================
-// Mocks
+// Mocks (using shared factories with local overrides)
 // =============================================================================
 
-const createMockLogger = (): Logger => ({
-  info: jest.fn(),
-  error: jest.fn(),
-  warn: jest.fn(),
-  debug: jest.fn(),
-});
+const createMockLogger = createMockStrategyLogger;
+const createMockProvider = createMockStrategyProvider;
+const createMockWallet = (): jest.Mocked<ethers.Wallet> =>
+  createMockStrategyWallet() as jest.Mocked<ethers.Wallet>;
 
-const createMockProvider = (): jest.Mocked<ethers.JsonRpcProvider> => {
-  const provider = {
-    getFeeData: jest.fn().mockResolvedValue({
-      gasPrice: ethers.parseUnits('30', 'gwei'),
-      maxFeePerGas: ethers.parseUnits('35', 'gwei'),
-      maxPriorityFeePerGas: ethers.parseUnits('1.5', 'gwei'),
-    }),
-    getNetwork: jest.fn().mockResolvedValue({ chainId: 1n }),
-    estimateGas: jest.fn().mockResolvedValue(300000n),
-    getTransactionReceipt: jest.fn().mockResolvedValue({
-      hash: '0xmocktxhash',
-      status: 1,
-      gasUsed: 250000n,
-      gasPrice: ethers.parseUnits('30', 'gwei'),
-    }),
-    call: jest.fn(),
-  } as unknown as jest.Mocked<ethers.JsonRpcProvider>;
-  return provider;
-};
-
-const createMockWallet = (provider?: ethers.JsonRpcProvider): jest.Mocked<ethers.Wallet> => {
-  const wallet = {
-    getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
-    sendTransaction: jest.fn().mockResolvedValue({
-      hash: '0xmocktxhash',
-      wait: jest.fn().mockResolvedValue({
-        hash: '0xmocktxhash',
-        status: 1,
-        gasUsed: 250000n,
-        gasPrice: ethers.parseUnits('30', 'gwei'),
-      }),
-    }),
-    provider: provider,
-  } as unknown as jest.Mocked<ethers.Wallet>;
-  return wallet;
-};
-
-const createMockOpportunity = (overrides?: Partial<ArbitrageOpportunity>): ArbitrageOpportunity => ({
-  id: 'test-opp-001',
-  type: 'cross-dex',
-  tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-  tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-  amountIn: ethers.parseEther('10').toString(),
-  expectedProfit: 100, // $100 profit
-  timestamp: Date.now(),
-  buyChain: 'ethereum',
-  sellChain: 'ethereum',
-  buyDex: 'uniswap_v3',
-  sellDex: 'sushiswap',
-  confidence: 0.95,
-  buyPrice: 2000,
-  sellPrice: 2010,
-  ...overrides,
-});
+const createMockOpportunity = (overrides?: Partial<ArbitrageOpportunity>): ArbitrageOpportunity =>
+  createMockStrategyOpportunity({
+    id: 'test-opp-001',
+    type: 'cross-dex',
+    amountIn: ethers.parseEther('10').toString(),
+    buyDex: 'uniswap_v3',
+    buyPrice: 2000,
+    sellPrice: 2010,
+    ...overrides,
+  });
 
 const createMockContext = (overrides?: Partial<StrategyContext>): StrategyContext => {
   const mockProvider = createMockProvider();
-  const mockWallet = createMockWallet(mockProvider);
+  const mockWallet = createMockWallet();
 
   return {
     logger: createMockLogger(),

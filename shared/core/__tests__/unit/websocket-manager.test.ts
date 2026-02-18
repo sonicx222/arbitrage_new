@@ -597,7 +597,7 @@ describe('WebSocketManager Rate Limit Handling (S3.3)', () => {
       expect(handler).toHaveBeenCalledWith(
         expect.objectContaining({
           url: 'wss://primary.example.com',
-          count: 1,
+          chainId: 'unknown',
         })
       );
     });

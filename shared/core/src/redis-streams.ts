@@ -15,6 +15,7 @@
  */
 
 import Redis from 'ioredis';
+import { RedisStreams } from '@arbitrage/types';
 
 // =============================================================================
 // DI Types (P16 pattern - enables testability without Jest mock hoisting)
@@ -310,27 +311,8 @@ export class RedisStreamsClient {
   private logger: Logger;
   private batchers: Map<string, StreamBatcher> = new Map();
 
-  // Standard stream names for the arbitrage system
-  static readonly STREAMS = {
-    PRICE_UPDATES: 'stream:price-updates',
-    SWAP_EVENTS: 'stream:swap-events',
-    OPPORTUNITIES: 'stream:opportunities',
-    WHALE_ALERTS: 'stream:whale-alerts',
-    VOLUME_AGGREGATES: 'stream:volume-aggregates',
-    HEALTH: 'stream:health',
-    // FIX: Added for coordinator to forward opportunities to execution engine
-    EXECUTION_REQUESTS: 'stream:execution-requests',
-    // Task 1.3.3: Pending opportunities from mempool detection
-    PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
-    // Circuit breaker state change events (ADR-018)
-    CIRCUIT_BREAKER: 'stream:circuit-breaker',
-    // System failover coordination events
-    SYSTEM_FAILOVER: 'stream:system-failover',
-    // P1 FIX #9: Health alerts from enhanced-health-monitor
-    HEALTH_ALERTS: 'stream:health-alerts',
-    // P1 FIX #9: System commands (cache clear, etc.) from enhanced-health-monitor
-    SYSTEM_COMMANDS: 'stream:system-commands',
-  } as const;
+  // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
+  static readonly STREAMS = RedisStreams;
 
   /**
    * P1-3 fix: Recommended MAXLEN values to prevent unbounded stream growth.
@@ -349,6 +331,14 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume
     [RedisStreamsClient.STREAMS.HEALTH_ALERTS]: 5000,            // P1 FIX #9: Health alerts, critical
     [RedisStreamsClient.STREAMS.SYSTEM_COMMANDS]: 1000,          // P1 FIX #9: System commands, low volume
+    // ARCH-006: Previously missing streams now covered by MAXLEN to prevent unbounded growth
+    [RedisStreamsClient.STREAMS.SERVICE_HEALTH]: 1000,           // Low volume health checks
+    [RedisStreamsClient.STREAMS.SERVICE_EVENTS]: 5000,           // Medium volume service events
+    [RedisStreamsClient.STREAMS.COORDINATOR_EVENTS]: 5000,       // Medium volume coordinator events
+    [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: 5000,        // Critical trading result data
+    [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: 10000,       // Failed ops, keep more history
+    [RedisStreamsClient.STREAMS.DLQ_ALERTS]: 5000,               // Alert data
+    [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: 5000,           // Forwarded failures
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
@@ -931,6 +921,7 @@ export class StreamConsumer {
   private running = false;
   private paused = false;
   private pollTimer: NodeJS.Timeout | null = null;
+  private pollPromise: Promise<void> | null = null;
   private stats: StreamConsumerStats = {
     messagesProcessed: 0,
     messagesFailed: 0,
@@ -957,7 +948,7 @@ export class StreamConsumer {
     if (this.running) return;
     this.running = true;
     this.stats.isRunning = true;
-    this.poll();
+    this.schedulePoll();
   }
 
   /**
@@ -969,6 +960,12 @@ export class StreamConsumer {
     this.stats.isRunning = false;
 
     this.pollTimer = clearTimeoutSafe(this.pollTimer);
+
+    // Await any in-flight poll to ensure clean shutdown
+    if (this.pollPromise) {
+      await this.pollPromise;
+      this.pollPromise = null;
+    }
   }
 
   /**
@@ -1006,7 +1003,7 @@ export class StreamConsumer {
     this.config.onPauseStateChange?.(false);
     // Restart polling if we were running
     if (this.running && !this.pollTimer) {
-      this.poll();
+      this.schedulePoll();
     }
   }
 
@@ -1015,6 +1012,13 @@ export class StreamConsumer {
    */
   isPaused(): boolean {
     return this.paused;
+  }
+
+  /**
+   * Schedule a poll() invocation, tracking its promise for clean shutdown.
+   */
+  private schedulePoll(): void {
+    this.pollPromise = this.poll();
   }
 
   private async poll(): Promise<void> {
@@ -1068,7 +1072,7 @@ export class StreamConsumer {
     if (this.running && !this.paused) {
       // Use setImmediate for non-blocking reads, short delay for blocking reads
       const delay = this.config.blockMs === 0 ? 0 : 10;
-      this.pollTimer = setTimeout(() => this.poll(), delay);
+      this.pollTimer = setTimeout(() => this.schedulePoll(), delay);
     }
   }
 }

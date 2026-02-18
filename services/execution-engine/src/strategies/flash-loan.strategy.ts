@@ -79,7 +79,7 @@ import {
   formatExecutionError,
   isNHopOpportunity,
 } from '../types';
-import { BaseExecutionStrategy } from './base.strategy';
+import { BaseExecutionStrategy, getSwapDeadline } from './base.strategy';
 // Task 1.2: BatchQuoterService types (Finding #7: logic moved to batch-quote-manager.ts)
 import type { BatchQuoterService } from '../services/simulation/batch-quoter.service';
 
@@ -692,112 +692,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         );
       }
 
-      // Task 2.3: Dynamic flash loan provider selection via aggregator
-      if (this.aggregator && opportunity.tokenIn) {
-        const selectionStartTime = Date.now();
-        try {
-          const providerSelection = await this.aggregator.selectProvider(opportunity, {
-            chain,
-            rpcProviders: ctx.providers,
-            estimatedValueUsd: opportunity.expectedProfit ?? 0,
-          });
-
-          // Check if selection was successful (protocol !== null)
-          if (!providerSelection.isSuccess) {
-            this.logger.warn('Aggregator rejected all providers, aborting execution', {
-              opportunityId: opportunity.id,
-              reason: providerSelection.selectionReason,
-            });
-
-            return createErrorResult(
-              opportunity.id,
-              formatExecutionError(
-                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
-                `No suitable flash loan provider: ${providerSelection.selectionReason}`
-              ),
-              chain,
-              opportunity.buyDex || 'unknown'
-            );
-          }
-
-          // Extract selected protocol
-          const selectedProtocol = providerSelection.protocol!;
-
-          // C5 Fix: Validate provider config exists (fail fast if misconfigured)
-          const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
-          if (!flashLoanConfig) {
-            this.logger.error('[ERR_CONFIG] Flash loan provider not configured for chain', {
-              chain,
-              selectedProtocol,
-            });
-            return createErrorResult(
-              opportunity.id,
-              formatExecutionError(
-                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
-                `Flash loan provider not configured for chain: ${chain}`
-              ),
-              chain,
-              opportunity.buyDex || 'unknown'
-            );
-          }
-
-          // Store provider info (validated IProviderInfo for metrics)
-          selectedProvider = {
-            protocol: selectedProtocol,
-            chain,
-            poolAddress: flashLoanConfig.address,
-            feeBps: flashLoanConfig.fee,
-            isAvailable: true,
-          };
-
-          this.logger.info('Flash loan provider selected via aggregator', {
-            opportunityId: opportunity.id,
-            protocol: selectedProtocol,
-            score: providerSelection.score?.totalScore.toFixed(3),
-            reason: providerSelection.selectionReason,
-            latencyMs: providerSelection.selectionLatencyMs,
-          });
-
-          // Validate selected protocol is supported by this strategy
-          if (!SUPPORTED_FLASH_LOAN_PROTOCOLS.has(selectedProtocol)) {
-            this.logger.warn('Aggregator selected unsupported protocol', {
-              opportunityId: opportunity.id,
-              selectedProtocol,
-              supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
-            });
-
-            return createErrorResult(
-              opportunity.id,
-              formatExecutionError(
-                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
-                `Selected protocol '${selectedProtocol}' not supported by this strategy`
-              ),
-              chain,
-              opportunity.buyDex || 'unknown'
-            );
-          }
-        } catch (error) {
-          this.logger.error('Flash loan provider selection failed', {
-            opportunityId: opportunity.id,
-            error: getErrorMessage(error),
-          });
-
-          return createErrorResult(
-            opportunity.id,
-            formatExecutionError(
-              ExecutionErrorCode.FLASH_LOAN_ERROR,
-              `Provider selection failed: ${getErrorMessage(error)}`
-            ),
-            chain,
-            opportunity.buyDex || 'unknown'
-          );
-        }
-      } else {
-        // Aggregator disabled - use hardcoded Aave V3 (backward compatible)
-        this.logger.debug('Using hardcoded Aave V3 provider (aggregator disabled)', {
-          opportunityId: opportunity.id,
-        });
+      // CQ3: Flash loan provider selection delegated to private method
+      const providerResult = await this.selectFlashLoanProvider(opportunity, chain, ctx);
+      if (providerResult.errorResult) {
+        return providerResult.errorResult;
       }
+      selectedProvider = providerResult.selectedProvider;
 
       // Fix 10.3: Parallelize independent operations for latency reduction
       // prepareFlashLoanContractTransaction and calculateExpectedProfitOnChain are independent
@@ -954,75 +854,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // Previous code had its own submission logic that was duplicated and missing
       // these protections. Now all strategies use the same battle-tested submission path.
 
-      const submitResult = await this.submitTransaction(protectedTx, chain, ctx, {
-        opportunityId: opportunity.id,
-        expectedProfit: opportunity.expectedProfit,
-        initialGasPrice: gasPrice,
-      });
-
-      // Fix 6.2: Return error result directly instead of throwing
-      // This ensures consistent pattern per Doc 4.1 in index.ts:
-      // execute() methods should return ExecutionResult, not throw
-      if (!submitResult.success) {
-        // Task 2.3: Record failed execution in aggregator metrics
-        if (this.aggregatorMetrics && selectedProvider) {
-          this.aggregatorMetrics.recordOutcome({
-            protocol: selectedProvider.protocol,
-            success: false,
-            executionLatencyMs: 0,
-            error: submitResult.error || 'Transaction submission failed',
-          });
-        }
-
-        // submitTransaction handles nonce management internally
-        return createErrorResult(
-          opportunity.id,
-          formatExecutionError(
-            ExecutionErrorCode.FLASH_LOAN_ERROR,
-            submitResult.error || 'Transaction submission failed'
-          ),
-          chain,
-          opportunity.buyDex || 'unknown'
-        );
-      }
-
-      // Calculate actual profit from receipt
-      const actualProfit = submitResult.receipt
-        ? await this.calculateActualProfit(submitResult.receipt, opportunity)
-        : undefined;
-
-      this.logger.info('Flash loan arbitrage executed successfully', {
-        opportunityId: opportunity.id,
-        txHash: submitResult.txHash,
-        actualProfit,
-        gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
-        chain,
-        usedMevProtection: submitResult.usedMevProtection,
-      });
-
-      // Task 2.3: Record successful execution in aggregator metrics
-      if (this.aggregatorMetrics && selectedProvider) {
-        this.aggregatorMetrics.recordOutcome({
-          protocol: selectedProvider.protocol,
-          success: true,
-          executionLatencyMs: 0, // Not tracking execution time here
-        });
-      }
-
-      return createSuccessResult(
-        opportunity.id,
-        submitResult.txHash || submitResult.receipt?.hash || '',
-        chain,
-        opportunity.buyDex || 'unknown',
-        {
-          actualProfit,
-          gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
-          gasCost: submitResult.receipt
-            ? parseFloat(ethers.formatEther(
-                submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice ?? gasPrice)
-              ))
-            : undefined,
-        }
+      // CQ3: Transaction submission and result processing delegated to private method
+      return await this.submitAndProcessFlashLoanResult(
+        opportunity, protectedTx, chain, ctx, gasPrice, selectedProvider
       );
     } catch (error) {
       const errorMessage = getErrorMessage(error);
@@ -1053,6 +887,219 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         opportunity.buyDex || 'unknown'
       );
     }
+  }
+
+  // ===========================================================================
+  // CQ3: Extracted Sub-Methods for execute() Readability
+  // ===========================================================================
+
+  /**
+   * CQ3: Select flash loan provider via aggregator or use hardcoded default.
+   *
+   * No new try-catch blocks added — the existing aggregator try-catch is preserved.
+   */
+  private async selectFlashLoanProvider(
+    opportunity: ArbitrageOpportunity,
+    chain: string,
+    ctx: StrategyContext,
+  ): Promise<{
+    selectedProvider: IProviderInfo | null;
+    errorResult?: ExecutionResult;
+  }> {
+    if (!this.aggregator || !opportunity.tokenIn) {
+      this.logger.debug('Using hardcoded Aave V3 provider (aggregator disabled)', {
+        opportunityId: opportunity.id,
+      });
+      return { selectedProvider: null };
+    }
+
+    try {
+      const providerSelection = await this.aggregator.selectProvider(opportunity, {
+        chain,
+        rpcProviders: ctx.providers,
+        estimatedValueUsd: opportunity.expectedProfit ?? 0,
+      });
+
+      if (!providerSelection.isSuccess) {
+        this.logger.warn('Aggregator rejected all providers, aborting execution', {
+          opportunityId: opportunity.id,
+          reason: providerSelection.selectionReason,
+        });
+
+        return {
+          selectedProvider: null,
+          errorResult: createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+              `No suitable flash loan provider: ${providerSelection.selectionReason}`
+            ),
+            chain,
+            opportunity.buyDex || 'unknown'
+          ),
+        };
+      }
+
+      const selectedProtocol = providerSelection.protocol!;
+
+      // Validate provider config exists (fail fast if misconfigured)
+      const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
+      if (!flashLoanConfig) {
+        this.logger.error('[ERR_CONFIG] Flash loan provider not configured for chain', {
+          chain,
+          selectedProtocol,
+        });
+        return {
+          selectedProvider: null,
+          errorResult: createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+              `Flash loan provider not configured for chain: ${chain}`
+            ),
+            chain,
+            opportunity.buyDex || 'unknown'
+          ),
+        };
+      }
+
+      const selectedProvider: IProviderInfo = {
+        protocol: selectedProtocol,
+        chain,
+        poolAddress: flashLoanConfig.address,
+        feeBps: flashLoanConfig.fee,
+        isAvailable: true,
+      };
+
+      this.logger.info('Flash loan provider selected via aggregator', {
+        opportunityId: opportunity.id,
+        protocol: selectedProtocol,
+        score: providerSelection.score?.totalScore.toFixed(3),
+        reason: providerSelection.selectionReason,
+        latencyMs: providerSelection.selectionLatencyMs,
+      });
+
+      // Validate selected protocol is supported by this strategy
+      if (!SUPPORTED_FLASH_LOAN_PROTOCOLS.has(selectedProtocol)) {
+        this.logger.warn('Aggregator selected unsupported protocol', {
+          opportunityId: opportunity.id,
+          selectedProtocol,
+          supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
+        });
+
+        return {
+          selectedProvider: null,
+          errorResult: createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+              `Selected protocol '${selectedProtocol}' not supported by this strategy`
+            ),
+            chain,
+            opportunity.buyDex || 'unknown'
+          ),
+        };
+      }
+
+      return { selectedProvider };
+    } catch (error) {
+      this.logger.error('Flash loan provider selection failed', {
+        opportunityId: opportunity.id,
+        error: getErrorMessage(error),
+      });
+
+      return {
+        selectedProvider: null,
+        errorResult: createErrorResult(
+          opportunity.id,
+          formatExecutionError(
+            ExecutionErrorCode.FLASH_LOAN_ERROR,
+            `Provider selection failed: ${getErrorMessage(error)}`
+          ),
+          chain,
+          opportunity.buyDex || 'unknown'
+        ),
+      };
+    }
+  }
+
+  /**
+   * CQ3: Submit transaction and process the flash loan execution result.
+   *
+   * Handles: transaction submission, profit calculation, aggregator metrics recording.
+   * No new try-catch — errors propagate to the caller's catch block.
+   */
+  private async submitAndProcessFlashLoanResult(
+    opportunity: ArbitrageOpportunity,
+    protectedTx: ethers.TransactionRequest,
+    chain: string,
+    ctx: StrategyContext,
+    gasPrice: bigint,
+    selectedProvider: IProviderInfo | null,
+  ): Promise<ExecutionResult> {
+    const submitResult = await this.submitTransaction(protectedTx, chain, ctx, {
+      opportunityId: opportunity.id,
+      expectedProfit: opportunity.expectedProfit,
+      initialGasPrice: gasPrice,
+    });
+
+    if (!submitResult.success) {
+      if (this.aggregatorMetrics && selectedProvider) {
+        this.aggregatorMetrics.recordOutcome({
+          protocol: selectedProvider.protocol,
+          success: false,
+          executionLatencyMs: 0,
+          error: submitResult.error || 'Transaction submission failed',
+        });
+      }
+
+      return createErrorResult(
+        opportunity.id,
+        formatExecutionError(
+          ExecutionErrorCode.FLASH_LOAN_ERROR,
+          submitResult.error || 'Transaction submission failed'
+        ),
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+
+    const actualProfit = submitResult.receipt
+      ? await this.calculateActualProfit(submitResult.receipt, opportunity)
+      : undefined;
+
+    this.logger.info('Flash loan arbitrage executed successfully', {
+      opportunityId: opportunity.id,
+      txHash: submitResult.txHash,
+      actualProfit,
+      gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
+      chain,
+      usedMevProtection: submitResult.usedMevProtection,
+    });
+
+    if (this.aggregatorMetrics && selectedProvider) {
+      this.aggregatorMetrics.recordOutcome({
+        protocol: selectedProvider.protocol,
+        success: true,
+        executionLatencyMs: 0,
+      });
+    }
+
+    return createSuccessResult(
+      opportunity.id,
+      submitResult.txHash || submitResult.receipt?.hash || '',
+      chain,
+      opportunity.buyDex || 'unknown',
+      {
+        actualProfit,
+        gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
+        gasCost: submitResult.receipt
+          ? parseFloat(ethers.formatEther(
+              submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice ?? gasPrice)
+            ))
+          : undefined,
+      }
+    );
   }
 
   // ===========================================================================
@@ -1235,7 +1282,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // Task 2.1: Use different interface based on protocol
     if (pool) {
       // PancakeSwap V3: Requires pool address and deadline
-      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+      const deadline = getSwapDeadline();
 
       return PANCAKESWAP_FLASH_INTERFACE.encodeFunctionData('executeArbitrage', [
         pool,
@@ -1247,7 +1294,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       ]);
     } else {
       // Aave V3: Standard flash loan (also needs deadline parameter)
-      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+      const deadline = getSwapDeadline();
       return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
         asset,
         amount,

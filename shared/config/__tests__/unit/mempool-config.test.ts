@@ -323,8 +323,8 @@ describe('MEMPOOL_CONFIG', () => {
     expect(reconnect.maxDelay).toBe(60000);
   });
 
-  it('should have service config with default port 3007', () => {
-    expect(MEMPOOL_CONFIG.service.port).toBe(3007);
+  it('should have service config with default port 3008', () => {
+    expect(MEMPOOL_CONFIG.service.port).toBe(3008);
     expect(MEMPOOL_CONFIG.service.maxBufferSize).toBe(10000);
     expect(MEMPOOL_CONFIG.service.batchSize).toBe(100);
     expect(MEMPOOL_CONFIG.service.batchTimeoutMs).toBe(50);

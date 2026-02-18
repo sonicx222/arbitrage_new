@@ -22,6 +22,10 @@ describe('Warming Flow Integration Tests', () => {
   let components: WarmingComponents;
 
   beforeEach(async () => {
+    // Fix 12b: l2Enabled is set to true but no Redis L2 backend is connected.
+    // The HierarchicalCache will operate with L1 only (L2 ops silently no-op).
+    // TODO: When Redis test infrastructure is available in integration setup,
+    // add tests that verify L2 promotion/eviction behavior with a real Redis backend.
     cache = new HierarchicalCache({
       l1Size: 64,
       l2Enabled: true,

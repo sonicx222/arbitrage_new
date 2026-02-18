@@ -13,7 +13,7 @@ const logger = createLogger('validation');
 
 // P2-1 FIX: Centralized supported chains list for consistency
 // When adding new chains, only update this array
-const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'optimism'] as const;
+const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'optimism', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'] as const;
 type SupportedChain = typeof SUPPORTED_CHAINS[number];
 
 // Arbitrage opportunity validation
@@ -194,25 +194,32 @@ export const validateWebhookRequest = (req: Request, res: Response, next: NextFu
     return;
   }
 
-  // Verify webhook signature if provided
-  // FIX: Require WEBHOOK_SECRET when signature verification is attempted
-  if (value.signature) {
-    const webhookSecret = process.env.WEBHOOK_SECRET;
-    if (!webhookSecret) {
-      logger.error('Webhook signature provided but WEBHOOK_SECRET not configured');
-      res.status(500).json({
-        error: 'Webhook signature verification not configured'
+  // Verify webhook signature
+  // FIX #6: When WEBHOOK_SECRET is configured, signature is required.
+  // When WEBHOOK_SECRET is not set, allow unsigned requests (backward compatible).
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+  if (webhookSecret) {
+    if (!value.signature) {
+      logger.warn('Webhook request missing required signature', { ip: req.ip });
+      res.status(401).json({
+        error: 'Webhook signature is required'
       });
       return;
     }
-    const expectedSignature = generateWebhookSignature(value, webhookSecret);
-    if (expectedSignature !== value.signature) {
+    // Strip signature from payload before computing HMAC - the sender computes
+    // HMAC over the payload without the signature field
+    const { signature: _sig, ...payloadWithoutSignature } = value;
+    const expectedSignature = generateWebhookSignature(payloadWithoutSignature, webhookSecret);
+    if (!timingSafeSignatureEqual(expectedSignature, value.signature)) {
       logger.warn('Webhook signature verification failed', { ip: req.ip });
       res.status(401).json({
         error: 'Invalid webhook signature'
       });
       return;
     }
+  } else if (value.signature) {
+    // Signature provided but no secret configured - cannot verify
+    logger.warn('Webhook signature provided but WEBHOOK_SECRET not configured', { ip: req.ip });
   }
 
   req.body = value;
@@ -253,6 +260,25 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
 
   next();
 };
+
+/**
+ * Timing-safe comparison for HMAC signatures.
+ * Uses crypto.timingSafeEqual to prevent timing side-channel attacks.
+ * Handles different-length strings safely (timingSafeEqual requires equal lengths).
+ */
+function timingSafeSignatureEqual(expected: string, actual: string): boolean {
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const actualBuf = Buffer.from(actual, 'utf8');
+
+  // If lengths differ, the signature is invalid. Still perform a constant-time
+  // comparison against the expected value to avoid leaking length information.
+  if (expectedBuf.length !== actualBuf.length) {
+    crypto.timingSafeEqual(expectedBuf, expectedBuf);
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
+}
 
 // Utility function for webhook signature verification
 // FIX: Use module-level crypto import instead of require()

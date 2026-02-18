@@ -37,6 +37,8 @@ export interface PairSnapshot {
   reserve1: string;
   fee: number;
   blockNumber?: number;
+  /** Epoch timestamp (ms) of last reserve update. Used for data freshness in confidence calculation. */
+  lastUpdated?: number;
 }
 
 /**
@@ -295,6 +297,7 @@ export class PairRepository {
       // Use ?? to correctly handle fee: 0 (promotional pools)
       fee: pair.feeDecimal ?? options?.defaultFee ?? DEFAULT_FEE,
       blockNumber: pair.blockNumber,
+      lastUpdated: pair.lastUpdate,
     };
   }
 

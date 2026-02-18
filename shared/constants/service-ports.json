@@ -10,7 +10,8 @@
     "partition-solana": 3004,
     "execution-engine": 3005,
     "cross-chain-detector": 3006,
-    "unified-detector": 3007
+    "unified-detector": 3007,
+    "mempool-detector": 3008
   },
 
   "partitions": {
@@ -41,6 +42,7 @@
     "execution-engine": "EXECUTION_ENGINE_PORT",
     "cross-chain-detector": "CROSS_CHAIN_DETECTOR_PORT",
     "unified-detector": "UNIFIED_DETECTOR_PORT",
+    "mempool-detector": "MEMPOOL_DETECTOR_PORT",
     "redis": "REDIS_PORT"
   }
 }

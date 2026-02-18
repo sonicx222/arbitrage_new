@@ -8,7 +8,7 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/src'],
+  roots: ['<rootDir>/src', '<rootDir>/__tests__'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/?(*.)+(spec|test).ts'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
@@ -21,7 +21,7 @@ module.exports = {
     '^@arbitrage/unified-detector$': '<rootDir>/../unified-detector/src/index.ts',
     '^@arbitrage/test-utils/(.*)$': '<rootDir>/../../shared/test-utils/src/$1',
   },
-  setupFilesAfterEnv: ['<rootDir>/src/__tests__/setupTests.ts'],
+  setupFilesAfterEnv: ['<rootDir>/__tests__/setupTests.ts'],
   testTimeout: 10000,
   // Clear mocks between tests for isolation
   clearMocks: true,

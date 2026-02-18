@@ -1108,7 +1108,39 @@ SimulationService now routes requests based on chain:
 
 **Related ADR**: [ADR-023: Detector Pre-validation](./adr/ADR-023-detector-prevalidation.md)
 
-### 10.8 Strategy Simulation Enhancements (Phase 4.2) ✅ NEW
+### 10.8 Destination Chain Flash Loans (FE-001) ✅ IMPLEMENTED
+
+**Problem**: Cross-chain arbitrage sells on the destination chain use direct DEX swaps, requiring capital held on the dest chain and offering no atomicity guarantee after bridge completion.
+
+**Solution**: Optional flash loan execution on the destination chain for the sell transaction. Gated behind `FEATURE_DEST_CHAIN_FLASH_LOAN` feature flag (default: off).
+
+**Execution Flow**:
+1. Buy on source chain → bridge tokens to destination chain
+2. After bridge completion, check if dest chain supports flash loans via `FlashLoanProviderFactory.isFullySupported(destChain)`
+3. If supported: execute sell via `FlashLoanStrategy` for atomic execution
+4. If flash loan fails: fall back to direct DEX swap (existing behavior)
+5. If not supported: use direct DEX swap (existing behavior)
+
+**Benefits**:
+- Atomic execution on dest chain (reverts if unprofitable)
+- No need to hold capital on destination chain
+- Protection against price movement during bridge delay
+
+**Trade-offs**:
+- Flash loan fee: ~0.09% (Aave V3), ~0.25-0.30% (other protocols)
+- Requires FlashLoanArbitrage contract deployed on dest chain
+- Not truly atomic end-to-end (bridge completes before flash loan)
+
+**Key Files**:
+- `services/execution-engine/src/strategies/cross-chain.strategy.ts` — Strategy implementation
+- `services/execution-engine/src/engine.ts` — Wiring logic in `initializeStrategies()`
+- `shared/config/src/feature-flags.ts` — `useDestChainFlashLoan` flag
+
+**Metrics**: Completion logs include `sellExecutionMethod` (`flash_loan` | `direct_swap`) and `usedDestFlashLoan` boolean.
+
+**Related**: [ADR-020: Flash Loan](./adr/ADR-020-flash-loan.md), [ADR-032: Flash Loan Provider Aggregation](./adr/ADR-032-flash-loan-provider-aggregation.md)
+
+### 10.9 Strategy Simulation Enhancements (Phase 4.2) ✅ NEW
 
 **Problem**: CrossChainStrategy only simulated sell-side; FlashLoanStrategy didn't validate simulated profit.
 

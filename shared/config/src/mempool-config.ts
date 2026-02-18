@@ -45,7 +45,7 @@ export const MEMPOOL_CONFIG = {
   /** Service configuration */
   service: {
     /** Health check port */
-    port: parseInt(process.env.MEMPOOL_DETECTOR_PORT || '3007', 10),
+    port: parseInt(process.env.MEMPOOL_DETECTOR_PORT || '3008', 10),
     /** Instance ID */
     instanceId: process.env.MEMPOOL_INSTANCE_ID || `mempool-detector-${Date.now()}`,
     /** Maximum pending transactions in buffer */

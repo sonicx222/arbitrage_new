@@ -3,7 +3,6 @@ import {
   isEventType,
   EventTypes,
   RedisStreams,
-  PubSubChannels,
   type BaseEvent,
   type PriceUpdateEvent,
   type ArbitrageDetectedEvent,
@@ -98,14 +97,6 @@ describe('RedisStreams constants', () => {
     for (const value of Object.values(RedisStreams)) {
       expect(value).toMatch(/^stream:/);
     }
-  });
-});
-
-describe('PubSubChannels constants', () => {
-  it('has expected channel names', () => {
-    expect(PubSubChannels.PRICE_UPDATE).toBe('price:update');
-    expect(PubSubChannels.ARBITRAGE_DETECTED).toBe('arbitrage:detected');
-    expect(PubSubChannels.SERVICE_HEALTH).toBe('service:health');
   });
 });
 

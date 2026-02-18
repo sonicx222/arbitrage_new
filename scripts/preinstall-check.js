@@ -9,13 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// Import colors from shared logger. The local log() function uses raw ANSI codes
-// (e.g., colors.bold + colors.yellow) which differs from logger's log(message, colorName).
-const { colors } = require('./lib/logger');
-
-function log(message, color = colors.reset) {
-  console.log(`${color}${message}${colors.reset}`);
-}
+const { logger, colors } = require('./lib/logger');
 
 // Known malicious package names (add to this list as needed)
 // Source: Various npm security advisories and security research
@@ -112,8 +106,7 @@ function checkPackageJson() {
           !depName.startsWith('@shared/') &&
           !depName.startsWith('@types/') &&
           !depName.startsWith('@nomicfoundation/') &&
-          !depName.startsWith('@openzeppelin/') &&
-          !depName.startsWith('@ethersproject/')) {
+          !depName.startsWith('@openzeppelin/')) {
         warnings.push(`Unexpected package: "${depName}" - verify this is intentional`);
       }
     }
@@ -121,7 +114,7 @@ function checkPackageJson() {
     return { success: blocked.length === 0, blocked, warnings };
 
   } catch (error) {
-    log(`Error reading package.json: ${error.message}`, colors.red);
+    logger.error(`Error reading package.json: ${error.message}`);
     return { success: true, warnings: [] };
   }
 }
@@ -129,33 +122,35 @@ function checkPackageJson() {
 function main() {
   // Skip check if SKIP_PREINSTALL_CHECK is set (useful for CI)
   if (process.env.SKIP_PREINSTALL_CHECK === 'true') {
-    // FIX L1: Log prominent warning when supply chain checks are bypassed
-    log('\n[Security] WARNING: Pre-install security checks SKIPPED', colors.bold + colors.yellow);
-    log('  Supply chain attack detection is disabled (SKIP_PREINSTALL_CHECK=true)', colors.yellow);
-    log('  This should only be used in trusted CI environments.\n', colors.yellow);
+    // FIX L1 + FIX #17: Audit-log the bypass to stderr so it's visible in CI logs
+    const timestamp = new Date().toISOString();
+    console.error(`[${timestamp}] SECURITY BYPASS: Pre-install checks skipped (SKIP_PREINSTALL_CHECK=true)`);
+    logger.warning('[Security] Pre-install security checks SKIPPED');
+    logger.warning('  Supply chain attack detection is disabled (SKIP_PREINSTALL_CHECK=true)');
+    logger.warning('  This should only be used in trusted CI environments.\n');
     return;
   }
 
-  log('\n[Security] Running pre-install checks...', colors.cyan);
+  logger.info('\n[Security] Running pre-install checks...');
 
   const result = checkPackageJson();
 
   if (result.blocked && result.blocked.length > 0) {
-    log('\n SECURITY ALERT: Blocked packages detected!\n', colors.bold + colors.red);
-    result.blocked.forEach(msg => log(`  ${msg}`, colors.red));
-    log('\nInstallation blocked. Remove malicious packages and try again.', colors.red);
+    console.log(`\n${colors.bold}${colors.red} SECURITY ALERT: Blocked packages detected!${colors.reset}\n`);
+    result.blocked.forEach(msg => logger.error(`  ${msg}`));
+    logger.error('\nInstallation blocked. Remove malicious packages and try again.');
     process.exit(1);
   }
 
   if (result.warnings && result.warnings.length > 0) {
-    log('\nWarnings:', colors.yellow);
-    result.warnings.slice(0, 10).forEach(msg => log(`  - ${msg}`, colors.yellow));
+    logger.warning('\nWarnings:');
+    result.warnings.slice(0, 10).forEach(msg => logger.warning(`  - ${msg}`));
     if (result.warnings.length > 10) {
-      log(`  ... and ${result.warnings.length - 10} more`, colors.yellow);
+      logger.warning(`  ... and ${result.warnings.length - 10} more`);
     }
   }
 
-  log('[Security] Pre-install check passed\n', colors.green);
+  logger.success('[Security] Pre-install check passed\n');
 }
 
 main();

@@ -866,6 +866,44 @@ export function createRedisMock(options?: RedisMockOptions): RedisMock {
   return new RedisMock(options);
 }
 
+/**
+ * Create an inline jest.fn()-based Redis mock for use in jest.mock() factories.
+ *
+ * Unlike RedisMock (class with real implementations), this returns a plain object
+ * with jest.fn() stubs. Designed for the resilience test pattern where mockRedis
+ * is defined at module scope and referenced inside jest.mock() factories.
+ *
+ * Usage in test files:
+ * ```typescript
+ * // IMPORTANT: Variable MUST start with 'mock' for jest.mock() hoisting
+ * const mockRedis = createInlineRedisMock();
+ * jest.mock('../../../src/redis', () => ({
+ *   getRedisClient: jest.fn(() => Promise.resolve(mockRedis)),
+ * }));
+ * ```
+ */
+export function createInlineRedisMock() {
+  return {
+    set: jest.fn(() => Promise.resolve(undefined)),
+    get: jest.fn(() => Promise.resolve(null)),
+    del: jest.fn(() => Promise.resolve(1)),
+    publish: jest.fn(() => Promise.resolve(1)),
+    subscribe: jest.fn(() => Promise.resolve(undefined)),
+    ping: jest.fn(() => Promise.resolve(true)),
+    disconnect: jest.fn(() => Promise.resolve(undefined)),
+    zadd: jest.fn(() => Promise.resolve(1)),
+    zrange: jest.fn(() => Promise.resolve([])),
+    zrem: jest.fn(() => Promise.resolve(1)),
+    zcard: jest.fn(() => Promise.resolve(0)),
+    zscore: jest.fn(() => Promise.resolve(null)),
+    scan: jest.fn(() => Promise.resolve(['0', []])),
+    exists: jest.fn(() => Promise.resolve(0)),
+    hset: jest.fn(() => Promise.resolve(1)),
+    hget: jest.fn(() => Promise.resolve(null)),
+    hgetall: jest.fn(() => Promise.resolve({})),
+  };
+}
+
 /** Create Jest mock module for ioredis */
 export function createIoredisMockModule(mock?: RedisMock): jest.Mock {
   const instance = mock ?? createRedisMock();

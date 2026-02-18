@@ -238,6 +238,7 @@ export {
 export type {
   LockConfig,
   AcquireOptions,
+  QueueOptions,
   LockHandle,
   LockStats
 } from './distributed-lock';
@@ -315,15 +316,19 @@ export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegra
 
 export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './resilience/dead-letter-queue';
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './resilience/self-healing-manager';
 
 // P1-14 FIX: Rename to RecoveryStrategyEnum to avoid shadowing RecoveryStrategy interface
 // P2-22 FIX: Export resetExpertSelfHealingManager for test cleanup
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { ExpertSelfHealingManager, getExpertSelfHealingManager, resetExpertSelfHealingManager, FailureSeverity, RecoveryStrategy as RecoveryStrategyEnum } from './resilience/expert-self-healing-manager';
 
 // P2-17 FIX: Shared dual-publish utility
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { dualPublish } from './resilience/dual-publish';
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './resilience/error-recovery';
 
 // =============================================================================
@@ -412,6 +417,7 @@ export type {
 // 2A.2 Flash Loan Aggregation - Application Layer
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   // Use Cases
   SelectProviderUseCase,
@@ -475,12 +481,14 @@ export type {
 } from './caching/price-matrix';
 
 // PHASE3-TASK43: SharedKeyRegistry for worker thread key-to-index mapping
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { SharedKeyRegistry } from './caching/shared-key-registry';
 export type { KeyRegistryConfig } from './caching/shared-key-registry';
 
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './caching/hierarchical-cache';
 export type { CacheConfig, CacheEntry, PredictiveWarmingConfig } from './caching/hierarchical-cache';
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './caching/shared-memory-cache';
 
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
@@ -514,6 +522,7 @@ export type {
 } from './warming/domain';
 
 // Domain Models
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   WarmingTrigger,
   WarmingEvent,
@@ -521,12 +530,14 @@ export {
 } from './warming/domain';
 
 // Application Layer: Use Cases
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   WarmCacheUseCase,
   TrackCorrelationUseCase
 } from './warming/application';
 
 // Application Layer: DTOs
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   WarmCacheRequest,
   WarmCacheResponse,
@@ -595,12 +606,14 @@ export {
 export type { IPrometheusHelpers } from './metrics/domain';
 
 // Application Layer: Use Cases
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   ExportMetricsUseCase,
   CollectMetricsUseCase
 } from './metrics/application';
 
 // Application Layer: DTOs
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   ExportMetricsRequest,
   ExportMetricsResponse,
@@ -637,6 +650,7 @@ export type {
 // =============================================================================
 
 // Phase 2: Gas Price Cache (ADR-012, ADR-013)
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   GasPriceCache,
   getGasPriceCache,
@@ -695,6 +709,7 @@ export type {
 // 4.2 Stream & System Health
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   EnhancedHealthMonitor,
   getEnhancedHealthMonitor,
@@ -734,6 +749,7 @@ export type {
 // 4.3 Provider Health (S3.3)
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   ProviderHealthScorer,
   getProviderHealthScorer,
@@ -748,6 +764,7 @@ export type {
 // 4.4 Performance Monitoring (Task 2.3)
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   HotPathMonitor,
   measureHotPath,
@@ -831,6 +848,7 @@ export type {
 } from './analytics/whale-activity-tracker';
 
 // T3.15: Liquidity Depth Analysis
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   LiquidityDepthAnalyzer,
   getLiquidityDepthAnalyzer,
@@ -886,6 +904,7 @@ export type {
 } from './analytics/ml-opportunity-scorer';
 
 // Professional Quality Monitor (AD-PQS scoring)
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   ProfessionalQualityMonitor
 } from './analytics/professional-quality-monitor';
@@ -897,6 +916,7 @@ export type {
 } from './analytics/professional-quality-monitor';
 
 // Performance Analytics
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   PerformanceAnalyticsEngine,
   StrategyPerformance,
@@ -933,6 +953,7 @@ export {
 // Migration: ADR-003 architecture evolved from inheritance to composition pattern
 
 // P2-14: Cross-chain price tracking for arbitrage detection
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   CrossChainPriceTracker,
   createCrossChainPriceTracker,
@@ -1076,6 +1097,7 @@ export type {
 // 7.2 Solana Swap Parser (S3.3.4)
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   SolanaSwapParser,
   getSolanaSwapParser,
@@ -1099,6 +1121,7 @@ export type {
 // 7.3 Solana Price Feed (S3.3.5)
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   SolanaPriceFeed,
   RAYDIUM_AMM_LAYOUT,
@@ -1342,6 +1365,7 @@ export {
 // =============================================================================
 
 // PairRepository - In-memory storage with O(1) lookups
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   PairRepository,
   createPairRepository,
@@ -1413,6 +1437,7 @@ export type {
 // 11.1 WebSocket & Event Handling
 // =============================================================================
 
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './event-batcher';
 
 export {
@@ -1425,6 +1450,12 @@ export {
   ErrorEventHandler,
   GenericEventHandler
 } from './websocket-manager';
+
+// CQ8-ALT: Extracted cold-path classes from websocket-manager
+export { ProviderRotationStrategy } from './provider-rotation-strategy';
+export type { ProviderRotationConfig } from './provider-rotation-strategy';
+export { ProviderHealthTracker } from './provider-health-tracker';
+export type { QualityMetrics as ProviderQualityMetrics, HealthTrackerConfig } from './provider-health-tracker';
 
 // Factory Subscription Service (Phase 2.1.2)
 // Factory-level event subscriptions for 40-50x RPC reduction
@@ -1625,8 +1656,9 @@ export type {
   ServiceLifecycleState,
   PartitionServiceRunnerOptions,
   PartitionServiceRunner,
-  // R10: Partition Entry Point Result
-  PartitionEntryResult
+  // R10: Partition Entry Point Result & Hooks
+  PartitionEntryResult,
+  PartitionEntryHooks
 } from './partition-service-utils';
 
 // =============================================================================
@@ -1648,6 +1680,7 @@ export {
 export type { PartitionEndpoint } from './partition-router';
 
 // Publishing Service (centralized message publishing)
+/** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   PublishingService,
   createPublishingService,

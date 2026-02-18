@@ -291,7 +291,7 @@ export class ExpertSelfHealingManager {
           id: failure.id,
           serviceName: failure.serviceName,
           component: failure.component,
-          errorMessage: failure.error.message,
+          errorMessage: failure.error?.message ?? 'unknown error',
           severity: failure.severity,
           context: failure.context,
           timestamp: failure.timestamp
@@ -308,46 +308,49 @@ export class ExpertSelfHealingManager {
       service: serviceName,
       component,
       severity: failure.severity,
-      error: error.message
+      error: error?.message ?? 'unknown error'
     });
   }
 
   // Assess failure severity based on error type and context
   private assessFailureSeverity(error: Error, context: any): FailureSeverity {
+    // Guard against null/undefined error
+    const message = error?.message ?? '';
+
     // Network-related failures
-    if (error.message.includes('ECONNREFUSED') ||
-      error.message.includes('ENOTFOUND') ||
-      error.message.includes('timeout')) {
+    if (message.includes('ECONNREFUSED') ||
+      message.includes('ENOTFOUND') ||
+      message.includes('timeout')) {
       return FailureSeverity.MEDIUM;
     }
 
     // Memory/CPU resource issues
-    if (error.message.includes('out of memory') ||
-      error.message.includes('heap limit') ||
-      context.memoryUsage > 0.9) { // 90% memory usage
+    if (message.includes('out of memory') ||
+      message.includes('heap limit') ||
+      context?.memoryUsage > 0.9) { // 90% memory usage
       return FailureSeverity.HIGH;
     }
 
     // Database connectivity issues
-    if (error.message.includes('Redis') && error.message.includes('connection')) {
+    if (message.includes('Redis') && message.includes('connection')) {
       return FailureSeverity.HIGH;
     }
 
     // Circuit breaker trips
-    if (context.circuitBreakerTripped) {
+    if (context?.circuitBreakerTripped) {
       return FailureSeverity.MEDIUM;
     }
 
     // WebSocket disconnections (common, low severity)
-    if (error.message.includes('WebSocket') &&
-      (error.message.includes('close') || error.message.includes('disconnect'))) {
+    if (message.includes('WebSocket') &&
+      (message.includes('close') || message.includes('disconnect'))) {
       return FailureSeverity.LOW;
     }
 
     // Data corruption or critical logic failures
-    if (error.message.includes('corrupt') ||
-      error.message.includes('invalid') ||
-      context.dataIntegrityFailure) {
+    if (message.includes('corrupt') ||
+      message.includes('invalid') ||
+      context?.dataIntegrityFailure) {
       return FailureSeverity.CRITICAL;
     }
 

@@ -14,7 +14,6 @@ const { RedisMemoryServer } = require('redis-memory-server');
 const fs = require('fs');
 
 const {
-  log,
   isPortInUse,
   checkTcpConnection,
   getRedisMemoryConfig,
@@ -22,6 +21,7 @@ const {
   REDIS_MEMORY_CONFIG_FILE
 } = require('./lib/utils');
 
+const { logger } = require('./lib/logger');
 const { PORTS } = require('./lib/services-config');
 
 // =============================================================================
@@ -29,13 +29,11 @@ const { PORTS } = require('./lib/services-config');
 // =============================================================================
 
 async function main() {
-  console.log('\n' + '='.repeat(60));
-  log('  Redis Memory Server (Docker Alternative)', 'cyan');
-  console.log('='.repeat(60) + '\n');
+  logger.header('Redis Memory Server (Docker Alternative)');
 
   // Check if already running on the port
   const port = PORTS.REDIS;
-  log(`Checking if port ${port} is available...`, 'yellow');
+  logger.warning(`Checking if port ${port} is available...`);
 
   const portInUse =
     await checkTcpConnection('127.0.0.1', port) ||
@@ -43,32 +41,32 @@ async function main() {
     await isPortInUse(port);
 
   if (portInUse) {
-    log(`Port ${port} is already in use.`, 'yellow');
+    logger.warning(`Port ${port} is already in use.`);
 
     // Check if we have a config file that matches this port
     const existingConfig = getRedisMemoryConfig();
     if (existingConfig && existingConfig.port === port) {
-      log('An existing Redis configuration was found. Checking if it\'s functional...', 'yellow');
+      logger.warning('An existing Redis configuration was found. Checking if it\'s functional...');
 
       const functional = await checkTcpConnection('127.0.0.1', port);
 
       if (functional) {
-        log(`Redis is already running and functional at redis://127.0.0.1:${port}`, 'green');
-        log(`Using existing process ID: ${existingConfig.pid}`, 'dim');
+        logger.success(`Redis is already running and functional at redis://127.0.0.1:${port}`);
+        logger.log(`Using existing process ID: ${existingConfig.pid}`, 'dim');
         process.exit(0);
       } else {
-        log('Existing process is not responding. Port may be occupied by another application or stale process.', 'red');
-        log('Try running: npm run dev:cleanup', 'yellow');
+        logger.error('Existing process is not responding. Port may be occupied by another application or stale process.');
+        logger.warning('Try running: npm run dev:cleanup');
         process.exit(1);
       }
     }
 
-    log(`Port ${port} is occupied but no valid config was found.`, 'red');
-    log('If you have a ghost Redis process, run: npm run dev:cleanup', 'yellow');
+    logger.error(`Port ${port} is occupied but no valid config was found.`);
+    logger.warning('If you have a ghost Redis process, run: npm run dev:cleanup');
     process.exit(1);
   }
 
-  log('Starting Redis in-memory server...', 'yellow');
+  logger.warning('Starting Redis in-memory server...');
 
   try {
     const redisServer = new RedisMemoryServer({
@@ -92,23 +90,23 @@ async function main() {
     };
     fs.writeFileSync(REDIS_MEMORY_CONFIG_FILE, JSON.stringify(config, null, 2));
 
-    log(`\nRedis server running at: redis://${host}:${actualPort}`, 'green');
-    log(`Process ID: ${process.pid}`, 'dim');
-    log(`Config saved to: ${REDIS_MEMORY_CONFIG_FILE}`, 'dim');
+    logger.success(`\nRedis server running at: redis://${host}:${actualPort}`);
+    logger.log(`Process ID: ${process.pid}`, 'dim');
+    logger.log(`Config saved to: ${REDIS_MEMORY_CONFIG_FILE}`, 'dim');
 
-    log('\nSet these environment variables:', 'cyan');
-    log(`  REDIS_HOST=${host}`, 'dim');
-    log(`  REDIS_PORT=${actualPort}`, 'dim');
-    log(`  REDIS_URL=redis://${host}:${actualPort}`, 'dim');
+    logger.info('\nSet these environment variables:');
+    logger.log(`  REDIS_HOST=${host}`, 'dim');
+    logger.log(`  REDIS_PORT=${actualPort}`, 'dim');
+    logger.log(`  REDIS_URL=redis://${host}:${actualPort}`, 'dim');
 
-    log('\nPress Ctrl+C to stop the server.', 'yellow');
+    logger.warning('\nPress Ctrl+C to stop the server.');
 
     // Handle shutdown
     let shuttingDown = false;
     const cleanupAndExit = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
-      log('\n\nShutting down Redis...', 'yellow');
+      logger.warning('\n\nShutting down Redis...');
       try {
         await redisServer.stop();
       } catch {
@@ -121,7 +119,7 @@ async function main() {
         deleteRedisMemoryConfig();
       }
 
-      log('Redis stopped.', 'green');
+      logger.success('Redis stopped.');
       process.exit(0);
     };
 
@@ -133,7 +131,7 @@ async function main() {
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log(`\nFailed to start Redis: ${errorMessage}`, 'red');
+    logger.error(`\nFailed to start Redis: ${errorMessage}`);
 
     // Clean up config if it was us
     const currentConfig = getRedisMemoryConfig();
@@ -141,11 +139,11 @@ async function main() {
       deleteRedisMemoryConfig();
     }
 
-    log('\nTroubleshooting:', 'yellow');
-    log('  1. Ensure redis-memory-server is installed: npm install', 'dim');
-    log('  2. Check if port 6379 is already in use', 'dim');
-    log('  3. Run cleanup script: npm run dev:cleanup', 'dim');
-    log('  4. Try using Docker instead: npm run dev:redis', 'dim');
+    logger.warning('\nTroubleshooting:');
+    logger.log('  1. Ensure redis-memory-server is installed: npm install', 'dim');
+    logger.log('  2. Check if port 6379 is already in use', 'dim');
+    logger.log('  3. Run cleanup script: npm run dev:cleanup', 'dim');
+    logger.log('  4. Try using Docker instead: npm run dev:redis', 'dim');
     process.exit(1);
   }
 }

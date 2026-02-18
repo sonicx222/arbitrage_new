@@ -159,3 +159,13 @@ export {
   initializeTxSimulationService,
   type SimulationProviderSource,
 } from './tx-simulation-initializer';
+
+// =============================================================================
+// S6: Standby Manager (extracted from engine.ts)
+// =============================================================================
+
+export {
+  StandbyManager,
+  createStandbyManager,
+  type StandbyManagerDeps,
+} from './standby-manager';

@@ -2,7 +2,7 @@
  * validateFeatureFlags() Tests
  *
  * Comprehensive test coverage for validateFeatureFlags() (Finding #14).
- * Tests all 4 feature flag validation paths, once-guard, logger injection,
+ * Tests all 5 feature flag validation paths, once-guard, logger injection,
  * production vs dev behavior, and Redis validation.
  *
  * Uses jest.resetModules() + dynamic import to get a fresh module for each
@@ -369,6 +369,132 @@ describe('validateFeatureFlags', () => {
 
       warnSpy.mockRestore();
       infoSpy.mockRestore();
+    });
+  });
+
+  // ===========================================================================
+  // DESTINATION CHAIN FLASH LOAN FLAG (FE-001)
+  // ===========================================================================
+
+  describe('useDestChainFlashLoan flag', () => {
+    it('should warn when flag is enabled but no flash loan contracts configured', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_DEST_CHAIN_FLASH_LOAN: 'true',
+        // No FLASH_LOAN_CONTRACT_* entries
+      });
+
+      validateFeatureFlags();
+
+      const warnCalls = warnSpy.mock.calls.flat().join(' ');
+      expect(warnCalls).toContain('FEATURE_DEST_CHAIN_FLASH_LOAN');
+      expect(warnCalls).toContain('no flash loan contract addresses are configured');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should log success when flag is enabled and contracts are configured', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_DEST_CHAIN_FLASH_LOAN: 'true',
+        FLASH_LOAN_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
+      });
+
+      validateFeatureFlags();
+
+      const infoCalls = infoSpy.mock.calls.flat().join(' ');
+      expect(infoCalls).toContain('Destination chain flash loans enabled');
+      expect(infoCalls).toContain('ethereum');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should list all configured chains when multiple contracts deployed', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_DEST_CHAIN_FLASH_LOAN: 'true',
+        FLASH_LOAN_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
+        FLASH_LOAN_CONTRACT_ARBITRUM: '0x2234567890123456789012345678901234567890',
+      });
+
+      validateFeatureFlags();
+
+      const infoCalls = infoSpy.mock.calls.flat().join(' ');
+      expect(infoCalls).toContain('ethereum');
+      expect(infoCalls).toContain('arbitrum');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should not validate dest chain flash loans when flag is false', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_DEST_CHAIN_FLASH_LOAN: undefined, // defaults to false
+      });
+
+      validateFeatureFlags();
+
+      const allOutput = [...warnSpy.mock.calls, ...infoSpy.mock.calls].flat().join(' ');
+      expect(allOutput).not.toContain('FEATURE_DEST_CHAIN_FLASH_LOAN');
+      expect(allOutput).not.toContain('Destination chain flash loans enabled');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should use provided logger for dest chain flash loan validation', async () => {
+      const mockLogger = {
+        info: jest.fn(),
+        warn: jest.fn(),
+      };
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_DEST_CHAIN_FLASH_LOAN: 'true',
+        FLASH_LOAN_CONTRACT_ARBITRUM: '0x1234567890123456789012345678901234567890',
+      });
+
+      validateFeatureFlags(mockLogger);
+
+      const infoCall = mockLogger.info.mock.calls.find(
+        (call) => typeof call[0] === 'string' && (call[0] as string).includes('Destination chain flash loans enabled'),
+      );
+      expect(infoCall).toBeDefined();
+      if (infoCall && infoCall[1]) {
+        expect(infoCall[1]).toHaveProperty('chains');
+        expect((infoCall[1] as { chains: string[] }).chains).toContain('arbitrum');
+      }
+    });
+
+    it('should use logger.warn when flag enabled but no contracts configured', async () => {
+      const mockLogger = {
+        info: jest.fn(),
+        warn: jest.fn(),
+      };
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_DEST_CHAIN_FLASH_LOAN: 'true',
+      });
+
+      validateFeatureFlags(mockLogger);
+
+      const warnCall = mockLogger.warn.mock.calls.find(
+        (call) => typeof call[0] === 'string' && (call[0] as string).includes('FEATURE_DEST_CHAIN_FLASH_LOAN'),
+      );
+      expect(warnCall).toBeDefined();
+      if (warnCall && warnCall[1]) {
+        expect(warnCall[1]).toHaveProperty('envVarsNeeded');
+      }
     });
   });
 

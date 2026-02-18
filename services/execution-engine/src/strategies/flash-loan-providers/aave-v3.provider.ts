@@ -17,6 +17,7 @@ import {
   getBpsDenominatorBigInt,
   FLASH_LOAN_ARBITRAGE_ABI,
 } from '@arbitrage/config';
+import { getSwapDeadline } from '../base.strategy';
 import type {
   IFlashLoanProvider,
   FlashLoanProtocol,
@@ -38,12 +39,7 @@ const BPS_DENOMINATOR = getBpsDenominatorBigInt();
  */
 const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
 
-/**
- * Default deadline for flash loan execution (5 minutes from now).
- * This protects against stale transactions being mined in poor market conditions.
- * Matches industry standard used by Uniswap, Sushiswap, etc.
- */
-const DEFAULT_DEADLINE_SECONDS = 300;
+// Deadline configuration centralized in base.strategy.ts via getSwapDeadline()
 
 /**
  * Aave V3 Flash Loan Provider
@@ -147,9 +143,7 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
       step.amountOutMin,
     ]);
 
-    // Calculate deadline: current time + 5 minutes
-    // This protects against stale transactions (FlashLoanArbitrage.sol v1.2.0)
-    const deadline = Math.floor(Date.now() / 1000) + DEFAULT_DEADLINE_SECONDS;
+    const deadline = getSwapDeadline();
 
     return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
       request.asset,

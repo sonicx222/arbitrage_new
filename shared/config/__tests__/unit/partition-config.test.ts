@@ -1,278 +1,979 @@
 /**
- * Integration Tests for Partitioned Deployment
+ * Consolidated Partition Configuration Tests
  *
- * Tests the full integration of the partition system including:
- * - Partition configuration loading
- * - Chain instance orchestration
- * - Cross-region health coordination
- * - Failover scenarios
- *
- * These tests verify that all Phase 1 components work together correctly.
+ * Tests for the partition configuration system including:
+ * - Partition constants (PARTITIONS, FUTURE_PARTITIONS, PARTITION_CONFIG)
+ * - Chain assignment logic (assignChainToPartition)
+ * - EVM chain helpers (isEvmChain, isEvmChainSafe, getNonEvmChains)
+ * - Partition lookup (getPartition, getEnabledPartitions, getChainsForPartition)
+ * - Chain instance creation (createChainInstance, createPartitionChainInstances)
+ * - Resource calculation (calculatePartitionResources)
+ * - Partition validation (validatePartitionConfig, validateAllPartitions)
+ * - Environment configuration (getPartitionIdFromEnv, getPartitionFromEnv, getChainsFromEnv)
+ * - 4-partition architecture (P1-P4) per ADR-003
+ * - Chain configuration for all 11 chains
+ * - Deployment scenarios, failover, resource allocation
+ * - ADR-003 compliance
  *
  * @see ADR-003: Partitioned Chain Detectors
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from '@jest/globals';
+
 import {
   PARTITIONS,
+  FUTURE_PARTITIONS,
+  PARTITION_CONFIG,
   PartitionConfig,
+  assignChainToPartition,
   getPartition,
+  getEnabledPartitions,
   getChainsForPartition,
+  createChainInstance,
   createPartitionChainInstances,
+  calculatePartitionResources,
+  validatePartitionConfig,
   validateAllPartitions,
-  assignChainToPartition
+  getPartitionIdFromEnv,
+  getPartitionFromEnv,
+  getChainsFromEnv,
+  isEvmChain,
+  isEvmChainSafe,
+  getNonEvmChains,
+} from '../../src/partitions';
+
+import {
+  CHAINS,
+  DEXES,
+  CORE_TOKENS,
+  PARTITION_IDS,
+  getEnabledDexes,
 } from '@arbitrage/config';
 
 import {
   DegradationLevel,
-  CrossRegionHealthConfig
+  CrossRegionHealthConfig,
 } from '@arbitrage/core';
 
-// Integration tests don't mock - they test real interactions
-// But we still need to handle missing Redis/network connections
+// =============================================================================
+// PARTITIONS Constant
+// =============================================================================
 
-describe('Partition Configuration Integration', () => {
-  describe('partition chain assignment consistency', () => {
-    it('should assign all defined chains to exactly one partition', () => {
-      const allChains = new Set<string>();
-      const chainToPartition = new Map<string, string>();
+describe('PARTITIONS constant', () => {
+  it('should have exactly 4 partitions defined', () => {
+    expect(PARTITIONS.length).toBe(4);
+  });
 
-      // Collect all chains from all partitions
-      for (const partition of PARTITIONS) {
-        for (const chain of partition.chains) {
-          if (chainToPartition.has(chain)) {
-            console.warn(`Chain ${chain} assigned to multiple partitions: ${chainToPartition.get(chain)} and ${partition.partitionId}`);
-          }
-          chainToPartition.set(chain, partition.partitionId);
-          allChains.add(chain);
+  it('should have all 4 required partition IDs', () => {
+    const ids = PARTITIONS.map(p => p.partitionId);
+    expect(ids).toContain('asia-fast');
+    expect(ids).toContain('l2-turbo');
+    expect(ids).toContain('high-value');
+    expect(ids).toContain('solana-native');
+  });
+
+  it('should have unique partition IDs', () => {
+    const ids = PARTITIONS.map(p => p.partitionId);
+    const uniqueIds = new Set(ids);
+    expect(uniqueIds.size).toBe(ids.length);
+  });
+
+  it('should have all partitions enabled', () => {
+    for (const partition of PARTITIONS) {
+      expect(partition.enabled).toBe(true);
+    }
+  });
+
+  it('should have valid resource profiles', () => {
+    const validProfiles = ['light', 'standard', 'heavy'];
+    for (const partition of PARTITIONS) {
+      expect(validProfiles).toContain(partition.resourceProfile);
+    }
+  });
+
+  it('should have valid regions', () => {
+    const validRegions = ['asia-southeast1', 'us-east1', 'us-west1', 'eu-west1'];
+    for (const partition of PARTITIONS) {
+      expect(validRegions).toContain(partition.region);
+    }
+  });
+
+  it('should have valid providers', () => {
+    const validProviders = ['fly', 'oracle', 'railway', 'render', 'koyeb', 'gcp'];
+    for (const partition of PARTITIONS) {
+      expect(validProviders).toContain(partition.provider);
+    }
+  });
+});
+
+// =============================================================================
+// Per-Partition Configuration Tests (P1-P4)
+// =============================================================================
+
+describe('P1: Asia-Fast Partition', () => {
+  let partition: PartitionConfig | undefined;
+
+  beforeAll(() => {
+    partition = getPartition('asia-fast');
+  });
+
+  it('should exist and be enabled', () => {
+    expect(partition).toBeDefined();
+    expect(partition!.enabled).toBe(true);
+  });
+
+  it('should contain BSC, Polygon, Avalanche, Fantom', () => {
+    expect(partition!.chains).toEqual(['bsc', 'polygon', 'avalanche', 'fantom']);
+  });
+
+  it('should be deployed to asia-southeast1 on Oracle Cloud', () => {
+    expect(partition!.region).toBe('asia-southeast1');
+    expect(partition!.provider).toBe('oracle');
+  });
+
+  it('should have heavy resource profile with sufficient memory', () => {
+    expect(partition!.resourceProfile).toBe('heavy');
+    expect(partition!.maxMemoryMB).toBe(768);
+  });
+
+  it('should have 15s health check interval', () => {
+    expect(partition!.healthCheckIntervalMs).toBe(15000);
+  });
+});
+
+describe('P2: L2-Turbo Partition', () => {
+  let partition: PartitionConfig | undefined;
+
+  beforeAll(() => {
+    partition = getPartition('l2-turbo');
+  });
+
+  it('should exist and be enabled', () => {
+    expect(partition).toBeDefined();
+    expect(partition!.enabled).toBe(true);
+  });
+
+  it('should contain Arbitrum, Optimism, Base', () => {
+    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base']);
+  });
+
+  it('should be deployed to asia-southeast1 on Fly.io', () => {
+    expect(partition!.region).toBe('asia-southeast1');
+    expect(partition!.provider).toBe('fly');
+  });
+
+  it('should have standard resource profile with 512MB memory', () => {
+    expect(partition!.resourceProfile).toBe('standard');
+    expect(partition!.maxMemoryMB).toBe(512);
+  });
+
+  it('should have fastest health check interval (10s for fast L2s)', () => {
+    expect(partition!.healthCheckIntervalMs).toBe(10000);
+  });
+});
+
+describe('P3: High-Value Partition', () => {
+  let partition: PartitionConfig | undefined;
+
+  beforeAll(() => {
+    partition = getPartition('high-value');
+  });
+
+  it('should exist and be enabled', () => {
+    expect(partition).toBeDefined();
+    expect(partition!.enabled).toBe(true);
+  });
+
+  it('should contain Ethereum, zkSync, Linea', () => {
+    expect(partition!.chains).toEqual(['ethereum', 'zksync', 'linea']);
+  });
+
+  it('should be deployed to us-east1 on Oracle Cloud', () => {
+    expect(partition!.region).toBe('us-east1');
+    expect(partition!.provider).toBe('oracle');
+  });
+
+  it('should have heavy resource profile with 768MB memory', () => {
+    expect(partition!.resourceProfile).toBe('heavy');
+    expect(partition!.maxMemoryMB).toBe(768);
+  });
+
+  it('should have 30s health check interval', () => {
+    expect(partition!.healthCheckIntervalMs).toBe(30000);
+  });
+});
+
+describe('P4: Solana-Native Partition', () => {
+  let partition: PartitionConfig | undefined;
+
+  beforeAll(() => {
+    partition = getPartition('solana-native');
+  });
+
+  it('should exist and be enabled', () => {
+    expect(partition).toBeDefined();
+    expect(partition!.enabled).toBe(true);
+  });
+
+  it('should contain only Solana', () => {
+    expect(partition!.chains).toEqual(['solana']);
+  });
+
+  it('should be deployed to us-west1 on Fly.io', () => {
+    expect(partition!.region).toBe('us-west1');
+    expect(partition!.provider).toBe('fly');
+  });
+
+  it('should have heavy resource profile (high-throughput chain)', () => {
+    expect(partition!.resourceProfile).toBe('heavy');
+  });
+
+  it('should have fast health check interval (400ms blocks)', () => {
+    expect(partition!.healthCheckIntervalMs).toBeLessThanOrEqual(10000);
+  });
+});
+
+// =============================================================================
+// FUTURE_PARTITIONS and PARTITION_CONFIG
+// =============================================================================
+
+describe('FUTURE_PARTITIONS constant', () => {
+  it('should have all partitions disabled', () => {
+    for (const partition of FUTURE_PARTITIONS) {
+      expect(partition.enabled).toBe(false);
+    }
+  });
+
+  it('should include expanded chain lists', () => {
+    const expanded = FUTURE_PARTITIONS.find(p => p.partitionId === 'asia-fast-expanded');
+    expect(expanded).toBeDefined();
+    expect(expanded!.chains.length).toBeGreaterThan(2);
+  });
+});
+
+describe('PARTITION_CONFIG immutability', () => {
+  it('should have frozen arrays that cannot be mutated', () => {
+    const originalLength = PARTITION_CONFIG.P1_ASIA_FAST.length;
+    expect(() => {
+      (PARTITION_CONFIG.P1_ASIA_FAST as string[]).push('test');
+    }).toThrow();
+    expect(PARTITION_CONFIG.P1_ASIA_FAST.length).toBe(originalLength);
+  });
+
+  it('should have frozen object that cannot have properties reassigned', () => {
+    expect(() => {
+      (PARTITION_CONFIG as any).P1_ASIA_FAST = [];
+    }).toThrow();
+  });
+});
+
+// =============================================================================
+// Chain Assignment Logic
+// =============================================================================
+
+describe('assignChainToPartition', () => {
+  it.each([
+    ['bsc', 'asia-fast'],
+    ['polygon', 'asia-fast'],
+    ['avalanche', 'asia-fast'],
+    ['fantom', 'asia-fast'],
+    ['arbitrum', 'l2-turbo'],
+    ['optimism', 'l2-turbo'],
+    ['base', 'l2-turbo'],
+    ['ethereum', 'high-value'],
+    ['zksync', 'high-value'],
+    ['linea', 'high-value'],
+    ['solana', 'solana-native'],
+  ])('should assign %s to %s partition', (chain, expectedPartition) => {
+    const partition = assignChainToPartition(chain);
+    expect(partition).not.toBeNull();
+    expect(partition!.partitionId).toBe(expectedPartition);
+  });
+
+  it('should return null for unknown chain', () => {
+    const partition = assignChainToPartition('unknown-chain');
+    expect(partition).toBeNull();
+  });
+
+  it('should assign all defined chains to exactly one partition', () => {
+    const allChains = new Set<string>();
+    const chainToPartition = new Map<string, string>();
+
+    for (const partition of PARTITIONS) {
+      for (const chain of partition.chains) {
+        if (chainToPartition.has(chain)) {
+          fail(`Chain ${chain} in multiple partitions: ${chainToPartition.get(chain)} and ${partition.partitionId}`);
         }
+        chainToPartition.set(chain, partition.partitionId);
+        allChains.add(chain);
       }
+    }
 
-      // Verify each chain assignment matches
-      for (const chain of allChains) {
-        const assigned = assignChainToPartition(chain);
-        expect(assigned).not.toBeNull();
-        // The assignment function should return a valid partition
-        expect(assigned!.chains).toContain(chain);
+    for (const chain of allChains) {
+      const assigned = assignChainToPartition(chain);
+      expect(assigned).not.toBeNull();
+      expect(assigned!.chains).toContain(chain);
+    }
+  });
+
+  it('should have all chains assigned to exactly one partition (11 total)', () => {
+    const assignedChains = new Set<string>();
+    for (const partition of PARTITIONS) {
+      for (const chainId of partition.chains) {
+        assignedChains.add(chainId);
       }
+    }
+    expect(assignedChains.size).toBe(11);
+  });
+});
+
+// =============================================================================
+// EVM Chain Helpers
+// =============================================================================
+
+describe('isEvmChain', () => {
+  it.each([
+    ['ethereum'], ['arbitrum'], ['optimism'], ['base'],
+    ['polygon'], ['bsc'], ['avalanche'], ['fantom'],
+    ['zksync'], ['linea'],
+  ])('should return true for EVM chain %s', (chain) => {
+    expect(isEvmChain(chain)).toBe(true);
+  });
+
+  it('should return false for Solana (non-EVM)', () => {
+    expect(isEvmChain('solana')).toBe(false);
+  });
+
+  it('should throw error for unknown chains', () => {
+    expect(() => isEvmChain('unknown-chain')).toThrow('Unknown chain "unknown-chain"');
+    expect(() => isEvmChain('')).toThrow('Unknown chain ""');
+  });
+});
+
+describe('isEvmChainSafe', () => {
+  it('should return true for EVM chains', () => {
+    expect(isEvmChainSafe('ethereum')).toBe(true);
+    expect(isEvmChainSafe('arbitrum')).toBe(true);
+  });
+
+  it('should return false for non-EVM chains', () => {
+    expect(isEvmChainSafe('solana')).toBe(false);
+  });
+
+  it('should return false for unknown chains (not throw)', () => {
+    expect(isEvmChainSafe('unknown-chain')).toBe(false);
+    expect(isEvmChainSafe('')).toBe(false);
+  });
+});
+
+describe('getNonEvmChains', () => {
+  it('should return Solana as the only non-EVM chain', () => {
+    const nonEvm = getNonEvmChains();
+    expect(nonEvm).toContain('solana');
+    expect(nonEvm.length).toBe(1);
+  });
+
+  it('should not include EVM chains', () => {
+    const nonEvm = getNonEvmChains();
+    expect(nonEvm).not.toContain('ethereum');
+    expect(nonEvm).not.toContain('arbitrum');
+    expect(nonEvm).not.toContain('bsc');
+  });
+});
+
+// =============================================================================
+// Partition Lookup
+// =============================================================================
+
+describe('getPartition', () => {
+  it('should return partition by ID', () => {
+    const partition = getPartition('asia-fast');
+    expect(partition).toBeDefined();
+    expect(partition!.partitionId).toBe('asia-fast');
+  });
+
+  it('should return undefined for unknown partition', () => {
+    const partition = getPartition('unknown-partition');
+    expect(partition).toBeUndefined();
+  });
+});
+
+describe('getEnabledPartitions', () => {
+  it('should return only enabled partitions (all 4)', () => {
+    const enabled = getEnabledPartitions();
+    expect(enabled.length).toBe(4);
+    for (const partition of enabled) {
+      expect(partition.enabled).toBe(true);
+    }
+  });
+
+  it('should not include disabled FUTURE_PARTITIONS', () => {
+    const enabled = getEnabledPartitions();
+    const ids = enabled.map(p => p.partitionId);
+    for (const future of FUTURE_PARTITIONS) {
+      expect(ids).not.toContain(future.partitionId);
+    }
+  });
+});
+
+describe('getChainsForPartition', () => {
+  it('should return chains for asia-fast partition', () => {
+    const chains = getChainsForPartition('asia-fast');
+    expect(chains).toContain('bsc');
+    expect(chains).toContain('polygon');
+  });
+
+  it('should return chains for l2-turbo partition', () => {
+    const chains = getChainsForPartition('l2-turbo');
+    expect(chains).toEqual(['arbitrum', 'optimism', 'base']);
+  });
+
+  it('should have matching assignments for all partitions', () => {
+    for (const partition of PARTITIONS) {
+      const chains = getChainsForPartition(partition.partitionId);
+      expect(chains).toEqual(partition.chains);
+    }
+  });
+
+  it('should return empty array for unknown partition', () => {
+    const chains = getChainsForPartition('unknown');
+    expect(chains).toEqual([]);
+  });
+});
+
+// =============================================================================
+// Chain Instance Creation
+// =============================================================================
+
+describe('createChainInstance', () => {
+  it.each([
+    ['bsc', 56, 'BNB'],
+    ['ethereum', 1, 'ETH'],
+    ['arbitrum', 42161, 'ETH'],
+    ['avalanche', 43114, 'AVAX'],
+    ['fantom', 250, 'FTM'],
+    ['zksync', 324, 'ETH'],
+    ['linea', 59144, 'ETH'],
+    ['solana', 101, 'SOL'],
+  ])('should create instance for %s with chainId=%d and nativeToken=%s', (chain, numericId, nativeToken) => {
+    const instance = createChainInstance(chain);
+    expect(instance).not.toBeNull();
+    expect(instance!.chainId).toBe(chain);
+    expect(instance!.numericId).toBe(numericId);
+    expect(instance!.nativeToken).toBe(nativeToken);
+  });
+
+  it('should include DEX names and tokens in BSC instance', () => {
+    const instance = createChainInstance('bsc');
+    expect(instance!.dexes.length).toBeGreaterThan(0);
+    expect(instance!.dexes).toContain('pancakeswap_v3');
+    expect(instance!.tokens.length).toBeGreaterThan(0);
+    expect(instance!.tokens).toContain('WBNB');
+  });
+
+  it('should have disconnected status initially', () => {
+    const instance = createChainInstance('bsc');
+    expect(instance!.status).toBe('disconnected');
+  });
+
+  it('should return null for unknown chain', () => {
+    const instance = createChainInstance('unknown');
+    expect(instance).toBeNull();
+  });
+});
+
+describe('createPartitionChainInstances', () => {
+  it.each([
+    ['asia-fast', 4, ['bsc', 'polygon', 'avalanche', 'fantom']],
+    ['l2-turbo', 3, ['arbitrum', 'optimism', 'base']],
+    ['high-value', 3, ['ethereum', 'zksync', 'linea']],
+    ['solana-native', 1, ['solana']],
+  ])('should create %d instances for %s partition', (partitionId, expectedCount, expectedChains) => {
+    const instances = createPartitionChainInstances(partitionId);
+    expect(instances).toHaveLength(expectedCount);
+    for (const chain of expectedChains) {
+      expect(instances.map(i => i.chainId)).toContain(chain);
+    }
+  });
+
+  it('should return empty array for unknown partition', () => {
+    const instances = createPartitionChainInstances('unknown');
+    expect(instances).toEqual([]);
+  });
+
+  it('should create consistent instances across partition boundaries', () => {
+    const bscDirect = createChainInstance('bsc');
+    const asiaFastInstances = createPartitionChainInstances('asia-fast');
+    const bscFromPartition = asiaFastInstances.find(i => i.chainId === 'bsc');
+
+    expect(bscDirect!.chainId).toBe(bscFromPartition!.chainId);
+    expect(bscDirect!.numericId).toBe(bscFromPartition!.numericId);
+    expect(bscDirect!.nativeToken).toBe(bscFromPartition!.nativeToken);
+  });
+
+  it('should create valid chain instances with URLs and DEXes for all partitions', () => {
+    for (const partition of PARTITIONS) {
+      const instances = createPartitionChainInstances(partition.partitionId);
+      expect(instances.length).toBe(partition.chains.length);
+
+      for (const instance of instances) {
+        expect(partition.chains).toContain(instance.chainId);
+        expect(instance.wsUrl).toBeDefined();
+        expect(instance.rpcUrl).toBeDefined();
+        expect(instance.dexes.length).toBeGreaterThan(0);
+        expect(instance.tokens.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+// =============================================================================
+// Resource Calculation
+// =============================================================================
+
+describe('calculatePartitionResources', () => {
+  it('should calculate asia-fast resources (4 chains, heavy)', () => {
+    const resources = calculatePartitionResources('asia-fast');
+    expect(resources.estimatedMemoryMB).toBeGreaterThan(300);
+    expect(resources.estimatedCpuCores).toBeGreaterThan(0);
+    expect(resources.recommendedProfile).toBe('heavy');
+  });
+
+  it('should calculate l2-turbo resources (fast chains, more CPU)', () => {
+    const resources = calculatePartitionResources('l2-turbo');
+    expect(resources.estimatedMemoryMB).toBeGreaterThan(0);
+    expect(resources.estimatedCpuCores).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('should return defaults for unknown partition', () => {
+    const resources = calculatePartitionResources('unknown');
+    expect(resources.estimatedMemoryMB).toBe(256);
+    expect(resources.estimatedCpuCores).toBe(0.5);
+    expect(resources.recommendedProfile).toBe('light');
+  });
+
+  it('should have resources proportional to chain/DEX/token count', () => {
+    for (const partition of PARTITIONS) {
+      const resources = calculatePartitionResources(partition.partitionId);
+      expect(resources.estimatedMemoryMB).toBeGreaterThanOrEqual(partition.chains.length * 50);
+    }
+  });
+});
+
+// =============================================================================
+// Partition Validation
+// =============================================================================
+
+describe('validatePartitionConfig', () => {
+  it.each([
+    ['asia-fast'], ['l2-turbo'], ['high-value'], ['solana-native'],
+  ])('should return valid for %s partition', (partitionId) => {
+    const partition = getPartition(partitionId)!;
+    const result = validatePartitionConfig(partition);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('should detect invalid partition ID (too short)', () => {
+    const invalidPartition: PartitionConfig = {
+      partitionId: 'ab',
+      name: 'Test',
+      chains: ['bsc'],
+      region: 'asia-southeast1',
+      provider: 'fly',
+      resourceProfile: 'light',
+      priority: 1,
+      maxMemoryMB: 256,
+      enabled: true,
+      healthCheckIntervalMs: 30000,
+      failoverTimeoutMs: 60000,
+    };
+    const result = validatePartitionConfig(invalidPartition);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('at least 3 characters'))).toBe(true);
+  });
+
+  it('should detect empty partition ID', () => {
+    const emptyIdPartition: PartitionConfig = {
+      partitionId: '',
+      name: 'Empty ID',
+      chains: ['bsc'],
+      region: 'us-east1',
+      provider: 'fly',
+      resourceProfile: 'light',
+      priority: 1,
+      maxMemoryMB: 512,
+      enabled: true,
+      healthCheckIntervalMs: 15000,
+      failoverTimeoutMs: 60000,
+    };
+    const result = validatePartitionConfig(emptyIdPartition);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('at least 3 characters'))).toBe(true);
+  });
+
+  it('should detect unknown chains', () => {
+    const invalidPartition: PartitionConfig = {
+      partitionId: 'test-partition',
+      name: 'Test',
+      chains: ['unknown-chain'],
+      region: 'asia-southeast1',
+      provider: 'fly',
+      resourceProfile: 'light',
+      priority: 1,
+      maxMemoryMB: 256,
+      enabled: true,
+      healthCheckIntervalMs: 30000,
+      failoverTimeoutMs: 60000,
+    };
+    const result = validatePartitionConfig(invalidPartition);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('not found'))).toBe(true);
+  });
+
+  it('should warn about insufficient memory', () => {
+    const partition: PartitionConfig = {
+      partitionId: 'test-partition',
+      name: 'Test',
+      chains: ['bsc', 'polygon', 'arbitrum', 'optimism', 'base'],
+      region: 'asia-southeast1',
+      provider: 'fly',
+      resourceProfile: 'light',
+      priority: 1,
+      maxMemoryMB: 100,
+      enabled: true,
+      healthCheckIntervalMs: 30000,
+      failoverTimeoutMs: 60000,
+    };
+    const result = validatePartitionConfig(partition);
+    expect(result.warnings.some(w => w.includes('insufficient'))).toBe(true);
+  });
+
+  it('should warn about duplicate chains across partitions', () => {
+    const duplicatePartition: PartitionConfig = {
+      partitionId: 'duplicate-test',
+      name: 'Duplicate Test',
+      chains: ['bsc'],
+      region: 'us-east1',
+      provider: 'fly',
+      resourceProfile: 'light',
+      priority: 1,
+      maxMemoryMB: 512,
+      enabled: true,
+      healthCheckIntervalMs: 15000,
+      failoverTimeoutMs: 60000,
+    };
+    const result = validatePartitionConfig(duplicatePartition);
+    expect(result.warnings.some(w => w.includes('multiple partitions'))).toBe(true);
+  });
+
+  it('should detect resource mismatches (too light for many chains)', () => {
+    const testPartition: PartitionConfig = {
+      partitionId: 'test-mismatch',
+      name: 'Test Mismatch',
+      chains: ['bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'ethereum'],
+      region: 'asia-southeast1',
+      provider: 'fly',
+      resourceProfile: 'light',
+      priority: 1,
+      maxMemoryMB: 128,
+      enabled: true,
+      healthCheckIntervalMs: 30000,
+      failoverTimeoutMs: 60000,
+    };
+    const validation = validatePartitionConfig(testPartition);
+    expect(validation.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('validateAllPartitions', () => {
+  it('should validate all 4 production partitions', () => {
+    const result = validateAllPartitions();
+    expect(result.results.size).toBe(4);
+  });
+
+  it('should report all production partitions as valid', () => {
+    const result = validateAllPartitions();
+    expect(result.valid).toBe(true);
+    for (const [, partResult] of result.results) {
+      expect(partResult.valid).toBe(true);
+      expect(partResult.errors).toHaveLength(0);
+    }
+  });
+
+  it('should have entries for all partition IDs', () => {
+    const result = validateAllPartitions();
+    for (const partition of PARTITIONS) {
+      expect(result.results.has(partition.partitionId)).toBe(true);
+    }
+  });
+});
+
+// =============================================================================
+// Environment Configuration
+// =============================================================================
+
+describe('Environment Configuration', () => {
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    savedEnv = { ...process.env };
+  });
+
+  afterEach(() => {
+    process.env = savedEnv;
+  });
+
+  describe('getPartitionIdFromEnv', () => {
+    it('should return asia-fast as default when PARTITION_ID is not set', () => {
+      delete process.env.PARTITION_ID;
+      expect(getPartitionIdFromEnv()).toBe('asia-fast');
     });
 
-    it('should have matching partition assignments for getChainsForPartition', () => {
-      for (const partition of PARTITIONS) {
-        const chains = getChainsForPartition(partition.partitionId);
-        expect(chains).toEqual(partition.chains);
-      }
+    it('should return PARTITION_ID when env var is set', () => {
+      process.env.PARTITION_ID = 'l2-turbo';
+      expect(getPartitionIdFromEnv()).toBe('l2-turbo');
+    });
+
+    it('should return custom value when set to non-standard value', () => {
+      process.env.PARTITION_ID = 'custom-partition';
+      expect(getPartitionIdFromEnv()).toBe('custom-partition');
     });
   });
 
-  describe('partition validation integration', () => {
-    it('should validate all production partitions successfully', () => {
-      const result = validateAllPartitions();
-
-      // All production partitions should be valid
-      for (const [partitionId, validation] of result.results) {
-        if (!validation.valid) {
-          console.log(`Partition ${partitionId} validation errors:`, validation.errors);
-        }
-        expect(validation.valid).toBe(true);
-      }
+  describe('getPartitionFromEnv', () => {
+    it('should return partition config for asia-fast by default', () => {
+      delete process.env.PARTITION_ID;
+      const partition = getPartitionFromEnv();
+      expect(partition).toBeDefined();
+      expect(partition!.partitionId).toBe('asia-fast');
     });
 
-    it('should detect resource mismatches', () => {
-      // Create a partition with mismatched resources
-      const testPartition: PartitionConfig = {
-        partitionId: 'test-mismatch',
-        name: 'Test Mismatch',
-        chains: ['bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'ethereum'],
-        region: 'asia-southeast1',
-        provider: 'fly',
-        resourceProfile: 'light', // Too light for 6 chains
-        priority: 1,
-        maxMemoryMB: 128, // Way too low
-        enabled: true,
-        healthCheckIntervalMs: 30000,
-        failoverTimeoutMs: 60000
-      };
+    it('should return partition config when PARTITION_ID is set', () => {
+      process.env.PARTITION_ID = 'high-value';
+      const partition = getPartitionFromEnv();
+      expect(partition).toBeDefined();
+      expect(partition!.partitionId).toBe('high-value');
+    });
 
-      const validation = require('@arbitrage/config').validatePartitionConfig(testPartition);
-
-      // Should have warnings about resources
-      expect(validation.warnings.length).toBeGreaterThan(0);
+    it('should return null for unknown partition in env', () => {
+      process.env.PARTITION_ID = 'nonexistent';
+      const partition = getPartitionFromEnv();
+      expect(partition).toBeNull();
     });
   });
 
-  describe('chain instance creation integration', () => {
-    it('should create valid chain instances for all partition chains', () => {
-      for (const partition of PARTITIONS) {
-        const instances = createPartitionChainInstances(partition.partitionId);
-
-        expect(instances.length).toBe(partition.chains.length);
-
-        for (const instance of instances) {
-          expect(partition.chains).toContain(instance.chainId);
-          expect(instance.wsUrl).toBeDefined();
-          expect(instance.rpcUrl).toBeDefined();
-          expect(instance.dexes.length).toBeGreaterThan(0);
-          expect(instance.tokens.length).toBeGreaterThan(0);
-        }
-      }
+  describe('getChainsFromEnv', () => {
+    it('should return partition chains when PARTITION_CHAINS is not set', () => {
+      delete process.env.PARTITION_CHAINS;
+      process.env.PARTITION_ID = 'asia-fast';
+      const chains = getChainsFromEnv();
+      expect(chains).toContain('bsc');
+      expect(chains).toContain('polygon');
     });
 
-    it('should have consistent chain data across instances', () => {
-      const bscFromAsiaFast = createPartitionChainInstances('asia-fast')
-        .find(i => i.chainId === 'bsc');
-
-      expect(bscFromAsiaFast).toBeDefined();
-      expect(bscFromAsiaFast!.numericId).toBe(56);
-      expect(bscFromAsiaFast!.nativeToken).toBe('BNB');
+    it('should parse comma-separated PARTITION_CHAINS override', () => {
+      process.env.PARTITION_CHAINS = 'bsc,polygon,arbitrum';
+      const chains = getChainsFromEnv();
+      expect(chains).toEqual(['bsc', 'polygon', 'arbitrum']);
     });
-  });
 
-  describe('degradation level integration', () => {
-    it('should have monotonically increasing severity', () => {
-      expect(DegradationLevel.FULL_OPERATION).toBeLessThan(DegradationLevel.REDUCED_CHAINS);
-      expect(DegradationLevel.REDUCED_CHAINS).toBeLessThan(DegradationLevel.DETECTION_ONLY);
-      expect(DegradationLevel.DETECTION_ONLY).toBeLessThan(DegradationLevel.READ_ONLY);
-      expect(DegradationLevel.READ_ONLY).toBeLessThan(DegradationLevel.COMPLETE_OUTAGE);
+    it('should handle spaces in comma-separated PARTITION_CHAINS', () => {
+      process.env.PARTITION_CHAINS = 'bsc, polygon, arbitrum';
+      const chains = getChainsFromEnv();
+      expect(chains).toEqual(['bsc', 'polygon', 'arbitrum']);
+    });
+
+    it('should filter invalid chains from PARTITION_CHAINS', () => {
+      process.env.PARTITION_CHAINS = 'bsc,invalid-chain,polygon';
+      const chains = getChainsFromEnv();
+      expect(chains).toContain('bsc');
+      expect(chains).toContain('polygon');
+      expect(chains).not.toContain('invalid-chain');
+    });
+
+    it('should normalize chains to lowercase', () => {
+      process.env.PARTITION_CHAINS = 'BSC,POLYGON';
+      const chains = getChainsFromEnv();
+      expect(chains).toContain('bsc');
+      expect(chains).toContain('polygon');
+    });
+
+    it('should return a copy of the chains array (not a reference)', () => {
+      delete process.env.PARTITION_CHAINS;
+      process.env.PARTITION_ID = 'asia-fast';
+      const chains1 = getChainsFromEnv();
+      const chains2 = getChainsFromEnv();
+      expect(chains1).toEqual(chains2);
+      expect(chains1).not.toBe(chains2);
+    });
+
+    it('should return empty array when partition is unknown and PARTITION_CHAINS not set', () => {
+      delete process.env.PARTITION_CHAINS;
+      process.env.PARTITION_ID = 'nonexistent';
+      const chains = getChainsFromEnv();
+      expect(chains).toEqual([]);
     });
   });
 });
 
-describe('Partition Deployment Scenarios', () => {
-  describe('asia-fast partition', () => {
-    it('should be configured for Oracle Cloud Singapore', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition).toBeDefined();
-      expect(partition!.provider).toBe('oracle');
-      expect(partition!.region).toBe('asia-southeast1');
-    });
+// =============================================================================
+// PARTITION_IDS Type-Safe Constants
+// =============================================================================
 
-    it('should have heavy resource profile', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition!.resourceProfile).toBe('heavy');
-      expect(partition!.maxMemoryMB).toBeGreaterThanOrEqual(512);
-    });
-
-    it('should include fast Asian chains', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition!.chains).toContain('bsc');
-      expect(partition!.chains).toContain('polygon');
-    });
+describe('PARTITION_IDS constant', () => {
+  it('should have all 4 partition IDs defined', () => {
+    expect(PARTITION_IDS.ASIA_FAST).toBe('asia-fast');
+    expect(PARTITION_IDS.L2_TURBO).toBe('l2-turbo');
+    expect(PARTITION_IDS.HIGH_VALUE).toBe('high-value');
+    expect(PARTITION_IDS.SOLANA_NATIVE).toBe('solana-native');
   });
 
-  describe('l2-turbo partition', () => {
-    it('should be configured for Fly.io', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition).toBeDefined();
-      expect(partition!.provider).toBe('fly');
-    });
-
-    it('should have standard resource profile', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition!.resourceProfile).toBe('standard');
-    });
-
-    it('should include all L2 chains', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition!.chains).toContain('arbitrum');
-      expect(partition!.chains).toContain('optimism');
-      expect(partition!.chains).toContain('base');
-    });
-
-    it('should have faster health checks for fast L2s', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition!.healthCheckIntervalMs).toBeLessThanOrEqual(15000);
-    });
+  it('should be consistent with PARTITIONS array', () => {
+    const partitionIds = PARTITIONS.map(p => p.partitionId);
+    expect(partitionIds).toContain(PARTITION_IDS.ASIA_FAST);
+    expect(partitionIds).toContain(PARTITION_IDS.L2_TURBO);
+    expect(partitionIds).toContain(PARTITION_IDS.HIGH_VALUE);
+    expect(partitionIds).toContain(PARTITION_IDS.SOLANA_NATIVE);
   });
 
-  describe('high-value partition', () => {
-    it('should be configured for Oracle Cloud US', () => {
-      const partition = getPartition('high-value');
-      expect(partition).toBeDefined();
-      expect(partition!.provider).toBe('oracle');
-      expect(partition!.region).toBe('us-east1');
-    });
-
-    it('should have heavy resource profile', () => {
-      const partition = getPartition('high-value');
-      expect(partition!.resourceProfile).toBe('heavy');
-    });
-
-    it('should include Ethereum', () => {
-      const partition = getPartition('high-value');
-      expect(partition!.chains).toContain('ethereum');
-    });
+  it('should work with getPartition using string or constant', () => {
+    const byString = getPartition('asia-fast');
+    const byConstant = getPartition(PARTITION_IDS.ASIA_FAST);
+    expect(byString).toEqual(byConstant);
   });
 });
 
-describe('Failover Configuration Integration', () => {
-  it('should have standby regions for critical partitions', () => {
-    const asiaFast = getPartition('asia-fast');
-    expect(asiaFast!.standbyRegion).toBeDefined();
+// =============================================================================
+// Chain Configuration (all 11 chains)
+// =============================================================================
 
-    const l2Fast = getPartition('l2-turbo');
-    expect(l2Fast!.standbyRegion).toBeDefined();
+describe('Chain Configuration', () => {
+  it('should have 11 chains configured', () => {
+    expect(Object.keys(CHAINS).length).toBe(11);
+  });
+
+  it.each([
+    ['avalanche', 43114, 'AVAX'],
+    ['fantom', 250, 'FTM'],
+    ['zksync', 324, 'ETH'],
+    ['linea', 59144, 'ETH'],
+    ['solana', 101, 'SOL'],
+  ])('should have correct config for new chain %s (id=%d, token=%s)', (chain, id, nativeToken) => {
+    expect(CHAINS[chain]).toBeDefined();
+    expect(CHAINS[chain].id).toBe(id);
+    expect(CHAINS[chain].rpcUrl).toBeTruthy();
+    expect(CHAINS[chain].nativeToken).toBe(nativeToken);
+  });
+
+  it('should have Solana marked as non-EVM', () => {
+    expect(CHAINS['solana'].isEVM).toBe(false);
+  });
+
+  it('should have appropriate block times for fast chains', () => {
+    expect(CHAINS['avalanche'].blockTime).toBeLessThanOrEqual(3);
+    expect(CHAINS['fantom'].blockTime).toBeLessThanOrEqual(2);
+    expect(CHAINS['solana'].blockTime).toBeLessThanOrEqual(0.5);
+  });
+
+  it('should have all chains properly configured with DEXes, tokens, and partition', () => {
+    for (const chainId of Object.keys(CHAINS)) {
+      expect(CHAINS[chainId].id).toBeGreaterThan(0);
+      expect(CHAINS[chainId].rpcUrl).toBeTruthy();
+      expect(CHAINS[chainId].nativeToken).toBeTruthy();
+      expect(DEXES[chainId]).toBeDefined();
+      expect(DEXES[chainId].length).toBeGreaterThan(0);
+      expect(CORE_TOKENS[chainId]).toBeDefined();
+      expect(CORE_TOKENS[chainId].length).toBeGreaterThan(0);
+      expect(assignChainToPartition(chainId)).not.toBeNull();
+    }
+  });
+});
+
+// =============================================================================
+// DEX Configuration for New Chains
+// =============================================================================
+
+describe('DEX Configuration for New Chains', () => {
+  it.each([
+    ['avalanche', 'trader_joe_v2'],
+    ['avalanche', 'pangolin'],
+    ['fantom', 'spookyswap'],
+    ['fantom', 'spiritswap'],
+    ['zksync', 'syncswap'],
+    ['zksync', 'mute'],
+    ['linea', 'syncswap'],
+    ['solana', 'raydium'],
+    ['solana', 'orca'],
+  ])('should have %s DEX on %s', (chain, dexName) => {
+    const dexes = getEnabledDexes(chain);
+    const found = dexes.find(d => d.name === dexName);
+    expect(found).toBeDefined();
+  });
+
+  it('should have at least 2 DEXes for each new chain', () => {
+    const newChains = ['avalanche', 'fantom', 'zksync', 'linea', 'solana'];
+    for (const chain of newChains) {
+      expect(getEnabledDexes(chain).length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('should use Solana program addresses (not EVM addresses)', () => {
+    const dexes = getEnabledDexes('solana');
+    const raydium = dexes.find(d => d.name === 'raydium');
+    expect(raydium!.factoryAddress).not.toMatch(/^0x/);
+  });
+
+  it('should have correct total DEX count (>=44)', () => {
+    let totalDexes = 0;
+    for (const chain of Object.keys(DEXES)) {
+      totalDexes += DEXES[chain].length;
+    }
+    expect(totalDexes).toBeGreaterThanOrEqual(44);
+  });
+});
+
+// =============================================================================
+// Failover Configuration
+// =============================================================================
+
+describe('Failover Configuration', () => {
+  it('should have standby regions for all partitions', () => {
+    for (const partition of PARTITIONS.filter(p => p.enabled)) {
+      expect(partition.standbyRegion).toBeDefined();
+      expect(partition.standbyProvider).toBeDefined();
+    }
   });
 
   it('should have different standby providers for redundancy', () => {
-    const asiaFast = getPartition('asia-fast');
-    expect(asiaFast!.standbyProvider).not.toBe(asiaFast!.provider);
-
-    const l2Fast = getPartition('l2-turbo');
-    expect(l2Fast!.standbyProvider).not.toBe(l2Fast!.provider);
+    for (const partition of PARTITIONS.filter(p => p.enabled)) {
+      if (partition.standbyProvider) {
+        expect(partition.standbyProvider).not.toBe(partition.provider);
+      }
+    }
   });
 
-  it('should have appropriate failover timeouts', () => {
+  it('should have failover timeouts within 30-60 seconds (ADR-007)', () => {
     for (const partition of PARTITIONS) {
-      // Failover should complete within 60 seconds (ADR-007 requirement)
       expect(partition.failoverTimeoutMs).toBeLessThanOrEqual(60000);
-      // But not too fast (need time for proper handoff)
       expect(partition.failoverTimeoutMs).toBeGreaterThanOrEqual(30000);
     }
   });
 
-  it('should have valid CrossRegionHealthConfig defaults', () => {
-    const config: CrossRegionHealthConfig = {
-      instanceId: 'test-1',
-      regionId: 'us-east1',
-      serviceName: 'unified-detector-asia-fast'
-    };
-
-    // Config should be valid for creating CrossRegionHealthManager
-    expect(config.instanceId).toBeDefined();
-    expect(config.regionId).toBeDefined();
-    expect(config.serviceName).toBeDefined();
+  it('should have faster health checks for L2 than high-value', () => {
+    const l2 = getPartition('l2-turbo');
+    const highValue = getPartition('high-value');
+    expect(l2!.healthCheckIntervalMs).toBeLessThan(highValue!.healthCheckIntervalMs);
   });
 });
 
-describe('Service Discovery Integration', () => {
-  it('should generate consistent instance IDs', () => {
-    const hostname = 'partition-asia-fast-1';
-    const timestamp = Date.now();
-    const instanceId = `unified-${hostname}-${timestamp}`;
+// =============================================================================
+// Resource Allocation
+// =============================================================================
 
-    expect(instanceId).toContain('unified-');
-    expect(instanceId).toContain(hostname);
-  });
-
-  it('should support environment-based configuration', () => {
-    // Simulate environment configuration
-    const mockEnv = {
-      PARTITION_ID: 'l2-turbo',
-      PARTITION_CHAINS: 'arbitrum,optimism',
-      REGION_ID: 'asia-southeast1',
-      INSTANCE_ID: 'test-instance-1'
-    };
-
-    // These should be parseable
-    expect(mockEnv.PARTITION_CHAINS.split(',')).toHaveLength(2);
-    expect(mockEnv.PARTITION_ID).toBe('l2-turbo');
-  });
-});
-
-describe('Resource Allocation Integration', () => {
-  it('should have total resources within free tier limits', () => {
-    // Calculate total resources across all partitions
+describe('Resource Allocation', () => {
+  it('should have total resources within reasonable limits', () => {
     let totalMemoryMB = 0;
     let totalServices = 0;
 
@@ -281,480 +982,100 @@ describe('Resource Allocation Integration', () => {
       totalServices++;
     }
 
-    // Log for visibility
-    console.log(`Total partitions: ${totalServices}, Total memory: ${totalMemoryMB}MB`);
-
-    // S3.1.2: 4-partition architecture with 11 chains
-    // Fly.io free tier: 3 shared-cpu-1x VMs with 256MB each = 768MB total
-    // Oracle Cloud free tier: 4 VMs with up to 24GB total
-    // Combined should be within reasonable limits for 4 partitions
-    expect(totalServices).toBeLessThanOrEqual(5); // 4 partitions
-    expect(totalMemoryMB).toBeLessThanOrEqual(3072); // 3GB total for 4 partitions (768+512+768+512=2560)
+    expect(totalServices).toBeLessThanOrEqual(5);
+    expect(totalMemoryMB).toBeLessThanOrEqual(3072);
   });
 
-  it('should have partitions sized appropriately for providers', () => {
-    for (const partition of PARTITIONS) {
-      if (partition.provider === 'fly') {
-        // Fly.io free tier: 256MB per app
-        expect(partition.maxMemoryMB).toBeLessThanOrEqual(512);
-      }
+  it('should respect Fly.io memory limit (<= 512MB)', () => {
+    const flyPartitions = PARTITIONS.filter(p => p.provider === 'fly' && p.enabled);
+    for (const partition of flyPartitions) {
+      expect(partition.maxMemoryMB).toBeLessThanOrEqual(512);
+    }
+  });
 
-      if (partition.provider === 'oracle') {
-        // Oracle free tier: more generous
-        expect(partition.maxMemoryMB).toBeLessThanOrEqual(1024);
-      }
+  it('should respect Oracle Cloud free tier limits (<= 1024MB)', () => {
+    const oraclePartitions = PARTITIONS.filter(p => p.provider === 'oracle' && p.enabled);
+    for (const partition of oraclePartitions) {
+      expect(partition.maxMemoryMB).toBeLessThanOrEqual(1024);
     }
   });
 });
 
-describe('Chain Coverage Integration', () => {
-  it('should cover all supported chains across partitions', () => {
-    const coveredChains = new Set<string>();
+// =============================================================================
+// ADR-003 Compliance
+// =============================================================================
 
-    for (const partition of PARTITIONS.filter(p => p.enabled)) {
-      for (const chain of partition.chains) {
-        coveredChains.add(chain);
-      }
-    }
+describe('ADR-003 Compliance', () => {
+  it('should support geographic-based partitioning', () => {
+    expect(getPartition('asia-fast')?.region).toBe('asia-southeast1');
+    expect(getPartition('high-value')?.region).toBe('us-east1');
+    expect(getPartition('solana-native')?.region).toBe('us-west1');
+  });
 
-    // All major chains should be covered
-    const expectedChains = ['bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'ethereum'];
-
-    for (const chain of expectedChains) {
-      expect(coveredChains.has(chain)).toBe(true);
+  it('should support block-time-based partitioning (L2s < 2s)', () => {
+    const l2Turbo = getPartition('l2-turbo');
+    for (const chainId of l2Turbo!.chains) {
+      expect(CHAINS[chainId].blockTime).toBeLessThanOrEqual(2);
     }
   });
 
-  it('should not have overlapping chains in enabled partitions', () => {
-    const chainAssignments = new Map<string, string>();
+  it('should isolate non-EVM chains in dedicated partition', () => {
+    const solanaNative = getPartition('solana-native');
+    expect(solanaNative!.chains).toEqual(['solana']);
 
+    for (const partition of PARTITIONS) {
+      if (partition.partitionId !== 'solana-native') {
+        expect(partition.chains).not.toContain('solana');
+      }
+    }
+  });
+
+  it('should have at least 2 regions for redundancy', () => {
+    const regions = new Set(PARTITIONS.filter(p => p.enabled).map(p => p.region));
+    expect(regions.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should have no overlapping chains in enabled partitions', () => {
+    const chainAssignments = new Map<string, string>();
     for (const partition of PARTITIONS.filter(p => p.enabled)) {
       for (const chain of partition.chains) {
         if (chainAssignments.has(chain)) {
-          fail(`Chain ${chain} is assigned to both ${chainAssignments.get(chain)} and ${partition.partitionId}`);
+          fail(`Chain ${chain} assigned to both ${chainAssignments.get(chain)} and ${partition.partitionId}`);
         }
         chainAssignments.set(chain, partition.partitionId);
       }
     }
-
-    // If we get here, no overlaps
     expect(chainAssignments.size).toBeGreaterThan(0);
   });
 });
 
 // =============================================================================
-// Phase 2: Deployment Configuration Tests
+// Degradation Level
 // =============================================================================
 
-describe('Phase 2: Docker Compose Partition Deployment', () => {
-  describe('partition service configuration', () => {
-    it('should map asia-fast partition to expected chains', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition).toBeDefined();
-      // S3.1.2: 4-partition architecture adds Avalanche and Fantom
-      expect(partition!.chains).toEqual(['bsc', 'polygon', 'avalanche', 'fantom']);
-    });
-
-    it('should map l2-turbo partition to expected chains', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition).toBeDefined();
-      expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base']);
-    });
-
-    it('should map high-value partition to expected chains', () => {
-      const partition = getPartition('high-value');
-      expect(partition).toBeDefined();
-      // S3.1.2: 4-partition architecture adds zkSync and Linea
-      expect(partition!.chains).toEqual(['ethereum', 'zksync', 'linea']);
-    });
-
-    it('should map solana-native partition to expected chains', () => {
-      const partition = getPartition('solana-native');
-      expect(partition).toBeDefined();
-      // S3.1.2: Non-EVM dedicated partition
-      expect(partition!.chains).toEqual(['solana']);
-    });
-  });
-
-  describe('partition resource allocation', () => {
-    it('should allocate heavy resources to asia-fast (BSC, Polygon, Avalanche, Fantom)', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition!.resourceProfile).toBe('heavy');
-      expect(partition!.maxMemoryMB).toBe(768); // S3.1.2: 4 chains need more memory
-    });
-
-    it('should allocate standard resources to l2-turbo (L2 chains)', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition!.resourceProfile).toBe('standard');
-      expect(partition!.maxMemoryMB).toBe(512); // S3.1.2: Updated for 3 L2 chains
-    });
-
-    it('should allocate heavy resources to high-value (Ethereum, zkSync, Linea)', () => {
-      const partition = getPartition('high-value');
-      expect(partition!.resourceProfile).toBe('heavy');
-      expect(partition!.maxMemoryMB).toBe(768); // S3.1.2: 3 high-value chains
-    });
-  });
-
-  describe('partition health check intervals', () => {
-    it('should have faster health checks for asia-fast', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition!.healthCheckIntervalMs).toBe(15000);
-    });
-
-    it('should have fastest health checks for l2-turbo', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition!.healthCheckIntervalMs).toBe(10000);
-    });
-
-    it('should have slower health checks for high-value', () => {
-      const partition = getPartition('high-value');
-      expect(partition!.healthCheckIntervalMs).toBe(30000);
-    });
-  });
-
-  describe('partition port allocation', () => {
-    // Port mappings from docker-compose.partition.yml
-    const portMappings = {
-      'asia-fast': 3011,
-      'l2-turbo': 3012,
-      'high-value': 3013,
-      'cross-chain-detector': 3014,
-      'execution-engine': 3015
-    };
-
-    it('should have unique ports for each partition', () => {
-      const ports = Object.values(portMappings);
-      const uniquePorts = new Set(ports);
-      expect(uniquePorts.size).toBe(ports.length);
-    });
-
-    it('should not conflict with coordinator port', () => {
-      const coordinatorPort = 3000;
-      for (const port of Object.values(portMappings)) {
-        expect(port).not.toBe(coordinatorPort);
-      }
-    });
-
-    it('should not conflict with redis port', () => {
-      const redisPort = 6379;
-      for (const port of Object.values(portMappings)) {
-        expect(port).not.toBe(redisPort);
-      }
-    });
-  });
-});
-
-describe('Phase 2: Migration Validation', () => {
-  describe('legacy detector replacement', () => {
-    // S3.1.2: Updated to include all 11 chains in 4-partition architecture
-    const legacyDetectors = [
-      // Original 6 chains
-      'bsc-detector', 'polygon-detector', 'arbitrum-detector',
-      'optimism-detector', 'base-detector', 'ethereum-detector',
-      // S3.1.2: New chains
-      'avalanche-detector', 'fantom-detector', 'zksync-detector',
-      'linea-detector', 'solana-detector'
-    ];
-    const partitionMappings: Record<string, string[]> = {
-      'asia-fast': ['bsc-detector', 'polygon-detector', 'avalanche-detector', 'fantom-detector'],
-      'l2-turbo': ['arbitrum-detector', 'optimism-detector', 'base-detector'],
-      'high-value': ['ethereum-detector', 'zksync-detector', 'linea-detector'],
-      'solana-native': ['solana-detector']
-    };
-
-    it('should account for all legacy detectors', () => {
-      const mappedDetectors: string[] = [];
-      for (const detectors of Object.values(partitionMappings)) {
-        mappedDetectors.push(...detectors);
-      }
-
-      expect(mappedDetectors.sort()).toEqual(legacyDetectors.sort());
-    });
-
-    it('should have partition for each legacy detector chain', () => {
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        for (const chain of partition.chains) {
-          const legacyName = `${chain}-detector`;
-          expect(legacyDetectors).toContain(legacyName);
-        }
-      }
-    });
-  });
-
-  describe('backward compatibility', () => {
-    it('should support PARTITION_CHAINS environment override', () => {
-      // Simulating PARTITION_CHAINS override parsing
-      const envOverride = 'bsc';
-      const chains = envOverride.split(',').map(c => c.trim());
-
-      expect(chains).toHaveLength(1);
-      expect(chains[0]).toBe('bsc');
-    });
-
-    it('should support comma-separated chain lists', () => {
-      const envOverride = 'bsc, polygon, arbitrum';
-      const chains = envOverride.split(',').map(c => c.trim());
-
-      expect(chains).toHaveLength(3);
-      expect(chains).toEqual(['bsc', 'polygon', 'arbitrum']);
-    });
-
-    it('should fallback to partition defaults when no override', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition).toBeDefined();
-      expect(partition!.chains.length).toBeGreaterThan(0);
-    });
-  });
-});
-
-describe('Phase 2: Cross-Partition Communication', () => {
-  describe('redis streams integration', () => {
-    const streamNames = [
-      'price-updates',
-      'opportunities',
-      'health',
-      'execution-requests',
-      'execution-results'
-    ];
-
-    it('should define all required stream names', () => {
-      expect(streamNames).toContain('price-updates');
-      expect(streamNames).toContain('opportunities');
-      expect(streamNames).toContain('health');
-    });
-
-    it('should support cross-partition price updates', () => {
-      // All partitions publish to the same price-updates stream
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        // Each chain in each partition should be able to publish
-        expect(partition.chains.length).toBeGreaterThan(0);
-      }
-    });
-  });
-
-  describe('consumer group naming', () => {
-    it('should generate unique consumer group names per partition', () => {
-      const consumerGroups = PARTITIONS.filter(p => p.enabled).map(
-        p => `unified-detector-${p.partitionId}-group`
-      );
-
-      const uniqueGroups = new Set(consumerGroups);
-      expect(uniqueGroups.size).toBe(consumerGroups.length);
-    });
-
-    it('should follow naming convention', () => {
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        const groupName = `unified-detector-${partition.partitionId}-group`;
-        expect(groupName).toMatch(/^unified-detector-[a-z0-9-]+-group$/);
-      }
-    });
-  });
-});
-
-describe('Phase 2: Health Check Endpoint Consistency', () => {
-  describe('health endpoint requirements', () => {
-    const expectedEndpoints = ['/health', '/ready', '/stats'];
-
-    it('should define all standard health endpoints', () => {
-      expect(expectedEndpoints).toContain('/health');
-      expect(expectedEndpoints).toContain('/ready');
-    });
-
-    it('should return consistent health status format', () => {
-      // Expected health response format
-      const mockHealthResponse = {
-        status: 'healthy',
-        partitionId: 'asia-fast',
-        chains: ['bsc', 'polygon'],
-        uptime: 3600,
-        eventsProcessed: 10000,
-        memoryMB: 256,
-        timestamp: Date.now()
-      };
-
-      expect(mockHealthResponse.status).toBeDefined();
-      expect(mockHealthResponse.partitionId).toBeDefined();
-      expect(Array.isArray(mockHealthResponse.chains)).toBe(true);
-    });
-  });
-
-  describe('docker health check configuration', () => {
-    it('should have appropriate health check intervals per partition', () => {
-      // Docker health check should align with partition health check interval
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        // Docker health check should be more frequent than or equal to partition interval
-        expect(partition.healthCheckIntervalMs).toBeGreaterThanOrEqual(10000);
-        expect(partition.healthCheckIntervalMs).toBeLessThanOrEqual(30000);
-      }
-    });
+describe('DegradationLevel', () => {
+  it('should have monotonically increasing severity', () => {
+    expect(DegradationLevel.FULL_OPERATION).toBe(0);
+    expect(DegradationLevel.REDUCED_CHAINS).toBe(1);
+    expect(DegradationLevel.DETECTION_ONLY).toBe(2);
+    expect(DegradationLevel.READ_ONLY).toBe(3);
+    expect(DegradationLevel.COMPLETE_OUTAGE).toBe(4);
   });
 });
 
 // =============================================================================
-// Phase 3: Multi-Region Deployment Tests
+// CrossRegionHealthConfig
 // =============================================================================
 
-describe('Phase 3: Multi-Region Deployment Configuration', () => {
-  describe('partition provider assignments', () => {
-    it('should assign asia-fast to Oracle Cloud', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition?.provider).toBe('oracle');
-    });
-
-    it('should assign l2-turbo to Fly.io', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition?.provider).toBe('fly');
-    });
-
-    it('should assign high-value to Oracle Cloud', () => {
-      const partition = getPartition('high-value');
-      expect(partition?.provider).toBe('oracle');
-    });
-  });
-
-  describe('standby region assignments', () => {
-    it('should have standby region for asia-fast', () => {
-      const partition = getPartition('asia-fast');
-      expect(partition?.standbyRegion).toBeDefined();
-      expect(partition?.standbyProvider).toBeDefined();
-    });
-
-    it('should have standby region for l2-turbo', () => {
-      const partition = getPartition('l2-turbo');
-      expect(partition?.standbyRegion).toBeDefined();
-      expect(partition?.standbyProvider).toBeDefined();
-    });
-
-    it('should have standby region for high-value', () => {
-      const partition = getPartition('high-value');
-      expect(partition?.standbyRegion).toBeDefined();
-      expect(partition?.standbyProvider).toBeDefined();
-    });
-
-    it('should use different providers for standby', () => {
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        if (partition.standbyProvider) {
-          expect(partition.standbyProvider).not.toBe(partition.provider);
-        }
-      }
-    });
-  });
-
-  describe('geographic distribution', () => {
-    const regionMappings: Record<string, string> = {
-      'asia-fast': 'asia-southeast1',
-      'l2-turbo': 'asia-southeast1',
-      'high-value': 'us-east1'
+describe('CrossRegionHealthConfig', () => {
+  it('should have valid defaults for creating CrossRegionHealthManager', () => {
+    const config: CrossRegionHealthConfig = {
+      instanceId: 'test-1',
+      regionId: 'us-east1',
+      serviceName: 'unified-detector-asia-fast',
     };
-
-    it('should deploy partitions to correct regions', () => {
-      for (const [partitionId, expectedRegion] of Object.entries(regionMappings)) {
-        const partition = getPartition(partitionId);
-        expect(partition?.region).toBe(expectedRegion);
-      }
-    });
-
-    it('should have at least 2 regions for redundancy', () => {
-      const regions = new Set(
-        PARTITIONS.filter(p => p.enabled).map(p => p.region)
-      );
-      expect(regions.size).toBeGreaterThanOrEqual(2);
-    });
-  });
-
-  describe('failover configuration', () => {
-    it('should have failover timeout within 60 seconds (ADR-007)', () => {
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        expect(partition.failoverTimeoutMs).toBeLessThanOrEqual(60000);
-      }
-    });
-
-    it('should have failover timeout >= 30 seconds for safe handoff', () => {
-      for (const partition of PARTITIONS.filter(p => p.enabled)) {
-        expect(partition.failoverTimeoutMs).toBeGreaterThanOrEqual(30000);
-      }
-    });
-  });
-
-  describe('provider-specific resource limits', () => {
-    it('should respect Fly.io memory limit (256MB for free tier)', () => {
-      const flyPartitions = PARTITIONS.filter(p => p.provider === 'fly' && p.enabled);
-      for (const partition of flyPartitions) {
-        // Fly.io free tier: 256MB per app, but we allow up to 384MB with paid scaling
-        expect(partition.maxMemoryMB).toBeLessThanOrEqual(512);
-      }
-    });
-
-    it('should respect Oracle Cloud free tier limits', () => {
-      const oraclePartitions = PARTITIONS.filter(p => p.provider === 'oracle' && p.enabled);
-      for (const partition of oraclePartitions) {
-        // Oracle Cloud allows more generous resources
-        expect(partition.maxMemoryMB).toBeLessThanOrEqual(1024);
-      }
-    });
-  });
-});
-
-describe('Phase 3: Cross-Region Health Configuration', () => {
-  describe('health check intervals by region', () => {
-    it('should have fastest health checks for l2-turbo (low latency L2s)', () => {
-      const l2Fast = getPartition('l2-turbo');
-      const asiaFast = getPartition('asia-fast');
-      const highValue = getPartition('high-value');
-
-      expect(l2Fast?.healthCheckIntervalMs).toBeLessThanOrEqual(asiaFast?.healthCheckIntervalMs || Infinity);
-      expect(l2Fast?.healthCheckIntervalMs).toBeLessThanOrEqual(highValue?.healthCheckIntervalMs || Infinity);
-    });
-
-    it('should have slower health checks for high-value (Ethereum)', () => {
-      const highValue = getPartition('high-value');
-      expect(highValue?.healthCheckIntervalMs).toBe(30000);
-    });
-  });
-
-  describe('degradation level thresholds', () => {
-    it('should have increasing severity levels', () => {
-      expect(DegradationLevel.FULL_OPERATION).toBe(0);
-      expect(DegradationLevel.REDUCED_CHAINS).toBe(1);
-      expect(DegradationLevel.DETECTION_ONLY).toBe(2);
-      expect(DegradationLevel.READ_ONLY).toBe(3);
-      expect(DegradationLevel.COMPLETE_OUTAGE).toBe(4);
-    });
-  });
-});
-
-describe('Phase 3: Service Discovery Integration', () => {
-  describe('instance ID generation', () => {
-    it('should generate unique instance IDs per deployment', () => {
-      const instanceIds = [
-        `oracle-asia-fast-${Date.now()}`,
-        `fly-l2-turbo-${Date.now() + 1}`,
-        `oracle-high-value-${Date.now() + 2}`
-      ];
-
-      const uniqueIds = new Set(instanceIds);
-      expect(uniqueIds.size).toBe(instanceIds.length);
-    });
-
-    it('should include provider in instance ID', () => {
-      const oracleInstance = 'oracle-asia-fast-vm1';
-      const flyInstance = 'fly-l2-turbo-app1';
-
-      expect(oracleInstance).toContain('oracle');
-      expect(flyInstance).toContain('fly');
-    });
-  });
-
-  describe('cross-region health key naming', () => {
-    it('should generate consistent health keys', () => {
-      const HEALTH_KEY_PREFIX = 'region:health:';
-
-      const regions = ['asia-southeast1', 'us-east1', 'us-west1'];
-      const keys = regions.map(r => `${HEALTH_KEY_PREFIX}${r}`);
-
-      expect(keys).toContain('region:health:asia-southeast1');
-      expect(keys).toContain('region:health:us-east1');
-    });
+    expect(config.instanceId).toBeDefined();
+    expect(config.regionId).toBeDefined();
+    expect(config.serviceName).toBeDefined();
   });
 });

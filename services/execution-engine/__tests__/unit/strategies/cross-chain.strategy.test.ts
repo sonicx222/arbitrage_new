@@ -9,10 +9,13 @@
  * - Multi-step execution flow
  * - Nonce management for both chains
  * - Error handling and partial execution recovery
+ * - Destination chain flash loan execution (FE-001)
  */
 
 import { ethers } from 'ethers';
 import { CrossChainStrategy } from '../../../src/strategies/cross-chain.strategy';
+import { FlashLoanStrategy } from '../../../src/strategies/flash-loan.strategy';
+import type { FlashLoanProviderFactory } from '../../../src/strategies/flash-loan-providers/provider-factory';
 import type { StrategyContext, ExecutionResult, Logger } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
@@ -21,17 +24,18 @@ import type {
   SimulationMetrics,
   SimulationProviderType,
 } from '../../../src/services/simulation/types';
+import {
+  createMockStrategyLogger,
+  createMockStrategyProvider,
+  createMockStrategyWallet,
+  createMockStrategyOpportunity,
+} from '@arbitrage/test-utils';
 
 // =============================================================================
-// Mock Implementations
+// Mock Implementations (shared factories with local aliases/overrides)
 // =============================================================================
 
-const createMockLogger = (): Logger => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-});
+const createMockLogger = createMockStrategyLogger;
 
 const createMockSimulationService = (
   overrides: Partial<ISimulationService> = {}
@@ -62,56 +66,16 @@ const createMockSimulationService = (
 
 const createMockOpportunity = (
   overrides: Partial<ArbitrageOpportunity> = {}
-): ArbitrageOpportunity => ({
-  id: 'test-cross-chain-opp-123',
-  type: 'cross-chain',
-  buyChain: 'ethereum',
-  sellChain: 'arbitrum',
-  buyDex: 'uniswap',
-  sellDex: 'sushiswap',
-  tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-  tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-  amountIn: '1000000000000000000', // 1 ETH
-  expectedProfit: 100, // $100 expected profit
-  confidence: 0.95,
-  timestamp: Date.now() - 500,
-  ...overrides,
-});
+): ArbitrageOpportunity =>
+  createMockStrategyOpportunity({
+    id: 'test-cross-chain-opp-123',
+    type: 'cross-chain',
+    sellChain: 'arbitrum',
+    ...overrides,
+  });
 
-const createMockProvider = (): ethers.JsonRpcProvider => {
-  const provider = {
-    getBlockNumber: jest.fn().mockResolvedValue(12345678),
-    getFeeData: jest.fn().mockResolvedValue({
-      gasPrice: BigInt('30000000000'), // 30 gwei
-      maxFeePerGas: BigInt('35000000000'),
-      maxPriorityFeePerGas: BigInt('2000000000'),
-    }),
-    getTransactionReceipt: jest.fn().mockResolvedValue({
-      hash: '0x123abc',
-      gasUsed: BigInt(150000),
-      gasPrice: BigInt('30000000000'),
-      status: 1,
-    }),
-  } as unknown as ethers.JsonRpcProvider;
-  return provider;
-};
-
-const createMockWallet = (): ethers.Wallet => {
-  const wallet = {
-    address: '0x1234567890123456789012345678901234567890',
-    getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
-    sendTransaction: jest.fn().mockResolvedValue({
-      hash: '0x123abc',
-      wait: jest.fn().mockResolvedValue({
-        hash: '0x123abc',
-        gasUsed: BigInt(150000),
-        gasPrice: BigInt('30000000000'),
-        status: 1,
-      }),
-    }),
-  } as unknown as ethers.Wallet;
-  return wallet;
-};
+const createMockProvider = createMockStrategyProvider;
+const createMockWallet = createMockStrategyWallet;
 
 const createMockBridgeRouter = (overrides: {
   quote?: any;
@@ -1069,5 +1033,334 @@ describe('CrossChainStrategy - Bridge Recovery', () => {
     const recovered = await strategy.recoverPendingBridges(ctx, mockRedis);
 
     expect(recovered).toBe(0);
+  });
+});
+
+// =============================================================================
+// Test Suite: Destination Chain Flash Loans (FE-001)
+// =============================================================================
+
+describe('CrossChainStrategy - Destination Flash Loans (FE-001)', () => {
+  let mockLogger: Logger;
+  let mockFlashLoanProviderFactory: jest.Mocked<FlashLoanProviderFactory>;
+  let mockFlashLoanStrategy: jest.Mocked<Pick<FlashLoanStrategy, 'execute'>>;
+
+  const createMockFlashLoanProviderFactory = (
+    supportedChains: string[] = ['arbitrum'],
+  ): jest.Mocked<FlashLoanProviderFactory> => ({
+    isFullySupported: jest.fn().mockImplementation((chain: string) =>
+      supportedChains.includes(chain)),
+    getProvider: jest.fn().mockReturnValue(undefined),
+    getProtocol: jest.fn().mockReturnValue('aave_v3'),
+  } as any);
+
+  const createMockFlashLoanStrategyInstance = (
+    overrides: Partial<ExecutionResult> = {},
+  ): jest.Mocked<Pick<FlashLoanStrategy, 'execute'>> => ({
+    execute: jest.fn().mockResolvedValue({
+      success: true,
+      transactionHash: '0xflash_sell_abc123',
+      chain: 'arbitrum',
+      dex: 'uniswap',
+      actualProfit: 85,
+      gasCost: 5,
+      ...overrides,
+    } as ExecutionResult),
+  });
+
+  const mockStrategyMethods = (strat: CrossChainStrategy) => {
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
+      to: '0x1234567890123456789012345678901234567890',
+      data: '0xabcdef',
+      value: 0n,
+      from: '0x1234567890123456789012345678901234567890',
+    });
+    jest.spyOn(strat as any, 'getOptimalGasPrice').mockResolvedValue(BigInt('30000000000'));
+    jest.spyOn(strat as any, 'applyMEVProtection').mockImplementation(async (tx: any) => ({
+      ...tx,
+      gasPrice: BigInt('30000000000'),
+    }));
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockFlashLoanProviderFactory = createMockFlashLoanProviderFactory();
+    mockFlashLoanStrategy = createMockFlashLoanStrategyInstance();
+  });
+
+  it('should not attempt flash loan when factory is not provided', async () => {
+    const strategy = new CrossChainStrategy(mockLogger);
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter();
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({ expectedProfit: 100 });
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should use standard DEX swap path (no flash loan attempted)
+    expect(mockFlashLoanProviderFactory.isFullySupported).not.toHaveBeenCalled();
+  });
+
+  it('should use flash loan when dest chain is supported and factory/strategy are provided', async () => {
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      mockFlashLoanProviderFactory,
+      mockFlashLoanStrategy as unknown as FlashLoanStrategy,
+    );
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter({
+      status: {
+        status: 'completed',
+        sourceHash: '0xbridge123',
+        destHash: '0xdest456',
+        amountReceived: '1000000000',
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({
+      expectedProfit: 100,
+      sellChain: 'arbitrum',
+    });
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should have checked flash loan support for dest chain
+    expect(mockFlashLoanProviderFactory.isFullySupported).toHaveBeenCalledWith('arbitrum');
+    // Should have called the flash loan strategy
+    expect(mockFlashLoanStrategy.execute).toHaveBeenCalled();
+  });
+
+  it('should fall back to direct DEX swap when dest chain flash loan is not supported', async () => {
+    // Factory says dest chain is NOT supported
+    const unsupportedFactory = createMockFlashLoanProviderFactory([]);
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      unsupportedFactory,
+      mockFlashLoanStrategy as unknown as FlashLoanStrategy,
+    );
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter({
+      status: {
+        status: 'completed',
+        sourceHash: '0xbridge123',
+        destHash: '0xdest456',
+        amountReceived: '1000000000',
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({ expectedProfit: 100 });
+
+    await strategy.execute(opportunity, ctx);
+
+    // Should have checked flash loan support
+    expect(unsupportedFactory.isFullySupported).toHaveBeenCalled();
+    // Flash loan strategy should NOT have been called
+    expect(mockFlashLoanStrategy.execute).not.toHaveBeenCalled();
+  });
+
+  it('should fall back to direct DEX swap when flash loan execution fails', async () => {
+    const failingFlashLoanStrategy = createMockFlashLoanStrategyInstance({
+      success: false,
+      error: 'Insufficient liquidity for flash loan',
+    } as any);
+
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      mockFlashLoanProviderFactory,
+      failingFlashLoanStrategy as unknown as FlashLoanStrategy,
+    );
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter({
+      status: {
+        status: 'completed',
+        sourceHash: '0xbridge123',
+        destHash: '0xdest456',
+        amountReceived: '1000000000',
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({
+      expectedProfit: 100,
+      sellChain: 'arbitrum',
+    });
+
+    await strategy.execute(opportunity, ctx);
+
+    // Flash loan was attempted but failed
+    expect(failingFlashLoanStrategy.execute).toHaveBeenCalled();
+    // Should have logged fallback warning
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Destination flash loan failed, falling back to direct DEX swap',
+      expect.objectContaining({
+        opportunityId: opportunity.id,
+        destChain: 'arbitrum',
+      }),
+    );
+  });
+
+  it('should set useFlashLoan flag on sell opportunity when flash loans are supported', async () => {
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      mockFlashLoanProviderFactory,
+      mockFlashLoanStrategy as unknown as FlashLoanStrategy,
+    );
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter({
+      status: {
+        status: 'completed',
+        sourceHash: '0xbridge123',
+        destHash: '0xdest456',
+        amountReceived: '1000000000',
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({
+      expectedProfit: 100,
+      sellChain: 'arbitrum',
+    });
+
+    await strategy.execute(opportunity, ctx);
+
+    // Verify the flash loan strategy was called with useFlashLoan flag
+    const callArgs = mockFlashLoanStrategy.execute.mock.calls[0];
+    if (callArgs) {
+      const sellOpportunity = callArgs[0] as ArbitrageOpportunity;
+      expect(sellOpportunity.useFlashLoan).toBe(true);
+      expect(sellOpportunity.buyChain).toBe('arbitrum');
+    }
+  });
+
+  it('should log flash loan info when dest flash loan succeeds', async () => {
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      mockFlashLoanProviderFactory,
+      mockFlashLoanStrategy as unknown as FlashLoanStrategy,
+    );
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter({
+      status: {
+        status: 'completed',
+        sourceHash: '0xbridge123',
+        destHash: '0xdest456',
+        amountReceived: '1000000000',
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({
+      expectedProfit: 100,
+      sellChain: 'arbitrum',
+    });
+
+    await strategy.execute(opportunity, ctx);
+
+    // Verify flash loan attempt was logged
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Destination chain supports flash loans - attempting atomic sell',
+      expect.objectContaining({
+        opportunityId: opportunity.id,
+        destChain: 'arbitrum',
+      }),
+    );
+    // Verify flash loan success was logged
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Destination flash loan sell completed successfully',
+      expect.objectContaining({
+        opportunityId: opportunity.id,
+        destChain: 'arbitrum',
+      }),
+    );
+  });
+
+  it('should correctly handle isDestinationFlashLoanSupported for various chains', () => {
+    const multiChainFactory = createMockFlashLoanProviderFactory(['ethereum', 'arbitrum', 'polygon']);
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      multiChainFactory,
+      mockFlashLoanStrategy as unknown as FlashLoanStrategy,
+    );
+
+    // Access the private method via type assertion for unit testing
+    const isSupported = (strategy as any).isDestinationFlashLoanSupported;
+
+    expect(isSupported.call(strategy, 'ethereum')).toBe(true);
+    expect(isSupported.call(strategy, 'arbitrum')).toBe(true);
+    expect(isSupported.call(strategy, 'polygon')).toBe(true);
+    expect(isSupported.call(strategy, 'solana')).toBe(false);
+    expect(isSupported.call(strategy, 'fantom')).toBe(false);
+  });
+
+  it('should return false from isDestinationFlashLoanSupported when no factory provided', () => {
+    const strategy = new CrossChainStrategy(mockLogger);
+
+    const isSupported = (strategy as any).isDestinationFlashLoanSupported;
+
+    expect(isSupported.call(strategy, 'ethereum')).toBe(false);
+    expect(isSupported.call(strategy, 'arbitrum')).toBe(false);
+  });
+
+  it('should handle flash loan strategy throwing an exception', async () => {
+    const throwingStrategy = createMockFlashLoanStrategyInstance();
+    throwingStrategy.execute.mockRejectedValue(new Error('Network timeout'));
+
+    const strategy = new CrossChainStrategy(
+      mockLogger,
+      mockFlashLoanProviderFactory,
+      throwingStrategy as unknown as FlashLoanStrategy,
+    );
+    mockStrategyMethods(strategy);
+
+    const mockRouter = createMockBridgeRouter({
+      status: {
+        status: 'completed',
+        sourceHash: '0xbridge123',
+        destHash: '0xdest456',
+        amountReceived: '1000000000',
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({
+      expectedProfit: 100,
+      sellChain: 'arbitrum',
+    });
+
+    // Should not throw — should handle gracefully and fall back
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should have logged the exception
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Destination flash loan execution threw exception',
+      expect.objectContaining({
+        error: 'Network timeout',
+      }),
+    );
+    // Should still attempt direct DEX swap fallback (or return an error from flash loan path)
+    // The executeDestinationFlashLoan wraps errors, so the main flow falls back
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Destination flash loan failed, falling back to direct DEX swap',
+      expect.objectContaining({
+        opportunityId: opportunity.id,
+      }),
+    );
   });
 });

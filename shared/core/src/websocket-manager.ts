@@ -11,8 +11,11 @@
 import WebSocket from 'ws';
 import { createLogger } from './logger';
 import { clearIntervalSafe, clearTimeoutSafe } from './lifecycle-utils';
-import { getProviderHealthScorer, ProviderHealthScorer, METHOD_CU_COSTS } from './monitoring/provider-health-scorer';
+// CQ8-ALT: ProviderHealthScorer now accessed via ProviderRotationStrategy
 import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
+// CQ8-ALT: Extracted cold-path classes
+import { ProviderRotationStrategy } from './provider-rotation-strategy';
+import { ProviderHealthTracker } from './provider-health-tracker';
 
 export interface WebSocketConfig {
   url: string;
@@ -71,39 +74,8 @@ export interface WebSocketConfig {
   workerParsingThresholdBytes?: number;
 }
 
-/**
- * T1.5: Chain-specific staleness thresholds based on block times.
- * Fast chains need aggressive staleness detection to avoid missing opportunities.
- */
-const CHAIN_STALENESS_THRESHOLDS: Record<string, number> = {
-  // Fast chains (sub-1s block times) - 5 seconds
-  arbitrum: 5000,
-  solana: 5000,
-
-  // Medium chains (1-3s block times) - 10 seconds
-  polygon: 10000,
-  bsc: 10000,
-  optimism: 10000,
-  base: 10000,
-  avalanche: 10000,
-  fantom: 10000,
-
-  // Slow chains (10+ second block times) - 15 seconds
-  ethereum: 15000,
-  zksync: 15000,
-  linea: 15000,
-
-  // Default for unknown chains
-  default: 15000
-};
-
-/**
- * T1.5: Get staleness threshold for a specific chain.
- */
-function getChainStalenessThreshold(chainId: string): number {
-  const normalizedChain = chainId.toLowerCase();
-  return CHAIN_STALENESS_THRESHOLDS[normalizedChain] ?? CHAIN_STALENESS_THRESHOLDS.default;
-}
+// T1.5: Chain staleness thresholds and provider rotation logic
+// now in provider-health-tracker.ts and provider-rotation-strategy.ts (CQ8-ALT)
 
 export interface WebSocketSubscription {
   id: number;
@@ -154,57 +126,14 @@ export class WebSocketManager {
 
   private nextSubscriptionId = 1;
 
-  /** All available URLs (primary + fallbacks) */
-  private allUrls: string[] = [];
-  /** Current URL index being used */
-  private currentUrlIndex = 0;
-
   /** Chain ID for health tracking */
   private chainId: string;
 
-  /**
-   * S3.3: Rate limit exclusion tracking
-   * Maps URL to exclusion info { until: timestamp, count: consecutive rate limits }
-   */
-  private excludedProviders: Map<string, { until: number; count: number }> = new Map();
-
-  /**
-   * S3.3: Connection quality metrics for proactive health monitoring
-   */
-  private qualityMetrics = {
-    /** Timestamp of last received message */
-    lastMessageTime: 0,
-    /** Time since last message in ms (updated periodically) */
-    messageGapMs: 0,
-    /** Last block number seen (for block-based subscriptions) */
-    lastBlockNumber: 0,
-    /** Total reconnection count during this session */
-    reconnectCount: 0,
-    /** Connection start time for uptime calculation */
-    connectionStartTime: 0,
-    /** Total messages received */
-    messagesReceived: 0,
-    /** Total errors encountered */
-    errorsEncountered: 0
-  };
-
-  /** Proactive health check interval timer */
-  private healthCheckTimer: NodeJS.Timeout | null = null;
-  /**
-   * T1.5: Staleness threshold in ms - now chain-specific.
-   * Previous: Fixed 30 seconds for all chains.
-   * New: 5s (fast chains) / 10s (medium) / 15s (slow) based on block times.
-   */
-  private stalenessThresholdMs: number;
-
-  /** S3.3: Provider health scorer for intelligent fallback selection */
-  private healthScorer: ProviderHealthScorer;
-
-  /** S3.3: Whether to use intelligent fallback selection (default true) */
-  private useIntelligentFallback = true;
-
-  /** Whether to use budget-aware provider selection (6-Provider Shield) */
-  private useBudgetAwareSelection = true;
+  // CQ8-ALT: Cold-path provider rotation and health tracking extracted
+  /** Provider rotation strategy (fallback selection, exclusion, reconnect delay) */
+  private readonly rotationStrategy: ProviderRotationStrategy;
+  /** Provider health tracker (quality metrics, staleness detection) */
+  private readonly healthTracker: ProviderHealthTracker;
 
   // ==========================================================================
   // Phase 2: Worker Thread JSON Parsing
@@ -279,29 +208,27 @@ export class WebSocketManager {
     };
     this.chainId = config.chainId || 'unknown';
 
-    // T1.5: Set staleness threshold based on chain type or explicit config
-    // Fast chains (arbitrum, solana): 5s
-    // Medium chains (polygon, bsc, optimism, base): 10s
-    // Slow chains (ethereum): 15s
-    this.stalenessThresholdMs = config.stalenessThresholdMs ??
-      getChainStalenessThreshold(this.chainId);
+    // CQ8-ALT: Initialize extracted cold-path classes
+    this.rotationStrategy = new ProviderRotationStrategy({
+      url: config.url,
+      fallbackUrls: config.fallbackUrls,
+      chainId: this.chainId,
+      reconnectInterval: this.config.reconnectInterval,
+      backoffMultiplier: this.config.backoffMultiplier,
+      maxReconnectDelay: this.config.maxReconnectDelay,
+      jitterPercent: this.config.jitterPercent,
+    });
+
+    this.healthTracker = new ProviderHealthTracker({
+      chainId: this.chainId,
+      stalenessThresholdMs: config.stalenessThresholdMs,
+    });
 
     if (this.logger.isLevelEnabled?.('debug') ?? false) {
-      this.logger.debug('Staleness threshold configured', {
+      this.logger.debug('WebSocket manager initialized', {
         chainId: this.chainId,
-        stalenessThresholdMs: this.stalenessThresholdMs
       });
     }
-
-    // S3.3: Initialize health scorer for intelligent fallback selection
-    this.healthScorer = getProviderHealthScorer();
-
-    // Build list of all URLs (primary + fallbacks)
-    this.allUrls = [config.url];
-    if (config.fallbackUrls && config.fallbackUrls.length > 0) {
-      this.allUrls.push(...config.fallbackUrls);
-    }
-    this.currentUrlIndex = 0;
 
     // Phase 2: Initialize worker thread JSON parsing
     // P1-PHASE1: Enable by default for production (NODE_ENV=production or detected production environment)
@@ -326,162 +253,27 @@ export class WebSocketManager {
   }
 
   /**
-   * Get the current active WebSocket URL
+   * Get the current active WebSocket URL.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   getCurrentUrl(): string {
-    return this.allUrls[this.currentUrlIndex] || this.config.url;
-  }
-
-  /**
-   * Extract provider name from URL for budget tracking.
-   * Maps common provider URL patterns to their names.
-   */
-  private extractProviderFromUrl(url: string): string {
-    const lowerUrl = url.toLowerCase();
-
-    // Check for API-key providers (more specific patterns first)
-    if (lowerUrl.includes('drpc.org') || lowerUrl.includes('lb.drpc.org')) return 'drpc';
-    if (lowerUrl.includes('ankr.com') || lowerUrl.includes('rpc.ankr.com')) return 'ankr';
-    if (lowerUrl.includes('publicnode.com')) return 'publicnode';
-    if (lowerUrl.includes('infura.io')) return 'infura';
-    if (lowerUrl.includes('alchemy.com') || lowerUrl.includes('alchemyapi.io')) return 'alchemy';
-    if (lowerUrl.includes('quicknode') || lowerUrl.includes('quiknode')) return 'quicknode';
-    if (lowerUrl.includes('blastapi.io')) return 'blastapi';
-
-    // Chain-specific RPCs
-    if (lowerUrl.includes('1rpc.io')) return '1rpc';
-    if (lowerUrl.includes('llamarpc.com')) return 'llamarpc';
-    if (lowerUrl.includes('binance.org')) return 'binance';
-    if (lowerUrl.includes('arbitrum.io')) return 'arbitrum-official';
-    if (lowerUrl.includes('optimism.io')) return 'optimism-official';
-    if (lowerUrl.includes('base.org')) return 'base-official';
-    if (lowerUrl.includes('polygon-rpc.com')) return 'polygon-official';
-
-    // Solana-specific
-    if (lowerUrl.includes('helius')) return 'helius';
-    if (lowerUrl.includes('triton')) return 'triton';
-    if (lowerUrl.includes('solana.com') || lowerUrl.includes('mainnet-beta.solana')) return 'solana-official';
-
-    return 'unknown';
-  }
-
-  /**
-   * S3.3: Select the best available fallback URL using health scoring.
-   * Updated with budget-aware selection from 6-Provider Shield.
-   * Falls back to round-robin if all candidates have similar scores.
-   *
-   * @returns The best available URL or null if all are excluded
-   */
-  private selectBestFallbackUrl(): string | null {
-    const currentUrl = this.getCurrentUrl();
-
-    // Get available (non-excluded) candidates excluding current
-    const candidates = this.allUrls.filter(url =>
-      url !== currentUrl && !this.isProviderExcluded(url)
-    );
-
-    if (candidates.length === 0) {
-      this.logger.warn('No available fallback URLs', { chainId: this.chainId });
-      return null;
-    }
-
-    if (!this.useIntelligentFallback || candidates.length === 1) {
-      return candidates[0];
-    }
-
-    // Use budget-aware selection if enabled (6-Provider Shield)
-    if (this.useBudgetAwareSelection) {
-      const selectedUrl = this.healthScorer.selectBestProviderWithBudget(
-        this.chainId,
-        candidates,
-        (url) => this.extractProviderFromUrl(url)
-      );
-
-      this.logger.info('Selected best fallback URL via budget-aware scoring', {
-        chainId: this.chainId,
-        selectedUrl,
-        provider: this.extractProviderFromUrl(selectedUrl),
-        candidateCount: candidates.length,
-        score: this.healthScorer.getHealthScore(selectedUrl, this.chainId)
-      });
-
-      return selectedUrl;
-    }
-
-    // Use health scorer for intelligent selection
-    const selectedUrl = this.healthScorer.selectBestProvider(this.chainId, candidates);
-
-    this.logger.info('Selected best fallback URL via health scoring', {
-      chainId: this.chainId,
-      selectedUrl,
-      candidateCount: candidates.length,
-      score: this.healthScorer.getHealthScore(selectedUrl, this.chainId)
-    });
-
-    return selectedUrl;
-  }
-
-  /**
-   * Switch to the next fallback URL, using intelligent selection (S3.3).
-   * Returns true if there's another URL to try, false if we've exhausted all options.
-   */
-  private switchToNextUrl(): boolean {
-    const startIndex = this.currentUrlIndex;
-
-    // Try intelligent selection first
-    const bestUrl = this.selectBestFallbackUrl();
-    if (bestUrl) {
-      const newIndex = this.allUrls.indexOf(bestUrl);
-      if (newIndex !== -1 && newIndex !== startIndex) {
-        this.currentUrlIndex = newIndex;
-        this.logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${this.getCurrentUrl()}`);
-        return true;
-      }
-    }
-
-    // Fallback to sequential search if intelligent selection fails
-    for (let i = 1; i <= this.allUrls.length; i++) {
-      const nextIndex = (startIndex + i) % this.allUrls.length;
-      const nextUrl = this.allUrls[nextIndex];
-
-      // Skip excluded providers
-      if (this.isProviderExcluded(nextUrl)) {
-        if (this.logger.isLevelEnabled?.('debug') ?? false) {
-          this.logger.debug(`Skipping excluded provider ${nextIndex}: ${nextUrl}`);
-        }
-        continue;
-      }
-
-      // Found a valid URL
-      if (nextIndex !== startIndex) {
-        this.currentUrlIndex = nextIndex;
-        this.logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${this.getCurrentUrl()}`);
-        return true;
-      }
-    }
-
-    // All URLs are either exhausted or excluded
-    // Reset to primary URL for next reconnection cycle (it may become available)
-    this.currentUrlIndex = 0;
-    return false;
+    return this.rotationStrategy.getCurrentUrl();
   }
 
   /**
    * S3.3: Enable or disable intelligent fallback selection.
-   *
-   * @param enabled - Whether to use health scoring for fallback selection
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   setIntelligentFallback(enabled: boolean): void {
-    this.useIntelligentFallback = enabled;
+    this.rotationStrategy.setIntelligentFallback(enabled);
   }
 
   /**
    * Enable or disable budget-aware provider selection (6-Provider Shield).
-   *
-   * @param enabled - Whether to consider provider budgets in selection
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   setBudgetAwareSelection(enabled: boolean): void {
-    this.useBudgetAwareSelection = enabled;
+    this.rotationStrategy.setBudgetAwareSelection(enabled);
   }
 
   // ==========================================================================
@@ -568,29 +360,26 @@ export class WebSocketManager {
 
   /**
    * Record a request for budget tracking.
-   * Call this for subscription messages to track provider usage.
-   *
-   * @param method - RPC method called (default: 'eth_subscribe')
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   recordRequestForBudget(method = 'eth_subscribe'): void {
-    const currentUrl = this.getCurrentUrl();
-    const providerName = this.extractProviderFromUrl(currentUrl);
-    this.healthScorer.recordRequest(providerName, method);
+    this.rotationStrategy.recordRequestForBudget(method);
   }
 
   /**
    * Get the current provider name for the active connection.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   getCurrentProvider(): string {
-    return this.extractProviderFromUrl(this.getCurrentUrl());
+    return this.rotationStrategy.getCurrentProvider();
   }
 
   /**
    * Get provider priority order based on time of day and budget status.
-   * Useful for deciding which provider URL to try first.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   getTimeBasedProviderPriority(): string[] {
-    return this.healthScorer.getTimeBasedProviderPriority();
+    return this.rotationStrategy.getTimeBasedProviderPriority();
   }
 
   async connect(): Promise<void> {
@@ -618,7 +407,7 @@ export class WebSocketManager {
       try {
         const currentUrl = this.getCurrentUrl();
         const connectionStartTime = Date.now(); // S3.3: Track connection time for health scoring
-        this.logger.info(`Connecting to WebSocket: ${currentUrl}${this.currentUrlIndex > 0 ? ' (fallback)' : ''}`);
+        this.logger.info(`Connecting to WebSocket: ${currentUrl}${this.rotationStrategy.getCurrentUrlIndex() > 0 ? ' (fallback)' : ''}`);
 
         this.ws = new WebSocket(currentUrl);
 
@@ -637,12 +426,11 @@ export class WebSocketManager {
           this.isConnected = true;
           this.reconnectAttempts = 0;
 
-          // S3.3: Track connection metrics
-          this.qualityMetrics.connectionStartTime = Date.now();
-          this.qualityMetrics.lastMessageTime = Date.now();
+          // CQ8-ALT: Track connection metrics via health tracker
+          this.healthTracker.onConnected();
 
           // S3.3: Report successful connection to health scorer
-          this.healthScorer.recordSuccess(currentUrl, this.chainId, connectionTime);
+          this.rotationStrategy.getHealthScorer().recordSuccess(currentUrl, this.chainId, connectionTime);
 
           // Start heartbeat
           this.startHeartbeat();
@@ -665,13 +453,12 @@ export class WebSocketManager {
           this.logger.error('WebSocket error', { error });
           this.isConnecting = false;
 
-          // S3.3: Check for rate limit errors and exclude provider
-          if (this.isRateLimitError(error)) {
-            this.handleRateLimit(currentUrl);
-            this.healthScorer.recordRateLimit(currentUrl, this.chainId);
+          // CQ8-ALT: Rate limit and health scoring via rotation strategy
+          if (this.rotationStrategy.isRateLimitError(error)) {
+            this.rotationStrategy.handleRateLimit(currentUrl);
+            this.rotationStrategy.getHealthScorer().recordRateLimit(currentUrl, this.chainId);
           } else {
-            // S3.3: Report connection failure to health scorer
-            this.healthScorer.recordFailure(currentUrl, this.chainId, 'connection_error');
+            this.rotationStrategy.getHealthScorer().recordFailure(currentUrl, this.chainId, 'connection_error');
           }
 
           // Notify error handlers
@@ -695,15 +482,14 @@ export class WebSocketManager {
           // Stop heartbeat
           this.stopHeartbeat();
 
-          // S3.3: Check if close reason indicates rate limiting
+          // CQ8-ALT: Rate limit and health scoring via rotation strategy
           if (code === 1008 || code === 1013 ||
               reasonStr.toLowerCase().includes('rate') ||
               reasonStr.toLowerCase().includes('limit')) {
-            this.handleRateLimit(currentUrl);
-            this.healthScorer.recordRateLimit(currentUrl, this.chainId);
+            this.rotationStrategy.handleRateLimit(currentUrl);
+            this.rotationStrategy.getHealthScorer().recordRateLimit(currentUrl, this.chainId);
           } else if (code !== 1000) {
-            // S3.3: Report connection drop to health scorer (not manual close)
-            this.healthScorer.recordConnectionDrop(currentUrl, this.chainId);
+            this.rotationStrategy.getHealthScorer().recordConnectionDrop(currentUrl, this.chainId);
           }
 
           // Notify connection handlers
@@ -745,7 +531,7 @@ export class WebSocketManager {
     this.clearReconnectionTimer();
     this.clearConnectionTimeout();
     this.stopHeartbeat();
-    this.stopProactiveHealthCheck(); // S3.3: Clean up health monitoring
+    this.healthTracker.stopProactiveHealthCheck(); // CQ8-ALT: Clean up health monitoring
 
     // Close connection
     if (this.ws) {
@@ -918,8 +704,8 @@ export class WebSocketManager {
       subscriptions: this.subscriptions.size,
       readyState: this.ws?.readyState,
       currentUrl: this.getCurrentUrl(),
-      currentUrlIndex: this.currentUrlIndex,
-      totalUrls: this.allUrls.length
+      currentUrlIndex: this.rotationStrategy.getCurrentUrlIndex(),
+      totalUrls: this.rotationStrategy.getTotalUrls()
     };
   }
 
@@ -966,7 +752,7 @@ export class WebSocketManager {
       this.processMessage(message);
     } catch (error) {
       this.logger.error('Failed to parse WebSocket message', { error, data: dataString.slice(0, 200) });
-      this.qualityMetrics.errorsEncountered++;
+      this.healthTracker.qualityMetrics.errorsEncountered++;
       this.workerParsingStats.parseErrors++;
     }
   }
@@ -1002,7 +788,7 @@ export class WebSocketManager {
           error: error instanceof Error ? error.message : String(error),
           dataPreview: dataString.slice(0, 200)
         });
-        this.qualityMetrics.errorsEncountered++;
+        this.healthTracker.qualityMetrics.errorsEncountered++;
         this.workerParsingStats.parseErrors++;
       });
   }
@@ -1050,9 +836,9 @@ export class WebSocketManager {
    * Shared logic for both sync and async parsing paths.
    */
   private processMessage(message: WebSocketMessage): void {
-    // S3.3: Update quality metrics
-    this.qualityMetrics.lastMessageTime = Date.now();
-    this.qualityMetrics.messagesReceived++;
+    // S3.3: Update quality metrics (direct property access for hot-path performance)
+    this.healthTracker.qualityMetrics.lastMessageTime = Date.now();
+    this.healthTracker.qualityMetrics.messagesReceived++;
 
     // NOTE: Budget tracking is NOT done for inbound messages.
     // Budget is only tracked for outbound requests (subscriptions, RPC calls).
@@ -1086,9 +872,9 @@ export class WebSocketManager {
     }
 
     // S3.3: Check for rate limit errors in JSON-RPC responses
-    if (message.error && this.isRateLimitError(message.error)) {
-      this.handleRateLimit(this.getCurrentUrl());
-      this.qualityMetrics.errorsEncountered++;
+    if (message.error && this.rotationStrategy.isRateLimitError(message.error)) {
+      this.rotationStrategy.handleRateLimit(this.getCurrentUrl());
+      this.healthTracker.qualityMetrics.errorsEncountered++;
       // Still notify handlers so they can handle the error
     }
 
@@ -1096,11 +882,18 @@ export class WebSocketManager {
     if (message.params?.result?.number) {
       const blockNumber = parseInt(message.params.result.number, 16);
       if (!isNaN(blockNumber)) {
-        // Check for data gaps before updating last known block
-        this.checkForDataGap(blockNumber);
-        this.qualityMetrics.lastBlockNumber = blockNumber;
+        // CQ8-ALT: Check for data gaps via health tracker
+        const gap = this.healthTracker.checkForDataGap(blockNumber);
+        if (gap) {
+          this.emit('dataGap', {
+            chainId: this.chainId,
+            ...gap,
+            url: this.getCurrentUrl()
+          });
+        }
+        this.healthTracker.qualityMetrics.lastBlockNumber = blockNumber;
         // Report to health scorer for freshness tracking
-        this.healthScorer.recordBlock(this.getCurrentUrl(), this.chainId, blockNumber);
+        this.rotationStrategy.getHealthScorer().recordBlock(this.getCurrentUrl(), this.chainId, blockNumber);
       }
     }
 
@@ -1110,7 +903,7 @@ export class WebSocketManager {
         handler(message);
       } catch (error) {
         this.logger.error('Error in WebSocket message handler', { error });
-        this.qualityMetrics.errorsEncountered++;
+        this.healthTracker.qualityMetrics.errorsEncountered++;
       }
     });
   }
@@ -1129,9 +922,7 @@ export class WebSocketManager {
       this.ws.send(JSON.stringify(message));
 
       // 6-Provider Shield: Track outbound requests for budget management
-      if (this.useBudgetAwareSelection) {
-        this.recordRequestForBudget(subscription.method);
-      }
+      this.rotationStrategy.recordRequestForBudget(subscription.method);
 
       if (this.logger.isLevelEnabled?.('debug') ?? false) {
         this.logger.debug(`Sent subscription`, { id: subscription.id, method: subscription.method });
@@ -1203,10 +994,8 @@ export class WebSocketManager {
 
         this.ws!.send(JSON.stringify(message));
 
-        // Track for budget if enabled
-        if (this.useBudgetAwareSelection) {
-          this.recordRequestForBudget(method);
-        }
+        // Track for budget
+        this.rotationStrategy.recordRequestForBudget(method);
 
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Sent RPC request', { id, method });
@@ -1364,7 +1153,7 @@ export class WebSocketManager {
     toBlock: number;
     missedBlocks: number;
   } | null> {
-    const lastKnownBlock = this.qualityMetrics.lastBlockNumber;
+    const lastKnownBlock = this.healthTracker.qualityMetrics.lastBlockNumber;
 
     // Can't detect gaps without a known block
     if (lastKnownBlock === 0) {
@@ -1418,8 +1207,8 @@ export class WebSocketManager {
       // No gap - we're up to date
       // Update last known block if current is newer
       if (currentBlock > lastKnownBlock) {
-        this.qualityMetrics.lastBlockNumber = currentBlock;
-        this.healthScorer.recordBlock(this.getCurrentUrl(), this.chainId, currentBlock);
+        this.healthTracker.qualityMetrics.lastBlockNumber = currentBlock;
+        this.rotationStrategy.getHealthScorer().recordBlock(this.getCurrentUrl(), this.chainId, currentBlock);
       }
 
       return null;
@@ -1435,202 +1224,68 @@ export class WebSocketManager {
     }
   }
 
-  /**
-   * S3.3: Check for data gaps by comparing received block to last known block.
-   * Called internally when processing block notifications.
-   *
-   * @param newBlockNumber - The new block number received
-   */
-  private checkForDataGap(newBlockNumber: number): void {
-    const lastKnownBlock = this.qualityMetrics.lastBlockNumber;
-
-    if (lastKnownBlock === 0) {
-      return; // First block, no gap possible
-    }
-
-    const missedBlocks = newBlockNumber - lastKnownBlock - 1;
-
-    if (missedBlocks > 0) {
-      this.logger.warn('Data gap detected', {
-        chainId: this.chainId,
-        lastKnownBlock,
-        newBlockNumber,
-        missedBlocks
-      });
-
-      this.emit('dataGap', {
-        chainId: this.chainId,
-        fromBlock: lastKnownBlock + 1,
-        toBlock: newBlockNumber - 1,
-        missedBlocks,
-        url: this.getCurrentUrl()
-      });
-    }
-  }
+  // CQ8-ALT: checkForDataGap() moved to ProviderHealthTracker
 
   /**
    * Calculate reconnection delay using exponential backoff with jitter.
-   * Formula: min(baseDelay * (multiplier ^ attempt), maxDelay) + random jitter
-   *
-   * This prevents thundering herd problems where all clients reconnect simultaneously.
-   *
-   * @param attempt - Current reconnection attempt number (0-based)
-   * @returns Delay in milliseconds before next reconnection attempt
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   calculateReconnectDelay(attempt: number): number {
-    const baseDelay = this.config.reconnectInterval ?? 1000;
-    const multiplier = this.config.backoffMultiplier ?? 2.0;
-    const maxDelay = this.config.maxReconnectDelay ?? 60000;
-    const jitterPercent = this.config.jitterPercent ?? 0.25;
-
-    // Exponential backoff: baseDelay * (multiplier ^ attempt)
-    let delay = baseDelay * Math.pow(multiplier, attempt);
-
-    // Cap at maximum delay
-    delay = Math.min(delay, maxDelay);
-
-    // Add jitter to prevent thundering herd (0 to jitterPercent of delay)
-    const jitter = delay * jitterPercent * Math.random();
-
-    return Math.floor(delay + jitter);
+    return this.rotationStrategy.calculateReconnectDelay(attempt);
   }
 
   /**
-   * S3.3: Check if an error indicates rate limiting by the RPC provider.
-   * Detects common rate limit patterns from various providers.
-   *
-   * @param error - The error to check
-   * @returns true if the error indicates rate limiting
+   * S3.3: Check if an error indicates rate limiting.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   isRateLimitError(error: any): boolean {
-    if (!error) return false;
-
-    const message = (error?.message || '').toLowerCase();
-    const code = error?.code;
-
-    // JSON-RPC rate limit error codes
-    // -32005: Limit exceeded (Infura, Alchemy)
-    // -32016: Rate limit exceeded (some providers)
-    // -32000: Server error (sometimes used for rate limits)
-    if (code === -32005 || code === -32016) return true;
-
-    // WebSocket close codes
-    // 1008: Policy violation (can indicate rate limiting)
-    // 1013: Try again later
-    if (code === 1008 || code === 1013) return true;
-
-    // HTTP status code equivalents (sometimes included in WebSocket errors)
-    if (code === 429) return true;
-
-    // Message pattern matching for various providers
-    const rateLimitPatterns = [
-      'rate limit',
-      'rate-limit',
-      'ratelimit',
-      'too many requests',
-      'request limit exceeded',
-      'quota exceeded',
-      'throttled',
-      'exceeded the limit',
-      'limit exceeded',
-      'capacity exceeded',
-      'try again later',
-      'too many concurrent',
-      'request per second',
-      'requests per second'
-    ];
-
-    return rateLimitPatterns.some(pattern => message.includes(pattern));
+    return this.rotationStrategy.isRateLimitError(error);
   }
 
   /**
-   * S3.3: Check if a provider URL is currently excluded due to rate limiting.
-   *
-   * @param url - The provider URL to check
-   * @returns true if the provider is excluded and should not be used
+   * S3.3: Check if a provider URL is currently excluded.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   isProviderExcluded(url: string): boolean {
-    const exclusion = this.excludedProviders.get(url);
-    if (!exclusion) return false;
-
-    // Check if exclusion has expired
-    if (Date.now() > exclusion.until) {
-      this.excludedProviders.delete(url);
-      if (this.logger.isLevelEnabled?.('debug') ?? false) {
-        this.logger.debug('Provider exclusion expired', { url, chainId: this.chainId });
-      }
-      return false;
-    }
-
-    return true;
+    return this.rotationStrategy.isProviderExcluded(url);
   }
 
   /**
-   * S3.3: Handle rate limit detection by excluding the provider temporarily.
-   * Uses exponential backoff for exclusion duration (30s, 60s, 120s, 240s, max 5min).
-   *
-   * @param url - The provider URL that rate limited us
+   * S3.3: Handle rate limit detection by excluding the provider.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   handleRateLimit(url: string): void {
-    const existing = this.excludedProviders.get(url);
-    const count = (existing?.count ?? 0) + 1;
-
-    // Exponential exclusion: 30s * 2^(count-1), max 5 minutes
-    const baseExcludeMs = 30000;
-    const excludeMs = Math.min(baseExcludeMs * Math.pow(2, count - 1), 300000);
-
-    this.excludedProviders.set(url, {
-      until: Date.now() + excludeMs,
-      count
-    });
-
-    this.logger.warn('Rate limit detected, excluding provider', {
-      url,
-      chainId: this.chainId,
-      excludeMs,
-      consecutiveRateLimits: count
-    });
-
-    // Emit event for monitoring
-    this.emit('rateLimit', { url, chainId: this.chainId, excludeMs, count });
+    this.rotationStrategy.handleRateLimit(url);
+    this.emit('rateLimit', { url, chainId: this.chainId });
   }
 
   /**
-   * S3.3: Get the count of currently available (non-excluded) providers.
-   *
-   * @returns Number of providers available for connection
+   * S3.3: Get available (non-excluded) provider count.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   getAvailableProviderCount(): number {
-    return this.allUrls.filter(url => !this.isProviderExcluded(url)).length;
+    return this.rotationStrategy.getAvailableProviderCount();
   }
 
   /**
    * S3.3: Get all excluded providers for diagnostics.
-   *
-   * @returns Map of excluded URLs with their exclusion info
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   getExcludedProviders(): Map<string, { until: number; count: number }> {
-    // Clean up expired exclusions first
-    for (const [url, exclusion] of this.excludedProviders) {
-      if (Date.now() > exclusion.until) {
-        this.excludedProviders.delete(url);
-      }
-    }
-    return new Map(this.excludedProviders);
+    return this.rotationStrategy.getExcludedProviders();
   }
 
   /**
-   * S3.3: Clear all provider exclusions (useful for recovery/reset).
+   * S3.3: Clear all provider exclusions.
+   * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
   clearProviderExclusions(): void {
-    this.excludedProviders.clear();
-    this.logger.info('Cleared all provider exclusions', { chainId: this.chainId });
+    this.rotationStrategy.clearProviderExclusions();
   }
 
   /**
-   * S3.3: Get connection quality metrics for health monitoring.
-   *
-   * @returns Current quality metrics snapshot
+   * S3.3: Get connection quality metrics.
+   * CQ8-ALT: Delegates to ProviderHealthTracker.
    */
   getQualityMetrics(): {
     lastMessageTime: number;
@@ -1642,106 +1297,63 @@ export class WebSocketManager {
     errorsEncountered: number;
     isStale: boolean;
   } {
-    const now = Date.now();
-    const messageGapMs = this.qualityMetrics.lastMessageTime > 0
-      ? now - this.qualityMetrics.lastMessageTime
-      : 0;
-    const uptime = this.qualityMetrics.connectionStartTime > 0
-      ? now - this.qualityMetrics.connectionStartTime
-      : 0;
-
-    return {
-      lastMessageTime: this.qualityMetrics.lastMessageTime,
-      messageGapMs,
-      lastBlockNumber: this.qualityMetrics.lastBlockNumber,
-      reconnectCount: this.qualityMetrics.reconnectCount,
-      uptime,
-      messagesReceived: this.qualityMetrics.messagesReceived,
-      errorsEncountered: this.qualityMetrics.errorsEncountered,
-      isStale: this.isConnectionStale()
-    };
+    return this.healthTracker.getQualityMetrics(this.subscriptions.size);
   }
 
   /**
-   * S3.3: Check if the connection appears stale (no messages for too long).
-   *
-   * @returns true if connection is stale and should be rotated
+   * S3.3: Check if the connection appears stale.
+   * CQ8-ALT: Delegates to ProviderHealthTracker.
    */
   isConnectionStale(): boolean {
-    // Don't consider stale if we have no subscriptions
-    if (this.subscriptions.size === 0) return false;
-
-    // Don't consider stale if we never received a message
-    if (this.qualityMetrics.lastMessageTime === 0) return false;
-
-    const messageGapMs = Date.now() - this.qualityMetrics.lastMessageTime;
-    return messageGapMs > this.stalenessThresholdMs;
+    return this.healthTracker.isConnectionStale(this.subscriptions.size);
   }
 
   /**
    * S3.3: Set the staleness threshold for proactive rotation.
-   *
-   * @param thresholdMs - Time in ms with no messages before considering stale
+   * CQ8-ALT: Delegates to ProviderHealthTracker.
    */
   setStalenessThreshold(thresholdMs: number): void {
-    this.stalenessThresholdMs = thresholdMs;
+    this.healthTracker.setStalenessThreshold(thresholdMs);
   }
 
   /**
    * S3.3: Start proactive health monitoring.
-   * Periodically checks connection quality and triggers rotation if stale.
-   *
-   * @param intervalMs - Check interval in ms (default 10000)
+   * CQ8-ALT: Delegates to ProviderHealthTracker with callback for stale detection.
    */
   startProactiveHealthCheck(intervalMs = 10000): void {
-    this.stopProactiveHealthCheck();
-
-    this.healthCheckTimer = setInterval(() => {
-      if (!this.isConnected) return;
-
-      // Update message gap metric
-      this.qualityMetrics.messageGapMs = this.qualityMetrics.lastMessageTime > 0
-        ? Date.now() - this.qualityMetrics.lastMessageTime
-        : 0;
-
-      // Check for staleness
-      if (this.isConnectionStale()) {
-        this.logger.warn('Proactive rotation: connection appears stale', {
-          chainId: this.chainId,
-          messageGapMs: this.qualityMetrics.messageGapMs,
-          lastBlockNumber: this.qualityMetrics.lastBlockNumber,
-          url: this.getCurrentUrl()
-        });
-
-        // Emit event for monitoring
+    this.healthTracker.startProactiveHealthCheck(
+      intervalMs,
+      () => {
+        // Stale connection callback
         this.emit('staleConnection', {
           chainId: this.chainId,
           url: this.getCurrentUrl(),
-          messageGapMs: this.qualityMetrics.messageGapMs
+          messageGapMs: this.healthTracker.qualityMetrics.messageGapMs
         });
 
         // Trigger reconnection to a different provider
-        this.handleRateLimit(this.getCurrentUrl()); // Temporarily exclude current
+        this.rotationStrategy.handleRateLimit(this.getCurrentUrl());
         this.scheduleReconnection();
-      }
-    }, intervalMs);
+      },
+      () => this.isConnected,
+      () => this.subscriptions.size,
+    );
   }
 
   /**
    * S3.3: Stop proactive health monitoring.
+   * CQ8-ALT: Delegates to ProviderHealthTracker.
    */
   stopProactiveHealthCheck(): void {
-    this.healthCheckTimer = clearIntervalSafe(this.healthCheckTimer);
+    this.healthTracker.stopProactiveHealthCheck();
   }
 
   /**
-   * S3.3: Record a block number (can be called externally for more accurate tracking).
-   *
-   * @param blockNumber - The block number received
+   * S3.3: Record a block number (can be called externally).
+   * CQ8-ALT: Delegates to ProviderHealthTracker.
    */
   recordBlockNumber(blockNumber: number): void {
-    this.qualityMetrics.lastBlockNumber = blockNumber;
-    this.qualityMetrics.lastMessageTime = Date.now();
+    this.healthTracker.recordBlockNumber(blockNumber);
   }
 
   private scheduleReconnection(): void {
@@ -1756,8 +1368,8 @@ export class WebSocketManager {
       return;
     }
 
-    // S3.3: Track reconnection attempts
-    this.qualityMetrics.reconnectCount++;
+    // CQ8-ALT: Track reconnection attempts via health tracker
+    this.healthTracker.onReconnecting();
 
     if (this.reconnectAttempts >= (this.config.maxReconnectAttempts ?? 10)) {
       this.logger.error('Max reconnection attempts reached across all URLs');
@@ -1772,15 +1384,15 @@ export class WebSocketManager {
       return;
     }
 
-    // Try fallback URL if available, otherwise increment attempts
-    const hasNextUrl = this.switchToNextUrl();
+    // CQ8-ALT: Try fallback URL via rotation strategy
+    const hasNextUrl = this.rotationStrategy.switchToNextUrl();
     if (!hasNextUrl) {
       // We've tried all URLs, increment the cycle counter
       this.reconnectAttempts++;
     }
 
     // Use exponential backoff with jitter for reconnection delay
-    const delay = this.calculateReconnectDelay(this.reconnectAttempts);
+    const delay = this.rotationStrategy.calculateReconnectDelay(this.reconnectAttempts);
 
     this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts} to ${this.getCurrentUrl()} in ${delay}ms (exponential backoff)`);
 

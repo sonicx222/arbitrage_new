@@ -442,7 +442,7 @@ export function createDecodeError(message: string, code?: string): DecodeResult 
 /**
  * Default mempool detector port.
  */
-export const DEFAULT_MEMPOOL_DETECTOR_PORT = 3007;
+export const DEFAULT_MEMPOOL_DETECTOR_PORT = 3008;
 
 /**
  * Default Redis stream name for pending opportunities.

@@ -1014,11 +1014,11 @@ export interface PartitionServiceRunnerOptions {
   /** Logger instance */
   logger: ReturnType<typeof createLogger>;
 
-  /** Optional callback on successful startup */
-  onStarted?: (detector: PartitionDetectorInterface, startupDurationMs: number) => void;
+  /** Optional callback on successful startup (may be async) */
+  onStarted?: (detector: PartitionDetectorInterface, startupDurationMs: number) => void | Promise<void>;
 
-  /** Optional callback on startup failure */
-  onStartupError?: (error: Error) => void;
+  /** Optional callback on startup failure (may be async) */
+  onStartupError?: (error: Error) => void | Promise<void>;
 }
 
 /**
@@ -1148,9 +1148,9 @@ export function createPartitionServiceRunner(
         rssMemoryMB: Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100,
       });
 
-      // Call optional success callback
+      // Call optional success callback (may be async for partitions with custom startup)
       if (onStarted) {
-        onStarted(detector, startupDurationMs);
+        await onStarted(detector, startupDurationMs);
       }
 
     } catch (error) {
@@ -1190,9 +1190,9 @@ export function createPartitionServiceRunner(
       // Clean up process handlers
       cleanup();
 
-      // Call optional error callback
+      // Call optional error callback (may be async for partitions with custom cleanup)
       if (onStartupError) {
-        onStartupError(err);
+        await onStartupError(err);
       }
 
       // Exit process
@@ -1296,12 +1296,53 @@ export interface PartitionEntryResult {
 
   /** Full runner instance for advanced use */
   runner: PartitionServiceRunner;
+
+  /** Service configuration (for partitions that need access to it) */
+  serviceConfig: PartitionServiceConfig;
+
+  /** Logger instance (for partitions that need to log from hooks) */
+  logger: ReturnType<typeof createLogger>;
+}
+
+/**
+ * Lifecycle hooks for createPartitionEntry.
+ *
+ * Allows partition services with custom initialization needs (e.g., P4 Solana)
+ * to hook into the standard partition lifecycle without duplicating boilerplate.
+ *
+ * @see ADR-003: Partitioned Chain Detectors (Factory Pattern)
+ */
+export interface PartitionEntryHooks {
+  /**
+   * Called after the detector is started successfully within the runner's start() method.
+   * Use this for post-startup initialization (e.g., starting additional detectors,
+   * initializing Redis Streams clients).
+   *
+   * Receives the detector instance and startup duration in milliseconds.
+   */
+  onStarted?: (detector: PartitionDetectorInterface, startupDurationMs: number) => void | Promise<void>;
+
+  /**
+   * Called when the runner's start() fails.
+   * Use this for cleanup of additional resources created during initialization.
+   */
+  onStartupError?: (error: Error) => void | Promise<void>;
+
+  /**
+   * Additional cleanup logic to run alongside the standard process handler cleanup.
+   * This function is composed with the runner's cleanup: calling cleanupProcessHandlers()
+   * will invoke both the standard cleanup and this additional cleanup.
+   *
+   * Use this to clean up additional resources (e.g., stopping a SolanaArbitrageDetector,
+   * removing custom event listeners).
+   */
+  additionalCleanup?: () => void;
 }
 
 /**
  * R10: Creates a complete partition service entry point from just a partition ID.
  *
- * This factory eliminates boilerplate across P1/P2/P3 partition services by
+ * This factory eliminates boilerplate across P1/P2/P3/P4 partition services by
  * encapsulating the common initialization sequence:
  * 1. Retrieve partition config (chains, region, provider)
  * 2. Validate chains are configured
@@ -1310,29 +1351,31 @@ export interface PartitionEntryResult {
  * 5. Run the partition service via runPartitionService()
  *
  * Each partition entry point reduces from ~140 lines to ~15 lines.
+ * For partitions with custom needs (e.g., P4 Solana), lifecycle hooks
+ * allow injecting additional initialization without duplicating boilerplate.
  *
  * @param partitionId - The partition ID (e.g., from PARTITION_IDS.ASIA_FAST)
  * @param createDetector - Factory function to create the detector instance
+ * @param hooks - Optional lifecycle hooks for custom initialization/cleanup
  * @returns All values needed for backward-compatible exports
  *
  * @example
  * ```typescript
- * import { createPartitionEntry } from '@arbitrage/core';
- * import { UnifiedChainDetector } from '@arbitrage/unified-detector';
- * import { PARTITION_IDS } from '@arbitrage/config';
- *
+ * // Simple usage (P1-P3):
  * const entry = createPartitionEntry(
  *   PARTITION_IDS.ASIA_FAST,
  *   (cfg) => new UnifiedChainDetector(cfg)
  * );
  *
- * export const detector = entry.detector as UnifiedChainDetector;
- * export const config = entry.config;
- * export const P1_PARTITION_ID = entry.partitionId;
- * export const P1_CHAINS = entry.chains;
- * export const P1_REGION = entry.region;
- * export const cleanupProcessHandlers = entry.cleanupProcessHandlers;
- * export const envConfig = entry.envConfig;
+ * // Usage with lifecycle hooks (P4 Solana):
+ * const entry = createPartitionEntry(
+ *   PARTITION_IDS.SOLANA_NATIVE,
+ *   (cfg) => new UnifiedChainDetector(cfg),
+ *   {
+ *     onStarted: (detector) => { /* post-startup logic *\/ },
+ *     additionalCleanup: () => { /* extra cleanup *\/ },
+ *   }
+ * );
  * ```
  *
  * @see ADR-003: Partitioned Chain Detectors
@@ -1340,7 +1383,8 @@ export interface PartitionEntryResult {
  */
 export function createPartitionEntry(
   partitionId: string,
-  createDetector: (config: PartitionServiceRunnerOptions['detectorConfig']) => PartitionDetectorInterface
+  createDetector: (config: PartitionServiceRunnerOptions['detectorConfig']) => PartitionDetectorInterface,
+  hooks?: PartitionEntryHooks
 ): PartitionEntryResult {
   const serviceName = PARTITION_SERVICE_NAMES[partitionId] ?? `partition-${partitionId}`;
   const logger = createLogger(`${serviceName}:main`);
@@ -1387,13 +1431,23 @@ export function createPartitionEntry(
     healthCheckPort: parsePort(envConfig?.healthCheckPort, defaultPort, logger)
   };
 
-  // Service Runner
+  // Service Runner (with optional lifecycle hooks)
   const runner = runPartitionService({
     config: serviceConfig,
     detectorConfig,
     createDetector,
-    logger
+    logger,
+    onStarted: hooks?.onStarted,
+    onStartupError: hooks?.onStartupError
   });
+
+  // Compose cleanup: standard runner cleanup + optional additional cleanup
+  const composedCleanup: ProcessHandlerCleanup = hooks?.additionalCleanup
+    ? () => {
+        hooks.additionalCleanup!();
+        runner.cleanup();
+      }
+    : runner.cleanup;
 
   return {
     detector: runner.detector,
@@ -1401,8 +1455,10 @@ export function createPartitionEntry(
     partitionId,
     chains,
     region,
-    cleanupProcessHandlers: runner.cleanup,
+    cleanupProcessHandlers: composedCleanup,
     envConfig,
-    runner
+    runner,
+    serviceConfig,
+    logger
   };
 }

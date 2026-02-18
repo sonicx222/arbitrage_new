@@ -375,9 +375,9 @@ export class SwapEventFilter {
    * Estimate USD value from raw swap amounts.
    *
    * @known-limitation This heuristic assumes one side of the swap is a stablecoin
-   * at $1 parity and that all token amounts use 18 decimals. This means:
+   * at $1 parity. It infers token decimals from the magnitude of the raw amount
+   * string length. This means:
    * - Non-stablecoin pairs (e.g., ETH/WBTC) will have inaccurate USD estimates
-   * - Tokens with non-18 decimals (USDC=6, WBTC=8) will be wildly over/under-counted
    * - The estimate is only suitable for coarse filtering (whale detection, dust filtering)
    *
    * For accurate USD estimation, callers should provide `event.usdValue` from a price
@@ -387,10 +387,10 @@ export class SwapEventFilter {
     // Fallback estimation when usdValue is not provided
     // This is a simplified estimation - real implementation would use price oracles
     try {
-      const amount0In = parseFloat(event.amount0In || '0') / 1e18;
-      const amount1In = parseFloat(event.amount1In || '0') / 1e18;
-      const amount0Out = parseFloat(event.amount0Out || '0') / 1e18;
-      const amount1Out = parseFloat(event.amount1Out || '0') / 1e18;
+      const amount0In = this.normalizeTokenAmount(event.amount0In || '0');
+      const amount1In = this.normalizeTokenAmount(event.amount1In || '0');
+      const amount0Out = this.normalizeTokenAmount(event.amount0Out || '0');
+      const amount1Out = this.normalizeTokenAmount(event.amount1Out || '0');
 
       // Simple heuristic: assume one side is stablecoin at $1
       // This is imprecise but provides a reasonable filter
@@ -399,6 +399,45 @@ export class SwapEventFilter {
     } catch {
       return 0;
     }
+  }
+
+  /**
+   * Infer token decimals from the magnitude of a raw amount string and normalize
+   * to a human-readable value. Common ERC-20 decimals:
+   * - 18 decimals: ETH, WETH, DAI, most tokens (amounts > 1e15 for even $1)
+   * - 8 decimals: WBTC (amounts > 1e5 for even $1)
+   * - 6 decimals: USDC, USDT (amounts > 1e3 for even $1)
+   *
+   * Uses the integer digit count of the raw value to pick the most likely decimals.
+   * This prevents USDC whale swaps (6 decimals) from being underestimated by 10^12x.
+   */
+  private normalizeTokenAmount(rawAmount: string): number {
+    const value = parseFloat(rawAmount);
+    if (!Number.isFinite(value) || value <= 0) {
+      return 0;
+    }
+
+    // Count the number of integer digits (order of magnitude)
+    const integerDigits = Math.floor(Math.log10(value)) + 1;
+
+    // Heuristic: infer decimals from magnitude of the raw value
+    // 18-decimal tokens: a $1 swap is ~1e18, so raw values typically have 19+ digits
+    // 8-decimal tokens: a $1 swap is ~1e8, so raw values typically have 9-15 digits
+    // 6-decimal tokens: a $1 swap is ~1e6, so raw values typically have 7-8 digits
+    // Values with fewer digits are likely already in human-readable form or dust
+    let decimals: number;
+    if (integerDigits > 15) {
+      decimals = 18;
+    } else if (integerDigits > 10) {
+      decimals = 8;
+    } else if (integerDigits > 3) {
+      decimals = 6;
+    } else {
+      // Very small raw value — likely already normalized or dust
+      decimals = 0;
+    }
+
+    return value / Math.pow(10, decimals);
   }
 
   private createFilteredResult(

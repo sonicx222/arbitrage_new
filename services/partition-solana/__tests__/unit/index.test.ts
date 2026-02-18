@@ -4,10 +4,10 @@
  * Tests partition-specific configuration, RPC selection logic,
  * environment validation, event wiring, and cleanup.
  *
- * P4 does NOT use createPartitionEntry() factory (unlike P1-P3).
- * It has a manual 500+ line index.ts with Solana-specific logic.
+ * P4 now uses createPartitionEntry() factory (matching P1-P3 pattern)
+ * with lifecycle hooks for Solana-specific initialization.
  *
- * @see .agent-reports/partition-solana-deep-analysis.md Fix #6
+ * @see ADR-003: Partitioned Chain Detectors (Factory Pattern)
  */
 
 import { EventEmitter } from 'events';
@@ -243,29 +243,19 @@ describe('P4 Solana-Native Partition Service - index.ts', () => {
       expect(createLogger).toHaveBeenCalledWith('partition-solana:main');
     });
 
-    it('should call getPartition with solana-native ID', async () => {
+    it('should call createPartitionEntry with solana-native ID', async () => {
       const mod = await importIndexModule();
       cleanupFn = mod.cleanupProcessHandlers;
-      const { getPartition } = jest.requireMock('@arbitrage/config');
-      expect(getPartition).toHaveBeenCalledWith('solana-native');
-    });
-
-    it('should call setupDetectorEventHandlers', async () => {
-      const mod = await importIndexModule();
-      cleanupFn = mod.cleanupProcessHandlers;
-      const { setupDetectorEventHandlers } = jest.requireMock('@arbitrage/core');
-      expect(setupDetectorEventHandlers).toHaveBeenCalledWith(
-        mod.detector,
-        expect.anything(),
-        'solana-native'
+      const { createPartitionEntry } = jest.requireMock('@arbitrage/core');
+      expect(createPartitionEntry).toHaveBeenCalledWith(
+        'solana-native',
+        expect.any(Function),
+        expect.objectContaining({
+          onStarted: expect.any(Function),
+          onStartupError: expect.any(Function),
+          additionalCleanup: expect.any(Function),
+        })
       );
-    });
-
-    it('should call setupProcessHandlers', async () => {
-      const mod = await importIndexModule();
-      cleanupFn = mod.cleanupProcessHandlers;
-      const { setupProcessHandlers } = jest.requireMock('@arbitrage/core');
-      expect(setupProcessHandlers).toHaveBeenCalled();
     });
 
     it('should call connectToSolanaDetector on arbitrage detector', async () => {
@@ -274,13 +264,6 @@ describe('P4 Solana-Native Partition Service - index.ts', () => {
       expect(mockSolanaArbitrageInstance.connectToSolanaDetector).toHaveBeenCalledWith(
         mod.detector
       );
-    });
-
-    it('should call generateInstanceId with solana-native', async () => {
-      const mod = await importIndexModule();
-      cleanupFn = mod.cleanupProcessHandlers;
-      const { generateInstanceId } = jest.requireMock('@arbitrage/core');
-      expect(generateInstanceId).toHaveBeenCalledWith('solana-native', undefined);
     });
 
     it('should not auto-start main() when JEST_WORKER_ID is set', async () => {

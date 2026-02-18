@@ -384,12 +384,21 @@ export function createCoreMocks(
       cleanup: jest.fn(),
       healthServer: { current: null },
     })),
-    createPartitionEntry: jest.fn().mockImplementation((partitionId: string, createDetector: (cfg: unknown) => unknown) => {
+    createPartitionEntry: jest.fn().mockImplementation((
+      partitionId: string,
+      createDetector: (cfg: unknown) => unknown,
+      hooks?: {
+        onStarted?: (detector: unknown, startupDurationMs: number) => void | Promise<void>;
+        onStartupError?: (error: Error) => void | Promise<void>;
+        additionalCleanup?: () => void;
+      }
+    ) => {
       const { getPartition } = require('@arbitrage/config');
       const partitionConfig = getPartition(partitionId);
       const chains: string[] = partitionConfig?.chains ?? [];
       const region: string = partitionConfig?.region ?? 'us-east1';
       const defaultPort = PORTS[partitionId] ?? 3000;
+      const serviceName = DEFAULT_PARTITION_SERVICE_NAMES[partitionId] ?? `partition-${partitionId}`;
 
       const envConfig = {
         redisUrl: process.env.REDIS_URL,
@@ -430,6 +439,24 @@ export function createCoreMocks(
       };
 
       const detector = createDetector(detectorConfig);
+      const runnerCleanup = jest.fn();
+
+      // Compose cleanup: standard runner cleanup + optional additional cleanup
+      const composedCleanup = hooks?.additionalCleanup
+        ? jest.fn().mockImplementation(() => {
+            hooks.additionalCleanup!();
+            runnerCleanup();
+          })
+        : runnerCleanup;
+
+      const serviceConfig = {
+        partitionId,
+        serviceName,
+        defaultChains: chains,
+        defaultPort,
+        region,
+        provider: partitionConfig?.provider ?? 'oracle',
+      };
 
       return {
         detector,
@@ -437,15 +464,17 @@ export function createCoreMocks(
         partitionId,
         chains,
         region,
-        cleanupProcessHandlers: jest.fn(),
+        cleanupProcessHandlers: composedCleanup,
         envConfig,
         runner: {
           detector,
           start: jest.fn().mockResolvedValue(undefined),
           getState: jest.fn().mockReturnValue('idle'),
-          cleanup: jest.fn(),
+          cleanup: runnerCleanup,
           healthServer: { current: null },
         },
+        serviceConfig,
+        logger: mockLogger,
       };
     }),
   };
@@ -537,6 +566,329 @@ export function createConfigMocks(options: PartitionConfigOptions = {}) {
       SOLANA_NATIVE: 'solana-native',
     },
     CHAINS: chainsData,
+  };
+}
+
+// =============================================================================
+// Partition Detector Mock Factory
+// =============================================================================
+
+/**
+ * Options for customizing createMockPartitionDetector behavior.
+ */
+export interface MockPartitionDetectorOptions {
+  /** Partition ID (default: 'test-partition') */
+  partitionId?: string;
+  /** Chains the detector monitors (default: ['bsc', 'polygon']) */
+  chains?: string[];
+  /** Whether the detector starts in running state (default: false) */
+  isRunning?: boolean;
+  /** Health status to return (default: 'healthy') */
+  healthStatus?: string;
+}
+
+/**
+ * Return type of createMockPartitionDetector.
+ *
+ * All methods are jest.Mock instances for easy assertion and override.
+ * Extends EventEmitter to support event-based testing (on/off/emit).
+ */
+export interface MockPartitionDetector extends EventEmitter {
+  getPartitionHealth: jest.Mock;
+  getHealthyChains: jest.Mock;
+  getStats: jest.Mock;
+  isRunning: jest.Mock;
+  getPartitionId: jest.Mock;
+  getChains: jest.Mock;
+  start: jest.Mock;
+  stop: jest.Mock;
+}
+
+/**
+ * Creates a mock partition detector with jest.fn() implementations.
+ *
+ * Unlike MockUnifiedChainDetector (which uses real method implementations),
+ * this factory returns an object where every method is a jest.Mock, making
+ * it easier to override return values and assert call counts in tests.
+ *
+ * The mock extends EventEmitter so on/off/emit work natively.
+ *
+ * @param options - Configuration for default return values
+ * @returns Mock detector instance with jest.fn() methods
+ *
+ * @example
+ * ```typescript
+ * const detector = createMockPartitionDetector({ partitionId: 'asia-fast' });
+ * detector.getHealthyChains.mockReturnValue(['bsc']);
+ * expect(detector.getHealthyChains()).toEqual(['bsc']);
+ * ```
+ *
+ * @see PartitionDetectorInterface in shared/core/src/partition-service-utils.ts
+ */
+export function createMockPartitionDetector(
+  options: MockPartitionDetectorOptions = {}
+): MockPartitionDetector {
+  const partitionId = options.partitionId ?? 'test-partition';
+  const chains = options.chains ?? ['bsc', 'polygon'];
+  const running = options.isRunning ?? false;
+  const healthStatus = options.healthStatus ?? 'healthy';
+
+  const emitter = new EventEmitter() as MockPartitionDetector;
+
+  emitter.getPartitionHealth = jest.fn().mockResolvedValue({
+    status: healthStatus,
+    partitionId,
+    chainHealth: new Map(),
+    uptimeSeconds: 0,
+    totalEventsProcessed: 0,
+    memoryUsage: 0,
+  });
+
+  emitter.getHealthyChains = jest.fn().mockReturnValue([...chains]);
+
+  emitter.getStats = jest.fn().mockReturnValue({
+    partitionId,
+    chains: [...chains],
+    totalEventsProcessed: 0,
+    totalOpportunitiesFound: 0,
+    uptimeSeconds: 0,
+    memoryUsageMB: 0,
+    chainStats: new Map(),
+  });
+
+  emitter.isRunning = jest.fn().mockReturnValue(running);
+  emitter.getPartitionId = jest.fn().mockReturnValue(partitionId);
+  emitter.getChains = jest.fn().mockReturnValue([...chains]);
+  emitter.start = jest.fn().mockResolvedValue(undefined);
+  emitter.stop = jest.fn().mockResolvedValue(undefined);
+
+  return emitter;
+}
+
+// =============================================================================
+// Health Server Mock Factory
+// =============================================================================
+
+/**
+ * Return type of createMockHealthServer.
+ *
+ * Mimics the subset of http.Server used by partition services:
+ * listen, close, on, address, and timeout properties.
+ */
+export interface MockHealthServer {
+  listen: jest.Mock;
+  close: jest.Mock;
+  on: jest.Mock;
+  address: jest.Mock;
+  requestTimeout: number;
+  headersTimeout: number;
+  keepAliveTimeout: number;
+  maxConnections: number;
+}
+
+/**
+ * Creates a mock HTTP server matching the shape used by partition health servers.
+ *
+ * - listen() invokes its callback synchronously (simulating immediate bind).
+ * - close() invokes its callback synchronously (simulating immediate close).
+ * - on() is a no-op mock for attaching error handlers.
+ * - address() returns a mock address object.
+ * - Timeout properties match the values set by createPartitionHealthServer.
+ *
+ * @returns Mock health server instance
+ *
+ * @example
+ * ```typescript
+ * const server = createMockHealthServer();
+ * server.listen(3001, '0.0.0.0', () => console.log('listening'));
+ * expect(server.listen).toHaveBeenCalledWith(3001, '0.0.0.0', expect.any(Function));
+ * ```
+ *
+ * @see createPartitionHealthServer in shared/core/src/partition-service-utils.ts
+ */
+export function createMockHealthServer(): MockHealthServer {
+  return {
+    listen: jest.fn().mockImplementation(
+      (_port: number, _host?: string | (() => void), cb?: () => void) => {
+        // Support both listen(port, cb) and listen(port, host, cb) signatures
+        const callback = typeof _host === 'function' ? _host : cb;
+        if (callback) callback();
+      }
+    ),
+    close: jest.fn().mockImplementation((cb?: (err?: Error) => void) => {
+      if (cb) cb();
+    }),
+    on: jest.fn(),
+    address: jest.fn().mockReturnValue({ port: 3000, family: 'IPv4', address: '0.0.0.0' }),
+    requestTimeout: 5000,
+    headersTimeout: 3000,
+    keepAliveTimeout: 5000,
+    maxConnections: 100,
+  };
+}
+
+// =============================================================================
+// Partition Entry Mock Factory
+// =============================================================================
+
+/**
+ * Options for customizing createMockPartitionEntry behavior.
+ */
+export interface MockPartitionEntryOptions {
+  /** Partition ID (default: 'test') */
+  partitionId?: string;
+  /** Chains for this partition (default: ['bsc', 'polygon']) */
+  chains?: string[];
+  /** Region (default: 'us-east1') */
+  region?: string;
+  /** Health check port (default: 3001) */
+  healthCheckPort?: number;
+  /** Instance ID (default: 'test-local-1234567890') */
+  instanceId?: string;
+  /** Region ID for detector config (default: same as region) */
+  regionId?: string;
+  /** Enable cross-region health (default: true) */
+  enableCrossRegionHealth?: boolean;
+  /** Node environment (default: 'test') */
+  nodeEnv?: string;
+  /** Override detector mock (default: createMockPartitionDetector()) */
+  detector?: MockPartitionDetector;
+  /** Override health server mock (default: createMockHealthServer()) */
+  healthServer?: MockHealthServer;
+}
+
+/**
+ * Return type of createMockPartitionEntry.
+ *
+ * Matches the shape of PartitionEntryResult from partition-service-utils.ts,
+ * with all nested objects using jest.fn() mocks for easy assertion.
+ */
+export interface MockPartitionEntry {
+  /** Mock detector instance */
+  detector: MockPartitionDetector;
+  /** Detector configuration */
+  config: {
+    partitionId: string;
+    chains: string[];
+    instanceId: string;
+    regionId: string;
+    enableCrossRegionHealth: boolean;
+    healthCheckPort: number;
+  };
+  /** Partition ID constant */
+  partitionId: string;
+  /** Configured chains */
+  chains: readonly string[];
+  /** Deployment region */
+  region: string;
+  /** Process handler cleanup function (jest.fn) */
+  cleanupProcessHandlers: jest.Mock;
+  /** Parsed environment configuration */
+  envConfig: {
+    redisUrl: string | undefined;
+    partitionChains: string | undefined;
+    healthCheckPort: string | undefined;
+    instanceId: string | undefined;
+    regionId: string | undefined;
+    enableCrossRegionHealth: boolean;
+    nodeEnv: string;
+    rpcUrls: Record<string, string | undefined>;
+    wsUrls: Record<string, string | undefined>;
+  };
+  /** Full runner instance */
+  runner: {
+    detector: MockPartitionDetector;
+    start: jest.Mock;
+    getState: jest.Mock;
+    cleanup: jest.Mock;
+    healthServer: { current: MockHealthServer | null };
+  };
+}
+
+/**
+ * Creates a complete mock of the createPartitionEntry() factory output.
+ *
+ * Returns all fields from PartitionEntryResult with sensible test defaults.
+ * All function-typed fields are jest.fn() mocks for easy assertion.
+ *
+ * This is the preferred way to mock the partition entry in tests that
+ * need to verify behavior after the factory has run, without pulling
+ * in the full createCoreMocks + createConfigMocks setup.
+ *
+ * @param options - Configuration overrides
+ * @returns Complete mock of PartitionEntryResult
+ *
+ * @example
+ * ```typescript
+ * const entry = createMockPartitionEntry({ partitionId: 'asia-fast', chains: ['bsc'] });
+ * expect(entry.config.partitionId).toBe('asia-fast');
+ * expect(entry.detector.getHealthyChains()).toEqual(['bsc']);
+ * entry.runner.start();
+ * expect(entry.runner.start).toHaveBeenCalled();
+ * ```
+ *
+ * @see PartitionEntryResult in shared/core/src/partition-service-utils.ts
+ * @see createPartitionEntry in shared/core/src/partition-service-utils.ts
+ */
+export function createMockPartitionEntry(
+  options: MockPartitionEntryOptions = {}
+): MockPartitionEntry {
+  const partitionId = options.partitionId ?? 'test';
+  const chains = options.chains ?? ['bsc', 'polygon'];
+  const region = options.region ?? 'us-east1';
+  const healthCheckPort = options.healthCheckPort ?? 3001;
+  const instanceId = options.instanceId ?? `${partitionId}-local-1234567890`;
+  const regionId = options.regionId ?? region;
+  const enableCrossRegionHealth = options.enableCrossRegionHealth ?? true;
+  const nodeEnv = options.nodeEnv ?? 'test';
+
+  const detector = options.detector ?? createMockPartitionDetector({
+    partitionId,
+    chains,
+  });
+
+  const healthServer = options.healthServer ?? createMockHealthServer();
+
+  const config = {
+    partitionId,
+    chains: [...chains],
+    instanceId,
+    regionId,
+    enableCrossRegionHealth,
+    healthCheckPort,
+  };
+
+  const envConfig = {
+    redisUrl: process.env.REDIS_URL,
+    partitionChains: undefined as string | undefined,
+    healthCheckPort: undefined as string | undefined,
+    instanceId: undefined as string | undefined,
+    regionId: undefined as string | undefined,
+    enableCrossRegionHealth,
+    nodeEnv,
+    rpcUrls: Object.fromEntries(chains.map(c => [c, undefined])) as Record<string, string | undefined>,
+    wsUrls: Object.fromEntries(chains.map(c => [c, undefined])) as Record<string, string | undefined>,
+  };
+
+  const cleanupProcessHandlers = jest.fn();
+
+  const runner = {
+    detector,
+    start: jest.fn().mockResolvedValue(undefined),
+    getState: jest.fn().mockReturnValue('idle' as const),
+    cleanup: jest.fn(),
+    healthServer: { current: healthServer },
+  };
+
+  return {
+    detector,
+    config,
+    partitionId,
+    chains,
+    region,
+    cleanupProcessHandlers,
+    envConfig,
+    runner,
   };
 }
 

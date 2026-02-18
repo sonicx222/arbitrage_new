@@ -7,6 +7,7 @@
 export {
   RedisMock,
   createRedisMock,
+  createInlineRedisMock,
   createIoredisMockModule,
   setupRedisMock
 } from './redis.mock';
@@ -20,6 +21,9 @@ export {
   MockUnifiedChainDetector,
   createCoreMocks,
   createConfigMocks,
+  createMockPartitionDetector,
+  createMockHealthServer,
+  createMockPartitionEntry,
 } from './partition-service.mock';
 
 export type {
@@ -28,6 +32,11 @@ export type {
   MockDetectorOptions,
   PartitionConfigOptions,
   CoreMocksOptions,
+  MockPartitionDetectorOptions,
+  MockPartitionDetector,
+  MockHealthServer,
+  MockPartitionEntryOptions,
+  MockPartitionEntry,
 } from './partition-service.mock';
 
 // Shared mock factories (PerfLogger, ExecutionStateManager, RedisClient)
@@ -56,3 +65,13 @@ export type {
   MockWalletOptions,
   MockProvider
 } from './provider.mock';
+
+// Execution engine strategy mocks
+export {
+  createMockStrategyLogger,
+  createMockStrategyProvider,
+  createMockStrategyWallet,
+  createMockStrategyOpportunity,
+} from './execution-engine.mock';
+
+export type { StrategyMockLogger } from './execution-engine.mock';

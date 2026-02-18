@@ -22,29 +22,49 @@ import * as path from 'path';
 
 /**
  * Creates a mock state manager with configurable running state.
+ *
+ * Fix 12c: This mock mirrors the real ServiceStateManager state machine:
+ * - STOPPED -> RUNNING via executeStart (matches ServiceState.STOPPED -> STARTING -> RUNNING)
+ * - RUNNING -> STOPPED via executeStop (matches ServiceState.RUNNING -> STOPPING -> STOPPED)
+ * - executeStart returns { success, currentState } matching StateTransitionResult shape
+ * - executeStop returns { success, currentState } matching StateTransitionResult shape
+ *
+ * Limitation: The mock skips intermediate STARTING/STOPPING states and does not
+ * enforce the transition lock (transitionLock) that prevents concurrent transitions.
+ * TODO: Consider swapping to real ServiceStateManager when test setup allows it.
+ *
+ * @see shared/core/src/service-state.ts — Real ServiceStateManager
  */
 function createMockStateManager() {
   const state = { running: false };
 
   // Use explicit function implementations to avoid Jest type issues
   const executeStartImpl = async (callback: () => Promise<void>) => {
+    // Match real behavior: reject start if already running
+    if (state.running) {
+      return { success: false as const, previousState: 'RUNNING' as const, currentState: 'RUNNING' as const };
+    }
     try {
       await callback();
       state.running = true;
-      return { success: true as const, currentState: 'RUNNING' as const };
+      return { success: true as const, previousState: 'STOPPED' as const, currentState: 'RUNNING' as const };
     } catch (error) {
       state.running = false;
-      return { success: false as const, error };
+      return { success: false as const, previousState: 'STOPPED' as const, currentState: 'STOPPED' as const, error };
     }
   };
 
   const executeStopImpl = async (callback: () => Promise<void>) => {
+    // Match real behavior: reject stop if not running
+    if (!state.running) {
+      return { success: false as const, previousState: 'STOPPED' as const, currentState: 'STOPPED' as const };
+    }
     try {
       await callback();
       state.running = false;
-      return { success: true as const, currentState: 'STOPPED' as const };
+      return { success: true as const, previousState: 'RUNNING' as const, currentState: 'STOPPED' as const };
     } catch (error) {
-      return { success: false as const, error };
+      return { success: false as const, previousState: 'RUNNING' as const, currentState: 'RUNNING' as const, error };
     }
   };
 

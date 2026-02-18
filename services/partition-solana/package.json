@@ -6,8 +6,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "start": "cross-env PARTITION_ID=solana node dist/index.js",
-    "dev": "cross-env PARTITION_ID=solana ts-node src/index.ts",
+    "start": "cross-env PARTITION_ID=solana-native node dist/index.js",
+    "dev": "cross-env PARTITION_ID=solana-native ts-node src/index.ts",
     "test": "jest",
     "lint": "eslint src/**/*.ts",
     "typecheck": "tsc --noEmit"

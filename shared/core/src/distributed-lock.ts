@@ -75,6 +75,15 @@ export interface LockHandle {
   extend: (additionalMs?: number) => Promise<boolean>;
 }
 
+export interface QueueOptions {
+  /** TTL for this specific lock acquisition (overrides default) */
+  ttlMs?: number;
+  /** Maximum time to wait in queue in ms (default: 30000) */
+  waitTimeoutMs?: number;
+  /** Maximum queue size per resource (default: 100) */
+  maxQueueSize?: number;
+}
+
 export interface LockStats {
   /** Total lock acquisition attempts */
   acquisitionAttempts: number;
@@ -88,6 +97,17 @@ export interface LockStats {
   extensions: number;
   /** Currently held locks */
   currentlyHeld: number;
+  /** Total callers currently waiting in queues */
+  queuedWaiters: number;
+  /** Number of resources with active queues */
+  activeQueues: number;
+}
+
+/** Internal type for queued lock waiters. Not exported. */
+interface QueuedWaiter {
+  resolve: (handle: LockHandle) => void;
+  reject: (error: Error) => void;
+  timeoutId: NodeJS.Timeout;
 }
 
 // =============================================================================
@@ -133,13 +153,16 @@ export class DistributedLockManager {
   private instanceId: string;
   private config: Required<Omit<LockConfig, 'logger'>>;
   private heldLocks: Map<string, { value: string; extendInterval?: NodeJS.Timeout }> = new Map();
+  private waitQueues: Map<string, QueuedWaiter[]> = new Map();
   private stats: LockStats = {
     acquisitionAttempts: 0,
     successfulAcquisitions: 0,
     failedAcquisitions: 0,
     releases: 0,
     extensions: 0,
-    currentlyHeld: 0
+    currentlyHeld: 0,
+    queuedWaiters: 0,
+    activeQueues: 0
   };
 
   constructor(config: LockConfig = {}) {
@@ -289,6 +312,91 @@ export class DistributedLockManager {
   }
 
   // ===========================================================================
+  // Queued Lock Acquisition
+  // ===========================================================================
+
+  /**
+   * Attempt to acquire a lock, waiting in a FIFO queue if unavailable.
+   *
+   * When the lock is held by another caller, this method places the caller
+   * in a per-resource queue. When the current holder releases the lock,
+   * the next queued waiter is notified and attempts acquisition.
+   *
+   * @param resourceId - Unique identifier for the resource to lock
+   * @param options - Queue and acquisition options
+   * @returns LockHandle with acquired status and release function
+   */
+  async acquireLockWithQueue(resourceId: string, options: QueueOptions = {}): Promise<LockHandle> {
+    if (!this.redis) {
+      throw new Error('DistributedLockManager not initialized. Call initialize() first.');
+    }
+
+    this.validateResourceId(resourceId);
+
+    const ttlMs = options.ttlMs ?? this.config.defaultTtlMs;
+    const waitTimeoutMs = options.waitTimeoutMs ?? 30000;
+    const maxQueueSize = options.maxQueueSize ?? 100;
+    const key = this.buildLockKey(resourceId);
+
+    // First, try immediate acquisition (no retries)
+    const immediate = await this.acquireLock(resourceId, { ttlMs });
+    if (immediate.acquired) {
+      return immediate;
+    }
+
+    // Check queue backpressure
+    const queue = this.waitQueues.get(key) ?? [];
+    if (queue.length >= maxQueueSize) {
+      this.logger.warn('Lock queue full, rejecting waiter', {
+        key,
+        queueSize: queue.length,
+        maxQueueSize
+      });
+      return {
+        acquired: false,
+        release: async () => { /* no-op */ },
+        extend: async () => false
+      };
+    }
+
+    // Warn at 50% capacity
+    if (queue.length >= Math.floor(maxQueueSize / 2)) {
+      this.logger.warn('Lock queue exceeds 50% capacity', {
+        key,
+        queueSize: queue.length,
+        maxQueueSize
+      });
+    }
+
+    // Enqueue the caller and wait for notification
+    return new Promise<LockHandle>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        // Remove this waiter from the queue on timeout
+        this.removeWaiter(key, waiter);
+        resolve({
+          acquired: false,
+          release: async () => { /* no-op */ },
+          extend: async () => false
+        });
+      }, waitTimeoutMs);
+
+      const waiter: QueuedWaiter = { resolve, reject, timeoutId };
+
+      if (!this.waitQueues.has(key)) {
+        this.waitQueues.set(key, []);
+      }
+      this.waitQueues.get(key)!.push(waiter);
+      this.updateQueueStats();
+
+      this.logger.debug('Caller enqueued for lock', {
+        key,
+        position: this.waitQueues.get(key)!.length,
+        waitTimeoutMs
+      });
+    });
+  }
+
+  // ===========================================================================
   // Lock Release
   // ===========================================================================
 
@@ -324,6 +432,9 @@ export class DistributedLockManager {
         clearInterval(lockInfo.extendInterval);
       }
       this.heldLocks.delete(key);
+
+      // Notify next queued waiter (FIFO)
+      this.notifyNextWaiter(key);
 
     } catch (error) {
       this.logger.error('Error releasing lock', { key, error });
@@ -481,6 +592,20 @@ export class DistributedLockManager {
   async shutdown(): Promise<void> {
     this.logger.info('Shutting down DistributedLockManager');
 
+    // Reject all queued waiters
+    for (const [key, queue] of this.waitQueues) {
+      for (const waiter of queue) {
+        clearTimeout(waiter.timeoutId);
+        waiter.reject(new Error('DistributedLockManager is shutting down'));
+      }
+      this.logger.debug('Rejected queued waiters on shutdown', {
+        key,
+        count: queue.length
+      });
+    }
+    this.waitQueues.clear();
+    this.updateQueueStats();
+
     // Release all held locks
     const releasePromises: Promise<void>[] = [];
 
@@ -530,6 +655,72 @@ export class DistributedLockManager {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Notify the next queued waiter for a resource.
+   * The woken waiter attempts to acquire the lock (may still fail
+   * if a non-queued caller acquires it first).
+   */
+  private notifyNextWaiter(key: string): void {
+    const queue = this.waitQueues.get(key);
+    if (!queue || queue.length === 0) {
+      return;
+    }
+
+    const waiter = queue.shift()!;
+    clearTimeout(waiter.timeoutId);
+
+    // Clean up empty queues
+    if (queue.length === 0) {
+      this.waitQueues.delete(key);
+    }
+    this.updateQueueStats();
+
+    // Derive resourceId from key by stripping the prefix
+    const resourceId = key.startsWith(this.config.keyPrefix)
+      ? key.slice(this.config.keyPrefix.length)
+      : key;
+
+    this.logger.debug('Waking queued waiter', { key, remainingInQueue: queue.length });
+
+    // Attempt lock acquisition for the woken waiter
+    this.acquireLock(resourceId).then(
+      (handle) => waiter.resolve(handle),
+      (error) => waiter.reject(error)
+    );
+  }
+
+  /**
+   * Remove a specific waiter from a resource queue (used on timeout).
+   */
+  private removeWaiter(key: string, waiter: QueuedWaiter): void {
+    const queue = this.waitQueues.get(key);
+    if (!queue) {
+      return;
+    }
+
+    const idx = queue.indexOf(waiter);
+    if (idx !== -1) {
+      queue.splice(idx, 1);
+    }
+
+    if (queue.length === 0) {
+      this.waitQueues.delete(key);
+    }
+    this.updateQueueStats();
+  }
+
+  /**
+   * Recalculate queue stats from current waitQueues state.
+   */
+  private updateQueueStats(): void {
+    let totalWaiters = 0;
+    for (const queue of this.waitQueues.values()) {
+      totalWaiters += queue.length;
+    }
+    this.stats.queuedWaiters = totalWaiters;
+    this.stats.activeQueues = this.waitQueues.size;
   }
 }
 

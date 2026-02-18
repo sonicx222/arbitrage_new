@@ -192,6 +192,15 @@ const VALIDATED_SWAP_DEADLINE_SECONDS = Number.isNaN(SWAP_DEADLINE_SECONDS) || S
   : SWAP_DEADLINE_SECONDS;
 
 /**
+ * Returns a Unix timestamp deadline for swap transactions.
+ * Uses the validated SWAP_DEADLINE_SECONDS (default 300s / 5 minutes).
+ * Centralizes deadline computation to avoid hardcoded magic numbers across strategies.
+ */
+export function getSwapDeadline(): number {
+  return Math.floor(Date.now() / 1000) + VALIDATED_SWAP_DEADLINE_SECONDS;
+}
+
+/**
  * Pre-computed BigInt for slippage tolerance.
  */
 const SLIPPAGE_BASIS_POINTS_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
@@ -1023,7 +1032,7 @@ export abstract class BaseExecutionStrategy {
 
     const path = this.buildSwapPath(opportunity);
     const routerContract = this.getRouterContract(targetDex.routerAddress, provider, chain);
-    const deadline = Math.floor(Date.now() / 1000) + VALIDATED_SWAP_DEADLINE_SECONDS;
+    const deadline = getSwapDeadline();
     const recipient = recipientAddress || await this.getWalletAddress(wallet);
 
     const tx = await routerContract.swapExactTokensForTokens.populateTransaction(

@@ -228,7 +228,20 @@ export class EventBatcher<T = any> {
       return e.id;
     }
 
-    // Fallback to JSON stringification (expensive but works)
+    // FIX #3: Intermediate field checks before expensive JSON.stringify fallback
+    // Build a composite key from commonly available fields on price/sync events
+    const pairAddr = e.pairAddress || e.address || '';
+    const block = e.blockNumber ?? '';
+    const ts = e.timestamp ?? '';
+    if (pairAddr && (block !== '' || ts !== '')) {
+      return `${pairAddr}_${block}_${ts}`;
+    }
+
+    if (e.pairKey && ts !== '') {
+      return `${e.pairKey}_${ts}`;
+    }
+
+    // Last resort fallback (expensive but correct)
     return JSON.stringify(event);
   }
 

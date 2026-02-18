@@ -16,6 +16,7 @@
  */
 
 import { ethers } from 'ethers';
+import { getSwapDeadline } from '../base.strategy';
 import {
   BALANCER_V2_FEE_BPS,
   getBpsDenominatorBigInt,
@@ -39,11 +40,7 @@ const BPS_DENOMINATOR = getBpsDenominatorBigInt();
  */
 const BALANCER_V2_INTERFACE = new ethers.Interface(BALANCER_V2_FLASH_ARBITRAGE_ABI);
 
-/**
- * Default deadline for flash loan execution (5 minutes from now).
- * This protects against stale transactions being mined in poor market conditions.
- */
-const DEFAULT_DEADLINE_SECONDS = 300;
+// Deadline configuration centralized in base.strategy.ts via getSwapDeadline()
 
 /**
  * Balancer V2 Flash Loan Provider
@@ -144,8 +141,7 @@ export class BalancerV2FlashLoanProvider implements IFlashLoanProvider {
       step.amountOutMin,
     ]);
 
-    // Calculate deadline: current time + 5 minutes
-    const deadline = Math.floor(Date.now() / 1000) + DEFAULT_DEADLINE_SECONDS;
+    const deadline = getSwapDeadline();
 
     return BALANCER_V2_INTERFACE.encodeFunctionData('executeArbitrage', [
       request.asset,

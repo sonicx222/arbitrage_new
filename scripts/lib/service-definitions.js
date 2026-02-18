@@ -49,8 +49,9 @@ const {
  */
 function buildServiceDefinitions(PORTS) {
   /**
-   * Core services that should always be started for local development.
+   * Core services that should always be started for local development (7 services).
    * Order matters - services are started in this order.
+   * Must match `dev:all` in package.json (coord, P1-P4, cross-chain, execution).
    */
   const CORE_SERVICES = [
     {
@@ -89,6 +90,16 @@ function buildServiceDefinitions(PORTS) {
       healthEndpoint: '/health',
       delay: P3_STARTUP_DELAY_MS,
       env: { HEALTH_CHECK_PORT: PORTS.P3_HIGH_VALUE, PARTITION_ID: 'high-value' },
+      type: 'node',
+      enabled: true
+    },
+    {
+      name: 'P4 Solana Detector',
+      script: 'services/partition-solana/src/index.ts',
+      port: PORTS.P4_SOLANA,
+      healthEndpoint: '/health',
+      delay: P4_STARTUP_DELAY_MS,
+      env: { HEALTH_CHECK_PORT: PORTS.P4_SOLANA, PARTITION_ID: 'solana-native' },
       type: 'node',
       enabled: true
     },

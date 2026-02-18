@@ -93,6 +93,7 @@ import { IntraChainStrategy } from './strategies/intra-chain.strategy';
 import { CrossChainStrategy } from './strategies/cross-chain.strategy';
 import { SimulationStrategy } from './strategies/simulation.strategy';
 import { FlashLoanStrategy } from './strategies/flash-loan.strategy';
+import { createFlashLoanProviderFactory } from './strategies/flash-loan-providers/provider-factory';
 import { ExecutionStrategyFactory, createStrategyFactory } from './strategies/strategy-factory';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import type { ISimulationService } from './services/simulation/types';
@@ -121,6 +122,11 @@ import {
 } from './services/pending-state-manager';
 // Finding #7: TX simulation init extracted from engine.ts
 import { initializeTxSimulationService } from './services/tx-simulation-initializer';
+// S6: Standby management extracted from engine.ts
+import {
+  StandbyManager,
+  createStandbyManager,
+} from './services/standby-manager';
 // R2: Extracted risk management orchestrator
 import { RiskManagementOrchestrator, createRiskOrchestrator } from './risk';
 // Task 3: A/B Testing Framework
@@ -218,10 +224,9 @@ export class ExecutionEngineService {
   private readonly circuitBreakerConfig: Required<CircuitBreakerConfig>;
   private readonly pendingStateConfig: PendingStateEngineConfig; // Phase 2 config
   private readonly consumerConfig: Partial<ConsumerConfig> | undefined; // Consumer tuning
-  private isActivated = false; // Track if standby has been activated
-  private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
-  // FIX 5.1: Promise-based mutex for provider initialization (replaces boolean flag)
-  private providerInitPromise: Promise<void> | null = null;
+
+  // S6: Standby activation management extracted to StandbyManager
+  private standbyManager: StandbyManager | null = null;
 
   // State
   private stats: ExecutionStats;
@@ -564,6 +569,22 @@ export class ExecutionEngineService {
         });
       }
 
+      // S6: Initialize standby manager (delegates activate/standby state)
+      this.standbyManager = createStandbyManager({
+        logger: this.logger,
+        stateManager: this.stateManager,
+        standbyConfig: this.standbyConfig,
+        initialSimulationMode: this.isSimulationMode,
+        getProviderService: () => this.providerService,
+        getQueueService: () => this.queueService,
+        getStrategyFactory: () => this.strategyFactory,
+        getStreamsClient: () => this.streamsClient,
+        getNonceManager: () => this.nonceManager,
+        onMevProviderFactoryUpdated: (factory) => { this.mevProviderFactory = factory; },
+        onBridgeRouterFactoryUpdated: (factory) => { this.bridgeRouterFactory = factory; },
+        onSimulationModeChanged: (mode) => { this.isSimulationMode = mode; },
+      });
+
       // Initialize opportunity consumer
       this.opportunityConsumer = new OpportunityConsumer({
         logger: this.logger,
@@ -681,6 +702,9 @@ export class ExecutionEngineService {
       await this.bridgeRouterFactory?.dispose();
       this.bridgeRouterFactory = null;
 
+      // S6: Nullify standby manager
+      this.standbyManager = null;
+
       // Clear risk management components (Phase 3: Task 3.4.5)
       // Note: We don't reset singletons here as they may be shared across tests
       // Reset functions are available for test cleanup
@@ -722,24 +746,7 @@ export class ExecutionEngineService {
   // FIX 1.1/9.3: Removed duplicate initializeBridgeRouter() - now in initialization module
 
   private initializeStrategies(): void {
-    // Create strategy instances
-    this.intraChainStrategy = new IntraChainStrategy(this.logger);
-    this.crossChainStrategy = new CrossChainStrategy(this.logger);
-    this.simulationStrategy = new SimulationStrategy(this.logger, this.simulationConfig);
-
-    // Create strategy factory and register strategies
-    this.strategyFactory = createStrategyFactory({
-      logger: this.logger,
-      isSimulationMode: this.isSimulationMode,
-    });
-
-    this.strategyFactory.registerStrategies({
-      simulation: this.simulationStrategy,
-      crossChain: this.crossChainStrategy,
-      intraChain: this.intraChainStrategy,
-    });
-
-    // F2: Register FlashLoanStrategy when contract addresses are configured
+    // F2: Build flash loan contract addresses and approved routers from config
     // Contract addresses sourced from env vars (FLASH_LOAN_CONTRACT_<CHAIN>)
     // Approved routers sourced from FLASH_LOAN_PROVIDERS.approvedRouters or DEXES config
     const contractAddresses: Record<string, string> = {};
@@ -763,16 +770,24 @@ export class ExecutionEngineService {
       }
     }
 
+    // Create FlashLoanStrategy and FlashLoanProviderFactory if contract addresses are configured
+    let flashLoanStrategy: FlashLoanStrategy | undefined;
+    let flashLoanProviderFactory: ReturnType<typeof createFlashLoanProviderFactory> | undefined;
+
     if (Object.keys(contractAddresses).length > 0) {
       try {
-        const flashLoanStrategy = new FlashLoanStrategy(this.logger, {
+        flashLoanStrategy = new FlashLoanStrategy(this.logger, {
           contractAddresses,
           approvedRouters,
           enableAggregator: FEATURE_FLAGS.useFlashLoanAggregator,
         });
-        this.strategyFactory.registerFlashLoanStrategy(flashLoanStrategy);
 
-        this.logger.info('FlashLoanStrategy registered', {
+        flashLoanProviderFactory = createFlashLoanProviderFactory(this.logger, {
+          contractAddresses,
+          approvedRouters,
+        });
+
+        this.logger.info('FlashLoanStrategy initialized', {
           chains: Object.keys(contractAddresses),
           aggregatorEnabled: FEATURE_FLAGS.useFlashLoanAggregator,
         });
@@ -785,9 +800,48 @@ export class ExecutionEngineService {
       this.logger.debug('FlashLoanStrategy not registered - no contract addresses configured');
     }
 
+    // Create strategy instances
+    this.intraChainStrategy = new IntraChainStrategy(this.logger);
+    this.simulationStrategy = new SimulationStrategy(this.logger, this.simulationConfig);
+
+    // FE-001: Wire flash loan dependencies into CrossChainStrategy when feature flag enabled
+    if (FEATURE_FLAGS.useDestChainFlashLoan && flashLoanProviderFactory && flashLoanStrategy) {
+      this.crossChainStrategy = new CrossChainStrategy(
+        this.logger,
+        flashLoanProviderFactory,
+        flashLoanStrategy,
+      );
+      this.logger.info('CrossChainStrategy initialized with destination flash loan support', {
+        supportedChains: Object.keys(contractAddresses),
+      });
+    } else {
+      this.crossChainStrategy = new CrossChainStrategy(this.logger);
+      if (FEATURE_FLAGS.useDestChainFlashLoan) {
+        this.logger.warn('Destination flash loan feature enabled but no flash loan contracts configured');
+      }
+    }
+
+    // Create strategy factory and register strategies
+    this.strategyFactory = createStrategyFactory({
+      logger: this.logger,
+      isSimulationMode: this.isSimulationMode,
+    });
+
+    this.strategyFactory.registerStrategies({
+      simulation: this.simulationStrategy,
+      crossChain: this.crossChainStrategy,
+      intraChain: this.intraChainStrategy,
+    });
+
+    // Register FlashLoanStrategy with factory for direct flash loan opportunities
+    if (flashLoanStrategy) {
+      this.strategyFactory.registerFlashLoanStrategy(flashLoanStrategy);
+    }
+
     this.logger.info('Strategy factory initialized', {
       registeredTypes: this.strategyFactory.getRegisteredTypes(),
       simulationMode: this.isSimulationMode,
+      destChainFlashLoan: FEATURE_FLAGS.useDestChainFlashLoan,
     });
 
     // Finding #7: Initialize tx simulation service via extracted function
@@ -1443,16 +1497,17 @@ export class ExecutionEngineService {
     return this.simulationMetricsCollector?.getSnapshot() ?? null;
   }
 
+  // S6: Standby getters delegated to StandbyManager
   getIsStandby(): boolean {
-    return this.standbyConfig.isStandby;
+    return this.standbyManager?.getIsStandby() ?? this.standbyConfig.isStandby;
   }
 
   getIsActivated(): boolean {
-    return this.isActivated;
+    return this.standbyManager?.getIsActivated() ?? false;
   }
 
   getStandbyConfig(): Readonly<StandbyConfig> {
-    return this.standbyConfig;
+    return this.standbyManager?.getStandbyConfig() ?? this.standbyConfig;
   }
 
   // ===========================================================================
@@ -1661,177 +1716,21 @@ export class ExecutionEngineService {
 
   // ===========================================================================
   // Standby Activation (ADR-007)
+  // S6: Delegated to StandbyManager
+  // @see services/standby-manager.ts
   // ===========================================================================
 
   /**
    * Activate a standby executor to become the active executor.
-   * This is called when the primary executor fails and this standby takes over.
-   *
-   * Activation:
-   * 1. Disables simulation mode (if configured)
-   * 2. Resumes the paused queue
-   * 3. Initializes real blockchain providers if not already done
-   *
-   * Uses Promise-based mutex to prevent race conditions in concurrent activation.
+   * S6: Delegates to StandbyManager.
    *
    * @returns Promise<boolean> - true if activation succeeded
    */
   async activate(): Promise<boolean> {
-    // Check if already activated
-    if (this.isActivated) {
-      this.logger.warn('Executor already activated, skipping');
-      return true;
-    }
-
-    // Atomic mutex: if activation is in progress, wait for it to complete
-    // This prevents race conditions where two callers could both pass the check
-    if (this.activationPromise) {
-      this.logger.warn('Activation already in progress, waiting for completion');
-      return this.activationPromise;
-    }
-
-    if (!this.stateManager.isRunning()) {
-      this.logger.error('Cannot activate - executor not running');
+    if (!this.standbyManager) {
+      this.logger.error('Cannot activate - standby manager not initialized');
       return false;
     }
-
-    // Create the activation promise atomically - this is the mutex
-    // FIX-5.2: The promise-based mutex pattern ensures:
-    // 1. Only one activation runs at a time
-    // 2. Concurrent callers wait for the same result
-    // 3. The mutex is always cleared (via finally) even on error
-    this.activationPromise = this.performActivation();
-
-    try {
-      return await this.activationPromise;
-    } catch (error) {
-      // FIX-5.2: Defensive error handling - performActivation catches internally,
-      // but if an unexpected error escapes (e.g., from logger), log and return false
-      this.logger.error('Unexpected error during activation', {
-        error: getErrorMessage(error)
-      });
-      return false;
-    } finally {
-      // FIX-5.2: Clear the mutex after activation completes (success or failure)
-      // This is critical - without this, failed activations would block all future attempts
-      this.activationPromise = null;
-    }
-  }
-
-  /**
-   * Internal activation logic, separated for mutex pattern.
-   */
-  private async performActivation(): Promise<boolean> {
-    this.logger.warn('ACTIVATING STANDBY EXECUTOR', {
-      previousSimulationMode: this.isSimulationMode,
-      queuePaused: this.queueService?.isPaused() ?? false,
-      regionId: this.standbyConfig.regionId
-    });
-
-    try {
-      // Step 1: Disable simulation mode if configured
-      if (this.standbyConfig.activationDisablesSimulation && this.isSimulationMode) {
-        this.isSimulationMode = false;
-        // Sync strategy factory with new simulation mode state
-        this.strategyFactory?.setSimulationMode(false);
-        this.logger.warn('SIMULATION MODE DISABLED - Real transactions will now execute');
-
-        // Initialize real blockchain providers if not already done
-        // FIX 5.1: Use promise-based mutex to prevent race conditions
-        if (this.providerService && !this.providerService.getHealthyCount()) {
-          // If initialization is already in progress, wait for it
-          if (this.providerInitPromise) {
-            this.logger.info('Provider initialization already in progress, waiting...');
-            await this.providerInitPromise;
-          } else {
-            // Start initialization and store promise for other callers to await
-            this.providerInitPromise = this.initializeProviders();
-            try {
-              await this.providerInitPromise;
-            } finally {
-              this.providerInitPromise = null;
-            }
-          }
-        }
-      }
-
-      // Step 2: Resume the queue
-      if (this.queueService?.isManuallyPaused()) {
-        this.queueService.resume();
-        this.logger.info('Queue resumed - now processing opportunities');
-      }
-
-      // Mark as activated
-      this.isActivated = true;
-
-      this.logger.warn('STANDBY EXECUTOR ACTIVATED SUCCESSFULLY', {
-        simulationMode: this.isSimulationMode,
-        queuePaused: this.queueService?.isPaused() ?? false,
-        healthyProviders: this.providerService?.getHealthyCount() ?? 0
-      });
-
-      // Publish activation event to stream
-      if (this.streamsClient) {
-        await this.streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, {
-          name: 'execution-engine',
-          service: 'execution-engine',
-          status: 'healthy',
-          event: 'standby_activated',
-          regionId: this.standbyConfig.regionId,
-          simulationMode: this.isSimulationMode,
-          timestamp: Date.now()
-        });
-      }
-
-      return true;
-
-    } catch (error) {
-      this.logger.error('Failed to activate standby executor', {
-        error: getErrorMessage(error)
-      });
-      return false;
-    }
-  }
-
-  /**
-   * FIX 5.1: Extracted provider initialization logic for promise-based mutex pattern.
-   * Called by performActivation when providers need to be initialized.
-   *
-   * FIX 1.1: Uses initialization module instead of duplicate private methods.
-   */
-  private async initializeProviders(): Promise<void> {
-    if (!this.providerService) {
-      throw new Error('Provider service not initialized');
-    }
-
-    this.logger.info('Initializing blockchain providers for real execution');
-    await this.providerService.initialize();
-    this.providerService.initializeWallets();
-
-    // FIX 1.1: Use initialization module instead of duplicate private methods
-    // Initialize MEV protection using module
-    const mevResult = await initializeMevProviders(this.providerService, this.logger);
-    this.mevProviderFactory = mevResult.factory;
-    if (!mevResult.success && mevResult.error) {
-      this.logger.warn('MEV initialization had issues', { error: mevResult.error });
-    }
-
-    // Initialize bridge router using module
-    const bridgeResult = initializeBridgeRouter(this.providerService, this.logger);
-    this.bridgeRouterFactory = bridgeResult.factory;
-    if (!bridgeResult.success && bridgeResult.error) {
-      this.logger.warn('Bridge router initialization had issues', { error: bridgeResult.error });
-    }
-
-    // Start nonce manager
-    if (this.nonceManager) {
-      this.nonceManager.start();
-    }
-
-    // Validate and start health monitoring
-    await this.providerService.validateConnectivity();
-    this.providerService.startHealthChecks();
-
-    this.logger.info('Blockchain providers initialized successfully');
+    return this.standbyManager.activate();
   }
 }

@@ -26,6 +26,7 @@ import {
   createTestRedisClient,
   ensureConsumerGroup,
 } from '@arbitrage/test-utils';
+import type { ArbitrageOpportunity as CanonicalArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================
 // Types and Constants
@@ -102,6 +103,13 @@ interface PriceUpdate {
   timestamp: number;
 }
 
+/**
+ * Test-local ArbitrageOpportunity with required fields for integration test clarity.
+ * All fields here are a subset of CanonicalArbitrageOpportunity from @arbitrage/types.
+ *
+ * Fix 12a: Type assertion below validates this interface stays compatible with
+ * the canonical type. If the canonical type changes, this will produce a compile error.
+ */
 interface ArbitrageOpportunity {
   id: string;
   type: string;
@@ -119,6 +127,11 @@ interface ArbitrageOpportunity {
   timestamp: number;
   expiresAt: number;
 }
+
+// Fix 12a: Compile-time check that test ArbitrageOpportunity is assignable to canonical type.
+// If the canonical type gains new required fields, this will fail to compile.
+const _typeCheck: CanonicalArbitrageOpportunity = {} as ArbitrageOpportunity;
+void _typeCheck; // Suppress unused variable warning
 
 /**
  * Generate a realistic pair address based on chain.

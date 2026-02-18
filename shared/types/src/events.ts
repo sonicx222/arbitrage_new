@@ -45,32 +45,6 @@ export const RedisStreams = {
 export type RedisStreamName = typeof RedisStreams[keyof typeof RedisStreams];
 
 // ============================================================================
-// Redis Pub/Sub Channels (Legacy/Fallback)
-// ============================================================================
-export const PubSubChannels = {
-  // Price channels
-  PRICE_UPDATE: 'price:update',
-  PRICE_BATCH: 'price:batch',
-
-  // Arbitrage channels
-  ARBITRAGE_DETECTED: 'arbitrage:detected',
-  ARBITRAGE_EXECUTED: 'arbitrage:executed',
-  ARBITRAGE_FAILED: 'arbitrage:failed',
-
-  // Service channels
-  SERVICE_HEALTH: 'service:health',
-  SERVICE_DEGRADED: 'service:degraded',
-  SERVICE_RECOVERED: 'service:recovered',
-  SERVICE_ALERT: 'service:alert',
-
-  // Whale channels
-  WHALE_ALERT: 'whale:alert',
-  WHALE_TRANSACTION: 'whale:transaction',
-} as const;
-
-export type PubSubChannelName = typeof PubSubChannels[keyof typeof PubSubChannels];
-
-// ============================================================================
 // Event Types
 // ============================================================================
 export const EventTypes = {

@@ -101,6 +101,45 @@ describe('ExpertSelfHealingManager', () => {
 
     (getRedisClient as jest.Mock).mockImplementation(() => Promise.resolve(mockRedis));
 
+    // Re-establish mock implementations after clearMocks: true wipes jest.fn() impls.
+    // Streams client methods
+    mockStreamsClient.xadd.mockImplementation(() => Promise.resolve('1234567890-0'));
+    mockStreamsClient.xread.mockImplementation(() => Promise.resolve(null));
+    mockStreamsClient.xreadgroup.mockImplementation(() => Promise.resolve(null));
+    mockStreamsClient.xack.mockImplementation(() => Promise.resolve(1));
+    mockStreamsClient.createConsumerGroup.mockImplementation(() => Promise.resolve('OK'));
+    mockStreamsClient.disconnect.mockImplementation(() => Promise.resolve(undefined));
+
+    // Streams module: getRedisStreamsClient + StreamConsumer constructor
+    const redisStreamsMod = require('../../src/redis-streams') as any;
+    redisStreamsMod.getRedisStreamsClient.mockImplementation(() => Promise.resolve(mockStreamsClient));
+    redisStreamsMod.resetRedisStreamsInstance.mockImplementation(() => Promise.resolve(undefined));
+    redisStreamsMod.StreamConsumer.mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(() => Promise.resolve()),
+      getStats: jest.fn(() => ({ messagesProcessed: 0, messagesFailed: 0, lastProcessedAt: null, isRunning: false, isPaused: false })),
+    }));
+
+    // Circuit breaker, DLQ, health monitor, error recovery
+    const cbMod = require('../../src/resilience/circuit-breaker') as any;
+    cbMod.getCircuitBreakerRegistry.mockImplementation(() => ({
+      getBreaker: jest.fn(() => ({ forceOpen: jest.fn(() => Promise.resolve(true)) })),
+    }));
+    const dlqTestMod = require('../../src/resilience/dead-letter-queue') as any;
+    dlqTestMod.getDeadLetterQueue.mockImplementation(() => ({
+      enqueue: jest.fn(() => Promise.resolve(true)),
+    }));
+    const healthMod = require('../../src/monitoring/enhanced-health-monitor') as any;
+    healthMod.getEnhancedHealthMonitor.mockImplementation(() => ({
+      recordHealthMetric: jest.fn(),
+      getCurrentSystemHealth: jest.fn(),
+    }));
+    const errRecMod = require('../../src/resilience/error-recovery') as any;
+    errRecMod.getErrorRecoveryOrchestrator.mockImplementation(() => ({
+      recoverFromError: jest.fn(() => Promise.resolve(true)),
+      withErrorRecovery: jest.fn(),
+    }));
+
     selfHealingManager = new ExpertSelfHealingManager();
   });
 
@@ -174,72 +213,100 @@ describe('ExpertSelfHealingManager', () => {
       expect(state.healthScore).toBeLessThan(100);
     });
 
-    // Skip: Redis Streams initialization required
-    it.skip('should publish failure events to Redis', async () => {
-      const error = new Error('Test failure');
+    it('should publish failure events to Redis via dual-publish', async () => {
+      // Must start the manager to initialize streams client
+      await selfHealingManager.start();
 
+      const error = new Error('Test failure');
       await selfHealingManager.reportFailure('test-service', 'component', error);
 
-      expect(mockRedis.publish).toHaveBeenCalledWith('system:failures', expect.objectContaining({
-        serviceName: 'test-service',
-        component: 'component',
-        error: error,
-        severity: expect.any(String)
-      }));
+      // P0-10: publishControlMessage uses dual-publish: streams (xadd) + pub/sub (publish)
+      // Streams: should publish to stream:system-failures via xadd
+      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+        'stream:system-failures',
+        expect.objectContaining({
+          type: 'failure_reported',
+          data: expect.objectContaining({
+            serviceName: 'test-service',
+            component: 'component',
+          }),
+        }),
+        '*',
+        expect.any(Object)
+      );
+
+      // Pub/Sub: should publish to system:failures channel
+      expect(mockRedis.publish).toHaveBeenCalledWith(
+        'system:failures',
+        expect.objectContaining({
+          type: 'failure_reported',
+          data: expect.objectContaining({
+            serviceName: 'test-service',
+            component: 'component',
+          }),
+        })
+      );
     });
   });
 
   describe('recovery strategy selection', () => {
-    // Skip: Recovery strategies require full initialization
-    it.skip('should determine appropriate recovery strategies', () => {
+    it('should determine appropriate recovery strategies', async () => {
       const testCases = [
         {
           failure: {
+            id: 'fail-ws',
             serviceName: 'test-service',
             component: 'websocket',
             error: new Error('WebSocket error'),
             severity: FailureSeverity.LOW,
             recoveryAttempts: 0,
-            context: {}
+            context: {},
+            timestamp: Date.now()
           },
           expectedStrategy: RecoveryStrategy.NETWORK_RESET
         },
         {
           failure: {
+            id: 'fail-mem',
             serviceName: 'test-service',
             component: 'memory',
             error: new Error('Out of memory'),
             severity: FailureSeverity.HIGH,
             recoveryAttempts: 0,
-            context: { memoryUsage: 0.95 }
+            context: { memoryUsage: 0.95 },
+            timestamp: Date.now()
           },
           expectedStrategy: RecoveryStrategy.MEMORY_COMPACTION
         },
         {
           failure: {
+            id: 'fail-svc',
             serviceName: 'test-service',
             component: 'service',
             error: new Error('Service crashed'),
             severity: FailureSeverity.HIGH,
             recoveryAttempts: 0,
-            context: {}
+            context: {},
+            timestamp: Date.now()
           },
           expectedStrategy: RecoveryStrategy.RESTART_SERVICE
         }
       ];
 
-      testCases.forEach(({ failure, expectedStrategy }) => {
+      for (const { failure, expectedStrategy } of testCases) {
         const state = {
           serviceName: failure.serviceName,
           healthScore: 80,
+          lastHealthyCheck: Date.now(),
           consecutiveFailures: 1,
           recoveryCooldown: 0,
           activeRecoveryActions: []
         };
 
-        const strategy = (selfHealingManager as any).determineRecoveryStrategy(failure, state);
+        // determineRecoveryStrategy is async
+        const strategy = await (selfHealingManager as any).determineRecoveryStrategy(failure, state);
         expect(strategy).toBe(expectedStrategy);
-      });
+      }
     });
 
     it('should respect recovery cooldown', async () => {
@@ -324,8 +391,10 @@ describe('ExpertSelfHealingManager', () => {
       mockRedis.publish.mockResolvedValue(1);
     });
 
-    // Skip: Recovery execution requires Redis Streams
-    it.skip('should execute restart service recovery', async () => {
+    it('should execute restart service recovery', async () => {
+      // Mock getServiceHealth to return healthy after restart
+      mockRedis.getServiceHealth.mockResolvedValue({ status: 'healthy' });
+
       const failure = {
         id: 'test-failure',
         serviceName: 'partition-asia-fast',
@@ -337,27 +406,26 @@ describe('ExpertSelfHealingManager', () => {
         recoveryAttempts: 0
       };
 
-      const recoveryPromise = (selfHealingManager as any).executeRecoveryAction(failure, RecoveryStrategy.RESTART_SERVICE);
+      await (selfHealingManager as any).executeRecoveryAction(failure, RecoveryStrategy.RESTART_SERVICE);
 
-      // Wait for completion
-      await recoveryPromise;
-
-      // Verify recovery command was published
+      // Verify recovery command was published via pub/sub
       expect(mockRedis.publish).toHaveBeenCalledWith(
         'service:partition-asia-fast:control',
         expect.objectContaining({
-          command: 'restart'
+          type: 'restart_command',
+          data: expect.objectContaining({ command: 'restart' })
         })
       );
 
-      // Verify action was recorded
+      // Verify action was cleaned up after completion
       const actions = (selfHealingManager as any).activeRecoveryActions;
-      expect(actions.size).toBe(0); // Should be cleaned up after completion
+      expect(actions.size).toBe(0);
     });
 
-    // Skip: Recovery failures require Redis Streams
-    it.skip('should handle recovery action failures', async () => {
-      mockRedis.publish.mockRejectedValue(new Error('Redis publish failed'));
+    it('should handle recovery action failures', async () => {
+      // Mock performRecoveryAction to throw
+      jest.spyOn(selfHealingManager as any, 'performRecoveryAction')
+        .mockRejectedValue(new Error('Redis publish failed'));
 
       const failure = {
         id: 'test-failure',
@@ -370,15 +438,22 @@ describe('ExpertSelfHealingManager', () => {
         recoveryAttempts: 0
       };
 
-      const recoveryPromise = (selfHealingManager as any).executeRecoveryAction(failure, RecoveryStrategy.RESTART_SERVICE);
+      // executeRecoveryAction catches errors internally, does not reject
+      await (selfHealingManager as any).executeRecoveryAction(failure, RecoveryStrategy.RESTART_SERVICE);
 
-      await expect(recoveryPromise).rejects.toThrow('Redis publish failed');
-
-      // Verify action status
+      // Verify recovery action was cleaned up (removed from activeRecoveryActions map)
       const actions = (selfHealingManager as any).activeRecoveryActions;
-      const action = Array.from(actions.values())[0] as { status: string; error: string };
-      expect(action.status).toBe('failed');
-      expect(action.error).toBe('Redis publish failed');
+      expect(actions.size).toBe(0);
+
+      // Verify the redis.set was called to persist the failed action result
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        expect.stringMatching(/^recovery_action:/),
+        expect.objectContaining({
+          status: 'failed',
+          error: 'Redis publish failed',
+        }),
+        86400
+      );
     });
 
     it('should wait for service health after recovery', async () => {
@@ -403,8 +478,7 @@ describe('ExpertSelfHealingManager', () => {
   });
 
   describe('health monitoring and statistics', () => {
-    // Skip: Health monitoring requires Redis Streams initialization
-    it.skip('should provide system health overview', async () => {
+    it('should provide system health overview', async () => {
       // Set up some test health states
       const states = (selfHealingManager as any).serviceHealthStates;
       states.get('partition-asia-fast').healthScore = 90;
@@ -416,7 +490,9 @@ describe('ExpertSelfHealingManager', () => {
 
       const overview = await selfHealingManager.getSystemHealthOverview();
 
-      expect(overview.overallHealth).toBe(80); // Average of 90 and 70
+      // 7 services: 5 at 100, 1 at 90, 1 at 70 => average = (500 + 90 + 70) / 7 ≈ 94.28
+      const expectedAvg = (90 + 70 + 5 * 100) / states.size;
+      expect(overview.overallHealth).toBeCloseTo(expectedAvg, 1);
       expect(overview.serviceCount).toBe(states.size);
       expect(overview.criticalServices).toBe(0); // No services below 50
       expect(overview.activeRecoveries).toBe(1);
@@ -531,9 +607,8 @@ describe('ExpertSelfHealingManager', () => {
         .resolves.not.toThrow(); // Should not throw, should handle error internally
     });
 
-    // Skip: Code bug - assessFailureSeverity accesses error.message without null check
-    // TODO: Fix ExpertSelfHealingManager.assessFailureSeverity to handle null errors
-    it.skip('should handle malformed failure data', async () => {
+    it('should handle malformed failure data', async () => {
+      // assessFailureSeverity now has null guard for error parameter
       await expect(selfHealingManager.reportFailure('', '', null as any))
         .resolves.not.toThrow();
     });

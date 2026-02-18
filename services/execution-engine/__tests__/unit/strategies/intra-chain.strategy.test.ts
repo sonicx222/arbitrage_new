@@ -20,17 +20,18 @@ import type {
   SimulationProviderHealth,
   SimulationProviderType,
 } from '../../../src/services/simulation/types';
+import {
+  createMockStrategyLogger,
+  createMockStrategyProvider,
+  createMockStrategyWallet,
+  createMockStrategyOpportunity,
+} from '@arbitrage/test-utils';
 
 // =============================================================================
-// Mock Implementations
+// Mock Implementations (shared factories with local aliases)
 // =============================================================================
 
-const createMockLogger = (): Logger => ({
-  debug: jest.fn(),
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-});
+const createMockLogger = createMockStrategyLogger;
 
 const createMockSimulationService = (
   overrides: Partial<ISimulationService> = {}
@@ -59,57 +60,10 @@ const createMockSimulationService = (
   ...overrides,
 });
 
-const createMockOpportunity = (
-  overrides: Partial<ArbitrageOpportunity> = {}
-): ArbitrageOpportunity => ({
-  id: 'test-opp-123',
-  type: 'simple', // Single DEX arbitrage
-  buyChain: 'ethereum',
-  sellChain: 'ethereum',
-  buyDex: 'uniswap',
-  sellDex: 'sushiswap',
-  tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-  tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-  amountIn: '1000000000000000000', // 1 ETH
-  expectedProfit: 100, // $100 expected profit
-  confidence: 0.95,
-  timestamp: Date.now() - 500, // 500ms old (for opportunity age calculation)
-  ...overrides,
-});
+const createMockOpportunity = createMockStrategyOpportunity;
 
-const createMockProvider = (): ethers.JsonRpcProvider => {
-  const provider = {
-    getBlockNumber: jest.fn().mockResolvedValue(12345678),
-    getFeeData: jest.fn().mockResolvedValue({
-      gasPrice: BigInt('30000000000'), // 30 gwei
-      maxFeePerGas: BigInt('35000000000'),
-      maxPriorityFeePerGas: BigInt('2000000000'),
-    }),
-    getTransactionReceipt: jest.fn().mockResolvedValue({
-      hash: '0x123abc',
-      gasUsed: BigInt(150000),
-      gasPrice: BigInt('30000000000'),
-      status: 1,
-    }),
-  } as unknown as ethers.JsonRpcProvider;
-  return provider;
-};
-
-const createMockWallet = (): ethers.Wallet => {
-  const wallet = {
-    address: '0x1234567890123456789012345678901234567890',
-    sendTransaction: jest.fn().mockResolvedValue({
-      hash: '0x123abc',
-      wait: jest.fn().mockResolvedValue({
-        hash: '0x123abc',
-        gasUsed: BigInt(150000),
-        gasPrice: BigInt('30000000000'),
-        status: 1,
-      }),
-    }),
-  } as unknown as ethers.Wallet;
-  return wallet;
-};
+const createMockProvider = createMockStrategyProvider;
+const createMockWallet = createMockStrategyWallet;
 
 const createMockContext = (
   overrides: Partial<StrategyContext> = {}

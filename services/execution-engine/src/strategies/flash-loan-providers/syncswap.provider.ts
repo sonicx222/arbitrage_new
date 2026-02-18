@@ -17,6 +17,7 @@
  */
 
 import { ethers } from 'ethers';
+import { getSwapDeadline } from '../base.strategy';
 import {
   SYNCSWAP_FEE_BPS,
   getBpsDenominatorBigInt,
@@ -37,11 +38,7 @@ import { validateFlashLoanRequest } from './validation-utils';
  */
 const SYNCSWAP_INTERFACE = new ethers.Interface(SYNCSWAP_FLASH_ARBITRAGE_ABI);
 
-/**
- * Default deadline for flash loan execution (5 minutes from now).
- * This protects against stale transactions being mined in poor market conditions.
- */
-const DEFAULT_DEADLINE_SECONDS = 300;
+// Deadline configuration centralized in base.strategy.ts via getSwapDeadline()
 
 /**
  * SyncSwap Flash Loan Provider
@@ -176,8 +173,7 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
       step.amountOutMin,
     ]);
 
-    // Calculate deadline: current time + 5 minutes
-    const deadline = Math.floor(Date.now() / 1000) + DEFAULT_DEADLINE_SECONDS;
+    const deadline = getSwapDeadline();
 
     return SYNCSWAP_INTERFACE.encodeFunctionData('executeArbitrage', [
       request.asset,
