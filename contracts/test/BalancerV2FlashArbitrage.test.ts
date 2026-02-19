@@ -65,9 +65,9 @@ describe('BalancerV2FlashArbitrage', () => {
       expect(await arbitrage.VAULT()).to.equal(await vault.getAddress());
     });
 
-    it('should set initial minimumProfit to 0', async () => {
+    it('should set initial minimumProfit to default (1e14)', async () => {
       const { arbitrage } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.minimumProfit()).to.equal(0);
+      expect(await arbitrage.minimumProfit()).to.equal(BigInt(1e14));
     });
 
     it('should set initial totalProfits to 0', async () => {
@@ -1071,11 +1071,12 @@ describe('BalancerV2FlashArbitrage', () => {
       // Slot 4: BaseFlashArbitrage.totalProfits
       // Slot 5: BaseFlashArbitrage.tokenProfits (mapping)
       // Slot 6: BaseFlashArbitrage.swapDeadline (= 60)
-      // Slot 7: BaseFlashArbitrage._approvedRouters._inner._values (array length)
-      // Slot 8: BaseFlashArbitrage._approvedRouters._inner._indexes (mapping)
-      // Slot 9: BalancerV2FlashArbitrage._flashLoanActive (bool)
+      // Slot 7: BaseFlashArbitrage.withdrawGasLimit (= 50000)
+      // Slot 8: BaseFlashArbitrage._approvedRouters._inner._values (array length)
+      // Slot 9: BaseFlashArbitrage._approvedRouters._inner._indexes (mapping)
+      // Slot 10: BalancerV2FlashArbitrage._flashLoanActive (bool)
       const arbitrageAddress = await arbitrage.getAddress();
-      const flashLoanActiveSlot = 9;
+      const flashLoanActiveSlot = 10;
 
       // Set _flashLoanActive = true
       await ethers.provider.send('hardhat_setStorageAt', [
@@ -1372,16 +1373,15 @@ describe('BalancerV2FlashArbitrage', () => {
         const newMinProfit = ethers.parseEther('0.1');
         await expect(arbitrage.connect(owner).setMinimumProfit(newMinProfit))
           .to.emit(arbitrage, 'MinimumProfitUpdated')
-          .withArgs(0, newMinProfit);
+          .withArgs(BigInt(1e14), newMinProfit);
       });
 
-      it('should allow setting to zero', async () => {
+      it('should revert when setting to zero', async () => {
         const { arbitrage, owner } = await loadFixture(deployContractsFixture);
 
-        await arbitrage.connect(owner).setMinimumProfit(ethers.parseEther('1'));
-        await arbitrage.connect(owner).setMinimumProfit(0);
-
-        expect(await arbitrage.minimumProfit()).to.equal(0);
+        await expect(
+          arbitrage.connect(owner).setMinimumProfit(0)
+        ).to.be.revertedWithCustomError(arbitrage, 'InvalidMinimumProfit');
       });
 
       it('should revert if non-owner tries to set', async () => {

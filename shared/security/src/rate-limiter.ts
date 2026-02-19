@@ -15,6 +15,10 @@ export interface RateLimitConfig {
   keyPrefix?: string; // Redis key prefix
   skipSuccessfulRequests?: boolean; // Don't count successful requests
   skipFailedRequests?: boolean; // Don't count failed requests
+  /** S-4 FIX: Whether to fail open (allow requests) when Redis is unavailable.
+   *  Default: false (fail closed - deny requests when rate limiting is unavailable).
+   *  Set to true only for non-critical endpoints where availability > security. */
+  failOpen?: boolean;
 }
 
 export interface RateLimitInfo {
@@ -36,6 +40,7 @@ export class RateLimiter {
       skipSuccessfulRequests: false,
       skipFailedRequests: false,
       keyPrefix: 'ratelimit',
+      failOpen: false, // S-4 FIX: Default to fail-closed for security
       ...config
     };
     this.keyPrefix = this.config.keyPrefix!;
@@ -133,15 +138,25 @@ export class RateLimiter {
 
       return info;
     } catch (error) {
-      logger.error('Rate limiter error', { error, identifier });
-      // P1-4 FIX: Fail OPEN on Redis error - allow requests when rate limiting is unavailable
-      // Trade-off: Temporary abuse window vs complete service denial
-      // Circuit breaker pattern should be used for sustained Redis failures
+      logger.error('Rate limiter error', { error, identifier, failOpen: config.failOpen });
+      // S-4 FIX: Configurable fail-open/fail-closed behavior on Redis error
+      // Default: fail CLOSED (deny requests) for security
+      // Set failOpen: true for non-critical endpoints where availability > security
+      if (config.failOpen) {
+        logger.warn('Rate limiter failing OPEN - allowing request (Redis unavailable)', { identifier });
+        return {
+          remaining: config.maxRequests,
+          resetTime: now + config.windowMs,
+          total: config.maxRequests,
+          exceeded: false
+        };
+      }
+      // Fail CLOSED: deny request when rate limiting is unavailable
       return {
-        remaining: config.maxRequests,
+        remaining: 0,
         resetTime: now + config.windowMs,
         total: config.maxRequests,
-        exceeded: false  // Allow request when rate limiting unavailable
+        exceeded: true
       };
     }
   }
@@ -187,10 +202,17 @@ export class RateLimiter {
         req.rateLimit = limitInfo;
         next();
       } catch (error) {
-        logger.error('Rate limiter error', { error });
-        // P1-4 FIX: Fail OPEN - allow request when rate limiting is unavailable
-        // Trade-off: Temporary abuse window vs complete service denial
-        next();
+        logger.error('Rate limiter middleware error', { error, failOpen: this.config.failOpen });
+        // S-4 FIX: Respect failOpen configuration
+        if (this.config.failOpen) {
+          logger.warn('Rate limiter middleware failing OPEN - allowing request');
+          next();
+        } else {
+          return res.status(503).json({
+            error: 'Rate limiting unavailable',
+            message: 'Rate limiting service is temporarily unavailable. Please try again later.',
+          });
+        }
       }
     };
   }

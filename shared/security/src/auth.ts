@@ -701,11 +701,12 @@ export function apiAuth(options: AuthOptions = {}) {
 
   return async (req: any, res: any, next: any) => {
     try {
-      // P1 FIX #8: Only allow auth bypass in test/development environments.
+      // P1 FIX #8 + S-3 FIX: Only allow auth bypass in test/development environments.
       // Previously, missing JWT_SECRET + API_KEYS in production granted admin access.
+      // S-3: Explicitly whitelist NODE_ENV values; undefined/unknown NODE_ENV is treated as production.
       if (!isAuthEnabled()) {
         const nodeEnv = process.env.NODE_ENV;
-        if (nodeEnv === 'test' || nodeEnv === 'development') {
+        if ((AUTH_BYPASS_ALLOWED_ENVS as readonly string[]).includes(nodeEnv ?? '')) {
           moduleLogger.debug('Auth not configured - allowing request with default dev user (non-production)');
           req.user = {
             id: 'dev-user',
@@ -717,15 +718,12 @@ export function apiAuth(options: AuthOptions = {}) {
           };
           return next();
         }
-        // In production (or unknown NODE_ENV), reject if auth is required
-        if (required) {
-          moduleLogger.error('Auth not configured in production - rejecting request. Set JWT_SECRET or API_KEYS.');
-          return res.status(503).json({
-            error: 'Authentication not configured',
-            message: 'Server authentication is not properly configured. Contact administrator.',
-          });
-        }
-        return next();
+        // In production or unknown NODE_ENV (including undefined), always reject
+        moduleLogger.error('Auth not configured in non-dev/test environment - rejecting request. Set JWT_SECRET or API_KEYS.', { nodeEnv: nodeEnv ?? '(unset)' });
+        return res.status(503).json({
+          error: 'Authentication not configured',
+          message: 'Server authentication is not properly configured. Contact administrator.',
+        });
       }
 
       // Try API key first (simpler, no expiry issues)
@@ -833,6 +831,47 @@ export function apiAuthorize(resource: string, action: string) {
       return res.status(500).json({ error: 'Authorization failed' });
     }
   };
+}
+
+// =============================================================================
+// Startup Auth Environment Validation (S-3 Fix)
+// =============================================================================
+
+/** Whitelist of NODE_ENV values where auth bypass is allowed */
+const AUTH_BYPASS_ALLOWED_ENVS = ['test', 'development'] as const;
+
+/**
+ * Validate authentication environment at startup.
+ *
+ * S-3 FIX: When auth is not configured (no JWT_SECRET and no API_KEYS),
+ * this function ensures that NODE_ENV is explicitly set to a safe value
+ * ('test' or 'development'). If NODE_ENV is unset or set to any other value
+ * (e.g., 'production', 'staging'), this throws to prevent running without auth.
+ *
+ * Call this at service startup (before accepting requests).
+ *
+ * @throws Error if auth is not configured and NODE_ENV is not in the safe whitelist
+ */
+export function validateAuthEnvironment(): void {
+  if (isAuthEnabled()) {
+    // Auth is configured, no issue
+    return;
+  }
+
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv && (AUTH_BYPASS_ALLOWED_ENVS as readonly string[]).includes(nodeEnv)) {
+    moduleLogger.warn('Auth not configured - auth bypass allowed in non-production environment', { nodeEnv });
+    return;
+  }
+
+  // NODE_ENV is unset, empty, or not in the whitelist
+  const errorMsg =
+    `SECURITY ERROR: Authentication is not configured (no JWT_SECRET or API_KEYS) ` +
+    `and NODE_ENV is "${nodeEnv ?? '(unset)'}". ` +
+    `Auth bypass is only allowed when NODE_ENV is one of: ${AUTH_BYPASS_ALLOWED_ENVS.join(', ')}. ` +
+    `Set JWT_SECRET or API_KEYS, or explicitly set NODE_ENV=development for local development.`;
+  moduleLogger.error(errorMsg);
+  throw new Error(errorMsg);
 }
 
 // Initialize API keys on module load

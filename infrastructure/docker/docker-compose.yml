@@ -28,7 +28,7 @@ services:
       - NODE_ENV=production
       - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
-      - HEALTH_CHECK_PORT=3001
+      - HEALTH_CHECK_PORT=${UNIFIED_DETECTOR_HEALTH_PORT:-3001}
       - PARTITION_ID=${PARTITION_ID:-default}
       - INSTANCE_ID=${INSTANCE_ID:-unified-1}
       - REGION_ID=${REGION_ID:-us-east-1}
@@ -36,7 +36,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:${UNIFIED_DETECTOR_HEALTH_PORT:-3001}/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -50,14 +50,14 @@ services:
       - NODE_ENV=production
       - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
-      - HEALTH_CHECK_PORT=3001
+      - HEALTH_CHECK_PORT=${CROSS_CHAIN_HEALTH_PORT:-3006}
     depends_on:
       redis:
         condition: service_healthy
       unified-detector:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:${CROSS_CHAIN_HEALTH_PORT:-3006}/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -71,7 +71,7 @@ services:
       - NODE_ENV=production
       - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
-      - HEALTH_CHECK_PORT=3001
+      - HEALTH_CHECK_PORT=${EXECUTION_ENGINE_HEALTH_PORT:-3005}
       - ETHEREUM_PRIVATE_KEY=${ETHEREUM_PRIVATE_KEY}
       - BSC_PRIVATE_KEY=${BSC_PRIVATE_KEY}
       - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY}
@@ -84,7 +84,7 @@ services:
       cross-chain-detector:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:${EXECUTION_ENGINE_HEALTH_PORT:-3005}/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       retries: 3

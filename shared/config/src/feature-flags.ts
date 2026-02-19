@@ -44,38 +44,38 @@ export const FEATURE_FLAGS = {
   /**
    * Enable flash loan protocol aggregator (Task 2.3).
    *
-   * When enabled (default):
+   * When enabled:
    * - Dynamically selects best flash loan provider via weighted ranking
    * - Validates liquidity with on-chain checks (5-min cache)
    * - Tracks provider metrics (success rate, latency)
    * - Supports automatic fallback on provider failures
    *
-   * When disabled:
+   * When disabled (default):
    * - Uses hardcoded Aave V3 provider (backward compatible)
-   * - Set FEATURE_FLASH_LOAN_AGGREGATOR=false to disable
+   * - Set FEATURE_FLASH_LOAN_AGGREGATOR=true to enable
    *
    * Impact:
    * - Better fee optimization (select lowest-fee provider)
    * - Prevents insufficient liquidity failures
    * - Improves reliability via fallback mechanisms
    *
-   * @default true (production-ready - opt-out to disable)
+   * @default false (safe rollout - explicitly opt-in via FEATURE_FLASH_LOAN_AGGREGATOR=true)
    * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
    */
-  useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR !== 'false',
+  useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR === 'true',
 
   /**
    * Enable commit-reveal MEV protection (Task 3.1).
    *
-   * When enabled (default):
+   * When enabled:
    * - Automatically activates for high-risk transactions (sandwichRiskScore >= 70)
    * - Two-phase execution: commit hash → wait 1 block → reveal and execute
    * - Prevents sandwich attacks by hiding transaction parameters
    * - Fallback to standard execution if commit-reveal fails
    *
-   * When disabled:
+   * When disabled (default):
    * - Uses only private mempool (Flashbots/Jito) for MEV protection
-   * - Set FEATURE_COMMIT_REVEAL=false to disable
+   * - Set FEATURE_COMMIT_REVEAL=true to enable
    *
    * Impact:
    * - Additional MEV protection layer when private mempools unavailable
@@ -87,10 +87,10 @@ export const FEATURE_FLAGS = {
    * - CrossChainStrategy with HIGH/CRITICAL MEV risk
    * - NOT used for FlashLoanStrategy (incompatible with flash loans)
    *
-   * @default true (production-ready - opt-out to disable)
+   * @default false (safe rollout - explicitly opt-in via FEATURE_COMMIT_REVEAL=true)
    * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 3 Task 3.1
    */
-  useCommitReveal: process.env.FEATURE_COMMIT_REVEAL !== 'false',
+  useCommitReveal: process.env.FEATURE_COMMIT_REVEAL === 'true',
 
   /**
    * Enable Redis storage for commit-reveal parameters.

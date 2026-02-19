@@ -103,6 +103,8 @@ abstract contract BaseFlashArbitrage is
     // ==========================================================================
 
     /// @notice Minimum profit required for arbitrage execution (in token units)
+    /// @dev Defaults to 1e14 (0.0001 ETH for 18-decimal tokens) to prevent
+    ///      zero-profit trades that waste gas. Override via setMinimumProfit().
     uint256 public minimumProfit;
 
     /// @notice Total profits accumulated (aggregate counter, may mix denominations)
@@ -115,6 +117,11 @@ abstract contract BaseFlashArbitrage is
 
     /// @notice Configurable swap deadline in seconds (default: DEFAULT_SWAP_DEADLINE)
     uint256 public swapDeadline;
+
+    /// @notice Configurable gas limit for ETH withdrawals (default: 50000)
+    /// @dev 50000 gas is sufficient for multisig wallets like Gnosis Safe.
+    ///      Adjustable via setWithdrawGasLimit() if more gas is needed.
+    uint256 public withdrawGasLimit;
 
     /// @notice Set of approved DEX routers (O(1) add/remove/contains)
     /// @dev Uses EnumerableSet for gas-efficient operations and enumeration
@@ -168,6 +175,9 @@ abstract contract BaseFlashArbitrage is
     /// @notice Emitted when swap deadline is updated
     event SwapDeadlineUpdated(uint256 oldValue, uint256 newValue);
 
+    /// @notice Emitted when withdraw gas limit is updated
+    event WithdrawGasLimitUpdated(uint256 oldValue, uint256 newValue);
+
     // ==========================================================================
     // Errors
     // ==========================================================================
@@ -187,6 +197,9 @@ abstract contract BaseFlashArbitrage is
     error InvalidSwapDeadline();
     error InvalidAmount();
     error TransactionTooOld();
+    error InvalidMinimumProfit();
+    error InvalidGasLimit();
+    error InvalidAmountsLength();
 
     // ==========================================================================
     // Constructor
@@ -199,6 +212,8 @@ abstract contract BaseFlashArbitrage is
     constructor(address _owner) {
         if (_owner == address(0)) revert InvalidOwnerAddress();
         swapDeadline = DEFAULT_SWAP_DEADLINE;
+        minimumProfit = 1e14; // 0.0001 ETH for 18-decimal tokens — prevents zero-profit gas waste
+        withdrawGasLimit = 50000; // Sufficient for multisig wallets (Gnosis Safe, Argent)
         _transferOwnership(_owner);
     }
 
@@ -340,6 +355,10 @@ abstract contract BaseFlashArbitrage is
             try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
                 uint256[] memory amounts
             ) {
+                // Validate RPC response: getAmountsOut must return at least path.length elements
+                if (amounts.length < path.length) {
+                    return 0;
+                }
                 currentAmount = amounts[amounts.length - 1];
                 currentToken = step.tokenOut;
             } catch {
@@ -383,11 +402,19 @@ abstract contract BaseFlashArbitrage is
      * @dev Consolidates profit verification logic used across all protocol callbacks.
      *      Uses max(minProfit, minimumProfit) to enforce both per-trade and contract-wide thresholds.
      *
+     *      CEI Pattern (Checks-Effects-Interactions):
+     *      This function performs Checks (profit validation) and Effects (state updates).
+     *      Derived contract callbacks MUST call this BEFORE any subsequent external interactions
+     *      (e.g., forceApprove for flash loan repayment). The calling function's nonReentrant
+     *      modifier provides the primary reentrancy protection; CEI ordering is defense-in-depth.
+     *
      * @param profit The actual profit earned from the arbitrage
      * @param minProfit The per-trade minimum profit specified by the caller
      * @param asset The token address used for per-token profit tracking
      */
     function _verifyAndTrackProfit(uint256 profit, uint256 minProfit, address asset) internal {
+        // === CHECKS ===
+
         // Zero-profit flash loans are never desirable — always revert
         if (profit == 0) revert InsufficientProfit();
 
@@ -396,10 +423,15 @@ abstract contract BaseFlashArbitrage is
         uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
         if (profit < effectiveMinProfit) revert InsufficientProfit();
 
+        // === EFFECTS (state updates before any subsequent external interactions) ===
+
         // Track profits per-token (avoids mixing denominations)
         tokenProfits[asset] += profit;
         // Maintain legacy aggregate counter for backward compatibility
         totalProfits += profit;
+
+        // === INTERACTIONS: None in this function. Derived contracts must perform ===
+        // === external calls (e.g., forceApprove) AFTER calling this function.    ===
     }
 
     // ==========================================================================
@@ -453,9 +485,12 @@ abstract contract BaseFlashArbitrage is
 
     /**
      * @notice Sets the minimum profit threshold
-     * @param _minimumProfit The new minimum profit value
+     * @dev Rejects zero to prevent trades that waste gas without generating profit.
+     *      Use a value appropriate for the token's decimals (e.g., 1e14 for 18-decimal tokens).
+     * @param _minimumProfit The new minimum profit value (must be > 0)
      */
     function setMinimumProfit(uint256 _minimumProfit) external onlyOwner {
+        if (_minimumProfit == 0) revert InvalidMinimumProfit();
         uint256 oldValue = minimumProfit;
         minimumProfit = _minimumProfit;
         emit MinimumProfitUpdated(oldValue, _minimumProfit);
@@ -474,6 +509,19 @@ abstract contract BaseFlashArbitrage is
         uint256 oldValue = swapDeadline;
         swapDeadline = _swapDeadline;
         emit SwapDeadlineUpdated(oldValue, _swapDeadline);
+    }
+
+    /**
+     * @notice Sets the gas limit for ETH withdrawals
+     * @dev Must be at least 2300 (minimum for ETH transfer) and at most 500000 (reasonable ceiling).
+     *      Default of 50000 is sufficient for most multisig wallets.
+     * @param _withdrawGasLimit The new gas limit for withdrawETH
+     */
+    function setWithdrawGasLimit(uint256 _withdrawGasLimit) external onlyOwner {
+        if (_withdrawGasLimit < 2300 || _withdrawGasLimit > 500000) revert InvalidGasLimit();
+        uint256 oldValue = withdrawGasLimit;
+        withdrawGasLimit = _withdrawGasLimit;
+        emit WithdrawGasLimitUpdated(oldValue, _withdrawGasLimit);
     }
 
     /**
@@ -512,22 +560,19 @@ abstract contract BaseFlashArbitrage is
 
     /**
      * @notice Withdraws ETH from the contract
-     * @dev Uses gas-limited call (10,000 gas) to prevent the recipient from executing
-     *      arbitrary logic in their receive/fallback function. This is a security measure.
-     *
-     *      WARNING: Some smart contract wallets (Gnosis Safe, Argent) may require >10,000 gas
-     *      to receive ETH. If withdrawal to a multisig fails, use one of these workarounds:
-     *      1. Withdraw to an intermediary EOA, then forward to the multisig
-     *      2. Wrap ETH to WETH using a helper, then use withdrawToken() instead
+     * @dev Uses a configurable gas-limited call to prevent the recipient from executing
+     *      arbitrary logic in their receive/fallback function. Default is 50,000 gas,
+     *      sufficient for multisig wallets (Gnosis Safe, Argent). Adjustable via
+     *      setWithdrawGasLimit() if more gas is needed.
      *
      * @param to The recipient address
      * @param amount The amount to withdraw
      */
     function withdrawETH(address payable to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert InvalidRecipient();
-        // Gas-limited call (10,000) prevents recipient from executing arbitrary logic.
-        // Sufficient for EOAs and simple contracts; may fail for complex multisig wallets.
-        (bool success, ) = to.call{value: amount, gas: 10000}("");
+        // Gas-limited call prevents recipient from executing arbitrary logic.
+        // Uses configurable withdrawGasLimit (default 50000, adjustable via setWithdrawGasLimit).
+        (bool success, ) = to.call{value: amount, gas: withdrawGasLimit}("");
         if (!success) revert ETHTransferFailed();
         emit ETHWithdrawn(to, amount);
     }
@@ -594,8 +639,9 @@ abstract contract BaseFlashArbitrage is
         if (swapPath[0].tokenIn != asset) revert SwapPathAssetMismatch();
 
         // Validate token continuity and routers
-        // Cache validated routers to avoid redundant checks for repeated routers
-        address lastValidatedRouter = address(0);
+        // S-1 Fix: Each step's router is independently validated against the approved set.
+        // A previous caching optimization (lastValidatedRouter) could allow an unapproved
+        // router to be inserted between two identical approved routers and skip validation.
         address expectedTokenIn = asset;
 
         for (uint256 i = 0; i < pathLength;) {
@@ -605,11 +651,8 @@ abstract contract BaseFlashArbitrage is
             // This ensures the swap path is valid before taking a flash loan
             if (step.tokenIn != expectedTokenIn) revert InvalidSwapPath();
 
-            // Skip router validation if same router as previous step (common in triangular arb)
-            if (step.router != lastValidatedRouter) {
-                if (!_approvedRouters.contains(step.router)) revert RouterNotApproved();
-                lastValidatedRouter = step.router;
-            }
+            // Validate every step's router independently against the approved set
+            if (!_approvedRouters.contains(step.router)) revert RouterNotApproved();
 
             // Enforce minimum slippage protection to prevent sandwich attacks
             // Note: amount > 0 is guaranteed by InvalidAmount check above

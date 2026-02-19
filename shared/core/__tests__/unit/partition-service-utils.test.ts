@@ -38,10 +38,10 @@ jest.mock('@arbitrage/config', () => ({
   },
   getPartition: jest.fn().mockImplementation((partitionId) => {
     const partitions: Record<string, any> = {
-      'asia-fast': { id: 'asia-fast', chains: ['bsc', 'polygon', 'avalanche', 'fantom'], region: 'asia-southeast1', name: 'P1: Asia-Fast' },
-      'l2-turbo': { id: 'l2-turbo', chains: ['arbitrum', 'optimism', 'base'], region: 'us-central1', name: 'P2: L2-Turbo' },
-      'high-value': { id: 'high-value', chains: ['ethereum', 'zksync', 'linea'], region: 'us-east1', name: 'P3: High-Value' },
-      'solana-native': { id: 'solana-native', chains: ['solana'], region: 'us-west1', name: 'P4: Solana-Native' },
+      'asia-fast': { partitionId: 'asia-fast', chains: ['bsc', 'polygon', 'avalanche', 'fantom'], region: 'asia-southeast1', name: 'P1: Asia-Fast', provider: 'oracle' },
+      'l2-turbo': { partitionId: 'l2-turbo', chains: ['arbitrum', 'optimism', 'base'], region: 'us-central1', name: 'P2: L2-Turbo', provider: 'fly' },
+      'high-value': { partitionId: 'high-value', chains: ['ethereum', 'zksync', 'linea'], region: 'us-east1', name: 'P3: High-Value', provider: 'oracle' },
+      'solana-native': { partitionId: 'solana-native', chains: ['solana'], region: 'us-west1', name: 'P4: Solana-Native', provider: 'fly' },
     };
     return partitions[partitionId as string] ?? undefined;
   }),
@@ -768,6 +768,10 @@ describe('Partition Service Utilities', () => {
       process.env.ETHEREUM_RPC_URL = 'https://eth.example.com';
       process.env.ETHEREUM_WS_URL = 'wss://eth-ws.example.com';
       process.env.ZKSYNC_RPC_URL = 'https://zksync.example.com';
+      // Explicitly clear WS URLs that may be set by global test env setup
+      delete process.env.ZKSYNC_WS_URL;
+      delete process.env.LINEA_RPC_URL;
+      delete process.env.LINEA_WS_URL;
 
       const config = parsePartitionEnvironmentConfig(['ethereum', 'zksync', 'linea']);
 
@@ -793,10 +797,10 @@ describe('Partition Service Utilities', () => {
       jest.requireMock<typeof import('@arbitrage/config')>('@arbitrage/config');
 
     const MOCK_PARTITIONS: Record<string, any> = {
-      'asia-fast': { id: 'asia-fast', chains: ['bsc', 'polygon', 'avalanche', 'fantom'], region: 'asia-southeast1', name: 'P1: Asia-Fast' },
-      'l2-turbo': { id: 'l2-turbo', chains: ['arbitrum', 'optimism', 'base'], region: 'us-central1', name: 'P2: L2-Turbo' },
-      'high-value': { id: 'high-value', chains: ['ethereum', 'zksync', 'linea'], region: 'us-east1', name: 'P3: High-Value' },
-      'solana-native': { id: 'solana-native', chains: ['solana'], region: 'us-west1', name: 'P4: Solana-Native' },
+      'asia-fast': { partitionId: 'asia-fast', chains: ['bsc', 'polygon', 'avalanche', 'fantom'], region: 'asia-southeast1', name: 'P1: Asia-Fast', provider: 'oracle' },
+      'l2-turbo': { partitionId: 'l2-turbo', chains: ['arbitrum', 'optimism', 'base'], region: 'us-central1', name: 'P2: L2-Turbo', provider: 'fly' },
+      'high-value': { partitionId: 'high-value', chains: ['ethereum', 'zksync', 'linea'], region: 'us-east1', name: 'P3: High-Value', provider: 'oracle' },
+      'solana-native': { partitionId: 'solana-native', chains: ['solana'], region: 'us-west1', name: 'P4: Solana-Native', provider: 'fly' },
     };
 
     const MOCK_PARTITION_CHAINS: Record<string, string[]> = {

@@ -40,7 +40,7 @@
 - Phase 3: Migrate Secondary Channels - COMPLETE
 - Phase 4: Cleanup (Pub/Sub removal) - COMPLETE
 
-### Phase 5: Blocking Reads Pattern (2026-01-15)
+### Phase 5: Blocking Reads Pattern (2026-01-15) [IMPLEMENTED]
 
 **Objective**: Replace `setInterval` polling with blocking reads for improved latency and reduced Redis command usage.
 
@@ -85,7 +85,7 @@
 - 90% reduction in Redis commands during idle periods (preserves Upstash free tier)
 - Backpressure prevents message waste when queue is saturated
 
-### Phase 6: Swap Events & Volume Aggregates Consumers (2026-01-16)
+### Phase 6: Swap Events & Volume Aggregates Consumers (2026-01-16) [IMPLEMENTED]
 
 **Objective**: Complete the data flow for swap events and volume aggregates streams by implementing consumers in the Coordinator.
 

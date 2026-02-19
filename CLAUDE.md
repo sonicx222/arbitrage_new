@@ -22,7 +22,7 @@ infrastructure/    Docker, deployment configs
 docs/              Architecture, ADRs, strategies, conventions
 ```
 
-**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector, deprecated)
+**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector, active — factory for P1-P3 partitions)
 
 **Path Aliases:**
 - `@arbitrage/types` - shared/types

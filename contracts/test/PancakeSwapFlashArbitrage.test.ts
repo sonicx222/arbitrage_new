@@ -314,7 +314,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       const newMinProfit = ethers.parseEther('0.1');
       await expect(flashArbitrage.setMinimumProfit(newMinProfit))
         .to.emit(flashArbitrage, 'MinimumProfitUpdated')
-        .withArgs(0, newMinProfit);
+        .withArgs(BigInt(1e14), newMinProfit);
 
       expect(await flashArbitrage.minimumProfit()).to.equal(newMinProfit);
     });

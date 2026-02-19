@@ -75,9 +75,9 @@ describe('CommitRevealArbitrage', () => {
       expect(await commitRevealArbitrage.owner()).to.equal(owner.address);
     });
 
-    it('should set initial minimumProfit to 0', async () => {
+    it('should set initial minimumProfit to default (1e14)', async () => {
       const { commitRevealArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await commitRevealArbitrage.minimumProfit()).to.equal(0);
+      expect(await commitRevealArbitrage.minimumProfit()).to.equal(BigInt(1e14));
     });
 
     it('should revert on zero address owner', async () => {
@@ -2191,7 +2191,7 @@ describe('CommitRevealArbitrage', () => {
         const newMinProfit = ethers.parseEther('0.05');
         await expect(commitRevealArbitrage.connect(owner).setMinimumProfit(newMinProfit))
           .to.emit(commitRevealArbitrage, 'MinimumProfitUpdated')
-          .withArgs(0, newMinProfit);
+          .withArgs(BigInt(1e14), newMinProfit);
       });
 
       it('should revert if non-owner tries to update', async () => {

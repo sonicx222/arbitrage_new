@@ -15,10 +15,22 @@ import type { MinimalLogger } from '../types';
 /**
  * Configure all middleware on an Express application.
  *
+ * S-12 FIX: Throws at startup if NODE_ENV=production and ALLOWED_ORIGINS is not set,
+ * preventing accidental use of localhost CORS defaults in production.
+ *
  * @param app - Express application
  * @param logger - Logger for request logging
+ * @throws Error if in production without ALLOWED_ORIGINS configured
  */
 export function configureMiddleware(app: Application, logger: MinimalLogger): void {
+  // S-12 FIX: Prevent localhost CORS defaults in production
+  if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
+    throw new Error(
+      'CORS MISCONFIGURATION: ALLOWED_ORIGINS environment variable is required in production. ' +
+      'Without it, CORS defaults to localhost origins which is insecure. ' +
+      'Set ALLOWED_ORIGINS to a comma-separated list of allowed origins (e.g., "https://dashboard.example.com").'
+    );
+  }
   // Security headers
   app.use(helmet({
     contentSecurityPolicy: {

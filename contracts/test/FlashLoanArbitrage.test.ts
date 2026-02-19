@@ -201,7 +201,7 @@ describe('FlashLoanArbitrage', () => {
       const newMinProfit = ethers.parseEther('0.1');
       await expect(flashLoanArbitrage.setMinimumProfit(newMinProfit))
         .to.emit(flashLoanArbitrage, 'MinimumProfitUpdated')
-        .withArgs(0, newMinProfit);
+        .withArgs(BigInt(1e14), newMinProfit);
 
       expect(await flashLoanArbitrage.minimumProfit()).to.equal(newMinProfit);
     });

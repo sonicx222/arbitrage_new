@@ -181,12 +181,12 @@ describe('validateFeatureFlags', () => {
   // ===========================================================================
 
   describe('useFlashLoanAggregator flag', () => {
-    it('should log info when flash loan aggregator is enabled (default)', async () => {
+    it('should log info when flash loan aggregator is explicitly enabled', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
-        // FEATURE_FLASH_LOAN_AGGREGATOR defaults to enabled (!== 'false')
+        FEATURE_FLASH_LOAN_AGGREGATOR: 'true',
       });
 
       validateFeatureFlags();
@@ -198,12 +198,12 @@ describe('validateFeatureFlags', () => {
       infoSpy.mockRestore();
     });
 
-    it('should warn when flash loan aggregator is explicitly disabled', async () => {
+    it('should warn when flash loan aggregator is disabled (default)', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
-        FEATURE_FLASH_LOAN_AGGREGATOR: 'false',
+        // FEATURE_FLASH_LOAN_AGGREGATOR defaults to disabled (=== 'true' pattern)
       });
 
       validateFeatureFlags();
@@ -226,7 +226,7 @@ describe('validateFeatureFlags', () => {
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
-        // FEATURE_COMMIT_REVEAL defaults to enabled (!== 'false')
+        FEATURE_COMMIT_REVEAL: 'true',
         // No COMMIT_REVEAL_CONTRACT_* env vars → no deployed contracts
       });
 
@@ -245,6 +245,7 @@ describe('validateFeatureFlags', () => {
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_COMMIT_REVEAL: 'true',
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
       });
 
@@ -263,6 +264,7 @@ describe('validateFeatureFlags', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_COMMIT_REVEAL: 'true',
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
         FEATURE_COMMIT_REVEAL_REDIS: 'true',
         REDIS_URL: 'redis://prod.example.com:6379',
@@ -277,12 +279,12 @@ describe('validateFeatureFlags', () => {
       warnSpy.mockRestore();
     });
 
-    it('should warn when commit-reveal is explicitly disabled', async () => {
+    it('should warn when commit-reveal is disabled (default)', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
-        FEATURE_COMMIT_REVEAL: 'false',
+        // FEATURE_COMMIT_REVEAL defaults to disabled (=== 'true' pattern)
       });
 
       validateFeatureFlags();
@@ -303,6 +305,7 @@ describe('validateFeatureFlags', () => {
     it('should throw in production when Redis storage enabled but REDIS_URL missing', async () => {
       const { validateFeatureFlags } = await importWithFlags({
         NODE_ENV: 'production',
+        FEATURE_COMMIT_REVEAL: 'true',
         FEATURE_COMMIT_REVEAL_REDIS: 'true',
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
         REDIS_URL: undefined,
@@ -317,6 +320,7 @@ describe('validateFeatureFlags', () => {
 
       const { validateFeatureFlags } = await importWithFlags({
         NODE_ENV: 'development',
+        FEATURE_COMMIT_REVEAL: 'true',
         FEATURE_COMMIT_REVEAL_REDIS: 'true',
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
         REDIS_URL: undefined,
@@ -337,6 +341,7 @@ describe('validateFeatureFlags', () => {
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_COMMIT_REVEAL: 'true',
         FEATURE_COMMIT_REVEAL_REDIS: 'true',
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
         REDIS_URL: 'redis://prod.example.com:6379',
@@ -356,6 +361,7 @@ describe('validateFeatureFlags', () => {
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_COMMIT_REVEAL: 'true',
         FEATURE_COMMIT_REVEAL_REDIS: undefined, // defaults to false
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
         REDIS_URL: undefined,
@@ -513,7 +519,7 @@ describe('validateFeatureFlags', () => {
       const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
-        // Flash loan aggregator enabled by default → triggers info log
+        FEATURE_FLASH_LOAN_AGGREGATOR: 'true', // Explicitly enable to trigger info log
       });
 
       validateFeatureFlags(mockLogger);
@@ -532,7 +538,7 @@ describe('validateFeatureFlags', () => {
       };
 
       const { validateFeatureFlags } = await importWithFlags({
-        // Flash loan aggregator enabled by default
+        FEATURE_FLASH_LOAN_AGGREGATOR: 'true', // Explicitly enable
       });
 
       validateFeatureFlags(mockLogger);
@@ -557,6 +563,7 @@ describe('validateFeatureFlags', () => {
 
       const { validateFeatureFlags } = await importWithFlags({
         NODE_ENV: 'production',
+        FEATURE_COMMIT_REVEAL: 'true',
         FEATURE_COMMIT_REVEAL_REDIS: 'true',
         COMMIT_REVEAL_CONTRACT_ETHEREUM: '0x1234567890123456789012345678901234567890',
         REDIS_URL: undefined,

@@ -43,9 +43,9 @@ export class EventBatcher<T = any> {
   ) {
     this.config = {
       maxBatchSize: config.maxBatchSize || 10,
-      // T1.3: Reduced from 50ms to 5ms for ultra-low latency detection
-      // This reduces batch wait time by 90%, enabling faster opportunity detection
-      maxWaitTime: config.maxWaitTime || 5,
+      // T1.3: Reduced from 50ms to 1ms for ultra-low latency detection
+      // This reduces batch wait time by 98%, enabling fastest opportunity detection
+      maxWaitTime: config.maxWaitTime || 1,
       enableDeduplication: config.enableDeduplication !== false,
       enablePrioritization: config.enablePrioritization !== false,
       // P1-3 fix: Default max queue size to prevent unbounded growth
@@ -245,17 +245,38 @@ export class EventBatcher<T = any> {
     return JSON.stringify(event);
   }
 
+  /**
+   * Insert the last element in the queue into its correct sorted position.
+   * Uses binary search + insertion instead of full Array.sort() for O(log n)
+   * insertion vs O(n log n) full sort. Maintains: batch size desc, then timestamp asc.
+   */
   private sortProcessingQueue(): void {
-    // Sort by batch size (larger batches first) and then by age (older first)
-    this.processingQueue.sort((a, b) => {
-      // Prioritize larger batches
-      if (a.batchSize !== b.batchSize) {
-        return b.batchSize - a.batchSize;
-      }
+    if (this.processingQueue.length <= 1) {
+      return;
+    }
 
-      // Then by timestamp (older first)
-      return a.timestamp - b.timestamp;
-    });
+    // The newly added element is always the last one
+    const item = this.processingQueue.pop()!;
+
+    // Binary search for the correct insertion position
+    let low = 0;
+    let high = this.processingQueue.length;
+
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      const midItem = this.processingQueue[mid];
+
+      // Compare: larger batchSize first, then older timestamp first
+      if (midItem.batchSize > item.batchSize ||
+          (midItem.batchSize === item.batchSize && midItem.timestamp <= item.timestamp)) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+
+    // Insert at the correct position
+    this.processingQueue.splice(low, 0, item);
   }
 
   /**
@@ -397,8 +418,8 @@ export function getDefaultEventBatcher(): EventBatcher {
       defaultEventBatcher = new EventBatcher(
         {
           maxBatchSize: 25, // Optimized for high-throughput
-          // T1.3: Reduced from 25ms to 5ms for ultra-low latency detection
-          maxWaitTime: 5,   // 5ms for minimal latency
+          // T1.3: Reduced from 25ms to 1ms for ultra-low latency detection
+          maxWaitTime: 1,   // 1ms for minimal latency
           enableDeduplication: true,
           enablePrioritization: true
         },

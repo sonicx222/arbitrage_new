@@ -66,9 +66,9 @@ describe('SyncSwapFlashArbitrage', () => {
       expect(await syncSwapArbitrage.VAULT()).to.equal(await vault.getAddress());
     });
 
-    it('should initialize with zero minimum profit', async () => {
+    it('should initialize with default minimum profit (1e14)', async () => {
       const { syncSwapArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await syncSwapArbitrage.minimumProfit()).to.equal(0);
+      expect(await syncSwapArbitrage.minimumProfit()).to.equal(BigInt(1e14));
     });
 
     it('should initialize with zero total profits', async () => {
@@ -1259,7 +1259,7 @@ describe('SyncSwapFlashArbitrage', () => {
         const newMinProfit = ethers.parseEther('0.05');
         await expect(syncSwapArbitrage.connect(owner).setMinimumProfit(newMinProfit))
           .to.emit(syncSwapArbitrage, 'MinimumProfitUpdated')
-          .withArgs(0, newMinProfit);
+          .withArgs(BigInt(1e14), newMinProfit);
       });
 
       it('should revert if non-owner tries to update', async () => {
@@ -1270,13 +1270,12 @@ describe('SyncSwapFlashArbitrage', () => {
         ).to.be.revertedWith('Ownable: caller is not the owner');
       });
 
-      it('should allow setting minimum profit to zero', async () => {
+      it('should revert when setting minimum profit to zero', async () => {
         const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
 
-        await syncSwapArbitrage.connect(owner).setMinimumProfit(ethers.parseEther('0.1'));
-        await syncSwapArbitrage.connect(owner).setMinimumProfit(0);
-
-        expect(await syncSwapArbitrage.minimumProfit()).to.equal(0);
+        await expect(
+          syncSwapArbitrage.connect(owner).setMinimumProfit(0)
+        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidMinimumProfit');
       });
     });
 
