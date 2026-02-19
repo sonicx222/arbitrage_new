@@ -65,7 +65,7 @@ export default [
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-empty-function': 'off',
       '@typescript-eslint/no-require-imports': 'warn',
       '@typescript-eslint/no-unsafe-function-type': 'warn',
@@ -74,7 +74,22 @@ export default [
       'no-useless-catch': 'warn',
       'no-control-regex': 'warn',
       'prefer-const': 'warn',
-      'no-var': 'error'
+      'no-var': 'error',
+      'no-restricted-imports': ['warn', {
+        patterns: [
+          {
+            group: ['../../../shared/*', '../../shared/*', '../../../../shared/*'],
+            message: 'Use @arbitrage/* path aliases (e.g., @arbitrage/types, @arbitrage/core, @arbitrage/config, @arbitrage/security) instead of relative paths to shared packages.'
+          }
+        ]
+      }],
+      'no-restricted-syntax': ['warn', {
+        selector: 'BinaryExpression[operator="||"][right.value=0]',
+        message: 'Use ?? (nullish coalescing) instead of || for numeric defaults. || treats 0 as falsy.'
+      }, {
+        selector: 'BinaryExpression[operator="||"][right.raw="0n"]',
+        message: 'Use ?? (nullish coalescing) instead of || for BigInt defaults. || treats 0n as falsy.'
+      }]
     }
   },
   // TypeScript TEST files - no project requirement, relaxed rules

@@ -33,6 +33,7 @@ import {
   type MevProviderFactory,
   type BridgeRouterFactory,
   type BatchProvider,
+  type TradeLoggerConfig,
 } from '@arbitrage/core';
 // Fix 3.1: Import CHAINS from config to derive SUPPORTED_CHAINS dynamically
 import { CHAINS } from '@arbitrage/config';
@@ -714,6 +715,8 @@ export interface ExecutionEngineConfig {
   consumerConfig?: Partial<ConsumerConfig>;
   /** Task 3: A/B testing framework configuration */
   abTestingConfig?: Partial<ABTestingConfig>;
+  /** O-6: Persistent trade logging configuration */
+  tradeLoggerConfig?: Partial<TradeLoggerConfig>;
 }
 
 /**

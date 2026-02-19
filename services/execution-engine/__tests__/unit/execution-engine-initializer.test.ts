@@ -181,15 +181,12 @@ describe('Execution Engine Initializer', () => {
 
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.mev).toBeDefined();
         expect(result.mev.success).toBe(true);
         expect(result.mev.providersInitialized).toBe(5);
 
-        expect(result.risk).toBeDefined();
         expect(result.risk.success).toBe(true);
         expect(result.risk.enabled).toBe(true);
 
-        expect(result.bridgeRouter).toBeDefined();
         expect(result.bridgeRouter.success).toBe(true);
         expect(result.bridgeRouter.protocols).toEqual(['stargate', 'across']);
       }
@@ -326,7 +323,7 @@ describe('Execution Engine Initializer', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.message).toBe('MEV provider timeout');
-        expect(result.partial).toBeDefined();
+        expect(typeof result.partial).toBe('object');
         // MEV failed, so mev should not be in partial results
         // (it threw before storing)
         expect(result.partial?.risk).toBeUndefined();
@@ -395,8 +392,7 @@ describe('Execution Engine Initializer', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.message).toBe('Risk config invalid');
-        expect(result.partial).toBeDefined();
-        expect(result.partial?.mev).toBeDefined();
+        expect(typeof result.partial).toBe('object');
         expect(result.partial?.mev?.success).toBe(true);
         expect(result.partial?.risk).toBeUndefined();
         expect(result.partial?.bridgeRouter).toBeUndefined();
@@ -443,10 +439,8 @@ describe('Execution Engine Initializer', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.message).toBe('Bridge router unavailable');
-        expect(result.partial).toBeDefined();
-        expect(result.partial?.mev).toBeDefined();
+        expect(typeof result.partial).toBe('object');
         expect(result.partial?.mev?.success).toBe(true);
-        expect(result.partial?.risk).toBeDefined();
         expect(result.partial?.risk?.success).toBe(true);
         expect(result.partial?.bridgeRouter).toBeUndefined();
       }
@@ -553,9 +547,9 @@ describe('Execution Engine Initializer', () => {
 
       const partial = getLastPartialResults();
       expect(partial).not.toBeNull();
-      expect(partial?.mev).toBeDefined();
-      expect(partial?.risk).toBeDefined();
-      expect(partial?.bridgeRouter).toBeDefined();
+      expect(typeof partial?.mev).toBe('object');
+      expect(typeof partial?.risk).toBe('object');
+      expect(typeof partial?.bridgeRouter).toBe('object');
     });
 
     it('should have only MEV after risk failure', async () => {
@@ -567,7 +561,7 @@ describe('Execution Engine Initializer', () => {
 
       const partial = getLastPartialResults();
       expect(partial).not.toBeNull();
-      expect(partial?.mev).toBeDefined();
+      expect(typeof partial?.mev).toBe('object');
       expect(partial?.risk).toBeUndefined();
       expect(partial?.bridgeRouter).toBeUndefined();
     });
@@ -581,8 +575,8 @@ describe('Execution Engine Initializer', () => {
 
       const partial = getLastPartialResults();
       expect(partial).not.toBeNull();
-      expect(partial?.mev).toBeDefined();
-      expect(partial?.risk).toBeDefined();
+      expect(typeof partial?.mev).toBe('object');
+      expect(typeof partial?.risk).toBe('object');
       expect(partial?.bridgeRouter).toBeUndefined();
     });
 
@@ -617,7 +611,7 @@ describe('Execution Engine Initializer', () => {
       // Verify the mutex's runExclusive is called when we initialize.
       // The mutex instance was created at module load; we tracked it.
       const mutexInstance = mockMutexInstances[0];
-      expect(mutexInstance).toBeDefined();
+      expect(typeof mutexInstance).toBe('object');
 
       await initializeExecutionEngine(mockProviderService, mockLogger);
 

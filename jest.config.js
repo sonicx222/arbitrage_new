@@ -82,7 +82,7 @@ module.exports = {
   // Test timeout - default for non-project runs
   // Individual tests override this with jest.setTimeout() or it() timeout parameter
   // ML and performance tests use much longer timeouts (2min - 11min)
-  testTimeout: 700000, // ~11 minutes (handles longest performance tests)
+  testTimeout: 30000, // 30 seconds default (per-project timeouts set in project blocks and setup files)
 
   // Coverage thresholds (enforce quality) - standardized to 60%
   coverageThreshold: {
@@ -132,7 +132,7 @@ module.exports = {
         integrationThreshold: 5000, // Integration tests should be <5s
         e2eThreshold: 30000, // E2E tests should be <30s
         outputFile: 'slow-tests.json',
-        failOnSlow: false // Don't fail CI yet - just report (set to true later if desired)
+        failOnSlow: true // Fail CI on slow unit/integration/e2e tests (performance tests exempt via Infinity threshold)
       }
     ]
   ],
@@ -150,6 +150,7 @@ module.exports = {
       ],
       // P2-3.1: High parallelism for unit tests (CPU-bound, no shared resources)
       maxWorkers: process.env.CI ? 4 : '75%',
+      testTimeout: 10000, // 10s - unit tests should be fast
       ...projectConfig
     },
     {
@@ -164,6 +165,7 @@ module.exports = {
       ],
       // P2-3.1: Moderate parallelism for integration tests (I/O-bound, shared Redis)
       maxWorkers: process.env.CI ? 2 : '50%',
+      testTimeout: 60000, // 60s - allows for Redis/service startup
       ...projectConfig
     },
     {
@@ -175,6 +177,7 @@ module.exports = {
       ],
       // P2-3.1: Low parallelism for e2e tests (full system tests, potential conflicts)
       maxWorkers: process.env.CI ? 1 : 2,
+      testTimeout: 120000, // 2min - full workflow execution
       ...projectConfig
     },
     {
@@ -191,7 +194,7 @@ module.exports = {
       ],
       // P2-3.1: MUST be serial - measuring performance requires no interference
       maxWorkers: 1,
-      // Note: testTimeout is not valid in project config - set at root level instead
+      testTimeout: 600000, // 10min - performance benchmarks can be long-running
       ...projectConfig
     },
     {
@@ -203,6 +206,7 @@ module.exports = {
       ],
       // P2-3.1: Low parallelism for smoke tests (quick checks, may share resources)
       maxWorkers: process.env.CI ? 1 : 2,
+      testTimeout: 60000, // 60s - quick validation checks
       ...projectConfig
     },
     {
@@ -215,7 +219,7 @@ module.exports = {
       // Serial execution for ML tests (memory-intensive TensorFlow.js)
       // Prevents multiple workers from loading models simultaneously
       maxWorkers: 1,
-      // Note: testTimeout is not valid in project config - set at root level instead
+      testTimeout: 120000, // 2min - ML model loading and inference can be slow
       ...projectConfig
     }
   ]

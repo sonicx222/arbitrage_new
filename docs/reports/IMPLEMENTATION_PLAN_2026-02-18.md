@@ -567,48 +567,52 @@ Copy this checklist into each session to track progress:
 - [x] #46 A-3  Fix unified-detector docs — port 3007 marked active
 - [x] #47 A-8  Clarify ADR-002 phases — Phase 5-6 [IMPLEMENTED]
 
-## Wave 3: Monitoring + CI [_/8 items]
-- [ ] #9  P-3  E2E latency monitoring
-- [ ] #13 S-6  Execution engine auth
-- [ ] #17 T-4  Mock fidelity
-- [ ] #18 T-6  Fork tests in CI
-- [ ] #19 T-7  Coverage thresholds
-- [ ] #41 T-16 Slow test reporter
-- [ ] #21 P-4  .find()/.filter() → Map/Set
-- [ ] #22 P-5  JSON.parse removal
-- [ ] #31 S-11 WebSocket message size
+## Wave 3: Monitoring + CI [9/9 items] ✅ COMPLETE
+- [x] #9  P-3  E2E latency monitoring — LatencyTracker with Float64Array ring buffers, p50/p95/p99, recordFromTimestamps(), 38 tests
+- [x] #13 S-6  Execution engine auth — timing-safe API key validation on POST endpoints, public GET
+- [x] #17 T-4  Mock fidelity — BalancerVault fees documented, DexRouter configurable exchange rates + slippage
+- [x] #18 T-6  Fork tests in CI — weekly schedule trigger (Monday 3 AM UTC), 45min timeout, FORK_ENABLED=true, warning-only on PR
+- [x] #19 T-7  Coverage thresholds — 60% global threshold enforced (branches, functions, lines, statements)
+- [x] #41 T-16 Slow test reporter — failOnSlow=true globally, per-project testTimeout (unit:10s, integration:60s, e2e:2min, perf:10min)
+- [x] #21 P-4  .find()/.filter() → Map/Set — pendingOperationsByKey Map for O(1) in gossip path, Set exclusions in triangular detection, zero-alloc dex uniqueness check
+- [x] #22 P-5  JSON.parse removal — explicit JSON handling replaces double-serialization bug (P0-FIX)
+- [x] #31 S-11 WebSocket message size — maxMessageSize config (default 10MB), closes connection with code 1008, 5 tests
 
-## Wave 4: Infrastructure [_/6 items]
-- [ ] #4  O-6  Persistent trade logging
-- [ ] #5  O-2  External alerting
-- [ ] #24 T-12 Coordinator test coverage
-- [ ] #28 O-11 Pre-deployment validation
-- [ ] #38 P-6  Partition service profiling
-- [ ] #39 O-12 Prometheus /metrics endpoint
+## Wave 4: Infrastructure [6/6 items] ✅ COMPLETE
+- [x] #4  O-6  Persistent trade logging — TradeLogger with append-only JSONL, daily rotation, wired into execution engine publishExecutionResult(), 19 tests
+- [x] #5  O-2  External alerting — Discord + Slack webhooks via AlertNotifier, circuit breaker pattern, wired into coordinator
+- [x] #24 T-12 Coordinator test coverage — 11 unit test files + integration test (coordinator, routing, alerts, health, leadership, streaming)
+- [x] #28 O-11 Pre-deployment validation — validate-deployment.ts with 7 check categories (Redis, RPC latency, contracts, private key, MEV, gas, env), 49 tests, npm run validate:deployment
+- [x] #38 P-6  Partition service profiling — startup timing instrumentation, memory profiling (heapUsed/rss), onStarted callback
+- [x] #39 O-12 Prometheus /metrics endpoint — coordinator /api/metrics with auth, execution-engine /stats, PrometheusExporter (733 lines) with Grafana dashboard
 
-## Wave 5: Test Expansion [_/6 items]
-- [ ] #10 T-1  E2E flow test
-- [ ] #14 S-5  Redis Streams signing
-- [ ] #25 T-14 Redis Streams edge cases
-- [ ] #26 T-15 Execution failure modes
-- [ ] #36 T-2  Un-skip alignment tests
-- [ ] #37 T-8  CommitReveal security tests
+## Wave 5: Test Expansion [6/6 items] ✅ COMPLETE
+- [x] #10 T-1  E2E flow test — tests/e2e/data-flow-e2e.test.ts: price→detection→coordination→execution with real Redis Streams
+- [x] #14 S-5  Redis Streams signing — HMAC-SHA256 signing in xadd(), timingSafeEqual verification in parseStreamResult(), backward-compatible opt-in via STREAM_SIGNING_KEY, 21 tests
+- [x] #25 T-14 Redis Streams edge cases — 15 integration tests: buffer overflow, consumer rebalancing/XCLAIM, exact/approximate trimming, corrupted batches, block timeout, order preservation, concurrent consumers
+- [x] #26 T-15 Execution failure modes — flash-loan-edge-cases.test.ts: N-hop, provider disconnect, race conditions, invalid routers
+- [x] #36 T-2  Un-skip alignment tests — deleted rejected Option A, fixed paths for Blocks 2-6, un-skipped ADR-002 compliance; 17 tests now passing
+- [x] #37 T-8  CommitReveal security tests — CommitRevealArbitrage.test.ts (2445 lines): reveal security, reentrancy, admin access control
 
-## Wave 6: Tech Debt [_/4 items]
-- [ ] #20 T-5  Weak assertion cleanup
-- [ ] #27 T-13 Bridge recovery logic
-- [ ] #29 O-4  Redis failure fallback
-- [ ] #33 Q-1  Pino logger migration
+## Wave 6: Tech Debt [4/4 items] ✅ COMPLETE
+- [x] #20 T-5  Weak assertion cleanup — strengthened ~65 assertions across 5 priority files (factory-functions, stream-health-monitor, stargate-v2-router, execution-engine-initializer, performance-analytics) with typeof/enum/regex/NaN checks
+- [x] #27 T-13 Bridge recovery logic — BridgeRecoveryManager with Redis SCAN, periodic checks (60s), concurrency limits, sell recovery, abandoned bridge cleanup, 37 tests, wired into engine startup/shutdown
+- [x] #29 O-4  Redis failure fallback — graceful-degradation.ts: DegradationLevel, dual-publish (Streams + Pub/Sub fallback), dead-letter-queue
+- [x] #33 Q-1  Pino logger migration — Pino 9.6.0 production dep, createLogger() throughout shared/core, only 11 console.log remaining in src/
 
-## Wave 7: Architecture QoL [_/6 items]
-- [ ] #34 A-1  Split shared/core
-- [ ] #35 A-2  Mempool-detector decision
-- [ ] #42 Q-4  ESLint ?? rules
-- [ ] #43 A-6  Path alias enforcement
-- [ ] #44 O-1  Testnet deployment
-- [ ] #45 O-3  Centralized logging
+## Wave 7: Architecture QoL [6/6 items] ✅ COMPLETE
+- [x] #34 A-1  Split shared/core — virtual split via package.json exports (./caching, ./analytics, ./resilience, ./bridge-router) with source directories
+- [x] #35 A-2  Mempool-detector decision — wired as optional service: `npm run dev:mempool`, enabled=false by default, added to service-definitions.js, port-config.js, CURRENT_STATE.md, .env.example
+- [x] #42 Q-4  ESLint ?? rules — no-restricted-syntax for `|| 0`/`|| 0n` patterns (warn), no-explicit-any upgraded to error for source files
+- [x] #43 A-6  Path alias enforcement — no-restricted-imports (warn) for `../../shared/*` patterns, directs to @arbitrage/* aliases
+- [x] #44 O-1  Testnet deployment — Fly.io configs for coordinator, execution-engine, partition-high-value; docker-compose.testnet.yml with SIMULATION_MODE=true; deploy.sh updated with all 6 targets
+- [x] #45 O-3  Centralized logging — OpenTelemetry: trace-context.ts (propagation via Redis Streams), otel-transport.ts (Pino → OTLP/HTTP), multistream in pino-logger.ts, 68 tests
 ```
 
 ---
 
-*Plan generated 2026-02-18. Based on Critical Assessment Report v1 (65 findings, 47 action items).*
+*Plan generated 2026-02-18. Progress updated 2026-02-19.*
+*Based on Critical Assessment Report v1 (65 findings, 47 action items).*
+*Legend: [x] = completed, [~] = partially done, [ ] = not started*
+
+**Overall Progress: 47/47 completed ✅ ALL WAVES COMPLETE**

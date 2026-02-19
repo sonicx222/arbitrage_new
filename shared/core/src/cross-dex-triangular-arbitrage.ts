@@ -348,8 +348,10 @@ export class CrossDexTriangularArbitrage {
       const neighborsA = adjacency.get(tokenA);
       if (!neighborsA || neighborsA.size < 2) continue;
 
+      // P4-FIX: Use Set for O(1) exclusion checks instead of !== comparisons
+      const excludedB = new Set([baseToken, tokenA]);
       const sortedNeighborsB = this.sortTokensByLiquidity(
-        Array.from(neighborsA).filter(t => t !== baseToken && t !== tokenA),
+        Array.from(neighborsA).filter(t => !excludedB.has(t)),
         tokenA,
         tokenPairs
       ).slice(0, 10); // Limit second hop
@@ -362,10 +364,12 @@ export class CrossDexTriangularArbitrage {
         const neighborsB = adjacency.get(tokenB);
         if (!neighborsB || neighborsB.size < 2) continue;
 
+        // P4-FIX: Use Set for O(1) exclusion checks instead of !== comparisons
         // Filter: must connect to a token that connects back to base
+        const excludedC = new Set([baseToken, tokenA, tokenB]);
         const sortedNeighborsC = this.sortTokensByLiquidity(
           Array.from(neighborsB).filter(t =>
-            t !== baseToken && t !== tokenA && t !== tokenB &&
+            !excludedC.has(t) &&
             adjacency.get(t)?.has(baseToken) // CRITICAL: Must connect back to base
           ),
           tokenB,
@@ -583,8 +587,9 @@ export class CrossDexTriangularArbitrage {
   private filterAndRankQuadrilaterals(opportunities: QuadrilateralOpportunity[]): QuadrilateralOpportunity[] {
     return opportunities
       .filter(opp => {
-        // Enforce cross-DEX routing: single-DEX loops are high-noise in simulation.
-        if (new Set(opp.dexes).size < 2) return false;
+        // P4-FIX: Enforce cross-DEX routing without allocating a Set per opportunity.
+        // Check if any dex differs from the first (at least 2 unique dexes).
+        if (opp.dexes.length < 2 || !opp.dexes.some(d => d !== opp.dexes[0])) return false;
 
         // Filter by minimum profit
         if (opp.netProfit < this.minProfitThreshold) return false;
@@ -907,8 +912,9 @@ export class CrossDexTriangularArbitrage {
   private filterAndRankOpportunities(opportunities: TriangularOpportunity[]): TriangularOpportunity[] {
     return opportunities
       .filter(opp => {
-        // Enforce cross-DEX routing: single-DEX loops are high-noise in simulation.
-        if (new Set(opp.dexes).size < 2) return false;
+        // P4-FIX: Enforce cross-DEX routing without allocating a Set per opportunity.
+        // Check if any dex differs from the first (at least 2 unique dexes).
+        if (opp.dexes.length < 2 || !opp.dexes.some(d => d !== opp.dexes[0])) return false;
 
         // Filter by minimum profit
         if (opp.netProfit < this.minProfitThreshold) return false;

@@ -19,7 +19,8 @@ const {
   CROSS_CHAIN_STARTUP_DELAY_MS,
   EXECUTION_ENGINE_STARTUP_DELAY_MS,
   UNIFIED_DETECTOR_STARTUP_DELAY_MS,
-  P4_STARTUP_DELAY_MS
+  P4_STARTUP_DELAY_MS,
+  MEMPOOL_DETECTOR_STARTUP_DELAY_MS
 } = require('./constants');
 
 // =============================================================================
@@ -134,6 +135,17 @@ function buildServiceDefinitions(PORTS) {
       healthEndpoint: '/health',
       delay: UNIFIED_DETECTOR_STARTUP_DELAY_MS,
       env: { HEALTH_CHECK_PORT: PORTS.UNIFIED_DETECTOR },
+      type: 'node',
+      enabled: false,
+      optional: true
+    },
+    {
+      name: 'Mempool Detector',
+      script: 'services/mempool-detector/src/index.ts',
+      port: PORTS.MEMPOOL_DETECTOR,
+      healthEndpoint: '/health',
+      delay: MEMPOOL_DETECTOR_STARTUP_DELAY_MS,
+      env: { HEALTH_CHECK_PORT: PORTS.MEMPOOL_DETECTOR },
       type: 'node',
       enabled: false,
       optional: true

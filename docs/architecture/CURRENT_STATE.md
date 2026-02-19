@@ -16,7 +16,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ---
 
-## Service Inventory (8 Services)
+## Service Inventory (8 Core + 1 Optional)
 
 | Service | Internal Port | External Port | Type | Description |
 |---------|---------------|---------------|------|-------------|
@@ -27,8 +27,9 @@ This document provides a snapshot of the current arbitrage trading system archit
 | **Partition Solana** | 3004 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3005 | 3015 | Core | Trade execution and MEV protection |
 | **Cross-Chain Detector** | 3006 | 3016 | Detector | Cross-chain arbitrage opportunities |
+| **Mempool Detector** | 3008 | — | Optional | Pre-block pending tx detection via bloXroute BDN |
 
-> **Note:** `services/mempool-detector` (port 3007) exists in the repository but is orphaned — it is not wired into the dev tooling (`start-local.js`, `service-definitions.js`) and is not started by any `npm run dev:*` command.
+> **Note:** The Mempool Detector is an optional service — run with `npm run dev:mempool` or `npm run dev:mempool:fast`. Requires bloXroute BDN API key (`BLOXROUTE_AUTH_HEADER`). Currently supports Ethereum and BSC mempool feeds.
 
 **Note**: Each partition service uses a unique internal port (P1:3001, P2:3002, P3:3003, P4:3004, configurable via `HEALTH_CHECK_PORT`). Port assignments are the single source of truth in `shared/constants/service-ports.json`.
 
@@ -105,6 +106,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 | Partition Detectors | `/health` | `{ status, chains, blocksProcessed }` |
 | Cross-Chain Detector | `/health` | `{ status, opportunities }` |
 | Execution Engine | `/health` | `{ status, trades, pending }` |
+| Mempool Detector | `/health` | `{ status, feeds, stats, uptime }` |
 
 ### Health Status Values
 

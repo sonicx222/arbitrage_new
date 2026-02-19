@@ -72,6 +72,14 @@ export interface WebSocketConfig {
    * @default 1024 (1KB) - only worker-parse messages >1KB
    */
   workerParsingThresholdBytes?: number;
+
+  /**
+   * Maximum allowed message size in bytes.
+   * Messages exceeding this limit will close the connection with code 1008.
+   *
+   * @default 10485760 (10MB)
+   */
+  maxMessageSize?: number;
 }
 
 // T1.5: Chain staleness thresholds and provider rotation logic
@@ -155,6 +163,9 @@ export class WebSocketManager {
    * Below 2KB, main thread parsing overhead is less than worker message-passing overhead.
    */
   private workerParsingThresholdBytes = 2048;
+
+  /** Maximum allowed message size in bytes. Messages exceeding this close the connection. */
+  private maxMessageSize: number;
 
   /** Worker pool reference (lazy-initialized when worker parsing enabled) */
   private workerPool: EventProcessingWorkerPool | null = null;
@@ -240,6 +251,7 @@ export class WebSocketManager {
 
     this.useWorkerParsing = config.useWorkerParsing ?? workerParsingDefault;
     this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 2048;
+    this.maxMessageSize = config.maxMessageSize ?? 10 * 1024 * 1024; // 10MB
 
     if (this.useWorkerParsing) {
       // Lazy init - worker pool will be started when first needed
@@ -723,6 +735,19 @@ export class WebSocketManager {
   private handleMessage(data: Buffer): void {
     const dataString = data.toString();
     const dataSize = data.length;
+
+    // Reject oversized messages
+    if (dataSize > this.maxMessageSize) {
+      this.logger.warn('Oversized WebSocket message received, closing connection', {
+        chainId: this.chainId,
+        messageSize: dataSize,
+        maxMessageSize: this.maxMessageSize,
+      });
+      if (this.ws) {
+        this.ws.close(1008, `Message size ${dataSize} exceeds limit ${this.maxMessageSize}`);
+      }
+      return;
+    }
 
     // Phase 2: Worker Thread JSON Parsing
     // Use worker pool for large payloads to avoid blocking main thread

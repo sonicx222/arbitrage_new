@@ -37,40 +37,40 @@ describe('Factory Functions Tests', () => {
     it('should create components with default config', () => {
       const components = createTopNWarming(cache);
 
-      expect(components).toBeDefined();
-      expect(components.analyzer).toBeDefined();
-      expect(components.tracker).toBeDefined();
-      expect(components.strategy).toBeDefined();
-      expect(components.warmer).toBeDefined();
+      expect(typeof components).toBe('object');
+      expect(typeof components.analyzer).toBe('object');
+      expect(typeof components.tracker).toBe('object');
+      expect(typeof components.strategy).toBe('object');
+      expect(typeof components.warmer).toBe('object');
       expect(components.strategy.constructor.name).toBe('TopNStrategy');
     });
 
     it('should create components with custom topN', () => {
       const components = createTopNWarming(cache, 10);
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('TopNStrategy');
     });
 
     it('should create components with custom minScore', () => {
       const components = createTopNWarming(cache, 5, 0.5);
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('TopNStrategy');
     });
 
     it('should create components with both custom params', () => {
       const components = createTopNWarming(cache, 8, 0.4);
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('TopNStrategy');
     });
 
     it('should include metrics by default', () => {
       const components = createTopNWarming(cache);
 
-      expect(components.metricsCollector).toBeDefined();
-      expect(components.metricsExporter).toBeDefined();
+      expect(typeof components.metricsCollector).toBe('object');
+      expect(typeof components.metricsExporter).toBe('object');
     });
 
     it('should use shared analyzer by default', () => {
@@ -97,40 +97,40 @@ describe('Factory Functions Tests', () => {
     it('should create components with default config', () => {
       const components = createAdaptiveWarming(cache);
 
-      expect(components).toBeDefined();
-      expect(components.analyzer).toBeDefined();
-      expect(components.tracker).toBeDefined();
-      expect(components.strategy).toBeDefined();
-      expect(components.warmer).toBeDefined();
+      expect(typeof components).toBe('object');
+      expect(typeof components.analyzer).toBe('object');
+      expect(typeof components.tracker).toBe('object');
+      expect(typeof components.strategy).toBe('object');
+      expect(typeof components.warmer).toBe('object');
       expect(components.strategy.constructor.name).toBe('AdaptiveStrategy');
     });
 
     it('should create components with custom targetHitRate', () => {
       const components = createAdaptiveWarming(cache, 0.95);
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('AdaptiveStrategy');
     });
 
     it('should create components with custom maxPairs', () => {
       const components = createAdaptiveWarming(cache, 0.97, 15);
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('AdaptiveStrategy');
     });
 
     it('should create components with both custom params', () => {
       const components = createAdaptiveWarming(cache, 0.98, 12);
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('AdaptiveStrategy');
     });
 
     it('should include metrics by default', () => {
       const components = createAdaptiveWarming(cache);
 
-      expect(components.metricsCollector).toBeDefined();
-      expect(components.metricsExporter).toBeDefined();
+      expect(typeof components.metricsCollector).toBe('object');
+      expect(typeof components.metricsExporter).toBe('object');
     });
 
     it('should use shared analyzer by default', () => {
@@ -157,39 +157,39 @@ describe('Factory Functions Tests', () => {
     it('should create components with default strategy', () => {
       const components = createTestWarming(cache);
 
-      expect(components).toBeDefined();
-      expect(components.analyzer).toBeDefined();
-      expect(components.tracker).toBeDefined();
-      expect(components.strategy).toBeDefined();
-      expect(components.warmer).toBeDefined();
+      expect(typeof components).toBe('object');
+      expect(typeof components.analyzer).toBe('object');
+      expect(typeof components.tracker).toBe('object');
+      expect(typeof components.strategy).toBe('object');
+      expect(typeof components.warmer).toBe('object');
       expect(components.strategy.constructor.name).toBe('TopNStrategy'); // Default
     });
 
     it('should create components with topn strategy', () => {
       const components = createTestWarming(cache, 'topn');
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('TopNStrategy');
     });
 
     it('should create components with threshold strategy', () => {
       const components = createTestWarming(cache, 'threshold');
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('ThresholdStrategy');
     });
 
     it('should create components with adaptive strategy', () => {
       const components = createTestWarming(cache, 'adaptive');
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('AdaptiveStrategy');
     });
 
     it('should create components with timebased strategy', () => {
       const components = createTestWarming(cache, 'timebased');
 
-      expect(components).toBeDefined();
+      expect(typeof components.strategy).toBe('object');
       expect(components.strategy.constructor.name).toBe('TimeBasedStrategy');
     });
 
@@ -255,8 +255,8 @@ describe('Factory Functions Tests', () => {
       const adaptive = createAdaptiveWarming(cache);
       const test = createTestWarming(cache);
 
-      expect(topN.metricsCollector).toBeDefined();
-      expect(adaptive.metricsCollector).toBeDefined();
+      expect(typeof topN.metricsCollector).toBe('object');
+      expect(typeof adaptive.metricsCollector).toBe('object');
       expect(test.metricsCollector).toBeUndefined(); // Test mode
     });
 
@@ -284,7 +284,7 @@ describe('Factory Functions Tests', () => {
       const components = createTopNWarming(cache);
       const duration = performance.now() - start;
 
-      expect(components).toBeDefined();
+      expect(typeof components).toBe('object');
       expect(duration).toBeLessThan(10);
     });
 
@@ -304,7 +304,7 @@ describe('Factory Functions Tests', () => {
       const components = createTestWarming(cache);
       const duration = performance.now() - start;
 
-      expect(components).toBeDefined();
+      expect(typeof components).toBe('object');
       expect(duration).toBeLessThan(10);
     });
   });
@@ -316,7 +316,7 @@ describe('Factory Functions Tests', () => {
 
       // Container creation doesn't throw, but usage will fail
       const components = createTopNWarming(invalidCache);
-      expect(components).toBeDefined();
+      expect(typeof components).toBe('object');
 
       // Using the components with invalid cache should fail gracefully
       try {
@@ -331,15 +331,15 @@ describe('Factory Functions Tests', () => {
     it('should handle extreme parameter values', () => {
       // Very high topN
       const components1 = createTopNWarming(cache, 1000, 0.1);
-      expect(components1).toBeDefined();
+      expect(typeof components1.strategy).toBe('object');
 
       // Very low minScore
       const components2 = createTopNWarming(cache, 5, 0.01);
-      expect(components2).toBeDefined();
+      expect(typeof components2.strategy).toBe('object');
 
       // Very high targetHitRate
       const components3 = createAdaptiveWarming(cache, 0.999, 20);
-      expect(components3).toBeDefined();
+      expect(typeof components3.strategy).toBe('object');
     });
   });
 
@@ -352,7 +352,7 @@ describe('Factory Functions Tests', () => {
       tracker.recordPriceUpdate('WETH_USDT', Date.now());
       const result = warmer.warmForPair('WETH_USDT');
 
-      expect(result).toBeDefined();
+      expect(typeof result).toBe('object');
     });
 
     it('should support adaptive production use case', () => {
@@ -367,7 +367,7 @@ describe('Factory Functions Tests', () => {
       tracker.recordPriceUpdate('WETH_USDT', Date.now());
       const result = warmer.warmForPair('WETH_USDT');
 
-      expect(result).toBeDefined();
+      expect(typeof result).toBe('object');
       expect(strategy.constructor.name).toBe('AdaptiveStrategy');
     });
 
@@ -379,7 +379,7 @@ describe('Factory Functions Tests', () => {
       components.tracker.recordPriceUpdate('TEST_PAIR', Date.now());
       const stats = components.tracker.getStats();
 
-      expect(stats).toBeDefined();
+      expect(typeof stats).toBe('object');
       expect(stats.totalPairs).toBeGreaterThanOrEqual(0);
     });
 

@@ -53,6 +53,8 @@ export class CacheCoherencyManager {
   private conflictResolver: (op1: CacheOperation, op2: CacheOperation) => CacheOperation;
   // P2-FIX: Track operation keys to prevent duplicates (O(1) lookup)
   private operationKeys: Set<string> = new Set();
+  // P4-FIX: Index pending operations by cache key for O(1) conflict lookups
+  private pendingOperationsByKey: Map<string, CacheOperation[]> = new Map();
   // P2-FIX: Maximum pending operations to prevent unbounded memory growth
   private readonly MAX_PENDING_OPERATIONS = 1000;
   private readonly PRUNE_TARGET = 500;
@@ -333,9 +335,10 @@ export class CacheCoherencyManager {
     return this.operationKeys.has(operationKey);
   }
 
+  // P4-FIX: Use pendingOperationsByKey Map for O(1) key lookup instead of scanning entire array
   private findConflictingOperations(operation: CacheOperation): CacheOperation[] {
-    return this.pendingOperations.filter(op =>
-      op.key === operation.key &&
+    const sameKeyOps = this.pendingOperationsByKey.get(operation.key) ?? [];
+    return sameKeyOps.filter(op =>
       op.nodeId !== operation.nodeId &&
       Math.abs(op.timestamp - operation.timestamp) < 1000 // Within 1 second
     );
@@ -549,15 +552,35 @@ export class CacheCoherencyManager {
     this.operationKeys.add(operationKey);
     this.pendingOperations.push(operation);
 
+    // P4-FIX: Also add to the by-key index for O(1) conflict lookups
+    let keyOps = this.pendingOperationsByKey.get(operation.key);
+    if (!keyOps) {
+      keyOps = [];
+      this.pendingOperationsByKey.set(operation.key, keyOps);
+    }
+    keyOps.push(operation);
+
     // P2-FIX: Atomic pruning using splice instead of array reassignment
     // This prevents losing concurrent additions during the reassignment
     if (this.pendingOperations.length > this.MAX_PENDING_OPERATIONS) {
       const removeCount = this.pendingOperations.length - this.PRUNE_TARGET;
       const removedOps = this.pendingOperations.splice(0, removeCount);
 
-      // Also remove from the keys set to keep them in sync
+      // Also remove from the keys set and by-key index to keep them in sync
       for (const op of removedOps) {
         this.operationKeys.delete(this.getOperationKey(op));
+
+        // P4-FIX: Remove from the by-key index
+        const keyOps = this.pendingOperationsByKey.get(op.key);
+        if (keyOps) {
+          const idx = keyOps.indexOf(op);
+          if (idx !== -1) {
+            keyOps.splice(idx, 1);
+          }
+          if (keyOps.length === 0) {
+            this.pendingOperationsByKey.delete(op.key);
+          }
+        }
       }
 
       logger.debug('Pruned pending operations', { removed: removeCount, remaining: this.pendingOperations.length });
@@ -669,6 +692,8 @@ export class CacheCoherencyManager {
     this.pendingOperations.length = 0;
     // P2-FIX: Also clear the operation keys set
     this.operationKeys.clear();
+    // P4-FIX: Also clear the by-key index
+    this.pendingOperationsByKey.clear();
     // P1-14 FIX: Also clear vector clock tracking
     this.vectorClock.clear();
     this.vectorClockLastUpdated.clear();

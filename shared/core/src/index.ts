@@ -117,7 +117,18 @@ export {
   PinoPerformanceLogger,
   resetLoggerCache,
   resetPerformanceLoggerCache,
+  // OTEL transport lifecycle (O-3)
+  getOtelTransport,
+  shutdownOtelTransport,
 } from './logging';
+
+// OpenTelemetry log transport (O-3: Centralized log aggregation)
+export {
+  createOtelTransport,
+  resolveOtelConfig,
+  OtelTransportStream,
+} from './logging';
+export type { OtelTransportConfig } from './logging';
 
 // Testing utilities (no jest.mock needed)
 export {
@@ -144,6 +155,22 @@ export type {
 
 export { V8Profiler, getGlobalProfiler, profileHotPath } from './v8-profiler';
 export type { ProfileResult, ProfileOptions } from './v8-profiler';
+
+// =============================================================================
+// 1.2.2 Trace Context Propagation (O-3: Centralized Log Aggregation)
+// =============================================================================
+
+export {
+  createTraceContext,
+  createChildContext,
+  propagateContext,
+  extractContext,
+  stripTraceFields,
+  generateTraceId,
+  generateSpanId,
+  TRACE_FIELDS,
+} from './tracing';
+export type { TraceContext } from './tracing';
 
 // =============================================================================
 // 1.3 Async Primitives
@@ -1920,6 +1947,19 @@ export type {
   ServiceHealthStatus,
   ValidationResult
 } from './message-validators';
+
+// #############################################################################
+// #                                                                           #
+// #                    SECTION 15A: PERSISTENCE                               #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 15A.1 Trade Logger (O-6: Persistent trade logging)
+// =============================================================================
+
+export { TradeLogger } from './persistence/trade-logger';
+export type { TradeLogEntry, TradeLoggerConfig } from './persistence/trade-logger';
 
 // #############################################################################
 // #                                                                           #

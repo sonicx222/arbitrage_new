@@ -12,7 +12,7 @@ Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading
 # Monorepo Structure
 
 ```
-services/          8 microservices (coordinator, 4 partitions, execution, cross-chain, unified-detector) + mempool (orphaned, not wired into dev tooling)
+services/          8 core microservices (coordinator, 4 partitions, execution, cross-chain, unified-detector) + mempool-detector (optional, `npm run dev:mempool`)
 shared/            7 shared packages (types, config, core, ml, security, test-utils, constants)
 contracts/         Smart contracts (Hardhat project)
   src/             Source contracts (base/, interfaces/, mocks/)
@@ -22,7 +22,7 @@ infrastructure/    Docker, deployment configs
 docs/              Architecture, ADRs, strategies, conventions
 ```
 
-**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector, active — factory for P1-P3 partitions)
+**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector, active — factory for P1-P3 partitions), 3008 (Mempool Detector, optional)
 
 **Path Aliases:**
 - `@arbitrage/types` - shared/types
@@ -66,6 +66,7 @@ npm run dev:redis          # Start Redis via Docker
 npm run dev:redis:memory   # In-memory Redis (no Docker)
 npm run dev:all            # 7 services with hot reload (coord, P1-P4, cross-chain, execution)
 npm run dev:minimal        # Coordinator + P1 + Execution only
+npm run dev:mempool        # Mempool detector only (optional, port 3008)
 npm run dev:status         # Check running services
 npm run dev:stop           # Stop all services
 ```
@@ -75,6 +76,7 @@ npm run dev:stop           # Stop all services
 npm run generate:error-selectors   # Generate error selectors from ABI
 npm run validate:mev-setup          # Validate MEV config for all chains
 npm run validate:routers             # Verify on-chain router approvals
+npm run validate:deployment          # Pre-deploy checks (Redis, RPC, contracts, gas)
 npm run lint:fix                    # Auto-fix linting
 ```
 
@@ -200,19 +202,23 @@ await expect(tx).to.be.reverted; // Don't do this
 ## Architecture
 - `/docs/architecture/ARCHITECTURE_V2.md` - System design (v2.8)
 - `/docs/architecture/CURRENT_STATE.md` - Service inventory
-- `/docs/architecture/adr/README.md` - 27 ADRs with decisions
+- `/docs/architecture/adr/README.md` - 32 ADRs with decisions
 
-## Development
+## Development & Deployment
 - `/docs/local-development.md` - Setup guide
 - `/docs/CONFIGURATION.md` - All config options
 - `/docs/API.md` - Service endpoints
+- `infrastructure/fly/` - Fly.io deployment configs (coordinator, execution-engine, partition-high-value)
+- `infrastructure/docker/docker-compose.testnet.yml` - Testnet deployment (SIMULATION_MODE=true)
 
 ## Patterns
 - `/docs/strategies.md` - Arbitrage strategies
 - `/docs/agent/code_conventions.md` - Code patterns
 
 ## Analysis Reports
-- `.agent-reports/FINAL_UNIFIED_REPORT.md` - Latest deep analysis (28 findings, grade B+)
+- `docs/reports/CRITICAL_PROJECT_ASSESSMENT_2026-02-18.md` - Full-system assessment (65 findings, 47/47 remediated)
+- `docs/reports/IMPLEMENTATION_PLAN_2026-02-18.md` - Remediation plan (47 items, all complete)
+- `.agent-reports/FINAL_UNIFIED_REPORT.md` - Earlier deep analysis (28 findings, grade B+)
 - `.agent-reports/partition-asia-fast-deep-analysis.md` - partition-asia-fast deep analysis (26 findings, grade B+)
 - `.agent-reports/partition-high-value-deep-analysis.md` - partition-high-value deep analysis (22 findings, grade B+)
 
@@ -237,7 +243,7 @@ When making changes:
 - `.tsbuildinfo` cache can cause stale builds -- clean with `npm run clean:cache`
 
 **Dockerfile Issues:**
-- Multiple Dockerfiles across services use older Node versions (18/20) despite `engines: ">=22.0.0"` -- check and align when modifying any Dockerfile
+- All Dockerfiles use `node:22-alpine` matching `engines: ">=22.0.0"` — keep aligned when adding new services
 - Service-local Dockerfiles (e.g., `services/partition-asia-fast/Dockerfile`) may differ from infrastructure Dockerfiles (`infrastructure/docker/docker-compose.partition.yml` uses `services/unified-detector/Dockerfile`)
 
 **Redis Issues:**
@@ -251,6 +257,10 @@ When making changes:
 - Flash loan callbacks are implicitly protected by calling function's `nonReentrant`
 - `totalProfits` accumulator mixes denominations (legacy) -- use `tokenProfits` per-asset mapping instead
 - Token address configs vary by chain -- check `contracts/scripts/lib/addresses.ts` for coverage gaps
+- `minimumProfit` is enforced non-zero (setter rejects 0) -- prevents grief attacks via break-even paths
+- Router validation is per-step (no caching) -- each step independently checks `approvedRouters.contains()`
+- Profit tracking follows CEI pattern -- state updates before external interactions
+- `withdrawETH()` uses configurable gas limit (default 50000) -- supports multisig wallets
 
 **Testing Patterns (Jest for services):**
 - Constructor DI pattern for testable classes (not factory functions)
@@ -264,7 +274,6 @@ When making changes:
 - Real logic lives in `shared/core/src/partition-service-utils.ts` (~1288 lines): health server, shutdown, event handlers, env config
 - P4 (partition-solana) does NOT use the factory -- manual 503-line `index.ts` with Solana-specific RPC handling
 - Shared test mocks in `shared/test-utils/src/mocks/partition-service.mock.ts` exist but are incomplete (missing `createPartitionEntry`, `runPartitionService`) -- tests use inline mocks instead
-- `shared/core/__tests__/unit/partition-service-utils.test.ts` has pre-existing `createPartitionEntry` test failures (11 tests, `getPartition` mock issue)
 
 **Testing Patterns (Hardhat for contracts):**
 - Use `loadFixture(deployContractsFixture)` for every test (snapshot/restore)
@@ -273,9 +282,33 @@ When making changes:
 - Test both authorized and unauthorized callers for every admin function
 - Include reentrancy tests using MockMaliciousRouter for all flash loan contracts
 
+**ESLint Enforcement (eslint.config.js):**
+- `no-explicit-any` is `error` in source files (off in test files) -- use proper types
+- `no-restricted-syntax` warns on `|| 0` and `|| 0n` patterns -- use `?? 0` / `?? 0n` instead
+- `no-restricted-imports` warns on `../../shared/*` cross-package relative imports -- use `@arbitrage/*` aliases
+- Run `npm run lint:fix` to auto-fix; remaining warnings must be fixed manually
+
 **Path Aliases:**
 - Use `@arbitrage/*` and `@shared/*` imports, not relative paths across packages
 - Must run `npm run build:deps` after changing shared packages
+
+# Security & Operational Patterns
+
+**Redis Streams HMAC signing:** When `STREAM_SIGNING_KEY` env var is set, all Redis Streams messages are signed with HMAC-SHA256 and verified on read with `crypto.timingSafeEqual`. Unsigned/invalid messages are rejected. See `shared/core/src/redis-streams.ts`.
+
+**Rate limiting fails CLOSED:** When Redis is unavailable, rate limiter returns `exceeded: true` (denies requests). Never fail open — an attacker could crash Redis then flood endpoints.
+
+**Feature flags require explicit opt-in:** Experimental features (`FEATURE_FLASH_LOAN_AGGREGATOR`, `FEATURE_COMMIT_REVEAL`, `FEATURE_COMMIT_REVEAL_REDIS`) use `=== 'true'` pattern, NOT `!== 'false'`. Unset env vars = feature disabled.
+
+**Auth requires NODE_ENV whitelist:** Auth can only be disabled in `test` or `development` NODE_ENV. `validateAuthEnvironment()` throws on startup if auth is misconfigured in production.
+
+**Pre-deployment validation:** Always run `npm run validate:deployment` before deploying. Checks: env config, private key format, MEV providers, Redis connectivity, contract addresses, RPC latency, gas price sanity.
+
+**OpenTelemetry tracing:** When `OTEL_EXPORTER_ENDPOINT` is set, Pino logs are also exported via OTLP/HTTP. Trace context (`traceId`, `spanId`, `parentSpanId`) propagates across Redis Streams for cross-service correlation. See `shared/core/src/tracing/` and `shared/core/src/logging/otel-transport.ts`.
+
+**Trade logging:** Execution engine writes all trades to append-only JSONL files (`trades-YYYY-MM-DD.jsonl`) via `TradeLogger`. Daily rotation, async writes. Persists beyond Redis TTLs.
+
+**Bridge recovery:** `BridgeRecoveryManager` in execution engine periodically scans Redis for `bridge:recovery:*` keys, classifies by age/status, and attempts recovery. Concurrency-limited (maxConcurrentRecoveries: 3).
 
 # Agent Spawning Lessons
 
@@ -312,6 +345,13 @@ Patterns learned from running multi-agent deep analysis and fix workflows on thi
 - Compile after source changes to catch errors early (`npx hardhat compile`)
 - Run full test suite after all fixes to catch interaction effects
 - Some "simple" assertion fixes require understanding OZ version and mock internals
+
+## Batch Remediation Patterns
+- Organize fixes into dependency-ordered batches (contracts first, then shared packages, then services)
+- Run `npm run typecheck` after each batch to catch cross-package interaction effects early
+- Independent fixes within a batch can be parallelized across agents, but contract changes must compile before test changes
+- Always update tracking documents (implementation plan, assessment) after each completed batch — prevents duplicate work across sessions
+- For large-scale test assertion fixes, group by file and apply all changes in one pass per file — avoid repeated reads
 
 ## Shutdown and Server Close Patterns
 - Use the `safeResolve` flag pattern (see `closeServerWithTimeout` in `partition-service-utils.ts`) for server shutdown timeouts

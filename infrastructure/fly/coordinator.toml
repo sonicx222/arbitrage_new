@@ -1,0 +1,79 @@
+# Fly.io Deployment Configuration for Coordinator (Primary)
+#
+# Service: Coordinator (Primary Instance)
+# Region: sjc (San Jose, US-West)
+# Purpose: Main coordinator dashboard - orchestrates all partitions and services
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   fly deploy -c infrastructure/fly/coordinator.toml
+#
+# Notes:
+# - Primary coordinator instance (IS_STANDBY=false)
+# - Uses Redis-based leader election for failover with standby
+# - Exposes port 3000 for dashboard and API access
+# - Health check on /health (matches coordinator Dockerfile)
+
+app = "arbitrage-coordinator"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "services/coordinator/Dockerfile"
+  [build.args]
+    NODE_ENV = "production"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  REGION_ID = "us-west1"
+  LOG_LEVEL = "info"
+  ENABLE_CROSS_REGION_HEALTH = "true"
+  IS_STANDBY = "false"
+  CAN_BECOME_LEADER = "true"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 40
+
+# NOTE: Using [http_service] and [checks] (Machines V2 syntax)
+
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    port = 3000
+    timeout = "5s"
+    type = "http"
+
+[processes]
+  app = "node dist/index.js"
+
+[deploy]
+  release_command = "echo 'Coordinator primary deploying...'"
+  strategy = "rolling"
+
+# Secrets to configure (via fly secrets set):
+# REDIS_URL - Upstash Redis connection URL

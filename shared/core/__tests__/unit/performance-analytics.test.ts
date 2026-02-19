@@ -248,7 +248,8 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const metrics = await engine.calculateMetrics('daily');
       // With consistently positive returns, Sharpe should be positive
-      expect(metrics.sharpeRatio).toBeDefined();
+      expect(typeof metrics.sharpeRatio).toBe('number');
+      expect(metrics.sharpeRatio).not.toBeNaN();
     });
 
     it('should calculate profit factor', async () => {
@@ -318,8 +319,8 @@ describe('PerformanceAnalyticsEngine', () => {
       }));
 
       const metrics = await engine.calculateMetrics('daily');
-      expect(metrics.byStrategy['cross-dex']).toBeDefined();
-      expect(metrics.byStrategy['flash-loan']).toBeDefined();
+      expect(typeof metrics.byStrategy['cross-dex']).toBe('object');
+      expect(typeof metrics.byStrategy['flash-loan']).toBe('object');
       expect(metrics.byStrategy['cross-dex'].trades).toBe(1);
     });
 
@@ -343,8 +344,8 @@ describe('PerformanceAnalyticsEngine', () => {
       }));
 
       const metrics = await engine.calculateMetrics('daily');
-      expect(metrics.byAsset['ETH']).toBeDefined();
-      expect(metrics.byAsset['BTC']).toBeDefined();
+      expect(typeof metrics.byAsset['ETH']).toBe('object');
+      expect(typeof metrics.byAsset['BTC']).toBe('object');
     });
 
     it('should handle time-of-day attribution', async () => {
@@ -377,7 +378,7 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const alerts = engine.getPerformanceAlerts(metrics);
       const drawdownAlert = alerts.find(a => a.metric === 'drawdown');
-      expect(drawdownAlert).toBeDefined();
+      expect(drawdownAlert).not.toBeUndefined();
       expect(drawdownAlert!.level).toBe('warning');
     });
 
@@ -404,7 +405,7 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const alerts = engine.getPerformanceAlerts(metrics);
       const sharpeAlert = alerts.find(a => a.metric === 'sharpe_ratio');
-      expect(sharpeAlert).toBeDefined();
+      expect(sharpeAlert).toEqual(expect.objectContaining({ metric: 'sharpe_ratio' }));
     });
 
     it('should generate low win rate alert', () => {
@@ -417,7 +418,7 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const alerts = engine.getPerformanceAlerts(metrics);
       const winRateAlert = alerts.find(a => a.metric === 'win_rate');
-      expect(winRateAlert).toBeDefined();
+      expect(winRateAlert).toEqual(expect.objectContaining({ metric: 'win_rate' }));
     });
 
     it('should generate high volatility alert', () => {
@@ -430,7 +431,7 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const alerts = engine.getPerformanceAlerts(metrics);
       const volAlert = alerts.find(a => a.metric === 'volatility');
-      expect(volAlert).toBeDefined();
+      expect(volAlert).toEqual(expect.objectContaining({ metric: 'volatility' }));
     });
 
     it('should return no alerts for healthy metrics', () => {
@@ -462,7 +463,8 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const comparison = await engine.compareWithBenchmark(metrics, 'ETH', 'monthly');
       expect(comparison.benchmark).toBe('ETH');
-      expect(comparison.excessReturn).toBeDefined();
+      expect(typeof comparison.excessReturn).toBe('number');
+      expect(comparison.excessReturn).not.toBeNaN();
       expect(comparison.strategyReturn).toBe(0.1);
     });
   });
@@ -481,8 +483,10 @@ describe('PerformanceAnalyticsEngine', () => {
 
       const attribution = await engine.generateAttributionAnalysis(metrics, 'ETH');
       expect(attribution.totalReturn).toBe(1000);
-      expect(attribution.marketContribution).toBeDefined();
-      expect(attribution.strategyContribution).toBeDefined();
+      expect(typeof attribution.marketContribution).toBe('number');
+      expect(attribution.marketContribution).not.toBeNaN();
+      expect(typeof attribution.strategyContribution).toBe('number');
+      expect(attribution.strategyContribution).not.toBeNaN();
     });
   });
 
@@ -494,12 +498,12 @@ describe('PerformanceAnalyticsEngine', () => {
     it('should generate a complete report', async () => {
       const report = await engine.generateReport('daily');
 
-      expect(report.generatedAt).toBeDefined();
+      expect(typeof report.generatedAt).toBe('string');
       expect(report.period).toBe('daily');
-      expect(report.summary).toBeDefined();
-      expect(report.riskMetrics).toBeDefined();
-      expect(report.efficiencyMetrics).toBeDefined();
-      expect(report.alerts).toBeDefined();
+      expect(typeof report.summary).toBe('object');
+      expect(typeof report.riskMetrics).toBe('object');
+      expect(typeof report.efficiencyMetrics).toBe('object');
+      expect(Array.isArray(report.alerts)).toBe(true);
 
       // Should cache report in Redis
       expect(mockRedisInstance.set).toHaveBeenCalled();
@@ -532,7 +536,7 @@ describe('PerformanceAnalyticsEngine', () => {
         averageTradeDuration: expect.any(Number)
       }));
       expect(Array.isArray(report.alerts)).toBe(true);
-      expect(report.attribution).toBeDefined();
+      expect(typeof report.attribution).toBe('object');
       expect(Array.isArray(report.benchmarks)).toBe(true);
       expect(typeof report.strategyBreakdown).toBe('object');
       expect(typeof report.assetBreakdown).toBe('object');

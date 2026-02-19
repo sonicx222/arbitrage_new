@@ -7,9 +7,12 @@
 #   ./deploy.sh [service] [--secrets]
 #
 # Services:
-#   l2-fast            Deploy L2-Fast partition (Arbitrum, Optimism, Base)
-#   solana             Deploy Solana partition
+#   coordinator        Deploy Coordinator (primary)
 #   coordinator-standby Deploy Coordinator standby instance
+#   execution-engine   Deploy Execution Engine
+#   l2-fast            Deploy L2-Fast partition (Arbitrum, Optimism, Base)
+#   high-value         Deploy High-Value partition (Ethereum, zkSync, Linea)
+#   solana             Deploy Solana partition
 #   all                Deploy all Fly.io services
 #
 # Options:
@@ -107,7 +110,7 @@ setup_l2_fast_secrets() {
 }
 
 # Set up secrets for Coordinator standby
-setup_coordinator_secrets() {
+setup_coordinator_standby_secrets() {
     log_info "Setting up secrets for Coordinator standby..."
     log_warn "Secrets will be hidden from terminal output for security"
 
@@ -120,6 +123,119 @@ setup_coordinator_secrets() {
         -c "$SCRIPT_DIR/coordinator-standby.toml"
 
     log_info "Secrets set for Coordinator standby"
+}
+
+# Set up secrets for Coordinator (primary)
+setup_coordinator_secrets() {
+    log_info "Setting up secrets for Coordinator (primary)..."
+    log_warn "Secrets will be hidden from terminal output for security"
+
+    echo -n "Enter REDIS_URL (Upstash Redis connection URL): "
+    read -rs REDIS_URL
+    echo ""
+
+    fly secrets set \
+        REDIS_URL="$REDIS_URL" \
+        -c "$SCRIPT_DIR/coordinator.toml"
+
+    log_info "Secrets set for Coordinator (primary)"
+}
+
+# Set up secrets for Execution Engine
+setup_execution_engine_secrets() {
+    log_info "Setting up secrets for Execution Engine..."
+    log_warn "Secrets will be hidden from terminal output for security"
+
+    echo -n "Enter REDIS_URL (Upstash Redis connection URL): "
+    read -rs REDIS_URL
+    echo ""
+
+    echo -n "Enter WALLET_PRIVATE_KEY (primary wallet): "
+    read -rs WALLET_PRIVATE_KEY
+    echo ""
+
+    echo -n "Enter ETHEREUM_RPC_URL: "
+    read -rs ETHEREUM_RPC_URL
+    echo ""
+
+    echo -n "Enter BSC_RPC_URL: "
+    read -rs BSC_RPC_URL
+    echo ""
+
+    echo -n "Enter ARBITRUM_RPC_URL: "
+    read -rs ARBITRUM_RPC_URL
+    echo ""
+
+    echo -n "Enter BASE_RPC_URL: "
+    read -rs BASE_RPC_URL
+    echo ""
+
+    echo -n "Enter POLYGON_RPC_URL: "
+    read -rs POLYGON_RPC_URL
+    echo ""
+
+    echo -n "Enter OPTIMISM_RPC_URL: "
+    read -rs OPTIMISM_RPC_URL
+    echo ""
+
+    fly secrets set \
+        REDIS_URL="$REDIS_URL" \
+        WALLET_PRIVATE_KEY="$WALLET_PRIVATE_KEY" \
+        ETHEREUM_RPC_URL="$ETHEREUM_RPC_URL" \
+        BSC_RPC_URL="$BSC_RPC_URL" \
+        ARBITRUM_RPC_URL="$ARBITRUM_RPC_URL" \
+        BASE_RPC_URL="$BASE_RPC_URL" \
+        POLYGON_RPC_URL="$POLYGON_RPC_URL" \
+        OPTIMISM_RPC_URL="$OPTIMISM_RPC_URL" \
+        -c "$SCRIPT_DIR/execution-engine.toml"
+
+    log_info "Secrets set for Execution Engine"
+}
+
+# Set up secrets for High-Value partition
+setup_high_value_secrets() {
+    log_info "Setting up secrets for High-Value partition..."
+    log_warn "Secrets will be hidden from terminal output for security"
+
+    echo -n "Enter REDIS_URL (Upstash Redis connection URL): "
+    read -rs REDIS_URL
+    echo ""
+
+    echo -n "Enter ETHEREUM_WS_URL: "
+    read -rs ETHEREUM_WS_URL
+    echo ""
+
+    echo -n "Enter ETHEREUM_RPC_URL: "
+    read -rs ETHEREUM_RPC_URL
+    echo ""
+
+    echo -n "Enter ZKSYNC_WS_URL: "
+    read -rs ZKSYNC_WS_URL
+    echo ""
+
+    echo -n "Enter ZKSYNC_RPC_URL: "
+    read -rs ZKSYNC_RPC_URL
+    echo ""
+
+    echo -n "Enter LINEA_WS_URL: "
+    read -rs LINEA_WS_URL
+    echo ""
+
+    echo -n "Enter LINEA_RPC_URL: "
+    read -rs LINEA_RPC_URL
+    echo ""
+
+    fly secrets set \
+        REDIS_URL="$REDIS_URL" \
+        ETHEREUM_WS_URL="$ETHEREUM_WS_URL" \
+        ETHEREUM_RPC_URL="$ETHEREUM_RPC_URL" \
+        ZKSYNC_WS_URL="$ZKSYNC_WS_URL" \
+        ZKSYNC_RPC_URL="$ZKSYNC_RPC_URL" \
+        LINEA_WS_URL="$LINEA_WS_URL" \
+        LINEA_RPC_URL="$LINEA_RPC_URL" \
+        -c "$SCRIPT_DIR/partition-high-value.toml"
+
+    log_info "Secrets set for High-Value partition"
 }
 
 # Verify deployment health
@@ -235,6 +351,129 @@ deploy_coordinator_standby() {
     log_info "Coordinator standby deployed and verified successfully"
 }
 
+# Deploy Coordinator (primary)
+deploy_coordinator() {
+    log_info "Deploying Coordinator (primary)..."
+
+    cd "$PROJECT_ROOT"
+
+    if [ "$DRY_RUN" = true ]; then
+        log_info "[DRY-RUN] Would deploy: fly deploy -c $SCRIPT_DIR/coordinator.toml"
+        return 0
+    fi
+
+    # Verify config file exists
+    if [ ! -f "$SCRIPT_DIR/coordinator.toml" ]; then
+        log_error "Config file not found: $SCRIPT_DIR/coordinator.toml"
+        return 1
+    fi
+
+    # Create app if it doesn't exist
+    if ! fly apps list 2>/dev/null | grep -q "arbitrage-coordinator"; then
+        log_info "Creating app: arbitrage-coordinator"
+        if ! fly apps create arbitrage-coordinator --org personal; then
+            log_error "Failed to create app: arbitrage-coordinator"
+            return 1
+        fi
+    fi
+
+    # Deploy with error handling
+    if ! fly deploy -c "$SCRIPT_DIR/coordinator.toml"; then
+        log_error "Deployment failed for Coordinator (primary)"
+        return 1
+    fi
+
+    # Verify deployment health
+    if ! verify_deployment_health "arbitrage-coordinator" "$SCRIPT_DIR/coordinator.toml"; then
+        log_error "Deployment verification failed for Coordinator (primary)"
+        return 1
+    fi
+
+    log_info "Coordinator (primary) deployed and verified successfully"
+}
+
+# Deploy Execution Engine
+deploy_execution_engine() {
+    log_info "Deploying Execution Engine..."
+
+    cd "$PROJECT_ROOT"
+
+    if [ "$DRY_RUN" = true ]; then
+        log_info "[DRY-RUN] Would deploy: fly deploy -c $SCRIPT_DIR/execution-engine.toml"
+        return 0
+    fi
+
+    # Verify config file exists
+    if [ ! -f "$SCRIPT_DIR/execution-engine.toml" ]; then
+        log_error "Config file not found: $SCRIPT_DIR/execution-engine.toml"
+        return 1
+    fi
+
+    # Create app if it doesn't exist
+    if ! fly apps list 2>/dev/null | grep -q "arbitrage-execution-engine"; then
+        log_info "Creating app: arbitrage-execution-engine"
+        if ! fly apps create arbitrage-execution-engine --org personal; then
+            log_error "Failed to create app: arbitrage-execution-engine"
+            return 1
+        fi
+    fi
+
+    # Deploy with error handling
+    if ! fly deploy -c "$SCRIPT_DIR/execution-engine.toml"; then
+        log_error "Deployment failed for Execution Engine"
+        return 1
+    fi
+
+    # Verify deployment health
+    if ! verify_deployment_health "arbitrage-execution-engine" "$SCRIPT_DIR/execution-engine.toml"; then
+        log_error "Deployment verification failed for Execution Engine"
+        return 1
+    fi
+
+    log_info "Execution Engine deployed and verified successfully"
+}
+
+# Deploy High-Value partition
+deploy_high_value() {
+    log_info "Deploying High-Value partition..."
+
+    cd "$PROJECT_ROOT"
+
+    if [ "$DRY_RUN" = true ]; then
+        log_info "[DRY-RUN] Would deploy: fly deploy -c $SCRIPT_DIR/partition-high-value.toml"
+        return 0
+    fi
+
+    # Verify config file exists
+    if [ ! -f "$SCRIPT_DIR/partition-high-value.toml" ]; then
+        log_error "Config file not found: $SCRIPT_DIR/partition-high-value.toml"
+        return 1
+    fi
+
+    # Create app if it doesn't exist
+    if ! fly apps list 2>/dev/null | grep -q "arbitrage-high-value"; then
+        log_info "Creating app: arbitrage-high-value"
+        if ! fly apps create arbitrage-high-value --org personal; then
+            log_error "Failed to create app: arbitrage-high-value"
+            return 1
+        fi
+    fi
+
+    # Deploy with error handling
+    if ! fly deploy -c "$SCRIPT_DIR/partition-high-value.toml"; then
+        log_error "Deployment failed for High-Value partition"
+        return 1
+    fi
+
+    # Verify deployment health
+    if ! verify_deployment_health "arbitrage-high-value" "$SCRIPT_DIR/partition-high-value.toml"; then
+        log_error "Deployment verification failed for High-Value partition"
+        return 1
+    fi
+
+    log_info "High-Value partition deployed and verified successfully"
+}
+
 # Set up secrets for Solana partition
 setup_solana_secrets() {
     log_info "Setting up secrets for Solana partition..."
@@ -307,21 +546,42 @@ show_status() {
     log_info "Fly.io Services Status:"
     echo ""
 
-    if fly apps list | grep -q "arbitrage-l2-fast"; then
+    local apps_list
+    apps_list=$(fly apps list 2>/dev/null || true)
+
+    if echo "$apps_list" | grep -q "arbitrage-coordinator[^-]"; then
+        echo "=== Coordinator (Primary) ==="
+        fly status -c "$SCRIPT_DIR/coordinator.toml" 2>/dev/null || echo "Not deployed"
+        echo ""
+    fi
+
+    if echo "$apps_list" | grep -q "arbitrage-coordinator-standby"; then
+        echo "=== Coordinator Standby ==="
+        fly status -c "$SCRIPT_DIR/coordinator-standby.toml" 2>/dev/null || echo "Not deployed"
+        echo ""
+    fi
+
+    if echo "$apps_list" | grep -q "arbitrage-execution-engine"; then
+        echo "=== Execution Engine ==="
+        fly status -c "$SCRIPT_DIR/execution-engine.toml" 2>/dev/null || echo "Not deployed"
+        echo ""
+    fi
+
+    if echo "$apps_list" | grep -q "arbitrage-l2-fast"; then
         echo "=== L2-Fast Partition ==="
         fly status -c "$SCRIPT_DIR/partition-l2-fast.toml" 2>/dev/null || echo "Not deployed"
         echo ""
     fi
 
-    if fly apps list | grep -q "arbitrage-solana"; then
-        echo "=== Solana Partition ==="
-        fly status -c "$SCRIPT_DIR/partition-solana.toml" 2>/dev/null || echo "Not deployed"
+    if echo "$apps_list" | grep -q "arbitrage-high-value"; then
+        echo "=== High-Value Partition ==="
+        fly status -c "$SCRIPT_DIR/partition-high-value.toml" 2>/dev/null || echo "Not deployed"
         echo ""
     fi
 
-    if fly apps list | grep -q "arbitrage-coordinator-standby"; then
-        echo "=== Coordinator Standby ==="
-        fly status -c "$SCRIPT_DIR/coordinator-standby.toml" 2>/dev/null || echo "Not deployed"
+    if echo "$apps_list" | grep -q "arbitrage-solana"; then
+        echo "=== Solana Partition ==="
+        fly status -c "$SCRIPT_DIR/partition-solana.toml" 2>/dev/null || echo "Not deployed"
         echo ""
     fi
 }
@@ -335,7 +595,7 @@ main() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
-            l2-fast|solana|coordinator-standby|all|status)
+            coordinator|coordinator-standby|execution-engine|l2-fast|high-value|solana|all|status)
                 SERVICE="$1"
                 shift
                 ;;
@@ -351,9 +611,12 @@ main() {
                 echo "Usage: $0 [service] [--secrets] [--dry-run]"
                 echo ""
                 echo "Services:"
-                echo "  l2-fast              Deploy L2-Fast partition"
-                echo "  solana               Deploy Solana partition"
+                echo "  coordinator          Deploy Coordinator (primary)"
                 echo "  coordinator-standby  Deploy Coordinator standby"
+                echo "  execution-engine     Deploy Execution Engine"
+                echo "  l2-fast              Deploy L2-Fast partition"
+                echo "  high-value           Deploy High-Value partition"
+                echo "  solana               Deploy Solana partition"
                 echo "  all                  Deploy all services"
                 echo "  status               Show status of all services"
                 echo ""
@@ -378,24 +641,44 @@ main() {
     check_fly_auth
 
     case $SERVICE in
+        coordinator)
+            [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
+            deploy_coordinator
+            ;;
+        coordinator-standby)
+            [ "$SETUP_SECRETS" = true ] && setup_coordinator_standby_secrets
+            deploy_coordinator_standby
+            ;;
+        execution-engine)
+            [ "$SETUP_SECRETS" = true ] && setup_execution_engine_secrets
+            deploy_execution_engine
+            ;;
         l2-fast)
             [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
             deploy_l2_fast
+            ;;
+        high-value)
+            [ "$SETUP_SECRETS" = true ] && setup_high_value_secrets
+            deploy_high_value
             ;;
         solana)
             [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
             deploy_solana
             ;;
-        coordinator-standby)
-            [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
-            deploy_coordinator_standby
-            ;;
         all)
-            [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
-            [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
+            # Set up secrets for all services if requested
             [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_coordinator_standby_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_execution_engine_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_high_value_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
+            # Deploy in dependency order: partitions first, then execution, then coordinator
             deploy_l2_fast
+            deploy_high_value
             deploy_solana
+            deploy_execution_engine
+            deploy_coordinator
             deploy_coordinator_standby
             ;;
         status)

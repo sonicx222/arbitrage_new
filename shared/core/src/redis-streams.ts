@@ -14,6 +14,7 @@
  * - Automatic stream trimming to manage memory
  */
 
+import crypto from 'crypto';
 import Redis from 'ioredis';
 import { RedisStreams } from '@arbitrage/types';
 
@@ -31,6 +32,8 @@ export type RedisStreamsConstructor = new (url: string, options: object) => Redi
  */
 export interface RedisStreamsClientDeps {
   RedisImpl?: RedisStreamsConstructor;
+  /** HMAC signing key for message authentication (S-5). Omit for dev mode (no signing). */
+  signingKey?: string;
 }
 import { createLogger, Logger } from './logger';
 import { clearTimeoutSafe } from './lifecycle-utils';
@@ -310,6 +313,8 @@ export class RedisStreamsClient {
   // P2-FIX: Use proper Logger type
   private logger: Logger;
   private batchers: Map<string, StreamBatcher> = new Map();
+  /** S-5: HMAC signing key for message authentication. Null = signing disabled (dev mode). */
+  private signingKey: string | null;
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -343,6 +348,7 @@ export class RedisStreamsClient {
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
     this.logger = createLogger('redis-streams');
+    this.signingKey = deps?.signingKey ?? null;
 
     const options: any = {
       password,
@@ -377,6 +383,30 @@ export class RedisStreamsClient {
   }
 
   // ===========================================================================
+  // S-5: HMAC Message Signing
+  // ===========================================================================
+
+  /**
+   * Compute HMAC-SHA256 signature for message data.
+   * Returns empty string if signing is disabled (no key configured).
+   */
+  private signMessage(data: string): string {
+    if (!this.signingKey) return '';
+    return crypto.createHmac('sha256', this.signingKey).update(data).digest('hex');
+  }
+
+  /**
+   * Verify HMAC-SHA256 signature using constant-time comparison.
+   * Returns true if signing is disabled (dev mode passthrough).
+   */
+  private verifySignature(data: string, signature: string): boolean {
+    if (!this.signingKey) return true;
+    const expected = this.signMessage(data);
+    if (expected.length !== signature.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  }
+
+  // ===========================================================================
   // XADD - Add message to stream
   // ===========================================================================
 
@@ -389,6 +419,9 @@ export class RedisStreamsClient {
     this.validateStreamName(streamName);
 
     const serialized = JSON.stringify(message);
+    // S-5: Compute HMAC signature for message authentication
+    const signature = this.signMessage(serialized);
+    const sigFields = signature ? ['sig', signature] : [];
     const maxRetries = options.maxRetries ?? 3;
     let lastError: Error | null = null;
 
@@ -405,7 +438,8 @@ export class RedisStreamsClient {
               streamName,
               'MAXLEN', '~', options.maxLen.toString(),
               id,
-              'data', serialized
+              'data', serialized,
+              ...sigFields
             ) as string;
           } else {
             // Exact trimming (slower but precise)
@@ -413,11 +447,12 @@ export class RedisStreamsClient {
               streamName,
               'MAXLEN', options.maxLen.toString(),
               id,
-              'data', serialized
+              'data', serialized,
+              ...sigFields
             ) as string;
           }
         } else {
-          messageId = await this.client.xadd(streamName, id, 'data', serialized) as string;
+          messageId = await this.client.xadd(streamName, id, 'data', serialized, ...sigFields) as string;
         }
 
         return messageId;
@@ -788,10 +823,32 @@ export class RedisStreamsClient {
       if (!entries) continue;
 
       for (const [id, fields] of entries) {
-        // Parse fields array into object
+        // First pass: extract raw field values for signature verification
+        let rawData: string | undefined;
+        let sig: string | undefined;
+
+        for (let i = 0; i < fields.length; i += 2) {
+          const key = fields[i] as string;
+          if (key === 'data') rawData = fields[i + 1] as string;
+          if (key === 'sig') sig = fields[i + 1] as string;
+        }
+
+        // S-5: Verify HMAC signature when signing is enabled
+        if (this.signingKey && sig && rawData) {
+          if (!this.verifySignature(rawData, sig)) {
+            this.logger.warn('Invalid message signature, rejecting', { messageId: id });
+            continue;
+          }
+        } else if (this.signingKey && !sig) {
+          this.logger.warn('Unsigned message received with signing enabled, rejecting', { messageId: id });
+          continue;
+        }
+
+        // Second pass: parse fields into object (skip 'sig' field from output)
         const data: Record<string, unknown> = {};
         for (let i = 0; i < fields.length; i += 2) {
-          const key = fields[i];
+          const key = fields[i] as string;
+          if (key === 'sig') continue; // Don't include signature in parsed data
           const value = fields[i + 1];
           try {
             data[key] = JSON.parse(value);
@@ -1172,9 +1229,14 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     redisPassword = resolveRedisPassword(password);
   }
 
+  // S-5: Resolve signing key from environment
+  const signingKey = process.env.STREAM_SIGNING_KEY?.trim() || undefined;
+
   initializingPromise = (async () => {
     try {
-      const instance = new RedisStreamsClient(redisUrl, redisPassword);
+      const instance = new RedisStreamsClient(redisUrl, redisPassword, {
+        signingKey
+      });
 
       // Verify connection
       const isHealthy = await instance.ping();

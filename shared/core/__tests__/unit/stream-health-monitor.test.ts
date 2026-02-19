@@ -84,16 +84,16 @@ describe('StreamHealthMonitor', () => {
     it('should check health of all monitored streams', async () => {
       const health = await monitor.checkStreamHealth();
 
-      expect(health).toBeDefined();
-      expect(health.overall).toBeDefined();
-      expect(health.streams).toBeDefined();
+      expect(typeof health).toBe('object');
+      expect(['healthy', 'warning', 'critical', 'unknown']).toContain(health.overall);
+      expect(typeof health.streams).toBe('object');
       expect(health.timestamp).toBeGreaterThan(0);
     });
 
     it('should report stream length for each stream', async () => {
       const health = await monitor.checkStreamHealth();
 
-      expect(health.streams['stream:price-updates']).toBeDefined();
+      expect(typeof health.streams['stream:price-updates']).toBe('object');
       expect(health.streams['stream:price-updates'].length).toBe(100);
     });
 
@@ -114,7 +114,7 @@ describe('StreamHealthMonitor', () => {
     it('should calculate consumer lag', async () => {
       const lagInfo = await monitor.getStreamLag('stream:price-updates', 'arbitrage-group');
 
-      expect(lagInfo).toBeDefined();
+      expect(typeof lagInfo).toBe('object');
       expect(lagInfo.pendingMessages).toBe(5);
     });
 
@@ -149,8 +149,9 @@ describe('StreamHealthMonitor', () => {
     it('should track stream throughput', async () => {
       const metrics = await monitor.getStreamMetrics('stream:price-updates');
 
-      expect(metrics).toBeDefined();
-      expect(metrics.messagesPerSecond).toBeDefined();
+      expect(typeof metrics).toBe('object');
+      expect(typeof metrics.messagesPerSecond).toBe('number');
+      expect(metrics.messagesPerSecond).not.toBeNaN();
     });
 
     it('should track consumer group health', async () => {
@@ -159,7 +160,7 @@ describe('StreamHealthMonitor', () => {
         'arbitrage-group'
       );
 
-      expect(groupHealth).toBeDefined();
+      expect(typeof groupHealth).toBe('object');
       expect(groupHealth.consumers).toBeGreaterThanOrEqual(0);
     });
   });
@@ -203,11 +204,13 @@ describe('StreamHealthMonitor', () => {
     it('should provide summary stats for dashboard', async () => {
       const summary = await monitor.getSummary();
 
-      expect(summary).toBeDefined();
-      expect(summary.totalStreams).toBeDefined();
-      expect(summary.healthyStreams).toBeDefined();
-      expect(summary.totalPending).toBeDefined();
-      expect(summary.averageLag).toBeDefined();
+      expect(typeof summary).toBe('object');
+      expect(typeof summary.totalStreams).toBe('number');
+      expect(typeof summary.healthyStreams).toBe('number');
+      expect(typeof summary.totalPending).toBe('number');
+      expect(typeof summary.averageLag).toBe('number');
+      expect(summary.totalStreams).not.toBeNaN();
+      expect(summary.averageLag).not.toBeNaN();
     });
 
     it('should export metrics in Prometheus format', async () => {
@@ -269,7 +272,7 @@ describe('StreamHealthMonitor Lifecycle', () => {
 
       // Verify client is initialized by making a health check
       const health = await monitor.checkStreamHealth();
-      expect(health).toBeDefined();
+      expect(['healthy', 'warning', 'critical', 'unknown']).toContain(health.overall);
       expect(mockStreamsClient.ping).toHaveBeenCalled();
     });
 
@@ -319,7 +322,7 @@ describe('StreamHealthMonitor Lifecycle', () => {
 
       // After stop, a new checkStreamHealth should re-initialize
       const health = await monitor.checkStreamHealth();
-      expect(health).toBeDefined();
+      expect(['healthy', 'warning', 'critical', 'unknown']).toContain(health.overall);
     });
   });
 });
@@ -349,7 +352,7 @@ describe('StreamHealthMonitor Concurrent Init', () => {
 
     // All should resolve successfully (no double-init errors)
     for (const result of results) {
-      expect(result).toBeDefined();
+      expect(['healthy', 'warning', 'critical', 'unknown']).toContain(result.overall);
       expect(result.timestamp).toBeGreaterThan(0);
     }
 
@@ -443,7 +446,7 @@ describe('StreamLagInfo Types', () => {
       timestamp: Date.now()
     };
 
-    expect(lagInfo.streamName).toBeDefined();
+    expect(typeof lagInfo.streamName).toBe('string');
     expect(lagInfo.status).toBe('healthy');
   });
 });

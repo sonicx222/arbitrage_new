@@ -80,7 +80,9 @@ function buildPorts() {
     // Other services (from shared config)
     EXECUTION_ENGINE: parsePort(process.env.EXECUTION_ENGINE_PORT, portConfig.services['execution-engine'], 'EXECUTION_ENGINE_PORT'),
     CROSS_CHAIN: parsePort(process.env.CROSS_CHAIN_DETECTOR_PORT, portConfig.services['cross-chain-detector'], 'CROSS_CHAIN_DETECTOR_PORT'),
-    UNIFIED_DETECTOR: parsePort(process.env.UNIFIED_DETECTOR_PORT, portConfig.services['unified-detector'], 'UNIFIED_DETECTOR_PORT')
+    UNIFIED_DETECTOR: parsePort(process.env.UNIFIED_DETECTOR_PORT, portConfig.services['unified-detector'], 'UNIFIED_DETECTOR_PORT'),
+    // Optional services
+    MEMPOOL_DETECTOR: parsePort(process.env.MEMPOOL_DETECTOR_PORT, portConfig.services['mempool-detector'], 'MEMPOOL_DETECTOR_PORT')
   };
 }
 

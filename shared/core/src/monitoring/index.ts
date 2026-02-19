@@ -6,6 +6,7 @@
  * - StreamHealthMonitor: Redis Stream lag monitoring
  * - ProviderHealthScorer: RPC provider health scoring (S3.3)
  * - CrossRegionHealthManager: Cross-region failover (ADR-007)
+ * - LatencyTracker: E2E pipeline latency tracking (ADR-022)
  *
  * @module monitoring
  */
@@ -78,3 +79,17 @@ export type {
   CrossRegionHealthConfig,
   GlobalHealthStatus
 } from './cross-region-health';
+
+// Latency Tracker (ADR-022)
+export {
+  LatencyTracker,
+  getLatencyTracker,
+  resetLatencyTracker,
+  PIPELINE_STAGES
+} from './latency-tracker';
+export type {
+  PercentileStats,
+  LatencyMetrics,
+  LatencyTrackerConfig,
+  PipelineStage
+} from './latency-tracker';

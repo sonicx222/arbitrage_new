@@ -48,6 +48,8 @@ import {
   type PositionSize,
   stopAndNullify,
   clearIntervalSafe,
+  TradeLogger,
+  type TradeLoggerConfig,
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
@@ -129,6 +131,12 @@ import {
 } from './services/standby-manager';
 // R2: Extracted risk management orchestrator
 import { RiskManagementOrchestrator, createRiskOrchestrator } from './risk';
+// T-13: Bridge Recovery Manager
+import {
+  BridgeRecoveryManager,
+  createBridgeRecoveryManager,
+  type RecoveryMetrics,
+} from './services/bridge-recovery-manager';
 // Task 3: A/B Testing Framework
 import {
   ABTestingFramework,
@@ -154,6 +162,9 @@ export type { SimulationMetricsSnapshot };
 
 // Re-export circuit breaker status type (Phase 1.3.1)
 export type { CircuitBreakerStatus };
+
+// Re-export bridge recovery metrics type (T-13)
+export type { RecoveryMetrics };
 
 /**
  * Execution Engine Service - Composition Root
@@ -246,6 +257,12 @@ export class ExecutionEngineService {
   // Tracks repeated lock conflicts to detect crashed lock holders
   // P1 FIX: Logger injected via constructor DI (was module-level)
   private lockConflictTracker: LockConflictTracker = null!; // Initialized in constructor
+
+  // O-6: Persistent trade logger for audit and analysis
+  private tradeLogger: TradeLogger | null = null;
+
+  // T-13: Bridge recovery manager for cross-chain failure recovery
+  private bridgeRecoveryManager: BridgeRecoveryManager | null = null;
 
   // P0 Refactoring: Health monitoring extracted to dedicated manager
   // Handles non-hot-path interval operations (health checks, gas cleanup, pending cleanup)
@@ -355,6 +372,17 @@ export class ExecutionEngineService {
 
     // P1 FIX: Initialize lock conflict tracker with injected logger
     this.lockConflictTracker = new LockConflictTracker({ logger: this.logger });
+
+    // O-6: Initialize persistent trade logger
+    const tradeLogEnabled = process.env.TRADE_LOG_ENABLED !== 'false';
+    const tradeLogDir = process.env.TRADE_LOG_DIR ?? './data/trades';
+    this.tradeLogger = new TradeLogger(
+      {
+        enabled: config.tradeLoggerConfig?.enabled ?? tradeLogEnabled,
+        outputDir: config.tradeLoggerConfig?.outputDir ?? tradeLogDir,
+      },
+      this.logger,
+    );
 
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
@@ -569,6 +597,26 @@ export class ExecutionEngineService {
         });
       }
 
+      // T-13: Initialize bridge recovery manager (cross-chain failure recovery)
+      // Requires: Redis client, bridge router factory
+      // Only start in non-simulation mode with a bridge router available
+      if (!this.isSimulationMode && this.redis && this.bridgeRouterFactory) {
+        this.bridgeRecoveryManager = createBridgeRecoveryManager({
+          logger: this.logger,
+          redis: this.redis,
+          bridgeRouterFactory: this.bridgeRouterFactory,
+          config: {
+            enabled: process.env.BRIDGE_RECOVERY_ENABLED !== 'false',
+            checkIntervalMs: parseEnvInt('BRIDGE_RECOVERY_CHECK_INTERVAL_MS', 60000, 5000),
+            maxConcurrentRecoveries: parseEnvInt('BRIDGE_RECOVERY_MAX_CONCURRENT', 3),
+          },
+        });
+        const recoveredCount = await this.bridgeRecoveryManager.start();
+        if (recoveredCount > 0) {
+          this.logger.info('Bridge recovery found pending bridges on startup', { count: recoveredCount });
+        }
+      }
+
       // S6: Initialize standby manager (delegates activate/standby state)
       this.standbyManager = createStandbyManager({
         logger: this.logger,
@@ -643,6 +691,15 @@ export class ExecutionEngineService {
 
       // Clear execution processing interval (hot-path related)
       this.clearIntervals();
+
+      // O-6: Close persistent trade logger
+      if (this.tradeLogger) {
+        await this.tradeLogger.close();
+        this.tradeLogger = null;
+      }
+
+      // T-13: Stop bridge recovery manager
+      this.bridgeRecoveryManager = await stopAndNullify(this.bridgeRecoveryManager);
 
       // P0 Refactoring: Stop health monitoring manager
       this.healthMonitoringManager = await stopAndNullify(this.healthMonitoringManager);
@@ -1147,7 +1204,7 @@ export class ExecutionEngineService {
         'unknown',
         opportunity.buyDex || 'unknown'
       );
-      await this.publishExecutionResult(errorResult);
+      await this.publishExecutionResult(errorResult, opportunity);
       this.opportunityConsumer?.markComplete(opportunity.id);
       return;
     }
@@ -1225,7 +1282,7 @@ export class ExecutionEngineService {
             chain,
             dex
           );
-          await this.publishExecutionResult(skippedResult);
+          await this.publishExecutionResult(skippedResult, opportunity);
           return;
         }
 
@@ -1283,7 +1340,7 @@ export class ExecutionEngineService {
       const result = await this.strategyFactory.execute(opportunity, ctx);
 
       // Publish result
-      await this.publishExecutionResult(result);
+      await this.publishExecutionResult(result, opportunity);
       this.perfLogger.logExecutionResult(result);
 
       // =======================================================================
@@ -1370,7 +1427,7 @@ export class ExecutionEngineService {
         dex
       );
 
-      await this.publishExecutionResult(errorResult);
+      await this.publishExecutionResult(errorResult, opportunity);
     } finally {
       this.opportunityConsumer?.markComplete(opportunity.id);
     }
@@ -1403,7 +1460,14 @@ export class ExecutionEngineService {
   // Result Publishing
   // ===========================================================================
 
-  private async publishExecutionResult(result: ExecutionResult): Promise<void> {
+  private async publishExecutionResult(result: ExecutionResult, opportunity?: ArbitrageOpportunity): Promise<void> {
+    // O-6: Log trade to persistent JSONL file (non-blocking, never throws)
+    if (this.tradeLogger) {
+      await this.tradeLogger.logTrade(result, opportunity).catch(() => {
+        // logTrade already handles errors internally; this catch is defense-in-depth
+      });
+    }
+
     if (!this.streamsClient) return;
 
     try {
@@ -1495,6 +1559,25 @@ export class ExecutionEngineService {
    */
   getSimulationMetrics(): SimulationMetricsSnapshot | null {
     return this.simulationMetricsCollector?.getSnapshot() ?? null;
+  }
+
+  // ===========================================================================
+  // Bridge Recovery Getters (T-13)
+  // ===========================================================================
+
+  /**
+   * Get bridge recovery metrics snapshot.
+   * Returns null if bridge recovery is not initialized.
+   */
+  getBridgeRecoveryMetrics(): Readonly<RecoveryMetrics> | null {
+    return this.bridgeRecoveryManager?.getMetrics() ?? null;
+  }
+
+  /**
+   * Check if bridge recovery manager is running.
+   */
+  isBridgeRecoveryRunning(): boolean {
+    return this.bridgeRecoveryManager?.getIsRunning() ?? false;
   }
 
   // S6: Standby getters delegated to StandbyManager

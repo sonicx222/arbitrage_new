@@ -33,7 +33,18 @@ export {
   PinoPerformanceLogger,
   resetLoggerCache,
   resetPerformanceLoggerCache,
+  // OTEL transport lifecycle
+  getOtelTransport,
+  shutdownOtelTransport,
 } from './pino-logger';
+
+// OpenTelemetry log transport (O-3: Centralized log aggregation)
+export {
+  createOtelTransport,
+  resolveOtelConfig,
+  OtelTransportStream,
+} from './otel-transport';
+export type { OtelTransportConfig } from './otel-transport';
 
 // Testing implementations
 export {

@@ -12,8 +12,9 @@
  * @see docs/architecture/adr/ADR-015-pino-logger-migration.md
  */
 
-import pino, { Logger as PinoLoggerType, LoggerOptions } from 'pino';
+import pino, { Logger as PinoLoggerType, LoggerOptions, DestinationStream } from 'pino';
 import type { ILogger, IPerformanceLogger, LoggerConfig, LogLevel, LogMeta } from './types';
+import { resolveOtelConfig, createOtelTransport, OtelTransportStream } from './otel-transport';
 
 // =============================================================================
 // Singleton Cache
@@ -26,11 +27,36 @@ import type { ILogger, IPerformanceLogger, LoggerConfig, LogLevel, LogMeta } fro
 const loggerCache = new Map<string, ILogger>();
 
 /**
+ * Singleton OTEL transport stream shared by all loggers.
+ * Created lazily on first logger creation when OTEL_EXPORTER_ENDPOINT is set.
+ */
+let sharedOtelTransport: OtelTransportStream | null = null;
+
+/**
  * Reset all cached loggers.
  * Used for testing and service shutdown.
  */
 export function resetLoggerCache(): void {
   loggerCache.clear();
+}
+
+/**
+ * Get the shared OTEL transport instance (for shutdown/stats).
+ * Returns null if OTEL is not configured.
+ */
+export function getOtelTransport(): OtelTransportStream | null {
+  return sharedOtelTransport;
+}
+
+/**
+ * Shut down the OTEL transport, flushing remaining records.
+ * Safe to call even if OTEL is not configured (noop).
+ */
+export async function shutdownOtelTransport(): Promise<void> {
+  if (sharedOtelTransport) {
+    await sharedOtelTransport.shutdown();
+    sharedOtelTransport = null;
+  }
 }
 
 // =============================================================================
@@ -346,8 +372,31 @@ export function createPinoLogger(config: string | LoggerConfig): ILogger {
     };
   }
 
-  // Create Pino instance
-  const pinoInstance = pino(options);
+  // Resolve OTEL transport configuration (lazy singleton)
+  // Only create when OTEL_EXPORTER_ENDPOINT is set and pretty mode is off
+  // (Pino transport option is incompatible with multistream destination)
+  let destination: DestinationStream | undefined;
+
+  if (!usePretty) {
+    const otelConfig = resolveOtelConfig();
+    if (otelConfig) {
+      // Create shared OTEL transport singleton
+      if (!sharedOtelTransport) {
+        sharedOtelTransport = createOtelTransport(otelConfig);
+      }
+
+      // Use pino.multistream to write to both stdout and OTEL
+      destination = pino.multistream([
+        { stream: pino.destination(1) },  // stdout (fd 1)
+        { stream: sharedOtelTransport },   // OTEL collector
+      ]);
+    }
+  }
+
+  // Create Pino instance (with optional multistream destination)
+  const pinoInstance = destination
+    ? pino(options, destination)
+    : pino(options);
 
   // Wrap in our interface
   const logger = new PinoLoggerWrapper(pinoInstance);

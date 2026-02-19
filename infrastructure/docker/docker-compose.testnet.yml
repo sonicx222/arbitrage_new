@@ -1,0 +1,285 @@
+# Testnet Deployment Configuration
+#
+# This docker-compose file provides a testnet-safe deployment using the
+# partitioned architecture from ADR-003. All services connect to testnet
+# RPCs (Sepolia, Arbitrum Sepolia, Base Sepolia, zkSync Sepolia) and run
+# in simulation mode by default.
+#
+# Partitions (testnet subset):
+# - partition-l2-turbo: Arbitrum Sepolia + Base Sepolia
+# - partition-high-value: Sepolia (Ethereum testnet) + zkSync Sepolia
+#
+# Omitted from testnet (no reliable public testnets):
+# - partition-asia-fast: BSC, Polygon, Avalanche, Fantom
+# - partition-solana: Solana (use devnet separately)
+#
+# ============================================================================
+# REQUIRED Environment Variables:
+# ============================================================================
+# Create .env.testnet from .env.testnet.example and fill in the values.
+#
+# Usage:
+#   cp .env.testnet.example .env.testnet
+#   docker-compose -f docker-compose.testnet.yml --env-file .env.testnet up -d
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see contracts/hardhat.config.ts for testnet network definitions
+
+services:
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_testnet_data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-testnet-changeme} --bind 0.0.0.0
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-testnet-changeme}", "--no-auth-warning", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    networks:
+      - arbitrage-testnet
+    restart: unless-stopped
+
+  # =============================================================================
+  # Partitioned Chain Detectors (Testnet Chains)
+  # =============================================================================
+
+  # Partition: l2-turbo (Arbitrum Sepolia + Base Sepolia)
+  partition-l2-turbo:
+    build:
+      context: ../..
+      dockerfile: services/unified-detector/Dockerfile
+    environment:
+      - NODE_ENV=testnet
+      - PARTITION_ID=l2-turbo
+      - PARTITION_CHAINS=arbitrum,base
+      - REGION_ID=testnet-local
+      - INSTANCE_ID=partition-l2-turbo-testnet
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - HEALTH_CHECK_PORT=3001
+      - SIMULATION_MODE=${SIMULATION_MODE:-true}
+      # Testnet RPC URLs (Arbitrum Sepolia + Base Sepolia)
+      - ARBITRUM_WS_URL=${ARBITRUM_SEPOLIA_WS_URL:-wss://sepolia-rollup.arbitrum.io/ws}
+      - ARBITRUM_RPC_URL=${ARBITRUM_SEPOLIA_RPC_URL:-https://sepolia-rollup.arbitrum.io/rpc}
+      - BASE_WS_URL=${BASE_SEPOLIA_WS_URL:-wss://sepolia.base.org/ws}
+      - BASE_RPC_URL=${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
+    ports:
+      - "3012:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+        reservations:
+          memory: 192M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-testnet
+    restart: unless-stopped
+    labels:
+      - "com.arbitrage.partition=l2-turbo"
+      - "com.arbitrage.chains=arbitrum-sepolia,base-sepolia"
+      - "com.arbitrage.env=testnet"
+
+  # Partition: high-value (Ethereum Sepolia + zkSync Sepolia)
+  partition-high-value:
+    build:
+      context: ../..
+      dockerfile: services/unified-detector/Dockerfile
+    environment:
+      - NODE_ENV=testnet
+      - PARTITION_ID=high-value
+      - PARTITION_CHAINS=ethereum,zksync
+      - REGION_ID=testnet-local
+      - INSTANCE_ID=partition-high-value-testnet
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - HEALTH_CHECK_PORT=3001
+      - SIMULATION_MODE=${SIMULATION_MODE:-true}
+      # Testnet RPC URLs (Sepolia + zkSync Sepolia)
+      - ETHEREUM_WS_URL=${SEPOLIA_WS_URL:-wss://ethereum-sepolia-rpc.publicnode.com}
+      - ETHEREUM_RPC_URL=${SEPOLIA_RPC_URL:-https://rpc.sepolia.org}
+      - ZKSYNC_WS_URL=${ZKSYNC_SEPOLIA_WS_URL:-wss://sepolia.era.zksync.dev/ws}
+      - ZKSYNC_RPC_URL=${ZKSYNC_SEPOLIA_RPC_URL:-https://sepolia.era.zksync.dev}
+    ports:
+      - "3013:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.75'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-testnet
+    restart: unless-stopped
+    labels:
+      - "com.arbitrage.partition=high-value"
+      - "com.arbitrage.chains=sepolia,zksync-sepolia"
+      - "com.arbitrage.env=testnet"
+
+  # =============================================================================
+  # Cross-Chain Analysis & Execution Services
+  # =============================================================================
+
+  # Cross-Chain Detector (consumes from testnet partitions via Redis Streams)
+  cross-chain-detector:
+    build:
+      context: ../..
+      dockerfile: services/cross-chain-detector/Dockerfile
+    environment:
+      - NODE_ENV=testnet
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - INSTANCE_ID=cross-chain-detector-testnet
+      - HEALTH_CHECK_PORT=3001
+      - SIMULATION_MODE=${SIMULATION_MODE:-true}
+    ports:
+      - "3016:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      partition-l2-turbo:
+        condition: service_healthy
+      partition-high-value:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-testnet
+    restart: unless-stopped
+
+  # Execution Engine (testnet mode - simulation by default)
+  execution-engine:
+    build:
+      context: ../..
+      dockerfile: services/execution-engine/Dockerfile
+    environment:
+      - NODE_ENV=testnet
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - INSTANCE_ID=execution-engine-testnet
+      - HEALTH_CHECK_PORT=3001
+      - SIMULATION_MODE=${SIMULATION_MODE:-true}
+      # Testnet private keys (use dedicated testnet wallets ONLY)
+      - ETHEREUM_PRIVATE_KEY=${TESTNET_PRIVATE_KEY}
+      - ARBITRUM_PRIVATE_KEY=${TESTNET_PRIVATE_KEY}
+      - BASE_PRIVATE_KEY=${TESTNET_PRIVATE_KEY}
+      # Testnet RPC URLs for execution
+      - ETHEREUM_RPC_URL=${SEPOLIA_RPC_URL:-https://rpc.sepolia.org}
+      - ARBITRUM_RPC_URL=${ARBITRUM_SEPOLIA_RPC_URL:-https://sepolia-rollup.arbitrum.io/rpc}
+      - BASE_RPC_URL=${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
+      - ZKSYNC_RPC_URL=${ZKSYNC_SEPOLIA_RPC_URL:-https://sepolia.era.zksync.dev}
+    ports:
+      - "3015:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      cross-chain-detector:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-testnet
+    restart: unless-stopped
+
+  # =============================================================================
+  # Dashboard & Monitoring
+  # =============================================================================
+
+  # Coordinator Dashboard
+  coordinator:
+    build:
+      context: ../..
+      dockerfile: services/coordinator/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=testnet
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - PORT=3000
+      - INSTANCE_ID=coordinator-testnet
+      - REGION_ID=testnet-local
+      - SIMULATION_MODE=${SIMULATION_MODE:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+      partition-l2-turbo:
+        condition: service_healthy
+      partition-high-value:
+        condition: service_healthy
+      cross-chain-detector:
+        condition: service_healthy
+      execution-engine:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-testnet
+    restart: unless-stopped
+
+# =============================================================================
+# Networks & Volumes
+# =============================================================================
+
+networks:
+  arbitrage-testnet:
+    driver: bridge
+
+volumes:
+  redis_testnet_data:
+    driver: local

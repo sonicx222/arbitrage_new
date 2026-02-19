@@ -169,3 +169,15 @@ export {
   createStandbyManager,
   type StandbyManagerDeps,
 } from './standby-manager';
+
+// =============================================================================
+// T-13: Bridge Recovery Manager (cross-chain failure recovery)
+// =============================================================================
+
+export {
+  BridgeRecoveryManager,
+  createBridgeRecoveryManager,
+  type BridgeRecoveryManagerConfig,
+  type BridgeRecoveryManagerDeps,
+  type RecoveryMetrics,
+} from './bridge-recovery-manager';

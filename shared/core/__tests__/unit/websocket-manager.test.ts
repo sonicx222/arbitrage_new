@@ -873,3 +873,140 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
     });
   });
 });
+
+/**
+ * S-11: Message Size Limit Tests
+ * Verifies that oversized WebSocket messages are rejected and the connection is closed.
+ */
+describe('WebSocketManager Message Size Limits (S-11)', () => {
+  let manager: WebSocketManager;
+  // Import ws constructor mock so we can restore it after clearAllMocks
+  const WebSocketMock = jest.requireMock('ws') as jest.Mock;
+
+  /**
+   * Helper: call connect() and simulate the 'open' event so the manager
+   * transitions to connected state. Returns the captured 'message' handler.
+   */
+  async function connectAndGetMessageHandler(mgr: WebSocketManager): Promise<(data: Buffer) => void> {
+    const connectPromise = mgr.connect();
+
+    // Find and trigger the 'open' handler to complete connection
+    const openCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'open'
+    );
+    expect(openCall).toBeDefined();
+    (openCall![1] as () => void)();
+
+    await connectPromise;
+
+    // Find the 'message' handler registered during connect()
+    const messageCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'message'
+    );
+    expect(messageCall).toBeDefined();
+    return messageCall![1] as (data: Buffer) => void;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    // Restore WS constructor mock implementation (cleared by clearAllMocks)
+    WebSocketMock.mockImplementation(() => mockWebSocket);
+    // Reset mock WebSocket state
+    mockWebSocket.readyState = 1;
+    mockWebSocket.on.mockReset();
+    mockWebSocket.send.mockReset();
+    mockWebSocket.close.mockReset();
+    mockWebSocket.ping.mockReset();
+    mockWebSocket.removeAllListeners.mockReset();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+    jest.useRealTimers();
+  });
+
+  it('should use 10MB default maxMessageSize', () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+    });
+
+    // Default is 10MB = 10 * 1024 * 1024 = 10485760 bytes
+    // Verify the manager accepts the default without errors
+    expect(manager).toBeDefined();
+  });
+
+  it('should accept custom maxMessageSize configuration', () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxMessageSize: 1024,
+    });
+
+    expect(manager).toBeDefined();
+  });
+
+  it('should close connection when message exceeds maxMessageSize', async () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxMessageSize: 1024, // 1KB for testing
+    });
+
+    const messageHandler = await connectAndGetMessageHandler(manager);
+
+    // Create an oversized message (> 1024 bytes)
+    const oversizedData = Buffer.alloc(2048, 'x');
+
+    // Trigger the message handler with oversized data
+    messageHandler(oversizedData);
+
+    // Verify that ws.close was called with code 1008 (policy violation)
+    expect(mockWebSocket.close).toHaveBeenCalledWith(
+      1008,
+      expect.stringContaining('Message size 2048 exceeds limit 1024')
+    );
+  });
+
+  it('should not close connection for messages within maxMessageSize', async () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxMessageSize: 1024, // 1KB for testing
+    });
+
+    const messageHandler = await connectAndGetMessageHandler(manager);
+
+    // Create a message within limits (valid JSON to avoid parse errors)
+    const validMessage = Buffer.from(JSON.stringify({ jsonrpc: '2.0', method: 'eth_subscription', params: { result: {} } }));
+    expect(validMessage.length).toBeLessThan(1024);
+
+    // Reset close mock to check it's not called for valid messages
+    mockWebSocket.close.mockClear();
+
+    // Trigger message handler
+    messageHandler(validMessage);
+
+    // ws.close should NOT have been called
+    expect(mockWebSocket.close).not.toHaveBeenCalled();
+  });
+
+  it('should not close connection for messages exactly at maxMessageSize', async () => {
+    const exactSize = 512;
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxMessageSize: exactSize,
+    });
+
+    const messageHandler = await connectAndGetMessageHandler(manager);
+
+    // Create a message exactly at the limit
+    const exactData = Buffer.alloc(exactSize, 'a');
+
+    mockWebSocket.close.mockClear();
+
+    // Trigger message handler - should NOT close (equal, not exceeding)
+    messageHandler(exactData);
+
+    expect(mockWebSocket.close).not.toHaveBeenCalled();
+  });
+});

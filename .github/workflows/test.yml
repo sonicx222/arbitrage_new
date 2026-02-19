@@ -15,6 +15,9 @@ on:
       - 'docs/**'
       - '.gitignore'
       - 'LICENSE'
+  schedule:
+    # Weekly fork tests: Monday 3 AM UTC
+    - cron: '0 3 * * 1'
 
 # Minimum permissions for security (least privilege)
 permissions:
@@ -288,6 +291,45 @@ jobs:
           REDIS_URL: redis://localhost:6379
 
   # ===========================================================================
+  # Fork Tests - Mainnet fork integration tests (weekly + contract changes)
+  # ===========================================================================
+  fork-tests:
+    name: Fork Tests (Mainnet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Run on schedule (weekly) OR when contract files change on push/PR
+    if: |
+      github.event_name == 'schedule' ||
+      (
+        (github.event_name == 'push' || github.event_name == 'pull_request') &&
+        contains(toJSON(github.event.commits.*.modified), 'contracts/') ||
+        contains(toJSON(github.event.commits.*.added), 'contracts/') ||
+        contains(toJSON(github.event.head_commit.modified), 'contracts/') ||
+        contains(toJSON(github.event.head_commit.added), 'contracts/')
+      )
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: cd contracts && npx hardhat compile
+
+      - name: Run Fork Tests
+        run: cd contracts && npx hardhat test test/FlashLoanArbitrage.fork.test.ts
+        env:
+          FORK_ENABLED: 'true'
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL != '' && secrets.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com' }}
+
+  # ===========================================================================
   # Code Quality - Lint and Type Check
   # ===========================================================================
   code-quality:
@@ -329,7 +371,7 @@ jobs:
     name: Test Summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [unit-tests, integration-tests, e2e-tests, performance-tests, smoke-tests, code-quality]
+    needs: [unit-tests, integration-tests, e2e-tests, performance-tests, smoke-tests, fork-tests, code-quality]
     if: always()
     steps:
       - name: Check test results
@@ -339,7 +381,23 @@ jobs:
           echo "E2E Tests: ${{ needs.e2e-tests.result }}"
           echo "Performance Tests: ${{ needs.performance-tests.result }}"
           echo "Smoke Tests: ${{ needs.smoke-tests.result }}"
+          echo "Fork Tests: ${{ needs.fork-tests.result }}"
           echo "Code Quality: ${{ needs.code-quality.result }}"
+
+      - name: Warn if fork tests failed (non-scheduled)
+        if: |
+          needs.fork-tests.result == 'failure' &&
+          github.event_name != 'schedule'
+        run: |
+          echo "::warning::Fork tests failed — this is informational for push/PR runs and does not block CI."
+
+      - name: Fail if fork tests failed (scheduled)
+        if: |
+          needs.fork-tests.result == 'failure' &&
+          github.event_name == 'schedule'
+        run: |
+          echo "::error::Fork tests failed on scheduled weekly run."
+          exit 1
 
       - name: Fail if any required job failed
         if: |

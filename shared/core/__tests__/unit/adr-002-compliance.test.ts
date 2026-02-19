@@ -68,10 +68,10 @@ describe('ADR-002 Compliance: Redis Streams Required', () => {
 // ADR-002 Compliance Tests: Other Files
 // =============================================================================
 
-// NOTE: Skipped until Pub/Sub to Streams migration is complete per ADR-002.
-// The migration is in progress - files may still use Pub/Sub during transition.
-// Future work: Complete migration and re-enable these tests.
-describe.skip('ADR-002 Compliance: Cross-File Analysis', () => {
+// ADR-002 migration is complete. All listed files have been removed as part of the
+// Pub/Sub elimination. The test verifies that any remaining files (if they were
+// re-introduced) do not regress to Pub/Sub-only patterns.
+describe('ADR-002 Compliance: Cross-File Analysis', () => {
   it('should not have Pub/Sub-only event channels', async () => {
     // List of files that may have Pub/Sub usage
     const filesToCheck = [

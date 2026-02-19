@@ -231,9 +231,9 @@ describe('StargateV2Router', () => {
     it('should use V2 pool addresses for route validation (not V1 pool IDs)', () => {
       // V2 uses per-token pool contracts, not the V1 pool ID model
       const pools = STARGATE_V2_POOL_ADDRESSES;
-      expect(pools.USDC).toBeDefined();
-      expect(pools.USDT).toBeDefined();
-      expect(pools.ETH).toBeDefined();
+      expect(typeof pools.USDC).toBe('object');
+      expect(typeof pools.USDT).toBe('object');
+      expect(typeof pools.ETH).toBe('object');
     });
   });
 
@@ -251,7 +251,7 @@ describe('StargateV2Router', () => {
 
     it('should have endpoint IDs for all supported chains', () => {
       for (const chain of router.supportedSourceChains) {
-        expect(STARGATE_V2_ENDPOINT_IDS[chain]).toBeDefined();
+        expect(typeof STARGATE_V2_ENDPOINT_IDS[chain]).toBe('number');
         expect(STARGATE_V2_ENDPOINT_IDS[chain]).toBeGreaterThan(30000);
       }
     });
@@ -359,7 +359,7 @@ describe('StargateV2Router', () => {
 
       // Verify the sendParam passed to quoteSend has taxi mode oftCmd
       const sendParam = mockQuoteSend.mock.calls[0]?.[0];
-      expect(sendParam).toBeDefined();
+      expect(typeof sendParam).toBe('object');
       // Taxi mode: oftCmd should not be empty
       expect(sendParam.oftCmd).not.toBe('0x');
     });
@@ -383,7 +383,7 @@ describe('StargateV2Router', () => {
       });
 
       const sendParam = mockQuoteSend.mock.calls[0]?.[0];
-      expect(sendParam).toBeDefined();
+      expect(typeof sendParam).toBe('object');
       // Bus mode: oftCmd should be empty bytes
       expect(sendParam.oftCmd).toBe('0x');
     });
@@ -513,8 +513,7 @@ describe('StargateV2Router', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.sourceTxHash).toBeDefined();
-      expect(result.bridgeId).toBeDefined();
+      expect(typeof result.sourceTxHash).toBe('string');
       expect(result.bridgeId).toContain('stargate-v2-');
 
       // Verify pending bridge was tracked
@@ -552,7 +551,7 @@ describe('StargateV2Router', () => {
 
       // Verify tx.value = amountIn + LZ fee for native ETH
       const sendTxCall = mockWallet.sendTransaction.mock.calls[0]?.[0] as any;
-      expect(sendTxCall).toBeDefined();
+      expect(typeof sendTxCall).toBe('object');
       expect(sendTxCall.value).toBe(BigInt('1000000000000000000') + BigInt('10000000000000000'));
     });
 
@@ -944,9 +943,9 @@ describe('StargateV2Router', () => {
 describe('Stargate V2 Router Constants', () => {
   describe('STARGATE_V2_POOL_ADDRESSES', () => {
     it('should have pool addresses for USDC, USDT, and ETH', () => {
-      expect(STARGATE_V2_POOL_ADDRESSES.USDC).toBeDefined();
-      expect(STARGATE_V2_POOL_ADDRESSES.USDT).toBeDefined();
-      expect(STARGATE_V2_POOL_ADDRESSES.ETH).toBeDefined();
+      expect(typeof STARGATE_V2_POOL_ADDRESSES.USDC).toBe('object');
+      expect(typeof STARGATE_V2_POOL_ADDRESSES.USDT).toBe('object');
+      expect(typeof STARGATE_V2_POOL_ADDRESSES.ETH).toBe('object');
     });
 
     it('should have valid Ethereum addresses', () => {
@@ -980,7 +979,7 @@ describe('Stargate V2 Router Constants', () => {
     });
 
     it('should have default time', () => {
-      expect(STARGATE_V2_BRIDGE_TIMES.default).toBeDefined();
+      expect(typeof STARGATE_V2_BRIDGE_TIMES.default).toBe('number');
       expect(STARGATE_V2_BRIDGE_TIMES.default).toBeGreaterThan(0);
     });
   });
@@ -1064,9 +1063,6 @@ describe('BridgeRouterFactory with StargateV2Router', () => {
   it('should health check all three routers', async () => {
     const results = await factory.healthCheckAll();
 
-    expect(results.stargate).toBeDefined();
-    expect(results.across).toBeDefined();
-    expect(results['stargate-v2']).toBeDefined();
     expect(results.stargate.healthy).toBe(true);
     expect(results.across.healthy).toBe(true);
     expect(results['stargate-v2'].healthy).toBe(true);
@@ -1076,9 +1072,9 @@ describe('BridgeRouterFactory with StargateV2Router', () => {
     await factory.healthCheckAll();
 
     const metrics = factory.getHealthMetrics();
-    expect(metrics.get('stargate')).toBeDefined();
-    expect(metrics.get('across')).toBeDefined();
-    expect(metrics.get('stargate-v2')).toBeDefined();
+    expect(typeof metrics.get('stargate')).toBe('object');
+    expect(typeof metrics.get('across')).toBe('object');
+    expect(typeof metrics.get('stargate-v2')).toBe('object');
     expect(metrics.get('stargate-v2')!.totalChecks).toBe(1);
     expect(metrics.get('stargate-v2')!.lastHealthy).toBe(true);
   });

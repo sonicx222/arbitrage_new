@@ -159,6 +159,13 @@ const UNIFIED_DETECTOR_STARTUP_DELAY_MS = 4500;
  */
 const P4_STARTUP_DELAY_MS = 5000;
 
+/**
+ * Startup delay for Mempool Detector (milliseconds).
+ * Optional service — started separately via `npm run dev:mempool`.
+ * @type {number}
+ */
+const MEMPOOL_DETECTOR_STARTUP_DELAY_MS = 5500;
+
 // =============================================================================
 // Path Constants
 // =============================================================================
@@ -220,6 +227,7 @@ module.exports = {
   EXECUTION_ENGINE_STARTUP_DELAY_MS,
   UNIFIED_DETECTOR_STARTUP_DELAY_MS,
   P4_STARTUP_DELAY_MS,
+  MEMPOOL_DETECTOR_STARTUP_DELAY_MS,
 
   // Validation thresholds
   LARGE_NODE_MODULES_THRESHOLD_BYTES
