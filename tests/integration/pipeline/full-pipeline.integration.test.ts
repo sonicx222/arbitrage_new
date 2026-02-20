@@ -496,4 +496,65 @@ describe('[Integration] Full Pipeline: Opportunity -> Execution -> Result', () =
       expect(pendingAfter).toBe(0);
     }, 30000);
   });
+
+  describe('Pipeline Instrumentation', () => {
+    it('should track pipeline latency through stages', async () => {
+      const detectedAt = Date.now();
+      const opportunity = createTestOpportunity({
+        id: `timestamps-${Date.now()}`,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        expectedProfit: 35,
+        confidence: 0.9,
+        amountIn: '1000000000000000000',
+        pipelineTimestamps: { detectedAt },
+      });
+
+      await redis.xadd(
+        RedisStreams.OPPORTUNITIES,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+
+      const results = await collectResults(
+        redis, RedisStreams.EXECUTION_RESULTS, 1, 15000
+      );
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+
+      // Verify the opportunity flowed through the pipeline
+      const result = results.find(
+        (r) => r.opportunityId === opportunity.id
+      );
+      expect(result).toBeDefined();
+
+      // Verify the forwarded message on execution-requests has coordinator metadata
+      const execMessages = await redis.xrange(RedisStreams.EXECUTION_REQUESTS, '-', '+');
+      const forwardedMsg = execMessages.find(([, fields]) => {
+        const obj: Record<string, string> = {};
+        for (let i = 0; i < fields.length; i += 2) {
+          obj[fields[i]] = fields[i + 1];
+        }
+        try {
+          const parsed = JSON.parse(obj.data);
+          return parsed.id === opportunity.id;
+        } catch { return false; }
+      });
+
+      expect(forwardedMsg).toBeDefined();
+      if (forwardedMsg) {
+        const obj: Record<string, string> = {};
+        for (let i = 0; i < forwardedMsg[1].length; i += 2) {
+          obj[forwardedMsg[1][i]] = forwardedMsg[1][i + 1];
+        }
+        const parsed = JSON.parse(obj.data);
+        expect(parsed.forwardedBy).toBeDefined();
+        expect(parsed.forwardedAt).toBeGreaterThanOrEqual(detectedAt);
+        if (parsed.pipelineTimestamps) {
+          expect(parsed.pipelineTimestamps.coordinatorAt).toBeGreaterThanOrEqual(detectedAt);
+        }
+      }
+    }, 30000);
+  });
 });
