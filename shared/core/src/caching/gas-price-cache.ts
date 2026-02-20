@@ -143,17 +143,43 @@ const FALLBACK_GAS_PRICE_METADATA = {
  * Last updated: 2026-01-18
  * @see FALLBACK_GAS_PRICE_METADATA for staleness info
  */
+// FIX P1-8: Aligned with gas-price-optimizer.ts DEFAULT_GAS_PRICES_GWEI and .env.example.
+// Previously polygon=50 and fantom=50, while optimizer and .env use 35 for both.
+// @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P1 #8
 const FALLBACK_GAS_PRICES: Record<string, number> = {
   ethereum: 30,    // ~30 gwei average
   arbitrum: 0.1,   // Very low L2 fees
   optimism: 0.01,  // Low L2 fees
   base: 0.01,      // Low L2 fees
-  polygon: 50,     // ~50 gwei average
+  polygon: 35,     // ~35 gwei average (aligned with gas-price-optimizer)
   bsc: 3,          // ~3 gwei average
   avalanche: 25,   // ~25 nAVAX
-  fantom: 50,      // ~50 gwei
+  fantom: 35,      // ~35 gwei (aligned with gas-price-optimizer)
   zksync: 0.25,    // L2 fees
   linea: 0.5       // L2 fees
+};
+
+/**
+ * FIX P0-5: L1 data fee estimates for rollup chains (in USD per arbitrage transaction).
+ *
+ * L2 rollups post transaction data to L1 (Ethereum). The L1 data fee is often the
+ * dominant cost component and was previously missing from gas estimates, causing
+ * 30-300x underestimation on L2 chains.
+ *
+ * Estimates assume ~500 bytes calldata for a typical arbitrage tx at ~30 gwei L1 gas
+ * and ~$3500/ETH. These are conservative fallback values; real-time L1 fee estimation
+ * would require querying each rollup's fee oracle (e.g., Arbitrum's ArbGasInfo,
+ * Optimism's GasPriceOracle L1 fee function).
+ *
+ * Last updated: 2026-02-20
+ * @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P0-5
+ */
+const L1_DATA_FEE_USD: Record<string, number> = {
+  arbitrum: 0.50,   // Arbitrum posts calldata to L1; ~500 bytes @ 30 gwei ≈ $0.30-0.70
+  optimism: 0.40,   // OP-stack with EIP-4844 blobs; cheaper than Arbitrum
+  base: 0.40,       // OP-stack (same model as Optimism)
+  zksync: 0.30,     // zkSync Era uses validity proofs; data cost amortized across batch
+  linea: 0.35,      // Consensys zkEVM; similar to zkSync cost model
 };
 
 /**
@@ -383,9 +409,16 @@ export class GasPriceCache {
     const gasPrice = this.getGasPrice(chainLower);
     const nativePrice = this.getNativeTokenPrice(chainLower);
 
-    // Calculate cost: gasUnits * gasPrice (in ETH) * nativeTokenPrice (USD)
+    // Calculate L2 execution cost: gasUnits * gasPrice (in ETH) * nativeTokenPrice (USD)
     const gasPriceEth = gasPrice.gasPriceGwei / 1e9; // gwei to ETH
-    const costUsd = gasUnits * gasPriceEth * nativePrice.priceUsd;
+    const l2ExecutionCostUsd = gasUnits * gasPriceEth * nativePrice.priceUsd;
+
+    // FIX P0-5: Add L1 data fee for rollup chains.
+    // L2 rollups post tx data to L1; this is often the dominant cost component.
+    // Without this, L2 gas estimates were 30-300x too low.
+    // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P0-5
+    const l1DataFeeUsd = L1_DATA_FEE_USD[chainLower] ?? 0;
+    const costUsd = l2ExecutionCostUsd + l1DataFeeUsd;
 
     return {
       costUsd,

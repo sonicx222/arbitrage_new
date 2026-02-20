@@ -88,17 +88,21 @@ export class IntervalManager {
       }
 
       // Execute callback (handle both sync and async)
+      // OP-33 FIX: Log errors instead of silently swallowing them
       try {
         const result = callback();
         // If it's a promise, catch errors to prevent unhandled rejections
         if (result instanceof Promise) {
-          result.catch(() => {
-            // Errors are expected to be handled by the callback itself
-            // This is just a safety net to prevent unhandled rejection crashes
+          result.catch((error: unknown) => {
+            if (typeof console !== 'undefined') {
+              console.error(`[IntervalManager] Async callback '${name}' error:`, error instanceof Error ? error.message : String(error));
+            }
           });
         }
-      } catch {
-        // Sync errors are also swallowed - callbacks should handle their own errors
+      } catch (error: unknown) {
+        if (typeof console !== 'undefined') {
+          console.error(`[IntervalManager] Sync callback '${name}' error:`, error instanceof Error ? error.message : String(error));
+        }
       }
     };
 

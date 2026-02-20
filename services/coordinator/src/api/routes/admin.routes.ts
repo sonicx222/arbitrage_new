@@ -135,7 +135,7 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
         // In production, implement service restart logic via orchestration
         res.json({ success: true, message: `Restart requested for ${service}` });
       } catch (error) {
-        res.status(500).json({ success: false, error: (error as Error).message });
+        res.status(500).json({ success: false, error: 'Internal server error' });
       }
     }
   );

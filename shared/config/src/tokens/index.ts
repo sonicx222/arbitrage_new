@@ -572,6 +572,10 @@ const TOKEN_DECIMALS_LOOKUP: Map<string, number> = (() => {
 /**
  * Common token decimals by symbol (fallback when address not found).
  * These are well-known standards that rarely change.
+ *
+ * NOTE: BSC uses 18 decimals for USDT/USDC (BEP-20 variants), unlike the
+ * standard 6 decimals on other EVM chains. Use CHAIN_TOKEN_DECIMAL_OVERRIDES
+ * for chain-specific exceptions.
  */
 const COMMON_TOKEN_DECIMALS: Record<string, number> = {
   // 6-decimal stablecoins
@@ -584,6 +588,24 @@ const COMMON_TOKEN_DECIMALS: Record<string, number> = {
   weth: 18,
   eth: 18,
   dai: 18,
+};
+
+/**
+ * FIX P0-6: Chain-specific token decimal overrides.
+ *
+ * BSC (BNB Chain) uses 18 decimals for USDT and USDC, unlike the standard
+ * 6 decimals on Ethereum, Arbitrum, Polygon, etc. Without this override,
+ * getTokenDecimals('bsc', '', 'USDT') would return 6 from COMMON_TOKEN_DECIMALS,
+ * causing a 10^12 magnitude error in amount calculations.
+ *
+ * @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P0-6
+ */
+const CHAIN_TOKEN_DECIMAL_OVERRIDES: Record<string, Record<string, number>> = {
+  bsc: {
+    usdt: 18,
+    usdc: 18,
+    busd: 18,
+  },
 };
 
 /**
@@ -617,6 +639,17 @@ export function getTokenDecimals(
   // Try matching by symbol if provided
   if (symbol) {
     const symbolLower = symbol.toLowerCase();
+
+    // FIX P0-6: Check chain-specific overrides first (e.g., BSC USDT/USDC = 18 decimals)
+    // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P0-6
+    const chainOverrides = CHAIN_TOKEN_DECIMAL_OVERRIDES[chain.toLowerCase()];
+    if (chainOverrides) {
+      const overrideDecimals = chainOverrides[symbolLower];
+      if (overrideDecimals !== undefined) {
+        return overrideDecimals;
+      }
+    }
+
     const commonDecimals = COMMON_TOKEN_DECIMALS[symbolLower];
     if (commonDecimals !== undefined) {
       return commonDecimals;

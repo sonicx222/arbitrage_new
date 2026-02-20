@@ -931,7 +931,7 @@ describe('CrossChainStrategy - Bridge Recovery', () => {
   it('should return 0 when bridgeRouterFactory is null', async () => {
     const state = createBridgeRecoveryState();
     mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-id-1']]);
-    mockRedis.get.mockResolvedValue(JSON.stringify(state));
+    mockRedis.get.mockResolvedValue(state);
 
     const ctx = createMockContext({ bridgeRouterFactory: null });
 
@@ -948,7 +948,7 @@ describe('CrossChainStrategy - Bridge Recovery', () => {
       initiatedAt: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago
     });
     mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-id-1']]);
-    mockRedis.get.mockResolvedValue(JSON.stringify(expiredState));
+    mockRedis.get.mockResolvedValue(expiredState);
 
     const ctx = createMockContext();
 
@@ -974,8 +974,8 @@ describe('CrossChainStrategy - Bridge Recovery', () => {
     });
     mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-1', 'bridge:recovery:bridge-2']]);
     mockRedis.get
-      .mockResolvedValueOnce(JSON.stringify(state1))
-      .mockResolvedValueOnce(JSON.stringify(state2));
+      .mockResolvedValueOnce(state1)
+      .mockResolvedValueOnce(state2);
 
     // Mock the private recoverSingleBridge to simulate partial success
     // The first call succeeds, the second fails

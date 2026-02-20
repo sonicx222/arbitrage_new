@@ -312,43 +312,53 @@ export class RiskManagementOrchestrator {
     gasCost?: number;
     gasPrice?: bigint;
   }): void {
-    // FIX P2-11: Decrement in-flight counter when trade completes
-    if (this.inFlightCount > 0) {
-      this.inFlightCount--;
-    }
+    // FIX P1-6: Decrement in-flight counter in finally block to prevent leaks.
+    // Previously, if probabilityTracker.recordOutcome() or drawdownBreaker.recordTradeResult()
+    // threw, inFlightCount would never decrement, eventually blocking all trades.
+    // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P1 #6
+    try {
+      // FIX 2.1: Record to probability tracker for win rate learning
+      // Uses properly injected probabilityTracker instead of unsafe `as any` cast
+      if (this.probabilityTracker) {
+        this.probabilityTracker.recordOutcome({
+          chain: outcome.chain,
+          dex: outcome.dex,
+          pathLength: outcome.pathLength,
+          hourOfDay: new Date().getUTCHours(),
+          gasPrice: outcome.gasPrice ?? 0n,
+          success: outcome.success,
+          profit: outcome.actualProfit
+            ? BigInt(Math.floor(outcome.actualProfit * 1e18))
+            : undefined,
+          // FIX P0-2: gasCost is in ETH units (fractional) — convert to wei before BigInt
+          // @see FIX P0-2 in docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md
+          gasCost: outcome.gasCost ? BigInt(Math.floor(outcome.gasCost * 1e18)) : 0n,
+          timestamp: Date.now(),
+        });
+      }
 
-    // FIX 2.1: Record to probability tracker for win rate learning
-    // Uses properly injected probabilityTracker instead of unsafe `as any` cast
-    if (this.probabilityTracker) {
-      this.probabilityTracker.recordOutcome({
-        chain: outcome.chain,
-        dex: outcome.dex,
-        pathLength: outcome.pathLength,
-        hourOfDay: new Date().getUTCHours(),
-        gasPrice: outcome.gasPrice ?? 0n,
-        success: outcome.success,
-        profit: outcome.actualProfit
-          ? BigInt(Math.floor(outcome.actualProfit * 1e18))
-          : undefined,
-        gasCost: outcome.gasCost ? BigInt(outcome.gasCost) : 0n,
-        timestamp: Date.now(),
-      });
-    }
+      // Update drawdown breaker with trade result
+      if (this.drawdownBreaker) {
+        // FIX P0-2: gasCost is in ETH units (fractional) — convert to wei before BigInt
+        // @see FIX P0-2 in docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md
+        const pnl =
+          outcome.success && outcome.actualProfit
+            ? BigInt(Math.floor(outcome.actualProfit * 1e18))
+            : outcome.gasCost
+              ? -BigInt(Math.floor(outcome.gasCost * 1e18))
+              : 0n;
 
-    // Update drawdown breaker with trade result
-    if (this.drawdownBreaker) {
-      const pnl =
-        outcome.success && outcome.actualProfit
-          ? BigInt(Math.floor(outcome.actualProfit * 1e18))
-          : outcome.gasCost
-            ? -BigInt(outcome.gasCost)
-            : 0n;
-
-      this.drawdownBreaker.recordTradeResult({
-        success: outcome.success,
-        pnl,
-        timestamp: Date.now(),
-      });
+        this.drawdownBreaker.recordTradeResult({
+          success: outcome.success,
+          pnl,
+          timestamp: Date.now(),
+        });
+      }
+    } finally {
+      // FIX P1-6: Always decrement in-flight counter, even if recording throws
+      if (this.inFlightCount > 0) {
+        this.inFlightCount--;
+      }
     }
   }
 }

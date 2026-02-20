@@ -548,6 +548,17 @@ export class PriceMatrix implements Resettable {
     const timestamps = this.getTimestampArray();
     const sequences = this.getSequenceArray();
 
+    // OP-5 FIX: Monotonic timestamp enforcement - reject stale prices
+    // Only check for existing keys (new keys have no prior timestamp)
+    if (!isNewKey) {
+      const currentTimestamp = this.useSharedMemory && this.config.enableAtomics
+        ? Atomics.load(timestamps, index)
+        : timestamps[index];
+      if (currentTimestamp > relativeTimestamp) {
+        return false; // Stale price, existing is newer
+      }
+    }
+
     // P1-FIX: Write price to SharedArrayBuffer BEFORE registering key
     // This ensures workers cannot read uninitialized data (timestamp=0)
     // when they look up a newly registered key

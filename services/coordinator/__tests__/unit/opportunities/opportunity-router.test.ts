@@ -17,8 +17,8 @@
 import {
   OpportunityRouter,
 } from '../../../src/opportunities/opportunity-router';
+import { createMockLogger } from '@arbitrage/test-utils';
 import type {
-  OpportunityRouterLogger,
   OpportunityStreamsClient,
   CircuitBreaker,
   OpportunityAlert,
@@ -47,17 +47,8 @@ const MOCK_SERIALIZED_DATA: Record<string, string> = {
 // Test Helpers
 // =============================================================================
 
-/**
- * Creates a mock logger with jest.fn() for all methods.
- */
-function createMockLogger(): jest.Mocked<OpportunityRouterLogger> {
-  return {
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  };
-}
+// M12 FIX: Logger mock now uses shared createMockLogger from @arbitrage/test-utils
+// for consistency across test files (coordinator-routing, opportunity-router, etc.)
 
 /**
  * Creates a mock Redis Streams client.
@@ -71,13 +62,14 @@ function createMockStreamsClient(): jest.Mocked<OpportunityStreamsClient> {
 /**
  * Creates a mock circuit breaker in closed state by default.
  */
+// M13 FIX: Standardized circuit breaker mock (matches coordinator-routing.test.ts)
 function createMockCircuitBreaker(overrides?: Partial<jest.Mocked<CircuitBreaker>>): jest.Mocked<CircuitBreaker> {
   return {
     isCurrentlyOpen: jest.fn().mockReturnValue(false),
     recordFailure: jest.fn().mockReturnValue(false),
     recordSuccess: jest.fn().mockReturnValue(false),
     getFailures: jest.fn().mockReturnValue(0),
-    getStatus: jest.fn().mockReturnValue({ isOpen: false, failures: 0, resetTimeoutMs: 30000 }),
+    getStatus: jest.fn().mockReturnValue({ isOpen: false, failures: 0, resetTimeoutMs: 60000 }),
     ...overrides,
   };
 }
@@ -121,7 +113,7 @@ function createOpportunity(overrides: Partial<ArbitrageOpportunity> = {}): Arbit
 // =============================================================================
 
 describe('OpportunityRouter', () => {
-  let logger: jest.Mocked<OpportunityRouterLogger>;
+  let logger: ReturnType<typeof createMockLogger>;
   let streamsClient: jest.Mocked<OpportunityStreamsClient>;
   let circuitBreaker: jest.Mocked<CircuitBreaker>;
   let router: OpportunityRouter;
@@ -255,6 +247,68 @@ describe('OpportunityRouter', () => {
       );
     });
 
+    // =========================================================================
+    // H2: Chain whitelist validation
+    // =========================================================================
+
+    it('should accept opportunities with canonical chain names', async () => {
+      const validChains = ['ethereum', 'bsc', 'arbitrum', 'polygon', 'optimism', 'base', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'];
+      for (const chain of validChains) {
+        router.reset();
+        const data = createOpportunityData({ id: `opp-${chain}`, chain });
+        const result = await router.processOpportunity(data, false);
+        expect(result).toBe(true);
+      }
+    });
+
+    it('should reject opportunities with unrecognized chain names', async () => {
+      const data = createOpportunityData({
+        id: 'opp-bad-chain',
+        chain: 'fake-chain-does-not-exist',
+      });
+
+      const result = await router.processOpportunity(data, false);
+
+      expect(result).toBe(false);
+      expect(router.getPendingCount()).toBe(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown chain'),
+        expect.objectContaining({ chain: 'fake-chain-does-not-exist' }),
+      );
+    });
+
+    it('should normalize chain aliases before validation', async () => {
+      // 'eth' is a common alias for 'ethereum' — normalizeChainId handles this
+      const data = createOpportunityData({
+        id: 'opp-alias-chain',
+        chain: 'eth',
+      });
+
+      const result = await router.processOpportunity(data, false);
+
+      // 'eth' normalizes to 'ethereum' which is canonical
+      expect(result).toBe(true);
+    });
+
+    it('should accept opportunities without a chain field (optional)', async () => {
+      const data = createOpportunityData({ id: 'opp-no-chain' });
+      delete data.chain;
+
+      const result = await router.processOpportunity(data, false);
+
+      expect(result).toBe(true);
+      expect(router.getPendingCount()).toBe(1);
+    });
+
+    it('should skip chain validation when chain is not a string', async () => {
+      const data = createOpportunityData({ id: 'opp-num-chain', chain: 12345 });
+
+      const result = await router.processOpportunity(data, false);
+
+      // Non-string chain is treated as missing (rawChain is undefined)
+      expect(result).toBe(true);
+    });
+
     it('should accept opportunities without a profitPercentage field (undefined passes validation)', async () => {
       const data = createOpportunityData({ id: 'opp-no-profit' });
       delete data.profitPercentage;
@@ -376,10 +430,14 @@ describe('OpportunityRouter', () => {
 
       await router.forwardToExecutionEngine(opp);
 
-      expect(mockSerialize).toHaveBeenCalledWith(opp, 'test-coordinator');
+      // OP-3: Third argument is optional trace context (undefined when not provided)
+      expect(mockSerialize).toHaveBeenCalledWith(opp, 'test-coordinator', undefined);
+      // FIX W2-8: xadd now includes MAXLEN options
       expect(streamsClient.xadd).toHaveBeenCalledWith(
         'stream:execution-requests',
         expect.objectContaining({ id: 'mock-serialized' }),
+        '*',
+        expect.objectContaining({ maxLen: 5000, approximate: true }),
       );
       expect(circuitBreaker.recordSuccess).toHaveBeenCalled();
       expect(router.getTotalExecutions()).toBe(1);
@@ -410,14 +468,23 @@ describe('OpportunityRouter', () => {
       expect(routerNoClient.getTotalExecutions()).toBe(0);
     });
 
-    it('should skip forwarding when circuit breaker is open', async () => {
+    it('should skip forwarding when circuit breaker is open but write to DLQ', async () => {
       circuitBreaker.isCurrentlyOpen.mockReturnValue(true);
       circuitBreaker.getFailures.mockReturnValue(5);
       const opp = createOpportunity({ id: 'opp-circuit-open' });
 
       await router.forwardToExecutionEngine(opp);
 
-      expect(streamsClient.xadd).not.toHaveBeenCalled();
+      // OP-2 FIX: xadd is NOT called for the execution stream, but IS called for DLQ
+      expect(streamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(streamsClient.xadd).toHaveBeenCalledWith(
+        'stream:forwarding-dlq',
+        expect.objectContaining({
+          opportunityId: 'opp-circuit-open',
+          error: 'Circuit breaker open',
+          service: 'opportunity-router',
+        }),
+      );
       expect(router.getTotalExecutions()).toBe(0);
       expect(router.getOpportunitiesDropped()).toBe(1);
       expect(logger.debug).toHaveBeenCalledWith(
@@ -432,6 +499,26 @@ describe('OpportunityRouter', () => {
 
       await router.forwardToExecutionEngine(opp);
 
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('circuit breaker closed - recovered'),
+      );
+    });
+
+    // M13 FIX: Explicit half-open scenario test
+    it('should forward successfully in half-open state and record recovery', async () => {
+      // Simulate half-open: circuit was previously open but timer expired,
+      // allowing one test request through
+      circuitBreaker.isCurrentlyOpen.mockReturnValue(false); // half-open allows requests
+      circuitBreaker.getFailures.mockReturnValue(3); // previous failures still recorded
+      circuitBreaker.recordSuccess.mockReturnValue(true); // success → circuit closes (recovery)
+
+      const opp = createOpportunity({ id: 'opp-halfopen', chain: 'ethereum', profitPercentage: 1.2 });
+      await router.forwardToExecutionEngine(opp);
+
+      // Verify the request went through
+      expect(streamsClient.xadd).toHaveBeenCalled();
+      expect(circuitBreaker.recordSuccess).toHaveBeenCalled();
+      // Verify recovery was logged
       expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining('circuit breaker closed - recovered'),
       );
@@ -1006,6 +1093,20 @@ describe('OpportunityRouter', () => {
       expect(await router.processOpportunity(dataMax, false)).toBe(true);
     });
 
+    // M10 FIX: Test with realistic production profit ranges (typical DEX arb: -0.5% to 15%)
+    it('should accept opportunities with realistic production profit values', async () => {
+      const realisticProfits = [0.3, 0.5, 1.2, 2.5, 5.0, 8.0, 12.0, 15.0];
+      for (let i = 0; i < realisticProfits.length; i++) {
+        const data = createOpportunityData({
+          id: `opp-realistic-${i}`,
+          profitPercentage: realisticProfits[i],
+        });
+        const result = await router.processOpportunity(data, false);
+        expect(result).toBe(true);
+      }
+      expect(router.getTotalOpportunities()).toBe(realisticProfits.length);
+    });
+
     it('should use custom executionRequestsStream when configured', async () => {
       const customRouter = new OpportunityRouter(
         logger, circuitBreaker, streamsClient,
@@ -1015,9 +1116,12 @@ describe('OpportunityRouter', () => {
       const opp = createOpportunity({ id: 'opp-custom-stream' });
       await customRouter.forwardToExecutionEngine(opp);
 
+      // FIX W2-8: xadd now includes id and MAXLEN options
       expect(streamsClient.xadd).toHaveBeenCalledWith(
         'stream:custom-exec',
         expect.any(Object),
+        '*',
+        expect.objectContaining({ maxLen: 5000 }),
       );
     });
 

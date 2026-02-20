@@ -187,12 +187,12 @@ describe('OpportunityConsumer - Configurable Settings', () => {
 
     consumer.start();
 
-    // Default batchSize is 10, blockMs is 1000
+    // Default batchSize is 10, blockMs is 200
     expect(mockLogger.info).toHaveBeenCalledWith(
       'Stream consumer started with blocking reads',
       expect.objectContaining({
         batchSize: 10,
-        blockMs: 1000,
+        blockMs: 200,
       })
     );
   });
@@ -639,7 +639,7 @@ describe('OpportunityConsumer - Business Rule Validation (BUG FIX 4.3)', () => {
     const result = (consumer as any).handleArbitrageOpportunity(validOpp);
 
     // Should succeed
-    expect(result).toBe(true);
+    expect(result).toBe('queued');
 
     // Log should use the original opportunity (not a copy from validation)
     expect(mockLogger.info).toHaveBeenCalledWith(
@@ -847,7 +847,7 @@ describe('Exception Path Stats Tracking (BUG FIX 4.2)', () => {
 
     const result = (consumer as any).handleArbitrageOpportunity(validOpp);
 
-    expect(result).toBe(false);
+    expect(result).toBe('rejected');
     expect(mockStats.opportunitiesRejected).toBe(1);
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Failed to handle arbitrage opportunity',

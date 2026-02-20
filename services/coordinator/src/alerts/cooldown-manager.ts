@@ -20,6 +20,8 @@ export interface CooldownManagerLogger {
  */
 export interface CooldownDelegate {
   getAlertCooldowns(): Map<string, number>;
+  getAlertCooldown(key: string): number | undefined;
+  getAlertCooldownCount(): number;
   setAlertCooldown(key: string, timestamp: number): void;
   cleanupAlertCooldowns(now: number): void;
 }
@@ -82,8 +84,9 @@ export class AlertCooldownManager {
    * @returns true if alert is on cooldown and should be suppressed
    */
   isOnCooldown(key: string, now: number = Date.now()): boolean {
-    const cooldowns = this.getCooldowns();
-    const lastAlert = cooldowns.get(key);
+    const lastAlert = this.delegate
+      ? this.delegate.getAlertCooldown(key)
+      : this.localCooldowns.get(key);
     // If no record exists, not on cooldown
     if (lastAlert === undefined) {
       return false;
@@ -105,7 +108,10 @@ export class AlertCooldownManager {
     }
 
     // Automatic cleanup when threshold exceeded
-    if (this.getCooldowns().size > this.config.cleanupThreshold) {
+    const count = this.delegate
+      ? this.delegate.getAlertCooldownCount()
+      : this.localCooldowns.size;
+    if (count > this.config.cleanupThreshold) {
       this.cleanup(now);
     }
   }
@@ -170,7 +176,9 @@ export class AlertCooldownManager {
    * Get the current size of the cooldowns map
    */
   get size(): number {
-    return this.getCooldowns().size;
+    return this.delegate
+      ? this.delegate.getAlertCooldownCount()
+      : this.localCooldowns.size;
   }
 
   /**
@@ -189,7 +197,7 @@ export class AlertCooldownManager {
     } else {
       // Delegate mode: cooldowns are managed by HealthMonitor, clear is a no-op
       this.logger?.debug('clear() called in delegate mode - cooldowns are managed by HealthMonitor', {
-        delegateSize: this.delegate.getAlertCooldowns().size,
+        delegateSize: this.delegate.getAlertCooldownCount(),
       });
     }
   }

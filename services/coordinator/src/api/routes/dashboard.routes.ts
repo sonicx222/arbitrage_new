@@ -2,9 +2,13 @@
  * Dashboard Routes
  *
  * HTML dashboard for visual system monitoring.
- * Public endpoint - no authentication required.
+ *
+ * C4 FIX: DASHBOARD_AUTH_TOKEN is required in production. Without it, the dashboard
+ * exposes instance ID, service topology, trading metrics, and profit data to anyone
+ * who can reach the port (e.g., container deployments with port forwarding).
  *
  * @see coordinator.ts (parent service)
+ * @throws Error if NODE_ENV=production and DASHBOARD_AUTH_TOKEN is not set
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -43,9 +47,21 @@ const CACHE_TTL_MS = 1000; // 1 second cache - dashboard auto-refreshes every 10
  * @returns Express router with dashboard endpoint
  */
 export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
+  // C4 FIX: Require DASHBOARD_AUTH_TOKEN in production.
+  // Dashboard exposes instance ID, service topology, trading metrics, and profit data.
+  // Without auth, container deployments with port forwarding would expose sensitive data.
+  if (process.env.NODE_ENV === 'production' && !process.env.DASHBOARD_AUTH_TOKEN) {
+    throw new Error(
+      'DASHBOARD_AUTH_TOKEN is required in production. ' +
+      'Without it, the dashboard endpoint exposes instance ID, service topology, ' +
+      'trading metrics, and profit data without authentication. ' +
+      'Set DASHBOARD_AUTH_TOKEN environment variable to enable dashboard authentication.'
+    );
+  }
+
   const router = Router();
 
-  // Optional auth: if DASHBOARD_AUTH_TOKEN is set, require Bearer token
+  // Auth: if DASHBOARD_AUTH_TOKEN is set, require Bearer token
   const dashboardAuthToken = process.env.DASHBOARD_AUTH_TOKEN;
   if (dashboardAuthToken) {
     router.use((_req: Request, res: Response, next: NextFunction) => {

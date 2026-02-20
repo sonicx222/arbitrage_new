@@ -1414,9 +1414,21 @@ export class ChainDetectorInstance extends EventEmitter {
     // Publish to Redis Streams
     this.publishPriceUpdate(priceUpdate);
 
-    // PHASE2-TASK37: Store in HierarchicalCache if enabled (non-blocking)
-    // Cache key format: "price:{chainId}:{pairAddress}"
-    // This provides persistent caching and cross-instance sharing
+    // Cache price data asynchronously (fire-and-forget).
+    // Non-blocking to preserve hot-path latency (<50ms target per ADR-022).
+    //
+    // Transformation: PriceUpdate → CachedPriceData (normalized subset)
+    //   - Extracts: price, reserve0, reserve1, timestamp, blockNumber
+    //   - Cache key format: "price:{chainId}:{pairAddress}"
+    //
+    // This cache (L2 HierarchicalCache / Redis) provides:
+    //   1. Cross-instance price sharing between partitions
+    //   2. Recovery data for restart scenarios
+    //   3. NOT used in hot-path detection (which uses pairsByAddress Map)
+    //
+    // Failures silently logged — cache is optimization, not critical path.
+    // @see ADR-005: L2 cache for distributed sharing
+    // @see ADR-022: Hot-path memory optimization
     if (this.usePriceCache && this.priceCache) {
       const cacheKey = `price:${this.chainId}:${pair.address.toLowerCase()}`;
       // Fire-and-forget write to avoid blocking hot path

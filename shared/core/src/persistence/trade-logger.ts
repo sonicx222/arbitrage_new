@@ -67,6 +67,20 @@ export interface TradeLogEntry {
   latencyMs?: number;
   /** Whether MEV protection was used */
   usedMevProtection?: boolean;
+  /** OpenTelemetry trace ID for cross-service correlation */
+  traceId?: string;
+  /** Swap route/path (e.g., token addresses in order) */
+  route?: string[];
+  /** Slippage tolerance used (decimal, e.g., 0.05 = 5%) */
+  slippage?: number;
+  /** Execution strategy used (e.g., 'intra-chain', 'flash-loan', 'cross-chain') */
+  strategyUsed?: string;
+  /** Number of retry attempts before success/failure */
+  retryCount?: number;
+  /** Chain where the sell side executed (for cross-chain) */
+  sellChain?: string;
+  /** DEX where the sell side executed (for cross-chain) */
+  sellDex?: string;
 }
 
 /**
@@ -228,6 +242,9 @@ export class TradeLogger {
    * ArbitrageOpportunity enrichment.
    */
   private buildEntry(result: ExecutionResult, opportunity?: ArbitrageOpportunity): TradeLogEntry {
+    // Extract traceId from opportunity metadata if available (set by trace context propagation)
+    const traceId = (opportunity as unknown as Record<string, unknown> | undefined)?._traceId as string | undefined;
+
     return {
       timestamp: result.timestamp ?? Date.now(),
       opportunityId: result.opportunityId,
@@ -246,6 +263,13 @@ export class TradeLogger {
       error: result.error,
       latencyMs: result.latencyMs,
       usedMevProtection: result.usedMevProtection,
+      traceId,
+      route: opportunity?.path,
+      slippage: undefined, // Populated by caller if available
+      strategyUsed: opportunity?.type,
+      retryCount: undefined, // Populated by caller if available
+      sellChain: opportunity?.sellChain,
+      sellDex: opportunity?.sellDex,
     };
   }
 }

@@ -56,7 +56,7 @@ const config: UnifiedDetectorConfig = {
   chains: process.env.PARTITION_CHAINS?.split(',').map(c => c.trim()),
   instanceId: process.env.INSTANCE_ID || `unified-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
   regionId,
-  enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH === 'true',
+  enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
   healthCheckPort
 };
 

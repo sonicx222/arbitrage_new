@@ -548,6 +548,17 @@ Launch Agent 7 (news-catalyst-intelligence).
 - If verdict is **CAUTION**: Proceed but flag constraints; pass no-trade zones to Agent 4
 - If verdict is **CLEAR**: Proceed normally
 
+### Agent Stall Detection (applies to all phases)
+
+After spawning agents in any phase:
+1. Send each agent an activation message with their specific research inputs
+2. Wait 60-90 seconds, then check inbox read status
+3. If agents haven't read their messages after 90s, send a nudge: "Check your inbox for your assigned research task. Begin analysis and report findings when done."
+4. If an agent is unresponsive after 3 minutes, send a direct message: "You have an active research assignment. Read your activation message and begin immediately."
+5. If still unresponsive after 5 minutes, note the gap and proceed with available results.
+
+For Phase 2 (4 parallel agents): track which have reported vs not. For sequential phases (1, 3-5): apply to the single agent.
+
 ### Phase 2: Parallel Analysis (4 agents in single message)
 Launch simultaneously:
 | Agent | Focus |

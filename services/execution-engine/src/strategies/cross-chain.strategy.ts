@@ -32,8 +32,8 @@
 
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getNativeTokenPrice, getTokenDecimals } from '@arbitrage/config';
-import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/core';
-import type { BridgeStatusResult } from '@arbitrage/core';
+import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice, hmacSign, hmacVerify, getHmacSigningKey, isSignedEnvelope } from '@arbitrage/core';
+import type { BridgeStatusResult, SignedEnvelope } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger, BridgePollingResult, BridgeRecoveryState } from '../types';
 import {
@@ -69,11 +69,30 @@ const BRIDGE_POLL_BACKOFF_SCHEDULE = [
   { afterMs: 0, intervalMs: 5000 },        // First 30s: poll every 5s
 ] as const;
 
+/**
+ * Fix W2-6: Per-route bridge circuit breaker configuration.
+ * Tracks consecutive failures per source->dest->token route and skips
+ * routes that have failed repeatedly within a cooldown window.
+ */
+interface BridgeRouteCircuitBreaker {
+  /** Number of consecutive failures */
+  failures: number;
+  /** Timestamp when the route was cooled down (0 = not cooled) */
+  cooledDownAt: number;
+}
+
+/** Default thresholds for bridge route circuit breaker */
+const BRIDGE_ROUTE_CB_FAILURE_THRESHOLD = 3;
+const BRIDGE_ROUTE_CB_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
 export class CrossChainStrategy extends BaseExecutionStrategy {
   // Phase 5.2: Optional flash loan provider factory for destination chain flash loans
   private readonly flashLoanProviderFactory?: FlashLoanProviderFactory;
   // Fix 7.2: Flash loan strategy instance for destination chain execution
   private readonly flashLoanStrategy?: FlashLoanStrategy;
+
+  // Fix W2-6: Per-route bridge circuit breaker
+  private readonly bridgeRouteBreakers = new Map<string, BridgeRouteCircuitBreaker>();
 
   /**
    * Create a CrossChainStrategy instance.
@@ -267,6 +286,68 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
    * Emit a structured audit log entry for cross-chain execution phases.
    * All audit entries use the same prefix for easy grep/filtering.
    */
+  // ===========================================================================
+  // Fix W2-6: Bridge Route Circuit Breaker
+  // ===========================================================================
+
+  /**
+   * Build a route key for circuit breaker tracking.
+   */
+  private bridgeRouteKey(source: string, dest: string, token: string): string {
+    return `${source}->${dest}:${token}`;
+  }
+
+  /**
+   * Check if a bridge route is currently cooled down.
+   * Returns true if the route should be skipped.
+   */
+  private isBridgeRouteCooledDown(source: string, dest: string, token: string): boolean {
+    const key = this.bridgeRouteKey(source, dest, token);
+    const breaker = this.bridgeRouteBreakers.get(key);
+    if (!breaker || breaker.cooledDownAt === 0) return false;
+
+    const elapsed = Date.now() - breaker.cooledDownAt;
+    if (elapsed >= BRIDGE_ROUTE_CB_COOLDOWN_MS) {
+      // Cooldown expired — reset breaker
+      this.bridgeRouteBreakers.delete(key);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Record a bridge failure for circuit breaker tracking.
+   * If consecutive failures reach the threshold, the route enters cooldown.
+   */
+  private recordBridgeRouteFailure(source: string, dest: string, token: string): void {
+    const key = this.bridgeRouteKey(source, dest, token);
+    const breaker = this.bridgeRouteBreakers.get(key) ?? { failures: 0, cooledDownAt: 0 };
+
+    breaker.failures++;
+
+    if (breaker.failures >= BRIDGE_ROUTE_CB_FAILURE_THRESHOLD) {
+      breaker.cooledDownAt = Date.now();
+      this.logger.warn('Bridge route circuit breaker triggered — cooling down', {
+        route: key,
+        failures: breaker.failures,
+        cooldownMs: BRIDGE_ROUTE_CB_COOLDOWN_MS,
+      });
+    }
+
+    this.bridgeRouteBreakers.set(key, breaker);
+  }
+
+  /**
+   * Record a bridge success, resetting the failure counter.
+   */
+  private recordBridgeRouteSuccess(source: string, dest: string, token: string): void {
+    const key = this.bridgeRouteKey(source, dest, token);
+    if (this.bridgeRouteBreakers.has(key)) {
+      this.bridgeRouteBreakers.delete(key);
+    }
+  }
+
   private logCrossChainAudit(
     phase: string,
     opportunityId: string,
@@ -332,6 +413,20 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         defaultBridgeToken: 'USDC',
         tokenIn: opportunity.tokenIn,
       });
+    }
+
+    // Fix W2-6: Check per-route circuit breaker before attempting bridge
+    if (this.isBridgeRouteCooledDown(sourceChain, destChain, bridgeToken)) {
+      this.logger.debug('Bridge route is in cooldown, skipping', {
+        opportunityId: opportunity.id,
+        route: this.bridgeRouteKey(sourceChain, destChain, bridgeToken),
+      });
+      return createErrorResult(
+        opportunity.id,
+        formatExecutionError(ExecutionErrorCode.BRIDGE_EXEC, 'Bridge route is in cooldown after consecutive failures'),
+        sourceChain,
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     // Estimate trade size in USD for bridge scoring (falls back to default $1000 if unavailable)
@@ -682,6 +777,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           ctx.nonceManager.failTransaction(sourceChain, bridgeNonce, bridgeResult.error || 'Bridge failed');
         }
 
+        // Fix W2-6: Record bridge failure for route circuit breaker
+        this.recordBridgeRouteFailure(sourceChain, destChain, bridgeToken);
+
         return createErrorResult(
           opportunity.id,
           formatExecutionError(ExecutionErrorCode.BRIDGE_EXEC, bridgeResult.error),
@@ -725,6 +823,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       );
 
       if (!pollingResult.completed) {
+        // Fix W2-6: Record bridge failure for route circuit breaker
+        this.recordBridgeRouteFailure(sourceChain, destChain, bridgeToken);
+
         // Bridge failed or timed out
         return createErrorResult(
           opportunity.id,
@@ -768,10 +869,38 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         destBalanceAfterBridge,
       });
 
+      // Fix W2-6: Record bridge success — resets consecutive failure counter
+      this.recordBridgeRouteSuccess(sourceChain, destChain, bridgeToken);
+
+      // Fix #1: Persist bridge recovery state BEFORE sell attempt
+      // If any subsequent step fails (dest validation, sell execution, etc.),
+      // the BridgeRecoveryManager can detect and attempt recovery on restart.
+      // @see docs/reports/SOLANA_BRIDGE_DEEP_ANALYSIS_2026-02-20.md P1 #1
+      if (ctx.redis) {
+        await this.persistBridgeRecoveryState({
+          bridgeId,
+          opportunityId: opportunity.id,
+          sourceChain,
+          destChain: destChain!,
+          bridgeToken,
+          bridgeAmount: String(bridgeAmount),
+          sourceTxHash: bridgeResult.sourceTxHash || '',
+          sellDex: opportunity.sellDex || opportunity.buyDex || '',
+          expectedProfit,
+          tokenIn: opportunity.tokenIn || '',
+          tokenOut: opportunity.tokenOut || '',
+          initiatedAt: Date.now(),
+          bridgeProtocol: bridgeRouter.protocol,
+          status: 'bridge_completed_sell_pending',
+          lastCheckAt: Date.now(),
+        }, ctx.redis);
+      }
+
       // Step 5: Validate destination chain context using helper (Fix 6.2 & 9.1)
       const destValidation = this.validateContext(destChain, ctx);
       if (!destValidation.valid) {
         // Bridge succeeded but can't execute sell - funds are on dest chain
+        // Recovery state already persisted above — BridgeRecoveryManager will handle
         this.logger.error('Cannot execute sell - no wallet/provider for destination chain', {
           opportunityId: opportunity.id,
           destChain,
@@ -885,6 +1014,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
           // Flash loan result already includes profit calculation
           const actualProfitUsd = (flashLoanResult.actualProfit ?? 0) - bridgeGasCostUsd;
+
+          // Fix W2-6: Record bridge route success
+          this.recordBridgeRouteSuccess(sourceChain, destChain, bridgeToken);
 
           // Fix 7.2: Return success using correct createSuccessResult signature
           return createSuccessResult(
@@ -1260,6 +1392,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       sellExecutionMethod: usedDestFlashLoan ? 'flash_loan' : 'direct_swap',
     });
 
+    // Fix W2-6: Record bridge route success
+    this.recordBridgeRouteSuccess(sourceChain, destChain, opportunity.tokenOut || 'USDC');
+
     return createSuccessResult(
       opportunity.id,
       sellTxHash || bridgeResult.sourceTxHash || '',
@@ -1514,12 +1649,15 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const ttlSeconds = Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
 
     try {
-      await redis.set(key, state, ttlSeconds);
+      // Fix #4: HMAC-sign recovery state to prevent tampering
+      const signedEnvelope = hmacSign(state, getHmacSigningKey());
+      await redis.set(key, signedEnvelope, ttlSeconds);
       this.logger.debug('Persisted bridge recovery state', {
         bridgeId: state.bridgeId,
         opportunityId: state.opportunityId,
         sourceChain: state.sourceChain,
         destChain: state.destChain,
+        signed: !!signedEnvelope.sig,
       });
     } catch (error) {
       // Log but don't fail - recovery is best-effort
@@ -1549,45 +1687,66 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${bridgeId}`;
 
     try {
-      const existing = await redis.get(key);
-      if (!existing) {
-        // State already expired or wasn't persisted - OK
+      // Fix #4: Read and verify HMAC-signed envelope
+      const signingKey = getHmacSigningKey();
+      const raw = await redis.get(key);
+      if (!raw || typeof raw !== 'object') {
+        if (raw !== null) {
+          this.logger.warn('Corrupt bridge recovery state, deleting key', {
+            bridgeId,
+            key,
+          });
+          await redis.del(key);
+        }
         return;
       }
 
+      // Handle both signed envelopes and legacy unsigned data
       let state: BridgeRecoveryState;
-      try {
-        state = JSON.parse(existing);
-      } catch (parseError) {
-        // Corrupt data in Redis - clean up and return
-        this.logger.warn('Corrupt bridge recovery state, deleting key', {
-          bridgeId,
-          key,
-          error: getErrorMessage(parseError),
-        });
-        await redis.del(key);
-        return;
+      if (isSignedEnvelope(raw)) {
+        const verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+        if (!verified) {
+          this.logger.error('Bridge recovery state HMAC verification failed - possible tampering', {
+            bridgeId,
+            key,
+          });
+          return;
+        }
+        state = verified;
+      } else {
+        // Legacy unsigned data — accept but log warning
+        state = raw as BridgeRecoveryState;
+        if (signingKey) {
+          this.logger.warn('Unsigned bridge recovery state found with signing enabled', {
+            bridgeId,
+          });
+        }
       }
+
       state.status = status;
       state.lastCheckAt = Date.now();
       if (errorMessage) {
         state.errorMessage = errorMessage;
       }
 
+      // Fix #4: Re-sign updated state
+      const signedEnvelope = hmacSign(state, signingKey);
+
       // Keep same TTL for tracking purposes
       const ttlSeconds = Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
-      await redis.set(key, state, ttlSeconds);
+      await redis.set(key, signedEnvelope, ttlSeconds);
 
       // If recovered or failed, we can delete the key (cleanup)
       if (status === 'recovered' || status === 'failed') {
         // Short TTL for post-processing analysis, then auto-cleanup
-        await redis.set(key, state, 3600); // 1 hour
+        await redis.set(key, signedEnvelope, 3600); // 1 hour
       }
 
       this.logger.debug('Updated bridge recovery status', {
         bridgeId,
         status,
         errorMessage,
+        signed: !!signedEnvelope.sig,
       });
     } catch (error) {
       this.logger.warn('Failed to update bridge recovery status', {
@@ -1640,17 +1799,15 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       for (const key of keys) {
         try {
-          const stateJson = await redis.get(key);
-          if (!stateJson) continue;
+          // FIX P0-1: redis.get() already returns parsed object — no JSON.parse needed
+          // @see FIX P0-1 in docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md
+          const state = await redis.get(key) as BridgeRecoveryState | null;
+          if (!state) continue;
 
-          let state: BridgeRecoveryState;
-          try {
-            state = JSON.parse(stateJson);
-          } catch (parseError) {
+          if (typeof state !== 'object') {
             // Corrupt data in Redis - clean up and continue
             this.logger.warn('Corrupt bridge recovery state during scan, deleting key', {
               key,
-              error: getErrorMessage(parseError),
             });
             await redis.del(key);
             continue;

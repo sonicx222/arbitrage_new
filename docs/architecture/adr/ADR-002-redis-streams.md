@@ -149,6 +149,42 @@ Chain Detectors → SwapEventFilter → stream:swap-events → Coordinator
 - Active pairs tracking for dashboard
 - No more orphaned stream data
 
+## Consumer Group Semantics
+
+Each service uses a dedicated consumer group to isolate message processing:
+
+### Coordinator Consumer Groups
+- **Streams**: `stream:opportunities`, `stream:swap-events`, `stream:whale-alerts`, `stream:volume-aggregates`, `stream:health`, `stream:price-updates`
+- **Group**: `coordinator-group` (shared across coordinator instances)
+- **startId**: `$` (only new messages — no backlog replay on restart)
+- **Purpose**: Deduplicates opportunities across multiple coordinator instances via Redis consumer group semantics
+
+### Execution Engine Consumer Group
+- **Stream**: `stream:execution-requests`
+- **Group**: `execution-engine-group`
+- **Consumer**: Per-instance (`instanceId`) — enables standby activation pattern
+- **startId**: `$` (only new messages)
+- **Purpose**: Distributes execution requests across engine instances; per-instance consumers allow failover
+
+### Cross-Chain Detector Consumer Group
+- **Streams**: `stream:price-updates`, `stream:whale-alerts`, `stream:pending-opportunities`
+- **Group**: `cross-chain-detector-group`
+- **Purpose**: Aggregates price updates and whale alerts from all chain partitions for cross-chain arbitrage detection; processes pending opportunities for re-evaluation
+
+### Why Separate Group Names?
+
+Different services use different consumer group names to ensure message isolation:
+- Each service processes the FULL stream of messages relevant to it
+- Consumer groups within a service share load (multiple instances of same service)
+- Different services that read the same stream each get their own copy of messages
+
+### Pending Message Handling
+
+All consumer groups use `startId: '$'` which means:
+- On first join: only process messages arriving AFTER the consumer group is created
+- On reconnect: pending messages (delivered but un-ACKed) are re-delivered automatically
+- ACK patterns: Coordinator uses auto-ACK; Execution Engine uses deferred ACK (ACK after execution completes)
+
 ## Context
 
 The system currently uses Redis Pub/Sub for inter-service communication:

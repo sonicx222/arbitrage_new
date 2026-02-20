@@ -28,6 +28,7 @@ import {
 } from './price-calculator';
 
 import { resolveFeeValue as resolveFee } from '../utils/fee-utils';
+import { getOpportunityTimeoutMs } from '@arbitrage/config';
 
 import type { PairSnapshot } from './pair-repository';
 
@@ -552,8 +553,14 @@ export function calculateCrossChainArbitrage(
     return null;
   }
 
-  // Calculate confidence based on price difference and data freshness
-  const confidence = calculateCrossChainConfidence(lowestPrice, highestPrice, maxAgeMs);
+  // Calculate confidence based on price difference and data freshness.
+  // Use the minimum timeout of the two chains for staleness detection —
+  // if either chain's data is stale, the cross-chain opportunity is unreliable.
+  const effectiveMaxAgeMs = maxAgeMs ?? Math.min(
+    getOpportunityTimeoutMs(lowestPrice.chain),
+    getOpportunityTimeoutMs(highestPrice.chain)
+  );
+  const confidence = calculateCrossChainConfidence(lowestPrice, highestPrice, effectiveMaxAgeMs);
 
   return {
     token: lowestPrice.pairKey || 'UNKNOWN',

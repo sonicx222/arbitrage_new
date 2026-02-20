@@ -477,8 +477,9 @@ export class StreamHealthMonitor {
     try {
       const pendingInfo = await this.streamsClient!.xpending(streamName, this.defaultConsumerGroup);
       pendingCount = pendingInfo.total;
-    } catch {
-      // Group may not exist
+    } catch (error) {
+      // OP-34 FIX: Log instead of silently swallowing — distinguishes "group doesn't exist" from real errors
+      this.logger.debug(`Failed to get pending count for ${streamName}:${this.defaultConsumerGroup}`, { error });
     }
 
     return {
@@ -518,6 +519,8 @@ export class StreamHealthMonitor {
         status
       };
     } catch (error) {
+      // OP-34 FIX: Log instead of silently swallowing
+      this.logger.debug(`Failed to get consumer group health for ${streamName}:${groupName}`, { error });
       return {
         groupName,
         consumers: 0,

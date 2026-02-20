@@ -470,6 +470,17 @@ Each agent prompt MUST include:
 - The Performance Patterns table (complete) — so they can assess hot-path proximity
 - Instruction to return findings in the structured format
 
+### Agent Stall Detection (applies to all steps)
+
+After spawning agents in any step:
+1. Send each agent an activation message with their specific inputs and key files to read
+2. Wait 60-90 seconds, then check inbox read status
+3. If agents haven't read their messages after 90s, send a nudge: "Check your inbox for your assigned task. Begin analysis and report findings when done."
+4. If an agent is unresponsive after 3 minutes, send a direct message: "You have an active task assignment. Read your activation message and begin immediately."
+5. If still unresponsive after 5 minutes, note the gap and proceed with available results.
+
+For Step 2 (3 parallel agents): track which have reported vs not. For Step 3+ (sequential): apply to the single agent.
+
 ### Step 3: Performance Safety Review (Agent 3, after Step 2)
 
 After discovery agents complete, spawn the **performance-guardian**:

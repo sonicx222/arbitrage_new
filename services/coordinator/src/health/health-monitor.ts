@@ -87,6 +87,8 @@ export interface HealthMonitorConfig {
   cooldownCleanupThreshold?: number;
   /** Maximum age for cooldown entries before cleanup (default: 3600000 ms = 1 hour) */
   cooldownMaxAgeMs?: number;
+  /** @see OP-13: Threshold in ms for detecting stale heartbeats (default: 30000) */
+  staleHeartbeatThresholdMs?: number;
 }
 
 /**
@@ -100,6 +102,8 @@ const DEFAULT_CONFIG: Required<Omit<HealthMonitorConfig, 'servicePatterns'>> & {
   // P2-005 FIX: Default values for cooldown cleanup
   cooldownCleanupThreshold: 1000,
   cooldownMaxAgeMs: 3600000, // 1 hour
+  // OP-13: Stale heartbeat detection threshold (heartbeats are every 5-10s)
+  staleHeartbeatThresholdMs: 30000,
 };
 
 /**
@@ -165,6 +169,9 @@ export class HealthMonitor {
     serviceHealth: Map<string, ServiceHealth>,
     systemHealth: number
   ): void {
+    // OP-13 FIX: Detect stale heartbeats before evaluating degradation
+    this.detectStaleServices(serviceHealth);
+
     const previousLevel = this.degradationLevel;
 
     // Single-pass analysis of all services
@@ -244,6 +251,35 @@ export class HealthMonitor {
   }
 
   /**
+   * OP-13 FIX: Detect services with stale heartbeats and mark them unhealthy.
+   *
+   * If a service crashes silently, its last 'healthy' status is retained forever
+   * because lastHeartbeat is never compared to current time. This method checks
+   * all services and marks those with stale heartbeats as 'unhealthy'.
+   *
+   * @param serviceHealth - Map of service name to health status (mutated in place)
+   */
+  detectStaleServices(serviceHealth: Map<string, ServiceHealth>): void {
+    const now = Date.now();
+    const threshold = this.config.staleHeartbeatThresholdMs;
+
+    for (const [name, health] of serviceHealth) {
+      if (health.status === 'healthy' && health.lastHeartbeat) {
+        const age = now - health.lastHeartbeat;
+        if (age > threshold) {
+          health.status = 'unhealthy';
+          this.logger.warn('Service heartbeat stale, marking unhealthy', {
+            service: name,
+            lastHeartbeat: health.lastHeartbeat,
+            ageMs: age,
+            thresholdMs: threshold,
+          });
+        }
+      }
+    }
+  }
+
+  /**
    * Check for alerts and trigger notifications.
    * Respects startup grace period to avoid false alerts during initialization.
    *
@@ -314,7 +350,15 @@ export class HealthMonitor {
    * @param alert - Alert to send
    */
   sendAlertWithCooldown(alert: Alert): void {
-    this.onAlert(alert);
+    // OP-35 FIX: Wrap in try-catch to prevent one failed alert from breaking iteration loop
+    try {
+      this.onAlert(alert);
+    } catch (error) {
+      this.logger.error('Failed to send alert via callback', {
+        alertType: alert.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -391,6 +435,20 @@ export class HealthMonitor {
    */
   getAlertCooldowns(): Map<string, number> {
     return new Map(this.alertCooldowns);
+  }
+
+  /**
+   * Get a single alert cooldown timestamp by key (avoids Map copy)
+   */
+  getAlertCooldown(key: string): number | undefined {
+    return this.alertCooldowns.get(key);
+  }
+
+  /**
+   * Get the number of active alert cooldowns (avoids Map copy)
+   */
+  getAlertCooldownCount(): number {
+    return this.alertCooldowns.size;
   }
 
   /**

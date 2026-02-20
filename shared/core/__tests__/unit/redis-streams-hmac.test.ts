@@ -91,9 +91,11 @@ function createMockRedisConstructor(instance: MockRedisInstance): RedisStreamsCo
 
 /**
  * Compute HMAC-SHA256 for test assertions (mirrors RedisStreamsClient.signMessage).
+ * OP-18 FIX: Now includes stream name prefix for replay protection.
  */
-function computeHmac(key: string, data: string): string {
-  return crypto.createHmac('sha256', key).update(data).digest('hex');
+function computeHmac(key: string, data: string, streamName?: string): string {
+  const input = streamName ? `${streamName}:${data}` : data;
+  return crypto.createHmac('sha256', key).update(input).digest('hex');
 }
 
 // =============================================================================
@@ -139,8 +141,9 @@ describe('Redis Streams HMAC Signing/Verification (Task 3.2)', () => {
       expect(sigValue).toBeDefined();
 
       // Verify the signature matches expected HMAC
+      // OP-18 FIX: Signature now includes stream name for replay protection
       const serialized = JSON.stringify(message);
-      const expectedSig = computeHmac(TEST_SIGNING_KEY, serialized);
+      const expectedSig = computeHmac(TEST_SIGNING_KEY, serialized, TEST_STREAM);
       expect(sigValue).toBe(expectedSig);
     });
 

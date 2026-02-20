@@ -155,6 +155,12 @@ export async function createSolanaConnectionPool(
         failedRequests: failedRequests[index]
       });
 
+      // Clear any existing timer before scheduling a new one (prevents timer leak on repeated failures)
+      if (reconnectTimers[index]) {
+        clearTimeout(reconnectTimers[index]!);
+        reconnectTimers[index] = null;
+      }
+
       // Schedule reconnection attempt
       reconnectTimers[index] = setTimeout(() => attemptReconnection(index), config.retryDelayMs);
     }

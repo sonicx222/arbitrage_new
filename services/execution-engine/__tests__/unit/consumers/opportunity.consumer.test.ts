@@ -196,7 +196,7 @@ describe('OpportunityConsumer - Validation', () => {
     // Access private method through type assertion
     const result = (consumer as any).handleArbitrageOpportunity(lowConfidenceOpp);
 
-    expect(result).toBe(false);
+    expect(result).toBe('rejected');
     expect(mockStats.opportunitiesRejected).toBe(1);
     expect(mockLogger.debug).toHaveBeenCalledWith(
       'Opportunity rejected by business rules',
@@ -212,7 +212,7 @@ describe('OpportunityConsumer - Validation', () => {
 
     const result = (consumer as any).handleArbitrageOpportunity(lowProfitOpp);
 
-    expect(result).toBe(false);
+    expect(result).toBe('rejected');
     expect(mockStats.opportunitiesRejected).toBe(1);
     expect(mockLogger.debug).toHaveBeenCalledWith(
       'Opportunity rejected by business rules',
@@ -231,7 +231,7 @@ describe('OpportunityConsumer - Validation', () => {
 
     const result = (consumer as any).handleArbitrageOpportunity(opportunity);
 
-    expect(result).toBe(false);
+    expect(result).toBe('rejected');
     expect(mockLogger.debug).toHaveBeenCalledWith(
       'Opportunity rejected: already queued or executing',
       expect.any(Object)
@@ -246,7 +246,7 @@ describe('OpportunityConsumer - Validation', () => {
 
     const result = (consumer as any).handleArbitrageOpportunity(validOpp);
 
-    expect(result).toBe(true);
+    expect(result).toBe('queued');
     expect(mockStats.opportunitiesReceived).toBe(1);
     expect(mockQueueService.enqueue).toHaveBeenCalledWith(validOpp);
   });
@@ -281,16 +281,36 @@ describe('OpportunityConsumer - Backpressure', () => {
     });
   });
 
-  it('should reject opportunities when queue is full', async () => {
+  it('should reject opportunities when queue is full with backpressure result', async () => {
     const opportunity = createMockOpportunity();
 
     const result = (consumer as any).handleArbitrageOpportunity(opportunity);
 
-    expect(result).toBe(false);
+    // P0-7 FIX: Returns 'backpressure' (transient) instead of boolean false
+    expect(result).toBe('backpressure');
     expect(mockStats.queueRejects).toBe(1);
     expect(mockLogger.warn).toHaveBeenCalledWith(
       'Opportunity rejected due to queue backpressure',
       expect.any(Object)
+    );
+  });
+
+  it('should NOT ACK messages rejected due to queue backpressure (P0-7 FIX)', async () => {
+    const opportunity = createMockOpportunity();
+    const message = { id: 'msg-backpressure', data: opportunity };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    // P0-7 FIX: Backpressure-rejected messages must NOT be ACKed.
+    // They stay in Redis PEL for redelivery when queue drains.
+    expect(mockStreamsClient.xack).not.toHaveBeenCalled();
+    expect(consumer.getPendingCount()).toBe(0);
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      'Backpressure: message left in PEL for redelivery',
+      expect.objectContaining({
+        messageId: 'msg-backpressure',
+        opportunityId: opportunity.id,
+      })
     );
   });
 });
@@ -400,13 +420,13 @@ describe('OpportunityConsumer - Message Handling', () => {
     expect(mockStreamsClient.xack).toHaveBeenCalled();
   });
 
-  it('should ACK rejected opportunities immediately', async () => {
+  it('should ACK permanently rejected opportunities immediately', async () => {
     const lowConfidenceOpp = createMockOpportunity({ confidence: 0.1 });
     const message = { id: 'msg-123', data: lowConfidenceOpp };
 
     await (consumer as any).handleStreamMessage(message);
 
-    // Rejected opportunities should be ACKed immediately
+    // Permanently rejected opportunities (business rules) should be ACKed immediately
     expect(mockStreamsClient.xack).toHaveBeenCalled();
   });
 
@@ -423,7 +443,7 @@ describe('OpportunityConsumer - Message Handling', () => {
 
   it('should handle queue enqueue errors gracefully', async () => {
     // The actual implementation catches enqueue errors inside handleArbitrageOpportunity
-    // and returns false, which triggers a normal rejection ACK (not DLQ)
+    // and returns 'rejected' (permanent), which triggers immediate ACK (not DLQ)
     mockQueueService.enqueue = jest.fn().mockImplementation(() => {
       throw new Error('Queue error');
     });
@@ -433,8 +453,8 @@ describe('OpportunityConsumer - Message Handling', () => {
 
     await (consumer as any).handleStreamMessage(message);
 
-    // Queue errors are caught internally and treated as rejections
-    // The message is ACKed to prevent redelivery
+    // Queue errors (exceptions) are caught internally and treated as permanent rejections
+    // The message is ACKed to prevent redelivery (unlike backpressure which is transient)
     expect(mockStreamsClient.xack).toHaveBeenCalled();
   });
 
@@ -502,7 +522,7 @@ describe('OpportunityConsumer - Active Execution Tracking', () => {
     consumer.markActive('opp-dup');
     const result = (consumer as any).handleArbitrageOpportunity(opportunity);
 
-    expect(result).toBe(false);
+    expect(result).toBe('rejected');
     expect(mockLogger.debug).toHaveBeenCalledWith(
       'Opportunity rejected: already queued or executing',
       expect.any(Object)
@@ -571,7 +591,7 @@ describe('OpportunityConsumer - Shutdown Cleanup', () => {
     });
   });
 
-  it('should ACK all pending messages during stop (BUG-FIX regression)', async () => {
+  it('should ACK only non-in-flight pending messages during stop (W2-5 FIX)', async () => {
     // Queue multiple opportunities to create pending messages
     const opp1 = createMockOpportunity({ id: 'opp-1' });
     const opp2 = createMockOpportunity({ id: 'opp-2' });
@@ -581,14 +601,18 @@ describe('OpportunityConsumer - Shutdown Cleanup', () => {
 
     expect(consumer.getPendingCount()).toBe(2);
 
-    // Stop should ACK all pending messages
+    // Simulate opp-1 execution completed (removed from activeExecutions)
+    // but deferred ACK not yet sent (still in pendingMessages)
+    consumer.markComplete('opp-1');
+
+    // Stop should ACK only opp-1 (completed), NOT opp-2 (still in-flight)
     await consumer.stop();
 
-    // Both messages should be ACKed
-    expect(mockStreamsClient.xack).toHaveBeenCalledTimes(2);
+    // Only one message should be ACKed (the completed one)
+    expect(mockStreamsClient.xack).toHaveBeenCalledTimes(1);
     expect(mockLogger.info).toHaveBeenCalledWith(
-      'ACKing pending messages during shutdown',
-      expect.objectContaining({ count: 2 })
+      'Shutdown ACK: safe to ACK / left in PEL for XCLAIM',
+      expect.objectContaining({ acking: 1, inFlight: 1 })
     );
 
     // Pending count should be cleared
@@ -598,6 +622,9 @@ describe('OpportunityConsumer - Shutdown Cleanup', () => {
   it('should handle ACK failures during shutdown gracefully', async () => {
     const opportunity = createMockOpportunity();
     await (consumer as any).handleStreamMessage({ id: 'msg-1', data: opportunity });
+
+    // Simulate execution completed so message is eligible for ACK during shutdown
+    consumer.markComplete(opportunity.id);
 
     // Make ACK fail
     mockStreamsClient.xack.mockRejectedValue(new Error('Redis connection lost'));

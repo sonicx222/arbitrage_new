@@ -19,7 +19,7 @@ The system has a hierarchical cache ([shared/core/src/caching/hierarchical-cache
 
 ### Problem Statement
 
-1. **L1 not fully utilized**: SharedArrayBuffer allocated but not used for price matrix
+1. **L1 role clarified**: L1 (SharedArrayBuffer PriceMatrix) is correctly used for cross-worker/cross-thread price sharing scenarios. However, the single-process detection hot-path uses in-memory `pairsByAddress` Map for O(1) local lookups, bypassing L1
 2. **L2 over-reliance**: Too many Redis calls for price lookups
 3. **No predictive warming**: Cache misses on first access after events
 4. **Promotion/demotion not tuned**: Generic thresholds, not optimized for arbitrage
@@ -33,6 +33,9 @@ Optimize the hierarchical cache specifically for arbitrage price data:
 - Indexed by `hash(chain, dex, pair)` → offset
 - Atomic updates via `Atomics.store()`
 - Zero-copy access from worker threads
+- **Note**: L1 is designed for cross-worker/cross-thread scenarios where SharedArrayBuffer
+  enables zero-copy price sharing. Single-process detection uses in-memory `pairsByAddress`
+  Map for fastest local access (no SharedArrayBuffer overhead needed within a single thread).
 
 ### L2: Redis (1-5ms)
 - Recent price history (last 100 updates per pair)
@@ -113,7 +116,7 @@ class PriceMatrix {
 
 | Level | Speed | Scope | Use Case |
 |-------|-------|-------|----------|
-| L1 | ~0.1μs | Single instance | Hot path price lookups |
+| L1 | ~0.1μs | Single instance | Cross-worker price sharing |
 | L2 | ~2ms | Cross-partition | Price sharing, history |
 | L3 | ~200ms | RPC Fallback | Fresh on-chain data when cache stale |
 
@@ -144,6 +147,11 @@ would require adding a persistence layer in the future.
 | Price lookup | 2ms (Redis) | 0.1μs | 20,000x |
 | Cross-chain check (10 pairs) | 20ms | 1μs | 20,000x |
 | Arbitrage detection cycle | 50ms | 5ms | 10x |
+
+> **Note**: The "20,000x improvement" applies to cross-worker price sharing (L1 SharedArrayBuffer
+> vs L2 Redis). The single-process detection hot-path uses O(1) `pairsByAddress` Map lookups
+> which are already sub-microsecond without L1. L1's primary value is enabling zero-copy
+> price reads from worker threads (see ADR-012).
 
 ## Consequences
 

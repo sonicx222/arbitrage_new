@@ -637,6 +637,17 @@ Each agent prompt MUST include:
 - The Critical Rules section (Anti-Hallucination, Best Practices, Known Correct Patterns)
 - Current test landscape summary (from Context section)
 
+### Agent Stall Detection (applies to all phases)
+
+After spawning agents in any phase:
+1. Send each agent an activation message with their specific inputs
+2. Wait 60-90 seconds, then check inbox read status
+3. If agents haven't read their messages after 90s, send a broadcast nudge: "All agents: check your inbox for your assigned task. Begin analysis and report findings when done."
+4. If an agent is unresponsive after 3 minutes, send a direct message: "You have an active task assignment. Read your activation message and begin immediately."
+5. If still unresponsive after 5 minutes, note the gap in the final report and proceed with available results.
+
+For Phase 1 (2 parallel agents) and Phase 2 (3 parallel agents): track which agents have reported vs not.
+
 ### Phase 2: Deep Analysis (after Phase 1)
 
 After BOTH Phase 1 agents complete, spawn all 3 analysis agents **in a single message** with 3 parallel Task tool calls:

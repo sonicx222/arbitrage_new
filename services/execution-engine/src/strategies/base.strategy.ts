@@ -39,6 +39,7 @@ import {
   getFallbackGasPrice,
   type GasBaselineEntry,
 } from '../services/gas-price-optimizer';
+import { PROVIDER_HEALTH_CHECK_TIMEOUT_MS } from '../types';
 import {
   NonceAllocationManager,
 } from '../services/nonce-allocation-manager';
@@ -208,7 +209,7 @@ const SLIPPAGE_BASIS_POINTS_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.slippage
 /**
  * Refactor 9.5: Pre-computed DEX lookup by chain and name for O(1) access.
  */
-const DEXES_BY_CHAIN_AND_NAME: Map<string, Map<string, typeof DEXES[string][number]>> = new Map(
+export const DEXES_BY_CHAIN_AND_NAME: Map<string, Map<string, typeof DEXES[string][number]>> = new Map(
   Object.entries(DEXES).map(([chain, dexes]) => [
     chain,
     new Map(dexes.map(dex => [dex.name.toLowerCase(), dex]))
@@ -501,7 +502,7 @@ export abstract class BaseExecutionStrategy {
       await Promise.race([
         provider.getNetwork(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Provider health check timeout')), 3000)
+          setTimeout(() => reject(new Error('Provider health check timeout')), PROVIDER_HEALTH_CHECK_TIMEOUT_MS)
         ),
       ]);
       return true;

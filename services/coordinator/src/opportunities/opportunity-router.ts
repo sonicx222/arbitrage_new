@@ -10,8 +10,11 @@
  * @see R2 - Coordinator Subsystems extraction
  */
 
-import { RedisStreams, type ArbitrageOpportunity } from '@arbitrage/types';
+import fs from 'fs';
+import pathModule from 'path';
+import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core';
+import type { TraceContext } from '@arbitrage/core/tracing';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 
 /**
@@ -26,9 +29,11 @@ export interface OpportunityRouterLogger {
 
 /**
  * Redis streams client interface (subset needed by router)
+ *
+ * FIX W2-8: Extended with options parameter to support MAXLEN trimming.
  */
 export interface OpportunityStreamsClient {
-  xadd(streamName: string, data: Record<string, unknown>): Promise<string>;
+  xadd(streamName: string, data: Record<string, unknown>, id?: string, options?: { maxLen?: number; approximate?: boolean }): Promise<string>;
 }
 
 /**
@@ -61,7 +66,18 @@ export interface OpportunityRouterConfig {
   maxOpportunities?: number;
   /** Opportunity TTL in milliseconds (default: 60000) */
   opportunityTtlMs?: number;
-  /** Duplicate detection window in milliseconds (default: 5000) */
+  /**
+   * Duplicate detection window in milliseconds (default: 5000).
+   *
+   * Why 5 seconds: Balances catching legitimate duplicates from multiple
+   * partition detectors seeing the same on-chain event, versus filtering
+   * out genuinely distinct opportunities on the same pair. At typical
+   * block times (2-12s), a 5s window covers 1-2 blocks — sufficient to
+   * catch cross-partition duplicates without being overly aggressive.
+   *
+   * Note: Consumer group pending messages (un-ACKed, redelivered by Redis)
+   * are handled separately by Redis Streams, not by this deduplication.
+   */
   duplicateWindowMs?: number;
   /** Instance ID for forwarding metadata */
   instanceId?: string;
@@ -71,6 +87,8 @@ export interface OpportunityRouterConfig {
   minProfitPercentage?: number;
   /** Maximum profit percentage (default: 10000) */
   maxProfitPercentage?: number;
+  /** @see OP-14: Per-chain TTL overrides for fast chains (default: built-in fast chain defaults) */
+  chainTtlOverrides?: Record<string, number>;
   // P1-7 FIX: Retry and DLQ configuration
   /** Maximum retry attempts for forwarding failures (default: 3) */
   maxRetries?: number;
@@ -80,7 +98,23 @@ export interface OpportunityRouterConfig {
    * P2 FIX #21 NOTE: Intentionally separate from StreamConsumerManager's
    * 'stream:dead-letter-queue' — different failure mode, different schema. */
   dlqStream?: string;
+  /** FIX W2-8: MAXLEN for execution requests stream to prevent unbounded growth (default: 5000) */
+  executionStreamMaxLen?: number;
 }
+
+/**
+ * OP-14: Default chain-specific TTL overrides for fast chains.
+ * Fast L2s and Solana produce blocks much faster than the 60s global TTL,
+ * so opportunities go stale before execution.
+ */
+const DEFAULT_CHAIN_TTL_OVERRIDES: Record<string, number> = {
+  arbitrum: 15000,   // ~60 blocks at 250ms
+  optimism: 15000,   // Similar to Arbitrum
+  base: 15000,       // Optimism-based
+  zksync: 15000,     // ~15 blocks at 1s
+  linea: 15000,      // Similar L2 characteristics
+  solana: 10000,     // ~25 slots at 400ms
+};
 
 /**
  * Default configuration
@@ -93,10 +127,14 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   executionRequestsStream: RedisStreams.EXECUTION_REQUESTS,
   minProfitPercentage: -100,
   maxProfitPercentage: 10000,
+  // OP-14: Default chain-specific TTL overrides
+  chainTtlOverrides: DEFAULT_CHAIN_TTL_OVERRIDES,
   // P1-7 FIX: Retry and DLQ defaults
   maxRetries: 3,
   retryBaseDelayMs: 10,
   dlqStream: RedisStreams.FORWARDING_DLQ,
+  // FIX W2-8: Prevent unbounded stream growth (matches RedisStreamsClient.STREAM_MAX_LENGTHS)
+  executionStreamMaxLen: 5000,
 };
 
 /**
@@ -176,11 +214,13 @@ export class OpportunityRouter {
    *
    * @param data - Raw opportunity data from stream message
    * @param isLeader - Whether this instance should forward to execution
+   * @param traceContext - OP-3 FIX: Optional trace context for cross-service correlation
    * @returns true if opportunity was processed, false if rejected
    */
   async processOpportunity(
     data: Record<string, unknown>,
-    isLeader: boolean
+    isLeader: boolean,
+    traceContext?: TraceContext,
   ): Promise<boolean> {
     const id = data.id as string | undefined;
     if (!id || typeof id !== 'string') {
@@ -214,6 +254,23 @@ export class OpportunityRouter {
       }
     }
 
+    // H2 FIX: Validate chain against canonical chain ID whitelist.
+    // Defense-in-depth: HMAC signing at the transport layer is the primary defense,
+    // but we also reject opportunities with unrecognized chains to prevent processing
+    // of forged or misconfigured data.
+    const rawChain = typeof data.chain === 'string' ? data.chain : undefined;
+    if (rawChain) {
+      const normalized = normalizeChainId(rawChain);
+      if (!isCanonicalChainId(normalized)) {
+        this.logger.warn('Unknown chain in opportunity, rejecting', {
+          id,
+          chain: rawChain,
+          normalizedChain: normalized,
+        });
+        return false;
+      }
+    }
+
     // Build opportunity object
     const opportunity: ArbitrageOpportunity = {
       id,
@@ -241,7 +298,7 @@ export class OpportunityRouter {
 
     // Forward to execution engine if leader and pending
     if (isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
-      await this.forwardToExecutionEngine(opportunity);
+      await this.forwardToExecutionEngine(opportunity, traceContext);
     }
 
     return true;
@@ -253,10 +310,12 @@ export class OpportunityRouter {
    * P1-7 FIX: Now includes retry logic with exponential backoff and DLQ support.
    * Retries up to maxRetries times before moving to dead letter queue.
    *
+   * OP-3 FIX: Now propagates trace context for cross-service correlation.
+   *
    * Only the leader coordinator should call this method to prevent
    * duplicate execution attempts.
    */
-  async forwardToExecutionEngine(opportunity: ArbitrageOpportunity): Promise<void> {
+  async forwardToExecutionEngine(opportunity: ArbitrageOpportunity, traceContext?: TraceContext): Promise<void> {
     if (!this.streamsClient) {
       this.logger.warn('Cannot forward opportunity - streams client not initialized', {
         id: opportunity.id,
@@ -272,6 +331,10 @@ export class OpportunityRouter {
       });
       // P1-7 FIX: Track as dropped when circuit is open
       this._opportunitiesDropped++;
+      // OP-2 FIX: Write to DLQ instead of silently dropping.
+      // Circuit breaker drops can last minutes — these opportunities are recoverable
+      // for analysis and potential manual replay once the circuit closes.
+      await this.moveToDeadLetterQueue(opportunity, new Error('Circuit breaker open'));
       return;
     }
 
@@ -281,7 +344,8 @@ export class OpportunityRouter {
     opportunity.pipelineTimestamps = timestamps;
 
     // FIX #12: Use shared serialization utility (single source of truth)
-    const messageData = serializeOpportunityForStream(opportunity, this.config.instanceId);
+    // OP-3 FIX: Pass trace context for cross-service correlation
+    const messageData = serializeOpportunityForStream(opportunity, this.config.instanceId, traceContext);
 
     // P1-7 FIX: Retry loop with exponential backoff
     // P1-8 FIX: Check shutdown flag before each attempt
@@ -293,7 +357,11 @@ export class OpportunityRouter {
         return;
       }
       try {
-        await this.streamsClient.xadd(this.config.executionRequestsStream, messageData);
+        // FIX W2-8: Use MAXLEN to prevent unbounded stream growth
+        await this.streamsClient.xadd(this.config.executionRequestsStream, messageData, '*', {
+          maxLen: this.config.executionStreamMaxLen,
+          approximate: true,
+        });
 
         // Success - record and return
         const justRecovered = this.circuitBreaker.recordSuccess();
@@ -419,11 +487,44 @@ export class OpportunityRouter {
         dlqStream: this.config.dlqStream,
       });
     } catch (dlqError) {
-      // If DLQ write fails, log but don't throw - the opportunity is already lost
-      this.logger.error('Failed to move opportunity to DLQ', {
+      // OP-16 FIX: If DLQ write fails, write to local file as last-resort backup
+      this.logger.error('Failed to move opportunity to DLQ, writing to local fallback', {
         opportunityId: opportunity.id,
         dlqError: (dlqError as Error).message,
         originalError: error?.message,
+      });
+      this.writeLocalDlqFallback(opportunity, error);
+    }
+  }
+
+  /**
+   * OP-16 FIX: Write failed opportunity to local file when Redis DLQ is unavailable.
+   * Last-resort backup for double-failure scenarios.
+   */
+  private writeLocalDlqFallback(
+    opportunity: ArbitrageOpportunity,
+    error: Error | null
+  ): void {
+    try {
+      const date = new Date().toISOString().split('T')[0];
+      const dir = pathModule.resolve('data');
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const filePath = pathModule.join(dir, `dlq-forwarding-fallback-${date}.jsonl`);
+      const entry = JSON.stringify({
+        opportunityId: opportunity.id,
+        originalData: opportunity,
+        error: error?.message ?? 'Unknown error',
+        failedAt: Date.now(),
+        service: 'opportunity-router',
+        instanceId: this.config.instanceId,
+      });
+      fs.appendFileSync(filePath, entry + '\n');
+    } catch (fileError) {
+      this.logger.error('Local DLQ fallback write also failed', {
+        opportunityId: opportunity.id,
+        fileError: (fileError as Error).message,
       });
     }
   }
@@ -449,7 +550,10 @@ export class OpportunityRouter {
         continue;
       }
       // Delete if older than TTL (for opportunities without expiresAt)
-      if (opp.timestamp && (now - opp.timestamp) > this.config.opportunityTtlMs) {
+      // OP-14 FIX: Use chain-specific TTL if available, fall back to global default
+      const ttl = (opp.chain ? this.config.chainTtlOverrides[opp.chain] : undefined)
+        ?? this.config.opportunityTtlMs;
+      if (opp.timestamp && (now - opp.timestamp) > ttl) {
         toDelete.push(id);
       }
     }

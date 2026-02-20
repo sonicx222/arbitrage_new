@@ -312,8 +312,11 @@ describe('BridgeRecoveryManager', () => {
       expect(mockRedis.set).toHaveBeenCalledWith(
         `${BRIDGE_RECOVERY_KEY_PREFIX}old-bridge`,
         expect.objectContaining({
-          status: 'failed',
-          errorMessage: 'Bridge abandoned: exceeded max age',
+          data: expect.objectContaining({
+            status: 'failed',
+            errorMessage: 'Bridge abandoned: exceeded max age',
+          }),
+          sig: expect.any(String),
         }),
         3600 // 1 hour TTL for terminal states
       );
@@ -363,7 +366,10 @@ describe('BridgeRecoveryManager', () => {
       expect(manager.getMetrics().recoveredBridges).toBe(1);
       expect(mockRedis.set).toHaveBeenCalledWith(
         `${BRIDGE_RECOVERY_KEY_PREFIX}bridge-456`,
-        expect.objectContaining({ status: 'recovered' }),
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'recovered' }),
+          sig: expect.any(String),
+        }),
         3600
       );
     });
@@ -390,8 +396,11 @@ describe('BridgeRecoveryManager', () => {
       expect(mockRedis.set).toHaveBeenCalledWith(
         `${BRIDGE_RECOVERY_KEY_PREFIX}bridge-456`,
         expect.objectContaining({
-          status: 'failed',
-          errorMessage: 'Bridge reverted',
+          data: expect.objectContaining({
+            status: 'failed',
+            errorMessage: 'Bridge reverted',
+          }),
+          sig: expect.any(String),
         }),
         3600
       );
@@ -418,8 +427,11 @@ describe('BridgeRecoveryManager', () => {
       expect(mockRedis.set).toHaveBeenCalledWith(
         `${BRIDGE_RECOVERY_KEY_PREFIX}bridge-456`,
         expect.objectContaining({
-          status: 'failed',
-          errorMessage: 'Bridge refunded to source',
+          data: expect.objectContaining({
+            status: 'failed',
+            errorMessage: 'Bridge refunded to source',
+          }),
+          sig: expect.any(String),
         }),
         3600
       );
@@ -442,12 +454,15 @@ describe('BridgeRecoveryManager', () => {
 
       await manager.recoverPendingBridges();
 
-      // Should update to 'bridging' status
+      // Should update to 'bridging' status (wrapped in HMAC SignedEnvelope)
       expect(mockRedis.set).toHaveBeenCalledWith(
         `${BRIDGE_RECOVERY_KEY_PREFIX}bridge-456`,
         expect.objectContaining({
-          status: 'bridging',
-          lastCheckAt: expect.any(Number),
+          data: expect.objectContaining({
+            status: 'bridging',
+            lastCheckAt: expect.any(Number),
+          }),
+          sig: expect.any(String),
         }),
         expect.any(Number)
       );

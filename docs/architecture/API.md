@@ -32,7 +32,8 @@ This document provides the API reference for all service endpoints in the arbitr
 | Partition Solana | 3004 | `http://localhost:3004` |
 | Execution Engine | 3005 | `http://localhost:3005` |
 | Cross-Chain Detector | 3006 | `http://localhost:3006` |
-| Mempool Detector | 3007 | `http://localhost:3007` |
+| Unified Detector | 3007 | `http://localhost:3007` |
+| Mempool Detector | 3008 | `http://localhost:3008` |
 
 ### Response Format
 
@@ -86,7 +87,9 @@ Returns system-wide health status.
     "partition-high-value": "healthy",
     "partition-solana": "healthy",
     "execution-engine": "healthy",
-    "cross-chain-detector": "healthy"
+    "cross-chain-detector": "healthy",
+    "unified-detector": "healthy",
+    "mempool-detector": "healthy"
   },
   "leader": true,
   "uptime": 86400,
@@ -349,6 +352,54 @@ Returns status of monitored bridges.
   ]
 }
 ```
+
+---
+
+## Mempool Detector
+
+Base URL: `http://localhost:3008`
+
+> **Note:** The mempool detector is an optional service (`npm run dev:mempool`). It requires bloXroute BDN access.
+
+### Health Check
+
+```
+GET /health
+```
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "service": "mempool-detector",
+  "connections": {
+    "bloxroute": "connected",
+    "redis": "connected"
+  },
+  "stats": {
+    "pendingTxProcessed": 12345,
+    "opportunitiesDetected": 42,
+    "latencyMs": 3
+  }
+}
+```
+
+### Readiness
+
+```
+GET /ready
+```
+
+Returns 200 when the service is connected to bloXroute BDN and Redis, 503 otherwise.
+
+### Statistics
+
+```
+GET /stats
+```
+
+Returns detailed mempool monitoring statistics including decode rates, buffer utilization, and publishing metrics.
 
 ---
 

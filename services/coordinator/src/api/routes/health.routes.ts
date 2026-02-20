@@ -62,5 +62,37 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
     }
   );
 
+  /**
+   * GET /api/health/live
+   * Liveness probe - returns 200 if the process is running.
+   * Used by orchestrators (k8s, Fly.io) to detect hung processes.
+   *
+   * @see OP-12: Readiness vs liveness probe distinction
+   */
+  router.get('/health/live', (_req: Request, res: Response) => {
+    res.json({ status: 'alive', timestamp: Date.now() });
+  });
+
+  /**
+   * GET /api/health/ready
+   * Readiness probe - returns 200 only if the service is fully operational.
+   * Checks that the coordinator is running and system health is above zero.
+   *
+   * @see OP-12: Readiness vs liveness probe distinction
+   */
+  router.get('/health/ready', (_req: Request, res: Response) => {
+    const isRunning = state.getIsRunning();
+    const systemHealth = state.getSystemMetrics().systemHealth;
+    const isReady = isRunning && systemHealth > 0;
+
+    const statusCode = isReady ? 200 : 503;
+    res.status(statusCode).json({
+      status: isReady ? 'ready' : 'not_ready',
+      isRunning,
+      systemHealth,
+      timestamp: Date.now(),
+    });
+  });
+
   return router;
 }

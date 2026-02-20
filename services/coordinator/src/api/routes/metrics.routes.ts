@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
-import { findKLargest, getRedisClient } from '@arbitrage/core';
+import { findKLargest, getRedisClient, getStreamHealthMonitor } from '@arbitrage/core';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -143,9 +143,31 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
       } catch (error) {
         const isTimeout = error instanceof Error && error.message === 'Redis connection timeout';
         res.status(isTimeout ? 504 : 500).json({
-          error: 'Failed to get Redis stats',
-          message: error instanceof Error ? error.message : 'Unknown error'
+          error: isTimeout ? 'Redis connection timeout' : 'Failed to get Redis stats',
         });
+      }
+    }
+  );
+
+  /**
+   * OP-20 FIX: GET /api/metrics/prometheus
+   * Returns stream health metrics in Prometheus text exposition format.
+   *
+   * Exposes the StreamHealthMonitor.getPrometheusMetrics() data that was
+   * previously built but never served. Provides stream_length, stream_pending,
+   * stream_consumer_groups, and stream_health_status gauges.
+   */
+  router.get(
+    '/metrics/prometheus',
+    readAuth,
+    apiAuthorize('metrics', 'read'),
+    async (_req: Request, res: Response) => {
+      try {
+        const monitor = getStreamHealthMonitor();
+        const metrics = await monitor.getPrometheusMetrics();
+        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics);
+      } catch (error) {
+        res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
       }
     }
   );
@@ -173,9 +195,11 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         res.type('text/plain').send(dashboard);
       } catch (error) {
         // Phase 4 FIX: Include error details for debugging (consistent with text/plain response type)
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        const statusCode = error instanceof Error && error.message === 'Redis connection timeout' ? 504 : 500;
-        res.status(statusCode).type('text/plain').send(`Failed to get Redis dashboard: ${errorMsg}`);
+        const isTimeout = error instanceof Error && error.message === 'Redis connection timeout';
+        const statusCode = isTimeout ? 504 : 500;
+        res.status(statusCode).type('text/plain').send(
+          isTimeout ? 'Failed to get Redis dashboard: connection timeout' : 'Failed to get Redis dashboard'
+        );
       }
     }
   );

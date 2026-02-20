@@ -25,22 +25,8 @@ import { getErrorMessage, MevRiskAnalyzer, type TransactionContext } from '@arbi
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
 import { createErrorResult, createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';
-import { BaseExecutionStrategy, getSwapDeadline } from './base.strategy';
+import { BaseExecutionStrategy, DEXES_BY_CHAIN_AND_NAME, getSwapDeadline } from './base.strategy';
 import { CommitRevealService, type CommitRevealParams } from '../services/commit-reveal.service';
-
-/**
- * Phase 2 Enhancement: Pre-computed DEX lookup for O(1) router address access.
- * Enables parallel pre-checks by determining router address early.
- *
- * BUG FIX: Aligned with base.strategy.ts logic - only uses sellDex for selection,
- * falls back to first DEX if sellDex is undefined (ignores buyDex for router selection).
- */
-const DEXES_BY_CHAIN_AND_NAME: Map<string, Map<string, typeof DEXES[string][number]>> = new Map(
-  Object.entries(DEXES).map(([chain, dexes]) => [
-    chain,
-    new Map(dexes.map(dex => [dex.name.toLowerCase(), dex]))
-  ])
-);
 
 /**
  * Get router address using same logic as base.strategy.ts prepareDexSwapTransaction.
@@ -577,8 +563,11 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
         if (!waitResult.success) {
           // Cancel commitment for gas refund
-          await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch(() => {
-            // Ignore cancel errors
+          await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch((err) => {
+            this.logger.warn('Commit-reveal cancel failed', {
+              error: err instanceof Error ? err.message : String(err),
+              commitmentHash: commitResult.commitmentHash,
+            });
           });
 
           return createErrorResult(
@@ -599,8 +588,11 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
       if (!revealResult.success) {
         // Attempt to cancel commitment for gas refund
-        await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch(() => {
-          // Ignore cancel errors
+        await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch((err) => {
+          this.logger.warn('Commit-reveal cancel failed', {
+            error: err instanceof Error ? err.message : String(err),
+            commitmentHash: commitResult.commitmentHash,
+          });
         });
 
         return createErrorResult(

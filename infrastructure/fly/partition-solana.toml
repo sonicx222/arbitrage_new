@@ -34,13 +34,13 @@ primary_region = "sjc"
   PARTITION_CHAINS = "solana"
   REGION_ID = "us-west1"
   LOG_LEVEL = "info"
-  HEALTH_CHECK_PORT = "3001"
+  HEALTH_CHECK_PORT = "3004"
   ENABLE_CROSS_REGION_HEALTH = "true"
   # Solana-specific configuration
   # Chain-specific RPC URLs set via secrets (fly secrets set)
 
 [http_service]
-  internal_port = 3001
+  internal_port = 3004
   force_https = true
   auto_stop_machines = false
   auto_start_machines = true
@@ -68,7 +68,7 @@ primary_region = "sjc"
     interval = "15s"
     method = "GET"
     path = "/health"
-    port = 3001
+    port = 3004
     timeout = "5s"
     type = "http"
 
@@ -77,7 +77,7 @@ primary_region = "sjc"
     interval = "15s"
     method = "GET"
     path = "/ready"
-    port = 3001
+    port = 3004
     timeout = "5s"
     type = "http"
 

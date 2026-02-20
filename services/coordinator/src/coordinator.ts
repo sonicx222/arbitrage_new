@@ -85,6 +85,10 @@ import { LeadershipElectionService } from './leadership';
 // P1-2: Import extracted ActivePairsTracker for bounded pair tracking
 import { ActivePairsTracker } from './tracking';
 
+// OP-3 FIX: Import trace context utilities for cross-service correlation
+import { extractContext, createTraceContext, createChildContext } from '@arbitrage/core/tracing';
+import type { TraceContext } from '@arbitrage/core/tracing';
+
 // P2-11: Import IntervalManager for centralized interval lifecycle management
 import { IntervalManager } from '@arbitrage/core';
 // REFACTOR: Import extracted standby activation manager
@@ -186,6 +190,9 @@ interface CoordinatorConfig {
   pairTtlMs?: number;              // Active pair expiry time (default: 300000)
   maxActivePairs?: number;         // P3-005: Max active pairs in memory (default: 10000)
   alertCooldownMs?: number;        // Alert cooldown duration (default: 300000)
+  // OP-22 FIX: Configurable execution circuit breaker thresholds
+  executionCbThreshold?: number;   // Failures before opening CB (default: 5)
+  executionCbResetMs?: number;     // Time before half-open attempt (default: 60000)
   // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
 }
 
@@ -263,10 +270,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // FIX P2: Circuit breaker for execution forwarding
   // Prevents hammering the execution stream when it's down
   // R7 Consolidation: Now uses shared SimpleCircuitBreaker from @arbitrage/core
-  private executionCircuitBreaker = new SimpleCircuitBreaker(
-    5,     // threshold: Open after 5 consecutive failures
-    60000  // resetTimeoutMs: Try again after 1 minute
-  );
+  // OP-22 FIX: Thresholds now configurable via config/env vars (previously hardcoded)
+  private executionCircuitBreaker!: SimpleCircuitBreaker;
 
   // Startup grace period: Don't report critical alerts during initial startup
   // This prevents false alerts when services haven't reported health yet
@@ -372,9 +377,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
         process.env.ALERT_COOLDOWN_MS ??
         (process.env.NODE_ENV === 'development' ? '30000' : '300000'),
         300000
-      )
+      ),
+      // OP-22 FIX: Configurable execution circuit breaker thresholds
+      executionCbThreshold: config?.executionCbThreshold ?? safeParseInt(process.env.EXECUTION_CB_THRESHOLD, 5),
+      executionCbResetMs: config?.executionCbResetMs ?? safeParseInt(process.env.EXECUTION_CB_RESET_MS, 60000),
       // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
     };
+
+    // OP-22 FIX: Initialize CB with configurable thresholds (previously hardcoded 5, 60000)
+    this.executionCircuitBreaker = new SimpleCircuitBreaker(
+      this.config.executionCbThreshold!,
+      this.config.executionCbResetMs!
+    );
 
     // FIX: Initialize configurable constants from config
     this.MAX_OPPORTUNITIES = this.config.maxOpportunities!;
@@ -484,6 +498,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // S3.3.5 FIX: Add PRICE_UPDATES consumer for Solana price feed integration
       {
         streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '$'
+      },
+      // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
+      {
+        streamName: RedisStreamsClient.STREAMS.EXECUTION_RESULTS,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
         startId: '$'
@@ -712,14 +733,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // P1-8 FIX: Signal opportunity router shutdown to cancel in-flight retry delays
       this.opportunityRouter?.shutdown();
 
+      // OP-11 FIX: Stop consumers BEFORE releasing leadership to prevent
+      // duplicate execution if a new coordinator acquires leadership while
+      // old consumers are still running
+      await this.clearAllIntervals();
+
       // P1-8 FIX: Stop leadership election service (replaces releaseLeadership)
       // This handles leadership release and heartbeat cleanup internally
       if (this.leadershipElection) {
         await this.leadershipElection.stop();
       }
-
-      // Stop all intervals and stream consumers
-      await this.clearAllIntervals();
 
       // Close HTTP server gracefully
       if (this.server) {
@@ -773,8 +796,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // P2-11: Use IntervalManager for centralized cleanup
     await this.intervalManager.clearAll();
 
-    // Stop all stream consumers (replaces setInterval pattern)
-    await Promise.all(this.streamConsumers.map(c => c.stop()));
+    // H1 FIX: Use Promise.allSettled to ensure all consumers are stopped even if
+    // some throw. Promise.all rejects on first error, losing subsequent results.
+    const results = await Promise.allSettled(this.streamConsumers.map(c => c.stop()));
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        this.logger.error('Failed to stop stream consumer during shutdown', {
+          error: (result.reason as Error).message,
+        });
+      }
+    }
     this.streamConsumers = [];
   }
 
@@ -805,17 +836,35 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private async createConsumerGroups(): Promise<void> {
     if (!this.streamsClient) return;
 
+    // OP-19 FIX: Track creation failures and warn if ALL groups fail
+    let successCount = 0;
+    let failureCount = 0;
+
     for (const config of this.consumerGroups) {
       try {
         await this.streamsClient.createConsumerGroup(config);
+        successCount++;
         this.logger.info('Consumer group ready', {
           stream: config.streamName,
           group: config.groupName
         });
       } catch (error) {
+        failureCount++;
         this.logger.error('Failed to create consumer group', {
           error,
           stream: config.streamName
+        });
+      }
+    }
+
+    // OP-19 FIX: Alert if any consumer groups failed to create
+    if (failureCount > 0) {
+      const message = `${failureCount}/${failureCount + successCount} consumer groups failed to create`;
+      this.logger.warn(message, { successCount, failureCount });
+      // If ALL consumer groups failed, the coordinator is non-functional
+      if (successCount === 0 && failureCount > 0) {
+        this.logger.error('CRITICAL: All consumer groups failed - coordinator cannot consume streams', {
+          failureCount,
         });
       }
     }
@@ -876,6 +925,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => this.handleSwapEventMessage(msg),
       [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg),
       [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => this.handlePriceUpdateMessage(msg),
+      // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
+      [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: (msg) => this.handleExecutionResultMessage(msg),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -1011,10 +1062,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private async handleOpportunityMessage(message: StreamMessage): Promise<void> {
     const data = message.data as Record<string, unknown>;
 
+    // OP-3 FIX: Extract or create trace context for cross-service correlation.
+    // If the upstream detector included trace context, continue the trace chain.
+    // Otherwise, start a new trace rooted at the coordinator.
+    const parentCtx = extractContext(data);
+    const traceCtx: TraceContext = parentCtx
+      ? createChildContext(parentCtx, 'coordinator')
+      : createTraceContext('coordinator');
+
     // R2: Delegate to opportunity router
     if (this.opportunityRouter) {
       // P2 FIX #19: Use getIsLeader() to always read canonical leadership state
-      const processed = await this.opportunityRouter.processOpportunity(data, this.getIsLeader());
+      // OP-3 FIX: Pass trace context for propagation to execution engine
+      const processed = await this.opportunityRouter.processOpportunity(data, this.getIsLeader(), traceCtx);
       if (processed) {
         // Update local metrics from router
         this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
@@ -1387,6 +1447,58 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
+   * OP-10 FIX: Handle execution result messages from stream:execution-results.
+   * Updates successfulExecutions and totalProfit metrics that were previously always zero.
+   *
+   * The execution engine publishes results after each trade attempt.
+   * The coordinator consumes these to maintain aggregate trading metrics
+   * for the dashboard and health monitoring.
+   *
+   * @see services/execution-engine/src/engine.ts publishExecutionResult()
+   * @see shared/types/src/execution.ts ExecutionResult interface
+   */
+  private async handleExecutionResultMessage(message: StreamMessage): Promise<void> {
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
+
+    const rawResult = unwrapMessageData(data);
+    const success = rawResult.success === true || rawResult.success === 'true';
+    const opportunityId = getString(rawResult, 'opportunityId', '');
+    const chain = getString(rawResult, 'chain', 'unknown');
+
+    if (!opportunityId) {
+      this.logger.debug('Skipping execution result - missing opportunityId', {
+        messageId: message.id,
+      });
+      return;
+    }
+
+    if (success) {
+      this.systemMetrics.successfulExecutions++;
+      const actualProfit = getNumber(rawResult, 'actualProfit', 0);
+      if (actualProfit > 0) {
+        this.systemMetrics.totalProfit += actualProfit;
+      }
+      this.logger.info('Execution result: success', {
+        opportunityId,
+        chain,
+        actualProfit,
+        totalSuccessful: this.systemMetrics.successfulExecutions,
+      });
+    } else {
+      const error = getOptionalString(rawResult, 'error');
+      this.logger.debug('Execution result: failure', {
+        opportunityId,
+        chain,
+        error,
+      });
+    }
+
+    // P2-5: Do not reset stream errors from execution results.
+    // Only the opportunity handler (primary data path) should reset errors.
+  }
+
+  /**
    * P1-2: Delegates to ActivePairsTracker.cleanup().
    * Kept as method for backward compatibility with integration tests.
    */
@@ -1491,7 +1603,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       // Publish to execution-requests stream for the execution engine to consume
       // FIX #12: Use shared serialization utility (single source of truth)
-      await this.streamsClient.xadd(
+      // @see OP-6: Use xaddWithLimit to prevent unbounded stream growth
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
         serializeOpportunityForStream(opportunity, this.config.leaderElection.instanceId)
       );
@@ -1632,7 +1745,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         service: 'coordinator', // Keep for backwards compatibility
         // P1-8 FIX: Use stateManager.isRunning() for consistency
         status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
-        isLeader: this.isLeader,
+        isLeader: this.getIsLeader(),
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage().heapUsed,
         cpuUsage: 0,

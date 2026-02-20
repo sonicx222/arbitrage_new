@@ -69,7 +69,7 @@ export interface LiquidityValidatorConfig {
 export class FlashLoanLiquidityValidator {
   private readonly config: Required<LiquidityValidatorConfig>;
   private readonly cache = new Map<string, CachedLiquidity>();
-  private readonly pendingChecks = new Map<string, Promise<boolean>>();
+  private readonly pendingChecks = new Map<string, Promise<bigint>>();
 
   constructor(
     private readonly logger: Logger,
@@ -120,22 +120,28 @@ export class FlashLoanLiquidityValidator {
       return cached.availableLiquidity >= requiredLiquidity;
     }
 
-    // Request coalescing - prevent duplicate on-chain checks
+    // Request coalescing - prevent duplicate on-chain checks.
+    // Coalesce on fetching available liquidity (not the boolean result),
+    // so each caller can compare against its own requested amount.
     const pending = this.pendingChecks.get(cacheKey);
     if (pending) {
       this.logger.debug('[LiquidityValidator] Request coalescing', {
         protocol: provider.protocol,
         asset,
       });
-      return pending;
+      const availableLiquidity = await pending;
+      const requiredLiquidity = this.applySafetyMargin(amount);
+      return availableLiquidity >= requiredLiquidity;
     }
 
-    // Perform on-chain check
-    const checkPromise = this.performLiquidityCheck(provider, asset, amount, ctx);
+    // Perform on-chain check — returns available liquidity
+    const checkPromise = this.fetchAvailableLiquidity(provider, asset, ctx);
     this.pendingChecks.set(cacheKey, checkPromise);
 
     try {
-      return await checkPromise;
+      const availableLiquidity = await checkPromise;
+      const requiredLiquidity = this.applySafetyMargin(amount);
+      return availableLiquidity >= requiredLiquidity;
     } finally {
       this.pendingChecks.delete(cacheKey);
     }
@@ -197,14 +203,17 @@ export class FlashLoanLiquidityValidator {
   }
 
   /**
-   * Perform on-chain liquidity check
+   * Fetch available liquidity from on-chain and update cache.
+   * Returns the available liquidity as bigint for amount-independent coalescing.
+   * On failure, returns MAX_SAFE bigint (graceful fallback: assume sufficient).
    */
-  private async performLiquidityCheck(
+  private async fetchAvailableLiquidity(
     provider: IFlashLoanProvider,
     asset: string,
-    amount: bigint,
     ctx: StrategyContext
-  ): Promise<boolean> {
+  ): Promise<bigint> {
+    // Sentinel value for "assume sufficient" fallback
+    const FALLBACK_LIQUIDITY = BigInt(Number.MAX_SAFE_INTEGER) * 10n ** 18n;
     const startTime = Date.now();
 
     try {
@@ -214,7 +223,8 @@ export class FlashLoanLiquidityValidator {
         this.logger.warn('[LiquidityValidator] No RPC provider for chain', {
           chain: provider.chain,
         });
-        return this.gracefulFallback(provider, asset, true); // Assume sufficient
+        this.gracefulFallback(provider, asset, true);
+        return FALLBACK_LIQUIDITY;
       }
 
       // Query on-chain liquidity with timeout
@@ -237,19 +247,14 @@ export class FlashLoanLiquidityValidator {
       // Cleanup cache if too large
       this.cleanupCacheIfNeeded();
 
-      const requiredWithMargin = this.applySafetyMargin(amount);
-      const hasLiquidity = liquidity >= requiredWithMargin;
-
       this.logger.debug('[LiquidityValidator] On-chain check complete', {
         protocol: provider.protocol,
         asset,
         available: liquidity.toString(),
-        required: requiredWithMargin.toString(),
-        hasLiquidity,
         latencyMs: latency,
       });
 
-      return hasLiquidity;
+      return liquidity;
     } catch (error) {
       const latency = Date.now() - startTime;
 
@@ -270,7 +275,8 @@ export class FlashLoanLiquidityValidator {
       });
 
       // Graceful fallback - assume sufficient liquidity
-      return this.gracefulFallback(provider, asset, true);
+      this.gracefulFallback(provider, asset, true);
+      return FALLBACK_LIQUIDITY;
     }
   }
 

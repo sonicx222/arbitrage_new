@@ -34,6 +34,8 @@ export interface RedisStreamsClientDeps {
   RedisImpl?: RedisStreamsConstructor;
   /** HMAC signing key for message authentication (S-5). Omit for dev mode (no signing). */
   signingKey?: string;
+  /** OP-17 FIX: Previous signing key accepted during rotation window. */
+  previousSigningKey?: string;
 }
 import { createLogger, Logger } from './logger';
 import { clearTimeoutSafe } from './lifecycle-utils';
@@ -282,6 +284,19 @@ export class StreamBatcher<T = Record<string, unknown>> {
 
     this.timer = clearTimeoutSafe(this.timer);
 
+    // Await any in-flight flush before proceeding. If the flush fails,
+    // it re-queues its batch back to this.queue. Without this await,
+    // destroy() could see an empty queue while flush holds messages in its
+    // local batch variable, causing silent message loss on flush failure.
+    if (this.flushLock) {
+      try {
+        await this.flushLock;
+      } catch {
+        // Flush failure is handled inside flush() — it re-queues messages.
+        // We just need to wait for it to finish so the queue is up-to-date.
+      }
+    }
+
     // P0-2 FIX: Merge any pending messages before final flush
     if (this.pendingDuringFlush.length > 0) {
       this.queue.push(...this.pendingDuringFlush);
@@ -290,7 +305,6 @@ export class StreamBatcher<T = Record<string, unknown>> {
 
     // Await final flush to ensure messages are sent
     if (this.queue.length > 0) {
-      // P0-2 FIX: Capture lost count BEFORE flush attempt (pendingDuringFlush already merged above)
       const lostMessageCount = this.queue.length;
       try {
         await this.flush();
@@ -316,6 +330,11 @@ export class RedisStreamsClient {
   private batchers: Map<string, StreamBatcher<unknown>> = new Map();
   /** S-5: HMAC signing key for message authentication. Null = signing disabled (dev mode). */
   private signingKey: string | null;
+  /** OP-17 FIX: Previous signing key for rotation window. Null = no rotation in progress. */
+  private previousSigningKey: string | null;
+  /** OP-32 FIX: Cached KeyObject instances to avoid per-message crypto.createHmac() overhead */
+  private cachedSigningKeyObj: crypto.KeyObject | null = null;
+  private cachedPreviousKeyObj: crypto.KeyObject | null = null;
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -350,13 +369,25 @@ export class RedisStreamsClient {
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
     this.logger = createLogger('redis-streams');
     this.signingKey = deps?.signingKey ?? null;
+    // OP-17 FIX: Accept previous key for dual-key verification during rotation
+    this.previousSigningKey = deps?.previousSigningKey ?? null;
+    // OP-32 FIX: Pre-cache KeyObject instances to avoid per-message crypto.createHmac() allocation
+    if (this.signingKey) {
+      this.cachedSigningKeyObj = crypto.createSecretKey(Buffer.from(this.signingKey, 'utf8'));
+    }
+    if (this.previousSigningKey) {
+      this.cachedPreviousKeyObj = crypto.createSecretKey(Buffer.from(this.previousSigningKey, 'utf8'));
+    }
 
-    // S-NEW-2 FIX: Warn when HMAC signing is not configured in production.
-    // Without a signing key, all Redis Streams messages are accepted without verification.
+    // Enforce HMAC signing in production. Without a signing key, verifySignature()
+    // returns true for ALL messages, allowing unsigned/tampered data through.
+    // Fail-closed: refuse to start rather than silently accepting unverified messages.
     if (!this.signingKey && process.env.NODE_ENV === 'production') {
-      this.logger.error('CRITICAL: STREAM_SIGNING_KEY is not set in production. ' +
-        'All Redis Streams messages will be accepted without HMAC verification. ' +
-        'Set STREAM_SIGNING_KEY environment variable to enable message signing.');
+      throw new Error(
+        'STREAM_SIGNING_KEY is required in production. ' +
+        'Without it, all Redis Streams messages are accepted without HMAC verification. ' +
+        'Set STREAM_SIGNING_KEY environment variable to enable message signing.'
+      );
     }
 
     const options: any = {
@@ -398,21 +429,77 @@ export class RedisStreamsClient {
   /**
    * Compute HMAC-SHA256 signature for message data.
    * Returns empty string if signing is disabled (no key configured).
+   *
+   * OP-18 FIX: Includes stream name in HMAC input to prevent cross-stream replay.
+   * A valid signed message from one stream cannot be replayed on another.
+   *
+   * @param data - Serialized message data
+   * @param streamName - Stream name for replay protection (optional for backward compat)
    */
-  private signMessage(data: string): string {
-    if (!this.signingKey) return '';
-    return crypto.createHmac('sha256', this.signingKey).update(data).digest('hex');
+  private signMessage(data: string, streamName?: string): string {
+    if (!this.cachedSigningKeyObj) return '';
+    const input = streamName ? `${streamName}:${data}` : data;
+    // OP-32 FIX: Use cached KeyObject instead of raw string to avoid per-message key setup overhead
+    return crypto.createHmac('sha256', this.cachedSigningKeyObj).update(input).digest('hex');
+  }
+
+  /**
+   * Compute HMAC-SHA256 signature with a specific key (object or string).
+   * Uses KeyObject when available for better performance.
+   */
+  private signMessageWithKey(data: string, key: string | crypto.KeyObject, streamName?: string): string {
+    const input = streamName ? `${streamName}:${data}` : data;
+    return crypto.createHmac('sha256', key).update(input).digest('hex');
   }
 
   /**
    * Verify HMAC-SHA256 signature using constant-time comparison.
    * Returns true if signing is disabled (dev mode passthrough).
+   *
+   * OP-17 FIX: Tries current key first, then previous key for rotation window.
+   * OP-18 FIX: Includes stream name in verification for replay protection.
+   *
+   * @param data - Serialized message data
+   * @param signature - Signature to verify
+   * @param streamName - Stream name for replay protection (optional for backward compat)
    */
-  private verifySignature(data: string, signature: string): boolean {
+  private verifySignature(data: string, signature: string, streamName?: string): boolean {
     if (!this.signingKey) return true;
-    const expected = this.signMessage(data);
-    if (expected.length !== signature.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+
+    // Try current key first
+    const expected = this.signMessage(data, streamName);
+    if (expected.length === signature.length &&
+        crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+      return true;
+    }
+
+    // OP-17 FIX: Try previous key during rotation window
+    if (this.cachedPreviousKeyObj) {
+      const previousExpected = this.signMessageWithKey(data, this.cachedPreviousKeyObj, streamName);
+      if (previousExpected.length === signature.length &&
+          crypto.timingSafeEqual(Buffer.from(previousExpected), Buffer.from(signature))) {
+        return true;
+      }
+      // Also try previous key WITHOUT stream name (backward compat with pre-OP-18 messages)
+      if (streamName) {
+        const legacyExpected = this.signMessageWithKey(data, this.cachedPreviousKeyObj);
+        if (legacyExpected.length === signature.length &&
+            crypto.timingSafeEqual(Buffer.from(legacyExpected), Buffer.from(signature))) {
+          return true;
+        }
+      }
+    }
+
+    // Also try current key WITHOUT stream name (backward compat with pre-OP-18 messages)
+    if (streamName) {
+      const legacyExpected = this.signMessageWithKey(data, this.cachedSigningKeyObj!);
+      if (legacyExpected.length === signature.length &&
+          crypto.timingSafeEqual(Buffer.from(legacyExpected), Buffer.from(signature))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // ===========================================================================
@@ -429,7 +516,8 @@ export class RedisStreamsClient {
 
     const serialized = JSON.stringify(message);
     // S-5: Compute HMAC signature for message authentication
-    const signature = this.signMessage(serialized);
+    // OP-18 FIX: Include stream name in HMAC to prevent cross-stream replay
+    const signature = this.signMessage(serialized, streamName);
     const sigFields = signature ? ['sig', signature] : [];
     const maxRetries = options.maxRetries ?? 3;
     let lastError: Error | null = null;
@@ -620,7 +708,25 @@ export class RedisStreamsClient {
         return [];
       }
 
-      return this.parseStreamResult(result);
+      // OP-9 FIX: Track HMAC-rejected message IDs for ACK to prevent PEL growth
+      const rejectedIds: string[] = [];
+      const messages = this.parseStreamResult(result, rejectedIds);
+
+      // OP-9 FIX: ACK HMAC-rejected messages to prevent unbounded PEL growth
+      if (rejectedIds.length > 0) {
+        try {
+          await this.client.xack(config.streamName, config.groupName, ...rejectedIds);
+          this.logger.warn('ACKed HMAC-rejected messages to prevent PEL growth', {
+            stream: config.streamName,
+            count: rejectedIds.length,
+            messageIds: rejectedIds,
+          });
+        } catch (ackError) {
+          this.logger.error('Failed to ACK rejected messages', { error: ackError });
+        }
+      }
+
+      return messages;
     } catch (error) {
       this.logger.error('XREADGROUP error', { error, config });
       throw error;
@@ -727,6 +833,122 @@ export class RedisStreamsClient {
   }
 
   // ===========================================================================
+  // XCLAIM - Claim pending messages from other consumers
+  // ===========================================================================
+
+  /**
+   * Claim pending messages from other consumers that have been idle too long.
+   *
+   * Used during startup to reclaim orphaned messages from a previous coordinator
+   * instance that crashed before ACKing them. The coordinator generates unique
+   * consumer names per startup, so pending messages from the old consumer name
+   * must be claimed by the new consumer.
+   *
+   * @param streamName - Stream to claim from
+   * @param groupName - Consumer group name
+   * @param consumerName - New consumer name to claim messages for
+   * @param minIdleTimeMs - Only claim messages idle longer than this (ms)
+   * @param messageIds - Specific message IDs to claim
+   * @returns Claimed messages with their data
+   *
+   * @see OP-1 fix: Orphaned PEL message recovery
+   */
+  async xclaim(
+    streamName: string,
+    groupName: string,
+    consumerName: string,
+    minIdleTimeMs: number,
+    messageIds: string[],
+  ): Promise<StreamMessage[]> {
+    if (messageIds.length === 0) return [];
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await (this.client as any).xclaim(
+        streamName,
+        groupName,
+        consumerName,
+        minIdleTimeMs,
+        ...messageIds,
+      );
+
+      if (!result || result.length === 0) return [];
+
+      // XCLAIM returns [[id, [field, value, ...]], ...] (same as XRANGE)
+      const messages: StreamMessage[] = [];
+      for (const entry of result) {
+        if (!entry || !Array.isArray(entry) || entry.length < 2) continue;
+
+        const [id, fields] = entry;
+        if (!id || !Array.isArray(fields)) continue;
+
+        const data: Record<string, unknown> = {};
+        for (let i = 0; i < fields.length; i += 2) {
+          data[fields[i] as string] = fields[i + 1];
+        }
+        messages.push({ id: id as string, data });
+      }
+
+      return messages;
+    } catch (error) {
+      this.logger.error('XCLAIM error', { error, streamName, groupName });
+      throw error;
+    }
+  }
+
+  /**
+   * Get detailed pending entries for a specific consumer or all consumers.
+   *
+   * Unlike xpending() which returns summary info, this returns individual
+   * message IDs with their idle times — needed to build the XCLAIM list.
+   *
+   * @param streamName - Stream name
+   * @param groupName - Consumer group name
+   * @param start - Start ID (use '-' for beginning)
+   * @param end - End ID (use '+' for end)
+   * @param count - Maximum entries to return
+   * @param consumerName - Optional: filter to specific consumer
+   * @returns Array of pending entry details
+   *
+   * @see OP-1 fix: Orphaned PEL message recovery
+   */
+  async xpendingRange(
+    streamName: string,
+    groupName: string,
+    start: string,
+    end: string,
+    count: number,
+    consumerName?: string,
+  ): Promise<Array<{ id: string; consumer: string; idleMs: number; deliveryCount: number }>> {
+    try {
+      const args: (string | number)[] = [streamName, groupName, start, end, count];
+      if (consumerName) {
+        args.push(consumerName);
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await (this.client.xpending as any)(...args);
+
+      if (!result || result.length === 0) return [];
+
+      // Result format: [[messageId, consumerName, idleTime, deliveryCount], ...]
+      return result.map((entry: unknown[]) => ({
+        id: entry[0] as string,
+        consumer: entry[1] as string,
+        idleMs: entry[2] as number,
+        deliveryCount: entry[3] as number,
+      }));
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes('NOGROUP') || errMsg.includes('no such key')) {
+        return [];
+      }
+      this.logger.error('XPENDING RANGE error', { error, streamName, groupName });
+      throw error;
+    }
+  }
+
+  // ===========================================================================
   // Stream Trimming
   // ===========================================================================
 
@@ -825,7 +1047,7 @@ export class RedisStreamsClient {
     }
   }
 
-  private parseStreamResult(result: any[]): StreamMessage[] {
+  private parseStreamResult(result: any[], rejectedIds?: string[]): StreamMessage[] {
     const messages: StreamMessage[] = [];
 
     if (!result || result.length === 0) {
@@ -833,7 +1055,7 @@ export class RedisStreamsClient {
     }
 
     // Result format: [[streamName, [[id, [field, value, ...]], ...]]]
-    for (const [, entries] of result) {
+    for (const [streamName, entries] of result) {
       if (!entries) continue;
 
       for (const [id, fields] of entries) {
@@ -848,18 +1070,22 @@ export class RedisStreamsClient {
         }
 
         // S-5: Verify HMAC signature when signing is enabled
+        // OP-18 FIX: Pass stream name for replay protection
         if (this.signingKey && sig && rawData) {
-          if (!this.verifySignature(rawData, sig)) {
+          if (!this.verifySignature(rawData, sig, streamName as string)) {
             this.logger.warn('Invalid message signature, rejecting', { messageId: id });
+            if (rejectedIds) rejectedIds.push(id);
             continue;
           }
         } else if (this.signingKey && !sig) {
           this.logger.warn('Unsigned message received with signing enabled, rejecting', { messageId: id });
+          if (rejectedIds) rejectedIds.push(id);
           continue;
         } else if (this.signingKey && sig && !rawData) {
           // S-NEW-3 FIX: Reject malformed messages that have a signature but no data field.
           // Without this branch, such messages would pass through unverified.
           this.logger.warn('Malformed message: signature present but no data field, rejecting', { messageId: id });
+          if (rejectedIds) rejectedIds.push(id);
           continue;
         }
 
@@ -961,6 +1187,8 @@ export interface StreamConsumerConfig {
   logger?: StreamConsumerLogger;
   /** Callback when pause state changes (for backpressure monitoring) */
   onPauseStateChange?: (isPaused: boolean) => void;
+  /** OP-27 FIX: Inter-poll delay in ms between batch reads (default: 10, 0 = no delay) */
+  interPollDelayMs?: number;
 }
 
 export interface StreamConsumerStats {
@@ -999,6 +1227,10 @@ export class StreamConsumer {
   private paused = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private pollPromise: Promise<void> | null = null;
+  /** Consecutive poll errors for exponential backoff */
+  private consecutiveErrors = 0;
+  private static readonly MAX_ERROR_BACKOFF_MS = 30_000;
+  private static readonly BASE_ERROR_DELAY_MS = 100;
   private stats: StreamConsumerStats = {
     messagesProcessed: 0,
     messagesFailed: 0,
@@ -1101,12 +1333,18 @@ export class StreamConsumer {
   private async poll(): Promise<void> {
     if (!this.running || this.paused) return;
 
+    let pollSucceeded = false;
+
     try {
       const messages = await this.client.xreadgroup(this.config.config, {
         count: this.config.batchSize,
         block: this.config.blockMs,
         startId: '>'
       });
+
+      // Successful read — reset backoff
+      pollSucceeded = true;
+      this.consecutiveErrors = 0;
 
       for (const message of messages) {
         if (!this.running) break;
@@ -1135,20 +1373,35 @@ export class StreamConsumer {
         }
       }
     } catch (error) {
-      // Ignore timeout errors from blocking read
+      // Ignore timeout errors from blocking read (these are normal)
       const errorMessage = (error as Error).message || '';
-      if (!errorMessage.includes('timeout')) {
+      if (errorMessage.includes('timeout')) {
+        pollSucceeded = true; // Timeout is not an error — reset backoff
+        this.consecutiveErrors = 0;
+      } else {
+        this.consecutiveErrors++;
         this.config.logger?.error('Error consuming stream', {
           error,
-          stream: this.config.config.streamName
+          stream: this.config.config.streamName,
+          consecutiveErrors: this.consecutiveErrors,
         });
       }
     }
 
     // Schedule next poll if still running and not paused
     if (this.running && !this.paused) {
-      // Use setImmediate for non-blocking reads, short delay for blocking reads
-      const delay = this.config.blockMs === 0 ? 0 : 10;
+      let delay: number;
+      if (!pollSucceeded && this.consecutiveErrors > 0) {
+        // Exponential backoff on consecutive errors to prevent tight error loop.
+        // Without this, Redis failure causes ~100 error/sec log spam.
+        delay = Math.min(
+          StreamConsumer.BASE_ERROR_DELAY_MS * Math.pow(2, this.consecutiveErrors - 1),
+          StreamConsumer.MAX_ERROR_BACKOFF_MS
+        );
+      } else {
+        // OP-27 FIX: Configurable inter-poll delay (previously hardcoded 10ms)
+        delay = this.config.blockMs === 0 ? 0 : (this.config.interPollDelayMs ?? 10);
+      }
       this.pollTimer = setTimeout(() => this.schedulePoll(), delay);
     }
   }
@@ -1264,10 +1517,15 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     }
   }
 
+  // OP-17 FIX: Resolve previous signing key for rotation window
+  const rawPreviousKey = process.env.STREAM_SIGNING_KEY_PREVIOUS;
+  const previousSigningKey = rawPreviousKey?.trim() || undefined;
+
   initializingPromise = (async () => {
     try {
       const instance = new RedisStreamsClient(redisUrl, redisPassword, {
-        signingKey
+        signingKey,
+        previousSigningKey,
       });
 
       // Verify connection

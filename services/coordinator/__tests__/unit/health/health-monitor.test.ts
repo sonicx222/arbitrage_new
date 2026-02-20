@@ -1073,6 +1073,150 @@ describe('HealthMonitor', () => {
   });
 
   // ===========================================================================
+  // H10: Concurrency edge cases
+  // ===========================================================================
+
+  describe('concurrent health evaluation (H10)', () => {
+    // Note: Service names must match DEFAULT_SERVICE_PATTERNS:
+    // - executionEngine: 'execution-engine' (exact match)
+    // - detectorPattern: 'detector' (contains pattern)
+
+    it('should produce consistent degradation level under concurrent evaluations', () => {
+      monitor.start();
+
+      const healthyMap = new Map<string, ServiceHealth>([
+        ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'healthy' })],
+        ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'healthy' })],
+      ]);
+
+      const degradedMap = new Map<string, ServiceHealth>([
+        ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'unhealthy' })],
+        ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'unhealthy' })],
+      ]);
+
+      // Simulate rapid concurrent evaluations with conflicting data
+      // (synchronous in JS, but tests that state doesn't get corrupted)
+      monitor.evaluateDegradationLevel(healthyMap, 100);
+      const levelAfterHealthy = monitor.getDegradationLevel();
+
+      monitor.evaluateDegradationLevel(degradedMap, 0);
+      const levelAfterDegraded = monitor.getDegradationLevel();
+
+      monitor.evaluateDegradationLevel(healthyMap, 100);
+      const levelAfterRecovery = monitor.getDegradationLevel();
+
+      // Each evaluation should produce a consistent result based on its input
+      expect(levelAfterHealthy).toBe(DegradationLevel.FULL_OPERATION);
+      expect(levelAfterDegraded).toBe(DegradationLevel.COMPLETE_OUTAGE);
+      expect(levelAfterRecovery).toBe(DegradationLevel.FULL_OPERATION);
+    });
+
+    it('should handle rapid service health transitions without stale state', () => {
+      monitor.start();
+
+      // Simulate executor going healthy -> unhealthy -> healthy rapidly
+      const states: Array<'healthy' | 'unhealthy'> = ['healthy', 'unhealthy', 'healthy', 'unhealthy', 'healthy'];
+
+      for (const status of states) {
+        const serviceMap = new Map<string, ServiceHealth>([
+          ['execution-engine', createServiceHealth({ name: 'execution-engine', status })],
+          ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'healthy' })],
+        ]);
+        const systemHealth = status === 'healthy' ? 100 : 50;
+        monitor.evaluateDegradationLevel(serviceMap, systemHealth);
+      }
+
+      // Final state should reflect last evaluation (executor healthy + detector healthy)
+      expect(monitor.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+    });
+
+    it('should handle concurrent metric updates without corruption', () => {
+      const metrics = createEmptyMetrics();
+
+      const serviceMap1 = new Map<string, ServiceHealth>([
+        ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'healthy', memoryUsage: 100, cpuUsage: 50 })],
+        ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'healthy', memoryUsage: 200, cpuUsage: 60 })],
+      ]);
+
+      const serviceMap2 = new Map<string, ServiceHealth>([
+        ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'healthy', memoryUsage: 300, cpuUsage: 80 })],
+      ]);
+
+      // Rapid sequential metric updates (signature: serviceHealth, metrics)
+      monitor.updateMetrics(serviceMap1, metrics);
+      const firstActiveServices = metrics.activeServices;
+
+      monitor.updateMetrics(serviceMap2, metrics);
+      const secondActiveServices = metrics.activeServices;
+
+      // First update: 2 healthy services, second: 1 healthy service
+      expect(firstActiveServices).toBe(2);
+      expect(secondActiveServices).toBe(1);
+
+      // Metrics should reflect the latest update
+      expect(metrics.systemHealth).toBeGreaterThanOrEqual(0);
+      expect(metrics.systemHealth).toBeLessThanOrEqual(100);
+    });
+
+    it('should not miss degradation level changes during rapid evaluation', () => {
+      monitor.start();
+      const transitions: string[] = [];
+
+      // Override logger to capture degradation changes
+      // Note: HealthMonitor logs DegradationLevel[value] which is already a string
+      (mockLogger.warn as jest.Mock).mockImplementation((msg: string, meta?: Record<string, unknown>) => {
+        if (msg === 'Degradation level changed' && meta) {
+          transitions.push(meta.current as string);
+        }
+      });
+
+      // Full operation -> Detection only -> Complete outage -> Recovery
+      const scenarios: Array<{ services: Map<string, ServiceHealth>; health: number }> = [
+        {
+          // FULL_OPERATION: executor + detector both healthy
+          services: new Map([
+            ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'healthy' })],
+            ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'healthy' })],
+          ]),
+          health: 100,
+        },
+        {
+          // DETECTION_ONLY: executor unhealthy, detector healthy
+          services: new Map([
+            ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'unhealthy' })],
+            ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'healthy' })],
+          ]),
+          health: 60,
+        },
+        {
+          // COMPLETE_OUTAGE: no services, zero health
+          services: new Map(),
+          health: 0,
+        },
+        {
+          // FULL_OPERATION again: recovery
+          services: new Map([
+            ['execution-engine', createServiceHealth({ name: 'execution-engine', status: 'healthy' })],
+            ['unified-detector', createServiceHealth({ name: 'unified-detector', status: 'healthy' })],
+          ]),
+          health: 100,
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        monitor.evaluateDegradationLevel(scenario.services, scenario.health);
+      }
+
+      // Should have logged 3 transitions:
+      // default FULL -> DETECTION_ONLY -> COMPLETE_OUTAGE -> FULL_OPERATION
+      expect(transitions.length).toBe(3);
+      expect(transitions[0]).toBe('DETECTION_ONLY');
+      expect(transitions[1]).toBe('COMPLETE_OUTAGE');
+      expect(transitions[2]).toBe('FULL_OPERATION');
+    });
+  });
+
+  // ===========================================================================
   // DegradationLevel enum
   // ===========================================================================
 

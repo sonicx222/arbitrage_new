@@ -50,6 +50,9 @@ function createMockStreamsClient(): OpportunityStreamsClient & StreamsClient {
     xadd: jest.fn().mockResolvedValue('1-0'),
     xack: jest.fn().mockResolvedValue(1),
     xpending: jest.fn().mockResolvedValue(null),
+    // OP-1 FIX: New interface methods for orphaned PEL recovery
+    xclaim: jest.fn().mockResolvedValue([]),
+    xpendingRange: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -203,7 +206,7 @@ describe('OpportunityRouter', () => {
   // =========================================================================
 
   describe('forwardToExecutionEngine', () => {
-    it('should skip forwarding when circuit breaker is open', async () => {
+    it('should skip forwarding when circuit breaker is open but write to DLQ', async () => {
       (mockCircuitBreaker.isCurrentlyOpen as jest.Mock).mockReturnValue(true);
 
       await router.processOpportunity(
@@ -211,7 +214,15 @@ describe('OpportunityRouter', () => {
         true,
       );
 
-      expect(mockStreams.xadd).not.toHaveBeenCalled();
+      // OP-2 FIX: xadd is called once for the DLQ write, not for execution stream
+      expect(mockStreams.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreams.xadd).toHaveBeenCalledWith(
+        'stream:forwarding-dlq',
+        expect.objectContaining({
+          opportunityId: 'cb-skip',
+          error: 'Circuit breaker open',
+        }),
+      );
       expect(router.getOpportunitiesDropped()).toBe(1);
     });
 
@@ -577,9 +588,13 @@ describe('StreamConsumerManager', () => {
       expect(alerts).toHaveLength(1);
 
       // Reset and trigger second alert
+      // OP-26 FIX: resetErrors() now emits STREAM_RECOVERED alert (total = 2 after reset)
       manager.resetErrors();
-      for (let i = 0; i < 3; i++) manager.trackError('stream:test');
       expect(alerts).toHaveLength(2);
+      expect(alerts[1]).toEqual(expect.objectContaining({ type: 'STREAM_RECOVERED' }));
+
+      for (let i = 0; i < 3; i++) manager.trackError('stream:test');
+      expect(alerts).toHaveLength(3);
     });
   });
 

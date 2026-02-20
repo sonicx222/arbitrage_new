@@ -30,6 +30,12 @@ import {
   getErrorMessage,
   stopAndNullify,
 } from '@arbitrage/core';
+import {
+  extractContext,
+  createChildContext,
+  createTraceContext,
+  type TraceContext,
+} from '@arbitrage/core/tracing';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
@@ -73,6 +79,19 @@ export interface PendingMessageInfo {
   /** Timestamp when message was queued (for TTL cleanup) */
   queuedAt: number;
 }
+
+/**
+ * Result of handling an arbitrage opportunity.
+ *
+ * P0-7 FIX: Distinguishes between transient and permanent rejections so that
+ * handleStreamMessage can decide whether to ACK (permanent) or leave in PEL
+ * for redelivery (transient).
+ *
+ * - 'queued': Successfully enqueued for execution (deferred ACK)
+ * - 'rejected': Permanent rejection (business rules, duplicate) — ACK immediately
+ * - 'backpressure': Transient rejection (queue full) — do NOT ACK, leave in PEL
+ */
+export type HandleResult = 'queued' | 'rejected' | 'backpressure';
 
 // =============================================================================
 // REFACTOR 9.1: Validation types moved to ./validation.ts
@@ -167,6 +186,96 @@ export class OpportunityConsumer {
   }
 
   /**
+   * FIX W2-4: Recover orphaned messages from PEL on startup.
+   *
+   * When a previous instance crashes or shuts down with in-flight executions
+   * (W2-5), those messages remain in the PEL under the old consumer name.
+   * This method scans for messages that have been idle longer than the
+   * execution timeout and claims them for the current consumer to reprocess.
+   *
+   * Should be called after createConsumerGroup() and before start().
+   *
+   * @param minIdleMs - Minimum idle time before claiming (default: 2 * EXECUTION_TIMEOUT_MS)
+   * @returns Number of messages recovered
+   *
+   * @see W2-5 fix in stop() — leaves in-flight messages in PEL
+   * @see redis-streams.ts xclaim() / xpendingRange()
+   */
+  async recoverOrphanedMessages(minIdleMs?: number): Promise<number> {
+    const idleThreshold = minIdleMs ?? this.config.pendingMessageMaxAgeMs;
+
+    try {
+      // Get all pending entries for the group (any consumer)
+      const pendingEntries = await this.streamsClient.xpendingRange(
+        this.consumerGroup.streamName,
+        this.consumerGroup.groupName,
+        '-',
+        '+',
+        100, // Process up to 100 orphaned messages per startup
+      );
+
+      if (pendingEntries.length === 0) {
+        return 0;
+      }
+
+      // Filter for entries idle longer than threshold AND not owned by current consumer
+      const orphanedIds = pendingEntries
+        .filter(entry =>
+          entry.idleMs >= idleThreshold &&
+          entry.consumer !== this.consumerGroup.consumerName
+        )
+        .map(entry => entry.id);
+
+      if (orphanedIds.length === 0) {
+        return 0;
+      }
+
+      this.logger.info('Recovering orphaned PEL messages via XCLAIM', {
+        count: orphanedIds.length,
+        minIdleMs: idleThreshold,
+        stream: this.consumerGroup.streamName,
+      });
+
+      // Claim the orphaned messages for this consumer
+      const claimed = await this.streamsClient.xclaim(
+        this.consumerGroup.streamName,
+        this.consumerGroup.groupName,
+        this.consumerGroup.consumerName,
+        idleThreshold,
+        orphanedIds,
+      );
+
+      // Reprocess claimed messages through the normal handler
+      let recovered = 0;
+      for (const message of claimed) {
+        try {
+          await this.handleStreamMessage(message);
+          recovered++;
+        } catch (error) {
+          this.logger.warn('Failed to reprocess recovered message', {
+            messageId: message.id,
+            error: getErrorMessage(error),
+          });
+          // ACK to prevent infinite reprocessing of permanently bad messages
+          await this.ackMessage(message.id);
+        }
+      }
+
+      this.logger.info('XCLAIM recovery complete', {
+        claimed: claimed.length,
+        reprocessed: recovered,
+      });
+
+      return recovered;
+    } catch (error) {
+      this.logger.warn('XCLAIM recovery failed (non-fatal)', {
+        error: getErrorMessage(error),
+      });
+      return 0;
+    }
+  }
+
+  /**
    * Start consuming opportunities from stream.
    */
   start(): void {
@@ -218,20 +327,45 @@ export class OpportunityConsumer {
   /**
    * Stop consuming opportunities.
    *
-   * Performance Optimization: Uses batch ACK pattern for efficient cleanup.
-   * All pending messages are ACKed before shutdown to prevent redelivery storms.
+   * FIX W2-5: Only ACK messages that are NOT currently in-flight.
+   * In-flight executions (tracked in activeExecutions) are left in the PEL
+   * so another instance can XCLAIM and reprocess them if this instance crashes
+   * during shutdown. Messages that were queued but not yet executing are ACKed
+   * to prevent redelivery storms.
+   *
+   * @see recoverOrphanedMessages() — XCLAIM recovery for orphaned PEL entries
    */
   async stop(): Promise<void> {
-    // Stop stream consumer first
+    // Stop stream consumer first (no new messages)
     this.streamConsumer = await stopAndNullify(this.streamConsumer);
 
-    // Batch ACK all pending messages using pipeline pattern
-    if (this.pendingMessages.size > 0) {
-      this.logger.info('ACKing pending messages during shutdown', {
-        count: this.pendingMessages.size,
-      });
+    // FIX W2-5: Separate in-flight from completed pending messages.
+    // Only ACK messages that are NOT actively executing.
+    const safeToAck = new Map<string, PendingMessageInfo>();
+    const inFlightCount = 0;
 
-      await this.batchAckPendingMessages();
+    for (const [id, info] of this.pendingMessages) {
+      if (this.activeExecutions.has(id)) {
+        // Leave in PEL — another instance can XCLAIM these
+        this.logger.debug('Leaving in-flight message in PEL during shutdown', {
+          id,
+          messageId: info.messageId,
+        });
+      } else {
+        safeToAck.set(id, info);
+      }
+    }
+
+    if (safeToAck.size > 0 || this.activeExecutions.size > 0) {
+      this.logger.info('Shutdown ACK: safe to ACK / left in PEL for XCLAIM', {
+        acking: safeToAck.size,
+        inFlight: this.pendingMessages.size - safeToAck.size,
+      });
+    }
+
+    // Batch ACK only safe-to-ACK messages
+    if (safeToAck.size > 0) {
+      await this.batchAckMessages(safeToAck);
     }
 
     // Clear local state
@@ -240,8 +374,11 @@ export class OpportunityConsumer {
   }
 
   /**
-   * Batch ACK pending messages efficiently.
+   * Batch ACK a set of messages efficiently.
    * Uses Promise.allSettled with timeout for resilience.
+   *
+   * FIX W2-5: Accepts a specific message map (not all pending) so callers
+   * can filter which messages to ACK (e.g., skip in-flight during shutdown).
    *
    * Performance Analysis (PERF 10.4):
    * - Current: Parallelized xack calls with Promise.allSettled + timeout guard
@@ -255,10 +392,10 @@ export class OpportunityConsumer {
    *
    * Revisit if: pending count at shutdown regularly exceeds 1000 messages
    */
-  private async batchAckPendingMessages(): Promise<void> {
+  private async batchAckMessages(messages: Map<string, PendingMessageInfo>): Promise<void> {
     const ackPromises: Promise<void>[] = [];
 
-    for (const [id, info] of this.pendingMessages) {
+    for (const [id, info] of messages) {
       const ackPromise = this.streamsClient
         .xack(info.streamName, info.groupName, info.messageId)
         .then(() => {
@@ -303,7 +440,8 @@ export class OpportunityConsumer {
    * ACK strategy:
    * - System messages (stream-init): ACK immediately, no DLQ
    * - Empty/invalid messages: ACK immediately, move to DLQ
-   * - Rejected opportunities (validation/backpressure): ACK immediately
+   * - Permanently rejected opportunities (business rules, duplicate): ACK immediately
+   * - Queue backpressure (transient): Do NOT ACK — leave in PEL for redelivery (P0-7 FIX)
    * - Queued opportunities: Deferred ACK after execution completes
    */
   private async handleStreamMessage(
@@ -327,14 +465,14 @@ export class OpportunityConsumer {
       try {
         const parsed = JSON.parse(rawTimestamps);
         // Whitelist known fields to prevent unexpected properties from leaking through
-        opportunity.pipelineTimestamps = {
-          ...(typeof parsed.wsReceivedAt === 'number' && { wsReceivedAt: parsed.wsReceivedAt }),
-          ...(typeof parsed.publishedAt === 'number' && { publishedAt: parsed.publishedAt }),
-          ...(typeof parsed.consumedAt === 'number' && { consumedAt: parsed.consumedAt }),
-          ...(typeof parsed.detectedAt === 'number' && { detectedAt: parsed.detectedAt }),
-          ...(typeof parsed.coordinatorAt === 'number' && { coordinatorAt: parsed.coordinatorAt }),
-          ...(typeof parsed.executionReceivedAt === 'number' && { executionReceivedAt: parsed.executionReceivedAt }),
-        };
+        const ts: Record<string, number> = {};
+        if (typeof parsed.wsReceivedAt === 'number') ts.wsReceivedAt = parsed.wsReceivedAt;
+        if (typeof parsed.publishedAt === 'number') ts.publishedAt = parsed.publishedAt;
+        if (typeof parsed.consumedAt === 'number') ts.consumedAt = parsed.consumedAt;
+        if (typeof parsed.detectedAt === 'number') ts.detectedAt = parsed.detectedAt;
+        if (typeof parsed.coordinatorAt === 'number') ts.coordinatorAt = parsed.coordinatorAt;
+        if (typeof parsed.executionReceivedAt === 'number') ts.executionReceivedAt = parsed.executionReceivedAt;
+        opportunity.pipelineTimestamps = ts;
       } catch {
         this.logger.warn('Failed to parse pipelineTimestamps JSON', { messageId: message.id });
         opportunity.pipelineTimestamps = undefined;
@@ -345,10 +483,23 @@ export class OpportunityConsumer {
     timestamps.executionReceivedAt = Date.now();
     opportunity.pipelineTimestamps = timestamps;
 
-    // Handle the opportunity - returns true if successfully queued
-    const wasQueued = this.handleArbitrageOpportunity(opportunity);
+    // FIX W2-7: Extract trace context from coordinator's serialized message.
+    // Creates a child span for execution-engine, inheriting the parent traceId
+    // for end-to-end correlation across detector -> coordinator -> execution.
+    const rawData = message.data as Record<string, unknown>;
+    const parentTrace = extractContext(rawData);
+    const traceCtx = parentTrace
+      ? createChildContext(parentTrace, 'execution-engine')
+      : createTraceContext('execution-engine');
 
-    if (wasQueued) {
+    // Attach traceId to opportunity for downstream logging
+    (opportunity as unknown as Record<string, unknown>)._traceId = traceCtx.traceId;
+    (opportunity as unknown as Record<string, unknown>)._spanId = traceCtx.spanId;
+
+    // Handle the opportunity - returns 'queued', 'rejected', or 'backpressure'
+    const result = this.handleArbitrageOpportunity(opportunity);
+
+    if (result === 'queued') {
       // BUG FIX 4.2: Handle duplicate opportunity IDs properly
       // If we already have a pending message for this ID, ACK the OLD message first
       // to prevent orphaned entries in Redis PEL (Pending Entries List)
@@ -380,9 +531,19 @@ export class OpportunityConsumer {
         messageId: message.id,
         queuedAt: Date.now(),
       });
-    } else {
-      // Opportunity was rejected - ACK immediately to prevent redelivery
+    } else if (result === 'rejected') {
+      // Permanent rejection (business rules, duplicate) - ACK immediately
       await this.ackMessage(message.id);
+    } else {
+      // P0-7 FIX: Transient rejection (backpressure) - do NOT ACK.
+      // Message stays in PEL and will be redelivered by Redis once the
+      // consumer resumes and the queue drains. This prevents permanent
+      // loss of opportunities during temporary backpressure.
+      this.logger.debug('Backpressure: message left in PEL for redelivery', {
+        messageId: message.id,
+        opportunityId: opportunity.id,
+        queueSize: this.queueService.size(),
+      });
     }
   }
 
@@ -451,6 +612,10 @@ export class OpportunityConsumer {
    * enqueue (not after dequeue by engine) to prevent race conditions where
    * duplicate messages pass the check before either is marked active.
    *
+   * P0-7 FIX: Returns HandleResult instead of boolean to distinguish transient
+   * (backpressure) from permanent (business rules, duplicate) rejections.
+   * Backpressure rejections leave the message in PEL for Redis redelivery.
+   *
    * Thread Safety Note (Fix 5.1):
    * =============================
    * This method is safe in Node.js single-threaded model because:
@@ -463,9 +628,9 @@ export class OpportunityConsumer {
    * - Consider using Atomics.wait/notify or SharedArrayBuffer patterns
    * - Alternatively, use a Redis-based distributed lock for multi-process safety
    *
-   * @returns true if successfully queued, false if rejected
+   * @returns HandleResult: 'queued', 'rejected' (permanent), or 'backpressure' (transient)
    */
-  private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): boolean {
+  private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): HandleResult {
     this.stats.opportunitiesReceived++;
 
     try {
@@ -478,7 +643,7 @@ export class OpportunityConsumer {
           code: businessValidation.code,
           details: businessValidation.details,
         });
-        return false;
+        return 'rejected';
       }
 
       // BUG FIX 4.1: Atomic check-and-add for duplicate detection
@@ -489,7 +654,7 @@ export class OpportunityConsumer {
         this.logger.debug('Opportunity rejected: already queued or executing', {
           id: opportunity.id,
         });
-        return false;
+        return 'rejected';
       }
 
       // Mark active BEFORE enqueue to prevent race condition
@@ -505,7 +670,9 @@ export class OpportunityConsumer {
           id: opportunity.id,
           queueSize: this.queueService.size(),
         });
-        return false;
+        // P0-7 FIX: Return 'backpressure' so the message is NOT ACKed.
+        // It stays in PEL and will be redelivered when queue drains.
+        return 'backpressure';
       }
 
       this.logger.info('Added opportunity to execution queue', {
@@ -520,7 +687,7 @@ export class OpportunityConsumer {
         this.onOpportunityQueued(opportunity);
       }
 
-      return true;
+      return 'queued';
     } catch (error) {
       // Rollback: ensure we don't leave orphaned entries on error
       this.activeExecutions.delete(opportunity.id);
@@ -530,7 +697,7 @@ export class OpportunityConsumer {
         id: opportunity.id,
         error: getErrorMessage(error),
       });
-      return false;
+      return 'rejected';
     }
   }
 

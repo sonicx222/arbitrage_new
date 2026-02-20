@@ -166,6 +166,8 @@ describe('AlertCooldownManager', () => {
       delegateCooldowns = new Map();
       mockDelegate = {
         getAlertCooldowns: jest.fn(() => delegateCooldowns),
+        getAlertCooldown: jest.fn((key: string) => delegateCooldowns.get(key)),
+        getAlertCooldownCount: jest.fn(() => delegateCooldowns.size),
         setAlertCooldown: jest.fn((key: string, ts: number) => { delegateCooldowns.set(key, ts); }),
         cleanupAlertCooldowns: jest.fn(),
       };

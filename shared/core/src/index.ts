@@ -173,6 +173,18 @@ export {
 export type { TraceContext } from './tracing';
 
 // =============================================================================
+// 1.2.3 HMAC Utilities for Redis Data Integrity
+// =============================================================================
+
+export {
+  hmacSign,
+  hmacVerify,
+  getHmacSigningKey,
+  isSignedEnvelope,
+} from './hmac-utils';
+export type { SignedEnvelope } from './hmac-utils';
+
+// =============================================================================
 // 1.3 Async Primitives
 // =============================================================================
 

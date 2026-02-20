@@ -157,6 +157,8 @@ export interface ConnectionPoolConfig {
   reconnecting: boolean[];
   /** Track reconnection attempts for exponential backoff */
   reconnectAttempts: number[];
+  /** Timer references for reconnection scheduling (prevents timer leaks) */
+  reconnectTimers: (NodeJS.Timeout | null)[];
 }
 
 /**
@@ -389,7 +391,8 @@ export class SolanaDetector extends EventEmitter {
       failedRequests: [],
       subscriptionConnections: new Map(),
       reconnecting: [],
-      reconnectAttempts: []
+      reconnectAttempts: [],
+      reconnectTimers: []
     };
 
     this.logger.info('SolanaDetector initialized', {
@@ -593,11 +596,17 @@ export class SolanaDetector extends EventEmitter {
       this.redis = null;
     }
 
+    // Clear reconnect timers to prevent leaks
+    for (const timer of this.connectionPool.reconnectTimers) {
+      if (timer) clearTimeout(timer);
+    }
+
     // Clear connection pool
     this.connectionPool.connections = [];
     this.connectionPool.healthStatus = [];
     this.connectionPool.reconnecting = [];
     this.connectionPool.reconnectAttempts = [];
+    this.connectionPool.reconnectTimers = [];
     this.connectionPool.subscriptionConnections.clear();
 
     // Clear pools
@@ -655,7 +664,8 @@ export class SolanaDetector extends EventEmitter {
       failedRequests: [],
       subscriptionConnections: new Map(),
       reconnecting: [],
-      reconnectAttempts: []
+      reconnectAttempts: [],
+      reconnectTimers: []
     };
 
     // Create connections - distribute across available URLs
@@ -674,6 +684,7 @@ export class SolanaDetector extends EventEmitter {
       this.connectionPool.failedRequests.push(0);
       this.connectionPool.reconnecting.push(false);
       this.connectionPool.reconnectAttempts.push(0);
+      this.connectionPool.reconnectTimers.push(null);
     }
 
     // Validate at least one connection works
@@ -764,13 +775,25 @@ export class SolanaDetector extends EventEmitter {
         failedRequests: this.connectionPool.failedRequests[index]
       });
 
+      // Clear any existing timer before scheduling (prevents timer leak on repeated failures)
+      if (this.connectionPool.reconnectTimers[index]) {
+        clearTimeout(this.connectionPool.reconnectTimers[index]!);
+        this.connectionPool.reconnectTimers[index] = null;
+      }
+
       // Schedule reconnection attempt
-      setTimeout(() => this.attemptReconnection(index), this.config.retryDelayMs);
+      this.connectionPool.reconnectTimers[index] = setTimeout(() => this.attemptReconnection(index), this.config.retryDelayMs);
     }
   }
 
   private async attemptReconnection(index: number): Promise<void> {
     if (this.stopping || !this.running) return;
+
+    // Clear the timer reference since we're now executing
+    if (this.connectionPool.reconnectTimers[index]) {
+      clearTimeout(this.connectionPool.reconnectTimers[index]!);
+      this.connectionPool.reconnectTimers[index] = null;
+    }
 
     // Mutex: prevent concurrent reconnection attempts for same index
     if (this.connectionPool.reconnecting[index]) {
@@ -816,7 +839,7 @@ export class SolanaDetector extends EventEmitter {
         nextDelayMs: backoffDelay,
         error
       });
-      setTimeout(() => this.attemptReconnection(index), backoffDelay);
+      this.connectionPool.reconnectTimers[index] = setTimeout(() => this.attemptReconnection(index), backoffDelay);
     } finally {
       this.connectionPool.reconnecting[index] = false;
     }

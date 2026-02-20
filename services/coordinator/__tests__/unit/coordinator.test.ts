@@ -716,7 +716,8 @@ describe('S3.3.5 Regression: PRICE_UPDATES Consumer', () => {
       'stream:whale-alerts',
       'stream:swap-events',
       'stream:volume-aggregates',
-      'stream:price-updates' // S3.3.5 FIX: Must be included
+      'stream:price-updates', // S3.3.5 FIX: Must be included
+      'stream:execution-results' // OP-10 FIX: Must be included
     ];
 
     // Simulate consumer group configuration check
@@ -726,7 +727,8 @@ describe('S3.3.5 Regression: PRICE_UPDATES Consumer', () => {
       { streamName: 'stream:whale-alerts' },
       { streamName: 'stream:swap-events' },
       { streamName: 'stream:volume-aggregates' },
-      { streamName: 'stream:price-updates' }
+      { streamName: 'stream:price-updates' },
+      { streamName: 'stream:execution-results' }
     ];
 
     const configuredStreams = consumerGroups.map(g => g.streamName);
@@ -1196,5 +1198,132 @@ describe('Rate Limiter Token Calculation (SPRINT 1 FIX)', () => {
     expect(partialPeriodTokensBuggy).toBe(0);
     // Fixed gives 99 tokens (proportional)
     expect(partialPeriodTokensFixed).toBe(99);
+  });
+});
+
+// =============================================================================
+// OP-10 Regression Tests - Execution Result Consumer
+// =============================================================================
+
+describe('OP-10 Regression: Execution Result Consumer', () => {
+  // Inline handler that mirrors coordinator.handleExecutionResultMessage logic
+  function handleExecutionResult(
+    message: { data: Record<string, unknown> },
+    metrics: { successfulExecutions: number; totalProfit: number },
+  ): void {
+    const data = message.data;
+    const rawResult = (data.data ?? data) as Record<string, unknown>;
+    const success = rawResult.success === true || rawResult.success === 'true';
+    const opportunityId = typeof rawResult.opportunityId === 'string' ? rawResult.opportunityId : '';
+
+    if (!opportunityId) return;
+
+    if (success) {
+      metrics.successfulExecutions++;
+      const actualProfit = typeof rawResult.actualProfit === 'number' ? rawResult.actualProfit : 0;
+      if (actualProfit > 0) {
+        metrics.totalProfit += actualProfit;
+      }
+    }
+  }
+
+  it('should include EXECUTION_RESULTS in consumer groups', () => {
+    const consumerGroups = [
+      { streamName: 'stream:health' },
+      { streamName: 'stream:opportunities' },
+      { streamName: 'stream:whale-alerts' },
+      { streamName: 'stream:swap-events' },
+      { streamName: 'stream:volume-aggregates' },
+      { streamName: 'stream:price-updates' },
+      { streamName: 'stream:execution-results' },
+    ];
+
+    const streamNames = consumerGroups.map(g => g.streamName);
+    expect(streamNames).toContain('stream:execution-results');
+  });
+
+  it('should increment successfulExecutions on successful result', () => {
+    const metrics = { successfulExecutions: 0, totalProfit: 0 };
+
+    handleExecutionResult({
+      data: {
+        opportunityId: 'opp-123',
+        success: true,
+        actualProfit: 0.05,
+        chain: 'ethereum',
+        dex: 'uniswap',
+        timestamp: Date.now(),
+      },
+    }, metrics);
+
+    expect(metrics.successfulExecutions).toBe(1);
+    expect(metrics.totalProfit).toBe(0.05);
+  });
+
+  it('should not increment on failed result', () => {
+    const metrics = { successfulExecutions: 0, totalProfit: 0 };
+
+    handleExecutionResult({
+      data: {
+        opportunityId: 'opp-456',
+        success: false,
+        error: 'Slippage exceeded',
+        chain: 'bsc',
+        dex: 'pancakeswap',
+        timestamp: Date.now(),
+      },
+    }, metrics);
+
+    expect(metrics.successfulExecutions).toBe(0);
+    expect(metrics.totalProfit).toBe(0);
+  });
+
+  it('should accumulate profit across multiple successes', () => {
+    const metrics = { successfulExecutions: 0, totalProfit: 0 };
+
+    handleExecutionResult({
+      data: { opportunityId: 'opp-1', success: true, actualProfit: 0.03, chain: 'ethereum', dex: 'uniswap', timestamp: Date.now() },
+    }, metrics);
+    handleExecutionResult({
+      data: { opportunityId: 'opp-2', success: true, actualProfit: 0.07, chain: 'bsc', dex: 'pancakeswap', timestamp: Date.now() },
+    }, metrics);
+    handleExecutionResult({
+      data: { opportunityId: 'opp-3', success: false, error: 'Failed', chain: 'polygon', dex: 'quickswap', timestamp: Date.now() },
+    }, metrics);
+
+    expect(metrics.successfulExecutions).toBe(2);
+    expect(metrics.totalProfit).toBeCloseTo(0.10, 10);
+  });
+
+  it('should skip results without opportunityId', () => {
+    const metrics = { successfulExecutions: 0, totalProfit: 0 };
+
+    handleExecutionResult({
+      data: { success: true, actualProfit: 1.0, chain: 'ethereum', dex: 'uniswap', timestamp: Date.now() },
+    }, metrics);
+
+    expect(metrics.successfulExecutions).toBe(0);
+  });
+
+  it('should handle success as string "true" (Redis serialization)', () => {
+    const metrics = { successfulExecutions: 0, totalProfit: 0 };
+
+    handleExecutionResult({
+      data: { opportunityId: 'opp-str', success: 'true', actualProfit: 0.02, chain: 'ethereum', dex: 'uniswap', timestamp: Date.now() },
+    }, metrics);
+
+    expect(metrics.successfulExecutions).toBe(1);
+    expect(metrics.totalProfit).toBe(0.02);
+  });
+
+  it('should not add negative profit', () => {
+    const metrics = { successfulExecutions: 0, totalProfit: 0 };
+
+    handleExecutionResult({
+      data: { opportunityId: 'opp-neg', success: true, actualProfit: -0.01, chain: 'ethereum', dex: 'uniswap', timestamp: Date.now() },
+    }, metrics);
+
+    expect(metrics.successfulExecutions).toBe(1);
+    expect(metrics.totalProfit).toBe(0); // Negative profit not added
   });
 });

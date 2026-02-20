@@ -9,6 +9,7 @@
  */
 import { serializeOpportunityForStream } from '../../../src/utils/stream-serialization';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { TraceContext } from '@arbitrage/core/tracing';
 
 describe('serializeOpportunityForStream', () => {
   const EXPECTED_FIELDS = [
@@ -130,5 +131,141 @@ describe('serializeOpportunityForStream', () => {
     for (const [key, value] of Object.entries(result)) {
       expect(typeof value).toBe('string');
     }
+  });
+
+  // ===========================================================================
+  // M11 FIX: Edge case serialization (special values, large numbers)
+  // ===========================================================================
+
+  describe('edge case serialization (M11)', () => {
+    it('should serialize very large profit values without precision loss', () => {
+      const opp = {
+        id: 'test-large',
+        profitPercentage: 9999.999999,
+        confidence: 0.999999,
+        timestamp: Number.MAX_SAFE_INTEGER,
+      } as unknown as ArbitrageOpportunity;
+      const result = serializeOpportunityForStream(opp, 'inst-1');
+
+      expect(result.profitPercentage).toBe('9999.999999');
+      expect(result.confidence).toBe('0.999999');
+      expect(result.timestamp).toBe(String(Number.MAX_SAFE_INTEGER));
+    });
+
+    it('should handle special characters in string fields', () => {
+      const opp = {
+        id: 'test-special-chars',
+        buyDex: 'uniswap v3 (0x1234)',
+        sellDex: 'sushi<swap>',
+        tokenIn: '0xABCDEF',
+        tokenOut: '0x123456',
+      } as unknown as ArbitrageOpportunity;
+      const result = serializeOpportunityForStream(opp, 'inst-1');
+
+      expect(result.buyDex).toBe('uniswap v3 (0x1234)');
+      expect(result.sellDex).toBe('sushi<swap>');
+    });
+
+    it('should handle pipelineTimestamps as JSON string', () => {
+      const opp = {
+        id: 'test-pipeline',
+        pipelineTimestamps: { detected: 1000, published: 1010, received: 1020 },
+      } as unknown as ArbitrageOpportunity;
+      const result = serializeOpportunityForStream(opp, 'inst-1');
+
+      expect(result.pipelineTimestamps).toBe(
+        JSON.stringify({ detected: 1000, published: 1010, received: 1020 }),
+      );
+    });
+
+    it('should handle negative profit percentage', () => {
+      const opp = {
+        id: 'test-negative',
+        profitPercentage: -0.5,
+      } as unknown as ArbitrageOpportunity;
+      const result = serializeOpportunityForStream(opp, 'inst-1');
+
+      expect(result.profitPercentage).toBe('-0.5');
+    });
+  });
+
+  // ===========================================================================
+  // OP-3 FIX: Trace context propagation
+  // ===========================================================================
+
+  describe('trace context propagation (OP-3)', () => {
+    const baseOpp = {
+      id: 'trace-test-1',
+      type: 'simple',
+      chain: 'bsc',
+      profitPercentage: 1.0,
+      confidence: 0.8,
+      timestamp: 1000,
+    } as unknown as ArbitrageOpportunity;
+
+    it('should inject _trace_ prefixed fields when traceContext is provided', () => {
+      const traceCtx: TraceContext = {
+        traceId: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+        spanId: '1234567890abcdef',
+        parentSpanId: 'fedcba0987654321',
+        serviceName: 'coordinator',
+        timestamp: 9999,
+      };
+
+      const result = serializeOpportunityForStream(baseOpp, 'inst-1', traceCtx);
+
+      expect(result._trace_traceId).toBe('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4');
+      expect(result._trace_spanId).toBe('1234567890abcdef');
+      expect(result._trace_parentSpanId).toBe('fedcba0987654321');
+      expect(result._trace_serviceName).toBe('coordinator');
+      expect(result._trace_timestamp).toBe('9999');
+    });
+
+    it('should omit _trace_parentSpanId when parentSpanId is absent', () => {
+      const traceCtx: TraceContext = {
+        traceId: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+        spanId: '1234567890abcdef',
+        serviceName: 'coordinator',
+        timestamp: 9999,
+      };
+
+      const result = serializeOpportunityForStream(baseOpp, 'inst-1', traceCtx);
+
+      expect(result._trace_traceId).toBe('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4');
+      expect(result._trace_spanId).toBe('1234567890abcdef');
+      expect(result._trace_parentSpanId).toBeUndefined();
+      expect(result._trace_serviceName).toBe('coordinator');
+    });
+
+    it('should NOT inject _trace_ fields when traceContext is undefined', () => {
+      const result = serializeOpportunityForStream(baseOpp, 'inst-1');
+
+      const traceKeys = Object.keys(result).filter(k => k.startsWith('_trace_'));
+      expect(traceKeys).toHaveLength(0);
+    });
+
+    it('should NOT inject _trace_ fields when traceContext is explicitly undefined', () => {
+      const result = serializeOpportunityForStream(baseOpp, 'inst-1', undefined);
+
+      const traceKeys = Object.keys(result).filter(k => k.startsWith('_trace_'));
+      expect(traceKeys).toHaveLength(0);
+    });
+
+    it('should return all trace field values as strings', () => {
+      const traceCtx: TraceContext = {
+        traceId: 'abc123',
+        spanId: 'def456',
+        serviceName: 'coordinator',
+        timestamp: 5555,
+      };
+
+      const result = serializeOpportunityForStream(baseOpp, 'inst-1', traceCtx);
+
+      for (const [key, value] of Object.entries(result)) {
+        if (key.startsWith('_trace_')) {
+          expect(typeof value).toBe('string');
+        }
+      }
+    });
   });
 });

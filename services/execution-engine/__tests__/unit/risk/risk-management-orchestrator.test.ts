@@ -433,7 +433,7 @@ describe('RiskManagementOrchestrator', () => {
         pathLength: 2,
         success: true,
         actualProfit: 0.01,
-        gasCost: 50000,
+        gasCost: 0.005, // ETH units (fractional)
       });
 
       expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
@@ -462,13 +462,55 @@ describe('RiskManagementOrchestrator', () => {
         dex: 'uniswap',
         pathLength: 2,
         success: false,
-        gasCost: 100000,
+        gasCost: 0.001, // ETH units (fractional)
       });
 
       expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
         expect.objectContaining({
           success: false,
-          pnl: -100000n, // Negative gas cost
+          pnl: -1000000000000000n, // -0.001 ETH in wei
+        })
+      );
+    });
+
+    it('should not crash on fractional gasCost values (P0-2 regression)', () => {
+      const mockBreaker = createMockDrawdownBreaker();
+      const mockTracker = {
+        recordOutcome: jest.fn(),
+      };
+
+      const deps: RiskOrchestratorDeps = {
+        drawdownBreaker: mockBreaker as any,
+        evCalculator: null,
+        positionSizer: null,
+        probabilityTracker: mockTracker as any,
+        logger,
+        stats,
+      };
+
+      const orchestrator = createRiskOrchestrator(deps);
+
+      // This would throw RangeError before the fix: BigInt(0.003) crashes
+      expect(() => {
+        orchestrator.recordOutcome({
+          chain: 'ethereum',
+          dex: 'uniswap',
+          pathLength: 2,
+          success: false,
+          gasCost: 0.003, // Fractional ETH from ethers.formatEther()
+        });
+      }).not.toThrow();
+
+      // Verify gasCost was converted to wei correctly
+      expect(mockTracker.recordOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          gasCost: 3000000000000000n, // 0.003 ETH = 3e15 wei
+        })
+      );
+
+      expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pnl: -3000000000000000n, // -0.003 ETH in wei
         })
       );
     });

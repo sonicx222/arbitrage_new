@@ -641,6 +641,18 @@ Each agent prompt MUST include:
 - The Critical Rules section (anti-hallucination, performance safety, investigation strategy)
 - The Known Correct Patterns table
 
+### Agent Stall Detection (applies to all phases)
+
+After spawning agents in any phase:
+1. Send each agent an activation message with their specific inputs
+2. Wait 60-90 seconds, then check inbox read status
+3. If agents haven't read their messages after 90s, send a nudge: "Check your inbox for your assigned task. Begin analysis and report findings when done."
+4. If an agent is unresponsive after 3 minutes, send a direct message: "You have an active task assignment. Read your activation message and begin immediately."
+5. If still unresponsive after 5 minutes, note the gap and proceed with available results.
+
+For parallel phases (Phase 2, Phase 3): apply to all agents simultaneously — track which have reported vs not.
+For sequential phases (Phase 4): apply to the single agent.
+
 ### Phase 3: Parallel Design (Agents 3 + 4, after Phase 2)
 
 After reconnaissance agents complete, spawn 2 design agents **in a single message** with 2 parallel Task tool calls:

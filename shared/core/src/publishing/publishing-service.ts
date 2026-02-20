@@ -68,7 +68,7 @@ export const STANDARD_BATCHER_CONFIGS: Record<string, PublishingBatcherConfig> =
   priceUpdates: {
     stream: RedisStreams.PRICE_UPDATES,
     maxBatchSize: 50,
-    maxWaitMs: 100, // Flush every 100ms for latency-sensitive price data
+    maxWaitMs: 25, // @see OP-4: Reduced from 100ms to stay within 50ms hot-path budget
     name: 'priceUpdateBatcher',
   },
   swapEvents: {
@@ -262,7 +262,8 @@ export class PublishingService {
     }
 
     // Arbitrage opportunities are high-priority - publish directly (no batching)
-    await this.streamsClient.xadd(
+    // @see OP-6: Use xaddWithLimit to prevent unbounded stream growth
+    await this.streamsClient.xaddWithLimit(
       RedisStreamsClient.STREAMS.OPPORTUNITIES,
       message
     );
@@ -291,7 +292,8 @@ export class PublishingService {
    */
   async publishVolumeAggregate(aggregate: VolumeAggregate): Promise<void> {
     const message = this.createMessage('volume-aggregate', aggregate);
-    await this.streamsClient.xadd(
+    // @see OP-6: Use xaddWithLimit to prevent unbounded stream growth
+    await this.streamsClient.xaddWithLimit(
       RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
       message
     );

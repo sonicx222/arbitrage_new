@@ -23,8 +23,8 @@
  * @see CrossChainStrategy.persistBridgeRecoveryState
  */
 
-import type { RedisClient, BridgeRouterFactory } from '@arbitrage/core';
-import { getErrorMessage } from '@arbitrage/core';
+import type { RedisClient, BridgeRouterFactory, SignedEnvelope } from '@arbitrage/core';
+import { getErrorMessage, hmacSign, hmacVerify, getHmacSigningKey, isSignedEnvelope } from '@arbitrage/core';
 import type {
   Logger,
   BridgeRecoveryState,
@@ -251,9 +251,9 @@ export class BridgeRecoveryManager {
 
       this.logger.info('Found bridge recovery states', { count: states.length });
 
-      // Filter to actionable states (pending/bridging only)
+      // Filter to actionable states (pending/bridging/bridge_completed_sell_pending)
       const actionableStates = states.filter(
-        (s) => s.status === 'pending' || s.status === 'bridging'
+        (s) => s.status === 'pending' || s.status === 'bridging' || s.status === 'bridge_completed_sell_pending'
       );
 
       this.metrics.pendingBridges = actionableStates.length;
@@ -414,13 +414,34 @@ export class BridgeRecoveryManager {
       );
       cursor = nextCursor;
 
+      const signingKey = getHmacSigningKey();
+
       for (const key of keys) {
         try {
           // redis.get<T>() returns parsed JSON directly (no need for JSON.parse)
-          const state = await this.redis.get<BridgeRecoveryState>(key);
-          if (state) {
-            states.push(state);
+          const raw = await this.redis.get(key);
+          if (!raw) continue;
+
+          // Fix #4: Handle both HMAC-signed envelopes and legacy unsigned data
+          let state: BridgeRecoveryState;
+          if (isSignedEnvelope(raw)) {
+            const verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+            if (!verified) {
+              this.logger.error('Bridge recovery state HMAC verification failed - possible tampering', {
+                key,
+              });
+              continue;
+            }
+            state = verified;
+          } else {
+            // Legacy unsigned data — accept but log if signing is enabled
+            state = raw as BridgeRecoveryState;
+            if (signingKey) {
+              this.logger.warn('Unsigned bridge recovery state found with signing enabled', { key });
+            }
           }
+
+          states.push(state);
         } catch (error) {
           this.logger.warn('Failed to read bridge recovery state', {
             key,
@@ -483,6 +504,35 @@ export class BridgeRecoveryManager {
         bridgeToken: state.bridgeToken,
       });
       // Don't mark as failed - router may become available later
+      return;
+    }
+
+    // Handle bridge_completed_sell_pending: bridge already completed, sell still needed
+    // Skip status check and go straight to sell recovery attempt
+    if (state.status === 'bridge_completed_sell_pending') {
+      this.logger.warn('Bridge completed but sell not executed - recovery needed', {
+        bridgeId: state.bridgeId,
+        opportunityId: state.opportunityId,
+        destChain: state.destChain,
+        bridgeToken: state.bridgeToken,
+        bridgeAmount: state.bridgeAmount,
+        ageMs: age,
+      });
+
+      const bridgeConfirmedComplete = await this.attemptSellRecovery(state);
+      if (bridgeConfirmedComplete) {
+        // Fix W2-4: Do NOT mark as 'recovered' — the BridgeRecoveryManager cannot execute
+        // the sell (no StrategyContext with wallets/providers). Leave status as
+        // 'bridge_completed_sell_pending' so CrossChainStrategy.recoverPendingBridges()
+        // picks it up on restart and executes the actual sell transaction.
+        // @see docs/reports/SOLANA_BRIDGE_DEEP_ANALYSIS_2026-02-20.md W2-4
+        this.logger.warn('Bridge confirmed complete but sell not executed — awaiting engine restart for sell recovery', {
+          bridgeId: state.bridgeId,
+          opportunityId: state.opportunityId,
+          destChain: state.destChain,
+        });
+      }
+      // State remains as bridge_completed_sell_pending for next check or engine restart
       return;
     }
 
@@ -567,10 +617,26 @@ export class BridgeRecoveryManager {
     const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${bridgeId}`;
 
     try {
-      const existing = await this.redis.get<BridgeRecoveryState>(key);
-      if (!existing) {
+      const signingKey = getHmacSigningKey();
+      const raw = await this.redis.get(key);
+      if (!raw) {
         // State already expired or wasn't persisted
         return;
+      }
+
+      // Fix #4: Handle HMAC-signed envelopes on read
+      let existing: BridgeRecoveryState;
+      if (isSignedEnvelope(raw)) {
+        const verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+        if (!verified) {
+          this.logger.error('Bridge recovery state HMAC verification failed during update', {
+            bridgeId,
+          });
+          return;
+        }
+        existing = verified;
+      } else {
+        existing = raw as BridgeRecoveryState;
       }
 
       const updated: BridgeRecoveryState = {
@@ -583,13 +649,16 @@ export class BridgeRecoveryManager {
         updated.errorMessage = errorMessage;
       }
 
+      // Fix #4: HMAC-sign updated state
+      const signedEnvelope = hmacSign(updated, signingKey);
+
       // Terminal states get short TTL for post-mortem; active states keep standard TTL
       const isTerminal = status === 'recovered' || status === 'failed';
       const ttlSeconds = isTerminal
         ? 3600 // 1 hour
         : Math.floor(this.config.maxAgeMs / 1000);
 
-      await this.redis.set(key, updated, ttlSeconds);
+      await this.redis.set(key, signedEnvelope, ttlSeconds);
 
       this.logger.debug('Updated bridge recovery status', {
         bridgeId,

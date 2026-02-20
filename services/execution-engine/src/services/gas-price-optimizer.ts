@@ -327,7 +327,8 @@ export class GasPriceOptimizer {
   private readonly DEFAULT_MEDIAN_CACHE_TTL_MS: number;
   private readonly FAST_CHAIN_MEDIAN_CACHE_TTL_MS: number;
   private readonly MEDIAN_CACHE_CLEANUP_INTERVAL_MS: number;
-  private readonly FAST_CHAINS = new Set(['arbitrum', 'optimism', 'base', 'zksync', 'linea']);
+  /** Chains with block times <= 2s. @see BLOCK_TIMES_MS in @arbitrage/config for authoritative source. */
+  private readonly FAST_CHAINS = new Set(['arbitrum', 'optimism', 'base', 'zksync', 'linea', 'avalanche', 'fantom']);
 
   /**
    * EMA smoothing factor (α). Higher = more responsive to price changes.

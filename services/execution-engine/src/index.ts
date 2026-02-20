@@ -123,6 +123,19 @@ export function getStandbyConfigFromEnv() {
  * - POST /circuit-breaker/close — Force close circuit breaker
  * - POST /circuit-breaker/open — Force open circuit breaker
  */
+// Cached Redis health status to avoid blocking health checks with ping on every request
+let cachedRedisHealthy = true;
+let redisHealthCheckInterval: NodeJS.Timeout | null = null;
+
+function startRedisHealthMonitor(engine: ExecutionEngineService): void {
+  // Check Redis health every 10 seconds and cache the result
+  redisHealthCheckInterval = setInterval(async () => {
+    cachedRedisHealthy = await engine.isRedisHealthy();
+  }, 10_000);
+  // Initial check
+  engine.isRedisHealthy().then(healthy => { cachedRedisHealthy = healthy; }).catch(() => { cachedRedisHealthy = false; });
+}
+
 function createHealthServer(engine: ExecutionEngineService): Server {
   const circuitBreakerHandler = createCircuitBreakerApiHandler(engine);
 
@@ -138,11 +151,13 @@ function createHealthServer(engine: ExecutionEngineService): Server {
       const isSimulation = engine.getIsSimulationMode();
 
       const status = !isRunning ? 'unhealthy' :
+                    (!cachedRedisHealthy) ? 'degraded' :
                     (healthyProviders === 0 && !isSimulation) ? 'degraded' : 'healthy';
 
       return {
         status,
         simulationMode: isSimulation,
+        redisConnected: cachedRedisHealthy,
         healthyProviders,
         queueSize: engine.getQueueSize(),
         activeExecutions: engine.getActiveExecutionsCount(),
@@ -265,6 +280,7 @@ async function main() {
 
     // Start health server first
     healthServer = createHealthServer(engine);
+    startRedisHealthMonitor(engine);
 
     await engine.start();
 
@@ -280,6 +296,10 @@ async function main() {
           await resetCrossRegionHealthManager();
         }
 
+        if (redisHealthCheckInterval) {
+          clearInterval(redisHealthCheckInterval);
+          redisHealthCheckInterval = null;
+        }
         await closeHealthServer(healthServer);
         await engine.stop();
       },

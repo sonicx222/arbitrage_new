@@ -126,18 +126,18 @@ export interface BusinessRuleConfig {
  *
  * Fix 7.3: Documented alignment with actually supported strategies.
  *
- * Supported types and their strategy mapping:
+ * Strategy routing (see strategy-factory.ts resolve()):
  * - 'simple': IntraChainStrategy (single-chain DEX arbitrage)
  * - 'cross-dex': IntraChainStrategy (same as 'simple', different discovery source)
- * - 'triangular': IntraChainStrategy (A->B->C->A within single chain)
- * - 'flash-loan': FlashLoanStrategy (flash loan arbitrage)
+ * - 'triangular': FlashLoanStrategy (A->B->C->A multi-hop via flash loan)
+ * - 'quadrilateral': FlashLoanStrategy (A->B->C->D->A 4-hop via flash loan)
+ * - 'flash-loan': FlashLoanStrategy (explicit flash loan arbitrage)
  * - 'cross-chain': CrossChainStrategy (multi-chain bridge arbitrage)
  *
  * Fallback routing (validation passes, routes to IntraChainStrategy):
- * - 'quadrilateral': Would need 4-hop strategy
- * - 'multi-leg': Would need N-hop strategy
- * - 'predictive': Would need predictive strategy
- * - 'intra-dex': Single-pool arbitrage
+ * - 'multi-leg': Would need N-hop strategy, defaults to IntraChainStrategy
+ * - 'predictive': Would need predictive strategy, defaults to IntraChainStrategy
+ * - 'intra-dex': Single-pool arbitrage, defaults to IntraChainStrategy
  *
  * Design decision: We allow all types through validation because:
  * 1. The strategy-factory routes unsupported types to IntraChainStrategy as fallback
@@ -150,12 +150,12 @@ export const VALID_OPPORTUNITY_TYPES = new Set([
   // Primary supported types with dedicated strategies
   'simple',           // IntraChainStrategy
   'cross-dex',        // IntraChainStrategy (different discovery source)
-  'triangular',       // IntraChainStrategy (multi-hop)
+  'triangular',       // FlashLoanStrategy (3-hop via flash loan)
+  'quadrilateral',    // FlashLoanStrategy (4-hop via flash loan)
   'flash-loan',       // FlashLoanStrategy
   'cross-chain',      // CrossChainStrategy
 
   // Secondary types that route to IntraChainStrategy fallback
-  'quadrilateral',    // Falls back to IntraChainStrategy
   'multi-leg',        // Falls back to IntraChainStrategy
   'predictive',       // Falls back to IntraChainStrategy
   'intra-dex',        // Falls back to IntraChainStrategy

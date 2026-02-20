@@ -55,15 +55,16 @@ Hot-path modules (any issue here is automatically P0):
 You are the **Team Lead**. Your responsibilities:
 1. Create the team and task list using TeamCreate
 2. Read `docs/agent/code_conventions.md` and skim relevant ADRs for shared context
-3. Spawn all 6 agents **in parallel** (single message, 6 Task tool calls)
-4. Wait for all agents to complete
-5. Deduplicate and cross-reference findings across agents
-6. Score and prioritize findings using the Priority Scoring Formula
-7. Produce a final unified report
+3. Spawn all 6 agents **in parallel** (single message, 6 Task tool calls) — **ALL agents MUST use model: opus**
+4. Send activation messages to all agents after spawning with specific file lists
+5. Monitor progress using the Stall Detection Protocol
+6. Deduplicate and cross-reference findings across agents
+7. Score and prioritize findings using the Priority Scoring Formula
+8. Produce a final unified report
 
 ---
 
-### Agent 1: "architecture-auditor" (subagent_type: Explore)
+### Agent 1: "architecture-auditor" (subagent_type: Explore, model: opus)
 
 **Analysis scope**: `$ARGUMENTS`
 
@@ -135,7 +136,7 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 2: "bug-hunter" (subagent_type: general-purpose)
+### Agent 2: "bug-hunter" (subagent_type: general-purpose, model: opus)
 
 **Analysis scope**: `$ARGUMENTS`
 
@@ -231,7 +232,7 @@ Redis Streams:
 
 ---
 
-### Agent 3: "security-auditor" (subagent_type: general-purpose)
+### Agent 3: "security-auditor" (subagent_type: general-purpose, model: opus)
 
 **Analysis scope**: `$ARGUMENTS` AND corresponding source contracts in `contracts/src/`
 
@@ -323,7 +324,7 @@ Redis Streams:
 
 ---
 
-### Agent 4: "test-quality-analyst" (subagent_type: Explore)
+### Agent 4: "test-quality-analyst" (subagent_type: Explore, model: opus)
 
 **Analysis scope**: `$ARGUMENTS`
 
@@ -373,7 +374,7 @@ Redis Streams:
 
 ---
 
-### Agent 5: "mock-fidelity-validator" (subagent_type: Explore)
+### Agent 5: "mock-fidelity-validator" (subagent_type: Explore, model: opus)
 
 **Analysis scope**: `$ARGUMENTS` AND `contracts/src/mocks/` AND corresponding real interfaces in `contracts/src/interfaces/`
 
@@ -435,7 +436,7 @@ Apply the 5 Whys:
 
 ---
 
-### Agent 6: "performance-refactor-reviewer" (subagent_type: Explore)
+### Agent 6: "performance-refactor-reviewer" (subagent_type: Explore, model: opus)
 
 **Analysis scope**: `$ARGUMENTS`
 
@@ -582,14 +583,14 @@ MARKING AS: NEEDS VERIFICATION until intent is clear."
 ### Step 2: Parallel Agent Launch
 Spawn ALL 6 agents in a **single message** with 6 parallel Task tool calls:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 1 | architecture-auditor | Explore | Mismatches (code vs arch/docs/config) |
-| 2 | bug-hunter | general-purpose | Bugs, race conditions, inconsistencies |
-| 3 | security-auditor | general-purpose | DeFi security, attack vectors, fund safety |
-| 4 | test-quality-analyst | Explore | Coverage gaps, TODOs, deprecated code |
-| 5 | mock-fidelity-validator | Explore | Mock accuracy, domain logic, parameter realism |
-| 6 | performance-refactor-reviewer | Explore | Refactoring, performance, code smells |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 1 | architecture-auditor | Explore | opus | Mismatches (code vs arch/docs/config) |
+| 2 | bug-hunter | general-purpose | opus | Bugs, race conditions, inconsistencies |
+| 3 | security-auditor | general-purpose | opus | DeFi security, attack vectors, fund safety |
+| 4 | test-quality-analyst | Explore | opus | Coverage gaps, TODOs, deprecated code |
+| 5 | mock-fidelity-validator | Explore | opus | Mock accuracy, domain logic, parameter realism |
+| 6 | performance-refactor-reviewer | Explore | opus | Refactoring, performance, code smells |
 
 Each agent prompt MUST include:
 - The exact folder path: `$ARGUMENTS`
@@ -599,8 +600,17 @@ Each agent prompt MUST include:
 - Instruction to use TodoWrite for their own progress tracking
 - Instruction to return findings in the structured format below
 
-### Step 3: Synthesis
-After ALL agents complete:
+### Step 3: Agent Activation & Stall Detection
+After spawning all 6 agents:
+1. Send each agent an activation message listing specific files to read and relevant ADR references for their focus area
+2. Wait 60-90 seconds, then check inbox read status
+3. If agents haven't read their messages after 90s, send a broadcast nudge: "All agents: check your inbox for activation message with file lists. Begin analysis and report findings when done."
+4. Continue monitoring every 60s. Track which agents have reported vs not.
+5. If an agent is unresponsive after 3 minutes, send a direct message: "You have an assigned analysis task. Read your activation message and begin immediately."
+6. If still unresponsive after 5 minutes, note the gap in the final report and proceed with available results.
+
+### Step 4: Synthesis
+After ALL agents complete (or Step 3 timeout reached):
 1. Collect all findings from all 6 agents
 2. Deduplicate (same issue found by multiple agents — merge, note which agents found it)
 3. Cross-reference (a bug from Agent 2 may explain a coverage gap from Agent 4, or a security finding from Agent 3 may reveal a mock fidelity issue from Agent 5)

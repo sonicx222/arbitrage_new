@@ -34,12 +34,12 @@ primary_region = "sjc"
   PARTITION_CHAINS = "ethereum,zksync,linea"
   REGION_ID = "us-west1"
   LOG_LEVEL = "info"
-  HEALTH_CHECK_PORT = "3001"
+  HEALTH_CHECK_PORT = "3003"
   ENABLE_CROSS_REGION_HEALTH = "true"
   # Chain-specific RPC URLs set via secrets
 
 [http_service]
-  internal_port = 3001
+  internal_port = 3003
   force_https = true
   auto_stop_machines = false
   auto_start_machines = true
@@ -69,7 +69,7 @@ primary_region = "sjc"
     interval = "15s"
     method = "GET"
     path = "/health"
-    port = 3001
+    port = 3003
     timeout = "5s"
     type = "http"
 
@@ -78,7 +78,7 @@ primary_region = "sjc"
     interval = "15s"
     method = "GET"
     path = "/ready"
-    port = 3001
+    port = 3003
     timeout = "5s"
     type = "http"
 

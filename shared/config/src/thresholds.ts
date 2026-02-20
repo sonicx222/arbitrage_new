@@ -61,6 +61,50 @@ export const ARBITRAGE_CONFIG = {
 };
 
 // =============================================================================
+// CHAIN-SPECIFIC OPPORTUNITY TIMEOUT
+// Accounts for block time differences across chains
+// =============================================================================
+
+/**
+ * Per-chain opportunity timeout in milliseconds.
+ * Fast chains (sub-second blocks) need much shorter timeouts to prevent
+ * executing stale opportunities. Ethereum with 12s blocks can tolerate longer windows.
+ *
+ * Values are derived from block times in BLOCK_TIMES_MS (chains/index.ts),
+ * targeting approximately 2-5 blocks per chain for a reasonable staleness window.
+ *
+ * @see BLOCK_TIMES_MS in chains/index.ts — authoritative source of block times
+ */
+export const chainOpportunityTimeoutMs: Record<string, number> = {
+  // L1 chains
+  ethereum: 30000,   // 12s blocks — 30s is ~2.5 blocks
+  bsc: 15000,        // 3s blocks — 15s is ~5 blocks
+  // L2 fast chains (sub-second to 2s blocks)
+  arbitrum: 2000,    // Sub-second blocks — opportunities expire fast
+  optimism: 4000,    // 2s blocks
+  base: 4000,        // 2s blocks
+  zksync: 3000,      // ~1s blocks
+  linea: 4000,       // ~2s blocks
+  // Alt-L1 chains
+  avalanche: 4000,   // 2s blocks
+  fantom: 2000,      // 1s blocks
+  polygon: 6000,     // 2s blocks, but higher variance
+  // Non-EVM
+  solana: 1000,      // ~400ms blocks — extremely fast
+};
+
+/**
+ * Get opportunity timeout for a specific chain.
+ * Uses chainOpportunityTimeoutMs with fallback to global opportunityTimeoutMs.
+ *
+ * @param chainId - Chain identifier (case-insensitive)
+ * @returns Timeout in milliseconds
+ */
+export function getOpportunityTimeoutMs(chainId: string): number {
+  return chainOpportunityTimeoutMs[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.opportunityTimeoutMs;
+}
+
+// =============================================================================
 // PROFIT THRESHOLD UTILITIES
 // Single source of truth for chain-specific profit thresholds
 // =============================================================================

@@ -433,6 +433,17 @@ The impact-analyst prompt MUST include:
 - The Critical Rules section
 - The Known Correct Patterns table
 
+### Per-Phase Stall Detection
+
+Each phase spawns a single agent. After spawning:
+1. Send the agent an activation message with the specific inputs listed above
+2. Monitor for response within 90 seconds
+3. If no response after 90s, send a direct nudge: "Check your inbox for your assigned task and begin immediately."
+4. If still unresponsive after 3 minutes, send a second message: "You have an active task assignment. Read your activation message and report your findings."
+5. If unresponsive after 5 minutes, note the gap and proceed (skip the phase or attempt with a new agent if critical)
+
+This protocol applies to **all three phases** below.
+
 ### Phase 2: Fix Implementation (after Phase 1)
 
 After the impact-analyst completes, spawn the fix-implementer:

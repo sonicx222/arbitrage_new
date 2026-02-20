@@ -366,8 +366,8 @@ describe('CoordinatorService Integration', () => {
       await coordinator.start(0);
 
       // Verify StreamConsumer was instantiated for each stream
-      // S3.3.5 FIX: Now 6 streams: health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates
-      expect(mockDeps.StreamConsumer).toHaveBeenCalledTimes(6);
+      // OP-10 FIX: Now 7 streams: health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results
+      expect(mockDeps.StreamConsumer).toHaveBeenCalledTimes(7);
     });
   });
 

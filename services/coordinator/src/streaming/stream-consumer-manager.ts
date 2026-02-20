@@ -10,6 +10,8 @@
  * @see ADR-002 - Redis Streams over Pub/Sub
  */
 
+import fs from 'fs';
+import path from 'path';
 import { StreamRateLimiter, RateLimiterConfig } from './rate-limiter';
 import { RedisStreams } from '@arbitrage/types';
 
@@ -53,6 +55,23 @@ export interface StreamsClient {
     largestId?: string;
     consumers: Array<{ name: string; pending: number }>;
   } | null>;
+  /** OP-1 FIX: Claim orphaned pending messages from stale consumers */
+  xclaim(
+    streamName: string,
+    groupName: string,
+    consumerName: string,
+    minIdleTimeMs: number,
+    messageIds: string[],
+  ): Promise<StreamMessage[]>;
+  /** OP-1 FIX: Get detailed pending entries with message IDs and idle times */
+  xpendingRange(
+    streamName: string,
+    groupName: string,
+    start: string,
+    end: string,
+    count: number,
+    consumerName?: string,
+  ): Promise<Array<{ id: string; consumer: string; idleMs: number; deliveryCount: number }>>;
 }
 
 /**
@@ -78,6 +97,10 @@ export interface StreamConsumerManagerConfig {
   rateLimiterConfig?: Partial<RateLimiterConfig>;
   /** Instance ID for DLQ metadata */
   instanceId?: string;
+  /** OP-1 FIX: Minimum idle time (ms) before claiming orphaned messages (default: 60000 = 1 min) */
+  orphanClaimMinIdleMs?: number;
+  /** OP-1 FIX: Maximum orphaned messages to claim per stream per recovery (default: 100) */
+  orphanClaimBatchSize?: number;
 }
 
 /**
@@ -88,6 +111,8 @@ const DEFAULT_CONFIG: Required<StreamConsumerManagerConfig> = {
   dlqStream: RedisStreams.DEAD_LETTER_QUEUE,
   rateLimiterConfig: {},
   instanceId: 'coordinator',
+  orphanClaimMinIdleMs: 60000, // 1 minute idle before claiming
+  orphanClaimBatchSize: 100,   // Max messages to claim per stream
 };
 
 /**
@@ -241,11 +266,27 @@ export class StreamConsumerManager {
 
   /**
    * Reset stream error tracking (called on successful processing).
+   *
+   * OP-26 FIX: Emits STREAM_RECOVERED alert when recovering from an error burst
+   * that triggered a failure alert. Previously only a debug log was emitted.
    */
-  resetErrors(): void {
+  resetErrors(streamName?: string): void {
     if (this.streamConsumerErrors > 0) {
+      const previousErrors = this.streamConsumerErrors;
+
+      // OP-26 FIX: Emit STREAM_RECOVERED alert if we previously sent a failure alert
+      if (this.alertSentForCurrentErrorBurst) {
+        this.onAlert?.({
+          type: 'STREAM_RECOVERED',
+          message: `Stream consumer recovered after ${previousErrors} errors${streamName ? ` on ${streamName}` : ''}`,
+          severity: 'warning',
+          data: { streamName: streamName ?? 'unknown', previousErrors },
+          timestamp: Date.now(),
+        });
+      }
+
       this.logger.debug('Stream consumer recovered', {
-        previousErrors: this.streamConsumerErrors,
+        previousErrors,
       });
       this.streamConsumerErrors = 0;
       this.alertSentForCurrentErrorBurst = false;
@@ -260,11 +301,24 @@ export class StreamConsumerManager {
   }
 
   /**
-   * Check for and log pending messages from previous coordinator instance.
+   * Recover orphaned pending messages from previous coordinator instances.
    *
-   * When coordinator crashes mid-processing, messages remain in XPENDING.
-   * Redis Streams automatically handles redelivery of pending messages
-   * to consumers in the same group.
+   * OP-1 FIX: When coordinator crashes mid-processing, messages remain in the
+   * Pending Entries List (PEL) under the old consumer name. Since each coordinator
+   * restart generates a unique consumer name (coordinator-${HOSTNAME}-${Date.now()}),
+   * the old consumer's pending messages are permanently orphaned without XCLAIM.
+   *
+   * Recovery strategy:
+   * 1. XPENDING summary to find all consumers with pending messages
+   * 2. For OTHER consumers (not us), get detailed pending entries via XPENDING RANGE
+   * 3. XCLAIM messages that have been idle longer than orphanClaimMinIdleMs
+   * 4. ACK claimed messages immediately (stale data in a trading system is dangerous)
+   * 5. Move claimed messages to DLQ for audit trail (optional reprocessing)
+   *
+   * Design notes:
+   * - We ACK + DLQ rather than reprocess because stale trading data can cause bad trades
+   * - The idle threshold (default 60s) prevents claiming messages from a healthy peer
+   * - Batch size limits prevent recovery from blocking startup
    *
    * @param groupConfigs - Array of consumer group configurations to check
    */
@@ -289,7 +343,16 @@ export class StreamConsumerManager {
           consumers: pendingInfo.consumers,
         });
 
-        // Find pending messages for THIS consumer (if any)
+        // OP-1 FIX: Claim orphaned messages from OTHER consumers
+        const otherConsumers = pendingInfo.consumers.filter(
+          c => c.name !== groupConfig.consumerName && c.pending > 0
+        );
+
+        for (const staleConsumer of otherConsumers) {
+          await this.claimOrphanedMessages(groupConfig, staleConsumer.name);
+        }
+
+        // Log our own pending (these will be redelivered naturally via XREADGROUP with '0')
         const ourPending = pendingInfo.consumers.find(
           c => c.name === groupConfig.consumerName
         );
@@ -306,6 +369,69 @@ export class StreamConsumerManager {
         });
         // Continue with other streams even if one fails
       }
+    }
+  }
+
+  /**
+   * OP-1 FIX: Claim orphaned messages from a stale consumer and move them to DLQ.
+   *
+   * Messages are ACKed immediately after claiming rather than reprocessed because:
+   * - Stale price/opportunity data in a trading system can cause financial loss
+   * - The DLQ provides an audit trail for manual review if needed
+   * - The idle threshold ensures we only claim truly abandoned messages
+   */
+  private async claimOrphanedMessages(
+    groupConfig: ConsumerGroupConfig,
+    staleConsumerName: string,
+  ): Promise<void> {
+    try {
+      // Get detailed pending entries for the stale consumer
+      const pendingEntries = await this.streamsClient.xpendingRange(
+        groupConfig.streamName,
+        groupConfig.groupName,
+        '-',
+        '+',
+        this.config.orphanClaimBatchSize,
+        staleConsumerName,
+      );
+
+      // Filter to entries idle longer than threshold
+      const orphanedIds = pendingEntries
+        .filter(entry => entry.idleMs >= this.config.orphanClaimMinIdleMs)
+        .map(entry => entry.id);
+
+      if (orphanedIds.length === 0) {
+        return;
+      }
+
+      // XCLAIM the orphaned messages to our consumer
+      const claimed = await this.streamsClient.xclaim(
+        groupConfig.streamName,
+        groupConfig.groupName,
+        groupConfig.consumerName,
+        this.config.orphanClaimMinIdleMs,
+        orphanedIds,
+      );
+
+      // ACK + DLQ each claimed message (stale data is unsafe to reprocess)
+      for (const message of claimed) {
+        await this.moveToDeadLetterQueue(message, new Error('Orphaned PEL message recovered via XCLAIM'), groupConfig.streamName);
+        await this.ackMessage(groupConfig, message.id);
+      }
+
+      this.logger.info('Recovered orphaned pending messages', {
+        stream: groupConfig.streamName,
+        staleConsumer: staleConsumerName,
+        claimedCount: claimed.length,
+        totalOrphaned: orphanedIds.length,
+      });
+    } catch (error) {
+      this.logger.error('Failed to claim orphaned messages', {
+        stream: groupConfig.streamName,
+        staleConsumer: staleConsumerName,
+        error: (error as Error).message,
+      });
+      // Don't throw — continue with other consumers/streams
     }
   }
 
@@ -355,12 +481,55 @@ export class StreamConsumerManager {
         sourceStream,
       });
     } catch (dlqError) {
-      // If DLQ write fails, log but don't throw - we still want to ACK the original message
-      // to prevent infinite retry loops
-      this.logger.error('Failed to move message to DLQ', {
+      // OP-16 FIX: If DLQ write fails, write to local file as last-resort backup.
+      // Without this, double failure (handler + DLQ) loses the message permanently.
+      this.logger.error('Failed to move message to DLQ, writing to local fallback', {
         originalMessageId: message.id,
         sourceStream,
         dlqError: (dlqError as Error).message,
+      });
+      this.writeLocalDlqFallback(message, error, sourceStream);
+    }
+  }
+
+  /**
+   * OP-16 FIX: Write failed message to local file when Redis DLQ is unavailable.
+   *
+   * This is a last-resort fallback for double-failure scenarios (handler fails
+   * AND DLQ write fails). The message would otherwise be permanently lost
+   * since it's ACKed to prevent infinite retry loops.
+   *
+   * Writes JSONL (one JSON object per line) to data/dlq-fallback-{date}.jsonl.
+   * Append-only, async-safe via synchronous fs.appendFileSync.
+   */
+  private writeLocalDlqFallback(
+    message: StreamMessage,
+    error: Error,
+    sourceStream: string
+  ): void {
+    try {
+      const date = new Date().toISOString().split('T')[0];
+      const dir = path.resolve('data');
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const filePath = path.join(dir, `dlq-fallback-${date}.jsonl`);
+      const entry = JSON.stringify({
+        originalMessageId: message.id,
+        originalStream: sourceStream,
+        originalData: message.data,
+        error: error.message,
+        timestamp: Date.now(),
+        service: 'coordinator',
+        instanceId: this.config.instanceId,
+      });
+      fs.appendFileSync(filePath, entry + '\n');
+    } catch (fileError) {
+      // Absolute last resort: message only exists in application logs
+      this.logger.error('Local DLQ fallback write also failed', {
+        originalMessageId: message.id,
+        sourceStream,
+        fileError: (fileError as Error).message,
       });
     }
   }

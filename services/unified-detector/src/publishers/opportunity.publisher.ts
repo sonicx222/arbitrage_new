@@ -16,7 +16,7 @@
  * @see implementation_plan.md: Fix Missing Opportunity Publisher
  */
 
-import { RedisStreamsClient } from '@arbitrage/core';
+import { RedisStreamsClient, createTraceContext, propagateContext } from '@arbitrage/core';
 import { ArbitrageOpportunity } from '@arbitrage/types';
 import type { Logger } from '../types';
 
@@ -78,8 +78,20 @@ export class OpportunityPublisher {
    * consumed by the Coordinator service, which forwards qualifying opportunities
    * to the Execution Engine.
    *
+   * Serialization: The ArbitrageOpportunity is published as a flat JSON object
+   * with all fields at the top level (no wrapper envelope). This is required
+   * because redis-streams.ts parseStreamResult() does `data.data ?? data`
+   * unwrapping — nested wrappers would lose metadata.
+   *
+   * Source metadata (OpenTelemetry-compatible trace context):
+   *   - `_source`: Identifies the producing partition (e.g., "unified-detector-asia-fast")
+   *   - `_publishedAt`: Timestamp when the opportunity was published (ms since epoch)
+   * These fields enable end-to-end tracing through the pipeline when correlated
+   * with the Coordinator's `coordinatorAt` and Execution Engine's timestamps.
+   *
    * @param opportunity - The arbitrage opportunity to publish
    * @returns true if published successfully, false otherwise
+   * @see ADR-002: Redis Streams serialization
    */
   async publish(opportunity: ArbitrageOpportunity): Promise<boolean> {
     try {
@@ -89,12 +101,14 @@ export class OpportunityPublisher {
       // when redis-streams.ts parseStreamResult() does `data.data ?? data` unwrapping
       //
       // Add source metadata directly to opportunity for traceability
-      const enrichedOpportunity = {
+      const sourceName = `unified-detector-${this.partitionId}`;
+      const traceCtx = createTraceContext(sourceName);
+      const enrichedOpportunity = propagateContext({
         ...opportunity,
         // Add source metadata inline (not nested) for traceability
-        _source: `unified-detector-${this.partitionId}`,
+        _source: sourceName,
         _publishedAt: Date.now(),
-      };
+      }, traceCtx);
 
       // Use xaddWithLimit to prevent unbounded stream growth
       // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts

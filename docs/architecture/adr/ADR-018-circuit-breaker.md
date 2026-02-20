@@ -19,7 +19,7 @@ During a network congestion event, the engine could attempt hundreds of failing 
 
 ## Decision
 
-Implement a circuit breaker pattern with three states:
+Implement a **per-chain** circuit breaker pattern with three states per chain:
 
 ```
                     ┌─────────────────────────────┐
@@ -39,6 +39,8 @@ Implement a circuit breaker pattern with three states:
                             back to OPEN
 ```
 
+Each chain maintains its own independent circuit breaker instance, managed by `CircuitBreakerManager`. Breakers are created lazily on first access per chain. This ensures that failures on one chain (e.g., Ethereum congestion) do not block executions on healthy chains (e.g., Arbitrum).
+
 ### Configuration
 
 ```typescript
@@ -50,13 +52,15 @@ interface CircuitBreakerConfig {
 }
 ```
 
+Configuration is shared across all per-chain breakers. Each chain's breaker tracks its own failure count and state independently.
+
 ### State Behavior
 
 | State | Behavior |
 |-------|----------|
-| CLOSED | Normal operation, executions proceed |
-| OPEN | All executions blocked, waiting for cooldown |
-| HALF_OPEN | Allow limited test executions |
+| CLOSED | Normal operation, executions proceed for this chain |
+| OPEN | All executions blocked for this chain, waiting for cooldown |
+| HALF_OPEN | Allow limited test executions for this chain |
 
 ### Events Published
 
@@ -94,21 +98,33 @@ Circuit breaker state changes are published to Redis Streams:
 - **Validation**: Confirm issue is resolved before full resumption
 - **Risk mitigation**: Single test failure returns to OPEN
 
+### Per-Chain Architecture
+
+```
+CircuitBreakerManager
+  ├── ethereum  → CircuitBreaker { state: CLOSED, failures: 0 }
+  ├── arbitrum  → CircuitBreaker { state: OPEN,   failures: 5 }
+  ├── bsc       → CircuitBreaker { state: CLOSED, failures: 1 }
+  └── (lazily created per chain on first access)
+```
+
 ### Integration Points
 
 ```typescript
 // In ExecutionEngine.executeOpportunity()
-if (this.circuitBreaker.isOpen()) {
+// Per-chain: only block the affected chain
+const chain = opportunity.buyChain;
+if (this.circuitBreakerManager.isOpen(chain)) {
   this.stats.circuitBreakerBlocks++;
-  return; // Skip execution
+  return; // Skip execution for this chain only
 }
 
 const result = await this.strategy.execute(opportunity, ctx);
 
 if (result.success) {
-  this.circuitBreaker.recordSuccess();
+  this.circuitBreakerManager.recordSuccess(chain);
 } else {
-  this.circuitBreaker.recordFailure();
+  this.circuitBreakerManager.recordFailure(chain);
 }
 ```
 
@@ -123,9 +139,10 @@ if (result.success) {
 
 ### Negative
 
-- **Missed opportunities**: Some valid opportunities blocked during OPEN state
+- **Missed opportunities**: Some valid opportunities blocked during OPEN state on affected chain
 - **Configuration complexity**: Thresholds need tuning per environment
-- **State synchronization**: In multi-instance setup, each has own breaker
+- **State synchronization**: In multi-instance setup, each instance has own per-chain breakers
+- **Memory per chain**: Each active chain holds a separate breaker instance (lightweight)
 
 ### Neutral
 
@@ -150,13 +167,19 @@ if (result.success) {
 **Rejected** because:
 - Added complexity
 - Redis dependency for critical path
-- Local state is simpler and faster
+- Local per-chain state is simpler and faster
+
+### 4. Global (Single) Circuit Breaker
+**Rejected** in favor of per-chain model because:
+- One chain's failure (e.g., Ethereum congestion) would block healthy chains (e.g., Arbitrum)
+- Per-chain isolation prevents cascade across chains while maintaining protection within each chain
 
 ## Implementation Details
 
 ### Files Created
-- `services/execution-engine/src/services/circuit-breaker.ts`
-- `services/execution-engine/src/api/circuit-breaker-api.ts`
+- `services/execution-engine/src/services/circuit-breaker.ts` — Single-chain circuit breaker implementation
+- `services/execution-engine/src/services/circuit-breaker-manager.ts` — Per-chain circuit breaker lifecycle manager
+- `services/execution-engine/src/api/circuit-breaker-api.ts` — REST API for manual control
 
 ### API Endpoints
 
@@ -178,18 +201,24 @@ POST /circuit-breaker/open    - Force open (requires API key)
 ### Usage Example
 
 ```typescript
-const circuitBreaker = createCircuitBreaker({
-  enabled: true,
-  failureThreshold: 5,
-  cooldownPeriodMs: 5 * 60 * 1000,
-  onStateChange: (prev, next, reason) => {
-    logger.warn(`Circuit breaker: ${prev} → ${next}`, { reason });
+// CircuitBreakerManager creates per-chain breakers lazily
+const cbManager = new CircuitBreakerManager({
+  config: {
+    enabled: true,
+    failureThreshold: 5,
+    cooldownPeriodMs: 5 * 60 * 1000,
+    halfOpenMaxAttempts: 1,
+  },
+  logger,
+  onStateChange: (chain, prev, next, reason) => {
+    logger.warn(`Circuit breaker [${chain}]: ${prev} → ${next}`, { reason });
     // Publish to Redis Stream
   },
 });
 
-// In engine
-engine.setCircuitBreaker(circuitBreaker);
+// Per-chain usage
+cbManager.recordFailure('ethereum'); // Only affects Ethereum breaker
+cbManager.isOpen('arbitrum');         // Arbitrum breaker is independent
 ```
 
 ## Success Criteria

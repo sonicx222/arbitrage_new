@@ -56,6 +56,19 @@ The CrossChainDetector consumes price updates from ALL chains to detect cross-ch
 
 See `services/cross-chain-detector/src/detector.ts` for full documentation.
 
+### Mempool Detector (Optional)
+
+The Mempool Detector is a separate optional service for pre-block arbitrage detection:
+
+| Aspect | Partition Detectors (P1-P4) | Mempool Detector |
+|--------|---------------------------|------------------|
+| Role | On-chain event detection | Pre-block opportunity detection |
+| Data source | WebSocket event logs | bloXroute BDN mempool feed |
+| Service port | 3001-3004 | 3008 |
+| Startup | `npm run dev:all` | `npm run dev:mempool` (separate) |
+
+The Mempool Detector operates independently of the partition model and publishes opportunities directly to `stream:opportunities`.
+
 ## Context
 
 The current architecture has **one service per blockchain**:

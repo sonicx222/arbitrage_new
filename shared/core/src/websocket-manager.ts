@@ -119,6 +119,8 @@ export class WebSocketManager {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private connectionTimeoutTimer: NodeJS.Timeout | null = null;
+  /** Slow recovery timer after max reconnect attempts exhausted */
+  private recoveryTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private isConnecting = false;
   private isConnected = false;
@@ -1464,7 +1466,7 @@ export class WebSocketManager {
     this.healthTracker.onReconnecting();
 
     if (this.reconnectAttempts >= (this.config.maxReconnectAttempts ?? 10)) {
-      this.logger.error('Max reconnection attempts reached across all URLs');
+      this.logger.error('Max reconnection attempts reached across all URLs — scheduling slow recovery');
       // Emit error for handlers
       this.errorHandlers.forEach(handler => {
         try {
@@ -1473,6 +1475,21 @@ export class WebSocketManager {
           this.logger.error('Error in error handler', { error: e });
         }
       });
+
+      // Schedule a slow recovery attempt (60s) to avoid permanent WS death
+      // without causing reconnect storms. Resets attempts and tries again.
+      if (!this.recoveryTimer && !this.isDisconnected) {
+        const recoveryDelayMs = 60_000;
+        this.logger.info(`Scheduling slow recovery attempt in ${recoveryDelayMs}ms`);
+        this.recoveryTimer = setTimeout(() => {
+          this.recoveryTimer = null;
+          if (this.isDisconnected) return;
+          this.logger.info('Slow recovery: resetting reconnect attempts and retrying');
+          this.reconnectAttempts = 0;
+          this.rotationStrategy.switchToNextUrl(); // Try a different URL
+          this.scheduleReconnection();
+        }, recoveryDelayMs);
+      }
       return;
     }
 
@@ -1540,5 +1557,6 @@ export class WebSocketManager {
 
   private clearReconnectionTimer(): void {
     this.reconnectTimer = clearTimeoutSafe(this.reconnectTimer);
+    this.recoveryTimer = clearTimeoutSafe(this.recoveryTimer);
   }
 }

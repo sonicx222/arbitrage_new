@@ -24,11 +24,11 @@ export const MEV_CONFIG = {
    * MEV-Share allows searchers to backrun transactions while sharing profits.
    * This provides value capture without sacrificing MEV protection.
    *
-   * Default: true (enabled for value capture)
+   * Default: false (opt-in experimental feature)
    * @see ADR-028: MEV-Share Integration
    * @see docs/architecture/adr/ADR-028-mev-share-integration.md
    */
-  useMevShare: process.env.FEATURE_MEV_SHARE !== 'false', // Default true
+  useMevShare: process.env.FEATURE_MEV_SHARE === 'true', // Opt-in feature flag
 
   /** Flashbots auth signing key for Ethereum mainnet */
   flashbotsAuthKey: process.env.FLASHBOTS_AUTH_KEY,

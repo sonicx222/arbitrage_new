@@ -352,7 +352,7 @@ The Mempool Detector service provides **pre-block arbitrage detection** by monit
 
 | Aspect | Details |
 |--------|---------|
-| **Port** | 3007 |
+| **Port** | 3008 |
 | **Purpose** | Detect arbitrage opportunities from pending transactions |
 | **Data Source** | bloXroute BDN (Blockchain Distribution Network) |
 | **Supported Chains** | Ethereum, BSC via BloXroute (other chains require alternative feeds) |
@@ -699,6 +699,39 @@ Message Received → Validate → Queue → Execute → ACK
        └───────────────────────────────────────────── Empty: ACK immediately
 ```
 
+### 5.5 Coordinator Internal Subsystems
+
+The coordinator maintains several internal subsystems for operational management:
+
+**Active Pairs Tracker**
+
+Tracks which token pairs are currently generating opportunities across all partitions. Used for monitoring and deduplication.
+
+- Configurable via `MAX_ACTIVE_PAIRS` (default: 10000) and `PAIR_TTL_MS` (default: 300000ms / 5 minutes)
+- Pairs expire after TTL to prevent unbounded growth
+- Size-limited map with LRU eviction at max capacity
+
+**Stream Consumer Groups (5 Hardcoded Groups)**
+
+The coordinator subscribes to 5 Redis Streams consumer groups, one per stream topic. The count is intentionally hardcoded to match the Redis stream topology:
+
+| Consumer Group | Stream | Purpose |
+|----------------|--------|---------|
+| `coordinator-health` | `stream:health` | Service health heartbeats |
+| `coordinator-opportunities` | `stream:opportunities` | Opportunity intake and routing |
+| `coordinator-swap-events` | `stream:swap-events` | Swap event monitoring |
+| `coordinator-whale-alerts` | `stream:whale-alerts` | Large transaction alerts |
+| `coordinator-volume` | `stream:volume-aggregates` | Volume tracking |
+
+Each consumer group uses a single consumer (the coordinator instance ID). This design ensures:
+- No duplicate processing (one coordinator instance processes each message)
+- Leader-only forwarding (only the elected leader forwards to execution)
+- Independent rate limiting per stream via `StreamRateLimiter`
+
+**Alert Cooldown Manager**
+
+Prevents alert spam by enforcing configurable cooldown periods (`ALERT_COOLDOWN_MS`, default: 300000ms / 5 minutes). When a health monitor is available, cooldowns delegate to its storage to avoid duplication.
+
 ---
 
 ## 6. Scaling Strategy
@@ -820,14 +853,16 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 
 ### 8.1 Latency Budgets
 
-| Operation | Target | Current | Optimization |
-|-----------|--------|---------|--------------|
-| WebSocket receive | <5ms | ~5ms | ✓ |
-| Sync decode | <1ms | ~2ms | Pre-compiled ABI |
-| Price matrix update | <1ms | ~10ms | Indexed structure |
-| Arbitrage detection | <5ms | ~50ms | O(1) lookups |
-| Redis publish | <10ms | ~20ms | Batching |
-| **Total (same-chain)** | **<25ms** | **~90ms** | **-65ms** |
+| Operation | Target | Measured | Notes |
+|-----------|--------|----------|-------|
+| WebSocket receive | <5ms | ~1-5ms | Event ingestion |
+| Sync decode + detection | <20ms | ~10-15ms | Includes pairsByAddress O(1) lookup |
+| Price publish (StreamBatcher) | <10ms | ~5-10ms | Batched: 50 msgs, max 10ms wait |
+| Coordinator routing | <30ms | ~20-40ms | Blocking read + filters + forwarding |
+| **Total (same-chain)** | **<50ms** | **~40-60ms** | **WebSocket -> detection -> forwarding** |
+| Execution (strategy-specific) | varies | ~50-500ms | Not included in detection latency |
+
+> **Note**: The <50ms target covers the detection pipeline (ingestion -> detection -> coordinator forwarding). Execution latency is additional and strategy-dependent. See ADR-022 for hot-path memory optimization details.
 
 ### 8.2 Reliability Targets
 
@@ -1282,7 +1317,7 @@ The following Architecture Decision Records document key decisions:
 | 2.5 | 2026-02-04 | Bug Hunt Fixes | Added ADR-022 (hot-path memory optimization), corrected data plane diagram (no MongoDB), documented ring buffer and normalization cache patterns |
 | 2.6 | 2026-02-04 | RPC/ML ADRs | Added ADR-024 (RPC rate limiting), ADR-025 (ML model lifecycle) - documenting existing implementations from RPC_PREDICTION_OPTIMIZATION_RESEARCH.md |
 | 2.7 | 2026-02-04 | Simulation Enhancements | Added Solana simulation (HeliusProvider), detector pre-validation (ADR-023), strategy simulation enhancements |
-| 2.8 | 2026-02-04 | Documentation Update | Added Mempool Detector service (port 3007), completed ADR references (all 27 ADRs), updated service count to 9 |
+| 2.8 | 2026-02-04 | Documentation Update | Added Mempool Detector service (port 3008), completed ADR references (all 27 ADRs), updated service count to 9 |
 | 2.9 | 2026-02-14 | Analytics Module | Added §4.8 Analytics Module documenting 9 analytics components, updated Layer 2/3 component hierarchy with PriceMomentum, PriceOracle, PairActivityTracker, SwapEventFilter, MLOpportunityScorer, PerformanceAnalyticsEngine |
 
 ---

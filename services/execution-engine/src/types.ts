@@ -27,6 +27,7 @@ import {
   type ILogger,
   type ServiceStateManager,
   type PerformanceLogger,
+  type RedisClient,
   type RedisStreamsClient,
   type DistributedLockManager,
   type NonceManager,
@@ -335,7 +336,7 @@ export interface ConsumerConfig {
 
 export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
   batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 10, 1, 100),
-  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 1000, 100, 10000),
+  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 200, 100, 10000),
   shutdownAckTimeoutMs: parseEnvTimeout('CONSUMER_SHUTDOWN_ACK_TIMEOUT_MS', 5000, 1000, 30000),
   pendingMessageMaxAgeMs: parseEnvTimeout('CONSUMER_PENDING_MAX_AGE_MS', 10 * 60 * 1000, 60000, 3600000),
   stalePendingCleanupIntervalMs: parseEnvTimeout('CONSUMER_STALE_CLEANUP_INTERVAL_MS', 60000, 0, 300000),
@@ -717,6 +718,8 @@ export interface ExecutionEngineConfig {
   abTestingConfig?: Partial<ABTestingConfig>;
   /** O-6: Persistent trade logging configuration */
   tradeLoggerConfig?: Partial<TradeLoggerConfig>;
+  /** Maximum number of concurrent executions (default: 5) */
+  maxConcurrentExecutions?: number;
 }
 
 /**
@@ -837,9 +840,8 @@ function parseEnvTimeout(
 }
 
 /**
- * Execution timeout - must be less than lock TTL (120s per-opportunity lock).
- * The distributed lock manager uses 60s default TTL, but withLock() in engine.ts
- * uses 120s for opportunity locks (2x execution timeout for safety margin).
+ * Execution timeout for opportunity execution.
+ * The distributed lock TTL in engine.ts is derived as 2x this value for safety margin.
  * Environment: EXECUTION_TIMEOUT_MS (default: 55000)
  * Valid range: 1000ms - 120000ms
  */
@@ -887,13 +889,13 @@ export const PROVIDER_CONNECTIVITY_TIMEOUT_MS = parseEnvTimeout(
 );
 
 /**
- * Provider health check timeout (periodic check).
- * Environment: PROVIDER_HEALTH_CHECK_TIMEOUT_MS (default: 5000)
+ * Provider health check timeout (used by both periodic checks and pre-transaction verification).
+ * Environment: PROVIDER_HEALTH_CHECK_TIMEOUT_MS (default: 3000)
  * Valid range: 500ms - 30000ms
  */
 export const PROVIDER_HEALTH_CHECK_TIMEOUT_MS = parseEnvTimeout(
   'PROVIDER_HEALTH_CHECK_TIMEOUT_MS',
-  5000,
+  3000,
   500,
   30000
 );
@@ -1014,6 +1016,8 @@ export interface StrategyContext {
    * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P3
    */
   orderflowSignal?: OrderflowSignal;
+  /** Redis client for bridge recovery state persistence (Fix #1: fund safety) */
+  redis?: RedisClient;
 }
 
 /**
@@ -1158,8 +1162,8 @@ export interface BridgeRecoveryState {
   initiatedAt: number;
   /** Bridge protocol (e.g., 'stargate', 'layerzero') */
   bridgeProtocol: string;
-  /** Current status: 'pending' | 'bridging' | 'recovered' | 'failed' */
-  status: 'pending' | 'bridging' | 'recovered' | 'failed';
+  /** Current status */
+  status: 'pending' | 'bridging' | 'bridge_completed_sell_pending' | 'recovered' | 'failed';
   /** Last status check timestamp */
   lastCheckAt?: number;
   /** Error message if status is 'failed' */

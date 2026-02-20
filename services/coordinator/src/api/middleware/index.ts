@@ -56,11 +56,13 @@ export function configureMiddleware(app: Application, logger: MinimalLogger): vo
   app.use(express.urlencoded({ extended: false, limit: '1mb' }));
   // NOTE: express.static('public') removed - no static files are served (API-only service)
 
-  // Rate limiting
+  // OP-23 FIX: Configurable rate limits via env vars (previously hardcoded)
+  const rateLimitWindowMs = parseInt(process.env.API_RATE_LIMIT_WINDOW_MS || '', 10) || (15 * 60 * 1000);
+  const rateLimitMax = parseInt(process.env.API_RATE_LIMIT_MAX || '', 10) || 100;
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
-    message: { error: 'Too many requests', retryAfter: 900 },
+    windowMs: rateLimitWindowMs,
+    max: rateLimitMax,
+    message: { error: 'Too many requests', retryAfter: Math.ceil(rateLimitWindowMs / 1000) },
     standardHeaders: true,
     legacyHeaders: false
   });

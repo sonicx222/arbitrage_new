@@ -175,6 +175,10 @@ export class CircuitBreakerManager {
     for (const breaker of this.chainBreakers.values()) {
       breaker.stop();
     }
+    // FIX P1-7: Clear the map to prevent stale state leaking into a new lifecycle.
+    // Previously, old breaker instances persisted after stop, causing state leaks on restart.
+    // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P1 #7
+    this.chainBreakers.clear();
   }
 
   // ===========================================================================
@@ -220,6 +224,97 @@ export class CircuitBreakerManager {
   forceOpen(reason = 'manual override'): void {
     for (const breaker of this.chainBreakers.values()) {
       breaker.forceOpen(reason);
+    }
+  }
+
+  // ===========================================================================
+  // Event Handling (NOT on hot path — async, rare events)
+  // ===========================================================================
+
+  // ===========================================================================
+  // State Persistence via CIRCUIT_BREAKER Stream (FIX W2-11)
+  // ===========================================================================
+
+  /**
+   * FIX W2-11: Restore circuit breaker states from recent CIRCUIT_BREAKER stream events.
+   *
+   * On startup, reads recent circuit breaker events from the stream and
+   * force-opens any chains whose most recent event was an OPEN transition
+   * within the cooldown window. This prevents a restarting instance from
+   * immediately resuming execution on a chain that was tripping.
+   *
+   * Uses the existing CIRCUIT_BREAKER stream (already published to by
+   * handleChainStateChange) — no separate persistence mechanism needed.
+   *
+   * Should be called after initialize() and before processing begins.
+   *
+   * @returns Number of chains restored to OPEN state
+   */
+  async restorePersistedState(): Promise<number> {
+    if (!this.enabled) return 0;
+
+    const streamsClient = this.getStreamsClient();
+    if (!streamsClient) return 0;
+
+    try {
+      // Read the most recent circuit breaker events from the stream
+      const messages = await streamsClient.xread(
+        RedisStreamsClient.STREAMS.CIRCUIT_BREAKER,
+        '0',
+        { count: 200 } // Read up to 200 recent events
+      );
+
+      if (!messages || messages.length === 0) return 0;
+
+      // Build latest state per chain from events (last write wins)
+      const latestByChain = new Map<string, { newState: string; reason: string; consecutiveFailures: string; timestamp: string }>();
+      for (const msg of messages) {
+        const data = msg.data as Record<string, string>;
+        if (data.chain && data.newState) {
+          latestByChain.set(data.chain, {
+            newState: data.newState,
+            reason: data.reason ?? 'unknown',
+            consecutiveFailures: data.consecutiveFailures ?? '0',
+            timestamp: data.timestamp ?? '0',
+          });
+        }
+      }
+
+      // Restore OPEN states that are still within the cooldown window
+      let restored = 0;
+      const now = Date.now();
+      for (const [chain, state] of latestByChain) {
+        if (state.newState === 'OPEN') {
+          const eventTimestamp = parseInt(state.timestamp, 10) || 0;
+          const ageMs = now - eventTimestamp;
+
+          // Only restore if the OPEN event is within the cooldown period
+          if (ageMs < this.config.cooldownPeriodMs) {
+            const breaker = this.getChainBreaker(chain);
+            if (breaker) {
+              breaker.forceOpen(`Restored from restart: ${state.reason}`);
+              restored++;
+              this.logger.info('Restored circuit breaker OPEN state from stream', {
+                chain,
+                originalReason: state.reason,
+                consecutiveFailures: parseInt(state.consecutiveFailures, 10),
+                ageMs,
+              });
+            }
+          }
+        }
+      }
+
+      if (restored > 0) {
+        this.logger.info('Circuit breaker state restoration complete', { restored });
+      }
+
+      return restored;
+    } catch (error) {
+      this.logger.warn('Failed to restore circuit breaker states (non-fatal)', {
+        error: getErrorMessage(error),
+      });
+      return 0;
     }
   }
 

@@ -251,13 +251,15 @@ export class ExecutionEngineService {
   // FIX 10.1: Pre-computed last gas prices for O(1) hot path access
   private lastGasPrices: Map<string, bigint> = new Map();
   private activeExecutionCount = 0;
-  private readonly maxConcurrentExecutions = 5; // Limit parallel executions
+  private readonly maxConcurrentExecutions: number;
   private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
 
   // FIX 5: Track circuit breaker re-enqueue attempts per opportunity to prevent
   // infinite dequeue/re-enqueue loops when CB is in HALF_OPEN state
   private readonly cbReenqueueCounts = new Map<string, number>();
   private static readonly MAX_CB_REENQUEUE_ATTEMPTS = 3;
+  /** Max size for cbReenqueueCounts before forced cleanup (prevents unbounded growth) */
+  private static readonly MAX_CB_REENQUEUE_MAP_SIZE = 10_000;
 
   // P1 FIX: Lock conflict tracking extracted to dedicated class
   // Tracks repeated lock conflicts to detect crashed lock holders
@@ -389,13 +391,18 @@ export class ExecutionEngineService {
       this.logger,
     );
 
+    // Max concurrent executions: config > env var > default 5
+    const envMaxConcurrent = parseInt(process.env.MAX_CONCURRENT_EXECUTIONS ?? '', 10);
+    this.maxConcurrentExecutions = config.maxConcurrentExecutions
+      ?? (!Number.isNaN(envMaxConcurrent) && envMaxConcurrent > 0 ? envMaxConcurrent : 5);
+
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
 
     // State machine for lifecycle management
     this.stateManager = config.stateManager ?? createServiceState({
       serviceName: 'execution-engine',
-      transitionTimeoutMs: 30000
+      transitionTimeoutMs: parseInt(process.env.STATE_TRANSITION_TIMEOUT_MS ?? '') || 30000
     });
 
     // Initialize stats
@@ -653,9 +660,9 @@ export class ExecutionEngineService {
         getStrategyFactory: () => this.strategyFactory,
         getStreamsClient: () => this.streamsClient,
         getNonceManager: () => this.nonceManager,
-        onMevProviderFactoryUpdated: (factory) => { this.mevProviderFactory = factory; },
-        onBridgeRouterFactoryUpdated: (factory) => { this.bridgeRouterFactory = factory; },
-        onSimulationModeChanged: (mode) => { this.isSimulationMode = mode; },
+        onMevProviderFactoryUpdated: (factory) => { this.mevProviderFactory = factory; this.invalidateStrategyContext(); },
+        onBridgeRouterFactoryUpdated: (factory) => { this.bridgeRouterFactory = factory; this.invalidateStrategyContext(); },
+        onSimulationModeChanged: (mode) => { this.isSimulationMode = mode; this.invalidateStrategyContext(); },
       });
 
       // Initialize opportunity consumer
@@ -786,6 +793,8 @@ export class ExecutionEngineService {
       this.lastGasPrices.clear();
       // FIX 5: Clear CB re-enqueue tracking
       this.cbReenqueueCounts.clear();
+      // FIX P1-13: Invalidate cached strategy context
+      this.invalidateStrategyContext();
       this.mevProviderFactory = null;
       await this.bridgeRouterFactory?.dispose();
       this.bridgeRouterFactory = null;
@@ -974,6 +983,19 @@ export class ExecutionEngineService {
     // FIX Race 1.1: Check stateManager.isRunning() to prevent processing during shutdown
     this.executionProcessingInterval = setInterval(() => {
       if (!this.stateManager.isRunning()) return;
+
+      // Prevent unbounded growth of cbReenqueueCounts. Entries accumulate for
+      // opportunities that expire without ever passing the CB check. Clearing
+      // is safe — it only resets retry counts, potentially allowing a few
+      // extra re-enqueue attempts for in-flight opportunities.
+      if (this.cbReenqueueCounts.size > ExecutionEngineService.MAX_CB_REENQUEUE_MAP_SIZE) {
+        this.logger.warn('cbReenqueueCounts exceeded size limit, clearing', {
+          size: this.cbReenqueueCounts.size,
+          limit: ExecutionEngineService.MAX_CB_REENQUEUE_MAP_SIZE,
+        });
+        this.cbReenqueueCounts.clear();
+      }
+
       this.processQueueItems();
     }, 1000);
   }
@@ -1032,7 +1054,7 @@ export class ExecutionEngineService {
             this.queueService.enqueue(opportunity);
             this.stats.circuitBreakerBlocks++;
           }
-          break;
+          continue;
         }
 
         // FIX 5: Clear re-enqueue tracking when opportunity proceeds to execution
@@ -1044,6 +1066,17 @@ export class ExecutionEngineService {
         // Execute and decrement counter when done (success or failure)
         // Also trigger another processing cycle to handle queued items
         this.executeOpportunityWithLock(opportunity)
+          .catch((error) => {
+            // Prevent unhandled promise rejection. The execution result
+            // (success/failure) is already tracked inside executeOpportunityWithLock
+            // and executeWithTimeout. This catch handles unexpected errors like
+            // lock acquisition failures or uncaught throws.
+            this.logger.error('Execution failed for opportunity', {
+              opportunityId: opportunity.id,
+              traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          })
           .finally(() => {
             // Fix 5.2: Ensure counter doesn't go negative (defensive check)
             if (this.activeExecutionCount > 0) {
@@ -1080,6 +1113,9 @@ export class ExecutionEngineService {
       return;
     }
 
+    // Extract trace context injected by opportunity consumer for cross-service correlation
+    const traceId = (opportunity as unknown as Record<string, unknown>)._traceId as string | undefined;
+
     const lockResourceId = `opportunity:${opportunity.id}`;
 
     const lockResult = await this.lockManager.withLock(
@@ -1088,7 +1124,7 @@ export class ExecutionEngineService {
         await this.executeWithTimeout(opportunity);
       },
       {
-        ttlMs: 120000, // 2x execution timeout for safety
+        ttlMs: EXECUTION_TIMEOUT_MS * 2, // 2x execution timeout for safety
         retries: 0
       }
     );
@@ -1103,6 +1139,7 @@ export class ExecutionEngineService {
           // Lock holder appears to have crashed - force release and retry
           this.logger.warn('Detected potential crashed lock holder - force releasing lock', {
             id: opportunity.id,
+            traceId,
             conflictCount: this.lockConflictTracker.getConflictInfo(opportunity.id)?.count
           });
 
@@ -1119,7 +1156,7 @@ export class ExecutionEngineService {
                 await this.executeWithTimeout(opportunity);
               },
               {
-                ttlMs: 120000,
+                ttlMs: EXECUTION_TIMEOUT_MS * 2,
                 retries: 0
               }
             );
@@ -1132,6 +1169,7 @@ export class ExecutionEngineService {
               // Had lock, execution failed - ACK to prevent infinite redelivery
               this.logger.error('Opportunity execution failed after crash recovery', {
                 id: opportunity.id,
+                traceId,
                 error: retryResult.error
               });
               await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
@@ -1145,13 +1183,15 @@ export class ExecutionEngineService {
         // Let Redis redeliver to the instance that holds the lock
         this.stats.lockConflicts++;
         this.logger.debug('Opportunity skipped - already being executed by another instance', {
-          id: opportunity.id
+          id: opportunity.id,
+          traceId,
         });
         return; // Don't ACK - another instance will handle it
       } else if (lockResult.reason === 'redis_error') {
         // Redis unavailable - can't reliably ACK anyway
         this.logger.error('Opportunity skipped - Redis unavailable', {
           id: opportunity.id,
+          traceId,
           error: lockResult.error?.message
         });
         return; // Don't ACK - Redis is down
@@ -1159,6 +1199,7 @@ export class ExecutionEngineService {
         // We had the lock, execution failed - ACK to prevent infinite redelivery
         this.logger.error('Opportunity execution failed', {
           id: opportunity.id,
+          traceId,
           error: lockResult.error
         });
         // Fall through to ACK below
@@ -1195,6 +1236,7 @@ export class ExecutionEngineService {
         this.stats.executionTimeouts++;
         this.logger.error('Execution timed out', {
           opportunityId: opportunity.id,
+          traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
           timeoutMs: EXECUTION_TIMEOUT_MS
         });
       }
@@ -1240,6 +1282,7 @@ export class ExecutionEngineService {
 
       this.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
+        traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
         type: opportunity.type,
         buyChain: chain,
         buyDex: dex,
@@ -1453,8 +1496,19 @@ export class ExecutionEngineService {
     }
   }
 
+  // FIX P1-13: Cached strategy context to avoid allocating a new 15-field object
+  // on every executeOpportunity() call. All fields are stable references that only
+  // change during start()/stop() or activation events. The cache is invalidated by
+  // setting it to null when dependencies change.
+  // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P1 #13
+  private cachedStrategyContext: StrategyContext | null = null;
+
   private buildStrategyContext(): StrategyContext {
-    return {
+    if (this.cachedStrategyContext) {
+      return this.cachedStrategyContext;
+    }
+
+    this.cachedStrategyContext = {
       logger: this.logger,
       perfLogger: this.perfLogger,
       providers: this.providerService?.getProviders() ?? new Map(),
@@ -1473,7 +1527,16 @@ export class ExecutionEngineService {
       pendingStateSimulator: this.pendingStateManager?.getSimulator() ?? undefined,
       // Phase 3: Batch providers for RPC request optimization
       batchProviders: this.providerService?.getBatchProviders(),
+      // Fix #1: Redis client for bridge recovery state persistence
+      redis: this.redis ?? undefined,
     };
+
+    return this.cachedStrategyContext;
+  }
+
+  /** Invalidate cached strategy context (call when dependencies change). */
+  private invalidateStrategyContext(): void {
+    this.cachedStrategyContext = null;
   }
 
   // ===========================================================================
@@ -1562,6 +1625,19 @@ export class ExecutionEngineService {
 
   getIsSimulationMode(): boolean {
     return this.isSimulationMode;
+  }
+
+  /**
+   * Check if Redis is connected. Uses a fast ping with cached result
+   * to avoid blocking health check responses.
+   */
+  async isRedisHealthy(): Promise<boolean> {
+    if (!this.redis) return false;
+    try {
+      return await this.redis.ping();
+    } catch {
+      return false;
+    }
   }
 
   getSimulationConfig(): Readonly<ResolvedSimulationConfig> {

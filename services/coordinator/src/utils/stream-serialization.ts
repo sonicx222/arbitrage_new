@@ -16,22 +16,29 @@
  *
  * @see coordinator.ts forwardOpportunityToExecution()
  * @see opportunities/opportunity-router.ts forwardToExecutionEngine()
+ * @see OP-3 FIX: Trace context propagation through serialized messages
  */
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { TraceContext } from '@arbitrage/core/tracing';
 
 /**
  * Serialize an ArbitrageOpportunity into a flat Record<string, string>
  * suitable for Redis Stream XADD.
  *
+ * OP-3 FIX: Now accepts optional trace context for cross-service correlation.
+ * Trace fields use the `_trace_` prefix per the trace-context module convention.
+ *
  * @param opportunity - The opportunity to serialize
  * @param instanceId - The forwarding service's instance ID
+ * @param traceContext - Optional trace context for cross-service correlation
  * @returns Flat string map for Redis Stream message data
  */
 export function serializeOpportunityForStream(
   opportunity: ArbitrageOpportunity,
   instanceId: string,
+  traceContext?: TraceContext,
 ): Record<string, string> {
-  return {
+  const result: Record<string, string> = {
     id: opportunity.id,
     type: opportunity.type || 'simple',
     chain: opportunity.chain || 'unknown',
@@ -53,4 +60,18 @@ export function serializeOpportunityForStream(
       ? { pipelineTimestamps: JSON.stringify(opportunity.pipelineTimestamps) }
       : {}),
   };
+
+  // OP-3 FIX: Inject trace context fields for cross-service correlation.
+  // Uses _trace_ prefix per shared/core/src/tracing/trace-context.ts convention.
+  if (traceContext) {
+    result._trace_traceId = traceContext.traceId;
+    result._trace_spanId = traceContext.spanId;
+    result._trace_serviceName = traceContext.serviceName;
+    result._trace_timestamp = String(traceContext.timestamp);
+    if (traceContext.parentSpanId) {
+      result._trace_parentSpanId = traceContext.parentSpanId;
+    }
+  }
+
+  return result;
 }

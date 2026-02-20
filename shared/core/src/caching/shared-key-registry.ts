@@ -97,12 +97,15 @@ export class SharedKeyRegistry {
   }
 
   /**
-   * Register a new key-to-index mapping (main thread only).
-   * Thread-safe using Atomics.compareExchange for atomic slot claiming.
+   * Register a new key-to-index mapping (main thread only — single writer).
    *
-   * P0-FIX: Uses CAS (compare-and-swap) loop to atomically claim a slot,
-   * preventing race condition where concurrent registrations could overwrite
-   * each other's data.
+   * IMPORTANT: This method must only be called from the main thread.
+   * Workers must use lookup() which is read-only.
+   *
+   * Write-then-publish pattern: All slot data (key bytes + index) is written
+   * BEFORE the entry count is incremented via Atomics.store (release semantics).
+   * Workers calling lookup() use Atomics.load (acquire semantics), so they
+   * will never see a partially-written slot.
    *
    * @param key - The key string (max 60 bytes UTF-8)
    * @param index - The array index for this key
@@ -125,42 +128,20 @@ export class SharedKeyRegistry {
       return false;
     }
 
-    // P0-FIX: CAS loop to atomically claim a slot
-    // This prevents race condition where two threads read the same count
-    let currentCount: number;
-    let slotOffset: number;
+    const currentCount = Atomics.load(this.entryCount, 0);
 
-    while (true) {
-      currentCount = Atomics.load(this.entryCount, 0);
-
-      // Check if registry is full
-      if (currentCount >= this.config.maxKeys) {
-        logger.warn('SharedKeyRegistry is full', {
-          maxKeys: this.config.maxKeys,
-          currentCount
-        });
-        return false;
-      }
-
-      // Try to atomically claim this slot by incrementing the counter
-      // If successful, we exclusively own the slot at 'currentCount'
-      const previousCount = Atomics.compareExchange(
-        this.entryCount,
-        0, // index in Int32Array
-        currentCount, // expected current value
-        currentCount + 1 // new value if current matches expected
-      );
-
-      // If CAS succeeded, previousCount equals currentCount
-      if (previousCount === currentCount) {
-        // We successfully claimed slot at currentCount
-        slotOffset = this.headerSize + (currentCount * this.slotSize);
-        break;
-      }
-      // Otherwise, another thread claimed it first - retry with new count
+    // Check if registry is full
+    if (currentCount >= this.config.maxKeys) {
+      logger.warn('SharedKeyRegistry is full', {
+        maxKeys: this.config.maxKeys,
+        currentCount
+      });
+      return false;
     }
 
-    // Now we exclusively own this slot - safe to write without race
+    const slotOffset = this.headerSize + (currentCount * this.slotSize);
+
+    // Write key bytes to slot FIRST (before publishing via entryCount)
     const keyBuffer = Buffer.from(key, 'utf8');
     for (let i = 0; i < this.keySize; i++) {
       const byte = i < keyBuffer.length ? keyBuffer[i] : 0;
@@ -169,6 +150,13 @@ export class SharedKeyRegistry {
 
     // Write index (last 4 bytes of slot)
     this.dataView.setInt32(slotOffset + this.keySize, index, true);
+
+    // PUBLISH: Atomics.store has release semantics — all prior writes
+    // (key bytes + index) are guaranteed visible to any thread that
+    // subsequently reads this count via Atomics.load (acquire semantics).
+    // This eliminates the race where workers could see an incremented count
+    // but read a partially-written slot.
+    Atomics.store(this.entryCount, 0, currentCount + 1);
 
     // Update local cache
     this.keyToIndexCache.set(key, index);
