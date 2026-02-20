@@ -1,14 +1,16 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
-import { loadFixture, mine } from '@nomicfoundation/hardhat-network-helpers';
+import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { CommitRevealArbitrage, MockDexRouter, MockERC20 } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
-  deployBaseFixture,
   RATE_USDC_TO_WETH_1PCT_PROFIT,
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,
   getDeadline,
+  deployCommitRevealFixture,
+  createCommitmentHash,
+  mineBlocks,
 } from './helpers';
 
 /**
@@ -26,34 +28,8 @@ import {
  * @see contracts/src/CommitRevealArbitrage.sol
  */
 describe('CommitRevealArbitrage Execution', () => {
-  async function deployContractsFixture() {
-    const base = await deployBaseFixture();
-    const CommitRevealArbitrageFactory = await ethers.getContractFactory('CommitRevealArbitrage');
-    const commitRevealArbitrage = await CommitRevealArbitrageFactory.deploy(base.owner.address);
-    await base.weth.mint(base.user.address, ethers.parseEther('100'));
-    return { commitRevealArbitrage, ...base };
-  }
-
-  function createCommitmentHash(
-    sender: string,
-    asset: string,
-    amountIn: bigint,
-    swapPath: any[],
-    minProfit: bigint,
-    deadline: number,
-    salt: string
-  ): string {
-    const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['tuple(address asset, uint256 amountIn, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline, bytes32 salt)'],
-      [[asset, amountIn, swapPath, minProfit, deadline, salt]]
-    );
-    const packed = ethers.solidityPacked(['address', 'bytes'], [sender, encoded]);
-    return ethers.keccak256(packed);
-  }
-
-  async function mineBlocks(count: number): Promise<void> {
-    await mine(count);
-  }
+  // Use shared fixture from helpers/commit-reveal.ts
+  const deployContractsFixture = deployCommitRevealFixture;
 
   // ===========================================================================
   // 5. Reveal Phase - Swap Execution Tests

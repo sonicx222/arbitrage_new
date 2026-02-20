@@ -181,3 +181,16 @@ export {
   type BridgeRecoveryManagerDeps,
   type RecoveryMetrics,
 } from './bridge-recovery-manager';
+
+// =============================================================================
+// Task 4.1: Per-Chain Balance Monitor
+// =============================================================================
+
+export {
+  BalanceMonitor,
+  createBalanceMonitor,
+  type BalanceMonitorConfig,
+  type BalanceMonitorDeps,
+  type BalanceSnapshot,
+  type ChainBalance,
+} from './balance-monitor';

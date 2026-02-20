@@ -43,6 +43,32 @@ jest.mock('@arbitrage/core', () => ({
   }))
 }));
 
+/** Re-establish all mock implementations after resetMocks clears them */
+function restoreAllMocks() {
+  // Restore mockModel.save with file-writing implementation
+  mockModel.save.mockImplementation((savePath: string) => {
+    const filePath = savePath.replace('file://', '');
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(filePath, JSON.stringify({ format: 'layers-model' }));
+    return Promise.resolve({ modelArtifactsInfo: { dateSaved: new Date() } });
+  });
+
+  // Restore mockTf.loadLayersModel
+  mockTf.loadLayersModel.mockResolvedValue(mockModel);
+
+  // Restore @arbitrage/core createLogger
+  const core = require('@arbitrage/core');
+  (core.createLogger as jest.Mock).mockReturnValue({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  });
+}
+
 // Import after mocks
 import {
   ModelPersistence,
@@ -68,7 +94,8 @@ describe('model-persistence', () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreAllMocks();
     resetModelPersistence();
 
     // Create temp directory for tests

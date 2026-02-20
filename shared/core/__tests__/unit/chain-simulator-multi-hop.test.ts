@@ -483,7 +483,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
   });
 
   describe('Buy/Sell DEX Consistency', () => {
-    it('should use same DEX for multi-hop (all hops on one DEX)', (done) => {
+    it('should use different DEXs for multi-hop buy and sell endpoints', (done) => {
       const simulator = createMultiHopSimulator();
       let completed = false;
 
@@ -502,8 +502,13 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
           completed = true;
           clearTimeout(failTimeout);
 
-          // Multi-hop uses same DEX for all swaps
-          expect(opportunity.buyDex).toBe(opportunity.sellDex);
+          // Multi-hop arbitrage buys on one DEX and sells on another
+          expect(opportunity.buyDex).not.toBe(opportunity.sellDex);
+
+          // Both should be valid DEX names from the configured pairs
+          const validDexes = ['uniswap_v3', 'sushiswap'];
+          expect(validDexes).toContain(opportunity.buyDex);
+          expect(validDexes).toContain(opportunity.sellDex);
 
           simulator.stop();
           done();

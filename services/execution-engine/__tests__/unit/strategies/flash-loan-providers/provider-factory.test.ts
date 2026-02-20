@@ -61,13 +61,31 @@ jest.mock('@arbitrage/config', () => {
     SYNCSWAP_FEE_BPS: 30,
     getBpsDenominatorBigInt: () => BPS_DENOMINATOR,
     getAaveV3FeeBpsBigInt: () => BigInt(9),
+    ARBITRAGE_CONFIG: {
+      gasPriceSpikeMultiplier: 2,
+      maxGasPrice: '500',
+      minProfitThreshold: '0.001',
+      maxTradeSize: '10',
+      defaultSlippageBps: 50,
+      slippageTolerance: 0.05,
+    },
   };
 });
+
+// Mock base.strategy to prevent deep import chain (ARBITRAGE_CONFIG, DEXES, CHAINS, etc.)
+// All flash loan providers import getSwapDeadline from base.strategy
+jest.mock('../../../../src/strategies/base.strategy', () => ({
+  getSwapDeadline: () => Math.floor(Date.now() / 1000) + 300,
+}));
 
 // Mock @arbitrage/core to prevent deep import chain
 jest.mock('@arbitrage/core', () => ({
   createLogger: jest.fn(() => ({
     info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
+  })),
+  createPinoLogger: jest.fn(() => ({
+    info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(), trace: jest.fn(),
+    child: jest.fn().mockReturnThis(),
   })),
 }));
 

@@ -37,6 +37,20 @@ jest.mock('@arbitrage/config', () => ({
     'function isApprovedRouter(address router) external view returns (bool)',
     'function VAULT() external view returns (address)',
   ],
+  ARBITRAGE_CONFIG: {
+    gasPriceSpikeMultiplier: 2,
+    maxGasPrice: '500',
+    minProfitThreshold: '0.001',
+    maxTradeSize: '10',
+    defaultSlippageBps: 50,
+    slippageTolerance: 0.05,
+  },
+}));
+
+// Mock base.strategy to prevent deep import chain (ARBITRAGE_CONFIG, DEXES, CHAINS, etc.)
+// Only getSwapDeadline is needed by the syncswap provider
+jest.mock('../../../../src/strategies/base.strategy', () => ({
+  getSwapDeadline: () => Math.floor(Date.now() / 1000) + 300,
 }));
 
 // =============================================================================

@@ -8,7 +8,8 @@ import {
   getGasPriceCache,
   GAS_UNITS,
   FALLBACK_GAS_COSTS_ETH,
-  FALLBACK_GAS_SCALING_PER_STEP
+  FALLBACK_GAS_SCALING_PER_STEP,
+  GAS_FALLBACK_SAFETY_FACTOR
 } from './caching/gas-price-cache';
 import { getNativeTokenPrice } from '@arbitrage/config';
 
@@ -960,7 +961,7 @@ export class CrossDexTriangularArbitrage {
       // Fallback to static estimates if cache fails
       // Uses shared constants for consistency across detectors
       const baseCost = FALLBACK_GAS_COSTS_ETH[chain] ?? 0.001;
-      return baseCost * (1 + steps * FALLBACK_GAS_SCALING_PER_STEP);
+      return baseCost * GAS_FALLBACK_SAFETY_FACTOR * (1 + steps * FALLBACK_GAS_SCALING_PER_STEP);
     }
   }
 

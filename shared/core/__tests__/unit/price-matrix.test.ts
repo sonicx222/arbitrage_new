@@ -879,17 +879,17 @@ describe('PriceMatrix.getPriceWithFreshnessCheck', () => {
     matrix.resetStats();
 
     // getPriceWithFreshnessCheck calls getPrice internally.
-    // getPrice counts a hit (data exists), then getPriceWithFreshnessCheck
-    // counts an additional miss when it rejects the stale data.
+    // getPrice counts a hit (data exists). The freshness check rejects
+    // the stale data and returns null, but does NOT increment misses.
     const result = matrix.getPriceWithFreshnessCheck(key, 2000);
     expect(result).toBeNull();
 
     const stats = matrix.getStats();
-    // getPrice: 1 read + 1 hit (data found)
-    // getPriceWithFreshnessCheck: +1 miss (stale rejection)
+    // getPrice: 1 read + 1 hit (data found in cache)
+    // Stale rejection does not increment misses
     expect(stats.reads).toBe(1);
     expect(stats.hits).toBe(1);
-    expect(stats.misses).toBe(1);
+    expect(stats.misses).toBe(0);
   });
 
   it('should count one read and one hit for fresh data', () => {

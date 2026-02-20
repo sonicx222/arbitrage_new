@@ -220,6 +220,8 @@ export class AuthService {
 
       return user;
     } catch (error) {
+      // FAIL-CLOSED: Any token validation error denies access (returns null → 401)
+      // This is intentional — see Task 2.4 FailOpen/FailClosed audit
       this.logger.debug('Token validation failed', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }

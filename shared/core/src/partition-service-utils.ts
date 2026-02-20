@@ -606,6 +606,23 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   server.keepAliveTimeout = 5000;
   server.maxConnections = 100;
 
+  // SEC-04: Prevent accidental public exposure in production
+  // If binding to all interfaces without auth token in production, refuse to start
+  const isProductionEnv = process.env.NODE_ENV === 'production';
+  const isPublicBind = bindAddress === '0.0.0.0' || bindAddress === '::';
+  if (isProductionEnv && isPublicBind && !authToken) {
+    const msg = `SECURITY ERROR: Health server binds to ${bindAddress} in production without HEALTH_AUTH_TOKEN. ` +
+      'Set HEALTH_AUTH_TOKEN or use HEALTH_BIND_ADDRESS=127.0.0.1 to restrict access.';
+    logger.error(msg);
+    throw new Error(msg);
+  }
+  if (!isProductionEnv && isPublicBind && !authToken) {
+    logger.warn('Health server bound to all interfaces without auth token (non-production)', {
+      bindAddress,
+      hint: 'Set HEALTH_AUTH_TOKEN or HEALTH_BIND_ADDRESS=127.0.0.1 for production',
+    });
+  }
+
   server.listen(port, bindAddress, () => {
     logger.debug(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
   });

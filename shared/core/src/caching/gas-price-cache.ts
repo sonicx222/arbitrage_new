@@ -236,6 +236,18 @@ export const FALLBACK_GAS_COSTS_ETH: Record<string, number> = {
  */
 export const FALLBACK_GAS_SCALING_PER_STEP = 0.25;
 
+/**
+ * Safety multiplier for fallback gas estimates.
+ * Applied when using static fallback values (RPC unavailable).
+ * Prevents submitting trades that lose money during gas spikes.
+ *
+ * Default: 2.0x — conservative to avoid unprofitable trades on stale data.
+ * Configurable via GAS_FALLBACK_SAFETY_FACTOR env var.
+ */
+export const GAS_FALLBACK_SAFETY_FACTOR = parseFloat(
+  process.env.GAS_FALLBACK_SAFETY_FACTOR ?? '2.0'
+);
+
 // =============================================================================
 // GasPriceCache Class
 // =============================================================================

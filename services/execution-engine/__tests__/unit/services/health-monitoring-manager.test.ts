@@ -39,6 +39,27 @@ jest.mock('@arbitrage/types', () => ({
   createSkippedResult: jest.fn(),
   extractErrorCode: jest.fn(),
   BaseHealth: {},
+  RedisStreams: {
+    PRICE_UPDATES: 'stream:price-updates',
+    SWAP_EVENTS: 'stream:swap-events',
+    OPPORTUNITIES: 'stream:opportunities',
+    WHALE_ALERTS: 'stream:whale-alerts',
+    SERVICE_HEALTH: 'stream:service-health',
+    SERVICE_EVENTS: 'stream:service-events',
+    COORDINATOR_EVENTS: 'stream:coordinator-events',
+    HEALTH: 'stream:health',
+    HEALTH_ALERTS: 'stream:health-alerts',
+    EXECUTION_REQUESTS: 'stream:execution-requests',
+    EXECUTION_RESULTS: 'stream:execution-results',
+    PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
+    VOLUME_AGGREGATES: 'stream:volume-aggregates',
+    CIRCUIT_BREAKER: 'stream:circuit-breaker',
+    SYSTEM_FAILOVER: 'stream:system-failover',
+    SYSTEM_COMMANDS: 'stream:system-commands',
+    DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
+    DLQ_ALERTS: 'stream:dlq-alerts',
+    FORWARDING_DLQ: 'stream:forwarding-dlq',
+  },
 }));
 
 jest.mock('@arbitrage/core', () => ({

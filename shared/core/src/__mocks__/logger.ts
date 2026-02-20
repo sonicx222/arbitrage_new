@@ -5,18 +5,10 @@
  * Jest automatically uses this file. Tests with explicit factory functions in
  * their jest.mock() call are NOT affected — the explicit factory takes precedence.
  *
- * This eliminates ~15-20 lines of boilerplate per test file that previously
- * inlined the same mock factory.
- *
- * @example
- * // Before (15+ lines per file):
- * jest.mock('../../src/logger', () => ({
- *   createLogger: jest.fn(() => ({ info: jest.fn(), ... })),
- *   getPerformanceLogger: jest.fn(() => ({ ... })),
- * }));
- *
- * // After (1 line):
- * jest.mock('../../src/logger');
+ * IMPORTANT: createLogger and getPerformanceLogger are regular functions (not
+ * jest.fn()) so that `resetMocks: true` in jest.config.base.js does NOT clear
+ * their return values between tests. If you need to spy on calls, use
+ * jest.spyOn() in your test.
  *
  * @see shared/core/src/logger.ts — Real implementation
  * @see Phase 2 Item 12 in .agent-reports/TEST_AUDIT_REPORT.md
@@ -47,8 +39,22 @@ const mockPerformanceLogger = {
   endTimer: jest.fn(() => 0),
 };
 
-export const createLogger = jest.fn(() => mockLogger);
-export const getPerformanceLogger = jest.fn(() => mockPerformanceLogger);
+/**
+ * Use regular functions so resetMocks: true doesn't clear the return value.
+ * The mockLogger/mockPerformanceLogger objects survive because their individual
+ * methods (jest.fn()) get reset but the objects themselves remain valid.
+ */
+export function createLogger(_serviceName?: string) {
+  // Re-establish child mock if cleared by resetMocks
+  if (!mockLogger.child.getMockImplementation()) {
+    mockLogger.child.mockImplementation(() => mockLogger);
+  }
+  return mockLogger;
+}
+
+export function getPerformanceLogger(..._args: unknown[]) {
+  return mockPerformanceLogger;
+}
 
 /**
  * Access the mock logger instance for assertions in tests.

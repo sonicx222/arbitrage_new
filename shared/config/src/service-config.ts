@@ -172,6 +172,19 @@ export function validateProductionConfig(): void {
     }
   }
 
+  // Task 2.5: Conflicting feature flag validation
+  if (process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true' && !process.env.REDIS_URL) {
+    warnings.push('FEATURE_COMMIT_REVEAL_REDIS=true but REDIS_URL not configured — commit-reveal will fail at runtime');
+  }
+  if (process.env.FEATURE_COMMIT_REVEAL === 'true' && !process.env.WALLET_PRIVATE_KEY && !process.env.WALLET_MNEMONIC) {
+    missingConfigs.push('FEATURE_COMMIT_REVEAL requires WALLET_PRIVATE_KEY or WALLET_MNEMONIC for on-chain commits');
+  }
+
+  // Task 2.5: Simulation mode sanity check in production
+  if (process.env.EXECUTION_SIMULATION_MODE === 'true' && !process.env.SIMULATION_MODE_PRODUCTION_OVERRIDE) {
+    warnings.push('EXECUTION_SIMULATION_MODE=true in production — no real trades will execute. Set SIMULATION_MODE_PRODUCTION_OVERRIDE=true if intentional.');
+  }
+
   // Log warnings
   if (warnings.length > 0) {
     console.warn('\n⚠️  Production configuration warnings:');

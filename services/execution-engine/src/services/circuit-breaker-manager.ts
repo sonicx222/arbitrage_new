@@ -1,17 +1,15 @@
 /**
- * Circuit Breaker Manager
+ * Circuit Breaker Manager — Per-Chain Isolation
  *
- * Extracted from engine.ts to reduce file complexity.
- * Manages circuit breaker lifecycle:
- * - Initialization from config
- * - State change event handling and Redis Stream publishing
- * - Public API for status queries and manual overrides
+ * Manages per-chain circuit breaker lifecycle, event handling, and public API.
+ * Each chain gets its own lazily-created CircuitBreaker so that failures on
+ * one chain (e.g., Solana RPC issues) do not block execution on other chains.
  *
  * Hot-path note:
- * - Initialization is NOT on hot path (called once during start())
- * - State change handler is NOT on hot path (async, rare events)
- * - getCircuitBreaker() returns direct reference for O(1) hot-path usage
- *   in processQueueItems() and executeOpportunity()
+ * - canExecute(chainId) is O(1) — Map.get + boolean check
+ * - recordSuccess/recordFailure are O(1) delegate calls
+ * - Chain breakers are created lazily on first access (not hot path)
+ * - State change publishing is async fire-and-forget
  *
  * @see engine.ts (consumer)
  * @see services/circuit-breaker.ts (implementation)
@@ -42,15 +40,23 @@ export interface CircuitBreakerManagerDeps {
 }
 
 /**
- * Manages circuit breaker lifecycle and event handling.
+ * Per-chain status entry returned by getAllStatus().
+ */
+export interface ChainCircuitBreakerStatus extends CircuitBreakerStatus {
+  chain: string;
+}
+
+/**
+ * Manages per-chain circuit breaker lifecycle and event handling.
  *
- * Performance Note:
- * - getCircuitBreaker() returns direct reference for O(1) hot-path access
- * - No allocations, no blocking operations in hot-path calls
- * - Event publishing is async and non-blocking
+ * Each chain gets its own CircuitBreaker instance, lazily created on first
+ * access. This prevents cascading failures — e.g., Solana RPC issues won't
+ * block Ethereum or Arbitrum execution.
  */
 export class CircuitBreakerManager {
-  private circuitBreaker: CircuitBreaker | null = null;
+  /** Per-chain circuit breakers, lazily created */
+  private readonly chainBreakers = new Map<string, CircuitBreaker>();
+  private enabled = false;
 
   private readonly config: Required<CircuitBreakerConfig>;
   private readonly logger: Logger;
@@ -67,14 +73,8 @@ export class CircuitBreakerManager {
   }
 
   /**
-   * Initialize circuit breaker for execution protection.
-   *
-   * Creates a circuit breaker that:
-   * - Halts execution after consecutive failures (prevents capital drain)
-   * - Emits state change events to Redis Stream for monitoring
-   * - Uses configurable threshold and cooldown period
-   *
-   * @see services/circuit-breaker.ts for implementation details
+   * Initialize the circuit breaker manager.
+   * No breakers are created here — they are lazily created per-chain on first access.
    */
   initialize(): void {
     if (!this.config.enabled) {
@@ -82,46 +82,126 @@ export class CircuitBreakerManager {
       return;
     }
 
-    this.circuitBreaker = createCircuitBreaker({
-      logger: this.logger,
+    this.enabled = true;
+    this.logger.info('Per-chain circuit breaker manager initialized', {
       failureThreshold: this.config.failureThreshold,
       cooldownPeriodMs: this.config.cooldownPeriodMs,
       halfOpenMaxAttempts: this.config.halfOpenMaxAttempts,
-      enabled: this.config.enabled,
-      onStateChange: (event: CircuitBreakerEvent) => {
-        this.handleStateChange(event);
-      },
     });
+  }
 
-    this.logger.info('Circuit breaker initialized', {
-      failureThreshold: this.config.failureThreshold,
-      cooldownPeriodMs: this.config.cooldownPeriodMs,
-      halfOpenMaxAttempts: this.config.halfOpenMaxAttempts,
-    });
+  // ===========================================================================
+  // Per-Chain API (primary interface for engine.ts)
+  // ===========================================================================
+
+  /**
+   * Get or lazily create a circuit breaker for a specific chain.
+   * Returns null if circuit breakers are disabled.
+   */
+  getChainBreaker(chainId: string): CircuitBreaker | null {
+    if (!this.enabled) return null;
+
+    let breaker = this.chainBreakers.get(chainId);
+    if (!breaker) {
+      breaker = createCircuitBreaker({
+        logger: this.logger,
+        failureThreshold: this.config.failureThreshold,
+        cooldownPeriodMs: this.config.cooldownPeriodMs,
+        halfOpenMaxAttempts: this.config.halfOpenMaxAttempts,
+        enabled: true,
+        onStateChange: (event: CircuitBreakerEvent) => {
+          this.handleChainStateChange(chainId, event);
+        },
+      });
+      this.chainBreakers.set(chainId, breaker);
+    }
+
+    return breaker;
   }
 
   /**
-   * Get the circuit breaker instance for direct hot-path usage.
-   *
-   * Engine's processQueueItems() and executeOpportunity() use this
-   * for O(1) canExecute()/recordSuccess()/recordFailure() calls.
+   * Check if execution is allowed on a specific chain.
+   * Returns true if disabled (fail-open for execution, fail-closed handled elsewhere).
+   */
+  canExecute(chainId: string): boolean {
+    if (!this.enabled) return true;
+    const breaker = this.getChainBreaker(chainId);
+    return breaker?.canExecute() ?? true;
+  }
+
+  /** Record a successful execution for a specific chain. */
+  recordSuccess(chainId: string): void {
+    if (!this.enabled) return;
+    this.getChainBreaker(chainId)?.recordSuccess();
+  }
+
+  /** Record a failed execution for a specific chain. */
+  recordFailure(chainId: string): void {
+    if (!this.enabled) return;
+    this.getChainBreaker(chainId)?.recordFailure();
+  }
+
+  /** Get status for a specific chain. Returns null if chain has no breaker. */
+  getChainStatus(chainId: string): CircuitBreakerStatus | null {
+    return this.chainBreakers.get(chainId)?.getStatus() ?? null;
+  }
+
+  /** Get status for all chains that have breakers. */
+  getAllStatus(): ChainCircuitBreakerStatus[] {
+    const result: ChainCircuitBreakerStatus[] = [];
+    for (const [chain, breaker] of this.chainBreakers) {
+      result.push({ chain, ...breaker.getStatus() });
+    }
+    return result;
+  }
+
+  /** Check if a specific chain's circuit breaker is open. */
+  isChainOpen(chainId: string): boolean {
+    return this.chainBreakers.get(chainId)?.isOpen() ?? false;
+  }
+
+  /** Force close a specific chain's circuit breaker. */
+  forceCloseChain(chainId: string): void {
+    this.chainBreakers.get(chainId)?.forceClose();
+  }
+
+  /** Force open a specific chain's circuit breaker. */
+  forceOpenChain(chainId: string, reason = 'manual override'): void {
+    this.chainBreakers.get(chainId)?.forceOpen(reason);
+  }
+
+  /** Stop all chain breakers and clear the map. */
+  stopAll(): void {
+    for (const breaker of this.chainBreakers.values()) {
+      breaker.stop();
+    }
+  }
+
+  // ===========================================================================
+  // Backward-Compatible API (used by health endpoints, dashboard, etc.)
+  // ===========================================================================
+
+  /**
+   * Get the first circuit breaker instance (backward compatibility).
+   * Returns null if no chain breakers exist or disabled.
    */
   getCircuitBreaker(): CircuitBreaker | null {
-    return this.circuitBreaker;
+    if (!this.enabled) return null;
+    const first = this.chainBreakers.values().next();
+    return first.done ? null : first.value;
   }
 
-  // ===========================================================================
-  // Public API (delegated from engine getters)
-  // ===========================================================================
-
-  /** Get circuit breaker status snapshot. Returns null if disabled. */
+  /** Get status of first chain breaker (backward compatibility). */
   getStatus(): CircuitBreakerStatus | null {
-    return this.circuitBreaker?.getStatus() ?? null;
+    return this.getCircuitBreaker()?.getStatus() ?? null;
   }
 
-  /** Check if circuit breaker is currently open (blocking executions). */
+  /** Check if any chain's circuit breaker is open. */
   isOpen(): boolean {
-    return this.circuitBreaker?.isOpen() ?? false;
+    for (const breaker of this.chainBreakers.values()) {
+      if (breaker.isOpen()) return true;
+    }
+    return false;
   }
 
   /** Get circuit breaker configuration. */
@@ -129,25 +209,17 @@ export class CircuitBreakerManager {
     return this.config;
   }
 
-  /**
-   * Force close the circuit breaker (manual override).
-   * Use with caution — this bypasses the protection mechanism.
-   */
+  /** Force close ALL chain circuit breakers. */
   forceClose(): void {
-    if (this.circuitBreaker) {
-      this.logger.warn('Manually force-closing circuit breaker');
-      this.circuitBreaker.forceClose();
+    for (const breaker of this.chainBreakers.values()) {
+      breaker.forceClose();
     }
   }
 
-  /**
-   * Force open the circuit breaker (manual override).
-   * Useful for emergency stops or maintenance.
-   */
+  /** Force open ALL chain circuit breakers. */
   forceOpen(reason = 'manual override'): void {
-    if (this.circuitBreaker) {
-      this.logger.warn('Manually force-opening circuit breaker', { reason });
-      this.circuitBreaker.forceOpen(reason);
+    for (const breaker of this.chainBreakers.values()) {
+      breaker.forceOpen(reason);
     }
   }
 
@@ -156,41 +228,36 @@ export class CircuitBreakerManager {
   // ===========================================================================
 
   /**
-   * Handle circuit breaker state change events.
-   * Publishes events to Redis Stream for monitoring and alerting.
+   * Handle chain-specific circuit breaker state change.
    */
-  private handleStateChange(event: CircuitBreakerEvent): void {
-    // Log state change
+  private handleChainStateChange(chain: string, event: CircuitBreakerEvent): void {
     if (event.newState === 'OPEN') {
-      this.logger.warn('Circuit breaker OPENED - halting executions', {
+      this.logger.warn('Chain circuit breaker OPENED - halting executions on chain', {
+        chain,
         reason: event.reason,
         consecutiveFailures: event.consecutiveFailures,
         cooldownRemainingMs: event.cooldownRemainingMs,
       });
       this.stats.circuitBreakerTrips++;
     } else if (event.newState === 'CLOSED') {
-      this.logger.info('Circuit breaker CLOSED - resuming executions', {
+      this.logger.info('Chain circuit breaker CLOSED - resuming executions on chain', {
+        chain,
         reason: event.reason,
       });
     } else if (event.newState === 'HALF_OPEN') {
-      this.logger.info('Circuit breaker HALF_OPEN - testing recovery', {
+      this.logger.info('Chain circuit breaker HALF_OPEN - testing recovery on chain', {
+        chain,
         reason: event.reason,
       });
     }
 
-    // Publish event to Redis Stream for monitoring (fire-and-forget, internally error-handled)
-    void this.publishEvent(event);
+    void this.publishChainEvent(chain, event);
   }
 
   /**
-   * Publish circuit breaker event to Redis Stream.
-   *
-   * Events are published to stream:circuit-breaker for:
-   * - Monitoring dashboards
-   * - Alerting systems
-   * - Audit trail
+   * Publish chain-annotated circuit breaker event to Redis Stream.
    */
-  private async publishEvent(event: CircuitBreakerEvent): Promise<void> {
+  private async publishChainEvent(chain: string, event: CircuitBreakerEvent): Promise<void> {
     const streamsClient = this.getStreamsClient();
     if (!streamsClient) return;
 
@@ -198,6 +265,7 @@ export class CircuitBreakerManager {
       await streamsClient.xadd(RedisStreamsClient.STREAMS.CIRCUIT_BREAKER, {
         service: 'execution-engine',
         instanceId: this.instanceId,
+        chain,
         previousState: event.previousState,
         newState: event.newState,
         reason: event.reason,
@@ -208,7 +276,7 @@ export class CircuitBreakerManager {
     } catch (error) {
       this.logger.error('Failed to publish circuit breaker event', {
         error: getErrorMessage(error),
-        event,
+        chain,
       });
     }
   }

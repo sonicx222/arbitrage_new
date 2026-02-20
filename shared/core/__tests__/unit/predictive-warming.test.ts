@@ -526,6 +526,15 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
   describe('Performance Optimizations (PERF-3)', () => {
     it('should deduplicate rapid warming requests for the same pair', async () => {
+      // Gate to keep the warming's internal get() call pending so the pair stays
+      // in pendingWarmingPairs long enough for subsequent callbacks to see it.
+      //
+      // Key insight: getPairsToWarm is called SYNCHRONOUSLY in the source code
+      // (not awaited), so it MUST return a plain array. The async gate is placed
+      // on the L2 Redis get instead, which IS properly awaited inside this.get().
+      let resolveGate!: () => void;
+      const gate = new Promise<string | null>(resolve => { resolveGate = () => resolve(null); });
+
       cache = createHierarchicalCache({
         l1Enabled: true,
         l2Enabled: true,
@@ -536,26 +545,45 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         }
       });
 
-      // Make warming slow enough that rapid updates will overlap
-      mockCorrelationAnalyzer.getPairsToWarm.mockImplementation(async () => {
-        await flushPromises();
-        return ['0x5678'];
+      // Return correlated pairs synchronously (as the source code expects)
+      mockCorrelationAnalyzer.getPairsToWarm.mockReturnValue(['0x5678']);
+
+      // Make the L2 get for the correlated pair block on the gate.
+      // When triggerPredictiveWarming calls this.get('pair:0x5678'), it goes through
+      // getFromL2 -> redis.getRaw('cache:l2:pair:0x5678'). We make this block so
+      // the warming stays in-flight (pendingWarmingPairs still has the pair).
+      mockRedis.getRaw.mockImplementation((key: string) => {
+        if (key === 'cache:l2:pair:0x5678') {
+          return gate;
+        }
+        return redisInstance.get(key);
       });
 
-      // Fire multiple rapid updates for the SAME pair
-      // Without deduplication, this would trigger 3 warming operations
-      cache.set('pair:0x1234', { reserve0: '1000' });
-      cache.set('pair:0x1234', { reserve0: '1001' });
-      cache.set('pair:0x1234', { reserve0: '1002' });
+      // Fire three rapid cache.set() calls without awaiting them individually.
+      // This queues three setImmediate callbacks for triggerPredictiveWarming.
+      const p1 = cache.set('pair:0x1234', { reserve0: '1000' });
+      const p2 = cache.set('pair:0x1234', { reserve0: '1001' });
+      const p3 = cache.set('pair:0x1234', { reserve0: '1002' });
+      await Promise.all([p1, p2, p3]);
 
-      // Wait for all warming operations to complete
+      // Let all three setImmediate callbacks fire:
+      // 1st: adds '0x1234' to pendingWarmingPairs, calls getPairsToWarm (sync),
+      //       starts this.get('pair:0x5678') which blocks on the gate
+      // 2nd: sees pendingWarmingPairs.has('0x1234') == true, increments deduplicatedCount
+      // 3rd: same dedup path
+      await flushPromises();
+
+      // Release the gate so the first warming can complete
+      resolveGate();
+
+      // Flush remaining microtasks so warming finishes
+      await flushPromises();
       await flushPromises();
 
       const stats = cache.getStats();
 
-      // Should have deduplicated some requests (deduplicatedCount > 0)
-      // At minimum 2 of the 3 should be deduplicated (could be all 3 depending on timing)
-      expect(stats.predictiveWarming?.deduplicatedCount).toBeGreaterThanOrEqual(0);
+      // The 2nd and 3rd warming calls should have been deduplicated
+      expect(stats.predictiveWarming?.deduplicatedCount).toBeGreaterThanOrEqual(1);
 
       // Price updates should still be recorded for correlation tracking even when deduplicated
       expect(mockCorrelationAnalyzer.recordPriceUpdate).toHaveBeenCalled();

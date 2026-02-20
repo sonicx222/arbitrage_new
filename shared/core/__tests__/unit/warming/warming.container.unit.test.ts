@@ -7,7 +7,7 @@
  * @module warming/container
  */
 
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import {
   WarmingContainer,
   WarmingContainerConfig,
@@ -22,9 +22,18 @@ describe('WarmingContainer - Unit Tests', () => {
 
   beforeEach(() => {
     cache = new HierarchicalCache({
-      l1Size: 64,
-      l2Enabled: true,
+      l1Size: 1, // Minimal size for unit tests
+      l2Enabled: false, // Disable L2 in unit tests to avoid Redis connection timeouts
+      l3Enabled: false, // Disable L3 for faster tests
+      usePriceMatrix: false, // Disable SharedArrayBuffer allocation for speed
     });
+  });
+
+  afterEach(async () => {
+    // Clean up cache to prevent resource leaks and lingering handles
+    if (cache) {
+      await cache.clear();
+    }
   });
 
   describe('Container Creation', () => {

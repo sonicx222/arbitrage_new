@@ -31,6 +31,7 @@ const mockRedisClient = {
   set: jest.fn(),
   del: jest.fn(),
   keys: jest.fn(),
+  scan: jest.fn().mockResolvedValue(['0', []]),
   isConnected: jest.fn().mockReturnValue(true)
 };
 
@@ -370,6 +371,7 @@ describe('S2.2.5 PairCacheService', () => {
     mockRedisClient.set.mockReset();
     mockRedisClient.del.mockReset();
     mockRedisClient.keys.mockReset();
+    mockRedisClient.scan.mockReset().mockResolvedValue(['0', []]);
 
     service.resetState(); // Fast: just clears statistics
   });
@@ -598,26 +600,28 @@ describe('S2.2.5 PairCacheService', () => {
 
   describe('Cache Invalidation', () => {
     it('should invalidate all pairs for a chain', async () => {
-      mockRedisClient.keys.mockResolvedValue(['key1', 'key2', 'key3']);
+      mockRedisClient.scan.mockResolvedValue(['0', ['key1', 'key2', 'key3']]);
       mockRedisClient.del.mockResolvedValue(1);
 
       const count = await service.invalidateChain('ethereum');
 
       expect(count).toBe(3);
+      expect(mockRedisClient.scan).toHaveBeenCalled();
       expect(mockRedisClient.del).toHaveBeenCalledTimes(3);
     });
 
     it('should invalidate all pairs for a DEX on a chain', async () => {
-      mockRedisClient.keys.mockResolvedValue(['key1', 'key2']);
+      mockRedisClient.scan.mockResolvedValue(['0', ['key1', 'key2']]);
       mockRedisClient.del.mockResolvedValue(1);
 
       const count = await service.invalidateDex('ethereum', 'uniswap_v2');
 
       expect(count).toBe(2);
+      expect(mockRedisClient.scan).toHaveBeenCalled();
     });
 
     it('should return 0 when no keys match', async () => {
-      mockRedisClient.keys.mockResolvedValue([]);
+      mockRedisClient.scan.mockResolvedValue(['0', []]);
 
       const count = await service.invalidateChain('nonexistent');
 
@@ -627,13 +631,14 @@ describe('S2.2.5 PairCacheService', () => {
     it('should use parallel batch deletes (S2.2.5 fix)', async () => {
       // Create 150 keys to test batching
       const keys = Array.from({ length: 150 }, (_, i) => `key${i}`);
-      mockRedisClient.keys.mockResolvedValue(keys);
+      mockRedisClient.scan.mockResolvedValue(['0', keys]);
       mockRedisClient.del.mockResolvedValue(1);
 
       const count = await service.invalidateChain('ethereum');
 
       expect(count).toBe(150);
       // Should batch deletes (150 keys / 50 batch size = 3 batches)
+      expect(mockRedisClient.scan).toHaveBeenCalled();
       expect(mockRedisClient.del).toHaveBeenCalledTimes(150);
     });
   });
@@ -882,7 +887,7 @@ describe('S2.2.5 Regression Tests', () => {
       await service.initialize();
 
       const keys = Array.from({ length: 25 }, (_, i) => `key${i}`);
-      mockRedisClient.keys.mockResolvedValue(keys);
+      mockRedisClient.scan.mockResolvedValue(['0', keys]);
 
       const deleteTimings: number[] = [];
       mockRedisClient.del.mockImplementation(async () => {

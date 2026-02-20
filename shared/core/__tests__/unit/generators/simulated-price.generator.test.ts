@@ -39,7 +39,7 @@ describe('SimulatedPriceGenerator', () => {
         count: 100,
       });
 
-      const avgPrice = prices.reduce((sum, p) => sum + p.price0, 0) / prices.length;
+      const avgPrice = prices.reduce((sum, p) => sum + p.price, 0) / prices.length;
 
       // Average should be within range of base (Gaussian walk drifts without mean reversion)
       // Relaxed bounds: 100-step random walk can drift significantly
@@ -71,7 +71,7 @@ describe('SimulatedPriceGenerator', () => {
 
       // Subsequent prices should have calculated change
       for (let i = 1; i < prices.length; i++) {
-        const expectedChange = ((prices[i].price0 - prices[i - 1].price0) / prices[i - 1].price0) * 100;
+        const expectedChange = ((prices[i].price - prices[i - 1].price) / prices[i - 1].price) * 100;
         expect(prices[i].changePercent).toBeCloseTo(expectedChange, 5);
       }
     });
@@ -120,7 +120,7 @@ describe('SimulatedPriceGenerator', () => {
       for (const price of prices) {
         expect(price.dex).toBe('sushiswap');
         expect(price.chain).toBe('arbitrum');
-        expect(price.pair).toBe('WETH/USDC');
+        expect(price.pairKey).toBe('WETH/USDC');
       }
     });
 
@@ -165,7 +165,7 @@ describe('SimulatedPriceGenerator', () => {
       });
 
       for (const price of prices) {
-        expect(price.price0).toBeGreaterThan(0);
+        expect(price.price).toBeGreaterThan(0);
       }
     });
   });
@@ -223,7 +223,7 @@ describe('SimulatedPriceGenerator', () => {
       // Calculate average spread between DEXs
       let totalSpread = 0;
       for (let i = 0; i < uniswapPrices.length; i++) {
-        const spread = Math.abs(uniswapPrices[i].price0 - sushiPrices[i].price0) / uniswapPrices[i].price0;
+        const spread = Math.abs(uniswapPrices[i].price - sushiPrices[i].price) / uniswapPrices[i].price;
         totalSpread += spread;
       }
       const avgSpread = totalSpread / uniswapPrices.length;
@@ -350,7 +350,7 @@ describe('SimulatedPriceGenerator', () => {
 
       // First 5 prices should be stable (within 0.5% of base)
       for (let i = 0; i < 5; i++) {
-        const deviation = Math.abs(prices[i].price0 - 2000) / 2000;
+        const deviation = Math.abs(prices[i].price - 2000) / 2000;
         expect(deviation).toBeLessThan(0.005);
       }
     });
@@ -366,7 +366,7 @@ describe('SimulatedPriceGenerator', () => {
       });
 
       // Spike is at index 5
-      const spikePrice = prices[5].price0;
+      const spikePrice = prices[5].price;
       const expectedSpike = basePrice * (1 + spikeMagnitude);
 
       expect(spikePrice).toBeCloseTo(expectedSpike, 0);
@@ -394,7 +394,7 @@ describe('SimulatedPriceGenerator', () => {
       });
 
       // Last price should be near base (within noise)
-      const lastPrice = prices[prices.length - 1].price0;
+      const lastPrice = prices[prices.length - 1].price;
       const deviation = Math.abs(lastPrice - basePrice) / basePrice;
 
       expect(deviation).toBeLessThan(0.02); // Within 2%
@@ -445,7 +445,7 @@ describe('SimulatedPriceGenerator', () => {
       });
 
       const ethPrice = result.get('ethereum:uniswap_v3')!;
-      expect(ethPrice.price0).toBe(basePrice);
+      expect(ethPrice.price).toBe(basePrice);
     });
 
     it('should create increasing spread across chains', () => {
@@ -462,9 +462,9 @@ describe('SimulatedPriceGenerator', () => {
         ],
       });
 
-      const ethPrice = result.get('ethereum:uniswap_v3')!.price0;
-      const bscPrice = result.get('bsc:pancakeswap')!.price0;
-      const arbPrice = result.get('arbitrum:sushiswap')!.price0;
+      const ethPrice = result.get('ethereum:uniswap_v3')!.price;
+      const bscPrice = result.get('bsc:pancakeswap')!.price;
+      const arbPrice = result.get('arbitrum:sushiswap')!.price;
 
       // Prices should increase
       expect(bscPrice).toBeGreaterThan(ethPrice);
@@ -511,7 +511,7 @@ describe('SimulatedPriceGenerator', () => {
         const prices = generateSimplePriceSequence(2000, 10);
 
         expect(prices.length).toBe(10);
-        expect(prices[0].price0).toBeGreaterThan(0);
+        expect(prices[0].price).toBeGreaterThan(0);
       });
 
       it('should accept optional overrides', () => {
@@ -532,7 +532,7 @@ describe('SimulatedPriceGenerator', () => {
           spreadPercent: 0.02,
         });
 
-        expect(lowPrice.price0).toBeLessThan(highPrice.price0);
+        expect(lowPrice.price).toBeLessThan(highPrice.price);
       });
 
       it('should create correct spread', () => {
@@ -544,7 +544,7 @@ describe('SimulatedPriceGenerator', () => {
           spreadPercent,
         });
 
-        const actualSpread = (highPrice.price0 - lowPrice.price0) / lowPrice.price0;
+        const actualSpread = (highPrice.price - lowPrice.price) / lowPrice.price;
         expect(actualSpread).toBeCloseTo(spreadPercent, 5);
       });
 

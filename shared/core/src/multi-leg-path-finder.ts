@@ -19,7 +19,8 @@ import {
   getGasPriceCache,
   GAS_UNITS,
   FALLBACK_GAS_COSTS_ETH,
-  FALLBACK_GAS_SCALING_PER_STEP
+  FALLBACK_GAS_SCALING_PER_STEP,
+  GAS_FALLBACK_SAFETY_FACTOR
 } from './caching/gas-price-cache';
 import type { DexPool, TriangularStep, DynamicSlippageConfig } from './cross-dex-triangular-arbitrage';
 
@@ -53,6 +54,8 @@ export interface MultiLegPathConfig {
   minConfidence?: number;
   /** Dynamic slippage configuration */
   slippageConfig?: DynamicSlippageConfig;
+  /** Per-chain timeout overrides (ms). Falls back to timeoutMs if chain not specified. */
+  chainTimeoutMs?: Record<string, number>;
 }
 
 /**
@@ -96,6 +99,8 @@ interface ExecutionContext {
   tokenPairs: Map<string, DexPool[]>;
   // P2-FIX 3.1: O(1) lookup index for pool by pair+dex (replaces O(n) .find())
   poolByPairDex: Map<string, DexPool>;
+  /** Effective timeout for this execution (chain-specific or global fallback) */
+  effectiveTimeoutMs: number;
 }
 
 /**
@@ -124,11 +129,23 @@ export interface PathFinderStats {
  */
 const DEFAULT_CONFIG: MultiLegPathConfig = {
   minProfitThreshold: parseFloat(process.env.MULTI_LEG_MIN_PROFIT || '0.001'),
-  maxPathLength: 7,
+  maxPathLength: 6,  // 6 tokens = 5 hops = matches contract MAX_SWAP_HOPS
   minPathLength: 5,
   maxCandidatesPerHop: parseInt(process.env.MULTI_LEG_MAX_CANDIDATES || '15', 10),
   timeoutMs: parseInt(process.env.MULTI_LEG_TIMEOUT_MS || '5000', 10),
-  minConfidence: 0.4
+  minConfidence: 0.4,
+  chainTimeoutMs: {
+    ethereum: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ETHEREUM ?? '5000', 10),
+    arbitrum: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ARBITRUM ?? '1500', 10),
+    optimism: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_OPTIMISM ?? '2000', 10),
+    base: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_BASE ?? '2000', 10),
+    polygon: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_POLYGON ?? '3000', 10),
+    bsc: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_BSC ?? '3000', 10),
+    avalanche: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_AVALANCHE ?? '3000', 10),
+    fantom: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_FANTOM ?? '3000', 10),
+    zksync: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ZKSYNC ?? '2000', 10),
+    linea: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_LINEA ?? '2000', 10),
+  }
 };
 
 const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
@@ -216,6 +233,8 @@ export class MultiLegPathFinder {
       tokenPairs: new Map(),
       // P2-FIX 3.1: O(1) lookup index for pool by pair+dex
       poolByPairDex: new Map(),
+      // Task 1.2: Use chain-specific timeout, falling back to global timeoutMs
+      effectiveTimeoutMs: this.config.chainTimeoutMs?.[chain] ?? this.config.timeoutMs,
     };
 
     this.stats.totalCalls++;
@@ -765,7 +784,7 @@ export class MultiLegPathFinder {
       // Fallback to static estimates if cache fails
       // Uses shared constants for consistency across detectors
       const baseCost = FALLBACK_GAS_COSTS_ETH[chain] ?? 0.001;
-      return baseCost * (1 + numSteps * FALLBACK_GAS_SCALING_PER_STEP);
+      return baseCost * GAS_FALLBACK_SAFETY_FACTOR * (1 + numSteps * FALLBACK_GAS_SCALING_PER_STEP);
     }
   }
 
@@ -823,7 +842,7 @@ export class MultiLegPathFinder {
    * Check if timeout has been reached.
    */
   private isTimeout(ctx: ExecutionContext): boolean {
-    return Date.now() - ctx.startTime > this.config.timeoutMs;
+    return Date.now() - ctx.startTime > ctx.effectiveTimeoutMs;
   }
 
   /**

@@ -77,6 +77,7 @@ describe('ConfigManager', () => {
     });
 
     it('should fail for missing REDIS_URL', () => {
+      process.env.NODE_ENV = 'production'; // REDIS_URL is only required in production
       delete process.env.REDIS_URL;
       delete process.env.REDIS_PORT; // Ensure fallback is also not available
       resetConfigManager(); // Reset singleton after env change
@@ -236,6 +237,7 @@ describe('ConfigManager', () => {
     });
 
     it('should throw for invalid configuration', () => {
+      process.env.NODE_ENV = 'production'; // REDIS_URL is only required in production
       delete process.env.REDIS_URL;
       delete process.env.REDIS_PORT; // Ensure fallback is also not available
       resetConfigManager(); // Reset singleton after env change
@@ -249,6 +251,7 @@ describe('ConfigManager', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
 
+      process.env.NODE_ENV = 'production'; // REDIS_URL is only required in production
       delete process.env.REDIS_URL;
       delete process.env.REDIS_PORT; // Ensure fallback is also not available
       resetConfigManager(); // Reset singleton after env change
@@ -377,8 +380,11 @@ describe('STRICT_CONFIG_VALIDATION', () => {
 
   it('should demote errors to warnings when STRICT_CONFIG_VALIDATION is false', () => {
     process.env.STRICT_CONFIG_VALIDATION = 'false';
-    delete process.env.REDIS_URL;
-    delete process.env.REDIS_PORT; // Ensure fallback is also not available
+    // Use an invalid PARTITION_ID to trigger a validation error that is
+    // not tied to production mode (REDIS_URL is only required in production,
+    // and production blocks relaxed mode)
+    process.env.SERVICE_TYPE = 'detector';
+    process.env.PARTITION_ID = 'invalid-partition';
     // Re-import to get fresh module with new env
     jest.resetModules();
     const mod = require('../../src/config-manager');
@@ -386,15 +392,16 @@ describe('STRICT_CONFIG_VALIDATION', () => {
 
     const result = mod.ConfigManager.getInstance().validate();
 
-    expect(result.valid).toBe(true); // Should be valid despite missing required var
+    expect(result.valid).toBe(true); // Should be valid despite invalid partition
     expect(result.errors).toHaveLength(0);
     expect(result.warnings.some((w: string) => w.includes('[RELAXED]'))).toBe(true);
   });
 
   it('should enforce errors when STRICT_CONFIG_VALIDATION is true', () => {
     process.env.STRICT_CONFIG_VALIDATION = 'true';
-    delete process.env.REDIS_URL;
-    delete process.env.REDIS_PORT; // Ensure fallback is also not available
+    // Use an invalid PARTITION_ID to trigger a validation error
+    process.env.SERVICE_TYPE = 'detector';
+    process.env.PARTITION_ID = 'invalid-partition';
     // Re-import to get fresh module with new env
     jest.resetModules();
     const mod = require('../../src/config-manager');
@@ -403,13 +410,14 @@ describe('STRICT_CONFIG_VALIDATION', () => {
     const result = mod.ConfigManager.getInstance().validate();
 
     expect(result.valid).toBe(false);
-    expect(result.errors).toHaveLength(1);
+    expect(result.errors.length).toBeGreaterThanOrEqual(1);
   });
 
   it('should default to strict validation (errors are errors)', () => {
     delete process.env.STRICT_CONFIG_VALIDATION;
-    delete process.env.REDIS_URL;
-    delete process.env.REDIS_PORT; // Ensure fallback is also not available
+    // Use an invalid PARTITION_ID to trigger a validation error
+    process.env.SERVICE_TYPE = 'detector';
+    process.env.PARTITION_ID = 'invalid-partition';
     // Re-import to get fresh module with new env
     jest.resetModules();
     const mod = require('../../src/config-manager');

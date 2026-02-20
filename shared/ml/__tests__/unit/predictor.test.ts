@@ -18,16 +18,17 @@ import { jest } from '@jest/globals';
 // P0-3 fix: Use TF.js mock for CI — tests validate prediction logic, not TF.js itself.
 // When RUN_SLOW_TESTS=true, the mock is still used (real TF tests need a separate suite).
 import { createTfMock } from './__helpers__/tf-mock';
-const { mockTf } = createTfMock();
+const { mockTf, restoreMocks: restoreTfMocks, restoreLastModelMocks } = createTfMock();
 jest.mock('@tensorflow/tfjs', () => mockTf);
 
 // Also mock model-persistence to avoid file system operations during tests
+const mockPersistenceInstance = {
+  modelExists: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
+  loadModel: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+  saveModel: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+};
 jest.mock('../../src/model-persistence', () => ({
-  getModelPersistence: jest.fn(() => ({
-    modelExists: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
-    loadModel: jest.fn<() => Promise<null>>().mockResolvedValue(null),
-    saveModel: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  })),
+  getModelPersistence: jest.fn(() => mockPersistenceInstance),
   resetModelPersistence: jest.fn(),
 }));
 
@@ -100,9 +101,33 @@ jest.mock('@arbitrage/core', () => {
   };
 });
 
+/** Re-establish model-persistence mock implementations after resetMocks clears them */
+function restorePersistenceMocks() {
+  mockPersistenceInstance.modelExists.mockResolvedValue(false);
+  mockPersistenceInstance.loadModel.mockResolvedValue(null);
+  mockPersistenceInstance.saveModel.mockResolvedValue(undefined);
+  const { getModelPersistence } = require('../../src/model-persistence');
+  (getModelPersistence as jest.Mock).mockReturnValue(mockPersistenceInstance);
+}
+
+/** Re-establish @arbitrage/core mock implementations after resetMocks clears them */
+function restoreCoreMocks() {
+  const core = require('@arbitrage/core');
+  (core.createLogger as jest.Mock).mockReturnValue({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  });
+}
+
 describe('LSTMPredictor', () => {
   // Reset singletons before each test
   beforeEach(() => {
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    restorePersistenceMocks();
+    restoreCoreMocks();
     resetAllMLSingletons();
   });
 
@@ -157,6 +182,11 @@ describe('LSTMPredictor', () => {
       predictor = new LSTMPredictor();
       await predictor.waitForReady();
     }, 30000);
+
+    beforeEach(() => {
+      // Restore model mock implementations cleared by resetMocks
+      restoreLastModelMocks();
+    });
 
     afterAll(() => {
       predictor.dispose();
@@ -523,6 +553,10 @@ describe('PatternRecognizer', () => {
 
 describe('Singleton Factory Functions', () => {
   beforeEach(() => {
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    restorePersistenceMocks();
+    restoreCoreMocks();
     resetAllMLSingletons();
   });
 
@@ -588,6 +622,10 @@ describe('Singleton Factory Functions', () => {
 
 describe('Edge Cases and Error Handling', () => {
   beforeEach(() => {
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    restorePersistenceMocks();
+    restoreCoreMocks();
     resetAllMLSingletons();
   });
 

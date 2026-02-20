@@ -110,7 +110,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         ],
       };
 
-      const requests = (strategy as any).buildQuoteRequestsFromOpportunity(
+      const requests = (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
         nhopOpportunity,
         'ethereum'
       );
@@ -164,7 +164,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       };
 
       expect(() => {
-        (strategy as any).buildQuoteRequestsFromOpportunity(
+        (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
           invalidNHopOpp,
           'ethereum'
         );
@@ -192,7 +192,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       };
 
       expect(() => {
-        (strategy as any).buildQuoteRequestsFromOpportunity(
+        (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
           noRouterOpp,
           'ethereum'
         );
@@ -239,7 +239,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         timestamp: Date.now(),
       } as ArbitrageOpportunity;
 
-      const result = await (strategy as any).calculateExpectedProfitWithBatching(
+      const result = await (strategy as any).batchQuoteManager.calculateExpectedProfitWithBatching(
         mockOpportunity,
         'ethereum',
         mockContext
@@ -276,9 +276,9 @@ describe('FlashLoanStrategy - Edge Cases', () => {
 
       // Simulate concurrent calls (Promise.all with same chain)
       const calls = [
-        (strategy as any).getBatchQuoterService('ethereum', mockContext),
-        (strategy as any).getBatchQuoterService('ethereum', mockContext),
-        (strategy as any).getBatchQuoterService('ethereum', mockContext),
+        (strategy as any).batchQuoteManager.getBatchQuoterService('ethereum', mockContext),
+        (strategy as any).batchQuoteManager.getBatchQuoterService('ethereum', mockContext),
+        (strategy as any).batchQuoteManager.getBatchQuoterService('ethereum', mockContext),
       ];
 
       const results = await Promise.all(calls);
@@ -307,9 +307,9 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       mockContext.providers.set('arbitrum', mockProvider);
       mockContext.providers.set('base', mockProvider);
 
-      const ethQuoter = (strategy as any).getBatchQuoterService('ethereum', mockContext);
-      const arbQuoter = (strategy as any).getBatchQuoterService('arbitrum', mockContext);
-      const baseQuoter = (strategy as any).getBatchQuoterService('base', mockContext);
+      const ethQuoter = (strategy as any).batchQuoteManager.getBatchQuoterService('ethereum', mockContext);
+      const arbQuoter = (strategy as any).batchQuoteManager.getBatchQuoterService('arbitrum', mockContext);
+      const baseQuoter = (strategy as any).batchQuoteManager.getBatchQuoterService('base', mockContext);
 
       expect(ethQuoter).toBeDefined();
       expect(arbQuoter).toBeDefined();
@@ -331,11 +331,11 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       (createBatchQuoterForChain as jest.Mock).mockReturnValue(mockBatchQuoter);
 
       // Create quoter (will cache)
-      const quoter = (strategy as any).getBatchQuoterService('ethereum', mockContext);
+      const quoter = (strategy as any).batchQuoteManager.getBatchQuoterService('ethereum', mockContext);
       expect(quoter).toBeDefined();
 
       // Verify cached
-      const cachedQuoter = (strategy as any).getBatchQuoterService('ethereum', mockContext);
+      const cachedQuoter = (strategy as any).batchQuoteManager.getBatchQuoterService('ethereum', mockContext);
       expect(cachedQuoter).toBe(quoter);
 
       // Dispose
@@ -367,7 +367,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       } as ArbitrageOpportunity;
 
       expect(() => {
-        (strategy as any).buildQuoteRequestsFromOpportunity(
+        (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
           opportunityWithBadDex,
           'ethereum'
         );
@@ -391,7 +391,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
       } as ArbitrageOpportunity;
 
       expect(() => {
-        (strategy as any).buildQuoteRequestsFromOpportunity(
+        (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
           opportunityWithBadSellDex,
           'ethereum'
         );

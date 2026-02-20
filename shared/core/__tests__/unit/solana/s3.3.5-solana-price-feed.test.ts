@@ -108,6 +108,22 @@ const mockLogger = {
 };
 
 /**
+ * Create a mock Solana Connection object for testing.
+ * Prevents real network calls during unit tests.
+ */
+function createMockConnection(): Connection {
+  return {
+    getSlot: jest.fn<() => Promise<number>>().mockResolvedValue(123456),
+    onAccountChange: jest.fn().mockReturnValue(1),
+    removeAccountChangeListener: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    getAccountInfo: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+  } as unknown as Connection;
+}
+
+// Shared mock connection instance, re-created per test in beforeEach
+let mockConnection: Connection;
+
+/**
  * Create mock Raydium AMM state for testing buffer encoding.
  */
 function createMockRaydiumAmmState(overrides: Partial<TestEncodableAmmState> = {}): TestEncodableAmmState {
@@ -207,8 +223,8 @@ function encodeRaydiumAmmState(state: TestEncodableAmmState & {
   return buffer;
 }
 
-// Import PublicKey for buffer encoding
-import { PublicKey } from '@solana/web3.js';
+// Import PublicKey and Connection for buffer encoding and mock connection
+import { PublicKey, Connection } from '@solana/web3.js';
 
 /**
  * Encode Raydium CLMM state to Buffer matching real layout offsets.
@@ -376,6 +392,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockConnection = createMockConnection();
   });
 
   afterEach(async () => {
@@ -390,7 +407,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.1: Configuration', () => {
     it('should initialize with valid config', () => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
 
       expect(priceFeed).toBeDefined();
       expect(priceFeed.isRunning()).toBe(false);
@@ -398,19 +415,19 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
     it('should derive WebSocket URL from RPC URL if not provided', () => {
       const config = createTestConfig({ wsUrl: undefined });
-      priceFeed = new SolanaPriceFeed(config, { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(config, { logger: mockLogger, connection: mockConnection });
 
       expect(priceFeed).toBeDefined();
     });
 
     it('should use default values for optional config', () => {
-      priceFeed = new SolanaPriceFeed({ rpcUrl: TEST_RPC_URL }, { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed({ rpcUrl: TEST_RPC_URL }, { logger: mockLogger, connection: mockConnection });
 
       expect(priceFeed).toBeDefined();
     });
 
     it('should start and stop cleanly', async () => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
 
       await priceFeed.start();
       expect(priceFeed.isRunning()).toBe(true);
@@ -426,7 +443,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.2: Raydium AMM Price Parsing', () => {
     beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
     });
 
     it('should parse Raydium AMM pool state from account data', () => {
@@ -585,7 +602,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.3: Raydium CLMM Price Parsing', () => {
     beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
     });
 
     it('should parse Raydium CLMM pool state from account data', () => {
@@ -747,7 +764,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.4: Orca Whirlpool Price Parsing', () => {
     beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
     });
 
     it('should parse Orca Whirlpool state from account data', () => {
@@ -870,7 +887,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.5: Pool Subscriptions', () => {
     beforeEach(async () => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
       await priceFeed.start();
     });
 
@@ -899,7 +916,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.6: Real-time Price Updates', () => {
     beforeEach(async () => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
       await priceFeed.start();
     });
 
@@ -926,7 +943,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.7: Error Handling', () => {
     beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
     });
 
     it.todo('should handle RPC connection errors gracefully');
@@ -962,7 +979,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.9: Price Accuracy', () => {
     beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
     });
 
     it.todo('should calculate AMM price with <0.01% error');
@@ -987,7 +1004,7 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
 
   describe('S3.3.5.10: Performance', () => {
     beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger });
+      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
     });
 
     it.todo('should parse AMM state in <1ms');

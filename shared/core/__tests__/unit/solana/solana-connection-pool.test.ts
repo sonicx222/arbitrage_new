@@ -9,17 +9,14 @@ import { createSolanaConnectionPool, type SolanaConnectionPool } from '../../../
 import { createMockLogger, createMockLifecycle } from './solana-test-helpers';
 
 // Mock @solana/web3.js Connection
-const mockGetSlot = jest.fn().mockResolvedValue(200000000);
-const mockOnProgramAccountChange = jest.fn().mockReturnValue(1);
-const mockRemoveProgramAccountChangeListener = jest.fn().mockResolvedValue(undefined);
+// NOTE: Only register the mock shape here; implementations are re-established
+// in beforeEach to survive resetMocks: true from root jest config.
+const mockGetSlot = jest.fn();
+const mockOnProgramAccountChange = jest.fn();
+const mockRemoveProgramAccountChangeListener = jest.fn();
 
 jest.mock('@solana/web3.js', () => ({
-  Connection: jest.fn().mockImplementation(() => ({
-    getSlot: mockGetSlot,
-    onProgramAccountChange: mockOnProgramAccountChange,
-    removeProgramAccountChangeListener: mockRemoveProgramAccountChangeListener,
-    rpcEndpoint: 'https://api.mainnet-beta.solana.com'
-  }))
+  Connection: jest.fn()
 }));
 
 const { Connection: MockConnection } = require('@solana/web3.js');
@@ -41,7 +38,17 @@ describe('SolanaConnectionPool', () => {
     jest.useFakeTimers();
     logger = createMockLogger();
     lifecycle = createMockLifecycle();
+
+    // Re-establish mock implementations (resetMocks: true clears these between tests)
     mockGetSlot.mockResolvedValue(200000000);
+    mockOnProgramAccountChange.mockReturnValue(1);
+    mockRemoveProgramAccountChangeListener.mockResolvedValue(undefined);
+    MockConnection.mockImplementation(() => ({
+      getSlot: mockGetSlot,
+      onProgramAccountChange: mockOnProgramAccountChange,
+      removeProgramAccountChangeListener: mockRemoveProgramAccountChangeListener,
+      rpcEndpoint: 'https://api.mainnet-beta.solana.com'
+    }));
   });
 
   afterEach(() => {

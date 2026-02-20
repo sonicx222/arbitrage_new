@@ -125,6 +125,50 @@ function createMockModel() {
 type MockModel = ReturnType<typeof createMockModel>;
 
 /**
+ * Re-establishes mock implementations on an existing model object.
+ * This is needed when resetMocks clears jest.fn() implementations
+ * on models created in beforeAll blocks.
+ */
+function restoreModelMocks(model: MockModel, orderflowMode = false) {
+  const outputShape = orderflowMode ? [1, 6] : [1, 3];
+  model._setOutputShape(outputShape);
+
+  model.add.mockImplementation(() => {});
+  model.compile.mockImplementation(() => {});
+  model.predict.mockImplementation((input: MockTensor) => {
+    const batchSize = input.shape[0] ?? 1;
+
+    if (outputShape[1] === 6) {
+      const data: number[] = [];
+      for (let i = 0; i < batchSize; i++) {
+        data.push(0.8, 0.1, 0.1, 0.3, 0.2, 0.15);
+      }
+      return createMockTensor(data, [batchSize, 6]);
+    }
+
+    const data: number[] = [];
+    for (let i = 0; i < batchSize; i++) {
+      data.push(100.5, 0.75, 0.2);
+    }
+    return createMockTensor(data, [batchSize, 3]);
+  });
+  model.fit.mockImplementation(async (_x: MockTensor, _y: MockTensor, config?: any) => {
+    if (config?.callbacks?.onEpochEnd) {
+      const epochs = config.epochs ?? 1;
+      for (let i = 0; i < epochs; i++) {
+        await config.callbacks.onEpochEnd(i, { loss: 0.1 - i * 0.001, mae: 0.05, mse: 0.01 });
+      }
+    }
+    return { history: { loss: [0.1, 0.05, 0.01] } };
+  });
+  model.save.mockResolvedValue({ modelArtifactsInfo: { dateSaved: new Date() } });
+  model.dispose.mockImplementation(() => {});
+  model.getWeights.mockReturnValue([]);
+  model.setWeights.mockImplementation(() => {});
+  model.summary.mockImplementation(() => {});
+}
+
+/**
  * Builds the complete TF.js mock object.
  *
  * Usage in test files:
@@ -210,6 +254,65 @@ export function createTfMock() {
     LayersModel: class {},
   };
 
+  /**
+   * Re-establishes all mock implementations on mockTf after resetMocks/clearMocks.
+   * Call this in beforeEach to ensure mocks survive jest auto-clearing.
+   */
+  function restoreMocks() {
+    mockTf.sequential.mockImplementation(() => {
+      lastModel = createMockModel();
+      return lastModel;
+    });
+
+    mockTf.layers.lstm.mockImplementation((config: any) => ({
+      _type: 'lstm', ...config,
+    }));
+    mockTf.layers.dense.mockImplementation((config: any) => ({
+      _type: 'dense', ...config,
+    }));
+    mockTf.layers.batchNormalization.mockReturnValue({ _type: 'batchNorm' });
+    mockTf.layers.dropout.mockImplementation((config: any) => ({
+      _type: 'dropout', ...config,
+    }));
+
+    mockTf.train.adam.mockImplementation((lr = 0.001) => ({
+      _type: 'adam', learningRate: lr,
+    }));
+
+    mockTf.losses.huberLoss.mockImplementation(() => createMockTensor([0.01]));
+
+    mockTf.tensor.mockImplementation((data: any, shape?: number[]) => {
+      const flatData = Array.isArray(data) ? data.flat() : [data];
+      return createMockTensor(flatData, shape ?? [flatData.length]);
+    });
+
+    mockTf.tensor2d.mockImplementation((data: any, shape?: number[]) => {
+      const flatData = Array.isArray(data) ? data.flat() : [data];
+      const inferredShape = shape ?? (Array.isArray(data) ? [data.length, data[0]?.length ?? 1] : [1, 1]);
+      return createMockTensor(flatData, inferredShape);
+    });
+
+    mockTf.zeros.mockImplementation((shape: number[]) => {
+      const size = shape.reduce((a, b) => a * b, 1);
+      return createMockTensor(new Array(size).fill(0), shape);
+    });
+
+    mockTf.loadLayersModel.mockImplementation(async () => {
+      lastModel = createMockModel();
+      return lastModel;
+    });
+
+    mockTf.setBackend.mockResolvedValue(true);
+    mockTf.ready.mockResolvedValue(undefined);
+    mockTf.getBackend.mockReturnValue('cpu');
+    mockTf.memory.mockReturnValue({ numTensors: 0, numDataBuffers: 0, numBytes: 0 });
+    mockTf.disposeVariables.mockImplementation(() => {});
+    mockTf.tidy.mockImplementation((fn: () => unknown) => fn());
+    mockTf.engine.mockReturnValue({
+      state: { registeredVariables: {} },
+    });
+  }
+
   return {
     mockTf,
     /** Get the most recently created model for assertions */
@@ -226,5 +329,19 @@ export function createTfMock() {
     getActiveTensorCount: () => activeTensorCount,
     /** Reset tensor counter */
     resetTensorCount: () => { activeTensorCount = 0; },
+    /**
+     * Re-establish all mock implementations on mockTf after clearMocks/resetMocks.
+     * Call this in beforeEach to ensure mocks survive jest auto-clearing.
+     */
+    restoreMocks,
+    /**
+     * Re-establish mock implementations on the last created model.
+     * Use this in beforeEach for describe blocks that use beforeAll to create predictors.
+     */
+    restoreLastModelMocks: (orderflowMode = false) => {
+      if (lastModel) {
+        restoreModelMocks(lastModel, orderflowMode);
+      }
+    },
   };
 }

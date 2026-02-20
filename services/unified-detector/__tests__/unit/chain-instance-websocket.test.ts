@@ -34,7 +34,34 @@ const mockGetSubscriptionCount = jest.fn().mockReturnValue(3);
 const mockFactoryStop = jest.fn().mockResolvedValue(undefined);
 
 // Mock @arbitrage/core
-jest.mock('@arbitrage/core', () => ({
+jest.mock('@arbitrage/core', () => {
+  const MockRedisStreamsClient = jest.fn();
+  Object.defineProperty(MockRedisStreamsClient, 'STREAMS', {
+    value: {
+      PRICE_UPDATES: 'stream:price-updates',
+      SWAP_EVENTS: 'stream:swap-events',
+      OPPORTUNITIES: 'stream:opportunities',
+      WHALE_ALERTS: 'stream:whale-alerts',
+      SERVICE_HEALTH: 'stream:service-health',
+      SERVICE_EVENTS: 'stream:service-events',
+      COORDINATOR_EVENTS: 'stream:coordinator-events',
+      HEALTH: 'stream:health',
+      HEALTH_ALERTS: 'stream:health-alerts',
+      EXECUTION_REQUESTS: 'stream:execution-requests',
+      EXECUTION_RESULTS: 'stream:execution-results',
+      PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
+      VOLUME_AGGREGATES: 'stream:volume-aggregates',
+      CIRCUIT_BREAKER: 'stream:circuit-breaker',
+      SYSTEM_FAILOVER: 'stream:system-failover',
+      SYSTEM_COMMANDS: 'stream:system-commands',
+      DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
+      DLQ_ALERTS: 'stream:dlq-alerts',
+      FORWARDING_DLQ: 'stream:forwarding-dlq',
+    },
+    writable: false,
+    enumerable: true,
+  });
+  return {
   createLogger: jest.fn().mockReturnValue({
     info: jest.fn(),
     error: jest.fn(),
@@ -42,7 +69,7 @@ jest.mock('@arbitrage/core', () => ({
     debug: jest.fn(),
   }),
   PerformanceLogger: jest.fn(),
-  RedisStreamsClient: jest.fn(),
+  RedisStreamsClient: MockRedisStreamsClient,
   WebSocketManager: jest.fn().mockImplementation(() => new MockWebSocketManager()),
   WebSocketConfig: {},
   calculatePriceFromBigIntReserves: jest.fn().mockReturnValue(1500.5),
@@ -94,7 +121,8 @@ jest.mock('@arbitrage/core', () => ({
   bpsToDecimal: jest.fn().mockImplementation((bps: number) => bps / 10000),
   disconnectWithTimeout: jest.fn().mockResolvedValue(undefined),
   stopAndNullify: jest.fn().mockResolvedValue(null),
-}));
+};
+});
 
 // Mock @arbitrage/config
 jest.mock('@arbitrage/config', () => ({
@@ -224,6 +252,20 @@ function createMockStreamsClient() {
   return {
     xadd: jest.fn().mockResolvedValue('stream-id'),
     xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
+    createBatcher: jest.fn().mockReturnValue({
+      add: jest.fn(),
+      flush: jest.fn().mockResolvedValue(undefined),
+      destroy: jest.fn().mockResolvedValue(undefined),
+      getStats: jest.fn().mockReturnValue({
+        currentQueueSize: 0,
+        totalMessagesQueued: 0,
+        batchesSent: 0,
+        totalMessagesSent: 0,
+        compressionRatio: 1,
+        averageBatchSize: 0,
+        totalBatchFlushes: 0,
+      }),
+    }),
     STREAMS: { OPPORTUNITIES: 'stream:opportunities' },
   } as any;
 }

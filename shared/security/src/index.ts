@@ -21,4 +21,4 @@ export { RateLimiter, createApiRateLimiter, createArbitrageRateLimiter, createAu
 
 // Re-export types for convenience
 export type { User, AuthToken, LoginRequest, RegisterRequest, ApiKeyUser, ApiKeyEntry, AuthOptions } from './auth';
-export type { RateLimitInfo, RateLimitConfig } from './rate-limiter';
+export type { RateLimitInfo, RateLimitConfig, FailModeMetrics } from './rate-limiter';

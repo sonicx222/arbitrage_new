@@ -7,12 +7,18 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+
+jest.mock('../../src/logger');
+
 import {
   parseEnvInt,
   parseEnvIntSafe,
   parseEnvBool,
   getCrossRegionEnvConfig,
 } from '../../src/env-utils';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { __mockLogger } = require('../../src/logger') as { __mockLogger: { warn: jest.Mock } };
 
 const originalEnv = process.env;
 
@@ -119,25 +125,21 @@ describe('env-utils', () => {
     });
 
     it('returns default on invalid value and warns', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       process.env.TEST_SAMPLES = 'not_a_number';
       const result = parseEnvIntSafe('TEST_SAMPLES', 10);
       expect(result).toBe(10);
-      expect(warnSpy).toHaveBeenCalledWith(
+      expect(__mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid integer value for TEST_SAMPLES')
       );
-      warnSpy.mockRestore();
     });
 
     it('returns min when value is below minimum and warns', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       process.env.TEST_SAMPLES = '-5';
       const result = parseEnvIntSafe('TEST_SAMPLES', 10, 0);
       expect(result).toBe(0);
-      expect(warnSpy).toHaveBeenCalledWith(
+      expect(__mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('below minimum')
       );
-      warnSpy.mockRestore();
     });
 
     it('accepts value equal to min', () => {
@@ -146,14 +148,12 @@ describe('env-utils', () => {
     });
 
     it('uses default min of 0 when min not specified', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       process.env.TEST_SAMPLES = '-1';
       const result = parseEnvIntSafe('TEST_SAMPLES', 10);
       expect(result).toBe(0); // default min is 0
-      expect(warnSpy).toHaveBeenCalledWith(
+      expect(__mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('below minimum 0')
       );
-      warnSpy.mockRestore();
     });
 
     it('accepts zero when default min is 0', () => {

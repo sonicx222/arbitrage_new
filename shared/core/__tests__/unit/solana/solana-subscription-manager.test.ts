@@ -31,6 +31,15 @@ describe('SolanaSubscriptionManager', () => {
   const ORCA_PROGRAM = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
 
   beforeEach(() => {
+    // Re-establish PublicKey mock after resetMocks clears it
+    const { PublicKey: MockPublicKey } = require('@solana/web3.js');
+    MockPublicKey.mockImplementation((key: string) => {
+      if (!key || key.length < 32) {
+        throw new Error('Invalid public key input');
+      }
+      return { toBase58: () => key, toString: () => key };
+    });
+
     logger = createMockLogger();
     lifecycle = createMockLifecycle();
     mockConnection = createMockConnection();

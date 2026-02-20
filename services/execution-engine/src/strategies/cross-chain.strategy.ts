@@ -238,6 +238,46 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     }
   }
 
+  // =========================================================================
+  // Task 4.2: Cross-Chain Execution Audit Logging
+  // =========================================================================
+
+  /**
+   * Query native token balance for a wallet on a given chain.
+   * Returns balance as a human-readable ETH string, or 'unavailable' on failure.
+   * Non-blocking: errors are swallowed to avoid disrupting execution flow.
+   */
+  private async queryNativeBalance(
+    chain: string,
+    ctx: StrategyContext,
+  ): Promise<string> {
+    try {
+      const provider = ctx.providers.get(chain);
+      const wallet = ctx.wallets.get(chain);
+      if (!provider || !wallet) return 'unavailable';
+      const address = await wallet.getAddress();
+      const balance = await provider.getBalance(address);
+      return ethers.formatEther(balance);
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  /**
+   * Emit a structured audit log entry for cross-chain execution phases.
+   * All audit entries use the same prefix for easy grep/filtering.
+   */
+  private logCrossChainAudit(
+    phase: string,
+    opportunityId: string,
+    data: Record<string, unknown>,
+  ): void {
+    this.logger.info(`[CROSS_CHAIN_AUDIT] ${phase}`, {
+      opportunityId,
+      ...data,
+    });
+  }
+
   async execute(
     opportunity: ArbitrageOpportunity,
     ctx: StrategyContext
@@ -595,6 +635,18 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
       }
 
+      // Task 4.2: Audit log — capture source chain balance BEFORE bridge
+      const sourceBalanceBefore = await this.queryNativeBalance(sourceChain!, ctx);
+      this.logCrossChainAudit('PRE_BRIDGE', opportunity.id, {
+        sourceChain,
+        destChain,
+        sourceBalanceBefore,
+        bridgeToken,
+        bridgeAmount,
+        bridgeProtocol: bridgeRouter.protocol,
+        expectedProfit,
+      });
+
       // Step 3: Execute bridge
       //
       // Note (Issue 4.3): MEV protection is NOT applied to bridge transactions.
@@ -649,6 +701,17 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         sourceTxHash: bridgeResult.sourceTxHash,
       });
 
+      // Task 4.2: Audit log — capture source chain balance AFTER bridge submission
+      const sourceBalanceAfter = await this.queryNativeBalance(sourceChain!, ctx);
+      this.logCrossChainAudit('POST_BRIDGE_SUBMIT', opportunity.id, {
+        sourceChain,
+        sourceTxHash: bridgeResult.sourceTxHash,
+        bridgeId: bridgeResult.bridgeId,
+        sourceBalanceBefore,
+        sourceBalanceAfter,
+        gasUsed: bridgeResult.gasUsed?.toString(),
+      });
+
       // Step 4: Wait for bridge completion
       // Refactor 9.3: Extracted polling logic to separate method for readability
       const bridgeId = bridgeResult.bridgeId!;
@@ -693,6 +756,17 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           bridgeResult.sourceTxHash
         );
       }
+
+      // Task 4.2: Audit log — capture destination chain balance AFTER bridge completion
+      const destBalanceAfterBridge = await this.queryNativeBalance(destChain!, ctx);
+      this.logCrossChainAudit('BRIDGE_COMPLETED', opportunity.id, {
+        sourceChain,
+        destChain,
+        sourceTxHash: bridgeResult.sourceTxHash,
+        destTxHash: pollingResult.destTxHash,
+        bridgedAmountReceived,
+        destBalanceAfterBridge,
+      });
 
       // Step 5: Validate destination chain context using helper (Fix 6.2 & 9.1)
       const destValidation = this.validateContext(destChain, ctx);
@@ -1049,6 +1123,16 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (ctx.nonceManager && sellNonce !== undefined && sellTxHash) {
         ctx.nonceManager.confirmTransaction(destChain, sellNonce, sellTxHash);
       }
+
+      // Task 4.2: Audit log — destination balance AFTER sell execution
+      const destBalanceAfterSell = await this.queryNativeBalance(destChain, ctx);
+      this.logCrossChainAudit('POST_SELL', opportunity.id, {
+        destChain,
+        sellTxHash,
+        destBalanceAfterSell,
+        sellGasUsed: sellReceipt?.gasUsed?.toString(),
+        usedMevProtection,
+      });
     } catch (sellError) {
       if (ctx.nonceManager && sellNonce !== undefined) {
         ctx.nonceManager.failTransaction(destChain, sellNonce, getErrorMessage(sellError));
@@ -1140,6 +1224,24 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     const totalGasCostUsd = bridgeGasCostUsd + sellGasCostUsd;
     const actualProfit = expectedProfit - bridgeFeeUsd - totalGasCostUsd;
+
+    // Task 4.2: Audit log — final execution summary with profit breakdown
+    this.logCrossChainAudit('EXECUTION_COMPLETE', opportunity.id, {
+      sourceChain,
+      destChain,
+      sourceTxHash: bridgeResult.sourceTxHash,
+      sellTxHash,
+      bridgeFeeEth,
+      bridgeFeeUsd,
+      bridgeGasCostUsd,
+      sellGasCostUsd,
+      totalGasCostUsd,
+      expectedProfit,
+      actualProfit,
+      executionTimeMs,
+      sellExecutionMethod: usedDestFlashLoan ? 'flash_loan' : 'direct_swap',
+      usedMevProtection,
+    });
 
     this.logger.info('Cross-chain arbitrage completed', {
       opportunityId: opportunity.id,

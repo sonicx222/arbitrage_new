@@ -189,6 +189,36 @@ export class TradeLogger {
     return this.config.enabled;
   }
 
+  /**
+   * Validate that the trade log directory is writable.
+   *
+   * Performs a write+read+delete cycle to verify the output directory is
+   * accessible. Should be called during service startup to fail fast
+   * rather than silently losing trade data in production.
+   *
+   * @throws Error if the directory is not writable
+   */
+  async validateLogDir(): Promise<void> {
+    if (!this.config.enabled) return;
+
+    const testFile = path.join(this.config.outputDir, '.write-test');
+    try {
+      await fsp.mkdir(this.config.outputDir, { recursive: true });
+      await fsp.writeFile(testFile, 'ok', 'utf8');
+      const content = await fsp.readFile(testFile, 'utf8');
+      if (content !== 'ok') {
+        throw new Error('Read-back verification failed');
+      }
+      await fsp.unlink(testFile);
+      this.dirEnsured = true;
+      this.logger.info('Trade log directory validated', { outputDir: this.config.outputDir });
+    } catch (error) {
+      const msg = `Trade log directory not writable: ${this.config.outputDir} — ${error instanceof Error ? error.message : String(error)}`;
+      this.logger.error(msg);
+      throw new Error(msg);
+    }
+  }
+
   // ===========================================================================
   // Private Helpers
   // ===========================================================================

@@ -107,7 +107,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       });
 
       // Execute
-      const result = await (strategy as any).calculateExpectedProfitWithBatching(
+      const result = await (strategy as any).batchQuoteManager.calculateExpectedProfitWithBatching(
         mockOpportunity,
         'ethereum',
         mockContext
@@ -141,12 +141,12 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       });
 
       const getBatchQuoterSpy = jest.spyOn(
-        strategy as any,
-        'getBatchQuoterService'
+        (strategy as any).batchQuoteManager,
+        'getBatchQuoterService' as any
       );
 
       // Execute
-      const result = await (strategy as any).calculateExpectedProfitWithBatching(
+      const result = await (strategy as any).batchQuoteManager.calculateExpectedProfitWithBatching(
         mockOpportunity,
         'ethereum',
         mockContext
@@ -179,7 +179,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       (createBatchQuoterForChain as jest.Mock).mockReturnValue(mockBatchQuoter);
 
       // Execute
-      const result = await (strategy as any).calculateExpectedProfitWithBatching(
+      const result = await (strategy as any).batchQuoteManager.calculateExpectedProfitWithBatching(
         mockOpportunity,
         'ethereum',
         mockContext
@@ -229,7 +229,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       });
 
       // Execute
-      const result = await (strategy as any).calculateExpectedProfitWithBatching(
+      const result = await (strategy as any).batchQuoteManager.calculateExpectedProfitWithBatching(
         mockOpportunity,
         'ethereum',
         mockContext
@@ -270,7 +270,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       });
 
       // Execute
-      const result = await (strategy as any).calculateExpectedProfitWithBatching(
+      const result = await (strategy as any).batchQuoteManager.calculateExpectedProfitWithBatching(
         mockOpportunity,
         'ethereum',
         mockContext
@@ -291,7 +291,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
 
   describe('getBatchQuoterService', () => {
     it('should return undefined when provider not available', () => {
-      const result = (strategy as any).getBatchQuoterService(
+      const result = (strategy as any).batchQuoteManager.getBatchQuoterService(
         'nonexistent-chain',
         mockContext
       );
@@ -303,7 +303,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       const { hasMultiPathQuoter } = require('@arbitrage/config');
       (hasMultiPathQuoter as jest.Mock).mockReturnValue(false);
 
-      const result = (strategy as any).getBatchQuoterService(
+      const result = (strategy as any).batchQuoteManager.getBatchQuoterService(
         'ethereum',
         mockContext
       );
@@ -323,13 +323,13 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       (createBatchQuoterForChain as jest.Mock).mockReturnValue(mockBatchQuoter);
 
       // First call
-      const result1 = (strategy as any).getBatchQuoterService(
+      const result1 = (strategy as any).batchQuoteManager.getBatchQuoterService(
         'ethereum',
         mockContext
       );
 
       // Second call (should use cache)
-      const result2 = (strategy as any).getBatchQuoterService(
+      const result2 = (strategy as any).batchQuoteManager.getBatchQuoterService(
         'ethereum',
         mockContext
       );
@@ -345,7 +345,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
 
   describe('buildQuoteRequestsFromOpportunity', () => {
     it('should build 2-hop quote requests', () => {
-      const requests = (strategy as any).buildQuoteRequestsFromOpportunity(
+      const requests = (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
         mockOpportunity,
         'ethereum'
       );
@@ -372,7 +372,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       };
 
       expect(() => {
-        (strategy as any).buildQuoteRequestsFromOpportunity(
+        (strategy as any).batchQuoteManager.buildQuoteRequestsFromOpportunity(
           invalidOpportunity,
           'ethereum'
         );

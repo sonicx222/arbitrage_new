@@ -29,12 +29,28 @@ export interface RateLimitInfo {
   exceeded: boolean;
 }
 
+/**
+ * Fail-mode metrics for monitoring rate limiter behavior under Redis failures.
+ * Queryable via RateLimiter.getFailModeMetrics().
+ *
+ * @see Task 2.4: FailOpen/FailClosed audit
+ */
+export interface FailModeMetrics {
+  /** Times rate limiter failed OPEN (allowed request despite Redis being down) */
+  failOpenCount: number;
+  /** Times rate limiter failed CLOSED (denied request because Redis is down) */
+  failClosedCount: number;
+}
+
 export class RateLimiter {
   // P0-3 FIX: Properly typed Redis client with async initialization
   private redis: RedisClient | null = null;
   private redisPromise: Promise<RedisClient> | null = null;
   private config: RateLimitConfig;
   private keyPrefix: string;
+  // Task 2.4: Fail-mode tracking counters
+  private failOpenCount = 0;
+  private failClosedCount = 0;
 
   constructor(config: RateLimitConfig) {
     this.config = {
@@ -162,7 +178,8 @@ export class RateLimiter {
       // Default: fail CLOSED (deny requests) for security
       // Set failOpen: true for non-critical endpoints where availability > security
       if (config.failOpen) {
-        logger.warn('Rate limiter failing OPEN - allowing request (Redis unavailable)', { identifier });
+        this.failOpenCount++;
+        logger.warn('Rate limiter failing OPEN - allowing request (Redis unavailable)', { identifier, failOpenCount: this.failOpenCount });
         return {
           remaining: config.maxRequests,
           resetTime: now + config.windowMs,
@@ -171,6 +188,7 @@ export class RateLimiter {
         };
       }
       // Fail CLOSED: deny request when rate limiting is unavailable
+      this.failClosedCount++;
       return {
         remaining: 0,
         resetTime: now + config.windowMs,
@@ -178,6 +196,11 @@ export class RateLimiter {
         exceeded: true
       };
     }
+  }
+
+  /** Get fail-mode metrics for monitoring. @see Task 2.4 */
+  getFailModeMetrics(): FailModeMetrics {
+    return { failOpenCount: this.failOpenCount, failClosedCount: this.failClosedCount };
   }
 
   async resetLimit(identifier: string): Promise<void> {

@@ -22,7 +22,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 
 // P0-3 fix: Use TF.js mock for CI — tests validate prediction logic, not TF.js itself.
 import { createTfMock } from './__helpers__/tf-mock';
-const { mockTf, setOrderflowMode } = createTfMock();
+const { mockTf, setOrderflowMode, restoreMocks: restoreTfMocks, restoreLastModelMocks } = createTfMock();
 setOrderflowMode(); // Configure mock for 6-output orderflow model
 jest.mock('@tensorflow/tfjs', () => mockTf);
 
@@ -183,9 +183,23 @@ function generateTrainingSamples(count: number): OrderflowTrainingSample[] {
 // OrderflowPredictor Tests
 // =============================================================================
 
+/** Re-establish @arbitrage/core mock implementations after resetMocks clears them */
+function restoreCoreMocks() {
+  const core = require('@arbitrage/core');
+  (core.createLogger as jest.Mock).mockReturnValue({
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn()
+  });
+}
+
 describe('OrderflowPredictor', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    setOrderflowMode();
+    restoreCoreMocks();
     // Re-setup whale tracker mock after clearAllMocks
     mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
     resetOrderflowPredictor();
@@ -254,6 +268,11 @@ describe('OrderflowPredictor', () => {
       predictor = new OrderflowPredictor();
       await predictor.waitForReady();
     }, 30000);
+
+    beforeEach(() => {
+      // Restore model mock implementations cleared by resetMocks
+      restoreLastModelMocks(true);
+    });
 
     afterAll(() => {
       predictor.dispose();
@@ -416,6 +435,11 @@ describe('OrderflowPredictor', () => {
       const samples = generateTrainingSamples(100);
       await predictor.train(samples);
     }, 60000);
+
+    beforeEach(() => {
+      // Restore model mock implementations cleared by resetMocks
+      restoreLastModelMocks(true);
+    });
 
     afterAll(() => {
       predictor.dispose();
@@ -684,6 +708,11 @@ describe('OrderflowPredictor', () => {
       await predictor.waitForReady();
     }, 30000);
 
+    beforeEach(() => {
+      // Restore model mock implementations cleared by resetMocks
+      restoreLastModelMocks(true);
+    });
+
     afterAll(() => {
       predictor.dispose();
     });
@@ -780,6 +809,11 @@ describe('OrderflowPredictor', () => {
       await predictor.waitForReady();
     }, 30000);
 
+    beforeEach(() => {
+      // Restore model mock implementations cleared by resetMocks
+      restoreLastModelMocks(true);
+    });
+
     afterAll(() => {
       predictor.dispose();
     });
@@ -825,7 +859,10 @@ describe('OrderflowPredictor', () => {
 
 describe('Singleton Factory', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    setOrderflowMode();
+    restoreCoreMocks();
     // Re-setup whale tracker mock after clearAllMocks
     mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
     resetOrderflowPredictor();
@@ -884,7 +921,10 @@ describe('Singleton Factory', () => {
 
 describe('Integration with OrderflowFeatureExtractor', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    setOrderflowMode();
+    restoreCoreMocks();
     // Re-setup whale tracker mock after clearAllMocks
     mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
     resetOrderflowPredictor();
@@ -961,7 +1001,10 @@ describe('Training Data Preparation', () => {
   let predictor: OrderflowPredictor;
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    setOrderflowMode();
+    restoreCoreMocks();
     // Re-setup whale tracker mock after clearAllMocks
     mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
     resetOrderflowPredictor();
@@ -1050,7 +1093,10 @@ describe('predictBatch', () => {
   let predictor: OrderflowPredictor;
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    // Re-establish all mock implementations after resetMocks clears them
+    restoreTfMocks();
+    setOrderflowMode();
+    restoreCoreMocks();
     mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
     resetOrderflowPredictor();
     resetOrderflowFeatureExtractor();

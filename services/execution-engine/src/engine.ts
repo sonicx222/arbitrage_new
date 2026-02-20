@@ -145,6 +145,12 @@ import {
   type VariantAssignment,
   type ExperimentSummary,
 } from './ab-testing';
+// Task 4.1: Per-Chain Balance Monitor
+import {
+  BalanceMonitor,
+  createBalanceMonitor,
+  type BalanceSnapshot,
+} from './services/balance-monitor';
 
 // Re-export types for consumers
 export type {
@@ -263,6 +269,9 @@ export class ExecutionEngineService {
 
   // T-13: Bridge recovery manager for cross-chain failure recovery
   private bridgeRecoveryManager: BridgeRecoveryManager | null = null;
+
+  // Task 4.1: Per-chain balance monitor
+  private balanceMonitor: BalanceMonitor | null = null;
 
   // P0 Refactoring: Health monitoring extracted to dedicated manager
   // Handles non-hot-path interval operations (health checks, gas cleanup, pending cleanup)
@@ -540,6 +549,11 @@ export class ExecutionEngineService {
       });
       this.cbManager.initialize();
 
+      // Task 2.3: Validate trade log directory is writable at startup
+      if (this.tradeLogger) {
+        await this.tradeLogger.validateLogDir();
+      }
+
       // FIX 1.1: Use initialization module for risk management
       // Initialize capital risk management (Phase 3: Task 3.4.5)
       const riskResult = initializeRiskManagement(this.logger, { skipValidation: false });
@@ -611,6 +625,21 @@ export class ExecutionEngineService {
         if (recoveredCount > 0) {
           this.logger.info('Bridge recovery found pending bridges on startup', { count: recoveredCount });
         }
+      }
+
+      // Task 4.1: Start per-chain balance monitor (monitoring only, non-blocking)
+      if (!this.isSimulationMode && this.providerService) {
+        this.balanceMonitor = createBalanceMonitor({
+          logger: this.logger,
+          getProviders: () => this.providerService?.getProviders() ?? new Map(),
+          getWallets: () => this.providerService?.getWallets() ?? new Map(),
+          config: {
+            enabled: process.env.BALANCE_MONITOR_ENABLED !== 'false',
+            checkIntervalMs: parseEnvInt('BALANCE_MONITOR_INTERVAL_MS', 60000, 5000),
+            lowBalanceThresholdEth: parseFloat(process.env.BALANCE_MONITOR_LOW_THRESHOLD_ETH ?? '0.01'),
+          },
+        });
+        await this.balanceMonitor.start();
       }
 
       // S6: Initialize standby manager (delegates activate/standby state)
@@ -696,6 +725,12 @@ export class ExecutionEngineService {
 
       // T-13: Stop bridge recovery manager
       this.bridgeRecoveryManager = await stopAndNullify(this.bridgeRecoveryManager);
+
+      // Task 4.1: Stop balance monitor
+      if (this.balanceMonitor) {
+        this.balanceMonitor.stop();
+        this.balanceMonitor = null;
+      }
 
       // P0 Refactoring: Stop health monitoring manager
       this.healthMonitoringManager = await stopAndNullify(this.healthMonitoringManager);
@@ -966,35 +1001,18 @@ export class ExecutionEngineService {
     this.isProcessingQueue = true;
 
     try {
-      // Finding #7: Get CB reference once per processing cycle (O(1) — manager returns direct ref)
-      const circuitBreaker = this.cbManager?.getCircuitBreaker() ?? null;
-
       // Process multiple items if under concurrency limit
       while (
         this.queueService.size() > 0 &&
         this.activeExecutionCount < this.maxConcurrentExecutions
       ) {
-        // Fix 5.1: Check circuit breaker state BEFORE dequeue to avoid blocking
-        // For OPEN state, we can skip without side effects
-        if (circuitBreaker) {
-          const cbState = circuitBreaker.getState();
-          if (cbState === 'OPEN') {
-            // Circuit is fully open - block all executions
-            // NOTE: Per-block debug logging removed - tracked via stats.circuitBreakerBlocks
-            if (this.queueService.size() > 0) {
-              this.stats.circuitBreakerBlocks++;
-            }
-            break;
-          }
-        }
-
-        // Dequeue first, then check if we can actually execute
+        // Dequeue first, then check per-chain circuit breaker
         const opportunity = this.queueService.dequeue();
         if (!opportunity) break;
 
-        // Fix 5.1: Check canExecute() AFTER successful dequeue to avoid wasting
-        // HALF_OPEN attempts on empty queue race conditions
-        if (circuitBreaker && !circuitBreaker.canExecute()) {
+        // Task 1.1: Per-chain circuit breaker check — only blocks the affected chain
+        const oppChain = opportunity.buyChain || 'unknown';
+        if (this.cbManager && !this.cbManager.canExecute(oppChain)) {
           // FIX 5: Track re-enqueue count to prevent infinite dequeue/re-enqueue loop
           // when circuit breaker is in HALF_OPEN state. Without this limit, the
           // setImmediate in .finally() triggers processQueueItems() again, creating
@@ -1386,12 +1404,12 @@ export class ExecutionEngineService {
 
       if (result.success) {
         this.stats.successfulExecutions++;
-        // Record success with circuit breaker (resets consecutive failures)
-        this.cbManager?.getCircuitBreaker()?.recordSuccess();
+        // Task 1.1: Record success on chain-specific circuit breaker
+        this.cbManager?.recordSuccess(chain);
       } else {
         this.stats.failedExecutions++;
-        // Record failure with circuit breaker (may trip circuit)
-        this.cbManager?.getCircuitBreaker()?.recordFailure();
+        // Task 1.1: Record failure on chain-specific circuit breaker
+        this.cbManager?.recordFailure(chain);
       }
 
       this.perfLogger.logEventLatency('opportunity_execution', latencyMs, {
@@ -1401,8 +1419,8 @@ export class ExecutionEngineService {
 
     } catch (error) {
       this.stats.failedExecutions++;
-      // Record failure with circuit breaker (may trip circuit)
-      this.cbManager?.getCircuitBreaker()?.recordFailure();
+      // Task 1.1: Record failure on chain-specific circuit breaker
+      this.cbManager?.recordFailure(chain);
 
       // Record failure to risk management
       // R2: Use orchestrator when available for consistency
@@ -1580,6 +1598,18 @@ export class ExecutionEngineService {
    */
   isBridgeRecoveryRunning(): boolean {
     return this.bridgeRecoveryManager?.getIsRunning() ?? false;
+  }
+
+  // ===========================================================================
+  // Task 4.1: Balance Monitor Getters
+  // ===========================================================================
+
+  /**
+   * Get per-chain balance snapshot for health endpoints.
+   * Returns null if balance monitor is not initialized.
+   */
+  getBalanceSnapshot(): BalanceSnapshot | null {
+    return this.balanceMonitor?.getSnapshot() ?? null;
   }
 
   // S6: Standby getters delegated to StandbyManager

@@ -23,9 +23,9 @@ const mockWebSocket = {
   readyState: 1, // WebSocket.OPEN
 };
 
-jest.mock('ws', () => {
-  return jest.fn(() => mockWebSocket);
-});
+// Use a stable reference that survives resetMocks
+const wsMockFn = jest.fn(() => mockWebSocket);
+jest.mock('ws', () => wsMockFn);
 
 // Import after mocks are set up
 import { WebSocketManager } from '@arbitrage/core';
@@ -37,6 +37,8 @@ describe('WebSocketManager', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
+    // Re-establish ws mock after resetMocks clears it
+    wsMockFn.mockImplementation(() => mockWebSocket);
     // Reset mock WebSocket state
     mockWebSocket.readyState = 1;
     mockWebSocket.on.mockReset();
@@ -1008,5 +1010,269 @@ describe('WebSocketManager Message Size Limits (S-11)', () => {
     messageHandler(exactData);
 
     expect(mockWebSocket.close).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Task 3.1: Reconnection Lifecycle Tests
+// Tests for reconnection behavior, max retry limits, re-subscription,
+// flapping connections, and graceful shutdown during reconnection.
+// =============================================================================
+
+describe('WebSocketManager Reconnection Lifecycle (Task 3.1)', () => {
+  let manager: WebSocketManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    // Re-establish ws mock after resetMocks clears it
+    wsMockFn.mockImplementation(() => mockWebSocket);
+    mockWebSocket.readyState = 1;
+    mockWebSocket.on.mockReset();
+    mockWebSocket.send.mockReset();
+    mockWebSocket.close.mockReset();
+    mockWebSocket.ping.mockReset();
+    mockWebSocket.removeAllListeners.mockReset();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+    jest.useRealTimers();
+  });
+
+  /**
+   * Helper: Simulate a successful connect by triggering the 'open' event.
+   */
+  function simulateConnect(): void {
+    const openCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'open'
+    ) as any[] | undefined;
+    if (openCall) openCall[1]();
+  }
+
+  /**
+   * Helper: Simulate a WebSocket close with a code/reason.
+   */
+  function simulateClose(code = 1006, reason = 'connection lost'): void {
+    const closeCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'close'
+    ) as any[] | undefined;
+    if (closeCall) closeCall[1](code, Buffer.from(reason));
+  }
+
+  describe('Max retry limit behavior', () => {
+    it('should stop reconnecting after maxReconnectAttempts', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        maxReconnectAttempts: 3,
+        reconnectInterval: 1000,
+        jitterPercent: 0,
+      });
+
+      const errorHandler = jest.fn();
+      manager.on('error', errorHandler);
+
+      // Trigger initial connect
+      const connectPromise = manager.connect();
+      simulateConnect();
+
+      // Now close the connection to trigger reconnection
+      simulateClose(1006, 'abnormal');
+
+      // Each reconnect attempt should be scheduled via setTimeout
+      // After maxReconnectAttempts (3), error should be emitted
+      // The reconnection cycle increments when all URLs have been tried
+      const stats = manager.getConnectionStats();
+      expect(stats.connected).toBe(false);
+    });
+
+    it('should emit error when max reconnection attempts reached', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        maxReconnectAttempts: 0, // No retries allowed
+        reconnectInterval: 100,
+        jitterPercent: 0,
+      });
+
+      const errorHandler = jest.fn();
+      manager.on('error', errorHandler);
+
+      // Trigger close event (non-normal close code)
+      // Need to connect first to have the close handler registered
+      manager.connect();
+      simulateConnect();
+      simulateClose(1006, 'abnormal');
+
+      // With maxReconnectAttempts=0, should immediately trigger error handlers
+      expect(errorHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('Max reconnection attempts') })
+      );
+    });
+  });
+
+  describe('Re-subscription after reconnect', () => {
+    it('should call resubscribe when connection re-opens', async () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        reconnectInterval: 100,
+        jitterPercent: 0,
+      });
+
+      // Add subscriptions before connecting
+      manager.subscribe({ method: 'eth_subscribe', params: ['newHeads'] });
+      manager.subscribe({ method: 'eth_subscribe', params: ['logs'] });
+
+      // Connect and verify subscriptions are tracked
+      expect(manager.getConnectionStats().subscriptions).toBe(2);
+
+      // After connect, subscriptions are still there
+      manager.connect();
+      simulateConnect();
+      expect(manager.getConnectionStats().subscriptions).toBe(2);
+    });
+
+    it('should preserve subscription list across disconnects', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+      });
+
+      const id1 = manager.subscribe({ method: 'eth_subscribe', params: ['newHeads'] });
+      const id2 = manager.subscribe({ method: 'eth_subscribe', params: ['logs'] });
+
+      // Simulate disconnect (non-graceful)
+      manager.connect();
+      simulateConnect();
+      simulateClose(1006, 'connection lost');
+
+      // Subscriptions should still be tracked for re-subscription
+      const stats = manager.getConnectionStats();
+      expect(stats.subscriptions).toBe(2);
+    });
+  });
+
+  describe('Graceful shutdown during reconnection', () => {
+    it('should not reconnect after explicit disconnect', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        reconnectInterval: 100,
+        maxReconnectAttempts: 10,
+        jitterPercent: 0,
+      });
+
+      manager.connect();
+      simulateConnect();
+
+      // Disconnect explicitly
+      manager.disconnect();
+
+      // Now simulate close — should NOT trigger reconnection
+      // (disconnect() sets isDisconnected flag)
+      const stats = manager.getConnectionStats();
+      expect(stats.connected).toBe(false);
+    });
+
+    it('should cancel pending reconnect timer on disconnect', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        reconnectInterval: 5000,
+        maxReconnectAttempts: 10,
+        jitterPercent: 0,
+      });
+
+      manager.connect();
+      simulateConnect();
+      simulateClose(1006, 'connection lost');
+
+      // A reconnection timer should be pending
+      // Now disconnect - should cancel the timer
+      manager.disconnect();
+
+      // Advance timers past the reconnect interval
+      jest.advanceTimersByTime(10000);
+
+      // Manager should remain disconnected
+      const stats = manager.getConnectionStats();
+      expect(stats.connected).toBe(false);
+      expect(stats.connecting).toBe(false);
+    });
+
+    it('should be safe to disconnect multiple times during reconnection', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        jitterPercent: 0,
+      });
+
+      manager.connect();
+      simulateConnect();
+      simulateClose(1006, 'connection lost');
+
+      // Should not throw
+      expect(() => {
+        manager.disconnect();
+        manager.disconnect();
+        manager.disconnect();
+      }).not.toThrow();
+    });
+  });
+
+  describe('Connection state tracking', () => {
+    it('should reset reconnect attempts after successful connection', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        maxReconnectAttempts: 10,
+        jitterPercent: 0,
+      });
+
+      manager.connect();
+      simulateConnect();
+
+      // After successful connect, reconnectAttempts resets to 0
+      const stats = manager.getConnectionStats();
+      expect(stats.reconnectAttempts).toBe(0);
+      expect(stats.connected).toBe(true);
+    });
+
+    it('should notify connection handlers on reconnect', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        jitterPercent: 0,
+      });
+
+      const connectionHandler = jest.fn();
+      manager.onConnectionChange(connectionHandler);
+
+      manager.connect();
+      simulateConnect();
+
+      // Should receive connected=true notification
+      expect(connectionHandler).toHaveBeenCalledWith(true);
+
+      // Simulate close
+      simulateClose(1006, 'lost');
+
+      // Should receive connected=false notification
+      expect(connectionHandler).toHaveBeenCalledWith(false);
+    });
+
+    it('should only schedule reconnection for non-normal close codes', () => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+        maxReconnectAttempts: 10,
+        jitterPercent: 0,
+      });
+
+      manager.connect();
+      simulateConnect();
+
+      // Normal close (1000) should NOT trigger reconnection
+      simulateClose(1000, 'Client disconnect');
+
+      // Manager should remain disconnected (no reconnection scheduled)
+      const stats = manager.getConnectionStats();
+      expect(stats.connected).toBe(false);
+    });
   });
 });

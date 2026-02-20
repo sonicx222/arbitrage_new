@@ -1,7 +1,7 @@
 /**
  * Tests for Circuit Breaker Manager
  *
- * Verifies circuit breaker lifecycle, event handling, and public API.
+ * Verifies per-chain circuit breaker lifecycle, event handling, and public API.
  */
 
 import {
@@ -18,19 +18,31 @@ const mockCircuitBreaker = {
   getStatus: jest.fn().mockReturnValue({ state: 'CLOSED', consecutiveFailures: 0 }),
   isOpen: jest.fn().mockReturnValue(false),
   canExecute: jest.fn().mockReturnValue(true),
+  isEnabled: jest.fn().mockReturnValue(true),
   recordSuccess: jest.fn(),
   recordFailure: jest.fn(),
+  getConsecutiveFailures: jest.fn().mockReturnValue(0),
+  getCooldownRemaining: jest.fn().mockReturnValue(0),
+  getMetrics: jest.fn().mockReturnValue({}),
+  getConfig: jest.fn().mockReturnValue({}),
   forceClose: jest.fn(),
   forceOpen: jest.fn(),
+  enable: jest.fn(),
+  disable: jest.fn(),
   stop: jest.fn(),
 };
 
-let capturedOnStateChange: ((event: any) => void) | undefined;
+const capturedCallbacks: Map<string, (event: any) => void> = new Map();
+let createCallCount = 0;
 
 jest.mock('../../../src/services/circuit-breaker', () => ({
   createCircuitBreaker: jest.fn().mockImplementation((opts) => {
-    capturedOnStateChange = opts.onStateChange;
-    return mockCircuitBreaker;
+    createCallCount++;
+    // Return a fresh mock for each chain
+    const breaker = { ...mockCircuitBreaker };
+    // Store the callback keyed by call count (chain breakers are created lazily)
+    capturedCallbacks.set(`cb-${createCallCount}`, opts.onStateChange);
+    return breaker;
   }),
 }));
 
@@ -44,12 +56,32 @@ describe('CircuitBreakerManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    capturedOnStateChange = undefined;
+    capturedCallbacks.clear();
+    createCallCount = 0;
 
     // Re-set mock implementations after clearAllMocks
     (createCircuitBreaker as jest.Mock).mockImplementation((opts: any) => {
-      capturedOnStateChange = opts.onStateChange;
-      return mockCircuitBreaker;
+      createCallCount++;
+      const breaker = {
+        getState: jest.fn().mockReturnValue('CLOSED'),
+        getStatus: jest.fn().mockReturnValue({ state: 'CLOSED', consecutiveFailures: 0 }),
+        isOpen: jest.fn().mockReturnValue(false),
+        canExecute: jest.fn().mockReturnValue(true),
+        isEnabled: jest.fn().mockReturnValue(true),
+        recordSuccess: jest.fn(),
+        recordFailure: jest.fn(),
+        getConsecutiveFailures: jest.fn().mockReturnValue(0),
+        getCooldownRemaining: jest.fn().mockReturnValue(0),
+        getMetrics: jest.fn().mockReturnValue({}),
+        getConfig: jest.fn().mockReturnValue({}),
+        forceClose: jest.fn(),
+        forceOpen: jest.fn(),
+        enable: jest.fn(),
+        disable: jest.fn(),
+        stop: jest.fn(),
+      };
+      capturedCallbacks.set(`cb-${createCallCount}`, opts.onStateChange);
+      return breaker;
     });
 
     mockLogger = {
@@ -71,12 +103,6 @@ describe('CircuitBreakerManager', () => {
       cooldownPeriodMs: 300000,
       halfOpenMaxAttempts: 1,
     };
-
-    // Reset mock states
-    mockCircuitBreaker.getState.mockReturnValue('CLOSED');
-    mockCircuitBreaker.getStatus.mockReturnValue({ state: 'CLOSED', consecutiveFailures: 0 });
-    mockCircuitBreaker.isOpen.mockReturnValue(false);
-    mockCircuitBreaker.canExecute.mockReturnValue(true);
   });
 
   function createManager(overrides: Partial<CircuitBreakerManagerDeps> = {}): CircuitBreakerManager {
@@ -91,20 +117,19 @@ describe('CircuitBreakerManager', () => {
   }
 
   describe('initialize', () => {
-    it('should create circuit breaker when enabled', () => {
+    it('should enable manager when config is enabled', () => {
       const manager = createManager();
       manager.initialize();
 
-      expect(createCircuitBreaker).toHaveBeenCalledWith(expect.objectContaining({
-        failureThreshold: 5,
-        cooldownPeriodMs: 300000,
-        halfOpenMaxAttempts: 1,
-        enabled: true,
-      }));
-      expect(manager.getCircuitBreaker()).toBe(mockCircuitBreaker);
+      // No circuit breakers created yet — they are lazy per-chain
+      expect(createCircuitBreaker).not.toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Per-chain circuit breaker manager initialized',
+        expect.objectContaining({ failureThreshold: 5 }),
+      );
     });
 
-    it('should not create circuit breaker when disabled', () => {
+    it('should not create circuit breakers when disabled', () => {
       const manager = createManager({
         config: { ...defaultConfig, enabled: false },
       });
@@ -114,29 +139,123 @@ describe('CircuitBreakerManager', () => {
       expect(manager.getCircuitBreaker()).toBeNull();
       expect(mockLogger.info).toHaveBeenCalledWith('Circuit breaker disabled by configuration');
     });
+  });
 
-    it('should log initialization details', () => {
+  describe('per-chain breaker lifecycle', () => {
+    it('should lazily create chain breaker on first access', () => {
       const manager = createManager();
       manager.initialize();
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Circuit breaker initialized',
-        expect.objectContaining({
-          failureThreshold: 5,
-          cooldownPeriodMs: 300000,
-          halfOpenMaxAttempts: 1,
-        }),
-      );
+      const breaker = manager.getChainBreaker('ethereum');
+      expect(breaker).not.toBeNull();
+      expect(createCircuitBreaker).toHaveBeenCalledTimes(1);
+      expect(createCircuitBreaker).toHaveBeenCalledWith(expect.objectContaining({
+        failureThreshold: 5,
+        cooldownPeriodMs: 300000,
+        halfOpenMaxAttempts: 1,
+        enabled: true,
+      }));
+    });
+
+    it('should reuse existing chain breaker on subsequent access', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      const breaker1 = manager.getChainBreaker('ethereum');
+      const breaker2 = manager.getChainBreaker('ethereum');
+      expect(breaker1).toBe(breaker2);
+      expect(createCircuitBreaker).toHaveBeenCalledTimes(1);
+    });
+
+    it('should create separate breakers for different chains', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      const ethBreaker = manager.getChainBreaker('ethereum');
+      const solBreaker = manager.getChainBreaker('solana');
+      expect(ethBreaker).not.toBe(solBreaker);
+      expect(createCircuitBreaker).toHaveBeenCalledTimes(2);
+    });
+
+    it('should return null for chain breaker when disabled', () => {
+      const manager = createManager({
+        config: { ...defaultConfig, enabled: false },
+      });
+      manager.initialize();
+
+      expect(manager.getChainBreaker('ethereum')).toBeNull();
+    });
+  });
+
+  describe('per-chain canExecute / recordSuccess / recordFailure', () => {
+    it('should delegate canExecute to chain-specific breaker', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      expect(manager.canExecute('ethereum')).toBe(true);
+      expect(createCircuitBreaker).toHaveBeenCalledTimes(1);
+    });
+
+    it('should always allow execution when disabled', () => {
+      const manager = createManager({
+        config: { ...defaultConfig, enabled: false },
+      });
+      manager.initialize();
+
+      expect(manager.canExecute('ethereum')).toBe(true);
+      expect(createCircuitBreaker).not.toHaveBeenCalled();
+    });
+
+    it('should record success on the correct chain breaker', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      manager.recordSuccess('ethereum');
+      const breaker = manager.getChainBreaker('ethereum')!;
+      expect(breaker.recordSuccess).toHaveBeenCalled();
+    });
+
+    it('should record failure on the correct chain breaker', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      manager.recordFailure('solana');
+      const breaker = manager.getChainBreaker('solana')!;
+      expect(breaker.recordFailure).toHaveBeenCalled();
+    });
+  });
+
+  describe('chain isolation', () => {
+    it('should isolate failures between chains', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      // Record failures on Solana
+      manager.recordFailure('solana');
+      manager.recordFailure('solana');
+
+      // Ethereum should still be functional (separate breaker)
+      const ethBreaker = manager.getChainBreaker('ethereum')!;
+      const solBreaker = manager.getChainBreaker('solana')!;
+
+      // Different breaker instances
+      expect(ethBreaker).not.toBe(solBreaker);
+      // Ethereum breaker was not affected by Solana failures
+      expect(ethBreaker.recordFailure).not.toHaveBeenCalled();
     });
   });
 
   describe('state change handling', () => {
-    it('should log warning and increment stats when circuit opens', () => {
+    it('should log chain-specific warning when circuit opens', () => {
       const manager = createManager();
       manager.initialize();
 
-      expect(capturedOnStateChange).toBeDefined();
-      capturedOnStateChange!({
+      // Trigger chain breaker creation
+      manager.getChainBreaker('ethereum');
+      const callback = capturedCallbacks.get('cb-1');
+      expect(callback).toBeDefined();
+
+      callback!({
         previousState: 'CLOSED',
         newState: 'OPEN',
         reason: 'consecutive failures',
@@ -146,8 +265,9 @@ describe('CircuitBreakerManager', () => {
       });
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Circuit breaker OPENED - halting executions',
+        'Chain circuit breaker OPENED - halting executions on chain',
         expect.objectContaining({
+          chain: 'ethereum',
           reason: 'consecutive failures',
           consecutiveFailures: 5,
         }),
@@ -155,11 +275,14 @@ describe('CircuitBreakerManager', () => {
       expect(mockStats.circuitBreakerTrips).toBe(1);
     });
 
-    it('should log info when circuit closes', () => {
+    it('should log chain-specific info when circuit closes', () => {
       const manager = createManager();
       manager.initialize();
 
-      capturedOnStateChange!({
+      manager.getChainBreaker('solana');
+      const callback = capturedCallbacks.get('cb-1');
+
+      callback!({
         previousState: 'HALF_OPEN',
         newState: 'CLOSED',
         reason: 'recovery successful',
@@ -169,35 +292,19 @@ describe('CircuitBreakerManager', () => {
       });
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        'Circuit breaker CLOSED - resuming executions',
-        expect.objectContaining({ reason: 'recovery successful' }),
+        'Chain circuit breaker CLOSED - resuming executions on chain',
+        expect.objectContaining({ chain: 'solana', reason: 'recovery successful' }),
       );
     });
 
-    it('should log info when circuit enters half-open', () => {
+    it('should publish chain-annotated event to Redis Stream', async () => {
       const manager = createManager();
       manager.initialize();
 
-      capturedOnStateChange!({
-        previousState: 'OPEN',
-        newState: 'HALF_OPEN',
-        reason: 'cooldown expired',
-        consecutiveFailures: 5,
-        cooldownRemainingMs: 0,
-        timestamp: Date.now(),
-      });
+      manager.getChainBreaker('arbitrum');
+      const callback = capturedCallbacks.get('cb-1');
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Circuit breaker HALF_OPEN - testing recovery',
-        expect.objectContaining({ reason: 'cooldown expired' }),
-      );
-    });
-
-    it('should publish event to Redis Stream', async () => {
-      const manager = createManager();
-      manager.initialize();
-
-      capturedOnStateChange!({
+      callback!({
         previousState: 'CLOSED',
         newState: 'OPEN',
         reason: 'failures',
@@ -206,14 +313,14 @@ describe('CircuitBreakerManager', () => {
         timestamp: 1234567890,
       });
 
-      // Allow async publish to complete
       await new Promise(resolve => setImmediate(resolve));
 
       expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
-        expect.any(String), // STREAMS.CIRCUIT_BREAKER
+        expect.any(String),
         expect.objectContaining({
           service: 'execution-engine',
           instanceId: 'test-instance-1',
+          chain: 'arbitrum',
           previousState: 'CLOSED',
           newState: 'OPEN',
           reason: 'failures',
@@ -227,7 +334,10 @@ describe('CircuitBreakerManager', () => {
       const manager = createManager();
       manager.initialize();
 
-      capturedOnStateChange!({
+      manager.getChainBreaker('ethereum');
+      const callback = capturedCallbacks.get('cb-1');
+
+      callback!({
         previousState: 'CLOSED',
         newState: 'OPEN',
         reason: 'failures',
@@ -240,7 +350,10 @@ describe('CircuitBreakerManager', () => {
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Failed to publish circuit breaker event',
-        expect.objectContaining({ error: expect.stringContaining('Redis down') }),
+        expect.objectContaining({
+          error: expect.stringContaining('Redis down'),
+          chain: 'ethereum',
+        }),
       );
     });
 
@@ -250,7 +363,10 @@ describe('CircuitBreakerManager', () => {
       });
       manager.initialize();
 
-      capturedOnStateChange!({
+      manager.getChainBreaker('ethereum');
+      const callback = capturedCallbacks.get('cb-1');
+
+      callback!({
         previousState: 'CLOSED',
         newState: 'OPEN',
         reason: 'failures',
@@ -266,73 +382,94 @@ describe('CircuitBreakerManager', () => {
   });
 
   describe('public API', () => {
-    it('should return status from circuit breaker', () => {
+    it('should return chain-specific status', () => {
       const manager = createManager();
       manager.initialize();
 
-      const status = manager.getStatus();
+      manager.getChainBreaker('ethereum');
+      const status = manager.getChainStatus('ethereum');
       expect(status).toEqual({ state: 'CLOSED', consecutiveFailures: 0 });
     });
 
-    it('should return null status when not initialized', () => {
-      const manager = createManager();
-      expect(manager.getStatus()).toBeNull();
-    });
-
-    it('should check if circuit is open', () => {
+    it('should return null status for unknown chain', () => {
       const manager = createManager();
       manager.initialize();
 
-      expect(manager.isOpen()).toBe(false);
-      mockCircuitBreaker.isOpen.mockReturnValue(true);
-      expect(manager.isOpen()).toBe(true);
+      expect(manager.getChainStatus('unknown')).toBeNull();
     });
 
-    it('should return false for isOpen when not initialized', () => {
+    it('should return all chain statuses', () => {
       const manager = createManager();
-      expect(manager.isOpen()).toBe(false);
+      manager.initialize();
+
+      manager.getChainBreaker('ethereum');
+      manager.getChainBreaker('solana');
+
+      const allStatus = manager.getAllStatus();
+      expect(allStatus).toHaveLength(2);
+      expect(allStatus.map(s => s.chain).sort()).toEqual(['ethereum', 'solana']);
+    });
+
+    it('should check if specific chain is open', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      expect(manager.isChainOpen('ethereum')).toBe(false);
     });
 
     it('should return config', () => {
       const manager = createManager();
-      const config = manager.getConfig();
-
-      expect(config).toEqual(defaultConfig);
+      expect(manager.getConfig()).toEqual(defaultConfig);
     });
 
-    it('should delegate forceClose to circuit breaker', () => {
+    it('should force close all circuit breakers', () => {
       const manager = createManager();
       manager.initialize();
+
+      const ethBreaker = manager.getChainBreaker('ethereum')!;
+      const solBreaker = manager.getChainBreaker('solana')!;
+
       manager.forceClose();
 
-      expect(mockLogger.warn).toHaveBeenCalledWith('Manually force-closing circuit breaker');
-      expect(mockCircuitBreaker.forceClose).toHaveBeenCalled();
+      expect(ethBreaker.forceClose).toHaveBeenCalled();
+      expect(solBreaker.forceClose).toHaveBeenCalled();
     });
 
-    it('should be safe to call forceClose when not initialized', () => {
-      const manager = createManager();
-      manager.forceClose(); // Should not throw
-      expect(mockCircuitBreaker.forceClose).not.toHaveBeenCalled();
-    });
-
-    it('should delegate forceOpen to circuit breaker', () => {
+    it('should force close a specific chain', () => {
       const manager = createManager();
       manager.initialize();
-      manager.forceOpen('maintenance');
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Manually force-opening circuit breaker',
-        { reason: 'maintenance' },
-      );
-      expect(mockCircuitBreaker.forceOpen).toHaveBeenCalledWith('maintenance');
+      const ethBreaker = manager.getChainBreaker('ethereum')!;
+      manager.getChainBreaker('solana');
+
+      manager.forceCloseChain('ethereum');
+      expect(ethBreaker.forceClose).toHaveBeenCalled();
     });
 
-    it('should use default reason for forceOpen', () => {
+    it('should force open all circuit breakers', () => {
       const manager = createManager();
       manager.initialize();
-      manager.forceOpen();
 
-      expect(mockCircuitBreaker.forceOpen).toHaveBeenCalledWith('manual override');
+      const ethBreaker = manager.getChainBreaker('ethereum')!;
+      const solBreaker = manager.getChainBreaker('solana')!;
+
+      manager.forceOpen('emergency');
+
+      expect(ethBreaker.forceOpen).toHaveBeenCalledWith('emergency');
+      expect(solBreaker.forceOpen).toHaveBeenCalledWith('emergency');
+    });
+
+    it('should stop all chain breakers', () => {
+      const manager = createManager();
+      manager.initialize();
+
+      const ethBreaker = manager.getChainBreaker('ethereum')!;
+      const solBreaker = manager.getChainBreaker('solana')!;
+
+      manager.stopAll();
+
+      expect(ethBreaker.stop).toHaveBeenCalled();
+      expect(solBreaker.stop).toHaveBeenCalled();
     });
   });
 

@@ -27,3 +27,9 @@ export {
   getDeadline,
   type SwapStep,
 } from './swap-paths';
+
+export {
+  deployCommitRevealFixture,
+  createCommitmentHash,
+  mineBlocks,
+} from './commit-reveal';
