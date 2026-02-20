@@ -439,4 +439,61 @@ describe('[Integration] Full Pipeline: Opportunity -> Execution -> Result', () =
       expect(pending).toBe(0);
     }, 15000);
   });
+
+  describe('Deferred ACK Lifecycle', () => {
+    it('should ACK messages only after execution completes', async () => {
+      // Stop current engine and restart with slower execution latency
+      // to observe pending state during execution
+      await engine.stop();
+      await resetRedisStreamsInstance();
+      await resetRedisInstance();
+      await resetDistributedLockManager();
+      resetNonceManager();
+
+      // Re-create consumer group (was created in beforeEach, still exists after flushall+restart)
+      await ensureConsumerGroup(
+        redis, RedisStreams.EXECUTION_REQUESTS, 'execution-engine-group'
+      );
+
+      engine = new ExecutionEngineService({
+        simulationConfig: {
+          enabled: true,
+          successRate: 1.0,
+          executionLatencyMs: 2000, // 2s execution delay to observe pending state
+          profitVariance: 0.1,
+        },
+      });
+      await engine.start();
+
+      const opportunity = createTestOpportunity({
+        id: `deferred-ack-${Date.now()}`,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        expectedProfit: 25,
+        confidence: 0.9,
+        amountIn: '1000000000000000000',
+      });
+
+      // Publish directly to execution-requests (skip forwarder for timing control)
+      await redis.xadd(
+        RedisStreams.EXECUTION_REQUESTS,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+
+      // Wait for execution to complete (2s simulated latency + buffer)
+      const results = await collectResults(
+        redis, RedisStreams.EXECUTION_RESULTS, 1, 10000
+      );
+      expect(results.length).toBeGreaterThanOrEqual(1);
+
+      // After execution + result: pending should be 0 (ACK completed after execution)
+      await new Promise(r => setTimeout(r, 500));
+      const pendingAfter = await getPendingCount(
+        redis, RedisStreams.EXECUTION_REQUESTS, 'execution-engine-group'
+      );
+      expect(pendingAfter).toBe(0);
+    }, 30000);
+  });
 });
