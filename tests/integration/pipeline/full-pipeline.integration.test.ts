@@ -313,4 +313,63 @@ describe('[Integration] Full Pipeline: Opportunity -> Execution -> Result', () =
       expect(result!.opportunityId).toBe(opportunity.id);
     }, 30000);
   });
+
+  describe('Consumer Group Semantics', () => {
+    it('should distribute messages across multiple consumers', async () => {
+      // Start a second engine instance on the same consumer group
+      // Note: Both engines share singletons (getRedisClient, getRedisStreamsClient)
+      // but have different instanceIds (consumer names) within the consumer group.
+      // Redis Streams handles distribution at the Redis level.
+      const engine2 = new ExecutionEngineService({
+        simulationConfig: {
+          enabled: true,
+          successRate: 1.0,
+          executionLatencyMs: 10,
+          profitVariance: 0.1,
+        },
+      });
+      await engine2.start();
+
+      try {
+        const count = 10;
+        const opportunities = Array.from({ length: count }, (_, i) =>
+          createTestOpportunity({
+            id: `multi-consumer-${i}-${Date.now()}`,
+            type: 'cross-dex',
+            chain: 'ethereum',
+            buyChain: 'ethereum',
+            expectedProfit: 20 + i,
+            confidence: 0.9,
+            amountIn: '1000000000000000000',
+          })
+        );
+
+        // Publish all opportunities
+        for (const opp of opportunities) {
+          await redis.xadd(
+            RedisStreams.OPPORTUNITIES,
+            '*',
+            'data', JSON.stringify(opp)
+          );
+        }
+
+        // Wait for all results
+        const results = await collectResults(
+          redis, RedisStreams.EXECUTION_RESULTS, count, 25000
+        );
+
+        // All messages should be processed (no lost messages)
+        expect(results.length).toBeGreaterThanOrEqual(count);
+
+        // No duplicate opportunity IDs in results
+        const resultIds = results.map((r) => r.opportunityId);
+        const uniqueIds = new Set(resultIds);
+        expect(uniqueIds.size).toBe(results.length);
+      } finally {
+        try {
+          await engine2.stop();
+        } catch { /* ignore */ }
+      }
+    }, 40000);
+  });
 });
