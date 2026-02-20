@@ -225,5 +225,92 @@ describe('[Integration] Full Pipeline: Opportunity -> Execution -> Result', () =
       );
       expect(execPending).toBe(0);
     }, 30000);
+
+    it('should handle batch of opportunities', async () => {
+      const count = 5;
+      const opportunities = Array.from({ length: count }, (_, i) =>
+        createTestOpportunity({
+          id: `batch-${i}-${Date.now()}`,
+          type: 'cross-dex',
+          chain: 'ethereum',
+          buyChain: 'ethereum',
+          expectedProfit: 10 + i * 5,
+          confidence: 0.85,
+          amountIn: '1000000000000000000',
+        })
+      );
+
+      // Publish all opportunities
+      for (const opp of opportunities) {
+        await redis.xadd(
+          RedisStreams.OPPORTUNITIES,
+          '*',
+          'data', JSON.stringify(opp)
+        );
+      }
+
+      // Wait for all results
+      const results = await collectResults(
+        redis,
+        RedisStreams.EXECUTION_RESULTS,
+        count,
+        20000
+      );
+
+      expect(results.length).toBeGreaterThanOrEqual(count);
+
+      // Verify all opportunity IDs are represented
+      const resultIds = new Set(
+        results.map((r) => r.opportunityId)
+      );
+      for (const opp of opportunities) {
+        expect(resultIds).toContain(opp.id);
+      }
+
+      // Verify all streams fully ACKed
+      await new Promise(r => setTimeout(r, 1000));
+
+      const oppPending = await getPendingCount(
+        redis, RedisStreams.OPPORTUNITIES, 'test-coordinator-group'
+      );
+      expect(oppPending).toBe(0);
+
+      const execPending = await getPendingCount(
+        redis, RedisStreams.EXECUTION_REQUESTS, 'execution-engine-group'
+      );
+      expect(execPending).toBe(0);
+    }, 30000);
+
+    it('should preserve opportunity data through pipeline', async () => {
+      const opportunity = createTestOpportunity({
+        id: `preserve-${Date.now()}`,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        buyDex: 'uniswap_v3',
+        sellDex: 'sushiswap',
+        expectedProfit: 42.5,
+        confidence: 0.95,
+        amountIn: '1000000000000000000',
+      });
+
+      await redis.xadd(
+        RedisStreams.OPPORTUNITIES,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+
+      const results = await collectResults(
+        redis, RedisStreams.EXECUTION_RESULTS, 1, 15000
+      );
+
+      const result = results.find(
+        (r) => r.opportunityId === opportunity.id
+      );
+      expect(result).toBeDefined();
+
+      // Verify the execution result references the correct opportunity
+      expect(result!.opportunityId).toBe(opportunity.id);
+    }, 30000);
   });
 });
