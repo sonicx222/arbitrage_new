@@ -372,4 +372,71 @@ describe('[Integration] Full Pipeline: Opportunity -> Execution -> Result', () =
       }
     }, 40000);
   });
+
+  describe('Edge Cases', () => {
+    it('should prevent duplicate execution via distributed lock', async () => {
+      const opportunityId = `dup-lock-${Date.now()}`;
+      const opportunity = createTestOpportunity({
+        id: opportunityId,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        expectedProfit: 30,
+        confidence: 0.9,
+        amountIn: '1000000000000000000',
+      });
+
+      // Publish the SAME opportunity twice to execution-requests
+      // (bypassing forwarder to directly test lock behavior)
+      await redis.xadd(
+        RedisStreams.EXECUTION_REQUESTS,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+      await redis.xadd(
+        RedisStreams.EXECUTION_REQUESTS,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+
+      // Wait for processing
+      await new Promise(r => setTimeout(r, 5000));
+
+      const results = await collectResults(
+        redis, RedisStreams.EXECUTION_RESULTS, 1, 10000
+      );
+
+      // Should have at most 1 successful execution for this ID
+      // (lock prevents duplicate, or consumer dedup catches it)
+      const matchingResults = results.filter(
+        (r) => r.opportunityId === opportunityId
+      );
+      expect(matchingResults.length).toBeLessThanOrEqual(1);
+    }, 20000);
+
+    it('should handle invalid opportunity gracefully', async () => {
+      // Publish malformed message directly to execution-requests
+      // (missing required fields like 'id', 'amountIn', etc.)
+      await redis.xadd(
+        RedisStreams.EXECUTION_REQUESTS,
+        '*',
+        'data', JSON.stringify({ type: 'invalid', noId: true })
+      );
+
+      // Wait briefly for processing
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Should NOT produce a result on execution-results
+      const streamLen = await redis.xlen(RedisStreams.EXECUTION_RESULTS);
+      expect(streamLen).toBe(0);
+
+      // The invalid message should be ACKed (removed from pending)
+      // to prevent infinite redelivery
+      await new Promise(r => setTimeout(r, 1000));
+      const pending = await getPendingCount(
+        redis, RedisStreams.EXECUTION_REQUESTS, 'execution-engine-group'
+      );
+      expect(pending).toBe(0);
+    }, 15000);
+  });
 });
