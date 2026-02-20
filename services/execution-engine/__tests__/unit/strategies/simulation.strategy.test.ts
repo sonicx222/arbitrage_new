@@ -137,9 +137,8 @@ describe('SimulationStrategy', () => {
 
         expect(result.success).toBe(true);
         expect(result.opportunityId).toBe(opportunity.id);
-        expect(result.transactionHash).toBeDefined();
         expect(result.transactionHash).toMatch(/^0x[0-9a-f]{64}$/);
-        expect(result.actualProfit).toBeDefined();
+        expect(typeof result.actualProfit).toBe('number');
         expect(result.gasUsed).toBe(config.gasUsed);
         expect(result.gasCost).toBe(opportunity.expectedProfit! * config.gasCostMultiplier);
         expect(result.error).toBeUndefined();
@@ -268,7 +267,6 @@ describe('SimulationStrategy', () => {
         // With 100x variance and 0.99 random, profit could be very high
         // The formula is: expectedProfit * (1 + (random * 2 - 1) * variance)
         // = 100 * (1 + (0.99 * 2 - 1) * 100) = 100 * (1 + 0.98 * 100) = 9900
-        expect(result.actualProfit).toBeDefined();
         expect(typeof result.actualProfit).toBe('number');
       });
 

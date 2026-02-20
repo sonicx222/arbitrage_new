@@ -312,7 +312,8 @@ export class RedisStreamsClient {
   private client: Redis;
   // P2-FIX: Use proper Logger type
   private logger: Logger;
-  private batchers: Map<string, StreamBatcher> = new Map();
+  // BUG-006 FIX: Use StreamBatcher<unknown> to accept any generic parameter
+  private batchers: Map<string, StreamBatcher<unknown>> = new Map();
   /** S-5: HMAC signing key for message authentication. Null = signing disabled (dev mode). */
   private signingKey: string | null;
 
@@ -349,6 +350,14 @@ export class RedisStreamsClient {
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
     this.logger = createLogger('redis-streams');
     this.signingKey = deps?.signingKey ?? null;
+
+    // S-NEW-2 FIX: Warn when HMAC signing is not configured in production.
+    // Without a signing key, all Redis Streams messages are accepted without verification.
+    if (!this.signingKey && process.env.NODE_ENV === 'production') {
+      this.logger.error('CRITICAL: STREAM_SIGNING_KEY is not set in production. ' +
+        'All Redis Streams messages will be accepted without HMAC verification. ' +
+        'Set STREAM_SIGNING_KEY environment variable to enable message signing.');
+    }
 
     const options: any = {
       password,
@@ -651,10 +660,12 @@ export class RedisStreamsClient {
   async xinfo(streamName: string): Promise<StreamInfo> {
     try {
       const result = await this.client.xinfo('STREAM', streamName);
-      return this.parseStreamInfo(result as any[]);
-    } catch (error: any) {
+      // BUG-006 FIX: Use unknown[] instead of any[] for type safety
+      return this.parseStreamInfo(result as unknown[]);
+    } catch (error: unknown) {
       // ERR no such key - stream doesn't exist yet (common during startup)
-      if (error.message?.includes('no such key') || error.message?.includes('ERR')) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes('no such key') || errMsg.includes('ERR')) {
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Stream does not exist yet', { streamName });
         }
@@ -678,11 +689,13 @@ export class RedisStreamsClient {
    */
   async xpending(streamName: string, groupName: string): Promise<PendingInfo> {
     try {
-      const result = await this.client.xpending(streamName, groupName) as any[];
+      // BUG-006 FIX: Use unknown[] instead of any[] for type safety
+      const result = await this.client.xpending(streamName, groupName) as unknown[];
 
       const consumers: Array<{ name: string; pending: number }> = [];
-      if (result[3]) {
-        for (const [name, count] of result[3]) {
+      const consumerList = result[3] as Array<[string, string]> | null;
+      if (consumerList) {
+        for (const [name, count] of consumerList) {
           consumers.push({ name, pending: parseInt(count, 10) });
         }
       }
@@ -693,10 +706,11 @@ export class RedisStreamsClient {
         largestId: result[2] as string,
         consumers
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // NOGROUP - consumer group doesn't exist yet (common during startup)
       // ERR no such key - stream doesn't exist yet
-      if (error.message?.includes('NOGROUP') || error.message?.includes('no such key')) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes('NOGROUP') || errMsg.includes('no such key')) {
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Consumer group or stream does not exist yet', { streamName, groupName });
         }
@@ -759,7 +773,7 @@ export class RedisStreamsClient {
     }
 
     const batcher = new StreamBatcher<T>(this, streamName, config, this.logger);
-    this.batchers.set(streamName, batcher as any);
+    this.batchers.set(streamName, batcher as StreamBatcher<unknown>);
     return batcher;
   }
 
@@ -842,6 +856,11 @@ export class RedisStreamsClient {
         } else if (this.signingKey && !sig) {
           this.logger.warn('Unsigned message received with signing enabled, rejecting', { messageId: id });
           continue;
+        } else if (this.signingKey && sig && !rawData) {
+          // S-NEW-3 FIX: Reject malformed messages that have a signature but no data field.
+          // Without this branch, such messages would pass through unverified.
+          this.logger.warn('Malformed message: signature present but no data field, rejecting', { messageId: id });
+          continue;
         }
 
         // Second pass: parse fields into object (skip 'sig' field from output)
@@ -864,7 +883,8 @@ export class RedisStreamsClient {
     return messages;
   }
 
-  private parseStreamInfo(result: any[]): StreamInfo {
+  // BUG-006 FIX: Use unknown[] instead of any[] for type safety
+  private parseStreamInfo(result: unknown[]): StreamInfo {
     const info: StreamInfo = {
       length: 0,
       radixTreeKeys: 0,
@@ -879,19 +899,19 @@ export class RedisStreamsClient {
 
       switch (key) {
         case 'length':
-          info.length = value;
+          info.length = value as number;
           break;
         case 'radix-tree-keys':
-          info.radixTreeKeys = value;
+          info.radixTreeKeys = value as number;
           break;
         case 'radix-tree-nodes':
-          info.radixTreeNodes = value;
+          info.radixTreeNodes = value as number;
           break;
         case 'last-generated-id':
-          info.lastGeneratedId = value;
+          info.lastGeneratedId = value as string;
           break;
         case 'groups':
-          info.groups = value;
+          info.groups = value as number;
           break;
       }
     }
@@ -1229,8 +1249,20 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     redisPassword = resolveRedisPassword(password);
   }
 
-  // S-5: Resolve signing key from environment
-  const signingKey = process.env.STREAM_SIGNING_KEY?.trim() || undefined;
+  // S-5 FIX (SEC-005): Resolve signing key from environment with explicit
+  // empty/whitespace detection. Previously used `|| undefined` which silently
+  // disabled HMAC signing when STREAM_SIGNING_KEY was set to empty/whitespace.
+  const rawSigningKey = process.env.STREAM_SIGNING_KEY;
+  let signingKey: string | undefined;
+  if (rawSigningKey !== undefined) {
+    const trimmed = rawSigningKey.trim();
+    if (trimmed.length > 0) {
+      signingKey = trimmed;
+    } else {
+      const factoryLogger = createLogger('redis-streams-factory');
+      factoryLogger.warn('STREAM_SIGNING_KEY is set but empty/whitespace — HMAC signing DISABLED');
+    }
+  }
 
   initializingPromise = (async () => {
     try {

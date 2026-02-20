@@ -167,7 +167,7 @@ jest.mock('@arbitrage/config', () => ({
 }));
 
 // Mock internal modules
-jest.mock('../../detection', () => ({
+jest.mock('../../src/detection', () => ({
   SimpleArbitrageDetector: jest.fn(),
   createSimpleArbitrageDetector: jest.fn().mockReturnValue({
     detect: jest.fn().mockReturnValue([]),
@@ -181,13 +181,13 @@ jest.mock('../../detection', () => ({
   }),
 }));
 
-jest.mock('../../simulation', () => ({
+jest.mock('../../src/simulation', () => ({
   ChainSimulationHandler: jest.fn(),
   PairForSimulation: jest.fn(),
   SimulationCallbacks: jest.fn(),
 }));
 
-jest.mock('../../publishers', () => ({
+jest.mock('../../src/publishers', () => ({
   WhaleAlertPublisher: jest.fn().mockImplementation(() => ({
     publishWhaleAlert: jest.fn().mockResolvedValue(undefined),
     publishSwapEvent: jest.fn(),
@@ -195,8 +195,8 @@ jest.mock('../../publishers', () => ({
   ExtendedPairInfo: jest.fn(),
 }));
 
-jest.mock('../../types', () => ({
-  ...jest.requireActual('../../types'),
+jest.mock('../../src/types', () => ({
+  ...jest.requireActual('../../src/types'),
   toWebSocketUrl: jest.fn().mockImplementation((url: string) => ({
     url: url.startsWith('wss://') ? url : url.replace('https://', 'wss://'),
     converted: !url.startsWith('wss://'),
@@ -328,7 +328,7 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
     ]);
 
     // Re-establish ../../detection mock implementations
-    const detection = require('../../detection');
+    const detection = require('../../src/detection');
     detection.createSimpleArbitrageDetector.mockReturnValue({
       detect: jest.fn().mockReturnValue([]),
     });
@@ -340,14 +340,14 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
     });
 
     // Re-establish ../../publishers mock implementations
-    const publishers = require('../../publishers');
+    const publishers = require('../../src/publishers');
     publishers.WhaleAlertPublisher.mockImplementation(() => ({
       publishWhaleAlert: jest.fn().mockResolvedValue(undefined),
       publishSwapEvent: jest.fn(),
     }));
 
     // Re-establish ../../types mock implementations
-    const types = require('../../types');
+    const types = require('../../src/types');
     types.toWebSocketUrl.mockImplementation((url: string) => ({
       url: url.startsWith('wss://') ? url : url.replace('https://', 'wss://'),
       converted: !url.startsWith('wss://'),

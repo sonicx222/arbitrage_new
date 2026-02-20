@@ -8,24 +8,30 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
+// Mock logger — recordLatency uses logger.warn() (not console.warn)
+jest.mock('../../src/logger');
+
 // Import will be done in beforeEach to allow reset
 let HotPathMonitor: any;
 let measureHotPath: any;
 let measureHotPathAsync: any;
+let mockLogger: any;
 
 describe('HotPathMonitor', () => {
   beforeEach(() => {
     // Reset modules for clean state
     jest.resetModules();
 
-    // Mock console.warn to suppress warnings in tests
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    // Import fresh module
+    // Import fresh module (logger mock persists across resetModules)
     const module = require('../../src/performance-monitor');
     HotPathMonitor = module.HotPathMonitor;
     measureHotPath = module.measureHotPath;
     measureHotPathAsync = module.measureHotPathAsync;
+
+    // Get mock logger for warn assertions
+    const loggerModule = require('../../src/logger');
+    mockLogger = loggerModule.__mockLogger;
+    if (mockLogger?.warn) mockLogger.warn.mockClear();
 
     // Reset singleton
     module.resetHotPathMonitor();
@@ -67,26 +73,24 @@ describe('HotPathMonitor', () => {
 
     it('should warn when threshold is exceeded', () => {
       const monitor = HotPathMonitor.getInstance();
-      const warnSpy = console.warn as jest.Mock;
 
       // Record latency above threshold (100us for price-calculation)
       monitor.recordLatency('price-calculation', 200);
 
-      expect(warnSpy).toHaveBeenCalled();
-      const warnMessage = warnSpy.mock.calls[0][0];
+      expect(mockLogger.warn).toHaveBeenCalled();
+      const warnMessage = mockLogger.warn.mock.calls[0][0];
       expect(warnMessage).toContain('Hot path slow');
       expect(warnMessage).toContain('price-calculation');
     });
 
     it('should not warn when below threshold', () => {
       const monitor = HotPathMonitor.getInstance();
-      const warnSpy = console.warn as jest.Mock;
 
       // Record latency below threshold
       monitor.recordLatency('price-calculation', 50);
 
       // No warning for below-threshold operations
-      const hotPathWarnings = warnSpy.mock.calls.filter(
+      const hotPathWarnings = mockLogger.warn.mock.calls.filter(
         (call: unknown[]) => {
           const firstArg = call[0];
           return typeof firstArg === 'string' && firstArg.includes('Hot path slow');
@@ -157,7 +161,7 @@ describe('HotPathMonitor', () => {
   describe('measureHotPathAsync', () => {
     it('should measure async function execution time', async () => {
       const result = await measureHotPathAsync('test-async', async () => {
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await Promise.resolve(); // simulate async work
         return 'completed';
       });
 

@@ -157,11 +157,11 @@ describe('Coordinator Configuration', () => {
   it('should have core chains available for coordination', () => {
     // Test for chains available in the base config (shared/config/index.ts)
     // Note: Full config in shared/config/src/index.ts has more chains (optimism, fantom, etc.)
-    expect(CHAINS.ethereum).toBeDefined();
-    expect(CHAINS.bsc).toBeDefined();
-    expect(CHAINS.polygon).toBeDefined();
-    expect(CHAINS.arbitrum).toBeDefined();
-    expect(CHAINS.base).toBeDefined();
+    expect(CHAINS.ethereum).toMatchObject({ name: expect.any(String) });
+    expect(CHAINS.bsc).toMatchObject({ name: expect.any(String) });
+    expect(CHAINS.polygon).toMatchObject({ name: expect.any(String) });
+    expect(CHAINS.arbitrum).toMatchObject({ name: expect.any(String) });
+    expect(CHAINS.base).toMatchObject({ name: expect.any(String) });
   });
 });
 
@@ -826,7 +826,7 @@ describe('S3.3.5 Regression: Stream Error Alert Data', () => {
     }
 
     expect(alerts.length).toBe(1);
-    expect(alerts[0].data).toBeDefined();
+    expect(alerts[0].data).toMatchObject({ streamName: 'stream:price-updates', errorCount: expect.any(Number) });
     expect(alerts[0].data?.streamName).toBe('stream:price-updates');
     expect(alerts[0].data?.errorCount).toBe(MAX_STREAM_ERRORS);
   });
@@ -852,7 +852,7 @@ describe('CoordinatorService Standby Activation', () => {
         // Create new activation promise
         activationPromise = (async () => {
           activationCount++;
-          await new Promise(resolve => setTimeout(resolve, 10));
+          await Promise.resolve(); // simulate async activation
           return true;
         })();
 

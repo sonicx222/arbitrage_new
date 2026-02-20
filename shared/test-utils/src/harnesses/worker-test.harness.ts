@@ -316,7 +316,7 @@ export class WorkerTestHarness {
     // Check final value (should be operations count if truly atomic)
     const final = this.priceMatrix.getPrice(testKey);
     if (!final || final.price !== operations) {
-      failures = Math.abs(operations - (final?.price || 0));
+      failures = Math.abs(operations - (final?.price ?? 0));
     }
 
     return { failures };

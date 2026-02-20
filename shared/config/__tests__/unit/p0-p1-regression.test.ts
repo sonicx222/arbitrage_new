@@ -187,9 +187,12 @@ describe('Fix 5: mainnetChains count', () => {
 // FIX 6 REGRESSION: Linea flash loan provider (P1 #6)
 // Linea must have a flash loan provider entry (PancakeSwap V3)
 // =============================================================================
-// NOTE: Linea flash loan provider is TODO in source (service-config.ts).
-// These tests are skipped until the Linea provider is implemented.
-describe.skip('Fix 6: Linea flash loan provider (TODO in source)', () => {
+// T-NEW-6 DEFERRED: Linea flash loan provider blocked on SyncSwap Vault deployment
+// to Linea mainnet. No contract address available yet. When SyncSwap deploys their
+// Vault to Linea, add the address to SYNCSWAP_VAULTS in service-config.ts and
+// uncomment the linea entry in FLASH_LOAN_PROVIDERS, then unskip these tests.
+// @see shared/config/src/service-config.ts:414
+describe.skip('Fix 6: Linea flash loan provider (blocked: SyncSwap Vault not deployed to Linea)', () => {
   it('should have Linea flash loan provider defined', () => {
     expect(FLASH_LOAN_PROVIDERS['linea']).toBeDefined();
   });

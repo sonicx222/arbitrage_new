@@ -4,6 +4,7 @@
 // P0-3 FIX: Added proper async initialization for Redis client
 // P1-3 FIX: Replace KEYS with SCAN in cleanup()
 
+import crypto from 'crypto';
 import { createLogger } from '@arbitrage/core';
 import { getRedisClient, RedisClient } from '@arbitrage/core';
 
@@ -99,8 +100,11 @@ export class RateLimiter {
       // Remove entries older than the window
       multi.zremrangebyscore(key, 0, windowStart);
 
-      // Add current request timestamp
-      multi.zadd(key, now, now.toString());
+      // BUG-001 FIX: Use unique member to prevent under-count when two requests
+      // arrive at the same millisecond. Previously used now.toString() which caused
+      // duplicate ZADD members, silently dropping one request from the count.
+      const uniqueMember = `${now}:${crypto.randomUUID()}`;
+      multi.zadd(key, now, uniqueMember);
 
       // Count remaining requests in window
       multi.zcard(key);
@@ -109,10 +113,25 @@ export class RateLimiter {
       multi.expire(key, Math.ceil(config.windowMs / 1000) + 60);
 
       const results = await multi.exec();
-      const currentCount = results[2][1];
+
+      // Q-NEW-2 FIX: multi.exec() returns null when the transaction is aborted
+      if (!results) {
+        throw new Error('Redis transaction aborted');
+      }
+
+      // BUG-007 FIX: Check for individual MULTI command errors. If ZCARD fails,
+      // results[2] could be [error, null], and null >= maxRequests evaluates to
+      // false, silently allowing all requests (fail-open).
+      const zcardResult = results[2];
+      if (zcardResult[0]) {
+        throw zcardResult[0] as Error;
+      }
+      const currentCount = zcardResult[1] as number;
 
       const remaining = Math.max(0, config.maxRequests - currentCount);
-      const exceeded = currentCount >= config.maxRequests;
+      // BUG-002 FIX: Use > instead of >= because currentCount includes the current
+      // request (ZADD before ZCARD). With >=, a limit of 10 only allowed 9 requests.
+      const exceeded = currentCount > config.maxRequests;
 
       // Calculate reset time (when oldest request expires)
       const oldestRequest = await redis.zrange(key, 0, 0, 'WITHSCORES');
@@ -220,8 +239,14 @@ export class RateLimiter {
   // Different identifier strategies
   private getIdentifier(req: any): string {
     // Primary: API key from header
+    // S-NEW-1 FIX: Hash API key with SHA-256 to avoid exposing plaintext keys in Redis.
+    // Anyone with Redis access could previously read raw API keys from rate-limit keys.
     if (req.headers['x-api-key']) {
-      return `api_key:${req.headers['x-api-key']}`;
+      const hashedKey = crypto.createHash('sha256')
+        .update(req.headers['x-api-key'])
+        .digest('hex')
+        .substring(0, 16);
+      return `api_key:${hashedKey}`;
     }
 
     // Secondary: JWT token payload (if authenticated)
@@ -248,6 +273,12 @@ export class RateLimiter {
       multi.zrange(key, 0, 0, 'WITHSCORES');
 
       const results = await multi.exec();
+
+      // Q-NEW-2 FIX: multi.exec() returns null when the transaction is aborted
+      if (!results) {
+        throw new Error('Redis transaction aborted');
+      }
+
       const currentCount = results[1][1];
       const oldestRequest = results[2][1];
 

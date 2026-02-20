@@ -113,7 +113,6 @@ describe('FlashLoanStrategy', () => {
 
   describe('constructor', () => {
     it('should create strategy with valid config', () => {
-      expect(strategy).toBeDefined();
       expect(strategy).toBeInstanceOf(FlashLoanStrategy);
     });
 
@@ -336,9 +335,8 @@ describe('FlashLoanStrategy', () => {
       // Should be valid hex string
       expect(calldata).toMatch(/^0x[a-fA-F0-9]+$/);
 
-      // Should start with executeArbitrage function selector
-      // executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256)
-      expect(calldata.slice(0, 10)).toBeDefined();
+      // Should start with a function selector (4 bytes = 10 hex chars including 0x)
+      expect(calldata.slice(0, 10)).toMatch(/^0x[a-fA-F0-9]{8}$/);
     });
 
     it('should include correct function signature', () => {
@@ -383,8 +381,7 @@ describe('FlashLoanStrategy', () => {
       );
 
       expect(tx.to).toBe(MOCK_FLASH_LOAN_CONTRACT_ADDRESS);
-      expect(tx.data).toBeDefined();
-      expect(tx.data).toMatch(/^0x/);
+      expect(tx.data).toMatch(/^0x[a-fA-F0-9]+$/);
     });
 
     it('should throw if no contract address for chain', async () => {
@@ -420,7 +417,7 @@ describe('FlashLoanStrategy', () => {
       const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(true);
-      expect(result.transactionHash).toBeDefined();
+      expect(result.transactionHash).toMatch(/^0x[a-fA-F0-9]+$/);
       expect(result.opportunityId).toBe(opportunity.id);
       expect(result.chain).toBe('ethereum');
     });
@@ -563,6 +560,55 @@ describe('FlashLoanStrategy', () => {
       // Fix 6.1: Error format changed to use ExecutionErrorCode
       expect(result.error).toContain('ERR_SIMULATION_REVERT');
       expect(ctx.stats.simulationPredictedReverts).toBe(1);
+    });
+
+    // GAP-002 FIX: Test simulation error/timeout edge case
+    it('should proceed with execution when simulation throws (timeout/error)', async () => {
+      const opportunity = createMockOpportunity({ expectedProfit: 100 });
+      const ctx = createMockContext();
+
+      const mockSimulationService = {
+        shouldSimulate: jest.fn().mockReturnValue(true),
+        simulate: jest.fn().mockRejectedValue(new Error('Simulation timed out after 30000ms')),
+        getAggregatedMetrics: jest.fn(),
+        getProvidersHealth: jest.fn(),
+        initialize: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn(),
+      };
+      ctx.simulationService = mockSimulationService as any;
+
+      // performSimulation catches errors and returns null, allowing execution to proceed
+      const result = await strategy.execute(opportunity, ctx);
+
+      // The execution should still proceed (not abort) — simulation errors are non-fatal
+      expect(mockSimulationService.simulate).toHaveBeenCalled();
+      expect(ctx.stats.simulationErrors).toBe(1);
+    });
+
+    // GAP-002 FIX: Test simulation service returning error result
+    it('should proceed with execution when simulation returns error (service unavailable)', async () => {
+      const opportunity = createMockOpportunity({ expectedProfit: 100 });
+      const ctx = createMockContext();
+
+      const mockSimulationService = {
+        shouldSimulate: jest.fn().mockReturnValue(true),
+        simulate: jest.fn().mockResolvedValue({
+          success: false,
+          error: 'Provider unavailable: all simulation providers failed',
+          provider: 'tenderly',
+          latencyMs: 50,
+        }),
+        getAggregatedMetrics: jest.fn(),
+        getProvidersHealth: jest.fn(),
+        initialize: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn(),
+      };
+      ctx.simulationService = mockSimulationService as any;
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(mockSimulationService.simulate).toHaveBeenCalled();
+      expect(ctx.stats.simulationErrors).toBe(1);
     });
 
     it('should track nonce via NonceManager', async () => {
@@ -897,7 +943,7 @@ describe('FlashLoanStrategy', () => {
 
       // Should not throw
       const result = await strategy.execute(opportunity, ctx);
-      expect(result).toBeDefined();
+      expect(result).toMatchObject({ opportunityId: expect.any(String) });
     });
 
     it('should handle gas spike by aborting', async () => {

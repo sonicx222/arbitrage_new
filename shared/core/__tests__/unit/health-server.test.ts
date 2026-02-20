@@ -398,12 +398,17 @@ describe('createPartitionHealthServer', () => {
       await request(port, '/health');
       expect(detector.getPartitionHealth).toHaveBeenCalledTimes(1);
 
-      // Wait for TTL to expire
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Advance Date.now() past TTL to expire the cache
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 100;
 
       // Second request - cache expired, should call again
-      await request(port, '/health');
-      expect(detector.getPartitionHealth).toHaveBeenCalledTimes(2);
+      try {
+        await request(port, '/health');
+        expect(detector.getPartitionHealth).toHaveBeenCalledTimes(2);
+      } finally {
+        Date.now = originalDateNow;
+      }
     });
 
     it('should cache healthyChains alongside health data', async () => {

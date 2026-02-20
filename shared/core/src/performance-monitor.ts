@@ -28,6 +28,10 @@
  * @see Task 2.3: Hot Path Latency Monitoring
  */
 
+import { createLogger } from './logger';
+
+const logger = createLogger('performance-monitor');
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -126,9 +130,8 @@ export class HotPathMonitor {
     // Warn if exceeding threshold
     const threshold = this.thresholds[operation];
     if (threshold && latencyUs > threshold) {
-      console.warn(
-        `\u26A0\uFE0F Hot path slow: ${operation} took ${latencyMs.toFixed(2)}ms ` +
-        `(threshold: ${threshold / 1000}ms)`
+      logger.warn(
+        `Hot path slow: ${operation} took ${latencyMs.toFixed(2)}ms (threshold: ${threshold / 1000}ms)`
       );
     }
 
@@ -179,11 +182,28 @@ export class HotPathMonitor {
    * @returns Map of operation names to statistics
    */
   getAllStats(): Map<string, LatencyStats> {
-    const operations = new Set(this.metrics.map(m => m.operation));
-    const stats = new Map<string, LatencyStats>();
+    // BUG-004 FIX: Single-pass grouping instead of O(n*k) repeated scans.
+    // Previously called getStats() per operation, each scanning all metrics.
+    const grouped = new Map<string, number[]>();
+    for (const m of this.metrics) {
+      let arr = grouped.get(m.operation);
+      if (!arr) {
+        arr = [];
+        grouped.set(m.operation, arr);
+      }
+      arr.push(m.latencyMs);
+    }
 
-    for (const operation of operations) {
-      stats.set(operation, this.getStats(operation));
+    const stats = new Map<string, LatencyStats>();
+    for (const [operation, latencies] of grouped) {
+      latencies.sort((a, b) => a - b);
+      stats.set(operation, {
+        avg: latencies.reduce((a, b) => a + b, 0) / latencies.length,
+        p50: latencies[Math.floor(latencies.length * 0.5)],
+        p95: latencies[Math.floor(latencies.length * 0.95)],
+        p99: latencies[Math.floor(latencies.length * 0.99)],
+        count: latencies.length
+      });
     }
 
     return stats;
@@ -307,6 +327,19 @@ export function resetHotPathMonitor(): void {
 }
 
 /**
- * Pre-configured singleton instance.
+ * BUG-010 FIX: Changed from const to getter function.
+ * The previous `const hotPathMonitor = HotPathMonitor.getInstance()` captured
+ * the singleton at module load time, so resetHotPathMonitor() didn't update it.
+ * Now returns the live singleton on every call.
+ *
+ * @deprecated Unused — no external consumers. Remove in next major version.
+ */
+export function getHotPathMonitor(): HotPathMonitor {
+  return HotPathMonitor.getInstance();
+}
+
+/**
+ * @deprecated Use getHotPathMonitor() instead. This const captures the instance
+ * at import time and doesn't reflect resets. Kept for backward compatibility.
  */
 export const hotPathMonitor = HotPathMonitor.getInstance();

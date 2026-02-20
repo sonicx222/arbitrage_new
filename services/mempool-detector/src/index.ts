@@ -52,6 +52,8 @@ import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIn
 // CONSTANTS
 // =============================================================================
 
+const _configLogger = createLogger('mempool-detector:config');
+
 /**
  * Validate and sanitize a numeric config value.
  * Ensures value is a positive integer within valid range.
@@ -77,8 +79,8 @@ function validateNumericConfig(
 
   // Validate range
   if (value < min || value > max) {
-    console.warn(
-      `[WARN] Invalid ${fieldName}: ${value}. Must be ${min}-${max}. Using default: ${defaultValue}`
+    _configLogger.warn(
+      `Invalid ${fieldName}: ${value}. Must be ${min}-${max}. Using default: ${defaultValue}`
     );
     return defaultValue;
   }

@@ -59,7 +59,7 @@ generatePartitionUnitTests({
   defaultPort: 3001,
   region: 'asia-southeast1',
   exportPrefix: 'P1',
-  importModule: () => import('../../index'),
+  importModule: () => import('../../src/index'),
   mockLogger,
 });
 
@@ -89,7 +89,7 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
   });
 
   it('should export envConfig with all required properties', async () => {
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig).toBeDefined();
@@ -108,7 +108,7 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
     process.env.BSC_RPC_URL = 'https://custom-bsc-rpc.com';
     process.env.POLYGON_RPC_URL = 'https://custom-polygon-rpc.com';
 
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     // Now using Record<string, string | undefined> instead of fixed properties
@@ -120,7 +120,7 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
     process.env.BSC_WS_URL = 'wss://custom-bsc-ws.com';
     process.env.FANTOM_WS_URL = 'wss://custom-fantom-ws.com';
 
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     // Now using Record<string, string | undefined> instead of fixed properties
@@ -129,7 +129,7 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
   });
 
   it('should set nodeEnv to test in test environment', async () => {
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig.nodeEnv).toBe('test');
@@ -137,7 +137,7 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
 
   it('should call createPartitionEntry during module init', async () => {
     jest.resetModules();
-    const { cleanupProcessHandlers } = await import('../../index');
+    const { cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     const { createPartitionEntry } = jest.requireMock('@arbitrage/core');
@@ -146,7 +146,7 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
 
   it('should use createPartitionEntry factory from shared utilities', async () => {
     jest.resetModules();
-    const { cleanupProcessHandlers, config } = await import('../../index');
+    const { cleanupProcessHandlers, config } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     // Verify the factory produced correct config

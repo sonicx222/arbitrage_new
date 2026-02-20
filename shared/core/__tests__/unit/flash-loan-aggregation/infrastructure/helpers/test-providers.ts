@@ -14,7 +14,7 @@
  * @see shared/config/src/service-config.ts FLASH_LOAN_PROVIDERS
  */
 
-import type { IProviderInfo } from '../../../../src/flash-loan-aggregation/domain';
+import type { IProviderInfo } from '../../../../../src/flash-loan-aggregation/domain';
 
 /**
  * Create a test provider with sensible defaults and optional overrides.

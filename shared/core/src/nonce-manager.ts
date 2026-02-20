@@ -601,6 +601,19 @@ export class NonceManager {
 let nonceManagerInstance: NonceManager | null = null;
 let nonceManagerInitialConfig: Partial<NonceManagerConfig> | undefined = undefined;
 
+/** PERF-008 FIX: Shallow comparison for flat config objects (avoids JSON.stringify) */
+function shallowConfigEquals(
+  a: Partial<NonceManagerConfig> | undefined,
+  b: Partial<NonceManagerConfig> | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keysA = Object.keys(a) as Array<keyof NonceManagerConfig>;
+  const keysB = Object.keys(b) as Array<keyof NonceManagerConfig>;
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => a[k] === b[k]);
+}
+
 /**
  * Get the singleton NonceManager instance.
  *
@@ -619,7 +632,8 @@ export function getNonceManager(config?: Partial<NonceManagerConfig>): NonceMana
     nonceManagerInitialConfig = config;
   } else if (config !== undefined) {
     // FIX 1.1: Warn if different config provided after initialization
-    const configChanged = JSON.stringify(config) !== JSON.stringify(nonceManagerInitialConfig);
+    // PERF-008 FIX: Shallow key comparison instead of JSON.stringify (avoids 3x traversal)
+    const configChanged = shallowConfigEquals(config, nonceManagerInitialConfig) === false;
     if (configChanged) {
       logger.warn('getNonceManager called with different config after initialization. Config ignored.', {
         initialConfig: nonceManagerInitialConfig,

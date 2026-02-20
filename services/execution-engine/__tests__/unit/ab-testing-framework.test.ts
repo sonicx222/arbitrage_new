@@ -140,7 +140,7 @@ describe('Statistical Analysis', () => {
 
       expect(result.significant).toBe(false);
       expect(result.recommendation).toBe('continue_testing');
-      expect(result.sampleSizeWarning).toBeDefined();
+      expect(typeof result.sampleSizeWarning).toBe('string');
     });
 
     it('should recommend keeping control when control is better', () => {
@@ -455,7 +455,7 @@ describe('ABTestingFramework', () => {
         variant: 'flash-loan',
       });
 
-      expect(experiment.id).toBeDefined();
+      expect(typeof experiment.id).toBe('string');
       expect(experiment.name).toBe('Flash Loan Test');
       expect(experiment.control).toBe('direct');
       expect(experiment.variant).toBe('flash-loan');
@@ -497,7 +497,7 @@ describe('ABTestingFramework', () => {
 
       const variant = framework.assignVariant(experiment.id, 'opp-123');
 
-      expect(variant).toBeDefined();
+      expect(variant).not.toBeNull();
       expect(['control', 'variant']).toContain(variant);
     });
 
@@ -530,7 +530,7 @@ describe('ABTestingFramework', () => {
       const updated = await framework.getExperiment(experiment.id);
 
       expect(updated?.status).toBe('completed');
-      expect(updated?.endDate).toBeDefined();
+      expect(updated?.endDate).toBeInstanceOf(Date);
     });
 
     it('should remove from active experiments when paused', async () => {

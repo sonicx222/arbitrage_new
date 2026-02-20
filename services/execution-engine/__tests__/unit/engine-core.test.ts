@@ -37,7 +37,6 @@ describe('ExecutionEngineService', () => {
    */
   test('should be fully initialized and ready for opportunity processing', () => {
     // Then: Engine is created successfully
-    expect(engine).toBeDefined();
     expect(engine).toBeInstanceOf(ExecutionEngineService);
   });
 
@@ -58,11 +57,13 @@ describe('ExecutionEngineService', () => {
     const stats = engine.getStats();
 
     // Then: All execution counters start at zero
-    expect(stats).toBeDefined();
+    expect(stats).toMatchObject({
+      opportunitiesReceived: 0,
+      executionAttempts: 0,
+      successfulExecutions: 0,
+      failedExecutions: 0,
+    });
     expect(stats.opportunitiesReceived).toBe(0);
-    expect(stats.executionAttempts).toBe(0);
-    expect(stats.successfulExecutions).toBe(0);
-    expect(stats.failedExecutions).toBe(0);
   });
 });
 
@@ -148,9 +149,6 @@ describe('ExecutionEngineService Production Simulation Guard (FIX-3.1)', () => {
     const mockPerfLogger = createMockPerfLogger();
     const mockStateManager = createMockExecutionStateManager();
 
-    // Capture console.error for the warning
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
     expect(() => {
       new ExecutionEngineService({
         logger: mockLogger,
@@ -162,12 +160,10 @@ describe('ExecutionEngineService Production Simulation Guard (FIX-3.1)', () => {
       });
     }).not.toThrow();
 
-    // Verify warning was logged
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
+    // Verify warning was logged via logger (engine.ts uses this.logger.error, not console.error)
+    expect(mockLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION')
     );
-
-    consoleErrorSpy.mockRestore();
   });
 });
 
@@ -191,8 +187,8 @@ describe('Precision Fix Regression Tests', () => {
 
     // The correct result should be 123456789000000000n (approximately)
     // But due to float representation, toFixed(18) gives us a precise string
-    expect(correctResult).toBeDefined();
     expect(typeof correctResult).toBe('bigint');
+    expect(correctResult).toBeGreaterThan(0n);
 
     // Verify the new implementation doesn't lose significant digits
     // The buggy version loses precision, the correct version maintains it

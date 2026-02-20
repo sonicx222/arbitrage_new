@@ -3,6 +3,9 @@
 
 import { parentPort, workerData } from 'worker_threads';
 import { PriceMatrix } from './caching/price-matrix';
+import { createLogger } from './logger';
+
+const logger = createLogger('event-processor-worker');
 
 const { workerId, priceBuffer, keyRegistryBuffer } = workerData;
 
@@ -23,12 +26,12 @@ if (priceBuffer && priceBuffer instanceof SharedArrayBuffer) {
     workerPriceMatrix = PriceMatrix.fromSharedBuffer(priceBuffer, keyRegistry);
 
     const registryInfo = keyRegistry ? ' with key registry' : ' (no key registry - lookups disabled)';
-    console.log(`Worker ${workerId}: PriceMatrix initialized from SharedArrayBuffer (${priceBuffer.byteLength} bytes)${registryInfo}`);
+    logger.info(`Worker ${workerId}: PriceMatrix initialized from SharedArrayBuffer (${priceBuffer.byteLength} bytes)${registryInfo}`);
   } catch (error) {
-    console.error(`Worker ${workerId}: Failed to initialize PriceMatrix:`, error);
+    logger.error(`Worker ${workerId}: Failed to initialize PriceMatrix`, { error });
   }
 } else {
-  console.log(`Worker ${workerId}: No SharedArrayBuffer provided, price lookups disabled`);
+  logger.info(`Worker ${workerId}: No SharedArrayBuffer provided, price lookups disabled`);
 }
 
 /**
@@ -419,4 +422,4 @@ parentPort?.on('message', async (message: TaskMessage) => {
 });
 
 // Worker initialization complete
-console.log(`Event processor worker ${workerId} initialized`);
+logger.info(`Event processor worker ${workerId} initialized`);

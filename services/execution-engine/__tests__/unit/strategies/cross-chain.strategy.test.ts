@@ -783,7 +783,7 @@ describe('CrossChainStrategy - Bridge Fee Type Coercion', () => {
 
     // Should handle undefined by defaulting to 0n or returning error
     // The fix converts undefined to 0n which is valid
-    expect(result).toBeDefined();
+    expect(result).toMatchObject({ opportunityId: expect.any(String) });
     // Either succeeds with 0 fee or fails for another reason, but should not crash
   });
 
@@ -881,7 +881,6 @@ describe('CrossChainStrategy - Successful Execution', () => {
 
     if (result.success) {
       // Actual profit should account for bridge fees and gas costs
-      expect(result.actualProfit).toBeDefined();
       expect(typeof result.actualProfit).toBe('number');
     }
   });

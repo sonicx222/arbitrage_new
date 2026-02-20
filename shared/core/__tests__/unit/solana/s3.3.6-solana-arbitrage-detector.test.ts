@@ -30,7 +30,7 @@ import {
   type PriorityFeeEstimate,
   type SolanaArbitrageStats,
   type SolanaPoolInfo,
-} from '../../services/partition-solana/src/arbitrage-detector';
+} from '../../../../../services/partition-solana/src/arbitrage-detector';
 
 // =============================================================================
 // Test Helpers

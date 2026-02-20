@@ -493,7 +493,7 @@ export class RedisMock {
     // Use monotonic sequence number for reliable ID generation
     let messageId: string;
     if (id === '*') {
-      const sequence = (this.streamSequences.get(stream) || 0) + 1;
+      const sequence = (this.streamSequences.get(stream) ?? 0) + 1;
       this.streamSequences.set(stream, sequence);
       messageId = `${Date.now()}-${sequence}`;
     } else {
@@ -625,7 +625,7 @@ export class RedisMock {
         'radix-tree-keys', 1,
         'radix-tree-nodes', 2,
         'last-generated-id', streamData.length > 0 ? streamData[streamData.length - 1].id : '0-0',
-        'groups', this.consumerGroups.get(stream)?.size || 0
+        'groups', this.consumerGroups.get(stream)?.size ?? 0
       ];
     }
 
@@ -990,7 +990,7 @@ export class RedisMockState {
    * Get next monotonic sequence number for a stream (thread-safe within single process)
    */
   getNextSequence(stream: string): number {
-    const current = this.streamSequences.get(stream) || 0;
+    const current = this.streamSequences.get(stream) ?? 0;
     const next = current + 1;
     this.streamSequences.set(stream, next);
     return next;

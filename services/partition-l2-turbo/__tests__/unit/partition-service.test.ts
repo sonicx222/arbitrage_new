@@ -59,6 +59,6 @@ generatePartitionUnitTests({
   defaultPort: 3002,
   region: 'asia-southeast1',
   exportPrefix: 'P2',
-  importModule: () => import('../../index'),
+  importModule: () => import('../../src/index'),
   mockLogger,
 });

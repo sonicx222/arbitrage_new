@@ -189,7 +189,7 @@ export default class SlowTestReporter implements Reporter {
 
   private groupByProject(): Record<string, number> {
     return this.slowTests.reduce((acc, test) => {
-      acc[test.project] = (acc[test.project] || 0) + 1;
+      acc[test.project] = (acc[test.project] ?? 0) + 1;
       return acc;
     }, {} as Record<string, number>);
   }

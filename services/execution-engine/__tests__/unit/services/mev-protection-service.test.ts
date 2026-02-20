@@ -108,7 +108,7 @@ describe('MevProtectionService', () => {
       const result = service.checkEligibility('ethereum', ctx, 100);
 
       expect(result.shouldUseMev).toBe(true);
-      expect(result.mevProvider).toBeDefined();
+      expect(result.mevProvider).not.toBeUndefined();
     });
 
     it('should return not eligible when no provider factory', () => {
@@ -160,7 +160,7 @@ describe('MevProtectionService', () => {
 
       // Should not throw
       const result = service.checkEligibility('ethereum', ctx);
-      expect(result).toBeDefined();
+      expect(result).toMatchObject({ shouldUseMev: expect.any(Boolean) });
     });
   });
 
@@ -202,7 +202,7 @@ describe('MevProtectionService', () => {
 
       const result = service.getProviderFallbackChain('ethereum', ctx, 100);
 
-      expect(result).toBeDefined();
+      expect(result).toMatchObject({ hasProtection: expect.any(Boolean) });
     });
   });
 
@@ -275,7 +275,7 @@ describe('MevProtectionService', () => {
 
       const result = await service.applyProtection(tx, 'ethereum', ctx, gasBaselines);
 
-      expect(result.gasPrice).toBeDefined();
+      expect(typeof result.gasPrice).toBe('bigint');
     });
 
     it('should use fallback gas price when no provider for chain', async () => {
@@ -288,7 +288,7 @@ describe('MevProtectionService', () => {
 
       const result = await service.applyProtection(tx, 'ethereum', ctx, gasBaselines);
 
-      expect(result.gasPrice).toBeDefined();
+      expect(typeof result.gasPrice).toBe('bigint');
     });
 
     it('should fall back to basic gas price on fee data error', async () => {
@@ -305,7 +305,7 @@ describe('MevProtectionService', () => {
 
       const result = await service.applyProtection(tx, 'ethereum', ctx, gasBaselines);
 
-      expect(result.gasPrice).toBeDefined();
+      expect(typeof result.gasPrice).toBe('bigint');
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Failed to apply full MEV protection'),
         expect.any(Object)

@@ -796,6 +796,7 @@ export {
   HotPathMonitor,
   measureHotPath,
   measureHotPathAsync,
+  getHotPathMonitor,
   hotPathMonitor,
   resetHotPathMonitor,
 } from './performance-monitor';

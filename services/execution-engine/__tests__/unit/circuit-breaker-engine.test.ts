@@ -115,8 +115,8 @@ describe('Circuit Breaker Integration Tests (Phase 1.3.3)', () => {
       // Verify transition event
       const events = mockEventEmitter.getEvents();
       const halfOpenEvent = events.find(e => e.newState === 'HALF_OPEN');
-      expect(halfOpenEvent).toBeDefined();
-      expect(halfOpenEvent?.previousState).toBe('OPEN');
+      expect(halfOpenEvent).not.toBeUndefined();
+      expect(halfOpenEvent!.previousState).toBe('OPEN');
 
       circuitBreaker.stop();
     });
@@ -160,8 +160,8 @@ describe('Circuit Breaker Integration Tests (Phase 1.3.3)', () => {
       const closeEvent = events.find(
         e => e.previousState === 'HALF_OPEN' && e.newState === 'CLOSED'
       );
-      expect(closeEvent).toBeDefined();
-      expect(closeEvent?.reason).toContain('recovered');
+      expect(closeEvent).not.toBeUndefined();
+      expect(closeEvent!.reason).toContain('recovered');
 
       circuitBreaker.stop();
     });
@@ -208,8 +208,8 @@ describe('Circuit Breaker Integration Tests (Phase 1.3.3)', () => {
       const reopenEvent = events.find(
         e => e.previousState === 'HALF_OPEN' && e.newState === 'OPEN'
       );
-      expect(reopenEvent).toBeDefined();
-      expect(reopenEvent?.reason).toContain('HALF_OPEN');
+      expect(reopenEvent).not.toBeUndefined();
+      expect(reopenEvent!.reason).toContain('HALF_OPEN');
 
       circuitBreaker.stop();
     });
@@ -500,7 +500,7 @@ describe('Circuit Breaker Integration Tests (Phase 1.3.3)', () => {
       const forceCloseEvent = events.find(
         e => e.newState === 'CLOSED' && e.reason.includes('Manual')
       );
-      expect(forceCloseEvent).toBeDefined();
+      expect(forceCloseEvent).not.toBeUndefined();
 
       circuitBreaker.stop();
     });

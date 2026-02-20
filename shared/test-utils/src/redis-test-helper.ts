@@ -31,7 +31,7 @@
  * @see ADR-009: Test Architecture
  */
 
-import { createClient, RedisClientType } from 'redis';
+import Redis from 'ioredis';
 
 // =============================================================================
 // Types
@@ -39,12 +39,19 @@ import { createClient, RedisClientType } from 'redis';
 
 /**
  * Extended Redis client type with database information.
+ * Uses ioredis (consolidating from dual redis/ioredis dependency).
  */
-export interface IsolatedRedisClient extends RedisClientType {
+export interface IsolatedRedisClient extends Redis {
   /** The isolated database number */
   __testDatabase?: number;
   /** The test suite name */
   __testSuiteName?: string;
+  /**
+   * Compatibility property: returns true if the client is connected.
+   * Mirrors the node-redis v4 `isOpen` property for backward compatibility
+   * with code that checks `redis.isOpen`.
+   */
+  isOpen?: boolean;
 }
 
 // =============================================================================
@@ -111,6 +118,18 @@ export function getIsolatedRedisDatabase(testSuite: string): number {
 }
 
 /**
+ * Parse a Redis URL into host, port, and optional password.
+ */
+function parseRedisUrl(url: string): { host: string; port: number; password?: string } {
+  const urlObj = new URL(url);
+  return {
+    host: urlObj.hostname || 'localhost',
+    port: parseInt(urlObj.port, 10) || 6379,
+    password: urlObj.password || undefined,
+  };
+}
+
+/**
  * Create an isolated Redis client for a test suite.
  *
  * The client connects to a dedicated Redis database to prevent
@@ -134,33 +153,41 @@ export async function createIsolatedRedisClient(
 ): Promise<IsolatedRedisClient> {
   const database = getIsolatedRedisDatabase(testSuite);
   const url = options.url || process.env.REDIS_URL || 'redis://localhost:6379';
+  const { host, port, password } = parseRedisUrl(url);
 
-  // Parse URL and add database
-  const urlWithDb = appendDatabaseToUrl(url, database);
-
-  const client = createClient({
-    url: urlWithDb,
-    socket: {
-      connectTimeout: options.connectTimeout || 5000,
-      reconnectStrategy: (retries) => {
-        // Don't retry forever in tests
-        if (retries > 3) {
-          return new Error('Redis connection failed after 3 retries');
-        }
-        return Math.min(retries * 100, 500);
+  const client = new Redis({
+    host,
+    port,
+    password,
+    db: database,
+    connectTimeout: options.connectTimeout ?? 5000,
+    maxRetriesPerRequest: 3,
+    retryStrategy(times: number) {
+      if (times > 3) {
+        return null; // Stop retrying
       }
-    }
+      return Math.min(times * 100, 500);
+    },
+    lazyConnect: true, // We'll connect explicitly below
   }) as IsolatedRedisClient;
 
   // Store metadata on client
   client.__testDatabase = database;
   client.__testSuiteName = testSuite;
 
-  // Connect
+  // Connect explicitly
   await client.connect();
 
+  // Define isOpen as a getter for backward compatibility
+  Object.defineProperty(client, 'isOpen', {
+    get() {
+      return client.status === 'ready';
+    },
+    configurable: true,
+  });
+
   // Flush the database to ensure clean state
-  await client.flushDb();
+  await client.flushdb();
 
   return client;
 }
@@ -181,12 +208,12 @@ export async function cleanupTestRedis(client: IsolatedRedisClient): Promise<voi
   if (!client) return;
 
   try {
-    // Check if client is connected
-    if (client.isOpen) {
+    // Check if client is connected (ioredis status check)
+    if (client.status === 'ready') {
       // Flush the test database
-      await client.flushDb();
+      await client.flushdb();
       // Disconnect
-      await client.disconnect();
+      await client.quit();
     }
   } catch (error) {
     // Log but don't throw - cleanup should be best-effort
@@ -210,33 +237,6 @@ export function resetDatabaseCounter(): void {
  */
 export function getDatabaseAssignments(): Map<string, number> {
   return new Map(testSuiteDatabases);
-}
-
-// =============================================================================
-// Internal Helpers
-// =============================================================================
-
-/**
- * Append database number to Redis URL.
- *
- * @param url - Base Redis URL
- * @param database - Database number to use
- * @returns URL with database number
- */
-function appendDatabaseToUrl(url: string, database: number): string {
-  // Handle URLs that already have a database
-  const urlObj = new URL(url);
-
-  // Redis URL format: redis://host:port/database
-  // pathname will be empty or '/' for default database
-  if (!urlObj.pathname || urlObj.pathname === '/') {
-    urlObj.pathname = `/${database}`;
-  } else {
-    // URL already has a database - use the isolated one instead
-    urlObj.pathname = `/${database}`;
-  }
-
-  return urlObj.toString();
 }
 
 // =============================================================================

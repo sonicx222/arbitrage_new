@@ -105,7 +105,7 @@ export function createChaosController(name: string) {
      */
     getLatency(): number {
       if (!state.isActive || state.config.mode === 'fail') return 0;
-      return state.config.latencyMs || 0;
+      return state.config.latencyMs ?? 0;
     },
 
     /**
@@ -147,7 +147,7 @@ export function withChaos<T extends (...args: unknown[]) => Promise<unknown>>(
 
     if (state.isActive) {
       // Apply latency
-      const latency = state.config.latencyMs || 0;
+      const latency = state.config.latencyMs ?? 0;
       if (latency > 0 && state.config.mode !== 'fail') {
         await sleep(latency);
         state.injectedLatency += latency;

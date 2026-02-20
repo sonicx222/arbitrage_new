@@ -369,11 +369,14 @@ describe('MLPredictionManager', () => {
       // Get a prediction to populate cache
       await manager.getCachedPrediction('ethereum', 'uniswap_WETH_USDC', 3014);
 
-      // Wait for TTL to expire
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Advance Date.now() past TTL to expire the cache entry
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 100;
 
       // Cleanup should remove expired entry
       manager.cleanup();
+
+      Date.now = originalDateNow;
 
       // This is an internal implementation detail - the test verifies cleanup runs without error
       expect(true).toBe(true);

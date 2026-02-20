@@ -14,6 +14,9 @@
 
 import { join } from 'path';
 import { mkdir, writeFile } from 'fs/promises';
+import { createLogger } from './logger';
+
+const logger = createLogger('v8-profiler');
 
 export interface ProfileResult {
   title: string;
@@ -32,17 +35,31 @@ export class V8Profiler {
   private outputDir: string;
   private sampleInterval: number;
   private outputDirReady = false;
+  // BUG-011 FIX: Track whether loading has been attempted (lazy init)
+  private loadAttempted = false;
 
   constructor(options: ProfileOptions = {}) {
     this.outputDir = options.outputDir || join(process.cwd(), '.profiler-output');
     this.sampleInterval = options.sampleInterval || 1000; // 1ms default
+  }
 
-    // Try to load v8-profiler-next
+  /**
+   * BUG-011 FIX: Lazy-load v8-profiler-next using dynamic import() instead of require().
+   * Compatible with ESM migration. Called automatically before profiling operations.
+   */
+  private async ensureProfiler(): Promise<boolean> {
+    if (this.loadAttempted) return this.profiler !== null;
+    this.loadAttempted = true;
     try {
-      this.profiler = require('v8-profiler-next');
+      // Use variable to prevent TypeScript from statically resolving the optional module
+      const moduleName = 'v8-profiler-next';
+      const mod = await import(/* webpackIgnore: true */ moduleName);
+      this.profiler = mod.default ?? mod;
       this.profiler.setSamplingInterval(this.sampleInterval);
-    } catch (err) {
-      console.warn('⚠ v8-profiler-next not available. Install with: npm install --save-dev v8-profiler-next');
+      return true;
+    } catch {
+      logger.warn('v8-profiler-next not available. Install with: npm install --save-dev v8-profiler-next');
+      return false;
     }
   }
 
@@ -56,22 +73,33 @@ export class V8Profiler {
   }
 
   /**
-   * Check if profiler is available
+   * Check if profiler is available.
+   * Note: Returns false until ensureProfiler() has been called (lazy init).
+   * Use isAvailableAsync() for a definitive check.
    */
   isAvailable(): boolean {
     return this.profiler !== null;
   }
 
   /**
+   * BUG-011 FIX: Async availability check that triggers lazy loading.
+   */
+  async isAvailableAsync(): Promise<boolean> {
+    return this.ensureProfiler();
+  }
+
+  /**
    * Start CPU profiling
    */
   async startProfiling(title: string = 'profile'): Promise<void> {
+    // BUG-011 FIX: Trigger lazy load via dynamic import()
+    await this.ensureProfiler();
     if (!this.profiler) {
       throw new Error('V8 profiler not available. Install v8-profiler-next.');
     }
 
     this.profiler.startProfiling(title, true);
-    console.log(`✓ Started profiling: ${title} (sampling interval: ${this.sampleInterval}μs)`);
+    logger.info(`Started profiling: ${title} (sampling interval: ${this.sampleInterval}us)`);
   }
 
   /**
@@ -90,7 +118,7 @@ export class V8Profiler {
     const duration = endTime - startTime;
     const samples = profile.samples?.length ?? 0;
 
-    console.log(`✓ Stopped profiling: ${profile.title || 'profile'} (duration: ${duration}μs, samples: ${samples})`);
+    logger.info(`Stopped profiling: ${profile.title || 'profile'} (duration: ${duration}us, samples: ${samples})`);
 
     return {
       title: profile.title || 'profile',
@@ -121,7 +149,7 @@ export class V8Profiler {
         try {
           await writeFile(filepath, result, 'utf8');
           profileResult.profile.delete();
-          console.log(`✓ Exported profile: ${filepath}`);
+          logger.info(`Exported profile: ${filepath}`);
           resolve(filepath);
         } catch (writeError) {
           reject(writeError);
@@ -209,8 +237,8 @@ export class V8Profiler {
 
     await this.ensureOutputDir();
     await writeFile(outputPath, htmlContent, 'utf8');
-    console.log(`✓ Generated flame graph HTML: ${outputPath}`);
-    console.log(`  View profile: open ${cpuprofilePath} in Chrome DevTools or Speedscope`);
+    logger.info(`Generated flame graph HTML: ${outputPath}`);
+    logger.info(`View profile: open ${cpuprofilePath} in Chrome DevTools or Speedscope`);
 
     return outputPath;
   }
@@ -252,7 +280,7 @@ export class V8Profiler {
    */
   async cleanup(olderThanMs: number = 24 * 60 * 60 * 1000): Promise<void> {
     // Implementation would clean up old .cpuprofile files
-    console.log(`Cleanup: would remove profiles older than ${olderThanMs}ms`);
+    logger.info(`Cleanup: would remove profiles older than ${olderThanMs}ms`);
   }
 }
 
@@ -277,8 +305,9 @@ export async function profileHotPath<T>(
 ): Promise<{ result: T; profileResult: ProfileResult | null }> {
   const profiler = getGlobalProfiler();
 
-  if (!profiler.isAvailable()) {
-    console.warn('⚠ V8 profiler not available, running without profiling');
+  // BUG-011 FIX: Use async check to trigger lazy loading via import()
+  if (!(await profiler.isAvailableAsync())) {
+    logger.warn('V8 profiler not available, running without profiling');
     const result = await fn();
     return { result, profileResult: null };
   }

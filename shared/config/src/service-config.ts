@@ -411,8 +411,10 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     protocol: 'syncswap',
     fee: 30  // 0.3% flash loan fee (30 bps)
   },
-  // Task 3.4 (Future): Linea - SyncSwap flash loans via Vault (EIP-3156)
-  // TODO: Add Linea Vault address when deploying SyncSwap support to Linea
+  // T-NEW-6 DEFERRED: Linea - SyncSwap flash loans via Vault (EIP-3156)
+  // Blocked on: SyncSwap Vault deployment to Linea mainnet (no contract address available).
+  // When available: uncomment linea entry below, add address to SYNCSWAP_VAULTS,
+  // and unskip tests in shared/config/__tests__/unit/p0-p1-regression.test.ts.
   // linea: {
   //   address: SYNCSWAP_VAULTS.linea,  // SyncSwap Vault (TBD)
   //   protocol: 'syncswap',

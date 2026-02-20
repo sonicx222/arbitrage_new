@@ -288,10 +288,13 @@ describe('OpportunityPublisher', () => {
 
       await publisher.publish(createTestOpportunity());
 
-      // Wait for TTL to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Advance Date.now() past TTL to expire the cache entry
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 150;
 
       publisher.cleanup();
+
+      Date.now = originalDateNow;
 
       expect(publisher.getCacheSize()).toBe(0);
     });

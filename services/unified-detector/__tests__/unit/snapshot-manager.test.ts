@@ -189,10 +189,13 @@ describe('SnapshotManager', () => {
 
       const first = shortTtlManager.createPairsSnapshot(pairs);
 
-      // Wait for TTL to expire
-      await new Promise(resolve => setTimeout(resolve, 20));
+      // Advance Date.now() past TTL to expire cache
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 20;
 
       const second = shortTtlManager.createPairsSnapshot(pairs);
+
+      Date.now = originalDateNow;
 
       expect(first).not.toBe(second); // Different reference (refreshed)
 

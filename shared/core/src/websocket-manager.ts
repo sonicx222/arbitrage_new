@@ -109,6 +109,9 @@ export type ErrorEventHandler = (error: Error) => void;
 export type GenericEventHandler = (...args: any[]) => void;
 
 export class WebSocketManager {
+  /** PERF-001: Maximum handlers per handler set to prevent unbounded listener accumulation */
+  private static readonly MAX_HANDLERS_PER_SET = 50;
+
   private ws: WebSocket | null = null;
   private config: WebSocketConfig;
   private logger = createLogger('websocket-manager');
@@ -210,7 +213,7 @@ export class WebSocketManager {
     this.config = {
       reconnectInterval: 1000,  // Base delay for exponential backoff
       maxReconnectAttempts: 10,
-      heartbeatInterval: config.pingInterval || 30000,
+      heartbeatInterval: config.pingInterval ?? 30000,
       connectionTimeout: 10000,
       backoffMultiplier: 2.0,
       maxReconnectDelay: 60000,
@@ -244,10 +247,14 @@ export class WebSocketManager {
     // Phase 2: Initialize worker thread JSON parsing
     // P1-PHASE1: Enable by default for production (NODE_ENV=production or detected production environment)
     // Worker parsing reduces main thread blocking by 20-30% for large payloads
+    // WS_WORKER_PARSING env var allows explicit override regardless of environment
+    const envOverride = process.env.WS_WORKER_PARSING;
     const isProduction = process.env.NODE_ENV === 'production' ||
       process.env.FLY_APP_NAME !== undefined ||
       process.env.RAILWAY_ENVIRONMENT !== undefined;
-    const workerParsingDefault = isProduction;
+    const workerParsingDefault = envOverride !== undefined
+      ? envOverride === 'true'
+      : isProduction;
 
     this.useWorkerParsing = config.useWorkerParsing ?? workerParsingDefault;
     this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 2048;
@@ -649,11 +656,25 @@ export class WebSocketManager {
   }
 
   onMessage(handler: WebSocketEventHandler): () => void {
+    if (this.messageHandlers.size >= WebSocketManager.MAX_HANDLERS_PER_SET) {
+      this.logger.warn('Maximum message handlers reached, ignoring new handler', {
+        current: this.messageHandlers.size,
+        max: WebSocketManager.MAX_HANDLERS_PER_SET
+      });
+      return () => {}; // Return no-op unsubscribe
+    }
     this.messageHandlers.add(handler);
     return () => this.messageHandlers.delete(handler);
   }
 
   onConnectionChange(handler: ConnectionStateHandler): () => void {
+    if (this.connectionHandlers.size >= WebSocketManager.MAX_HANDLERS_PER_SET) {
+      this.logger.warn('Maximum connection handlers reached, ignoring new handler', {
+        current: this.connectionHandlers.size,
+        max: WebSocketManager.MAX_HANDLERS_PER_SET
+      });
+      return () => {};
+    }
     this.connectionHandlers.add(handler);
     return () => this.connectionHandlers.delete(handler);
   }
@@ -664,14 +685,35 @@ export class WebSocketManager {
    */
   on(event: string, handler: GenericEventHandler): () => void {
     if (event === 'message') {
+      if (this.messageHandlers.size >= WebSocketManager.MAX_HANDLERS_PER_SET) {
+        this.logger.warn('Maximum message handlers reached, ignoring new handler', {
+          current: this.messageHandlers.size,
+          max: WebSocketManager.MAX_HANDLERS_PER_SET
+        });
+        return () => {};
+      }
       this.messageHandlers.add(handler as WebSocketEventHandler);
       return () => this.messageHandlers.delete(handler as WebSocketEventHandler);
     }
     if (event === 'error') {
+      if (this.errorHandlers.size >= WebSocketManager.MAX_HANDLERS_PER_SET) {
+        this.logger.warn('Maximum error handlers reached, ignoring new handler', {
+          current: this.errorHandlers.size,
+          max: WebSocketManager.MAX_HANDLERS_PER_SET
+        });
+        return () => {};
+      }
       this.errorHandlers.add(handler as ErrorEventHandler);
       return () => this.errorHandlers.delete(handler as ErrorEventHandler);
     }
     if (event === 'connected' || event === 'disconnected') {
+      if (this.connectionHandlers.size >= WebSocketManager.MAX_HANDLERS_PER_SET) {
+        this.logger.warn('Maximum connection handlers reached, ignoring new handler', {
+          current: this.connectionHandlers.size,
+          max: WebSocketManager.MAX_HANDLERS_PER_SET
+        });
+        return () => {};
+      }
       const wrappedHandler: ConnectionStateHandler = (connected: boolean) => {
         if ((event === 'connected' && connected) || (event === 'disconnected' && !connected)) {
           handler();
@@ -684,7 +726,16 @@ export class WebSocketManager {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, new Set());
     }
-    this.eventHandlers.get(event)!.add(handler);
+    const eventSet = this.eventHandlers.get(event)!;
+    if (eventSet.size >= WebSocketManager.MAX_HANDLERS_PER_SET) {
+      this.logger.warn('Maximum event handlers reached, ignoring new handler', {
+        event,
+        current: eventSet.size,
+        max: WebSocketManager.MAX_HANDLERS_PER_SET
+      });
+      return () => {};
+    }
+    eventSet.add(handler);
     return () => this.eventHandlers.get(event)?.delete(handler);
   }
 
@@ -730,6 +781,22 @@ export class WebSocketManager {
     this.connectionHandlers.clear();
     this.errorHandlers.clear();
     this.eventHandlers.clear();
+  }
+
+  /**
+   * PERF-001: Get current listener counts for monitoring handler accumulation.
+   */
+  getListenerStats(): { messageHandlers: number; connectionHandlers: number; errorHandlers: number; eventHandlers: number } {
+    let eventHandlerCount = 0;
+    for (const handlers of this.eventHandlers.values()) {
+      eventHandlerCount += handlers.size;
+    }
+    return {
+      messageHandlers: this.messageHandlers.size,
+      connectionHandlers: this.connectionHandlers.size,
+      errorHandlers: this.errorHandlers.size,
+      eventHandlers: eventHandlerCount,
+    };
   }
 
   private handleMessage(data: Buffer): void {

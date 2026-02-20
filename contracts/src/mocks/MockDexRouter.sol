@@ -31,6 +31,13 @@ contract MockDexRouter is IDexRouter {
     // Exchange rates: tokenIn => tokenOut => rate (output per 1e18 input)
     mapping(address => mapping(address => uint256)) public exchangeRates;
 
+    /// @notice When true, allows zero-output swaps instead of reverting
+    bool public allowZeroOutput = false;
+
+    function setAllowZeroOutput(bool _allow) external {
+        allowZeroOutput = _allow;
+    }
+
     event Swap(
         address indexed tokenIn,
         address indexed tokenOut,
@@ -103,6 +110,7 @@ contract MockDexRouter is IDexRouter {
             // Emit warning if truncation results in zero (helps debug test issues)
             if (amountOut == 0 && currentAmount > 0) {
                 emit ZeroOutputWarning(tokenIn, tokenOut, currentAmount, rate);
+                require(allowZeroOutput, "Zero output from truncation");
             }
 
             amounts[i + 1] = amountOut;
@@ -145,6 +153,9 @@ contract MockDexRouter is IDexRouter {
             require(rate > 0, "Exchange rate not set");
 
             uint256 amountOut = (currentAmount * rate) / 1e18;
+            if (amountOut == 0 && currentAmount > 0) {
+                require(allowZeroOutput, "Zero output from truncation");
+            }
             amounts[i + 1] = amountOut;
             currentAmount = amountOut;
         }

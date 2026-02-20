@@ -24,7 +24,7 @@ jest.mock('@arbitrage/core', () => ({
   bpsToDecimal: jest.fn((bps: number) => bps / 10000),
 }));
 
-jest.mock('../../types', () => ({
+jest.mock('../../src/types', () => ({
   validateFee: jest.fn((fee: number) => fee),
 }));
 

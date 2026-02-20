@@ -66,7 +66,6 @@ describe('calculateSignificance', () => {
     const result = calculateSignificance(control, variant);
 
     expect(result.significant).toBe(false);
-    expect(result.sampleSizeWarning).toBeDefined();
     expect(result.sampleSizeWarning).toContain('Insufficient sample size');
     expect(result.sampleSizeWarning).toContain('50/100');
     expect(result.recommendation).toBe('continue_testing');
@@ -79,7 +78,7 @@ describe('calculateSignificance', () => {
     const result = calculateSignificance(control, variant);
 
     expect(result.significant).toBe(false);
-    expect(result.sampleSizeWarning).toBeDefined();
+    expect(result.sampleSizeWarning).toContain('Insufficient sample size');
     expect(result.recommendation).toBe('continue_testing');
   });
 
@@ -90,7 +89,7 @@ describe('calculateSignificance', () => {
     const result = calculateSignificance(control, variant);
 
     expect(result.significant).toBe(false);
-    expect(result.sampleSizeWarning).toBeDefined();
+    expect(result.sampleSizeWarning).toContain('Insufficient sample size');
     expect(result.recommendation).toBe('continue_testing');
   });
 
@@ -164,7 +163,7 @@ describe('calculateSignificance', () => {
     const result = calculateSignificance(control, variant);
 
     expect(result.significant).toBe(false);
-    expect(result.sampleSizeWarning).toBeDefined();
+    expect(typeof result.sampleSizeWarning).toBe('string');
     // With zero samples, z-score should be 0 and p-value should be safe
     expect(Number.isFinite(result.pValue)).toBe(true);
     expect(Number.isFinite(result.zScore)).toBe(true);
@@ -198,7 +197,7 @@ describe('calculateSignificance', () => {
     const result = calculateSignificance(control, variant);
 
     expect(result.significant).toBe(false);
-    expect(result.sampleSizeWarning).toBeDefined();
+    expect(typeof result.sampleSizeWarning).toBe('string');
     expect(Number.isFinite(result.pValue)).toBe(true);
     expect(Number.isFinite(result.zScore)).toBe(true);
     expect(result.recommendation).toBe('continue_testing');
@@ -431,7 +430,6 @@ describe('shouldStopEarly', () => {
 
     // At 50% with p=0.0001, should be below the O'Brien-Fleming boundary
     expect(result.shouldStop).toBe(true);
-    expect(result.reason).toBeDefined();
     expect(result.reason).toContain('P-value');
   });
 

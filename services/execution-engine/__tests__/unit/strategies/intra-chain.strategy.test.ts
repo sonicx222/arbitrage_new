@@ -281,7 +281,7 @@ describe('IntraChainStrategy - Simulation Integration', () => {
 
       // Should proceed to send transaction
       expect(result.success).toBe(true);
-      expect(result.transactionHash).toBeDefined();
+      expect(result.transactionHash).toMatch(/^0x[a-fA-F0-9]+$/);
     });
 
     it('should handle simulation service errors gracefully', async () => {
@@ -349,7 +349,7 @@ describe('IntraChainStrategy - Simulation Integration', () => {
 
       // Should proceed without simulation
       expect(result.success).toBe(true);
-      expect(result.transactionHash).toBeDefined();
+      expect(result.transactionHash).toMatch(/^0x[a-fA-F0-9]+$/);
     });
   });
 

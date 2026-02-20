@@ -266,7 +266,7 @@ describe('RiskManagementOrchestrator', () => {
       });
 
       expect(result.allowed).toBe(true);
-      expect(result.evCalculation).toBeDefined();
+      expect(result.evCalculation).toMatchObject({ shouldExecute: true });
       expect(stats.riskEVRejections).toBe(0);
     });
   });
@@ -371,9 +371,9 @@ describe('RiskManagementOrchestrator', () => {
       });
 
       expect(result.allowed).toBe(true);
-      expect(result.drawdownCheck).toBeDefined();
-      expect(result.evCalculation).toBeDefined();
-      expect(result.positionSize).toBeDefined();
+      expect(result.drawdownCheck).toMatchObject({ allowed: true, state: 'NORMAL' });
+      expect(result.evCalculation).toMatchObject({ shouldExecute: true });
+      expect(result.positionSize).toMatchObject({ shouldTrade: true });
       expect(result.recommendedSize).toBe(100000000000000000n);
 
       // Verify no rejection stats incremented

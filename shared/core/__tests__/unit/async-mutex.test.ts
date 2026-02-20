@@ -136,13 +136,13 @@ describe('AsyncMutex', () => {
 
       const task1 = mutex.runExclusive(async () => {
         order.push(1);
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await Promise.resolve(); // yield to simulate async work
         order.push(2);
       });
 
       const task2 = mutex.runExclusive(async () => {
         order.push(3);
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await Promise.resolve(); // yield to simulate async work
         order.push(4);
       });
 
@@ -199,8 +199,9 @@ describe('AsyncMutex', () => {
       // Start waiting
       const waitPromise = mutex.acquire();
 
-      // Give it time to register as waiting
-      await new Promise(resolve => setTimeout(resolve, 5));
+      // Yield to allow the waiting acquire to register
+      await Promise.resolve();
+      await Promise.resolve();
 
       const statsWhileWaiting = mutex.getStats();
       expect(statsWhileWaiting.waitingCount).toBe(1);

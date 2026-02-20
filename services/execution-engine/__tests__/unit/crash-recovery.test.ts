@@ -18,9 +18,7 @@ describe('Lock Holder Crash Recovery (SPRINT 1 FIX)', () => {
     const stats = engine.getStats();
 
     // Verify staleLockRecoveries stat exists and is initialized to 0
-    expect(stats.staleLockRecoveries).toBeDefined();
     expect(stats.staleLockRecoveries).toBe(0);
-    expect(stats.lockConflicts).toBeDefined();
     expect(stats.lockConflicts).toBe(0);
   });
 

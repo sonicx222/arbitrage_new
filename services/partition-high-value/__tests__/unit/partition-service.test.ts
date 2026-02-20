@@ -69,7 +69,7 @@ generatePartitionUnitTests({
   defaultPort: 3003,
   region: 'us-east1',
   exportPrefix: 'P3',
-  importModule: () => import('../../index'),
+  importModule: () => import('../../src/index'),
   mockLogger,
   // P3 has custom env var and process handler tests that test through module import
   skipBlocks: ['envVarHandling', 'processHandlerCleanup'],
@@ -113,7 +113,7 @@ describe('P3 Environment Variable Handling', () => {
   it('should use PARTITION_CHAINS env var when provided', async () => {
     process.env.PARTITION_CHAINS = 'ethereum,zksync';
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.chains).toEqual(['ethereum', 'zksync']);
@@ -122,7 +122,7 @@ describe('P3 Environment Variable Handling', () => {
   it('should use HEALTH_CHECK_PORT env var when provided', async () => {
     process.env.HEALTH_CHECK_PORT = '4003';
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.healthCheckPort).toBe(4003);
@@ -131,7 +131,7 @@ describe('P3 Environment Variable Handling', () => {
   it('should use default port when HEALTH_CHECK_PORT is invalid', async () => {
     process.env.HEALTH_CHECK_PORT = 'invalid';
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.healthCheckPort).toBe(3003);
@@ -140,7 +140,7 @@ describe('P3 Environment Variable Handling', () => {
   it('should use INSTANCE_ID env var when provided', async () => {
     process.env.INSTANCE_ID = 'p3-high-value-custom-123';
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.instanceId).toBe('p3-high-value-custom-123');
@@ -149,7 +149,7 @@ describe('P3 Environment Variable Handling', () => {
   it('should use REGION_ID env var when provided', async () => {
     process.env.REGION_ID = 'eu-west1';
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.regionId).toBe('eu-west1');
@@ -158,14 +158,14 @@ describe('P3 Environment Variable Handling', () => {
   it('should disable cross-region health when ENABLE_CROSS_REGION_HEALTH is false', async () => {
     process.env.ENABLE_CROSS_REGION_HEALTH = 'false';
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.enableCrossRegionHealth).toBe(false);
   });
 
   it('should enable cross-region health by default', async () => {
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.enableCrossRegionHealth).toBe(true);
@@ -174,7 +174,7 @@ describe('P3 Environment Variable Handling', () => {
   it('should generate default instance ID when not provided', async () => {
     delete process.env.INSTANCE_ID;
 
-    const { config, cleanupProcessHandlers } = await import('../../index');
+    const { config, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(config.instanceId).toMatch(/^high-value-/);
@@ -211,7 +211,7 @@ describe('P3 Typed Environment Configuration (envConfig)', () => {
   });
 
   it('should export envConfig with typed configuration', async () => {
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig).toBeDefined();
@@ -224,7 +224,7 @@ describe('P3 Typed Environment Configuration (envConfig)', () => {
     process.env.ZKSYNC_RPC_URL = 'https://custom-zksync.com';
     process.env.LINEA_RPC_URL = 'https://custom-linea.com';
 
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig.rpcUrls).toBeDefined();
@@ -238,7 +238,7 @@ describe('P3 Typed Environment Configuration (envConfig)', () => {
     process.env.ZKSYNC_WS_URL = 'wss://custom-zksync.com';
     process.env.LINEA_WS_URL = 'wss://custom-linea.com';
 
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig.wsUrls).toBeDefined();
@@ -252,7 +252,7 @@ describe('P3 Typed Environment Configuration (envConfig)', () => {
     delete process.env.ZKSYNC_RPC_URL;
     delete process.env.LINEA_RPC_URL;
 
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig.rpcUrls.ethereum).toBeUndefined();
@@ -263,7 +263,7 @@ describe('P3 Typed Environment Configuration (envConfig)', () => {
   it('should reflect NODE_ENV in envConfig', async () => {
     process.env.NODE_ENV = 'production';
 
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    const { envConfig, cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
     expect(envConfig.nodeEnv).toBe('production');
@@ -281,23 +281,23 @@ describe('P3 High-Value Chain Characteristics', () => {
   });
 
   it('should have Ethereum (chain ID 1) in the partition', async () => {
-    const { config } = await import('../../index');
+    const { config } = await import('../../src/index');
     expect(config.chains).toContain('ethereum');
   });
 
   it('should have zkSync Era (chain ID 324) for ZK rollup arbitrage', async () => {
-    const { config } = await import('../../index');
+    const { config } = await import('../../src/index');
     expect(config.chains).toContain('zksync');
   });
 
   it('should have Linea (chain ID 59144) for Consensys ZK rollup', async () => {
-    const { config } = await import('../../index');
+    const { config } = await import('../../src/index');
     expect(config.chains).toContain('linea');
   });
 
   it('should use us-east1 region (Oracle Cloud US-East)', async () => {
     // Verify via the exported config from index.ts (avoids mock state issues)
-    const { P3_REGION, config } = await import('../../index');
+    const { P3_REGION, config } = await import('../../src/index');
     expect(P3_REGION).toBe('us-east1');
     expect(config.regionId).toBe('us-east1');
   });
@@ -305,7 +305,7 @@ describe('P3 High-Value Chain Characteristics', () => {
   it('should verify partition configuration via exported constants', async () => {
     // The partition details (provider, healthCheckIntervalMs, standbyRegion)
     // are verified through the index module's exported values
-    const { P3_PARTITION_ID, P3_CHAINS, P3_REGION } = await import('../../index');
+    const { P3_PARTITION_ID, P3_CHAINS, P3_REGION } = await import('../../src/index');
     expect(P3_PARTITION_ID).toBe('high-value');
     expect(P3_CHAINS).toEqual(expect.arrayContaining(['ethereum', 'zksync', 'linea']));
     expect(P3_REGION).toBe('us-east1');

@@ -165,18 +165,18 @@ export const CacheFixtures = {
    */
   metricsSnapshot: (config: CacheStateConfig): CacheMetrics => ({
     l1: {
-      size: config.l1Entries || 0,
-      hits: Math.floor((config.l1Entries || 0) * (config.hitRate || 0) / 100),
-      misses: Math.floor((config.l1Entries || 0) * (1 - (config.hitRate || 0) / 100)),
-      evictions: Math.floor((config.evictionRate || 0) * (config.l1Entries || 0) / 100),
-      hitRate: (config.hitRate || 0) / 100,
+      size: config.l1Entries ?? 0,
+      hits: Math.floor((config.l1Entries ?? 0) * (config.hitRate ?? 0) / 100),
+      misses: Math.floor((config.l1Entries ?? 0) * (1 - (config.hitRate ?? 0) / 100)),
+      evictions: Math.floor((config.evictionRate ?? 0) * (config.l1Entries ?? 0) / 100),
+      hitRate: (config.hitRate ?? 0) / 100,
     },
     l2: {
-      size: config.l2Entries || 0,
+      size: config.l2Entries ?? 0,
       hits: 0,
       misses: 0,
     },
-    memoryUsageMB: config.memoryUsageMB || 0,
+    memoryUsageMB: config.memoryUsageMB ?? 0,
   }),
 };
 

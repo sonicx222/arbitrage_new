@@ -706,8 +706,9 @@ export class PriceMatrix implements Resettable {
     const age = Date.now() - entry.timestamp;
 
     // If data is too old, treat it as stale (could be torn read or legitimately old)
+    // Note: Do NOT increment misses here — getPrice() already counted this as a hit.
+    // Staleness is a separate concern from cache hit/miss.
     if (age > maxAgeMs) {
-      this.stats.misses++; // Count as miss since we're rejecting it
       return null;
     }
 

@@ -272,6 +272,10 @@ export class ExecutionEngineService {
   private executionProcessingInterval: NodeJS.Timeout | null = null;
 
   constructor(config: ExecutionEngineConfig = {}) {
+    // Use injected dependencies or defaults (initialized early for use in safety guards)
+    this.logger = config.logger ?? createLogger('execution-engine');
+    this.perfLogger = config.perfLogger ?? getPerformanceLogger('execution-engine');
+
     // Initialize simulation config
     this.isSimulationMode = config.simulationConfig?.enabled ?? false;
     this.simulationConfig = resolveSimulationConfig(config.simulationConfig);
@@ -285,14 +289,10 @@ export class ExecutionEngineService {
     if (isProduction && this.isSimulationMode) {
       if (hasOverride) {
         // This is a deliberate override - log prominently but allow
-        console.error(
-          '\n' +
-          '╔══════════════════════════════════════════════════════════════════╗\n' +
-          '║  ⚠️  DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION  ⚠️   ║\n' +
-          '║                                                                  ║\n' +
-          '║  No real transactions will be executed!                          ║\n' +
-          '║  Remove SIMULATION_MODE_PRODUCTION_OVERRIDE for live trading.    ║\n' +
-          '╚══════════════════════════════════════════════════════════════════╝\n'
+        this.logger.error(
+          'DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION - ' +
+          'No real transactions will be executed! ' +
+          'Remove SIMULATION_MODE_PRODUCTION_OVERRIDE for live trading.'
         );
       } else {
         throw new Error(
@@ -365,10 +365,6 @@ export class ExecutionEngineService {
       significanceThreshold: validSignificance,
       ...config.abTestingConfig,
     };
-
-    // Use injected dependencies or defaults
-    this.logger = config.logger ?? createLogger('execution-engine');
-    this.perfLogger = config.perfLogger ?? getPerformanceLogger('execution-engine');
 
     // P1 FIX: Initialize lock conflict tracker with injected logger
     this.lockConflictTracker = new LockConflictTracker({ logger: this.logger });
@@ -1240,13 +1236,19 @@ export class ExecutionEngineService {
       // =======================================================================
 
       if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
+        // BUG-005 FIX: Guard against precision loss for gas estimates > Number.MAX_SAFE_INTEGER
+        let safeGasEstimate: number | undefined;
+        if (opportunity.gasEstimate) {
+          const raw = Number(opportunity.gasEstimate);
+          safeGasEstimate = Number.isFinite(raw) && raw <= Number.MAX_SAFE_INTEGER ? raw : undefined;
+        }
+
         const riskDecision = this.riskOrchestrator.assess({
           chain,
           dex,
           pathLength: opportunity.path?.length ?? 2,
           expectedProfit: opportunity.expectedProfit,
-          // Convert string Wei to number for orchestrator (ArbitrageOpportunity.gasEstimate is string)
-          gasEstimate: opportunity.gasEstimate ? Number(opportunity.gasEstimate) : undefined,
+          gasEstimate: safeGasEstimate,
         });
 
         // Store results for later use (outcome recording)

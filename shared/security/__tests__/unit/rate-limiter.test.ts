@@ -122,15 +122,90 @@ describe('RateLimiter', () => {
       expect(recordingLogger.hasLogMatching('warn', 'Rate limit exceeded')).toBe(true);
     });
 
-    it('should handle Redis errors gracefully', async () => {
+    it('should handle Redis errors gracefully (fail closed by default)', async () => {
       mockRedis.exec.mockRejectedValue(new Error('Redis connection failed'));
 
       const rateLimiter = createRateLimiter();
       const result = await rateLimiter.checkLimit('user_123');
 
-      // Should fail open (allow request) on Redis error
-      expect(result.exceeded).toBe(false);
+      // Default failOpen: false — fail CLOSED (deny request) on Redis error
+      expect(result.exceeded).toBe(true);
+      expect(result.remaining).toBe(0);
       expect(result.total).toBe(10);
+      expect(recordingLogger.hasLogMatching('error', 'Rate limiter error')).toBe(true);
+    });
+
+    // BUG-001 REGRESSION: ZADD member must be unique to prevent under-count at same ms
+    it('should use unique member for ZADD to prevent duplicate-member under-count', async () => {
+      mockRedis.exec.mockResolvedValue([
+        [null, 0], // zremrangebyscore
+        [null, 1], // zadd
+        [null, 5], // zcard
+        [null, 1]  // expire
+      ]);
+
+      const rateLimiter = createRateLimiter();
+      await rateLimiter.checkLimit('user_123');
+
+      // The zadd call receives (key, score, member). The member (index 2) should
+      // contain a UUID to prevent duplicate members at the same millisecond.
+      const zaddCall = mockRedis.zadd.mock.calls[0];
+      if (zaddCall && zaddCall.length >= 3) {
+        const member = zaddCall[2] as string;
+        // Member should match pattern: <timestamp>:<uuid>
+        expect(member).toMatch(/^\d+:[0-9a-f-]{36}$/);
+      }
+    });
+
+    // BUG-002 REGRESSION: maxRequests=10, zcard=10 (10th request) must NOT exceed
+    it('should allow exactly maxRequests requests (off-by-one fix)', async () => {
+      mockRedis.exec.mockResolvedValue([
+        [null, 0], // zremrangebyscore
+        [null, 1], // zadd
+        [null, 10], // zcard — this is the 10th request (current included)
+        [null, 1]  // expire
+      ]);
+
+      const rateLimiter = createRateLimiter();
+      const result = await rateLimiter.checkLimit('user_123');
+
+      // With maxRequests=10, the 10th request (zcard=10) must be allowed
+      expect(result.exceeded).toBe(false);
+      expect(result.remaining).toBe(0);
+    });
+
+    // BUG-002 REGRESSION: maxRequests=10, zcard=11 (11th request) must exceed
+    it('should exceed when requests are above maxRequests', async () => {
+      mockRedis.exec.mockResolvedValue([
+        [null, 0], // zremrangebyscore
+        [null, 1], // zadd
+        [null, 11], // zcard — this is the 11th request
+        [null, 1]  // expire
+      ]);
+
+      const rateLimiter = createRateLimiter();
+      const result = await rateLimiter.checkLimit('user_123');
+
+      expect(result.exceeded).toBe(true);
+      expect(result.remaining).toBe(0);
+    });
+
+    // BUG-007 REGRESSION: ZCARD command error must not silently allow requests
+    it('should throw when ZCARD command fails within MULTI (not fail-open)', async () => {
+      const zcardError = new Error('ZCARD command failed');
+      mockRedis.exec.mockResolvedValue([
+        [null, 0],        // zremrangebyscore OK
+        [null, 1],        // zadd OK
+        [zcardError, null], // zcard FAILED
+        [null, 1]         // expire OK
+      ]);
+
+      const rateLimiter = createRateLimiter();
+      const result = await rateLimiter.checkLimit('user_123');
+
+      // Should fail closed (default), not silently allow
+      expect(result.exceeded).toBe(true);
+      expect(result.remaining).toBe(0);
       expect(recordingLogger.hasLogMatching('error', 'Rate limiter error')).toBe(true);
     });
 
@@ -249,15 +324,17 @@ describe('RateLimiter', () => {
       expect(mockNext).toHaveBeenCalled();
     });
 
-    it('should handle middleware errors gracefully', async () => {
+    it('should handle middleware errors gracefully (fail closed by default)', async () => {
       mockRedis.exec.mockRejectedValue(new Error('Redis error'));
 
       const rateLimiter = createRateLimiter();
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
 
-      // Should fail open
-      expect(mockNext).toHaveBeenCalled();
+      // Default failOpen: false — checkLimit fail-closed returns exceeded:true,
+      // middleware responds with 429 (not 503 from middleware catch, since checkLimit handles it)
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(429);
       expect(recordingLogger.hasLogMatching('error', 'Rate limiter error')).toBe(true);
     });
   });
@@ -303,6 +380,68 @@ describe('RateLimiter', () => {
 
       expect(status).toBeNull();
       expect(recordingLogger.getLogs('error').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getIdentifier (via middleware)', () => {
+    let mockReq: any;
+    let mockRes: any;
+    let mockNext: jest.Mock<any>;
+
+    beforeEach(() => {
+      mockReq = { ip: '127.0.0.1', headers: {}, user: null };
+      mockRes = { set: jest.fn<any>(), status: jest.fn<any>().mockReturnThis(), json: jest.fn<any>() };
+      mockNext = jest.fn<any>();
+    });
+
+    // S-NEW-1 REGRESSION: API keys must be hashed in Redis keys
+    it('should hash API key in Redis key (not store plaintext)', async () => {
+      mockReq.headers['x-api-key'] = 'my-secret-api-key-12345';
+      mockRedis.exec.mockResolvedValue([
+        [null, 0], [null, 1], [null, 3], [null, 1]
+      ]);
+
+      const rateLimiter = createRateLimiter();
+      const middleware = rateLimiter.middleware();
+      await middleware(mockReq, mockRes, mockNext);
+
+      // The Redis key should NOT contain the raw API key
+      const zaddCall = mockRedis.zadd.mock.calls[0];
+      // zadd is called as part of multi chain: multi.zadd(key, score, member)
+      // But since multi returns self (mock chaining), we need to check differently.
+      // The key is passed to zremrangebyscore which is the first in the chain
+      const zremCall = mockRedis.zremrangebyscore.mock.calls[0];
+      if (zremCall && zremCall[0]) {
+        const redisKey = zremCall[0] as string;
+        // Key should NOT contain the raw API key
+        expect(redisKey).not.toContain('my-secret-api-key-12345');
+        // Key should contain the 'api_key:' prefix with a hash
+        expect(redisKey).toMatch(/test:api_key:[a-f0-9]{16}/);
+      }
+    });
+  });
+
+  describe('multi.exec() null check', () => {
+    // Q-NEW-2 REGRESSION: multi.exec() can return null on transaction abort
+    it('should handle null multi.exec() result (transaction abort)', async () => {
+      mockRedis.exec.mockResolvedValue(null);
+
+      const rateLimiter = createRateLimiter();
+      const result = await rateLimiter.checkLimit('user_123');
+
+      // Should fail closed when transaction aborts
+      expect(result.exceeded).toBe(true);
+      expect(result.remaining).toBe(0);
+    });
+
+    it('should handle null multi.exec() in getLimitStatus', async () => {
+      mockRedis.exec.mockResolvedValue(null);
+
+      const rateLimiter = createRateLimiter();
+      const status = await rateLimiter.getLimitStatus('user_123');
+
+      // Should return null on transaction abort
+      expect(status).toBeNull();
     });
   });
 

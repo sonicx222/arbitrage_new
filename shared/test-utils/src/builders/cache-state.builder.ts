@@ -151,11 +151,11 @@ export class CacheStateBuilder {
    */
   build(): CacheState {
     const finalState: CacheState = {
-      l1Entries: this.state.l1Entries || 0,
-      l2Entries: this.state.l2Entries || 0,
-      hitRate: this.state.hitRate || 0,
-      evictionRate: this.state.evictionRate || 0,
-      memoryUsageMB: this.state.memoryUsageMB || 0,
+      l1Entries: this.state.l1Entries ?? 0,
+      l2Entries: this.state.l2Entries ?? 0,
+      hitRate: this.state.hitRate ?? 0,
+      evictionRate: this.state.evictionRate ?? 0,
+      memoryUsageMB: this.state.memoryUsageMB ?? 0,
       metrics: this.buildMetrics(),
     };
 
@@ -166,9 +166,9 @@ export class CacheStateBuilder {
    * Build metrics from current state
    */
   private buildMetrics(): CacheMetrics {
-    const l1Entries = this.state.l1Entries || 0;
-    const hitRate = (this.state.hitRate || 0) / 100;
-    const evictionRate = (this.state.evictionRate || 0) / 100;
+    const l1Entries = this.state.l1Entries ?? 0;
+    const hitRate = (this.state.hitRate ?? 0) / 100;
+    const evictionRate = (this.state.evictionRate ?? 0) / 100;
 
     const totalRequests = l1Entries > 0 ? l1Entries * 10 : 100; // Simulate requests
     const hits = Math.floor(totalRequests * hitRate);
@@ -184,11 +184,11 @@ export class CacheStateBuilder {
         hitRate,
       },
       l2: {
-        size: this.state.l2Entries || 0,
+        size: this.state.l2Entries ?? 0,
         hits: Math.floor(misses * 0.5), // 50% of L1 misses hit L2
         misses: Math.floor(misses * 0.5),
       },
-      memoryUsageMB: this.state.memoryUsageMB || 0,
+      memoryUsageMB: this.state.memoryUsageMB ?? 0,
     };
   }
 

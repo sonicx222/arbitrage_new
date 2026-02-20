@@ -555,8 +555,9 @@ describe('DistributedLockManager', () => {
       mockRedisClient.setNx.mockResolvedValue(true);
       await autoExtendManager.acquireLock('test-resource');
 
-      // Give it a moment to set up the interval
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Allow microtasks to process the interval setup
+      await Promise.resolve();
+      await Promise.resolve();
 
       await autoExtendManager.shutdown();
 

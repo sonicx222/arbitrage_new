@@ -69,6 +69,9 @@ const mockLogger = createLogger('test') as unknown as {
   info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock;
 };
 
+// Helper to flush pending microtasks and macrotasks without real delays
+const flushPromises = () => new Promise<void>(resolve => setImmediate(resolve));
+
 describe('Predictive Cache Warming (Task 2.2.2)', () => {
   let cache: HierarchicalCache;
 
@@ -236,7 +239,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('pair:0x1234', { reserve0: '1000', reserve1: '2000' });
 
       // Wait for setImmediate and warming callbacks
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       expect(warmingCallback).toHaveBeenCalledWith(['0x5678', '0x9abc', '0xdef0']);
     });
@@ -270,7 +273,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('pair:0x1234', { reserve0: '1000', reserve1: '2000' });
 
       // Wait for callbacks
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Should only warm the first 2 (limited by maxPairsToWarm: 2)
       expect(warmingCallback).toHaveBeenCalledWith(['0x5678', '0x9abc']);
@@ -282,7 +285,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('pair:0x1234', { reserve0: '1000', reserve1: '2000' });
 
       // Wait for callbacks
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Should not call warming callback with empty array
       expect(warmingCallback).not.toHaveBeenCalled();
@@ -324,7 +327,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       mockCorrelationAnalyzer.getPairsToWarm.mockReturnValue(['0x5678']);
 
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       const stats = cache.getStats();
       expect(stats.predictiveWarming?.warmingTriggeredCount).toBe(1);
@@ -337,7 +340,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await redisInstance.set('cache:l2:pair:0x9abc', JSON.stringify({ reserve0: '200' }));
 
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       const stats = cache.getStats();
       expect(stats.predictiveWarming?.pairsWarmedCount).toBeGreaterThanOrEqual(2);
@@ -350,7 +353,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await redisInstance.set('cache:l2:pair:0x5678', JSON.stringify({ reserve0: '100' }));
 
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Access the warmed pair (should be in L1 now)
       const result = await cache.get('pair:0x5678');
@@ -368,7 +371,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
       // First cache set - should warm 0x5678 into L1
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Verify 0x5678 is now in L1 by checking pairsWarmedCount increased
       const statsAfterFirst = cache.getStats();
@@ -377,7 +380,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       // Second cache set for DIFFERENT pair but same correlated pair (0x5678)
       // Since 0x5678 is already in L1, this should increment warmingHitCount
       await cache.set('pair:0x9999', { reserve0: '2000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       const statsAfterSecond = cache.getStats();
       // warmingHitCount should have incremented because 0x5678 was already in L1
@@ -392,7 +395,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
       // Set with UPPERCASE pair address - should still work
       await cache.set('pair:0xABCDEF', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Should have recorded with lowercase
       expect(mockCorrelationAnalyzer.recordPriceUpdate).toHaveBeenCalledWith('0xabcdef');
@@ -423,7 +426,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       ).resolves.not.toThrow();
 
       // Wait for callbacks
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Error should be logged but not propagated
       expect(mockLogger.warn).toHaveBeenCalled();
@@ -436,7 +439,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('pair:0x1234', { reserve0: '1000' });
 
       // Wait for callbacks
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Should not throw and should log warning
       expect(mockLogger.error).toHaveBeenCalled();
@@ -461,7 +464,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await redisInstance.set('cache:l2:pair:0x9abc', JSON.stringify({ reserve0: '200' }));
 
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Warming callback should still be called (with pairs that have data)
       const stats = cache.getStats();
@@ -490,7 +493,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('pair:0x1234', { reserve0: '1000' });
 
       await clearPromise;
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Warming should not have been triggered
       expect(mockCorrelationAnalyzer.getPairsToWarm).not.toHaveBeenCalled();
@@ -513,7 +516,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('pair:0x9999', { reserve0: '2000' });
       await cache.set('pair:0xaaaa', { reserve0: '3000' });
 
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Should have recorded 3 price updates and queried 3 times
       expect(mockCorrelationAnalyzer.recordPriceUpdate).toHaveBeenCalledTimes(3);
@@ -535,7 +538,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
       // Make warming slow enough that rapid updates will overlap
       mockCorrelationAnalyzer.getPairsToWarm.mockImplementation(async () => {
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await flushPromises();
         return ['0x5678'];
       });
 
@@ -546,7 +549,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       cache.set('pair:0x1234', { reserve0: '1002' });
 
       // Wait for all warming operations to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await flushPromises();
 
       const stats = cache.getStats();
 
@@ -593,7 +596,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await redisInstance.set('cache:l2:pair:0x5678', JSON.stringify({ reserve0: '100' }));
 
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       const stats = cache.getStats();
       expect(stats.predictiveWarming).toHaveProperty('totalWarmingLatencyMs');
@@ -610,11 +613,11 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
       // First set - warms pair
       await cache.set('pair:0x1234', { reserve0: '1000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       // Second set - pair already in L1, should increment warmingHitCount
       await cache.set('pair:0x9999', { reserve0: '2000' });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await flushPromises();
 
       const stats = cache.getStats();
       expect(stats.predictiveWarming).toHaveProperty('warmingHitRate');

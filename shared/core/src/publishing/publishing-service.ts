@@ -28,6 +28,8 @@ import type { ServiceLogger } from '../logging/types';
 import type { SwapEventFilter, WhaleAlert, VolumeAggregate } from '../analytics/swap-event-filter';
 // R7 Consolidation: Use shared retry utility
 import { retryWithLogging } from '../resilience/retry-mechanism';
+// P-NEW-1: LatencyTracker integration for pipeline latency recording
+import { getLatencyTracker } from '../monitoring/latency-tracker';
 
 // =============================================================================
 // Types
@@ -253,6 +255,11 @@ export class PublishingService {
     opportunity.pipelineTimestamps = timestamps;
 
     const message = this.createMessage('arbitrage-opportunity', opportunity);
+
+    // P-NEW-1: Record pipeline latency from timestamps (O(1), zero-allocation)
+    if (opportunity.pipelineTimestamps) {
+      getLatencyTracker().recordFromTimestamps(opportunity.pipelineTimestamps);
+    }
 
     // Arbitrage opportunities are high-priority - publish directly (no batching)
     await this.streamsClient.xadd(

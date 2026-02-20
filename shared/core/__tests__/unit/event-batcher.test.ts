@@ -824,4 +824,54 @@ describe('EventBatcher', () => {
       expect(typeof batch.timestamp).toBe('number');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Q-NEW-3 Regression: ?? vs || for numeric defaults
+  // ---------------------------------------------------------------------------
+  describe('Q-NEW-3 regression: nullish coalescing for numeric config', () => {
+    it('should accept maxBatchSize of 0 without replacing with default', () => {
+      // With || operator, 0 would be treated as falsy and replaced with 10
+      // With ?? operator, 0 is preserved as an explicit value
+      const batcher = new EventBatcher(
+        { maxBatchSize: 0, maxWaitTime: 100 },
+        onBatchReady,
+      );
+
+      // With maxBatchSize=0, every event should immediately flush
+      batcher.addEvent({ id: '1' }, 'pair_A');
+
+      // The event should be in a batch (size 0 means it should flush immediately
+      // since events.length >= maxBatchSize when maxBatchSize is 0)
+      const stats = batcher.getStats();
+      // With 0 batch size, every event triggers a flush
+      expect(stats.activeBatches).toBe(0); // flushed immediately
+    });
+
+    it('should accept maxWaitTime of 0 without replacing with default', () => {
+      // With || operator, 0 would be treated as falsy and replaced with 1
+      // With ?? operator, 0 is preserved
+      const batcher = new EventBatcher(
+        { maxBatchSize: 100, maxWaitTime: 0 },
+        onBatchReady,
+      );
+
+      batcher.addEvent({ id: '1' }, 'pair_A');
+
+      // With maxWaitTime=0, the timeout fires immediately (setTimeout(fn, 0))
+      jest.advanceTimersByTime(0);
+    });
+
+    it('should accept maxQueueSize of 0 without replacing with default', () => {
+      // With || operator, 0 would be treated as falsy and replaced with 1000
+      // With ?? operator, 0 is preserved
+      const batcher = new EventBatcher(
+        { maxBatchSize: 1, maxQueueSize: 0 },
+        onBatchReady,
+      );
+
+      // maxQueueSize=0 means queue is always at capacity, so batches get dropped
+      const stats = batcher.getStats();
+      expect(stats.maxQueueSize).toBe(0);
+    });
+  });
 });

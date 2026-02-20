@@ -200,14 +200,14 @@ export const PerformanceFixtures = {
      * Actual baseline (to be measured)
      */
     actual: (measured: Partial<PerformanceBaseline>): PerformanceBaseline => ({
-      l1HitRate: measured.l1HitRate || 0,
-      l1ReadLatencyUs: measured.l1ReadLatencyUs || 0,
-      l1WriteLatencyUs: measured.l1WriteLatencyUs || 0,
-      workerReadLatencyUs: measured.workerReadLatencyUs || 0,
-      hotPathLatencyMs: measured.hotPathLatencyMs || 0,
-      memoryUsageMB: measured.memoryUsageMB || 0,
-      gcPauseMs: measured.gcPauseMs || 0,
-      evictionRate: measured.evictionRate || 0,
+      l1HitRate: measured.l1HitRate ?? 0,
+      l1ReadLatencyUs: measured.l1ReadLatencyUs ?? 0,
+      l1WriteLatencyUs: measured.l1WriteLatencyUs ?? 0,
+      workerReadLatencyUs: measured.workerReadLatencyUs ?? 0,
+      hotPathLatencyMs: measured.hotPathLatencyMs ?? 0,
+      memoryUsageMB: measured.memoryUsageMB ?? 0,
+      gcPauseMs: measured.gcPauseMs ?? 0,
+      evictionRate: measured.evictionRate ?? 0,
     }),
 
     /**

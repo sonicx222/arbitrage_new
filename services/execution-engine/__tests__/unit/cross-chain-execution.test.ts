@@ -547,8 +547,7 @@ describe('BridgeRouterFactory Unit Tests', () => {
   it('should perform health check on all routers', async () => {
     const results = await factory.healthCheckAll();
 
-    expect(results.stargate).toBeDefined();
-    expect(results.stargate.healthy).toBe(true);
+    expect(results.stargate).toMatchObject({ healthy: true });
   });
 });
 
@@ -602,8 +601,7 @@ describe('API Key Authentication Unit Tests', () => {
       // Authenticate
       await apiAuth()(req, res, next);
       expect(next).toHaveBeenCalled();
-      expect(req.user).toBeDefined();
-      expect(req.user.isApiKey).toBe(true);
+      expect(req.user).toMatchObject({ isApiKey: true });
 
       // Authorize read access
       next.mockClear();
@@ -829,7 +827,7 @@ describe('AsyncMutex Stress Tests (Race Condition Prevention)', () => {
     for (let i = 0; i < 10; i++) {
       operations.push(
         mutex.runExclusive(async () => {
-          await new Promise(resolve => setTimeout(resolve, 1));
+          await Promise.resolve(); // yield to simulate work
         })
       );
     }

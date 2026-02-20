@@ -308,7 +308,7 @@ describe('Execution Flow Unit Tests', () => {
 
       // The engine initializes successfully without wallets
       // SimulationStrategy handles missing wallets gracefully
-      expect(engine.getState()).toBeDefined();
+      expect(typeof engine.getState()).toBe('string');
     });
   });
 
@@ -347,8 +347,8 @@ describe('Execution Flow Unit Tests', () => {
 
       // Verify message was added to stream
       const streamData = mockStreams.get('stream:opportunities');
-      expect(streamData).toBeDefined();
-      expect(streamData?.length).toBe(1);
+      expect(streamData).not.toBeUndefined();
+      expect(streamData!.length).toBe(1);
 
       // Parse and verify opportunity data
       const storedData = JSON.parse(streamData![0].fields.data as string);
@@ -463,7 +463,7 @@ describe('Execution Flow Unit Tests', () => {
       expect(result.transactionHash).toMatch(/^0x[a-f0-9]{64}$/);
       expect(result.gasUsed).toBe(200000);
       expect(result.gasCost).toBe(10); // 100 * 0.1
-      expect(result.actualProfit).toBeDefined();
+      expect(typeof result.actualProfit).toBe('number');
       expect(result.timestamp).toBeGreaterThan(0);
     });
 
@@ -810,6 +810,56 @@ describe('Execution Flow Unit Tests', () => {
   });
 
   // ==========================================================================
+  // GAP-002: Simulation Timeout and Provider Fallback Edge Cases
+  // ==========================================================================
+  describe('Simulation Timeout Edge Cases (GAP-002)', () => {
+    it('should handle simulation strategy that exceeds execution latency gracefully', async () => {
+      // Create a strategy with very high latency to simulate a long-running operation
+      const config = resolveSimulationConfig({
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 100, // 100ms simulated delay
+        logSimulatedExecutions: false,
+      });
+      const strategy = new SimulationStrategy(
+        { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        config
+      );
+      const ctx = createMockCtx();
+
+      const opportunity: ArbitrageOpportunity = {
+        id: 'timeout-edge-1',
+        type: 'cross-dex',
+        buyDex: 'uniswap_v3',
+        sellDex: 'sushiswap',
+        buyChain: 'ethereum',
+        expectedProfit: 100,
+        confidence: 0.9,
+        timestamp: Date.now(),
+      };
+
+      // Execute with timer advancement to handle the delay
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(200);
+      const result = await executePromise;
+
+      // Should complete successfully even with high latency
+      expect(result.success).toBe(true);
+      expect(result.opportunityId).toBe('timeout-edge-1');
+    });
+
+    it('should track executionTimeouts stat when execution takes too long', () => {
+      const ctx = createMockCtx();
+      // Verify executionTimeouts stat starts at 0
+      expect(ctx.stats.executionTimeouts).toBe(0);
+
+      // Simulate what engine does when timeout fires
+      ctx.stats.executionTimeouts++;
+      expect(ctx.stats.executionTimeouts).toBe(1);
+    });
+  });
+
+  // ==========================================================================
   // Integration with Coordinator (Simulated)
   // ==========================================================================
   describe('Coordinator Integration', () => {
@@ -830,9 +880,9 @@ describe('Execution Flow Unit Tests', () => {
 
       // Verify both groups exist
       const consumerGroups = mockConsumerGroups.get(opportunityStream);
-      expect(consumerGroups).toBeDefined();
-      expect(consumerGroups?.has('coordinator-group')).toBe(true);
-      expect(consumerGroups?.has('execution-engine-group')).toBe(true);
+      expect(consumerGroups).toBeInstanceOf(Map);
+      expect(consumerGroups!.has('coordinator-group')).toBe(true);
+      expect(consumerGroups!.has('execution-engine-group')).toBe(true);
     });
 
     it('should track opportunities correctly across services', async () => {

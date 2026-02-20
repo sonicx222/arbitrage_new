@@ -51,7 +51,11 @@ contract MockBalancerVault is IBalancerV2Vault {
         // Call recipient callback
         recipient.receiveFlashLoan(tokens, amounts, feeAmounts, userData);
 
-        // Verify repayment - check balance increased by loaned amount
+        // Verify repayment — balance must be restored to at least pre-loan level.
+        // balancesBefore[i] is recorded BEFORE the vault transfers tokens out,
+        // so checking >= balancesBefore[i] ensures principal is fully repaid.
+        // This matches real Balancer V2 Vault behavior (see VaultFlashLoans.sol).
+        // Balancer V2 has 0% flash loan fees, so no fee check is needed.
         for (uint256 i = 0; i < tokens.length; i++) {
             uint256 balanceAfter = IERC20(tokens[i]).balanceOf(address(this));
             require(

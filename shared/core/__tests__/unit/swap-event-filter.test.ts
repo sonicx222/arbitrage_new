@@ -51,12 +51,14 @@ describe('SwapEventFilter', () => {
   let filter: SwapEventFilter;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     resetSwapEventFilter();
     filter = new SwapEventFilter();
   });
 
   afterEach(() => {
     filter.destroy();
+    jest.useRealTimers();
   });
 
   describe('Constructor and Configuration', () => {
@@ -183,8 +185,8 @@ describe('SwapEventFilter', () => {
       const result1 = customFilter.processEvent(swap);
       expect(result1.passed).toBe(true);
 
-      // Wait for dedup window to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Advance past dedup window to expire
+      jest.advanceTimersByTime(150);
 
       // Same swap should pass again after expiry
       const result2 = customFilter.processEvent(swap);
@@ -264,8 +266,8 @@ describe('SwapEventFilter', () => {
         }));
       }
 
-      // Wait for aggregation window
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Advance past aggregation window
+      jest.advanceTimersByTime(150);
 
       expect(aggregateEmitted).not.toBeNull();
       expect(aggregateEmitted!.swapCount).toBe(5);
@@ -299,8 +301,8 @@ describe('SwapEventFilter', () => {
         transactionHash: '0xtx3'
       }));
 
-      // Wait for aggregation window
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Advance past aggregation window
+      jest.advanceTimersByTime(150);
 
       expect(aggregates.length).toBe(2); // Two different pairs
 
@@ -346,7 +348,7 @@ describe('SwapEventFilter', () => {
         transactionHash: '0xtx3'
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 150));
+      jest.advanceTimersByTime(150);
 
       expect(aggregateEmitted).not.toBeNull();
       expect(aggregateEmitted!.minPrice).toBeDefined();
@@ -489,8 +491,8 @@ describe('SwapEventFilter', () => {
         }));
       }
 
-      // Wait for cleanup
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Advance past cleanup interval
+      jest.advanceTimersByTime(100);
 
       // Internal cache should be cleaned up
       const cacheSize = customFilter.getDedupCacheSize();
@@ -512,8 +514,8 @@ describe('SwapEventFilter', () => {
         }));
       }
 
-      // Wait for aggregation flush
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Advance past aggregation flush interval
+      jest.advanceTimersByTime(100);
 
       const bucketCount = customFilter.getAggregationBucketCount();
       expect(bucketCount).toBe(0);
@@ -631,8 +633,8 @@ describe('SwapEventFilter', () => {
       // Add event
       tempFilter.processEvent(createMockSwapEvent({ usdValue: 1000, transactionHash: '0xtx1' }));
 
-      // Wait for aggregation
-      await new Promise(resolve => setTimeout(resolve, 80));
+      // Advance past aggregation window
+      jest.advanceTimersByTime(80);
       expect(aggregateCount).toBe(1);
 
       // Unsubscribe
@@ -641,8 +643,8 @@ describe('SwapEventFilter', () => {
       // Add another event
       tempFilter.processEvent(createMockSwapEvent({ usdValue: 2000, transactionHash: '0xtx2' }));
 
-      // Wait for aggregation
-      await new Promise(resolve => setTimeout(resolve, 80));
+      // Advance past aggregation window
+      jest.advanceTimersByTime(80);
       expect(aggregateCount).toBe(1); // Still 1, not 2
 
       tempFilter.destroy();

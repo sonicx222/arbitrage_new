@@ -112,13 +112,18 @@ export class AdapterRegistry {
   }
 
   /**
-   * List adapters for a specific chain
+   * List adapters for a specific chain.
+   * PERF-003 FIX: Uses iterator-based filtering to avoid copying entire Map to array.
    */
   listAdaptersByChain(chain: string): DexAdapter[] {
     const chainLower = chain.toLowerCase();
-    return Array.from(this.adapters.values()).filter(
-      (adapter) => adapter.chain.toLowerCase() === chainLower
-    );
+    const result: DexAdapter[] = [];
+    for (const adapter of this.adapters.values()) {
+      if (adapter.chain.toLowerCase() === chainLower) {
+        result.push(adapter);
+      }
+    }
+    return result;
   }
 
   /**

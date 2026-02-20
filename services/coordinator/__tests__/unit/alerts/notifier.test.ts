@@ -43,7 +43,7 @@ describe('AlertNotifier', () => {
       process.env.DISCORD_WEBHOOK_URL = 'https://discord.com/webhook/test';
       const notifierWithChannel = new AlertNotifier(mockLogger);
 
-      expect(notifierWithChannel).toBeDefined();
+      expect(notifierWithChannel).toBeInstanceOf(AlertNotifier);
       // Logger info may be called with optional chaining, check if called at all
       expect(mockLogger.info).toHaveBeenCalled();
     });
@@ -490,7 +490,7 @@ describe('SlackChannel', () => {
     );
 
     const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
-    expect(body.blocks).toBeDefined();
+    expect(Array.isArray(body.blocks)).toBe(true);
     expect(body.blocks[0].type).toBe('header');
     expect(body.blocks[0].text.text).toContain('SERVICE_UNHEALTHY');
   });

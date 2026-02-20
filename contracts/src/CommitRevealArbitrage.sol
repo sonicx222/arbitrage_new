@@ -36,6 +36,28 @@ import "./base/BaseFlashArbitrage.sol";
  * - Time bounds: Commitments expire after 10 blocks to prevent staleness
  * - Replay protection: Each commitment can only be revealed once
  *
+ * ## Capital Model (SEC-003)
+ *
+ * Unlike flash loan siblings (FlashLoanArbitrage, BalancerV2FlashArbitrage, etc.),
+ * CommitRevealArbitrage uses UPFRONT CAPITAL, not flash loans. The caller must
+ * transfer tokens to this contract before calling reveal(). This has important
+ * security implications:
+ *
+ * - OPEN ACCESS: reveal() has no onlyOwner restriction (same as flash loan siblings).
+ *   Anyone can call reveal() if they have a valid commitment and sufficient capital.
+ * - CAPITAL AT RISK: Unlike flash loans (which are atomic and riskless), the caller's
+ *   capital is held by the contract during execution. If the trade reverts, the tokens
+ *   remain in the contract (recoverable via owner's withdrawToken).
+ * - PROFIT ENFORCEMENT: The contract enforces minimumProfit > 0, preventing grief
+ *   attacks via break-even paths. All profit stays in the contract for owner withdrawal.
+ * - WHY OPEN ACCESS IS SAFE: A non-owner caller must (1) provide their own capital,
+ *   (2) have a valid unexpired commitment, and (3) generate profit above minimumProfit.
+ *   Any profit goes to the contract (owner benefit), not the caller. An attacker
+ *   spending their own capital to generate profit for the contract owner is not
+ *   a viable attack vector.
+ * - COMMITMENT BINDING: Parameters are hash-locked at commit time. An attacker cannot
+ *   alter trade parameters between commit and reveal.
+ *
  * ## Use Cases
  *
  * Automatically activated by execution engine when:
@@ -452,6 +474,51 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
 
         // No flash loan fees for commit-reveal (user provides upfront capital)
         return _calculateProfit(amountIn, simulatedOutput, 0);
+    }
+
+    // ==========================================================================
+    // Admin Functions (Protocol-Specific)
+    // ==========================================================================
+
+    /**
+     * @notice Cleanup expired commitments to reclaim storage
+     * @dev Allows owner to delete commitments that are past MAX_COMMIT_AGE_BLOCKS.
+     *      This is a storage hygiene function — expired commitments can never be revealed
+     *      but still occupy storage slots. Deleting them provides gas refunds.
+     *
+     * Requirements:
+     * - Caller must be owner
+     * - Contract must not be paused
+     * - Each hash must correspond to an existing, expired commitment
+     *
+     * @param hashes Array of commitment hashes to clean up
+     * @return cleaned Number of commitments successfully cleaned up
+     */
+    function cleanupExpiredCommitments(bytes32[] calldata hashes)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 cleaned)
+    {
+        uint256 len = hashes.length;
+        for (uint256 i = 0; i < len;) {
+            bytes32 hash = hashes[i];
+            uint256 commitBlock = commitments[hash];
+
+            // Skip non-existent or already-revealed commitments
+            if (commitBlock != 0 && !revealed[hash]) {
+                // Only clean up if truly expired
+                if (block.number > commitBlock + MAX_COMMIT_AGE_BLOCKS) {
+                    delete commitments[hash];
+                    delete committers[hash];
+                    cleaned++;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     // Note: Router management (addApprovedRouter, removeApprovedRouter, etc.),

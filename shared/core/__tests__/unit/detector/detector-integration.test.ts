@@ -607,7 +607,7 @@ describe('Detector Integration', () => {
         }
         isRunning = true;
         operations.push('start');
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await Promise.resolve(); // simulate async operation
       };
 
       const stop = async () => {
@@ -617,7 +617,7 @@ describe('Detector Integration', () => {
         }
         isStopping = true;
         operations.push('stop');
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await Promise.resolve(); // simulate async operation
         isRunning = false;
         isStopping = false;
       };

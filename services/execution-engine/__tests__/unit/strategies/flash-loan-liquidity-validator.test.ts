@@ -173,12 +173,16 @@ describe('FlashLoanLiquidityValidator', () => {
       await v.checkLiquidity(mockProvider, mockAsset, amount, ctx);
       expect(rpcProvider.call).toHaveBeenCalledTimes(1);
 
-      // Wait for cache to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
-
-      // Second call - cache expired, should refetch
-      await v.checkLiquidity(mockProvider, mockAsset, amount, ctx);
-      expect(rpcProvider.call).toHaveBeenCalledTimes(2);
+      // Advance Date.now() past cache TTL to expire
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 150;
+      try {
+        // Second call - cache expired, should refetch
+        await v.checkLiquidity(mockProvider, mockAsset, amount, ctx);
+        expect(rpcProvider.call).toHaveBeenCalledTimes(2);
+      } finally {
+        Date.now = originalDateNow;
+      }
     });
 
     it('should coalesce concurrent requests for same provider/asset', async () => {
@@ -353,11 +357,15 @@ describe('FlashLoanLiquidityValidator', () => {
 
       await v.checkLiquidity(mockProvider, mockAsset, BigInt(100000e6), ctx);
 
-      // Wait for cache to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
-
-      const cached = v.getCachedLiquidity(mockProvider, mockAsset);
-      expect(cached).toBeNull();
+      // Advance Date.now() past cache TTL to expire
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 150;
+      try {
+        const cached = v.getCachedLiquidity(mockProvider, mockAsset);
+        expect(cached).toBeNull();
+      } finally {
+        Date.now = originalDateNow;
+      }
     });
   });
 

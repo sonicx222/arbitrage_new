@@ -14,6 +14,10 @@
  * @see S-6: Consolidate Env Parsing Functions
  */
 
+import { createLogger } from './logger';
+
+const logger = createLogger('env-utils');
+
 // =============================================================================
 // Strict Parsing (throws on invalid -- use at service startup)
 // =============================================================================
@@ -98,11 +102,11 @@ export function parseEnvIntSafe(
   }
   const parsed = parseInt(raw, 10);
   if (Number.isNaN(parsed)) {
-    console.warn(`[ENV] Invalid integer value for ${name}: "${raw}" - using default ${defaultValue}`);
+    logger.warn(`[ENV] Invalid integer value for ${name}: "${raw}" - using default ${defaultValue}`);
     return defaultValue;
   }
   if (parsed < min) {
-    console.warn(`[ENV] Value for ${name} (${parsed}) below minimum ${min} - using minimum`);
+    logger.warn(`[ENV] Value for ${name} (${parsed}) below minimum ${min} - using minimum`);
     return min;
   }
   return parsed;

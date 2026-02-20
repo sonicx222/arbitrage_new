@@ -320,8 +320,7 @@ describe('validateMessageStructure', () => {
       const result = validateMessageStructure(createValidMessage());
       expect(result.valid).toBe(true);
       if (result.valid) {
-        expect(result.opportunity).toBeDefined();
-        expect(result.opportunity.id).toBe('opp-123');
+        expect(result.opportunity).toMatchObject({ id: 'opp-123', type: 'simple' });
         expect(result.opportunity.type).toBe('simple');
       }
     });

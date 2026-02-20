@@ -67,7 +67,8 @@ describe('NonceAllocationManager', () => {
       const acquirePromise = manager.acquireLock('ethereum', 'opp-2');
 
       // Allow microtask to process
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await Promise.resolve();
+      await Promise.resolve();
 
       // Release first lock
       manager.releaseLock('ethereum', 'opp-1');
@@ -306,7 +307,8 @@ describe('NonceAllocationManager', () => {
       const acquirePromise = manager.acquireLock('ethereum', 'opp-2', 5000);
 
       // Give time for waiter to register
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await Promise.resolve();
+      await Promise.resolve();
 
       // Reset resolves all pending lock promises
       manager.reset();

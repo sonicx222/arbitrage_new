@@ -5,6 +5,16 @@ import { createLogger } from './logger';
 
 const logger = createLogger('event-batcher');
 
+/**
+ * Parse EVENT_BATCHER_TIMEOUT_MS from env. Returns the parsed integer,
+ * preserving 0 as a valid value. Falls back to `defaultMs` on NaN.
+ * BUG-009 FIX: Single source of truth — previously duplicated in constructor and singleton factory.
+ */
+function parseEventBatcherTimeoutMs(defaultMs: number = 1): number {
+  const parsed = parseInt(process.env.EVENT_BATCHER_TIMEOUT_MS ?? '', 10);
+  return Number.isNaN(parsed) ? defaultMs : parsed;
+}
+
 export interface BatchedEvent<T = any> {
   pairKey: string;
   events: T[];
@@ -42,14 +52,19 @@ export class EventBatcher<T = any> {
     onBatchReady: (batch: BatchedEvent<T>) => void
   ) {
     this.config = {
-      maxBatchSize: config.maxBatchSize || 10,
+      // Q-NEW-3 FIX: Use ?? instead of || for numeric defaults.
+      // || treats explicit 0 as falsy; ?? only replaces null/undefined.
+      maxBatchSize: config.maxBatchSize ?? 10,
       // T1.3: Reduced from 50ms to 1ms for ultra-low latency detection
       // This reduces batch wait time by 98%, enabling fastest opportunity detection
-      maxWaitTime: config.maxWaitTime || 1,
+      // Tunable via EVENT_BATCHER_TIMEOUT_MS env var (read once at construction)
+      // BUG-008 FIX: Use helper to handle NaN from empty string while preserving 0
+      // BUG-009 FIX: Deduplicated — uses shared parseEventBatcherTimeoutMs()
+      maxWaitTime: config.maxWaitTime ?? parseEventBatcherTimeoutMs(1),
       enableDeduplication: config.enableDeduplication !== false,
       enablePrioritization: config.enablePrioritization !== false,
       // P1-3 fix: Default max queue size to prevent unbounded growth
-      maxQueueSize: config.maxQueueSize || 1000
+      maxQueueSize: config.maxQueueSize ?? 1000
     };
     this.onBatchReady = onBatchReady;
 
@@ -124,14 +139,17 @@ export class EventBatcher<T = any> {
     };
 
     // P1-3 fix: Check queue size limit before adding
+    // PERF-007 FIX: Use shift() instead of splice() to avoid O(n) intermediate array allocation
     if (this.processingQueue.length >= this.config.maxQueueSize) {
       // Drop oldest batches to make room (FIFO eviction)
       const toRemove = this.processingQueue.length - this.config.maxQueueSize + 1;
-      const removed = this.processingQueue.splice(0, toRemove);
-      this.droppedBatches += removed.length;
+      for (let d = 0; d < toRemove; d++) {
+        this.processingQueue.shift();
+      }
+      this.droppedBatches += toRemove;
 
       logger.warn('Processing queue at capacity, dropping oldest batches', {
-        dropped: removed.length,
+        dropped: toRemove,
         totalDropped: this.droppedBatches,
         queueSize: this.processingQueue.length
       });
@@ -156,15 +174,13 @@ export class EventBatcher<T = any> {
    * BUG FIX: Made async to properly await processQueue() completion.
    */
   async flushAll(): Promise<void> {
-    // Clear all pending timeouts to prevent memory leaks
-    for (const batch of this.batches.values()) {
-      if (batch.timeout) {
-        clearTimeout(batch.timeout);
-      }
+    // Q-NEW-1 FIX: Flush each batch into the processingQueue before clearing.
+    // Previously, events in pending batches were permanently lost during shutdown
+    // because batches.clear() was called without moving events to the queue.
+    const keys = [...this.batches.keys()];
+    for (const key of keys) {
+      this.flushBatch(key);
     }
-
-    // Clear all batches
-    this.batches.clear();
 
     // Process any remaining items in the queue
     await this.processQueue();
@@ -241,8 +257,16 @@ export class EventBatcher<T = any> {
       return `${e.pairKey}_${ts}`;
     }
 
-    // Last resort fallback (expensive but correct)
-    return JSON.stringify(event);
+    // PERF-002: Last resort — build composite key from available primitive fields
+    // Much cheaper than JSON.stringify for dedup purposes
+    const parts: string[] = [];
+    for (const key of Object.keys(e)) {
+      const val = e[key];
+      if (typeof val === 'string' || typeof val === 'number' || typeof val === 'bigint') {
+        parts.push(`${key}:${val}`);
+      }
+    }
+    return parts.length > 0 ? parts.join('|') : `fallback_${Date.now()}_${Math.random()}`;
   }
 
   /**
@@ -419,7 +443,10 @@ export function getDefaultEventBatcher(): EventBatcher {
         {
           maxBatchSize: 25, // Optimized for high-throughput
           // T1.3: Reduced from 25ms to 1ms for ultra-low latency detection
-          maxWaitTime: 1,   // 1ms for minimal latency
+          // Tunable via EVENT_BATCHER_TIMEOUT_MS env var
+          // BUG-008 FIX: Use helper to handle NaN while preserving 0
+          // BUG-009 FIX: Deduplicated — uses shared parseEventBatcherTimeoutMs()
+          maxWaitTime: parseEventBatcherTimeoutMs(1),
           enableDeduplication: true,
           enablePrioritization: true
         },

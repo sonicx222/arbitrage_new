@@ -97,6 +97,7 @@
     "validate:routers": "tsx scripts/verify-router-approval.ts",
     "validate:routers:all": "tsx scripts/verify-router-approval.ts --all",
     "preinstall": "node scripts/preinstall-check.js || node -e \"process.exit(0)\"",
+    "check:circular": "madge --circular --extensions ts shared/types/src shared/config/src shared/core/src shared/security/src shared/ml/src",
     "security:audit": "node scripts/security-audit.js",
     "security:check": "npm run preinstall && npm audit",
     "postinstall": "npm audit || node -e \"process.exit(0)\""
@@ -127,6 +128,7 @@
     "fast-check": "^3.15.1",
     "jest": "^29.7.0",
     "lru-cache": "^11.0.0",
+    "madge": "^8.0.0",
     "redis-memory-server": "^0.15.0",
     "rimraf": "^6.0.1",
     "supertest": "^7.1.3",

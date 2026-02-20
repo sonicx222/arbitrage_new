@@ -36,9 +36,9 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_testnet_data:/data
-    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-testnet-changeme} --bind 0.0.0.0
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set} --bind 0.0.0.0
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-testnet-changeme}", "--no-auth-warning", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "--no-auth-warning", "ping"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -61,7 +61,7 @@ services:
       - PARTITION_CHAINS=arbitrum,base
       - REGION_ID=testnet-local
       - INSTANCE_ID=partition-l2-turbo-testnet
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       - HEALTH_CHECK_PORT=3001
       - SIMULATION_MODE=${SIMULATION_MODE:-true}
@@ -108,7 +108,7 @@ services:
       - PARTITION_CHAINS=ethereum,zksync
       - REGION_ID=testnet-local
       - INSTANCE_ID=partition-high-value-testnet
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       - HEALTH_CHECK_PORT=3001
       - SIMULATION_MODE=${SIMULATION_MODE:-true}
@@ -155,7 +155,7 @@ services:
       dockerfile: services/cross-chain-detector/Dockerfile
     environment:
       - NODE_ENV=testnet
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       - INSTANCE_ID=cross-chain-detector-testnet
       - HEALTH_CHECK_PORT=3001
@@ -191,7 +191,7 @@ services:
       dockerfile: services/execution-engine/Dockerfile
     environment:
       - NODE_ENV=testnet
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       - INSTANCE_ID=execution-engine-testnet
       - HEALTH_CHECK_PORT=3001
@@ -240,7 +240,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=testnet
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-testnet-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       - PORT=3000
       - INSTANCE_ID=coordinator-testnet

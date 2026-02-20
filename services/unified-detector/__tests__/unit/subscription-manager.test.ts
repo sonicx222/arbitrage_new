@@ -44,7 +44,7 @@ jest.mock('@arbitrage/config', () => ({
   getAllFactoryAddresses: jest.fn().mockReturnValue(['0xFactory1', '0xFactory2']),
 }));
 
-jest.mock('../../types', () => ({
+jest.mock('../../src/types', () => ({
   toWebSocketUrl: jest.fn((url: string) => {
     if (url.startsWith('ws://') || url.startsWith('wss://')) {
       return { url, converted: false };
@@ -60,7 +60,7 @@ jest.mock('../../types', () => ({
   isUnstableChain: jest.fn().mockReturnValue(false),
 }));
 
-jest.mock('../../constants', () => ({
+jest.mock('../../src/constants', () => ({
   UNSTABLE_WEBSOCKET_CHAINS: ['bsc', 'fantom'],
   DEFAULT_WS_CONNECTION_TIMEOUT_MS: 10000,
   EXTENDED_WS_CONNECTION_TIMEOUT_MS: 15000,

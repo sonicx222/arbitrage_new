@@ -87,16 +87,20 @@ describe('LockConflictTracker', () => {
       customTracker.recordConflict('opp-1');
       customTracker.recordConflict('opp-1');
 
-      // Wait for the window to expire
-      await new Promise(resolve => setTimeout(resolve, 20));
+      // Advance Date.now() past the conflict window
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 20;
+      try {
+        // This should reset the tracking since it's outside the window
+        const result = customTracker.recordConflict('opp-1');
+        expect(result).toBe(false);
 
-      // This should reset the tracking since it's outside the window
-      const result = customTracker.recordConflict('opp-1');
-      expect(result).toBe(false);
-
-      // Conflict info should be reset to count: 1
-      const info = customTracker.getConflictInfo('opp-1');
-      expect(info?.count).toBe(1);
+        // Conflict info should be reset to count: 1
+        const info = customTracker.getConflictInfo('opp-1');
+        expect(info?.count).toBe(1);
+      } finally {
+        Date.now = originalDateNow;
+      }
     });
 
     it('should increment count for successive conflicts within window', () => {
@@ -169,11 +173,15 @@ describe('LockConflictTracker', () => {
 
       customTracker.recordConflict('opp-1');
 
-      // Wait for entries to become stale (> 2x window = 20ms)
-      await new Promise(resolve => setTimeout(resolve, 30));
-
-      customTracker.cleanup();
-      expect(customTracker.size).toBe(0);
+      // Advance Date.now() past stale threshold (> 2x window = 20ms)
+      const originalDateNow = Date.now;
+      Date.now = () => originalDateNow() + 30;
+      try {
+        customTracker.cleanup();
+        expect(customTracker.size).toBe(0);
+      } finally {
+        Date.now = originalDateNow;
+      }
     });
 
     it('should keep recent entries during cleanup', () => {

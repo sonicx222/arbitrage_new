@@ -403,7 +403,7 @@ describe('S4.1.5: Failover Scenarios', () => {
           isActivating = true;
           try {
             // Simulate async leadership acquisition
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await Promise.resolve();
             isLeader = true;
             return true;
           } finally {

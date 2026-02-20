@@ -7,7 +7,8 @@
  * @see coordinator.ts (parent service)
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -43,6 +44,25 @@ const CACHE_TTL_MS = 1000; // 1 second cache - dashboard auto-refreshes every 10
  */
 export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
+
+  // Optional auth: if DASHBOARD_AUTH_TOKEN is set, require Bearer token
+  const dashboardAuthToken = process.env.DASHBOARD_AUTH_TOKEN;
+  if (dashboardAuthToken) {
+    router.use((_req: Request, res: Response, next: NextFunction) => {
+      const authHeader = _req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).send('Unauthorized');
+        return;
+      }
+      const provided = Buffer.from(authHeader.slice(7));
+      const expected = Buffer.from(dashboardAuthToken);
+      if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+        res.status(401).send('Unauthorized');
+        return;
+      }
+      next();
+    });
+  }
 
   // FIX: Instance-scoped cache (was module-level, could cause issues in tests)
   let dashboardCache: DashboardCache | null = null;

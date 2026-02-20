@@ -135,7 +135,8 @@ describe('OtelTransportStream - active mode', () => {
     });
 
     // Give flush a tick to complete
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(fetchMock).toHaveBeenCalled();
     await smallBatchTransport.shutdown();
