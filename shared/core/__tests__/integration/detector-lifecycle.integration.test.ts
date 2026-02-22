@@ -153,23 +153,21 @@ describe('[Level 1] DistributedLockManager Integration', () => {
       expect(second.acquired).toBe(true);
     });
 
-    // TODO: This test is flaky in full suite runs due to timing sensitivity
-    // The adapter layer for testing may have subtle differences from production RedisClient
-    // Skip for now - lock extension is covered by unit tests
-    it.skip('should extend lock TTL correctly', async () => {
-      // Use longer initial TTL to avoid race conditions in slow test runs
-      const result = await lockManager.acquireLock('extend:lock', { ttlMs: 5000 });
+    // FIX 4.2: Unskipped. Reduced timing sensitivity by widening margins:
+    // Original: 5s initial, extend to 10s, wait 6s (4s margin) — flaky
+    // Fixed: 2s initial, extend to 30s, wait 3s (27s margin) — robust
+    it('should extend lock TTL correctly', async () => {
+      const result = await lockManager.acquireLock('extend:lock', { ttlMs: 2000 });
       expect(result.acquired).toBe(true);
 
-      // Extend lock to 10 seconds
-      const extended = await result.extend(10000);
+      // Extend lock to 30 seconds (wide margin for slow CI)
+      const extended = await result.extend(30000);
       expect(extended).toBe(true);
 
-      // Wait longer than original TTL but less than extended TTL
-      // Using 6 seconds - more than original 5s but less than extended 10s
-      await new Promise(resolve => setTimeout(resolve, 6000));
+      // Wait 3 seconds — past original 2s TTL but well within extended 30s
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Lock should still exist (extended TTL)
+      // Lock should still exist (extended TTL has 27s remaining)
       expect(await redis.get('lock:extend:lock')).toBeTruthy();
     });
   });

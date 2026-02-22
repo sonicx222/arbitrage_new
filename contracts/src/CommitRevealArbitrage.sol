@@ -477,6 +477,71 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     }
 
     // ==========================================================================
+    // Capital Recovery (W1-14)
+    // ==========================================================================
+
+    /// @notice Emitted when capital is recovered from an expired commitment
+    event CommitmentRecovered(
+        bytes32 indexed commitmentHash,
+        address indexed committer,
+        address indexed asset,
+        uint256 amount
+    );
+
+    /// @notice Thrown when attempting to recover a commitment that hasn't expired yet
+    error CommitmentNotExpired();
+
+    /**
+     * @notice Recover capital from an expired commitment
+     * @dev Allows the original committer to recover tokens deposited for a commitment
+     *      that has expired past MAX_COMMIT_AGE_BLOCKS. This prevents capital from
+     *      being permanently trapped when a reveal fails or is abandoned.
+     *
+     *      The committer must specify the asset and amount because the contract
+     *      only stores the commitment hash and block number, not the deposit details.
+     *
+     * Security:
+     * - Only the original committer can call (prevents unauthorized withdrawals)
+     * - Commitment must exist and not be revealed
+     * - Commitment must be expired (past MAX_COMMIT_AGE_BLOCKS)
+     * - nonReentrant prevents reentrancy via token transfer callbacks
+     * - Contract must not be paused
+     * - Commitment state is cleared before transfer (CEI pattern)
+     *
+     * @param commitmentHash The hash of the expired commitment
+     * @param asset The token address to recover
+     * @param amount The amount of tokens to recover
+     */
+    function recoverCommitment(
+        bytes32 commitmentHash,
+        address asset,
+        uint256 amount
+    ) external nonReentrant whenNotPaused {
+        uint256 commitBlock = commitments[commitmentHash];
+
+        // Validate commitment exists
+        if (commitBlock == 0) revert CommitmentNotFound();
+
+        // Validate not already revealed
+        if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
+
+        // Validate caller is the original committer
+        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
+
+        // Validate commitment is expired (past MAX_COMMIT_AGE_BLOCKS)
+        if (block.number <= commitBlock + MAX_COMMIT_AGE_BLOCKS) revert CommitmentNotExpired();
+
+        // Clear commitment state before transfer (CEI pattern)
+        delete commitments[commitmentHash];
+        delete committers[commitmentHash];
+
+        // Transfer capital back to committer
+        IERC20(asset).safeTransfer(msg.sender, amount);
+
+        emit CommitmentRecovered(commitmentHash, msg.sender, asset, amount);
+    }
+
+    // ==========================================================================
     // Admin Functions (Protocol-Specific)
     // ==========================================================================
 

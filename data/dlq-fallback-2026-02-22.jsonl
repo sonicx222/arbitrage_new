@@ -1,0 +1,2 @@
+{"originalMessageId":"400-0","originalStream":"stream:opportunities","originalData":{"id":"opp-orphan"},"error":"Orphaned PEL message recovered via XCLAIM","timestamp":1771755974408,"service":"coordinator","instanceId":"test-coordinator"}
+{"originalMessageId":"400-0","originalStream":"stream:opportunities","originalData":{"id":"opp-orphan"},"error":"Orphaned PEL message recovered via XCLAIM","timestamp":1771771458397,"service":"coordinator","instanceId":"test-coordinator"}

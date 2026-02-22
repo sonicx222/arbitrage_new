@@ -501,6 +501,9 @@ export class OpportunityRouter {
    * OP-16 FIX: Write failed opportunity to local file when Redis DLQ is unavailable.
    * Last-resort backup for double-failure scenarios.
    */
+  /** FIX 4.3: Maximum DLQ fallback file size per day (100MB) */
+  private static readonly MAX_DLQ_FILE_BYTES = 100 * 1024 * 1024;
+
   private writeLocalDlqFallback(
     opportunity: ArbitrageOpportunity,
     error: Error | null
@@ -512,6 +515,21 @@ export class OpportunityRouter {
         fs.mkdirSync(dir, { recursive: true });
       }
       const filePath = pathModule.join(dir, `dlq-forwarding-fallback-${date}.jsonl`);
+
+      // FIX 4.3: Enforce 100MB daily file size limit to prevent disk exhaustion
+      if (fs.existsSync(filePath)) {
+        const stat = fs.statSync(filePath);
+        if (stat.size >= OpportunityRouter.MAX_DLQ_FILE_BYTES) {
+          this.logger.warn('DLQ fallback file size limit reached, dropping message', {
+            filePath,
+            sizeBytes: stat.size,
+            limitBytes: OpportunityRouter.MAX_DLQ_FILE_BYTES,
+            opportunityId: opportunity.id,
+          });
+          return;
+        }
+      }
+
       const entry = JSON.stringify({
         opportunityId: opportunity.id,
         originalData: opportunity,

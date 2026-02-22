@@ -139,6 +139,11 @@ library SwapHelpers {
             deadline
         );
 
+        // W1-15 FIX: Reset residual token approval after swap.
+        // If the router is compromised, any leftover allowance could be drained.
+        // Cost: ~5k gas per swap — acceptable for the security guarantee.
+        IERC20(currentToken).forceApprove(router, 0);
+
         // Defense-in-depth: Verify output matches minimum
         // NOTE: This check is technically redundant as compliant DEX routers
         // already revert if output < amountOutMin. However, we keep this as:

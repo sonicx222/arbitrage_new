@@ -507,3 +507,6 @@ export function calculatePriceDifferencePercent(price1: number, price2: number):
 // Re-export getMinProfitThreshold from config (single source of truth)
 // This maintains backward compatibility for code importing from components
 export { getMinProfitThreshold } from '../../../config/src/thresholds';
+
+// Re-export chain-specific confidence maxAgeMs for callers of calculateConfidence
+export { getConfidenceMaxAgeMs } from '../../../config/src/thresholds';

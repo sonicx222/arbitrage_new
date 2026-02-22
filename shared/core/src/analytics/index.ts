@@ -148,3 +148,14 @@ export type {
   PairActivityMetrics,
   ActivityTrackerStats
 } from './pair-activity-tracker';
+
+// Orderflow Pipeline Consumer (Fix 5)
+export {
+  OrderflowPipelineConsumer,
+  getOrderflowPipelineConsumer,
+  resetOrderflowPipelineConsumer
+} from './orderflow-pipeline-consumer';
+export type {
+  OrderflowPipelineConsumerConfig,
+  OrderflowPipelineConsumerDeps
+} from './orderflow-pipeline-consumer';

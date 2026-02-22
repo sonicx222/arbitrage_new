@@ -94,51 +94,76 @@ export class OpportunityPublisher {
    * @see ADR-002: Redis Streams serialization
    */
   async publish(opportunity: ArbitrageOpportunity): Promise<boolean> {
-    try {
-      // FIX P1: Publish opportunity directly without wrapper envelope
-      // The coordinator expects fields (id, timestamp, profitPercentage, etc.) at top level
-      // Previous wrapper format (id, type, data, metadata) caused metadata to be lost
-      // when redis-streams.ts parseStreamResult() does `data.data ?? data` unwrapping
-      //
-      // Add source metadata directly to opportunity for traceability
-      const sourceName = `unified-detector-${this.partitionId}`;
-      const traceCtx = createTraceContext(sourceName);
-      const enrichedOpportunity = propagateContext({
-        ...opportunity,
-        // Add source metadata inline (not nested) for traceability
-        _source: sourceName,
-        _publishedAt: Date.now(),
-      }, traceCtx);
+    // FIX P1: Publish opportunity directly without wrapper envelope
+    // The coordinator expects fields (id, timestamp, profitPercentage, etc.) at top level
+    // Previous wrapper format (id, type, data, metadata) caused metadata to be lost
+    // when redis-streams.ts parseStreamResult() does `data.data ?? data` unwrapping
+    //
+    // Add source metadata directly to opportunity for traceability
+    const sourceName = `unified-detector-${this.partitionId}`;
+    const traceCtx = createTraceContext(sourceName);
+    const enrichedOpportunity = propagateContext({
+      ...opportunity,
+      // Add source metadata inline (not nested) for traceability
+      _source: sourceName,
+      _publishedAt: Date.now(),
+    }, traceCtx);
 
-      // Use xaddWithLimit to prevent unbounded stream growth
-      // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts
-      await this.streamsClient.xaddWithLimit(
-        RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        enrichedOpportunity
-      );
+    // FIX W2-6: Bounded retry on transient Redis failures
+    // 3 attempts with 50ms exponential backoff (50, 100, 200ms)
+    // Prevents permanent loss of detected opportunities during Redis blips
+    const maxAttempts = 3;
+    const baseDelayMs = 50;
 
-      // Update stats
-      this.stats.published++;
-      this.stats.lastPublishedAt = Date.now();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // Use xaddWithLimit to prevent unbounded stream growth
+        // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts
+        await this.streamsClient.xaddWithLimit(
+          RedisStreamsClient.STREAMS.OPPORTUNITIES,
+          enrichedOpportunity
+        );
 
-      this.logger.debug('Opportunity published to stream', {
-        opportunityId: opportunity.id,
-        type: opportunity.type,
-        profit: opportunity.expectedProfit || opportunity.estimatedProfit,
-        profitPct: opportunity.profitPercentage,
-      });
+        // Update stats
+        this.stats.published++;
+        this.stats.lastPublishedAt = Date.now();
 
-      return true;
-    } catch (error) {
-      this.stats.failed++;
+        this.logger.debug('Opportunity published to stream', {
+          opportunityId: opportunity.id,
+          type: opportunity.type,
+          profit: opportunity.expectedProfit || opportunity.estimatedProfit,
+          profitPct: opportunity.profitPercentage,
+          ...(attempt > 1 ? { retriedAttempt: attempt } : {}),
+        });
 
-      this.logger.error('Failed to publish opportunity to stream', {
-        opportunityId: opportunity.id,
-        error: (error as Error).message,
-      });
-
-      return false;
+        return true;
+      } catch (error) {
+        if (attempt < maxAttempts) {
+          // Transient failure — retry after exponential backoff
+          const delayMs = baseDelayMs * (1 << (attempt - 1)); // 50, 100, 200ms
+          this.logger.warn('Opportunity publish failed, retrying', {
+            opportunityId: opportunity.id,
+            attempt,
+            maxAttempts,
+            retryInMs: delayMs,
+            error: (error as Error).message,
+          });
+          await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+        } else {
+          // Exhausted all attempts — permanent failure
+          this.stats.failed++;
+          this.logger.error('Failed to publish opportunity after all retries', {
+            opportunityId: opportunity.id,
+            attempts: maxAttempts,
+            error: (error as Error).message,
+          });
+          return false;
+        }
+      }
     }
+
+    // Unreachable, but satisfies TypeScript
+    return false;
   }
 
   // ===========================================================================

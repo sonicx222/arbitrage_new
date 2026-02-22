@@ -966,6 +966,17 @@ export {
   AttributionAnalysis
 } from './analytics/performance-analytics';
 
+// Orderflow Pipeline Consumer (Phase 3)
+export {
+  OrderflowPipelineConsumer,
+  getOrderflowPipelineConsumer,
+  resetOrderflowPipelineConsumer,
+} from './analytics/orderflow-pipeline-consumer';
+export type {
+  OrderflowPipelineConsumerConfig,
+  OrderflowPipelineConsumerDeps,
+} from './analytics/orderflow-pipeline-consumer';
+
 // #############################################################################
 // #                                                                           #
 // #                   SECTION 6: DETECTION & ARBITRAGE                        #

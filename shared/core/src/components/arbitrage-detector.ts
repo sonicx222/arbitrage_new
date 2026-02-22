@@ -545,8 +545,14 @@ export function calculateCrossChainArbitrage(
   const priceDiff = highestPrice.price - lowestPrice.price;
   const percentageDiff = calculatePriceDifferencePercent(lowestPrice.price, highestPrice.price) * 100;
 
-  // Calculate net profit after bridge cost
-  const netProfit = priceDiff - bridgeCost;
+  // Account for DEX trading fees on both buy and sell sides
+  // fee field is in decimal form (e.g. 0.003 = 0.3%), default to standard AMM 30bps
+  const buyFee = lowestPrice.fee ?? 0.003;
+  const sellFee = highestPrice.fee ?? 0.003;
+  const tradingFeeCost = buyFee * lowestPrice.price + sellFee * highestPrice.price;
+
+  // Calculate net profit after bridge cost and trading fees
+  const netProfit = priceDiff - bridgeCost - tradingFeeCost;
 
   // Check if profitable
   if (netProfit <= minProfitPct * lowestPrice.price) {

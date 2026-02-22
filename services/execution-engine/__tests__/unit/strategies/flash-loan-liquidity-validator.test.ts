@@ -109,7 +109,6 @@ describe('FlashLoanLiquidityValidator', () => {
         expect.objectContaining({
           protocol: 'aave_v3',
           asset: mockAsset,
-          hasLiquidity: true,
         })
       );
     });

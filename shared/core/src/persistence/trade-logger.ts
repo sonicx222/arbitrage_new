@@ -77,6 +77,8 @@ export interface TradeLogEntry {
   strategyUsed?: string;
   /** Number of retry attempts before success/failure */
   retryCount?: number;
+  /** Block number at which the opportunity was detected or executed */
+  blockNumber?: number;
   /** Chain where the sell side executed (for cross-chain) */
   sellChain?: string;
   /** DEX where the sell side executed (for cross-chain) */
@@ -268,6 +270,7 @@ export class TradeLogger {
       slippage: undefined, // Populated by caller if available
       strategyUsed: opportunity?.type,
       retryCount: undefined, // Populated by caller if available
+      blockNumber: opportunity?.blockNumber,
       sellChain: opportunity?.sellChain,
       sellDex: opportunity?.sellDex,
     };

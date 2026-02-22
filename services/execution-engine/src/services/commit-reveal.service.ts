@@ -985,14 +985,14 @@ export class CommitRevealService {
       });
       return true;
     } catch (error) {
-      // On any estimation error, fall back to proceeding with reveal.
-      // The on-chain minProfit check provides baseline protection.
-      // Fix #11: Downgrade to debug — expected error fallback, on-chain minProfit is the safety net
-      this.logger.debug('Gas estimation failed during profitability validation — proceeding with reveal', {
+      // W1-16 FIX: Abort on estimation error to avoid wasting gas on likely-failing reveals.
+      // Previous behavior returned true (proceed), which wasted ~$10-50 per failed reveal.
+      // The on-chain minProfit check is a safety net but costs gas to reach.
+      this.logger.warn('Gas estimation failed during profitability validation — aborting reveal', {
         chain,
         error: getErrorMessage(error),
       });
-      return true;
+      return false;
     }
   }
 

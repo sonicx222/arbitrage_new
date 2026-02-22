@@ -24,6 +24,7 @@ import {
   closeHealthServer,
   createSimpleHealthServer,
   runServiceMain,
+  getOrderflowPipelineConsumer,
 } from '@arbitrage/core';
 import type { CrossRegionHealthConfig } from '@arbitrage/core';
 import {
@@ -171,10 +172,12 @@ function createHealthServer(engine: ExecutionEngineService): Server {
     },
     readyCheck: () => engine.isRunning(),
     additionalRoutes: {
-      '/stats': (_req: IncomingMessage, res: ServerResponse) => {
+      '/stats': async (_req: IncomingMessage, res: ServerResponse) => {
         const stats = engine.getStats();
+        // W2-18 FIX: Include consumer lag metric from XPENDING
+        const consumerLag = await engine.getConsumerLag();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ service: 'execution-engine', stats }));
+        res.end(JSON.stringify({ service: 'execution-engine', stats, consumerLag }));
       },
       '/circuit-breaker': circuitBreakerHandler,
       '/circuit-breaker/close': circuitBreakerHandler,
@@ -284,6 +287,10 @@ async function main() {
 
     await engine.start();
 
+    // Start orderflow pipeline consumer (no-op if FEATURE_ORDERFLOW_PIPELINE != true)
+    const orderflowConsumer = getOrderflowPipelineConsumer();
+    await orderflowConsumer.start();
+
     // Graceful shutdown with shared bootstrap utility
     setupServiceShutdown({
       logger,
@@ -300,6 +307,7 @@ async function main() {
           clearInterval(redisHealthCheckInterval);
           redisHealthCheckInterval = null;
         }
+        await orderflowConsumer.stop();
         await closeHealthServer(healthServer);
         await engine.stop();
       },

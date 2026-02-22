@@ -213,7 +213,7 @@ export {
 // =============================================================================
 // THRESHOLDS
 // =============================================================================
-export { PERFORMANCE_THRESHOLDS, ARBITRAGE_CONFIG, getMinProfitThreshold, chainOpportunityTimeoutMs, getOpportunityTimeoutMs } from './thresholds';
+export { PERFORMANCE_THRESHOLDS, ARBITRAGE_CONFIG, getMinProfitThreshold, chainOpportunityTimeoutMs, getOpportunityTimeoutMs, chainGasSpikeMultiplier, getGasSpikeMultiplier, chainConfidenceMaxAgeMs, getConfidenceMaxAgeMs } from './thresholds';
 
 // =============================================================================
 // MEV CONFIGURATION

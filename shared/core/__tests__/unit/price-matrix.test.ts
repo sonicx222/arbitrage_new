@@ -445,6 +445,115 @@ describe('PriceMatrix', () => {
       expect(instance1).not.toBe(instance2);
     });
   });
+
+  // ===========================================================================
+  // getPriceOnly (Fix 3.4)
+  // ===========================================================================
+  describe('getPriceOnly (Fix 3.4)', () => {
+    it('should return price value for existing key', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 1850.50, Date.now());
+
+      const price = matrix.getPriceOnly(key);
+      expect(price).toBe(1850.50);
+    });
+
+    it('should return null for non-existent key', () => {
+      const price = matrix.getPriceOnly('nonexistent:key:here');
+      expect(price).toBeNull();
+    });
+
+    it('should return null on destroyed matrix without crashing', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 1850.50, Date.now());
+
+      matrix.destroy();
+
+      const price = matrix.getPriceOnly(key);
+      expect(price).toBeNull();
+    });
+
+    it('should return null for empty key', () => {
+      const price = matrix.getPriceOnly('');
+      expect(price).toBeNull();
+    });
+
+    it('should return correct prices for multiple keys', () => {
+      const testData = [
+        { key: createTestPriceKey(0), price: 1850.50 },
+        { key: createTestPriceKey(1), price: 65000.00 },
+        { key: createTestPriceKey(2), price: 0.0001234 },
+        { key: createTestPriceKey(3), price: 100.0 },
+        { key: createTestPriceKey(4), price: 999999.99 },
+      ];
+
+      const now = Date.now();
+      for (const { key, price } of testData) {
+        matrix.setPrice(key, price, now);
+      }
+
+      for (const { key, price } of testData) {
+        const result = matrix.getPriceOnly(key);
+        expect(result).toBe(price);
+      }
+    });
+
+    it('should return null after price is deleted', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 1850.50, Date.now());
+
+      // Verify price exists
+      const priceBefore = matrix.getPriceOnly(key);
+      expect(priceBefore).toBe(1850.50);
+
+      // Delete and verify null
+      matrix.deletePrice(key);
+      const priceAfter = matrix.getPriceOnly(key);
+      expect(priceAfter).toBeNull();
+    });
+
+    it('should return updated price after overwrite', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 1850.50, Date.now());
+
+      expect(matrix.getPriceOnly(key)).toBe(1850.50);
+
+      matrix.setPrice(key, 1900.00, Date.now());
+
+      expect(matrix.getPriceOnly(key)).toBe(1900.00);
+    });
+
+    it('should increment read and hit stats', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 1850.50, Date.now());
+
+      matrix.resetStats();
+      matrix.getPriceOnly(key);
+
+      const stats = matrix.getStats();
+      expect(stats.reads).toBe(1);
+      expect(stats.hits).toBe(1);
+      expect(stats.misses).toBe(0);
+    });
+
+    it('should increment read and miss stats for non-existent key', () => {
+      matrix.resetStats();
+      matrix.getPriceOnly('does:not:exist');
+
+      const stats = matrix.getStats();
+      expect(stats.reads).toBe(1);
+      expect(stats.misses).toBe(1);
+      expect(stats.hits).toBe(0);
+    });
+
+    it('should handle zero price correctly', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 0, Date.now());
+
+      const price = matrix.getPriceOnly(key);
+      expect(price).toBe(0);
+    });
+  });
 });
 
 // =============================================================================

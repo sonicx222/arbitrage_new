@@ -826,13 +826,17 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         // Fix W2-6: Record bridge failure for route circuit breaker
         this.recordBridgeRouteFailure(sourceChain, destChain, bridgeToken);
 
-        // Bridge failed or timed out
+        // Bridge failed or timed out — use optional chaining since type allows error?: undefined
+        const errorCode = pollingResult.error?.code ?? ExecutionErrorCode.BRIDGE_FAILED;
+        const errorMessage = pollingResult.error?.message ?? 'Bridge polling failed with no error details';
+        const errorSourceTxHash = pollingResult.error?.sourceTxHash;
+
         return createErrorResult(
           opportunity.id,
-          formatExecutionError(pollingResult.error!.code, pollingResult.error!.message),
+          formatExecutionError(errorCode, errorMessage),
           sourceChain,
           opportunity.buyDex || 'unknown',
-          pollingResult.error!.sourceTxHash
+          errorSourceTxHash
         );
       }
 

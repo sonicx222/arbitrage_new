@@ -75,6 +75,7 @@ const TEST_ADDRESSES = {
 /**
  * Create a valid flash loan request for testing
  */
+// W1-19 FIX: Uses realistic amountOutMin values (0.5% slippage) instead of 0n.
 const createValidRequest = (overrides?: Partial<FlashLoanRequest>): FlashLoanRequest => ({
   asset: TEST_ADDRESSES.WETH,
   amount: ethers.parseEther('10'), // 10 ETH
@@ -84,13 +85,13 @@ const createValidRequest = (overrides?: Partial<FlashLoanRequest>): FlashLoanReq
       router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
       tokenIn: TEST_ADDRESSES.WETH,
       tokenOut: TEST_ADDRESSES.USDC,
-      amountOutMin: 0n,
+      amountOutMin: ethers.parseUnits('24875', 6), // ~$2500/ETH * 10 * 0.995 (USDC 6 decimals)
     },
     {
       router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
       tokenIn: TEST_ADDRESSES.USDC,
       tokenOut: TEST_ADDRESSES.WETH,
-      amountOutMin: 0n,
+      amountOutMin: ethers.parseEther('9.95'), // 10 ETH * 0.995 slippage
     },
   ] as FlashLoanSwapStep[],
   minProfit: ethers.parseEther('0.1'), // 0.1 ETH minimum profit
@@ -386,19 +387,19 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_MUTE,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.DAI,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('24875'),
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.DAI,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -417,13 +418,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: '0x9999999999999999999999999999999999999999', // Random router
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: '0x8888888888888888888888888888888888888888', // Another random router
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -497,13 +498,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: 'invalid-router',
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -522,13 +523,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: '0x9999999999999999999999999999999999999999', // Not in approved list
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -548,13 +549,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: '0x' + TEST_ADDRESSES.ROUTER_SYNCSWAP.slice(2).toUpperCase(),
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_MUTE.toLowerCase(), // Lowercase
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -573,13 +574,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.DAI, // Ends with DAI, not WETH
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('24875'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -599,13 +600,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: '0x' + TEST_ADDRESSES.WETH.slice(2).toUpperCase(),
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH.toLowerCase(),
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -625,13 +626,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.USDC, // Starts with USDC, not WETH
             tokenOut: TEST_ADDRESSES.DAI,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.DAI,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
         ] as FlashLoanSwapStep[],
       });
@@ -650,13 +651,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.WETH.toUpperCase(),
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -1013,7 +1014,7 @@ describe('SyncSwapFlashLoanProvider - Integration Scenarios', () => {
           router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
           tokenIn: tokens[i],
           tokenOut: tokens[i + 1],
-          amountOutMin: 0n,
+          amountOutMin: 1n,
         });
       }
 

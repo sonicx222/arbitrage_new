@@ -937,6 +937,43 @@ export class OpportunityConsumer {
   }
 
   // ===========================================================================
+  // Consumer Lag Monitoring (W2-18)
+  // ===========================================================================
+
+  /**
+   * W2-18 FIX: Get consumer lag by querying Redis XPENDING for the consumer group.
+   *
+   * Returns the number of messages delivered but not yet acknowledged (pending).
+   * This indicates how far behind the consumer is from fully processing its
+   * stream. A growing lag suggests the execution pipeline is backlogged.
+   *
+   * NOT called on hot path — intended for periodic health checks (~30s intervals).
+   *
+   * @returns Consumer lag stats: pendingCount, minId, maxId
+   */
+  async getConsumerLag(): Promise<{ pendingCount: number; minId: string | null; maxId: string | null }> {
+    try {
+      const pendingInfo = await this.streamsClient.xpending(
+        this.consumerGroup.streamName,
+        this.consumerGroup.groupName,
+      );
+
+      return {
+        pendingCount: pendingInfo.total,
+        minId: pendingInfo.smallestId ?? null,
+        maxId: pendingInfo.largestId ?? null,
+      };
+    } catch (error) {
+      this.logger.warn('Failed to query consumer lag via XPENDING', {
+        stream: this.consumerGroup.streamName,
+        group: this.consumerGroup.groupName,
+        error: getErrorMessage(error),
+      });
+      return { pendingCount: -1, minId: null, maxId: null };
+    }
+  }
+
+  // ===========================================================================
   // Pause/Resume
   // ===========================================================================
 

@@ -7,7 +7,7 @@
  * @see simple-arbitrage-detector.ts
  */
 
-import { describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import {
   SimpleArbitrageDetector,
   PairSnapshot,
@@ -357,6 +357,416 @@ describe('SimpleArbitrageDetector', () => {
       // Amount should be reasonable (not 0 and not more than reserves)
       const amountInNum = Number(result!.amountIn);
       expect(amountInNum).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // FIX #22c: Unrealistic Profit Filter Edge Cases
+  // ===========================================================================
+
+  describe('Unrealistic Profit Filter (FIX #22c)', () => {
+    it('should reject opportunities with >500% profit', () => {
+      // pair1: price = reserve0/reserve1 = 1000/2000 = 0.5
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '2000000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('2000000000000000000000'),
+        fee: 0.003,
+      });
+
+      // pair2: price = reserve0/reserve1 = 1000/200 = 5.0
+      // priceDiff = |0.5 - 5.0| / 0.5 = 9.0 (900%)
+      // netProfitPct = 9.0 - 0.006 = 8.994 >> 5.0 threshold
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '200000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('200000000000000000000'),
+        fee: 0.003,
+      });
+
+      const result = detector.calculateArbitrage(pair1, pair2);
+      expect(result).toBeNull();
+    });
+
+    it('should increment unrealisticProfit counter when >500% profit rejected', () => {
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '2000000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('2000000000000000000000'),
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '200000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('200000000000000000000'),
+        fee: 0.003,
+      });
+
+      detector.calculateArbitrage(pair1, pair2);
+
+      const stats = detector.getStats();
+      expect(stats.unrealisticProfit).toBe(1);
+      expect(stats.total).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should accept opportunities near but below 500% profit', () => {
+      // We need netProfitPct < 5.0 but > minProfitThreshold (0.005 for ethereum)
+      // pair1: price = 1000/2000 = 0.5
+      // pair2: price = 1000/350 = ~2.857
+      // priceDiff = |0.5 - 2.857| / 0.5 = ~4.714 (471.4%)
+      // netProfitPct = 4.714 - 0.006 = 4.708 < 5.0 => accepted
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '2000000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('2000000000000000000000'),
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '350000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('350000000000000000000'),
+        fee: 0.003,
+      });
+
+      const result = detector.calculateArbitrage(pair1, pair2);
+      expect(result).not.toBeNull();
+      // Verify the profit is high but below 500%
+      expect(result!.profitPercentage).toBeGreaterThan(100);
+      expect(result!.profitPercentage).toBeLessThan(500);
+    });
+  });
+
+  // ===========================================================================
+  // Dust Amount Filter Edge Cases
+  // ===========================================================================
+
+  describe('Dust Amount Filter', () => {
+    it('should reject opportunities with dust amounts (amountIn < 1000)', () => {
+      // Need smallerReserve1 < 100000 so amountIn = smallerReserve1 / 100 < 1000
+      // pair1: reserve0=25000, reserve1=50000 => price = 0.5
+      // pair2: reserve0=27500, reserve1=50000 => price = 0.55
+      // priceDiff = |0.5 - 0.55| / 0.5 = 0.1 (10%)
+      // netProfitPct = 0.1 - 0.006 = 0.094 (9.4%) => passes profit threshold and < 5.0
+      // smallerReserve1 = min(50000, 50000) = 50000
+      // amountIn = 50000 * 100 / 10000 = 500 < 1000 => dust rejection
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '25000',
+        reserve1: '50000',
+        reserve0BigInt: 25000n,
+        reserve1BigInt: 50000n,
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '27500',
+        reserve1: '50000',
+        reserve0BigInt: 27500n,
+        reserve1BigInt: 50000n,
+        fee: 0.003,
+      });
+
+      const result = detector.calculateArbitrage(pair1, pair2);
+      expect(result).toBeNull();
+    });
+
+    it('should increment dustAmount counter when dust amount rejected', () => {
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '25000',
+        reserve1: '50000',
+        reserve0BigInt: 25000n,
+        reserve1BigInt: 50000n,
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '27500',
+        reserve1: '50000',
+        reserve0BigInt: 27500n,
+        reserve1BigInt: 50000n,
+        fee: 0.003,
+      });
+
+      detector.calculateArbitrage(pair1, pair2);
+
+      const stats = detector.getStats();
+      expect(stats.dustAmount).toBe(1);
+      expect(stats.total).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should accept opportunities just above dust threshold (amountIn >= 1000)', () => {
+      // Need smallerReserve1 >= 100000 so amountIn >= 1000
+      // pair1: reserve0=50000, reserve1=100000 => price = 0.5
+      // pair2: reserve0=55000, reserve1=100000 => price = 0.55
+      // amountIn = 100000 * 100 / 10000 = 1000 (exactly at threshold)
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '50000',
+        reserve1: '100000',
+        reserve0BigInt: 50000n,
+        reserve1BigInt: 100000n,
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '55000',
+        reserve1: '100000',
+        reserve0BigInt: 55000n,
+        reserve1BigInt: 100000n,
+        fee: 0.003,
+      });
+
+      const result = detector.calculateArbitrage(pair1, pair2);
+      expect(result).not.toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // Rejection Stats Tracking
+  // ===========================================================================
+
+  describe('Rejection Stats Tracking', () => {
+    it('should track multiple rejection types correctly', () => {
+      // Trigger zeroReserves rejection
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+      });
+      detector.calculateArbitrage(zeroPair, normalPair);
+
+      // Trigger belowProfitThreshold rejection (same-price pairs)
+      const samePair1 = createMockPairSnapshot();
+      const samePair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+      });
+      detector.calculateArbitrage(samePair1, samePair2);
+
+      const stats = detector.getStats();
+      expect(stats.zeroReserves).toBeGreaterThanOrEqual(1);
+      expect(stats.belowProfitThreshold).toBeGreaterThanOrEqual(1);
+      expect(stats.total).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should reset all rejection stats to zero', () => {
+      // Trigger a rejection
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({
+        address: '0xpair2',
+      });
+      detector.calculateArbitrage(zeroPair, normalPair);
+
+      // Verify stats are non-zero
+      const statsBefore = detector.getStats();
+      expect(statsBefore.total).toBeGreaterThan(0);
+
+      // Reset and verify all counters are zero
+      detector.resetStats();
+      const statsAfter = detector.getStats();
+
+      expect(statsAfter.zeroReserves).toBe(0);
+      expect(statsAfter.nullPrice).toBe(0);
+      expect(statsAfter.priceBoundsP1).toBe(0);
+      expect(statsAfter.priceBoundsP2).toBe(0);
+      expect(statsAfter.belowProfitThreshold).toBe(0);
+      expect(statsAfter.unrealisticProfit).toBe(0);
+      expect(statsAfter.dustAmount).toBe(0);
+      expect(statsAfter.total).toBe(0);
+    });
+
+    it('should return a snapshot copy from getStats (not a live reference)', () => {
+      const stats1 = detector.getStats();
+
+      // Trigger a rejection to modify internal state
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({ address: '0xpair2' });
+      detector.calculateArbitrage(zeroPair, normalPair);
+
+      // Previously retrieved stats should NOT have changed
+      expect(stats1.total).toBe(0);
+
+      // New retrieval should reflect the update
+      const stats2 = detector.getStats();
+      expect(stats2.total).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // Logger Throttling
+  // ===========================================================================
+
+  describe('Logger Throttling', () => {
+    it('should not call logger before 1000 rejections', () => {
+      const mockLogger = { debug: jest.fn() };
+      const logDetector = new SimpleArbitrageDetector(createMockConfig({
+        logger: mockLogger,
+      }));
+
+      // Trigger 999 rejections (zero reserves are cheapest)
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({ address: '0xpair2' });
+
+      for (let i = 0; i < 999; i++) {
+        logDetector.calculateArbitrage(zeroPair, normalPair);
+      }
+
+      expect(mockLogger.debug).not.toHaveBeenCalled();
+    });
+
+    it('should call logger at exactly 1000 rejections when time threshold met', () => {
+      const mockLogger = { debug: jest.fn() };
+      const logDetector = new SimpleArbitrageDetector(createMockConfig({
+        logger: mockLogger,
+      }));
+
+      // Ensure the 60-second throttle is satisfied by mocking Date.now
+      // The detector initializes lastStatsLogTime = 0, so any time >= 60000 works
+      const mockNow = jest.spyOn(Date, 'now').mockReturnValue(120_000);
+
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({ address: '0xpair2' });
+
+      for (let i = 0; i < 1000; i++) {
+        logDetector.calculateArbitrage(zeroPair, normalPair);
+      }
+
+      expect(mockLogger.debug).toHaveBeenCalledTimes(1);
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Arbitrage rejection stats',
+        expect.objectContaining({
+          chainId: 'ethereum',
+          total: 1000,
+          zeroReserves: 1000,
+        }),
+      );
+
+      mockNow.mockRestore();
+    });
+
+    it('should not call logger at 1000 rejections if within 60-second throttle', () => {
+      const mockLogger = { debug: jest.fn() };
+      const logDetector = new SimpleArbitrageDetector(createMockConfig({
+        logger: mockLogger,
+      }));
+
+      // First: trigger 1000 rejections to emit the first log
+      const mockNow = jest.spyOn(Date, 'now').mockReturnValue(120_000);
+
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({ address: '0xpair2' });
+
+      for (let i = 0; i < 1000; i++) {
+        logDetector.calculateArbitrage(zeroPair, normalPair);
+      }
+      expect(mockLogger.debug).toHaveBeenCalledTimes(1);
+
+      // Now trigger 1000 more within the 60s window (at 150s, only 30s after last log)
+      mockNow.mockReturnValue(150_000);
+
+      for (let i = 0; i < 1000; i++) {
+        logDetector.calculateArbitrage(zeroPair, normalPair);
+      }
+
+      // Should still be only 1 call (throttled)
+      expect(mockLogger.debug).toHaveBeenCalledTimes(1);
+
+      mockNow.mockRestore();
+    });
+
+    it('should call logger again after 60-second throttle expires', () => {
+      const mockLogger = { debug: jest.fn() };
+      const logDetector = new SimpleArbitrageDetector(createMockConfig({
+        logger: mockLogger,
+      }));
+
+      const mockNow = jest.spyOn(Date, 'now').mockReturnValue(120_000);
+
+      const zeroPair = createMockPairSnapshot({
+        reserve0: '0',
+        reserve1: '0',
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      });
+      const normalPair = createMockPairSnapshot({ address: '0xpair2' });
+
+      // First batch: 1000 rejections
+      for (let i = 0; i < 1000; i++) {
+        logDetector.calculateArbitrage(zeroPair, normalPair);
+      }
+      expect(mockLogger.debug).toHaveBeenCalledTimes(1);
+
+      // Advance past the 60-second window (120s + 61s = 181s)
+      mockNow.mockReturnValue(181_000);
+
+      // Second batch: 1000 more rejections
+      for (let i = 0; i < 1000; i++) {
+        logDetector.calculateArbitrage(zeroPair, normalPair);
+      }
+
+      expect(mockLogger.debug).toHaveBeenCalledTimes(2);
+
+      mockNow.mockRestore();
     });
   });
 });

@@ -108,6 +108,19 @@ export class TestCoordinatorForwarder {
       return;
     }
 
+    // Unwrap MessageEvent envelope if present (PublishingService wraps
+    // opportunities in { type, data: opportunity, timestamp, source }).
+    // This mirrors the real coordinator's unwrapMessageData() utility.
+    if (!parsed.id && typeof parsed.type === 'string' && parsed.data && typeof parsed.data === 'object') {
+      const inner = parsed.data as Record<string, unknown>;
+      if (inner.id) {
+        // Promote inner data fields to top level, preserving envelope metadata
+        const envelope = { ...parsed };
+        delete envelope.data;
+        parsed = { ...inner, _envelope: envelope };
+      }
+    }
+
     if (!parsed.id) {
       await this.redis.xack(
         RedisStreams.OPPORTUNITIES,

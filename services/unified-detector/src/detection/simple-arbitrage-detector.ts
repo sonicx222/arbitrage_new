@@ -65,6 +65,23 @@ export interface PairSnapshot {
   reserve1BigInt: bigint;
 }
 
+/** FIX 2.2: Rejection statistics for observability */
+export interface RejectionStats {
+  zeroReserves: number;
+  nullPrice: number;
+  priceBoundsP1: number;
+  priceBoundsP2: number;
+  belowProfitThreshold: number;
+  unrealisticProfit: number;
+  dustAmount: number;
+  total: number;
+}
+
+/** Minimal logger interface for optional structured logging */
+interface DetectorLogger {
+  debug(msg: string, obj?: Record<string, unknown>): void;
+}
+
 /**
  * Configuration for simple arbitrage detection.
  */
@@ -90,6 +107,8 @@ export interface SimpleArbitrageConfig {
    * Default: 1e18 (inverse of minSafePrice for symmetry).
    */
   maxSafePrice?: number;
+  /** FIX 2.2: Optional logger for rejection stats (backward compatible) */
+  logger?: DetectorLogger;
 }
 
 /**
@@ -106,8 +125,24 @@ export class SimpleArbitrageDetector {
   // FIX #32: Counter-based ID generation avoids 2 string allocations per opportunity
   private idCounter: number = 0;
 
+  // FIX 2.2: Rejection counters for observability (near-zero cost increment)
+  private readonly logger: DetectorLogger | null;
+  private rejectionStats: RejectionStats = {
+    zeroReserves: 0,
+    nullPrice: 0,
+    priceBoundsP1: 0,
+    priceBoundsP2: 0,
+    belowProfitThreshold: 0,
+    unrealisticProfit: 0,
+    dustAmount: 0,
+    total: 0,
+  };
+  /** Timestamp of last stats log emission (throttled to every 60s) */
+  private lastStatsLogTime = 0;
+
   constructor(config: SimpleArbitrageConfig) {
     this.config = config;
+    this.logger = config.logger ?? null;
     // Use chain-specific minimum profit threshold
     const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
     this.minProfitThreshold = chainMinProfits[config.chainId] ?? 0.003; // Default 0.3%
@@ -143,6 +178,8 @@ export class SimpleArbitrageDetector {
     const reserve2_1 = pair2.reserve1BigInt;
 
     if (reserve1_0 === 0n || reserve1_1 === 0n || reserve2_0 === 0n || reserve2_1 === 0n) {
+      this.rejectionStats.zeroReserves++;
+      this.trackRejection();
       return null;
     }
 
@@ -151,15 +188,21 @@ export class SimpleArbitrageDetector {
     const price2Raw = calculatePriceFromBigIntReserves(reserve2_0, reserve2_1);
 
     if (price1 === null || price2Raw === null) {
+      this.rejectionStats.nullPrice++;
+      this.trackRejection();
       return null;
     }
 
     // FIX 4.1: Validate prices BEFORE any division using configurable bounds
     // This prevents division overflow and precision loss while supporting memecoins
     if (!Number.isFinite(price1) || price1 < this.minSafePrice || price1 > this.maxSafePrice) {
+      this.rejectionStats.priceBoundsP1++;
+      this.trackRejection();
       return null;
     }
     if (!Number.isFinite(price2Raw) || price2Raw < this.minSafePrice || price2Raw > this.maxSafePrice) {
+      this.rejectionStats.priceBoundsP2++;
+      this.trackRejection();
       return null;
     }
 
@@ -180,6 +223,8 @@ export class SimpleArbitrageDetector {
 
     // Check if profitable after fees
     if (netProfitPct < this.minProfitThreshold) {
+      this.rejectionStats.belowProfitThreshold++;
+      this.trackRejection();
       return null;
     }
 
@@ -188,6 +233,8 @@ export class SimpleArbitrageDetector {
     // In production, >500% indicates stale/erroneous price data (real arb is 0.1-5%).
     // Sending absurd opportunities to the execution engine wastes resources.
     if (netProfitPct > 5.0) {
+      this.rejectionStats.unrealisticProfit++;
+      this.trackRejection();
       return null;
     }
 
@@ -211,15 +258,21 @@ export class SimpleArbitrageDetector {
 
     // Skip if calculated amount is too small (dust)
     if (amountIn < 1000n) {
+      this.rejectionStats.dustAmount++;
+      this.trackRejection();
       return null;
     }
 
     // CRITICAL FIX: Calculate expectedProfit as ABSOLUTE value
     const expectedProfitAbsolute = Number(amountIn) * netProfitPct;
 
+    // FIX W2-35: Cache Date.now() once — avoids 3 syscalls per opportunity and ensures
+    // consistent timestamps across id, timestamp, and expiresAt fields
+    const now = Date.now();
+
     const opportunity: ArbitrageOpportunity = {
       // FIX #32: Counter-based ID avoids Math.random().toString(36) string allocations in hot path
-      id: `${this.config.chainId}-${Date.now()}-${++this.idCounter}`,
+      id: `${this.config.chainId}-${now}-${++this.idCounter}`,
       type: 'simple',
       chain: this.config.chainId,
       buyDex: buyPair.dex,
@@ -238,8 +291,8 @@ export class SimpleArbitrageDetector {
       estimatedProfit: 0,
       gasEstimate: String(this.config.gasEstimate),
       confidence: this.config.confidence,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + this.config.expiryMs,
+      timestamp: now,
+      expiresAt: now + this.config.expiryMs,
       blockNumber: pair1.blockNumber,
       status: 'pending'
     };
@@ -252,6 +305,52 @@ export class SimpleArbitrageDetector {
    */
   getMinProfitThreshold(): number {
     return this.minProfitThreshold;
+  }
+
+  /**
+   * FIX 2.2: Track rejection and emit throttled log.
+   * Uses counter-modulo approach: only checks time every ~1000 rejections
+   * to avoid Date.now() overhead on every call (hot path: 100-1000 calls/sec).
+   */
+  private trackRejection(): void {
+    this.rejectionStats.total++;
+
+    // Only consider logging every 1000 rejections to amortize Date.now() cost
+    if (this.rejectionStats.total % 1000 === 0 && this.logger) {
+      const now = Date.now();
+      // Throttle to at most once every 60 seconds
+      if (now - this.lastStatsLogTime >= 60_000) {
+        this.lastStatsLogTime = now;
+        this.logger.debug('Arbitrage rejection stats', {
+          chainId: this.config.chainId,
+          ...this.rejectionStats,
+        });
+      }
+    }
+  }
+
+  /**
+   * FIX 2.2: Get current rejection statistics for external consumers.
+   * Returns a snapshot copy of the current counters.
+   */
+  getStats(): Readonly<RejectionStats> {
+    return { ...this.rejectionStats };
+  }
+
+  /**
+   * FIX 2.2: Reset rejection statistics (e.g., after periodic reporting).
+   */
+  resetStats(): void {
+    this.rejectionStats = {
+      zeroReserves: 0,
+      nullPrice: 0,
+      priceBoundsP1: 0,
+      priceBoundsP2: 0,
+      belowProfitThreshold: 0,
+      unrealisticProfit: 0,
+      dustAmount: 0,
+      total: 0,
+    };
   }
 }
 

@@ -428,7 +428,11 @@ export class WebSocketManager {
       try {
         const currentUrl = this.getCurrentUrl();
         const connectionStartTime = Date.now(); // S3.3: Track connection time for health scoring
-        this.logger.info(`Connecting to WebSocket: ${currentUrl}${this.rotationStrategy.getCurrentUrlIndex() > 0 ? ' (fallback)' : ''}`);
+        // FIX 2.1: Mask API keys in log string interpolation.
+        // Pino redaction only handles structured fields ({ url: ... }), not template literals.
+        // Use same regex pattern as ProviderHealthScorer.maskUrl() for consistency.
+        const maskedUrl = currentUrl.replace(/\/([a-zA-Z0-9_-]{12,})/g, (_, key) => '/' + key.slice(0, 5) + '...');
+        this.logger.info(`Connecting to WebSocket: ${maskedUrl}${this.rotationStrategy.getCurrentUrlIndex() > 0 ? ' (fallback)' : ''}`);
 
         this.ws = new WebSocket(currentUrl);
 

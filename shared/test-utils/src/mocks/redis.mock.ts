@@ -37,6 +37,8 @@ export interface RedisOperation {
  */
 export class RedisMock {
   private data = new Map<string, unknown>();
+  /** W1-20 FIX: TTL tracking — maps key to absolute expiry timestamp (ms). Lazy cleanup on access. */
+  private ttlExpiry = new Map<string, number>();
   private streams = new Map<string, Array<{ id: string; fields: Record<string, string> }>>();
   private consumerGroups = new Map<string, Map<string, { lastDeliveredId: string; pending: string[] }>>();
   private pubSubChannels = new Map<string, Set<(channel: string, message: string) => void>>();
@@ -60,6 +62,12 @@ export class RedisMock {
     await this.simulateLatency();
     this.trackOperation('get', [key]);
     this.checkFailure('get');
+    // W1-20 FIX: Lazy TTL expiry check
+    if (this.isExpired(key)) {
+      this.data.delete(key);
+      this.ttlExpiry.delete(key);
+      return null;
+    }
     const value = this.data.get(key);
     return value !== undefined ? String(value) : null;
   }
@@ -77,7 +85,8 @@ export class RedisMock {
     this.trackOperation('setex', [key, ttl, value]);
     this.checkFailure('setex');
     this.data.set(key, value);
-    // Note: TTL not simulated in mock
+    // W1-20 FIX: Track TTL expiry
+    this.ttlExpiry.set(key, Date.now() + ttl * 1000);
     return 'OK';
   }
 
@@ -96,6 +105,12 @@ export class RedisMock {
     await this.simulateLatency();
     this.trackOperation('exists', [key]);
     this.checkFailure('exists');
+    // W1-20 FIX: Lazy TTL expiry check
+    if (this.isExpired(key)) {
+      this.data.delete(key);
+      this.ttlExpiry.delete(key);
+      return 0;
+    }
     return this.data.has(key) ? 1 : 0;
   }
 
@@ -110,7 +125,12 @@ export class RedisMock {
   async expire(key: string, ttl: number): Promise<number> {
     await this.simulateLatency();
     this.trackOperation('expire', [key, ttl]);
-    return this.data.has(key) ? 1 : 0;
+    if (!this.data.has(key) || this.isExpired(key)) {
+      return 0;
+    }
+    // W1-20 FIX: Track TTL expiry
+    this.ttlExpiry.set(key, Date.now() + ttl * 1000);
+    return 1;
   }
 
   /**
@@ -122,12 +142,22 @@ export class RedisMock {
     this.trackOperation('setNx', [key, value, ttlSeconds]);
     this.checkFailure('setNx');
 
-    if (this.data.has(key)) {
+    // W1-20 FIX: Check if key exists but expired — treat as non-existent
+    if (this.data.has(key) && !this.isExpired(key)) {
       return false;
     }
 
+    // Clean up expired key if needed
+    if (this.isExpired(key)) {
+      this.data.delete(key);
+      this.ttlExpiry.delete(key);
+    }
+
     this.data.set(key, value);
-    // Note: TTL not simulated in mock - would need setTimeout to auto-delete
+    // W1-20 FIX: Track TTL expiry
+    if (ttlSeconds !== undefined && ttlSeconds > 0) {
+      this.ttlExpiry.set(key, Date.now() + ttlSeconds * 1000);
+    }
     return true;
   }
 
@@ -155,9 +185,17 @@ export class RedisMock {
     this.trackOperation('compareAndExtend', [key, expectedValue, ttlSeconds]);
     this.checkFailure('compareAndExtend');
 
+    // W1-20 FIX: Check TTL expiry before comparing
+    if (this.isExpired(key)) {
+      this.data.delete(key);
+      this.ttlExpiry.delete(key);
+      return false;
+    }
+
     const currentValue = this.data.get(key);
     if (currentValue === expectedValue) {
-      // In real Redis, this would reset TTL - we just confirm value matches
+      // W1-20 FIX: Reset TTL on successful extension
+      this.ttlExpiry.set(key, Date.now() + ttlSeconds * 1000);
       return true;
     }
     return false;
@@ -570,9 +608,15 @@ export class RedisMock {
 
     if (messages.length === 0) return null;
 
-    // Update last delivered
+    // Update last delivered and track pending messages (W1-21 FIX)
     if (group && messages.length > 0) {
       group.lastDeliveredId = messages[messages.length - 1][0];
+      // W1-21 FIX: Track delivered messages as pending
+      for (const [msgId] of messages) {
+        if (!group.pending.includes(msgId)) {
+          group.pending.push(msgId);
+        }
+      }
     }
 
     return [[streamName, messages]];
@@ -582,7 +626,18 @@ export class RedisMock {
     await this.simulateLatency();
     this.trackOperation('xack', [stream, group, ...ids]);
     this.checkFailure('xack');
-    return ids.length;
+
+    // W1-21 FIX: Remove acknowledged messages from pending
+    let acked = 0;
+    const groups = this.consumerGroups.get(stream);
+    const groupData = groups?.get(group);
+    if (groupData) {
+      const idSet = new Set(ids);
+      const before = groupData.pending.length;
+      groupData.pending = groupData.pending.filter(id => !idSet.has(id));
+      acked = before - groupData.pending.length;
+    }
+    return acked > 0 ? acked : ids.length;
   }
 
   async xgroup(...args: unknown[]): Promise<'OK'> {
@@ -641,7 +696,20 @@ export class RedisMock {
   async xpending(stream: string, group: string): Promise<unknown[]> {
     await this.simulateLatency();
     this.trackOperation('xpending', [stream, group]);
-    return [0, null, null, []];
+
+    // W1-21 FIX: Return actual pending message data
+    const groups = this.consumerGroups.get(stream);
+    const groupData = groups?.get(group);
+    if (!groupData || groupData.pending.length === 0) {
+      return [0, null, null, []];
+    }
+
+    const pending = groupData.pending;
+    const minId = pending[0];
+    const maxId = pending[pending.length - 1];
+    // Summary format: [count, minId, maxId, [[consumer, count], ...]]
+    // Simplify: attribute all pending to a single "mock-consumer"
+    return [pending.length, minId, maxId, [['mock-consumer', String(pending.length)]]];
   }
 
   // =========================================================================
@@ -704,6 +772,7 @@ export class RedisMock {
     this.trackOperation('disconnect', []);
     this.connected = false;
     this.data.clear();
+    this.ttlExpiry.clear();
     this.streams.clear();
     this.consumerGroups.clear();
     this.pubSubChannels.clear();
@@ -760,6 +829,7 @@ export class RedisMock {
   /** Clear all data and reset mock state */
   clear(): void {
     this.data.clear();
+    this.ttlExpiry.clear();
     this.streams.clear();
     this.consumerGroups.clear();
     this.pubSubChannels.clear();
@@ -781,6 +851,16 @@ export class RedisMock {
   // =========================================================================
   // Private Helpers
   // =========================================================================
+
+  /**
+   * W1-20 FIX: Check if a key has expired based on TTL tracking.
+   * Uses lazy expiry — only checks when key is accessed.
+   */
+  private isExpired(key: string): boolean {
+    const expiresAt = this.ttlExpiry.get(key);
+    if (expiresAt === undefined) return false;
+    return Date.now() >= expiresAt;
+  }
 
   private async simulateLatency(): Promise<void> {
     if (this.options.latencyMs && this.options.latencyMs > 0) {

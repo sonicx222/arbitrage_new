@@ -324,7 +324,12 @@ export class FlashLoanLiquidityValidator {
   }
 
   /**
-   * Make cache key for provider/asset pair
+   * Make cache key for provider/asset pair.
+   *
+   * Note (W1-26 review): The cache stores absolute availableLiquidity (pool balance),
+   * not a boolean result. Each caller compares against its own requested amount.
+   * Therefore, the cache key does NOT need to include amount — a single cached
+   * pool balance correctly serves requests of any size.
    */
   private makeCacheKey(provider: IFlashLoanProvider, asset: string): string {
     return `${provider.protocol}-${provider.chain}-${asset.toLowerCase()}`;

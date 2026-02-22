@@ -541,9 +541,8 @@ export class CrossDexTriangularArbitrage {
       // Estimate gas costs (4 swaps = higher gas than triangular)
       const gasCost = this.estimateGasCost(chain, steps.length);
 
-      // Calculate net profit after fees and gas
-      const totalFees = steps.reduce((sum, step) => sum + step.fee, 0);
-      const netProfit = grossProfit - totalFees - gasCost;
+      // Calculate net profit after gas (fees already applied in AMM simulation via simulateSwapBigInt)
+      const netProfit = grossProfit - gasCost;
 
       if (netProfit < this.minProfitThreshold) {
         return null;
@@ -740,9 +739,8 @@ export class CrossDexTriangularArbitrage {
       // Estimate gas costs (simplified)
       const gasCost = this.estimateGasCost(chain, steps.length);
 
-      // Calculate net profit after fees and gas
-      const totalFees = steps.reduce((sum, step) => sum + step.fee, 0);
-      const netProfit = grossProfit - totalFees - gasCost;
+      // Calculate net profit after gas (fees already applied in AMM simulation via simulateSwapBigInt)
+      const netProfit = grossProfit - gasCost;
 
       if (netProfit < this.minProfitThreshold) {
         return null;

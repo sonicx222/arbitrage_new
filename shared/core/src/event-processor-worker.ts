@@ -200,10 +200,14 @@ async function processStatisticalAnalysis(data: any): Promise<any> {
     throw new Error('Insufficient price data for statistical analysis');
   }
 
-  // Calculate moving average
+  // Calculate moving average using O(n) sliding window
+  // FIX 2.3: Replaced O(n*window) slice+reduce with running sum approach
   const movingAverage: number[] = [];
-  for (let i = window - 1; i < prices.length; i++) {
-    const sum = prices.slice(i - window + 1, i + 1).reduce((a: number, b: number) => a + b, 0);
+  let sum = 0;
+  for (let i = 0; i < window; i++) sum += prices[i];
+  movingAverage.push(sum / window);
+  for (let i = window; i < prices.length; i++) {
+    sum += prices[i] - prices[i - window];
     movingAverage.push(sum / window);
   }
 

@@ -62,7 +62,9 @@ const TEST_ADDRESSES = {
 };
 
 /**
- * Create a valid flash loan request for testing
+ * Create a valid flash loan request for testing.
+ * W1-19 FIX: Uses realistic amountOutMin values (0.5% slippage) instead of 0n.
+ * For 10 ETH input: step 1 expects ~24,875 USDC (6 decimals), step 2 expects ~9.95 WETH.
  */
 const createValidRequest = (overrides?: Partial<FlashLoanRequest>): FlashLoanRequest => ({
   asset: TEST_ADDRESSES.WETH,
@@ -73,13 +75,13 @@ const createValidRequest = (overrides?: Partial<FlashLoanRequest>): FlashLoanReq
       router: TEST_ADDRESSES.ROUTER_UNISWAP,
       tokenIn: TEST_ADDRESSES.WETH,
       tokenOut: TEST_ADDRESSES.USDC,
-      amountOutMin: 0n,
+      amountOutMin: ethers.parseUnits('24875', 6), // ~$2500/ETH * 10 ETH * 0.995 slippage (USDC 6 decimals)
     },
     {
       router: TEST_ADDRESSES.ROUTER_UNISWAP,
       tokenIn: TEST_ADDRESSES.USDC,
       tokenOut: TEST_ADDRESSES.WETH,
-      amountOutMin: 0n,
+      amountOutMin: ethers.parseEther('9.95'), // 10 ETH * 0.995 slippage
     },
   ] as FlashLoanSwapStep[],
   minProfit: ethers.parseEther('0.1'), // 0.1 ETH minimum profit
@@ -375,19 +377,19 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_SUSHISWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.DAI,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('24875'),
           },
           {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.DAI,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -406,13 +408,13 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: '0x9999999999999999999999999999999999999999',
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: '0x8888888888888888888888888888888888888888',
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -486,13 +488,13 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: 'invalid-router',
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
           {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -511,13 +513,13 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: '0x9999999999999999999999999999999999999999', // Not in approved list
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
           {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -536,13 +538,13 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: '0x' + TEST_ADDRESSES.ROUTER_UNISWAP.slice(2).toUpperCase(),
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_SUSHISWAP.toLowerCase(),
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -561,13 +563,13 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.DAI, // Ends with DAI, not WETH
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('24875'),
           },
         ] as FlashLoanSwapStep[],
       });
@@ -588,13 +590,13 @@ describe('AaveV3FlashLoanProvider - Request Validation', () => {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.USDC, // Starts with USDC, not WETH
             tokenOut: TEST_ADDRESSES.DAI,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
           {
             router: TEST_ADDRESSES.ROUTER_UNISWAP,
             tokenIn: TEST_ADDRESSES.DAI,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: 1n,
           },
         ] as FlashLoanSwapStep[],
       });
@@ -948,7 +950,7 @@ describe('AaveV3FlashLoanProvider - Integration Scenarios', () => {
           router: TEST_ADDRESSES.ROUTER_UNISWAP,
           tokenIn: tokens[i],
           tokenOut: tokens[i + 1],
-          amountOutMin: 0n,
+          amountOutMin: 1n,
         });
       }
 
@@ -999,13 +1001,13 @@ describe('AaveV3FlashLoanProvider - Integration Scenarios', () => {
             router: mixedCaseRouters[0].toLowerCase(),
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseUnits('24875', 6),
           },
           {
             router: mixedCaseRouters[1].toLowerCase(),
             tokenIn: TEST_ADDRESSES.USDC,
             tokenOut: TEST_ADDRESSES.WETH,
-            amountOutMin: 0n,
+            amountOutMin: ethers.parseEther('9.95'),
           },
         ] as FlashLoanSwapStep[],
       });

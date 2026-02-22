@@ -15,7 +15,7 @@
  */
 
 import { ethers } from 'ethers';
-import { ARBITRAGE_CONFIG } from '@arbitrage/config';
+import { ARBITRAGE_CONFIG, getGasSpikeMultiplier } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { Logger, GasBaselineEntry } from '../types';
 
@@ -39,7 +39,8 @@ function getModuleLogger(): ILogger {
  * Pre-computed BigInt multipliers for hot-path optimization.
  * Avoids repeated Math.floor + BigInt conversion on every call.
  *
- * GAS_SPIKE_MULTIPLIER_BIGINT: Used for initial spike detection (e.g., 1.5x = 150)
+ * GAS_SPIKE_MULTIPLIER_BIGINT: Global default (kept for backward compatibility).
+ *   Per-chain multipliers are resolved via getGasSpikeMultiplierBigInt().
  * WEI_PER_GWEI: 10^9, pre-computed for wei-to-gwei conversions
  *
  * P2 FIX #15: Guard against NaN/Infinity from corrupt config.
@@ -49,6 +50,35 @@ const _rawMultiplier = ARBITRAGE_CONFIG.gasPriceSpikeMultiplier;
 const _safeMultiplier = (Number.isFinite(_rawMultiplier) && _rawMultiplier > 0) ? _rawMultiplier : 1.5;
 export const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(_safeMultiplier * 100));
 export const WEI_PER_GWEI = BigInt(1e9);
+
+/**
+ * Pre-computed per-chain gas spike multiplier cache (BigInt, scaled by 100).
+ * Populated lazily on first access per chain. O(1) lookup after initialization.
+ *
+ * @see getGasSpikeMultiplier in @arbitrage/config for authoritative per-chain values
+ */
+const _chainSpikeMultiplierCache = new Map<string, bigint>();
+
+/**
+ * Get the gas spike multiplier for a specific chain as a BigInt (scaled by 100).
+ * Uses per-chain config from @arbitrage/config with lazy caching for O(1) hot-path access.
+ *
+ * Example: Ethereum 5.0x → returns 500n; Arbitrum 2.0x → returns 200n
+ *
+ * @param chain - Chain identifier
+ * @returns Spike multiplier as BigInt scaled by 100
+ */
+export function getGasSpikeMultiplierBigInt(chain: string): bigint {
+  let cached = _chainSpikeMultiplierCache.get(chain);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const multiplier = getGasSpikeMultiplier(chain);
+  const safeMultiplier = (Number.isFinite(multiplier) && multiplier > 0) ? multiplier : _safeMultiplier;
+  cached = BigInt(Math.floor(safeMultiplier * 100));
+  _chainSpikeMultiplierCache.set(chain, cached);
+  return cached;
+}
 
 /**
  * Fix 3.1: Minimum gas prices by chain type (mainnet vs L2).
@@ -398,22 +428,24 @@ export class GasPriceOptimizer {
       if (ARBITRAGE_CONFIG.gasPriceSpikeEnabled) {
         const baselinePrice = this.getGasBaseline(chain, gasBaselines);
         if (baselinePrice > 0n) {
-          const maxAllowedPrice = baselinePrice * GAS_SPIKE_MULTIPLIER_BIGINT / 100n;
+          const spikeMultiplierBigInt = getGasSpikeMultiplierBigInt(chain);
+          const maxAllowedPrice = baselinePrice * spikeMultiplierBigInt / 100n;
 
           if (currentPrice > maxAllowedPrice) {
             const currentGwei = Number(currentPrice / WEI_PER_GWEI);
             const baselineGwei = Number(baselinePrice / WEI_PER_GWEI);
             const maxGwei = Number(maxAllowedPrice / WEI_PER_GWEI);
+            const chainMultiplier = getGasSpikeMultiplier(chain);
 
             this.logger.warn('Gas price spike detected, aborting transaction', {
               chain,
               currentGwei,
               baselineGwei,
               maxGwei,
-              multiplier: ARBITRAGE_CONFIG.gasPriceSpikeMultiplier
+              multiplier: chainMultiplier,
             });
 
-            throw new Error(`Gas price spike: ${currentGwei} gwei exceeds ${maxGwei} gwei (${ARBITRAGE_CONFIG.gasPriceSpikeMultiplier}x baseline)`);
+            throw new Error(`Gas price spike: ${currentGwei} gwei exceeds ${maxGwei} gwei (${chainMultiplier}x baseline)`);
           }
         }
       }

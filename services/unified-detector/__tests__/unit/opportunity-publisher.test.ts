@@ -143,8 +143,9 @@ describe('OpportunityPublisher', () => {
       const result = await publisher.publish(opportunity);
 
       expect(result).toBe(false);
+      // FIX W2-6: With bounded retry, final error message reflects exhausted retries
       expect(logger.error).toHaveBeenCalledWith(
-        'Failed to publish opportunity to stream',
+        'Failed to publish opportunity after all retries',
         expect.objectContaining({
           opportunityId: opportunity.id,
           error: 'Redis connection error',
@@ -264,8 +265,12 @@ describe('OpportunityPublisher', () => {
     it('should track mixed success and failure', async () => {
       await publisher.publish(createSampleOpportunity()); // success
 
-      mockStreamsClient.xaddWithLimit.mockRejectedValueOnce(new Error('error'));
-      await publisher.publish(createSampleOpportunity()); // failure
+      // FIX W2-6: With 3-attempt retry, all attempts must fail for a publish to count as failed
+      mockStreamsClient.xaddWithLimit
+        .mockRejectedValueOnce(new Error('error'))
+        .mockRejectedValueOnce(new Error('error'))
+        .mockRejectedValueOnce(new Error('error'));
+      await publisher.publish(createSampleOpportunity()); // failure after 3 retries
 
       await publisher.publish(createSampleOpportunity()); // success
 

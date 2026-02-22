@@ -151,6 +151,8 @@ import {
   createBalanceMonitor,
   type BalanceSnapshot,
 } from './services/balance-monitor';
+// W1-42 FIX: Extracted execution pipeline
+import { ExecutionPipeline, type PipelineDeps } from './execution-pipeline';
 
 // Re-export types for consumers
 export type {
@@ -252,7 +254,10 @@ export class ExecutionEngineService {
   private lastGasPrices: Map<string, bigint> = new Map();
   private activeExecutionCount = 0;
   private readonly maxConcurrentExecutions: number;
-  private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
+  private isProcessingQueue = false; // Guard against concurrent processQueueItems calls (legacy, kept for pipeline fallback)
+
+  // W1-42 FIX: Extracted execution pipeline
+  private executionPipeline: ExecutionPipeline | null = null;
 
   // FIX 5: Track circuit breaker re-enqueue attempts per opportunity to prevent
   // infinite dequeue/re-enqueue loops when CB is in HALF_OPEN state
@@ -971,6 +976,9 @@ export class ExecutionEngineService {
    * Keeps a low-frequency fallback interval (1s) for edge cases.
    */
   private startExecutionProcessing(): void {
+    // W1-42 FIX: Create execution pipeline instance
+    this.executionPipeline = this.createExecutionPipeline();
+
     // Event-driven: process immediately when item is enqueued
     if (this.queueService) {
       this.queueService.onItemAvailable(() => {
@@ -1001,6 +1009,40 @@ export class ExecutionEngineService {
   }
 
   /**
+   * W1-42 FIX: Create ExecutionPipeline with all dependencies injected.
+   * Called once during startExecutionProcessing().
+   */
+  private createExecutionPipeline(): ExecutionPipeline {
+    if (!this.lockManager) throw new Error('Lock manager not initialized for pipeline');
+    if (!this.queueService) throw new Error('Queue service not initialized for pipeline');
+    if (!this.opportunityConsumer) throw new Error('Opportunity consumer not initialized for pipeline');
+    if (!this.strategyFactory) throw new Error('Strategy factory not initialized for pipeline');
+
+    const deps: PipelineDeps = {
+      logger: this.logger,
+      perfLogger: this.perfLogger,
+      stateManager: this.stateManager,
+      stats: this.stats,
+      queueService: this.queueService,
+      maxConcurrentExecutions: this.maxConcurrentExecutions,
+      lockManager: this.lockManager,
+      lockConflictTracker: this.lockConflictTracker,
+      opportunityConsumer: this.opportunityConsumer,
+      strategyFactory: this.strategyFactory,
+      cbManager: this.cbManager,
+      riskOrchestrator: this.riskOrchestrator,
+      abTestingFramework: this.abTestingFramework,
+      isSimulationMode: this.isSimulationMode,
+      riskManagementEnabled: this.riskManagementEnabled,
+      buildStrategyContext: () => this.buildStrategyContext(),
+      publishExecutionResult: (result, opp) => this.publishExecutionResult(result, opp),
+      getLastGasPrice: (chain) => this.lastGasPrices.get(chain) ?? 0n,
+    };
+
+    return new ExecutionPipeline(deps);
+  }
+
+  /**
    * Process available queue items up to concurrency limit.
    * Called both by event callback and fallback interval.
    *
@@ -1013,6 +1055,13 @@ export class ExecutionEngineService {
    * - Tracks blocked executions in stats
    */
   private processQueueItems(): void {
+    // W1-42 FIX: Delegate to extracted pipeline when available
+    if (this.executionPipeline) {
+      this.executionPipeline.processQueueItems();
+      return;
+    }
+
+    // Legacy fallback (during initialization before pipeline is created)
     // Check preconditions: running, queue exists
     if (!this.stateManager.isRunning()) return;
     if (!this.queueService) return;
@@ -1613,6 +1662,15 @@ export class ExecutionEngineService {
 
   getActiveExecutionsCount(): number {
     return this.opportunityConsumer?.getActiveCount() ?? 0;
+  }
+
+  /**
+   * W2-18 FIX: Get consumer lag via XPENDING.
+   * NOT for hot path — intended for periodic health checks.
+   */
+  async getConsumerLag(): Promise<{ pendingCount: number; minId: string | null; maxId: string | null }> {
+    return this.opportunityConsumer?.getConsumerLag()
+      ?? { pendingCount: 0, minId: null, maxId: null };
   }
 
   getProviderHealth(): Map<string, ProviderHealth> {

@@ -149,14 +149,17 @@ export class ConfidenceCalculator {
    * Calculate composite confidence score for a cross-chain opportunity.
    *
    * @param lowPrice - Price data from the lower-priced chain (buy side)
-   * @param highPrice - Price on the higher-priced chain (sell side)
+   * @param highPrice - Price on the higher-priced chain (sell side).
+   *   When `update` is provided, dual-side freshness penalty is applied using
+   *   the worst (oldest) timestamp from both sides. Without `update`, only
+   *   the buy-side (lowPrice) freshness is checked (backward compatible).
    * @param whaleData - Optional whale activity summary for adjustment
    * @param mlPrediction - Optional ML predictions for source/target chains
    * @returns Confidence score between 0 and maxConfidence
    */
   calculate(
     lowPrice: PriceData,
-    highPrice: { price: number },
+    highPrice: { price: number; update?: PriceUpdate },
     whaleData?: WhaleActivitySummary,
     mlPrediction?: MLPredictionPair
   ): number {
@@ -169,7 +172,13 @@ export class ConfidenceCalculator {
     let confidence = this.calculateBaseConfidence(lowPrice.price, highPrice.price);
 
     // Step 3: Apply age penalty for stale data
-    confidence = this.applyAgePenalty(confidence, lowPrice.update.timestamp);
+    // FIX W2-12: Use worst (oldest) timestamp from both buy-side and sell-side
+    // Previously only lowPrice freshness was checked — stale sell-side data produced
+    // overconfident opportunities that failed at execution
+    const worstTimestamp = highPrice.update
+      ? Math.min(lowPrice.update.timestamp, highPrice.update.timestamp)
+      : lowPrice.update.timestamp;
+    confidence = this.applyAgePenalty(confidence, worstTimestamp);
 
     // Capture pre-boost confidence for FIX #10 multiplier cap
     const preBoostConfidence = confidence;

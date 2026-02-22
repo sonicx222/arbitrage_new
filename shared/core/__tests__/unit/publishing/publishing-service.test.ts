@@ -22,6 +22,7 @@ function createMockStreamsClient() {
   return {
     createBatcher: jest.fn().mockReturnValue(mockBatcher),
     xadd: jest.fn().mockResolvedValue('123-0'),
+    xaddWithLimit: jest.fn().mockResolvedValue('123-0'),
     constructor: {
       STREAMS: {
         OPPORTUNITIES: 'stream:opportunities',
@@ -222,7 +223,7 @@ describe('PublishingService', () => {
 
       await service.publishArbitrageOpportunity(opportunity as any);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:opportunities',
         expect.objectContaining({
           type: 'arbitrage-opportunity',
@@ -248,7 +249,7 @@ describe('PublishingService', () => {
 
       await service.publishArbitrageOpportunity({ id: 'opp-123' } as any);
 
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
       expect(mockLogger.debug).toHaveBeenCalledWith(
         'Duplicate opportunity filtered',
         { id: 'opp-123' }
@@ -264,7 +265,7 @@ describe('PublishingService', () => {
         'Redis dedup check failed, publishing anyway',
         expect.any(Object)
       );
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
     });
 
     it('should stamp detectedAt on opportunity before publishing', async () => {
@@ -328,7 +329,7 @@ describe('PublishingService', () => {
 
       await service.publishVolumeAggregate(aggregate as any);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:volume-aggregates',
         expect.objectContaining({
           type: 'volume-aggregate',

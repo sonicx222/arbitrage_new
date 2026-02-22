@@ -121,6 +121,11 @@ jest.mock('@arbitrage/core', () => {
   bpsToDecimal: jest.fn().mockImplementation((bps: number) => bps / 10000),
   disconnectWithTimeout: jest.fn().mockResolvedValue(undefined),
   stopAndNullify: jest.fn().mockResolvedValue(null),
+  LiquidityDepthAnalyzer: jest.fn(),
+  getLiquidityDepthAnalyzer: jest.fn().mockReturnValue({
+    updatePoolLiquidity: jest.fn(),
+    analyzeDepth: jest.fn().mockReturnValue(null),
+  }),
 };
 });
 
@@ -192,6 +197,17 @@ jest.mock('@arbitrage/config', () => ({
   ]),
   PartitionHealth: jest.fn(),
   ChainHealth: jest.fn(),
+  FEATURE_FLAGS: {
+    useBatchedQuoter: false,
+    useFlashLoanAggregator: false,
+    useCommitReveal: false,
+    useCommitRevealRedis: false,
+    useDestChainFlashLoan: false,
+    useMomentumTracking: false,
+    useMLSignalScoring: false,
+    useSignalCacheRead: false,
+    useLiquidityDepthSizing: false,
+  },
 }));
 
 // Mock internal modules
@@ -353,6 +369,10 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
     core.disconnectWithTimeout.mockResolvedValue(undefined);
     core.stopAndNullify.mockResolvedValue(null);
     core.getCorrelationAnalyzer?.mockReturnValue?.({});
+    core.getLiquidityDepthAnalyzer.mockReturnValue({
+      updatePoolLiquidity: jest.fn(),
+      analyzeDepth: jest.fn().mockReturnValue(null),
+    });
 
     // Re-establish @arbitrage/config mock implementations
     const config = require('@arbitrage/config');
@@ -501,6 +521,36 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
 
       expect(errorHandler).not.toHaveBeenCalled();
       expect((instance as any).status).not.toBe('error');
+    });
+
+    it('should clean up old wsManager before slow recovery reconnection', () => {
+      jest.useFakeTimers();
+      try {
+        const instance = createInstance();
+        instance.on('error', jest.fn()); // Prevent unhandled error throw
+
+        // Simulate an old wsManager with listeners attached
+        const oldWsManager = new MockWebSocketManager();
+        (instance as any).wsManager = oldWsManager;
+        (instance as any).factorySubscriptionService = { stop: jest.fn() };
+
+        // Trigger max reconnect attempts to start slow recovery timer
+        (instance as any).reconnectAttempts = (instance as any).MAX_RECONNECT_ATTEMPTS - 1;
+        (instance as any).handleConnectionError(new Error('Connection lost'));
+
+        // Slow recovery timer should now be set
+        expect((instance as any).slowRecoveryTimer).not.toBeNull();
+
+        // Advance timer to trigger slow recovery tick
+        jest.advanceTimersByTime((instance as any).SLOW_RECOVERY_INTERVAL_MS);
+
+        // Old wsManager should have had removeAllListeners called
+        expect(oldWsManager.removeAllListeners).toHaveBeenCalled();
+        // Old references should be nulled before re-initialization
+        expect((instance as any).factorySubscriptionService).toBeNull();
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 

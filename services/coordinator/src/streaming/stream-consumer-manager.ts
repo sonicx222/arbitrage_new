@@ -502,6 +502,9 @@ export class StreamConsumerManager {
    * Writes JSONL (one JSON object per line) to data/dlq-fallback-{date}.jsonl.
    * Append-only, async-safe via synchronous fs.appendFileSync.
    */
+  /** FIX 4.3: Maximum DLQ fallback file size per day (100MB) */
+  private static readonly MAX_DLQ_FILE_BYTES = 100 * 1024 * 1024;
+
   private writeLocalDlqFallback(
     message: StreamMessage,
     error: Error,
@@ -514,6 +517,22 @@ export class StreamConsumerManager {
         fs.mkdirSync(dir, { recursive: true });
       }
       const filePath = path.join(dir, `dlq-fallback-${date}.jsonl`);
+
+      // FIX 4.3: Enforce 100MB daily file size limit to prevent disk exhaustion
+      if (fs.existsSync(filePath)) {
+        const stat = fs.statSync(filePath);
+        if (stat.size >= StreamConsumerManager.MAX_DLQ_FILE_BYTES) {
+          this.logger.warn('DLQ fallback file size limit reached, dropping message', {
+            filePath,
+            sizeBytes: stat.size,
+            limitBytes: StreamConsumerManager.MAX_DLQ_FILE_BYTES,
+            originalMessageId: message.id,
+            sourceStream,
+          });
+          return;
+        }
+      }
+
       const entry = JSON.stringify({
         originalMessageId: message.id,
         originalStream: sourceStream,

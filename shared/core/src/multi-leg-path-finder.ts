@@ -521,11 +521,8 @@ export class MultiLegPathFinder {
     // Gas cost (increases with hops)
     const gasCost = this.estimateGasCost(chain, allSteps.length);
 
-    // Total fees
-    const totalFees = allSteps.reduce((sum, step) => sum + step.fee, 0);
-
-    // Net profit
-    const netProfit = grossProfit - totalFees - gasCost;
+    // Net profit after gas (fees already applied in AMM simulation via simulateSwapBigInt)
+    const netProfit = grossProfit - gasCost;
 
     if (netProfit < this.config.minProfitThreshold) {
       return null;
@@ -545,9 +542,8 @@ export class MultiLegPathFinder {
     // Complete path including return to start
     const completePath = [...state.tokens, startToken];
 
-    // BUG FIX: Calculate actual percentage (grossProfit is already a decimal ratio)
-    // profitPercentage should be the percentage form (e.g., 0.01 = 1%)
-    const profitPercentage = grossProfit; // grossProfit is profit/investment ratio
+    // profitPercentage uses netProfit (consistent with cross-dex-triangular-arbitrage)
+    const profitPercentage = netProfit;
 
     return {
       id: `multi_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,

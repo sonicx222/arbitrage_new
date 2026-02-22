@@ -173,8 +173,8 @@ export function parseOrcaWhirlpoolState(
       status: 1, // Whirlpool doesn't have explicit status, assume active if parseable
       token0Mint: tokenMintA,
       token1Mint: tokenMintB,
-      token0Decimals: 0, // Must be provided externally
-      token1Decimals: 0  // Must be provided externally
+      token0Decimals: -1, // Sentinel: Whirlpool account does not store decimals; must be provided externally via parseOrcaWhirlpoolPriceUpdate()
+      token1Decimals: -1  // Sentinel: Whirlpool account does not store decimals; must be provided externally via parseOrcaWhirlpoolPriceUpdate()
     };
   } catch (error) {
     logger?.error('Error parsing Orca Whirlpool state', { error });

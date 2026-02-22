@@ -1486,9 +1486,10 @@ export class CrossChainDetectorService {
       }
 
       // Calculate confidence with optional whale data and ML predictions
+      // FIX W2-12: Pass highPrice update for dual-side freshness penalty
       const confidence = this.calculateConfidence(
         { update: lowestPrice.update, price: lowestPrice.price },
-        { price: highestPrice.price },
+        { update: highestPrice.update, price: highestPrice.price },
         whaleData,
         mlPredictionData
       );
@@ -1732,7 +1733,7 @@ export class CrossChainDetectorService {
    */
   private calculateConfidence(
     lowPrice: {update: PriceUpdate; price: number},
-    highPrice: {price: number},
+    highPrice: {update?: PriceUpdate; price: number},
     whaleData?: WhaleActivitySummary,
     mlPrediction?: { source?: PredictionResult | null; target?: PredictionResult | null }
   ): number {

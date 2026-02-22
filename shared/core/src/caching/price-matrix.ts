@@ -888,6 +888,11 @@ export class PriceMatrix implements Resettable {
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
       // Optimized SharedArrayBuffer path with Fix #7 sequence counter protocol
       for (const { index, price, relativeTs } of resolved) {
+        // FIX W2-10: Monotonic timestamp enforcement in batch path (matches OP-5 in setPrice)
+        // Skip stale prices where existing timestamp is newer
+        const currentTs = Atomics.load(timestamps, index);
+        if (currentTs > relativeTs) continue;
+
         const seq = Atomics.add(sequences, index, 1) + 1;
         this.dataView.setFloat64(index * 8, price, true);
         Atomics.store(timestamps, index, relativeTs);
@@ -897,6 +902,9 @@ export class PriceMatrix implements Resettable {
     } else {
       // Fallback path
       for (const { index, price, relativeTs } of resolved) {
+        // FIX W2-10: Monotonic timestamp enforcement in batch fallback path
+        if (timestamps[index] > relativeTs) continue;
+
         sequences[index]++;
         prices[index] = price;
         timestamps[index] = relativeTs;

@@ -30,6 +30,8 @@ import type { SwapEventFilter, WhaleAlert, VolumeAggregate } from '../analytics/
 import { retryWithLogging } from '../resilience/retry-mechanism';
 // P-NEW-1: LatencyTracker integration for pipeline latency recording
 import { getLatencyTracker } from '../monitoring/latency-tracker';
+// W2-23 FIX: Trace context injection for cross-service correlation
+import { createTraceContext, propagateContext } from '../tracing/trace-context';
 
 // =============================================================================
 // Types
@@ -256,6 +258,15 @@ export class PublishingService {
 
     const message = this.createMessage('arbitrage-opportunity', opportunity);
 
+    // W2-23 FIX: Inject trace context for cross-service correlation.
+    // The execution engine extracts _trace_* fields from the message
+    // for end-to-end tracing from detection through execution.
+    const traceCtx = createTraceContext(this.source);
+    const tracedMessage = propagateContext(
+      message as unknown as Record<string, unknown>,
+      traceCtx,
+    );
+
     // P-NEW-1: Record pipeline latency from timestamps (O(1), zero-allocation)
     if (opportunity.pipelineTimestamps) {
       getLatencyTracker().recordFromTimestamps(opportunity.pipelineTimestamps);
@@ -265,7 +276,7 @@ export class PublishingService {
     // @see OP-6: Use xaddWithLimit to prevent unbounded stream growth
     await this.streamsClient.xaddWithLimit(
       RedisStreamsClient.STREAMS.OPPORTUNITIES,
-      message
+      tracedMessage,
     );
   }
 
@@ -410,13 +421,6 @@ export class PublishingService {
         `${operationName} batcher not initialized - call initializeBatchers() first (ADR-002)`
       );
     }
-  }
-
-  /**
-   * Sleep helper for retry backoff.
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

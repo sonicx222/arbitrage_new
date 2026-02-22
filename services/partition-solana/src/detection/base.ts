@@ -23,7 +23,7 @@ export const MIN_VALID_PRICE = 1e-12;
  * Default SOL price fallback in USD.
  * Used when price oracle doesn't have SOL price.
  */
-export const DEFAULT_SOL_PRICE_USD = 100;
+export const DEFAULT_SOL_PRICE_USD = 200;
 
 /**
  * Compute unit estimates for different operations.

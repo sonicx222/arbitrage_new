@@ -1,797 +1,671 @@
+export {};
+
 /**
- * Price Update → Opportunity Detection Integration Test
+ * Price Update -> Opportunity Detection Integration Test
  *
- * TRUE integration test verifying the data flow from price updates
- * to arbitrage opportunity detection via Redis Streams.
+ * TRUE integration test wiring real production components:
+ * - SimpleArbitrageDetector (production detection logic)
+ * - PublishingService (production Redis Streams publishing)
+ * - RedisStreamsClient (production streams client)
+ * - Real Redis (via createTestRedisClient)
  *
  * **Flow Tested**:
- * 1. Price updates arrive from multiple DEXs
- * 2. Price matrix stores and compares prices
- * 3. Arbitrage opportunities are detected when price spreads exceed threshold
- * 4. Opportunities are published to stream for coordination
+ * 1. Two PairSnapshots with different prices feed into SimpleArbitrageDetector
+ * 2. Detector.calculateArbitrage() returns ArbitrageOpportunity (or null)
+ * 3. PublishingService.publishArbitrageOpportunity() writes to stream:opportunities
+ * 4. Consumer group reads the opportunity from the stream
  *
  * **What's Real**:
- * - Redis Streams (via redis-memory-server)
- * - Price data storage and retrieval
- * - Cross-DEX price comparison logic
- * - Opportunity scoring and filtering
+ * - SimpleArbitrageDetector with production threshold logic
+ * - PublishingService with production message envelope + trace context
+ * - RedisStreamsClient with production XADD/XREAD
+ * - Real Redis (redis-memory-server via jest.globalSetup)
  *
- * @see Phase 4: TRUE Integration Tests
+ * **What's Mocked**:
+ * - Logger (no-op jest.fn() object -- no business logic)
+ *
  * @see ADR-002: Redis Streams over Pub/Sub
+ * @see ADR-014: Modular Detector Components
  */
 
-import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import Redis from 'ioredis';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Production components -- import from source files, NOT barrel exports
 import {
-  createTestRedisClient,
-} from '@arbitrage/test-utils';
+  SimpleArbitrageDetector,
+  type PairSnapshot,
+} from '../../../services/unified-detector/src/detection/simple-arbitrage-detector';
+import { PublishingService } from '../../../shared/core/src/publishing/publishing-service';
+import { RedisStreamsClient } from '../../../shared/core/src/redis-streams';
+import type { ServiceLogger } from '../../../shared/core/src/logging/types';
 
-// Stream names (matching RedisStreamsClient.STREAMS)
-const STREAMS = {
-  PRICE_UPDATES: 'stream:price-updates',
-  SWAP_EVENTS: 'stream:swap-events',
-  OPPORTUNITIES: 'stream:opportunities',
-} as const;
+// Test utilities
+import { createTestRedisClient } from '@arbitrage/test-utils';
 
-// Cache key patterns
-const CACHE_KEYS = {
-  PRICE_PREFIX: 'price:',
-  PAIR_PREFIX: 'pair:',
-  TOKEN_PREFIX: 'token:',
-} as const;
+// Singleton reset for cleanup
+import { resetRedisStreamsInstance, resetRedisInstance } from '@arbitrage/core/internal';
 
-// Test tokens (Ethereum mainnet)
-const TEST_TOKENS = {
-  WETH: {
-    address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-    symbol: 'WETH',
-    decimals: 18,
-  },
-  USDC: {
-    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    symbol: 'USDC',
-    decimals: 6,
-  },
-  USDT: {
-    address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    symbol: 'USDT',
-    decimals: 6,
-  },
-  DAI: {
-    address: '0x6B175474E89094C44Da98b954EesdfDcD5F72dB',
-    symbol: 'DAI',
-    decimals: 18,
-  },
-} as const;
+// =============================================================================
+// Test Redis URL resolution (same pattern as redis-helpers.ts)
+// =============================================================================
 
-// Test DEX pairs
-const TEST_PAIRS = {
-  UNISWAP_V3_WETH_USDC: {
-    address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
-    dex: 'uniswap_v3',
-    token0: TEST_TOKENS.WETH.address,
-    token1: TEST_TOKENS.USDC.address,
-    fee: 0.003,
-  },
-  SUSHISWAP_WETH_USDC: {
-    address: '0x397FF1542f962076d0BFE58eA045FfA2d347ACa0',
-    dex: 'sushiswap',
-    token0: TEST_TOKENS.WETH.address,
-    token1: TEST_TOKENS.USDC.address,
-    fee: 0.003,
-  },
-  CURVE_WETH_USDC: {
-    address: '0x1234567890123456789012345678901234567890',
-    dex: 'curve',
-    token0: TEST_TOKENS.WETH.address,
-    token1: TEST_TOKENS.USDC.address,
-    fee: 0.0004,
-  },
-} as const;
+function getTestRedisUrl(): string {
+  const configFile = path.resolve(__dirname, '../../../.redis-test-config.json');
 
-interface PriceData {
-  dex: string;
-  pairAddress: string;
-  pairKey: string;
-  chain: string;
-  token0: string;
-  token1: string;
-  price: number;
-  liquidity: string;
-  reserve0: string;
-  reserve1: string;
-  blockNumber: number;
-  timestamp: number;
+  if (fs.existsSync(configFile)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      if (config.url) {
+        return config.url;
+      }
+    } catch {
+      // Fall through to env vars
+    }
+  }
+
+  return process.env.REDIS_URL || 'redis://localhost:6379';
 }
 
-interface ArbitrageOpportunity {
-  id: string;
-  type: 'cross-dex' | 'triangular' | 'cross-chain';
-  chain: string;
-  buyDex: string;
-  sellDex: string;
-  buyPair: string;
-  sellPair: string;
-  tokenIn: string;
-  tokenOut: string;
-  buyPrice: number;
-  sellPrice: number;
-  priceSpreadPercent: number;
-  expectedProfit: number;
-  estimatedGasCost: number;
-  netProfit: number;
-  confidence: number;
-  expiresAt: number;
-  timestamp: number;
-}
+// =============================================================================
+// Mock Logger (only thing mocked -- no business logic)
+// =============================================================================
 
-function createPriceData(overrides: Partial<PriceData> = {}): PriceData {
+function createMockLogger(): ServiceLogger {
   return {
-    dex: 'uniswap_v3',
-    pairAddress: TEST_PAIRS.UNISWAP_V3_WETH_USDC.address,
-    pairKey: 'UNISWAP_V3_WETH_USDC',
-    chain: 'ethereum',
-    token0: TEST_TOKENS.WETH.address,
-    token1: TEST_TOKENS.USDC.address,
-    price: 2500,
-    liquidity: '10000000000000000000000', // 10,000 ETH equivalent
-    reserve0: '5000000000000000000000', // 5000 WETH
-    reserve1: '12500000000000', // 12.5M USDC
-    blockNumber: 18000000,
-    timestamp: Date.now(),
-    ...overrides,
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
   };
 }
 
-function createOpportunity(
-  buyPriceData: PriceData,
-  sellPriceData: PriceData,
-  overrides: Partial<ArbitrageOpportunity> = {}
-): ArbitrageOpportunity {
-  const priceSpreadPercent = ((sellPriceData.price - buyPriceData.price) / buyPriceData.price) * 100;
-  const estimatedGasCost = 15; // ~$15 gas at 50 gwei
-  const grossProfit = sellPriceData.price - buyPriceData.price;
-  const netProfit = grossProfit - estimatedGasCost;
+// =============================================================================
+// Test Data: Token addresses (Ethereum mainnet)
+// =============================================================================
+
+const TOKEN_A = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'; // WETH
+const TOKEN_B = '0x6B175474E89094C44Da98b954EedeAC495271d0F'; // DAI
+
+const PAIR_ADDRESS_UNI = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+const PAIR_ADDRESS_SUSHI = '0x397FF1542f962076d0BFE58eA045FfA2d347ACa0';
+
+// =============================================================================
+// Helper: Create PairSnapshot with realistic reserves
+// =============================================================================
+
+/**
+ * Create a PairSnapshot with a given price ratio.
+ * Uses same-decimal tokens (18/18) for simpler arithmetic.
+ *
+ * Price = reserve1 / reserve0
+ * For price P with reserve0 = R0:
+ *   reserve1 = R0 * P
+ */
+function createPairSnapshot(overrides: Partial<PairSnapshot> & { price?: number } = {}): PairSnapshot {
+  const {
+    price = 2500,
+    address = PAIR_ADDRESS_UNI,
+    dex = 'uniswap_v3',
+    token0 = TOKEN_A,
+    token1 = TOKEN_B,
+    fee = 0.003,
+    blockNumber = 18000000,
+    ...rest
+  } = overrides;
+
+  // Base reserve: 1000 tokens (18 decimals)
+  const reserve0BigInt = 1000n * 10n ** 18n;
+  // Reserve1 = reserve0 * price (both 18 decimals, so price is the ratio)
+  const reserve1BigInt = BigInt(Math.floor(1000 * price)) * 10n ** 18n;
 
   return {
-    id: `opp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    type: 'cross-dex',
-    chain: 'ethereum',
-    buyDex: buyPriceData.dex,
-    sellDex: sellPriceData.dex,
-    buyPair: buyPriceData.pairAddress,
-    sellPair: sellPriceData.pairAddress,
-    tokenIn: buyPriceData.token0,
-    tokenOut: buyPriceData.token1,
-    buyPrice: buyPriceData.price,
-    sellPrice: sellPriceData.price,
-    priceSpreadPercent,
-    expectedProfit: grossProfit,
-    estimatedGasCost,
-    netProfit,
-    confidence: priceSpreadPercent > 1 ? 0.9 : 0.7,
-    expiresAt: Date.now() + 30000,
-    timestamp: Date.now(),
-    ...overrides,
+    address,
+    dex,
+    token0,
+    token1,
+    reserve0: reserve0BigInt.toString(),
+    reserve1: reserve1BigInt.toString(),
+    fee,
+    blockNumber,
+    reserve0BigInt,
+    reserve1BigInt,
+    ...rest,
   };
 }
 
-describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
+// =============================================================================
+// Test Suite
+// =============================================================================
+
+describe('[Level 1] Price Detection -> Publishing Integration (Real Components)', () => {
   let redis: Redis;
+  let streamsClient: RedisStreamsClient;
+  let detector: SimpleArbitrageDetector;
+  let publisher: PublishingService;
+  let mockLogger: ServiceLogger;
+  let redisUrl: string;
 
   beforeAll(async () => {
+    // Resolve Redis URL and set env var BEFORE creating clients
+    redisUrl = getTestRedisUrl();
+    process.env.REDIS_URL = redisUrl;
+
+    // Create raw Redis client for verification reads
     redis = await createTestRedisClient();
+
+    // Create real RedisStreamsClient (no HMAC signing in test)
+    streamsClient = new RedisStreamsClient(redisUrl);
+
+    // Create real SimpleArbitrageDetector with ethereum config
+    detector = new SimpleArbitrageDetector({
+      chainId: 'ethereum',
+      gasEstimate: 250000,
+      confidence: 0.85,
+      expiryMs: 30000,
+    });
+
+    // Create real PublishingService
+    mockLogger = createMockLogger();
+    publisher = new PublishingService({
+      streamsClient,
+      logger: mockLogger,
+      source: 'test-detector',
+    });
   }, 30000);
 
   afterAll(async () => {
+    // Clean up in reverse order
+    try {
+      await publisher.cleanup();
+    } catch {
+      // Ignore cleanup errors
+    }
+    try {
+      await streamsClient.disconnect();
+    } catch {
+      // Ignore disconnect errors
+    }
+    try {
+      await resetRedisStreamsInstance();
+    } catch {
+      // Ignore reset errors
+    }
+    try {
+      await resetRedisInstance();
+    } catch {
+      // Ignore reset errors
+    }
     if (redis) {
       await redis.quit();
     }
   });
 
-  // Note: We use unique stream/key names per test to avoid interference,
-  // so we don't need beforeEach flush which can cause race conditions
-  // with parallel test execution.
-
-  describe('Price Data Storage', () => {
-    it('should store price data in Redis cache', async () => {
-      // Use unique key to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const priceData = createPriceData({ dex: 'uniswap_v3', price: 2500 });
-      const cacheKey = `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${priceData.chain}:${priceData.dex}:${priceData.pairKey}`;
-
-      await redis.set(cacheKey, JSON.stringify(priceData), 'EX', 300); // 5 minute TTL
-
-      const stored = await redis.get(cacheKey);
-      expect(stored).toBeDefined();
-
-      const parsed = JSON.parse(stored!);
-      expect(parsed.dex).toBe('uniswap_v3');
-      expect(parsed.price).toBe(2500);
-    });
-
-    it('should store prices from multiple DEXs for same pair', async () => {
-      // Use unique prefix to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const chain = 'ethereum';
-      const pairKey = 'WETH_USDC';
-
-      const dexPrices = [
-        createPriceData({ dex: 'uniswap_v3', price: 2500 }),
-        createPriceData({ dex: 'sushiswap', price: 2495, pairAddress: TEST_PAIRS.SUSHISWAP_WETH_USDC.address }),
-        createPriceData({ dex: 'curve', price: 2498, pairAddress: TEST_PAIRS.CURVE_WETH_USDC.address }),
-      ];
-
-      // Store all prices
-      for (const priceData of dexPrices) {
-        const cacheKey = `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:${priceData.dex}:${pairKey}`;
-        await redis.set(cacheKey, JSON.stringify(priceData), 'EX', 300);
-      }
-
-      // Verify we can retrieve all prices
-      const keys = await redis.keys(`${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:*:${pairKey}`);
-      expect(keys).toHaveLength(3);
-
-      // Read and compare prices
-      const prices: number[] = [];
-      for (const key of keys) {
-        const data = await redis.get(key);
-        prices.push(JSON.parse(data!).price);
-      }
-
-      expect(Math.min(...prices)).toBe(2495);
-      expect(Math.max(...prices)).toBe(2500);
-    });
-
-    it('should track price history with sorted set', async () => {
-      // Use unique key to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const historyKey = `${CACHE_KEYS.PRICE_PREFIX}history:test:${testId}:ethereum:uniswap_v3:WETH_USDC`;
-
-      // Add price history entries
-      const baseTimestamp = Date.now();
-      const priceHistory = [
-        { price: 2500, timestamp: baseTimestamp },
-        { price: 2505, timestamp: baseTimestamp + 1000 },
-        { price: 2498, timestamp: baseTimestamp + 2000 },
-        { price: 2510, timestamp: baseTimestamp + 3000 },
-        { price: 2502, timestamp: baseTimestamp + 4000 },
-      ];
-
-      for (const entry of priceHistory) {
-        await redis.zadd(historyKey, entry.timestamp, JSON.stringify(entry));
-      }
-
-      // Get recent price history (last 3 entries)
-      const recent = await redis.zrange(historyKey, -3, -1);
-      expect(recent).toHaveLength(3);
-
-      // Calculate price volatility
-      const recentPrices = recent.map(r => JSON.parse(r).price);
-      const avgPrice = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
-      const variance = recentPrices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) / recentPrices.length;
-      const volatility = Math.sqrt(variance);
-
-      expect(volatility).toBeGreaterThan(0);
-    });
+  beforeEach(async () => {
+    // Flush Redis between tests for isolation
+    if (redis?.status === 'ready') {
+      await redis.flushall();
+    }
   });
 
-  describe('Price Update Stream', () => {
-    it('should publish price updates to stream', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:price-updates:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const priceData = createPriceData();
+  // ===========================================================================
+  // Test 1: Detection -- price difference produces an opportunity
+  // ===========================================================================
 
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(priceData));
-
-      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
-
-      const [, messages] = result![0];
-      expect(messages).toHaveLength(1);
-
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const parsed = JSON.parse(fieldObj.data);
-      expect(parsed.price).toBe(2500);
-    });
-
-    it('should handle high-frequency price updates', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:price-updates:hf:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const updateCount = 50;
-      const promises: Promise<string | null>[] = [];
-
-      // Simulate rapid price updates
-      for (let i = 0; i < updateCount; i++) {
-        const priceData = createPriceData({
-          price: 2500 + Math.random() * 10 - 5, // Random price variation
-          timestamp: Date.now() + i,
-        });
-
-        promises.push(redis.xadd(testStream, '*', 'data', JSON.stringify(priceData)));
-      }
-
-      await Promise.all(promises);
-
-      const streamLength = await redis.xlen(testStream);
-      expect(streamLength).toBe(updateCount);
-    });
-  });
-
-  describe('Swap Event Processing', () => {
-    it('should publish swap events to stream', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:swap-events:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const swapEvent = {
-        dex: 'uniswap_v3',
-        chain: 'ethereum',
-        pairAddress: TEST_PAIRS.UNISWAP_V3_WETH_USDC.address,
-        sender: '0xabcdef1234567890abcdef1234567890abcdef12',
-        recipient: '0x1234567890abcdef1234567890abcdef12345678',
-        amount0In: '1000000000000000000', // 1 WETH
-        amount0Out: '0',
-        amount1In: '0',
-        amount1Out: '2500000000', // 2500 USDC
-        sqrtPriceX96: '1234567890123456789012345678901234567890',
-        liquidity: '10000000000000000000000',
-        tick: -100,
-        blockNumber: 18000000,
-        txHash: '0x' + Math.random().toString(16).slice(2).padEnd(64, '0'),
-        logIndex: 0,
-        timestamp: Date.now(),
-      };
-
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(swapEvent));
-
-      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
-
-      const [, messages] = result![0];
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const parsed = JSON.parse(fieldObj.data);
-      expect(parsed.dex).toBe('uniswap_v3');
-      expect(parsed.amount0In).toBe('1000000000000000000');
-    });
-
-    it('should derive price from swap event', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:swap-events:price:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const swapEvent = {
-        dex: 'uniswap_v3',
-        amount0In: '1000000000000000000', // 1 WETH (18 decimals)
-        amount0Out: '0',
-        amount1In: '0',
-        amount1Out: '2520000000', // 2520 USDC (6 decimals)
-        timestamp: Date.now(),
-      };
-
-      // Calculate implied price from swap
-      const wethAmount = BigInt(swapEvent.amount0In) / BigInt(10 ** 18);
-      const usdcAmount = BigInt(swapEvent.amount1Out) / BigInt(10 ** 6);
-      const impliedPrice = Number(usdcAmount) / Number(wethAmount);
-
-      expect(impliedPrice).toBe(2520);
-
-      await redis.xadd(testStream, '*', 'data', JSON.stringify({ ...swapEvent, impliedPrice }));
-
-      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
-
-      const [, messages] = result![0];
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const parsed = JSON.parse(fieldObj.data);
-      expect(parsed.impliedPrice).toBe(2520);
-    });
-  });
-
-  describe('Arbitrage Detection', () => {
-    it('should detect cross-DEX arbitrage opportunity', async () => {
-      // Use unique keys/streams to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const testStream = `stream:opportunities:detect:${testId}`;
-
-      // Store prices from two DEXs with price difference
-      const uniswapPrice = createPriceData({
+  describe('Detection: price difference -> opportunity found', () => {
+    it('should detect arbitrage when two pools have a significant price spread', () => {
+      // Pair 1: Lower price (buy side) -- price = 2500
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
         dex: 'uniswap_v3',
         price: 2500,
-        pairAddress: TEST_PAIRS.UNISWAP_V3_WETH_USDC.address,
+        fee: 0.003,
       });
 
-      const sushiPrice = createPriceData({
+      // Pair 2: Higher price (sell side) -- price = 2700 (8% spread, well above threshold)
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
         dex: 'sushiswap',
-        price: 2550, // 2% higher price - arbitrage opportunity
-        pairAddress: TEST_PAIRS.SUSHISWAP_WETH_USDC.address,
+        price: 2700,
+        fee: 0.003,
       });
 
-      // Store in cache with unique keys
-      await redis.set(
-        `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:ethereum:uniswap_v3:WETH_USDC`,
-        JSON.stringify(uniswapPrice)
-      );
-      await redis.set(
-        `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:ethereum:sushiswap:WETH_USDC`,
-        JSON.stringify(sushiPrice)
-      );
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
 
-      // Detect arbitrage (buy low, sell high)
-      const buyPrice = uniswapPrice.price;
-      const sellPrice = sushiPrice.price;
-      const priceSpreadPercent = ((sellPrice - buyPrice) / buyPrice) * 100;
+      // Should return a valid opportunity
+      expect(opportunity).not.toBeNull();
+      expect(opportunity!.type).toBe('simple');
+      expect(opportunity!.chain).toBe('ethereum');
+      expect(opportunity!.confidence).toBe(0.85);
 
-      expect(priceSpreadPercent).toBeCloseTo(2, 1);
+      // Buy from the lower-priced DEX, sell on the higher-priced one
+      expect(opportunity!.buyPrice).toBeDefined();
+      expect(opportunity!.sellPrice).toBeDefined();
+      expect(opportunity!.buyPrice!).toBeLessThan(opportunity!.sellPrice!);
 
-      // Create opportunity if spread exceeds threshold
-      const minSpreadThreshold = 0.5; // 0.5% minimum spread
-      if (priceSpreadPercent >= minSpreadThreshold) {
-        const opportunity = createOpportunity(uniswapPrice, sushiPrice);
+      // Verify the opportunity has required fields for execution
+      expect(opportunity!.id).toBeDefined();
+      expect(opportunity!.tokenIn).toBeDefined();
+      expect(opportunity!.tokenOut).toBeDefined();
+      expect(opportunity!.amountIn).toBeDefined();
+      expect(opportunity!.profitPercentage).toBeGreaterThan(0);
+      expect(opportunity!.expectedProfit).toBeGreaterThan(0);
+      expect(opportunity!.expiresAt).toBeGreaterThan(opportunity!.timestamp);
+      expect(opportunity!.status).toBe('pending');
+      expect(opportunity!.blockNumber).toBe(18000000);
+    });
 
-        await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
-      }
+    it('should calculate profit percentage correctly based on net spread minus fees', () => {
+      // 4% raw spread with 0.3% + 0.3% = 0.6% total fees = ~3.4% net
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+        fee: 0.003,
+      });
 
-      // Verify opportunity was published
-      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2600,
+        fee: 0.003,
+      });
 
-      const [, messages] = result![0];
-      expect(messages).toHaveLength(1);
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).not.toBeNull();
 
+      // profitPercentage should be (priceDiff/minPrice - totalFees) * 100
+      // priceDiff = |2600-2500| / 2500 = 0.04 (4%)
+      // totalFees = 0.003 + 0.003 = 0.006 (0.6%)
+      // netProfitPct = 0.04 - 0.006 = 0.034 (3.4%)
+      // profitPercentage = 3.4
+      expect(opportunity!.profitPercentage).toBeCloseTo(3.4, 0);
+    });
+  });
+
+  // ===========================================================================
+  // Test 2: Detection -- insufficient spread returns null
+  // ===========================================================================
+
+  describe('Detection: insufficient spread -> no opportunity', () => {
+    it('should return null when price spread is below the minimum profit threshold', () => {
+      // Ethereum minProfitThreshold is 0.005 (0.5%)
+      // With fees 0.003 + 0.003 = 0.006, need raw spread > 0.005 + 0.006 = 1.1%
+      // Using 0.2% raw spread -- far below threshold
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+        fee: 0.003,
+      });
+
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2505, // Only 0.2% difference
+        fee: 0.003,
+      });
+
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).toBeNull();
+    });
+
+    it('should return null when spread covers fees but not profit threshold', () => {
+      // Total fees = 0.6%, ethereum min profit = 0.5%
+      // Need raw spread > 1.1% to pass
+      // Using 0.8% raw spread -- covers fees (0.6%) but net profit (0.2%) < threshold (0.5%)
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+        fee: 0.003,
+      });
+
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2520, // 0.8% difference
+        fee: 0.003,
+      });
+
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).toBeNull();
+    });
+
+    it('should return null when reserves are zero', () => {
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+      });
+
+      // Zero reserves -- invalid pool state
+      const pair2: PairSnapshot = {
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        token0: TOKEN_A,
+        token1: TOKEN_B,
+        reserve0: '0',
+        reserve1: '0',
+        fee: 0.003,
+        blockNumber: 18000000,
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
+      };
+
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // Test 3: Detection -> Publishing: opportunity flows to Redis Stream
+  // ===========================================================================
+
+  describe('Detection -> Publishing: opportunity flows to Redis Stream', () => {
+    it('should detect, publish, and read an opportunity from stream:opportunities', async () => {
+      // Step 1: Detect an opportunity
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+        fee: 0.003,
+      });
+
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2700, // 8% spread
+        fee: 0.003,
+      });
+
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).not.toBeNull();
+
+      // Step 2: Publish via real PublishingService
+      await publisher.publishArbitrageOpportunity(opportunity!);
+
+      // Step 3: Read from stream:opportunities using raw Redis xrange
+      const streamName = RedisStreamsClient.STREAMS.OPPORTUNITIES;
+      const messages = await redis.xrange(streamName, '-', '+');
+
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      // Parse the message data field
       const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
+      const fieldMap: Record<string, string> = {};
       for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
+        fieldMap[fields[i]] = fields[i + 1];
       }
 
-      const opp = JSON.parse(fieldObj.data);
-      expect(opp.buyDex).toBe('uniswap_v3');
-      expect(opp.sellDex).toBe('sushiswap');
-      expect(opp.priceSpreadPercent).toBeCloseTo(2, 1);
-    });
+      // The PublishingService wraps in a MessageEvent envelope
+      expect(fieldMap.data).toBeDefined();
+      const envelope = JSON.parse(fieldMap.data);
 
-    it('should not publish opportunity when spread is below threshold', async () => {
-      // Use unique stream to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const testStream = `stream:opportunities:below:${testId}`;
+      // Verify envelope structure
+      expect(envelope.type).toBe('arbitrage-opportunity');
+      expect(envelope.source).toBe('test-detector');
+      expect(envelope.timestamp).toBeDefined();
 
-      // Prices with minimal difference
-      const uniswapPrice = createPriceData({ dex: 'uniswap_v3', price: 2500 });
-      const sushiPrice = createPriceData({ dex: 'sushiswap', price: 2505 }); // Only 0.2% difference
+      // Verify the opportunity data inside the envelope
+      const oppData = envelope.data;
+      expect(oppData.id).toBe(opportunity!.id);
+      expect(oppData.chain).toBe('ethereum');
+      expect(oppData.type).toBe('simple');
+      expect(oppData.confidence).toBe(0.85);
+      expect(oppData.buyPrice).toBeLessThan(oppData.sellPrice);
+      expect(oppData.profitPercentage).toBeGreaterThan(0);
+      expect(oppData.tokenIn).toBeDefined();
+      expect(oppData.tokenOut).toBeDefined();
+      expect(oppData.amountIn).toBeDefined();
 
-      const priceSpreadPercent = ((sushiPrice.price - uniswapPrice.price) / uniswapPrice.price) * 100;
-      const minSpreadThreshold = 0.5; // 0.5% minimum
+      // Verify pipeline timestamps were injected
+      expect(oppData.pipelineTimestamps).toBeDefined();
+      expect(oppData.pipelineTimestamps.detectedAt).toBeDefined();
+    }, 30000);
 
-      // Should NOT create opportunity
-      expect(priceSpreadPercent).toBeLessThan(minSpreadThreshold);
-
-      // Simulate the detection logic: only publish if spread exceeds threshold
-      if (priceSpreadPercent >= minSpreadThreshold) {
-        const opportunity = createOpportunity(uniswapPrice, sushiPrice);
-        await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
-      }
-
-      // Verify no opportunity published (short block to check if any messages exist)
-      const result = await redis.xread('COUNT', 1, 'BLOCK', 100, 'STREAMS', testStream, '0');
-
-      expect(result).toBeNull();
-    });
-
-    it('should filter opportunities by net profit after gas', async () => {
-      // Use unique stream to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const testStream = `stream:opportunities:gas:${testId}`;
-
-      // High spread but low liquidity might not cover gas
-      const buyPrice = createPriceData({ dex: 'uniswap_v3', price: 2500 });
-      const sellPrice = createPriceData({ dex: 'sushiswap', price: 2510 }); // $10 spread
-
-      const opportunity = createOpportunity(buyPrice, sellPrice);
-
-      // Calculate if profitable after gas
-      const estimatedGasCost = 15; // $15
-      const netProfit = (sellPrice.price - buyPrice.price) - estimatedGasCost;
-
-      expect(netProfit).toBeLessThan(0); // Not profitable after gas
-
-      // Should not publish unprofitable opportunity
-      const minNetProfit = 5; // $5 minimum
-
-      if (netProfit >= minNetProfit) {
-        await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
-      }
-
-      // Verify no opportunity published
-      const streamLength = await redis.xlen(testStream);
-      expect(streamLength).toBe(0);
-    });
-
-    it('should detect multiple simultaneous opportunities', async () => {
-      // Use unique stream to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const testStream = `stream:opportunities:multi:${testId}`;
-
-      // Setup prices for multiple pairs with arbitrage potential
-      const pairs = [
-        {
-          buyDex: 'uniswap_v3',
-          buyPrice: 2500,
-          sellDex: 'sushiswap',
-          sellPrice: 2560,
-          pairKey: 'WETH_USDC',
-        },
-        {
-          buyDex: 'curve',
-          buyPrice: 2495,
-          sellDex: 'uniswap_v3',
-          sellPrice: 2540,
-          pairKey: 'WETH_USDT',
-        },
-        {
-          buyDex: 'sushiswap',
-          buyPrice: 1.001,
-          sellDex: 'curve',
-          sellPrice: 1.005,
-          pairKey: 'USDC_USDT',
-        },
-      ];
-
-      const minSpreadThreshold = 0.5;
-
-      for (const pair of pairs) {
-        const spreadPercent = ((pair.sellPrice - pair.buyPrice) / pair.buyPrice) * 100;
-
-        if (spreadPercent >= minSpreadThreshold) {
-          const opportunity = {
-            id: `opp-${pair.pairKey}-${Date.now()}`,
-            type: 'cross-dex',
-            buyDex: pair.buyDex,
-            sellDex: pair.sellDex,
-            pairKey: pair.pairKey,
-            buyPrice: pair.buyPrice,
-            sellPrice: pair.sellPrice,
-            priceSpreadPercent: spreadPercent,
-            timestamp: Date.now(),
-          };
-
-          await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
-        }
-      }
-
-      // Verify all profitable opportunities were published
-      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
-
-      const [, messages] = result![0];
-      expect(messages.length).toBeGreaterThanOrEqual(2);
-
-      const opps = messages.map(([, fields]) => {
-        const fieldObj: Record<string, string> = {};
-        for (let i = 0; i < fields.length; i += 2) {
-          fieldObj[fields[i]] = fields[i + 1];
-        }
-        return JSON.parse(fieldObj.data);
+    it('should NOT publish when detection returns null (no false positives in stream)', async () => {
+      // Insufficient spread -- detection returns null
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+        fee: 0.003,
       });
 
-      const pairKeys = opps.map(o => o.pairKey);
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2505, // Tiny spread
+        fee: 0.003,
+      });
 
-      expect(pairKeys).toContain('WETH_USDC');
-      expect(pairKeys).toContain('WETH_USDT');
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).toBeNull();
+
+      // Nothing to publish -- stream should remain empty
+      const streamName = RedisStreamsClient.STREAMS.OPPORTUNITIES;
+      const streamLen = await redis.xlen(streamName);
+      expect(streamLen).toBe(0);
     });
   });
 
-  describe('Opportunity Scoring and Ranking', () => {
-    it('should score opportunities by expected profit', async () => {
-      // Use unique key to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const rankingKey = `opportunities:ranked:${testId}`;
+  // ===========================================================================
+  // Test 4: Full flow -- detection + publishing + consumer group read
+  // ===========================================================================
 
-      const opportunities = [
-        createOpportunity(
-          createPriceData({ dex: 'uniswap_v3', price: 2500 }),
-          createPriceData({ dex: 'sushiswap', price: 2520 }),
-          { id: 'opp-low-profit' }
-        ),
-        createOpportunity(
-          createPriceData({ dex: 'curve', price: 2480 }),
-          createPriceData({ dex: 'uniswap_v3', price: 2560 }),
-          { id: 'opp-high-profit' }
-        ),
-        createOpportunity(
-          createPriceData({ dex: 'sushiswap', price: 2490 }),
-          createPriceData({ dex: 'curve', price: 2530 }),
-          { id: 'opp-medium-profit' }
-        ),
+  describe('Full flow: detection + publishing + consumer group read', () => {
+    it('should detect, publish, and consume via xreadgroup from a consumer group', async () => {
+      const streamName = RedisStreamsClient.STREAMS.OPPORTUNITIES;
+      const groupName = 'test-coordinator';
+      const consumerName = 'test-worker-1';
+
+      // Step 1: Create consumer group on the stream
+      try {
+        await redis.xgroup('CREATE', streamName, groupName, '0', 'MKSTREAM');
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (!errMsg.includes('BUSYGROUP')) {
+          throw error;
+        }
+      }
+
+      // Step 2: Detect an opportunity
+      const pair1 = createPairSnapshot({
+        address: PAIR_ADDRESS_UNI,
+        dex: 'uniswap_v3',
+        price: 2500,
+        fee: 0.003,
+      });
+
+      const pair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2700, // 8% spread
+        fee: 0.003,
+      });
+
+      const opportunity = detector.calculateArbitrage(pair1, pair2);
+      expect(opportunity).not.toBeNull();
+
+      // Step 3: Publish via real PublishingService
+      await publisher.publishArbitrageOpportunity(opportunity!);
+
+      // Step 4: Consume via xreadgroup (simulating coordinator)
+      // Type: xreadgroup returns [streamName, [messageId, fields[]][]][]
+      type StreamEntry = [id: string, fields: string[]];
+      type StreamResult = [stream: string, entries: StreamEntry[]];
+
+      const result = await redis.xreadgroup(
+        'GROUP', groupName, consumerName,
+        'COUNT', '10',
+        'STREAMS', streamName, '>'
+      ) as StreamResult[] | null;
+
+      expect(result).not.toBeNull();
+      expect(result!.length).toBe(1);
+
+      const [, messages] = result![0];
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      // Parse the consumed message
+      const [messageId, fields] = messages[0];
+      expect(messageId).toBeDefined();
+
+      const fieldMap: Record<string, string> = {};
+      for (let i = 0; i < fields.length; i += 2) {
+        fieldMap[fields[i]] = fields[i + 1];
+      }
+
+      const envelope = JSON.parse(fieldMap.data);
+      const oppData = envelope.data;
+
+      // Verify the consumed data matches what was detected
+      expect(oppData.id).toBe(opportunity!.id);
+      expect(oppData.chain).toBe('ethereum');
+      expect(oppData.type).toBe('simple');
+      expect(oppData.buyPrice).toBeCloseTo(opportunity!.buyPrice!, 2);
+      expect(oppData.sellPrice).toBeCloseTo(opportunity!.sellPrice!, 2);
+      expect(oppData.profitPercentage).toBeCloseTo(opportunity!.profitPercentage!, 2);
+      expect(oppData.confidence).toBe(opportunity!.confidence);
+      expect(oppData.tokenIn).toBe(opportunity!.tokenIn);
+      expect(oppData.tokenOut).toBe(opportunity!.tokenOut);
+      expect(oppData.amountIn).toBe(opportunity!.amountIn);
+
+      // Step 5: ACK the message
+      const ackCount = await redis.xack(streamName, groupName, messageId);
+      expect(ackCount).toBe(1);
+
+      // Verify no pending messages remain
+      const pending = await redis.xpending(streamName, groupName);
+      expect(pending[0]).toBe(0); // Total pending count
+    }, 30000);
+
+    it('should handle multiple opportunities published in sequence', async () => {
+      const streamName = RedisStreamsClient.STREAMS.OPPORTUNITIES;
+      const groupName = 'test-coordinator-multi';
+      const consumerName = 'test-worker-multi';
+
+      // Create consumer group
+      try {
+        await redis.xgroup('CREATE', streamName, groupName, '0', 'MKSTREAM');
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (!errMsg.includes('BUSYGROUP')) {
+          throw error;
+        }
+      }
+
+      // Detect and publish multiple opportunities with different price spreads
+      const spreads = [
+        { buyPrice: 2500, sellPrice: 2700, dex: 'curve' },        // 8% spread
+        { buyPrice: 2500, sellPrice: 2800, dex: 'balancer_v2' },   // 12% spread
+        { buyPrice: 2500, sellPrice: 2650, dex: 'pancakeswap_v3' },// 6% spread
       ];
 
-      // Store in sorted set by net profit for ranking
-      for (const opp of opportunities) {
-        await redis.zadd(rankingKey, opp.netProfit, JSON.stringify(opp));
-      }
+      const publishedIds: string[] = [];
 
-      // Get top opportunities
-      const topOpps = await redis.zrevrange(rankingKey, 0, -1);
-      expect(topOpps).toHaveLength(3);
-
-      // Highest profit should be first
-      const ranked = topOpps.map(o => JSON.parse(o));
-      expect(ranked[0].id).toBe('opp-high-profit');
-    });
-
-    it('should apply confidence weighting to opportunity score', async () => {
-      // Use unique key to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const rankingKey = `opportunities:weighted:${testId}`;
-
-      const opportunities = [
-        { profit: 100, confidence: 0.9, id: 'high-conf-low-profit' },
-        { profit: 150, confidence: 0.5, id: 'low-conf-high-profit' },
-        { profit: 120, confidence: 0.8, id: 'med-conf-med-profit' },
-      ];
-
-      // Calculate weighted scores
-      const weightedOpps = opportunities.map(opp => ({
-        ...opp,
-        weightedScore: opp.profit * opp.confidence,
-      }));
-
-      // Store by weighted score
-      for (const opp of weightedOpps) {
-        await redis.zadd(rankingKey, opp.weightedScore, JSON.stringify(opp));
-      }
-
-      // Get best weighted opportunity
-      const topOpps = await redis.zrevrange(rankingKey, 0, 0);
-      const best = JSON.parse(topOpps[0]);
-
-      // med-conf-med-profit: 120 * 0.8 = 96
-      // high-conf-low-profit: 100 * 0.9 = 90
-      // low-conf-high-profit: 150 * 0.5 = 75
-      expect(best.id).toBe('med-conf-med-profit');
-    });
-  });
-
-  describe('Price Matrix Updates', () => {
-    it('should update price matrix with new price data', async () => {
-      // Use unique key to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const matrixKey = `pricematrix:${testId}:ethereum:WETH_USDC`;
-
-      // Store prices from all DEXs as hash fields
-      const dexPrices = {
-        uniswap_v3: { price: 2500, timestamp: Date.now() },
-        sushiswap: { price: 2495, timestamp: Date.now() },
-        curve: { price: 2498, timestamp: Date.now() },
-      };
-
-      for (const [dex, data] of Object.entries(dexPrices)) {
-        await redis.hset(matrixKey, dex, JSON.stringify(data));
-      }
-
-      // Get all prices for the pair
-      const allPrices = await redis.hgetall(matrixKey);
-      expect(Object.keys(allPrices)).toHaveLength(3);
-
-      // Find best buy and sell prices
-      const prices = Object.entries(allPrices).map(([dex, data]) => ({
-        dex,
-        ...JSON.parse(data),
-      }));
-
-      const bestBuy = prices.reduce((min, p) => p.price < min.price ? p : min);
-      const bestSell = prices.reduce((max, p) => p.price > max.price ? p : max);
-
-      expect(bestBuy.dex).toBe('sushiswap');
-      expect(bestSell.dex).toBe('uniswap_v3');
-    });
-
-    it('should handle stale price data', async () => {
-      // Use unique key to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const matrixKey = `pricematrix:${testId}:ethereum:WETH_USDC`;
-      const maxAge = 30000; // 30 seconds
-
-      // Store prices with different timestamps
-      const now = Date.now();
-      const dexPrices = {
-        uniswap_v3: { price: 2500, timestamp: now },
-        sushiswap: { price: 2495, timestamp: now - 60000 }, // 60s old - stale
-        curve: { price: 2498, timestamp: now - 10000 }, // 10s old - fresh
-      };
-
-      for (const [dex, data] of Object.entries(dexPrices)) {
-        await redis.hset(matrixKey, dex, JSON.stringify(data));
-      }
-
-      // Filter out stale prices
-      const allPrices = await redis.hgetall(matrixKey);
-      const freshPrices = Object.entries(allPrices)
-        .map(([dex, data]) => ({ dex, ...JSON.parse(data) }))
-        .filter(p => now - p.timestamp < maxAge);
-
-      expect(freshPrices).toHaveLength(2);
-      expect(freshPrices.map(p => p.dex)).not.toContain('sushiswap');
-    });
-  });
-
-  describe('Multi-Chain Price Updates', () => {
-    it('should track prices across multiple chains', async () => {
-      // Use unique stream/keys to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const testStream = `stream:price-updates:multichain:${testId}`;
-      const chains = ['ethereum', 'bsc', 'polygon', 'arbitrum'];
-
-      // Publish price updates for each chain
-      for (const chain of chains) {
-        const priceData = createPriceData({
-          chain,
-          price: 2500 + Math.random() * 20 - 10, // Slight variations
+      for (const spread of spreads) {
+        const pair1 = createPairSnapshot({
+          address: PAIR_ADDRESS_UNI,
+          dex: 'uniswap_v3',
+          price: spread.buyPrice,
+          fee: 0.003,
         });
 
-        await redis.xadd(testStream, '*', 'data', JSON.stringify(priceData));
+        const pair2 = createPairSnapshot({
+          address: `0x${'ab'.repeat(20)}`, // Unique address per pair
+          dex: spread.dex,
+          price: spread.sellPrice,
+          fee: 0.003,
+        });
 
-        // Also store in per-chain cache with unique prefix
-        await redis.set(
-          `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`,
-          JSON.stringify(priceData)
-        );
+        const opp = detector.calculateArbitrage(pair1, pair2);
+        expect(opp).not.toBeNull();
+        publishedIds.push(opp!.id);
+
+        await publisher.publishArbitrageOpportunity(opp!);
       }
 
-      // Verify all chains have price data
-      const streamMessages = await redis.xlen(testStream);
-      expect(streamMessages).toBe(4);
+      // Consume all messages
+      type StreamEntry = [id: string, fields: string[]];
+      type StreamResult = [stream: string, entries: StreamEntry[]];
 
-      // Verify cache entries
-      for (const chain of chains) {
-        const cached = await redis.get(
-          `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`
-        );
-        expect(cached).toBeDefined();
-        expect(JSON.parse(cached!).chain).toBe(chain);
+      const result = await redis.xreadgroup(
+        'GROUP', groupName, consumerName,
+        'COUNT', '10',
+        'STREAMS', streamName, '>'
+      ) as StreamResult[] | null;
+
+      expect(result).not.toBeNull();
+      const [, messages] = result![0];
+      expect(messages.length).toBe(3);
+
+      // Verify all three opportunities are present with correct IDs
+      const consumedIds: string[] = [];
+      for (const [, fields] of messages) {
+        const fieldMap: Record<string, string> = {};
+        for (let i = 0; i < fields.length; i += 2) {
+          fieldMap[fields[i]] = fields[i + 1];
+        }
+        const envelope = JSON.parse(fieldMap.data);
+        consumedIds.push(envelope.data.id);
       }
-    });
 
-    it('should detect cross-chain arbitrage potential', async () => {
-      // Use unique keys to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      for (const id of publishedIds) {
+        expect(consumedIds).toContain(id);
+      }
 
-      // Store significantly different prices on different chains
-      const chainPrices = {
-        ethereum: 2500,
-        arbitrum: 2480, // 0.8% lower - potential arb with bridge cost
-        polygon: 2510, // 0.4% higher
+      // ACK all messages
+      const messageIds = messages.map((entry: StreamEntry) => entry[0]);
+      const ackCount = await redis.xack(streamName, groupName, ...messageIds);
+      expect(ackCount).toBe(3);
+    }, 30000);
+  });
+
+  // ===========================================================================
+  // Test 5: Detector rejection stats (observability)
+  // ===========================================================================
+
+  describe('Detector observability: rejection stats', () => {
+    it('should track rejection statistics for filtered opportunities', () => {
+      // Reset stats
+      detector.resetStats();
+
+      // Trigger zero-reserve rejection
+      const zeroPair: PairSnapshot = {
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        token0: TOKEN_A,
+        token1: TOKEN_B,
+        reserve0: '0',
+        reserve1: '0',
+        fee: 0.003,
+        blockNumber: 18000000,
+        reserve0BigInt: 0n,
+        reserve1BigInt: 0n,
       };
 
-      for (const [chain, price] of Object.entries(chainPrices)) {
-        await redis.set(
-          `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`,
-          JSON.stringify({ chain, price, timestamp: Date.now() })
-        );
-      }
+      const validPair = createPairSnapshot({ price: 2500 });
 
-      // Compare prices across chains
-      const prices = await Promise.all(
-        Object.keys(chainPrices).map(async chain => {
-          const data = await redis.get(`${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`);
-          return JSON.parse(data!);
-        })
-      );
+      detector.calculateArbitrage(validPair, zeroPair);
+      detector.calculateArbitrage(zeroPair, validPair);
 
-      const minPrice = prices.reduce((min, p) => p.price < min.price ? p : min);
-      const maxPrice = prices.reduce((max, p) => p.price > max.price ? p : max);
+      // Trigger below-profit-threshold rejection
+      const closePair1 = createPairSnapshot({ price: 2500, fee: 0.003 });
+      const closePair2 = createPairSnapshot({
+        address: PAIR_ADDRESS_SUSHI,
+        dex: 'sushiswap',
+        price: 2510, // Only 0.4% raw spread, below threshold after fees
+        fee: 0.003,
+      });
+      detector.calculateArbitrage(closePair1, closePair2);
 
-      const crossChainSpread = ((maxPrice.price - minPrice.price) / minPrice.price) * 100;
-      expect(crossChainSpread).toBeGreaterThan(1); // > 1% spread across chains
-
-      expect(minPrice.chain).toBe('arbitrum');
-      expect(maxPrice.chain).toBe('polygon');
+      const stats = detector.getStats();
+      expect(stats.zeroReserves).toBeGreaterThanOrEqual(2);
+      expect(stats.total).toBeGreaterThanOrEqual(3);
     });
   });
 });

@@ -144,6 +144,86 @@ export const FEATURE_FLAGS = {
    * @see services/execution-engine/src/strategies/cross-chain.strategy.ts
    */
   useDestChainFlashLoan: process.env.FEATURE_DEST_CHAIN_FLASH_LOAN === 'true',
+
+  /**
+   * Enable momentum data recording in the detection pipeline.
+   * When enabled, PriceMomentumTracker records price updates from Sync events.
+   * This feeds data for ML signal scoring (FEATURE_ML_SIGNAL_SCORING).
+   * @default false
+   */
+  useMomentumTracking: process.env.FEATURE_MOMENTUM_TRACKING === 'true',
+
+  /**
+   * Enable background ML signal pre-computation.
+   * When enabled, a background interval (500ms) pre-computes ML-enhanced
+   * confidence scores for active trading pairs using MLOpportunityScorer.
+   * Scores are cached for O(1) hot-path reads (FEATURE_SIGNAL_CACHE_READ).
+   * @default false
+   */
+  useMLSignalScoring: process.env.FEATURE_ML_SIGNAL_SCORING === 'true',
+
+  /**
+   * Enable hot-path reading of cached ML signal scores.
+   * When enabled, arbitrage opportunities are filtered by pre-computed
+   * ML confidence scores. Low-confidence opportunities are suppressed.
+   * Requires FEATURE_ML_SIGNAL_SCORING to be enabled for fresh data.
+   * @default false
+   */
+  useSignalCacheRead: process.env.FEATURE_SIGNAL_CACHE_READ === 'true',
+
+  /**
+   * Enable liquidity-depth-based optimal trade sizing.
+   * When enabled, LiquidityDepthAnalyzer feeds pool data from Sync events
+   * and overrides opportunity.amount with the slippage-knee optimal size.
+   * The execution engine can use this for refined trade sizing.
+   * @default false
+   */
+  useLiquidityDepthSizing: process.env.FEATURE_LIQUIDITY_DEPTH_SIZING === 'true',
+
+  /**
+   * Enable dynamic L1 fee estimation via on-chain oracle queries.
+   *
+   * When enabled:
+   * - Background task periodically queries L1 fee oracles (ArbGasInfo, OP GasPriceOracle)
+   * - Cached oracle values replace static L1_DATA_FEE_USD estimates
+   * - Falls back to static estimates if oracle query fails or cache is stale
+   *
+   * When disabled (default):
+   * - Uses static L1_DATA_FEE_USD fallback values (conservative estimates)
+   * - Set FEATURE_DYNAMIC_L1_FEES=true to enable
+   *
+   * Impact:
+   * - More accurate gas cost estimation on L2 rollups
+   * - Reduces false-positive opportunities caused by stale L1 fee assumptions
+   * - Cached values only — no hot-path latency impact
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see shared/core/src/caching/gas-price-cache.ts - L1 oracle integration
+   */
+  useDynamicL1Fees: process.env.FEATURE_DYNAMIC_L1_FEES === 'true',
+
+  /**
+   * Enable orderflow prediction pipeline consumer.
+   *
+   * When enabled:
+   * - Subscribes to stream:pending-opportunities Redis Stream
+   * - Converts pending swap intents to orderflow features
+   * - Runs ML predictions via OrderflowPredictor
+   * - Caches predictions for O(1) hot-path reads
+   *
+   * When disabled (default):
+   * - No orderflow prediction pipeline running
+   * - Set FEATURE_ORDERFLOW_PIPELINE=true to enable
+   *
+   * Impact:
+   * - Enables proactive orderflow-based opportunity filtering
+   * - Requires mempool-detector service for pending tx data
+   * - Background processing only — no hot-path latency impact
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see shared/core/src/analytics/orderflow-pipeline-consumer.ts
+   */
+  useOrderflowPipeline: process.env.FEATURE_ORDERFLOW_PIPELINE === 'true',
 };
 
 /**
@@ -417,6 +497,79 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       const message = `Destination chain flash loans enabled for chains: ${configuredChains.join(', ')}`;
       if (logger) {
         logger.info(message, { chains: configuredChains });
+      } else {
+        console.info(`✅ ${message}`);
+      }
+    }
+  }
+
+  // Validate ML signal scoring pipeline
+  if (FEATURE_FLAGS.useSignalCacheRead && !FEATURE_FLAGS.useMLSignalScoring) {
+    const message =
+      'FEATURE_SIGNAL_CACHE_READ is enabled but FEATURE_ML_SIGNAL_SCORING is not. ' +
+      'Signal cache will have no data. Enable FEATURE_ML_SIGNAL_SCORING=true for fresh scores.';
+    if (logger) {
+      logger.warn(message);
+    } else {
+      console.warn(`⚠️  WARNING: ${message}`);
+    }
+  }
+
+  if (FEATURE_FLAGS.useMLSignalScoring && !FEATURE_FLAGS.useMomentumTracking) {
+    const message =
+      'FEATURE_ML_SIGNAL_SCORING is enabled but FEATURE_MOMENTUM_TRACKING is not. ' +
+      'ML scoring will operate without momentum data (reduced signal quality).';
+    if (logger) {
+      logger.warn(message);
+    } else {
+      console.warn(`⚠️  WARNING: ${message}`);
+    }
+  }
+
+  if (FEATURE_FLAGS.useMLSignalScoring) {
+    const message = 'ML Signal Scoring enabled - background pre-computation active for hot pairs';
+    if (logger) {
+      logger.info(message);
+    } else {
+      console.info(`✅ ${message}`);
+    }
+  }
+
+  // Validate liquidity depth sizing feature
+  if (FEATURE_FLAGS.useLiquidityDepthSizing) {
+    const message = 'Liquidity Depth Sizing enabled - optimal trade sizes will be computed from pool depth analysis';
+    if (logger) {
+      logger.info(message);
+    } else {
+      console.info(`✅ ${message}`);
+    }
+  }
+
+  // Validate dynamic L1 fees feature
+  if (FEATURE_FLAGS.useDynamicL1Fees) {
+    const message = 'Dynamic L1 Fee Estimation enabled - L1 fee oracles will be queried in background for accurate rollup gas costs';
+    if (logger) {
+      logger.info(message);
+    } else {
+      console.info(`✅ ${message}`);
+    }
+  }
+
+  // Validate orderflow pipeline feature
+  if (FEATURE_FLAGS.useOrderflowPipeline) {
+    if (!process.env.BLOXROUTE_AUTH_HEADER) {
+      const message =
+        'FEATURE_ORDERFLOW_PIPELINE is enabled but BLOXROUTE_AUTH_HEADER is not set. ' +
+        'Mempool detector may not be running, so pending opportunity stream may have no data.';
+      if (logger) {
+        logger.warn(message);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`);
+      }
+    } else {
+      const message = 'Orderflow Pipeline enabled - pending opportunities will be scored via ML prediction';
+      if (logger) {
+        logger.info(message);
       } else {
         console.info(`✅ ${message}`);
       }

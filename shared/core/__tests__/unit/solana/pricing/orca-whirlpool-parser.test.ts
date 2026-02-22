@@ -226,14 +226,14 @@ describe('parseOrcaWhirlpoolState', () => {
     expect(result!.status).toBe(1);
   });
 
-  it('should set token0Decimals and token1Decimals to 0 (must be provided externally)', () => {
+  it('should set token0Decimals and token1Decimals to -1 sentinel (must be provided externally)', () => {
     const buf = createValidWhirlpoolBuffer();
 
     const result = parseOrcaWhirlpoolState(buf, logger);
 
     expect(result).not.toBeNull();
-    expect(result!.token0Decimals).toBe(0);
-    expect(result!.token1Decimals).toBe(0);
+    expect(result!.token0Decimals).toBe(-1);
+    expect(result!.token1Decimals).toBe(-1);
   });
 
   it('should set token0Mint and token1Mint from buffer', () => {

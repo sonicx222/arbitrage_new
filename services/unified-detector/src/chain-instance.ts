@@ -40,6 +40,12 @@ import {
   // Pair activity tracking for volatility-based prioritization
   PairActivityTracker,
   getPairActivityTracker,
+  // ML Signal Integration: Momentum data recording for ML scoring pipeline
+  PriceMomentumTracker,
+  getPriceMomentumTracker,
+  // ML Signal Integration: Background signal pre-computation
+  MLOpportunityScorer,
+  getMLOpportunityScorer,
   // Task 2.1.3: Factory subscription service for RPC reduction
   FactorySubscriptionService,
   PairCreatedEvent,
@@ -57,6 +63,9 @@ import {
   disconnectWithTimeout,
   stopAndNullify,
   getErrorMessage,
+  // Liquidity Depth: Optimal trade sizing from pool depth analysis
+  LiquidityDepthAnalyzer,
+  getLiquidityDepthAnalyzer,
 } from '@arbitrage/core';
 
 import {
@@ -70,6 +79,7 @@ import {
   // FIX (Issue 2.1): Removed deprecated dexFeeToPercentage import
   // Using bpsToDecimal from @arbitrage/core instead
   isEvmChain,
+  FEATURE_FLAGS,
 } from '@arbitrage/config';
 
 import {
@@ -141,6 +151,12 @@ export interface CachedPriceData {
   reserve1: string;
   timestamp: number;
   blockNumber: number;
+}
+
+/** Cached ML signal for hot-path O(1) reads */
+interface CachedSignal {
+  confidence: number;
+  updatedAt: number;
 }
 
 export interface ChainInstanceConfig {
@@ -302,6 +318,9 @@ export class ChainDetectorInstance extends EventEmitter {
   private lastWsReceivedAt: number = 0;
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  // Slow recovery: After max reconnect attempts, retry every 5 minutes
+  private slowRecoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly SLOW_RECOVERY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
   // P0-NEW-3/P0-NEW-4 FIX: Lifecycle promises to prevent race conditions
   // These ensure concurrent start/stop calls are handled correctly
@@ -340,6 +359,17 @@ export class ChainDetectorInstance extends EventEmitter {
   // Pair activity tracking for volatility-based prioritization
   // Hot pairs (high update frequency) bypass time-based throttling
   private activityTracker: PairActivityTracker;
+
+  // ML Signal Integration: Momentum data recording for ML scoring pipeline
+  private momentumTracker: PriceMomentumTracker | null = null;
+
+  // ML Signal Integration: Background pre-computed signal cache
+  private signalCache: Map<string, CachedSignal> = new Map();
+  private signalPreComputeTimer: ReturnType<typeof setInterval> | null = null;
+  private mlScorer: MLOpportunityScorer | null = null;
+
+  // Liquidity Depth: Optimal trade sizing from pool depth analysis
+  private liquidityAnalyzer: LiquidityDepthAnalyzer | null = null;
 
   // NOTE: Snapshot caching is now handled by SnapshotManager (R3 refactor)
   // The manager handles time-based TTL and version-based invalidation internally
@@ -455,6 +485,22 @@ export class ChainDetectorInstance extends EventEmitter {
       maxPairs: 5000                      // Max pairs to track
     });
 
+    // Initialize momentum tracker if feature flag is enabled
+    if (FEATURE_FLAGS.useMomentumTracking) {
+      this.momentumTracker = getPriceMomentumTracker();
+    }
+
+    // Initialize ML signal pre-computation if feature flag is enabled
+    if (FEATURE_FLAGS.useMLSignalScoring) {
+      this.mlScorer = getMLOpportunityScorer();
+      this.startSignalPreComputation();
+    }
+
+    // Initialize liquidity depth analyzer if feature flag is enabled
+    if (FEATURE_FLAGS.useLiquidityDepthSizing) {
+      this.liquidityAnalyzer = getLiquidityDepthAnalyzer();
+    }
+
     // Task 2.1.3: Initialize subscription config from constructor config or defaults
     this.subscriptionConfig = {
       useFactorySubscriptions: config.useFactorySubscriptions ?? DEFAULT_USE_FACTORY_SUBSCRIPTIONS,
@@ -512,6 +558,64 @@ export class ChainDetectorInstance extends EventEmitter {
         usePriceMatrix: true
       });
     }
+  }
+
+  /**
+   * ML Signal Integration: Background signal pre-computation (COLD PATH).
+   *
+   * Runs on 500ms interval, pre-computes ML-enhanced confidence scores
+   * for hot trading pairs. Results cached in signalCache for O(1) hot-path reads.
+   *
+   * This NEVER runs on the hot-path. Even if computation exceeds 500ms,
+   * the hot-path is unaffected (reads cached values only).
+   *
+   * @see docs/reports/DETECTION_PIPELINE_CRITICAL_EVALUATION_2026-02-21.md Phase 1
+   */
+  private startSignalPreComputation(): void {
+    this.signalPreComputeTimer = setInterval(async () => {
+      // Self-clear when stopping (code convention: interval cleanup)
+      if (this.isStopping) {
+        if (this.signalPreComputeTimer) {
+          clearInterval(this.signalPreComputeTimer);
+          this.signalPreComputeTimer = null;
+        }
+        return;
+      }
+
+      try {
+        const hotPairs = this.activityTracker.getHotPairs();
+        if (hotPairs.length === 0 || !this.mlScorer) return;
+
+        for (const pairKey of hotPairs) {
+          const momentum = this.momentumTracker?.getMomentumSignal(pairKey) ?? null;
+
+          const enhanced = await this.mlScorer.enhanceWithAllSignals({
+            baseConfidence: 1.0,
+            mlPrediction: null,
+            momentumSignal: momentum,
+            orderflowSignal: null,
+            opportunityDirection: 'buy',
+            currentPrice: 0,
+          });
+
+          this.signalCache.set(pairKey, {
+            confidence: enhanced.enhancedConfidence,
+            updatedAt: Date.now(),
+          });
+        }
+
+        // Evict stale entries (older than 5 seconds)
+        const staleThreshold = Date.now() - 5000;
+        for (const [key, value] of this.signalCache) {
+          if (value.updatedAt < staleThreshold) {
+            this.signalCache.delete(key);
+          }
+        }
+      } catch (error) {
+        this.logger.debug('Signal pre-computation cycle error', { error: getErrorMessage(error) });
+      }
+    }, 500);
+    this.signalPreComputeTimer.unref();
   }
 
   // ===========================================================================
@@ -763,6 +867,22 @@ export class ChainDetectorInstance extends EventEmitter {
     // PHASE-3.3: Clean up extracted publisher
     this.whaleAlertPublisher = null;
 
+    // Clean up slow recovery timer
+    if (this.slowRecoveryTimer) {
+      clearInterval(this.slowRecoveryTimer);
+      this.slowRecoveryTimer = null;
+    }
+
+    // ML Signal Integration: Clean up signal pre-computation
+    if (this.signalPreComputeTimer) {
+      clearInterval(this.signalPreComputeTimer);
+      this.signalPreComputeTimer = null;
+    }
+    this.signalCache.clear();
+
+    // Clean up liquidity depth analyzer
+    this.liquidityAnalyzer = null;
+
     // Clear pairs and caches
     this.pairs.clear();
     this.pairsByAddress.clear();
@@ -869,8 +989,14 @@ export class ChainDetectorInstance extends EventEmitter {
         }
       },
       onConnected: () => {
+        if (!this.isRunning) return;
         this.status = 'connected';
         this.reconnectAttempts = 0;
+        // Clear slow recovery timer on successful reconnection
+        if (this.slowRecoveryTimer) {
+          clearInterval(this.slowRecoveryTimer);
+          this.slowRecoveryTimer = null;
+        }
         this.emit('statusChange', this.status);
       },
       onSyncEvent: (log) => this.handleSyncEvent(log as EthereumLog),
@@ -894,7 +1020,74 @@ export class ChainDetectorInstance extends EventEmitter {
       this.status = 'error';
       this.emit('statusChange', this.status);
       this.emit('error', new Error(`Max reconnect attempts reached for ${this.chainId}`));
+
+      // Start slow recovery: retry connection every 5 minutes
+      // Clear any existing timer first to prevent duplicates (e.g., if called again after recovery fails)
+      this.startSlowRecoveryTimer();
     }
+  }
+
+  /**
+   * Start a slow recovery timer that attempts reconnection every 5 minutes
+   * after max reconnect attempts have been exhausted.
+   *
+   * On each tick:
+   * - Resets reconnectAttempts to 0 (allows 5 more rapid attempts)
+   * - Sets status to 'connecting' and emits statusChange
+   * - Calls initializeWebSocketAndSubscribe() to re-attempt connection
+   * - On success, onConnected callback clears this timer
+   * - On failure, handleConnectionError will fire again (5 more attempts, then new timer)
+   *
+   * Timer uses .unref() to not keep Node.js alive during shutdown.
+   */
+  private startSlowRecoveryTimer(): void {
+    // Clear existing timer to prevent duplicates
+    if (this.slowRecoveryTimer) {
+      clearInterval(this.slowRecoveryTimer);
+      this.slowRecoveryTimer = null;
+    }
+
+    this.slowRecoveryTimer = setInterval(() => {
+      // Self-clear if instance is stopping
+      if (this.isStopping) {
+        if (this.slowRecoveryTimer) {
+          clearInterval(this.slowRecoveryTimer);
+          this.slowRecoveryTimer = null;
+        }
+        return;
+      }
+
+      this.logger.info('Slow recovery: attempting reconnection', {
+        chainId: this.chainId,
+        intervalMs: this.SLOW_RECOVERY_INTERVAL_MS,
+      });
+
+      // Reset state for a fresh reconnect cycle
+      this.reconnectAttempts = 0;
+      this.status = 'connecting';
+      this.emit('statusChange', this.status);
+
+      // Clean up old WebSocket manager before creating a new one to prevent
+      // stale event handlers from the previous connection firing into callbacks
+      if (this.wsManager) {
+        this.wsManager.removeAllListeners();
+        this.wsManager = null;
+      }
+      // Factory subscription service depends on the dead wsManager — null it out
+      // so initializeWebSocketAndSubscribe() creates a fresh one
+      this.factorySubscriptionService = null;
+
+      // Attempt reconnection (async, fire-and-forget from interval)
+      this.initializeWebSocketAndSubscribe().catch((err) => {
+        this.logger.error('Slow recovery reconnection failed', {
+          chainId: this.chainId,
+          error: getErrorMessage(err),
+        });
+        // handleConnectionError will be called by WebSocket error handlers,
+        // which will increment reconnectAttempts and potentially start a new timer
+      });
+    }, this.SLOW_RECOVERY_INTERVAL_MS);
+    this.slowRecoveryTimer.unref();
   }
 
   // ===========================================================================
@@ -1220,6 +1413,40 @@ export class ChainDetectorInstance extends EventEmitter {
         // FIX Perf 10.2: Use cached chainPairKey to avoid string allocation on every Sync event
         // Falls back to template literal if chainPairKey wasn't pre-computed (e.g., newly added pairs)
         this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
+
+        // Compute price once for momentum tracking and liquidity depth feeding
+        // Avoids redundant BigInt division when both features are enabled
+        const syncPrice = (this.momentumTracker || (FEATURE_FLAGS.useLiquidityDepthSizing && this.liquidityAnalyzer))
+          ? calculatePriceFromBigIntReserves(reserve0BigInt, reserve1BigInt)
+          : null;
+
+        // ML Signal Integration: Record momentum data for ML scoring pipeline
+        // O(1) circular buffer insert (~50ns), guarded by feature flag
+        if (this.momentumTracker && syncPrice !== null) {
+          this.momentumTracker.addPriceUpdate(
+            pair.chainPairKey ?? `${this.chainId}:${pairAddress}`,
+            syncPrice, 0, Date.now()
+          );
+        }
+
+        // Liquidity Depth: Feed pool data for optimal trade sizing
+        // Must run BEFORE checkArbitrageOpportunity() so analyzeDepth() has fresh data
+        // updatePoolLiquidity() is O(1) Map.set(), acceptable in hot path
+        if (FEATURE_FLAGS.useLiquidityDepthSizing && this.liquidityAnalyzer) {
+          this.liquidityAnalyzer.updatePoolLiquidity({
+            poolAddress: pairAddress,
+            chain: this.chainId,
+            dex: pair.dex,
+            token0: pair.token0,
+            token1: pair.token1,
+            reserve0: reserve0BigInt,
+            reserve1: reserve1BigInt,
+            feeBps: Math.round((pair.fee ?? 0.003) * 10000),
+            liquidityUsd: 0, // Estimated by analyzer from reserves
+            price: syncPrice ?? 0,
+            timestamp: Date.now(),
+          });
+        }
 
         // HOT-PATH OPT (Perf-2): Direct property assignment instead of Object.assign.
         // Object.assign creates a temporary object; in single-threaded JS there is
@@ -1551,6 +1778,29 @@ export class ChainDetectorInstance extends EventEmitter {
       const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
 
       if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
+        // ML Signal Integration: Apply cached signal confidence (HOT PATH)
+        // O(1) Map.get() + timestamp check — sub-microsecond impact
+        if (FEATURE_FLAGS.useSignalCacheRead && this.signalCache.size > 0) {
+          const pairSignalKey = `${this.chainId}:${currentSnapshot.address}`;
+          const signal = this.signalCache.get(pairSignalKey);
+          if (signal && (now - signal.updatedAt < 2000)) {
+            opportunity.confidence *= signal.confidence;
+          }
+        }
+
+        // Liquidity Depth: Override amount with optimal trade size when available
+        // analyzeDepth() has 30s cache — cache hits are O(1) Map.get() + timestamp check
+        if (FEATURE_FLAGS.useLiquidityDepthSizing && this.liquidityAnalyzer) {
+          const depthAnalysis = this.liquidityAnalyzer.analyzeDepth(
+            opportunity.buyPair ?? currentSnapshot.address
+          );
+          if (depthAnalysis && depthAnalysis.optimalTradeSizeUsd > 0) {
+            // Set amount (optional USD estimate) — do NOT override amountIn (wei string)
+            // which the execution engine uses for the actual trade
+            opportunity.amount = depthAnalysis.optimalTradeSizeUsd;
+          }
+        }
+
         this.opportunitiesFound++;
         this.emitOpportunity(opportunity);
       }

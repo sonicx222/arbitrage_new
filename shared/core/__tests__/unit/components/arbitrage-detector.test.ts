@@ -363,5 +363,39 @@ describe('ArbitrageDetector', () => {
       expect(calculateCrossChainArbitrage([single], 0)).toBeNull();
       expect(calculateCrossChainArbitrage([], 0)).toBeNull();
     });
+
+    it('should subtract DEX trading fees from net profit', () => {
+      // Price diff = 100, bridge cost = 0, but DEX fees should reduce profit
+      // Default fee 0.3% on buy (2000 * 0.003 = 6) + sell (2100 * 0.003 = 6.3) = 12.3
+      const low = createChainPrice({ price: 2000 });
+      const high = createChainPrice({ chain: 'arbitrum', dex: 'camelot', price: 2100 });
+
+      const result = calculateCrossChainArbitrage([low, high], 0, 0.001);
+      expect(result).not.toBeNull();
+      // netProfit = 100 - 0 - 12.3 = 87.7
+      expect(result!.netProfit).toBeCloseTo(87.7, 0);
+    });
+
+    it('should use explicit fee from ChainPriceData when provided', () => {
+      // 0.1% fee pools instead of default 0.3%
+      const low = createChainPrice({ price: 2000, fee: 0.001 });
+      const high = createChainPrice({ chain: 'arbitrum', dex: 'camelot', price: 2100, fee: 0.001 });
+
+      const result = calculateCrossChainArbitrage([low, high], 0, 0.001);
+      expect(result).not.toBeNull();
+      // netProfit = 100 - 0 - (2000*0.001 + 2100*0.001) = 100 - 4.1 = 95.9
+      expect(result!.netProfit).toBeCloseTo(95.9, 0);
+    });
+
+    it('should reject opportunity that is profitable before fees but not after', () => {
+      // Slim margin: price diff = 10, bridge cost = 0
+      // Fees: 2000*0.003 + 2010*0.003 = 6 + 6.03 = 12.03
+      // netProfit = 10 - 12.03 = -2.03 → should be rejected
+      const low = createChainPrice({ price: 2000 });
+      const high = createChainPrice({ chain: 'arbitrum', dex: 'camelot', price: 2010 });
+
+      const result = calculateCrossChainArbitrage([low, high], 0, 0.001);
+      expect(result).toBeNull();
+    });
   });
 });

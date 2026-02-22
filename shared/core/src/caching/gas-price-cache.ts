@@ -17,7 +17,7 @@
 
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../lifecycle-utils';
-import { CHAINS, NATIVE_TOKEN_PRICES } from '@arbitrage/config';
+import { CHAINS, NATIVE_TOKEN_PRICES, FEATURE_FLAGS, isEvmChainSafe } from '@arbitrage/config';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -182,6 +182,44 @@ const L1_DATA_FEE_USD: Record<string, number> = {
   linea: 0.35,      // Consensys zkEVM; similar to zkSync cost model
 };
 
+// =============================================================================
+// L1 Oracle Configuration (Fix 3: Dynamic L1 Gas Fee Oracle)
+// =============================================================================
+
+/** TTL for cached L1 oracle values in milliseconds (default: 5 minutes). */
+const L1_ORACLE_CACHE_TTL_MS = parseInt(process.env.L1_ORACLE_CACHE_TTL_MS ?? '300000', 10);
+
+/** How often to refresh L1 oracle cache in milliseconds (default: 60 seconds). */
+const L1_ORACLE_REFRESH_INTERVAL_MS = parseInt(process.env.L1_ORACLE_REFRESH_INTERVAL_MS ?? '60000', 10);
+
+/** Typical arbitrage tx calldata size in bytes for L1 cost estimation. */
+const L1_CALLDATA_BYTES = 500;
+
+/**
+ * L1 fee oracle contract addresses (precompiles/predeploys).
+ * These are the same on all networks of the respective chain.
+ *
+ * Note: zkSync and Linea use RPC-based fee estimation (no oracle contract).
+ * See refreshL1OracleCache() for their handling.
+ */
+const L1_ORACLE_ADDRESSES: Record<string, string> = {
+  arbitrum: '0x000000000000000000000000000000000000006C', // ArbGasInfo
+  optimism: '0x420000000000000000000000000000000000000F', // GasPriceOracle
+  base: '0x420000000000000000000000000000000000000F',     // GasPriceOracle (OP Stack)
+};
+
+/**
+ * Chains that use RPC-based L1 fee estimation instead of oracle contracts.
+ * These chains have custom fee models that require specific RPC methods.
+ */
+const L1_RPC_FEE_CHAINS = ['zksync', 'linea'] as const;
+
+/** Cached L1 oracle fee data per chain. */
+interface L1OracleCacheEntry {
+  feeUsd: number;
+  updatedAt: number;
+}
+
 /**
  * Static fallback native token prices (USD) per chain.
  * Imported from @arbitrage/config for single source of truth.
@@ -292,6 +330,10 @@ export class GasPriceCache {
   private isRefreshing = false; // Mutex to prevent concurrent refresh
   private providers: Map<string, any> = new Map(); // ethers providers
 
+  // Fix 3: Dynamic L1 oracle cache (background-refreshed, sync reads)
+  private l1OracleCache: Map<string, L1OracleCacheEntry> = new Map();
+  private l1OracleRefreshTimer: NodeJS.Timeout | null = null;
+
   constructor(config: Partial<GasPriceCacheConfig> = {}, deps?: GasPriceCacheDeps) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // DI: Use provided logger or create default
@@ -329,6 +371,9 @@ export class GasPriceCache {
       this.startRefreshTimer();
     }
 
+    // Fix 3: Start L1 oracle background refresh if dynamic fees are enabled
+    this.startL1OracleRefresh();
+
     this.logger.info('GasPriceCache started');
   }
 
@@ -341,6 +386,10 @@ export class GasPriceCache {
     this.isRunning = false;
 
     this.refreshTimer = clearIntervalSafe(this.refreshTimer);
+
+    // Fix 3: Clear L1 oracle refresh timer
+    this.l1OracleRefreshTimer = clearIntervalSafe(this.l1OracleRefreshTimer);
+    this.l1OracleCache.clear();
 
     // Clear providers
     this.providers.clear();
@@ -416,9 +465,18 @@ export class GasPriceCache {
     // FIX P0-5: Add L1 data fee for rollup chains.
     // L2 rollups post tx data to L1; this is often the dominant cost component.
     // Without this, L2 gas estimates were 30-300x too low.
+    // Fix 3: Use dynamic oracle value when available, otherwise static fallback.
     // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P0-5
-    const l1DataFeeUsd = L1_DATA_FEE_USD[chainLower] ?? 0;
+    const l1DataFeeUsd = this.getL1DataFee(chainLower);
     const costUsd = l2ExecutionCostUsd + l1DataFeeUsd;
+
+    this.logger.debug('L1 fee estimation', {
+      chain: chainLower,
+      l1DataFeeUsd,
+      l2ExecutionCostUsd,
+      totalCostUsd: costUsd,
+      usesFallback: gasPrice.isFallback || nativePrice.isFallback,
+    });
 
     return {
       costUsd,
@@ -561,6 +619,13 @@ export class GasPriceCache {
   async refreshChain(chain: string): Promise<void> {
     const chainLower = chain.toLowerCase();
 
+    // Skip non-EVM chains (e.g., Solana) — they don't use ethers.JsonRpcProvider.
+    // Solana has its own gas estimation via compute units in partition-solana.
+    if (!isEvmChainSafe(chainLower)) {
+      this.logger.debug(`Skipping non-EVM chain: ${chain}`);
+      return;
+    }
+
     try {
       // Try to fetch real gas price via RPC
       const chainConfig = CHAINS[chainLower];
@@ -633,6 +698,247 @@ export class GasPriceCache {
   // ===========================================================================
   // Private Methods
   // ===========================================================================
+
+  /**
+   * Fix 3: Get L1 data fee for a chain, using dynamic oracle value when available.
+   *
+   * MUST remain synchronous — oracle queries happen in background only.
+   * Falls back to static L1_DATA_FEE_USD when:
+   * - FEATURE_FLAGS.useDynamicL1Fees is false
+   * - Oracle cache is empty or stale (beyond TTL)
+   * - Chain is not an L2 rollup (returns 0)
+   */
+  private getL1DataFee(chain: string): number {
+    // If dynamic L1 fees are disabled, use static fallback
+    if (!FEATURE_FLAGS.useDynamicL1Fees) {
+      return L1_DATA_FEE_USD[chain] ?? 0;
+    }
+
+    // Check oracle cache for fresh value
+    const cached = this.l1OracleCache.get(chain);
+    if (cached && (Date.now() - cached.updatedAt) < L1_ORACLE_CACHE_TTL_MS) {
+      return cached.feeUsd;
+    }
+
+    // Stale or no oracle data — use static fallback
+    return L1_DATA_FEE_USD[chain] ?? 0;
+  }
+
+  /**
+   * Fix 3: Start background L1 oracle refresh.
+   * Only starts if FEATURE_FLAGS.useDynamicL1Fees is enabled.
+   */
+  private startL1OracleRefresh(): void {
+    if (!FEATURE_FLAGS.useDynamicL1Fees) {
+      return;
+    }
+
+    this.logger.info('Starting L1 oracle background refresh', {
+      refreshIntervalMs: L1_ORACLE_REFRESH_INTERVAL_MS,
+      cacheTtlMs: L1_ORACLE_CACHE_TTL_MS,
+      oracleChains: Object.keys(L1_ORACLE_ADDRESSES),
+      rpcFeeChains: L1_RPC_FEE_CHAINS,
+    });
+
+    // Initial refresh (fire-and-forget, errors are logged internally)
+    this.refreshL1OracleCache().catch((error) => {
+      this.logger.error('Initial L1 oracle refresh failed', { error });
+    });
+
+    // Set up periodic refresh
+    this.l1OracleRefreshTimer = setInterval(async () => {
+      if (!this.isRunning) {
+        this.l1OracleRefreshTimer = clearIntervalSafe(this.l1OracleRefreshTimer);
+        return;
+      }
+      try {
+        await this.refreshL1OracleCache();
+      } catch (error) {
+        this.logger.error('L1 oracle refresh failed', { error });
+      }
+    }, L1_ORACLE_REFRESH_INTERVAL_MS);
+    this.l1OracleRefreshTimer.unref();
+  }
+
+  /**
+   * Fix 3: Refresh L1 oracle cache by querying on-chain fee oracles.
+   *
+   * Queries per-chain oracles:
+   * - Arbitrum: ArbGasInfo precompile getL1BaseFeeEstimate()
+   * - Optimism/Base: GasPriceOracle l1BaseFee()
+   * - zkSync: zks_estimateFee RPC method (validity proof fee model)
+   * - Linea: Derives L1 fee from Ethereum L1 base fee with compression ratio
+   *
+   * Calculates USD cost as: l1BaseFeeWei * L1_CALLDATA_BYTES * 16 / 1e18 * ethPriceUsd
+   * (16 gas per non-zero calldata byte on L1)
+   */
+  private async refreshL1OracleCache(): Promise<void> {
+    const { ethers } = await import('ethers');
+    const ethPrice = this.getNativeTokenPrice('ethereum').priceUsd;
+
+    // Refresh oracle-based chains (Arbitrum, Optimism, Base)
+    const oracleChains = Object.keys(L1_ORACLE_ADDRESSES);
+    const oracleResults = await Promise.allSettled(
+      oracleChains.map(async (chain) => {
+        const chainConfig = CHAINS[chain];
+        if (!chainConfig) return;
+
+        let provider = this.providers.get(chain);
+        if (!provider) {
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          this.providers.set(chain, provider);
+        }
+
+        const oracleAddress = L1_ORACLE_ADDRESSES[chain];
+        let l1BaseFeeWei: bigint;
+
+        if (chain === 'arbitrum') {
+          // ArbGasInfo.getL1BaseFeeEstimate() returns uint256 (L1 base fee in wei)
+          const abi = ['function getL1BaseFeeEstimate() external view returns (uint256)'];
+          const oracle = new ethers.Contract(oracleAddress, abi, provider);
+          l1BaseFeeWei = await oracle.getL1BaseFeeEstimate();
+        } else {
+          // OP Stack: GasPriceOracle.l1BaseFee() returns uint256
+          const abi = ['function l1BaseFee() external view returns (uint256)'];
+          const oracle = new ethers.Contract(oracleAddress, abi, provider);
+          l1BaseFeeWei = await oracle.l1BaseFee();
+        }
+
+        // Calculate L1 data cost in USD:
+        // cost = l1BaseFee (wei) * calldataBytes * 16 (gas per non-zero byte) / 1e18 * ethPrice
+        const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
+        const l1CostWei = l1BaseFeeWei * l1GasUsed;
+        const l1CostEth = Number(l1CostWei) / 1e18;
+        const feeUsd = l1CostEth * ethPrice;
+
+        this.l1OracleCache.set(chain, {
+          feeUsd,
+          updatedAt: Date.now(),
+        });
+
+        this.logger.debug('L1 oracle updated', {
+          chain,
+          l1BaseFeeGwei: Number(l1BaseFeeWei) / 1e9,
+          feeUsd,
+        });
+      })
+    );
+
+    // Refresh RPC-based chains (zkSync, Linea)
+    const rpcResults = await Promise.allSettled(
+      L1_RPC_FEE_CHAINS.map(async (chain) => {
+        const chainConfig = CHAINS[chain];
+        if (!chainConfig) return;
+
+        let provider = this.providers.get(chain);
+        if (!provider) {
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          this.providers.set(chain, provider);
+        }
+
+        if (chain === 'zksync') {
+          await this.refreshZkSyncL1Fee(provider, ethPrice);
+        } else if (chain === 'linea') {
+          await this.refreshLineaL1Fee(ethPrice);
+        }
+      })
+    );
+
+    const allResults = [...oracleResults, ...rpcResults];
+    const succeeded = allResults.filter(r => r.status === 'fulfilled').length;
+    const failed = allResults.filter(r => r.status === 'rejected').length;
+    if (failed > 0) {
+      this.logger.warn('L1 oracle refresh partial failure', { succeeded, failed });
+    }
+  }
+
+  /**
+   * Refresh zkSync L1 fee estimate using zks_estimateFee RPC method.
+   *
+   * zkSync Era uses a different fee model where fees are charged as
+   * gasLimit * gasPerPubdataLimit * l1GasPrice. The zks_estimateFee
+   * method returns the estimated fee for a reference transaction.
+   *
+   * Falls back to static L1_DATA_FEE_USD['zksync'] on failure.
+   */
+  private async refreshZkSyncL1Fee(provider: any, ethPrice: number): Promise<void> {
+    try {
+      // Reference tx for fee estimation: ~500 bytes calldata to a contract
+      const referenceTx = {
+        from: '0x0000000000000000000000000000000000000001',
+        to: '0x0000000000000000000000000000000000000002',
+        data: '0x' + '00'.repeat(L1_CALLDATA_BYTES),
+      };
+
+      const feeEstimate = await provider.send('zks_estimateFee', [referenceTx]);
+
+      // zks_estimateFee returns { gas_limit, max_fee_per_gas, max_priority_fee_per_gas, gas_per_pubdata_limit }
+      // Total fee in wei = gas_limit * max_fee_per_gas
+      const gasLimit = BigInt(feeEstimate.gas_limit);
+      const maxFeePerGas = BigInt(feeEstimate.max_fee_per_gas);
+      const totalFeeWei = gasLimit * maxFeePerGas;
+      const feeEth = Number(totalFeeWei) / 1e18;
+      const feeUsd = feeEth * ethPrice;
+
+      this.l1OracleCache.set('zksync', {
+        feeUsd,
+        updatedAt: Date.now(),
+      });
+
+      this.logger.debug('zkSync L1 fee updated via zks_estimateFee', {
+        chain: 'zksync',
+        gasLimit: gasLimit.toString(),
+        maxFeePerGas: maxFeePerGas.toString(),
+        feeUsd,
+      });
+    } catch (error) {
+      this.logger.warn('zkSync zks_estimateFee failed, using static fallback', { error });
+      // Do not cache — getL1DataFee() will return static fallback
+    }
+  }
+
+  /**
+   * Refresh Linea L1 fee estimate.
+   *
+   * Linea posts compressed data to L1. The L1 data fee is estimated by
+   * querying the Ethereum L1 base fee (already cached by refreshChain('ethereum'))
+   * and applying Linea's compression ratio (~4x reduction).
+   *
+   * Formula: l1BaseFee * calldataBytes * 16 / compressionRatio / 1e18 * ethPrice
+   *
+   * Falls back to static L1_DATA_FEE_USD['linea'] on failure.
+   */
+  private async refreshLineaL1Fee(ethPrice: number): Promise<void> {
+    try {
+      // Use Ethereum L1 gas price from our cache (already fetched by refreshChain)
+      const ethGasPrice = this.getGasPrice('ethereum');
+      const l1BaseFeeWei = ethGasPrice.gasPriceWei;
+
+      // Linea compresses calldata ~4x before posting to L1
+      const LINEA_COMPRESSION_RATIO = 4;
+
+      // L1 data cost = l1BaseFee * calldataBytes * 16 (gas/byte) / compressionRatio
+      const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
+      const l1CostWei = (l1BaseFeeWei * l1GasUsed) / BigInt(LINEA_COMPRESSION_RATIO);
+      const l1CostEth = Number(l1CostWei) / 1e18;
+      const feeUsd = l1CostEth * ethPrice;
+
+      this.l1OracleCache.set('linea', {
+        feeUsd,
+        updatedAt: Date.now(),
+      });
+
+      this.logger.debug('Linea L1 fee updated from Ethereum base fee', {
+        chain: 'linea',
+        l1BaseFeeGwei: ethGasPrice.gasPriceGwei,
+        compressionRatio: LINEA_COMPRESSION_RATIO,
+        feeUsd,
+      });
+    } catch (error) {
+      this.logger.warn('Linea L1 fee estimation failed, using static fallback', { error });
+      // Do not cache — getL1DataFee() will return static fallback
+    }
+  }
 
   private initializeFallbacks(): void {
     const chains = this.config.chains || Object.keys(CHAINS);

@@ -1,124 +1,134 @@
+export {};
+
 /**
- * Coordinator → Execution Engine Integration Test
+ * Coordinator -> Execution Engine Integration Test
  *
- * TRUE integration test verifying the data flow from the coordinator
- * to the execution engine via Redis Streams.
+ * TRUE integration test wiring real production components:
+ * - TestCoordinatorForwarder: reads stream:opportunities, forwards to stream:execution-requests
+ * - ExecutionEngineService: consumes execution-requests, produces execution-results
+ * - Real Redis via redis-memory-server (no mocks)
  *
- * **Flow Tested**:
- * 1. Coordinator receives validated opportunity
- * 2. Coordinator publishes to `stream:execution-requests`
- * 3. Execution engine consumes execution requests
- * 4. Execution engine processes and publishes results
+ * Flow:
+ *   [test publishes opportunity via xadd] -> stream:opportunities
+ *     -> TestCoordinatorForwarder reads + enriches with coordinator metadata
+ *     -> stream:execution-requests
+ *     -> ExecutionEngineService (simulation mode) processes
+ *     -> stream:execution-results
+ *     -> [test reads + asserts]
  *
- * **What's Real**:
- * - Redis Streams (via redis-memory-server)
- * - Distributed locking (prevents duplicate executions)
- * - Consumer group message delivery guarantees
- * - Stream-based request/response pattern
- *
- * @see Phase 4: TRUE Integration Tests
+ * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Leader Election and Coordination
  */
 
-import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import Redis from 'ioredis';
+import * as fs from 'fs';
+import * as path from 'path';
+import { RedisStreams } from '@arbitrage/types';
+import {
+  resetRedisInstance,
+  resetRedisStreamsInstance,
+  resetDistributedLockManager,
+  resetNonceManager,
+} from '@arbitrage/core/internal';
+import { ExecutionEngineService } from '../../../services/execution-engine/src/engine';
 import {
   createTestRedisClient,
   ensureConsumerGroup,
+  createTestOpportunity,
 } from '@arbitrage/test-utils';
+import { TestCoordinatorForwarder } from '../pipeline/helpers/coordinator-forwarder';
 
-// Type alias for Redis stream messages
-type StreamMessage = [string, string[]];
-type StreamResult = [string, StreamMessage[]][] | null;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-// Stream names (matching RedisStreamsClient.STREAMS)
-const STREAMS = {
-  OPPORTUNITIES: 'stream:opportunities',
-  EXECUTION_REQUESTS: 'stream:execution-requests',
-  EXECUTION_RESULTS: 'stream:execution-results',
-} as const;
-
-// Lock key patterns
-const LOCKS = {
-  OPPORTUNITY_PREFIX: 'lock:opportunity:',
-  EXECUTION_PREFIX: 'lock:execution:',
-} as const;
-
-interface ExecutionRequest {
-  requestId: string;
-  opportunityId: string;
-  type: string;
-  chain: string;
-  buyDex: string;
-  sellDex: string;
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: string;
-  minAmountOut: string;
-  expectedProfit: number;
-  gasLimit: string;
-  maxGasPrice: string;
-  deadline: number;
-  priority: 'high' | 'medium' | 'low';
-  timestamp: number;
+/**
+ * Read test Redis URL from config file (written by jest.globalSetup.ts).
+ */
+function getTestRedisUrl(): string {
+  const configFile = path.resolve(__dirname, '../../../.redis-test-config.json');
+  if (fs.existsSync(configFile)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      if (config.url) return config.url;
+    } catch { /* fall through */ }
+  }
+  return process.env.REDIS_URL ?? 'redis://localhost:6379';
 }
 
-interface ExecutionResult {
-  requestId: string;
-  opportunityId: string;
-  status: 'success' | 'failed' | 'expired' | 'cancelled';
-  txHash?: string;
-  actualProfit?: number;
-  gasUsed?: string;
-  errorMessage?: string;
-  executionTimeMs: number;
-  timestamp: number;
+/**
+ * Wait for messages on a stream with exponential backoff polling.
+ * Returns parsed 'data' fields from collected messages.
+ */
+async function collectResults(
+  redis: Redis,
+  stream: string,
+  expectedCount: number,
+  timeoutMs: number = 15000
+): Promise<Record<string, unknown>[]> {
+  const results: Record<string, unknown>[] = [];
+  const start = Date.now();
+  let pollInterval = 50;
+
+  while (results.length < expectedCount && Date.now() - start < timeoutMs) {
+    const raw = await redis.xrange(stream, '-', '+');
+    results.length = 0; // Reset -- xrange returns all
+    for (const [, fields] of raw) {
+      const fieldObj: Record<string, string> = {};
+      for (let i = 0; i < fields.length; i += 2) {
+        fieldObj[fields[i]] = fields[i + 1];
+      }
+      if (fieldObj.data) {
+        try {
+          results.push(JSON.parse(fieldObj.data));
+        } catch {
+          results.push(fieldObj as unknown as Record<string, unknown>);
+        }
+      }
+    }
+    if (results.length < expectedCount) {
+      await new Promise(r => setTimeout(r, pollInterval));
+      pollInterval = Math.min(pollInterval * 1.5, 500);
+    }
+  }
+  return results;
 }
 
-function createExecutionRequest(overrides: Partial<ExecutionRequest> = {}): ExecutionRequest {
-  const timestamp = Date.now();
-  return {
-    requestId: `req-${timestamp}-${Math.random().toString(36).slice(2)}`,
-    opportunityId: `opp-${timestamp}`,
-    type: 'cross-dex',
-    chain: 'ethereum',
-    buyDex: 'sushiswap',
-    sellDex: 'uniswap_v3',
-    tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-    tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    amountIn: '1000000000000000000', // 1 WETH
-    minAmountOut: '2475000000', // 2475 USDC
-    expectedProfit: 50,
-    gasLimit: '500000',
-    maxGasPrice: '50000000000', // 50 gwei
-    deadline: timestamp + 120000, // 2 minutes
-    priority: 'high',
-    timestamp,
-    ...overrides,
-  };
+/**
+ * Get pending message count for a consumer group on a stream.
+ */
+async function getPendingCount(
+  redis: Redis,
+  stream: string,
+  group: string
+): Promise<number> {
+  try {
+    const info = await redis.xpending(stream, group) as unknown[];
+    return (info[0] as number) ?? 0;
+  } catch {
+    return 0; // Stream or group doesn't exist yet
+  }
 }
 
-function createExecutionResult(
-  request: ExecutionRequest,
-  overrides: Partial<ExecutionResult> = {}
-): ExecutionResult {
-  return {
-    requestId: request.requestId,
-    opportunityId: request.opportunityId,
-    status: 'success',
-    txHash: '0x' + Math.random().toString(16).slice(2).padEnd(64, '0'),
-    actualProfit: request.expectedProfit * 0.95, // Slight slippage
-    gasUsed: '350000',
-    executionTimeMs: 2500,
-    timestamp: Date.now(),
-    ...overrides,
-  };
-}
+// ---------------------------------------------------------------------------
+// Test Suite
+// ---------------------------------------------------------------------------
 
-describe('[Level 1] Coordinator → Execution Engine Integration', () => {
+describe('[Integration] Coordinator -> Execution Engine (Real Components)', () => {
   let redis: Redis;
+  let forwarder: TestCoordinatorForwarder;
+  let engine: ExecutionEngineService;
 
   beforeAll(async () => {
+    // Point singletons to test Redis
+    const testUrl = getTestRedisUrl();
+    process.env.REDIS_URL = testUrl;
+
+    // Disable HMAC signing for tests
+    delete process.env.STREAM_SIGNING_KEY;
+
+    // Create direct Redis client for test assertions
     redis = await createTestRedisClient();
   }, 30000);
 
@@ -128,484 +138,281 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
     }
   });
 
-  // Note: We use unique stream/key names per test to avoid interference,
-  // so we don't need beforeEach flush which can cause race conditions
-  // with parallel test execution.
+  beforeEach(async () => {
+    // Clean slate
+    await redis.flushall();
 
-  describe('Execution Request Publishing', () => {
-    it('should publish execution request to stream:execution-requests', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:execution-requests:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const request = createExecutionRequest();
+    // Reset all @arbitrage/core singletons so each test gets fresh connections
+    await resetRedisStreamsInstance();
+    await resetRedisInstance();
+    await resetDistributedLockManager();
+    resetNonceManager();
 
-      const messageId = await redis.xadd(
-        testStream,
+    // Create consumer group that the forwarder subscribes to
+    await ensureConsumerGroup(
+      redis,
+      RedisStreams.OPPORTUNITIES,
+      'test-coordinator-group'
+    );
+
+    // Start coordinator forwarder (reads opportunities, writes execution-requests)
+    forwarder = new TestCoordinatorForwarder(redis);
+    await forwarder.start();
+
+    // Start execution engine in simulation mode (no blockchain providers needed)
+    engine = new ExecutionEngineService({
+      simulationConfig: {
+        enabled: true,
+        successRate: 1.0,
+        executionLatencyMs: 10,
+        profitVariance: 0.1,
+      },
+    });
+    await engine.start();
+  }, 30000);
+
+  afterEach(async () => {
+    // Stop in reverse start order
+    try {
+      if (engine) await engine.stop();
+    } catch { /* ignore cleanup errors */ }
+
+    try {
+      if (forwarder) await forwarder.stop();
+    } catch { /* ignore */ }
+
+    // Release singleton connections
+    await resetRedisStreamsInstance();
+    await resetRedisInstance();
+    await resetDistributedLockManager();
+    resetNonceManager();
+  });
+
+  // =========================================================================
+  // Test 1: Single opportunity end-to-end
+  // =========================================================================
+
+  describe('Single Opportunity Flow', () => {
+    it('coordinator forwards opportunity and execution engine produces result', async () => {
+      // Arrange
+      const opportunity = createTestOpportunity({
+        id: `coord-exec-${Date.now()}`,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        buyDex: 'uniswap_v3',
+        sellDex: 'sushiswap',
+        expectedProfit: 50,
+        confidence: 0.9,
+        amountIn: '1000000000000000000', // 1 ETH
+      });
+
+      // Act: Publish to stream:opportunities (simulating detector output)
+      await redis.xadd(
+        RedisStreams.OPPORTUNITIES,
         '*',
-        'data', JSON.stringify(request)
+        'data', JSON.stringify(opportunity)
       );
 
-      expect(messageId).toBeDefined();
+      // Assert: Result appears on stream:execution-results
+      const results = await collectResults(
+        redis,
+        RedisStreams.EXECUTION_RESULTS,
+        1,
+        15000
+      );
 
-      // Verify stream has the message
-      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
+      expect(results.length).toBeGreaterThanOrEqual(1);
 
-      // Ensure result is not null before accessing
-      expect(result).not.toBeNull();
-      expect(result).toHaveLength(1);
+      // Find our specific result
+      const result = results.find(r => r.opportunityId === opportunity.id);
+      expect(result).toBeDefined();
+      expect(result!.success).toBe(true);
+      expect(result!.opportunityId).toBe(opportunity.id);
+    }, 30000);
+  });
 
-      const [, messages] = result![0];
-      expect(messages).toHaveLength(1);
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
+  // =========================================================================
+  // Test 2: Execution result data shape and coordinator metadata
+  // =========================================================================
 
-      const parsedRequest = JSON.parse(fieldObj.data);
-      expect(parsedRequest.type).toBe('cross-dex');
-      expect(parsedRequest.chain).toBe('ethereum');
-      expect(parsedRequest.priority).toBe('high');
-    });
+  describe('Execution Result Data Shape', () => {
+    it('result contains expected fields and coordinator metadata is preserved', async () => {
+      const detectedAt = Date.now();
+      const opportunity = createTestOpportunity({
+        id: `shape-${Date.now()}`,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        buyDex: 'uniswap_v3',
+        sellDex: 'sushiswap',
+        expectedProfit: 42.5,
+        confidence: 0.95,
+        amountIn: '1000000000000000000',
+        pipelineTimestamps: { detectedAt },
+      });
 
-    it('should preserve request priority ordering', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:execution-requests:prio:${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      // Publish to stream:opportunities
+      await redis.xadd(
+        RedisStreams.OPPORTUNITIES,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
 
-      // Create requests with different priorities
-      const highPriority = createExecutionRequest({ priority: 'high', requestId: 'req-high' });
-      const mediumPriority = createExecutionRequest({ priority: 'medium', requestId: 'req-medium' });
-      const lowPriority = createExecutionRequest({ priority: 'low', requestId: 'req-low' });
+      // Wait for execution result
+      const results = await collectResults(
+        redis,
+        RedisStreams.EXECUTION_RESULTS,
+        1,
+        15000
+      );
 
-      // Publish in mixed order
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(mediumPriority));
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(highPriority));
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(lowPriority));
+      expect(results.length).toBeGreaterThanOrEqual(1);
 
-      // Read all requests
-      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
+      const result = results.find(r => r.opportunityId === opportunity.id);
+      expect(result).toBeDefined();
 
-      const [, messages] = result![0];
-      const requests = messages.map(([, fields]) => {
-        const fieldObj: Record<string, string> = {};
+      // Verify result has expected execution fields
+      expect(result!.opportunityId).toBe(opportunity.id);
+      expect(typeof result!.success).toBe('boolean');
+
+      // Verify coordinator metadata was preserved on the forwarded message
+      // by reading stream:execution-requests directly
+      const execMessages = await redis.xrange(RedisStreams.EXECUTION_REQUESTS, '-', '+');
+      const forwardedMsg = execMessages.find(([, fields]) => {
+        const obj: Record<string, string> = {};
         for (let i = 0; i < fields.length; i += 2) {
-          fieldObj[fields[i]] = fields[i + 1];
+          obj[fields[i]] = fields[i + 1];
         }
-        return JSON.parse(fieldObj.data);
-      });
-
-      // Verify all 3 were published (order by stream timestamp, not priority)
-      expect(requests).toHaveLength(3);
-      expect(requests.map(r => r.priority)).toContain('high');
-      expect(requests.map(r => r.priority)).toContain('medium');
-      expect(requests.map(r => r.priority)).toContain('low');
-    });
-  });
-
-  describe('Distributed Locking', () => {
-    // Helper to acquire lock using SET NX PX (bypasses strict TypeScript types)
-    async function acquireLock(key: string, value: string, ttlMs: number): Promise<string | null> {
-      return redis.call('SET', key, value, 'NX', 'PX', ttlMs) as Promise<string | null>;
-    }
-
-    it('should acquire lock to prevent duplicate execution', async () => {
-      const request = createExecutionRequest();
-      const lockKey = `${LOCKS.EXECUTION_PREFIX}${request.opportunityId}`;
-
-      // Attempt to acquire lock with SET NX (only set if not exists)
-      const acquired = await acquireLock(lockKey, 'worker-1', 30000);
-
-      expect(acquired).toBe('OK');
-
-      // Verify lock exists
-      const lockValue = await redis.get(lockKey);
-      expect(lockValue).toBe('worker-1');
-    });
-
-    it('should prevent second worker from acquiring same lock', async () => {
-      const request = createExecutionRequest();
-      const lockKey = `${LOCKS.EXECUTION_PREFIX}${request.opportunityId}`;
-
-      // First worker acquires lock
-      const firstAcquired = await acquireLock(lockKey, 'worker-1', 30000);
-      expect(firstAcquired).toBe('OK');
-
-      // Second worker tries to acquire same lock
-      const secondAcquired = await acquireLock(lockKey, 'worker-2', 30000);
-
-      // Second attempt should fail
-      expect(secondAcquired).toBeNull();
-
-      // Lock should still belong to first worker
-      const lockValue = await redis.get(lockKey);
-      expect(lockValue).toBe('worker-1');
-    });
-
-    it('should release lock after successful execution', async () => {
-      const request = createExecutionRequest();
-      const lockKey = `${LOCKS.EXECUTION_PREFIX}${request.opportunityId}`;
-
-      // Acquire lock
-      await acquireLock(lockKey, 'worker-1', 30000);
-
-      // Simulate execution...
-      // After successful execution, release lock
-      await redis.del(lockKey);
-
-      // Lock should be released
-      const lockValue = await redis.get(lockKey);
-      expect(lockValue).toBeNull();
-
-      // Another worker should be able to acquire it now
-      const reacquired = await acquireLock(lockKey, 'worker-2', 30000);
-      expect(reacquired).toBe('OK');
-    });
-
-    it('should handle lock expiration for stuck workers', async () => {
-      const request = createExecutionRequest();
-      const lockKey = `${LOCKS.EXECUTION_PREFIX}${request.opportunityId}`;
-
-      // Acquire lock with very short TTL
-      await acquireLock(lockKey, 'worker-1', 100); // 100ms TTL
-
-      // Wait for lock to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
-
-      // Lock should have expired
-      const lockValue = await redis.get(lockKey);
-      expect(lockValue).toBeNull();
-
-      // Another worker can acquire it
-      const acquired = await acquireLock(lockKey, 'worker-2', 30000);
-      expect(acquired).toBe('OK');
-    });
-
-    it('should handle concurrent lock attempts atomically', async () => {
-      const request = createExecutionRequest();
-      const lockKey = `${LOCKS.EXECUTION_PREFIX}${request.opportunityId}`;
-
-      // Simulate 5 workers trying to acquire lock concurrently
-      const results = await Promise.all([
-        acquireLock(lockKey, 'worker-1', 30000),
-        acquireLock(lockKey, 'worker-2', 30000),
-        acquireLock(lockKey, 'worker-3', 30000),
-        acquireLock(lockKey, 'worker-4', 30000),
-        acquireLock(lockKey, 'worker-5', 30000),
-      ]);
-
-      // Exactly one should succeed (Redis SET NX is atomic)
-      const successCount = results.filter(r => r === 'OK').length;
-      expect(successCount).toBe(1);
-
-      // Verify only one worker holds the lock
-      const lockValue = await redis.get(lockKey);
-      expect(lockValue).toMatch(/^worker-[1-5]$/);
-    });
-  });
-
-  describe('Execution Result Publishing', () => {
-    it('should publish successful execution result', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:execution-results:success:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const request = createExecutionRequest();
-      const result = createExecutionResult(request, {
-        status: 'success',
-        actualProfit: 48.5,
-      });
-
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(result));
-
-      const readResult = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
-
-      const [, messages] = readResult![0];
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const parsedResult = JSON.parse(fieldObj.data);
-      expect(parsedResult.status).toBe('success');
-      expect(parsedResult.actualProfit).toBe(48.5);
-      expect(parsedResult.txHash).toBeDefined();
-    });
-
-    it('should publish failed execution result with error', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:execution-results:failed:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const request = createExecutionRequest();
-      const result = createExecutionResult(request, {
-        status: 'failed',
-        errorMessage: 'Insufficient liquidity',
-        actualProfit: undefined,
-        txHash: undefined,
-      });
-
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(result));
-
-      const readResult = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
-
-      const [, messages] = readResult![0];
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const parsedResult = JSON.parse(fieldObj.data);
-      expect(parsedResult.status).toBe('failed');
-      expect(parsedResult.errorMessage).toBe('Insufficient liquidity');
-    });
-
-    it('should publish expired execution result for deadline exceeded', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:execution-results:expired:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const request = createExecutionRequest({
-        deadline: Date.now() - 1000, // Already expired
-      });
-      const result = createExecutionResult(request, {
-        status: 'expired',
-        errorMessage: 'Deadline exceeded',
-      });
-
-      await redis.xadd(testStream, '*', 'data', JSON.stringify(result));
-
-      const readResult = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
-
-      const [, messages] = readResult![0];
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const parsedResult = JSON.parse(fieldObj.data);
-      expect(parsedResult.status).toBe('expired');
-    });
-  });
-
-  describe('Consumer Group for Execution Engine', () => {
-    it('should create execution engine consumer group', async () => {
-      // Use unique stream/group names to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const streamName = `stream:execution-requests:cg:${testId}`;
-      const groupName = `execution-engine-group-${testId}`;
-
-      // Create stream with initial message
-      await redis.xadd(streamName, '*', 'data', 'init');
-
-      // Create consumer group
-      await ensureConsumerGroup(redis, streamName, groupName);
-
-      const groups = await redis.xinfo('GROUPS', streamName) as unknown[];
-      expect(groups.length).toBeGreaterThan(0);
-    });
-
-    it('should process execution requests through consumer group', async () => {
-      const streamName = STREAMS.EXECUTION_REQUESTS;
-      const groupName = 'execution-processor';
-      const consumerName = 'executor-1';
-
-      // Publish execution requests
-      const requests = [
-        createExecutionRequest({ requestId: 'req-1' }),
-        createExecutionRequest({ requestId: 'req-2' }),
-        createExecutionRequest({ requestId: 'req-3' }),
-      ];
-
-      for (const req of requests) {
-        await redis.xadd(streamName, '*', 'data', JSON.stringify(req));
-      }
-
-      // Create consumer group
-      await ensureConsumerGroup(redis, streamName, groupName);
-
-      // Process messages (use '>' to read new undelivered messages)
-      const result = await redis.xreadgroup(
-        'GROUP', groupName, consumerName,
-        'COUNT', 10,
-        'STREAMS', streamName, '>'
-      ) as StreamResult;
-
-      expect(result![0][1]).toHaveLength(3);
-
-      // Process and acknowledge each request
-      for (const [id, fields] of result![0][1]) {
-        const fieldObj: Record<string, string> = {};
-        for (let i = 0; i < fields.length; i += 2) {
-          fieldObj[fields[i]] = fields[i + 1];
+        try {
+          const parsed = JSON.parse(obj.data);
+          return parsed.id === opportunity.id;
+        } catch {
+          return false;
         }
-        const request = JSON.parse(fieldObj.data);
-
-        // Simulate execution result
-        const execResult = createExecutionResult(request);
-        await redis.xadd(STREAMS.EXECUTION_RESULTS, '*', 'data', JSON.stringify(execResult));
-
-        // Acknowledge processed message
-        await redis.xack(streamName, groupName, id);
-      }
-
-      // Verify no pending messages
-      const pending = await redis.xpending(streamName, groupName) as unknown[];
-      expect(pending[0]).toBe(0);
-
-      // Verify results were published
-      const resultsLen = await redis.xlen(STREAMS.EXECUTION_RESULTS);
-      expect(resultsLen).toBe(3);
-    });
-
-    it('should handle message redelivery for failed processing', async () => {
-      const streamName = STREAMS.EXECUTION_REQUESTS;
-      const groupName = 'execution-redelivery-test';
-      const consumerName = 'executor-1';
-
-      // Add a request
-      const request = createExecutionRequest();
-      await redis.xadd(streamName, '*', 'data', JSON.stringify(request));
-
-      // Create consumer group
-      await ensureConsumerGroup(redis, streamName, groupName);
-
-      // Read but don't acknowledge (simulates crash) - use '>' to read new messages
-      const result = await redis.xreadgroup(
-        'GROUP', groupName, consumerName,
-        'COUNT', 1,
-        'STREAMS', streamName, '>'
-      ) as StreamResult;
-
-      expect(result![0][1]).toHaveLength(1);
-      const messageId = result![0][1][0][0];
-
-      // Message should be pending
-      let pending = await redis.xpending(streamName, groupName) as unknown[];
-      expect(pending[0]).toBe(1);
-
-      // Claim the pending message for retry
-      const claimed = await redis.xclaim(
-        streamName,
-        groupName,
-        'executor-2',
-        0, // Min idle time
-        messageId
-      ) as StreamMessage[];
-
-      expect(claimed).toHaveLength(1);
-      expect(claimed[0][0]).toBe(messageId);
-
-      // Now acknowledge it
-      await redis.xack(streamName, groupName, messageId);
-
-      pending = await redis.xpending(streamName, groupName) as unknown[];
-      expect(pending[0]).toBe(0);
-    });
-  });
-
-  describe('Request-Response Correlation', () => {
-    it('should correlate execution results with requests by ID', async () => {
-      // Use unique stream names to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const requestStream = `stream:execution-requests:corr:${testId}`;
-      const resultStream = `stream:execution-results:corr:${testId}`;
-
-      const request = createExecutionRequest({ requestId: 'unique-request-123' });
-
-      // Publish request
-      await redis.xadd(requestStream, '*', 'data', JSON.stringify(request));
-
-      // Simulate execution and publish result
-      const result = createExecutionResult(request, {
-        status: 'success',
-        actualProfit: 52.3,
       });
 
-      await redis.xadd(resultStream, '*', 'data', JSON.stringify(result));
+      expect(forwardedMsg).toBeDefined();
+      if (forwardedMsg) {
+        const obj: Record<string, string> = {};
+        for (let i = 0; i < forwardedMsg[1].length; i += 2) {
+          obj[forwardedMsg[1][i]] = forwardedMsg[1][i + 1];
+        }
+        const parsed = JSON.parse(obj.data);
 
-      // Read result and correlate with request
-      const resultMessages = await redis.xread('COUNT', 10, 'STREAMS', resultStream, '0');
+        // TestCoordinatorForwarder adds these metadata fields
+        expect(parsed.forwardedBy).toBeDefined();
+        expect(typeof parsed.forwardedBy).toBe('string');
+        expect(parsed.forwardedAt).toBeGreaterThanOrEqual(detectedAt);
 
-      const [, messages] = resultMessages![0];
-      const [, fields] = messages[0];
-      const fieldObj: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) {
-        fieldObj[fields[i]] = fields[i + 1];
-      }
-
-      const resultData = JSON.parse(fieldObj.data);
-      expect(resultData.requestId).toBe('unique-request-123');
-      expect(resultData.opportunityId).toBe(request.opportunityId);
-    });
-  });
-
-  describe('Backpressure Handling', () => {
-    it('should handle high volume of execution requests', async () => {
-      // Use unique stream name to avoid interference from parallel tests
-      const testStream = `stream:execution-requests:hv:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const requestCount = 100;
-
-      // Publish many requests rapidly
-      const publishPromises: Promise<string | null>[] = [];
-      for (let i = 0; i < requestCount; i++) {
-        publishPromises.push(
-          redis.xadd(
-            testStream,
-            '*',
-            'data', JSON.stringify(createExecutionRequest({ requestId: `req-${i}` }))
-          )
-        );
-      }
-
-      await Promise.all(publishPromises);
-
-      // Verify all requests were published
-      const streamLength = await redis.xlen(testStream);
-      expect(streamLength).toBe(requestCount);
-    });
-
-    it('should process requests in batches', async () => {
-      // Use unique stream/group names to avoid interference from parallel tests
-      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const streamName = `stream:execution-requests:batch:${testId}`;
-      const groupName = `batch-processor-${testId}`;
-      const consumerName = 'executor-1';
-      const batchSize = 10;
-      const totalRequests = 50;
-
-      // Create consumer group first (MKSTREAM creates stream if needed)
-      await ensureConsumerGroup(redis, streamName, groupName);
-
-      // Publish many requests
-      for (let i = 0; i < totalRequests; i++) {
-        await redis.xadd(
-          streamName,
-          '*',
-          'data', JSON.stringify(createExecutionRequest({ requestId: `req-${i}` }))
-        );
-      }
-
-      // Process in batches
-      let totalProcessed = 0;
-      let batches = 0;
-
-      while (totalProcessed < totalRequests) {
-        const result = await redis.xreadgroup(
-          'GROUP', groupName, consumerName,
-          'COUNT', batchSize,
-          'STREAMS', streamName, '>'
-        ) as StreamResult;
-
-        if (!result || result[0][1].length === 0) break;
-
-        batches++;
-        const batchMessages = result[0][1];
-
-        // Acknowledge all in batch
-        for (const [id] of batchMessages) {
-          await redis.xack(streamName, groupName, id);
-          totalProcessed++;
+        // Pipeline timestamps should include coordinatorAt
+        if (parsed.pipelineTimestamps) {
+          expect(parsed.pipelineTimestamps.coordinatorAt).toBeGreaterThanOrEqual(detectedAt);
         }
       }
+    }, 30000);
+  });
 
-      expect(totalProcessed).toBe(totalRequests);
-      expect(batches).toBeGreaterThanOrEqual(Math.ceil(totalRequests / batchSize));
-    });
+  // =========================================================================
+  // Test 3: Distributed lock prevents duplicate execution
+  // =========================================================================
+
+  describe('Distributed Lock Prevents Duplicate Execution', () => {
+    it('publishing same opportunity ID twice to execution-requests produces at most 1 result', async () => {
+      const opportunityId = `dup-lock-${Date.now()}`;
+      const opportunity = createTestOpportunity({
+        id: opportunityId,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        expectedProfit: 30,
+        confidence: 0.9,
+        amountIn: '1000000000000000000',
+      });
+
+      // Bypass forwarder: publish the SAME opportunity directly to execution-requests twice
+      await redis.xadd(
+        RedisStreams.EXECUTION_REQUESTS,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+      await redis.xadd(
+        RedisStreams.EXECUTION_REQUESTS,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+
+      // Wait for processing
+      await new Promise(r => setTimeout(r, 5000));
+
+      const results = await collectResults(
+        redis,
+        RedisStreams.EXECUTION_RESULTS,
+        1,
+        10000
+      );
+
+      // Distributed lock should prevent duplicate execution for the same opportunity ID.
+      // At most 1 execution result for this opportunityId.
+      const matchingResults = results.filter(
+        r => r.opportunityId === opportunityId
+      );
+      expect(matchingResults.length).toBeLessThanOrEqual(1);
+    }, 20000);
+  });
+
+  // =========================================================================
+  // Test 4: All streams ACKed after processing
+  // =========================================================================
+
+  describe('Stream ACK Verification', () => {
+    it('all streams have zero pending messages after full processing', async () => {
+      const opportunity = createTestOpportunity({
+        id: `ack-test-${Date.now()}`,
+        type: 'cross-dex',
+        chain: 'ethereum',
+        buyChain: 'ethereum',
+        buyDex: 'uniswap_v3',
+        sellDex: 'sushiswap',
+        expectedProfit: 25,
+        confidence: 0.9,
+        amountIn: '1000000000000000000',
+      });
+
+      // Publish to stream:opportunities (enters the full pipeline)
+      await redis.xadd(
+        RedisStreams.OPPORTUNITIES,
+        '*',
+        'data', JSON.stringify(opportunity)
+      );
+
+      // Wait for result to appear (proves end-to-end processing completed)
+      const results = await collectResults(
+        redis,
+        RedisStreams.EXECUTION_RESULTS,
+        1,
+        15000
+      );
+      expect(results.length).toBeGreaterThanOrEqual(1);
+
+      // Allow brief settle time for deferred ACK propagation
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Verify stream:opportunities has 0 pending for the forwarder's group
+      const oppPending = await getPendingCount(
+        redis,
+        RedisStreams.OPPORTUNITIES,
+        'test-coordinator-group'
+      );
+      expect(oppPending).toBe(0);
+
+      // Verify stream:execution-requests has 0 pending for the engine's group
+      const execPending = await getPendingCount(
+        redis,
+        RedisStreams.EXECUTION_REQUESTS,
+        'execution-engine-group'
+      );
+      expect(execPending).toBe(0);
+    }, 30000);
   });
 });
