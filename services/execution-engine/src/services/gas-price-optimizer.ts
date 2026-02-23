@@ -578,6 +578,11 @@ export class GasPriceOptimizer {
       lastGasPrices.set(chain, price);
     }
 
+    // Record sample for linear regression prediction
+    if (price > 0n) {
+      this.recordPredictionSample(chain, price);
+    }
+
     // Phase 2: Update EMA baseline (O(1) operation)
     // EMA = price * α + prevEMA * (1 - α)
     // Using scaled integer math: EMA = (price * α_scaled + prevEMA * (1000 - α_scaled)) / 1000
@@ -756,5 +761,112 @@ export class GasPriceOptimizer {
    */
   resetEmaBaselines(): void {
     this.emaBaselines.clear();
+  }
+
+  // ===========================================================================
+  // Gas Price Prediction via Linear Regression
+  // ===========================================================================
+
+  /**
+   * Ring buffer of recent (timestamp, gasPrice) samples per chain.
+   * Used for linear regression prediction.
+   */
+  private predictionSamples: Map<string, { timestamp: number; price: bigint }[]> = new Map();
+
+  /** Maximum samples kept for regression (ring buffer size) */
+  private readonly PREDICTION_BUFFER_SIZE = 30;
+  /** Minimum samples needed for a valid regression */
+  private readonly MIN_REGRESSION_SAMPLES = 5;
+
+  /**
+   * Record a gas price sample for prediction.
+   * Called automatically from updateGasBaseline.
+   */
+  private recordPredictionSample(chain: string, price: bigint): void {
+    let samples = this.predictionSamples.get(chain);
+    if (!samples) {
+      samples = [];
+      this.predictionSamples.set(chain, samples);
+    }
+
+    samples.push({ timestamp: Date.now(), price });
+
+    // Ring buffer: remove oldest when over capacity
+    if (samples.length > this.PREDICTION_BUFFER_SIZE) {
+      samples.splice(0, samples.length - this.PREDICTION_BUFFER_SIZE);
+    }
+  }
+
+  /**
+   * Predict the gas price at a future time using simple linear regression.
+   *
+   * Fits a line y = slope * x + intercept on recent (timestamp, gasPrice) samples,
+   * then extrapolates to `now + estimatedDelayMs`.
+   *
+   * Falls back to EMA baseline when insufficient samples (<5).
+   *
+   * @param chain - Chain identifier
+   * @param estimatedDelayMs - How far into the future to predict (default: 2000ms)
+   * @returns Predicted gas price in wei, or EMA baseline as fallback
+   */
+  predictGasPrice(chain: string, estimatedDelayMs: number = 2000): bigint | undefined {
+    const samples = this.predictionSamples.get(chain);
+
+    // Insufficient data: fall back to EMA
+    if (!samples || samples.length < this.MIN_REGRESSION_SAMPLES) {
+      return this.emaBaselines.get(chain);
+    }
+
+    // Simple linear regression: y = slope * x + intercept
+    // x = timestamp (ms), y = gas price (Number, in gwei for precision)
+    const n = samples.length;
+
+    // Use relative timestamps to avoid precision loss with large epoch values
+    const t0 = samples[0].timestamp;
+
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumX2 = 0;
+
+    for (let i = 0; i < n; i++) {
+      const x = samples[i].timestamp - t0;
+      // Convert to gwei for regression to avoid BigInt precision issues
+      const y = Number(samples[i].price / WEI_PER_GWEI);
+
+      sumX += x;
+      sumY += y;
+      sumXY += x * y;
+      sumX2 += x * x;
+    }
+
+    const denominator = n * sumX2 - sumX * sumX;
+
+    // Degenerate case: all samples at same timestamp
+    if (Math.abs(denominator) < 1e-10) {
+      return this.emaBaselines.get(chain);
+    }
+
+    const slope = (n * sumXY - sumX * sumY) / denominator;
+    const intercept = (sumY - slope * sumX) / n;
+
+    // Predict at future timestamp
+    const futureX = (Date.now() - t0) + estimatedDelayMs;
+    const predictedGwei = slope * futureX + intercept;
+
+    // Sanity: predicted price must be positive
+    if (predictedGwei <= 0) {
+      return this.emaBaselines.get(chain);
+    }
+
+    // Convert back to wei
+    return ethers.parseUnits(predictedGwei.toFixed(9), 'gwei');
+  }
+
+  /**
+   * Reset prediction samples (for testing).
+   */
+  resetPredictionSamples(): void {
+    this.predictionSamples.clear();
   }
 }

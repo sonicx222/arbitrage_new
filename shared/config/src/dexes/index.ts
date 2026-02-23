@@ -6,7 +6,7 @@
  * - Fee structures
  * - Priority classifications: [C] Critical, [H] High, [M] Medium
  *
- * Total: 49 DEXes across 11 chains
+ * Total: 57 DEXes across 11 chains (50 EVM + 7 Solana)
  *
  * @see S2.2.1: Arbitrum DEX expansion (6→9)
  * @see S2.2.2: Base DEX expansion (5→7)
@@ -24,7 +24,7 @@ const BPS_DENOMINATOR = 10000;
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
 // =============================================================================
-// DEX CONFIGURATIONS - 49 DEXs
+// DEX CONFIGURATIONS - 57 DEXs
 // [C] = Critical, [H] = High Priority, [M] = Medium Priority
 // =============================================================================
 export const DEXES: Record<string, Dex[]> = {
@@ -265,7 +265,7 @@ export const DEXES: Record<string, Dex[]> = {
       feeBps: bps(30),
     }
   ],
-  // Ethereum: 2 DEXs (selective - large arbs only)
+  // Ethereum: 5 DEXs (selective - large arbs only) — Phase 0 Item 3: expanded from 2 → 5
   ethereum: [
     {
       name: 'uniswap_v3',       // [C]
@@ -280,7 +280,31 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac',
       routerAddress: '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F',
       feeBps: bps(30),
-    }
+    },
+    // === Phase 0 Item 3: New Ethereum DEXs (2 → 5) ===
+    {
+      name: 'uniswap_v2',       // [C] - $2B+ TVL, largest V2 AMM
+      chain: 'ethereum',
+      factoryAddress: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+      routerAddress: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
+      feeBps: bps(30),
+    },
+    // Balancer V2 uses Vault model - uses BalancerV2Adapter for pool discovery
+    {
+      name: 'balancer_v2',      // [H] - $1B+ TVL, weighted pools
+      chain: 'ethereum',
+      factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault (uses adapter)
+      routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',  // Vault is also router for swaps
+      feeBps: bps(30),  // Variable fees per pool, using default
+      enabled: true  // ENABLED: Uses BalancerV2Adapter from dex-adapters
+    },
+    {
+      name: 'curve',            // [H] - $3B+ TVL, dominant stablecoin DEX
+      chain: 'ethereum',
+      factoryAddress: '0xB9fC157394Af804a3578134A6585C0dc9cc990d4', // Curve Factory (meta pool)
+      routerAddress: '0x99a58482BD75cbab83b27EC03CA68fF489b5788f',  // Curve Router v1.0
+      feeBps: bps(4),  // 0.04% typical for stablecoin pools
+    },
   ],
   // =============================================================================
   // S3.1.2: New Chain DEXs for 4-Partition Architecture

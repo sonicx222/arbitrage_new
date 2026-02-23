@@ -21,7 +21,8 @@ export type FlashLoanProtocol =
   | 'balancer_v2'
   | 'pancakeswap_v3'
   | 'spookyswap'
-  | 'syncswap';
+  | 'syncswap'
+  | 'dai_flash_mint';
 
 export interface Chain {
   id: number;
@@ -363,6 +364,9 @@ export interface MessageEvent {
   timestamp: number;
   source: string;
   correlationId?: string;
+  /** P2-13: Schema version for forward-compatible message evolution.
+   * Consumers can use this to handle message format changes gracefully. */
+  schemaVersion?: string;
 }
 
 /**

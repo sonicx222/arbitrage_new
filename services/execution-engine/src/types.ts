@@ -1173,8 +1173,30 @@ export interface BridgeRecoveryState {
 /** Redis key prefix for bridge recovery state */
 export const BRIDGE_RECOVERY_KEY_PREFIX = 'bridge:recovery:';
 
-/** Maximum time to wait for a bridge before considering it failed (24 hours) */
-export const BRIDGE_RECOVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** Default maximum time to wait for a bridge before considering it failed (72 hours).
+ * @see Phase 0 Item 7: Increased from 24h to 72h to accommodate multi-day bridge delays
+ * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-3 */
+export const BRIDGE_RECOVERY_MAX_AGE_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * Per-protocol maximum age overrides.
+ * Native rollup bridges (Arbitrum, Optimism) have 7-day challenge periods.
+ * The 8-day TTL provides a 1-day buffer beyond the challenge window.
+ * Fast bridges (Stargate, Across, etc.) use the default 72h TTL.
+ *
+ * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-3
+ */
+export const BRIDGE_RECOVERY_MAX_AGE_BY_PROTOCOL: Record<string, number> = {
+  native: 8 * 24 * 60 * 60 * 1000, // 8 days for native rollup bridges (7-day challenge + buffer)
+};
+
+/**
+ * Get the maximum recovery age for a given bridge protocol.
+ * Returns the protocol-specific override if one exists, otherwise the default.
+ */
+export function getBridgeRecoveryMaxAge(bridgeProtocol: string): number {
+  return BRIDGE_RECOVERY_MAX_AGE_BY_PROTOCOL[bridgeProtocol] ?? BRIDGE_RECOVERY_MAX_AGE_MS;
+}
 
 // =============================================================================
 // P3 Optimization: Orderflow-Adjusted Execution Priority

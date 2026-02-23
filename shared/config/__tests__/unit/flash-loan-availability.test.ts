@@ -28,8 +28,9 @@ describe('flash-loan-availability', () => {
       expect(protocols).toContain('aave_v3');
       expect(protocols).toContain('balancer_v2');
       expect(protocols).toContain('pancakeswap_v3');
+      expect(protocols).toContain('dai_flash_mint');
       expect(protocols).not.toContain('syncswap');
-      expect(protocols).toHaveLength(3);
+      expect(protocols).toHaveLength(4);
     });
 
     it('returns only pancakeswap_v3 for bsc', () => {
@@ -189,6 +190,7 @@ describe('flash-loan-availability', () => {
         pancakeswap_v3: true,
         spookyswap: false,
         syncswap: false,
+        dai_flash_mint: true,
       });
     });
 

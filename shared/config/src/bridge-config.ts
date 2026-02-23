@@ -116,6 +116,11 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'avalanche', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
     { src: 'avalanche', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
     { src: 'bsc', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'bsc', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'bsc', dst: 'base', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'bsc', dst: 'optimism', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'bsc', dst: 'polygon', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'bsc', dst: 'avalanche', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
   ]},
   // Native bridges (L2 -> L1 are slower)
   { bridge: 'native', routes: [
@@ -152,6 +157,10 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'polygon', dst: 'ethereum', feeBps: 3, minFeeUsd: 0.5, latency: 90, reliability: 0.96 },
     { src: 'polygon', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 90, reliability: 0.96 },
     { src: 'polygon', dst: 'optimism', feeBps: 3, minFeeUsd: 0.5, latency: 90, reliability: 0.96 },
+    { src: 'bsc', dst: 'arbitrum', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
+    { src: 'bsc', dst: 'base', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
+    { src: 'bsc', dst: 'optimism', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
+    { src: 'bsc', dst: 'polygon', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
     { src: 'base', dst: 'ethereum', feeBps: 3, minFeeUsd: 0.5, latency: 90, reliability: 0.96 },
     { src: 'base', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.3, latency: 60, reliability: 0.97 },
     { src: 'base', dst: 'optimism', feeBps: 3, minFeeUsd: 0.3, latency: 60, reliability: 0.97 },
@@ -176,6 +185,10 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'base', dst: 'optimism', feeBps: 4, minFeeUsd: 0.5, latency: 90, reliability: 0.94 },
     { src: 'polygon', dst: 'ethereum', feeBps: 5, minFeeUsd: 1, latency: 150, reliability: 0.94 },
     { src: 'polygon', dst: 'arbitrum', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
+    { src: 'bsc', dst: 'arbitrum', feeBps: 5, minFeeUsd: 1, latency: 120, reliability: 0.94 },
+    { src: 'bsc', dst: 'base', feeBps: 5, minFeeUsd: 1, latency: 120, reliability: 0.94 },
+    { src: 'bsc', dst: 'optimism', feeBps: 5, minFeeUsd: 1, latency: 120, reliability: 0.94 },
+    { src: 'bsc', dst: 'polygon', feeBps: 5, minFeeUsd: 1, latency: 120, reliability: 0.94 },
   ]},
 ];
 

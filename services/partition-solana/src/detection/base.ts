@@ -125,7 +125,7 @@ export const DEFAULT_DETECTION_CONFIG = {
   opportunityExpiryMs: 1000, // 1 second (Solana is fast)
   priceStalenessMs: 5000, // 5 seconds
   defaultTradeValueUsd: 1000,
-  normalizeLiquidStaking: true,
+  normalizeLiquidStaking: false, // Phase 0 Item 2: LST price deviation IS the arb opportunity
   crossChainCosts: {
     bridgeFeeDefault: 0.001, // 0.1%
     evmGasCostUsd: 15, // ~150k gas at 30 gwei, ETH ~$3000

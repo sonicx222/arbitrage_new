@@ -157,6 +157,13 @@ export interface InitializationConfig {
    * Useful for testing MEV integration without changing environment.
    */
   forceMev?: boolean;
+  /**
+   * Redis client for probability tracker persistence.
+   * When provided with persistToRedis: true in RISK_CONFIG, the tracker
+   * persists outcome aggregates to Redis for cross-restart continuity.
+   * @see Fix 2: Redis client injection for ExecutionProbabilityTracker
+   */
+  redis?: import('@arbitrage/core').RedisClient | null;
 }
 
 /**

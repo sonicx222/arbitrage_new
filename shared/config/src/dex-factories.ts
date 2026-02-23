@@ -628,7 +628,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
     },
   ],
 
-  // Ethereum: 2 factories
+  // Ethereum: 5 factories (Phase 0 Item 3: +3 Uniswap V2, Curve, Balancer V2)
   ethereum: [
     {
       address: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
@@ -643,6 +643,36 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       type: 'uniswap_v2',
       chain: 'ethereum',
       initCodeHash: '0xe18a34eb0e04b04f7a0ac29a6e80748dca96319b42c54d679cb821dca90c6303',
+    },
+    {
+      address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+      dexName: 'uniswap_v2',
+      type: 'uniswap_v2',
+      chain: 'ethereum',
+      initCodeHash: '0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f',
+    },
+    {
+      address: '0xB9fC157394Af804a3578134A6585C0dc9cc990d4',
+      dexName: 'curve',
+      type: 'curve',
+      chain: 'ethereum',
+      // CryptoSwap Factory — discovers crypto pools (volatile pairs)
+    },
+    {
+      address: '0x90E00ACe148ca3b23Ac1bC8C240C2a7Dd9c2d7f5',
+      dexName: 'curve',
+      type: 'curve',
+      chain: 'ethereum',
+      // P2-22: Main Registry — discovers legacy StableSwap pools (3pool, sUSD, etc.)
+      // Without this, ~60% of Curve TVL (legacy pools) is invisible to detection.
+      // Uses pool_count/pool_list enumeration, not PlainPoolDeployed/MetaPoolDeployed events.
+      supportsFactoryEvents: false,
+    },
+    {
+      address: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+      dexName: 'balancer_v2',
+      type: 'balancer_v2',
+      chain: 'ethereum',
     },
   ],
 
@@ -888,8 +918,9 @@ export function validateFactoryRegistryUnified(
         });
       }
 
-      // Check 5: Factory address matches DEXES config (skip for vault-model DEXes)
-      if (checkAddressMatchesDexes && dex && !isVaultModelDex(factory.dexName)) {
+      // Check 5: Factory address matches DEXES config (skip for vault-model DEXes and
+      // entries that don't support factory events — registries, adapters, etc.)
+      if (checkAddressMatchesDexes && dex && !isVaultModelDex(factory.dexName) && factory.supportsFactoryEvents !== false) {
         if (dex.factoryAddress.toLowerCase() !== factory.address.toLowerCase()) {
           errors.push({
             severity: 'warning',

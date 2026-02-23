@@ -28,9 +28,51 @@ import {
 } from './price-calculator';
 
 import { resolveFeeValue as resolveFee } from '../utils/fee-utils';
+import { ObjectPool } from '../utils/object-pool';
 import { getOpportunityTimeoutMs } from '@arbitrage/config';
+import { createLogger } from '../logger';
+import type { LiquidityDepthAnalyzer } from '../analytics/liquidity-depth-analyzer';
+
+// P2-16: Logger for enrichment adjustments (debug level, no hot-path overhead)
+const detectorLogger = createLogger('arbitrage-detector');
 
 import type { PairSnapshot } from './pair-repository';
+
+// =============================================================================
+// Fix #17: Slippage estimation cache to avoid redundant Newton's method
+// computations for StableSwap pools (up to 256 iterations each).
+// Cache key = pairAddress:tradeSizeUsd:side, TTL = 5s (prices change fast).
+// @see docs/reports/PHASE1_DEEP_ANALYSIS_2026-02-22.md Finding #17
+// =============================================================================
+interface SlippageCacheEntry {
+  slippagePercent: number;
+  timestamp: number;
+}
+
+const SLIPPAGE_CACHE = new Map<string, SlippageCacheEntry>();
+const SLIPPAGE_CACHE_MAX_SIZE = 500;
+const SLIPPAGE_CACHE_TTL_MS = 5000;
+
+/** Default time budget (ms) for liquidity enrichment in a single batch. */
+const ENRICHMENT_TIME_BUDGET_MS = 20;
+
+function getCachedSlippage(pair: string, tradeSizeUsd: number, side: string): number | undefined {
+  const key = `${pair}:${tradeSizeUsd}:${side}`;
+  const entry = SLIPPAGE_CACHE.get(key);
+  if (entry && Date.now() - entry.timestamp < SLIPPAGE_CACHE_TTL_MS) {
+    return entry.slippagePercent;
+  }
+  return undefined;
+}
+
+function setCachedSlippage(pair: string, tradeSizeUsd: number, side: string, slippagePercent: number): void {
+  const key = `${pair}:${tradeSizeUsd}:${side}`;
+  if (SLIPPAGE_CACHE.size >= SLIPPAGE_CACHE_MAX_SIZE) {
+    const oldest = SLIPPAGE_CACHE.keys().next().value;
+    if (oldest !== undefined) SLIPPAGE_CACHE.delete(oldest);
+  }
+  SLIPPAGE_CACHE.set(key, { slippagePercent, timestamp: Date.now() });
+}
 
 /**
  * Module-level counter for generating unique opportunity IDs.
@@ -38,6 +80,69 @@ import type { PairSnapshot } from './pair-repository';
  * JS numbers are precise up to 2^53, so this wraps safely.
  */
 let _opCounter = 0;
+
+/**
+ * Object pool for ArbitrageOpportunityData to reduce GC pressure on the hot path.
+ * At 1000+ price updates/sec, transient object allocations cause P99 latency spikes.
+ */
+const opportunityPool = new ObjectPool<ArbitrageOpportunityData>(
+  () => ({
+    id: '',
+    type: 'cross-dex',
+    chain: '',
+    buyDex: '',
+    sellDex: '',
+    buyPair: '',
+    sellPair: '',
+    token0: '',
+    token1: '',
+    buyPrice: 0,
+    sellPrice: 0,
+    profitPercentage: 0,
+    expectedProfit: 0,
+    confidence: 0,
+    timestamp: 0,
+    expiresAt: 0,
+    gasEstimate: '',
+  }),
+  (obj) => {
+    obj.id = '';
+    obj.type = 'cross-dex';
+    obj.chain = '';
+    obj.buyDex = '';
+    obj.sellDex = '';
+    obj.buyPair = '';
+    obj.sellPair = '';
+    obj.token0 = '';
+    obj.token1 = '';
+    obj.buyPrice = 0;
+    obj.sellPrice = 0;
+    obj.profitPercentage = 0;
+    obj.expectedProfit = 0;
+    obj.confidence = 0;
+    obj.timestamp = 0;
+    obj.expiresAt = 0;
+    obj.gasEstimate = '';
+    obj.optimalTradeSizeUsd = undefined;
+    obj.estimatedSlippagePercent = undefined;
+  },
+  200 // pool capacity
+);
+
+/**
+ * Release an ArbitrageOpportunityData back to the pool when no longer needed.
+ * Callers that consume opportunities should call this after processing.
+ */
+export function releaseOpportunity(opp: ArbitrageOpportunityData): void {
+  opportunityPool.release(opp);
+}
+
+/**
+ * Get object pool stats for monitoring.
+ */
+export function getOpportunityPoolStats(): ReturnType<ObjectPool<ArbitrageOpportunityData>['getStats']> {
+  return opportunityPool.getStats();
+}
 
 // =============================================================================
 // Types
@@ -130,6 +235,10 @@ export interface ArbitrageOpportunityData {
   expiresAt: number;
   /** Estimated gas for execution */
   gasEstimate: string;
+  /** Phase 0 Item 5: Optimal trade size in USD from LiquidityDepthAnalyzer */
+  optimalTradeSizeUsd?: number;
+  /** Phase 0 Item 5: Estimated slippage percent from LiquidityDepthAnalyzer */
+  estimatedSlippagePercent?: number;
 }
 
 /**
@@ -150,6 +259,10 @@ export interface BatchDetectionOptions {
   maxOpportunities?: number;
   /** Current timestamp (optional, for testing) */
   timestamp?: number;
+  /** Phase 0 Item 5: Optional LiquidityDepthAnalyzer for trade sizing */
+  liquidityAnalyzer?: LiquidityDepthAnalyzer | null;
+  /** Phase 0 Item 5: Default trade value in USD for slippage estimation */
+  defaultTradeSizeUsd?: number;
 }
 
 // =============================================================================
@@ -240,26 +353,32 @@ export function detectArbitrage(input: ArbitrageDetectionInput): ArbitrageDetect
   const rawConfidence = calculateConfidence(grossSpread, dataAge, chainConfig.expiryMs);
   const confidence = Number.isFinite(rawConfidence) ? rawConfidence : 0.5; // Default to 50% if invalid
 
-  // Build opportunity
-  const opportunity: ArbitrageOpportunityData = {
-    id: `${pair1.address}-${pair2.address}-${timestamp}-${++_opCounter}`,
-    type: pair1.dex === pair2.dex ? 'intra-dex' : 'cross-dex',
-    chain,
-    buyDex: buyFromPair1 ? pair1.dex : pair2.dex,
-    sellDex: buyFromPair1 ? pair2.dex : pair1.dex,
-    buyPair: buyFromPair1 ? pair1.address : pair2.address,
-    sellPair: buyFromPair1 ? pair2.address : pair1.address,
-    token0: pair1.token0,
-    token1: pair1.token1,
-    buyPrice: Math.min(price1, price2),
-    sellPrice: Math.max(price1, price2),
-    profitPercentage: netProfit * 100,
-    expectedProfit: netProfit,
-    confidence: Math.min(confidence, chainConfig.confidence),
-    timestamp,
-    expiresAt: timestamp + chainConfig.expiryMs,
-    gasEstimate: chainConfig.gasEstimate,
-  };
+  // Build opportunity (from pool to reduce GC pressure)
+  const opportunity = opportunityPool.acquire();
+  opportunity.id = `${pair1.address}-${pair2.address}-${timestamp}-${++_opCounter}`;
+  opportunity.type = pair1.dex === pair2.dex ? 'intra-dex' : 'cross-dex';
+  opportunity.chain = chain;
+  opportunity.buyDex = buyFromPair1 ? pair1.dex : pair2.dex;
+  opportunity.sellDex = buyFromPair1 ? pair2.dex : pair1.dex;
+  opportunity.buyPair = buyFromPair1 ? pair1.address : pair2.address;
+  opportunity.sellPair = buyFromPair1 ? pair2.address : pair1.address;
+  opportunity.token0 = pair1.token0;
+  opportunity.token1 = pair1.token1;
+  opportunity.buyPrice = Math.min(price1, price2);
+  opportunity.sellPrice = Math.max(price1, price2);
+  opportunity.profitPercentage = netProfit * 100;
+  opportunity.expectedProfit = netProfit;
+  opportunity.confidence = Math.min(confidence, chainConfig.confidence);
+  opportunity.timestamp = timestamp;
+  // P1-11: Use chain-aware opportunity timeout for expiry.
+  // chainConfig.expiryMs is caller-provided (usually from DETECTOR_CONFIG), but
+  // getOpportunityTimeoutMs() is the canonical per-chain timeout (e.g., Arbitrum 2s,
+  // Solana 1s, Ethereum 30s). Use the tighter bound to prevent stale opportunities
+  // on fast chains.
+  // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-11
+  const chainAwareExpiryMs = getOpportunityTimeoutMs(chain);
+  opportunity.expiresAt = timestamp + Math.min(chainConfig.expiryMs, chainAwareExpiryMs);
+  opportunity.gasEstimate = chainConfig.gasEstimate;
 
   return {
     found: true,
@@ -308,7 +427,31 @@ export function detectArbitrageForTokenPair(
   }
 
   // Sort by profit (highest first)
-  return opportunities.sort((a, b) => b.expectedProfit - a.expectedProfit);
+  opportunities.sort((a, b) => b.expectedProfit - a.expectedProfit);
+
+  // Phase 0 Item 5: Enrich top candidates with liquidity depth analysis.
+  // Done AFTER sorting to avoid paying the enrichment cost (0.5-5ms per opportunity)
+  // inside the O(n^2) pair comparison loop. Only the top candidates need enrichment.
+  // Fix #17: Time budget guard — skip remaining enrichment if budget exceeded.
+  // StableSwap pools trigger 256-iteration Newton's method; a batch of 10 cache-miss
+  // pools could push past 50ms without this guard.
+  // @see docs/reports/PHASE1_DEEP_ANALYSIS_2026-02-22.md Finding #17
+  if (options.liquidityAnalyzer) {
+    const topK = Math.min(opportunities.length, maxOpportunities);
+    const enrichStart = Date.now();
+    for (let k = 0; k < topK; k++) {
+      if (Date.now() - enrichStart > ENRICHMENT_TIME_BUDGET_MS) {
+        break; // Time budget exceeded — remaining opportunities skip enrichment
+      }
+      enrichWithLiquidityData(
+        opportunities[k],
+        options.liquidityAnalyzer,
+        options.defaultTradeSizeUsd ?? 1000,
+      );
+    }
+  }
+
+  return opportunities;
 }
 
 /**
@@ -323,6 +466,97 @@ export function calculateArbitrageProfit(
   source2: PriceSource
 ): ProfitCalculationResult {
   return calculateProfitBetweenSources(source1, source2);
+}
+
+// =============================================================================
+// Phase 0 Item 5: Liquidity-Aware Trade Sizing
+// =============================================================================
+
+/**
+ * Enrich a detected opportunity with liquidity depth analysis.
+ *
+ * Queries the LiquidityDepthAnalyzer for:
+ * 1. Optimal trade size at the buy pair
+ * 2. Estimated slippage for the given trade size at both buy and sell pairs
+ *
+ * Uses the WORSE of the two slippage estimates (buy and sell) to be conservative.
+ * This prevents oversized trades that would erase profit through slippage and
+ * prevents undersized trades that leave money on the table.
+ *
+ * @param opportunity - The detected opportunity to enrich (mutated in place)
+ * @param analyzer - LiquidityDepthAnalyzer instance with pool data
+ * @param defaultTradeSizeUsd - Default trade size for slippage estimation
+ */
+function enrichWithLiquidityData(
+  opportunity: ArbitrageOpportunityData,
+  analyzer: LiquidityDepthAnalyzer,
+  defaultTradeSizeUsd: number,
+): void {
+  // Get depth analysis for the buy pair (this gives optimal trade size)
+  const buyAnalysis = analyzer.analyzeDepth(opportunity.buyPair);
+  if (buyAnalysis) {
+    opportunity.optimalTradeSizeUsd = buyAnalysis.optimalTradeSizeUsd;
+  }
+
+  // Use optimal trade size if available, else default
+  const tradeSizeUsd = opportunity.optimalTradeSizeUsd ?? defaultTradeSizeUsd;
+
+  // Fix #17: Check slippage cache before calling analyzer.estimateSlippage().
+  // StableSwap pools trigger 256-iteration Newton's method per call; caching
+  // avoids redundant computation for the same pair+size within the TTL window.
+  // @see docs/reports/PHASE1_DEEP_ANALYSIS_2026-02-22.md Finding #17
+  let buySlippagePct = getCachedSlippage(opportunity.buyPair, tradeSizeUsd, 'buy');
+  if (buySlippagePct === undefined) {
+    const buySlippage = analyzer.estimateSlippage(opportunity.buyPair, tradeSizeUsd, 'buy');
+    buySlippagePct = buySlippage?.slippagePercent ?? 0;
+    setCachedSlippage(opportunity.buyPair, tradeSizeUsd, 'buy', buySlippagePct);
+  }
+
+  let sellSlippagePct = getCachedSlippage(opportunity.sellPair, tradeSizeUsd, 'sell');
+  if (sellSlippagePct === undefined) {
+    const sellSlippage = analyzer.estimateSlippage(opportunity.sellPair, tradeSizeUsd, 'sell');
+    sellSlippagePct = sellSlippage?.slippagePercent ?? 0;
+    setCachedSlippage(opportunity.sellPair, tradeSizeUsd, 'sell', sellSlippagePct);
+  }
+  const totalSlippage = buySlippagePct + sellSlippagePct;
+
+  if (totalSlippage > 0) {
+    opportunity.estimatedSlippagePercent = totalSlippage;
+
+    // P2-16: Capture pre-adjustment values for logging
+    const preProfitPct = opportunity.profitPercentage;
+    const preConfidence = opportunity.confidence;
+
+    // Adjust expected profit: subtract slippage (as decimal, not percent)
+    const slippageDecimal = totalSlippage / 100;
+    opportunity.expectedProfit = opportunity.expectedProfit - slippageDecimal;
+    opportunity.profitPercentage = opportunity.expectedProfit * 100;
+
+    // Reduce confidence if slippage eats most of the profit
+    if (opportunity.expectedProfit <= 0) {
+      opportunity.confidence *= 0.1; // Very low confidence if unprofitable after slippage
+    } else if (slippageDecimal > opportunity.expectedProfit * 0.5) {
+      opportunity.confidence *= 0.7; // Reduced confidence if slippage is >50% of profit
+    }
+
+    // P2-16: Log significant enrichment adjustments for debugging.
+    // Only logs at debug level to avoid hot-path overhead.
+    const profitReduction = preProfitPct - opportunity.profitPercentage;
+    const confidenceReduction = preConfidence - opportunity.confidence;
+    if (profitReduction > 0.1 || confidenceReduction > 0.1) {
+      detectorLogger.debug('Enrichment adjusted opportunity', {
+        id: opportunity.id,
+        buyPair: opportunity.buyPair,
+        sellPair: opportunity.sellPair,
+        totalSlippage,
+        profitBefore: preProfitPct.toFixed(4),
+        profitAfter: opportunity.profitPercentage.toFixed(4),
+        confidenceBefore: preConfidence.toFixed(3),
+        confidenceAfter: opportunity.confidence.toFixed(3),
+        optimalTradeSizeUsd: opportunity.optimalTradeSizeUsd,
+      });
+    }
+  }
 }
 
 // =============================================================================
@@ -536,11 +770,14 @@ export function calculateCrossChainArbitrage(
     return null;
   }
 
-  // Sort by price to find best buy/sell
-  const sortedPrices = [...chainPrices].sort((a, b) => a.price - b.price);
-
-  const lowestPrice = sortedPrices[0];
-  const highestPrice = sortedPrices[sortedPrices.length - 1];
+  // P2-19: O(n) min/max scan instead of O(n log n) spread+sort.
+  // Only the lowest and highest prices are needed for cross-chain arbitrage.
+  let lowestPrice = chainPrices[0];
+  let highestPrice = chainPrices[0];
+  for (let i = 1; i < chainPrices.length; i++) {
+    if (chainPrices[i].price < lowestPrice.price) lowestPrice = chainPrices[i];
+    if (chainPrices[i].price > highestPrice.price) highestPrice = chainPrices[i];
+  }
 
   const priceDiff = highestPrice.price - lowestPrice.price;
   const percentageDiff = calculatePriceDifferencePercent(lowestPrice.price, highestPrice.price) * 100;

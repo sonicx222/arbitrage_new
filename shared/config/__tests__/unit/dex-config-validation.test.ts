@@ -57,7 +57,7 @@ const EXPECTED_DEX_COUNTS: Record<string, number> = {
   polygon: 4,
   fantom: 4,
   optimism: 3,
-  ethereum: 2,
+  ethereum: 5,
   zksync: 2,
   linea: 2,
   solana: 7,

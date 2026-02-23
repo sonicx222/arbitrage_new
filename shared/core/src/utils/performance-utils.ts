@@ -161,7 +161,10 @@ export function memoizeAsync<T, R>(
 
     cache.set(key, promise);
 
-    // Clean up on rejection to allow retry
+    // Clean up on rejection to allow retry.
+    // P3-28: Intentionally silent — this is a cache-cleanup side-effect handler,
+    // not an error handler. The rejection still propagates to the original caller
+    // who is responsible for error handling/logging.
     promise.catch(() => {
       if (cache.get(key) === promise) {
         cache.delete(key);

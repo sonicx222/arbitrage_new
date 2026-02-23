@@ -26,7 +26,11 @@ const PRECISION = 10n ** 18n;
 
 /**
  * PRECISION-FIX: Safely convert a float to BigInt with 18 decimal places.
- * Avoids float multiplication precision loss by using string manipulation.
+ *
+ * P2-21: Optimized to avoid string allocation on the hot path.
+ * Splits into integer and fractional parts using arithmetic, then combines
+ * as BigInt. The fractional part (0..1) multiplied by 1e18 always fits
+ * within Number.MAX_SAFE_INTEGER, preserving precision without toFixed().
  *
  * @param value - Float value to convert (e.g., 0.000000123456789)
  * @returns BigInt representation in wei (value * 10^18)
@@ -34,13 +38,13 @@ const PRECISION = 10n ** 18n;
 function floatToBigInt18(value: number): bigint {
   if (value === 0) return 0n;
 
-  // Use toFixed to get a precise string representation
-  // Then split on decimal and pad/truncate to 18 decimal places
-  const [intPart, decPart = ''] = value.toFixed(18).split('.');
-  const paddedDec = decPart.padEnd(18, '0').slice(0, 18);
+  const sign = value < 0 ? -1n : 1n;
+  const abs = Math.abs(value);
+  const intPart = Math.trunc(abs);
+  const fracPart = abs - intPart;
 
-  // Combine integer and decimal parts as a single BigInt
-  return BigInt(intPart + paddedDec);
+  // intPart as BigInt * 10^18 + fractional part (always < 1e18, safe in float)
+  return sign * (BigInt(intPart) * PRECISION + BigInt(Math.round(fracPart * 1e18)));
 }
 
 // =============================================================================
@@ -102,6 +106,12 @@ export interface PoolLiquidity {
   // --- Curve StableSwap fields ---
   /** Curve amplification parameter A (typically 100-2000) */
   amplificationParameter?: number;
+  /** Multi-token pool reserves (for Curve 3pool, sUSD 4-token pools). If provided, used instead of reserve0/reserve1 for StableSwap. */
+  reserves?: bigint[];
+  /** Index of input token in reserves array (for multi-token StableSwap) */
+  inputIndex?: number;
+  /** Index of output token in reserves array (for multi-token StableSwap) */
+  outputIndex?: number;
 }
 
 /**
@@ -242,9 +252,39 @@ export class LiquidityDepthAnalyzer {
     }
 
     this.evictLRUPoolsIfNeeded();
+
+    // P1-5: Only invalidate depth cache when reserves change significantly (>1%).
+    // Pool data updates with each price event (hundreds/sec), so unconditional
+    // cache invalidation causes perpetual thrashing — enrichment always pays
+    // full computation cost (0.5-5ms for StableSwap Newton's method).
+    // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-5
+    const existing = this.pools.get(pool.poolAddress);
     this.pools.set(pool.poolAddress, pool);
 
-    // Invalidate depth cache for this pool
+    if (existing) {
+      // Check reserve change (V2/StableSwap primary indicator)
+      const prevR0 = existing.reserve0;
+      const prevR1 = existing.reserve1;
+      let reservesSignificant = false;
+      if (prevR0 > 0n && prevR1 > 0n) {
+        const delta0 = pool.reserve0 > prevR0 ? pool.reserve0 - prevR0 : prevR0 - pool.reserve0;
+        const delta1 = pool.reserve1 > prevR1 ? pool.reserve1 - prevR1 : prevR1 - pool.reserve1;
+        reservesSignificant = delta0 * 100n / prevR0 >= 1n || delta1 * 100n / prevR1 >= 1n;
+      } else {
+        reservesSignificant = true; // New pool or zero reserves — always invalidate
+      }
+
+      // Check price change (V3 primary indicator — sqrtPriceX96 moves with ticks)
+      const priceSignificant = existing.price > 0
+        ? Math.abs(pool.price - existing.price) / existing.price >= 0.01
+        : true;
+
+      if (!reservesSignificant && !priceSignificant) {
+        // Neither reserves nor price changed significantly — keep cache valid
+        return;
+      }
+    }
+
     this.depthCache.delete(pool.poolAddress);
   }
 
@@ -523,10 +563,23 @@ export class LiquidityDepthAnalyzer {
           });
           return this.calculateSwapOutput(amountIn, reserveIn, reserveOut, pool.feeBps);
         }
+        // Multi-token pool: use reserves array with indices
+        if (pool.reserves && pool.reserves.length > 2 && pool.inputIndex != null && pool.outputIndex != null) {
+          return this.calculateStableSwapOutput(
+            amountIn,
+            pool.reserves,
+            pool.inputIndex,
+            pool.outputIndex,
+            pool.feeBps,
+            pool.amplificationParameter
+          );
+        }
+        // 2-token pool: use reserve0/reserve1 as array
         return this.calculateStableSwapOutput(
           amountIn,
-          reserveIn,
-          reserveOut,
+          [reserveIn, reserveOut],
+          0,
+          1,
           pool.feeBps,
           pool.amplificationParameter
         );
@@ -644,15 +697,30 @@ export class LiquidityDepthAnalyzer {
    *
    * @see https://curve.fi/files/stableswap-paper.pdf
    */
+  /**
+   * Generalized StableSwap output for n-token pools (n=2,3,4).
+   *
+   * @param amountIn - Input amount
+   * @param reserves - Array of all pool reserves (length 2, 3, or 4)
+   * @param inputIdx - Index of input token in reserves array
+   * @param outputIdx - Index of output token in reserves array
+   * @param feeBps - Fee in basis points
+   * @param amplificationParameter - Curve A parameter
+   */
   private calculateStableSwapOutput(
     amountIn: bigint,
-    reserveIn: bigint,
-    reserveOut: bigint,
+    reserves: bigint[],
+    inputIdx: number,
+    outputIdx: number,
     feeBps: number,
     amplificationParameter: number
   ): { amountOut: bigint; priceImpact: number } {
-    if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) {
+    const n = reserves.length;
+    if (amountIn <= 0n || n < 2 || inputIdx >= n || outputIdx >= n || inputIdx === outputIdx) {
       return { amountOut: 0n, priceImpact: 1 };
+    }
+    for (const r of reserves) {
+      if (r <= 0n) return { amountOut: 0n, priceImpact: 1 };
     }
 
     // Apply fee
@@ -660,28 +728,41 @@ export class LiquidityDepthAnalyzer {
     const amountInWithFee = (amountIn * feeMultiplier) / 10000n;
 
     const A = BigInt(amplificationParameter);
-    const n = 2n; // 2-token pool
-    const Ann = A * n * n; // A * n^n for n=2
+    const nBig = BigInt(n);
+    // A * n^n
+    let Ann = A;
+    for (let i = 0; i < n; i++) {
+      Ann = Ann * nBig;
+    }
 
     // Step 1: Compute D (invariant) from current reserves
-    const D = this.computeStableSwapD(reserveIn, reserveOut, Ann);
+    const D = this.computeStableSwapD(reserves, Ann);
     if (D <= 0n) {
       return { amountOut: 0n, priceImpact: 1 };
     }
 
-    // Step 2: Compute new output reserve y given new input reserve
-    const newReserveIn = reserveIn + amountInWithFee;
-    const newReserveOut = this.computeStableSwapY(newReserveIn, D, Ann);
-    if (newReserveOut <= 0n || newReserveOut >= reserveOut) {
+    // Step 2: Build updated reserves with new input, compute new output reserve
+    const updatedReserves: bigint[] = [];
+    for (let i = 0; i < n; i++) {
+      if (i === inputIdx) {
+        updatedReserves.push(reserves[i] + amountInWithFee);
+      } else if (i !== outputIdx) {
+        updatedReserves.push(reserves[i]);
+      }
+      // skip outputIdx — that's what we solve for
+    }
+
+    const newReserveOut = this.computeStableSwapY(updatedReserves, D, Ann, nBig);
+    if (newReserveOut <= 0n || newReserveOut >= reserves[outputIdx]) {
       return { amountOut: 0n, priceImpact: 1 };
     }
 
     // Step 3: amountOut = old_y - new_y
-    const amountOut = reserveOut - newReserveOut;
+    const amountOut = reserves[outputIdx] - newReserveOut;
 
     // Calculate price impact
-    // Initial price for stableswap at balanced reserves ≈ 1:1
-    // Effective price = amountOut / amountIn
+    const reserveIn = reserves[inputIdx];
+    const reserveOut = reserves[outputIdx];
     const initialPriceScaled = (reserveOut * PRECISION) / reserveIn;
     const effectivePriceScaled = (amountOut * PRECISION) / amountIn;
 
@@ -693,33 +774,37 @@ export class LiquidityDepthAnalyzer {
   }
 
   /**
-   * Compute the StableSwap invariant D for a 2-token pool using Newton's method.
+   * Compute the StableSwap invariant D for an n-token pool using Newton's method.
    *
-   * Solves: Ann * S + D = Ann * D + D^3 / (4 * x * y)
-   * Where S = x + y
+   * Generalized formula: Ann * S + D = Ann * D + D^(n+1) / (n^n * prod(reserves))
+   * Where S = sum(reserves)
    *
    * Newton iteration:
-   *   D_next = (Ann * S + 2 * D_prod - D * (Ann - 1)) * D / ((Ann + 1) * D - (Ann - 1) * D + 3 * D_prod)
-   *   Simplified: D_next = (Ann * S + n * D_prod) * D / ((Ann - 1) * D + (n + 1) * D_prod)
+   *   D_next = (Ann * S + n * D_prod) * D / ((Ann - 1) * D + (n + 1) * D_prod)
+   *   where D_prod = D^(n+1) / (n^n * prod(reserves))
    *
-   * @param x - Reserve of token 0
-   * @param y - Reserve of token 1
-   * @param Ann - A * n^n (amplification * 4 for n=2)
+   * @param reserves - Array of all pool reserves
+   * @param Ann - A * n^n
    * @returns D - the invariant value
    */
-  private computeStableSwapD(x: bigint, y: bigint, Ann: bigint): bigint {
-    const S = x + y;
+  private computeStableSwapD(reserves: bigint[], Ann: bigint): bigint {
+    const n = BigInt(reserves.length);
+    let S = 0n;
+    for (const r of reserves) {
+      S += r;
+    }
     if (S === 0n) return 0n;
 
     let D = S;
-    const n = 2n;
 
     // Newton's method — converges in ~10 iterations for typical values
     for (let i = 0; i < 256; i++) {
-      // D_prod = D^3 / (n^n * prod(reserves)) = D^3 / (4*x*y)
+      // D_prod = D^(n+1) / (n^n * prod(reserves))
+      // Computed iteratively: start with D, then for each reserve r: D_prod = D_prod * D / (r * n)
       let D_prod = D;
-      D_prod = (D_prod * D) / (x * n);
-      D_prod = (D_prod * D) / (y * n);
+      for (const r of reserves) {
+        D_prod = (D_prod * D) / (r * n);
+      }
 
       const D_prev = D;
 
@@ -744,29 +829,40 @@ export class LiquidityDepthAnalyzer {
   }
 
   /**
-   * Compute the output reserve y for a 2-token StableSwap pool using Newton's method.
+   * Compute the output reserve y for an n-token StableSwap pool using Newton's method.
    *
-   * Given the new input reserve x and invariant D, find y such that:
-   *   Ann * (x + y) + D = Ann * D + D^3 / (4*x*y)
+   * Given the other reserves (excluding the output token) and invariant D, find y such that
+   * the StableSwap invariant holds.
    *
-   * Rearranged as f(y) = 0:
-   *   y^2 + (x + D/Ann - D) * y = D^3 / (4 * Ann * x)
-   *
-   * Newton iteration:
-   *   y_next = (y^2 + c) / (2*y + b - D)
-   *   where b = x + D/Ann, c = D^3 / (4*Ann*x)
+   * @param otherReserves - All reserves except the output token (already updated with new input)
+   * @param D - The pool invariant
+   * @param Ann - A * n^n
+   * @param n - Number of tokens in the pool
    */
-  private computeStableSwapY(x: bigint, D: bigint, Ann: bigint): bigint {
-    if (x <= 0n || D <= 0n || Ann <= 0n) return 0n;
+  private computeStableSwapY(otherReserves: bigint[], D: bigint, Ann: bigint, n?: bigint): bigint {
+    if (D <= 0n || Ann <= 0n) return 0n;
+    for (const r of otherReserves) {
+      if (r <= 0n) return 0n;
+    }
 
-    const n = 2n;
-    // c = D^3 / (4 * Ann * x) — but we compute step by step to avoid overflow
+    const nTokens = n ?? BigInt(otherReserves.length + 1);
+
+    // S_ = sum of other reserves (all except the one we're solving for)
+    let S_ = 0n;
+    for (const r of otherReserves) {
+      S_ += r;
+    }
+
+    // c = D^(n+1) / (Ann * n^n * prod(otherReserves))
+    // Computed iteratively to avoid overflow
     let c = D;
-    c = (c * D) / (x * n);
-    c = (c * D) / (Ann * n);
+    for (const r of otherReserves) {
+      c = (c * D) / (r * nTokens);
+    }
+    c = (c * D) / (Ann * nTokens);
 
-    // b = x + D/Ann
-    const b = x + D / Ann;
+    // b = S_ + D / Ann
+    const b = S_ + D / Ann;
 
     let y = D;
 

@@ -23,6 +23,7 @@ import { AaveV3FlashLoanProvider } from './aave-v3.provider';
 import { BalancerV2FlashLoanProvider } from './balancer-v2.provider';
 import { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
 import { SyncSwapFlashLoanProvider } from './syncswap.provider';
+import { DaiFlashMintProvider } from './dai-flash-mint.provider';
 import { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 /**
@@ -66,6 +67,16 @@ const BALANCER_V2_SUPPORTED_CHAINS = new Set(
 const SYNCSWAP_SUPPORTED_CHAINS = new Set(
   Object.entries(FLASH_LOAN_PROVIDERS)
     .filter(([_, config]) => config.protocol === 'syncswap')
+    .map(([chain]) => chain)
+);
+
+/**
+ * Chains that have fully supported DAI Flash Mint
+ * DAI's DssFlash module is Ethereum-only
+ */
+const DAI_FLASH_MINT_SUPPORTED_CHAINS = new Set(
+  Object.entries(FLASH_LOAN_PROVIDERS)
+    .filter(([_, config]) => config.protocol === 'dai_flash_mint')
     .map(([chain]) => chain)
 );
 
@@ -144,11 +155,15 @@ export class FlashLoanProviderFactory {
       return this.createSyncSwapProvider(chain, flashLoanConfig);
     }
 
+    if (protocol === 'dai_flash_mint') {
+      return this.createDaiFlashMintProvider(chain, flashLoanConfig);
+    }
+
     // Create unsupported provider for other protocols
     this.logger.info('Creating placeholder provider for unsupported protocol', {
       chain,
       protocol,
-      note: 'Only Aave V3, Balancer V2, PancakeSwap V3, and SyncSwap are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
+      note: 'Only Aave V3, Balancer V2, PancakeSwap V3, SyncSwap, and DAI Flash Mint are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
     });
 
     return new UnsupportedFlashLoanProvider({
@@ -300,6 +315,30 @@ export class FlashLoanProviderFactory {
   }
 
   /**
+   * Create DAI Flash Mint provider
+   *
+   * @see https://docs.makerdao.com/smart-contract-modules/flash-mint-module
+   */
+  private createDaiFlashMintProvider(
+    chain: string,
+    flashLoanConfig: { address: string; protocol: string; fee: number }
+  ): DaiFlashMintProvider | undefined {
+    const validated = this.validateProviderConfig(
+      chain, flashLoanConfig, 'DaiFlashMintArbitrage', 'dssFlashAddress',
+      { note: 'DAI Flash Mint is only available on Ethereum mainnet' },
+    );
+    if (!validated) return undefined;
+
+    return new DaiFlashMintProvider({
+      chain,
+      poolAddress: flashLoanConfig.address, // DssFlash contract address
+      contractAddress: validated.contractAddress,
+      approvedRouters: validated.approvedRouters,
+      feeOverride: validated.feeOverride,
+    });
+  }
+
+  /**
    * Check if a chain has a fully supported flash loan provider
    *
    * @param chain - Chain identifier
@@ -363,7 +402,12 @@ export class FlashLoanProviderFactory {
       return isValidContractAddress(contractAddress);
     });
 
-    return [...aaveChains, ...balancerChains, ...pancakeSwapChains, ...syncSwapChains];
+    const daiFlashMintChains = Array.from(DAI_FLASH_MINT_SUPPORTED_CHAINS).filter(chain => {
+      const contractAddress = this.config.contractAddresses[chain];
+      return isValidContractAddress(contractAddress);
+    });
+
+    return [...aaveChains, ...balancerChains, ...pancakeSwapChains, ...syncSwapChains, ...daiFlashMintChains];
   }
 
   /**
@@ -405,9 +449,9 @@ export class FlashLoanProviderFactory {
       const hasContract = isValidContractAddress(contractAddress);
 
       let status: ProtocolSupportStatus;
-      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap') && hasContract) {
+      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap' || config.protocol === 'dai_flash_mint') && hasContract) {
         status = 'fully_supported';
-      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap') {
+      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap' || config.protocol === 'dai_flash_mint') {
         status = 'partial_support'; // Protocol supported but no contract deployed
       } else {
         status = 'not_implemented';

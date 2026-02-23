@@ -32,6 +32,8 @@ import { retryWithLogging } from '../resilience/retry-mechanism';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
 // W2-23 FIX: Trace context injection for cross-service correlation
 import { createTraceContext, propagateContext } from '../tracing/trace-context';
+// P2-13: Schema version for forward-compatible message evolution
+import { SYSTEM_CONSTANTS } from '@arbitrage/config';
 
 // =============================================================================
 // Types
@@ -64,25 +66,42 @@ export interface PublishingBatcherConfig {
 }
 
 /**
+ * Parse an environment variable as a positive integer, returning the fallback if
+ * unset, empty, or not a valid positive number.
+ */
+function parseEnvPositiveInt(key: string, fallback: number): number {
+  const val = process.env[key];
+  if (val === undefined || val === '') return fallback;
+  const parsed = parseInt(val, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
  * Standard batcher configurations for different message types.
+ *
+ * Fix #21: maxWaitMs is now env-configurable per message type to allow
+ * operators to tune the latency-vs-batching tradeoff without code changes.
+ * Set PRICE_BATCHER_MAX_WAIT_MS, SWAP_BATCHER_MAX_WAIT_MS, or
+ * WHALE_BATCHER_MAX_WAIT_MS to override the defaults.
+ * @see docs/reports/PHASE1_DEEP_ANALYSIS_2026-02-22.md Finding #21
  */
 export const STANDARD_BATCHER_CONFIGS: Record<string, PublishingBatcherConfig> = {
   priceUpdates: {
     stream: RedisStreams.PRICE_UPDATES,
     maxBatchSize: 50,
-    maxWaitMs: 25, // @see OP-4: Reduced from 100ms to stay within 50ms hot-path budget
+    maxWaitMs: parseEnvPositiveInt('PRICE_BATCHER_MAX_WAIT_MS', 5),
     name: 'priceUpdateBatcher',
   },
   swapEvents: {
     stream: RedisStreams.SWAP_EVENTS,
     maxBatchSize: 100,
-    maxWaitMs: 500, // Less time-sensitive
+    maxWaitMs: parseEnvPositiveInt('SWAP_BATCHER_MAX_WAIT_MS', 500),
     name: 'swapEventBatcher',
   },
   whaleAlerts: {
     stream: RedisStreams.WHALE_ALERTS,
     maxBatchSize: 10,
-    maxWaitMs: 50, // Whale alerts are time-sensitive
+    maxWaitMs: parseEnvPositiveInt('WHALE_BATCHER_MAX_WAIT_MS', 50),
     name: 'whaleAlertBatcher',
   },
 };
@@ -231,9 +250,13 @@ export class PublishingService {
    * Includes Redis-based deduplication for multi-instance deployments.
    */
   async publishArbitrageOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
-    // Redis-based deduplication for multi-instance deployments
+    // Redis-based deduplication for multi-instance deployments.
+    // P1-10: TTL must exceed XCLAIM minIdleMs (default 10 minutes = 600s) so that
+    // PEL-recovered messages after restart still hit the dedup guard. With the old
+    // 30s TTL, messages idle in PEL for 30-600s would pass dedup and re-execute.
+    // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-10
     const dedupKey = `opp:dedup:${opportunity.id}`;
-    const DEDUP_TTL_SECONDS = 30;
+    const DEDUP_TTL_SECONDS = 900; // 15 minutes — safely exceeds XCLAIM 10-min default
 
     if (this.redis) {
       try {
@@ -406,6 +429,9 @@ export class PublishingService {
       data,
       timestamp: Date.now(),
       source: this.source,
+      // P2-13: Include schema version for forward-compatible message evolution.
+      // Consumers can gracefully handle envelope changes by checking this field.
+      schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
     };
   }
 

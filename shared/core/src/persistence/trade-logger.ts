@@ -247,6 +247,18 @@ export class TradeLogger {
     // Extract traceId from opportunity metadata if available (set by trace context propagation)
     const traceId = (opportunity as unknown as Record<string, unknown> | undefined)?._traceId as string | undefined;
 
+    // P1-8: Calculate effective slippage from expected vs actual profit.
+    // This gives the realized slippage which is what matters for post-mortem analysis.
+    // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-8
+    const expectedProfit = opportunity?.expectedProfit;
+    const slippage = (expectedProfit != null && expectedProfit > 0 && result.actualProfit != null)
+      ? (expectedProfit - result.actualProfit) / expectedProfit
+      : undefined;
+
+    // P1-8: Extract retry/delivery count from opportunity metadata if present.
+    // Consumer layer sets _deliveryCount on redelivered messages from PEL.
+    const retryCount = (opportunity as unknown as Record<string, unknown> | undefined)?._deliveryCount as number | undefined;
+
     return {
       timestamp: result.timestamp ?? Date.now(),
       opportunityId: result.opportunityId,
@@ -256,7 +268,7 @@ export class TradeLogger {
       tokenIn: opportunity?.tokenIn,
       tokenOut: opportunity?.tokenOut,
       amountIn: opportunity?.amountIn,
-      expectedProfit: opportunity?.expectedProfit,
+      expectedProfit,
       actualProfit: result.actualProfit,
       gasUsed: result.gasUsed,
       gasCost: result.gasCost,
@@ -267,9 +279,9 @@ export class TradeLogger {
       usedMevProtection: result.usedMevProtection,
       traceId,
       route: opportunity?.path,
-      slippage: undefined, // Populated by caller if available
+      slippage,
       strategyUsed: opportunity?.type,
-      retryCount: undefined, // Populated by caller if available
+      retryCount,
       blockNumber: opportunity?.blockNumber,
       sellChain: opportunity?.sellChain,
       sellDex: opportunity?.sellDex,

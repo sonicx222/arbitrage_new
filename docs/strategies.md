@@ -26,7 +26,7 @@ Detecting price discrepancies for the same token pair across different Decentral
 
 - **Execution**: Instant swap on DEX A, sell on DEX B
 - **Key Metric**: Net profit after gas and slippage
-- **Module**: `shared/core/src/cross-dex-arbitrage.ts`
+- **Module**: `services/unified-detector/src/detection/simple-arbitrage.ts`, wired via `services/unified-detector/src/chain-instance.ts`
 
 ### 2. Triangular Arbitrage
 

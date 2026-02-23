@@ -85,6 +85,9 @@ export function assembleSolanaConfig(logger: ReturnType<typeof createLogger>): {
     triangularEnabled: process.env.TRIANGULAR_ENABLED !== 'false',
     maxTriangularDepth: parseInt(process.env.MAX_TRIANGULAR_DEPTH ?? '3', 10),
     opportunityExpiryMs: parseInt(process.env.OPPORTUNITY_EXPIRY_MS ?? '1000', 10),
+    // P3-25: Make defaultTradeValueUsd configurable to align with EVM partition thresholds.
+    // Used for gas cost estimation in cross-chain and intra-Solana detection.
+    defaultTradeValueUsd: parseFloat(process.env.SOLANA_DEFAULT_TRADE_VALUE_USD ?? '1000'),
     // Issue 1.3: Chain identifier for Solana
     chainId: isDevnetMode() ? 'solana-devnet' : 'solana',
   };

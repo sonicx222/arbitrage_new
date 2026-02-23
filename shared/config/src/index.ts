@@ -5,7 +5,7 @@
  * The configuration has been split into organized submodules for maintainability:
  *
  * - chains/: Blockchain configurations (11 chains)
- * - dexes/: DEX configurations (49 DEXes)
+ * - dexes/: DEX configurations (52 DEXes)
  * - tokens/: Token configurations (112 tokens)
  * - thresholds.ts: Performance and arbitrage thresholds
  * - mev-config.ts: MEV protection settings
@@ -319,13 +319,18 @@ export type { FlashLoanProtocol } from './flash-loan-availability';
 // =============================================================================
 export {
   CROSS_CHAIN_TOKEN_ALIASES,
+  LIQUID_STAKING_TOKENS,
   normalizeTokenForCrossChain,
+  normalizeTokenForPricing,
   findCommonTokensBetweenChains,
   preWarmCommonTokensCache,
   getChainSpecificTokenSymbol,
   // Refactored from detector.ts - chain-specific quote tokens
   DEFAULT_QUOTE_TOKENS,
-  getDefaultQuoteToken
+  getDefaultQuoteToken,
+  // Fix #28: Address-based token verification for cross-chain normalization
+  verifyTokenAddress,
+  isKnownToken,
 } from './cross-chain';
 
 // =============================================================================

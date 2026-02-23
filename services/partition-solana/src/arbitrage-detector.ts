@@ -19,12 +19,14 @@
  */
 
 import { EventEmitter } from 'events';
-import { normalizeTokenForCrossChain } from '@arbitrage/config';
+import { normalizeTokenForCrossChain, normalizeTokenForPricing } from '@arbitrage/config';
 import {
   LRUCache,
   NumericRollingWindow,
   createSimpleCircuitBreaker,
   type SimpleCircuitBreaker,
+  createTraceContext,
+  propagateContext,
 } from '@arbitrage/core';
 
 // Import extracted modules
@@ -451,14 +453,13 @@ export class SolanaArbitrageDetector extends EventEmitter {
   }
 
   private getNormalizedToken(symbol: string): string {
-    const upperSymbol = symbol.toUpperCase();
-    if (!this.config.normalizeLiquidStaking && LIQUID_STAKING_TOKENS.has(upperSymbol)) {
-      return upperSymbol;
-    }
-
     let normalized = this.tokenCache.get(symbol);
     if (normalized === undefined) {
-      normalized = normalizeTokenForCrossChain(symbol);
+      // Phase 0 Item 2: Use pricing normalization (preserves LST identities) unless
+      // explicitly configured to collapse LSTs for cross-chain routing
+      normalized = this.config.normalizeLiquidStaking
+        ? normalizeTokenForCrossChain(symbol)
+        : normalizeTokenForPricing(symbol);
       this.tokenCache.set(symbol, normalized);
     }
     return normalized;
@@ -608,10 +609,13 @@ export class SolanaArbitrageDetector extends EventEmitter {
   async compareCrossChainPrices(evmPrices: EvmPriceUpdate[]): Promise<CrossChainPriceComparison[]> {
     if (!this.config.crossChainEnabled) return [];
 
+    // Phase 0 Item 2: Cross-chain comparison always uses cross-chain normalization
+    // (MSOL→SOL) regardless of normalizeLiquidStaking setting, because the purpose
+    // of this function is to match Solana tokens to their EVM equivalents.
     return comparePrices(
       evmPrices,
       this.poolStore,
-      (symbol) => this.getNormalizedToken(symbol),
+      (symbol) => normalizeTokenForCrossChain(symbol),
       (t0, t1) => this.createPairKeyFromNormalized(t0, t1),
       {
         minProfitThreshold: this.config.minProfitThreshold,
@@ -633,11 +637,15 @@ export class SolanaArbitrageDetector extends EventEmitter {
     if (!this.isDetectionAllowed()) return [];
 
     try {
+      // Fix 10: Use normalizeTokenForCrossChain for cross-chain detection consistency.
+      // Previously used getNormalizedToken() which may use pricing normalization
+      // (preserving LST identities), causing missed cross-chain LST opportunities.
+      // @see compareCrossChainPrices() which already uses normalizeTokenForCrossChain
       const result = detectCrossChainArbitrage(
         evmPrices,
         this.poolStore,
         this.opportunityFactory,
-        (symbol) => this.getNormalizedToken(symbol),
+        (symbol) => normalizeTokenForCrossChain(symbol),
         (t0, t1) => this.createPairKeyFromNormalized(t0, t1),
         {
           minProfitThreshold: this.config.minProfitThreshold,
@@ -778,7 +786,11 @@ export class SolanaArbitrageDetector extends EventEmitter {
       this.redisPublishState.consecutiveFailures = 0;
     }
 
-    const data = {
+    // P1-7: Inject trace context for cross-service correlation, matching P1-P3 pattern.
+    // Previously raw xadd without tracing made end-to-end debugging impossible.
+    // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-7
+    const traceCtx = createTraceContext('partition-solana');
+    const baseData: Record<string, string> = {
       id: opportunity.id,
       type: opportunity.type,
       chain: opportunity.chain,
@@ -795,6 +807,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
       status: opportunity.status,
       source: 'solana-arbitrage-detector',
     };
+    const data = propagateContext(baseData, traceCtx) as Record<string, string>;
 
     for (let attempt = 1; attempt <= REDIS_RETRY.MAX_ATTEMPTS; attempt++) {
       try {

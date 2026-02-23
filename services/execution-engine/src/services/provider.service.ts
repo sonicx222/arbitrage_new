@@ -16,6 +16,7 @@
  */
 
 import { ethers } from 'ethers';
+import * as http2 from 'http2';
 import { CHAINS } from '@arbitrage/config';
 import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider, clearIntervalSafe } from '@arbitrage/core';
 import type { ServiceStateManager, BatchProviderConfig } from '@arbitrage/core';
@@ -26,6 +27,175 @@ import {
   PROVIDER_RECONNECTION_TIMEOUT_MS,
 } from '../types';
 import { createCancellableTimeout } from './simulation/types';
+import { derivePerChainWallets } from './hd-wallet-manager';
+
+// =============================================================================
+// HTTP/2 Session Pool for RPC Providers
+// =============================================================================
+
+/**
+ * Pool of HTTP/2 client sessions, keyed by origin (e.g., "https://eth-mainnet.alchemyapi.io").
+ * Sessions are reused across multiple requests for connection multiplexing.
+ * Falls back to HTTP/1.1 if HTTP/2 connection fails.
+ */
+const http2Sessions = new Map<string, http2.ClientHttp2Session>();
+
+/**
+ * Get or create an HTTP/2 session for a given origin.
+ */
+function getHttp2Session(origin: string): http2.ClientHttp2Session | null {
+  let session = http2Sessions.get(origin);
+  if (session && !session.closed && !session.destroyed) {
+    return session;
+  }
+
+  try {
+    session = http2.connect(origin);
+
+    session.on('error', () => {
+      http2Sessions.delete(origin);
+    });
+
+    session.on('close', () => {
+      http2Sessions.delete(origin);
+    });
+
+    http2Sessions.set(origin, session);
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create a custom FetchRequest getUrlFunc that uses HTTP/2 for HTTPS endpoints.
+ * Falls back to the default HTTP/1.1 transport for non-HTTPS or on error.
+ *
+ * @param defaultGetUrl - The default ethers.js getUrlFunc for fallback
+ * @returns Custom getUrlFunc with HTTP/2 support
+ */
+function createHttp2GetUrlFunc(
+  defaultGetUrl: ethers.FetchGetUrlFunc
+): ethers.FetchGetUrlFunc {
+  return async (req: ethers.FetchRequest, signal?: FetchCancelSignal): Promise<ethers.GetUrlResponse> => {
+    const url = new URL(req.url);
+
+    // Only use HTTP/2 for HTTPS endpoints
+    if (url.protocol !== 'https:') {
+      return defaultGetUrl(req, signal);
+    }
+
+    const origin = url.origin;
+    const session = getHttp2Session(origin);
+
+    // Fallback to HTTP/1.1 if session creation fails
+    if (!session) {
+      return defaultGetUrl(req, signal);
+    }
+
+    return new Promise<ethers.GetUrlResponse>((resolve, reject) => {
+      const headers: http2.OutgoingHttpHeaders = {
+        ':method': req.method || 'POST',
+        ':path': url.pathname + url.search,
+        'content-type': 'application/json',
+      };
+
+      // Copy request headers
+      for (const [key, value] of req.headers) {
+        headers[key.toLowerCase()] = value;
+      }
+
+      const stream = session.request(headers);
+
+      let statusCode = 200;
+      const responseChunks: Buffer[] = [];
+
+      stream.on('response', (responseHeaders) => {
+        statusCode = (responseHeaders[':status'] as number) ?? 200;
+      });
+
+      stream.on('data', (chunk: Buffer) => {
+        responseChunks.push(chunk);
+      });
+
+      stream.on('end', () => {
+        const body = Buffer.concat(responseChunks);
+        resolve({
+          statusCode,
+          statusMessage: '',
+          headers: {},
+          body,
+        });
+      });
+
+      stream.on('error', (err: Error) => {
+        // On HTTP/2 error, fall back to default transport
+        http2Sessions.delete(origin);
+        defaultGetUrl(req, signal).then(resolve).catch(reject);
+      });
+
+      // Handle abort signal
+      if (signal) {
+        const onAbort = () => {
+          stream.close();
+          reject(new Error('Request aborted'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      // Write request body
+      const body = req.body;
+      if (body) {
+        stream.end(Buffer.from(body));
+      } else {
+        stream.end();
+      }
+    });
+  };
+}
+
+/**
+ * Interface for FetchCancelSignal — subset of AbortSignal used by ethers.
+ */
+interface FetchCancelSignal {
+  addEventListener(event: string, handler: () => void, options?: { once?: boolean }): void;
+}
+
+/**
+ * Create an ethers JsonRpcProvider with HTTP/2 support.
+ * Wraps the provider's FetchRequest to use HTTP/2 multiplexing for HTTPS endpoints.
+ *
+ * @param rpcUrl - RPC endpoint URL
+ * @param enableHttp2 - Whether to enable HTTP/2 (default: true for HTTPS URLs)
+ * @returns Configured JsonRpcProvider
+ */
+export function createHttp2Provider(
+  rpcUrl: string,
+  enableHttp2 = true
+): ethers.JsonRpcProvider {
+  const fetchRequest = new ethers.FetchRequest(rpcUrl);
+
+  if (enableHttp2 && rpcUrl.startsWith('https://')) {
+    const defaultGetUrl = ethers.FetchRequest.createGetUrlFunc();
+    fetchRequest.getUrlFunc = createHttp2GetUrlFunc(defaultGetUrl);
+  }
+
+  return new ethers.JsonRpcProvider(fetchRequest);
+}
+
+/**
+ * Shut down all HTTP/2 sessions (for graceful shutdown).
+ */
+export function closeHttp2Sessions(): void {
+  for (const [origin, session] of http2Sessions) {
+    try {
+      session.close();
+    } catch {
+      // Ignore close errors during shutdown
+    }
+  }
+  http2Sessions.clear();
+}
 
 export interface ProviderServiceConfig {
   logger: Logger;
@@ -42,6 +212,25 @@ export interface ProviderServiceConfig {
    * Phase 3: Configuration for batch providers.
    */
   batchConfig?: BatchProviderConfig;
+  /**
+   * Enable HTTP/2 multiplexing for HTTPS RPC endpoints.
+   * Reduces head-of-line blocking and saves 2-5ms on batch calls.
+   * Default: true
+   */
+  enableHttp2?: boolean;
+  /**
+   * P2-17: Health check interval in milliseconds.
+   * Controls how often provider connectivity is verified.
+   * Default: 30000 (30 seconds)
+   */
+  healthCheckIntervalMs?: number;
+  /**
+   * P2-18: Consecutive failure threshold before reconnection attempt.
+   * After this many consecutive health check failures, the provider
+   * will be replaced with a new connection.
+   * Default: 3
+   */
+  reconnectionFailureThreshold?: number;
 }
 
 export class ProviderServiceImpl implements IProviderService {
@@ -63,9 +252,21 @@ export class ProviderServiceImpl implements IProviderService {
   private batchProviders: Map<string, BatchProvider> = new Map();
   private readonly enableBatching: boolean;
   private readonly batchConfig: BatchProviderConfig;
+  private readonly enableHttp2: boolean;
+  // P2-17: Configurable health check interval
+  private readonly healthCheckIntervalMs: number;
+  // P2-18: Configurable reconnection failure threshold
+  private readonly reconnectionFailureThreshold: number;
 
   // Callback for provider reconnection (allows engine to clear stale state)
   private onProviderReconnectCallback: ((chainName: string) => void) | null = null;
+
+  /**
+   * Fix #9: Cached private keys for wallet reconnection.
+   * Populated during initializeWallets() so reconnection logic does not
+   * depend on process.env (keys may be rotated or cleaned from env).
+   */
+  private chainPrivateKeys: Map<string, string> = new Map();
 
   /**
    * Fix 5.2: Guard to prevent concurrent health check iterations.
@@ -92,6 +293,9 @@ export class ProviderServiceImpl implements IProviderService {
       enabled: true,
       maxQueueSize: 100,
     };
+    this.enableHttp2 = config.enableHttp2 ?? true;
+    this.healthCheckIntervalMs = config.healthCheckIntervalMs ?? 30000;
+    this.reconnectionFailureThreshold = config.reconnectionFailureThreshold ?? 3;
   }
 
   /**
@@ -108,7 +312,9 @@ export class ProviderServiceImpl implements IProviderService {
   async initialize(): Promise<void> {
     for (const [chainName, chainConfig] of Object.entries(CHAINS)) {
       try {
-        const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+        const provider = this.enableHttp2
+          ? createHttp2Provider(chainConfig.rpcUrl, true)
+          : new ethers.JsonRpcProvider(chainConfig.rpcUrl);
         this.providers.set(chainName, provider);
 
         // Phase 3: Create BatchProvider if batching is enabled
@@ -256,7 +462,7 @@ export class ProviderServiceImpl implements IProviderService {
       } finally {
         this.isCheckingHealth = false;
       }
-    }, 30000);
+    }, this.healthCheckIntervalMs);
   }
 
   /**
@@ -319,8 +525,8 @@ export class ProviderServiceImpl implements IProviderService {
         error: getErrorMessage(error)
       });
 
-      // Attempt reconnection after 3 consecutive failures
-      if (newFailures >= 3) {
+      // P2-18: Attempt reconnection after configurable consecutive failures
+      if (newFailures >= this.reconnectionFailureThreshold) {
         await this.attemptProviderReconnection(chainName);
       }
     }
@@ -336,8 +542,10 @@ export class ProviderServiceImpl implements IProviderService {
     try {
       this.logger.info(`Attempting provider reconnection for ${chainName}`);
 
-      // Create new provider instance
-      const newProvider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+      // Create new provider instance (with HTTP/2 if enabled)
+      const newProvider = this.enableHttp2
+        ? createHttp2Provider(chainConfig.rpcUrl, true)
+        : new ethers.JsonRpcProvider(chainConfig.rpcUrl);
 
       // Verify connectivity
       // P1 FIX: Use cancellable timeout to prevent timer leak on success
@@ -373,16 +581,27 @@ export class ProviderServiceImpl implements IProviderService {
       });
       this.stats.providerReconnections++;
 
-      // Update wallet if exists
-      const privateKey = process.env[`${chainName.toUpperCase()}_PRIVATE_KEY`];
-      if (privateKey && this.wallets.has(chainName)) {
-        const wallet = new ethers.Wallet(privateKey, newProvider);
-        this.wallets.set(chainName, wallet);
+      // Update wallet if exists (reconnect with new provider)
+      const existingWallet = this.wallets.get(chainName);
+      if (existingWallet) {
+        // Fix #9: Use cached private key instead of re-reading process.env.
+        // Keys are cached in initializeWallets() for both per-chain and HD-derived wallets.
+        const cachedKey = this.chainPrivateKeys.get(chainName);
+        let reconnectedWallet: ethers.Wallet;
+        if (cachedKey) {
+          // Recreate wallet from cached private key with new provider
+          reconnectedWallet = new ethers.Wallet(cachedKey, newProvider);
+        } else {
+          // Fallback: reconnect existing wallet to new provider
+          // Fix 12: Removed redundant cast — Wallet.connect() returns Wallet in ethers v6
+          reconnectedWallet = existingWallet.connect(newProvider);
+        }
+        this.wallets.set(chainName, reconnectedWallet);
 
         // Re-register wallet with NonceManager after provider reconnection
         if (this.nonceManager) {
           await this.nonceManager.resetChain(chainName);
-          this.nonceManager.registerWallet(chainName, wallet);
+          this.nonceManager.registerWallet(chainName, reconnectedWallet);
         }
       }
 
@@ -400,48 +619,106 @@ export class ProviderServiceImpl implements IProviderService {
   }
 
   /**
-   * Initialize wallets for all chains with configured private keys.
+   * Initialize wallets for all chains.
+   *
+   * Wallet sources (in priority order):
+   * 1. Per-chain private key: `{CHAIN}_PRIVATE_KEY` env var (overrides HD derivation)
+   * 2. HD derivation: `WALLET_MNEMONIC` env var (BIP-44: m/44'/60'/0'/0/{chainIndex})
+   *
+   * Per-chain private keys always take precedence over HD-derived wallets.
+   * Solana requires an explicit private key (non-EVM, HD path differs).
+   *
+   * @see Phase 0 Item 4: Per-chain HD wallets (BIP-44 derivation)
    */
   initializeWallets(): void {
+    // Phase 0 Item 4: Derive HD wallets from mnemonic if available
+    const mnemonic = process.env.WALLET_MNEMONIC;
+    let hdWallets = new Map<string, ethers.HDNodeWallet>();
+    if (mnemonic) {
+      try {
+        hdWallets = derivePerChainWallets(
+          { mnemonic, passphrase: process.env.WALLET_MNEMONIC_PASSPHRASE },
+          Object.keys(CHAINS),
+          this.logger,
+        );
+        this.logger.info(`HD wallet derivation complete`, {
+          chainsWithHDWallets: hdWallets.size,
+        });
+      } catch (error) {
+        this.logger.error('HD wallet derivation failed — falling back to per-chain private keys only', {
+          error: getErrorMessage(error),
+        });
+      }
+    }
+
     for (const chainName of Object.keys(CHAINS)) {
       const privateKey = process.env[`${chainName.toUpperCase()}_PRIVATE_KEY`];
 
-      // Skip if no private key configured
-      if (!privateKey) {
-        this.logger.debug(`No private key configured for ${chainName}`);
-        continue;
-      }
-
-      // Validate private key format before attempting wallet creation
-      // Valid format: 64 hex chars (without 0x) or 66 chars (with 0x prefix)
-      const keyWithoutPrefix = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
-      if (!/^[0-9a-fA-F]{64}$/.test(keyWithoutPrefix)) {
-        this.logger.error(`Invalid private key format for ${chainName}`, {
-          hint: 'Private key must be 64 hex characters (or 66 with 0x prefix)',
-          envVar: `${chainName.toUpperCase()}_PRIVATE_KEY`,
-          hasHexPrefix: privateKey.startsWith('0x'),
-        });
-        continue;
-      }
-
-      const provider = this.providers.get(chainName);
-      if (provider) {
-        try {
-          const wallet = new ethers.Wallet(privateKey, provider);
-          this.wallets.set(chainName, wallet);
-
-          // Register wallet with nonce manager for atomic nonce allocation
-          if (this.nonceManager) {
-            this.nonceManager.registerWallet(chainName, wallet);
-          }
-
-          this.logger.info(`Initialized wallet for ${chainName}`, {
-            address: wallet.address
+      // Source 1: Explicit per-chain private key (highest priority)
+      if (privateKey) {
+        // Validate private key format before attempting wallet creation
+        // Valid format: 64 hex chars (without 0x) or 66 chars (with 0x prefix)
+        const keyWithoutPrefix = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+        if (!/^[0-9a-fA-F]{64}$/.test(keyWithoutPrefix)) {
+          this.logger.error(`Invalid private key format for ${chainName}`, {
+            hint: 'Private key must be 64 hex characters (or 66 with 0x prefix)',
+            envVar: `${chainName.toUpperCase()}_PRIVATE_KEY`,
+            hasHexPrefix: privateKey.startsWith('0x'),
           });
-        } catch (error) {
-          this.logger.error(`Failed to initialize wallet for ${chainName}`, { error });
+          continue;
         }
+
+        const provider = this.providers.get(chainName);
+        if (provider) {
+          try {
+            const wallet = new ethers.Wallet(privateKey, provider);
+            this.wallets.set(chainName, wallet);
+            // Fix #9: Cache validated private key for reconnection
+            this.chainPrivateKeys.set(chainName, privateKey);
+            if (this.nonceManager) {
+              this.nonceManager.registerWallet(chainName, wallet);
+            }
+            this.logger.info(`Initialized wallet for ${chainName}`, {
+              address: wallet.address,
+              source: 'private-key',
+            });
+          } catch (error) {
+            this.logger.error(`Failed to initialize wallet for ${chainName}`, { error });
+          }
+        }
+        continue;
       }
+
+      // Source 2: HD-derived wallet from mnemonic
+      const hdWallet = hdWallets.get(chainName);
+      if (hdWallet) {
+        const provider = this.providers.get(chainName);
+        if (provider) {
+          try {
+            // Create a standard Wallet from the HD-derived private key.
+            // ethers.Wallet and HDNodeWallet are separate types — extract
+            // the private key to construct a Wallet compatible with the
+            // Map<string, ethers.Wallet> interface.
+            const wallet = new ethers.Wallet(hdWallet.privateKey, provider);
+            this.wallets.set(chainName, wallet);
+            // Fix #9: Cache HD-derived private key for reconnection
+            this.chainPrivateKeys.set(chainName, hdWallet.privateKey);
+            if (this.nonceManager) {
+              this.nonceManager.registerWallet(chainName, wallet);
+            }
+            this.logger.info(`Initialized wallet for ${chainName}`, {
+              address: wallet.address,
+              source: 'hd-derivation',
+              path: hdWallet.path,
+            });
+          } catch (error) {
+            this.logger.error(`Failed to initialize HD-derived wallet for ${chainName}`, { error });
+          }
+        }
+        continue;
+      }
+
+      this.logger.debug(`No wallet configured for ${chainName} (no private key or mnemonic)`);
     }
   }
 
@@ -554,7 +831,11 @@ export class ProviderServiceImpl implements IProviderService {
     this.providers.clear();
     this.wallets.clear();
     this.providerHealth.clear();
+    // Fix #9: Clear cached private keys on shutdown
+    this.chainPrivateKeys.clear();
     // Fix 10.2: Reset cached count
     this.cachedHealthyCount = 0;
+    // Close HTTP/2 sessions
+    closeHttp2Sessions();
   }
 }

@@ -113,7 +113,8 @@ export function initializeRiskManagement(
       persistToRedis: RISK_CONFIG.probability.persistToRedis,
       redisKeyPrefix: RISK_CONFIG.probability.redisKeyPrefix,
     };
-    probabilityTracker = getExecutionProbabilityTracker(probabilityConfig);
+    // Fix 2: Pass Redis client for probability persistence (previously always null)
+    probabilityTracker = getExecutionProbabilityTracker(probabilityConfig, config?.redis);
     componentStatus.probabilityTracker = true;
 
     logger.info('Execution probability tracker initialized', {

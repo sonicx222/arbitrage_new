@@ -60,6 +60,7 @@ export { AaveV3FlashLoanProvider } from './aave-v3.provider';
 export { BalancerV2FlashLoanProvider } from './balancer-v2.provider';
 export { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
 export { SyncSwapFlashLoanProvider } from './syncswap.provider';
+export { DaiFlashMintProvider } from './dai-flash-mint.provider';
 export { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 // Factory

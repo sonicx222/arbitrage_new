@@ -193,8 +193,8 @@ describe('PHASE_METRICS Alignment', () => {
   it('should match current token count with PHASE_METRICS', () => {
     const tokenCount = Object.values(CORE_TOKENS).flat().length;
 
-    // Phase 1: 112 tokens across 11 chains
-    expect(tokenCount).toBe(112);
+    // Phase 1: 112 tokens + Phase 0 Item 2: +2 LST tokens = 114
+    expect(tokenCount).toBe(114);
     expect(PHASE_METRICS.current.tokens).toBe(tokenCount);
   });
 });

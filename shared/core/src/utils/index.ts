@@ -130,3 +130,9 @@ export {
   assert,
   assertDefined,
 } from './common-validators';
+
+// =============================================================================
+// Object Pool - GC Pressure Reduction for Hot Paths
+// =============================================================================
+
+export { ObjectPool } from './object-pool';

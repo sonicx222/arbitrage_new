@@ -18,6 +18,7 @@
 import { ethers } from 'ethers';
 import { clearTimeoutSafe } from '../lifecycle-utils';
 import { createLogger } from '../logger';
+import { Http2SessionPool } from './http2-session-pool';
 
 const logger = createLogger('batch-provider');
 import {
@@ -98,6 +99,13 @@ export interface BatchProviderConfig {
    * Used to auto-detect appropriate rate limits.
    */
   chainOrProvider?: string;
+  /**
+   * P3 Enhancement: Use HTTP/2 for batch RPC calls.
+   * HTTP/2 multiplexing reduces connection overhead for high-frequency batch flushes.
+   * Falls back to HTTP/1.1 fetch on connection failure.
+   * @default false (opt-in)
+   */
+  enableHttp2?: boolean;
 }
 
 /**
@@ -213,6 +221,9 @@ export class BatchProvider {
   // R3 Optimization: Rate limiter instance (only when enabled)
   private rateLimiter: TokenBucketRateLimiter | null = null;
 
+  // P3 Enhancement: HTTP/2 session pool (only when enabled)
+  private http2Pool: Http2SessionPool | null = null;
+
   constructor(provider: ethers.JsonRpcProvider, config?: BatchProviderConfig) {
     this.provider = provider;
 
@@ -231,6 +242,7 @@ export class BatchProvider {
       enableRateLimiting: config?.enableRateLimiting ?? false,
       rateLimitConfig: resolvedRateLimitConfig,
       chainOrProvider: config?.chainOrProvider ?? 'default',
+      enableHttp2: config?.enableHttp2 ?? false,
     };
 
     // Cache connection URL and headers at construction time.
@@ -252,6 +264,12 @@ export class BatchProvider {
     // R3 Optimization: Initialize rate limiter if enabled
     if (this.config.enableRateLimiting) {
       this.rateLimiter = new TokenBucketRateLimiter(this.config.rateLimitConfig);
+    }
+
+    // P3 Enhancement: Initialize HTTP/2 session pool if enabled
+    if (this.config.enableHttp2) {
+      this.http2Pool = new Http2SessionPool();
+      logger.info('HTTP/2 transport enabled for batch RPC calls');
     }
   }
 
@@ -446,6 +464,12 @@ export class BatchProvider {
 
     // Clear timeout
     this.batchTimeout = clearTimeoutSafe(this.batchTimeout);
+
+    // Close HTTP/2 sessions
+    if (this.http2Pool) {
+      await this.http2Pool.close();
+      this.http2Pool = null;
+    }
   }
 
   // ===========================================================================
@@ -623,10 +647,38 @@ export class BatchProvider {
   private async sendBatchRequest(
     batchRequest: JsonRpcRequest[]
   ): Promise<JsonRpcResponse[]> {
+    const bodyStr = JSON.stringify(batchRequest);
+
+    // P3 Enhancement: Use HTTP/2 when enabled, fall back to fetch on error
+    if (this.http2Pool) {
+      try {
+        const h2Response = await this.http2Pool.request(this.cachedUrl, {
+          method: 'POST',
+          headers: this.cachedHeaders,
+          body: bodyStr,
+        });
+
+        if (h2Response.status < 200 || h2Response.status >= 300) {
+          throw new Error(`HTTP/2 error: ${h2Response.status}`);
+        }
+
+        const results = JSON.parse(h2Response.body);
+        if (!Array.isArray(results)) {
+          throw new Error('Invalid batch response: expected array');
+        }
+        return results;
+      } catch (h2Error) {
+        // Fall back to HTTP/1.1 fetch
+        logger.debug('HTTP/2 request failed, falling back to fetch', {
+          error: h2Error instanceof Error ? h2Error.message : String(h2Error),
+        });
+      }
+    }
+
     const response = await fetch(this.cachedUrl, {
       method: 'POST',
       headers: this.cachedHeaders,
-      body: JSON.stringify(batchRequest),
+      body: bodyStr,
     });
 
     if (!response.ok) {

@@ -294,15 +294,22 @@ describe('BridgeRecoveryManager', () => {
     });
 
     it('should mark abandoned bridges that exceed maxAgeMs', async () => {
+      // Phase 0 Item 7: TTL is now 72h, use 73h for test
       const oldState = createBridgeRecoveryState({
         bridgeId: 'old-bridge',
-        initiatedAt: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago
+        initiatedAt: Date.now() - (73 * 60 * 60 * 1000), // 73 hours ago (exceeds 72h TTL)
       });
 
       mockRedis.scan.mockResolvedValueOnce(['0', [`${BRIDGE_RECOVERY_KEY_PREFIX}old-bridge`]]);
       mockRedis.get
         .mockResolvedValueOnce(oldState)   // First call: scanBridgeRecoveryStates
         .mockResolvedValueOnce(oldState);  // Second call: updateRecoveryStatus
+
+      // Phase 0 Item 7: Final status check returns 'pending' (not completed), so bridge is abandoned
+      mockBridgeRouter.getStatus.mockResolvedValueOnce({
+        status: 'pending',
+        sourceTxHash: '0xsource123',
+      });
 
       createManager();
 
@@ -344,7 +351,7 @@ describe('BridgeRecoveryManager', () => {
       expect(mockBridgeRouter.getStatus).toHaveBeenCalledWith('bridge-456');
     });
 
-    it('should mark bridge as recovered when completed', async () => {
+    it('should transition bridge to sell_pending when completed', async () => {
       const state = createBridgeRecoveryState({ status: 'bridging' });
 
       mockRedis.scan.mockResolvedValueOnce(['0', [`${BRIDGE_RECOVERY_KEY_PREFIX}bridge-456`]]);
@@ -363,14 +370,17 @@ describe('BridgeRecoveryManager', () => {
 
       await manager.recoverPendingBridges();
 
-      expect(manager.getMetrics().recoveredBridges).toBe(1);
+      // Fix 5: Bridge completed transitions to sell_pending, not recovered.
+      // The sell must still be executed by CrossChainStrategy on restart.
+      expect(manager.getMetrics().recoveredBridges).toBe(0);
+      // Non-terminal state uses standard TTL (maxAgeMs / 1000 = 72h = 259200s)
       expect(mockRedis.set).toHaveBeenCalledWith(
         `${BRIDGE_RECOVERY_KEY_PREFIX}bridge-456`,
         expect.objectContaining({
-          data: expect.objectContaining({ status: 'recovered' }),
+          data: expect.objectContaining({ status: 'bridge_completed_sell_pending' }),
           sig: expect.any(String),
         }),
-        3600
+        Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000),
       );
     });
 
@@ -713,7 +723,8 @@ describe('BridgeRecoveryManager', () => {
       await manager.recoverPendingBridges();
 
       const metrics = manager.getMetrics();
-      expect(metrics.recoveredBridges).toBe(1);
+      // Fix 5: completed → sell_pending (not recovered), so recoveredBridges stays 0
+      expect(metrics.recoveredBridges).toBe(0);
       expect(metrics.failedRecoveries).toBe(1);
       expect(metrics.lastCheckAt).toBeGreaterThan(0);
     });
@@ -816,7 +827,8 @@ describe('BridgeRecoveryManager', () => {
       await manager.checkBridgeStatus(state);
 
       expect(mockBridgeRouter.getStatus).toHaveBeenCalledWith('bridge-456');
-      expect(manager.getMetrics().recoveredBridges).toBe(1);
+      // Fix 5: completed → sell_pending (not recovered)
+      expect(manager.getMetrics().recoveredBridges).toBe(0);
     });
   });
 

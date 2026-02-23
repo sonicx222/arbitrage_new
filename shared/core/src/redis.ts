@@ -54,6 +54,28 @@ const REDIS_DEFAULTS = {
   maxChannelNameLength: SYSTEM_CONSTANTS?.redis?.maxChannelNameLength ?? 128,
 };
 
+/**
+ * P1-12: Redis operation timeout to prevent hanging when Redis is slow.
+ * Wraps a Redis promise with a timeout. If the operation doesn't complete
+ * within the deadline, rejects with a timeout error. This prevents slow
+ * Redis from cascading to all consumers.
+ * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-12
+ */
+const REDIS_OPERATION_TIMEOUT_MS = SYSTEM_CONSTANTS?.timeouts?.redisOperation ?? 5000;
+
+function withRedisTimeout<T>(promise: Promise<T>, timeoutMs: number = REDIS_OPERATION_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new RedisOperationError('timeout', new Error(`Redis operation exceeded ${timeoutMs}ms`)));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 // P1-1 FIX: Define Redis connection options interface
 interface RedisConnectionOptions {
   host: string;
@@ -527,11 +549,11 @@ export class RedisClient {
       this.trackCommand('setnx');
       let result: string | null;
       if (ttlSeconds) {
-        // SET key value NX EX seconds
-        result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+        // SET key value NX EX seconds — P1-12: timeout prevents hanging
+        result = await withRedisTimeout(this.client.set(key, value, 'EX', ttlSeconds, 'NX'));
       } else {
-        // SET key value NX
-        result = await this.client.set(key, value, 'NX');
+        // SET key value NX — P1-12: timeout prevents hanging
+        result = await withRedisTimeout(this.client.set(key, value, 'NX'));
       }
       return result === 'OK';
     } catch (error) {
@@ -1130,11 +1152,11 @@ export class RedisClient {
     }
   }
 
-  // Health check
+  // Health check — P1-12: wrapped with timeout to prevent hanging when Redis is slow
   async ping(): Promise<boolean> {
     try {
       this.trackCommand('ping');
-      const result = await this.client.ping();
+      const result = await withRedisTimeout(this.client.ping(), 2000);
       return result === 'PONG';
     } catch (error) {
       return false;

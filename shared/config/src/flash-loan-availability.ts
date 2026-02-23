@@ -48,6 +48,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: true, // DAI DssFlash: 0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853 (0.01% fee)
   },
 
   polygon: {
@@ -56,6 +57,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   arbitrum: {
@@ -64,6 +66,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   base: {
@@ -72,6 +75,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   optimism: {
@@ -80,6 +84,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   bsc: {
@@ -88,6 +93,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   avalanche: {
@@ -96,6 +102,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   fantom: {
@@ -104,6 +111,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false, // SpookySwap exists on Fantom but flash loans not implemented
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   zksync: {
@@ -112,6 +120,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB
     spookyswap: false,
     syncswap: true, // SyncSwap Vault: 0x621425a1Ef6abE91058E9712575dcc4258F8d091
+    dai_flash_mint: false,
   },
 
   linea: {
@@ -120,6 +129,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false, // SyncSwap planned but not yet deployed
+    dai_flash_mint: false,
   },
 
   // =========================================================================
@@ -132,6 +142,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false, // PancakeSwap is EVM-only
     spookyswap: false, // SpookySwap is EVM-only
     syncswap: false, // SyncSwap is EVM-only
+    dai_flash_mint: false,
     // Note: Solana has native flash loan protocols (Solend, Port, Mango)
     // but they use different interfaces and are not covered by these contracts
   },
@@ -146,6 +157,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false, // No testnet deployment
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   'arbitrum-sepolia': {
@@ -154,6 +166,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 
   'zksync-sepolia': {
@@ -162,6 +175,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: true, // SyncSwap Vault: 0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8 (Staging)
+    dai_flash_mint: false,
   },
 
   'solana-devnet': {
@@ -170,6 +184,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
+    dai_flash_mint: false,
   },
 } as const;
 
@@ -261,9 +276,10 @@ export function validateFlashLoanSupport(
  *
  * Preference order (by fee, lowest first):
  * 1. Balancer V2 (0% fee)
- * 2. Aave V3 (0.09% fee)
- * 3. PancakeSwap V3 (0.01-1% fee, pool-dependent)
- * 4. SyncSwap (0.3% fee)
+ * 2. DAI Flash Mint (0.01% fee, Ethereum-only, DAI-only)
+ * 3. Aave V3 (0.09% fee)
+ * 4. PancakeSwap V3 (0.01-1% fee, pool-dependent)
+ * 5. SyncSwap (0.3% fee)
  *
  * @param chain - Chain identifier
  * @returns Preferred protocol or null if none available
@@ -278,6 +294,7 @@ export function validateFlashLoanSupport(
 export function getPreferredProtocol(chain: string): FlashLoanProtocol | null {
   const preferences: FlashLoanProtocol[] = [
     'balancer_v2', // 0% fee - always best if available
+    'dai_flash_mint', // 0.01% fee - Ethereum-only, DAI-only
     'aave_v3', // 0.09% fee - second best
     'pancakeswap_v3', // 0.01-1% fee - varies by pool
     'syncswap', // 0.3% fee - higher than Aave
@@ -323,7 +340,7 @@ export const FLASH_LOAN_STATS = (() => {
   const testnetChains = allChains.filter(c => TESTNET_CHAINS.has(c));
 
   // Count how many chains support each protocol
-  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'spookyswap', 'syncswap'];
+  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'spookyswap', 'syncswap', 'dai_flash_mint'];
   const protocolCoverage = {} as Record<FlashLoanProtocol, number>;
   for (const protocol of protocols) {
     protocolCoverage[protocol] = allChains.filter(

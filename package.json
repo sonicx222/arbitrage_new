@@ -19,7 +19,7 @@
     "test:smoke": "jest --selectProjects smoke",
     "test:ml": "jest --selectProjects ml",
     "test:perf": "npm test && node scripts/analyze-performance.js",
-    "test:ci": "jest --ci --coverage --selectProjects unit integration --coverageThreshold='{}'",
+    "test:ci": "jest --ci --coverage --selectProjects unit integration",
     "test:debug": "cross-env DEBUG_TESTS=true jest --runInBand",
     "test:changed": "jest --onlyChanged --passWithNoTests",
     "test:related": "jest --findRelatedTests",

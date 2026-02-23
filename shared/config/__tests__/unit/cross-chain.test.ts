@@ -10,7 +10,9 @@
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import {
   CROSS_CHAIN_TOKEN_ALIASES,
+  LIQUID_STAKING_TOKENS,
   normalizeTokenForCrossChain,
+  normalizeTokenForPricing,
   findCommonTokensBetweenChains,
   preWarmCommonTokensCache,
   getChainSpecificTokenSymbol,
@@ -117,6 +119,85 @@ describe('Cross-Chain Token Normalization', () => {
 
       expect(result1).toBe(result2);
       expect(result1).toBe('WETH');
+    });
+  });
+
+  describe('LIQUID_STAKING_TOKENS', () => {
+    it('should contain all known LST/LRT tokens', () => {
+      // Ethereum LSTs
+      expect(LIQUID_STAKING_TOKENS.has('STETH')).toBe(true);
+      expect(LIQUID_STAKING_TOKENS.has('WSTETH')).toBe(true);
+      expect(LIQUID_STAKING_TOKENS.has('RETH')).toBe(true);
+      expect(LIQUID_STAKING_TOKENS.has('CBETH')).toBe(true);
+
+      // Solana LSTs
+      expect(LIQUID_STAKING_TOKENS.has('MSOL')).toBe(true);
+      expect(LIQUID_STAKING_TOKENS.has('JITOSOL')).toBe(true);
+      expect(LIQUID_STAKING_TOKENS.has('BSOL')).toBe(true);
+
+      // Avalanche LSTs
+      expect(LIQUID_STAKING_TOKENS.has('SAVAX')).toBe(true);
+    });
+
+    it('should NOT contain base tokens', () => {
+      expect(LIQUID_STAKING_TOKENS.has('SOL')).toBe(false);
+      expect(LIQUID_STAKING_TOKENS.has('ETH')).toBe(false);
+      expect(LIQUID_STAKING_TOKENS.has('AVAX')).toBe(false);
+      expect(LIQUID_STAKING_TOKENS.has('WETH')).toBe(false);
+    });
+  });
+
+  describe('normalizeTokenForPricing', () => {
+    it('should preserve LST token identities (not alias to underlying)', () => {
+      // Solana LSTs — these MUST stay distinct for arbitrage detection
+      expect(normalizeTokenForPricing('MSOL')).toBe('MSOL');
+      expect(normalizeTokenForPricing('mSOL')).toBe('MSOL');
+      expect(normalizeTokenForPricing('JITOSOL')).toBe('JITOSOL');
+      expect(normalizeTokenForPricing('BSOL')).toBe('BSOL');
+
+      // Ethereum LSTs
+      expect(normalizeTokenForPricing('STETH')).toBe('STETH');
+      expect(normalizeTokenForPricing('stETH')).toBe('STETH');
+      expect(normalizeTokenForPricing('WSTETH')).toBe('WSTETH');
+      expect(normalizeTokenForPricing('wstETH')).toBe('WSTETH');
+      expect(normalizeTokenForPricing('RETH')).toBe('RETH');
+      expect(normalizeTokenForPricing('rETH')).toBe('RETH');
+      expect(normalizeTokenForPricing('CBETH')).toBe('CBETH');
+
+      // Avalanche LSTs
+      expect(normalizeTokenForPricing('SAVAX')).toBe('SAVAX');
+      expect(normalizeTokenForPricing('sAVAX')).toBe('SAVAX');
+    });
+
+    it('should still alias bridged token variants (same asset, different chain)', () => {
+      // These are NOT LSTs — they represent the same priced asset
+      expect(normalizeTokenForPricing('WETH.e')).toBe('WETH');
+      expect(normalizeTokenForPricing('fUSDT')).toBe('USDT');
+      expect(normalizeTokenForPricing('BTCB')).toBe('WBTC');
+      expect(normalizeTokenForPricing('ETH')).toBe('WETH');
+      expect(normalizeTokenForPricing('WBNB')).toBe('BNB');
+    });
+
+    it('should pass through canonical tokens unchanged', () => {
+      expect(normalizeTokenForPricing('WETH')).toBe('WETH');
+      expect(normalizeTokenForPricing('USDC')).toBe('USDC');
+      expect(normalizeTokenForPricing('SOL')).toBe('SOL');
+    });
+
+    it('should differ from normalizeTokenForCrossChain for LSTs', () => {
+      // This is the critical test: cross-chain maps LSTs to underlying,
+      // pricing normalization preserves them
+      expect(normalizeTokenForCrossChain('MSOL')).toBe('SOL');
+      expect(normalizeTokenForPricing('MSOL')).toBe('MSOL');
+
+      expect(normalizeTokenForCrossChain('SAVAX')).toBe('AVAX');
+      expect(normalizeTokenForPricing('SAVAX')).toBe('SAVAX');
+    });
+
+    it('should cache results for performance', () => {
+      const result1 = normalizeTokenForPricing('WETH');
+      const result2 = normalizeTokenForPricing('WETH');
+      expect(result1).toBe(result2);
     });
   });
 

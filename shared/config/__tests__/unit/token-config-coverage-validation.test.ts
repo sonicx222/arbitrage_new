@@ -57,7 +57,8 @@ describe('S2.2.4 Token Coverage Verification', () => {
       // 11 chains with tokens: original 6 + 5 new chains
       // S3.2.1: Avalanche expanded to 15, Fantom to 10
       // S3.3.3: Solana expanded to 15 → Total 112
-      expect(totalTokens).toBe(112);
+      // Phase 0 Item 2: Added cbETH, sfrxETH to Ethereum → Total 114
+      expect(totalTokens).toBe(114);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -86,7 +87,7 @@ describe('S2.2.4 Token Coverage Verification', () => {
       base: 10,
       polygon: 10,
       optimism: 10,
-      ethereum: 8,
+      ethereum: 10,  // Phase 0 Item 2: +2 (cbETH, sfrxETH)
       // S3.1.2: New chains (S3.2.1: avalanche expanded to 15, fantom to 10, S3.3.3: solana to 15)
       avalanche: 15,
       fantom: 10,

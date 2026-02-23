@@ -127,11 +127,37 @@ export function getStandbyConfigFromEnv() {
 // Cached Redis health status to avoid blocking health checks with ping on every request
 let cachedRedisHealthy = true;
 let redisHealthCheckInterval: NodeJS.Timeout | null = null;
+// P1-6: Cached DLQ length for health monitoring
+let cachedDlqLength = 0;
+const DLQ_WARNING_THRESHOLD = 100;
+// P2-14: Consumer lag alerting thresholds
+let cachedConsumerLag = { pendingCount: 0, minId: null as string | null, maxId: null as string | null };
+const CONSUMER_LAG_WARNING_THRESHOLD = 50;
 
 function startRedisHealthMonitor(engine: ExecutionEngineService): void {
   // Check Redis health every 10 seconds and cache the result
   redisHealthCheckInterval = setInterval(async () => {
     cachedRedisHealthy = await engine.isRedisHealthy();
+    // P1-6: Monitor DLQ length — alert when failed messages accumulate
+    cachedDlqLength = await engine.getDlqLength();
+    if (cachedDlqLength > DLQ_WARNING_THRESHOLD) {
+      logger.warn('DLQ stream has accumulated failed messages', {
+        dlqLength: cachedDlqLength,
+        threshold: DLQ_WARNING_THRESHOLD,
+        action: 'Investigate failed execution requests in stream:dead-letter-queue',
+      });
+    }
+    // P2-14: Monitor consumer lag — alert when pending messages accumulate
+    cachedConsumerLag = await engine.getConsumerLag();
+    if (cachedConsumerLag.pendingCount > CONSUMER_LAG_WARNING_THRESHOLD) {
+      logger.warn('Consumer lag is high — pending messages accumulating', {
+        pendingCount: cachedConsumerLag.pendingCount,
+        threshold: CONSUMER_LAG_WARNING_THRESHOLD,
+        minId: cachedConsumerLag.minId,
+        maxId: cachedConsumerLag.maxId,
+        action: 'Check consumer health, increase concurrency, or investigate stalled processing',
+      });
+    }
   }, 10_000);
   // Initial check
   engine.isRedisHealthy().then(healthy => { cachedRedisHealthy = healthy; }).catch(() => { cachedRedisHealthy = false; });
@@ -166,11 +192,26 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         successRate: stats.executionAttempts > 0
           ? (stats.successfulExecutions / stats.executionAttempts * 100).toFixed(2) + '%'
           : 'N/A',
+        // P1-6: DLQ monitoring — surface accumulated failed messages
+        dlqLength: cachedDlqLength,
+        dlqAlert: cachedDlqLength > DLQ_WARNING_THRESHOLD,
+        // P2-14: Consumer lag monitoring
+        consumerLagPending: cachedConsumerLag.pendingCount,
+        consumerLagAlert: cachedConsumerLag.pendingCount > CONSUMER_LAG_WARNING_THRESHOLD,
         uptime: process.uptime(),
         memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       };
     },
-    readyCheck: () => engine.isRunning(),
+    // P1-9: Ready check verifies engine is running AND essential subsystems are operational.
+    // Previously only checked isRunning(), reporting "ready" when Redis was down or no providers healthy.
+    // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-9
+    readyCheck: () => {
+      if (!engine.isRunning()) return false;
+      if (!cachedRedisHealthy) return false;
+      // In simulation mode, providers aren't required
+      if (!engine.getIsSimulationMode() && engine.getHealthyProvidersCount() === 0) return false;
+      return true;
+    },
     additionalRoutes: {
       '/stats': async (_req: IncomingMessage, res: ServerResponse) => {
         const stats = engine.getStats();
@@ -178,6 +219,19 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         const consumerLag = await engine.getConsumerLag();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ service: 'execution-engine', stats, consumerLag }));
+      },
+      // P2-15: Bridge recovery metrics endpoint
+      '/bridge-recovery': async (_req: IncomingMessage, res: ServerResponse) => {
+        const metrics = engine.getBridgeRecoveryMetrics();
+        const isRunning = engine.isBridgeRecoveryRunning();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ service: 'execution-engine', bridgeRecovery: { isRunning, metrics } }));
+      },
+      // P2-20: Probability tracker stats endpoint
+      '/probability-tracker': async (_req: IncomingMessage, res: ServerResponse) => {
+        const stats = engine.getProbabilityTrackerStats();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ service: 'execution-engine', probabilityTracker: stats }));
       },
       '/circuit-breaker': circuitBreakerHandler,
       '/circuit-breaker/close': circuitBreakerHandler,

@@ -61,6 +61,8 @@ Implement a comprehensive WebSocket resilience system with three layers:
 - 30s threshold balances false positives vs. stale data risk
 - Rotation before failure maintains data continuity
 
+> **Note**: This ADR covers **connection-level** staleness — detecting when a WebSocket connection has stopped delivering messages. This is distinct from **price-data** staleness (rejecting outdated price data during opportunity detection), which is covered by [ADR-033: Stale Price Window Protection](./ADR-033-stale-price-window.md) and documented in [STALE_PRICE_WINDOW.md](../../STALE_PRICE_WINDOW.md).
+
 ## Consequences
 
 ### Positive

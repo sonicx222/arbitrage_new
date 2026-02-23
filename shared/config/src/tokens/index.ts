@@ -115,9 +115,11 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6, chainId: 1 },
     { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6, chainId: 1 },
     { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol: 'WBTC', decimals: 8, chainId: 1 },
-    // LST tokens (high volume)
+    // LST/LRT tokens — Phase 0 Item 2: expanded for LST arbitrage surface
     { address: '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0', symbol: 'wstETH', decimals: 18, chainId: 1 },
     { address: '0xae78736Cd615f374D3085123A210448E74Fc6393', symbol: 'rETH', decimals: 18, chainId: 1 },
+    { address: '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704', symbol: 'cbETH', decimals: 18, chainId: 1 },
+    { address: '0xac3E018457B222d93114458476f3E3416Abbe38F', symbol: 'sfrxETH', decimals: 18, chainId: 1 }, // FIX: Corrected from Fraxtal chain address to Ethereum mainnet sfrxETH
     // Core DeFi
     { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18, chainId: 1 },
     { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18, chainId: 1 }
@@ -225,7 +227,7 @@ export const CORE_TOKENS: Record<string, Token[]> = {
  * Used to detect when prices may be stale and need refreshing.
  * Format: ISO 8601 date string
  */
-export const FALLBACK_PRICES_LAST_UPDATED = '2026-02-15T00:00:00Z';
+export const FALLBACK_PRICES_LAST_UPDATED = '2026-02-23T00:00:00Z';
 
 /**
  * Number of days after which fallback prices are considered stale.
@@ -284,33 +286,33 @@ export function getFallbackPriceAgeDays(): number {
  * @see FALLBACK_PRICES_LAST_UPDATED for when these were last updated
  */
 export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
-  // Native tokens and wrappers
-  ETH: 3500, WETH: 3500,
-  BNB: 600, WBNB: 600,
-  MATIC: 1.00, WMATIC: 1.00,
-  AVAX: 40, WAVAX: 40,
-  FTM: 0.80, WFTM: 0.80,
-  SOL: 200, WSOL: 200, // Solana (aligned with NATIVE_TOKEN_PRICES.solana)
+  // Native tokens and wrappers (updated 2026-02-23)
+  ETH: 3200, WETH: 3200,
+  BNB: 650, WBNB: 650,
+  MATIC: 0.50, WMATIC: 0.50,
+  AVAX: 35, WAVAX: 35,
+  FTM: 0.70, WFTM: 0.70,
+  SOL: 170, WSOL: 170,
   // L2 tokens
-  ARB: 1.50,
-  OP: 3.00,
+  ARB: 1.20,
+  OP: 2.50,
   // Major tokens
-  BTC: 100000, WBTC: 100000, BTCB: 100000, tBTC: 100000,
+  BTC: 95000, WBTC: 95000, BTCB: 95000, tBTC: 95000,
   // Stablecoins (default to 1.00)
   USDT: 1.00, USDC: 1.00, DAI: 1.00, BUSD: 1.00,
   FRAX: 1.00, LUSD: 1.00, TUSD: 1.00, USDP: 1.00, GUSD: 1.00,
   USDbC: 1.00, fUSDT: 1.00, // Bridged stables
   // DeFi tokens
-  UNI: 10.00, AAVE: 250.00, LINK: 15.00, CRV: 1.00,
-  MKR: 2000.00, COMP: 60.00, SNX: 3.00, SUSHI: 1.50, YFI: 10000.00,
+  UNI: 12.00, AAVE: 280.00, LINK: 18.00, CRV: 0.80,
+  MKR: 1800.00, COMP: 55.00, SNX: 2.50, SUSHI: 1.20, YFI: 9000.00,
   // Liquid staking
-  STETH: 3500, WSTETH: 4000, RETH: 3700, CBETH: 3600,
-  stETH: 3500, wstETH: 4000, rETH: 3700, cbETH: 3600, // lowercase variants
+  STETH: 3200, WSTETH: 3700, RETH: 3400, CBETH: 3300,
+  stETH: 3200, wstETH: 3700, rETH: 3400, cbETH: 3300, // lowercase variants
   // Solana LSTs
-  mSOL: 210, jitoSOL: 210, BSOL: 205,
+  mSOL: 180, jitoSOL: 180, BSOL: 175,
   // DEX/Protocol tokens
-  GMX: 40, CAKE: 3.00, JOE: 0.50, VELO: 0.15, AERO: 1.50,
-  RAY: 2.00, ORCA: 3.00, JUP: 0.80,
+  GMX: 35, CAKE: 2.50, JOE: 0.40, VELO: 0.12, AERO: 1.30,
+  RAY: 1.80, ORCA: 2.50, JUP: 0.70,
 });
 
 // =============================================================================
@@ -326,7 +328,7 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
  */
 export const NATIVE_TOKEN_PRICE_METADATA = Object.freeze({
   /** ISO date string of last price update */
-  lastUpdated: '2026-02-15',
+  lastUpdated: '2026-02-23',
   /** Maximum age in days before prices are considered stale */
   maxAgeDays: 7,
   /** Update frequency recommendation */
@@ -372,25 +374,25 @@ let _stalenessWarningShown = false;
  * IMPORTANT: These are FALLBACK prices used when real-time price feeds are unavailable.
  * For production arbitrage, always prefer real-time price data from oracles.
  *
- * Last updated: 2026-02-15
+ * Last updated: 2026-02-23
  * @see NATIVE_TOKEN_PRICE_METADATA for staleness tracking
  * @see checkNativeTokenPriceStaleness() to verify price freshness
  */
 export const NATIVE_TOKEN_PRICES: Record<string, number> = Object.freeze({
-  // EVM L1 chains
-  ethereum: 3500,  // ETH
-  bsc: 600,        // BNB
-  polygon: 1.00,   // MATIC
-  avalanche: 40,   // AVAX
-  fantom: 0.80,    // FTM
+  // EVM L1 chains (updated 2026-02-23)
+  ethereum: 3200,  // ETH
+  bsc: 650,        // BNB
+  polygon: 0.50,   // MATIC
+  avalanche: 35,   // AVAX
+  fantom: 0.70,    // FTM
   // EVM L2 chains (use ETH as native)
-  arbitrum: 3500,  // ETH
-  optimism: 3500,  // ETH
-  base: 3500,      // ETH
-  zksync: 3500,    // ETH
-  linea: 3500,     // ETH
+  arbitrum: 3200,  // ETH
+  optimism: 3200,  // ETH
+  base: 3200,      // ETH
+  zksync: 3200,    // ETH
+  linea: 3200,     // ETH
   // Non-EVM
-  solana: 200,     // SOL
+  solana: 170,     // SOL
 });
 
 /**

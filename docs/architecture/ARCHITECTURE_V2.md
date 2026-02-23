@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **11 blockchains** (10 EVM + Solana) with **49 DEXs** (current) and **112 tokens** (current)
+- Monitor **11 blockchains** (10 EVM + Solana) with **57 DEXs** (current) and **112 tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -63,7 +63,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 | Metric | Current (Feb 2026) | Target (Q2 2026) | Status |
 |--------|-------------------|------------------|--------|
 | **Chains Supported** | **11** (10 EVM + Solana) | 11 | ✅ Complete |
-| **DEXs Monitored** | **49** (42 EVM + 7 Solana) | 54 | 🔄 +5 DEXs planned |
+| **DEXs Monitored** | **57** (50 EVM + 7 Solana) | 60 | 🔄 +3 DEXs planned |
 | **Tokens Tracked** | **112** | 143 | 🔄 +31 tokens planned |
 | **Detection Latency (EVM)** | <50ms | <50ms | ✅ Achieved |
 | **Detection Latency (Solana)** | <100ms | <100ms | ✅ Achieved |
@@ -201,6 +201,7 @@ The architecture combines two patterns:
 │  ├── Liquidity Depth Analyzer (T3.15: Slippage prediction)                      │
 │  ├── Price Momentum Tracker (T2.7: EMA/z-score/velocity signals)               │
 │  ├── Price Oracle (Centralized price source with stale detection)               │
+│  │   └── Stale Price Window (dual-layer staleness protection, ADR-033)         │
 │  ├── Pair Activity Tracker (Volatility-based pair prioritization)               │
 │  ├── Swap Event Filter (Volume filtering, whale alerts, dedup)                  │
 │  ├── Correlation Analyzer (Predictive cache warming) ✅ NEW                     │
@@ -270,7 +271,7 @@ The execution engine has been refactored to extract reusable services for improv
 - `hasChain(chainId)` - Check if chain is supported
 
 **Performance**:
-- Memory: ~40 KB (all 49 DEXes cached)
+- Memory: ~40 KB (all 57 DEXes cached)
 - Lookup time: <0.01ms per operation
 - Indexes: 3 maps (by name, by router, by chain)
 
@@ -483,7 +484,7 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Redis Streams
 **Solution**: Redis-persisted recovery mechanism
 
 **Key Features**:
-- **Redis Persistence**: Stores bridge transaction state with 24-hour TTL
+- **Redis Persistence**: Stores bridge transaction state with 72-hour TTL
 - **Automatic Recovery**: On restart, checks for in-flight bridges and resumes monitoring
 - **Deadline Tracking**: Expires old recovery attempts (configurable timeout)
 - **Idempotent**: Safe to query bridge status multiple times
@@ -498,7 +499,7 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Redis Streams
 ```
 
 **Configuration**:
-- `BRIDGE_RECOVERY_MAX_AGE_MS`: Maximum age for recovery (default: 24 hours)
+- `BRIDGE_RECOVERY_MAX_AGE_MS`: Maximum age for recovery (default: 72 hours)
 - Redis key pattern: `bridge:recovery:{opportunityId}`
 
 **Location**: Implemented in `services/execution-engine/src/strategies/cross-chain.strategy.ts` (lines 1091-1658)
@@ -601,7 +602,23 @@ Price Update (Chain B) ─┘           │
 Total Target: <100ms detection, <10s for bridge opportunities
 ```
 
-### 5.3 Message Channels (Redis Streams)
+### 5.3 Stale Price Window Protection (ADR-033)
+
+Cross-chain detection uses a **dual-layer staleness protection** system to prevent trading on outdated price data. Stale prices are dangerous because cross-chain arbitrage opportunities derived from them may no longer exist by the time a trade executes.
+
+| Layer | Component | Default | Location |
+|-------|-----------|---------|----------|
+| Hard Rejection | `maxPriceAgeMs` gate in `findArbitrageInPrices()` | 30s | `detector.ts` |
+| Soft Confidence Penalty | `applyAgePenalty()` — 10%/min degradation, 0.1 floor | Gradient | `confidence-calculator.ts` |
+| Data Cleanup | `PriceDataManager.cleanup()` — background memory maintenance | 5min | `price-data-manager.ts` |
+
+The hard rejection runs **before** any confidence calculation, ensuring that whale activity boosts and ML prediction boosts cannot override staleness (FIX #11). Within the 30s window, older prices receive proportionally lower confidence scores.
+
+> **Note**: This is distinct from **connection-level** staleness detection in [ADR-010](./adr/ADR-010-websocket-resilience.md), which detects when WebSocket connections have stopped delivering messages.
+
+**See**: [STALE_PRICE_WINDOW.md](../STALE_PRICE_WINDOW.md) for full implementation details, penalty schedules, and tuning guidance. [ADR-033](./adr/ADR-033-stale-price-window.md) for the architectural decision record.
+
+### 5.4 Message Channels (Redis Streams)
 
 | Stream | Producer | Consumer | Volume | Retention |
 |--------|----------|----------|--------|-----------|
@@ -614,7 +631,7 @@ Total Target: <100ms detection, <10s for bridge opportunities
 | `stream:health` | All | Coordinator | ~10/min | 1 hour |
 | `stream:dead-letter-queue` | All | Ops/Monitoring | ~1/hour | 7 days |
 
-### 5.4 Opportunity Execution Flow (Broker Pattern)
+### 5.5 Opportunity Execution Flow (Broker Pattern)
 
 The Execution Engine does NOT consume directly from `stream:opportunities`.
 Instead, a broker pattern is used where the Coordinator forwards approved
@@ -699,7 +716,7 @@ Message Received → Validate → Queue → Execute → ACK
        └───────────────────────────────────────────── Empty: ACK immediately
 ```
 
-### 5.5 Coordinator Internal Subsystems
+### 5.6 Coordinator Internal Subsystems
 
 The coordinator maintains several internal subsystems for operational management:
 
@@ -908,7 +925,7 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 - Low fees (<$0.001) enable micro-arbitrage
 - Unique ecosystem (memecoins, LSTs) not available on EVM
 
-### 9.2 DEX Distribution (54 DEXs: 47 EVM + 7 Solana)
+### 9.2 DEX Distribution (57 DEXs: 50 EVM + 7 Solana)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -926,21 +943,20 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 │  ├── WooFi [M]              └── KnightSwap [M]                                  │
 │  └── Ramses [M]                                                                 │
 │                                                                                  │
-│  POLYGON (6 DEXs)           OPTIMISM (6 DEXs)         ETHEREUM (5 DEXs)         │
+│  POLYGON (4 DEXs)           OPTIMISM (3 DEXs)         ETHEREUM (5 DEXs)         │
 │  ├── Uniswap V3 [C]         ├── Uniswap V3 [C]        ├── Uniswap V3 [C]        │
 │  ├── QuickSwap V3 [C]       ├── Velodrome [C]         ├── Uniswap V2 [C]        │
-│  ├── SushiSwap [H]          ├── SushiSwap [H]         ├── SushiSwap [C]         │
-│  ├── Balancer [H]           ├── Beethoven X [H]       ├── Curve [H]             │
-│  ├── DFYN [M]               ├── Zipswap [M]           └── Balancer [H]          │
-│  └── Apeswap [M]            └── Rubicon [M]                                     │
+│  ├── SushiSwap [H]          └── SushiSwap [H]         ├── SushiSwap [C]         │
+│  └── Balancer [H]                                      ├── Curve [H]             │
+│                                                         └── Balancer [H]          │
 │                                                                                  │
-│  AVALANCHE (6 DEXs)         FANTOM (4 DEXs)           zkSYNC (4 DEXs)           │
+│  AVALANCHE (6 DEXs)         FANTOM (4 DEXs)           zkSYNC (2 DEXs)           │
 │  ├── Trader Joe V2 [C]      ├── SpookySwap [C]        ├── SyncSwap [C]          │
-│  ├── Pangolin [C]           ├── Equalizer [C]         ├── Mute.io [C]           │
-│  ├── SushiSwap [H]          ├── SpiritSwap [H]        ├── SpaceFi [H]           │
-│  ├── GMX [H]                └── Beethoven X [M]       └── Velocore [M]          │
-│  ├── Platypus [M]                                                               │
-│  └── KyberSwap [M]                                                              │
+│  ├── Pangolin [C]           ├── Equalizer [C]         └── Mute.io [C]           │
+│  ├── SushiSwap [H]          ├── SpiritSwap [H]                                  │
+│  ├── GMX [H]                └── Beethoven X [M]       LINEA (2 DEXs)            │
+│  ├── Platypus [M]                                      ├── Velocore [C]          │
+│  └── KyberSwap [M]                                     └── HorizonDEX [C]       │
 │                                                                                  │
 │  ═══════════════════════════════════════════════════════════════════════════    │
 │  SOLANA (7 DEXs) - NON-EVM                                                      │
@@ -1301,6 +1317,9 @@ The following Architecture Decision Records document key decisions:
 - [ADR-024: RPC Rate Limiting Strategy](./adr/ADR-024-rpc-rate-limiting.md)
 - [ADR-025: ML Model Lifecycle Management](./adr/ADR-025-ml-model-lifecycle.md)
 - [ADR-027: Nonce Pre-allocation Pool](./adr/ADR-027-nonce-preallocation-pool.md)
+
+### Data Integrity (ADR-033)
+- [ADR-033: Stale Price Window Protection](./adr/ADR-033-stale-price-window.md)
 
 ---
 

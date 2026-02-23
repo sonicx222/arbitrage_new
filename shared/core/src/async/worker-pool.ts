@@ -287,16 +287,32 @@ export class EventProcessingWorkerPool extends EventEmitter {
   // Task ID counter for JSON parsing (atomic increment)
   private jsonTaskIdCounter = 0;
 
+  // Elastic scaling configuration
+  private minPoolSize: number;
+  private maxPoolSize: number;
+  private elasticEvalTimer: NodeJS.Timeout | null = null;
+  private readonly ELASTIC_EVAL_INTERVAL_MS = 5000; // 5 seconds
+  private readonly SCALE_UP_THRESHOLD_MULTIPLIER = 2; // queue depth > workers * 2
+  private readonly SCALE_DOWN_IDLE_THRESHOLD = 2; // idle workers > 2
+  private readonly SCALE_UP_CONSECUTIVE_CHECKS = 3;
+  private readonly SCALE_DOWN_IDLE_DURATION_MS = 30000; // 30 seconds
+  private scaleUpConsecutiveCount = 0;
+  private lastAllBusyTimestamp = 0;
+
   constructor(
     poolSize = 4,
     maxQueueSize = 1000,
     taskTimeout = 30000, // 30 seconds
     priceBuffer: SharedArrayBuffer | null = null, // PHASE3-TASK41: Optional SharedArrayBuffer for price data
     keyRegistryBuffer: SharedArrayBuffer | null = null, // PHASE3-TASK43: Optional SharedArrayBuffer for key registry
-    workerPath?: string // Finding #16: Optional custom worker script path for testing
+    workerPath?: string, // Finding #16: Optional custom worker script path for testing
+    minPoolSize?: number,
+    maxPoolSize?: number
   ) {
     super();
-    this.poolSize = poolSize;
+    this.maxPoolSize = maxPoolSize ?? poolSize;
+    this.minPoolSize = minPoolSize ?? Math.max(2, Math.floor(poolSize / 2));
+    this.poolSize = Math.min(Math.max(poolSize, this.minPoolSize), this.maxPoolSize);
     this.maxQueueSize = maxQueueSize;
     this.taskTimeout = taskTimeout;
     this.priceBuffer = priceBuffer;
@@ -331,6 +347,9 @@ export class EventProcessingWorkerPool extends EventEmitter {
     // P1-FIX: Initial dispatch (event-driven, replaces startTaskDispatcher polling)
     this.tryDispatch();
 
+    // Start elastic scaling evaluation
+    this.startElasticEvaluation();
+
     logger.info('Worker pool started successfully');
   }
 
@@ -340,6 +359,9 @@ export class EventProcessingWorkerPool extends EventEmitter {
     logger.info('Stopping worker pool');
 
     this.isRunning = false;
+
+    // Stop elastic evaluation
+    this.stopElasticEvaluation();
 
     // Clear dispatch timer to prevent new dispatches
     this.dispatchTimer = clearTimeoutSafe(this.dispatchTimer);
@@ -991,6 +1013,159 @@ export class EventProcessingWorkerPool extends EventEmitter {
     if (this.statsWindowCount < this.STATS_WINDOW_SIZE) this.statsWindowCount++;
 
     this.recalculateJsonStats();
+  }
+
+  // ===========================================================================
+  // Elastic Pool Scaling
+  // ===========================================================================
+
+  /**
+   * Start periodic elastic scaling evaluation.
+   */
+  private startElasticEvaluation(): void {
+    if (this.minPoolSize >= this.maxPoolSize) return; // Static pool, no scaling needed
+
+    this.elasticEvalTimer = setInterval(() => {
+      this.evaluateElasticScaling();
+    }, this.ELASTIC_EVAL_INTERVAL_MS);
+
+    // Unref so it doesn't prevent process exit
+    if (this.elasticEvalTimer.unref) {
+      this.elasticEvalTimer.unref();
+    }
+  }
+
+  /**
+   * Stop elastic scaling evaluation.
+   */
+  private stopElasticEvaluation(): void {
+    if (this.elasticEvalTimer) {
+      clearInterval(this.elasticEvalTimer);
+      this.elasticEvalTimer = null;
+    }
+  }
+
+  /**
+   * Evaluate whether to scale up or down based on current load.
+   *
+   * Scale UP: if queue depth > (workers * 2) for 3 consecutive checks
+   * Scale DOWN: if idle workers > 2 for 30s, terminate one idle worker (never below min)
+   */
+  private evaluateElasticScaling(): void {
+    if (!this.isRunning) return;
+
+    const activeWorkerCount = this.workers.filter(Boolean).length;
+    const queueDepth = this.taskQueue.size();
+    const idleWorkerCount = this.availableWorkers.size;
+
+    // --- Scale UP evaluation ---
+    if (queueDepth > activeWorkerCount * this.SCALE_UP_THRESHOLD_MULTIPLIER) {
+      this.scaleUpConsecutiveCount++;
+      if (this.scaleUpConsecutiveCount >= this.SCALE_UP_CONSECUTIVE_CHECKS && activeWorkerCount < this.maxPoolSize) {
+        this.scaleUp();
+        this.scaleUpConsecutiveCount = 0;
+      }
+    } else {
+      this.scaleUpConsecutiveCount = 0;
+    }
+
+    // --- Scale DOWN evaluation ---
+    if (idleWorkerCount > this.SCALE_DOWN_IDLE_THRESHOLD && activeWorkerCount > this.minPoolSize) {
+      const now = Date.now();
+      if (this.lastAllBusyTimestamp === 0) {
+        this.lastAllBusyTimestamp = now;
+      } else if (now - this.lastAllBusyTimestamp >= this.SCALE_DOWN_IDLE_DURATION_MS) {
+        this.scaleDown();
+        this.lastAllBusyTimestamp = 0;
+      }
+    } else {
+      this.lastAllBusyTimestamp = 0;
+    }
+  }
+
+  /**
+   * Scale up by adding one worker.
+   */
+  private scaleUp(): void {
+    const newWorkerId = this.workers.length;
+    if (newWorkerId >= this.maxPoolSize) return;
+
+    try {
+      const worker = new Worker(this.workerPath, {
+        workerData: {
+          workerId: newWorkerId,
+          priceBuffer: this.priceBuffer,
+          keyRegistryBuffer: this.keyRegistryBuffer
+        }
+      });
+
+      worker.on('message', (message) => this.handleWorkerMessage(message, newWorkerId));
+      worker.on('error', (error) => this.handleWorkerError(error, newWorkerId));
+      worker.on('exit', (code) => this.handleWorkerExit(code, newWorkerId));
+
+      this.workers.push(worker);
+      this.availableWorkers.add(newWorkerId);
+      this.poolSize = this.workers.filter(Boolean).length;
+
+      this.workerStats.set(newWorkerId, {
+        workerId: newWorkerId,
+        activeTasks: 0,
+        completedTasks: 0,
+        failedTasks: 0,
+        averageProcessingTime: 0,
+        uptime: Date.now()
+      });
+
+      logger.info(`Elastic scale UP: added worker ${newWorkerId} (pool size: ${this.poolSize})`);
+      this.emit('elasticScaleUp', { workerId: newWorkerId, poolSize: this.poolSize });
+      this.scheduleDispatch();
+    } catch (error) {
+      logger.error('Failed to scale up worker pool', { error });
+    }
+  }
+
+  /**
+   * Scale down by terminating one idle worker (never below minPoolSize).
+   */
+  private scaleDown(): void {
+    const activeWorkerCount = this.workers.filter(Boolean).length;
+    if (activeWorkerCount <= this.minPoolSize) return;
+
+    // Find an idle worker to terminate (pick from availableWorkers)
+    const idleWorkerId = this.availableWorkers.values().next();
+    if (idleWorkerId.done) return;
+
+    const workerId = idleWorkerId.value;
+    const worker = this.workers[workerId];
+    if (!worker) return;
+
+    this.availableWorkers.delete(workerId);
+    this.workerStats.delete(workerId);
+
+    worker.removeAllListeners();
+    worker.terminate().then(() => {
+      logger.debug(`Worker ${workerId} terminated for scale down`);
+    }).catch((err) => {
+      logger.warn(`Error terminating worker ${workerId} during scale down`, { err });
+    });
+
+    // Null out the slot (don't splice to keep indices stable)
+    this.workers[workerId] = null as unknown as Worker;
+    this.poolSize = this.workers.filter(Boolean).length;
+
+    logger.info(`Elastic scale DOWN: removed worker ${workerId} (pool size: ${this.poolSize})`);
+    this.emit('elasticScaleDown', { workerId, poolSize: this.poolSize });
+  }
+
+  /**
+   * Get the current min/max pool size configuration.
+   */
+  getElasticConfig(): { minPoolSize: number; maxPoolSize: number; currentSize: number } {
+    return {
+      minPoolSize: this.minPoolSize,
+      maxPoolSize: this.maxPoolSize,
+      currentSize: this.workers.filter(Boolean).length,
+    };
   }
 
   /**

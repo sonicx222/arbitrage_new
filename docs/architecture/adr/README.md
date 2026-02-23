@@ -46,6 +46,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-030](./ADR-030-pancakeswap-v3-flash-loans.md) | PancakeSwap V3 Flash Loan Integration & Multi-Protocol Architecture | Accepted | 2026-02-08 | 90% |
 | [ADR-031](./ADR-031-multi-bridge-strategy.md) | Multi-Bridge Selection Strategy | Accepted | 2026-02-15 | 92% |
 | [ADR-032](./ADR-032-flash-loan-provider-aggregation.md) | Flash Loan Provider Aggregation | Accepted | 2026-02-15 | 92% |
+| [ADR-033](./ADR-033-stale-price-window.md) | Stale Price Window Protection | Accepted | 2026-02-22 | 95% |
 
 ## Decision Summary
 
@@ -238,6 +239,15 @@ An Architecture Decision Record captures an important architectural decision mad
     - Fallback routing on provider failure
     - 194 tests across 6 test suites
 
+### Data Integrity
+
+29. **Stale Price Window Protection** (ADR-033)
+    - Dual-layer staleness protection for cross-chain price data
+    - Hard rejection gate (30s default) before confidence calculation
+    - Soft confidence penalty (10%/min degradation, 0.1 floor)
+    - Prevents whale/ML boost bypass of stale data (FIX #11)
+    - Background data cleanup at 5min for memory management
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -310,3 +320,4 @@ XX% - Explanation of confidence factors
 | 2026-02-04 | ADR-022 | Added Hot-Path Memory Optimization decision |
 | 2026-02-15 | ADR-031 | Added Multi-Bridge Selection Strategy decision |
 | 2026-02-15 | ADR-032 | Added Flash Loan Provider Aggregation decision |
+| 2026-02-22 | ADR-033 | Added Stale Price Window Protection decision |

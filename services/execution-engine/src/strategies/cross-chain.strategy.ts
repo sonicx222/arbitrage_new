@@ -43,6 +43,7 @@ import {
   formatExecutionError,
   BRIDGE_RECOVERY_KEY_PREFIX,
   BRIDGE_RECOVERY_MAX_AGE_MS,
+  getBridgeRecoveryMaxAge,
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 // Phase 5.2: Flash loan support for destination chain
@@ -1640,21 +1641,25 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
    * Persist bridge recovery state to Redis before bridge execution.
    *
    * This enables recovery if shutdown occurs during bridge polling.
-   * The state is stored in Redis with a TTL matching BRIDGE_RECOVERY_MAX_AGE_MS.
+   * The state is stored in Redis with a protocol-aware TTL.
+   * Native rollup bridges get 8 days (7-day challenge + buffer).
    *
    * @param state - Bridge recovery state to persist
    * @param redis - Redis client for persistence
+   * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-3
    */
   async persistBridgeRecoveryState(
     state: BridgeRecoveryState,
     redis: import('@arbitrage/core').RedisClient
   ): Promise<void> {
     const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${state.bridgeId}`;
-    const ttlSeconds = Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
+    // P0-3: Use protocol-aware TTL instead of global constant
+    const ttlSeconds = Math.floor(getBridgeRecoveryMaxAge(state.bridgeProtocol) / 1000);
 
     try {
       // Fix #4: HMAC-sign recovery state to prevent tampering
-      const signedEnvelope = hmacSign(state, getHmacSigningKey());
+      // P3-27: Include Redis key as HMAC context to prevent cross-key replay
+      const signedEnvelope = hmacSign(state, getHmacSigningKey(), key);
       await redis.set(key, signedEnvelope, ttlSeconds);
       this.logger.debug('Persisted bridge recovery state', {
         bridgeId: state.bridgeId,
@@ -1708,7 +1713,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Handle both signed envelopes and legacy unsigned data
       let state: BridgeRecoveryState;
       if (isSignedEnvelope(raw)) {
-        const verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+        // P3-27: Include Redis key as HMAC context to prevent cross-key replay
+        let verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey, key);
+        if (!verified) {
+          // Migration: try without context for pre-P3-27 signed data
+          verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+        }
         if (!verified) {
           this.logger.error('Bridge recovery state HMAC verification failed - possible tampering', {
             bridgeId,
@@ -1734,10 +1744,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // Fix #4: Re-sign updated state
-      const signedEnvelope = hmacSign(state, signingKey);
+      // P3-27: Include Redis key as HMAC context
+      const signedEnvelope = hmacSign(state, signingKey, key);
 
-      // Keep same TTL for tracking purposes
-      const ttlSeconds = Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
+      // P0-3: Use protocol-aware TTL for tracking purposes
+      const ttlSeconds = Math.floor(getBridgeRecoveryMaxAge(state.bridgeProtocol) / 1000);
       await redis.set(key, signedEnvelope, ttlSeconds);
 
       // If recovered or failed, we can delete the key (cleanup)
@@ -1822,12 +1833,15 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
             continue;
           }
 
-          // Check if bridge is too old
-          if (Date.now() - state.initiatedAt > BRIDGE_RECOVERY_MAX_AGE_MS) {
+          // P0-3: Check if bridge is too old using protocol-aware max age
+          const protocolMaxAge = getBridgeRecoveryMaxAge(state.bridgeProtocol);
+          if (Date.now() - state.initiatedAt > protocolMaxAge) {
             this.logger.warn('Bridge recovery state expired', {
               bridgeId: state.bridgeId,
+              bridgeProtocol: state.bridgeProtocol,
               initiatedAt: state.initiatedAt,
               ageMs: Date.now() - state.initiatedAt,
+              maxAgeMs: protocolMaxAge,
             });
             await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'Recovery state expired');
             continue;

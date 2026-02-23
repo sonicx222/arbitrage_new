@@ -60,6 +60,28 @@ export const CROSS_CHAIN_TOKEN_ALIASES: Readonly<Record<string, string>> = {
 } as const;
 
 // =============================================================================
+// Phase 0 Item 2: LIQUID STAKING TOKEN EXCLUSION SET
+// These tokens MUST NOT be aliased during price normalization — their price
+// deviation from the underlying IS the arbitrage opportunity ($40B+ TVL market).
+// normalizeTokenForCrossChain() still maps them for bridge routing.
+// =============================================================================
+
+/**
+ * Tokens that are LSTs/LRTs. These have distinct market prices from their
+ * underlying asset and should not be collapsed during price comparison.
+ *
+ * Used by normalizeTokenForPricing() to skip aliasing for these tokens.
+ */
+export const LIQUID_STAKING_TOKENS: ReadonlySet<string> = new Set([
+  // Ethereum LSTs
+  'STETH', 'WSTETH', 'RETH', 'CBETH', 'SFRXETH', 'EETH', 'RSETH', 'PUFETH',
+  // Solana LSTs
+  'MSOL', 'JITOSOL', 'BSOL', 'STSOL', 'LSOL', 'SCNSOL', 'CGTSOL', 'LAINESOL', 'EDGESOL', 'COMPASSSOL',
+  // Avalanche LSTs
+  'SAVAX',
+]);
+
+// =============================================================================
 // PERFORMANCE OPTIMIZATION: Pre-computed alias Map for O(1) lookup
 // Avoids repeated toUpperCase() calls in hot-path
 // =============================================================================
@@ -72,9 +94,21 @@ const NORMALIZED_ALIASES = new Map<string, string>(
 const NORMALIZE_CACHE = new Map<string, string>();
 const NORMALIZE_CACHE_MAX_SIZE = 1000; // Prevent unbounded growth
 
+// Phase 0 Item 2: Separate cache for pricing normalization
+const PRICING_NORMALIZE_CACHE = new Map<string, string>();
+
 /**
  * Normalize a token symbol to its canonical form for cross-chain comparison.
  * This enables identifying equivalent tokens across different chains.
+ *
+ * **SECURITY NOTE (Fix #28):** This function normalizes by SYMBOL ONLY and does
+ * not verify token contract addresses. An adversarial token with symbol "USDC"
+ * deployed on one chain would match the real USDC on another chain, potentially
+ * triggering a false cross-chain arbitrage opportunity. Callers performing
+ * cross-chain comparisons MUST use {@link verifyTokenAddress} to confirm that the
+ * token address matches the known CORE_TOKENS entry for that chain before acting
+ * on any cross-chain opportunity.
+ * @see docs/reports/PHASE1_DEEP_ANALYSIS_2026-02-22.md Finding #28
  *
  * Performance optimized:
  * - Uses memoization cache to avoid repeated toUpperCase() calls
@@ -94,8 +128,11 @@ const NORMALIZE_CACHE_MAX_SIZE = 1000; // Prevent unbounded growth
  * @returns The canonical token symbol for cross-chain comparison
  */
 export function normalizeTokenForCrossChain(symbol: string): string {
+  // Fix 13: Use lowercase cache key so 'weth', 'WETH', 'Weth' share one entry
+  const cacheKey = symbol.toLowerCase();
+
   // Check memoization cache first (most common case)
-  const cached = NORMALIZE_CACHE.get(symbol);
+  const cached = NORMALIZE_CACHE.get(cacheKey);
   if (cached !== undefined) {
     // P0-5 FIX: Removed LRU refresh (delete/set) to prevent race condition.
     // The delete/set sequence was not atomic - under high concurrency, another
@@ -119,9 +156,68 @@ export function normalizeTokenForCrossChain(symbol: string): string {
     }
   }
 
-  // Cache result
-  NORMALIZE_CACHE.set(symbol, result);
+  // Cache result with normalized key
+  NORMALIZE_CACHE.set(cacheKey, result);
 
+  return result;
+}
+
+// =============================================================================
+// Phase 0 Item 2: PRICING NORMALIZATION (preserves LST identities)
+// =============================================================================
+
+/**
+ * Normalize a token symbol for PRICING comparison (intra-chain arbitrage).
+ *
+ * Unlike normalizeTokenForCrossChain(), this function preserves LST/LRT token
+ * identities. The price deviation between an LST and its underlying IS the
+ * arbitrage opportunity — mapping mSOL→SOL destroys this signal.
+ *
+ * Bridged token variants are still normalized (WETH.e→WETH, fUSDT→USDT)
+ * because those represent the same priced asset on different chains.
+ *
+ * Examples:
+ * - normalizeTokenForPricing('mSOL') → 'MSOL'      (preserved — distinct price)
+ * - normalizeTokenForPricing('stETH') → 'STETH'     (preserved — distinct price)
+ * - normalizeTokenForPricing('wstETH') → 'WSTETH'   (preserved — distinct price)
+ * - normalizeTokenForPricing('sAVAX') → 'SAVAX'     (preserved — distinct price)
+ * - normalizeTokenForPricing('WETH.e') → 'WETH'     (aliased — same asset, different chain)
+ * - normalizeTokenForPricing('fUSDT') → 'USDT'      (aliased — same asset, different chain)
+ * - normalizeTokenForPricing('BTCB') → 'WBTC'       (aliased — same asset, different chain)
+ *
+ * @param symbol - The token symbol to normalize
+ * @returns The canonical token symbol for pricing comparison
+ */
+export function normalizeTokenForPricing(symbol: string): string {
+  // Fix 13: Use lowercase cache key for case-insensitive deduplication
+  const cacheKey = symbol.toLowerCase();
+
+  // Check memoization cache first
+  const cached = PRICING_NORMALIZE_CACHE.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Compute normalized value
+  const upper = symbol.includes(' ') ? symbol.toUpperCase().trim() : symbol.toUpperCase();
+
+  // If this is an LST/LRT token, preserve its identity (don't alias to underlying)
+  let result: string;
+  if (LIQUID_STAKING_TOKENS.has(upper)) {
+    result = upper; // Preserve: mSOL stays MSOL, stETH stays STETH
+  } else {
+    result = NORMALIZED_ALIASES.get(upper) ?? upper;
+  }
+
+  // FIFO eviction
+  if (PRICING_NORMALIZE_CACHE.size >= NORMALIZE_CACHE_MAX_SIZE) {
+    const oldestKey = PRICING_NORMALIZE_CACHE.keys().next().value;
+    if (oldestKey !== undefined) {
+      PRICING_NORMALIZE_CACHE.delete(oldestKey);
+    }
+  }
+
+  PRICING_NORMALIZE_CACHE.set(cacheKey, result);
   return result;
 }
 
@@ -251,4 +347,63 @@ export const DEFAULT_QUOTE_TOKENS: Readonly<Record<string, string>> = {
  */
 export function getDefaultQuoteToken(chain: string): string {
   return DEFAULT_QUOTE_TOKENS[chain.toLowerCase()] || 'USDC';
+}
+
+// =============================================================================
+// Fix #28: ADDRESS-BASED TOKEN VERIFICATION
+// Mitigates adversarial symbol collision in cross-chain normalization.
+// A fake token with symbol "USDC" on one chain would match real USDC on
+// another. This function lets callers verify the token address before trusting
+// a symbol-based cross-chain match.
+// @see docs/reports/PHASE1_DEEP_ANALYSIS_2026-02-22.md Finding #28
+// =============================================================================
+
+// Pre-built lookup: chain → symbol (uppercase) → address (lowercase) for O(1) verification.
+// Built once at module load from CORE_TOKENS.
+const TOKEN_ADDRESS_INDEX = new Map<string, Map<string, string>>();
+
+(function buildTokenAddressIndex() {
+  for (const [chain, tokens] of Object.entries(CORE_TOKENS)) {
+    const chainMap = new Map<string, string>();
+    for (const token of tokens) {
+      chainMap.set(token.symbol.toUpperCase(), token.address.toLowerCase());
+    }
+    TOKEN_ADDRESS_INDEX.set(chain.toLowerCase(), chainMap);
+  }
+})();
+
+/**
+ * Verify that a token's contract address matches the known CORE_TOKENS address
+ * for the given symbol on the given chain. Returns false if the token is unknown
+ * (not in CORE_TOKENS) or the address doesn't match.
+ *
+ * Use this AFTER normalizeTokenForCrossChain() to guard against adversarial
+ * symbol collisions in cross-chain arbitrage detection.
+ *
+ * @param chain - Chain identifier (e.g., 'ethereum', 'arbitrum')
+ * @param symbol - Token symbol (e.g., 'USDC', 'WETH')
+ * @param address - Token contract address to verify
+ * @returns true if address matches known CORE_TOKENS entry; false otherwise
+ */
+export function verifyTokenAddress(chain: string, symbol: string, address: string): boolean {
+  const chainMap = TOKEN_ADDRESS_INDEX.get(chain.toLowerCase());
+  if (!chainMap) return false;
+
+  const knownAddress = chainMap.get(symbol.toUpperCase());
+  if (!knownAddress) return false;
+
+  return knownAddress === address.toLowerCase();
+}
+
+/**
+ * Check if a token symbol is known (present in CORE_TOKENS) on a given chain.
+ * Does NOT verify the address — use {@link verifyTokenAddress} for that.
+ *
+ * @param chain - Chain identifier
+ * @param symbol - Token symbol
+ * @returns true if the symbol is in CORE_TOKENS for this chain
+ */
+export function isKnownToken(chain: string, symbol: string): boolean {
+  const chainMap = TOKEN_ADDRESS_INDEX.get(chain.toLowerCase());
+  return chainMap?.has(symbol.toUpperCase()) ?? false;
 }

@@ -794,7 +794,10 @@ export class CrossChainDetectorService {
       // Reschedule only if still running (delay starts AFTER completion)
       if (this.stateManager.isRunning()) {
         this.ethPriceRefreshInterval = setTimeout(
-          () => { scheduleRefresh().catch(() => {}); },
+          // P3-28: Log rescheduled refresh failures (was silently swallowed)
+          () => { scheduleRefresh().catch(err => {
+            this.logger.debug('Rescheduled ETH price refresh failed', { error: (err as Error).message });
+          }); },
           CrossChainDetectorService.ETH_PRICE_REFRESH_INTERVAL_MS
         );
       }

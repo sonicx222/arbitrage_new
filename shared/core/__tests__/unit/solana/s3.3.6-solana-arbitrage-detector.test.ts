@@ -519,8 +519,18 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
     });
 
     it('should normalize token symbols for cross-chain matching', async () => {
+      // Phase 0 Item 2: LST normalization requires normalizeLiquidStaking: true
+      // to collapse MSOL→SOL for cross-chain matching. Default is now false
+      // (preserves LST identities for intra-chain pricing).
+      const crossChainDetector = new SolanaArbitrageDetector({
+        rpcUrl: 'https://api.mainnet-beta.solana.com',
+        minProfitThreshold: 0.5,
+        crossChainEnabled: true,
+        normalizeLiquidStaking: true,
+      }, { logger: mockLogger });
+
       // Solana uses MSOL (staked SOL)
-      await detector.addPool(createMockPool({
+      await crossChainDetector.addPool(createMockPool({
         address: 'msol-usdc-pool',
         dex: 'raydium',
         token0Symbol: 'MSOL',
@@ -539,7 +549,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       ];
 
       // MSOL should be normalized to SOL for comparison
-      const comparisons = await detector.compareCrossChainPrices(evmPrices);
+      const comparisons = await crossChainDetector.compareCrossChainPrices(evmPrices);
 
       expect(comparisons.length).toBeGreaterThanOrEqual(1);
       expect(comparisons[0].token).toBe('SOL'); // Normalized

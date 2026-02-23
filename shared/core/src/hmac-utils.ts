@@ -43,14 +43,19 @@ export function getHmacSigningKey(): string | null {
  *
  * @param data - The data to sign
  * @param signingKey - HMAC signing key (null = no signing)
+ * @param context - Optional context (e.g. Redis key) included in HMAC to prevent cross-key replay
  */
-export function hmacSign<T>(data: T, signingKey: string | null): SignedEnvelope<T> {
+export function hmacSign<T>(data: T, signingKey: string | null, context?: string): SignedEnvelope<T> {
   if (!signingKey) {
     return { data, sig: '' };
   }
 
-  const serialized = JSON.stringify(data);
-  const sig = createHmac('sha256', signingKey).update(serialized).digest('hex');
+  const hmac = createHmac('sha256', signingKey);
+  if (context) {
+    hmac.update(context);
+    hmac.update('\0'); // Null separator to prevent context+data ambiguity
+  }
+  const sig = hmac.update(JSON.stringify(data)).digest('hex');
   return { data, sig };
 }
 
@@ -61,8 +66,9 @@ export function hmacSign<T>(data: T, signingKey: string | null): SignedEnvelope<
  *
  * @param envelope - The signed envelope to verify
  * @param signingKey - HMAC signing key (null = skip verification)
+ * @param context - Optional context (e.g. Redis key) that was included in HMAC during signing
  */
-export function hmacVerify<T>(envelope: SignedEnvelope<T>, signingKey: string | null): T | null {
+export function hmacVerify<T>(envelope: SignedEnvelope<T>, signingKey: string | null, context?: string): T | null {
   if (!signingKey) {
     return envelope.data;
   }
@@ -72,8 +78,12 @@ export function hmacVerify<T>(envelope: SignedEnvelope<T>, signingKey: string | 
     return null;
   }
 
-  const serialized = JSON.stringify(envelope.data);
-  const expected = createHmac('sha256', signingKey).update(serialized).digest('hex');
+  const hmac = createHmac('sha256', signingKey);
+  if (context) {
+    hmac.update(context);
+    hmac.update('\0');
+  }
+  const expected = hmac.update(JSON.stringify(envelope.data)).digest('hex');
 
   if (expected.length !== envelope.sig.length) {
     return null;

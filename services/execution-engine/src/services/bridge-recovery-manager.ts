@@ -32,6 +32,7 @@ import type {
 import {
   BRIDGE_RECOVERY_KEY_PREFIX,
   BRIDGE_RECOVERY_MAX_AGE_MS,
+  getBridgeRecoveryMaxAge,
 } from '../types';
 
 // =============================================================================
@@ -44,7 +45,7 @@ import {
 export interface BridgeRecoveryManagerConfig {
   /** How often to check pending bridges (ms). Default: 60000 (1 min) */
   checkIntervalMs: number;
-  /** Max age before marking bridge as abandoned (ms). Default: 24 hours */
+  /** Max age before marking bridge as abandoned (ms). Default: 72 hours */
   maxAgeMs: number;
   /** Max concurrent recovery operations. Default: 3 */
   maxConcurrentRecoveries: number;
@@ -91,7 +92,7 @@ export interface BridgeRecoveryManagerDeps {
 
 const DEFAULT_CONFIG: BridgeRecoveryManagerConfig = {
   checkIntervalMs: 60_000,       // 1 minute
-  maxAgeMs: BRIDGE_RECOVERY_MAX_AGE_MS,  // 24 hours
+  maxAgeMs: BRIDGE_RECOVERY_MAX_AGE_MS,  // 72 hours
   maxConcurrentRecoveries: 3,
   enabled: true,
 };
@@ -425,7 +426,18 @@ export class BridgeRecoveryManager {
           // Fix #4: Handle both HMAC-signed envelopes and legacy unsigned data
           let state: BridgeRecoveryState;
           if (isSignedEnvelope(raw)) {
-            const verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+            // P3-27: Include Redis key as HMAC context to prevent cross-key replay
+            let verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey, key);
+            if (!verified) {
+              // Migration: try without context for pre-P3-27 signed data
+              verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+              if (verified) {
+                // Re-sign with context for future reads
+                this.logger.info('Migrating bridge recovery state to context-bound HMAC', { key });
+                const resigned = hmacSign(verified, signingKey, key);
+                await this.redis.set(key, resigned).catch(() => {});
+              }
+            }
             if (!verified) {
               this.logger.error('Bridge recovery state HMAC verification failed - possible tampering', {
                 key,
@@ -433,12 +445,15 @@ export class BridgeRecoveryManager {
               continue;
             }
             state = verified;
+          } else if (signingKey) {
+            // Fix 6: When HMAC signing is enabled, reject unsigned data instead of
+            // accepting it. Unsigned data with signing enabled indicates either
+            // legacy data that should be re-signed or potential tampering.
+            this.logger.error('Unsigned bridge recovery state rejected — HMAC signing is enabled', { key });
+            continue;
           } else {
-            // Legacy unsigned data — accept but log if signing is enabled
+            // No signing key configured — accept unsigned data as-is
             state = raw as BridgeRecoveryState;
-            if (signingKey) {
-              this.logger.warn('Unsigned bridge recovery state found with signing enabled', { key });
-            }
           }
 
           states.push(state);
@@ -474,22 +489,17 @@ export class BridgeRecoveryManager {
   private async processSingleBridge(state: BridgeRecoveryState): Promise<void> {
     const age = Date.now() - state.initiatedAt;
 
-    // Check if bridge is too old (abandoned)
-    if (age > this.config.maxAgeMs) {
-      this.logger.warn('Bridge recovery state expired, marking as abandoned', {
-        bridgeId: state.bridgeId,
-        opportunityId: state.opportunityId,
-        ageMs: age,
-        maxAgeMs: this.config.maxAgeMs,
-        sourceChain: state.sourceChain,
-        destChain: state.destChain,
-      });
-      await this.updateRecoveryStatus(state.bridgeId, 'failed', 'Bridge abandoned: exceeded max age');
-      this.metrics.abandonedBridges++;
-      return;
-    }
+    // P0-3: Use protocol-aware max age. Native rollup bridges (Arbitrum, Optimism)
+    // have 7-day challenge periods and need 8-day TTL instead of the default 72h.
+    // Protocol override only applies when the protocol needs MORE time than the
+    // global default — otherwise respect the (possibly customized) config.maxAgeMs.
+    // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-3
+    const protocolMaxAge = getBridgeRecoveryMaxAge(state.bridgeProtocol);
+    const maxAge = protocolMaxAge > BRIDGE_RECOVERY_MAX_AGE_MS
+      ? protocolMaxAge
+      : this.config.maxAgeMs;
 
-    // Find bridge router for status check
+    // Find bridge router for status check (needed for both expiry and active paths)
     const bridgeRouter = this.bridgeRouterFactory.findSupportedRouter(
       state.sourceChain,
       state.destChain,
@@ -504,6 +514,45 @@ export class BridgeRecoveryManager {
         bridgeToken: state.bridgeToken,
       });
       // Don't mark as failed - router may become available later
+      return;
+    }
+
+    // Phase 0 Item 7: Final bridge status check before marking as abandoned.
+    // Previously, expired bridges were immediately abandoned without checking if the
+    // bridge actually completed (funds sitting on destination chain with no recovery).
+    if (age > maxAge) {
+      try {
+        const finalStatus = await bridgeRouter.getStatus(state.bridgeId);
+        if (finalStatus.status === 'completed') {
+          // Bridge completed after TTL — transition to sell recovery instead of abandoning
+          this.logger.warn('Bridge completed after TTL expiry — transitioning to sell recovery', {
+            bridgeId: state.bridgeId,
+            opportunityId: state.opportunityId,
+            ageMs: age,
+            maxAgeMs: maxAge,
+            bridgeProtocol: state.bridgeProtocol,
+          });
+          await this.updateRecoveryStatus(state.bridgeId, 'bridge_completed_sell_pending');
+          return;
+        }
+      } catch (error) {
+        this.logger.debug('Final status check failed before abandonment', {
+          bridgeId: state.bridgeId,
+          error: getErrorMessage(error),
+        });
+      }
+
+      this.logger.warn('Bridge recovery state expired, marking as abandoned', {
+        bridgeId: state.bridgeId,
+        opportunityId: state.opportunityId,
+        ageMs: age,
+        maxAgeMs: maxAge,
+        bridgeProtocol: state.bridgeProtocol,
+        sourceChain: state.sourceChain,
+        destChain: state.destChain,
+      });
+      await this.updateRecoveryStatus(state.bridgeId, 'failed', 'Bridge abandoned: exceeded max age');
+      this.metrics.abandonedBridges++;
       return;
     }
 
@@ -548,14 +597,18 @@ export class BridgeRecoveryManager {
 
       switch (bridgeStatus.status) {
         case 'completed': {
-          this.logger.info('Bridge completed during recovery check', {
+          // Fix 5: Transition to bridge_completed_sell_pending instead of recovered.
+          // The bridge has completed but the sell on the destination chain has NOT been
+          // executed yet. The BridgeRecoveryManager cannot execute sells (no StrategyContext).
+          // CrossChainStrategy.recoverPendingBridges() picks up this state on restart.
+          // @see Fix W2-4 pattern used for the bridge_completed_sell_pending handler above
+          this.logger.info('Bridge completed during recovery — transitioning to sell pending', {
             bridgeId: state.bridgeId,
             opportunityId: state.opportunityId,
             amountReceived: bridgeStatus.amountReceived,
             destTxHash: bridgeStatus.destTxHash,
           });
-          await this.updateRecoveryStatus(state.bridgeId, 'recovered');
-          this.metrics.recoveredBridges++;
+          await this.updateRecoveryStatus(state.bridgeId, 'bridge_completed_sell_pending');
           break;
         }
 
@@ -625,9 +678,14 @@ export class BridgeRecoveryManager {
       }
 
       // Fix #4: Handle HMAC-signed envelopes on read
+      // P3-27: Include Redis key as HMAC context to prevent cross-key replay
       let existing: BridgeRecoveryState;
       if (isSignedEnvelope(raw)) {
-        const verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+        let verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey, key);
+        if (!verified) {
+          // Migration: try without context for pre-P3-27 signed data
+          verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+        }
         if (!verified) {
           this.logger.error('Bridge recovery state HMAC verification failed during update', {
             bridgeId,
@@ -650,13 +708,19 @@ export class BridgeRecoveryManager {
       }
 
       // Fix #4: HMAC-sign updated state
-      const signedEnvelope = hmacSign(updated, signingKey);
+      // P3-27: Include Redis key as HMAC context
+      const signedEnvelope = hmacSign(updated, signingKey, key);
 
-      // Terminal states get short TTL for post-mortem; active states keep standard TTL
+      // Terminal states get short TTL for post-mortem; active states use protocol-aware TTL
+      // P0-3: Native rollup bridges need 8-day TTL for 7-day challenge period
       const isTerminal = status === 'recovered' || status === 'failed';
+      const protocolMaxAge = getBridgeRecoveryMaxAge(existing.bridgeProtocol);
+      const effectiveMaxAge = protocolMaxAge > BRIDGE_RECOVERY_MAX_AGE_MS
+        ? protocolMaxAge
+        : this.config.maxAgeMs;
       const ttlSeconds = isTerminal
         ? 3600 // 1 hour
-        : Math.floor(this.config.maxAgeMs / 1000);
+        : Math.floor(effectiveMaxAge / 1000);
 
       await this.redis.set(key, signedEnvelope, ttlSeconds);
 

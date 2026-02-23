@@ -568,7 +568,8 @@ export class ExecutionEngineService {
 
       // FIX 1.1: Use initialization module for risk management
       // Initialize capital risk management (Phase 3: Task 3.4.5)
-      const riskResult = initializeRiskManagement(this.logger, { skipValidation: false });
+      // Fix 2: Pass Redis client for probability tracker persistence
+      const riskResult = initializeRiskManagement(this.logger, { skipValidation: false, redis: this.redis });
       this.drawdownBreaker = riskResult.drawdownBreaker;
       this.evCalculator = riskResult.evCalculator;
       this.positionSizer = riskResult.positionSizer;
@@ -813,6 +814,18 @@ export class ExecutionEngineService {
       this.drawdownBreaker = null;
       this.evCalculator = null;
       this.positionSizer = null;
+      // P0-4: Call destroy() to persist final batch of outcomes to Redis before clearing.
+      // Previously just nullified, losing up to 10 outcomes per shutdown.
+      // @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-4
+      if (this.probabilityTracker) {
+        try {
+          await this.probabilityTracker.destroy();
+        } catch (error) {
+          this.logger.warn('Failed to destroy probability tracker on shutdown', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       this.probabilityTracker = null;
       this.riskManagementEnabled = false;
       this.riskOrchestrator = null;
@@ -1695,6 +1708,20 @@ export class ExecutionEngineService {
       return await this.redis.ping();
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * P1-6: Get the length of the dead-letter queue stream.
+   * Used by health monitoring to alert when failed messages accumulate.
+   * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-6
+   */
+  async getDlqLength(): Promise<number> {
+    if (!this.streamsClient) return 0;
+    try {
+      return await this.streamsClient.xlen(RedisStreams.DEAD_LETTER_QUEUE);
+    } catch {
+      return 0;
     }
   }
 

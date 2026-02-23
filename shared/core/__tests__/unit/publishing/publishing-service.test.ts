@@ -237,10 +237,11 @@ describe('PublishingService', () => {
 
       await service.publishArbitrageOpportunity(opportunity as any);
 
+      // P1-10: TTL extended from 30s to 900s to exceed XCLAIM minIdleMs (10 min default)
       expect(mockRedis.setNx).toHaveBeenCalledWith(
         'opp:dedup:opp-123',
         '1',
-        30
+        900
       );
     });
 

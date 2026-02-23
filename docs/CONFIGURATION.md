@@ -62,8 +62,47 @@ Each chain requires HTTP and WebSocket endpoints:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `PRIVATE_KEY` | EVM wallet private key | Yes (for execution) |
+| `PRIVATE_KEY` | EVM wallet private key (fallback for all chains) | Yes (for execution) |
 | `SOLANA_PRIVATE_KEY` | Solana wallet keypair (base58) | Yes (for Solana) |
+
+#### Per-Chain Private Keys
+
+Each chain can have its own private key, overriding the global `PRIVATE_KEY`:
+
+| Variable | Chain |
+|----------|-------|
+| `ETHEREUM_PRIVATE_KEY` | Ethereum |
+| `BSC_PRIVATE_KEY` | BNB Smart Chain |
+| `ARBITRUM_PRIVATE_KEY` | Arbitrum |
+| `POLYGON_PRIVATE_KEY` | Polygon |
+| `OPTIMISM_PRIVATE_KEY` | Optimism |
+| `BASE_PRIVATE_KEY` | Base |
+| `AVALANCHE_PRIVATE_KEY` | Avalanche |
+| `FANTOM_PRIVATE_KEY` | Fantom |
+| `ZKSYNC_PRIVATE_KEY` | zkSync Era |
+| `LINEA_PRIVATE_KEY` | Linea |
+
+#### HD Wallet Derivation (BIP-44)
+
+As an alternative to per-chain private keys, the system supports HD wallet derivation
+from a BIP-39 mnemonic. Each EVM chain gets a unique wallet derived via BIP-44 path
+`m/44'/60'/0'/0/{chainIndex}`, so compromising one chain's key does not affect others.
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `WALLET_MNEMONIC` | BIP-39 mnemonic phrase (12 or 24 words) for per-chain HD wallet derivation | No |
+| `WALLET_MNEMONIC_PASSPHRASE` | Optional BIP-39 passphrase extension (adds entropy beyond the mnemonic) | No |
+
+**Priority order:** Per-chain `{CHAIN}_PRIVATE_KEY` env vars take precedence over HD derivation.
+If neither a per-chain key nor a mnemonic is set, the global `PRIVATE_KEY` is used.
+
+**Note:** Solana uses Ed25519 (not secp256k1) and is excluded from HD derivation.
+Solana wallets must be provided via `SOLANA_PRIVATE_KEY`.
+
+**Security:** Store `WALLET_MNEMONIC` and `WALLET_MNEMONIC_PASSPHRASE` only in `.env.local`
+(gitignored). Never commit mnemonic phrases to version control.
+
+See `services/execution-engine/src/services/hd-wallet-manager.ts` for implementation details.
 
 ### Optional Variables
 
@@ -316,7 +355,7 @@ Located in `shared/config/src/performance.ts`:
 | `DETECTION_LATENCY_TARGET_MS` | Target detection latency | `50` | ADR-011 |
 | `EVENT_BATCH_SIZE` | Events per batch | `100` | ADR-002 |
 | `EVENT_BATCH_INTERVAL_MS` | Batch flush interval | `5` | ADR-002 |
-| `PRICE_STALENESS_MS` | Price expiry threshold | `10000` | ADR-005 |
+| `PRICE_STALENESS_MS` | Price expiry threshold (hard rejection) | `30000` | [ADR-033](architecture/adr/ADR-033-stale-price-window.md) |
 | `WORKER_THREAD_POOL_SIZE` | Path finder workers | `4` | ADR-012 |
 | `NONCE_POOL_SIZE` | Pre-allocated nonces | `5` | ADR-027 |
 

@@ -188,19 +188,22 @@ export const FEATURE_FLAGS = {
    * - Cached oracle values replace static L1_DATA_FEE_USD estimates
    * - Falls back to static estimates if oracle query fails or cache is stale
    *
-   * When disabled (default):
+   * When disabled:
    * - Uses static L1_DATA_FEE_USD fallback values (conservative estimates)
-   * - Set FEATURE_DYNAMIC_L1_FEES=true to enable
+   * - Set FEATURE_DYNAMIC_L1_FEES=false to disable
    *
    * Impact:
    * - More accurate gas cost estimation on L2 rollups
    * - Reduces false-positive opportunities caused by stale L1 fee assumptions
    * - Cached values only — no hot-path latency impact
    *
-   * @default false (safe rollout - explicitly opt-in)
+   * @default true (safety-on-by-default — L1 data fees are 50-90% of total gas
+   *   cost on L2 rollups; without dynamic fees, gas is underestimated 2-10x,
+   *   causing unprofitable trade execution on Arbitrum/Optimism/Base/zkSync/Linea)
    * @see shared/core/src/caching/gas-price-cache.ts - L1 oracle integration
+   * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-1
    */
-  useDynamicL1Fees: process.env.FEATURE_DYNAMIC_L1_FEES === 'true',
+  useDynamicL1Fees: process.env.FEATURE_DYNAMIC_L1_FEES !== 'false',
 
   /**
    * Enable orderflow prediction pipeline consumer.

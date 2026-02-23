@@ -86,6 +86,14 @@ export const SYSTEM_CONSTANTS = {
     defaultSuccessThreshold: 2,
   },
 
+  // Stream message schema versioning
+  stream: {
+    /** P2-13: Current schema version for Redis Streams messages.
+     * Bump when message envelope fields change (type, data, timestamp, source, schemaVersion).
+     * Consumers should handle unknown versions gracefully (log + process). */
+    schemaVersion: '1',
+  },
+
   // P4-FIX: Centralized timeout constants
   timeouts: {
     /** HTTP health check timeout in milliseconds */
@@ -94,8 +102,11 @@ export const SYSTEM_CONSTANTS = {
     redisOperation: 5000,
     /** Graceful shutdown timeout in milliseconds */
     gracefulShutdown: 30000,
-    /** Opportunity deduplication TTL in seconds (Redis SET NX) */
-    opportunityDedupTtlSeconds: 30,
+    /** Opportunity deduplication TTL in seconds (Redis SET NX).
+     * P1-10: Must exceed XCLAIM minIdleMs (default 600s) to prevent duplicate
+     * processing of PEL-recovered messages after consumer restart.
+     * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P1-10 */
+    opportunityDedupTtlSeconds: 900,
     /** Subgraph API request timeout in milliseconds */
     subgraphRequest: 10000,
     /** RPC provider request timeout in milliseconds */

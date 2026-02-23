@@ -386,6 +386,40 @@ export function checkPrivateKeyFormat(): ValidationResult {
 }
 
 /**
+ * Validate mnemonic format (BIP-39: 12 or 24 words).
+ * Phase 0 Item 4: Per-chain HD wallets support.
+ */
+export function checkMnemonicFormat(): ValidationResult {
+  const mnemonic = process.env.WALLET_MNEMONIC;
+
+  if (!mnemonic) {
+    return {
+      check: 'Mnemonic Format',
+      status: 'warn',
+      message: 'WALLET_MNEMONIC not set. Per-chain private keys will be used instead.',
+      details: { configured: false },
+    };
+  }
+
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12 && words.length !== 24) {
+    return {
+      check: 'Mnemonic Format',
+      status: 'fail',
+      message: `WALLET_MNEMONIC has ${words.length} words (expected 12 or 24).`,
+      details: { configured: true, valid: false, wordCount: words.length },
+    };
+  }
+
+  return {
+    check: 'Mnemonic Format',
+    status: 'pass',
+    message: `WALLET_MNEMONIC format valid (${words.length} words). HD wallets will be derived per-chain.`,
+    details: { configured: true, valid: true, wordCount: words.length },
+  };
+}
+
+/**
  * Check MEV provider configuration.
  * Validates Flashbots auth key, BloXroute header, and Fastlane URL.
  */

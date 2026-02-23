@@ -943,9 +943,10 @@ describe('CrossChainStrategy - Bridge Recovery', () => {
     );
   });
 
-  it('should skip expired bridge states (>24h old)', async () => {
+  it('should skip expired bridge states (>72h old)', async () => {
+    // Phase 0 Item 7: TTL extended from 24h to 72h
     const expiredState = createBridgeRecoveryState({
-      initiatedAt: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago
+      initiatedAt: Date.now() - (73 * 60 * 60 * 1000), // 73 hours ago (exceeds 72h TTL)
     });
     mockRedis.scan.mockResolvedValue(['0', ['bridge:recovery:bridge-id-1']]);
     mockRedis.get.mockResolvedValue(expiredState);
