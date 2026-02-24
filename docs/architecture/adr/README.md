@@ -47,6 +47,9 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-031](./ADR-031-multi-bridge-strategy.md) | Multi-Bridge Selection Strategy | Accepted | 2026-02-15 | 92% |
 | [ADR-032](./ADR-032-flash-loan-provider-aggregation.md) | Flash Loan Provider Aggregation | Accepted | 2026-02-15 | 92% |
 | [ADR-033](./ADR-033-stale-price-window.md) | Stale Price Window Protection | Accepted | 2026-02-22 | 95% |
+| [ADR-034](./ADR-034-solana-execution.md) | Solana Execution via Jupiter + Jito | Accepted | 2026-02-24 | 85% |
+| [ADR-035](./ADR-035-statistical-arbitrage.md) | Statistical Arbitrage Strategy | Accepted | 2026-02-24 | 80% |
+| [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Accepted | 2026-02-24 | 85% |
 
 ## Decision Summary
 
@@ -248,6 +251,26 @@ An Architecture Decision Record captures an important architectural decision mad
     - Prevents whale/ML boost bypass of stale data (FIX #11)
     - Background data cleanup at 5min for memory management
 
+### Solana Execution & New Strategies (Phase 6)
+
+30. **Solana Execution via Jupiter + Jito** (ADR-034)
+    - Jupiter V6 Aggregator API for multi-DEX swap routing
+    - Jito Block Engine for Solana MEV protection
+    - SolanaExecutionStrategy implements ExecutionStrategy directly (not EVM-based)
+    - Feature flag controlled (`FEATURE_SOLANA_EXECUTION=true`)
+
+31. **Statistical Arbitrage Strategy** (ADR-035)
+    - Triple-gate signal: Bollinger Bands + Hurst exponent + Pearson correlation
+    - Atomic execution via flash loans (no position holding risk)
+    - Targets correlated majors: WETH/WBTC, stablecoin pegs, LST/underlying
+    - Feature flag controlled (`FEATURE_STATISTICAL_ARB=true`)
+
+32. **CEX Price Signal Integration** (ADR-036)
+    - Binance public WebSocket trade stream (no API key required)
+    - Symbol normalization layer maps CEX symbols to internal token IDs
+    - CEX-DEX spread calculator for spread-based opportunity detection
+    - Feature flag controlled (`FEATURE_CEX_PRICE_SIGNALS=true`)
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -321,3 +344,6 @@ XX% - Explanation of confidence factors
 | 2026-02-15 | ADR-031 | Added Multi-Bridge Selection Strategy decision |
 | 2026-02-15 | ADR-032 | Added Flash Loan Provider Aggregation decision |
 | 2026-02-22 | ADR-033 | Added Stale Price Window Protection decision |
+| 2026-02-24 | ADR-034 | Added Solana Execution via Jupiter + Jito decision |
+| 2026-02-24 | ADR-035 | Added Statistical Arbitrage Strategy decision |
+| 2026-02-24 | ADR-036 | Added CEX Price Signal Integration decision |

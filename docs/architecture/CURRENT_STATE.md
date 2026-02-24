@@ -1,8 +1,8 @@
 # Current Architecture State
 
-**Date:** February 5, 2026
-**Version:** 1.1
-**Last Updated:** 2026-02-05
+**Date:** February 24, 2026
+**Version:** 1.2
+**Last Updated:** 2026-02-24
 
 ---
 
@@ -22,7 +22,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 |---------|---------------|---------------|------|-------------|
 | **Coordinator** | 3000 | 3000 | Core | Orchestrates all services, manages leader election |
 | **Partition Asia-Fast** | 3001 | 3011 | Detector | P1: BSC, Polygon, Avalanche, Fantom (Unified Detector) |
-| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base (Unified Detector) |
+| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode (Unified Detector) |
 | **Partition High-Value** | 3003 | 3013 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
 | **Partition Solana** | 3004 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3005 | 3015 | Core | Trade execution and MEV protection |
@@ -47,11 +47,11 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ### P2: L2-Turbo
 - **Partition ID:** `l2-turbo`
-- **Chains:** Arbitrum, Optimism, Base
+- **Chains:** Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode
 - **Region:** Asia-Southeast-1 (Fly.io)
 - **Standby:** US-East-1 (Railway)
-- **Resource Profile:** Standard (512MB)
-- **Rationale:** Ethereum L2 rollups with sub-second confirmations
+- **Resource Profile:** Heavy (768MB) -- upgraded from Standard due to 7 chains
+- **Rationale:** Ethereum L2 rollups with sub-second confirmations, including 4 emerging L2s (Blast, Scroll, Mantle, Mode)
 
 ### P3: High-Value
 - **Partition ID:** `high-value`
@@ -68,6 +68,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 - **Standby:** US-East-1 (Railway)
 - **Resource Profile:** Heavy (512MB)
 - **Rationale:** Non-EVM chain requiring dedicated handling
+- **Execution:** Supported via Jupiter V6 + Jito bundles when `FEATURE_SOLANA_EXECUTION=true` (ADR-034)
 
 ---
 
@@ -188,10 +189,12 @@ ETHEREUM_WS_URL=wss://...
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Chains | 11 | 11 |
-| DEXes | 49 | 49 |
-| Tokens | 112 | 112 |
-| Target Opportunities/day | 500 | 500 |
+| Chains | 15 (14 EVM + Solana) | 15 |
+| DEXes | 71 (64 EVM + 7 Solana) | 75 |
+| Tokens | 112+ | 150 |
+| Strategies | 4 (Intra-chain, Cross-chain, Flash Loan, Statistical Arb) | 5+ |
+| Data Sources | DEX feeds + Binance CEX feed | Multi-CEX |
+| Target Opportunities/day | 500 | 750 |
 
 ---
 
@@ -227,6 +230,11 @@ ETHEREUM_WS_URL=wss://...
 ### ML & Advanced
 - [ADR-025: ML Model Lifecycle](adr/ADR-025.md) - Model persistence and retraining
 
+### Solana Execution & New Strategies
+- [ADR-034: Solana Execution](adr/ADR-034-solana-execution.md) - Jupiter V6 + Jito bundles
+- [ADR-035: Statistical Arbitrage](adr/ADR-035-statistical-arbitrage.md) - Triple-gate signal strategy
+- [ADR-036: CEX Price Signals](adr/ADR-036-cex-price-signals.md) - Binance WebSocket feed
+
 ---
 
 ## Recent Architectural Changes (Since v1.0)
@@ -239,6 +247,11 @@ ETHEREUM_WS_URL=wss://...
 | 2026-02-04 | ML model lifecycle management | ADR-025 |
 | 2026-02-04 | Integration test consolidation (34→18 files) | ADR-026 |
 | 2026-02-04 | Nonce pre-allocation pool (5-10ms savings) | ADR-027 |
+| 2026-02-24 | 4 emerging L2 chains added (Blast, Scroll, Mantle, Mode) | ADR-003 |
+| 2026-02-24 | P2 partition expanded from 3 to 7 chains | ADR-003 |
+| 2026-02-24 | Solana execution via Jupiter V6 + Jito bundles | ADR-034 |
+| 2026-02-24 | Statistical arbitrage strategy (triple-gate signals) | ADR-035 |
+| 2026-02-24 | Binance CEX price signal integration | ADR-036 |
 
 ---
 

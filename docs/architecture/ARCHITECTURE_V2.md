@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.9
-> **Last Updated:** 2026-02-14
+> **Document Version:** 2.10
+> **Last Updated:** 2026-02-24
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **11 blockchains** (10 EVM + Solana) with **57 DEXs** (current) and **112 tokens** (current)
+- Monitor **15 blockchains** (14 EVM + Solana) with **71 DEXs** (current) and **112+ tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -62,8 +62,8 @@ Build a **professional and reliable profitable arbitrage application** with:
 
 | Metric | Current (Feb 2026) | Target (Q2 2026) | Status |
 |--------|-------------------|------------------|--------|
-| **Chains Supported** | **11** (10 EVM + Solana) | 11 | ✅ Complete |
-| **DEXs Monitored** | **57** (50 EVM + 7 Solana) | 60 | 🔄 +3 DEXs planned |
+| **Chains Supported** | **15** (14 EVM + Solana) | 15 | ✅ Complete (+4 L2s: Blast, Scroll, Mantle, Mode) |
+| **DEXs Monitored** | **71** (64 EVM + 7 Solana) | 75 | 🔄 +4 DEXs planned |
 | **Tokens Tracked** | **112** | 143 | 🔄 +31 tokens planned |
 | **Detection Latency (EVM)** | <50ms | <50ms | ✅ Achieved |
 | **Detection Latency (Solana)** | <100ms | <100ms | ✅ Achieved |
@@ -178,7 +178,7 @@ The architecture combines two patterns:
 │                                                                                  │
 │  LAYER 1: INGESTION                                                              │
 │  ├── Chain Detector Partition 1 (Asia-Fast: BSC, Polygon, Avalanche, Fantom)    │
-│  ├── Chain Detector Partition 2 (L2-Turbo: Arbitrum, Optimism, Base)            │
+│  ├── Chain Detector Partition 2 (L2-Turbo: Arbitrum, Optimism, Base + 4 L2s)    │
 │  ├── Chain Detector Partition 3 (High-Value: Ethereum, zkSync, Linea)           │
 │  ├── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
 │  ├── Unified Detector - Mempool (bloXroute BDN: Pre-block arbitrage)            │
@@ -316,7 +316,7 @@ Instead of one service per chain, chains are grouped into partitions based on:
 | Partition | Chains | Location | Provider | Resources |
 |-----------|--------|----------|----------|-----------|
 | P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | Singapore | Oracle ARM | 2 OCPU, 12GB |
-| P2: L2-Turbo | Arbitrum, Optimism, Base | Singapore | Fly.io x2 | 512MB total |
+| P2: L2-Turbo | Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode | Singapore | Fly.io x2 | 768MB total |
 | P3: High-Value | Ethereum, zkSync, Linea | US-East | Oracle ARM | 2 OCPU, 12GB |
 | P4: Solana | Solana (non-EVM) | US-West | Fly.io | 256MB |
 
@@ -433,29 +433,30 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Redis Streams
 
 ### 4.5 Chain Support Scope Clarification
 
-**IMPORTANT**: The execution engine currently supports **EVM chains ONLY**.
+**IMPORTANT**: The execution engine supports **EVM chains** and **Solana** (when `FEATURE_SOLANA_EXECUTION=true`).
 
-| Layer | EVM Chains (10) | Solana |
+| Layer | EVM Chains (14) | Solana |
 |-------|-----------------|--------|
 | **Detection** | ✅ Fully Supported | ✅ Fully Supported |
-| **Execution** | ✅ Fully Supported | ❌ **Not Implemented** |
+| **Execution** | ✅ Fully Supported | ✅ Supported (feature flag) |
 
 **EVM Chains Supported for Execution**:
 - Ethereum, BSC, Polygon, Arbitrum, Optimism, Base, Avalanche, Fantom, zkSync, Linea
+- Emerging L2s (Blast, Scroll, Mantle, Mode) -- detection enabled, execution support follows EVM path
 
-**Solana Status**:
+**Solana Execution** (ADR-034):
 - ✅ **Detection**: Partition 4 monitors Solana DEXs (Raydium, Orca, Jupiter, etc.)
-- ✅ **Opportunity Finding**: Cross-chain arbs detected between Solana ↔ EVM
-- ❌ **Execution**: Requires separate Solana-native executor (different transaction model, SPL tokens, program invocations)
+- ✅ **Opportunity Finding**: Cross-chain arbs detected between Solana <-> EVM
+- ✅ **Execution**: `SolanaExecutionStrategy` via Jupiter V6 API + Jito bundles
+- Controlled by `FEATURE_SOLANA_EXECUTION=true` feature flag
+- Uses `@solana/web3.js` (dynamically imported when enabled)
 
-**Why Solana Execution is Separate**:
+**Why Solana Execution is a Separate Strategy**:
 - Different transaction structure (@solana/web3.js vs ethers.js)
 - Account-based model vs EVM contract calls
 - SPL token standard vs ERC-20
 - Jito bundles vs Flashbots
 - Program invocations vs smart contract ABIs
-
-**Future Work**: See roadmap for Solana execution engine development plan.
 
 ### 4.6 Bridge Router Module
 
@@ -1268,7 +1269,7 @@ The core arbitrage math is implemented in Rust and compiled to WebAssembly (WASM
 |----------|------|--------|-----------------|
 | **P1** | ML Model Training | Medium | +15-25% prediction accuracy (model persistence complete, see [ADR-025](./adr/ADR-025-ml-model-lifecycle.md)) |
 | **P2** | Cross-Chain Multi-Hop | High | +50% ROI potential |
-| **P3** | Jito Integration | Low | Solana MEV protection |
+| **P3** | ~~Jito Integration~~ | ~~Low~~ | ✅ Complete (ADR-034, Solana execution) |
 | **P4** | WASM Engine | Very High | 10-50x math speedup (optional) |
 
 ---
@@ -1321,6 +1322,11 @@ The following Architecture Decision Records document key decisions:
 ### Data Integrity (ADR-033)
 - [ADR-033: Stale Price Window Protection](./adr/ADR-033-stale-price-window.md)
 
+### Solana Execution & New Strategies - Phase 6 (ADR-034 to ADR-036)
+- [ADR-034: Solana Execution via Jupiter + Jito](./adr/ADR-034-solana-execution.md)
+- [ADR-035: Statistical Arbitrage Strategy](./adr/ADR-035-statistical-arbitrage.md)
+- [ADR-036: CEX Price Signal Integration](./adr/ADR-036-cex-price-signals.md)
+
 ---
 
 ## Appendix: Document History
@@ -1338,6 +1344,7 @@ The following Architecture Decision Records document key decisions:
 | 2.7 | 2026-02-04 | Simulation Enhancements | Added Solana simulation (HeliusProvider), detector pre-validation (ADR-023), strategy simulation enhancements |
 | 2.8 | 2026-02-04 | Documentation Update | Added Mempool Detector service (port 3008), completed ADR references (all 27 ADRs), updated service count to 9 |
 | 2.9 | 2026-02-14 | Analytics Module | Added §4.8 Analytics Module documenting 9 analytics components, updated Layer 2/3 component hierarchy with PriceMomentum, PriceOracle, PairActivityTracker, SwapEventFilter, MLOpportunityScorer, PerformanceAnalyticsEngine |
+| 2.10 | 2026-02-24 | Phase 6 Expansion | Added 4 emerging L2 chains (Blast, Scroll, Mantle, Mode) to P2 partition (3→7 chains, 11→15 total), Solana execution via Jupiter + Jito (ADR-034), statistical arbitrage strategy (ADR-035), CEX price signal integration (ADR-036), updated chain/DEX counts (57→71 DEXs) |
 
 ---
 
