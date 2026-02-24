@@ -15,7 +15,7 @@ import { clearIntervalSafe, clearTimeoutSafe } from './lifecycle-utils';
 import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
 // CQ8-ALT: Extracted cold-path classes
 import { ProviderRotationStrategy } from './provider-rotation-strategy';
-import { ProviderHealthTracker } from './provider-health-tracker';
+import { ProviderHealthTracker } from './monitoring/provider-health-tracker';
 
 export interface WebSocketConfig {
   url: string;

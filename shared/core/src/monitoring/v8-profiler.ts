@@ -14,7 +14,7 @@
 
 import { join } from 'path';
 import { mkdir, writeFile } from 'fs/promises';
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('v8-profiler');
 

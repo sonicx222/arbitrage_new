@@ -28,7 +28,7 @@
  * @see Task 2.3: Hot Path Latency Monitoring
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('performance-monitor');
 

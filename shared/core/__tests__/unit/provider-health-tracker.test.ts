@@ -23,7 +23,7 @@ jest.mock('../../src/lifecycle-utils');
 // Import under test (after mocks)
 // =============================================================================
 
-import { ProviderHealthTracker, HealthTrackerConfig } from '../../src/provider-health-tracker';
+import { ProviderHealthTracker, HealthTrackerConfig } from '../../src/monitoring/provider-health-tracker';
 import { clearIntervalSafe } from '../../src/lifecycle-utils';
 
 const mockedClearIntervalSafe = clearIntervalSafe as jest.MockedFunction<typeof clearIntervalSafe>;

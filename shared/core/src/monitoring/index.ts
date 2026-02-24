@@ -93,3 +93,12 @@ export type {
   LatencyTrackerConfig,
   PipelineStage
 } from './latency-tracker';
+
+// Performance Monitor (Task 2.3)
+export * from './performance-monitor';
+
+// Provider Health Tracker (CQ8-ALT)
+export * from './provider-health-tracker';
+
+// V8 Profiler (Task #46)
+export * from './v8-profiler';

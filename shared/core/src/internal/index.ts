@@ -84,7 +84,7 @@ export { resetSimulatorInstance, stopChainSimulator, stopAllChainSimulators } fr
 export { resetNonceManager } from '../nonce-manager';
 
 // Performance monitoring
-export { resetHotPathMonitor } from '../performance-monitor';
+export { resetHotPathMonitor } from '../monitoring/performance-monitor';
 
 // Risk management
 export {

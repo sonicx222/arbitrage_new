@@ -153,8 +153,8 @@ export type {
 // 1.2.1 V8 Profiler (Task #46: Performance Profiling)
 // =============================================================================
 
-export { V8Profiler, getGlobalProfiler, profileHotPath } from './v8-profiler';
-export type { ProfileResult, ProfileOptions } from './v8-profiler';
+export { V8Profiler, getGlobalProfiler, profileHotPath } from './monitoring/v8-profiler';
+export type { ProfileResult, ProfileOptions } from './monitoring/v8-profiler';
 
 // =============================================================================
 // 1.2.2 Trace Context Propagation (O-3: Centralized Log Aggregation)
@@ -811,11 +811,11 @@ export {
   getHotPathMonitor,
   hotPathMonitor,
   resetHotPathMonitor,
-} from './performance-monitor';
+} from './monitoring/performance-monitor';
 export type {
   LatencyMetric,
   LatencyStats,
-} from './performance-monitor';
+} from './monitoring/performance-monitor';
 
 // #############################################################################
 // #                                                                           #
@@ -1505,8 +1505,8 @@ export {
 // CQ8-ALT: Extracted cold-path classes from websocket-manager
 export { ProviderRotationStrategy } from './provider-rotation-strategy';
 export type { ProviderRotationConfig } from './provider-rotation-strategy';
-export { ProviderHealthTracker } from './provider-health-tracker';
-export type { QualityMetrics as ProviderQualityMetrics, HealthTrackerConfig } from './provider-health-tracker';
+export { ProviderHealthTracker } from './monitoring/provider-health-tracker';
+export type { QualityMetrics as ProviderQualityMetrics, HealthTrackerConfig } from './monitoring/provider-health-tracker';
 
 // Factory Subscription Service (Phase 2.1.2)
 // Factory-level event subscriptions for 40-50x RPC reduction

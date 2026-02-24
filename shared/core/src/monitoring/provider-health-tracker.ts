@@ -17,9 +17,9 @@
  * @see websocket-manager.ts (consumer)
  */
 
-import { createLogger } from './logger';
-import { clearIntervalSafe } from './lifecycle-utils';
-import type { ProviderHealthScorer } from './monitoring/provider-health-scorer';
+import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
+import type { ProviderHealthScorer } from './provider-health-scorer';
 
 const logger = createLogger('provider-health-tracker');
 
