@@ -133,6 +133,46 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
   },
 
   // =========================================================================
+  // Emerging L2s
+  // =========================================================================
+
+  blast: {
+    aave_v3: false,
+    balancer_v2: false,
+    pancakeswap_v3: false,
+    spookyswap: false,
+    syncswap: false,
+    dai_flash_mint: false,
+  },
+
+  scroll: {
+    aave_v3: false,
+    balancer_v2: false,
+    pancakeswap_v3: false,
+    spookyswap: false,
+    syncswap: true, // SyncSwap deployed on Scroll
+    dai_flash_mint: false,
+  },
+
+  mantle: {
+    aave_v3: false,
+    balancer_v2: false,
+    pancakeswap_v3: false,
+    spookyswap: false,
+    syncswap: false,
+    dai_flash_mint: false,
+  },
+
+  mode: {
+    aave_v3: false,
+    balancer_v2: false,
+    pancakeswap_v3: false,
+    spookyswap: false,
+    syncswap: false,
+    dai_flash_mint: false,
+  },
+
+  // =========================================================================
   // Non-EVM
   // =========================================================================
 

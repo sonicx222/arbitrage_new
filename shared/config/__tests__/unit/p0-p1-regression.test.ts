@@ -170,8 +170,8 @@ describe('Fix 4: feePercentage removed from bridge costs', () => {
 // FLASH_LOAN_STATS.mainnetChains must match actual mainnet entries
 // =============================================================================
 describe('Fix 5: mainnetChains count', () => {
-  it('should have mainnetChains equal to 11', () => {
-    expect(FLASH_LOAN_STATS.mainnetChains).toBe(11);
+  it('should have mainnetChains equal to 15', () => {
+    expect(FLASH_LOAN_STATS.mainnetChains).toBe(15);
   });
 
   it('should match actual mainnet entry count in FLASH_LOAN_AVAILABILITY', () => {

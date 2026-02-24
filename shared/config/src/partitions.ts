@@ -213,7 +213,7 @@ export function getNonEvmChains(): string[] {
  *
  * S3.1.2: 4-Partition Architecture
  * - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom) - EVM high-throughput chains
- * - P2: L2-Turbo (Arbitrum, Optimism, Base) - Ethereum L2 rollups
+ * - P2: L2-Turbo (Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode) - Ethereum L2 rollups
  * - P3: High-Value (Ethereum, zkSync, Linea) - High-value EVM chains
  * - P4: Solana-Native (Solana) - Non-EVM, dedicated partition
  */
@@ -239,18 +239,18 @@ export const PARTITIONS: PartitionConfig[] = [
     healthCheckIntervalMs: 15000,
     failoverTimeoutMs: 60000
   },
-  // P2: L2-Turbo - Fast Ethereum L2 rollups
+  // P2: L2-Turbo - Fast Ethereum L2 rollups + emerging L2s
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    chains: ['arbitrum', 'optimism', 'base'],
+    chains: ['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'standard',
+    resourceProfile: 'heavy', // Upgraded from 'standard': 7 chains need more resources
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 512,
+    maxMemoryMB: 768, // Increased from 512: 7 chains need more memory
     enabled: true,
     healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000

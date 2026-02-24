@@ -842,8 +842,8 @@ describe('Regression Tests', () => {
   });
 
   describe('Total System Counts', () => {
-    it('should maintain 11 total chains', () => {
-      expect(Object.keys(CHAINS).length).toBe(11);
+    it('should maintain 15 total chains', () => {
+      expect(Object.keys(CHAINS).length).toBe(15);
     });
 
     it('should have at least 47 enabled DEXs', () => {

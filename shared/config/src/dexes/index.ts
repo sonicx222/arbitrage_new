@@ -6,7 +6,7 @@
  * - Fee structures
  * - Priority classifications: [C] Critical, [H] High, [M] Medium
  *
- * Total: 57 DEXes across 11 chains (50 EVM + 7 Solana)
+ * Total: 71 DEXes across 15 chains (50 EVM + 7 Solana + 14 Emerging L2s)
  *
  * @see S2.2.1: Arbitrum DEX expansion (6→9)
  * @see S2.2.2: Base DEX expansion (5→7)
@@ -24,7 +24,7 @@ const BPS_DENOMINATOR = 10000;
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
 // =============================================================================
-// DEX CONFIGURATIONS - 57 DEXs
+// DEX CONFIGURATIONS - 71 DEXs
 // [C] = Critical, [H] = High Priority, [M] = Medium Priority
 // =============================================================================
 export const DEXES: Record<string, Dex[]> = {
@@ -424,6 +424,124 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'linea',
       factoryAddress: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',
       routerAddress: '0x1d0188c4B276A09366D05d6Be06aF61a73bC7535', // Velocore Vault on Linea
+      feeBps: bps(30),
+    }
+  ],
+  // =============================================================================
+  // Emerging L2s: Blast, Scroll, Mantle, Mode
+  // TODO: Verify on-chain addresses before mainnet
+  // =============================================================================
+  // Blast: 4 DEXs
+  // TODO: Verify on-chain addresses before mainnet
+  blast: [
+    {
+      name: 'thruster_v3',       // [C] - Dominant on Blast
+      chain: 'blast',
+      factoryAddress: '0x0000000000000000000000000000000000000001',
+      routerAddress: '0x0000000000000000000000000000000000000002',
+      feeBps: bps(30),
+    },
+    {
+      name: 'thruster_v2',       // [C] - V2 AMM on Blast
+      chain: 'blast',
+      factoryAddress: '0x0000000000000000000000000000000000000003',
+      routerAddress: '0x0000000000000000000000000000000000000004',
+      feeBps: bps(30),
+    },
+    {
+      name: 'bladeswap',         // [H] - Native Blast DEX
+      chain: 'blast',
+      factoryAddress: '0x0000000000000000000000000000000000000005',
+      routerAddress: '0x0000000000000000000000000000000000000006',
+      feeBps: bps(30),
+    },
+    {
+      name: 'ring_protocol',     // [M] - Ring Protocol on Blast
+      chain: 'blast',
+      factoryAddress: '0x0000000000000000000000000000000000000007',
+      routerAddress: '0x0000000000000000000000000000000000000008',
+      feeBps: bps(30),
+    }
+  ],
+  // Scroll: 4 DEXs
+  // TODO: Verify on-chain addresses before mainnet
+  scroll: [
+    {
+      name: 'syncswap',          // [C] - Multi-chain presence on Scroll
+      chain: 'scroll',
+      factoryAddress: '0x0000000000000000000000000000000000000009',
+      routerAddress: '0x000000000000000000000000000000000000000a',
+      feeBps: bps(30),
+    },
+    {
+      name: 'spacefi',           // [H] - Native Scroll DEX
+      chain: 'scroll',
+      factoryAddress: '0x000000000000000000000000000000000000000b',
+      routerAddress: '0x000000000000000000000000000000000000000c',
+      feeBps: bps(30),
+    },
+    {
+      name: 'ambient',           // [H] - CrocSwap/Ambient on Scroll
+      chain: 'scroll',
+      factoryAddress: '0x000000000000000000000000000000000000000d',
+      routerAddress: '0x000000000000000000000000000000000000000e',
+      feeBps: bps(30),
+    },
+    {
+      name: 'zebra',             // [M] - Zebra DEX on Scroll
+      chain: 'scroll',
+      factoryAddress: '0x000000000000000000000000000000000000000f',
+      routerAddress: '0x0000000000000000000000000000000000000010',
+      feeBps: bps(30),
+    }
+  ],
+  // Mantle: 3 DEXs
+  // TODO: Verify on-chain addresses before mainnet
+  mantle: [
+    {
+      name: 'merchant_moe',      // [C] - Dominant on Mantle
+      chain: 'mantle',
+      factoryAddress: '0x0000000000000000000000000000000000000011',
+      routerAddress: '0x0000000000000000000000000000000000000012',
+      feeBps: bps(30),
+    },
+    {
+      name: 'agni_finance',      // [H] - Agni Finance on Mantle
+      chain: 'mantle',
+      factoryAddress: '0x0000000000000000000000000000000000000013',
+      routerAddress: '0x0000000000000000000000000000000000000014',
+      feeBps: bps(30),
+    },
+    {
+      name: 'fusionx',           // [H] - FusionX on Mantle
+      chain: 'mantle',
+      factoryAddress: '0x0000000000000000000000000000000000000015',
+      routerAddress: '0x0000000000000000000000000000000000000016',
+      feeBps: bps(30),
+    }
+  ],
+  // Mode: 3 DEXs
+  // TODO: Verify on-chain addresses before mainnet
+  mode: [
+    {
+      name: 'kim_exchange',      // [C] - Dominant on Mode
+      chain: 'mode',
+      factoryAddress: '0x0000000000000000000000000000000000000017',
+      routerAddress: '0x0000000000000000000000000000000000000018',
+      feeBps: bps(30),
+    },
+    {
+      name: 'supswap',           // [H] - SupSwap on Mode
+      chain: 'mode',
+      factoryAddress: '0x0000000000000000000000000000000000000019',
+      routerAddress: '0x000000000000000000000000000000000000001a',
+      feeBps: bps(30),
+    },
+    {
+      name: 'swapmode',          // [M] - SwapMode native DEX
+      chain: 'mode',
+      factoryAddress: '0x000000000000000000000000000000000000001b',
+      routerAddress: '0x000000000000000000000000000000000000001c',
       feeBps: bps(30),
     }
   ],

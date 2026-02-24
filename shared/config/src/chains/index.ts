@@ -64,8 +64,10 @@ const fallbacks = (...urls: (string | null)[]): string[] =>
   urls.filter((url): url is string => url !== null);
 
 // =============================================================================
-// CHAIN CONFIGURATIONS - 11 Chains
+// CHAIN CONFIGURATIONS - 15 Chains
 // Priority: T1 (Arbitrum, BSC, Base), T2 (Polygon, Optimism), T3 (Ethereum)
+// S3.1.2: New chains (Avalanche, Fantom, zkSync, Linea, Solana)
+// Emerging L2s: Blast, Scroll, Mantle, Mode
 // Updated with 6-Provider Shield: dRPC → Ankr → PublicNode → Infura → Alchemy
 // =============================================================================
 export const CHAINS: Record<string, Chain> = {
@@ -339,6 +341,94 @@ export const CHAINS: Record<string, Chain> = {
     blockTime: 2,
     nativeToken: 'ETH'
   },
+  // =============================================================================
+  // Emerging L2s: Blast, Scroll, Mantle, Mode
+  // Fast-growing L2 chains added for expanded arbitrage surface
+  // =============================================================================
+  blast: {
+    id: 81457,
+    name: 'Blast',
+    // Primary: dRPC > Ankr > chain-native RPC
+    rpcUrl: process.env.BLAST_RPC_URL || drpc('blast') || 'https://rpc.blast.io',
+    wsUrl: process.env.BLAST_WS_URL || drpc('blast', true) || 'wss://rpc.blast.io',
+    // Fallbacks
+    wsFallbackUrls: fallbacks(
+      ankr('blast', true),
+      publicNode('blast-rpc', true),
+      'wss://rpc.blast.io'
+    ),
+    rpcFallbackUrls: fallbacks(
+      ankr('blast'),
+      publicNode('blast-rpc'),
+      'https://rpc.blast.io',
+      'https://1rpc.io/blast'
+    ),
+    blockTime: 2,
+    nativeToken: 'ETH'
+  },
+  scroll: {
+    id: 534352,
+    name: 'Scroll',
+    // Primary: dRPC > Ankr > chain-native RPC
+    rpcUrl: process.env.SCROLL_RPC_URL || drpc('scroll') || 'https://rpc.scroll.io',
+    wsUrl: process.env.SCROLL_WS_URL || drpc('scroll', true) || 'wss://rpc.scroll.io',
+    // Fallbacks
+    wsFallbackUrls: fallbacks(
+      ankr('scroll', true),
+      publicNode('scroll-rpc', true),
+      'wss://rpc.scroll.io'
+    ),
+    rpcFallbackUrls: fallbacks(
+      ankr('scroll'),
+      publicNode('scroll-rpc'),
+      'https://rpc.scroll.io',
+      'https://1rpc.io/scroll'
+    ),
+    blockTime: 3,
+    nativeToken: 'ETH'
+  },
+  mantle: {
+    id: 5000,
+    name: 'Mantle',
+    // Primary: dRPC > Ankr > chain-native RPC
+    rpcUrl: process.env.MANTLE_RPC_URL || drpc('mantle') || 'https://rpc.mantle.xyz',
+    wsUrl: process.env.MANTLE_WS_URL || drpc('mantle', true) || 'wss://rpc.mantle.xyz',
+    // Fallbacks
+    wsFallbackUrls: fallbacks(
+      ankr('mantle', true),
+      publicNode('mantle-rpc', true),
+      'wss://rpc.mantle.xyz'
+    ),
+    rpcFallbackUrls: fallbacks(
+      ankr('mantle'),
+      publicNode('mantle-rpc'),
+      'https://rpc.mantle.xyz',
+      'https://1rpc.io/mantle'
+    ),
+    blockTime: 2,
+    nativeToken: 'MNT'
+  },
+  mode: {
+    id: 34443,
+    name: 'Mode',
+    // Primary: dRPC > Ankr > chain-native RPC
+    rpcUrl: process.env.MODE_RPC_URL || drpc('mode') || 'https://mainnet.mode.network',
+    wsUrl: process.env.MODE_WS_URL || drpc('mode', true) || 'wss://mainnet.mode.network',
+    // Fallbacks
+    wsFallbackUrls: fallbacks(
+      ankr('mode', true),
+      publicNode('mode-rpc', true),
+      'wss://mainnet.mode.network'
+    ),
+    rpcFallbackUrls: fallbacks(
+      ankr('mode'),
+      publicNode('mode-rpc'),
+      'https://mainnet.mode.network',
+      'https://1rpc.io/mode'
+    ),
+    blockTime: 2,
+    nativeToken: 'ETH'
+  },
   // Non-EVM chain (P4)
   // Solana: Helius > Triton > dRPC > Ankr > PublicNode > Public RPC
   // Note: Helius/Triton are premium Solana-specific providers
@@ -393,7 +483,8 @@ export const CHAINS: Record<string, Chain> = {
 // =============================================================================
 export const MAINNET_CHAIN_IDS = [
   'arbitrum', 'bsc', 'base', 'polygon', 'optimism',
-  'ethereum', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
+  'ethereum', 'avalanche', 'fantom', 'zksync', 'linea',
+  'blast', 'scroll', 'mantle', 'mode', 'solana'
 ] as const;
 
 export type MainnetChainId = typeof MAINNET_CHAIN_IDS[number];

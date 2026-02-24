@@ -185,16 +185,16 @@ describe('PHASE_METRICS Alignment', () => {
   it('should match current chain count with PHASE_METRICS', () => {
     const chainCount = Object.keys(CHAINS).length;
 
-    // Phase 1: 11 mainnet chains (no devnet)
-    expect(chainCount).toBe(11);
+    // 15 mainnet chains (no devnet): 11 original + 4 emerging L2s
+    expect(chainCount).toBe(15);
     expect(PHASE_METRICS.current.chains).toBe(chainCount);
   });
 
   it('should match current token count with PHASE_METRICS', () => {
     const tokenCount = Object.values(CORE_TOKENS).flat().length;
 
-    // Phase 1: 112 tokens + Phase 0 Item 2: +2 LST tokens = 114
-    expect(tokenCount).toBe(114);
+    // 114 original + 10 emerging L2s (Blast:2, Scroll:3, Mantle:3, Mode:2) = 124
+    expect(tokenCount).toBe(124);
     expect(PHASE_METRICS.current.tokens).toBe(tokenCount);
   });
 });

@@ -131,6 +131,10 @@ export function validateProductionConfig(): void {
     fantom: 'FANTOM_RPC_URL',
     zksync: 'ZKSYNC_RPC_URL',
     linea: 'LINEA_RPC_URL',
+    blast: 'BLAST_RPC_URL',
+    scroll: 'SCROLL_RPC_URL',
+    mantle: 'MANTLE_RPC_URL',
+    mode: 'MODE_RPC_URL',
     solana: 'SOLANA_RPC_URL',
   };
 
@@ -240,6 +244,10 @@ export const SUPPORTED_EXECUTION_CHAINS = new Set([
   'fantom',
   'zksync',
   'linea',
+  'blast',
+  'scroll',
+  'mantle',
+  'mode',
 ]);
 
 /**

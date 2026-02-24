@@ -335,6 +335,10 @@ export const DEFAULT_QUOTE_TOKENS: Readonly<Record<string, string>> = {
   fantom: 'USDC',
   zksync: 'USDC',
   linea: 'USDC',
+  blast: 'USDB',   // Blast native stablecoin
+  scroll: 'USDC',
+  mantle: 'USDC',
+  mode: 'USDC',
   solana: 'USDC',
 } as const;
 

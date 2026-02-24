@@ -201,11 +201,15 @@ describe('PartitionRouter', () => {
     expect(PartitionRouter.isRoutable('unknown-chain')).toBe(false);
   });
 
-  it('should get all 11 routable chains', () => {
+  it('should get all 15 routable chains', () => {
     const chains = PartitionRouter.getRoutableChains();
-    expect(chains.length).toBe(11);
+    expect(chains.length).toBe(15);
     expect(chains).toContain('bsc');
     expect(chains).toContain('ethereum');
+    expect(chains).toContain('blast');
+    expect(chains).toContain('scroll');
+    expect(chains).toContain('mantle');
+    expect(chains).toContain('mode');
     expect(chains).toContain('solana');
   });
 

@@ -6,7 +6,7 @@
  * - TOKEN_METADATA: Chain-specific token addresses for USD estimation
  *
  * Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
- * Total: 112 tokens across 11 chains
+ * Total: 122 tokens across 15 chains
  *
  * @see S3.1.2: New chain tokens
  * @see S3.2.1: Avalanche token expansion
@@ -16,7 +16,7 @@
 import { Token } from '../../../types';
 
 // =============================================================================
-// TOKEN CONFIGURATIONS - 112 Tokens
+// TOKEN CONFIGURATIONS - 122 Tokens
 // Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
 // =============================================================================
 export const CORE_TOKENS: Record<string, Token[]> = {
@@ -189,6 +189,36 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0x3aAB2285ddcDdaD8edf438C1bAB47e1a9D05a9b4', symbol: 'WBTC', decimals: 8, chainId: 59144 },
     { address: '0x7d43AABC515C356145049227CeE54B608342c0ad', symbol: 'BUSD', decimals: 18, chainId: 59144 }
   ],
+  // =============================================================================
+  // Emerging L2s: Blast, Scroll, Mantle, Mode
+  // =============================================================================
+  // Blast: 2 tokens
+  blast: [
+    // Anchor tokens
+    { address: '0x4300000000000000000000000000000000000004', symbol: 'WETH', decimals: 18, chainId: 81457 },
+    // Blast native stablecoin
+    { address: '0x4300000000000000000000000000000000000003', symbol: 'USDB', decimals: 18, chainId: 81457 },
+  ],
+  // Scroll: 3 tokens
+  scroll: [
+    // Anchor tokens
+    { address: '0x5300000000000000000000000000000000000004', symbol: 'WETH', decimals: 18, chainId: 534352 },
+    { address: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4', symbol: 'USDC', decimals: 6, chainId: 534352 },
+    { address: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', symbol: 'USDT', decimals: 6, chainId: 534352 },
+  ],
+  // Mantle: 3 tokens
+  mantle: [
+    // Anchor tokens
+    { address: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', symbol: 'WMNT', decimals: 18, chainId: 5000 },
+    { address: '0x09Bc4E0D10F09B1CdA8b8BB72C1e89F10B53BcA6', symbol: 'USDC', decimals: 6, chainId: 5000 },
+    { address: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', symbol: 'USDT', decimals: 6, chainId: 5000 },
+  ],
+  // Mode: 2 tokens
+  mode: [
+    // Anchor tokens
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18, chainId: 34443 },
+    { address: '0xd988097fb8612cc24eeC14542bC03424c656005f', symbol: 'USDC', decimals: 6, chainId: 34443 },
+  ],
   // S3.3.3: Solana - 15 tokens (non-EVM - uses different address format)
   // Categories: anchor (1), stablecoin (2), defi (3), meme (2), governance (4), LST (3)
   solana: [
@@ -296,12 +326,13 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
   // L2 tokens
   ARB: 1.20,
   OP: 2.50,
+  MNT: 0.80, WMNT: 0.80,
   // Major tokens
   BTC: 95000, WBTC: 95000, BTCB: 95000, tBTC: 95000,
   // Stablecoins (default to 1.00)
   USDT: 1.00, USDC: 1.00, DAI: 1.00, BUSD: 1.00,
   FRAX: 1.00, LUSD: 1.00, TUSD: 1.00, USDP: 1.00, GUSD: 1.00,
-  USDbC: 1.00, fUSDT: 1.00, // Bridged stables
+  USDbC: 1.00, fUSDT: 1.00, USDB: 1.00, // Bridged stables
   // DeFi tokens
   UNI: 12.00, AAVE: 280.00, LINK: 18.00, CRV: 0.80,
   MKR: 1800.00, COMP: 55.00, SNX: 2.50, SUSHI: 1.20, YFI: 9000.00,
@@ -391,6 +422,11 @@ export const NATIVE_TOKEN_PRICES: Record<string, number> = Object.freeze({
   base: 3200,      // ETH
   zksync: 3200,    // ETH
   linea: 3200,     // ETH
+  // Emerging L2s
+  blast: 3200,     // ETH
+  scroll: 3200,    // ETH
+  mantle: 0.80,    // MNT
+  mode: 3200,      // ETH
   // Non-EVM
   solana: 170,     // SOL
 });
@@ -525,6 +561,39 @@ export const TOKEN_METADATA: Record<string, {
       { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6 },
       { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6 },
       { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  // =============================================================================
+  // Emerging L2s: Blast, Scroll, Mantle, Mode
+  // =============================================================================
+  blast: {
+    weth: '0x4300000000000000000000000000000000000004',
+    nativeWrapper: '0x4300000000000000000000000000000000000004', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0x4300000000000000000000000000000000000003', symbol: 'USDB', decimals: 18 }
+    ]
+  },
+  scroll: {
+    weth: '0x5300000000000000000000000000000000000004',
+    nativeWrapper: '0x5300000000000000000000000000000000000004', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4', symbol: 'USDC', decimals: 6 },
+      { address: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', symbol: 'USDT', decimals: 6 }
+    ]
+  },
+  mantle: {
+    weth: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT (no bridged WETH standard)
+    nativeWrapper: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
+    stablecoins: [
+      { address: '0x09Bc4E0D10F09B1CdA8b8BB72C1e89F10B53BcA6', symbol: 'USDC', decimals: 6 },
+      { address: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', symbol: 'USDT', decimals: 6 }
+    ]
+  },
+  mode: {
+    weth: '0x4200000000000000000000000000000000000006',
+    nativeWrapper: '0x4200000000000000000000000000000000000006', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0xd988097fb8612cc24eeC14542bC03424c656005f', symbol: 'USDC', decimals: 6 }
     ]
   },
   solana: {

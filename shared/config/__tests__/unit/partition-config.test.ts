@@ -11,7 +11,7 @@
  * - Partition validation (validatePartitionConfig, validateAllPartitions)
  * - Environment configuration (getPartitionIdFromEnv, getPartitionFromEnv, getChainsFromEnv)
  * - 4-partition architecture (P1-P4) per ADR-003
- * - Chain configuration for all 11 chains
+ * - Chain configuration for all 15 chains
  * - Deployment scenarios, failover, resource allocation
  * - ADR-003 compliance
  *
@@ -154,8 +154,8 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.enabled).toBe(true);
   });
 
-  it('should contain Arbitrum, Optimism, Base', () => {
-    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base']);
+  it('should contain Arbitrum, Optimism, Base, and emerging L2s', () => {
+    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode']);
   });
 
   it('should be deployed to asia-southeast1 on Fly.io', () => {
@@ -163,9 +163,9 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.provider).toBe('fly');
   });
 
-  it('should have standard resource profile with 512MB memory', () => {
-    expect(partition!.resourceProfile).toBe('standard');
-    expect(partition!.maxMemoryMB).toBe(512);
+  it('should have heavy resource profile with 768MB memory', () => {
+    expect(partition!.resourceProfile).toBe('heavy');
+    expect(partition!.maxMemoryMB).toBe(768);
   });
 
   it('should have fastest health check interval (10s for fast L2s)', () => {
@@ -317,14 +317,14 @@ describe('assignChainToPartition', () => {
     }
   });
 
-  it('should have all chains assigned to exactly one partition (11 total)', () => {
+  it('should have all chains assigned to exactly one partition (15 total)', () => {
     const assignedChains = new Set<string>();
     for (const partition of PARTITIONS) {
       for (const chainId of partition.chains) {
         assignedChains.add(chainId);
       }
     }
-    expect(assignedChains.size).toBe(11);
+    expect(assignedChains.size).toBe(15);
   });
 });
 
@@ -426,7 +426,7 @@ describe('getChainsForPartition', () => {
 
   it('should return chains for l2-turbo partition', () => {
     const chains = getChainsForPartition('l2-turbo');
-    expect(chains).toEqual(['arbitrum', 'optimism', 'base']);
+    expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode']);
   });
 
   it('should have matching assignments for all partitions', () => {
@@ -486,7 +486,7 @@ describe('createChainInstance', () => {
 describe('createPartitionChainInstances', () => {
   it.each([
     ['asia-fast', 4, ['bsc', 'polygon', 'avalanche', 'fantom']],
-    ['l2-turbo', 3, ['arbitrum', 'optimism', 'base']],
+    ['l2-turbo', 7, ['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode']],
     ['high-value', 3, ['ethereum', 'zksync', 'linea']],
     ['solana-native', 1, ['solana']],
   ])('should create %d instances for %s partition', (partitionId, expectedCount, expectedChains) => {
@@ -846,12 +846,12 @@ describe('PARTITION_IDS constant', () => {
 });
 
 // =============================================================================
-// Chain Configuration (all 11 chains)
+// Chain Configuration (all 15 chains)
 // =============================================================================
 
 describe('Chain Configuration', () => {
-  it('should have 11 chains configured', () => {
-    expect(Object.keys(CHAINS).length).toBe(11);
+  it('should have 15 chains configured', () => {
+    expect(Object.keys(CHAINS).length).toBe(15);
   });
 
   it.each([
@@ -986,10 +986,10 @@ describe('Resource Allocation', () => {
     expect(totalMemoryMB).toBeLessThanOrEqual(3072);
   });
 
-  it('should respect Fly.io memory limit (<= 512MB)', () => {
+  it('should respect Fly.io memory limit (<= 1024MB)', () => {
     const flyPartitions = PARTITIONS.filter(p => p.provider === 'fly' && p.enabled);
     for (const partition of flyPartitions) {
-      expect(partition.maxMemoryMB).toBeLessThanOrEqual(512);
+      expect(partition.maxMemoryMB).toBeLessThanOrEqual(1024);
     }
   });
 
@@ -1012,10 +1012,10 @@ describe('ADR-003 Compliance', () => {
     expect(getPartition('solana-native')?.region).toBe('us-west1');
   });
 
-  it('should support block-time-based partitioning (L2s < 2s)', () => {
+  it('should support block-time-based partitioning (L2s <= 3s)', () => {
     const l2Turbo = getPartition('l2-turbo');
     for (const chainId of l2Turbo!.chains) {
-      expect(CHAINS[chainId].blockTime).toBeLessThanOrEqual(2);
+      expect(CHAINS[chainId].blockTime).toBeLessThanOrEqual(3);
     }
   });
 

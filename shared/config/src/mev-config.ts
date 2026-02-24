@@ -119,6 +119,31 @@ export const MEV_CONFIG = {
       priorityFeeGwei: 100.0,
       minProfitForProtection: 50, // 50 FTM minimum
     },
+    // Emerging L2s: All use sequencer ordering (L2 sequencer-based MEV)
+    blast: {
+      enabled: true,
+      strategy: 'sequencer' as const,
+      priorityFeeGwei: 0.01,
+      minProfitForProtection: 0.001,
+    },
+    scroll: {
+      enabled: true,
+      strategy: 'sequencer' as const,
+      priorityFeeGwei: 0.01,
+      minProfitForProtection: 0.001,
+    },
+    mantle: {
+      enabled: true,
+      strategy: 'sequencer' as const,
+      priorityFeeGwei: 0.01,
+      minProfitForProtection: 0.001,
+    },
+    mode: {
+      enabled: true,
+      strategy: 'sequencer' as const,
+      priorityFeeGwei: 0.01,
+      minProfitForProtection: 0.001,
+    },
     // S3.3.7-FIX: Added Solana MEV protection via Jito bundles
     solana: {
       enabled: true,
@@ -220,6 +245,10 @@ export const MEV_PRIORITY_FEE_SUMMARY = {
   base: 0.01,
   zksync: 0.01,
   linea: 0.01,
+  blast: 0.01,
+  scroll: 0.01,
+  mantle: 0.01,
+  mode: 0.01,
   avalanche: 25.0,
   fantom: 100.0,
   solana: 0,

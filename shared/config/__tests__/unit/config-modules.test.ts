@@ -600,14 +600,15 @@ describe('Detector Config Module', () => {
 // =============================================================================
 describe('Chains Module', () => {
   describe('MAINNET_CHAIN_IDS', () => {
-    it('should have exactly 11 mainnet chains', () => {
-      expect(MAINNET_CHAIN_IDS.length).toBe(11);
+    it('should have exactly 15 mainnet chains', () => {
+      expect(MAINNET_CHAIN_IDS.length).toBe(15);
     });
 
     it('should include all expected mainnet chains', () => {
       const expected = [
         'arbitrum', 'bsc', 'base', 'polygon', 'optimism',
-        'ethereum', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
+        'ethereum', 'avalanche', 'fantom', 'zksync', 'linea',
+        'blast', 'scroll', 'mantle', 'mode', 'solana'
       ];
       for (const chain of expected) {
         expect(MAINNET_CHAIN_IDS).toContain(chain);
@@ -620,8 +621,8 @@ describe('Chains Module', () => {
   });
 
   describe('CHAINS', () => {
-    it('should have exactly 11 chains (no devnet)', () => {
-      expect(Object.keys(CHAINS).length).toBe(11);
+    it('should have exactly 15 chains (no devnet)', () => {
+      expect(Object.keys(CHAINS).length).toBe(15);
     });
 
     it('should NOT include solana-devnet', () => {
@@ -653,8 +654,8 @@ describe('Chains Module', () => {
 
     it('should return combined mainnet and testnet chains', () => {
       const allChains = getAllChains();
-      // Should have 11 mainnet + 1 testnet = 12 total
-      expect(Object.keys(allChains).length).toBe(12);
+      // Should have 15 mainnet + 1 testnet = 16 total
+      expect(Object.keys(allChains).length).toBe(16);
     });
 
     it('should include both mainnet Solana and devnet', () => {
