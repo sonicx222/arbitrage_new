@@ -1494,6 +1494,12 @@ export async function deployContractPipeline(
   config: DeploymentPipelineConfig
 ): Promise<DeploymentPipelineResult> {
   const [deployer] = await ethers.getSigners();
+  if (!deployer) {
+    throw new Error(
+      '[ERR_NO_DEPLOYER_SIGNER] No deployer account available for this network.\n' +
+      'Set DEPLOYER_PRIVATE_KEY in project-root .env.local (or export it in your shell) and retry.'
+    );
+  }
   const networkName = normalizeNetworkName(network.name);
   const chainId = await getSafeChainId();
 
