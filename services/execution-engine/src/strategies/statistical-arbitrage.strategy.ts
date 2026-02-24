@@ -24,7 +24,6 @@
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import {
   createErrorResult,
-  createSuccessResult,
   createSkippedResult,
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
@@ -39,7 +38,7 @@ export interface StatisticalArbitrageConfig {
   minConfidence: number;
   /** Maximum age of opportunity in ms before stale (default: 30000 = 30s) */
   maxOpportunityAgeMs: number;
-  /** Minimum expected profit in USD to justify gas costs (default: 10) */
+  /** Minimum expected profit in USD to justify gas costs (default: 5) */
   minExpectedProfitUsd: number;
 }
 
@@ -50,7 +49,7 @@ export interface StatisticalArbitrageConfig {
 const DEFAULT_CONFIG: StatisticalArbitrageConfig = {
   minConfidence: 0.5,
   maxOpportunityAgeMs: 30_000,
-  minExpectedProfitUsd: 10,
+  minExpectedProfitUsd: 5,
 };
 
 // =============================================================================
@@ -194,21 +193,18 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
       }
     }
 
-    // No flash loan strategy available - return a simulated success for now
-    // In production, this would be wired to the actual flash loan strategy
-    this.logger.warn('No flash loan strategy available, returning simulated result', {
+    // No flash loan strategy available — report error instead of faking success.
+    // Fake success would corrupt P&L tracking with phantom profits.
+    this.logger.error('No flash loan strategy available for stat arb execution', {
       opportunityId: oppId,
+      chain,
     });
 
-    return createSuccessResult(
+    return createErrorResult(
       oppId,
-      '0x0000000000000000000000000000000000000000000000000000000000000000',
+      '[ERR_NO_FLASH_LOAN_STRATEGY] Statistical arbitrage requires a flash loan strategy for execution',
       chain,
       dex,
-      {
-        actualProfit: expectedProfit,
-        latencyMs: Date.now() - opportunity.timestamp,
-      },
     );
   }
 }

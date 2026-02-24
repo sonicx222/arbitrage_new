@@ -1060,16 +1060,20 @@ export class ExecutionEngineService {
         // In production, this would use a fully configured JitoProvider
         const { createJitoProvider } = await import('@arbitrage/core/mev-protection/jito-provider');
 
-        // Build a minimal connection interface for the Jito provider
-        // The actual Solana Connection is injected at runtime via env config
+        // Build a connection interface for the Jito provider.
+        // Stubs throw descriptive errors instead of returning empty values
+        // to make misconfiguration visible. Configure SOLANA_RPC_URL for production.
+        const notConfigured = (method: string) => async () => {
+          throw new Error(`Solana connection not configured: ${method}() requires SOLANA_RPC_URL`);
+        };
         const jitoProvider = createJitoProvider({
           chain: 'solana',
           connection: {
-            getLatestBlockhash: async () => ({ blockhash: '', lastValidBlockHeight: 0 }),
-            getSlot: async () => 0,
-            getSignatureStatus: async () => ({ value: null }),
-            getBalance: async () => 0,
-            sendRawTransaction: async () => '',
+            getLatestBlockhash: notConfigured('getLatestBlockhash'),
+            getSlot: notConfigured('getSlot'),
+            getSignatureStatus: notConfigured('getSignatureStatus'),
+            getBalance: notConfigured('getBalance'),
+            sendRawTransaction: notConfigured('sendRawTransaction'),
           },
           keypair: {
             publicKey: { toBase58: () => process.env.SOLANA_WALLET_PUBLIC_KEY ?? '', toBuffer: () => Buffer.alloc(32) },
@@ -1113,7 +1117,7 @@ export class ExecutionEngineService {
           {
             minConfidence: parseNumericEnv('STAT_ARB_MIN_CONFIDENCE') ?? 0.5,
             maxOpportunityAgeMs: parseNumericEnv('STAT_ARB_MAX_AGE_MS') ?? 30_000,
-            minExpectedProfitUsd: parseNumericEnv('STAT_ARB_MIN_PROFIT_USD') ?? 10,
+            minExpectedProfitUsd: parseNumericEnv('STAT_ARB_MIN_PROFIT_USD') ?? 5,
           },
           flashLoanStrategy ?? undefined,
         );

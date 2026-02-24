@@ -50,6 +50,8 @@ export interface StatArbDetectorConfig {
   bollingerStdDev: number;
   /** Regime window size for Hurst calculation (default: 100) */
   regimeWindowSize: number;
+  /** Default position size in USD for expectedProfit estimation (default: 50000) */
+  defaultPositionSizeUsd: number;
 }
 
 // =============================================================================
@@ -60,6 +62,7 @@ const DEFAULT_CONFIG: Omit<StatArbDetectorConfig, 'pairs'> = {
   minCorrelation: 0.7,
   bollingerStdDev: 2.0,
   regimeWindowSize: 100,
+  defaultPositionSizeUsd: 50_000,
 };
 
 // =============================================================================
@@ -74,11 +77,15 @@ const DEFAULT_CONFIG: Omit<StatArbDetectorConfig, 'pairs'> = {
  * all three conditions are satisfied.
  */
 export class StatisticalArbitrageDetector extends EventEmitter {
+  /** Default max listeners to prevent Node.js warnings */
+  static readonly DEFAULT_MAX_LISTENERS = 20;
   private readonly correlationTracker: PairCorrelationTracker;
   private readonly spreadTracker: SpreadTracker;
   private readonly regimeDetector: RegimeDetector;
   private readonly config: StatArbDetectorConfig;
   private readonly activeSignals: Map<string, SpreadSignal> = new Map();
+  /** O(1) pair config lookup by pairId */
+  private readonly pairConfigMap: Map<string, StatArbPairConfig> = new Map();
   private running: boolean = false;
 
   constructor(
@@ -88,6 +95,7 @@ export class StatisticalArbitrageDetector extends EventEmitter {
     config: StatArbDetectorConfig,
   ) {
     super();
+    this.setMaxListeners(StatisticalArbitrageDetector.DEFAULT_MAX_LISTENERS);
     this.correlationTracker = correlationTracker;
     this.spreadTracker = spreadTracker;
     this.regimeDetector = regimeDetector;
@@ -95,6 +103,11 @@ export class StatisticalArbitrageDetector extends EventEmitter {
       ...DEFAULT_CONFIG,
       ...config,
     };
+
+    // Build O(1) lookup map for pair configs
+    for (const pair of this.config.pairs) {
+      this.pairConfigMap.set(pair.id, pair);
+    }
 
     logger.info('StatisticalArbitrageDetector initialized', {
       pairs: this.config.pairs.length,
@@ -123,10 +136,11 @@ export class StatisticalArbitrageDetector extends EventEmitter {
     this.correlationTracker.addSample(pairId, priceA, priceB, timestamp);
     this.spreadTracker.addSpread(pairId, priceA, priceB);
 
-    // Feed spread to regime detector
+    // Feed log-spread to regime detector.
+    // SpreadTracker also computes log(priceA/priceB) internally, but RegimeDetector
+    // uses a different circular buffer so we need to feed it explicitly.
     if (priceA > 0 && priceB > 0) {
-      const spread = Math.log(priceA / priceB);
-      this.regimeDetector.addSample(pairId, spread);
+      this.regimeDetector.addSample(pairId, Math.log(priceA / priceB));
     }
 
     // Check for opportunity
@@ -159,7 +173,7 @@ export class StatisticalArbitrageDetector extends EventEmitter {
     }
 
     // All three conditions met - emit opportunity
-    const pairConfig = this.config.pairs.find(p => p.id === pairId);
+    const pairConfig = this.pairConfigMap.get(pairId);
     if (!pairConfig) {
       logger.warn('Signal for unconfigured pair', { pairId });
       return;
@@ -175,10 +189,13 @@ export class StatisticalArbitrageDetector extends EventEmitter {
     const regimeConfidence = Math.max(0, 1 - hurst * 2); // H=0 -> 1.0, H=0.5 -> 0
     const confidence = Math.min(1, (correlationConfidence + regimeConfidence) / 2);
 
-    // Expected profit from spread deviation
-    const expectedProfit = bands
+    // Expected profit from spread deviation, scaled to USD.
+    // spreadDeviation is in log-spread units (≈ fractional price deviation for small values).
+    // Multiply by position size to get approximate USD profit.
+    const spreadDeviation = bands
       ? Math.abs(bands.currentSpread - bands.middle)
       : 0;
+    const expectedProfit = spreadDeviation * this.config.defaultPositionSizeUsd;
 
     // Determine token direction based on signal
     const tokenIn = signal === 'entry_long' ? pairConfig.tokenB : pairConfig.tokenA;
@@ -193,6 +210,11 @@ export class StatisticalArbitrageDetector extends EventEmitter {
       confidence,
       expectedProfit,
       timestamp,
+      // amountIn intentionally omitted. The detector computes expectedProfit in USD
+      // but cannot convert to token-native units (lamports, wei) without on-chain
+      // price data. Downstream execution strategies size the trade from expectedProfit
+      // and route context instead. Setting a USD value here would be misinterpreted
+      // as lamports/wei by Jupiter/flash-loan paths, causing orders-of-magnitude errors.
     };
 
     logger.info('Statistical arbitrage opportunity detected', {

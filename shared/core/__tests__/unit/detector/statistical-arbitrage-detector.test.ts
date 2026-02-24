@@ -36,10 +36,10 @@ function createMockSpreadTracker(overrides?: Partial<SpreadTracker>): SpreadTrac
     addSpread: jest.fn(),
     getSignal: jest.fn<() => SpreadSignal>().mockReturnValue('entry_long'),
     getBollingerBands: jest.fn<() => BollingerBands | undefined>().mockReturnValue({
-      upper: 0.8,
-      middle: 0.5,
-      lower: 0.2,
-      currentSpread: 0.1,
+      upper: 0.008,
+      middle: 0.003,
+      lower: -0.002,
+      currentSpread: -0.004,
     }),
     getSpreadHistory: jest.fn<() => number[]>().mockReturnValue([]),
     reset: jest.fn(),
@@ -78,6 +78,7 @@ const DEFAULT_CONFIG = {
   minCorrelation: 0.7,
   bollingerStdDev: 2.0,
   regimeWindowSize: 100,
+  defaultPositionSizeUsd: 50_000,
 };
 
 describe('StatisticalArbitrageDetector', () => {

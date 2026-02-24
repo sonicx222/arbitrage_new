@@ -101,7 +101,7 @@ describe('StatisticalArbitrageStrategy', () => {
       {
         minConfidence: 0.5,
         maxOpportunityAgeMs: 30_000,
-        minExpectedProfitUsd: 10,
+        minExpectedProfitUsd: 5,
       },
       mockFlashLoan,
     );
@@ -181,7 +181,7 @@ describe('StatisticalArbitrageStrategy', () => {
   describe('low profit rejection', () => {
     it('should skip opportunities with profit below threshold', async () => {
       const opp = createTestOpportunity({
-        expectedProfit: 5, // below $10 threshold
+        expectedProfit: 3, // below $5 threshold
       });
 
       const result = await strategy.execute(opp, ctx);
@@ -253,18 +253,18 @@ describe('StatisticalArbitrageStrategy', () => {
   // ===========================================================================
 
   describe('no flash loan strategy', () => {
-    it('should return simulated result when no flash loan strategy is wired', async () => {
+    it('should return error when no flash loan strategy is wired', async () => {
       const strategyNoFlash = new StatisticalArbitrageStrategy(
         createMockLogger(),
-        { minConfidence: 0.5, maxOpportunityAgeMs: 30_000, minExpectedProfitUsd: 10 },
+        { minConfidence: 0.5, maxOpportunityAgeMs: 30_000, minExpectedProfitUsd: 5 },
       );
 
       const opp = createTestOpportunity();
       const result = await strategyNoFlash.execute(opp, ctx);
 
-      // Returns a "success" with zero hash as placeholder
-      expect(result.success).toBe(true);
-      expect(result.transactionHash).toContain('0x00000');
+      // Must return error — fake success would corrupt P&L tracking
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ERR_NO_FLASH_LOAN_STRATEGY');
     });
   });
 
