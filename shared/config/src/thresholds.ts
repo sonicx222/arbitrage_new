@@ -29,14 +29,14 @@ export const ARBITRAGE_CONFIG = {
   crossChainEnabled: true,  // FIX: Enabled - cross-chain-detector service is implemented
   predictiveEnabled: false, // Enable in Phase 3
   // Additional config properties for opportunity calculation
-  defaultAmount: 1000, // Default trade amount in USD
-  estimatedGasCost: 5, // Estimated gas cost in USD
+  defaultAmount: 10000, // Default trade amount in USD (flash loans need $10k+ to cover gas)
+  estimatedGasCost: 15, // Estimated gas cost in USD (conservative for mainnet; L2s are cheaper)
   opportunityTimeoutMs: 30000, // 30 seconds
-  minProfitThreshold: 10, // Minimum $10 net profit
+  minProfitThreshold: 2, // Minimum $2 net profit (per-chain % thresholds in chainMinProfits are primary filter)
   minConfidenceThreshold: 0.7, // Minimum 70% confidence
   feePercentage: 0.003, // 0.3% DEX trading fee
   // P1-4 FIX: Configurable slippage tolerance (was hardcoded 0.9 = 10%)
-  slippageTolerance: 0.05, // 5% slippage tolerance (minProfit = expectedProfit * (1 - slippageTolerance))
+  slippageTolerance: 0.01, // 1% slippage tolerance (minProfit = expectedProfit * (1 - slippageTolerance))
   // P1-5 FIX: Gas price spike protection - reject transactions if gas exceeds threshold
   gasPriceSpikeMultiplier: 2.0, // Global default max above baseline gas price (used when chain not in per-chain map)
   gasPriceBaselineWindowMs: 300000, // 5 minute window for baseline calculation

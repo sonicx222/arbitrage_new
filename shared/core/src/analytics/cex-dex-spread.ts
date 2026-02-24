@@ -49,6 +49,8 @@ export interface CexDexSpreadConfig {
   historyWindowMs: number;
   /** Maximum number of token-chain pairs to track (default: 50) */
   maxTokens: number;
+  /** Maximum age of CEX price before it's considered stale (default: 60000 = 60s) */
+  maxCexPriceAgeMs: number;
 }
 
 /**
@@ -82,6 +84,7 @@ const DEFAULT_CONFIG: CexDexSpreadConfig = {
   alertThresholdPct: 0.3,
   historyWindowMs: 300_000, // 5 minutes
   maxTokens: 50,
+  maxCexPriceAgeMs: 10_000, // 10 seconds -- crypto moves 0.5-1% in 60s, generating phantom alerts
 };
 
 // =============================================================================
@@ -98,9 +101,12 @@ export class CexDexSpreadCalculator extends EventEmitter {
   private config: CexDexSpreadConfig;
   /** Map of "tokenId:chain" -> state */
   private state: Map<string, TokenChainState> = new Map();
+  /** Reverse index: tokenId -> Set of "tokenId:chain" keys for O(1) CEX price fan-out */
+  private tokenIndex: Map<string, Set<string>> = new Map();
 
   constructor(config?: Partial<CexDexSpreadConfig>) {
     super();
+    this.setMaxListeners(20);
     this.config = { ...DEFAULT_CONFIG, ...config };
 
     logger.info('CexDexSpreadCalculator initialized', {
@@ -122,19 +128,19 @@ export class CexDexSpreadCalculator extends EventEmitter {
   updateCexPrice(tokenId: string, price: number, timestamp: number): void {
     const entry: PriceEntry = { price, timestamp };
 
-    // Update CEX price for all existing chain entries for this token
-    let updated = false;
-    for (const [key, pairState] of this.state) {
-      if (key.startsWith(`${tokenId}:`)) {
-        pairState.cexPrice = entry;
-        this.checkAndEmitAlert(key, pairState);
-        updated = true;
-      }
+    // Use tokenIndex for O(1) lookup instead of iterating all state entries
+    const keys = this.tokenIndex.get(tokenId);
+    if (!keys || keys.size === 0) {
+      logger.debug('CEX price updated but no DEX chain entries exist yet', { tokenId, price });
+      return;
     }
 
-    // If no chain entries exist yet, we just note it but can't compute spreads
-    if (!updated) {
-      logger.debug('CEX price updated but no DEX chain entries exist yet', { tokenId, price });
+    for (const key of keys) {
+      const pairState = this.state.get(key);
+      if (pairState) {
+        pairState.cexPrice = entry;
+        this.checkAndEmitAlert(key, pairState);
+      }
     }
   }
 
@@ -166,6 +172,14 @@ export class CexDexSpreadCalculator extends EventEmitter {
         history: [],
       };
       this.state.set(key, pairState);
+
+      // Maintain reverse index for O(1) CEX price fan-out
+      let tokenKeys = this.tokenIndex.get(tokenId);
+      if (!tokenKeys) {
+        tokenKeys = new Set();
+        this.tokenIndex.set(tokenId, tokenKeys);
+      }
+      tokenKeys.add(key);
     }
 
     pairState.dexPrice = { price, timestamp };
@@ -249,6 +263,7 @@ export class CexDexSpreadCalculator extends EventEmitter {
    */
   reset(): void {
     this.state.clear();
+    this.tokenIndex.clear();
     logger.info('CexDexSpreadCalculator reset');
   }
 
@@ -276,19 +291,38 @@ export class CexDexSpreadCalculator extends EventEmitter {
       return;
     }
 
+    const now = Date.now();
+
+    // Reject stale CEX prices (e.g., Binance WebSocket disconnected)
+    if (now - pairState.cexPrice.timestamp > this.config.maxCexPriceAgeMs) {
+      logger.debug('Skipping spread check: stale CEX price', {
+        key,
+        cexPriceAge: now - pairState.cexPrice.timestamp,
+        maxAge: this.config.maxCexPriceAgeMs,
+      });
+      return;
+    }
+
     const spreadPct = this.calculateSpread(
       pairState.cexPrice.price,
       pairState.dexPrice.price
     );
-    const now = Date.now();
 
     // Record in history
     pairState.history.push({ spreadPct, timestamp: now });
 
-    // Trim old history entries (amortized cleanup)
-    if (pairState.history.length > 1000) {
+    // Trim old history entries (amortized cleanup).
+    // History is chronological, so find the first entry within the window
+    // and splice from the front — avoids allocating a new array via filter().
+    if (pairState.history.length > 500) {
       const cutoff = now - this.config.historyWindowMs;
-      pairState.history = pairState.history.filter(h => h.timestamp >= cutoff);
+      let trimCount = 0;
+      while (trimCount < pairState.history.length && pairState.history[trimCount].timestamp < cutoff) {
+        trimCount++;
+      }
+      if (trimCount > 0) {
+        pairState.history.splice(0, trimCount);
+      }
     }
 
     // Check threshold

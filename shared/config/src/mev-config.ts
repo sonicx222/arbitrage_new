@@ -52,7 +52,7 @@ export const MEV_CONFIG = {
   maxRetries: parseInt(process.env.MEV_MAX_RETRIES || '3'),
 
   /** Fallback to public mempool if protected submission fails */
-  fallbackToPublic: process.env.MEV_FALLBACK_TO_PUBLIC !== 'false', // Default true
+  fallbackToPublic: process.env.MEV_FALLBACK_TO_PUBLIC === 'true', // Default false -- public mempool exposes to sandwich attacks
 
   /** Simulate bundles before submission (recommended) */
   simulateBeforeSubmit: process.env.MEV_SIMULATE_BEFORE_SUBMIT !== 'false', // Default true
