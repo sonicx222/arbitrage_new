@@ -74,8 +74,8 @@ export {
   getRedisClient,
   /** @internal Use '@arbitrage/core/internal' for test cleanup functions */
   resetRedisInstance
-} from './redis';
-export type { RedisClientDeps, RedisConstructor, RedisCommandStats } from './redis';
+} from './redis/client';
+export type { RedisClientDeps, RedisConstructor, RedisCommandStats } from './redis/client';
 
 export {
   RedisStreamsClient,
@@ -84,7 +84,7 @@ export {
   getRedisStreamsClient,
   resetRedisStreamsInstance,
   unwrapBatchMessages
-} from './redis-streams';
+} from './redis/streams';
 export type {
   StreamMessage,
   ConsumerGroupConfig,
@@ -100,7 +100,7 @@ export type {
   StreamConsumerStats,
   RedisStreamsConstructor,
   RedisStreamsClientDeps
-} from './redis-streams';
+} from './redis/streams';
 
 // =============================================================================
 // 1.2 Logging Infrastructure (ADR-015: Pino Logger Migration)
@@ -273,14 +273,14 @@ export {
   DistributedLockManager,
   getDistributedLockManager,
   resetDistributedLockManager
-} from './distributed-lock';
+} from './redis/distributed-lock';
 export type {
   LockConfig,
   AcquireOptions,
   QueueOptions,
   LockHandle,
   LockStats
-} from './distributed-lock';
+} from './redis/distributed-lock';
 
 // Interval Manager (centralized interval management)
 export {

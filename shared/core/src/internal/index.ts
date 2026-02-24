@@ -34,10 +34,10 @@ export {
 // =============================================================================
 
 // Core services
-export { resetRedisInstance } from '../redis';
-export { resetRedisStreamsInstance } from '../redis-streams';
+export { resetRedisInstance } from '../redis/client';
+export { resetRedisStreamsInstance } from '../redis/streams';
 export { resetServiceRegistry } from '../async/service-registry';
-export { resetDistributedLockManager } from '../distributed-lock';
+export { resetDistributedLockManager } from '../redis/distributed-lock';
 
 // Caching services
 export { resetPriceMatrix } from '../caching/price-matrix';
