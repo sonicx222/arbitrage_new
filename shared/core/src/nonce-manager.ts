@@ -56,6 +56,17 @@ interface ChainNonceState {
   noncePool: number[];
   /** Whether a pool replenishment is in progress */
   isReplenishing: boolean;
+  /**
+   * FIX 12: Maintained counter of transactions with status === 'pending'.
+   * Avoids O(n) iteration in getState() by incrementing/decrementing on state changes.
+   */
+  pendingStatusCount: number;
+  /**
+   * Pool generation counter. Incremented each time the nonce pool is cleared
+   * (failTransaction, cleanupTimedOut, resetChain). A replenishNoncePool() call
+   * that started before a pool clear should abort if the generation changed.
+   */
+  poolGeneration: number;
 }
 
 export interface NonceManagerConfig {
@@ -112,8 +123,25 @@ export class NonceManager {
    * Register a wallet for a specific chain.
    */
   registerWallet(chain: string, wallet: ethers.Wallet): void {
-    this.providers.set(chain, wallet.provider!);
-    this.walletAddresses.set(chain, wallet.address);
+    this.registerSigner(chain, wallet.address, wallet.provider!);
+  }
+
+  /**
+   * Register any signer (Wallet, KMS, or AbstractSigner) for a specific chain.
+   *
+   * This is the generalized registration method that accepts an address and provider
+   * directly, making it compatible with any signer type (ethers.Wallet, KmsSigner,
+   * or any AbstractSigner subclass).
+   *
+   * @param chain - Chain identifier (e.g., 'ethereum', 'bsc')
+   * @param address - Signer's address (checksummed)
+   * @param provider - JSON-RPC provider for nonce queries
+   *
+   * @see Phase 2 Item #18: NonceManager for KMS signers
+   */
+  registerSigner(chain: string, address: string, provider: ethers.Provider): void {
+    this.providers.set(chain, provider);
+    this.walletAddresses.set(chain, address);
 
     // Initialize chain state
     // P0-FIX-2: Use queue-based mutex instead of simple lock
@@ -127,11 +155,13 @@ export class NonceManager {
       isLocked: false,
       noncePool: [],
       isReplenishing: false,
+      pendingStatusCount: 0,
+      poolGeneration: 0,
     });
 
-    logger.info('Wallet registered for nonce management', {
+    logger.info('Signer registered for nonce management', {
       chain,
-      address: wallet.address.slice(0, 10) + '...'
+      address: address.slice(0, 10) + '...'
     });
 
     // Tier 2: Pre-fill nonce pool if enabled
@@ -182,6 +212,7 @@ export class NonceManager {
             timestamp: Date.now(),
             status: 'pending'
           });
+          state.pendingStatusCount++;
 
           logger.debug('Nonce allocated from pool', {
             chain,
@@ -232,6 +263,7 @@ export class NonceManager {
         timestamp: Date.now(),
         status: 'pending'
       });
+      state.pendingStatusCount++;
 
       logger.debug('Nonce allocated (direct)', { chain, nonce, pending: state.pendingTxs.size });
 
@@ -302,6 +334,7 @@ export class NonceManager {
 
     // Prevent concurrent replenishment
     state.isReplenishing = true;
+    const generationAtStart = state.poolGeneration;
 
     try {
       // Calculate how many nonces to pre-allocate
@@ -317,6 +350,12 @@ export class NonceManager {
       await this.acquireLock(state);
 
       try {
+        // Abort if pool was cleared while we waited for the lock
+        if (state.poolGeneration !== generationAtStart) {
+          logger.debug('Nonce pool replenishment aborted: pool generation changed', { chain, startGen: generationAtStart, currentGen: state.poolGeneration });
+          return;
+        }
+
         // Ensure we have a valid base nonce
         if (state.confirmedNonce === -1 || Date.now() - state.lastSync > this.config.syncIntervalMs) {
           await this.syncNonce(chain);
@@ -392,6 +431,14 @@ export class NonceManager {
 
     const tx = state.pendingTxs.get(nonce);
     if (tx) {
+      // FIX 12: Decrement pending counter when transitioning from 'pending'
+      if (tx.status === 'pending') {
+        state.pendingStatusCount--;
+        if (state.pendingStatusCount < 0) {
+          logger.warn('pendingStatusCount went negative in confirmTransaction, resetting to 0', { chain, nonce, count: state.pendingStatusCount });
+          state.pendingStatusCount = 0;
+        }
+      }
       tx.status = 'confirmed';
       tx.hash = hash;
 
@@ -420,6 +467,14 @@ export class NonceManager {
 
     const tx = state.pendingTxs.get(nonce);
     if (tx) {
+      // FIX 12: Decrement pending counter when transitioning from 'pending'
+      if (tx.status === 'pending') {
+        state.pendingStatusCount--;
+        if (state.pendingStatusCount < 0) {
+          logger.warn('pendingStatusCount went negative in failTransaction, resetting to 0', { chain, nonce, count: state.pendingStatusCount });
+          state.pendingStatusCount = 0;
+        }
+      }
       tx.status = 'failed';
       state.pendingTxs.delete(nonce);
 
@@ -427,11 +482,23 @@ export class NonceManager {
 
       // If this was the lowest pending nonce, we need to reset
       // because the network won't accept higher nonces until this one is used
-      const lowestPending = Math.min(...Array.from(state.pendingTxs.keys()));
+      // FIX 13: Replace Math.min(...Array.from()) with a simple for-of loop
+      // to avoid temporary array allocation
+      let lowestPending = Infinity;
+      for (const key of state.pendingTxs.keys()) {
+        if (key < lowestPending) {
+          lowestPending = key;
+        }
+      }
       if (nonce < lowestPending || state.pendingTxs.size === 0) {
         // Reset to network state on next allocation
         state.confirmedNonce = -1;
         state.pendingNonce = -1;
+        // Fix R5: Clear stale nonce pool — pre-allocated nonces are based on the
+        // old pendingNonce value and would cause "nonce too low" errors after reset.
+        state.noncePool = [];
+        state.isReplenishing = false;
+        state.poolGeneration++;
         logger.info('Nonce state reset due to failed transaction', { chain, nonce });
       }
     }
@@ -451,6 +518,9 @@ export class NonceManager {
     // Tier 2: Clear pool on reset
     state.noncePool = [];
     state.isReplenishing = false;
+    state.poolGeneration++;
+    // FIX 12: Reset pending counter
+    state.pendingStatusCount = 0;
 
     await this.syncNonce(chain);
 
@@ -480,18 +550,11 @@ export class NonceManager {
     const state = this.chainStates.get(chain);
     if (!state) return null;
 
-    // P0-FIX-1: Count only transactions with 'pending' status
-    let pendingStatusCount = 0;
-    for (const tx of state.pendingTxs.values()) {
-      if (tx.status === 'pending') {
-        pendingStatusCount++;
-      }
-    }
-
+    // FIX 12: Use maintained counter instead of O(n) iteration
     return {
       confirmed: state.confirmedNonce,
       pending: state.pendingNonce,
-      pendingCount: pendingStatusCount,
+      pendingCount: state.pendingStatusCount,
       // Tier 2: Pool status
       poolSize: state.noncePool.length,
       isReplenishing: state.isReplenishing
@@ -568,12 +631,27 @@ export class NonceManager {
       logger.warn('Cleaning up timed out transactions', { chain, count: timedOut.length });
 
       for (const nonce of timedOut) {
+        // FIX 12: Decrement pending counter for pending txs being cleaned up
+        const timedOutTx = state.pendingTxs.get(nonce);
+        if (timedOutTx?.status === 'pending') {
+          state.pendingStatusCount--;
+          if (state.pendingStatusCount < 0) {
+            logger.warn('pendingStatusCount went negative in cleanupTimedOutTransactions, resetting to 0', { chain, nonce, count: state.pendingStatusCount });
+            state.pendingStatusCount = 0;
+          }
+        }
         state.pendingTxs.delete(nonce);
       }
 
       // Reset state to sync fresh from network
       state.confirmedNonce = -1;
       state.pendingNonce = -1;
+      // Fix: Clear stale nonce pool — pre-allocated nonces are based on the
+      // old pendingNonce value and would cause "nonce too low" errors after reset.
+      // Matches failTransaction() (line 477-478) and resetChain() (line 496-497).
+      state.noncePool = [];
+      state.isReplenishing = false;
+      state.poolGeneration++;
     }
   }
 

@@ -11,7 +11,9 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
+import { parentPort } from 'worker_threads';
 import type { Logger } from './logger';
+import { setupParentPortListener } from './lifecycle-utils';
 
 // =============================================================================
 // Types
@@ -178,11 +180,22 @@ export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShut
   process.on('uncaughtException', uncaughtHandler);
   process.on('unhandledRejection', rejectionHandler);
 
+  // Fix #37: Listen for shutdown and health_request messages from monolith WorkerManager.
+  // Extracted to shared utility to eliminate duplication with partition-service-utils.ts.
+  const cleanupParentPort = setupParentPortListener({
+    parentPort,
+    serviceName,
+    logger,
+    isShuttingDown: () => isShuttingDown,
+    shutdown,
+  });
+
   return () => {
     process.off('SIGTERM', sigtermHandler);
     process.off('SIGINT', sigintHandler);
     process.off('uncaughtException', uncaughtHandler);
     process.off('unhandledRejection', rejectionHandler);
+    cleanupParentPort?.();
   };
 }
 

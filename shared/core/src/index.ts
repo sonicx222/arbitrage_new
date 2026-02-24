@@ -1597,7 +1597,10 @@ export {
   MevRiskAnalyzer,
   createMevRiskAnalyzer,
   SandwichRiskLevel,
-  MempoolRecommendation
+  MempoolRecommendation,
+  // MEV-Share Event Listener (Phase 2 Item #23: Backrun filling)
+  MevShareEventListener,
+  createMevShareEventListener,
 } from './mev-protection';
 export type {
   IMevProvider,
@@ -1612,7 +1615,10 @@ export type {
   // MEV Risk Analyzer types
   TransactionContext,
   MevRiskAssessment,
-  MevRiskAnalyzerConfig
+  MevRiskAnalyzerConfig,
+  // MEV-Share types (Phase 2 Item #23)
+  BackrunOpportunity,
+  MevShareEventListenerConfig,
 } from './mev-protection';
 
 // =============================================================================

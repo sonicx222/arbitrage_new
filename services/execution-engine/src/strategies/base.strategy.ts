@@ -24,7 +24,7 @@
  */
 
 import { ethers } from 'ethers';
-import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains } from '@arbitrage/config';
+import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
 import { getErrorMessage, createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
@@ -1498,6 +1498,109 @@ export abstract class BaseExecutionStrategy {
     }
 
     return errorMessage || 'Unknown contract error';
+  }
+
+  // ===========================================================================
+  // Fix #29: Shared Result Builders
+  // ===========================================================================
+
+  /**
+   * Fix #29: Create a failure ExecutionResult.
+   *
+   * Shared across strategies. Subclasses provide the `dex` field via
+   * `getDexLabel()` or pass it explicitly.
+   *
+   * @param opportunity - The opportunity that failed
+   * @param startTime - When execution started (for latency calc)
+   * @param error - Error message
+   * @param dex - DEX label for the result (defaults to opportunity's buyDex/sellDex)
+   */
+  protected createBaseFailureResult(
+    opportunity: ArbitrageOpportunity,
+    startTime: number,
+    error: string,
+    dex?: string
+  ): ExecutionResult {
+    return {
+      success: false,
+      opportunityId: opportunity.id,
+      chain: opportunity.chain ?? 'ethereum',
+      dex: dex ?? opportunity.buyDex ?? opportunity.sellDex ?? 'unknown',
+      error,
+      latencyMs: Date.now() - startTime,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Fix #29: Create an ExecutionResult from a transaction submission result.
+   *
+   * Shared across strategies. Subclasses customize behavior via options:
+   * - `dex`: Override the DEX label (e.g., 'uniswapx')
+   * - `profitMultiplier`: Apply to expectedProfit before gas deduction
+   *   (e.g., 0.9 for MEV-Share refund where searcher retains 90%)
+   *
+   * @param opportunity - The opportunity that was executed
+   * @param startTime - When execution started (for latency calc)
+   * @param submission - Transaction submission result
+   * @param chain - Chain name (for gas price conversion)
+   * @param options - Customization options for dex label and profit calculation
+   */
+  protected createBaseResultFromSubmission(
+    opportunity: ArbitrageOpportunity,
+    startTime: number,
+    submission: {
+      success: boolean;
+      receipt?: ethers.TransactionReceipt;
+      txHash?: string;
+      error?: string;
+      nonce?: number;
+      usedMevProtection?: boolean;
+    },
+    chain: string,
+    options?: {
+      dex?: string;
+      profitMultiplier?: number;
+    }
+  ): ExecutionResult {
+    const latencyMs = Date.now() - startTime;
+    const dex = options?.dex ?? opportunity.buyDex ?? opportunity.sellDex ?? 'unknown';
+
+    if (!submission.success) {
+      return {
+        success: false,
+        opportunityId: opportunity.id,
+        chain,
+        dex,
+        error: submission.error ?? 'Unknown submission error',
+        latencyMs,
+        timestamp: Date.now(),
+      };
+    }
+
+    const expectedProfit = opportunity.expectedProfit ?? 0;
+    const gasCostEth = submission.receipt
+      ? Number(ethers.formatEther(
+          submission.receipt.gasUsed * (submission.receipt.gasPrice ?? 0n)
+        ))
+      : 0;
+    const nativeTokenPriceUsd = getNativeTokenPrice(chain);
+    const gasCostUsd = gasCostEth * nativeTokenPriceUsd;
+    const profitMultiplier = options?.profitMultiplier ?? 1;
+
+    return {
+      success: true,
+      opportunityId: opportunity.id,
+      chain,
+      dex,
+      transactionHash: submission.txHash,
+      gasUsed: submission.receipt ? Number(submission.receipt.gasUsed) : undefined,
+      gasCost: gasCostUsd,
+      actualProfit: expectedProfit * profitMultiplier - gasCostUsd,
+      latencyMs,
+      timestamp: Date.now(),
+      usedMevProtection: submission.usedMevProtection,
+    };
   }
 
   // ===========================================================================

@@ -76,7 +76,41 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 1: "impact-analyst" (subagent_type: Explore)
+## Agent Resilience Protocol (MANDATORY)
+
+Lessons from past sessions: agents stall when given weak models, oversized prompts, or no report-back instructions. Follow these rules to prevent stalls:
+
+### 1. Model Requirement
+**ALL agents MUST be spawned with `model: "opus"`** — pass this explicitly in the Task tool call. Explore agents default to haiku, which cannot handle multi-file analysis. Never rely on defaults.
+
+### 2. Report-Back Requirement
+Every agent prompt MUST include this instruction at the TOP (before any other instructions):
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool to send your findings back to the team lead. Your text output is NOT visible to the team lead — only SendMessage delivers your results. Use: SendMessage(type: "message", recipient: "<team-lead-name>", content: "<your full findings>", summary: "<5-10 word summary>"). Do this IMMEDIATELY when done.
+```
+
+### 3. Prompt Size Limit
+Agent prompts MUST be **under 300 lines**. Include:
+- The agent's specific mission and deliverable format
+- The numbered fix list with target files
+- Key constraints (Critical Rules summary, Known Correct Patterns)
+
+Do NOT copy the entire command file into the agent prompt. Summarize shared context; don't duplicate it.
+
+### 4. Self-Execution Fallback
+If an agent is unresponsive after **2 minutes** (not 5):
+1. Stop waiting immediately
+2. Do the work yourself as Team Lead
+3. Note in the summary: "Phase N executed by Team Lead (agent unresponsive)"
+
+This is faster and more reliable than sending multiple nudges that go unread.
+
+### 5. Prefer general-purpose Over Explore
+Use `subagent_type: "general-purpose"` for ALL agents that need deep multi-file analysis. Explore agents have limited tools and weaker models. Only use Explore for simple, quick file searches.
+
+---
+
+### Agent 1: "impact-analyst" (subagent_type: general-purpose, model: opus)
 
 **Mission**: Map the COMBINED blast radius of ALL fixes before any code is changed. Identify ordering constraints, interaction risks, and shared state dependencies across the entire fix batch.
 
@@ -422,57 +456,58 @@ Within each priority level, follow the ordering from the Impact Map.
 
 Spawn the impact-analyst:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 1 | impact-analyst | Explore | Combined blast radius, ordering, interactions |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 1 | impact-analyst | general-purpose | opus | Combined blast radius, ordering, interactions |
 
-The impact-analyst prompt MUST include:
+The impact-analyst prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
 - The complete numbered fix list (what to fix, where)
 - The target files/directories
-- The investigation protocol, deliverable format, and quality gates (copy from above)
-- The Critical Rules section
-- The Known Correct Patterns table
+- The investigation protocol and deliverable format (concise version)
+- Key quality gates (bullet list, not full tables)
+- Brief summary of Critical Rules (3-4 key points, not full copy)
 
-### Per-Phase Stall Detection
+### Per-Phase Stall Detection & Fallback
 
 Each phase spawns a single agent. After spawning:
-1. Send the agent an activation message with the specific inputs listed above
-2. Monitor for response within 90 seconds
-3. If no response after 90s, send a direct nudge: "Check your inbox for your assigned task and begin immediately."
-4. If still unresponsive after 3 minutes, send a second message: "You have an active task assignment. Read your activation message and report your findings."
-5. If unresponsive after 5 minutes, note the gap and proceed (skip the phase or attempt with a new agent if critical)
+1. Wait up to **2 minutes** for the agent to respond via SendMessage
+2. If no response after 2 minutes, **abandon the agent and do the work yourself as Team Lead**
+3. Do NOT send multiple nudge messages — they rarely work and waste time
 
-This protocol applies to **all three phases** below.
+**Self-execution is always faster than waiting for a stalled agent.** The Team Lead has full tool access and can perform any agent's work directly.
 
 ### Phase 2: Fix Implementation (after Phase 1)
 
 After the impact-analyst completes, spawn the fix-implementer:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 2 | fix-implementer | general-purpose | Implement all fixes per Impact Map ordering |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 2 | fix-implementer | general-purpose | opus | Implement all fixes per Impact Map ordering |
 
-The fix-implementer prompt MUST include:
+The fix-implementer prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
 - The findings/issues to fix
-- The FULL Impact Map output from Phase 1
-- The pre-fix verification steps, fix design constraints, and quality gates (copy from above)
-- The Critical Rules section
-- The Known Correct Patterns table
+- The Impact Map output from Phase 1 (or summary if too long)
+- The pre-fix verification steps and fix design constraints (concise version)
+- Key quality gates (bullet list)
+- Brief summary of Critical Rules and Known Correct Patterns
 
 ### Phase 3: Regression Validation (after Phase 2)
 
 After the fix-implementer completes, spawn the regression-guard:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 3 | regression-guard | general-purpose | Independent batch validation |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 3 | regression-guard | general-purpose | opus | Independent batch validation |
 
-The regression-guard prompt MUST include:
-- The Impact Map (from Phase 1)
+The regression-guard prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
+- The Impact Map (from Phase 1, summarized if needed)
 - ALL fix diffs — the before/after code for EVERY fix applied (read the modified files and describe what changed)
 - The finding descriptions (what was supposed to be fixed)
-- The review protocol, verdict definitions, and quality gates (copy from above)
-- The Critical Rules section and Known Correct Patterns table
+- The review protocol and verdict definitions (concise version)
+- Key quality gates (bullet list)
 
 **CRITICAL**: Do NOT include the fix-implementer's reasoning, design decisions, or self-validation notes. The regression-guard must evaluate the code changes independently.
 

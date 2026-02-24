@@ -64,6 +64,40 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
+## Agent Resilience Protocol (MANDATORY)
+
+Lessons from past sessions: agents stall when given weak models, oversized prompts, or no report-back instructions. Follow these rules to prevent stalls:
+
+### 1. Model Requirement
+**ALL agents MUST be spawned with `model: "opus"`** — pass this explicitly in the Task tool call. Explore agents default to haiku, which cannot handle multi-file analysis. Never rely on defaults.
+
+### 2. Report-Back Requirement
+Every agent prompt MUST include this instruction at the TOP (before any other instructions):
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool to send your findings back to the team lead. Your text output is NOT visible to the team lead — only SendMessage delivers your results. Use: SendMessage(type: "message", recipient: "<team-lead-name>", content: "<your full findings>", summary: "<5-10 word summary>"). Do this IMMEDIATELY when done.
+```
+
+### 3. Prompt Size Limit
+Agent prompts MUST be **under 300 lines**. Include:
+- The agent's specific mission and focus areas
+- The target folder/files
+- Key constraints (Critical Rules summary, Known Correct Patterns)
+
+Do NOT copy the entire command file into the agent prompt. Summarize shared context; don't duplicate it.
+
+### 4. Self-Execution Fallback
+If an agent is unresponsive after **2 minutes** (not 5):
+1. Stop waiting immediately
+2. Do the work yourself as Team Lead
+3. Note in the final report: "Agent N analysis executed by Team Lead (agent unresponsive)"
+
+This is faster and more reliable than sending multiple nudges that go unread.
+
+### 5. Prefer general-purpose Over Explore
+Use `subagent_type: "general-purpose"` for agents that need deep multi-file analysis or code writing. Explore agents have limited tools and weaker default models. Use Explore only for read-only survey tasks.
+
+---
+
 ### Agent 1: "architecture-auditor" (subagent_type: Explore, model: opus)
 
 **Analysis scope**: `$ARGUMENTS`
@@ -592,22 +626,23 @@ Spawn ALL 6 agents in a **single message** with 6 parallel Task tool calls:
 | 5 | mock-fidelity-validator | Explore | opus | Mock accuracy, domain logic, parameter realism |
 | 6 | performance-refactor-reviewer | Explore | opus | Refactoring, performance, code smells |
 
-Each agent prompt MUST include:
+Each agent prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
 - The exact folder path: `$ARGUMENTS`
-- Their specific focus areas, reasoning chain, checklists, and detection tables (copy from above)
-- The Critical Rules section (shared rules)
-- The Known Correct Patterns table
+- Their specific focus areas and deliverable format (concise version — summarize, don't copy verbatim)
+- Key quality gates (bullet list)
+- Brief summary of Critical Rules and Known Correct Patterns (don't copy full tables)
 - Instruction to use TodoWrite for their own progress tracking
-- Instruction to return findings in the structured format below
 
 ### Step 3: Agent Activation & Stall Detection
 After spawning all 6 agents:
 1. Send each agent an activation message listing specific files to read and relevant ADR references for their focus area
-2. Wait 60-90 seconds, then check inbox read status
-3. If agents haven't read their messages after 90s, send a broadcast nudge: "All agents: check your inbox for activation message with file lists. Begin analysis and report findings when done."
-4. Continue monitoring every 60s. Track which agents have reported vs not.
-5. If an agent is unresponsive after 3 minutes, send a direct message: "You have an assigned analysis task. Read your activation message and begin immediately."
-6. If still unresponsive after 5 minutes, note the gap in the final report and proceed with available results.
+2. Wait up to **2 minutes** for agents to respond via SendMessage
+3. Track which agents have reported vs not
+4. For any agent unresponsive after 2 minutes: **abandon it and do that agent's work yourself as Team Lead**
+5. Do NOT send multiple nudge messages — they rarely work and waste time
+
+**Self-execution is always faster than waiting for a stalled agent.** With 6 agents, expect some to stall. Plan to self-execute 1-2 agents' work in every session.
 
 ### Step 4: Synthesis
 After ALL agents complete (or Step 3 timeout reached):

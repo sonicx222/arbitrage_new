@@ -263,6 +263,114 @@ describe('P0-2: NonceManager', () => {
     });
   });
 
+  // ===========================================================================
+  // Fix #18: registerSigner — supports KMS and AbstractSigner
+  // ===========================================================================
+
+  describe('registerSigner (Fix #18: KMS/AbstractSigner support)', () => {
+    it('should register a signer by address and provider', async () => {
+      const manager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 5,
+        preAllocationPoolSize: 0,
+        poolReplenishThreshold: 0,
+      });
+
+      const provider = new MockProvider() as unknown as ethers.Provider;
+      manager.registerSigner('bsc', '0xABCDEF1234567890ABCDEF1234567890ABCDEF12', provider);
+
+      const state = manager.getState('bsc');
+      expect(state).not.toBeNull();
+      expect(state!.confirmed).toBe(-1);
+      expect(state!.pendingCount).toBe(0);
+
+      manager.stop();
+    });
+
+    it('should allocate nonces after registerSigner', async () => {
+      const provider = new MockProvider();
+      provider.setNonce(42);
+      const manager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 5,
+        preAllocationPoolSize: 0,
+        poolReplenishThreshold: 0,
+      });
+
+      manager.registerSigner('arbitrum', '0x1111111111111111111111111111111111111111', provider as unknown as ethers.Provider);
+
+      const nonce = await manager.getNextNonce('arbitrum');
+      expect(nonce).toBe(42);
+
+      manager.stop();
+    });
+
+    it('should work identically to registerWallet', async () => {
+      const provider = new MockProvider();
+      provider.setNonce(10);
+
+      // Register via registerWallet
+      const walletManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 5,
+        preAllocationPoolSize: 0,
+        poolReplenishThreshold: 0,
+      });
+      const wallet = createMockWallet('0xAAAABBBBCCCCDDDDEEEEFFFF0000111122223333', provider);
+      walletManager.registerWallet('ethereum', wallet);
+
+      // Register via registerSigner
+      const signerManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 5,
+        preAllocationPoolSize: 0,
+        poolReplenishThreshold: 0,
+      });
+      signerManager.registerSigner(
+        'ethereum',
+        '0xAAAABBBBCCCCDDDDEEEEFFFF0000111122223333',
+        provider as unknown as ethers.Provider,
+      );
+
+      // Both should allocate the same nonce
+      const walletNonce = await walletManager.getNextNonce('ethereum');
+      const signerNonce = await signerManager.getNextNonce('ethereum');
+      expect(walletNonce).toBe(signerNonce);
+
+      walletManager.stop();
+      signerManager.stop();
+    });
+
+    it('should pre-allocate pool when enabled with registerSigner', async () => {
+      const provider = new MockProvider();
+      provider.setNonce(0);
+      const manager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 3,
+        poolReplenishThreshold: 1,
+      });
+
+      manager.registerSigner('polygon', '0x2222222222222222222222222222222222222222', provider as unknown as ethers.Provider);
+
+      await waitForCondition(
+        () => manager.getPoolStatus('polygon')?.poolSize === 3,
+        { timeout: 1000, description: 'pool fill via registerSigner' },
+      );
+
+      const poolStatus = manager.getPoolStatus('polygon');
+      expect(poolStatus).not.toBeNull();
+      expect(poolStatus!.poolSize).toBe(3);
+
+      manager.stop();
+    });
+  });
+
   describe('Background Sync', () => {
     it('should start and stop background sync', () => {
       const manager = new NonceManager({ syncIntervalMs: 100 });

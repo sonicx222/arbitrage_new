@@ -357,3 +357,11 @@ Patterns learned from running multi-agent deep analysis and fix workflows on thi
 - Use the `safeResolve` flag pattern (see `closeServerWithTimeout` in `partition-service-utils.ts`) for server shutdown timeouts
 - Do NOT use `Promise.race` with a deferred `timeoutId` -- `server.close()` can fire synchronously, causing the timeout handle to be null when clearTimeout is called
 - The `||` vs `??` convention applies to ALL env var defaults, including `process.env.NODE_ENV` -- empty string is a valid env value
+
+## Agent Communication & Stall Prevention (CRITICAL)
+- **Always specify `model: "opus"` explicitly** when spawning agents via Task tool. Explore agents default to haiku, which cannot handle multi-file analysis with complex prompts
+- **Always include SendMessage report-back instruction** at the TOP of every agent prompt. Agents that complete work without SendMessage are invisible to the team lead
+- **Keep agent prompts under 300 lines**. Summarize shared context; don't copy entire command files verbatim
+- **Self-execute after 2 minutes of agent silence**. Sending nudge messages rarely works -- do the work yourself instead
+- **Prefer `general-purpose` subagent_type** for complex analysis. Explore agents have limited tools (no Edit/Write) and default to weaker models
+- **Expect 30-50% agent stall rate** in multi-agent workflows. Design workflows so the team lead can self-execute any agent's work as a fallback

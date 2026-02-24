@@ -145,6 +145,31 @@ export type {
   AdaptiveThresholdConfig,
 } from './adaptive-threshold.service';
 
+// MEV-Share Event Listener (Phase 2 Item #23: Backrun filling)
+export {
+  MevShareEventListener,
+  createMevShareEventListener,
+  COMMON_SWAP_SELECTORS,
+} from './mev-share-event-listener';
+export type {
+  MevShareEvent,
+  MevShareEventLog,
+  MevShareEventTx,
+  BackrunOpportunity,
+  MevShareEventListenerConfig,
+} from './mev-share-event-listener';
+
+// Backrun Bundle Builder (Phase 2 Item #23: Backrun filling)
+export {
+  BackrunBundleBuilder,
+  createBackrunBundleBuilder,
+} from './backrun-bundle-builder';
+export type {
+  BackrunBundleBuilderConfig,
+  BackrunBundle,
+  BackrunSubmissionResult,
+} from './backrun-bundle-builder';
+
 // Types
 export {
   // EVM types

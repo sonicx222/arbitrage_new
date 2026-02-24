@@ -83,6 +83,8 @@ export interface HealthMonitoringDependencies {
   getOpportunityConsumer: () => OpportunityConsumer | null;
   /** Get simulation metrics snapshot (may be null) */
   getSimulationMetricsSnapshot: () => SimulationMetricsSnapshot | null;
+  /** Fix 4: Get strategy-specific metrics (backrun, uniswapx) */
+  getStrategyMetrics?: () => Record<string, unknown>;
 }
 
 // =============================================================================
@@ -221,6 +223,7 @@ export class HealthMonitoringManager {
           pendingMessages: opportunityConsumer?.getPendingCount() ?? 0,
           stats: this.deps.stats,
           simulationMetrics: simulationMetrics ?? null,
+          strategyMetrics: this.deps.getStrategyMetrics?.() ?? null,
         }
       );
     }

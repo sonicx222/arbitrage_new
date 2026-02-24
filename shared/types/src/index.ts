@@ -172,7 +172,8 @@ export interface SwapHop {
 
 export interface ArbitrageOpportunity {
   id: string;
-  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex' | 'flash-loan';
+  // P0 Fix #1: Added 'backrun' (MEV-Share) and 'uniswapx' (Dutch auction filler) types
+  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex' | 'flash-loan' | 'backrun' | 'uniswapx';
   chain?: string;        // Single chain for same-chain arbitrage
   buyDex?: string;
   sellDex?: string;
@@ -244,6 +245,67 @@ export interface ArbitrageOpportunity {
   /** Phase 0 instrumentation: pipeline latency tracking */
   pipelineTimestamps?: PipelineTimestamps;
   netProfit?: number;
+  /**
+   * P0 Fix #2: MEV-Share backrun target metadata.
+   * Present when type === 'backrun'. Contains the target transaction
+   * details needed to construct a backrun bundle.
+   */
+  backrunTarget?: {
+    /** Target transaction hash from MEV-Share SSE stream */
+    txHash: string;
+    /** Target DEX router address */
+    routerAddress: string;
+    /** Direction of target swap: 'buy' or 'sell' */
+    swapDirection: 'buy' | 'sell';
+    /** Source: 'mev-share' | 'mempool' | 'block-event' */
+    source: string;
+    /** Estimated swap size in token units */
+    estimatedSwapSize?: string;
+    /** Target pool address (if known) */
+    poolAddress?: string;
+    /** Fix #42: Trace ID propagated from MEV-Share event listener */
+    traceId?: string;
+  };
+  /**
+   * P0 Fix #2: UniswapX order metadata.
+   * Present when type === 'uniswapx'. Contains the Dutch auction
+   * order details needed to fill the order.
+   */
+  uniswapxOrder?: {
+    /** Encoded order bytes */
+    encodedOrder: string;
+    /** Order signature */
+    signature: string;
+    /** Reactor contract address */
+    reactorAddress: string;
+    /** Chain ID for the order */
+    chainId: number;
+    /** Dutch auction decay start/end timestamps */
+    decayStartTime: number;
+    decayEndTime: number;
+    /** Input token address */
+    inputToken: string;
+    /** Input amount in wei */
+    inputAmount: string;
+    /** Output token address */
+    outputToken: string;
+    /** Starting output amount (beginning of Dutch auction) */
+    outputStartAmount: string;
+    /** Ending output amount (minimum, end of Dutch auction) */
+    outputEndAmount: string;
+    /** Exclusive filler address (if any) */
+    exclusiveFiller?: string;
+    /** Exclusivity override BPS (after exclusivity expires) */
+    exclusivityOverrideBps?: number;
+    /** Nonce for the order */
+    nonce: string;
+    /** Deadline (Unix timestamp) after which order expires */
+    deadline: number;
+    /** The swapper's address */
+    swapper: string;
+    /** Order hash for identification */
+    orderHash: string;
+  };
 }
 
 export interface SwapEvent {

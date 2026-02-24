@@ -524,15 +524,45 @@ CI pipeline (`.github/workflows/test.yml`) runs comprehensive tests but has no d
 
 ### Phase 2: Architecture Evolution (Week 5-8)
 
-| # | Item | Category | Effort | Impact |
-|---|------|----------|--------|--------|
-| 21 | Oracle ARM monolith migration | Architecture | 2 weeks | 2.5-3x latency improvement |
-| 22 | UniswapX filler integration | Strategy | 2 weeks | New revenue stream |
-| 23 | MEV-Share backrun filling | Strategy | 1 week | 50-200 opps/day |
-| 24 | Curve multi-token StableSwap math | DeFi Protocol | 1 week | Accurate Curve pricing |
-| 25 | BSC cross-chain bridge routes | DeFi Protocol | 2 days | BSC<->L2 arb enabled |
-| 26 | Backrunning strategy | Strategy | 1 week | +10-20% additional revenue |
-| 27 | KMS integration for signing | Security | 1 week | HSM-grade key security |
+> **Status as of 2026-02-23**: Items #21-#23 and #26-#27 have initial implementations merged.
+> A 6-agent deep analysis ([PHASE2_DEEP_ANALYSIS_2026-02-23.md](PHASE2_DEEP_ANALYSIS_2026-02-23.md))
+> found **35 issues (6 Critical, 8 High, 12 Medium, 9 Low)** — grade **D+**.
+> All 5 implemented items require remediation before production use.
+
+| # | Item | Category | Status | Issues Found |
+|---|------|----------|--------|--------------|
+| 21 | Oracle ARM monolith migration | Architecture | **CODE COMPLETE — NOT PRODUCTION-READY** | Health port conflict (coordinator vs monolith both on 3000), `resolveServicePath()` fails in dev mode, `process.exit()` before async cleanup, `require('os')` in ESM, `@types/node` version mismatch, full `process.env` leaked to all workers, no tests for entry point. Worker manager auto-restart logic untested. |
+| 22 | UniswapX filler integration | Strategy | **CODE COMPLETE — NOT WIRED** | Strategy not registered in factory (dead code). `ArbitrageOpportunity.type` union missing `'uniswapx'`. Config spread bug can overwrite `minProfitUsd` with `undefined`, disabling profitability checks. Reactor address not validated against whitelist. No happy-path execution tests. Dead variable `inputAmount`. |
+| 23 | MEV-Share backrun filling | Strategy | **CODE COMPLETE — NOT WIRED** | Listener, bundle builder, and strategy exist as 3 disconnected components — no glue code subscribes to listener events or feeds opportunities into execution pipeline. `privacy.hints` uses wrong format (object vs array per Flashbots spec). SSE buffer grows unbounded (OOM risk). Core matching logic (`evaluateBackrunOpportunity`) is private and untestable — existing tests are vacuous (always pass). `extractTokenPairFromLogs` returns same address for both tokens. |
+| 24 | Curve multi-token StableSwap math | DeFi Protocol | **NOT STARTED** | — |
+| 25 | BSC cross-chain bridge routes | DeFi Protocol | **NOT STARTED** | — |
+| 26 | Backrunning strategy | Strategy | **CODE COMPLETE — NOT WIRED** | Strategy not registered in factory (dead code). `getAmountsOut` fallback mixes USD with 18-decimal wei (guaranteed reverts). Profit calculation ignores MEV-Share refund percentage (~10x inflation). `refundConfig` semantics inverted or misnamed (searcher keeps 90% vs intended 90% to user). Config spread bug same as #22. Gas price check uses integer truncation. No happy-path execution tests. |
+| 27 | KMS integration for signing | Security | **CODE COMPLETE — UNTESTED** | Zero test coverage across all 11 functions (CRITICAL for fund-safety code). SPKI public key parsing uses heuristic byte scanning instead of proper ASN.1 DER parsing. `connect()` doesn't share address cache. `getAddress()` has no concurrency guard. Dynamic `import()` on every sign call. Not registered with NonceManager in provider service. KMS key ID partially logged (info leak). |
+
+#### Phase 2 Remediation Plan
+
+The 6 Critical findings must be resolved before any Phase 2 feature can be deployed:
+
+| Priority | Fix | Files | Ref |
+|----------|-----|-------|-----|
+| **P0-1** | Remove `...config` spread from 3 constructors | uniswapx-filler.strategy.ts, backrun-bundle-builder.ts, mev-share-event-listener.ts | Deep Analysis #3 |
+| **P0-2** | Deduct `mevShareRefundPercent` from profit calculations | backrun.strategy.ts, uniswapx-filler.strategy.ts | Deep Analysis #5 |
+| **P0-3** | Fix `getAmountsOut` fallback (abort or use %-based estimate) | backrun.strategy.ts:361-368 | Deep Analysis #6 |
+| **P0-4** | Resolve `refundConfig` semantics (verify against Flashbots spec) | backrun-bundle-builder.ts:219-222 | Deep Analysis #4 |
+| **P0-5** | Register both strategies in factory + update StrategyType union | strategy-factory.ts, engine.ts, shared/types | Deep Analysis #1 |
+| **P0-6** | Create pipeline wiring: listener → opportunity → execution | New integration code needed | Deep Analysis #2 |
+
+After P0 fixes, the 8 High findings should be addressed:
+- Write KMS signer test suite (DER parsing, SPKI, address derivation, v-recovery)
+- Replace vacuous MEV-Share listener tests with real matching logic tests
+- Fix monolith port conflict (suppress worker health servers or unique ports)
+- Fix `privacy.hints` format to array of strings
+- Add reactor address whitelist to UniswapX filler
+- Add SSE buffer size limit
+- Write happy-path execution tests for both strategies
+- Replace SPKI heuristic parsing with proper ASN.1
+
+See [PHASE2_DEEP_ANALYSIS_2026-02-23.md](PHASE2_DEEP_ANALYSIS_2026-02-23.md) for the full 35-finding report with file:line references, cross-agent insights, and scoring.
 
 ### Phase 3: Strategic Expansion (Week 9+)
 
@@ -549,15 +579,15 @@ CI pipeline (`.github/workflows/test.yml`) runs comprehensive tests but has no d
 
 ## 10. Architecture Rework Decision Matrix
 
-| Proposal | Impact | Effort | Risk | Cost | Verdict |
-|----------|--------|--------|------|------|---------|
-| **Self-hosted Redis** | Very High (20-40ms) | Low (2d) | Low | $0 | **DO IT** |
-| **Oracle ARM Monolith** | Transformative (2.5-3x) | Medium (4w) | Medium (SPOF) | $0 | **RECOMMENDED** |
-| **Intent Protocols** | High (new revenue) | High (3-4w) | Medium (competition) | $0 | **PHASE 2** |
-| **Unified CI/CD** | High (ops safety) | Medium (1w) | Low | $0 | **DO IT** |
-| WASM Engine | Low (at scale) | Very High | Low | $0 | **SKIP** |
-| Diamond Proxy | Negative (gas +2500) | Medium | High (upgradeability risk) | $0 | **SKIP** |
-| NATS/Kafka | Low | High | Medium | $0 | **SKIP** |
+| Proposal | Impact | Effort | Risk | Cost | Verdict | Status (2026-02-23) |
+|----------|--------|--------|------|------|---------|---------------------|
+| **Self-hosted Redis** | Very High (20-40ms) | Low (2d) | Low | $0 | **DO IT** | NOT STARTED |
+| **Oracle ARM Monolith** | Transformative (2.5-3x) | Medium (4w) | Medium (SPOF) | $0 | **RECOMMENDED** | CODE COMPLETE — 12 issues found, not production-ready |
+| **Intent Protocols** | High (new revenue) | High (3-4w) | Medium (competition) | $0 | **PHASE 2** | CODE COMPLETE — strategies not wired into pipeline |
+| **Unified CI/CD** | High (ops safety) | Medium (1w) | Low | $0 | **DO IT** | NOT STARTED |
+| WASM Engine | Low (at scale) | Very High | Low | $0 | **SKIP** | — |
+| Diamond Proxy | Negative (gas +2500) | Medium | High (upgradeability risk) | $0 | **SKIP** | — |
+| NATS/Kafka | Low | High | Medium | $0 | **SKIP** | — |
 
 ---
 

@@ -88,7 +88,41 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 1: "pattern-scout" (subagent_type: Explore)
+## Agent Resilience Protocol (MANDATORY)
+
+Lessons from past sessions: agents stall when given weak models, oversized prompts, or no report-back instructions. Follow these rules to prevent stalls:
+
+### 1. Model Requirement
+**ALL agents MUST be spawned with `model: "opus"`** — pass this explicitly in the Task tool call. Explore agents default to haiku, which cannot handle multi-file analysis. Never rely on defaults.
+
+### 2. Report-Back Requirement
+Every agent prompt MUST include this instruction at the TOP (before any other instructions):
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool to send your findings back to the team lead. Your text output is NOT visible to the team lead — only SendMessage delivers your results. Use: SendMessage(type: "message", recipient: "<team-lead-name>", content: "<your full findings>", summary: "<5-10 word summary>"). Do this IMMEDIATELY when done.
+```
+
+### 3. Prompt Size Limit
+Agent prompts MUST be **under 300 lines**. Include:
+- The agent's specific mission and deliverable format
+- The feature specification and target area
+- Key constraints (Critical Rules summary, Known Correct Patterns)
+
+Do NOT copy the entire command file into the agent prompt. Summarize shared context; don't duplicate it.
+
+### 4. Self-Execution Fallback
+If an agent is unresponsive after **2 minutes** (not 5):
+1. Stop waiting immediately
+2. Do the work yourself as Team Lead
+3. Note in the summary: "Phase N executed by Team Lead (agent unresponsive)"
+
+This is faster and more reliable than sending multiple nudges that go unread.
+
+### 5. Prefer general-purpose Over Explore
+Use `subagent_type: "general-purpose"` for ALL agents that need deep multi-file analysis. Explore agents have limited tools and weaker models. Only use Explore for simple, quick file searches.
+
+---
+
+### Agent 1: "pattern-scout" (subagent_type: general-purpose, model: opus)
 
 **Mission**: Find the closest existing implementations to use as templates for the requested feature. Extract the "recipe" — the step-by-step pattern for building this type of feature in this codebase.
 
@@ -152,7 +186,7 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 2: "integration-mapper" (subagent_type: Explore)
+### Agent 2: "integration-mapper" (subagent_type: general-purpose, model: opus)
 
 **Mission**: Map every integration point the new feature will touch. Trace data flow end-to-end for related features. Identify shared state, concurrency requirements, cleanup patterns, and hot-path proximity.
 
@@ -228,7 +262,7 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 3: "feature-architect" (subagent_type: general-purpose)
+### Agent 3: "feature-architect" (subagent_type: general-purpose, model: opus)
 
 **Mission**: Design the complete implementation blueprint for the feature. File-by-file plan with class/function signatures, data flow, error handling, and integration strategy. This design must account for ALL constraints from Phase 1.
 
@@ -350,7 +384,7 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 4: "test-architect" (subagent_type: general-purpose)
+### Agent 4: "test-architect" (subagent_type: general-purpose, model: opus)
 
 **Mission**: Design the complete TDD test strategy for the feature. Test file structure, specific test cases with descriptions and expected behaviors, mock requirements, edge cases. This design is INDEPENDENT from the implementation design — reason from the feature specification, not from any architecture.
 
@@ -467,7 +501,7 @@ You are the **Team Lead**. Your responsibilities:
 
 ---
 
-### Agent 5: "adversarial-reviewer" (subagent_type: general-purpose)
+### Agent 5: "adversarial-reviewer" (subagent_type: general-purpose, model: opus)
 
 **Mission**: Review BOTH the implementation design and test design. Find gaps between them. Challenge assumptions. Identify missed edge cases, convention violations, performance concerns, and integration risks. Produce specific, actionable concerns — not vague worries.
 
@@ -627,46 +661,48 @@ RECOMMENDATION: [specific change to make — not vague advice]
 
 ### Phase 2: Parallel Reconnaissance (Agents 1 + 2)
 
-Spawn 2 Explore agents **in a single message** with 2 parallel Task tool calls:
+Spawn 2 agents **in a single message** with 2 parallel Task tool calls:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 1 | pattern-scout | Explore | Templates, conventions, recipes |
-| 2 | integration-mapper | Explore | Data flow, dependencies, hot-path proximity |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 1 | pattern-scout | general-purpose | opus | Templates, conventions, recipes |
+| 2 | integration-mapper | general-purpose | opus | Data flow, dependencies, hot-path proximity |
 
-Each agent prompt MUST include:
+Each agent prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
 - The feature specification from the user
 - The target area/directory for the feature
-- Their specific investigation protocol, deliverable format, and quality gates (copy from above)
-- The Critical Rules section (anti-hallucination, performance safety, investigation strategy)
-- The Known Correct Patterns table
+- Their specific investigation protocol and deliverable format (concise version)
+- Key quality gates (bullet list)
+- Brief summary of Critical Rules and Known Correct Patterns
 
-### Agent Stall Detection (applies to all phases)
+### Agent Stall Detection & Self-Execution Fallback (applies to all phases)
 
 After spawning agents in any phase:
-1. Send each agent an activation message with their specific inputs
-2. Wait 60-90 seconds, then check inbox read status
-3. If agents haven't read their messages after 90s, send a nudge: "Check your inbox for your assigned task. Begin analysis and report findings when done."
-4. If an agent is unresponsive after 3 minutes, send a direct message: "You have an active task assignment. Read your activation message and begin immediately."
-5. If still unresponsive after 5 minutes, note the gap and proceed with available results.
+1. Wait up to **2 minutes** for agents to respond via SendMessage
+2. If an agent is unresponsive after 2 minutes, **abandon it and do the work yourself as Team Lead**
+3. Do NOT send multiple nudge messages — they rarely work and waste time
 
-For parallel phases (Phase 2, Phase 3): apply to all agents simultaneously — track which have reported vs not.
-For sequential phases (Phase 4): apply to the single agent.
+**Self-execution is always faster than waiting for a stalled agent.** The Team Lead has full tool access and can perform any agent's work directly.
+
+For parallel phases: if one agent responds and the other stalls, use the responding agent's output and self-execute the stalled agent's work.
 
 ### Phase 3: Parallel Design (Agents 3 + 4, after Phase 2)
 
 After reconnaissance agents complete, spawn 2 design agents **in a single message** with 2 parallel Task tool calls:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 3 | feature-architect | general-purpose | Implementation blueprint |
-| 4 | test-architect | general-purpose | TDD test strategy |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 3 | feature-architect | general-purpose | opus | Implementation blueprint |
+| 4 | test-architect | general-purpose | opus | TDD test strategy |
 
-Each agent prompt MUST include:
+Each agent prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
 - The feature specification from the user
-- The FULL output from BOTH Phase 2 agents (Pattern Catalog + Integration Map)
-- Their specific design protocol, deliverable format, and quality gates (copy from above)
-- The Critical Rules section and Known Correct Patterns table
+- The output from BOTH Phase 2 agents (Pattern Catalog + Integration Map — summarize if needed to stay under limit)
+- Their specific design protocol and deliverable format (concise version)
+- Key quality gates (bullet list)
+- Brief summary of Critical Rules and Known Correct Patterns
 
 **CRITICAL**: The test-architect MUST NOT receive the feature-architect's output, and vice versa. They work independently from the same Phase 1 inputs to create the natural cross-check.
 
@@ -674,15 +710,17 @@ Each agent prompt MUST include:
 
 After design agents complete, spawn 1 review agent:
 
-| # | Agent Name | subagent_type | Focus |
-|---|-----------|---------------|-------|
-| 5 | adversarial-reviewer | general-purpose | Challenge both designs, find gaps |
+| # | Agent Name | subagent_type | model | Focus |
+|---|-----------|---------------|-------|-------|
+| 5 | adversarial-reviewer | general-purpose | opus | Challenge both designs, find gaps |
 
-The adversarial-reviewer prompt MUST include:
+The adversarial-reviewer prompt MUST include (keep under 300 lines total):
+- **First line**: The SendMessage report-back instruction (see Agent Resilience Protocol §2)
 - The feature specification from the user
-- The FULL output from ALL 4 previous agents (Pattern Catalog + Integration Map + Implementation Blueprint + Test Blueprint)
-- Their specific review protocol, deliverable format, and quality gates (copy from above)
-- The Critical Rules section and Known Correct Patterns table
+- The output from ALL 4 previous agents (summarize if needed to stay under limit)
+- Their specific review protocol and deliverable format (concise version)
+- Key quality gates (bullet list)
+- Brief summary of Critical Rules and Known Correct Patterns
 
 ### Phase 5: Synthesis & Implementation (Team Lead)
 

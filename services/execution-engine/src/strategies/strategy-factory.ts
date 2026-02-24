@@ -77,7 +77,8 @@ import type {
  * capital-free execution via flash loans. The flash-loan strategy supports N-hop
  * swap paths via buildNHopSwapSteps().
  */
-export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral';
+// P0 Fix #1: Added 'backrun' and 'uniswapx' strategy types
+export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral' | 'backrun' | 'uniswapx';
 
 /**
  * Strategy resolution result
@@ -123,6 +124,10 @@ export interface RegisteredStrategies {
   crossChain?: ExecutionStrategy;
   intraChain?: ExecutionStrategy;
   flashLoan?: ExecutionStrategy;
+  /** P0 Fix #1: MEV-Share backrun strategy (Ethereum only) */
+  backrun?: ExecutionStrategy;
+  /** P0 Fix #1: UniswapX Dutch auction filler strategy */
+  uniswapx?: ExecutionStrategy;
 }
 
 // =============================================================================
@@ -190,6 +195,22 @@ export class ExecutionStrategyFactory {
   }
 
   /**
+   * P0 Fix #1: Register the backrun strategy (MEV-Share backrunning).
+   */
+  registerBackrunStrategy(strategy: ExecutionStrategy): void {
+    this.strategies.backrun = strategy;
+    this.logger.debug('Registered backrun strategy');
+  }
+
+  /**
+   * P0 Fix #1: Register the UniswapX filler strategy.
+   */
+  registerUniswapXStrategy(strategy: ExecutionStrategy): void {
+    this.strategies.uniswapx = strategy;
+    this.logger.debug('Registered uniswapx strategy');
+  }
+
+  /**
    * Register multiple strategies at once.
    */
   registerStrategies(strategies: RegisteredStrategies): void {
@@ -204,6 +225,12 @@ export class ExecutionStrategyFactory {
     }
     if (strategies.flashLoan) {
       this.registerFlashLoanStrategy(strategies.flashLoan);
+    }
+    if (strategies.backrun) {
+      this.registerBackrunStrategy(strategies.backrun);
+    }
+    if (strategies.uniswapx) {
+      this.registerUniswapXStrategy(strategies.uniswapx);
     }
   }
 
@@ -340,6 +367,30 @@ export class ExecutionStrategyFactory {
       };
     }
 
+    // P0 Fix #1: Priority 2.5: Backrun opportunities (MEV-Share)
+    if (opportunity.type === 'backrun') {
+      if (!this.strategies.backrun) {
+        throw new Error('[ERR_NO_STRATEGY] Backrun opportunity but no backrun strategy registered');
+      }
+      return {
+        type: 'backrun',
+        strategy: this.strategies.backrun,
+        reason: 'MEV-Share backrun opportunity',
+      };
+    }
+
+    // P0 Fix #1: Priority 2.6: UniswapX fill opportunities
+    if (opportunity.type === 'uniswapx') {
+      if (!this.strategies.uniswapx) {
+        throw new Error('[ERR_NO_STRATEGY] UniswapX opportunity but no UniswapX strategy registered');
+      }
+      return {
+        type: 'uniswapx',
+        strategy: this.strategies.uniswapx,
+        reason: 'UniswapX Dutch auction fill opportunity',
+      };
+    }
+
     // Priority 3: Cross-chain opportunities
     // Fix 1.3: Detect cross-chain implicitly from buyChain/sellChain mismatch
     const isExplicitCrossChain = opportunity.type === 'cross-chain';
@@ -419,6 +470,11 @@ export class ExecutionStrategyFactory {
       case 'quadrilateral':
         // Fix 2.1 & 2.2: Multi-hop strategies use flash-loan strategy
         return !!this.strategies.flashLoan;
+      // P0 Fix #1: New strategy types
+      case 'backrun':
+        return !!this.strategies.backrun;
+      case 'uniswapx':
+        return !!this.strategies.uniswapx;
       default:
         return false;
     }
@@ -433,6 +489,9 @@ export class ExecutionStrategyFactory {
     if (this.strategies.crossChain) types.push('cross-chain');
     if (this.strategies.intraChain) types.push('intra-chain');
     if (this.strategies.flashLoan) types.push('flash-loan');
+    // P0 Fix #1: Include new strategy types
+    if (this.strategies.backrun) types.push('backrun');
+    if (this.strategies.uniswapx) types.push('uniswapx');
     return types;
   }
 

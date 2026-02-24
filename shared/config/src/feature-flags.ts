@@ -227,6 +227,78 @@ export const FEATURE_FLAGS = {
    * @see shared/core/src/analytics/orderflow-pipeline-consumer.ts
    */
   useOrderflowPipeline: process.env.FEATURE_ORDERFLOW_PIPELINE === 'true',
+
+  /**
+   * Enable KMS-based transaction signing (Phase 2 Item 27).
+   *
+   * When enabled:
+   * - Transactions are signed via AWS KMS (key never leaves HSM)
+   * - Per-chain KMS keys supported: KMS_KEY_ID_{CHAIN} env vars
+   * - Falls back to KMS_KEY_ID for chains without per-chain config
+   * - Private key env vars still override KMS for that chain
+   *
+   * When disabled (default):
+   * - Uses local private keys (PRIVATE_KEY or per-chain *_PRIVATE_KEY)
+   * - Set FEATURE_KMS_SIGNING=true to enable
+   *
+   * Prerequisites:
+   * - npm install @aws-sdk/client-kms
+   * - AWS credentials configured (env vars, instance profile, etc.)
+   * - KMS key created with ECC_SECG_P256K1 key spec
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see services/execution-engine/src/services/kms-signer.ts
+   * @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Section 7.1.1
+   */
+  useKmsSigning: process.env.FEATURE_KMS_SIGNING === 'true',
+
+  /**
+   * Fix #51: Enable backrun strategy for MEV-Share backrunning.
+   *
+   * When enabled:
+   * - BackrunStrategy is registered in the strategy factory
+   * - MEV-Share event listener opportunities are routed to backrun execution
+   *
+   * When disabled (default):
+   * - BackrunStrategy is not registered; backrun opportunities are ignored
+   * - Set FEATURE_BACKRUN_STRATEGY=true to enable
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see services/execution-engine/src/strategies/backrun.strategy.ts
+   */
+  useBackrunStrategy: process.env.FEATURE_BACKRUN_STRATEGY === 'true',
+
+  /**
+   * Fix #51: Enable UniswapX filler strategy.
+   *
+   * When enabled:
+   * - UniswapXFillerStrategy is registered in the strategy factory
+   * - UniswapX Dutch auction orders are evaluated and filled
+   *
+   * When disabled (default):
+   * - UniswapX orders are ignored
+   * - Set FEATURE_UNISWAPX_FILLER=true to enable
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see services/execution-engine/src/strategies/uniswapx-filler.strategy.ts
+   */
+  useUniswapxFiller: process.env.FEATURE_UNISWAPX_FILLER === 'true',
+
+  /**
+   * Fix #51: Enable MEV-Share backrun event processing.
+   *
+   * When enabled:
+   * - MEV-Share SSE event listener is started
+   * - Pending transactions from MEV-Share are evaluated as backrun opportunities
+   *
+   * When disabled (default):
+   * - No MEV-Share event stream connection
+   * - Set FEATURE_MEV_SHARE_BACKRUN=true to enable
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see shared/core/src/mev-protection/mev-share-event-listener.ts
+   */
+  useMevShareBackrun: process.env.FEATURE_MEV_SHARE_BACKRUN === 'true',
 };
 
 /**
@@ -577,6 +649,38 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
         console.info(`✅ ${message}`);
       }
     }
+  }
+
+  // Fix #53: Validate KMS signing configuration
+  if (FEATURE_FLAGS.useKmsSigning) {
+    if (!process.env.KMS_KEY_ID) {
+      const isProduction = process.env.NODE_ENV === 'production';
+      const msg = 'FEATURE_KMS_SIGNING is enabled but KMS_KEY_ID is not set. ' +
+        'createKmsSigner() will return null for chains without per-chain KMS_KEY_ID_{CHAIN} env vars.';
+      if (isProduction) {
+        // In production, KMS without keys means no signing capability — fail fast
+        throw new Error(`CRITICAL: ${msg} Set KMS_KEY_ID or disable FEATURE_KMS_SIGNING in production.`);
+      }
+      if (logger) {
+        logger.warn(msg);
+      } else {
+        console.warn(`WARNING: ${msg}`);
+      }
+    }
+  }
+
+  // Fix #51: Validate backrun/UniswapX/MEV-Share feature flags
+  if (FEATURE_FLAGS.useBackrunStrategy) {
+    const msg = 'Backrun Strategy enabled - MEV-Share backrun opportunities will be executed';
+    if (logger) { logger.info(msg); } else { console.info(msg); }
+  }
+  if (FEATURE_FLAGS.useUniswapxFiller) {
+    const msg = 'UniswapX Filler Strategy enabled - Dutch auction orders will be filled';
+    if (logger) { logger.info(msg); } else { console.info(msg); }
+  }
+  if (FEATURE_FLAGS.useMevShareBackrun) {
+    const msg = 'MEV-Share Backrun event processing enabled - SSE event stream will be consumed';
+    if (logger) { logger.info(msg); } else { console.info(msg); }
   }
 }
 

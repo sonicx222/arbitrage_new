@@ -97,6 +97,11 @@ import { SimulationStrategy } from './strategies/simulation.strategy';
 import { FlashLoanStrategy } from './strategies/flash-loan.strategy';
 import { createFlashLoanProviderFactory } from './strategies/flash-loan-providers/provider-factory';
 import { ExecutionStrategyFactory, createStrategyFactory } from './strategies/strategy-factory';
+// P0 Fix #1: Import backrun and UniswapX strategies for registration
+import { BackrunStrategy } from './strategies/backrun.strategy';
+import { UniswapXFillerStrategy } from './strategies/uniswapx-filler.strategy';
+// Fix #51: Import MEV-Share event listener for backrun opportunity wiring
+import type { MevShareEventListener, BackrunOpportunity, Logger as CoreLogger } from '@arbitrage/core';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import type { ISimulationService } from './services/simulation/types';
 import {
@@ -203,6 +208,9 @@ export class ExecutionEngineService {
   private intraChainStrategy: IntraChainStrategy | null = null;
   private crossChainStrategy: CrossChainStrategy | null = null;
   private simulationStrategy: SimulationStrategy | null = null;
+  // Fix 4: Store references for metrics exposure via health endpoint
+  private backrunStrategy: BackrunStrategy | null = null;
+  private uniswapxStrategy: UniswapXFillerStrategy | null = null;
 
   // Transaction simulation service (Phase 1.1)
   private txSimulationService: ISimulationService | null = null;
@@ -279,6 +287,9 @@ export class ExecutionEngineService {
 
   // Task 4.1: Per-chain balance monitor
   private balanceMonitor: BalanceMonitor | null = null;
+
+  // Fix #51: MEV-Share SSE event listener for backrun opportunity ingestion
+  private mevShareListener: MevShareEventListener | null = null;
 
   // P0 Refactoring: Health monitoring extracted to dedicated manager
   // Handles non-hot-path interval operations (health checks, gas cleanup, pending cleanup)
@@ -407,7 +418,7 @@ export class ExecutionEngineService {
     // State machine for lifecycle management
     this.stateManager = config.stateManager ?? createServiceState({
       serviceName: 'execution-engine',
-      transitionTimeoutMs: parseInt(process.env.STATE_TRANSITION_TIMEOUT_MS ?? '') || 30000
+      transitionTimeoutMs: (() => { const v = parseInt(process.env.STATE_TRANSITION_TIMEOUT_MS ?? '', 10); return Number.isNaN(v) ? 30000 : v; })()
     });
 
     // Initialize stats
@@ -512,6 +523,8 @@ export class ExecutionEngineService {
       if (!this.isSimulationMode) {
         await this.providerService.initialize();
         this.providerService.initializeWallets();
+        // FIX 11: Await KMS address resolution before processing opportunities
+        await this.providerService.waitForKmsRegistrations();
 
         // FIX 1.1: Use initialization module instead of duplicate private methods
         // Initialize MEV protection using module
@@ -688,6 +701,12 @@ export class ExecutionEngineService {
       // Start execution processing
       this.startExecutionProcessing();
 
+      // Fix #51: Wire MEV-Share backrun event listener when both flags are enabled
+      // Requires useBackrunStrategy (registers BackrunStrategy) AND useMevShareBackrun (enables SSE stream)
+      if (FEATURE_FLAGS.useMevShareBackrun && FEATURE_FLAGS.useBackrunStrategy) {
+        await this.initializeMevShareListener();
+      }
+
       // Start simulation metrics collector (Phase 1.1.3)
       // Note: Must start before health monitoring to provide metrics
       this.startSimulationMetricsCollection();
@@ -709,6 +728,8 @@ export class ExecutionEngineService {
         getQueueService: () => this.queueService,
         getOpportunityConsumer: () => this.opportunityConsumer,
         getSimulationMetricsSnapshot: () => this.simulationMetricsCollector?.getSnapshot() ?? null,
+        // Fix 4: Expose strategy-specific metrics (backrun, UniswapX) in health data
+        getStrategyMetrics: () => this.getStrategyMetrics(),
       });
       this.healthMonitoringManager.start();
 
@@ -729,6 +750,25 @@ export class ExecutionEngineService {
 
       // Clear execution processing interval (hot-path related)
       this.clearIntervals();
+
+      // Fix R2: Wait for in-flight executions to complete before tearing down.
+      // Without this, active executions lose access to providers/Redis/nonces mid-flight.
+      if (this.activeExecutionCount > 0) {
+        this.logger.info('Waiting for in-flight executions to complete', {
+          activeCount: this.activeExecutionCount,
+        });
+        const drainStart = Date.now();
+        const drainTimeoutMs = 10_000;
+        while (this.activeExecutionCount > 0 && Date.now() - drainStart < drainTimeoutMs) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        }
+        if (this.activeExecutionCount > 0) {
+          this.logger.warn('In-flight executions did not complete within drain timeout', {
+            remaining: this.activeExecutionCount,
+            drainTimeoutMs,
+          });
+        }
+      }
 
       // O-6: Close persistent trade logger
       if (this.tradeLogger) {
@@ -761,6 +801,12 @@ export class ExecutionEngineService {
       if (this.pendingStateManager) {
         await this.pendingStateManager.shutdown();
         this.pendingStateManager = null;
+      }
+
+      // Fix #51: Stop MEV-Share event listener
+      if (this.mevShareListener) {
+        await this.mevShareListener.stop();
+        this.mevShareListener = null;
       }
 
       // Stop consumer
@@ -804,6 +850,9 @@ export class ExecutionEngineService {
       this.mevProviderFactory = null;
       await this.bridgeRouterFactory?.dispose();
       this.bridgeRouterFactory = null;
+      // Fix 4: Clear strategy references
+      this.backrunStrategy = null;
+      this.uniswapxStrategy = null;
 
       // S6: Nullify standby manager
       this.standbyManager = null;
@@ -953,6 +1002,37 @@ export class ExecutionEngineService {
       this.strategyFactory.registerFlashLoanStrategy(flashLoanStrategy);
     }
 
+    // FIX 2: Respect feature flags for strategy registration.
+    // Feature flags documentation states: "When disabled: BackrunStrategy is not registered."
+    // Previous code always registered regardless of flag, contradicting the flag contract.
+    // Fix 9: Wire env var configuration to strategy thresholds.
+    // Fix 4: Store references for metrics exposure via health endpoint.
+    // Regression guard CAUTION: validate numeric env vars to prevent NaN (which silently disables thresholds).
+    const parseNumericEnv = (key: string): number | undefined => {
+      const raw = process.env[key];
+      if (!raw) return undefined;
+      const parsed = Number(raw);
+      if (isNaN(parsed)) {
+        this.logger.warn(`Invalid numeric env var ${key}='${raw}', ignoring (using default)`);
+        return undefined;
+      }
+      return parsed;
+    };
+    if (FEATURE_FLAGS.useBackrunStrategy) {
+      this.backrunStrategy = new BackrunStrategy(this.logger, {
+        minProfitUsd: parseNumericEnv('BACKRUN_MIN_PROFIT_USD'),
+        maxGasPriceGwei: parseNumericEnv('BACKRUN_MAX_GAS_PRICE_GWEI'),
+      });
+      this.strategyFactory.registerBackrunStrategy(this.backrunStrategy);
+    }
+    if (FEATURE_FLAGS.useUniswapxFiller) {
+      this.uniswapxStrategy = new UniswapXFillerStrategy(this.logger, {
+        minProfitUsd: parseNumericEnv('UNISWAPX_MIN_PROFIT_USD'),
+        maxGasPriceGwei: parseNumericEnv('UNISWAPX_MAX_GAS_PRICE_GWEI'),
+      });
+      this.strategyFactory.registerUniswapXStrategy(this.uniswapxStrategy);
+    }
+
     this.logger.info('Strategy factory initialized', {
       registeredTypes: this.strategyFactory.getRegisteredTypes(),
       simulationMode: this.isSimulationMode,
@@ -963,6 +1043,80 @@ export class ExecutionEngineService {
     if (!this.isSimulationMode && this.providerService) {
       this.txSimulationService = initializeTxSimulationService(this.providerService, this.logger);
     }
+  }
+
+  /**
+   * Fix #51: Initialize MEV-Share SSE event listener for backrun opportunity ingestion.
+   *
+   * Collects DEX router addresses from config, creates the listener, subscribes
+   * to backrunOpportunity events, and converts them to ArbitrageOpportunity objects
+   * that are enqueued into the execution pipeline.
+   *
+   * @see shared/core/src/mev-protection/mev-share-event-listener.ts
+   */
+  private async initializeMevShareListener(): Promise<void> {
+    // Collect all Ethereum DEX router addresses (MEV-Share is Ethereum-only)
+    const ethereumDexes = DEXES['ethereum'] ?? [];
+    const dexRouterAddresses = new Set<string>(
+      ethereumDexes
+        .map(dex => dex.routerAddress.toLowerCase())
+        .filter(Boolean)
+    );
+
+    if (dexRouterAddresses.size === 0) {
+      this.logger.warn('MEV-Share listener: no Ethereum DEX routers configured, skipping');
+      return;
+    }
+
+    // Dynamic import to avoid pulling the listener into the module graph
+    // when the feature flag is disabled
+    const { createMevShareEventListener } = await import('@arbitrage/core');
+
+    this.mevShareListener = createMevShareEventListener({
+      sseEndpoint: process.env.MEV_SHARE_SSE_ENDPOINT,
+      dexRouterAddresses,
+      // Cast: engine's Logger type is a subset of core's Logger; the actual value
+      // is created via createLogger() which returns the full core Logger.
+      logger: this.logger as unknown as CoreLogger,
+    });
+
+    // Subscribe to backrun opportunities and convert to ArbitrageOpportunity
+    this.mevShareListener.on('backrunOpportunity', (backrun: BackrunOpportunity) => {
+      if (!this.queueService || !this.stateManager.isRunning()) {
+        return;
+      }
+
+      const opportunity: ArbitrageOpportunity = {
+        id: `backrun-${backrun.txHash}-${backrun.detectedAt}`,
+        type: 'backrun',
+        chain: 'ethereum',
+        confidence: 0.5, // MEV-Share hints are partial; confidence is moderate
+        timestamp: backrun.detectedAt,
+        backrunTarget: {
+          txHash: backrun.txHash,
+          routerAddress: backrun.routerAddress,
+          swapDirection: 'buy', // Default; BackrunStrategy will refine from calldata
+          source: 'mev-share',
+          poolAddress: backrun.pairAddress,
+          traceId: backrun.traceId,
+        },
+      };
+
+      const enqueued = this.queueService.enqueue(opportunity);
+      if (enqueued) {
+        this.logger.debug('MEV-Share backrun opportunity enqueued', {
+          txHash: backrun.txHash,
+          router: backrun.routerAddress,
+          traceId: backrun.traceId,
+        });
+      }
+    });
+
+    await this.mevShareListener.start();
+    this.logger.info('MEV-Share event listener started', {
+      routerCount: dexRouterAddresses.size,
+      endpoint: process.env.MEV_SHARE_SSE_ENDPOINT ?? 'https://mev-share.flashbots.net',
+    });
   }
 
   // Finding #7: initializeCircuitBreaker, handleCircuitBreakerStateChange,
@@ -1696,6 +1850,21 @@ export class ExecutionEngineService {
 
   getIsSimulationMode(): boolean {
     return this.isSimulationMode;
+  }
+
+  /**
+   * Fix 4: Get strategy-specific metrics for health endpoint exposure.
+   * Returns metrics from backrun and UniswapX strategies if registered.
+   */
+  getStrategyMetrics(): Record<string, unknown> {
+    const metrics: Record<string, unknown> = {};
+    if (this.backrunStrategy) {
+      metrics.backrun = this.backrunStrategy.getBackrunMetrics();
+    }
+    if (this.uniswapxStrategy) {
+      metrics.uniswapx = this.uniswapxStrategy.getFillerMetrics();
+    }
+    return metrics;
   }
 
   /**

@@ -17,7 +17,7 @@
 
 import { ethers } from 'ethers';
 import * as http2 from 'http2';
-import { CHAINS } from '@arbitrage/config';
+import { CHAINS, FEATURE_FLAGS } from '@arbitrage/config';
 import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider, clearIntervalSafe } from '@arbitrage/core';
 import type { ServiceStateManager, BatchProviderConfig } from '@arbitrage/core';
 import type { Logger, ProviderHealth, ProviderService as IProviderService, ExecutionStats } from '../types';
@@ -28,6 +28,7 @@ import {
 } from '../types';
 import { createCancellableTimeout } from './simulation/types';
 import { derivePerChainWallets } from './hd-wallet-manager';
+import { createKmsSigner, type KmsSigner } from './kms-signer';
 
 // =============================================================================
 // HTTP/2 Session Pool for RPC Providers
@@ -52,7 +53,11 @@ function getHttp2Session(origin: string): http2.ClientHttp2Session | null {
   try {
     session = http2.connect(origin);
 
-    session.on('error', () => {
+    // Fix #8: Log HTTP/2 session errors instead of silently swallowing.
+    // Module-level code has no structured logger, so use console.debug.
+    session.on('error', (err) => {
+      // eslint-disable-next-line no-console
+      console.debug(`[provider.service] HTTP/2 session error for ${origin}, falling back to HTTP/1.1: ${err?.message ?? String(err)}`);
       http2Sessions.delete(origin);
     });
 
@@ -77,7 +82,7 @@ function getHttp2Session(origin: string): http2.ClientHttp2Session | null {
 function createHttp2GetUrlFunc(
   defaultGetUrl: ethers.FetchGetUrlFunc
 ): ethers.FetchGetUrlFunc {
-  return async (req: ethers.FetchRequest, signal?: FetchCancelSignal): Promise<ethers.GetUrlResponse> => {
+  return async (req, signal) => {
     const url = new URL(req.url);
 
     // Only use HTTP/2 for HTTPS endpoints
@@ -101,7 +106,7 @@ function createHttp2GetUrlFunc(
       };
 
       // Copy request headers
-      for (const [key, value] of req.headers) {
+      for (const [key, value] of Object.entries(req.headers)) {
         headers[key.toLowerCase()] = value;
       }
 
@@ -134,13 +139,12 @@ function createHttp2GetUrlFunc(
         defaultGetUrl(req, signal).then(resolve).catch(reject);
       });
 
-      // Handle abort signal
+      // Handle abort signal (ethers FetchCancelSignal uses addListener)
       if (signal) {
-        const onAbort = () => {
+        signal.addListener(() => {
           stream.close();
           reject(new Error('Request aborted'));
-        };
-        signal.addEventListener('abort', onAbort, { once: true });
+        });
       }
 
       // Write request body
@@ -152,13 +156,6 @@ function createHttp2GetUrlFunc(
       }
     });
   };
-}
-
-/**
- * Interface for FetchCancelSignal — subset of AbortSignal used by ethers.
- */
-interface FetchCancelSignal {
-  addEventListener(event: string, handler: () => void, options?: { once?: boolean }): void;
 }
 
 /**
@@ -267,6 +264,20 @@ export class ProviderServiceImpl implements IProviderService {
    * depend on process.env (keys may be rotated or cleaned from env).
    */
   private chainPrivateKeys: Map<string, string> = new Map();
+
+  /**
+   * Phase 2 Item 27: KMS signers for chains configured with KMS keys.
+   * KMS signers implement ethers.AbstractSigner (key never leaves HSM).
+   * Only populated when FEATURE_KMS_SIGNING=true.
+   */
+  private kmsSigners: Map<string, KmsSigner> = new Map();
+
+  /**
+   * FIX 11: Collect KMS address resolution promises so callers can await
+   * them before processing the first opportunity. Without this, the
+   * NonceManager registration was fire-and-forget and might not be ready.
+   */
+  private kmsRegistrationPromises: Promise<void>[] = [];
 
   /**
    * Fix 5.2: Guard to prevent concurrent health check iterations.
@@ -718,7 +729,51 @@ export class ProviderServiceImpl implements IProviderService {
         continue;
       }
 
-      this.logger.debug(`No wallet configured for ${chainName} (no private key or mnemonic)`);
+      // Source 3: KMS signer (when FEATURE_KMS_SIGNING=true)
+      if (FEATURE_FLAGS.useKmsSigning) {
+        const provider = this.providers.get(chainName);
+        if (provider) {
+          const kmsSigner = createKmsSigner(chainName, provider, this.logger);
+          if (kmsSigner) {
+            // KMS signers are stored separately — they implement AbstractSigner
+            // but not ethers.Wallet. The engine uses getAddress() which works for both.
+            this.kmsSigners.set(chainName, kmsSigner);
+            // Fix #18: Register KMS signer with NonceManager using address+provider
+            // to prevent nonce conflicts between KMS and wallet transactions.
+            // FIX 11: Collect promise so callers can await KMS registration completion
+            // before processing the first opportunity.
+            if (this.nonceManager) {
+              const nm = this.nonceManager;
+              const registrationPromise = kmsSigner.getAddress().then(addr => {
+                nm.registerSigner(chainName, addr, provider);
+                this.logger.debug(`Registered KMS signer with NonceManager for ${chainName}`, { address: addr.slice(0, 10) + '...' });
+              }).catch(err => {
+                this.logger.warn(`Failed to register KMS signer with NonceManager for ${chainName}`, { error: err });
+              });
+              this.kmsRegistrationPromises.push(registrationPromise);
+            }
+            this.logger.info(`Initialized KMS signer for ${chainName}`, {
+              keyId: process.env[`KMS_KEY_ID_${chainName.toUpperCase()}`] ?? process.env.KMS_KEY_ID ?? 'unknown',
+              source: 'kms',
+            });
+            continue;
+          }
+        }
+      }
+
+      this.logger.debug(`No wallet configured for ${chainName} (no private key, mnemonic, or KMS key)`);
+    }
+  }
+
+  /**
+   * FIX 11: Await all KMS address resolution promises.
+   * Call this after initializeWallets() to ensure NonceManager registrations
+   * are complete before processing the first opportunity.
+   */
+  async waitForKmsRegistrations(): Promise<void> {
+    if (this.kmsRegistrationPromises.length > 0) {
+      await Promise.allSettled(this.kmsRegistrationPromises);
+      this.kmsRegistrationPromises = [];
     }
   }
 
@@ -805,6 +860,30 @@ export class ProviderServiceImpl implements IProviderService {
   }
 
   /**
+   * Phase 2 Item 27: Get KMS signer for a specific chain.
+   * Returns undefined if KMS is not configured for that chain.
+   */
+  getKmsSigner(chain: string): KmsSigner | undefined {
+    return this.kmsSigners.get(chain);
+  }
+
+  /**
+   * Phase 2 Item 27: Get all KMS signer instances.
+   * Returns empty map if KMS signing is disabled.
+   */
+  getKmsSigners(): Map<string, KmsSigner> {
+    return this.kmsSigners;
+  }
+
+  /**
+   * Get the effective signer for a chain (Wallet or KMS signer).
+   * Prefers Wallet if available, falls back to KMS signer.
+   */
+  getEffectiveSigner(chain: string): ethers.Wallet | KmsSigner | undefined {
+    return this.wallets.get(chain) ?? this.kmsSigners.get(chain);
+  }
+
+  /**
    * Set nonce manager reference (for post-initialization injection).
    */
   setNonceManager(nonceManager: NonceManager | null): void {
@@ -833,6 +912,11 @@ export class ProviderServiceImpl implements IProviderService {
     this.providerHealth.clear();
     // Fix #9: Clear cached private keys on shutdown
     this.chainPrivateKeys.clear();
+    // Phase 2 Item 27: Drain queued KMS sign operations, then clear signers
+    for (const signer of this.kmsSigners.values()) {
+      signer.drain();
+    }
+    this.kmsSigners.clear();
     // Fix 10.2: Reset cached count
     this.cachedHealthyCount = 0;
     // Close HTTP/2 sessions

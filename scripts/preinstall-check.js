@@ -60,7 +60,7 @@ const EXPECTED_TOP_LEVEL = new Set([
   '@stryker-mutator/typescript-checker', '@swc/core', '@swc/jest',
   '@types/jest', '@types/node', '@types/ws', '@typescript-eslint/eslint-plugin',
   '@typescript-eslint/parser', 'concurrently', 'cross-env', 'dotenv',
-  'eslint', 'fast-check', 'jest', 'lru-cache', 'redis-memory-server',
+  'eslint', 'fast-check', 'jest', 'lru-cache', 'madge', 'redis-memory-server',
   'rimraf', 'supertest', 'ts-jest', 'ts-node', 'tsconfig-paths', 'tsx', 'typescript',
 ]);
 

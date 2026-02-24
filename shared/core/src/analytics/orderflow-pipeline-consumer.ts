@@ -18,15 +18,41 @@ import { RedisStreamsClient, getRedisStreamsClient } from '../redis-streams';
 import { ReserveCache, getReserveCache } from '../caching/reserve-cache';
 import type { Logger } from '../logger';
 import type { StreamMessage, ConsumerGroupConfig } from '../redis-streams';
-import {
-  OrderflowPredictor,
-  getOrderflowPredictor,
-} from '@arbitrage/ml';
-import type {
-  OrderflowPrediction,
-  OrderflowFeatureInput,
-} from '@arbitrage/ml';
 import type { PendingOpportunity, PendingSwapIntent } from '@arbitrage/types';
+
+// ---------------------------------------------------------------------------
+// Local type definitions (structurally compatible with @arbitrage/ml exports)
+// to break circular @arbitrage/core ↔ @arbitrage/ml build dependency.
+// @see shared/ml/src/orderflow-predictor.ts - OrderflowPrediction
+// @see shared/ml/src/orderflow-features.ts - OrderflowFeatureInput
+// ---------------------------------------------------------------------------
+
+/** Prediction result from the orderflow model. */
+interface OrderflowPrediction {
+  direction: 'bullish' | 'bearish' | 'neutral';
+  confidence: number;
+  orderflowPressure: number;
+  expectedVolatility: number;
+  whaleImpact: number;
+  timeHorizonMs: number;
+  features: Record<string, number | boolean>;
+  timestamp: number;
+}
+
+/** Input features for orderflow prediction. */
+interface OrderflowFeatureInput {
+  pairKey: string;
+  chain: string;
+  currentTimestamp: number;
+  poolReserves: { reserve0: bigint; reserve1: bigint };
+  recentSwaps: Array<{ direction: 'buy' | 'sell'; amountUsd: number; timestamp: number }>;
+  liquidationData?: { nearestLiquidationLevel: number; openInterestChange24h: number };
+}
+
+/** Minimal predictor interface (structurally compatible with OrderflowPredictor). */
+interface IOrderflowPredictor {
+  predict(input: OrderflowFeatureInput): Promise<OrderflowPrediction>;
+}
 
 // =============================================================================
 // Configuration
@@ -86,7 +112,7 @@ export interface OrderflowPipelineConsumerConfig {
 export interface OrderflowPipelineConsumerDeps {
   logger?: Logger;
   redisStreamsClient?: RedisStreamsClient;
-  predictor?: OrderflowPredictor;
+  predictor?: IOrderflowPredictor;
   reserveCache?: ReserveCache;
 }
 
@@ -113,7 +139,7 @@ export class OrderflowPipelineConsumer {
   private readonly batchSize: number;
 
   private redisClient: RedisStreamsClient | null;
-  private predictor: OrderflowPredictor;
+  private predictor: IOrderflowPredictor | null;
   private reserveCache: ReserveCache | null;
   private predictionCache: Map<string, CachedPrediction> = new Map();
   private pollTimer: NodeJS.Timeout | null = null;
@@ -132,7 +158,7 @@ export class OrderflowPipelineConsumer {
     this.batchSize = config.batchSize ?? ORDERFLOW_BATCH_SIZE;
 
     this.redisClient = deps.redisStreamsClient ?? null;
-    this.predictor = deps.predictor ?? getOrderflowPredictor();
+    this.predictor = deps.predictor ?? null;
     this.reserveCache = deps.reserveCache ?? null;
 
     this.consumerGroupConfig = {
@@ -162,6 +188,20 @@ export class OrderflowPipelineConsumer {
     if (this.isRunning) {
       this.logger.warn('OrderflowPipelineConsumer already running');
       return;
+    }
+
+    // Lazily resolve predictor via dynamic import (avoids circular build dep).
+    // The variable indirection prevents TypeScript from resolving the module at compile time.
+    if (!this.predictor) {
+      try {
+        const mlModule = '@arbitrage/ml';
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const ml = await (import(mlModule) as Promise<{ getOrderflowPredictor: () => IOrderflowPredictor }>);
+        this.predictor = ml.getOrderflowPredictor();
+      } catch (error) {
+        this.logger.error('Failed to load @arbitrage/ml, orderflow pipeline will not start', { error });
+        return;
+      }
     }
 
     // Lazily resolve Redis client if not injected
@@ -283,9 +323,15 @@ export class OrderflowPipelineConsumer {
 
     if (messages.length === 0) return;
 
+    // FIX 10: Track successfully processed message IDs separately
+    // so only successful messages are ACKed. Failed messages remain
+    // in the pending entries list for reprocessing.
+    const successfulIds: string[] = [];
+
     for (const message of messages) {
       try {
         await this.processMessage(message);
+        successfulIds.push(message.id);
       } catch (error) {
         this.logger.warn('Failed to process pending opportunity message', {
           messageId: message.id,
@@ -294,16 +340,17 @@ export class OrderflowPipelineConsumer {
       }
     }
 
-    // ACK processed messages
-    try {
-      const ids = messages.map(m => m.id);
-      await this.redisClient.xack(
-        this.consumerGroupConfig.streamName,
-        this.consumerGroupConfig.groupName,
-        ...ids,
-      );
-    } catch (error) {
-      this.logger.warn('Failed to ACK messages', { error });
+    // ACK only successfully processed messages
+    if (successfulIds.length > 0) {
+      try {
+        await this.redisClient.xack(
+          this.consumerGroupConfig.streamName,
+          this.consumerGroupConfig.groupName,
+          ...successfulIds,
+        );
+      } catch (error) {
+        this.logger.warn('Failed to ACK messages', { error });
+      }
     }
   }
 
@@ -323,8 +370,8 @@ export class OrderflowPipelineConsumer {
     // Convert to orderflow feature input
     const featureInput = this.convertToFeatureInput(intent, pairKey);
 
-    // Run prediction
-    const prediction = await this.predictor.predict(featureInput);
+    // Run prediction (predictor is guaranteed non-null after start())
+    const prediction = await this.predictor!.predict(featureInput);
 
     // Cache the prediction
     this.cachePrediction(pairKey, prediction);
