@@ -1,9 +1,40 @@
 import { HardhatUserConfig } from 'hardhat/config';
 import '@nomicfoundation/hardhat-toolbox';
 import '@nomicfoundation/hardhat-verify';
+import { existsSync, readFileSync } from 'fs';
+import * as path from 'path';
+import dotenv from 'dotenv';
 
 // Suppress Node.js version warning
 process.removeAllListeners('warning');
+
+/**
+ * Load deployment environment variables from project root.
+ * Precedence: existing process.env > .env.local > .env.
+ */
+function loadDeploymentEnv(): void {
+  const shellEnvKeys = new Set(Object.keys(process.env));
+  const projectRoot = path.resolve(__dirname, '..');
+  const rootEnvPath = path.join(projectRoot, '.env');
+  const rootEnvLocalPath = path.join(projectRoot, '.env.local');
+
+  if (existsSync(rootEnvPath)) {
+    dotenv.config({ path: rootEnvPath, quiet: true });
+  }
+
+  if (existsSync(rootEnvLocalPath)) {
+    const local = dotenv.parse(readFileSync(rootEnvLocalPath));
+
+    for (const [key, value] of Object.entries(local)) {
+      // Respect explicit shell exports while still allowing .env.local to override .env.
+      if (!shellEnvKeys.has(key)) {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+loadDeploymentEnv();
 
 /**
  * Hardhat Configuration for Flash Loan Arbitrage Contracts
