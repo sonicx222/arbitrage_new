@@ -15,7 +15,7 @@ import {
   parseEnvIntSafe,
   parseEnvBool,
   getCrossRegionEnvConfig,
-} from '../../src/env-utils';
+} from '../../src/utils/env-utils';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { __mockLogger } = require('../../src/logger') as { __mockLogger: { warn: jest.Mock } };

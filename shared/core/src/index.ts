@@ -181,8 +181,8 @@ export {
   hmacVerify,
   getHmacSigningKey,
   isSignedEnvelope,
-} from './hmac-utils';
-export type { SignedEnvelope } from './hmac-utils';
+} from './utils/hmac-utils';
+export type { SignedEnvelope } from './utils/hmac-utils';
 
 // =============================================================================
 // 1.3 Async Primitives
@@ -1835,14 +1835,14 @@ export {
   parseEnvIntSafe,
   parseEnvBool,
   getCrossRegionEnvConfig,
-} from './env-utils';
-export type { CrossRegionEnvConfig } from './env-utils';
+} from './utils/env-utils';
+export type { CrossRegionEnvConfig } from './utils/env-utils';
 
 // =============================================================================
 // 14.0.1 Disconnect Utilities (C-2 Consolidation)
 // =============================================================================
 
-export { disconnectWithTimeout } from './disconnect-utils';
+export { disconnectWithTimeout } from './utils/disconnect-utils';
 
 // =============================================================================
 // 14.1 Common Validators (Lightweight validation utilities)

@@ -7,7 +7,7 @@
  */
 
 import { jest, describe, it, expect } from '@jest/globals';
-import { disconnectWithTimeout } from '../../src/disconnect-utils';
+import { disconnectWithTimeout } from '../../src/utils/disconnect-utils';
 
 describe('disconnect-utils', () => {
   const createMockLogger = () => ({

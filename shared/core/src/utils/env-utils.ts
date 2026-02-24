@@ -14,7 +14,7 @@
  * @see S-6: Consolidate Env Parsing Functions
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('env-utils');
 
