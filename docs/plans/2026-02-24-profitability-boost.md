@@ -27,7 +27,7 @@ The reality check identified 5 root causes of zero profitability:
 |-------|------|-----------|
 | 0 | ~~Fix economic parameters~~ | ~~Stop generating false-positive opportunities~~ **COMPLETED** (bf9649d5) |
 | 1 | ~~Fix broken strategies~~ | ~~Make detection pipeline honest~~ **COMPLETED** (619580fb, d93e6b1d) |
-| 2 | Deploy to Arbitrum Sepolia testnet | Validate end-to-end with real blockchain |
+| 2 | ~~Deploy to Arbitrum Sepolia testnet~~ | ~~Validate end-to-end with real blockchain~~ **COMPLETED** (0xE5b26749430ed50917b75689B654a4C5808b23FB) |
 | 3 | ~~Build UniswapV3Adapter~~ | ~~Unlock majority of DEX liquidity~~ **COMPLETED** (9846af47, d6fc4993) |
 | 4 | ~~Fill L2 DEX coverage gaps~~ | ~~Maximize arbitrage surface area~~ **COMPLETED** (836a8b29) |
 | 5 | Deploy Balancer V2 (0% fee) | Eliminate flash loan costs |
@@ -288,9 +288,11 @@ Removed from P2 partition until real addresses are added."
 
 ---
 
-## Phase 2: Deploy to Arbitrum Sepolia (Testnet)
+## Phase 2: Deploy to Arbitrum Sepolia (Testnet) -- COMPLETED
 
 **Rationale:** The system has never touched a real blockchain. Deploy to testnet first to validate the full pipeline: detection -> opportunity -> execution -> on-chain settlement. This is the most important phase -- without it, nothing else matters.
+
+> **Status:** FlashLoanArbitrage deployed at `0xE5b26749430ed50917b75689B654a4C5808b23FB` on Arbitrum Sepolia (chainId 421614). Deployer: `0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748`. Registry and address map updated.
 
 ### Task 2.1: Verify Testnet Configuration
 
