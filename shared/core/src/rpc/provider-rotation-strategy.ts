@@ -16,8 +16,8 @@
  * @see websocket-manager.ts (consumer)
  */
 
-import { createLogger } from './logger';
-import { type ProviderHealthScorer, getProviderHealthScorer } from './monitoring/provider-health-scorer';
+import { createLogger } from '../logger';
+import { type ProviderHealthScorer, getProviderHealthScorer } from '../monitoring/provider-health-scorer';
 
 const logger = createLogger('provider-rotation');
 

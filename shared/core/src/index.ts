@@ -1503,8 +1503,8 @@ export {
 } from './websocket-manager';
 
 // CQ8-ALT: Extracted cold-path classes from websocket-manager
-export { ProviderRotationStrategy } from './provider-rotation-strategy';
-export type { ProviderRotationConfig } from './provider-rotation-strategy';
+export { ProviderRotationStrategy } from './rpc/provider-rotation-strategy';
+export type { ProviderRotationConfig } from './rpc/provider-rotation-strategy';
 export { ProviderHealthTracker } from './monitoring/provider-health-tracker';
 export type { QualityMetrics as ProviderQualityMetrics, HealthTrackerConfig } from './monitoring/provider-health-tracker';
 

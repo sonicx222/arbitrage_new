@@ -33,7 +33,7 @@ jest.mock('../../src/monitoring/provider-health-scorer');
 // Import under test (after mocks)
 // =============================================================================
 
-import { ProviderRotationStrategy, ProviderRotationConfig } from '../../src/provider-rotation-strategy';
+import { ProviderRotationStrategy, ProviderRotationConfig } from '../../src/rpc/provider-rotation-strategy';
 import { getProviderHealthScorer } from '../../src/monitoring/provider-health-scorer';
 
 const mockedGetProviderHealthScorer = getProviderHealthScorer as jest.MockedFunction<typeof getProviderHealthScorer>;

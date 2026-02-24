@@ -41,3 +41,6 @@ export type {
 // P3 Enhancement: HTTP/2 session pool
 export { Http2SessionPool } from './http2-session-pool';
 export type { Http2SessionPoolConfig } from './http2-session-pool';
+
+// CQ8-ALT: Provider Rotation Strategy
+export * from './provider-rotation-strategy';
