@@ -170,7 +170,7 @@ describe('UniswapV3Adapter', () => {
       const AdapterFactory = await ethers.getContractFactory('UniswapV3Adapter');
       await expect(
         AdapterFactory.deploy(ethers.ZeroAddress, ethers.ZeroAddress, owner.address, DEFAULT_FEE),
-      ).to.be.revertedWith('V3 router is zero address');
+      ).to.be.revertedWithCustomError({ interface: AdapterFactory.interface }, 'ZeroAddress');
     });
 
     it('should revert on zero owner address', async () => {
@@ -178,7 +178,7 @@ describe('UniswapV3Adapter', () => {
       const AdapterFactory = await ethers.getContractFactory('UniswapV3Adapter');
       await expect(
         AdapterFactory.deploy(v3RouterAddr, ethers.ZeroAddress, ethers.ZeroAddress, DEFAULT_FEE),
-      ).to.be.revertedWith('Owner is zero address');
+      ).to.be.revertedWithCustomError({ interface: AdapterFactory.interface }, 'ZeroAddress');
     });
 
     it('should revert on zero default fee', async () => {
@@ -187,7 +187,7 @@ describe('UniswapV3Adapter', () => {
       const AdapterFactory = await ethers.getContractFactory('UniswapV3Adapter');
       await expect(
         AdapterFactory.deploy(v3RouterAddr, ethers.ZeroAddress, owner.address, 0),
-      ).to.be.revertedWith('Default fee must be > 0');
+      ).to.be.revertedWithCustomError({ interface: AdapterFactory.interface }, 'InvalidFeeTier');
     });
 
     it('should allow zero quoter address (quoting disabled)', async () => {
@@ -409,6 +409,26 @@ describe('UniswapV3Adapter', () => {
 
       const userDaiAfter = await dai.balanceOf(user.address);
       expect(userDaiAfter - userDaiBefore).to.equal(ethers.parseEther('10.5'));
+    });
+
+    it('should reset approval after swap (no residual allowance)', async () => {
+      const { adapter, weth, wethAddr, daiAddr, owner, v3RouterAddr } =
+        await loadFixture(deployAdapterFixture);
+
+      const amountIn = ethers.parseEther('10');
+      const deadline = await getDeadline();
+      const adapterAddr = await adapter.getAddress();
+
+      await adapter.swapExactTokensForTokens(
+        amountIn,
+        0,
+        [wethAddr, daiAddr],
+        owner.address,
+        deadline,
+      );
+
+      // After swap, adapter's allowance to V3 router should be zero
+      expect(await weth.allowance(adapterAddr, v3RouterAddr)).to.equal(0);
     });
   });
 
@@ -674,6 +694,105 @@ describe('UniswapV3Adapter', () => {
       await expect(userAdapter.setQuoter(ethers.ZeroAddress)).to.be.revertedWith(
         'Ownable: caller is not the owner',
       );
+    });
+  });
+
+  // ==========================================================================
+  // Pausable Tests
+  // ==========================================================================
+
+  describe('Pausable', () => {
+    it('should allow owner to pause', async () => {
+      const { adapter } = await loadFixture(deployAdapterFixture);
+
+      await adapter.pause();
+      expect(await adapter.paused()).to.be.true;
+    });
+
+    it('should allow owner to unpause', async () => {
+      const { adapter } = await loadFixture(deployAdapterFixture);
+
+      await adapter.pause();
+      await adapter.unpause();
+      expect(await adapter.paused()).to.be.false;
+    });
+
+    it('should revert pause for non-owner', async () => {
+      const { adapter, user } = await loadFixture(deployAdapterFixture);
+
+      const userAdapter = adapter.connect(user) as UniswapV3Adapter;
+      await expect(userAdapter.pause()).to.be.revertedWith(
+        'Ownable: caller is not the owner',
+      );
+    });
+
+    it('should revert unpause for non-owner', async () => {
+      const { adapter, user } = await loadFixture(deployAdapterFixture);
+
+      await adapter.pause();
+      const userAdapter = adapter.connect(user) as UniswapV3Adapter;
+      await expect(userAdapter.unpause()).to.be.revertedWith(
+        'Ownable: caller is not the owner',
+      );
+    });
+
+    it('should revert swapExactTokensForTokens when paused', async () => {
+      const { adapter, wethAddr, daiAddr, owner } = await loadFixture(deployAdapterFixture);
+
+      await adapter.pause();
+
+      const amountIn = ethers.parseEther('10');
+      const deadline = await getDeadline();
+
+      await expect(
+        adapter.swapExactTokensForTokens(
+          amountIn,
+          0,
+          [wethAddr, daiAddr],
+          owner.address,
+          deadline,
+        ),
+      ).to.be.revertedWith('Pausable: paused');
+    });
+
+    it('should revert swapTokensForExactTokens when paused', async () => {
+      const { adapter, wethAddr, daiAddr, owner } = await loadFixture(deployAdapterFixture);
+
+      await adapter.pause();
+
+      const deadline = await getDeadline();
+
+      await expect(
+        adapter.swapTokensForExactTokens(
+          ethers.parseEther('10'),
+          ethers.parseEther('10'),
+          [wethAddr, daiAddr],
+          owner.address,
+          deadline,
+        ),
+      ).to.be.revertedWith('Pausable: paused');
+    });
+
+    it('should allow swaps after unpause', async () => {
+      const { adapter, wethAddr, daiAddr, owner, dai } = await loadFixture(deployAdapterFixture);
+
+      await adapter.pause();
+      await adapter.unpause();
+
+      const amountIn = ethers.parseEther('10');
+      const deadline = await getDeadline();
+      const daiBefore = await dai.balanceOf(owner.address);
+
+      await adapter.swapExactTokensForTokens(
+        amountIn,
+        0,
+        [wethAddr, daiAddr],
+        owner.address,
+        deadline,
+      );
+
+      const daiAfter = await dai.balanceOf(owner.address);
+      expect(daiAfter - daiBefore).to.equal(ethers.parseEther('10.5'));
     });
   });
 

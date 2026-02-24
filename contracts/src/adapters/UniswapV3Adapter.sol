@@ -4,6 +4,8 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "../interfaces/IDexRouter.sol";
 import "../interfaces/ISwapRouterV3.sol";
 
@@ -48,7 +50,7 @@ import "../interfaces/ISwapRouterV3.sol";
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.0.0
  */
-contract UniswapV3Adapter is IDexRouter, Ownable2Step {
+contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     // ==========================================================================
@@ -57,9 +59,6 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
 
     /// @notice Thrown when path has fewer than 2 elements
     error PathTooShort();
-
-    /// @notice Thrown when path has only 1 element
-    error InvalidPathLength();
 
     /// @notice Thrown when a zero address is provided for a required parameter
     error ZeroAddress();
@@ -72,9 +71,6 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
 
     /// @notice Thrown when final output amount is below minimum
     error InsufficientOutputAmount(uint256 amountOut, uint256 amountOutMin);
-
-    /// @notice Thrown when the required input exceeds the maximum allowed
-    error ExcessiveInputAmount(uint256 amountIn, uint256 amountInMax);
 
     // ==========================================================================
     // Events
@@ -123,9 +119,9 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
         address _owner,
         uint24 _defaultFee
     ) {
-        require(_v3Router != address(0), "V3 router is zero address");
-        require(_owner != address(0), "Owner is zero address");
-        require(_defaultFee > 0, "Default fee must be > 0");
+        if (_v3Router == address(0)) revert ZeroAddress();
+        if (_owner == address(0)) revert ZeroAddress();
+        if (_defaultFee == 0) revert InvalidFeeTier();
 
         v3Router = ISwapRouterV3(_v3Router);
         defaultFee = _defaultFee;
@@ -181,6 +177,22 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
         emit QuoterSet(_quoter);
     }
 
+    /**
+     * @notice Pause the adapter, preventing all swaps
+     * @dev Only callable by the contract owner
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @notice Unpause the adapter, re-enabling swaps
+     * @dev Only callable by the contract owner
+     */
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     // ==========================================================================
     // IDexRouter Implementation
     // ==========================================================================
@@ -203,7 +215,7 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
         address[] calldata path,
         address to,
         uint256 deadline
-    ) external override returns (uint256[] memory amounts) {
+    ) external override nonReentrant whenNotPaused returns (uint256[] memory amounts) {
         if (path.length < 2) revert PathTooShort();
 
         amounts = new uint256[](path.length);
@@ -258,9 +270,11 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
     }
 
     /**
-     * @notice Swap tokens for exact output tokens through Uniswap V3
-     * @dev Simplified implementation: executes forward swap and checks input bounds.
-     *      For production use, consider implementing V3's exactOutputSingle for precise control.
+     * @notice WARNING: This simplified implementation always consumes the full amountInMax.
+     * @dev Unlike standard V2 routers which return excess input, this adapter uses V3's
+     * exactInputSingle (forward swap) rather than exactOutputSingle, so it cannot determine
+     * the minimum input required. Callers should set amountInMax close to the expected input.
+     * The amounts[0] value reflects the full amountInMax consumed, not the theoretical minimum.
      *
      * @param amountOut The exact amount of output tokens desired
      * @param amountInMax The maximum amount of input tokens to spend
@@ -275,7 +289,7 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step {
         address[] calldata path,
         address to,
         uint256 deadline
-    ) external override returns (uint256[] memory amounts) {
+    ) external override nonReentrant whenNotPaused returns (uint256[] memory amounts) {
         if (path.length < 2) revert PathTooShort();
 
         // For simplicity, execute a forward swap with amountInMax and verify output
