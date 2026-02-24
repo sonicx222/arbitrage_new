@@ -23,7 +23,7 @@ describe('HotPathMonitor', () => {
     jest.resetModules();
 
     // Import fresh module (logger mock persists across resetModules)
-    const module = require('../../src/performance-monitor');
+    const module = require('../../src/monitoring/performance-monitor');
     HotPathMonitor = module.HotPathMonitor;
     measureHotPath = module.measureHotPath;
     measureHotPathAsync = module.measureHotPathAsync;
