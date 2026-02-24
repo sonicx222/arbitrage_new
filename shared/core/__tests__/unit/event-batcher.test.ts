@@ -24,7 +24,7 @@ import {
   getDefaultEventBatcher,
   resetDefaultEventBatcher,
   BatchedEvent,
-} from '../../src/event-batcher';
+} from '../../src/async/event-batcher';
 
 export {};
 

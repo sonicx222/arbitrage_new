@@ -1,7 +1,7 @@
 // Event Batching Infrastructure
 // Optimizes event processing by batching similar events and reducing redundant operations
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('event-batcher');
 

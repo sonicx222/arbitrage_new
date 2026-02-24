@@ -286,18 +286,18 @@ export type {
 export {
   IntervalManager,
   createIntervalManager
-} from './interval-manager';
+} from './async/interval-manager';
 export type {
   IntervalInfo,
   IntervalManagerStats
-} from './interval-manager';
+} from './async/interval-manager';
 
 // Lifecycle Utilities (safe interval/timeout cleanup)
 export {
   clearIntervalSafe,
   clearTimeoutSafe,
   stopAndNullify
-} from './lifecycle-utils';
+} from './async/lifecycle-utils';
 
 // #############################################################################
 // #                                                                           #
@@ -1489,7 +1489,7 @@ export type {
 // =============================================================================
 
 /** @deprecated Unused — no external consumers. Remove in next major version. */
-export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './event-batcher';
+export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './async/event-batcher';
 
 export {
   WebSocketManager,

@@ -93,3 +93,32 @@ export type {
   RegisteredServiceHealth,
   RegistryHealth
 } from './service-registry';
+
+// Lifecycle Utilities (safe interval/timeout cleanup)
+export {
+  clearIntervalSafe,
+  clearTimeoutSafe,
+  stopAndNullify,
+  setupParentPortListener
+} from './lifecycle-utils';
+export type { ParentPortListenerConfig } from './lifecycle-utils';
+
+// Interval Manager (centralized interval management)
+export {
+  IntervalManager,
+  createIntervalManager
+} from './interval-manager';
+export type {
+  IntervalInfo,
+  IntervalManagerStats
+} from './interval-manager';
+
+// Event Batching Infrastructure
+export {
+  EventBatcher,
+  BatchedEvent,
+  createEventBatcher,
+  getDefaultEventBatcher,
+  resetDefaultEventBatcher
+} from './event-batcher';
+// Note: event-processor-worker.ts is a worker script, not exported

@@ -24,10 +24,10 @@ function createWorkerWithMessage(taskType: string, taskData: any): Promise<{
   processingTime: number;
 }> {
   return new Promise((resolve, reject) => {
-    const workerPath = path.resolve(__dirname, '../../src/event-processor-worker.ts');
+    const workerPath = path.resolve(__dirname, '../../src/async/event-processor-worker.ts');
 
     // Use ts-node/esm loader or compiled JS path
-    const compiledPath = path.resolve(__dirname, '../../dist/event-processor-worker.js');
+    const compiledPath = path.resolve(__dirname, '../../dist/async/event-processor-worker.js');
 
     let worker: Worker;
     try {

@@ -69,7 +69,7 @@ export { resetPairDiscoveryService } from '../pair-discovery';
 export { resetLoggerCache, resetPerformanceLoggerCache } from '../logging';
 
 // Event processing
-export { resetDefaultEventBatcher } from '../event-batcher';
+export { resetDefaultEventBatcher } from '../async/event-batcher';
 
 // DEX adapters
 export { resetAdapterRegistry } from '../dex-adapters';
@@ -174,7 +174,7 @@ export {
 // =============================================================================
 
 export { getWorkerPool } from '../async/worker-pool';
-export { getDefaultEventBatcher } from '../event-batcher';
+export { getDefaultEventBatcher } from '../async/event-batcher';
 export { getHierarchicalCache } from '../caching/hierarchical-cache';
 export { getSharedMemoryCache } from '../caching/shared-memory-cache';
 export { getCacheCoherencyManager } from '../caching/cache-coherency-manager';

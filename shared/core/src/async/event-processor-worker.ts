@@ -2,8 +2,8 @@
 // Handles parallel processing of arbitrage detection tasks
 
 import { parentPort, workerData } from 'worker_threads';
-import { PriceMatrix } from './caching/price-matrix';
-import { createLogger } from './logger';
+import { PriceMatrix } from '../caching/price-matrix';
+import { createLogger } from '../logger';
 
 const logger = createLogger('event-processor-worker');
 
@@ -321,7 +321,7 @@ async function processMultiLegPathFinding(data: any): Promise<any> {
   const { chain, pools, baseTokens, targetPathLength, config } = data;
 
   // Dynamic import to avoid circular dependencies
-  const { MultiLegPathFinder } = await import('./path-finding/multi-leg-path-finder');
+  const { MultiLegPathFinder } = await import('../path-finding/multi-leg-path-finder');
   const requestedConfig = config || {};
   const requestedConfigHash = JSON.stringify(requestedConfig);
 

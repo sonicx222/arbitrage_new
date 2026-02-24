@@ -4,7 +4,7 @@
  * Moved from src/__tests__/unit/ to __tests__/unit/ per ADR-009 convention.
  */
 
-import { IntervalManager, createIntervalManager } from '../../src/interval-manager';
+import { IntervalManager, createIntervalManager } from '../../src/async/interval-manager';
 
 describe('IntervalManager', () => {
   let manager: IntervalManager;
