@@ -11,7 +11,7 @@ import {
   clearIntervalSafe,
   clearTimeoutSafe,
   stopAndNullify,
-} from '../../src/lifecycle-utils';
+} from '../../src/async/lifecycle-utils';
 
 describe('lifecycle-utils', () => {
   // ===========================================================================

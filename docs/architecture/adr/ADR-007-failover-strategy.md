@@ -41,7 +41,7 @@ Implement a **Multi-Region Active-Passive Failover** architecture with:
 │                                                                                  │
 │                         ┌─────────────────────────┐                             │
 │                         │    HEALTH AGGREGATOR    │                             │
-│                         │    (Upstash Redis)      │                             │
+│                         │  (Self-hosted Redis 7)  │                             │
 │                         └───────────┬─────────────┘                             │
 │                                     │                                           │
 │             ┌───────────────────────┼───────────────────────┐                  │
@@ -81,7 +81,7 @@ Implement a **Multi-Region Active-Passive Failover** architecture with:
 | Detector P2 | Fly.io SG | (none) | N/A (degraded mode) |
 | Detector P3 | Oracle US | (none) | N/A (degraded mode) |
 | Detector P4 | Fly.io US-West | (none) | N/A (degraded mode) |
-| Redis | Upstash Global | Local cache fallback | <10s |
+| Redis | Self-hosted (Oracle ARM) | Local cache fallback | <10s |
 
 ### Implementation
 

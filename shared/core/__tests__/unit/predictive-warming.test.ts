@@ -45,7 +45,7 @@ const mockCorrelationAnalyzer = {
 jest.mock('../../src/logger');
 
 // Mock redis
-jest.mock('../../src/redis', () => ({
+jest.mock('../../src/redis/client', () => ({
   getRedisClient: () => Promise.resolve(mockRedis)
 }));
 

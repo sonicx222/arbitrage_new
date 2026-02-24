@@ -28,13 +28,13 @@ const mockStreamsClient = {
 };
 
 // Mock dependencies
-jest.mock('../../src/redis', () => ({
+jest.mock('../../src/redis/client', () => ({
   getRedisClient: jest.fn(),
   resetRedisInstance: jest.fn()
 }));
 
 // P2-FIX: Add Redis Streams mock with StreamConsumer class
-jest.mock('../../src/redis-streams', () => ({
+jest.mock('../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(() => Promise.resolve(mockStreamsClient)),
   resetRedisStreamsInstance: jest.fn(() => Promise.resolve(undefined)),
   StreamConsumer: jest.fn().mockImplementation(() => ({
@@ -111,7 +111,7 @@ describe('ExpertSelfHealingManager', () => {
     mockStreamsClient.disconnect.mockImplementation(() => Promise.resolve(undefined));
 
     // Streams module: getRedisStreamsClient + StreamConsumer constructor
-    const redisStreamsMod = require('../../src/redis-streams') as any;
+    const redisStreamsMod = require('../../src/redis/streams') as any;
     redisStreamsMod.getRedisStreamsClient.mockImplementation(() => Promise.resolve(mockStreamsClient));
     redisStreamsMod.resetRedisStreamsInstance.mockImplementation(() => Promise.resolve(undefined));
     redisStreamsMod.StreamConsumer.mockImplementation(() => ({

@@ -163,11 +163,18 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ## Configuration Sources
 
+### Redis Infrastructure
+
+**Self-hosted Redis 7** (recommended): Deployed as Docker sidecar on each Oracle ARM instance. Set `REDIS_SELF_HOSTED=true`. Config at `infrastructure/oracle/redis/redis-production.conf`.
+
+**Upstash Redis** (legacy): 10K commands/day limit. Batching mitigates but does not eliminate the constraint.
+
 ### Environment Variables
 
 ```bash
-# Redis
-REDIS_URL=redis://localhost:6379
+# Redis (self-hosted recommended)
+REDIS_URL=redis://:password@localhost:6379
+REDIS_SELF_HOSTED=true
 
 # Partition
 PARTITION_ID=asia-fast|l2-turbo|high-value|solana-native
@@ -252,6 +259,7 @@ ETHEREUM_WS_URL=wss://...
 | 2026-02-24 | Solana execution via Jupiter V6 + Jito bundles | ADR-034 |
 | 2026-02-24 | Statistical arbitrage strategy (triple-gate signals) | ADR-035 |
 | 2026-02-24 | Binance CEX price signal integration | ADR-036 |
+| 2026-02-24 | Self-hosted Redis 7 on Oracle ARM (replaces Upstash) | ADR-002, ADR-006 |
 
 ---
 
@@ -261,5 +269,6 @@ ETHEREUM_WS_URL=wss://...
   - New services are added
   - Partition assignments change
   - Redis Streams topology changes
+  - Redis infrastructure changes (e.g., provider migration)
   - New health endpoints are added
   - New ADRs are created

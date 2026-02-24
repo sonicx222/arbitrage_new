@@ -11,7 +11,7 @@
 import { Server } from 'http';
 import { parentPort } from 'worker_threads';
 import { createLogger } from '../logger';
-import { setupParentPortListener } from '../lifecycle-utils';
+import { setupParentPortListener } from '../async/lifecycle-utils';
 import type { PartitionDetectorInterface } from './config';
 import { shutdownPartitionService } from './health-server';
 

@@ -17,14 +17,14 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 
 jest.mock('../../src/logger');
 
-jest.mock('../../src/lifecycle-utils');
+jest.mock('../../src/async/lifecycle-utils');
 
 // =============================================================================
 // Import under test (after mocks)
 // =============================================================================
 
 import { ProviderHealthTracker, HealthTrackerConfig } from '../../src/monitoring/provider-health-tracker';
-import { clearIntervalSafe } from '../../src/lifecycle-utils';
+import { clearIntervalSafe } from '../../src/async/lifecycle-utils';
 
 const mockedClearIntervalSafe = clearIntervalSafe as jest.MockedFunction<typeof clearIntervalSafe>;
 

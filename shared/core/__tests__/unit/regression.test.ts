@@ -38,7 +38,7 @@ import { createMockRedisClient } from '@arbitrage/test-utils/mocks/mock-factorie
 let mockRedisClient: MockRedisClient;
 
 // Mock the redis module
-jest.mock('../../src/redis', () => ({
+jest.mock('../../src/redis/client', () => ({
   getRedisClient: jest.fn<() => Promise<MockRedisClient>>().mockImplementation(() => Promise.resolve(mockRedisClient)),
   RedisClient: jest.fn()
 }));
@@ -63,7 +63,7 @@ describe('Singleton Race Condition Regression Tests', () => {
     beforeEach(async () => {
       // Dynamic import to get fresh module state
       jest.resetModules();
-      const module = await import('../../src/distributed-lock');
+      const module = await import('../../src/redis/distributed-lock');
       getDistributedLockManager = module.getDistributedLockManager;
       resetDistributedLockManager = module.resetDistributedLockManager;
       await resetDistributedLockManager();
@@ -98,7 +98,7 @@ describe('Singleton Race Condition Regression Tests', () => {
 
     it('should cache initialization errors', async () => {
       // Make getRedisClient fail
-      const { getRedisClient } = await import('../../src/redis');
+      const { getRedisClient } = await import('../../src/redis/client');
       (getRedisClient as jest.Mock).mockImplementation(() => Promise.reject(new Error('Init failed')));
 
       // First call should fail
@@ -137,7 +137,7 @@ describe('Singleton Race Condition Regression Tests', () => {
 
     it('should cache initialization errors', async () => {
       // Make getRedisClient fail
-      const { getRedisClient } = await import('../../src/redis');
+      const { getRedisClient } = await import('../../src/redis/client');
       (getRedisClient as jest.Mock).mockImplementation(() => Promise.reject(new Error('Connection failed')));
 
       // First call should fail
@@ -424,7 +424,7 @@ import {
   stopAndNullify,
   clearIntervalSafe,
   clearTimeoutSafe,
-} from '../../src/lifecycle-utils';
+} from '../../src/async/lifecycle-utils';
 
 describe('Lifecycle Utils Cleanup Regression Tests', () => {
   describe('stopAndNullify', () => {

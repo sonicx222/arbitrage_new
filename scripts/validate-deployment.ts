@@ -82,11 +82,60 @@ const GAS_THRESHOLDS = {
 
 /**
  * Check Redis connectivity by attempting a TCP connection and sending PING.
- * Also checks Upstash REST URL if configured.
+ * Supports three providers: self-hosted (local), Upstash (hosted), and standard (remote).
+ *
+ * @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Item #1 (self-hosted Redis)
  */
 export async function checkRedisConnectivity(): Promise<ValidationResult> {
   const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+  const isSelfHosted = process.env.REDIS_SELF_HOSTED === 'true';
   const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
+
+  // Self-hosted Redis: validate localhost connectivity
+  if (isSelfHosted) {
+    const isLocal = redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1');
+    if (!isLocal) {
+      return {
+        check: 'Redis Connectivity',
+        status: 'warn',
+        message: 'REDIS_SELF_HOSTED=true but REDIS_URL does not point to localhost',
+        details: { provider: 'self-hosted', url: redisUrl.replace(/\/\/.*@/, '//***@') },
+      };
+    }
+
+    // Attempt TCP connection to local Redis
+    let host = 'localhost';
+    let port = 6379;
+    try {
+      const parsed = new URL(redisUrl);
+      host = parsed.hostname || 'localhost';
+      port = parseInt(parsed.port, 10) || 6379;
+    } catch {
+      return {
+        check: 'Redis Connectivity',
+        status: 'fail',
+        message: 'Invalid REDIS_URL format: cannot parse URL',
+        details: { provider: 'self-hosted' },
+      };
+    }
+
+    try {
+      const latencyMs = await tcpPing(host, port, 5000);
+      return {
+        check: 'Redis Connectivity',
+        status: 'pass',
+        message: `Self-hosted Redis reachable at ${host}:${port} (${latencyMs}ms)`,
+        details: { host, port, latencyMs, provider: 'self-hosted' },
+      };
+    } catch {
+      return {
+        check: 'Redis Connectivity',
+        status: 'fail',
+        message: `Self-hosted Redis unreachable at ${host}:${port}. Ensure Redis 7 is running locally.`,
+        details: { host, port, provider: 'self-hosted' },
+      };
+    }
+  }
 
   // If Upstash is configured, validate its URL format
   if (upstashUrl) {
@@ -610,13 +659,28 @@ export function checkEnvironmentConfig(): ValidationResult[] {
     // In production, check for critical env vars
     const redisUrl = process.env.REDIS_URL ?? '';
     const isLocalRedis = redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1');
+    const isSelfHosted = process.env.REDIS_SELF_HOSTED === 'true';
 
-    if (isLocalRedis || !redisUrl) {
+    if (!redisUrl) {
       results.push({
         check: 'Production: Redis',
         status: 'fail',
-        message: 'Using localhost Redis in production environment. Set REDIS_URL to a production instance.',
-        details: { nodeEnv, redisUrl: redisUrl ? 'localhost' : 'not set' },
+        message: 'REDIS_URL not set in production environment.',
+        details: { nodeEnv, redisUrl: 'not set' },
+      });
+    } else if (isLocalRedis && !isSelfHosted) {
+      results.push({
+        check: 'Production: Redis',
+        status: 'fail',
+        message: 'Using localhost Redis in production. Set REDIS_SELF_HOSTED=true for self-hosted Redis, or use a remote instance.',
+        details: { nodeEnv, redisUrl: 'localhost' },
+      });
+    } else if (isLocalRedis && isSelfHosted) {
+      results.push({
+        check: 'Production: Redis',
+        status: 'pass',
+        message: 'Self-hosted Redis on localhost (REDIS_SELF_HOSTED=true)',
+        details: { nodeEnv, provider: 'self-hosted' },
       });
     }
 

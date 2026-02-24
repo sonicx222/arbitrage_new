@@ -14,11 +14,11 @@
 import {
   RedisClient,
   getRedisClient,
-} from '../redis';
+} from '../redis/client';
 import {
   RedisStreamsClient,
   getRedisStreamsClient,
-} from '../redis-streams';
+} from '../redis/streams';
 import {
   SwapEventFilter,
   WhaleAlert,

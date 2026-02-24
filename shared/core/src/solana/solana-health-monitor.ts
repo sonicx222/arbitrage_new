@@ -14,7 +14,7 @@
 
 import { NumericRollingWindow } from '../data-structures/numeric-rolling-window';
 import { AsyncMutex } from '../async/async-mutex';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { withTimeout } from '../async/async-utils';
 import type { Connection } from '@solana/web3.js';
 import type {

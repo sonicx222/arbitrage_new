@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { createLogger } from '../logger';
-import { clearTimeoutSafe } from '../lifecycle-utils';
+import { clearTimeoutSafe } from './lifecycle-utils';
 import { WORKER_POOL_CONFIG, PLATFORM_NAME } from '@arbitrage/config';
 
 const logger = createLogger('worker-pool');

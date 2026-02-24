@@ -17,6 +17,7 @@
  */
 
 import { RedisStreamsClient, createTraceContext, propagateContext } from '@arbitrage/core';
+import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 import { ArbitrageOpportunity } from '@arbitrage/types';
 import type { Logger } from '../types';
 
@@ -44,6 +45,9 @@ export interface OpportunityPublisherStats {
 
   /** Timestamp of last successful publish */
   lastPublishedAt: number | null;
+
+  /** Total opportunities published to fast lane */
+  fastLanePublished: number;
 }
 
 // =============================================================================
@@ -59,6 +63,7 @@ export class OpportunityPublisher {
     published: 0,
     failed: 0,
     lastPublishedAt: null,
+    fastLanePublished: 0,
   };
 
   constructor(config: OpportunityPublisherConfig) {
@@ -136,6 +141,10 @@ export class OpportunityPublisher {
           ...(attempt > 1 ? { retriedAttempt: attempt } : {}),
         });
 
+        // Fast lane: publish high-confidence, high-profit opportunities
+        // to stream:fast-lane for coordinator bypass (fire-and-forget)
+        this.tryPublishToFastLane(opportunity, enrichedOpportunity);
+
         return true;
       } catch (error) {
         if (attempt < maxAttempts) {
@@ -185,6 +194,46 @@ export class OpportunityPublisher {
       published: 0,
       failed: 0,
       lastPublishedAt: null,
+      fastLanePublished: 0,
     };
+  }
+
+  // ===========================================================================
+  // Fast Lane Publishing (Item 12)
+  // ===========================================================================
+
+  /**
+   * Publish to fast lane if opportunity meets confidence and profit criteria.
+   * Fire-and-forget: failures are logged but don't affect normal path.
+   */
+  private tryPublishToFastLane(
+    opportunity: ArbitrageOpportunity,
+    enrichedData: Record<string, unknown>
+  ): void {
+    if (!FEATURE_FLAGS.useFastLane) return;
+
+    const confidence = opportunity.confidence ?? 0;
+    const profit = opportunity.expectedProfit ?? opportunity.estimatedProfit ?? 0;
+
+    if (confidence < FAST_LANE_CONFIG.minConfidence) return;
+    if (profit < FAST_LANE_CONFIG.minProfitUsd) return;
+
+    // Fire-and-forget publish to fast lane stream
+    this.streamsClient
+      .xaddWithLimit(RedisStreamsClient.STREAMS.FAST_LANE, enrichedData)
+      .then(() => {
+        this.stats.fastLanePublished++;
+        this.logger.debug('Opportunity published to fast lane', {
+          opportunityId: opportunity.id,
+          confidence,
+          profit,
+        });
+      })
+      .catch((error) => {
+        this.logger.warn('Failed to publish to fast lane (non-fatal)', {
+          opportunityId: opportunity.id,
+          error: (error as Error).message,
+        });
+      });
   }
 }

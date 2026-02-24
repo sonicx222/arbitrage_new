@@ -9,7 +9,7 @@
 
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import type {
   ChainSimulatorConfig,
   SimulatedPairConfig,

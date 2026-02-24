@@ -8,7 +8,7 @@
  */
 
 import { createLogger } from '../logger';
-import type { RedisStreamsClient } from '../redis-streams';
+import type { RedisStreamsClient } from '../redis/streams';
 
 const logger = createLogger('dual-publish');
 

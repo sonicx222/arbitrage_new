@@ -35,7 +35,7 @@ jest.mock('../../../src/logger', () => ({
 }));
 
 // Mock lifecycle-utils
-jest.mock('../../../src/lifecycle-utils', () => ({
+jest.mock('../../../src/async/lifecycle-utils', () => ({
   clearIntervalSafe: jest.fn((timer: any) => {
     if (timer) clearInterval(timer);
     return null;
@@ -44,7 +44,7 @@ jest.mock('../../../src/lifecycle-utils', () => ({
 
 // Mock Redis client - uses shared factory from @arbitrage/test-utils
 // Must create mock INSIDE jest.mock factory (hoisted above module-scope const)
-jest.mock('../../../src/redis', () => {
+jest.mock('../../../src/redis/client', () => {
   const { createInlineRedisMock } = require('@arbitrage/test-utils');
   return {
     getRedisClient: jest.fn(),
@@ -52,7 +52,7 @@ jest.mock('../../../src/redis', () => {
   };
 });
 
-const redisMod = require('../../../src/redis') as any;
+const redisMod = require('../../../src/redis/client') as any;
 const mockRedis = redisMod._mockRedis;
 
 // Mock Redis Streams client
@@ -61,7 +61,7 @@ const mockStreamsClient = {
   disconnect: jest.fn(() => Promise.resolve(undefined)),
 };
 
-jest.mock('../../../src/redis-streams', () => ({
+jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(),
   RedisStreamsClient: { STREAMS: {} },
 }));
@@ -128,7 +128,7 @@ describe('SelfHealingManager', () => {
 
     // Re-establish mock implementations after resetMocks wipes them
     redisMod.getRedisClient.mockResolvedValue(mockRedis);
-    const { getRedisStreamsClient } = require('../../../src/redis-streams') as any;
+    const { getRedisStreamsClient } = require('../../../src/redis/streams') as any;
     getRedisStreamsClient.mockResolvedValue(mockStreamsClient);
     mockRedis.set.mockResolvedValue(undefined);
     mockRedis.get.mockResolvedValue(null);
@@ -226,7 +226,7 @@ describe('SelfHealingManager', () => {
 
       // If it started twice, subscribe would be called twice
       // It should only be called once
-      const redisMod = require('../../../src/redis') as any;
+      const redisMod = require('../../../src/redis/client') as any;
       const redis = await redisMod.getRedisClient();
       // subscribe is called once during start()
       expect(redis.subscribe).toHaveBeenCalledTimes(1);

@@ -204,20 +204,20 @@ describe('FlashLoanLiquidityValidator', () => {
       expect(rpcProvider.call).toHaveBeenCalledTimes(1);
     });
 
-    it('should return true (graceful fallback) when RPC provider unavailable', async () => {
+    it('should return false (fail closed) when RPC provider unavailable', async () => {
       const ctx = createMockContext(); // No RPC provider
       const amount = BigInt(100000e6);
 
       const result = await validator.checkLiquidity(mockProvider, mockAsset, amount, ctx);
 
-      expect(result).toBe(true); // Graceful fallback
+      expect(result).toBe(false); // Fail closed: assume insufficient
       expect(mockLogger.warn).toHaveBeenCalledWith(
         '[LiquidityValidator] No RPC provider for chain',
         expect.objectContaining({ chain: 'ethereum' })
       );
     });
 
-    it('should return true (graceful fallback) on RPC timeout', async () => {
+    it('should return false (fail closed) on RPC timeout', async () => {
       const rpcProvider = {
         call: jest.fn().mockImplementation(
           () => new Promise((_, reject) => {
@@ -236,14 +236,14 @@ describe('FlashLoanLiquidityValidator', () => {
 
       const result = await v.checkLiquidity(mockProvider, mockAsset, amount, ctx);
 
-      expect(result).toBe(true); // Graceful fallback
+      expect(result).toBe(false); // Fail closed: assume insufficient
       expect(mockLogger.warn).toHaveBeenCalledWith(
         '[LiquidityValidator] On-chain check failed',
         expect.any(Object)
       );
     });
 
-    it('should return true (graceful fallback) on RPC error', async () => {
+    it('should return false (fail closed) on RPC error', async () => {
       const rpcProvider = {
         call: jest.fn<any>().mockRejectedValue(new Error('RPC error')),
       } as unknown as ethers.JsonRpcProvider;
@@ -253,7 +253,7 @@ describe('FlashLoanLiquidityValidator', () => {
 
       const result = await validator.checkLiquidity(mockProvider, mockAsset, amount, ctx);
 
-      expect(result).toBe(true); // Graceful fallback
+      expect(result).toBe(false); // Fail closed: assume insufficient
       expect(mockLogger.warn).toHaveBeenCalledWith(
         '[LiquidityValidator] On-chain check failed',
         expect.objectContaining({

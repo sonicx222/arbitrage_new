@@ -17,11 +17,71 @@ packages:
   - jq
 
 write_files:
+  - path: /opt/arbitrage/redis.conf
+    permissions: '0644'
+    content: |
+      # Self-hosted Redis 7 for arbitrage partition
+      # @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Item #1
+      bind 127.0.0.1 -::1
+      port 6379
+      tcp-backlog 511
+      timeout 0
+      tcp-keepalive 60
+      maxmemory 512mb
+      maxmemory-policy allkeys-lru
+      appendonly yes
+      appendfsync everysec
+      no-appendfsync-on-rewrite no
+      auto-aof-rewrite-percentage 100
+      auto-aof-rewrite-min-size 64mb
+      save 900 1
+      save 300 10
+      save 60 10000
+      lazyfree-lazy-eviction yes
+      lazyfree-lazy-expire yes
+      lazyfree-lazy-server-del yes
+      io-threads 2
+      io-threads-do-reads yes
+      rename-command FLUSHDB ""
+      rename-command FLUSHALL ""
+      rename-command DEBUG ""
+      rename-command KEYS ""
+      loglevel notice
+      logfile ""
+      slowlog-log-slower-than 10000
+      slowlog-max-len 128
+
   - path: /opt/arbitrage/docker-compose.yml
     permissions: '0644'
     content: |
       version: '3.8'
       services:
+        redis:
+          image: redis:7-alpine
+          restart: unless-stopped
+          ports:
+            - "127.0.0.1:6379:6379"
+          volumes:
+            - redis_data:/data
+            - /opt/arbitrage/redis.conf:/usr/local/etc/redis/redis.conf:ro
+          command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${redis_password}
+          healthcheck:
+            test: ["CMD", "redis-cli", "-a", "${redis_password}", "--no-auth-warning", "ping"]
+            interval: 15s
+            timeout: 10s
+            retries: 3
+          deploy:
+            resources:
+              limits:
+                memory: 768M
+              reservations:
+                memory: 256M
+          logging:
+            driver: json-file
+            options:
+              max-size: "10m"
+              max-file: "3"
+
         partition:
           image: ${docker_image}
           restart: unless-stopped
@@ -33,7 +93,8 @@ write_files:
             - PARTITION_CHAINS=${chains}
             - REGION_ID=${region_id}
             - INSTANCE_ID=oracle-${partition_id}-$${HOSTNAME}
-            - REDIS_URL=${redis_url}
+            - REDIS_URL=redis://:${redis_password}@localhost:6379
+            - REDIS_SELF_HOSTED=true
             - LOG_LEVEL=${log_level}
             - HEALTH_CHECK_PORT=3001
             - ENABLE_CROSS_REGION_HEALTH=true
@@ -52,6 +113,9 @@ write_files:
             - ZKSYNC_RPC_URL=${zksync_rpc_url}
             - LINEA_WS_URL=${linea_ws_url}
             - LINEA_RPC_URL=${linea_rpc_url}
+          depends_on:
+            redis:
+              condition: service_healthy
           healthcheck:
             # Use node-based health check (curl not available in Alpine Node images)
             test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
@@ -70,23 +134,46 @@ write_files:
               max-size: "10m"
               max-file: "3"
 
+      volumes:
+        redis_data:
+
   - path: /opt/arbitrage/scripts/health-check.sh
     permissions: '0755'
     content: |
       #!/bin/bash
-      # Health check script for partition service
+      # Health check script for partition service + Redis
+      # @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Item #1
 
       HEALTH_URL="http://localhost:${health_port}/health"
       MAX_RETRIES=3
       RETRY_DELAY=5
 
+      # Check Redis first (critical dependency)
+      redis_ok=false
+      if command -v redis-cli &> /dev/null; then
+        if redis-cli -a "${redis_password}" --no-auth-warning ping 2>/dev/null | grep -q PONG; then
+          redis_ok=true
+        fi
+      else
+        # Fallback: check via Docker
+        if docker exec $(docker ps -q -f name=redis) redis-cli -a "${redis_password}" --no-auth-warning ping 2>/dev/null | grep -q PONG; then
+          redis_ok=true
+        fi
+      fi
+
+      if [ "$redis_ok" != "true" ]; then
+        echo "Redis health check failed"
+        exit 1
+      fi
+
+      # Check partition service
       for i in $(seq 1 $MAX_RETRIES); do
         response=$(curl -s -o /dev/null -w "%%{http_code}" "$HEALTH_URL")
         if [ "$response" = "200" ]; then
-          echo "Health check passed"
+          echo "Health check passed (Redis + partition)"
           exit 0
         fi
-        echo "Health check failed (attempt $i/$MAX_RETRIES), retrying in $RETRY_DELAY seconds..."
+        echo "Partition health check failed (attempt $i/$MAX_RETRIES), retrying in $RETRY_DELAY seconds..."
         sleep $RETRY_DELAY
       done
 
@@ -171,7 +258,7 @@ runcmd:
     validate_var "partition_id" "${partition_id}" "^[a-zA-Z0-9_-]+$"
     validate_var "region_id" "${region_id}" "^[a-zA-Z0-9_-]+$"
     validate_var "health_port" "${health_port}" "^[0-9]+$"
-    validate_var "redis_url" "${redis_url}" "^redis(s)?://"
+    validate_var "redis_password" "${redis_password}" "."
     validate_var "log_level" "${log_level}" "^(debug|info|warn|error)$"
 
     # Validate port range (must be non-privileged and valid)

@@ -18,7 +18,7 @@
  */
 
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import type { ProviderHealthScorer } from './provider-health-scorer';
 
 const logger = createLogger('provider-health-tracker');

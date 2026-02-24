@@ -167,7 +167,14 @@ const COMMAND_CATEGORIES: Record<string, CommandCategory> = {
   ping: 'other', scan: 'other', keys: 'other', multi: 'other', exec: 'other',
 };
 
+/**
+ * Default daily command limit for Upstash free tier.
+ * When REDIS_SELF_HOSTED=true, this limit is not enforced (set to Infinity).
+ *
+ * @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Item #1
+ */
 const UPSTASH_DAILY_LIMIT = 10000;
+const REDIS_DAILY_LIMIT = process.env.REDIS_SELF_HOSTED === 'true' ? Infinity : UPSTASH_DAILY_LIMIT;
 
 export class RedisClient {
   private client: Redis;
@@ -1224,8 +1231,10 @@ export class RedisClient {
     // Estimated daily usage at current rate
     const estimatedDailyUsage = Math.round(commandsPerMinute * 60 * 24);
 
-    // Percentage of Upstash daily limit
-    const dailyLimitPercent = Math.round((estimatedDailyUsage / UPSTASH_DAILY_LIMIT) * 100);
+    // Percentage of daily limit (Infinity for self-hosted = 0%)
+    const dailyLimitPercent = Number.isFinite(REDIS_DAILY_LIMIT)
+      ? Math.round((estimatedDailyUsage / REDIS_DAILY_LIMIT) * 100)
+      : 0;
 
     return {
       byCategory: { ...this.commandStats.byCategory },
@@ -1274,8 +1283,8 @@ export class RedisClient {
       '📊 USAGE SUMMARY',
       `   Total Commands:      ${stats.totalCommands.toLocaleString()}`,
       `   Commands/min:        ${stats.commandsPerMinute}`,
-      `   Est. Daily Usage:    ${stats.estimatedDailyUsage.toLocaleString()} / ${UPSTASH_DAILY_LIMIT.toLocaleString()}`,
-      `   Daily Limit Used:    ${stats.dailyLimitPercent}%`,
+      `   Est. Daily Usage:    ${stats.estimatedDailyUsage.toLocaleString()}${Number.isFinite(REDIS_DAILY_LIMIT) ? ` / ${REDIS_DAILY_LIMIT.toLocaleString()}` : ' (no limit - self-hosted)'}`,
+      `   Daily Limit Used:    ${Number.isFinite(REDIS_DAILY_LIMIT) ? `${stats.dailyLimitPercent}%` : 'N/A (self-hosted)'}`,
       '',
       '📂 BY CATEGORY',
     ];

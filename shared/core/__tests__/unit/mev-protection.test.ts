@@ -169,10 +169,13 @@ describe('MEV Protection', () => {
       expect(CHAIN_MEV_STRATEGIES.polygon).toBe('fastlane');
     });
 
-    it('should have sequencer strategy for L2s', () => {
-      expect(CHAIN_MEV_STRATEGIES.arbitrum).toBe('sequencer');
+    it('should have enhanced strategies for Arbitrum and Base (Batch 5)', () => {
+      expect(CHAIN_MEV_STRATEGIES.arbitrum).toBe('timeboost');
+      expect(CHAIN_MEV_STRATEGIES.base).toBe('flashbots_protect');
+    });
+
+    it('should have sequencer strategy for other L2s', () => {
       expect(CHAIN_MEV_STRATEGIES.optimism).toBe('sequencer');
-      expect(CHAIN_MEV_STRATEGIES.base).toBe('sequencer');
       expect(CHAIN_MEV_STRATEGIES.zksync).toBe('sequencer');
       expect(CHAIN_MEV_STRATEGIES.linea).toBe('sequencer');
     });
@@ -450,7 +453,7 @@ describe('MEV Protection', () => {
       expect(provider.strategy).toBe('flashbots');
     });
 
-    it('should create L2SequencerProvider for L2 chains', () => {
+    it('should create TimeboostProvider for Arbitrum (Batch 5)', () => {
       const provider = factory.createProvider({
         chain: 'arbitrum',
         provider: mockProvider,
@@ -458,6 +461,17 @@ describe('MEV Protection', () => {
       });
 
       expect(provider.chain).toBe('arbitrum');
+      expect(provider.strategy).toBe('timeboost');
+    });
+
+    it('should create L2SequencerProvider for sequencer L2 chains', () => {
+      const provider = factory.createProvider({
+        chain: 'optimism',
+        provider: mockProvider,
+        wallet: mockWallet,
+      });
+
+      expect(provider.chain).toBe('optimism');
       expect(provider.strategy).toBe('sequencer');
     });
 
@@ -475,9 +489,9 @@ describe('MEV Protection', () => {
     it('should select correct provider for each chain (comprehensive)', () => {
       const chainProviders: Array<{ chain: string; expectedStrategy: string }> = [
         { chain: 'ethereum', expectedStrategy: 'flashbots' },
-        { chain: 'arbitrum', expectedStrategy: 'sequencer' },
+        { chain: 'arbitrum', expectedStrategy: 'timeboost' },
         { chain: 'optimism', expectedStrategy: 'sequencer' },
-        { chain: 'base', expectedStrategy: 'sequencer' },
+        { chain: 'base', expectedStrategy: 'flashbots_protect' },
         { chain: 'bsc', expectedStrategy: 'bloxroute' },
         { chain: 'polygon', expectedStrategy: 'fastlane' },
         { chain: 'avalanche', expectedStrategy: 'standard' },
@@ -582,7 +596,7 @@ describe('MEV Protection', () => {
 
     it('should get correct strategy for chain', () => {
       expect(factory.getStrategy('ethereum')).toBe('flashbots');
-      expect(factory.getStrategy('arbitrum')).toBe('sequencer');
+      expect(factory.getStrategy('arbitrum')).toBe('timeboost');
       expect(factory.getStrategy('unknown')).toBe('standard');
     });
 
@@ -1349,7 +1363,7 @@ describe('MEV Protection', () => {
       // Verify strategies
       expect(results).toEqual([
         { chain: 'ethereum', strategy: 'flashbots' },
-        { chain: 'arbitrum', strategy: 'sequencer' },
+        { chain: 'arbitrum', strategy: 'timeboost' },
         { chain: 'bsc', strategy: 'bloxroute' },
         { chain: 'polygon', strategy: 'fastlane' },
         { chain: 'avalanche', strategy: 'standard' },

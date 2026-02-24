@@ -4,7 +4,7 @@
 // L3: Persistent storage for long-term data
 // Task 2.2.2: Predictive cache warming using CorrelationAnalyzer
 
-import { getRedisClient } from '../redis';
+import { getRedisClient } from '../redis/client';
 import { createLogger } from '../logger';
 import { getCorrelationAnalyzer } from './correlation-analyzer';
 import type { CorrelationAnalyzer } from './correlation-analyzer';

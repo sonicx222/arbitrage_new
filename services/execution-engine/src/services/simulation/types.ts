@@ -25,6 +25,17 @@ import { ethers } from 'ethers';
 export type SimulationProviderType = 'tenderly' | 'alchemy' | 'local' | 'helius';
 
 /**
+ * Simulation tier based on trade size and urgency.
+ *
+ * - 'none': Skip simulation entirely (below noSimulationThreshold or time-critical)
+ * - 'light': Local eth_call only (between noSimulation and lightSimulation thresholds)
+ * - 'full': All providers with fallback (above lightSimulationThreshold)
+ *
+ * @see SimulationService.getSimulationTier()
+ */
+export type SimulationTier = 'none' | 'light' | 'full';
+
+/**
  * Result of a transaction simulation
  */
 export interface SimulationResult {
@@ -326,6 +337,18 @@ export interface SimulationServiceConfig {
    * Default: 60000 (60 seconds)
    */
   healthCheckIntervalMs?: number;
+  /**
+   * Profit threshold below which simulation is skipped entirely ('none' tier).
+   * Trades below this value are too small to justify simulation overhead.
+   * Default: 50 ($)
+   */
+  noSimulationThreshold?: number;
+  /**
+   * Profit threshold below which only local eth_call simulation is used ('light' tier).
+   * Trades between noSimulationThreshold and this value use local-only simulation.
+   * Default: 500 ($)
+   */
+  lightSimulationThreshold?: number;
 }
 
 /**
@@ -346,9 +369,10 @@ export interface ISimulationService {
    * Simulate a transaction using the best available provider
    *
    * @param request - Simulation request
+   * @param restrictToProviders - Optional list of provider types to restrict simulation to
    * @returns Simulation result
    */
-  simulate(request: SimulationRequest): Promise<SimulationResult>;
+  simulate(request: SimulationRequest, restrictToProviders?: SimulationProviderType[]): Promise<SimulationResult>;
 
   /**
    * Check if simulation should be performed for an opportunity
@@ -358,6 +382,15 @@ export interface ISimulationService {
    * @returns Whether to simulate
    */
   shouldSimulate(expectedProfit: number, opportunityAge: number): boolean;
+
+  /**
+   * Determine the simulation tier based on expected profit and opportunity age.
+   *
+   * @param expectedProfit - Expected profit in USD
+   * @param opportunityAge - Age of opportunity in ms
+   * @returns SimulationTier: 'none', 'light', or 'full'
+   */
+  getSimulationTier(expectedProfit: number, opportunityAge: number): SimulationTier;
 
   /**
    * Get aggregated metrics across all providers
@@ -518,6 +551,10 @@ export const SIMULATION_DEFAULTS = {
    * external simulation providers are unavailable.
    */
   providerPriority: ['tenderly', 'alchemy', 'local'] as SimulationProviderType[],
+  /** Skip simulation below this profit threshold ($). Tier: 'none' */
+  noSimulationThreshold: 50,
+  /** Use local eth_call only below this profit threshold ($). Tier: 'light' */
+  lightSimulationThreshold: 500,
 };
 
 /**

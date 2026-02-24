@@ -17,11 +17,69 @@ packages:
   - jq
 
 write_files:
+  - path: /opt/arbitrage/redis.conf
+    permissions: '0644'
+    content: |
+      # Self-hosted Redis 7 for cross-chain detector
+      # @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Item #1
+      bind 127.0.0.1 -::1
+      port 6379
+      tcp-backlog 511
+      timeout 0
+      tcp-keepalive 60
+      maxmemory 256mb
+      maxmemory-policy allkeys-lru
+      appendonly yes
+      appendfsync everysec
+      no-appendfsync-on-rewrite no
+      auto-aof-rewrite-percentage 100
+      auto-aof-rewrite-min-size 64mb
+      save 900 1
+      save 300 10
+      save 60 10000
+      lazyfree-lazy-eviction yes
+      lazyfree-lazy-expire yes
+      lazyfree-lazy-server-del yes
+      rename-command FLUSHDB ""
+      rename-command FLUSHALL ""
+      rename-command DEBUG ""
+      rename-command KEYS ""
+      loglevel notice
+      logfile ""
+      slowlog-log-slower-than 10000
+      slowlog-max-len 128
+
   - path: /opt/arbitrage/docker-compose.yml
     permissions: '0644'
     content: |
       version: '3.8'
       services:
+        redis:
+          image: redis:7-alpine
+          restart: unless-stopped
+          ports:
+            - "127.0.0.1:6379:6379"
+          volumes:
+            - redis_data:/data
+            - /opt/arbitrage/redis.conf:/usr/local/etc/redis/redis.conf:ro
+          command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${redis_password}
+          healthcheck:
+            test: ["CMD", "redis-cli", "-a", "${redis_password}", "--no-auth-warning", "ping"]
+            interval: 15s
+            timeout: 10s
+            retries: 3
+          deploy:
+            resources:
+              limits:
+                memory: 384M
+              reservations:
+                memory: 128M
+          logging:
+            driver: json-file
+            options:
+              max-size: "10m"
+              max-file: "3"
+
         cross-chain-detector:
           image: ${docker_image}
           restart: unless-stopped
@@ -29,10 +87,14 @@ write_files:
             - "3014:3001"
           environment:
             - NODE_ENV=production
-            - REDIS_URL=${redis_url}
+            - REDIS_URL=redis://:${redis_password}@localhost:6379
+            - REDIS_SELF_HOSTED=true
             - LOG_LEVEL=${log_level}
             - INSTANCE_ID=oracle-cross-chain-$${HOSTNAME}
             - HEALTH_CHECK_PORT=3001
+          depends_on:
+            redis:
+              condition: service_healthy
           healthcheck:
             # Use node-based health check (curl not available in Alpine Node images)
             test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
@@ -51,10 +113,18 @@ write_files:
               max-size: "10m"
               max-file: "3"
 
+      volumes:
+        redis_data:
+
   - path: /opt/arbitrage/scripts/health-check.sh
     permissions: '0755'
     content: |
       #!/bin/bash
+      # Check Redis first
+      if command -v redis-cli &> /dev/null; then
+        redis-cli -a "${redis_password}" --no-auth-warning ping 2>/dev/null | grep -q PONG || exit 1
+      fi
+      # Check service
       HEALTH_URL="http://localhost:3014/health"
       response=$(curl -s -o /dev/null -w "%%{http_code}" "$HEALTH_URL")
       if [ "$response" = "200" ]; then
@@ -133,7 +203,7 @@ runcmd:
 
     # Validate critical variables with safe patterns
     validate_var "docker_image" "${docker_image}" "^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$"
-    validate_var "redis_url" "${redis_url}" "^redis(s)?://"
+    validate_var "redis_password" "${redis_password}" "."
     validate_var "log_level" "${log_level}" "^(debug|info|warn|error)$"
 
     echo "$(date): All template variables validated successfully" >> "$LOG_FILE"

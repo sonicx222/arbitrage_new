@@ -11,7 +11,7 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  */
 
-import { clearTimeoutSafe } from '../lifecycle-utils';
+import { clearTimeoutSafe } from '../async/lifecycle-utils';
 import type { RedisStreamsClient, StreamMessage, ConsumerGroupConfig } from './streams';
 
 // =============================================================================

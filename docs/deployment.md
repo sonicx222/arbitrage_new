@@ -33,7 +33,7 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 
 | Service | Region | Provider | Tier |
 |---------|--------|----------|------|
-| **Redis DB** | Global | Upstash | Free |
+| **Redis DB** | Per-instance | Self-hosted (Oracle ARM) | Free |
 | **unified-detector (asia-fast)** | Singapore | Fly.io | Free |
 | **unified-detector (l2-turbo)** | US-East | Oracle Cloud | Always Free |
 | **unified-detector (high-value)** | US-East | Oracle Cloud | Always Free |
@@ -65,6 +65,18 @@ See [RPC Research Report](./reports/RPC_RESEARCH_REPORT.md) for detailed provide
 ## Step-by-Step Deployment
 
 ### 1. Infrastructure Setup (Redis)
+
+**Option A: Self-Hosted Redis (Recommended)**
+
+Deploy Redis 7 as a sidecar on each Oracle ARM instance. This eliminates Upstash's 10K cmd/day limit and reduces Redis RTT from 5-20ms to <0.1ms. See [Deep Enhancement Analysis Item #1](./reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md).
+
+1. Set `redis_self_hosted = true` in your `terraform.tfvars`
+2. Set `redis_password` to a strong password in your `terraform.tfvars`
+3. Redis 7 will be deployed automatically via cloud-init on each Oracle ARM instance
+4. Each service connects to `redis://localhost:6379` (configured automatically)
+5. Set `REDIS_SELF_HOSTED=true` in your service environment
+
+**Option B: Upstash (Legacy - 10K cmd/day limit)**
 
 1. Create an Upstash account and a **Global Redis** database.
 2. Enable **Redis Streams** (required for ADR-002).
@@ -209,8 +221,15 @@ All services expose a `/health` endpoint. The Coordinator service monitors these
 
 ### Common (All Services)
 ```bash
+# Self-hosted Redis (recommended)
+REDIS_URL=redis://:password@localhost:6379  # Local Redis URL
+REDIS_SELF_HOSTED=true                      # Permits localhost in production
+REDIS_PASSWORD=your_password                # Redis authentication
+
+# OR Upstash Redis (legacy)
 UPSTASH_REDIS_REST_URL=     # Upstash Redis REST URL
 UPSTASH_REDIS_REST_TOKEN=   # Upstash Redis REST token
+
 LOG_LEVEL=info              # debug, info, warn, error
 NODE_ENV=production         # development, production
 ```

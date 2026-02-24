@@ -29,6 +29,7 @@ const createMockStreamsClient = () => ({
   xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
   STREAMS: {
     OPPORTUNITIES: 'stream:opportunities',
+    FAST_LANE: 'stream:fast-lane',
   },
 });
 
@@ -250,6 +251,7 @@ describe('OpportunityPublisher', () => {
         published: 0,
         failed: 0,
         lastPublishedAt: null,
+        fastLanePublished: 0,
       });
     });
 
@@ -304,6 +306,7 @@ describe('OpportunityPublisher', () => {
         published: 0,
         failed: 0,
         lastPublishedAt: null,
+        fastLanePublished: 0,
       });
     });
 
@@ -399,6 +402,22 @@ describe('OpportunityPublisher', () => {
 
       // Verify no nested data field (old wrapper format)
       expect(publishedMessage.data).toBeUndefined();
+    });
+
+    it('should not publish to fast lane when feature flag is off', async () => {
+      const opportunity = createSampleOpportunity({
+        confidence: 0.95,
+        expectedProfit: 200,
+      });
+
+      await publisher.publish(opportunity);
+
+      // Only normal publish, no fast lane (flag is off by default in tests)
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        'stream:opportunities',
+        expect.anything()
+      );
     });
 
     it('should include all fields coordinator uses for validation', async () => {

@@ -19,7 +19,7 @@
  * - Stablecoins: $1.00
  */
 
-import { RedisClient, getRedisClient } from '../redis';
+import { RedisClient, getRedisClient } from '../redis/client';
 import { createLogger, Logger } from '../logger';
 import { FALLBACK_TOKEN_PRICES } from '@arbitrage/config';
 

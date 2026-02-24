@@ -28,13 +28,13 @@ import {
 } from '../logger';
 import { NumericRollingWindow } from '../data-structures/numeric-rolling-window';
 import { AsyncMutex } from '../async/async-mutex';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { withTimeout } from '../async/async-utils';
-import { getRedisClient, RedisClient } from '../redis';
+import { getRedisClient, RedisClient } from '../redis/client';
 import {
   getRedisStreamsClient,
   RedisStreamsClient
-} from '../redis-streams';
+} from '../redis/streams';
 import type { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '@arbitrage/types';
 import { meetsThreshold } from '../components/price-calculator';
 import { basisPointsToDecimal } from '../utils/fee-utils';

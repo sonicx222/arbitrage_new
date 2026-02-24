@@ -29,12 +29,14 @@ import type { Keypair } from '@solana/web3.js';
  * MEV protection strategy for a specific chain
  */
 export type MevStrategy =
-  | 'flashbots'      // Ethereum: Flashbots private bundle
-  | 'bloxroute'      // BSC: BloXroute private transaction
-  | 'fastlane'       // Polygon: Fastlane MEV protection
-  | 'sequencer'      // L2s: Direct sequencer (inherent protection)
-  | 'jito'           // Solana: Jito private bundles
-  | 'standard';      // Fallback: Standard with gas optimization
+  | 'flashbots'          // Ethereum: Flashbots private bundle
+  | 'bloxroute'          // BSC: BloXroute private transaction
+  | 'fastlane'           // Polygon: Fastlane MEV protection
+  | 'sequencer'          // L2s: Direct sequencer (inherent protection)
+  | 'jito'               // Solana: Jito private bundles
+  | 'timeboost'          // Arbitrum: Timeboost express lane auction
+  | 'flashbots_protect'  // Base: Flashbots Protect L2 RPC
+  | 'standard';          // Fallback: Standard with gas optimization
 
 /**
  * Result of a protected transaction submission
@@ -101,6 +103,24 @@ export interface MevProviderConfig {
    * @see https://docs.flashbots.net/flashbots-mev-share/overview
    */
   useMevShare?: boolean;
+  /**
+   * Timeboost express lane URL for Arbitrum MEV protection.
+   *
+   * Timeboost is Arbitrum's express lane auction mechanism that allows
+   * transactions to bypass the standard sequencer queue for faster inclusion.
+   *
+   * @see https://docs.arbitrum.io/timeboost
+   */
+  timeboostExpressLaneUrl?: string;
+  /**
+   * Flashbots Protect L2 RPC URL for Base MEV protection.
+   *
+   * Flashbots Protect provides private transaction submission on Base,
+   * preventing frontrunning by hiding transactions from the public mempool.
+   *
+   * @see https://docs.flashbots.net/flashbots-protect/overview
+   */
+  flashbotsProtectL2Url?: string;
 }
 
 /**
@@ -316,10 +336,12 @@ export const CHAIN_MEV_STRATEGIES: Record<string, MevStrategy> = {
   // Solana with Jito MEV protection
   solana: 'jito',
 
+  // L2s with enhanced MEV protection (Batch 5)
+  arbitrum: 'timeboost',           // Timeboost express lane auction
+  base: 'flashbots_protect',       // Flashbots Protect L2 RPC
+
   // L2s with sequencer-based ordering (inherent MEV protection)
-  arbitrum: 'sequencer',
   optimism: 'sequencer',
-  base: 'sequencer',
   zksync: 'sequencer',
   linea: 'sequencer',
 
@@ -351,11 +373,14 @@ export const CHAIN_MEV_FALLBACK_STRATEGIES: Record<string, MevStrategy[]> = {
   // Polygon: Fastlane → Standard
   polygon: ['fastlane', 'standard'],
 
-  // L2s already have inherent MEV protection via sequencer
-  // Fallback to standard if sequencer submission fails
-  arbitrum: ['sequencer', 'standard'],
+  // L2s with enhanced MEV protection (Batch 5)
+  // Timeboost → Sequencer → Standard
+  arbitrum: ['timeboost', 'sequencer', 'standard'],
+  // Flashbots Protect → Sequencer → Standard
+  base: ['flashbots_protect', 'sequencer', 'standard'],
+
+  // L2s with sequencer-based ordering (inherent MEV protection)
   optimism: ['sequencer', 'standard'],
-  base: ['sequencer', 'standard'],
   zksync: ['sequencer', 'standard'],
   linea: ['sequencer', 'standard'],
 

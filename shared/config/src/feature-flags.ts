@@ -266,6 +266,28 @@ export const FEATURE_FLAGS = {
    * @default false (safe rollout - explicitly opt-in)
    * @see services/execution-engine/src/strategies/backrun.strategy.ts
    */
+  /**
+   * Enable fast lane for high-confidence opportunities (Item 12).
+   *
+   * When enabled:
+   * - High-confidence, high-profit opportunities are published to stream:fast-lane
+   *   in parallel with the normal stream:opportunities path
+   * - Execution engine consumes fast lane directly, bypassing coordinator routing
+   * - Normal coordinator path still processes the opportunity for metrics/dedup
+   *
+   * When disabled (default):
+   * - All opportunities go through the normal coordinator path only
+   * - Set FEATURE_FAST_LANE=true to enable
+   *
+   * Impact:
+   * - Reduces latency for qualifying opportunities by ~20-50ms (skip coordinator)
+   * - Execution engine deduplicates against normal path using opportunity ID
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see services/execution-engine/src/consumers/fast-lane.consumer.ts
+   */
+  useFastLane: process.env.FEATURE_FAST_LANE === 'true',
+
   useBackrunStrategy: process.env.FEATURE_BACKRUN_STRATEGY === 'true',
 
   /**

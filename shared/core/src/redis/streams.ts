@@ -38,7 +38,7 @@ export interface RedisStreamsClientDeps {
   previousSigningKey?: string;
 }
 import { createLogger, Logger } from '../logger';
-import { clearTimeoutSafe } from '../lifecycle-utils';
+import { clearTimeoutSafe } from '../async/lifecycle-utils';
 
 // =============================================================================
 // Types
@@ -364,6 +364,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: 10000,       // Failed ops, keep more history
     [RedisStreamsClient.STREAMS.DLQ_ALERTS]: 5000,               // Alert data
     [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: 5000,           // Forwarded failures
+    [RedisStreamsClient.STREAMS.FAST_LANE]: 5000,                // Fast lane: high-confidence, coordinator bypass
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {

@@ -9,17 +9,17 @@ import {
   initializeDetectorConnections,
   disconnectDetectorConnections,
 } from '../../../src/detector/detector-connection-manager';
-import { getRedisClient, resetRedisInstance } from '../../../src/redis';
-import { getRedisStreamsClient, resetRedisStreamsInstance, RedisStreamsClient } from '../../../src/redis-streams';
+import { getRedisClient, resetRedisInstance } from '../../../src/redis/client';
+import { getRedisStreamsClient, resetRedisStreamsInstance, RedisStreamsClient } from '../../../src/redis/streams';
 import { SwapEventFilter } from '../../../src/analytics/swap-event-filter';
 
 // Mock dependencies
-jest.mock('../../../src/redis', () => ({
+jest.mock('../../../src/redis/client', () => ({
   getRedisClient: jest.fn(),
   resetRedisInstance: jest.fn(),
 }));
 
-jest.mock('../../../src/redis-streams', () => ({
+jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(),
   resetRedisStreamsInstance: jest.fn(),
   RedisStreamsClient: {

@@ -36,6 +36,9 @@ export const RedisStreams = {
   SYSTEM_FAILOVER: 'stream:system-failover',
   SYSTEM_COMMANDS: 'stream:system-commands',
 
+  // Fast lane (coordinator bypass for high-confidence opportunities)
+  FAST_LANE: 'stream:fast-lane',
+
   // Dead letter queue
   DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
   DLQ_ALERTS: 'stream:dlq-alerts',

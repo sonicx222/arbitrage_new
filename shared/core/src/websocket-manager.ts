@@ -10,7 +10,7 @@
 
 import WebSocket from 'ws';
 import { createLogger } from './logger';
-import { clearIntervalSafe, clearTimeoutSafe } from './lifecycle-utils';
+import { clearIntervalSafe, clearTimeoutSafe } from './async/lifecycle-utils';
 // CQ8-ALT: ProviderHealthScorer now accessed via ProviderRotationStrategy
 import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
 // CQ8-ALT: Extracted cold-path classes

@@ -235,6 +235,46 @@ export function hasSyncSwap(chain: string): boolean {
 }
 
 // =============================================================================
+// Morpho Blue Addresses
+// =============================================================================
+
+/**
+ * Morpho Blue contract addresses by chain.
+ * Used for zero-fee flash loans via EIP-3156 interface.
+ *
+ * Morpho Blue uses a singleton contract per chain with a deterministic address
+ * (CREATE2 deployment with same salt across chains).
+ *
+ * @see https://docs.morpho.org/morpho/contracts/addresses
+ */
+export const MORPHO_BLUE_POOLS: Readonly<Record<string, string>> = {
+  ethereum: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
+  base: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb', // Same CREATE2 address
+} as const;
+
+/**
+ * Get Morpho Blue contract address for a chain.
+ * @throws Error if chain not supported by Morpho Blue
+ */
+export function getMorphoBluePool(chain: string): string {
+  const address = MORPHO_BLUE_POOLS[chain];
+  if (!address) {
+    throw new Error(
+      `Morpho Blue not available on chain: ${chain}. ` +
+      `Supported chains: ${Object.keys(MORPHO_BLUE_POOLS).join(', ')}`
+    );
+  }
+  return address;
+}
+
+/**
+ * Check if Morpho Blue is available on a chain.
+ */
+export function hasMorphoBlue(chain: string): boolean {
+  return chain in MORPHO_BLUE_POOLS;
+}
+
+// =============================================================================
 // Address Validation Helpers (FIX: Issue 1.2)
 // =============================================================================
 

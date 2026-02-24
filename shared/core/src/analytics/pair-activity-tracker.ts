@@ -19,7 +19,7 @@
  */
 
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { findKSmallest } from '../data-structures/min-heap';
 
 const logger = createLogger('pair-activity-tracker');

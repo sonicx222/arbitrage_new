@@ -28,6 +28,10 @@
       "@arbitrage/types/*": ["../types/src/*"],
       "@arbitrage/config": ["../config/src"],
       "@arbitrage/config/*": ["../config/src/*"],
+      "@arbitrage/flash-loan-aggregation": ["../flash-loan-aggregation/src"],
+      "@arbitrage/flash-loan-aggregation/*": ["../flash-loan-aggregation/src/*"],
+      "@arbitrage/metrics": ["../metrics/src"],
+      "@arbitrage/metrics/*": ["../metrics/src/*"],
       "@arbitrage/test-utils": ["../test-utils/src"],
       "@arbitrage/test-utils/*": ["../test-utils/src/*"]
     },
@@ -37,6 +41,8 @@
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**"],
   "references": [
     { "path": "../types" },
-    { "path": "../config" }
+    { "path": "../config" },
+    { "path": "../flash-loan-aggregation" },
+    { "path": "../metrics" }
   ]
 }

@@ -64,6 +64,8 @@ beforeEach(() => {
   // Clear Upstash vars
   delete process.env.UPSTASH_REDIS_REST_URL;
   delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Clear self-hosted Redis flag
+  delete process.env.REDIS_SELF_HOSTED;
   // Clear production indicator vars
   delete process.env.FLY_APP_NAME;
   delete process.env.RAILWAY_ENVIRONMENT;
@@ -278,6 +280,35 @@ describe('checkEnvironmentConfig', () => {
     const redisResult = results.find(r => r.check === 'Production: Redis');
     expect(redisResult?.status).toBe('fail');
   });
+
+  it('should pass in production with localhost Redis when REDIS_SELF_HOSTED=true', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    process.env.REDIS_SELF_HOSTED = 'true';
+    process.env.WALLET_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+    const results = checkEnvironmentConfig();
+    const redisResult = results.find(r => r.check === 'Production: Redis');
+    expect(redisResult?.status).toBe('pass');
+    expect(redisResult?.details?.provider).toBe('self-hosted');
+  });
+
+  it('should fail in production with no REDIS_URL set', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.REDIS_URL;
+    const results = checkEnvironmentConfig();
+    const redisResult = results.find(r => r.check === 'Production: Redis');
+    expect(redisResult?.status).toBe('fail');
+    expect(redisResult?.message).toContain('not set');
+  });
+
+  it('should still fail with localhost Redis when REDIS_SELF_HOSTED is not true', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.REDIS_URL = 'redis://127.0.0.1:6379';
+    process.env.REDIS_SELF_HOSTED = 'false';
+    const results = checkEnvironmentConfig();
+    const redisResult = results.find(r => r.check === 'Production: Redis');
+    expect(redisResult?.status).toBe('fail');
+  });
 });
 
 // =============================================================================
@@ -315,6 +346,33 @@ describe('checkRedisConnectivity', () => {
     const result = await checkRedisConnectivity();
     expect(result.status).toBe('fail');
     expect(result.message).toContain('Invalid REDIS_URL format');
+  });
+
+  it('should detect self-hosted provider when REDIS_SELF_HOSTED=true', async () => {
+    process.env.REDIS_SELF_HOSTED = 'true';
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    const result = await checkRedisConnectivity();
+    expect(result.details?.provider).toBe('self-hosted');
+  });
+
+  it('should warn when REDIS_SELF_HOSTED=true but URL is not localhost', async () => {
+    process.env.REDIS_SELF_HOSTED = 'true';
+    process.env.REDIS_URL = 'redis://remote-server:6379';
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    const result = await checkRedisConnectivity();
+    expect(result.status).toBe('warn');
+    expect(result.message).toContain('does not point to localhost');
+  });
+
+  it('should warn for self-hosted when Redis URL is not localhost', async () => {
+    process.env.REDIS_SELF_HOSTED = 'true';
+    process.env.REDIS_URL = 'redis://remote-host:6379';
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    const result = await checkRedisConnectivity();
+    expect(result.status).toBe('warn');
+    expect(result.details?.provider).toBe('self-hosted');
+    expect(result.message).toContain('does not point to localhost');
   });
 });
 

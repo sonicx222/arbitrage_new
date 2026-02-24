@@ -239,6 +239,8 @@ export {
   supportsFlashLoan,
   // Production configuration validation
   validateProductionConfig,
+  // Self-hosted Redis detection
+  isRedisSelfHosted,
   // Tier 2 Enhancement: MultiPathQuoter contract addresses
   MULTI_PATH_QUOTER_ADDRESSES,
   hasMultiPathQuoter,
@@ -247,6 +249,10 @@ export {
   SUPPORTED_EXECUTION_CHAINS,
   isExecutionSupported,
   getSupportedExecutionChains,
+  // Item 12: Fast lane coordinator bypass configuration
+  FAST_LANE_CONFIG,
+  // Batch 6: R2 trade log upload configuration
+  R2_CONFIG,
 } from './service-config';
 
 // =============================================================================

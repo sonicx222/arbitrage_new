@@ -51,7 +51,7 @@ const mockRedis = {
 jest.mock('../../src/logger');
 
 // Mock redis module - return mockRedis directly
-jest.mock('../../src/redis', () => ({
+jest.mock('../../src/redis/client', () => ({
   getRedisClient: () => Promise.resolve(mockRedis)
 }));
 

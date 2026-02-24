@@ -93,6 +93,8 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "dependencies": {
+    "@arbitrage/flash-loan-aggregation": "*",
+    "@arbitrage/metrics": "*",
     "@solana/web3.js": "^1.95.0",
     "ioredis": "^5.4.1",
     "pino": "^9.6.0",

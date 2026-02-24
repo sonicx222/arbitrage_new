@@ -16,7 +16,7 @@
  */
 
 import { createLogger } from '../logger';
-import { getRedisClient } from '../redis';
+import { getRedisClient } from '../redis/client';
 
 const logger = createLogger('adaptive-threshold-service');
 

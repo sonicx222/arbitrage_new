@@ -2,7 +2,7 @@
 // Advanced performance tracking with risk-adjusted metrics and statistical analysis
 
 import { createLogger } from '../logger';
-import { getRedisClient } from '../redis';
+import { getRedisClient } from '../redis/client';
 
 const logger = createLogger('performance-analytics');
 

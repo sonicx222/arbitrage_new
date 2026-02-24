@@ -26,8 +26,20 @@ These must be set for the system to start:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
+| `REDIS_URL` | Redis connection URL | `redis://:password@localhost:6379` |
 | `PARTITION_ID` | Partition this service belongs to | `asia-fast` |
+
+### Redis Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REDIS_URL` | Redis connection URL | Required |
+| `REDIS_PASSWORD` | Redis authentication password | - |
+| `REDIS_SELF_HOSTED` | Enable self-hosted Redis mode (permits localhost in production) | `false` |
+
+**Self-hosted Redis (recommended):** Deploy Redis 7 as a Docker sidecar on each Oracle ARM instance. Set `REDIS_SELF_HOSTED=true` and use `REDIS_URL=redis://:password@localhost:6379`. This eliminates the Upstash 10K commands/day limit and reduces RTT from 5-20ms to <0.1ms. See [Deployment Guide](deployment.md) for setup instructions.
+
+**Upstash Redis (legacy):** Set `REDIS_URL` to the Upstash REST URL. The 10K commands/day limit applies; batching (50:1 ratio) is used to stay within this limit.
 
 ### Chain RPC URLs
 

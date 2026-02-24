@@ -6,6 +6,7 @@
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { SolanaExecutionStrategy } from '../../../src/strategies/solana-execution.strategy';
+import type { SolanaConfirmationClient } from '../../../src/strategies/solana-execution.strategy';
 import type { JupiterSwapClient, JupiterQuote, JupiterSwapResult } from '../../../src/solana/jupiter-client';
 import type { SolanaTransactionBuilder } from '../../../src/solana/transaction-builder';
 
@@ -71,6 +72,28 @@ function createMockJitoProvider() {
       secretKey: new Uint8Array(64),
     }),
   };
+}
+
+function createMockConfirmationClient(overrides?: {
+  confirmationStatus?: string | null;
+  slot?: number;
+  blockHeight?: number;
+  getSignatureStatusError?: Error;
+  getBlockHeightError?: Error;
+}): jest.Mocked<SolanaConfirmationClient> {
+  const status = overrides?.confirmationStatus;
+  return {
+    getSignatureStatus: overrides?.getSignatureStatusError
+      ? jest.fn().mockRejectedValue(overrides.getSignatureStatusError)
+      : jest.fn().mockResolvedValue({
+          value: status != null
+            ? { confirmationStatus: status, slot: overrides?.slot ?? 200000001 }
+            : null,
+        }),
+    getBlockHeight: overrides?.getBlockHeightError
+      ? jest.fn().mockRejectedValue(overrides.getBlockHeightError)
+      : jest.fn().mockResolvedValue(overrides?.blockHeight ?? 199999990),
+  } as jest.Mocked<SolanaConfirmationClient>;
 }
 
 function createMockContext(overrides?: any) {
@@ -484,6 +507,200 @@ describe('SolanaExecutionStrategy', () => {
 
       // Strategy should be created without errors
       expect(defaultStrategy).toBeInstanceOf(SolanaExecutionStrategy);
+    });
+  });
+
+  // ===========================================================================
+  // H1: Transaction confirmation polling
+  // ===========================================================================
+
+  describe('transaction confirmation polling (H1)', () => {
+    let mockConfirmationClient: jest.Mocked<SolanaConfirmationClient>;
+
+    function createStrategyWithConfirmation(
+      confirmationClient: SolanaConfirmationClient,
+      configOverrides?: Record<string, unknown>,
+    ) {
+      return new SolanaExecutionStrategy(
+        mockJupiterClient,
+        mockTxBuilder,
+        mockJitoProvider,
+        {
+          walletPublicKey: 'testWalletPublicKey123',
+          tipLamports: 1_000_000,
+          maxSlippageBps: 100,
+          minProfitLamports: 100_000n,
+          maxPriceDeviationPct: 1.0,
+          confirmationTimeoutMs: 5000,
+          confirmationPollIntervalMs: 100,
+          ...configOverrides,
+        },
+        createMockLogger(),
+        confirmationClient,
+      );
+    }
+
+    function setupSuccessfulSubmission() {
+      mockJupiterClient.getQuote.mockResolvedValue(createTestQuote());
+      mockJupiterClient.getSwapTransaction.mockResolvedValue(createTestSwapResult());
+      mockJitoProvider.sendProtectedTransaction.mockResolvedValue({
+        success: true,
+        transactionHash: 'solana-tx-hash-confirmed',
+        strategy: 'jito',
+        latencyMs: 500,
+        usedFallback: false,
+      });
+    }
+
+    it('should return success when transaction is confirmed', async () => {
+      mockConfirmationClient = createMockConfirmationClient({
+        confirmationStatus: 'confirmed',
+        slot: 200000001,
+        blockHeight: 199999990, // below lastValidBlockHeight (200000000)
+      });
+      const confirmedStrategy = createStrategyWithConfirmation(mockConfirmationClient);
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      expect(result.success).toBe(true);
+      expect(result.transactionHash).toBe('solana-tx-hash-confirmed');
+      expect(mockConfirmationClient.getSignatureStatus).toHaveBeenCalledWith('solana-tx-hash-confirmed');
+    });
+
+    it('should return success when transaction is finalized', async () => {
+      mockConfirmationClient = createMockConfirmationClient({
+        confirmationStatus: 'finalized',
+        slot: 200000005,
+        blockHeight: 199999990,
+      });
+      const confirmedStrategy = createStrategyWithConfirmation(mockConfirmationClient);
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should return error when block height exceeds lastValidBlockHeight', async () => {
+      // Block height already past lastValidBlockHeight (200000000) — tx expired
+      mockConfirmationClient = createMockConfirmationClient({
+        confirmationStatus: null, // not confirmed
+        blockHeight: 200000001, // past lastValidBlockHeight
+      });
+      const confirmedStrategy = createStrategyWithConfirmation(mockConfirmationClient);
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('[ERR_TX_EXPIRED]');
+    });
+
+    it('should return error when confirmation times out', async () => {
+      // Status never confirms, block height stays below threshold
+      // but timeout is reached
+      mockConfirmationClient = createMockConfirmationClient({
+        confirmationStatus: null, // never confirms
+        blockHeight: 199999990,
+      });
+      const confirmedStrategy = createStrategyWithConfirmation(mockConfirmationClient, {
+        confirmationTimeoutMs: 200, // very short timeout
+        confirmationPollIntervalMs: 50,
+      });
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('[ERR_TX_UNCONFIRMED]');
+    });
+
+    it('should handle getSignatureStatus errors gracefully', async () => {
+      mockConfirmationClient = createMockConfirmationClient({
+        getSignatureStatusError: new Error('RPC node unavailable'),
+        blockHeight: 199999990,
+      });
+      const confirmedStrategy = createStrategyWithConfirmation(mockConfirmationClient, {
+        confirmationTimeoutMs: 200,
+        confirmationPollIntervalMs: 50,
+      });
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      // Should return error after timeout — RPC errors don't give us confirmation
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('[ERR_TX_UNCONFIRMED]');
+    });
+
+    it('should handle getBlockHeight errors by continuing to poll', async () => {
+      // getBlockHeight fails, but getSignatureStatus confirms the tx
+      const client: jest.Mocked<SolanaConfirmationClient> = {
+        getSignatureStatus: jest.fn().mockResolvedValue({
+          value: { confirmationStatus: 'confirmed', slot: 200000001 },
+        }),
+        getBlockHeight: jest.fn().mockRejectedValue(new Error('Block height unavailable')),
+      };
+      const confirmedStrategy = createStrategyWithConfirmation(client);
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      // Should succeed despite block height error — confirmation status is authoritative
+      expect(result.success).toBe(true);
+    });
+
+    it('should not poll when no confirmation client is injected (backward compatible)', async () => {
+      // Use the default strategy (no confirmation client)
+      setupSuccessfulSubmission();
+
+      const result = await strategy.execute(createTestOpportunity(), mockContext);
+
+      // Should succeed immediately without polling (current behavior)
+      expect(result.success).toBe(true);
+      expect(result.transactionHash).toBe('solana-tx-hash-confirmed');
+    });
+
+    it('should not attempt confirmation when submission returns no transactionHash', async () => {
+      mockConfirmationClient = createMockConfirmationClient({
+        confirmationStatus: 'confirmed',
+      });
+      const confirmedStrategy = createStrategyWithConfirmation(mockConfirmationClient);
+
+      mockJupiterClient.getQuote.mockResolvedValue(createTestQuote());
+      mockJupiterClient.getSwapTransaction.mockResolvedValue(createTestSwapResult());
+      mockJitoProvider.sendProtectedTransaction.mockResolvedValue({
+        success: true,
+        // No transactionHash — can't confirm what we can't identify
+        strategy: 'jito',
+        latencyMs: 500,
+        usedFallback: false,
+      });
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      // Should return success but confirmation client should NOT have been called
+      expect(result.success).toBe(true);
+      expect(mockConfirmationClient.getSignatureStatus).not.toHaveBeenCalled();
+    });
+
+    it('should poll multiple times before confirmation', async () => {
+      // First 2 calls return null (pending), 3rd returns confirmed
+      const client: jest.Mocked<SolanaConfirmationClient> = {
+        getSignatureStatus: jest.fn()
+          .mockResolvedValueOnce({ value: null })
+          .mockResolvedValueOnce({ value: { confirmationStatus: 'processed', slot: 200000000 } })
+          .mockResolvedValueOnce({ value: { confirmationStatus: 'confirmed', slot: 200000001 } }),
+        getBlockHeight: jest.fn().mockResolvedValue(199999990),
+      };
+      const confirmedStrategy = createStrategyWithConfirmation(client);
+      setupSuccessfulSubmission();
+
+      const result = await confirmedStrategy.execute(createTestOpportunity(), mockContext);
+
+      expect(result.success).toBe(true);
+      expect(client.getSignatureStatus).toHaveBeenCalledTimes(3);
     });
   });
 });

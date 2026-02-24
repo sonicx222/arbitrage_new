@@ -8,8 +8,8 @@
  */
 
 import { createLogger, LoggerLike } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 
 /** Configuration options for StreamHealthMonitor */
 export interface StreamHealthMonitorConfig {

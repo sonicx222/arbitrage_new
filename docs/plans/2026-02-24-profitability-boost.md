@@ -28,8 +28,8 @@ The reality check identified 5 root causes of zero profitability:
 | 0 | ~~Fix economic parameters~~ | ~~Stop generating false-positive opportunities~~ **COMPLETED** (bf9649d5) |
 | 1 | ~~Fix broken strategies~~ | ~~Make detection pipeline honest~~ **COMPLETED** (619580fb, d93e6b1d) |
 | 2 | Deploy to Arbitrum Sepolia testnet | Validate end-to-end with real blockchain |
-| 3 | Build UniswapV3Adapter | Unlock majority of DEX liquidity |
-| 4 | Fill L2 DEX coverage gaps | Maximize arbitrage surface area |
+| 3 | ~~Build UniswapV3Adapter~~ | ~~Unlock majority of DEX liquidity~~ **COMPLETED** (9846af47, d6fc4993) |
+| 4 | ~~Fill L2 DEX coverage gaps~~ | ~~Maximize arbitrage surface area~~ **COMPLETED** (836a8b29) |
 | 5 | Deploy Balancer V2 (0% fee) | Eliminate flash loan costs |
 | 6 | Wire real monitoring | See what's happening in production |
 | 7 | Mainnet deployment | Go live on Arbitrum, then Base, then Optimism |
@@ -407,9 +407,11 @@ Record what works and what breaks. This data is more valuable than any code anal
 
 ---
 
-## Phase 3: Build UniswapV3Adapter
+## Phase 3: Build UniswapV3Adapter -- COMPLETED (9846af47, d6fc4993)
 
 **Rationale:** The contracts only support V2-style `swapExactTokensForTokens`. On Ethereum, Uniswap V3 handles 60-70% of volume. On L2s, V3 pools often have deeper liquidity than V2. The adapter pattern wraps V3's `exactInputSingle` behind the existing V2 interface, requiring zero changes to BaseFlashArbitrage.
+
+> **Status:** Tasks 3.1-3.3 completed. UniswapV3Adapter (474 lines) wraps V3 behind IDexRouter. Includes ReentrancyGuard, Pausable, Ownable2Step. 56 adapter tests pass, 579 total contract tests pass. Task 3.4 (deploy script) deferred until Phase 2 testnet deployment is complete.
 
 ### Task 3.1: Create V3 Router Interface
 
@@ -631,9 +633,11 @@ git commit -m "deploy: UniswapV3Adapter to Arbitrum Sepolia testnet"
 
 ---
 
-## Phase 4: Fill L2 DEX Coverage Gaps
+## Phase 4: Fill L2 DEX Coverage Gaps -- COMPLETED (836a8b29)
 
 **Rationale:** Arbitrage opportunities scale with the number of DEX pairs. More DEXs = more price discrepancies = more profitable paths. Some of these are pure config additions (addresses already exist in the codebase but aren't wired up).
+
+> **Status:** All tasks completed. Added 7 new DEX entries across 5 chains (Optimism +2, Base +1, zkSync +2, Linea +1, Arbitrum +1). Total DEXs: 71 → 78. All 218 DEX config tests pass. GMX V2 deferred (needs custom adapter).
 
 ### Task 4.1: Add Missing DEXs to Optimism (3 -> 6+)
 

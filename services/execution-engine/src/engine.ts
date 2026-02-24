@@ -50,10 +50,12 @@ import {
   clearIntervalSafe,
   TradeLogger,
   type TradeLoggerConfig,
+  R2Uploader,
+  type R2UploaderConfig,
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
-import { RISK_CONFIG, FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES } from '@arbitrage/config';
+import { RISK_CONFIG, FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, R2_CONFIG } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
 import {
   initializeMevProviders,
@@ -103,6 +105,7 @@ import { UniswapXFillerStrategy } from './strategies/uniswapx-filler.strategy';
 // Fix #51: Import MEV-Share event listener for backrun opportunity wiring
 import type { MevShareEventListener, BackrunOpportunity, Logger as CoreLogger } from '@arbitrage/core';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
+import { FastLaneConsumer } from './consumers/fast-lane.consumer';
 import type { ISimulationService } from './services/simulation/types';
 import {
   createSimulationMetricsCollector,
@@ -202,6 +205,7 @@ export class ExecutionEngineService {
   private providerService: ProviderServiceImpl | null = null;
   private queueService: QueueServiceImpl | null = null;
   private opportunityConsumer: OpportunityConsumer | null = null;
+  private fastLaneConsumer: FastLaneConsumer | null = null;
 
   // Execution strategies (using factory pattern for clean dispatch)
   private strategyFactory: ExecutionStrategyFactory | null = null;
@@ -281,6 +285,10 @@ export class ExecutionEngineService {
 
   // O-6: Persistent trade logger for audit and analysis
   private tradeLogger: TradeLogger | null = null;
+
+  // Batch 6: R2 trade log uploader for durable storage
+  private r2Uploader: R2Uploader | null = null;
+  private r2DailyUploadInterval: ReturnType<typeof setInterval> | null = null;
 
   // T-13: Bridge recovery manager for cross-chain failure recovery
   private bridgeRecoveryManager: BridgeRecoveryManager | null = null;
@@ -579,6 +587,31 @@ export class ExecutionEngineService {
         await this.tradeLogger.validateLogDir();
       }
 
+      // Batch 6: Initialize R2 uploader for trade log durability
+      if (R2_CONFIG.enabled) {
+        this.r2Uploader = new R2Uploader(R2_CONFIG, this.logger);
+        // Schedule daily upload of previous day's logs at midnight
+        const tradeLogDir = this.tradeLogger?.getLogPath()
+          ? this.tradeLogger.getLogPath().replace(/[/\\][^/\\]+$/, '')
+          : (process.env.TRADE_LOG_DIR ?? './data/trades');
+        const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+        this.r2DailyUploadInterval = setInterval(() => {
+          this.r2Uploader?.uploadPreviousDayLogs(tradeLogDir).catch((err: unknown) => {
+            this.logger.warn('R2 daily upload failed', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }, TWENTY_FOUR_HOURS_MS);
+        // Prevent interval from keeping process alive
+        if (this.r2DailyUploadInterval && typeof this.r2DailyUploadInterval === 'object' && 'unref' in this.r2DailyUploadInterval) {
+          this.r2DailyUploadInterval.unref();
+        }
+        this.logger.info('R2 trade log uploader initialized', {
+          bucket: R2_CONFIG.bucket,
+          prefix: R2_CONFIG.prefix,
+        });
+      }
+
       // FIX 1.1: Use initialization module for risk management
       // Initialize capital risk management (Phase 3: Task 3.4.5)
       // Fix 2: Pass Redis client for probability tracker persistence
@@ -698,6 +731,21 @@ export class ExecutionEngineService {
       await this.opportunityConsumer.createConsumerGroup();
       this.opportunityConsumer.start();
 
+      // Item 12: Initialize fast lane consumer (coordinator bypass for high-confidence opps)
+      if (FEATURE_FLAGS.useFastLane) {
+        this.fastLaneConsumer = new FastLaneConsumer({
+          logger: this.logger,
+          streamsClient: this.streamsClient,
+          queueService: this.queueService,
+          stats: this.stats,
+          instanceId: this.instanceId,
+          isAlreadySeen: (id) => this.opportunityConsumer?.isActive(id) ?? false,
+          consumerConfig: this.consumerConfig,
+        });
+        await this.fastLaneConsumer.createConsumerGroup();
+        this.fastLaneConsumer.start();
+      }
+
       // Start execution processing
       this.startExecutionProcessing();
 
@@ -770,6 +818,18 @@ export class ExecutionEngineService {
         }
       }
 
+      // Batch 6: Upload current day's trade log to R2 before shutdown
+      if (this.r2Uploader && this.tradeLogger) {
+        const tradeLogDir = this.tradeLogger.getLogPath().replace(/[/\\][^/\\]+$/, '');
+        await this.r2Uploader.uploadDayLogs(tradeLogDir, new Date()).catch((err: unknown) => {
+          this.logger.warn('R2 shutdown upload failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+      this.r2DailyUploadInterval = clearIntervalSafe(this.r2DailyUploadInterval);
+      this.r2Uploader = null;
+
       // O-6: Close persistent trade logger
       if (this.tradeLogger) {
         await this.tradeLogger.close();
@@ -809,7 +869,8 @@ export class ExecutionEngineService {
         this.mevShareListener = null;
       }
 
-      // Stop consumer
+      // Stop consumers
+      this.fastLaneConsumer = await stopAndNullify(this.fastLaneConsumer);
       this.opportunityConsumer = await stopAndNullify(this.opportunityConsumer);
 
       // Stop nonce manager
@@ -1088,6 +1149,44 @@ export class ExecutionEngineService {
           tipAccounts,
         });
 
+        // H1: Build confirmation client from Solana RPC for transaction
+        // finality polling. Uses direct JSON-RPC calls to avoid importing
+        // @solana/web3.js at the engine level.
+        const solanaRpcUrl = process.env.SOLANA_RPC_URL!;
+        const confirmationClient = {
+          async getSignatureStatus(signature: string) {
+            const response = await fetch(solanaRpcUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'getSignatureStatuses',
+                params: [[signature]],
+              }),
+            });
+            const data = (await response.json()) as {
+              result?: { value?: Array<{ confirmationStatus: string; slot?: number } | null> };
+            };
+            const statuses = data.result?.value;
+            return { value: statuses?.[0] ?? null };
+          },
+          async getBlockHeight() {
+            const response = await fetch(solanaRpcUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'getBlockHeight',
+                params: [],
+              }),
+            });
+            const data = (await response.json()) as { result?: number };
+            return data.result ?? 0;
+          },
+        };
+
         const solanaStrategy = new SolanaExecutionStrategy(
           jupiterClient,
           txBuilder,
@@ -1098,8 +1197,11 @@ export class ExecutionEngineService {
             maxSlippageBps: parseNumericEnv('SOLANA_MAX_SLIPPAGE_BPS') ?? 100,
             minProfitLamports: BigInt(process.env.SOLANA_MIN_PROFIT_LAMPORTS ?? '100000'),
             maxPriceDeviationPct: parseNumericEnv('SOLANA_MAX_PRICE_DEVIATION_PCT') ?? 1.0,
+            confirmationTimeoutMs: parseNumericEnv('SOLANA_CONFIRMATION_TIMEOUT_MS') ?? undefined,
+            confirmationPollIntervalMs: parseNumericEnv('SOLANA_CONFIRMATION_POLL_INTERVAL_MS') ?? undefined,
           },
           this.logger,
+          confirmationClient,
         );
 
         this.strategyFactory.registerSolanaStrategy(solanaStrategy);

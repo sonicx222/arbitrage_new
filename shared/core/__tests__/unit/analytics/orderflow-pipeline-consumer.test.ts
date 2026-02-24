@@ -52,7 +52,7 @@ const mockRedisClient = {
   xack: mockXack,
 };
 
-jest.mock('../../../src/redis-streams', () => ({
+jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn<() => Promise<unknown>>().mockResolvedValue(mockRedisClient),
 }));
 

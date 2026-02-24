@@ -19,8 +19,8 @@
 
 import { RedisStreams } from '@arbitrage/types';
 import { createLogger } from '../logger';
-import { getRedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { getRedisClient } from '../redis/client';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 import { dualPublish as dualPublishUtil } from './dual-publish';
 
 const logger = createLogger('dead-letter-queue');

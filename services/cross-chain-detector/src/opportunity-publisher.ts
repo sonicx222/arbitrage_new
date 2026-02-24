@@ -24,6 +24,7 @@ import {
   PerformanceLogger,
 } from '@arbitrage/core';
 import { ArbitrageOpportunity } from '@arbitrage/types';
+import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating
 import { Logger, CrossChainOpportunity } from './types';
 
@@ -268,6 +269,10 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
 
       perfLogger.logArbitrageOpportunity(arbitrageOpp);
 
+      // Fast lane: publish high-confidence, high-profit opportunities
+      // to stream:fast-lane for coordinator bypass (fire-and-forget)
+      tryPublishToFastLane(arbitrageOpp);
+
       // Cache with timestamp for deduplication
       opportunitiesCache.set(dedupeKey, {
         ...opportunity,
@@ -333,6 +338,41 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
   function clear(): void {
     opportunitiesCache.clear();
     logger.info('OpportunityPublisher cache cleared');
+  }
+
+  // ===========================================================================
+  // Fast Lane Publishing (Item 12)
+  // ===========================================================================
+
+  /**
+   * Publish to fast lane if opportunity meets confidence and profit criteria.
+   * Fire-and-forget: failures are logged but don't affect normal path.
+   */
+  function tryPublishToFastLane(arbitrageOpp: ArbitrageOpportunity): void {
+    if (!FEATURE_FLAGS.useFastLane) return;
+
+    const confidence = arbitrageOpp.confidence ?? 0;
+    const profit = arbitrageOpp.expectedProfit ?? 0;
+
+    if (confidence < FAST_LANE_CONFIG.minConfidence) return;
+    if (profit < FAST_LANE_CONFIG.minProfitUsd) return;
+
+    // Fire-and-forget publish to fast lane stream
+    streamsClient
+      .xaddWithLimit(RedisStreamsClient.STREAMS.FAST_LANE, arbitrageOpp)
+      .then(() => {
+        logger.debug('Cross-chain opportunity published to fast lane', {
+          id: arbitrageOpp.id,
+          confidence,
+          profit,
+        });
+      })
+      .catch((error) => {
+        logger.warn('Failed to publish to fast lane (non-fatal)', {
+          id: arbitrageOpp.id,
+          error: (error as Error).message,
+        });
+      });
   }
 
   return {

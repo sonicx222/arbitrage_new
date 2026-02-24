@@ -108,21 +108,24 @@ output "deployment_summary" {
   description = "Summary of deployed resources"
   value = {
     asia_fast_partition = {
-      region     = "ap-singapore-1"
-      public_ip  = oci_core_instance.asia_fast_partition.public_ip
-      health_url = "http://${oci_core_instance.asia_fast_partition.public_ip}:3011/health"
-      chains     = var.partition_asia_fast.chains
+      region          = "ap-singapore-1"
+      public_ip       = oci_core_instance.asia_fast_partition.public_ip
+      health_url      = "http://${oci_core_instance.asia_fast_partition.public_ip}:3011/health"
+      chains          = var.partition_asia_fast.chains
+      redis           = var.redis_self_hosted ? "self-hosted (localhost:6379)" : "external"
     }
     high_value_partition = {
-      region     = "us-ashburn-1"
-      public_ip  = oci_core_instance.high_value_partition.public_ip
-      health_url = "http://${oci_core_instance.high_value_partition.public_ip}:3013/health"
-      chains     = var.partition_high_value.chains
+      region          = "us-ashburn-1"
+      public_ip       = oci_core_instance.high_value_partition.public_ip
+      health_url      = "http://${oci_core_instance.high_value_partition.public_ip}:3013/health"
+      chains          = var.partition_high_value.chains
+      redis           = var.redis_self_hosted ? "self-hosted (localhost:6379)" : "external"
     }
     cross_chain_detector = {
-      region     = "us-ashburn-1"
-      public_ip  = oci_core_instance.cross_chain_detector.public_ip
-      health_url = "http://${oci_core_instance.cross_chain_detector.public_ip}:3014/health"
+      region          = "us-ashburn-1"
+      public_ip       = oci_core_instance.cross_chain_detector.public_ip
+      health_url      = "http://${oci_core_instance.cross_chain_detector.public_ip}:3014/health"
+      redis           = var.redis_self_hosted ? "self-hosted (localhost:6379)" : "external"
     }
   }
 }

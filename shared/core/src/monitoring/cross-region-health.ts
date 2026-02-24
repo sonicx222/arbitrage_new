@@ -20,10 +20,10 @@
 
 import { EventEmitter } from 'events';
 import { createLogger, LoggerLike } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { getRedisClient, RedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
-import { getDistributedLockManager, DistributedLockManager } from '../distributed-lock';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { getRedisClient, RedisClient } from '../redis/client';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
+import { getDistributedLockManager, DistributedLockManager } from '../redis/distributed-lock';
 
 // P0-11 FIX: Stream name for failover events (ADR-002 compliant)
 const FAILOVER_STREAM = 'stream:system-failover';

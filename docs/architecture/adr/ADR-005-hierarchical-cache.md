@@ -202,7 +202,7 @@ class PredictiveWarmer {
 
 ### Alternative 1: Redis Only (No L1)
 - **Rejected because**: 2ms per lookup unacceptable for high-frequency detection
-- **Would reconsider if**: Redis latency dropped to <0.1ms
+- **Would reconsider if**: Redis latency dropped to <0.1ms (now achieved with self-hosted Redis, but L1 SharedArrayBuffer is still faster at ~0.1μs)
 
 ### Alternative 2: In-Process Map (No SharedArrayBuffer)
 - **Rejected because**: Not accessible from worker threads
@@ -317,9 +317,11 @@ Updated: 2026-02-07 | Post-PriceMatrix Integration Testing
 | Arbitrage cycle: 5ms | **8-35ms** | ~5x slower (still <50ms target) |
 
 **Analysis**: Original predictions were highly optimistic (assumed local Redis, no network latency). Actual performance still **excellent** and **well within production requirements** (<50ms hot-path target). The 10x variance is primarily due to:
-1. Redis network latency (assumed localhost, actual is over network)
+1. Redis network latency (originally over network to Upstash; now <0.1ms with self-hosted Redis on Oracle ARM)
 2. JavaScript overhead vs theoretical lower bounds
 3. Test environment overhead (logging, metrics collection)
+
+> **Note (2026-02-24)**: With self-hosted Redis on localhost, L2 latency drops from 15-25ms to <1ms, bringing actual performance much closer to original predictions. L1 SharedArrayBuffer remains essential for <0.1μs reads in the hot path.
 
 ## Confidence Level
 

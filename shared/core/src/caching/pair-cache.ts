@@ -15,7 +15,7 @@
 
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
-import { getRedisClient, RedisClient } from '../redis';
+import { getRedisClient, RedisClient } from '../redis/client';
 import type { Resettable } from '@arbitrage/types';
 
 // =============================================================================

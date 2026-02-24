@@ -205,15 +205,14 @@ export class FlashLoanLiquidityValidator {
   /**
    * Fetch available liquidity from on-chain and update cache.
    * Returns the available liquidity as bigint for amount-independent coalescing.
-   * On failure, returns MAX_SAFE bigint (graceful fallback: assume sufficient).
+   * On failure, returns 0n (fail closed: assume insufficient liquidity).
+   * This prevents gas waste on likely-failing flash loans when RPC is disrupted.
    */
   private async fetchAvailableLiquidity(
     provider: IFlashLoanProvider,
     asset: string,
     ctx: StrategyContext
   ): Promise<bigint> {
-    // Sentinel value for "assume sufficient" fallback
-    const FALLBACK_LIQUIDITY = BigInt(Number.MAX_SAFE_INTEGER) * 10n ** 18n;
     const startTime = Date.now();
 
     try {
@@ -223,8 +222,7 @@ export class FlashLoanLiquidityValidator {
         this.logger.warn('[LiquidityValidator] No RPC provider for chain', {
           chain: provider.chain,
         });
-        this.gracefulFallback(provider, asset, true);
-        return FALLBACK_LIQUIDITY;
+        return 0n;
       }
 
       // Query on-chain liquidity with timeout
@@ -274,9 +272,9 @@ export class FlashLoanLiquidityValidator {
         lastCheckSuccessful: false,
       });
 
-      // Graceful fallback - assume sufficient liquidity
-      this.gracefulFallback(provider, asset, true);
-      return FALLBACK_LIQUIDITY;
+      // Fail closed: assume insufficient liquidity.
+      // Prevents gas waste on likely-failing flash loans when RPC is disrupted.
+      return 0n;
     }
   }
 
@@ -365,21 +363,6 @@ export class FlashLoanLiquidityValidator {
     });
   }
 
-  /**
-   * Graceful fallback when check fails
-   */
-  private gracefulFallback(
-    provider: IFlashLoanProvider,
-    asset: string,
-    assumeSufficient: boolean
-  ): boolean {
-    this.logger.debug('[LiquidityValidator] Using graceful fallback', {
-      protocol: provider.protocol,
-      asset,
-      assumeSufficient,
-    });
-    return assumeSufficient;
-  }
 }
 
 /**

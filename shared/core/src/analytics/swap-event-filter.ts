@@ -16,7 +16,7 @@
 
 import type { SwapEvent } from '@arbitrage/types';
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 
 const logger = createLogger('swap-event-filter');
 
