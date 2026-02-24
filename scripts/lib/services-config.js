@@ -28,33 +28,20 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
-const path = require('path');
-
 // =============================================================================
 // Environment Loading
 // =============================================================================
 
-const dotenv = require('dotenv');
 const { ROOT_DIR } = require('./constants');
+const { loadEnvFiles } = require('./load-env');
 
 // IMPORTANT: Load order matters!
-// .env.local is loaded AFTER .env with override: true
-// This means .env.local values ALWAYS win over .env values
+// .env.local is merged AFTER .env
+// Existing process.env values still win (shell/CI/test overrides).
 // See docs/local-development.md for full explanation
 
-// Load base .env first
-dotenv.config({ path: path.join(ROOT_DIR, '.env') });
-
-// Then override with .env.local (explicit override: true)
-const localEnvResult = dotenv.config({
-  path: path.join(ROOT_DIR, '.env.local'),
-  override: true
-});
-
-// If .env.local doesn't exist, that's okay for production
-if (localEnvResult.error && localEnvResult.error.code !== 'ENOENT') {
-  console.warn('Warning: Error loading .env.local:', localEnvResult.error.message);
-}
+// Load environment layers once for this process.
+loadEnvFiles();
 
 // =============================================================================
 // Deprecation Checking

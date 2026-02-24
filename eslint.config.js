@@ -164,6 +164,39 @@ export default [
       'no-console': 'off'
     }
   },
+  // Script TypeScript files (standalone tooling; not part of root tsconfig project)
+  {
+    files: ['scripts/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module'
+      },
+      globals: {
+        ...globals.node,
+        ...globals.es2021,
+        RequestInit: 'readonly',
+        Response: 'readonly',
+        Request: 'readonly',
+        fetch: 'readonly'
+      }
+    },
+    plugins: {
+      '@typescript-eslint': tseslint
+    },
+    rules: {
+      ...tseslint.configs.recommended.rules,
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/explicit-module-boundary-types': 'off',
+      'no-console': 'off',
+      'prefer-const': 'warn',
+      'no-var': 'error'
+    }
+  },
   // JavaScript files (CommonJS)
   {
     files: ['**/*.js', '**/*.cjs'],

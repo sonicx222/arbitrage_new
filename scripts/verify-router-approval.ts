@@ -23,6 +23,7 @@
  * @see docs/architecture/adr/ADR-030-pancakeswap-v3-flash-loans.md (I4)
  */
 
+import './lib/load-env';
 import { ethers } from 'ethers';
 import {
   FLASH_LOAN_PROVIDERS,

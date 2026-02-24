@@ -74,6 +74,13 @@ async function killProcess(pid, options = {}) {
     return false;
   }
 
+  // Guardrail: do not signal process groups if the target PID does not exist.
+  // This avoids false positives from `kill -9 -<pgid>` and accidental kills of
+  // unrelated process groups that happen to share the numeric ID.
+  if (!(await processExists(safePid))) {
+    return false;
+  }
+
   const { graceful = true, gracefulTimeoutMs = 3000 } = options;
 
   if (isWindows()) {
@@ -103,17 +110,20 @@ async function killProcess(pid, options = {}) {
   }
 
   // Phase 2: SIGKILL to process group (force kill entire tree)
-  const groupKilled = await new Promise((resolve) => {
-    exec(`kill -9 -${safePid} 2>/dev/null`, (error) => resolve(!error));
+  await new Promise((resolve) => {
+    exec(`kill -9 -${safePid} 2>/dev/null`, () => resolve(undefined));
   });
-  if (groupKilled) {
+  await new Promise((r) => setTimeout(r, 100));
+  if (!(await processExists(safePid))) {
     return true;
   }
 
   // Fallback: SIGKILL individual PID (in case it's not a process group leader)
-  return new Promise((resolve) => {
-    exec(`kill -9 ${safePid} 2>/dev/null`, (error) => resolve(!error));
+  await new Promise((resolve) => {
+    exec(`kill -9 ${safePid} 2>/dev/null`, () => resolve(undefined));
   });
+  await new Promise((r) => setTimeout(r, 100));
+  return !(await processExists(safePid));
 }
 
 /**

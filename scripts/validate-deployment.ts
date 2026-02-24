@@ -21,6 +21,7 @@
 import { createConnection, Socket } from 'net';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
+import './lib/load-env';
 
 // =============================================================================
 // Types
@@ -859,19 +860,22 @@ export async function runAllChecks(): Promise<ValidationResult[]> {
   // 2. Private key format (sync, fast)
   results.push(checkPrivateKeyFormat());
 
-  // 3. MEV providers (sync, fast)
+  // 3. Mnemonic format (sync, fast)
+  results.push(checkMnemonicFormat());
+
+  // 4. MEV providers (sync, fast)
   results.push(...checkMevProviders());
 
-  // 4. Redis connectivity (async, may timeout)
+  // 5. Redis connectivity (async, may timeout)
   results.push(await checkRedisConnectivity());
 
-  // 5. Contract addresses (async import)
+  // 6. Contract addresses (async import)
   results.push(...await checkContractAddresses());
 
-  // 6. RPC endpoint latency (async, network calls)
+  // 7. RPC endpoint latency (async, network calls)
   results.push(...await checkRpcEndpoints());
 
-  // 7. Gas price sanity (async, network calls)
+  // 8. Gas price sanity (async, network calls)
   results.push(...await checkGasPrices());
 
   return results;

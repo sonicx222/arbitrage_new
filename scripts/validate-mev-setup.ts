@@ -15,6 +15,7 @@
  * @see Task 1.3: BloXroute & Fastlane Activation
  */
 
+import './lib/load-env';
 import { MEV_CONFIG } from '../shared/config/src/mev-config';
 import { CHAIN_MEV_STRATEGIES } from '../shared/core/src/mev-protection/types';
 
