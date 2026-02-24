@@ -243,14 +243,16 @@ export const PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    chains: ['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode'],
+    // Removed blast, scroll, mantle, mode -- all have placeholder DEX addresses (0x000...)
+    // Re-add when real factory addresses are configured in dexes/index.ts
+    chains: ['arbitrum', 'optimism', 'base'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'heavy', // Upgraded from 'standard': 7 chains need more resources
+    resourceProfile: 'standard', // 3 chains (was 'heavy' for 7)
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 768, // Increased from 512: 7 chains need more memory
+    maxMemoryMB: 512, // 3 chains (was 768 for 7)
     enabled: true,
     healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000

@@ -154,8 +154,8 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.enabled).toBe(true);
   });
 
-  it('should contain Arbitrum, Optimism, Base, and emerging L2s', () => {
-    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode']);
+  it('should contain Arbitrum, Optimism, Base (emerging L2s removed -- placeholder addresses)', () => {
+    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base']);
   });
 
   it('should be deployed to asia-southeast1 on Fly.io', () => {
@@ -163,9 +163,9 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.provider).toBe('fly');
   });
 
-  it('should have heavy resource profile with 768MB memory', () => {
-    expect(partition!.resourceProfile).toBe('heavy');
-    expect(partition!.maxMemoryMB).toBe(768);
+  it('should have standard resource profile with 512MB memory (3 chains)', () => {
+    expect(partition!.resourceProfile).toBe('standard');
+    expect(partition!.maxMemoryMB).toBe(512);
   });
 
   it('should have fastest health check interval (10s for fast L2s)', () => {
@@ -324,7 +324,7 @@ describe('assignChainToPartition', () => {
         assignedChains.add(chainId);
       }
     }
-    expect(assignedChains.size).toBe(15);
+    expect(assignedChains.size).toBe(11); // 15 - 4 placeholder L2s (blast, scroll, mantle, mode)
   });
 });
 
@@ -426,7 +426,7 @@ describe('getChainsForPartition', () => {
 
   it('should return chains for l2-turbo partition', () => {
     const chains = getChainsForPartition('l2-turbo');
-    expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode']);
+    expect(chains).toEqual(['arbitrum', 'optimism', 'base']);
   });
 
   it('should have matching assignments for all partitions', () => {
@@ -486,7 +486,7 @@ describe('createChainInstance', () => {
 describe('createPartitionChainInstances', () => {
   it.each([
     ['asia-fast', 4, ['bsc', 'polygon', 'avalanche', 'fantom']],
-    ['l2-turbo', 7, ['arbitrum', 'optimism', 'base', 'blast', 'scroll', 'mantle', 'mode']],
+    ['l2-turbo', 3, ['arbitrum', 'optimism', 'base']],
     ['high-value', 3, ['ethereum', 'zksync', 'linea']],
     ['solana-native', 1, ['solana']],
   ])('should create %d instances for %s partition', (partitionId, expectedCount, expectedChains) => {
