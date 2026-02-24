@@ -31,8 +31,8 @@ The reality check identified 5 root causes of zero profitability:
 | 3 | ~~Build UniswapV3Adapter~~ | ~~Unlock majority of DEX liquidity~~ **COMPLETED** (9846af47, d6fc4993) |
 | 4 | ~~Fill L2 DEX coverage gaps~~ | ~~Maximize arbitrage surface area~~ **COMPLETED** (836a8b29) |
 | 5 | ~~Deploy Balancer V2 (0% fee)~~ | ~~Eliminate flash loan costs~~ **COMPLETED** (provider priority + testnet prep) |
-| 6 | Wire real monitoring | See what's happening in production |
-| 7 | Mainnet deployment | Go live on Arbitrum, then Base, then Optimism |
+| 6 | ~~Wire real monitoring~~ | ~~See what's happening in production~~ **COMPLETED** (9ba0b3de, 93a48e1d) |
+| 7 | Mainnet deployment | Go live on Arbitrum, then Base, then Optimism — **IN PROGRESS** |
 
 ### Key Principle
 
@@ -808,9 +808,11 @@ git commit -m "feat(execution): prioritize Balancer V2 (0% fee) over Aave V3 (0.
 
 ---
 
-## Phase 6: Wire Real Monitoring
+## Phase 6: Wire Real Monitoring -- COMPLETED (9ba0b3de, 93a48e1d)
 
 **Rationale:** You cannot optimize what you cannot measure. The alert rules reference ~20 Prometheus metrics that are not emitted by any service. Without monitoring, you're flying blind in production.
+
+> **Status:** Task 6.1 added 5 Prometheus metrics to execution engine with `/metrics` HTTP endpoint (9ba0b3de). Task 6.2 added RPC call/error metrics to provider rotation strategy (93a48e1d). Metrics match alert-rules.yml expectations.
 
 ### Task 6.1: Add Core Prometheus Metrics to Execution Engine
 

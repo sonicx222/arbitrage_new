@@ -123,24 +123,27 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 300,
     },
-    // Production networks - uncomment after security audit
-    // TODO: Track deployment progress - create GitHub issue for mainnet deployment
-    // Prerequisites before enabling:
-    // 1) Security audit completed (contracts/docs/SECURITY_REVIEW.md checklist)
-    // 2) Testnet verification (Sepolia, Arbitrum Sepolia, BSC Testnet)
-    // 3) Deployment runbook (contracts/docs/DEPLOYMENT.md)
-    // 4) Multi-sig wallet configured for contract ownership
-    // 5) Router/pool whitelists populated and verified
-    // 6) Minimum profit thresholds configured appropriately
+    // Production L2 networks — enabled for deployment
+    arbitrum: {
+      url: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 42161,
+    },
+    base: {
+      url: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 8453,
+    },
+    optimism: {
+      url: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 10,
+    },
+    // Ethereum mainnet — high gas costs, enable only after L2 success
     // ethereum: {
     //   url: process.env.ETHEREUM_RPC_URL || '',
     //   accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     //   chainId: 1,
-    // },
-    // arbitrum: {
-    //   url: process.env.ARBITRUM_RPC_URL || '',
-    //   accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-    //   chainId: 42161,
     // },
   },
   gasReporter: {
