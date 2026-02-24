@@ -60,7 +60,7 @@ export { resetCrossRegionHealthManager } from '../monitoring/cross-region-health
 export { resetStreamHealthMonitor } from '../monitoring/stream-health-monitor';
 
 // Path finding services
-export { resetMultiLegPathFinder } from '../multi-leg-path-finder';
+export { resetMultiLegPathFinder } from '../path-finding/multi-leg-path-finder';
 
 // Pair discovery
 export { resetPairDiscoveryService } from '../pair-discovery';

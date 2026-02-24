@@ -1008,13 +1008,13 @@ export type {
 export {
   CrossChainPriceTracker,
   createCrossChainPriceTracker,
-} from './cross-chain-price-tracker';
+} from './path-finding/cross-chain-price-tracker';
 export type {
   CrossChainPriceTrackerConfig,
   PriceTrackerLogger,
   PricePoint as CrossChainPricePoint,
   CrossChainDiscrepancy as CrossChainPriceDiscrepancy,
-} from './cross-chain-price-tracker';
+} from './path-finding/cross-chain-price-tracker';
 
 // =============================================================================
 // 6.2 Arbitrage Detection Components
@@ -1059,19 +1059,19 @@ export {
   ArbitragePath,
   // T2.6: Quadrilateral arbitrage
   QuadrilateralOpportunity
-} from './cross-dex-triangular-arbitrage';
+} from './path-finding/cross-dex-triangular-arbitrage';
 
 // T3.11: Multi-Leg Path Finding (5+ tokens)
 export {
   MultiLegPathFinder,
   getMultiLegPathFinder,
   resetMultiLegPathFinder
-} from './multi-leg-path-finder';
+} from './path-finding/multi-leg-path-finder';
 export type {
   MultiLegPathConfig,
   MultiLegOpportunity,
   PathFinderStats
-} from './multi-leg-path-finder';
+} from './path-finding/multi-leg-path-finder';
 
 // =============================================================================
 // 6.4 Detector Infrastructure
@@ -1990,6 +1990,47 @@ export type {
 
 export { TradeLogger } from './persistence/trade-logger';
 export type { TradeLogEntry, TradeLoggerConfig } from './persistence/trade-logger';
+
+// #############################################################################
+// #                                                                           #
+// #                SECTION 15b: PHASE 3 MODULE RE-EXPORTS                     #
+// #                                                                           #
+// #############################################################################
+
+/**
+ * Phase 3 Strategic Expansion modules.
+ *
+ * For tree-shaking, prefer specific sub-entry imports:
+ * ```typescript
+ * import { PairCorrelationTracker } from '@arbitrage/core/analytics';
+ * import { StatisticalArbitrageDetector } from '@arbitrage/core/detector';
+ * import { BinanceWebSocketClient } from '@arbitrage/core/feeds';
+ * ```
+ */
+
+// Phase 3 Analytics (Statistical Arbitrage)
+export { PairCorrelationTracker } from './analytics/pair-correlation-tracker';
+export type { CorrelationConfig } from './analytics/pair-correlation-tracker';
+export { SpreadTracker } from './analytics/spread-tracker';
+export type { SpreadSignal, SpreadConfig, BollingerBands } from './analytics/spread-tracker';
+export { RegimeDetector } from './analytics/regime-detector';
+export type { Regime, RegimeConfig } from './analytics/regime-detector';
+export { CexDexSpreadCalculator } from './analytics/cex-dex-spread';
+export type { SpreadAlert, CexDexSpreadConfig } from './analytics/cex-dex-spread';
+
+// Phase 3 Detectors
+export { StatisticalArbitrageDetector } from './detector/statistical-arbitrage-detector';
+export type { StatArbPairConfig, StatArbDetectorConfig } from './detector/statistical-arbitrage-detector';
+export { CowBackrunDetector } from './detector/cow-backrun-detector';
+export type { CowBackrunConfig, PriceImpactEstimate } from './detector/cow-backrun-detector';
+
+// Phase 3 Feeds
+export { BinanceWebSocketClient } from './feeds/binance-ws-client';
+export type { BinanceTradeEvent, BinanceWsConfig } from './feeds/binance-ws-client';
+export { CowSettlementWatcher, GPV2_SETTLEMENT_ADDRESS } from './feeds/cow-settlement-watcher';
+export type { CowTrade, CowSettlement, CowWatcherConfig } from './feeds/cow-settlement-watcher';
+export { CexPriceNormalizer } from './feeds/cex-price-normalizer';
+export type { NormalizedCexPrice, TokenMapping, CexNormalizerConfig } from './feeds/cex-price-normalizer';
 
 // #############################################################################
 // #                                                                           #

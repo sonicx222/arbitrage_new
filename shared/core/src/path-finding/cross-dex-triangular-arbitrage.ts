@@ -2,15 +2,15 @@
 // Finds arbitrage opportunities across multiple DEXes on the same blockchain
 // P0-FIX: Uses BigInt for precise wei calculations to prevent precision loss
 
-import { createLogger } from './logger';
-import { getHierarchicalCache } from './caching/hierarchical-cache';
+import { createLogger } from '../logger';
+import { getHierarchicalCache } from '../caching/hierarchical-cache';
 import {
   getGasPriceCache,
   GAS_UNITS,
   FALLBACK_GAS_COSTS_ETH,
   FALLBACK_GAS_SCALING_PER_STEP,
   GAS_FALLBACK_SAFETY_FACTOR
-} from './caching/gas-price-cache';
+} from '../caching/gas-price-cache';
 import { getNativeTokenPrice } from '@arbitrage/config';
 import {
   PRECISION_MULTIPLIER,
@@ -19,8 +19,8 @@ import {
   calculateAmmAmountOut,
   calculateDynamicSlippage as calculateDynamicSlippageUtil,
   DEFAULT_SLIPPAGE_CONFIG,
-} from './utils/amm-math';
-import type { DynamicSlippageConfig } from './utils/amm-math';
+} from '../utils/amm-math';
+import type { DynamicSlippageConfig } from '../utils/amm-math';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
 
@@ -89,7 +89,7 @@ export interface QuadrilateralOpportunity {
 }
 
 // Re-export DynamicSlippageConfig for backward compatibility (now defined in utils/amm-math)
-export type { DynamicSlippageConfig } from './utils/amm-math';
+export type { DynamicSlippageConfig } from '../utils/amm-math';
 
 /**
  * Environment variable configuration:

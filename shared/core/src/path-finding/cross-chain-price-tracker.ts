@@ -13,7 +13,7 @@
  * @see docs/research/REFACTORING_IMPLEMENTATION_PLAN.md P2-14
  */
 
-import { LRUCache } from './data-structures';
+import { LRUCache } from '../data-structures';
 
 // =============================================================================
 // Types

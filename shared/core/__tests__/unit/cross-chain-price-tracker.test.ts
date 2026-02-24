@@ -12,12 +12,12 @@ import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import {
   CrossChainPriceTracker,
   createCrossChainPriceTracker,
-} from '../../src/cross-chain-price-tracker';
+} from '../../src/path-finding/cross-chain-price-tracker';
 import type {
   PriceTrackerLogger,
   TokenNormalizeFn,
   CrossChainDiscrepancy,
-} from '../../src/cross-chain-price-tracker';
+} from '../../src/path-finding/cross-chain-price-tracker';
 
 // =============================================================================
 // Helpers

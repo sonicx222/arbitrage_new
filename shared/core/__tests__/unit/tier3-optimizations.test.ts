@@ -12,12 +12,12 @@
 import {
   CrossDexTriangularArbitrage,
   DexPool
-} from '../../src/cross-dex-triangular-arbitrage';
+} from '../../src/path-finding/cross-dex-triangular-arbitrage';
 import {
   MultiLegPathFinder,
   MultiLegOpportunity,
   MultiLegPathConfig
-} from '../../src/multi-leg-path-finder';
+} from '../../src/path-finding/multi-leg-path-finder';
 import {
   WhaleActivityTracker,
   TrackedWhaleTransaction,

@@ -70,7 +70,7 @@ import {
   TriangularOpportunity,
   QuadrilateralOpportunity,
   DynamicSlippageConfig,
-} from '../../src/cross-dex-triangular-arbitrage';
+} from '../../src/path-finding/cross-dex-triangular-arbitrage';
 
 export {};
 

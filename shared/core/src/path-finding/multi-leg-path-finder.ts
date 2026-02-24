@@ -14,14 +14,14 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding 1.2
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 import {
   getGasPriceCache,
   GAS_UNITS,
   FALLBACK_GAS_COSTS_ETH,
   FALLBACK_GAS_SCALING_PER_STEP,
   GAS_FALLBACK_SAFETY_FACTOR
-} from './caching/gas-price-cache';
+} from '../caching/gas-price-cache';
 import type { DexPool, TriangularStep } from './cross-dex-triangular-arbitrage';
 import {
   PRECISION_MULTIPLIER,
@@ -30,8 +30,8 @@ import {
   calculateAmmAmountOut,
   calculateDynamicSlippage as calculateDynamicSlippageUtil,
   DEFAULT_SLIPPAGE_CONFIG,
-} from './utils/amm-math';
-import type { DynamicSlippageConfig } from './utils/amm-math';
+} from '../utils/amm-math';
+import type { DynamicSlippageConfig } from '../utils/amm-math';
 
 const logger = createLogger('multi-leg-path-finder');
 let hasLoggedWorkerFallback = false;
@@ -897,7 +897,7 @@ export class MultiLegPathFinder {
     workerPool?: any
   ): Promise<MultiLegOpportunity[]> {
     // Lazy import worker pool to avoid circular dependencies
-    const pool = workerPool || (await import('./async/worker-pool')).getWorkerPool();
+    const pool = workerPool || (await import('../async/worker-pool')).getWorkerPool();
 
     // Start pool lazily when first needed by path finding.
     let health = pool.getHealthStatus?.();

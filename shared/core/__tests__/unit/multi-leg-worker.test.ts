@@ -27,8 +27,8 @@ import {
   MultiLegOpportunity,
   getMultiLegPathFinder,
   resetMultiLegPathFinder
-} from '../../src/multi-leg-path-finder';
-import type { DexPool } from '../../src/cross-dex-triangular-arbitrage';
+} from '../../src/path-finding/multi-leg-path-finder';
+import type { DexPool } from '../../src/path-finding/cross-dex-triangular-arbitrage';
 import { Worker } from 'worker_threads';
 
 // ===========================================================================

@@ -321,7 +321,7 @@ async function processMultiLegPathFinding(data: any): Promise<any> {
   const { chain, pools, baseTokens, targetPathLength, config } = data;
 
   // Dynamic import to avoid circular dependencies
-  const { MultiLegPathFinder } = await import('./multi-leg-path-finder');
+  const { MultiLegPathFinder } = await import('./path-finding/multi-leg-path-finder');
   const requestedConfig = config || {};
   const requestedConfigHash = JSON.stringify(requestedConfig);
 
