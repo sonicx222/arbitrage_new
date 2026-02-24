@@ -356,10 +356,13 @@ export class Http2SessionPool {
    * @param defaultGetUrl - Fallback ethers.js URL fetcher for non-HTTPS or errors
    * @returns FetchGetUrlFunc that uses HTTP/2 multiplexing
    */
-  createEthersGetUrlFunc(
-    defaultGetUrl: EthersFetchGetUrlFunc
-  ): EthersFetchGetUrlFunc {
-    return async (req: EthersFetchRequest, signal?: EthersFetchCancelSignal) => {
+  createEthersGetUrlFunc<
+    Req extends EthersFetchRequest,
+    Sig extends EthersFetchCancelSignal
+  >(
+    defaultGetUrl: (req: Req, signal?: Sig) => Promise<EthersGetUrlResponse>
+  ): (req: Req, signal?: Sig) => Promise<EthersGetUrlResponse> {
+    return async (req: Req, signal?: Sig) => {
       const url = new URL(req.url);
 
       // Only use HTTP/2 for HTTPS endpoints
@@ -468,7 +471,7 @@ interface EthersGetUrlResponse {
   statusCode: number;
   statusMessage: string;
   headers: Record<string, string>;
-  body: Uint8Array;
+  body: Uint8Array | null;
 }
 
 /** Type alias matching ethers.FetchGetUrlFunc signature */
