@@ -176,6 +176,7 @@ export const AAVE_V3_POOL_ADDRESSES = AAVE_V3_POOLS;
  */
 export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
+  arbitrumSepolia: '0xE5b26749430ed50917b75689B654a4C5808b23FB',
 };
 
 // =============================================================================

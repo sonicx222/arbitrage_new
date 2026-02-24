@@ -150,16 +150,12 @@ const config: HardhatUserConfig = {
     coinmarketcap: process.env.COINMARKETCAP_API_KEY,
   },
   etherscan: {
-    apiKey: {
-      mainnet: process.env.ETHERSCAN_API_KEY || '',
-      sepolia: process.env.ETHERSCAN_API_KEY || '',
-      arbitrumOne: process.env.ARBISCAN_API_KEY || '',
-      arbitrumSepolia: process.env.ARBISCAN_API_KEY || '',
-      baseSepolia: process.env.BASESCAN_API_KEY || '',
-      // zkSync Era uses its own explorer
-      zksync: process.env.ZKSYNC_ETHERSCAN_API_KEY || '',
-      'zksync-testnet': process.env.ZKSYNC_ETHERSCAN_API_KEY || '',
-    },
+    // Etherscan V2 requires a single etherscan.io API key for all supported chains.
+    apiKey: process.env.ETHERSCAN_API_KEY || '',
+  },
+  sourcify: {
+    // Keep disabled to avoid informational noise during verification runs.
+    enabled: false,
   },
   typechain: {
     outDir: './typechain-types',

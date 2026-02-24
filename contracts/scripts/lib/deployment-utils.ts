@@ -1533,7 +1533,7 @@ export async function deployContractPipeline(
 
   // Deploy
   console.log(`\nDeploying ${config.contractName}...`);
-  const contract = await ContractFactory.deploy(...constructorArgs);
+  const contract: any = await ContractFactory.deploy(...constructorArgs);
 
   await contract.waitForDeployment();
   const contractAddress = await contract.getAddress();

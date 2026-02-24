@@ -301,7 +301,7 @@ describe('Interface Compliance', () => {
             test.amounts,
             '0x'
           )
-        ).to.be.revertedWith(test.expectedError, `Failed test: ${test.name}`);
+        ).to.be.revertedWith(test.expectedError);
       }
     });
   });

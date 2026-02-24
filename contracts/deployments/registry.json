@@ -5,7 +5,14 @@
   "_schema": {
     "description": "Central deployment registry. Each network key maps contract types to addresses.",
     "metadataKeys": "Top-level keys prefixed with '_' are metadata, not network entries. generate-addresses.ts filters these out.",
-    "contractTypes": ["FlashLoanArbitrage", "PancakeSwapFlashArbitrage", "BalancerV2FlashArbitrage", "SyncSwapFlashArbitrage", "CommitRevealArbitrage", "MultiPathQuoter"],
+    "contractTypes": [
+      "FlashLoanArbitrage",
+      "PancakeSwapFlashArbitrage",
+      "BalancerV2FlashArbitrage",
+      "SyncSwapFlashArbitrage",
+      "CommitRevealArbitrage",
+      "MultiPathQuoter"
+    ],
     "networkStructure": {
       "<ContractType>": "Contract address string (e.g., '0x...') or null if not deployed",
       "<ContractType>_deployedAt": "Unix timestamp of this specific contract's deployment",
@@ -39,15 +46,18 @@
     "verified": false
   },
   "arbitrumSepolia": {
-    "FlashLoanArbitrage": null,
+    "FlashLoanArbitrage": "0xE5b26749430ed50917b75689B654a4C5808b23FB",
     "PancakeSwapFlashArbitrage": null,
     "BalancerV2FlashArbitrage": null,
     "SyncSwapFlashArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
-    "deployedAt": null,
-    "deployedBy": null,
-    "verified": false
+    "deployedAt": 1771948633,
+    "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "verified": false,
+    "FlashLoanArbitrage_deployedAt": 1771948633,
+    "FlashLoanArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "FlashLoanArbitrage_verified": false
   },
   "baseSepolia": {
     "FlashLoanArbitrage": null,
