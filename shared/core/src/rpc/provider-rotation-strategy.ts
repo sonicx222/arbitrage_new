@@ -18,6 +18,7 @@
 
 import { createLogger } from '../logger';
 import { type ProviderHealthScorer, getProviderHealthScorer } from '../monitoring/provider-health-scorer';
+import { recordRpcCall, recordRpcError } from './rpc-metrics';
 
 const logger = createLogger('provider-rotation');
 
@@ -307,6 +308,10 @@ export class ProviderRotationStrategy {
       count
     });
 
+    // Phase 6: Record rate limit error metric
+    const provider = this.extractProviderFromUrl(url);
+    recordRpcError(provider, this.chainId, 'rate_limit');
+
     logger.warn('Rate limit detected, excluding provider', {
       url,
       chainId: this.chainId,
@@ -463,5 +468,26 @@ export class ProviderRotationStrategy {
    */
   getHealthScorer(): ProviderHealthScorer {
     return this.healthScorer;
+  }
+
+  // ===========================================================================
+  // Prometheus Metrics (Phase 6)
+  // ===========================================================================
+
+  /**
+   * Record an RPC call for the current provider.
+   * Call this from WebSocketManager or RPC callers on each request.
+   */
+  recordRpcCallMetric(): void {
+    const provider = this.getCurrentProvider();
+    recordRpcCall(provider, this.chainId);
+  }
+
+  /**
+   * Record an RPC error for the current provider.
+   */
+  recordRpcErrorMetric(errorType: string): void {
+    const provider = this.getCurrentProvider();
+    recordRpcError(provider, this.chainId, errorType);
   }
 }

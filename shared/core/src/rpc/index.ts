@@ -44,3 +44,6 @@ export type { Http2SessionPoolConfig } from './http2-session-pool';
 
 // CQ8-ALT: Provider Rotation Strategy
 export * from './provider-rotation-strategy';
+
+// Phase 6: RPC Prometheus metrics
+export { recordRpcCall, recordRpcError, getRpcMetricsText } from './rpc-metrics';
