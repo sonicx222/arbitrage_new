@@ -196,4 +196,4 @@ export {
   isDeprecatedPattern,
   getMigrationRecommendation,
   warnIfDeprecated,
-} from '../partition-router';
+} from '../partition/router';

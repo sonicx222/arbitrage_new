@@ -1700,7 +1700,7 @@ export {
   runPartitionService,
   // R10: Partition Entry Point Factory
   createPartitionEntry
-} from './partition-service-utils';
+} from './partition';
 export type {
   PartitionServiceConfig,
   HealthServerOptions,
@@ -1716,7 +1716,7 @@ export type {
   // R10: Partition Entry Point Result & Hooks
   PartitionEntryResult,
   PartitionEntryHooks
-} from './partition-service-utils';
+} from './partition';
 
 // =============================================================================
 // 12.2 Partition Router (S3.1.7 - Detector Migration)
@@ -1733,8 +1733,8 @@ export {
   PARTITION_SERVICE_NAMES,
   // P3-FIX: All service ports centralized
   SERVICE_PORTS
-} from './partition-router';
-export type { PartitionEndpoint } from './partition-router';
+} from './partition/router';
+export type { PartitionEndpoint } from './partition/router';
 
 // Publishing Service (centralized message publishing)
 /** @deprecated Unused — no external consumers. Remove in next major version. */
