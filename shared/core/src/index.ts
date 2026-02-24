@@ -258,7 +258,7 @@ export {
   ServiceState,
   createServiceState,
   isServiceState
-} from './service-state';
+} from './service-lifecycle/service-state';
 export type {
   StateTransitionResult,
   StateChangeEvent,
@@ -266,7 +266,7 @@ export type {
   ServiceStateSnapshot,
   ServiceStateLogger,
   ServiceStateManagerDeps
-} from './service-state';
+} from './service-lifecycle/service-state';
 
 // Distributed Lock Manager (ADR-007)
 export {
@@ -1667,14 +1667,14 @@ export {
   createSimpleHealthServer,
   runServiceMain,
   closeHealthServer,
-} from './service-bootstrap';
+} from './service-lifecycle/service-bootstrap';
 export type {
   ServiceShutdownConfig,
   ServiceShutdownCleanup,
   SimpleHealthServerConfig,
   HealthCheckResult,
   RunServiceMainConfig,
-} from './service-bootstrap';
+} from './service-lifecycle/service-bootstrap';
 
 // =============================================================================
 // 12.1 Partition Service Utilities (P12-P16 refactor)

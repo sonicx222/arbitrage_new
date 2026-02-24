@@ -22,7 +22,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 // =============================================================================
 // DI Types (P16 pattern - enables testability without Jest mock hoisting)

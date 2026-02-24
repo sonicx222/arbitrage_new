@@ -13,7 +13,7 @@ import {
   runServiceMain,
   closeHealthServer,
   createSimpleHealthServer,
-} from '../../src/service-bootstrap';
+} from '../../src/service-lifecycle/service-bootstrap';
 
 // Minimal mock logger
 function createMockLogger() {

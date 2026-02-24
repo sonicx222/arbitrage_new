@@ -161,7 +161,7 @@ describe('Service State Event Emission Regression Tests', () => {
   beforeEach(async () => {
     jest.resetModules();
     mockRedisClient = createMockRedisClient();
-    const module = await import('../../src/service-state');
+    const module = await import('../../src/service-lifecycle/service-state');
     ServiceStateManager = module.ServiceStateManager;
     createServiceState = module.createServiceState;
     ServiceState = module.ServiceState;
@@ -319,14 +319,14 @@ describe('Redis Subscription Memory Leak Regression Tests', () => {
 // =============================================================================
 
 describe('ServiceStateManager Stop Promise Race Regression Tests', () => {
-  let ServiceStateManagerClass: typeof import('../../src/service-state').ServiceStateManager;
-  let ServiceStateEnum: typeof import('../../src/service-state').ServiceState;
-  let createServiceStateFn: typeof import('../../src/service-state').createServiceState;
+  let ServiceStateManagerClass: typeof import('../../src/service-lifecycle/service-state').ServiceStateManager;
+  let ServiceStateEnum: typeof import('../../src/service-lifecycle/service-state').ServiceState;
+  let createServiceStateFn: typeof import('../../src/service-lifecycle/service-state').createServiceState;
 
   beforeEach(async () => {
     jest.resetModules();
     mockRedisClient = createMockRedisClient();
-    const module = await import('../../src/service-state');
+    const module = await import('../../src/service-lifecycle/service-state');
     ServiceStateManagerClass = module.ServiceStateManager;
     ServiceStateEnum = module.ServiceState;
     createServiceStateFn = module.createServiceState;
@@ -520,13 +520,13 @@ describe('Lifecycle Utils Cleanup Regression Tests', () => {
 // =============================================================================
 
 describe('ServiceStateManager Full Lifecycle Regression Tests', () => {
-  let createServiceStateFn2: typeof import('../../src/service-state').createServiceState;
-  let ServiceStateEnum2: typeof import('../../src/service-state').ServiceState;
+  let createServiceStateFn2: typeof import('../../src/service-lifecycle/service-state').createServiceState;
+  let ServiceStateEnum2: typeof import('../../src/service-lifecycle/service-state').ServiceState;
 
   beforeEach(async () => {
     jest.resetModules();
     mockRedisClient = createMockRedisClient();
-    const module = await import('../../src/service-state');
+    const module = await import('../../src/service-lifecycle/service-state');
     createServiceStateFn2 = module.createServiceState;
     ServiceStateEnum2 = module.ServiceState;
   });
