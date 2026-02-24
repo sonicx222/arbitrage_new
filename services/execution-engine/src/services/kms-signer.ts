@@ -91,6 +91,22 @@ export interface KmsSignerConfig {
   maxSignQueueSize?: number;
 }
 
+/**
+ * Minimal runtime shape of @aws-sdk/client-kms used by this module.
+ * Keep this local so TypeScript doesn't require the optional dependency
+ * to be installed for non-KMS builds.
+ */
+type AwsKmsSdkModule = {
+  KMSClient: new (config: { region: string }) => { send: (command: unknown) => Promise<unknown> };
+  GetPublicKeyCommand: new (input: { KeyId: string }) => unknown;
+  SignCommand: new (input: {
+    KeyId: string;
+    Message: Uint8Array;
+    MessageType: 'DIGEST';
+    SigningAlgorithm: 'ECDSA_SHA_256';
+  }) => unknown;
+};
+
 // =============================================================================
 // DER Signature Parsing
 // =============================================================================
@@ -648,8 +664,8 @@ export class KmsSigner extends ethers.AbstractSigner {
 export class AwsKmsClient implements KmsClient {
   private readonly region: string;
   private _client: unknown = null;
-  /** Fix #33: Cache the KMS module reference to avoid repeated dynamic import overhead */
-  private _kmsModule: Awaited<typeof import('@aws-sdk/client-kms')> | null = null;
+  /** Fix #33: Cache the KMS module reference to avoid repeated module load overhead */
+  private _kmsModule: AwsKmsSdkModule | null = null;
 
   constructor(region?: string) {
     this.region = region ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -657,11 +673,11 @@ export class AwsKmsClient implements KmsClient {
 
   /**
    * Fix #33: Load and cache the KMS module alongside the client.
-   * Previously, getPublicKey() and sign() each called `await import(...)` separately.
+   * Previously, getPublicKey() and sign() each loaded the module separately.
    */
   private async getClientAndModule(): Promise<{
     client: { send: (command: unknown) => Promise<unknown> };
-    kmsModule: Awaited<typeof import('@aws-sdk/client-kms')>;
+    kmsModule: AwsKmsSdkModule;
   }> {
     if (this._client && this._kmsModule) {
       return {
@@ -671,8 +687,8 @@ export class AwsKmsClient implements KmsClient {
     }
 
     try {
-      // Dynamic import to avoid hard dependency — cached after first load
-      const kmsModule = await import('@aws-sdk/client-kms');
+      // Lazy require keeps AWS SDK optional for builds that don't use KMS signing.
+      const kmsModule = require('@aws-sdk/client-kms') as AwsKmsSdkModule;
       this._kmsModule = kmsModule;
       this._client = new kmsModule.KMSClient({ region: this.region });
       return {

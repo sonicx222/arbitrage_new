@@ -6,8 +6,9 @@
  * Catches configuration errors early, before services are started.
  *
  * FIX M3: Extracted from services-config.js God Module.
- * FIX M5: Validation is no longer triggered at module load — callers use
- *         validateAllServices() explicitly in startup scripts.
+ * FIX M5: This module has no import-time side effects. The orchestrator
+ *         decides when to call validateAllServices() (services-config.js can
+ *         run it on import unless SKIP_SERVICE_VALIDATION=true).
  *
  * @see scripts/lib/validators.js (reusable validation primitives)
  */
