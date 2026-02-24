@@ -11,6 +11,7 @@
  * - ProfessionalQualityMonitor: AD-PQS scoring system
  * - PriceOracle: Centralized price source with fallbacks
  * - PairActivityTracker: Volatility-based pair prioritization
+ * - CexDexSpreadCalculator: CEX vs DEX spread detection
  *
  * @module analytics
  */
@@ -159,3 +160,40 @@ export type {
   OrderflowPipelineConsumerConfig,
   OrderflowPipelineConsumerDeps
 } from './orderflow-pipeline-consumer';
+
+// Pair Correlation Tracker (Statistical Arbitrage)
+export {
+  PairCorrelationTracker
+} from './pair-correlation-tracker';
+export type {
+  CorrelationConfig
+} from './pair-correlation-tracker';
+
+// Spread Tracker with Bollinger Bands (Statistical Arbitrage)
+export {
+  SpreadTracker
+} from './spread-tracker';
+export type {
+  SpreadSignal,
+  SpreadConfig,
+  BollingerBands
+} from './spread-tracker';
+
+// Regime Detector - Hurst Exponent (Statistical Arbitrage)
+export {
+  RegimeDetector
+} from './regime-detector';
+export type {
+  Regime,
+  RegimeConfig
+} from './regime-detector';
+
+// CEX-DEX Spread Calculator (CEX Price Signals)
+export {
+  CexDexSpreadCalculator
+} from './cex-dex-spread';
+export type {
+  SpreadAlert,
+  CexDexSpreadConfig,
+  SpreadHistoryPoint
+} from './cex-dex-spread';

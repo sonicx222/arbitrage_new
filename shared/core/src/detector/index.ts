@@ -107,3 +107,29 @@ export type {
   DecodedSwapEvent,
   RawEventLog,
 } from './event-processor';
+
+// =============================================================================
+// Statistical Arbitrage Detector (Phase 3 #31)
+// =============================================================================
+
+export {
+  StatisticalArbitrageDetector,
+} from './statistical-arbitrage-detector';
+
+export type {
+  StatArbPairConfig,
+  StatArbDetectorConfig,
+} from './statistical-arbitrage-detector';
+
+// =============================================================================
+// CoW Protocol Backrun Detector (Phase 4 #28)
+// =============================================================================
+
+export {
+  CowBackrunDetector,
+} from './cow-backrun-detector';
+
+export type {
+  CowBackrunConfig,
+  PriceImpactEstimate,
+} from './cow-backrun-detector';

@@ -84,6 +84,10 @@ export {
 } from './flash-loan-fee-calculator';
 export type { FlashLoanFeeCalculatorConfig } from './flash-loan-fee-calculator';
 
+// Statistical Arbitrage Strategy (Phase 3 #31)
+export { StatisticalArbitrageStrategy } from './statistical-arbitrage.strategy';
+export type { StatisticalArbitrageConfig } from './statistical-arbitrage.strategy';
+
 // Flash Loan Provider Abstraction (Fix 1.1)
 export {
   FlashLoanProviderFactory,
