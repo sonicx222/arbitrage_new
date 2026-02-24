@@ -22,15 +22,19 @@ import {
   FALLBACK_GAS_SCALING_PER_STEP,
   GAS_FALLBACK_SAFETY_FACTOR
 } from './caching/gas-price-cache';
-import type { DexPool, TriangularStep, DynamicSlippageConfig } from './cross-dex-triangular-arbitrage';
+import type { DexPool, TriangularStep } from './cross-dex-triangular-arbitrage';
+import {
+  PRECISION_MULTIPLIER,
+  BASIS_POINTS_DIVISOR,
+  ONE_ETH_WEI,
+  calculateAmmAmountOut,
+  calculateDynamicSlippage as calculateDynamicSlippageUtil,
+  DEFAULT_SLIPPAGE_CONFIG,
+} from './utils/amm-math';
+import type { DynamicSlippageConfig } from './utils/amm-math';
 
 const logger = createLogger('multi-leg-path-finder');
 let hasLoggedWorkerFallback = false;
-
-// BigInt constants for precise calculations
-const PRECISION_MULTIPLIER = 10n ** 18n;
-const BASIS_POINTS_DIVISOR = 10000n;
-const ONE_ETH_WEI = 10n ** 18n;
 
 // =============================================================================
 // Types
@@ -146,14 +150,6 @@ const DEFAULT_CONFIG: MultiLegPathConfig = {
     zksync: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ZKSYNC ?? '2000', 10),
     linea: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_LINEA ?? '2000', 10),
   }
-};
-
-const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
-  baseSlippage: 0.003,
-  priceImpactScale: 5.0,
-  maxSlippage: 0.10,
-  minLiquidityUsd: 100000,
-  liquidityPenaltyScale: 2.0
 };
 
 // =============================================================================
@@ -588,17 +584,9 @@ export class MultiLegPathFinder {
       const reserveOutBigInt = BigInt(reserveOutStr);
       const feeBigInt = BigInt(pool.fee);
 
-      // Apply fee
-      const feeMultiplierNumerator = BASIS_POINTS_DIVISOR - feeBigInt;
-      const amountInWithFee = (amountInBigInt * feeMultiplierNumerator) / BASIS_POINTS_DIVISOR;
-
-      // AMM formula
-      const numerator = amountInWithFee * reserveOutBigInt;
-      const denominator = reserveInBigInt + amountInWithFee;
-
-      if (denominator === 0n) return null;
-
-      const amountOutBigInt = numerator / denominator;
+      // AMM constant-product formula (shared)
+      const amountOutBigInt = calculateAmmAmountOut(amountInBigInt, reserveInBigInt, reserveOutBigInt, feeBigInt);
+      if (amountOutBigInt === null) return null;
 
       // Calculate dynamic slippage
       const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6;
@@ -631,22 +619,7 @@ export class MultiLegPathFinder {
     reserveIn: number,
     liquidityUsd: number
   ): number {
-    const config = this.slippageConfig;
-
-    let slippage = config.baseSlippage;
-
-    if (reserveIn > 0) {
-      const priceImpact = tradeSize / (reserveIn + tradeSize);
-      slippage += priceImpact * config.priceImpactScale;
-    }
-
-    if (liquidityUsd > 0 && liquidityUsd < config.minLiquidityUsd) {
-      const liquidityRatio = liquidityUsd / config.minLiquidityUsd;
-      const liquidityPenalty = (1 - liquidityRatio) * config.liquidityPenaltyScale * 0.01;
-      slippage += liquidityPenalty;
-    }
-
-    return Math.min(slippage, config.maxSlippage);
+    return calculateDynamicSlippageUtil(tradeSize, reserveIn, liquidityUsd, this.slippageConfig);
   }
 
   /**

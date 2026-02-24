@@ -12,13 +12,17 @@ import {
   GAS_FALLBACK_SAFETY_FACTOR
 } from './caching/gas-price-cache';
 import { getNativeTokenPrice } from '@arbitrage/config';
+import {
+  PRECISION_MULTIPLIER,
+  BASIS_POINTS_DIVISOR,
+  ONE_ETH_WEI,
+  calculateAmmAmountOut,
+  calculateDynamicSlippage as calculateDynamicSlippageUtil,
+  DEFAULT_SLIPPAGE_CONFIG,
+} from './utils/amm-math';
+import type { DynamicSlippageConfig } from './utils/amm-math';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
-
-// P0-FIX: Constants for BigInt calculations
-const PRECISION_MULTIPLIER = 10n ** 18n; // 18 decimal places for wei precision
-const BASIS_POINTS_DIVISOR = 10000n;
-const ONE_ETH_WEI = 10n ** 18n; // 1 ETH in wei
 
 export interface DexPool {
   dex: string;
@@ -84,40 +88,8 @@ export interface QuadrilateralOpportunity {
   executionTime: number;
 }
 
-/**
- * T1.2: Dynamic slippage configuration for liquidity-aware calculations.
- * Instead of using a static maxSlippage, we calculate slippage dynamically
- * based on trade size relative to pool reserves.
- */
-export interface DynamicSlippageConfig {
-  /** Base slippage floor (minimum slippage regardless of liquidity) */
-  baseSlippage: number;
-  /** Scale factor for price impact contribution */
-  priceImpactScale: number;
-  /** Maximum allowed slippage (hard cap) */
-  maxSlippage: number;
-  /** Minimum liquidity (USD) for confident trades */
-  minLiquidityUsd: number;
-  /** Liquidity penalty scale (higher = more penalty for low liquidity) */
-  liquidityPenaltyScale: number;
-}
-
-/**
- * Default slippage configuration.
- * Can be overridden via environment variables for different deployment environments.
- *
- * Environment variables:
- * - SLIPPAGE_BASE: Base slippage floor (default: 0.003 = 0.3%)
- * - SLIPPAGE_MAX: Maximum slippage cap (default: 0.10 = 10%)
- * - SLIPPAGE_MIN_LIQUIDITY_USD: Minimum liquidity for full confidence (default: 100000)
- */
-const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
-  baseSlippage: parseFloat(process.env.SLIPPAGE_BASE || '0.003'),
-  priceImpactScale: 5.0,    // Price impact multiplied by this factor
-  maxSlippage: parseFloat(process.env.SLIPPAGE_MAX || '0.10'),
-  minLiquidityUsd: parseInt(process.env.SLIPPAGE_MIN_LIQUIDITY_USD || '100000', 10),
-  liquidityPenaltyScale: 2.0 // Penalty factor for low liquidity
-};
+// Re-export DynamicSlippageConfig for backward compatibility (now defined in utils/amm-math)
+export type { DynamicSlippageConfig } from './utils/amm-math';
 
 /**
  * Environment variable configuration:
@@ -169,26 +141,7 @@ export class CrossDexTriangularArbitrage {
     reserveIn: number,
     liquidityUsd: number = 0
   ): number {
-    const config = this.slippageConfig;
-
-    // Base slippage floor
-    let slippage = config.baseSlippage;
-
-    // Price impact contribution (standard AMM formula)
-    if (reserveIn > 0) {
-      const priceImpact = tradeSize / (reserveIn + tradeSize);
-      slippage += priceImpact * config.priceImpactScale;
-    }
-
-    // Liquidity penalty for low-liquidity pools
-    if (liquidityUsd > 0 && liquidityUsd < config.minLiquidityUsd) {
-      const liquidityRatio = liquidityUsd / config.minLiquidityUsd;
-      const liquidityPenalty = (1 - liquidityRatio) * config.liquidityPenaltyScale * 0.01;
-      slippage += liquidityPenalty;
-    }
-
-    // Cap at maximum slippage
-    return Math.min(slippage, config.maxSlippage);
+    return calculateDynamicSlippageUtil(tradeSize, reserveIn, liquidityUsd, this.slippageConfig);
   }
 
   // Find triangular arbitrage opportunities across DEXes
@@ -806,19 +759,10 @@ export class CrossDexTriangularArbitrage {
     const reserveOutBigInt = BigInt(reserveOutStr);
     const feeBigInt = BigInt(pool.fee);
 
-    // P0-FIX: Apply fee using BigInt arithmetic
-    // feeMultiplier = (10000 - fee) / 10000
-    const feeMultiplierNumerator = BASIS_POINTS_DIVISOR - feeBigInt;
-
-    // amountInWithFee = amountIn * (10000 - fee) / 10000
-    const amountInWithFee = (amountInBigInt * feeMultiplierNumerator) / BASIS_POINTS_DIVISOR;
-
-    // P0-FIX: Constant product formula with BigInt
-    // amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee)
-    const numerator = amountInWithFee * reserveOutBigInt;
-    const denominator = reserveInBigInt + amountInWithFee;
-    if (denominator === 0n) throw new Error('Zero denominator: pool has zero reserves');
-    const amountOutBigInt = numerator / denominator;
+    // P0-FIX: Constant product formula with BigInt (shared AMM math)
+    const amountOutResult = calculateAmmAmountOut(amountInBigInt, reserveInBigInt, reserveOutBigInt, feeBigInt);
+    if (amountOutResult === null) throw new Error('Zero denominator: pool has zero reserves');
+    const amountOutBigInt = amountOutResult;
 
     // T1.2: Calculate dynamic slippage based on trade size and pool liquidity
     // Convert BigInt to number for ratio calculation (safe as it's scaled down)
