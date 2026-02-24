@@ -8,7 +8,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { ValidationMiddleware } from '@arbitrage/core';
+import type { RequestHandler } from 'express';
+import { validateHealthRequest } from '@arbitrage/security';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -31,7 +32,8 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/health',
-    ValidationMiddleware.validateHealthCheck,
+    // Cast needed: security package has its own @types/express installation
+    validateHealthRequest as unknown as RequestHandler,
     (req: Request, res: Response) => {
       const systemHealth = state.getSystemMetrics().systemHealth;
       // FIX #24: Use 'healthy'/'degraded' to match other services.

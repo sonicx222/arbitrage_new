@@ -1908,13 +1908,8 @@ export {
 } from './utils/performance-utils';
 
 // =============================================================================
-// 14.3 Validation Middleware
+// 14.3 Validation Middleware (removed — use @arbitrage/security)
 // =============================================================================
-
-export {
-  ValidationMiddleware,
-  ValidationSchemas
-} from './validation';
 
 // =============================================================================
 // 14.4 Simulation Mode (Local Testing)

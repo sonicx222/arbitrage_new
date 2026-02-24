@@ -88,11 +88,6 @@ jest.mock('@arbitrage/core', () => ({
       EXECUTION_REQUESTS: 'stream:execution-requests'
     }
   },
-  ValidationMiddleware: {
-    validateRequest: jest.fn(() => (req: any, res: any, next: any) => next()),
-    validateHealthCheck: jest.fn((req: any, res: any, next: any) => next()),
-    validateOpportunity: jest.fn((req: any, res: any, next: any) => next())
-  },
   createServiceState: jest.fn(() => {
     // Use object to allow mutation in closures
     const state = { running: false };
