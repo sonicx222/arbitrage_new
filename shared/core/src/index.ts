@@ -1564,6 +1564,9 @@ export {
   getRateLimitConfig,
   isRateLimitExempt,
   DEFAULT_RATE_LIMITS,
+  Http2SessionPool,
+  getHttp2SessionPool,
+  closeDefaultHttp2Pool,
 } from './rpc';
 export type {
   BatchProviderConfig,
@@ -1572,6 +1575,7 @@ export type {
   JsonRpcResponse,
   RateLimiterConfig,
   RateLimiterStats,
+  Http2SessionPoolConfig,
 } from './rpc';
 
 // =============================================================================

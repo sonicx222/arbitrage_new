@@ -39,7 +39,7 @@ export type {
 } from './rate-limiter';
 
 // P3 Enhancement: HTTP/2 session pool
-export { Http2SessionPool } from './http2-session-pool';
+export { Http2SessionPool, getHttp2SessionPool, closeDefaultHttp2Pool } from './http2-session-pool';
 export type { Http2SessionPoolConfig } from './http2-session-pool';
 
 // CQ8-ALT: Provider Rotation Strategy
