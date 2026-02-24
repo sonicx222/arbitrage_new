@@ -108,6 +108,13 @@ import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import { FastLaneConsumer } from './consumers/fast-lane.consumer';
 import type { ISimulationService } from './services/simulation/types';
 import {
+  recordExecutionAttempt,
+  recordExecutionSuccess,
+  recordOpportunityDetected,
+  updateGasPrice,
+  recordVolume,
+} from './services/prometheus-metrics';
+import {
   createSimulationMetricsCollector,
   SimulationMetricsCollector,
   SimulationMetricsSnapshot,
@@ -1732,6 +1739,7 @@ export class ExecutionEngineService {
     try {
       this.opportunityConsumer?.markActive(opportunity.id);
       this.stats.executionAttempts++;
+      recordExecutionAttempt(chain, opportunity.type ?? 'unknown');
 
       this.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
@@ -1900,6 +1908,11 @@ export class ExecutionEngineService {
 
       if (result.success) {
         this.stats.successfulExecutions++;
+        recordExecutionSuccess(chain, opportunity.type ?? 'unknown');
+        // Record volume for successful trades
+        if (result.actualProfit !== undefined && result.actualProfit > 0) {
+          recordVolume(chain, result.actualProfit);
+        }
         // Task 1.1: Record success on chain-specific circuit breaker
         this.cbManager?.recordSuccess(chain);
       } else {

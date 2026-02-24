@@ -46,6 +46,7 @@ import type {
 } from '../types';
 import { DEFAULT_CONSUMER_CONFIG, DLQ_STREAM } from '../types';
 import { createCancellableTimeout } from '../services/simulation/types';
+import { recordOpportunityDetected } from '../services/prometheus-metrics';
 
 // REFACTOR 9.1: Import validation types and functions from extracted module
 import {
@@ -632,6 +633,10 @@ export class OpportunityConsumer {
    */
   private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): HandleResult {
     this.stats.opportunitiesReceived++;
+    recordOpportunityDetected(
+      opportunity.buyChain ?? 'unknown',
+      opportunity.type ?? 'unknown',
+    );
 
     try {
       // Validate business rules

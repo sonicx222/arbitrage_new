@@ -30,6 +30,7 @@ import type { CrossRegionHealthConfig } from '@arbitrage/core';
 import {
   createCircuitBreakerApiHandler,
 } from './api';
+import { getMetricsText } from './services/prometheus-metrics';
 
 const logger = createLogger('execution-engine');
 
@@ -213,6 +214,11 @@ function createHealthServer(engine: ExecutionEngineService): Server {
       return true;
     },
     additionalRoutes: {
+      '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {
+        const text = await getMetricsText();
+        res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+        res.end(text);
+      },
       '/stats': async (_req: IncomingMessage, res: ServerResponse) => {
         const stats = engine.getStats();
         // W2-18 FIX: Include consumer lag metric from XPENDING

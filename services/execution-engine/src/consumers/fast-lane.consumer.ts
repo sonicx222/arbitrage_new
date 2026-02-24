@@ -35,6 +35,7 @@ import {
   validateMessageStructure,
   validateBusinessRules as validateBusinessRulesFunc,
 } from './validation';
+import { recordOpportunityDetected } from '../services/prometheus-metrics';
 
 // =============================================================================
 // Configuration
@@ -219,6 +220,10 @@ export class FastLaneConsumer {
 
     this.fastLaneStats.enqueued++;
     this.stats.opportunitiesReceived++;
+    recordOpportunityDetected(
+      opportunity.buyChain ?? 'unknown',
+      opportunity.type ?? 'unknown',
+    );
 
     this.logger.info('Fast lane opportunity enqueued', {
       id: opportunity.id,

@@ -14,6 +14,7 @@
   "dependencies": {
     "@arbitrage/config": "*",
     "@arbitrage/core": "*",
+    "@arbitrage/metrics": "*",
     "@arbitrage/types": "*",
     "@solana/web3.js": "1.98.4",
     "ethers": "^6.16.0",

@@ -18,6 +18,7 @@ import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getGasSpikeMultiplier } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { Logger, GasBaselineEntry } from '../types';
+import { updateGasPrice as updateGasPriceMetric } from './prometheus-metrics';
 
 // =============================================================================
 // Module Logger
@@ -576,6 +577,12 @@ export class GasPriceOptimizer {
     // Update pre-computed last gas price for O(1) hot path access
     if (lastGasPrices) {
       lastGasPrices.set(chain, price);
+    }
+
+    // Update Prometheus gas price gauge (convert wei to gwei)
+    if (price > 0n) {
+      const priceGwei = Number(price / 1_000_000_000n);
+      updateGasPriceMetric(chain, priceGwei);
     }
 
     // Record sample for linear regression prediction
