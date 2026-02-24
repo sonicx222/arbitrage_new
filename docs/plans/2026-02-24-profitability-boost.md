@@ -30,7 +30,7 @@ The reality check identified 5 root causes of zero profitability:
 | 2 | ~~Deploy to Arbitrum Sepolia testnet~~ | ~~Validate end-to-end with real blockchain~~ **COMPLETED** (0xE5b26749430ed50917b75689B654a4C5808b23FB) |
 | 3 | ~~Build UniswapV3Adapter~~ | ~~Unlock majority of DEX liquidity~~ **COMPLETED** (9846af47, d6fc4993) |
 | 4 | ~~Fill L2 DEX coverage gaps~~ | ~~Maximize arbitrage surface area~~ **COMPLETED** (836a8b29) |
-| 5 | Deploy Balancer V2 (0% fee) | Eliminate flash loan costs |
+| 5 | ~~Deploy Balancer V2 (0% fee)~~ | ~~Eliminate flash loan costs~~ **COMPLETED** (provider priority + testnet prep) |
 | 6 | Wire real monitoring | See what's happening in production |
 | 7 | Mainnet deployment | Go live on Arbitrum, then Base, then Optimism |
 
@@ -743,9 +743,13 @@ git commit -m "feat(config): expand zkSync DEX coverage from 2 to 5 DEXs"
 
 ---
 
-## Phase 5: Deploy Balancer V2 Flash Loans (0% Fee)
+## Phase 5: Deploy Balancer V2 Flash Loans (0% Fee) -- COMPLETED
 
 **Rationale:** Currently using Aave V3 flash loans at 0.09% fee on all L2s. Balancer V2 offers 0% fee flash loans. On a $50k flash loan, this saves $45 per trade. The Balancer V2 vault is already deployed on Arbitrum, Optimism, and Base. The `BalancerV2FlashArbitrage.sol` contract already exists in the codebase.
+
+> **Status:** Software changes complete. Deploy script exists (`deploy-balancer.ts`). Added `arbitrumSepolia` to `BALANCER_V2_VAULTS`. Engine auto-detects `BALANCER_V2_CONTRACT_<CHAIN>` env vars and prefers 0% Balancer V2 over 0.09% Aave V3. Provider factory supports `providerOverrides`. Fee calculator receives 0% fee overrides for Balancer V2 chains.
+>
+> **Manual step:** Deploy BalancerV2FlashArbitrage to testnet: `cd contracts && npx hardhat run scripts/deploy-balancer.ts --network arbitrumSepolia`. Note: Balancer V2 Vault may not be deployed on Arbitrum Sepolia — if constructor reverts with `InvalidProtocolAddress`, skip testnet and deploy directly on mainnet in Phase 7.
 
 ### Task 5.1: Deploy BalancerV2FlashArbitrage to Testnet
 

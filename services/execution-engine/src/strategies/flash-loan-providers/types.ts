@@ -208,4 +208,10 @@ export interface FlashLoanProviderConfig {
   approvedRouters: Record<string, string[]>;
   /** Custom fee overrides per chain (basis points) */
   feeOverrides?: Record<string, number>;
+  /**
+   * Protocol overrides per chain (takes precedence over FLASH_LOAN_PROVIDERS).
+   * Used to prefer cheaper protocols (e.g., Balancer V2 at 0% over Aave V3 at 0.09%)
+   * when the corresponding contract is deployed.
+   */
+  providerOverrides?: Record<string, { address: string; protocol: string; fee: number }>;
 }

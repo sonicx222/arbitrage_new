@@ -55,7 +55,7 @@ import {
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
-import { RISK_CONFIG, FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, R2_CONFIG } from '@arbitrage/config';
+import { RISK_CONFIG, FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, R2_CONFIG, BALANCER_V2_VAULTS } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
 import {
   initializeMevProviders,
@@ -976,13 +976,38 @@ export class ExecutionEngineService {
     // Approved routers sourced from FLASH_LOAN_PROVIDERS.approvedRouters or DEXES config
     const contractAddresses: Record<string, string> = {};
     const approvedRouters: Record<string, string[]> = {};
+    // Phase 5: Provider overrides for cheaper flash loan protocols (Balancer V2 at 0% > Aave V3 at 0.09%)
+    const providerOverrides: Record<string, { address: string; protocol: string; fee: number }> = {};
 
     for (const chain of Object.keys(FLASH_LOAN_PROVIDERS)) {
-      const envKey = `FLASH_LOAN_CONTRACT_${chain.toUpperCase()}`;
-      const address = process.env[envKey];
-      if (address) {
-        contractAddresses[chain] = address;
+      // Phase 5: Prefer Balancer V2 (0% fee) over default provider when deployed
+      const balancerEnvKey = `BALANCER_V2_CONTRACT_${chain.toUpperCase()}`;
+      const balancerAddress = process.env[balancerEnvKey];
+      const vaultAddress = BALANCER_V2_VAULTS[chain as keyof typeof BALANCER_V2_VAULTS];
 
+      if (balancerAddress && vaultAddress) {
+        contractAddresses[chain] = balancerAddress;
+        providerOverrides[chain] = {
+          address: vaultAddress,
+          protocol: 'balancer_v2',
+          fee: 0,
+        };
+        this.logger.info('Preferring Balancer V2 (0% fee) over default provider', {
+          chain,
+          defaultProtocol: FLASH_LOAN_PROVIDERS[chain].protocol,
+          defaultFee: FLASH_LOAN_PROVIDERS[chain].fee,
+          contract: balancerAddress,
+        });
+      } else {
+        // Fall back to generic flash loan contract
+        const envKey = `FLASH_LOAN_CONTRACT_${chain.toUpperCase()}`;
+        const address = process.env[envKey];
+        if (address) {
+          contractAddresses[chain] = address;
+        }
+      }
+
+      if (contractAddresses[chain]) {
         // Source approved routers: prefer explicit config, fallback to DEXES router addresses
         const providerConfig = FLASH_LOAN_PROVIDERS[chain];
         if (providerConfig.approvedRouters && providerConfig.approvedRouters.length > 0) {
@@ -1001,15 +1026,23 @@ export class ExecutionEngineService {
 
     if (Object.keys(contractAddresses).length > 0) {
       try {
+        // Build fee overrides from provider overrides (e.g., Balancer V2 at 0%)
+        const feeOverrides: Record<string, number> = {};
+        for (const [chain, override] of Object.entries(providerOverrides)) {
+          feeOverrides[chain] = override.fee;
+        }
+
         flashLoanStrategy = new FlashLoanStrategy(this.logger, {
           contractAddresses,
           approvedRouters,
+          feeOverrides: Object.keys(feeOverrides).length > 0 ? feeOverrides : undefined,
           enableAggregator: FEATURE_FLAGS.useFlashLoanAggregator,
         });
 
         flashLoanProviderFactory = createFlashLoanProviderFactory(this.logger, {
           contractAddresses,
           approvedRouters,
+          providerOverrides: Object.keys(providerOverrides).length > 0 ? providerOverrides : undefined,
         });
 
         this.logger.info('FlashLoanStrategy initialized', {

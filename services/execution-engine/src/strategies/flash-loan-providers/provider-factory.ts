@@ -123,8 +123,8 @@ export class FlashLoanProviderFactory {
       return cached;
     }
 
-    // Get flash loan config for chain
-    const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
+    // Get flash loan config for chain (providerOverrides take precedence)
+    const flashLoanConfig = this.config.providerOverrides?.[chain] ?? FLASH_LOAN_PROVIDERS[chain];
     if (!flashLoanConfig) {
       this.logger.debug('No flash loan provider configured for chain', { chain });
       return undefined;

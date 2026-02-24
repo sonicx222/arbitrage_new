@@ -169,6 +169,8 @@ export const BALANCER_V2_VAULTS: Readonly<Record<string, string>> = {
   optimism: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
   base: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
   fantom: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', // Beethoven X
+  // Testnets — same CREATE2 address where Balancer has deployed
+  arbitrumSepolia: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
 } as const;
 
 /**
