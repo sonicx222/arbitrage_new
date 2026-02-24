@@ -11,8 +11,8 @@
 
 import http from 'http';
 import { EventEmitter } from 'events';
-import { createPartitionHealthServer } from '../../src/partition-service-utils';
-import type { PartitionServiceConfig, PartitionDetectorInterface } from '../../src/partition-service-utils';
+import { createPartitionHealthServer } from '../../src/partition';
+import type { PartitionServiceConfig, PartitionDetectorInterface } from '../../src/partition';
 
 // =============================================================================
 // Helpers

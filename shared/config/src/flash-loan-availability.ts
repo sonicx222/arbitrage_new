@@ -49,6 +49,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: true, // DAI DssFlash: 0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853 (0.01% fee)
+    morpho: true, // Morpho Blue: 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb (zero-fee, EIP-3156)
   },
 
   polygon: {
@@ -58,6 +59,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   arbitrum: {
@@ -67,6 +69,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   base: {
@@ -76,6 +79,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: true, // Morpho Blue: 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb (zero-fee, EIP-3156)
   },
 
   optimism: {
@@ -85,6 +89,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   bsc: {
@@ -94,6 +99,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   avalanche: {
@@ -103,6 +109,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   fantom: {
@@ -112,6 +119,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false, // SpookySwap exists on Fantom but flash loans not implemented
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   zksync: {
@@ -121,6 +129,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: true, // SyncSwap Vault: 0x621425a1Ef6abE91058E9712575dcc4258F8d091
     dai_flash_mint: false,
+    morpho: false,
   },
 
   linea: {
@@ -130,6 +139,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false, // SyncSwap planned but not yet deployed
     dai_flash_mint: false,
+    morpho: false,
   },
 
   // =========================================================================
@@ -143,6 +153,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   scroll: {
@@ -152,6 +163,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: true, // SyncSwap deployed on Scroll
     dai_flash_mint: false,
+    morpho: false,
   },
 
   mantle: {
@@ -161,6 +173,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   mode: {
@@ -170,6 +183,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   // =========================================================================
@@ -183,6 +197,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false, // SpookySwap is EVM-only
     syncswap: false, // SyncSwap is EVM-only
     dai_flash_mint: false,
+    morpho: false,
     // Note: Solana has native flash loan protocols (Solend, Port, Mango)
     // but they use different interfaces and are not covered by these contracts
   },
@@ -198,6 +213,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   'arbitrum-sepolia': {
@@ -207,6 +223,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 
   'zksync-sepolia': {
@@ -216,6 +233,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: true, // SyncSwap Vault: 0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8 (Staging)
     dai_flash_mint: false,
+    morpho: false,
   },
 
   'solana-devnet': {
@@ -225,6 +243,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
+    morpho: false,
   },
 } as const;
 
@@ -333,6 +352,7 @@ export function validateFlashLoanSupport(
  */
 export function getPreferredProtocol(chain: string): FlashLoanProtocol | null {
   const preferences: FlashLoanProtocol[] = [
+    'morpho', // 0% fee - zero-fee flash loans (Ethereum + Base)
     'balancer_v2', // 0% fee - always best if available
     'dai_flash_mint', // 0.01% fee - Ethereum-only, DAI-only
     'aave_v3', // 0.09% fee - second best
@@ -380,7 +400,7 @@ export const FLASH_LOAN_STATS = (() => {
   const testnetChains = allChains.filter(c => TESTNET_CHAINS.has(c));
 
   // Count how many chains support each protocol
-  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'spookyswap', 'syncswap', 'dai_flash_mint'];
+  const protocols: FlashLoanProtocol[] = ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'spookyswap', 'syncswap', 'dai_flash_mint', 'morpho'];
   const protocolCoverage = {} as Record<FlashLoanProtocol, number>;
   for (const protocol of protocols) {
     protocolCoverage[protocol] = allChains.filter(

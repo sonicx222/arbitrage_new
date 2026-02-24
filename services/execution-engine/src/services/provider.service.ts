@@ -16,9 +16,8 @@
  */
 
 import { ethers } from 'ethers';
-import * as http2 from 'http2';
 import { CHAINS, FEATURE_FLAGS } from '@arbitrage/config';
-import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider, clearIntervalSafe } from '@arbitrage/core';
+import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider, clearIntervalSafe, getHttp2SessionPool, closeDefaultHttp2Pool } from '@arbitrage/core';
 import type { ServiceStateManager, BatchProviderConfig } from '@arbitrage/core';
 import type { Logger, ProviderHealth, ProviderService as IProviderService, ExecutionStats } from '../types';
 import {
@@ -31,167 +30,32 @@ import { derivePerChainWallets } from './hd-wallet-manager';
 import { createKmsSigner, type KmsSigner } from './kms-signer';
 
 // =============================================================================
-// HTTP/2 Session Pool for RPC Providers
+// HTTP/2 Provider Factory
 // =============================================================================
 
 /**
- * Pool of HTTP/2 client sessions, keyed by origin (e.g., "https://eth-mainnet.alchemyapi.io").
- * Sessions are reused across multiple requests for connection multiplexing.
- * Falls back to HTTP/1.1 if HTTP/2 connection fails.
- */
-const http2Sessions = new Map<string, http2.ClientHttp2Session>();
-
-/**
- * Get or create an HTTP/2 session for a given origin.
- */
-function getHttp2Session(origin: string): http2.ClientHttp2Session | null {
-  let session = http2Sessions.get(origin);
-  if (session && !session.closed && !session.destroyed) {
-    return session;
-  }
-
-  try {
-    session = http2.connect(origin);
-
-    // Fix #8: Log HTTP/2 session errors instead of silently swallowing.
-    // Module-level code has no structured logger, so use console.debug.
-    session.on('error', (err) => {
-      // eslint-disable-next-line no-console
-      console.debug(`[provider.service] HTTP/2 session error for ${origin}, falling back to HTTP/1.1: ${err?.message ?? String(err)}`);
-      http2Sessions.delete(origin);
-    });
-
-    session.on('close', () => {
-      http2Sessions.delete(origin);
-    });
-
-    http2Sessions.set(origin, session);
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Create a custom FetchRequest getUrlFunc that uses HTTP/2 for HTTPS endpoints.
- * Falls back to the default HTTP/1.1 transport for non-HTTPS or on error.
- *
- * @param defaultGetUrl - The default ethers.js getUrlFunc for fallback
- * @returns Custom getUrlFunc with HTTP/2 support
- */
-function createHttp2GetUrlFunc(
-  defaultGetUrl: ethers.FetchGetUrlFunc
-): ethers.FetchGetUrlFunc {
-  return async (req, signal) => {
-    const url = new URL(req.url);
-
-    // Only use HTTP/2 for HTTPS endpoints
-    if (url.protocol !== 'https:') {
-      return defaultGetUrl(req, signal);
-    }
-
-    const origin = url.origin;
-    const session = getHttp2Session(origin);
-
-    // Fallback to HTTP/1.1 if session creation fails
-    if (!session) {
-      return defaultGetUrl(req, signal);
-    }
-
-    return new Promise<ethers.GetUrlResponse>((resolve, reject) => {
-      const headers: http2.OutgoingHttpHeaders = {
-        ':method': req.method || 'POST',
-        ':path': url.pathname + url.search,
-        'content-type': 'application/json',
-      };
-
-      // Copy request headers
-      for (const [key, value] of Object.entries(req.headers)) {
-        headers[key.toLowerCase()] = value;
-      }
-
-      const stream = session.request(headers);
-
-      let statusCode = 200;
-      const responseChunks: Buffer[] = [];
-
-      stream.on('response', (responseHeaders) => {
-        statusCode = (responseHeaders[':status'] as number) ?? 200;
-      });
-
-      stream.on('data', (chunk: Buffer) => {
-        responseChunks.push(chunk);
-      });
-
-      stream.on('end', () => {
-        const body = Buffer.concat(responseChunks);
-        resolve({
-          statusCode,
-          statusMessage: '',
-          headers: {},
-          body,
-        });
-      });
-
-      stream.on('error', (err: Error) => {
-        // On HTTP/2 error, fall back to default transport
-        http2Sessions.delete(origin);
-        defaultGetUrl(req, signal).then(resolve).catch(reject);
-      });
-
-      // Handle abort signal (ethers FetchCancelSignal uses addListener)
-      if (signal) {
-        signal.addListener(() => {
-          stream.close();
-          reject(new Error('Request aborted'));
-        });
-      }
-
-      // Write request body
-      const body = req.body;
-      if (body) {
-        stream.end(Buffer.from(body));
-      } else {
-        stream.end();
-      }
-    });
-  };
-}
-
-/**
  * Create an ethers JsonRpcProvider with HTTP/2 support.
- * Wraps the provider's FetchRequest to use HTTP/2 multiplexing for HTTPS endpoints.
+ *
+ * Uses the shared Http2SessionPool from @arbitrage/core for managed connections
+ * with idle cleanup, ping keep-alive, and connection timeouts.
  *
  * @param rpcUrl - RPC endpoint URL
- * @param enableHttp2 - Whether to enable HTTP/2 (default: true for HTTPS URLs)
+ * @param useHttp2 - Whether to enable HTTP/2 (default: true for HTTPS URLs)
  * @returns Configured JsonRpcProvider
  */
-export function createHttp2Provider(
+function createHttp2Provider(
   rpcUrl: string,
-  enableHttp2 = true
+  useHttp2 = true
 ): ethers.JsonRpcProvider {
   const fetchRequest = new ethers.FetchRequest(rpcUrl);
 
-  if (enableHttp2 && rpcUrl.startsWith('https://')) {
+  if (useHttp2 && rpcUrl.startsWith('https://')) {
+    const pool = getHttp2SessionPool();
     const defaultGetUrl = ethers.FetchRequest.createGetUrlFunc();
-    fetchRequest.getUrlFunc = createHttp2GetUrlFunc(defaultGetUrl);
+    fetchRequest.getUrlFunc = pool.createEthersGetUrlFunc(defaultGetUrl) as ethers.FetchGetUrlFunc;
   }
 
   return new ethers.JsonRpcProvider(fetchRequest);
-}
-
-/**
- * Shut down all HTTP/2 sessions (for graceful shutdown).
- */
-export function closeHttp2Sessions(): void {
-  for (const [origin, session] of http2Sessions) {
-    try {
-      session.close();
-    } catch {
-      // Ignore close errors during shutdown
-    }
-  }
-  http2Sessions.clear();
 }
 
 export interface ProviderServiceConfig {
@@ -919,7 +783,7 @@ export class ProviderServiceImpl implements IProviderService {
     this.kmsSigners.clear();
     // Fix 10.2: Reset cached count
     this.cachedHealthyCount = 0;
-    // Close HTTP/2 sessions
-    closeHttp2Sessions();
+    // Close HTTP/2 sessions (fire-and-forget during sync clear)
+    closeDefaultHttp2Pool().catch(() => {});
   }
 }

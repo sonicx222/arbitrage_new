@@ -24,6 +24,7 @@ import { BalancerV2FlashLoanProvider } from './balancer-v2.provider';
 import { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
 import { SyncSwapFlashLoanProvider } from './syncswap.provider';
 import { DaiFlashMintProvider } from './dai-flash-mint.provider';
+import { MorphoFlashLoanProvider } from './morpho.provider';
 import { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 /**
@@ -79,6 +80,14 @@ const DAI_FLASH_MINT_SUPPORTED_CHAINS = new Set(
     .filter(([_, config]) => config.protocol === 'dai_flash_mint')
     .map(([chain]) => chain)
 );
+
+/**
+ * Chains that have fully supported Morpho Blue flash loans
+ * Zero-fee flash loans on Ethereum and Base
+ *
+ * @see https://docs.morpho.org/morpho/contracts/addresses
+ */
+const MORPHO_SUPPORTED_CHAINS = new Set(['ethereum', 'base']);
 
 /**
  * Flash Loan Provider Factory
@@ -159,11 +168,15 @@ export class FlashLoanProviderFactory {
       return this.createDaiFlashMintProvider(chain, flashLoanConfig);
     }
 
+    if (protocol === 'morpho') {
+      return this.createMorphoProvider(chain, flashLoanConfig);
+    }
+
     // Create unsupported provider for other protocols
     this.logger.info('Creating placeholder provider for unsupported protocol', {
       chain,
       protocol,
-      note: 'Only Aave V3, Balancer V2, PancakeSwap V3, SyncSwap, and DAI Flash Mint are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
+      note: 'Only Aave V3, Balancer V2, PancakeSwap V3, SyncSwap, DAI Flash Mint, and Morpho are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
     });
 
     return new UnsupportedFlashLoanProvider({
@@ -339,6 +352,30 @@ export class FlashLoanProviderFactory {
   }
 
   /**
+   * Create Morpho Blue provider
+   *
+   * @see https://docs.morpho.org/morpho/contracts/addresses
+   */
+  private createMorphoProvider(
+    chain: string,
+    flashLoanConfig: { address: string; protocol: string; fee: number }
+  ): MorphoFlashLoanProvider | undefined {
+    const validated = this.validateProviderConfig(
+      chain, flashLoanConfig, 'MorphoFlashArbitrage', 'morphoBlueAddress',
+      { note: 'Morpho Blue flash loans available on Ethereum and Base' },
+    );
+    if (!validated) return undefined;
+
+    return new MorphoFlashLoanProvider({
+      chain,
+      poolAddress: flashLoanConfig.address, // Morpho Blue contract address
+      contractAddress: validated.contractAddress,
+      approvedRouters: validated.approvedRouters,
+      feeOverride: validated.feeOverride,
+    });
+  }
+
+  /**
    * Check if a chain has a fully supported flash loan provider
    *
    * @param chain - Chain identifier
@@ -407,7 +444,12 @@ export class FlashLoanProviderFactory {
       return isValidContractAddress(contractAddress);
     });
 
-    return [...aaveChains, ...balancerChains, ...pancakeSwapChains, ...syncSwapChains, ...daiFlashMintChains];
+    const morphoChains = Array.from(MORPHO_SUPPORTED_CHAINS).filter(chain => {
+      const contractAddress = this.config.contractAddresses[chain];
+      return isValidContractAddress(contractAddress);
+    });
+
+    return [...aaveChains, ...balancerChains, ...pancakeSwapChains, ...syncSwapChains, ...daiFlashMintChains, ...morphoChains];
   }
 
   /**
@@ -449,9 +491,9 @@ export class FlashLoanProviderFactory {
       const hasContract = isValidContractAddress(contractAddress);
 
       let status: ProtocolSupportStatus;
-      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap' || config.protocol === 'dai_flash_mint') && hasContract) {
+      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap' || config.protocol === 'dai_flash_mint' || config.protocol === 'morpho') && hasContract) {
         status = 'fully_supported';
-      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap' || config.protocol === 'dai_flash_mint') {
+      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap' || config.protocol === 'dai_flash_mint' || config.protocol === 'morpho') {
         status = 'partial_support'; // Protocol supported but no contract deployed
       } else {
         status = 'not_implemented';

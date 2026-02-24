@@ -13,7 +13,7 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { parentPort } from 'worker_threads';
 import type { Logger } from '../logger';
-import { setupParentPortListener } from '../lifecycle-utils';
+import { setupParentPortListener } from '../async/lifecycle-utils';
 
 // =============================================================================
 // Types

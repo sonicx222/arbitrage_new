@@ -12,8 +12,8 @@
  * @see MIGRATION_PLAN.md
  */
 
-import type { RedisClient } from '../redis';
-import type { RedisStreamsClient, StreamBatcher } from '../redis-streams';
+import type { RedisClient } from '../redis/client';
+import type { RedisStreamsClient, StreamBatcher } from '../redis/streams';
 import type { SwapEventFilter } from '../analytics/swap-event-filter';
 import type { ServiceLogger } from '../logging';
 import type { PairDiscoveryService } from '../pair-discovery';

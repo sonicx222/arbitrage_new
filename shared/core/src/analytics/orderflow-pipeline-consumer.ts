@@ -14,10 +14,10 @@
 
 import { FEATURE_FLAGS, getChainName } from '@arbitrage/config';
 import { createLogger } from '../logger';
-import { RedisStreamsClient, getRedisStreamsClient } from '../redis-streams';
+import { RedisStreamsClient, getRedisStreamsClient } from '../redis/streams';
 import { ReserveCache, getReserveCache } from '../caching/reserve-cache';
 import type { Logger } from '../logger';
-import type { StreamMessage, ConsumerGroupConfig } from '../redis-streams';
+import type { StreamMessage, ConsumerGroupConfig } from '../redis/streams';
 import type { PendingOpportunity, PendingSwapIntent } from '@arbitrage/types';
 
 // ---------------------------------------------------------------------------

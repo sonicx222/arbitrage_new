@@ -450,7 +450,7 @@ export type {
   ILiquidityContext,
   IRankedProvider,
   IAggregatedMetrics,
-} from './flash-loan-aggregation/domain';
+} from '@arbitrage/flash-loan-aggregation';
 
 // =============================================================================
 // 2A.2 Flash Loan Aggregation - Application Layer
@@ -463,13 +463,13 @@ export {
 
   // DTOs
   toSelectProviderResponse,
-} from './flash-loan-aggregation/application';
+} from '@arbitrage/flash-loan-aggregation';
 
 export type {
   SelectProviderRequest,
   SelectProviderResponse,
   SelectProviderUseCaseDependencies,
-} from './flash-loan-aggregation/application';
+} from '@arbitrage/flash-loan-aggregation';
 
 // =============================================================================
 // 2A.3 Flash Loan Aggregation - Infrastructure Layer
@@ -487,12 +487,12 @@ export {
 
   // Aggregator implementation
   FlashLoanAggregatorImpl,
-} from './flash-loan-aggregation/infrastructure';
+} from '@arbitrage/flash-loan-aggregation';
 
 export type {
   OnChainLiquidityValidatorConfig,
   InMemoryAggregatorMetricsConfig,
-} from './flash-loan-aggregation/infrastructure';
+} from '@arbitrage/flash-loan-aggregation';
 
 // #############################################################################
 // #                                                                           #
@@ -630,7 +630,7 @@ export type {
   ExporterStats,
   GrafanaDashboardConfig,
   GrafanaPanelDefinition
-} from './metrics/domain';
+} from '@arbitrage/metrics';
 
 // Domain Models
 export {
@@ -639,17 +639,17 @@ export {
   MetricValue,
   MetricTimestamp,
   MetricThreshold
-} from './metrics/domain';
+} from '@arbitrage/metrics';
 
 // Prometheus Helpers
-export type { IPrometheusHelpers } from './metrics/domain';
+export type { IPrometheusHelpers } from '@arbitrage/metrics';
 
 // Application Layer: Use Cases
 /** @deprecated Unused — no external consumers. Remove in next major version. */
 export {
   ExportMetricsUseCase,
   CollectMetricsUseCase
-} from './metrics/application';
+} from '@arbitrage/metrics';
 
 // Application Layer: DTOs
 /** @deprecated Unused — no external consumers. Remove in next major version. */
@@ -658,14 +658,14 @@ export {
   ExportMetricsResponse,
   RecordMetricRequest,
   RecordMetricResponse
-} from './metrics/application';
+} from '@arbitrage/metrics';
 
 // Infrastructure Layer: Implementations
 export {
   PrometheusMetricsCollector,
   PrometheusExporter,
   PrometheusHelpers
-} from './metrics/infrastructure';
+} from '@arbitrage/metrics';
 
 // =============================================================================
 // 3.2 Pair Caching (S2.2.5)
@@ -1564,6 +1564,9 @@ export {
   getRateLimitConfig,
   isRateLimitExempt,
   DEFAULT_RATE_LIMITS,
+  Http2SessionPool,
+  getHttp2SessionPool,
+  closeDefaultHttp2Pool,
 } from './rpc';
 export type {
   BatchProviderConfig,
@@ -1572,6 +1575,7 @@ export type {
   JsonRpcResponse,
   RateLimiterConfig,
   RateLimiterStats,
+  Http2SessionPoolConfig,
 } from './rpc';
 
 // =============================================================================
@@ -1904,13 +1908,8 @@ export {
 } from './utils/performance-utils';
 
 // =============================================================================
-// 14.3 Validation Middleware
+// 14.3 Validation Middleware (removed — use @arbitrage/security)
 // =============================================================================
-
-export {
-  ValidationMiddleware,
-  ValidationSchemas
-} from './validation';
 
 // =============================================================================
 // 14.4 Simulation Mode (Local Testing)
@@ -1967,7 +1966,7 @@ export {
   createPriceUpdate,
   createWhaleTransaction,
   createCoordinatorCommand
-} from './message-validators';
+} from './validation/message-validators';
 export type {
   PriceUpdate as ValidatedPriceUpdate,
   WhaleTransaction as ValidatedWhaleTransaction,
@@ -1976,7 +1975,7 @@ export type {
   CoordinatorCommand,
   ServiceHealthStatus,
   ValidationResult
-} from './message-validators';
+} from './validation/message-validators';
 
 // #############################################################################
 // #                                                                           #
@@ -1990,6 +1989,9 @@ export type {
 
 export { TradeLogger } from './persistence/trade-logger';
 export type { TradeLogEntry, TradeLoggerConfig } from './persistence/trade-logger';
+
+export { R2Uploader, getSignatureKey, signRequest } from './persistence/r2-uploader';
+export type { R2UploaderConfig, R2UploaderLogger } from './persistence/r2-uploader';
 
 // #############################################################################
 // #                                                                           #

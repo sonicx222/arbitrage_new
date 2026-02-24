@@ -31,13 +31,13 @@ import {
   createFactoryIntegrationService,
 } from '../../../src/detector/factory-integration';
 import type { FactoryIntegrationDeps } from '../../../src/detector/factory-integration';
-import { getRedisClient } from '../../../src/redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../../../src/redis-streams';
+import { getRedisClient } from '../../../src/redis/client';
+import { getRedisStreamsClient, RedisStreamsClient } from '../../../src/redis/streams';
 import { getAllFactoryAddresses, validateFactoryRegistry } from '@arbitrage/config';
 import type { Pair } from '@arbitrage/types';
 
 // Mock Redis for testing - in-memory implementation
-jest.mock('../../../src/redis', () => {
+jest.mock('../../../src/redis/client', () => {
   const inMemoryStore = new Map<string, string>();
 
   return {
@@ -64,7 +64,7 @@ jest.mock('../../../src/redis', () => {
 });
 
 // Mock Redis Streams - implementation set up in beforeEach
-jest.mock('../../../src/redis-streams', () => ({
+jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(),
   RedisStreamsClient: {
     STREAMS: {

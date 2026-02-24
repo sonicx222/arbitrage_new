@@ -34,6 +34,8 @@
     "postbuild:deps": "npm run generate:error-selectors --if-present || node -e \"process.exit(0)\"",
     "build:types": "cd shared/types && npm run build",
     "build:config": "cd shared/config && npm run build",
+    "build:flash-loan-aggregation": "cd shared/flash-loan-aggregation && npm run build",
+    "build:metrics": "cd shared/metrics && npm run build",
     "build:core": "cd shared/core && npm run build",
     "build:ml": "cd shared/ml && npm run build",
     "build:clean": "npm run clean:cache && node scripts/clean-dist.js && npm run build",

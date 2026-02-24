@@ -21,7 +21,7 @@
  */
 
 import { createLogger, Logger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { PROVIDER_CONFIGS } from '@arbitrage/config';
 
 /**

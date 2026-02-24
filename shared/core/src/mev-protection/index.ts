@@ -99,6 +99,12 @@ export {
 } from './l2-sequencer-provider';
 export { StandardProvider, createStandardProvider } from './standard-provider';
 
+// Timeboost provider for Arbitrum MEV protection (Batch 5)
+export { TimeboostProvider, createTimeboostProvider } from './timeboost-provider';
+
+// Flashbots Protect L2 provider for Base MEV protection (Batch 5)
+export { FlashbotsProtectL2Provider, createFlashbotsProtectL2Provider } from './flashbots-protect-l2.provider';
+
 // Jito provider for Solana MEV protection (Phase 1.2)
 export {
   JitoProvider,

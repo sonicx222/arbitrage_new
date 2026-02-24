@@ -82,6 +82,17 @@ const STABLECOIN_ADDRESSES = new Set([
 const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 
 /**
+ * M5 FIX: Known token decimals for major non-stablecoin, non-WETH tokens on Ethereum mainnet.
+ * Prevents bigintTo18DecimalNumber() from assuming 18 decimals for tokens like WBTC (8).
+ * Without this, WBTC amounts (10^8 raw) divide by 10^12 → 0 in BigInt truncation.
+ */
+const KNOWN_TOKEN_DECIMALS = new Map<string, number>([
+  ['0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', 8],  // WBTC
+  ['0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6', 8],  // WBTC (Polygon)
+  ['0xfe18be6b3bd88a2d2a7f928d00292e7a9963cfc6', 8],  // sBTC
+]);
+
+/**
  * USDC and USDT use 6 decimals. Module-level constant to avoid
  * allocating a new Set on every stablecoinToUsd() call.
  */
@@ -343,9 +354,18 @@ export class CowBackrunDetector extends EventEmitter {
       return this.wethToUsd(trade.buyAmount);
     }
 
-    // Unknown tokens: use a conservative minimum estimate
-    // Assume 18 decimals and $1 per token as a floor.
-    // Use BigInt division first to avoid Number overflow for large amounts.
+    // M5 FIX: Check known token decimals before falling back to 18-decimal assumption.
+    // WBTC (8 decimals) would truncate to $0 with bigintTo18DecimalNumber().
+    const sellDecimals = KNOWN_TOKEN_DECIMALS.get(sellTokenLower);
+    const buyDecimals = KNOWN_TOKEN_DECIMALS.get(buyTokenLower);
+    if (sellDecimals !== undefined) {
+      return this.bigintToDecimalNumber(trade.sellAmount, sellDecimals);
+    }
+    if (buyDecimals !== undefined) {
+      return this.bigintToDecimalNumber(trade.buyAmount, buyDecimals);
+    }
+
+    // Unknown tokens: assume 18 decimals and $1 per token as a floor.
     return this.bigintTo18DecimalNumber(trade.sellAmount);
   }
 
@@ -379,5 +399,19 @@ export class CowBackrunDetector extends EventEmitter {
     // Divide by 10^12 in BigInt space (safe, no overflow)
     // Then divide by 10^6 in Number space to get the full 18-decimal conversion
     return Number(amount / 1_000_000_000_000n) / 1e6;
+  }
+
+  /**
+   * M5 FIX: Convert BigInt amount to Number using the token's actual decimals.
+   * Splits the division between BigInt and Number space to preserve precision.
+   */
+  private bigintToDecimalNumber(amount: bigint, decimals: number): number {
+    if (decimals <= 6) {
+      // Fits safely in Number space (max ~9 trillion at 6 decimals)
+      return Number(amount) / 10 ** decimals;
+    }
+    // Split: divide by 10^(decimals-6) in BigInt, then by 10^6 in Number
+    const bigintDivisor = 10n ** BigInt(decimals - 6);
+    return Number(amount / bigintDivisor) / 1e6;
   }
 }

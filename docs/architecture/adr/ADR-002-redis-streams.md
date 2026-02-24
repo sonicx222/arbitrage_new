@@ -1,7 +1,7 @@
 # ADR-002: Redis Streams over Pub/Sub for Event Backbone
 
 ## Status
-**Implemented** | 2025-01-10 | Updated 2025-01-11 | Best Practices Updated 2026-01-14 | Blocking Reads 2026-01-15 | Volume Analytics 2026-01-16
+**Implemented** | 2025-01-10 | Updated 2025-01-11 | Best Practices Updated 2026-01-14 | Blocking Reads 2026-01-15 | Volume Analytics 2026-01-16 | Self-hosted Redis 2026-02-24
 
 ## Implementation Status
 
@@ -82,7 +82,7 @@
 
 **Benefits**:
 - Latency reduced from ~50ms to <1ms (meets <50ms architecture target)
-- 90% reduction in Redis commands during idle periods (preserves Upstash free tier)
+- 90% reduction in Redis commands during idle periods
 - Backpressure prevents message waste when queue is saturated
 
 ### Phase 6: Swap Events & Volume Aggregates Consumers (2026-01-16) [IMPLEMENTED]
@@ -262,12 +262,11 @@ await redis.xack('stream:price-updates', 'cross-chain-detector', messageId);
    - Pub/Sub: Cannot see historical messages
    - Streams: Can replay last N messages for debugging
 
-### Upstash Compatibility
+### Redis Deployment Modes
 
-Upstash Redis supports Streams with the same rate limits:
-- XADD counts as 1 command
-- XREADGROUP counts as 1 command
-- No additional cost vs Pub/Sub
+**Self-hosted Redis 7 (recommended):** Deployed as a Docker sidecar on each Oracle ARM instance. Eliminates command limits and reduces RTT from 5-20ms (Upstash) to <0.1ms (localhost). Set `REDIS_SELF_HOSTED=true` to enable localhost Redis in production.
+
+**Upstash (legacy):** Upstash Redis supports Streams with the same rate limits (XADD and XREADGROUP each count as 1 command). The 10K commands/day limit requires aggressive batching.
 
 ### Rate Limit Impact
 
@@ -276,7 +275,7 @@ Upstash Redis supports Streams with the same rate limits:
 | 100 price updates | 100 PUBLISH | 2 XADD (batched) | 98% |
 | 100 reads | 100 callbacks | 2 XREADGROUP | 98% |
 
-Streams enable **batching** that Pub/Sub cannot support.
+Streams enable **batching** that Pub/Sub cannot support. With self-hosted Redis, batching is still used for efficiency but the 10K/day limit no longer applies.
 
 ## Consequences
 
@@ -399,13 +398,13 @@ export async function resetRedisInstance(): Promise<void> {
 ## References
 
 - [Redis Streams Documentation](https://redis.io/docs/data-types/streams/)
-- [Upstash Redis Streams](https://docs.upstash.com/redis/features/streams)
-- [Current Redis implementation](../../../shared/core/src/redis.ts)
+- [Current Redis client](../../../shared/core/src/redis/client.ts)
+- [Redis production config](../../../infrastructure/oracle/redis/redis-production.conf)
 
 ## Confidence Level
 
 **88%** - High confidence based on:
 - Redis Streams is battle-tested technology
-- Upstash fully supports Streams
+- Self-hosted Redis 7 on Oracle ARM eliminates Upstash command limits and reduces RTT to <0.1ms
 - Clear benefits for reliability and scalability
 - Migration path is incremental and reversible

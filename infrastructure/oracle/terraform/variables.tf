@@ -205,9 +205,22 @@ variable "docker_image_cross_chain" {
 # =============================================================================
 
 variable "redis_url" {
-  description = "Upstash Redis connection URL"
+  description = "Redis connection URL (legacy - kept for backwards compatibility). When redis_self_hosted=true, this is ignored in favor of localhost."
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "redis_password" {
+  description = "Password for self-hosted Redis instances (used by both partition and cross-chain services)"
+  type        = string
+  sensitive   = true
+}
+
+variable "redis_self_hosted" {
+  description = "Whether to deploy self-hosted Redis 7 on each Oracle ARM instance (replaces Upstash)"
+  type        = bool
+  default     = true
 }
 
 variable "log_level" {

@@ -14,10 +14,10 @@
  */
 
 import { createLogger, Logger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { hmacSign, hmacVerify, getHmacSigningKey, isSignedEnvelope } from '../utils/hmac-utils';
 import type { SignedEnvelope } from '../utils/hmac-utils';
-import type { RedisClient } from '../redis';
+import type { RedisClient } from '../redis/client';
 import type {
   ExecutionOutcome,
   ExecutionProbabilityConfig,

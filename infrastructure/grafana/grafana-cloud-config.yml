@@ -1,0 +1,36 @@
+# Grafana Cloud Configuration Template
+#
+# Copy to your deployment and fill in values from your Grafana Cloud stack.
+# Environment variables are referenced with ${VAR} syntax for envsubst/docker-compose.
+#
+# Setup:
+#   1. Create a Grafana Cloud account at https://grafana.com/products/cloud/
+#   2. Navigate to your stack settings to find the Stack ID and URLs
+#   3. Generate an API key with Admin permissions
+#   4. Fill in the values below or set corresponding environment variables
+#   5. Run: ./setup-grafana.sh --cloud
+#
+# @see infrastructure/grafana/setup-grafana.sh --cloud
+
+stack:
+  id: "${GRAFANA_CLOUD_STACK_ID}"
+  url: "${GRAFANA_CLOUD_URL}"
+
+datasources:
+  prometheus:
+    uid: "grafanacloud-prom"
+    url: "${GRAFANA_CLOUD_PROM_URL}"
+
+remote_write:
+  - url: "${GRAFANA_CLOUD_PROM_URL}/api/prom/push"
+    basic_auth:
+      username: "${GRAFANA_CLOUD_PROM_USERNAME}"
+      password: "${GRAFANA_CLOUD_API_KEY}"
+
+# Optional: Loki log aggregation
+# loki:
+#   uid: "grafanacloud-logs"
+#   url: "${GRAFANA_CLOUD_LOKI_URL}"
+#   basic_auth:
+#     username: "${GRAFANA_CLOUD_LOKI_USERNAME}"
+#     password: "${GRAFANA_CLOUD_API_KEY}"

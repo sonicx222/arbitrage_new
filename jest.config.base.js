@@ -31,6 +31,10 @@ const projectConfig = {
 
   // Module resolution - maps package aliases to source directories
   moduleNameMapper: {
+    '^@arbitrage/flash-loan-aggregation$': '<rootDir>/shared/flash-loan-aggregation/src',
+    '^@arbitrage/flash-loan-aggregation/(.*)$': '<rootDir>/shared/flash-loan-aggregation/src/$1',
+    '^@arbitrage/metrics$': '<rootDir>/shared/metrics/src',
+    '^@arbitrage/metrics/(.*)$': '<rootDir>/shared/metrics/src/$1',
     '^@arbitrage/core$': '<rootDir>/shared/core/src',
     '^@arbitrage/core/(.*)$': '<rootDir>/shared/core/src/$1',
     '^@arbitrage/config$': '<rootDir>/shared/config/src',

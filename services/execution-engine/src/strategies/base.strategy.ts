@@ -72,7 +72,7 @@ import type {
   ExecutionResult,
 } from '../types';
 import { TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
-import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
+import type { SimulationRequest, SimulationResult, SimulationTier } from '../services/simulation/types';
 
 // =============================================================================
 // Hybrid Mode Support (Solution S4)
@@ -1625,9 +1625,12 @@ export abstract class BaseExecutionStrategy {
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
 
-    if (!ctx.simulationService.shouldSimulate(expectedProfit, opportunityAge)) {
+    // Use tiered simulation based on trade size
+    const tier: SimulationTier = ctx.simulationService.getSimulationTier(expectedProfit, opportunityAge);
+
+    if (tier === 'none') {
       ctx.stats.simulationsSkipped++;
-      this.logger.debug('Skipping simulation', {
+      this.logger.debug('Skipping simulation (tier: none)', {
         opportunityId: opportunity.id,
         expectedProfit,
         opportunityAge,
@@ -1649,11 +1652,27 @@ export abstract class BaseExecutionStrategy {
     };
 
     try {
-      const result = await ctx.simulationService.simulate(simulationRequest);
+      let result: SimulationResult;
+
+      if (tier === 'light') {
+        // Light tier: restrict to local provider only for fast eth_call simulation
+        result = await ctx.simulationService.simulate(simulationRequest, ['local']);
+        this.logger.debug('Light simulation completed (local-only tier)', {
+          opportunityId: opportunity.id,
+          tier: 'light',
+          provider: result.provider,
+          latencyMs: result.latencyMs,
+        });
+      } else {
+        // Full tier: use all providers with fallback
+        result = await ctx.simulationService.simulate(simulationRequest);
+      }
+
       ctx.stats.simulationsPerformed++;
 
       this.logger.debug('Simulation completed', {
         opportunityId: opportunity.id,
+        tier,
         success: result.success,
         wouldRevert: result.wouldRevert,
         revertReason: result.revertReason,

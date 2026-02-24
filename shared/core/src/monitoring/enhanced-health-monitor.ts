@@ -4,8 +4,8 @@
 
 import { createLogger } from '../logger';
 import { ServiceHealth as RedisServiceHealth } from '@arbitrage/types';
-import { getRedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { getRedisClient } from '../redis/client';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 import { getCircuitBreakerRegistry, CircuitBreakerStats } from '../resilience/circuit-breaker';
 import { getDeadLetterQueue } from '../resilience/dead-letter-queue';
 import { getGracefulDegradationManager } from '../resilience/graceful-degradation';

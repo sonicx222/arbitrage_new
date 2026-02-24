@@ -19,6 +19,8 @@ import { FlashbotsProvider, createFlashbotsProvider } from './flashbots-provider
 import { L2SequencerProvider, createL2SequencerProvider, isL2SequencerChain } from './l2-sequencer-provider';
 import { StandardProvider, createStandardProvider } from './standard-provider';
 import { createMevShareProvider } from './mev-share-provider';
+import { TimeboostProvider, createTimeboostProvider } from './timeboost-provider';
+import { FlashbotsProtectL2Provider, createFlashbotsProtectL2Provider } from './flashbots-protect-l2.provider';
 import { AsyncMutex } from '../async/async-mutex';
 import { createLogger } from '../logger';
 
@@ -259,6 +261,12 @@ export class MevProviderFactory {
         return createFlashbotsProvider(config);
       }
 
+      case 'timeboost':
+        return createTimeboostProvider(config);
+
+      case 'flashbots_protect':
+        return createFlashbotsProtectL2Provider(config);
+
       case 'sequencer':
         return createL2SequencerProvider(config);
 
@@ -367,6 +375,20 @@ export class MevProviderFactory {
         // Only valid for Ethereum mainnet
         if (chain === 'ethereum' || chain === 'goerli' || chain === 'sepolia') {
           return createFlashbotsProvider(config);
+        }
+        return undefined;
+
+      case 'timeboost':
+        // Only valid for Arbitrum
+        if (chain === 'arbitrum') {
+          return createTimeboostProvider(config);
+        }
+        return undefined;
+
+      case 'flashbots_protect':
+        // Only valid for Base
+        if (chain === 'base') {
+          return createFlashbotsProtectL2Provider(config);
         }
         return undefined;
 
@@ -576,6 +598,10 @@ export function createMevProvider(
   switch (strategy) {
     case 'flashbots':
       return createFlashbotsProvider(config);
+    case 'timeboost':
+      return createTimeboostProvider(config);
+    case 'flashbots_protect':
+      return createFlashbotsProtectL2Provider(config);
     case 'sequencer':
       return createL2SequencerProvider(config);
     case 'jito':
@@ -652,6 +678,8 @@ export function getRecommendedPriorityFee(chain: string): number {
       return 3.0;
     case 'fastlane':
       return 30.0;
+    case 'timeboost':
+    case 'flashbots_protect':
     case 'sequencer':
       return 0.01;
     case 'jito':
@@ -669,4 +697,6 @@ export { BaseMevProvider } from './base-provider';
 export { FlashbotsProvider } from './flashbots-provider';
 export { L2SequencerProvider, isL2SequencerChain, getL2ChainConfig } from './l2-sequencer-provider';
 export { StandardProvider } from './standard-provider';
+export { TimeboostProvider } from './timeboost-provider';
+export { FlashbotsProtectL2Provider } from './flashbots-protect-l2.provider';
 export * from './types';

@@ -334,6 +334,11 @@ export class MevRiskAnalyzer {
   private getChainRiskAdjustment(chain: string): number {
     const strategy = CHAIN_MEV_STRATEGIES[chain];
 
+    // L2s with enhanced MEV protection (Timeboost, Flashbots Protect) have strong protection
+    if (strategy === 'timeboost' || strategy === 'flashbots_protect') {
+      return 0.4; // 60% risk reduction (better than raw sequencer)
+    }
+
     // L2s with sequencer have inherent protection (FCFS ordering, no public mempool)
     if (strategy === 'sequencer') {
       return 0.5; // 50% risk reduction
@@ -435,8 +440,8 @@ export class MevRiskAnalyzer {
   ): MempoolRecommendation {
     const strategy = CHAIN_MEV_STRATEGIES[context.chain];
 
-    // L2s with sequencer have inherent protection - public is usually fine
-    if (strategy === 'sequencer') {
+    // L2s with enhanced MEV protection or sequencer have inherent protection - public is usually fine
+    if (strategy === 'sequencer' || strategy === 'timeboost' || strategy === 'flashbots_protect') {
       return riskScore >= 90
         ? MempoolRecommendation.CONDITIONAL
         : MempoolRecommendation.PUBLIC;

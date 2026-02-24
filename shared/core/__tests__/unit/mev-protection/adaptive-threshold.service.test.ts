@@ -27,7 +27,7 @@ const mockRedis = {
 };
 
 // Mock Redis BEFORE service import
-jest.mock('../../../src/redis', () => ({
+jest.mock('../../../src/redis/client', () => ({
   getRedisClient: () => Promise.resolve(mockRedis)
 }));
 

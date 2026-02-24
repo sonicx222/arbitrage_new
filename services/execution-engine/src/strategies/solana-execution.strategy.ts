@@ -49,6 +49,27 @@ export interface SolanaExecutionConfig {
   minProfitLamports: bigint;
   /** Maximum price deviation percentage to abort execution (default: 1%) */
   maxPriceDeviationPct: number;
+  /** Timeout for transaction confirmation polling in ms (default: 30000) */
+  confirmationTimeoutMs: number;
+  /** Poll interval for transaction confirmation in ms (default: 500) */
+  confirmationPollIntervalMs: number;
+}
+
+/**
+ * Minimal interface for Solana transaction confirmation polling.
+ *
+ * Used by SolanaExecutionStrategy to verify on-chain finality after
+ * Jito bundle submission. Without this, submitted transactions may be
+ * dropped during slot leader changes, causing phantom profit tracking.
+ *
+ * @see H1 in Phase 3 Deep Analysis — transaction confirmation polling
+ * @see jito-provider.ts SolanaConnection — compatible superset interface
+ */
+export interface SolanaConfirmationClient {
+  getSignatureStatus(signature: string): Promise<{
+    value: { confirmationStatus: string; slot?: number } | null;
+  }>;
+  getBlockHeight(): Promise<number>;
 }
 
 // =============================================================================
@@ -61,6 +82,8 @@ const DEFAULT_CONFIG: SolanaExecutionConfig = {
   maxSlippageBps: 100,
   minProfitLamports: 100_000n,
   maxPriceDeviationPct: 1.0,
+  confirmationTimeoutMs: 30_000,
+  confirmationPollIntervalMs: 500,
 };
 
 // =============================================================================
@@ -79,6 +102,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
   private readonly jitoProvider: ISolanaMevProvider;
   private readonly config: SolanaExecutionConfig;
   private readonly logger: Logger;
+  private readonly confirmationClient: SolanaConfirmationClient | null;
 
   constructor(
     jupiterClient: JupiterSwapClient,
@@ -86,6 +110,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
     jitoProvider: ISolanaMevProvider,
     config: Partial<SolanaExecutionConfig> & { walletPublicKey: string },
     logger: Logger,
+    confirmationClient?: SolanaConfirmationClient,
   ) {
     this.jupiterClient = jupiterClient;
     this.txBuilder = txBuilder;
@@ -96,8 +121,11 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       maxSlippageBps: config.maxSlippageBps ?? DEFAULT_CONFIG.maxSlippageBps,
       minProfitLamports: config.minProfitLamports ?? DEFAULT_CONFIG.minProfitLamports,
       maxPriceDeviationPct: config.maxPriceDeviationPct ?? DEFAULT_CONFIG.maxPriceDeviationPct,
+      confirmationTimeoutMs: config.confirmationTimeoutMs ?? DEFAULT_CONFIG.confirmationTimeoutMs,
+      confirmationPollIntervalMs: config.confirmationPollIntervalMs ?? DEFAULT_CONFIG.confirmationPollIntervalMs,
     };
     this.logger = logger;
+    this.confirmationClient = confirmationClient ?? null;
   }
 
   /**
@@ -296,29 +324,69 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       const latencyMs = Date.now() - startTime;
 
       if (submissionResult.success) {
-        // H1: Transaction submitted but not yet confirmed on-chain.
+        const txHash = submissionResult.transactionHash ?? '';
+
+        // H1: Confirm transaction on-chain before recording profit.
         // Solana transactions may be dropped during slot leader changes.
-        // TODO: When Solana Connection is injected, poll getSignatureStatuses()
-        // up to lastValidBlockHeight for finality confirmation.
-        this.logger.info('Solana arbitrage submitted (pending confirmation)', {
-          traceId,
-          opportunityId: opportunity.id,
-          transactionHash: submissionResult.transactionHash,
-          latencyMs,
-          netProfitLamports: netProfitLamports.toString(),
-          usedFallback: submissionResult.usedFallback,
-          lastValidBlockHeight: swapResult.lastValidBlockHeight,
-          confirmationStatus: 'unconfirmed',
-        });
+        // Poll getSignatureStatus() up to lastValidBlockHeight for finality.
+        if (this.confirmationClient && txHash) {
+          const confirmation = await this.confirmTransaction(
+            txHash,
+            swapResult.lastValidBlockHeight,
+            traceId,
+            opportunity.id,
+          );
+
+          if (!confirmation.confirmed) {
+            this.logger.error('Solana transaction not confirmed on-chain', {
+              traceId,
+              opportunityId: opportunity.id,
+              transactionHash: txHash,
+              reason: confirmation.reason,
+              lastValidBlockHeight: swapResult.lastValidBlockHeight,
+              latencyMs: Date.now() - startTime,
+            });
+
+            return createErrorResult(
+              opportunity.id,
+              `[${confirmation.errorCode}] ${confirmation.reason}`,
+              chain,
+              dex,
+              txHash,
+            );
+          }
+
+          this.logger.info('Solana arbitrage confirmed on-chain', {
+            traceId,
+            opportunityId: opportunity.id,
+            transactionHash: txHash,
+            confirmationSlot: confirmation.slot,
+            latencyMs: Date.now() - startTime,
+            netProfitLamports: netProfitLamports.toString(),
+            usedFallback: submissionResult.usedFallback,
+          });
+        } else {
+          // No confirmation client — log as unconfirmed (backward compatible)
+          this.logger.info('Solana arbitrage submitted (confirmation polling unavailable)', {
+            traceId,
+            opportunityId: opportunity.id,
+            transactionHash: txHash,
+            latencyMs,
+            netProfitLamports: netProfitLamports.toString(),
+            usedFallback: submissionResult.usedFallback,
+            lastValidBlockHeight: swapResult.lastValidBlockHeight,
+            confirmationStatus: 'unconfirmed',
+          });
+        }
 
         return createSuccessResult(
           opportunity.id,
-          submissionResult.transactionHash ?? '',
+          txHash,
           chain,
           dex,
           {
             actualProfit: Number(netProfitLamports),
-            latencyMs,
+            latencyMs: Date.now() - startTime,
             usedMevProtection: !submissionResult.usedFallback,
           },
         );
@@ -356,5 +424,86 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
         dex,
       );
     }
+  }
+
+  // ===========================================================================
+  // Private Methods
+  // ===========================================================================
+
+  /**
+   * Poll for Solana transaction confirmation up to lastValidBlockHeight.
+   *
+   * Solana transactions include a recent blockhash with a finite validity window.
+   * If the block height exceeds lastValidBlockHeight and the transaction hasn't
+   * been confirmed, it is guaranteed to have expired and will never land.
+   *
+   * @see H1 in Phase 3 Deep Analysis — prevents phantom profit tracking
+   */
+  private async confirmTransaction(
+    signature: string,
+    lastValidBlockHeight: number,
+    traceId: string,
+    opportunityId: string,
+  ): Promise<{
+    confirmed: boolean;
+    slot?: number;
+    reason?: string;
+    errorCode?: string;
+  }> {
+    const startTime = Date.now();
+    const { confirmationTimeoutMs, confirmationPollIntervalMs } = this.config;
+
+    while (Date.now() - startTime < confirmationTimeoutMs) {
+      try {
+        // Check if transaction has been confirmed
+        const status = await this.confirmationClient!.getSignatureStatus(signature);
+
+        if (status.value) {
+          const { confirmationStatus, slot } = status.value;
+
+          if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') {
+            return { confirmed: true, slot };
+          }
+          // 'processed' means included but not yet confirmed — keep polling
+        }
+      } catch (error) {
+        this.logger.debug('Confirmation polling error (will retry)', {
+          traceId,
+          opportunityId,
+          signature,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue polling — transient RPC errors shouldn't abort confirmation
+      }
+
+      // Check if block height has exceeded lastValidBlockHeight (tx expired)
+      try {
+        const currentBlockHeight = await this.confirmationClient!.getBlockHeight();
+        if (currentBlockHeight > lastValidBlockHeight) {
+          return {
+            confirmed: false,
+            reason: `Transaction expired: block height ${currentBlockHeight} exceeds lastValidBlockHeight ${lastValidBlockHeight}`,
+            errorCode: 'ERR_TX_EXPIRED',
+          };
+        }
+      } catch {
+        // Block height check failed — don't abort, rely on timeout
+      }
+
+      await this.sleep(confirmationPollIntervalMs);
+    }
+
+    return {
+      confirmed: false,
+      reason: `Transaction not confirmed within ${confirmationTimeoutMs}ms timeout`,
+      errorCode: 'ERR_TX_UNCONFIRMED',
+    };
+  }
+
+  /**
+   * Sleep helper for confirmation polling.
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

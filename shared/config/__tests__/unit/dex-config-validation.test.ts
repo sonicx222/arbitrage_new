@@ -50,16 +50,16 @@ const ALL_CHAINS = [...EVM_CHAINS, 'solana'];
 
 /** Expected DEX counts per chain */
 const EXPECTED_DEX_COUNTS: Record<string, number> = {
-  arbitrum: 9,
+  arbitrum: 10,  // Phase 4: +1 (Uniswap V2)
   bsc: 8,
-  base: 7,
+  base: 8,       // Phase 4: +1 (PancakeSwap V3)
   avalanche: 6,
   polygon: 4,
   fantom: 4,
-  optimism: 3,
+  optimism: 5,   // Phase 4: +2 (Balancer V2, Curve)
   ethereum: 5,
-  zksync: 2,
-  linea: 2,
+  zksync: 4,     // Phase 4: +2 (PancakeSwap V3, SpaceFi)
+  linea: 3,      // Phase 4: +1 (PancakeSwap V3)
   solana: 7,
 };
 
@@ -148,9 +148,9 @@ describe.each(EVM_CHAINS)('%s DEX Configuration', (chain) => {
 describe('Chain-Specific DEX Names', () => {
   it.each([
     ['bsc', ['pancakeswap_v3', 'pancakeswap_v2', 'biswap', 'thena', 'apeswap', 'mdex', 'ellipsis', 'nomiswap']],
-    ['arbitrum', ['uniswap_v3', 'sushiswap', 'camelot_v3', 'trader_joe', 'zyberswap', 'ramses', 'balancer_v2', 'curve', 'chronos']],
-    ['base', ['uniswap_v3', 'aerodrome', 'baseswap', 'sushiswap', 'alienbase', 'swapbased', 'maverick']],
-    ['optimism', ['uniswap_v3', 'velodrome', 'sushiswap']],
+    ['arbitrum', ['uniswap_v3', 'sushiswap', 'camelot_v3', 'trader_joe', 'zyberswap', 'ramses', 'balancer_v2', 'curve', 'chronos', 'uniswap_v2']],
+    ['base', ['uniswap_v3', 'aerodrome', 'baseswap', 'sushiswap', 'alienbase', 'swapbased', 'maverick', 'pancakeswap_v3']],
+    ['optimism', ['uniswap_v3', 'velodrome', 'sushiswap', 'balancer_v2', 'curve']],
     ['avalanche', ['trader_joe_v2', 'pangolin', 'sushiswap', 'platypus', 'gmx', 'kyberswap']],
     ['fantom', ['spookyswap', 'spiritswap', 'equalizer', 'beethoven_x']],
     ['solana', ['jupiter', 'raydium', 'raydium-clmm', 'orca', 'meteora', 'phoenix', 'lifinity']],

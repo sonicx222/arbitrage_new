@@ -6,7 +6,7 @@
  * @see P1-4: Flash loan provider configuration
  */
 
-import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_VAULTS } from './addresses';
+import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, MORPHO_BLUE_POOLS, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_VAULTS } from './addresses';
 
 // =============================================================================
 // SERVICE CONFIGURATIONS
@@ -21,6 +21,14 @@ export const isProduction = process.env.NODE_ENV === 'production' ||
   process.env.RAILWAY_ENVIRONMENT !== undefined ||  // Railway
   process.env.RENDER_SERVICE_NAME !== undefined ||  // Render
   process.env.KOYEB_SERVICE_NAME !== undefined;  // Koyeb
+
+/**
+ * Check if Redis is self-hosted (e.g., on same Oracle ARM instance).
+ * When true, localhost Redis URLs are permitted in production.
+ *
+ * @see docs/reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md Item #1
+ */
+export const isRedisSelfHosted = process.env.REDIS_SELF_HOSTED === 'true';
 
 /**
  * Warn if using localhost defaults in production.
@@ -79,6 +87,8 @@ export const SERVICE_CONFIGS = {
     password: process.env.REDIS_PASSWORD,
     /** Flag indicating if using production Redis (not localhost) */
     isProductionRedis: !isLocalhostUrl(redisUrl),
+    /** Flag indicating self-hosted Redis (localhost is intentional in production) */
+    isSelfHosted: isRedisSelfHosted,
   },
   monitoring: {
     enabled: process.env.MONITORING_ENABLED === 'true',
@@ -109,8 +119,11 @@ export function validateProductionConfig(): void {
   const warnings: string[] = [];
 
   // Redis URL validation - use comprehensive localhost check
-  if (!process.env.REDIS_URL || isLocalhostUrl(process.env.REDIS_URL)) {
-    missingConfigs.push('REDIS_URL (production Redis instance required - localhost not allowed)');
+  // When REDIS_SELF_HOSTED=true, localhost is allowed (self-hosted Redis on same host)
+  if (!process.env.REDIS_URL) {
+    missingConfigs.push('REDIS_URL (Redis connection URL required)');
+  } else if (isLocalhostUrl(process.env.REDIS_URL) && !isRedisSelfHosted) {
+    missingConfigs.push('REDIS_URL (localhost not allowed in production - set REDIS_SELF_HOSTED=true for self-hosted Redis)');
   }
 
   // Wallet credentials validation
@@ -224,10 +237,13 @@ export function validateProductionConfig(): void {
  * - All use ethers.js for transaction submission
  * - Support flash loans, MEV protection, gas estimation
  *
- * **Solana (Detection Only)**:
+ * **Solana**:
  * - ✅ Opportunity detection supported (Partition 4)
  * - ✅ Execution supported via Jupiter V6 + Jito bundles (Phase 3 #29)
  * - Requires: @solana/web3.js, SPL tokens, Jito bundles
+ * - NOTE: Solana is NOT in this set because it uses a separate execution path
+ *   (SolanaExecutionStrategy, not BaseExecutionStrategy). Inclusion here would
+ *   mislead callers of isExecutionSupported() when FEATURE_SOLANA_EXECUTION is off.
  * - See: docs/architecture/ARCHITECTURE_V2.md Section 4.7
  *
  * @see isExecutionSupported() for validation helper
@@ -248,7 +264,9 @@ export const SUPPORTED_EXECUTION_CHAINS = new Set([
   'scroll',
   'mantle',
   'mode',
-  'solana',
+  // M6 FIX: 'solana' removed — Solana uses SolanaExecutionStrategy (not BaseExecutionStrategy),
+  // which routes via strategy-factory.ts (opportunity.chain === 'solana') and never calls
+  // isExecutionSupported(). Including 'solana' here returned true regardless of FEATURE_SOLANA_EXECUTION.
 ]);
 
 /**
@@ -262,8 +280,8 @@ export const SUPPORTED_EXECUTION_CHAINS = new Set([
  *
  * @example
  * ```typescript
- * if (!isExecutionSupported('solana')) {
- *   throw new Error('Solana execution not implemented');
+ * if (!isExecutionSupported(opportunity.chain)) {
+ *   throw new Error(`Execution not supported for chain: ${opportunity.chain}`);
  * }
  * ```
  */
@@ -452,6 +470,33 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
 };
 
 /**
+ * Morpho Blue flash loan providers — zero-fee alternative.
+ *
+ * Morpho Blue provides EIP-3156 compliant flash loans with zero fees.
+ * These are separate from FLASH_LOAN_PROVIDERS because each chain can only
+ * have one default provider. Morpho is used as an alternative when selected
+ * by the flash loan aggregator or preferred protocol logic.
+ *
+ * @see https://docs.morpho.org/morpho/contracts/addresses
+ */
+export const MORPHO_FLASH_LOAN_PROVIDERS: Record<string, {
+  address: string;
+  protocol: 'morpho';
+  fee: number;
+}> = {
+  ethereum: {
+    address: MORPHO_BLUE_POOLS.ethereum, // 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb
+    protocol: 'morpho',
+    fee: 0  // Zero-fee flash loans
+  },
+  base: {
+    address: MORPHO_BLUE_POOLS.base, // 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb
+    protocol: 'morpho',
+    fee: 0  // Zero-fee flash loans
+  },
+};
+
+/**
  * Check if a chain supports traditional flash loans.
  * Solana uses Jupiter atomic swaps instead of flash loans.
  */
@@ -544,3 +589,54 @@ export function getMultiPathQuoterAddress(chainId: string): string | undefined {
   }
   return address;
 }
+
+// =============================================================================
+// R2 TRADE LOG UPLOAD CONFIGURATION (Batch 6: Item 20)
+// Cloudflare R2 storage for durable trade log retention
+// =============================================================================
+
+/**
+ * Cloudflare R2 upload configuration for trade log durability.
+ *
+ * When enabled, the execution engine uploads daily JSONL trade logs to R2
+ * for long-term retention beyond local disk. Uses S3-compatible API with
+ * AWS Signature V4 authentication (native crypto, no AWS SDK).
+ *
+ * Configuration is read from environment variables:
+ * - R2_ENABLED: Set to 'true' to enable uploads (default: false)
+ * - R2_BUCKET: Bucket name (default: 'arbitrage-trades')
+ * - R2_ACCOUNT_ID: Cloudflare account ID (required if enabled)
+ * - R2_ACCESS_KEY_ID: S3-compatible access key (required if enabled)
+ * - R2_SECRET_ACCESS_KEY: S3-compatible secret key (required if enabled)
+ * - R2_ENDPOINT: Custom endpoint URL (optional, defaults to R2 standard endpoint)
+ * - R2_PREFIX: Object key prefix (default: 'trades/')
+ *
+ * @see shared/core/src/persistence/r2-uploader.ts
+ * @see services/execution-engine/src/engine.ts - Scheduling consumer
+ */
+/**
+ * Fast Lane configuration (Item 12: Coordinator Bypass).
+ *
+ * When FEATURE_FAST_LANE=true, opportunities exceeding both confidence
+ * and profit thresholds are published to stream:fast-lane in parallel
+ * with the normal stream:opportunities path.
+ *
+ * @see shared/config/src/feature-flags.ts FEATURE_FLAGS.useFastLane
+ * @see services/execution-engine/src/consumers/fast-lane.consumer.ts
+ */
+export const FAST_LANE_CONFIG = {
+  /** Minimum confidence score to qualify for fast lane (0-1) */
+  minConfidence: parseFloat(process.env.FAST_LANE_MIN_CONFIDENCE ?? '0.90'),
+  /** Minimum expected profit in USD to qualify for fast lane */
+  minProfitUsd: parseFloat(process.env.FAST_LANE_MIN_PROFIT_USD ?? '100'),
+};
+
+export const R2_CONFIG = {
+  enabled: process.env.R2_ENABLED === 'true',
+  bucket: process.env.R2_BUCKET ?? 'arbitrage-trades',
+  accountId: process.env.R2_ACCOUNT_ID ?? '',
+  accessKeyId: process.env.R2_ACCESS_KEY_ID ?? '',
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? '',
+  endpoint: process.env.R2_ENDPOINT,
+  prefix: process.env.R2_PREFIX ?? 'trades/',
+};

@@ -21,6 +21,7 @@ import {
   SimulationMetrics,
   SimulationProviderHealth,
   SimulationProviderType,
+  SimulationTier,
   SIMULATION_DEFAULTS,
   createCancellableTimeout,
   isDeprecatedChain,
@@ -134,6 +135,9 @@ export class SimulationService implements ISimulationService {
       cacheTtlMs: options.config?.cacheTtlMs ?? SIMULATION_DEFAULTS.cacheTtlMs,
       // Fix 10.4: Added configurable health check interval
       healthCheckIntervalMs: options.config?.healthCheckIntervalMs ?? SIMULATION_DEFAULTS.healthCheckIntervalMs,
+      // Simulation tiering thresholds
+      noSimulationThreshold: options.config?.noSimulationThreshold ?? SIMULATION_DEFAULTS.noSimulationThreshold,
+      lightSimulationThreshold: options.config?.lightSimulationThreshold ?? SIMULATION_DEFAULTS.lightSimulationThreshold,
     };
 
     // Fix 7.2: Validate provider priority configuration
@@ -257,7 +261,7 @@ export class SimulationService implements ISimulationService {
    * - Solana chains are routed to HeliusSimulationProvider automatically
    * - EVM chains use Tenderly/Alchemy/Local providers with health-based selection
    */
-  async simulate(request: SimulationRequest): Promise<SimulationResult> {
+  async simulate(request: SimulationRequest, restrictToProviders?: SimulationProviderType[]): Promise<SimulationResult> {
     if (this.stopped) {
       return this.createErrorResult('Simulation service is stopped');
     }
@@ -294,7 +298,7 @@ export class SimulationService implements ISimulationService {
     if (isSolanaChain(request.chain)) {
       simulationPromise = this.executeSolanaSimulation(request, cacheKey);
     } else {
-      simulationPromise = this.executeSimulationWithFallback(request, cacheKey);
+      simulationPromise = this.executeSimulationWithFallback(request, cacheKey, restrictToProviders);
     }
 
     // Fix 5.1: Store in pending map for request coalescing
@@ -351,10 +355,16 @@ export class SimulationService implements ISimulationService {
    */
   private async executeSimulationWithFallback(
     request: SimulationRequest,
-    cacheKey: string
+    cacheKey: string,
+    restrictToProviders?: SimulationProviderType[]
   ): Promise<SimulationResult> {
-    // Get ordered list of providers to try
-    const orderedProviders = this.getOrderedProviders();
+    // Get ordered list of providers to try, optionally filtered by restriction
+    let orderedProviders = this.getOrderedProviders();
+
+    if (restrictToProviders && restrictToProviders.length > 0) {
+      const allowed = new Set(restrictToProviders);
+      orderedProviders = orderedProviders.filter(p => allowed.has(p.type));
+    }
 
     if (orderedProviders.length === 0) {
       return this.createErrorResult('No simulation providers available');
@@ -439,6 +449,44 @@ export class SimulationService implements ISimulationService {
     }
 
     return true;
+  }
+
+  /**
+   * Determine the simulation tier based on expected profit and opportunity age.
+   *
+   * Tiering reduces simulation overhead for small/medium trades while maintaining
+   * full protection for large trades:
+   * - 'none': Profit < noSimulationThreshold or no providers or time-critical
+   * - 'light': Profit >= noSimulationThreshold but < lightSimulationThreshold (local eth_call only)
+   * - 'full': Profit >= lightSimulationThreshold (all providers with fallback)
+   */
+  getSimulationTier(expectedProfit: number, opportunityAge: number): SimulationTier {
+    // No providers available
+    if (!this.hasEnabledProvider()) {
+      return 'none';
+    }
+
+    // Time-critical bypass
+    if (this.config.bypassForTimeCritical) {
+      if (opportunityAge > this.config.timeCriticalThresholdMs) {
+        return 'none';
+      }
+    }
+
+    // Below minimum threshold — skip entirely
+    const noThreshold = this.config.noSimulationThreshold ?? SIMULATION_DEFAULTS.noSimulationThreshold;
+    if (expectedProfit < noThreshold) {
+      return 'none';
+    }
+
+    // Between no and light thresholds — local only
+    const lightThreshold = this.config.lightSimulationThreshold ?? SIMULATION_DEFAULTS.lightSimulationThreshold;
+    if (expectedProfit < lightThreshold) {
+      return 'light';
+    }
+
+    // Above light threshold — full simulation
+    return 'full';
   }
 
   /**

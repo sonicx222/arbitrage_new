@@ -40,7 +40,7 @@ The current swap event processing:
 3. **Provides limited value**: Most swaps don't create arbitrage
 4. **Doesn't extract intelligence**: Raw events, no pattern analysis
 
-At scale (9+ chains, 50+ DEXs), swap events would consume the entire Upstash quota.
+At scale (9+ chains, 50+ DEXs), swap events would consume significant Redis resources (the entire Upstash quota on legacy deployments).
 
 ## Decision
 

@@ -31,7 +31,7 @@ import {
   BRIDGE_DEFAULTS,
 } from './types';
 import type { Logger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { AsyncMutex } from '../async/async-mutex';
 
 // =============================================================================

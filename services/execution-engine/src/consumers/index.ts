@@ -10,6 +10,10 @@
 export { OpportunityConsumer } from './opportunity.consumer';
 export type { OpportunityConsumerConfig, PendingMessageInfo } from './opportunity.consumer';
 
+// Item 12: Fast lane consumer (coordinator bypass)
+export { FastLaneConsumer } from './fast-lane.consumer';
+export type { FastLaneConsumerConfig, FastLaneConsumerStats } from './fast-lane.consumer';
+
 // Re-export validation error code and constants from types for testing
 export { ValidationErrorCode, DLQ_STREAM } from '../types';
 

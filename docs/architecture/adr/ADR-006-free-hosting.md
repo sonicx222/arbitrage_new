@@ -1,7 +1,7 @@
 # ADR-006: Free Hosting Provider Selection and Allocation
 
 ## Status
-**Accepted** | 2025-01-10
+**Accepted** | 2025-01-10 | Updated 2026-02-24 (Redis self-hosted)
 
 ## Context
 
@@ -42,7 +42,7 @@ Allocate services across providers to maximize resource utilization and reliabil
 | **Coordinator Primary** | Koyeb | US-East | 256MB | Dashboard, health |
 | **Coordinator Standby** | GCP | US-Central | 1GB | Failover |
 | **Dashboard** | Vercel | Edge | Serverless | Global CDN |
-| **Redis** | Upstash | Global | 10K/day | Event backbone |
+| **Redis** | Self-hosted (Oracle ARM) | Per-instance (localhost) | No limit | Event backbone |
 | **Database** | MongoDB Atlas | Global | 512MB | Opportunity logs |
 
 ### Resource Utilization
@@ -94,16 +94,19 @@ Fly.io offers **low-latency Singapore deployment** with simple Dockerfile.
 
 Railway provides **excellent DX** and US-West coverage.
 
-### Why Upstash for Redis?
+### Why Self-hosted Redis on Oracle ARM?
 
-| Factor | Upstash | Redis Cloud | Self-hosted |
-|--------|---------|-------------|-------------|
-| Free tier | 10K/day | 30MB | Consumes VM resources |
-| Global replication | Yes | No | Manual |
+| Factor | Self-hosted (Oracle ARM) | Upstash | Redis Cloud |
+|--------|--------------------------|---------|-------------|
+| Command limit | None | 10K/day | 30MB |
+| RTT latency | <0.1ms (localhost) | 5-20ms (global) | 5-15ms |
 | Streams support | Yes | Yes | Yes |
-| Serverless | Yes | No | No |
+| Cost | $0 (uses Oracle free tier) | $0 | $0 |
+| Persistence | AOF + RDB | Managed | Managed |
 
-Upstash offers **global, serverless Redis** with Streams support.
+Self-hosted Redis 7 on Oracle ARM eliminates the Upstash 10K commands/day limit and reduces Redis RTT from 5-20ms to <0.1ms, recovering 20-40ms on the hot path. Redis runs as a Docker sidecar on each Oracle ARM instance with `REDIS_SELF_HOSTED=true`.
+
+> **Historical note:** Upstash was the original Redis provider. The backup plan (self-host Redis on Oracle) was activated in 2026-02-24 as a performance optimization, not due to Upstash failure. Upstash remains a viable fallback.
 
 ## Consequences
 
@@ -132,10 +135,9 @@ If any provider removes free tier:
 
 | Provider Lost | Backup Plan |
 |---------------|-------------|
-| Oracle Cloud | Move to GCP + Azure free tiers |
+| Oracle Cloud | Move to GCP + Azure free tiers; Redis to Upstash |
 | Fly.io | Move to Render + Railway |
 | Railway | Move to Render + Koyeb |
-| Upstash | Self-host Redis on Oracle |
 | Koyeb | Move to Render |
 
 ## Provider-Specific Notes
@@ -155,10 +157,13 @@ If any provider removes free tier:
 - ~500 compute hours
 - Excellent for always-on services
 
-### Upstash
-- 10K commands/day is firm limit
-- Commands reset at midnight UTC
-- Use batching to stay under limit
+### Redis (Self-hosted on Oracle ARM)
+- Deployed as Docker sidecar on each ARM instance (512MB allocation)
+- AOF persistence with everysec fsync, RDB snapshots
+- Dangerous commands (KEYS, FLUSHDB, FLUSHALL, DEBUG) renamed/disabled
+- Bound to localhost only (no external access)
+- Health checks via `redis-cli ping`
+- Legacy Upstash option available as fallback (10K commands/day limit)
 
 ## Alternatives Considered
 

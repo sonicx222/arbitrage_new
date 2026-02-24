@@ -10,18 +10,12 @@ import { Router } from 'express';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import type { CoordinatorStateProvider, SystemMetrics, Alert } from '../../src/api/types';
 
-// Mock @arbitrage/security to bypass auth in tests
+// Mock @arbitrage/security to bypass auth and validation in tests
 jest.mock('@arbitrage/security', () => ({
   apiAuth: jest.fn().mockReturnValue((_req: any, _res: any, next: any) => next()),
   apiAuthorize: jest.fn().mockReturnValue((_req: any, _res: any, next: any) => next()),
-  isAuthEnabled: jest.fn().mockReturnValue(false)
-}));
-
-// Mock @arbitrage/core for ValidationMiddleware
-jest.mock('@arbitrage/core', () => ({
-  ValidationMiddleware: {
-    validateHealthCheck: jest.fn((_req: any, _res: any, next: any) => next())
-  }
+  isAuthEnabled: jest.fn().mockReturnValue(false),
+  validateHealthRequest: jest.fn((_req: any, _res: any, next: any) => next())
 }));
 
 // Mock express-rate-limit for admin routes

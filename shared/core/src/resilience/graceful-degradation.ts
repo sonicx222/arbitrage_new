@@ -5,8 +5,8 @@
 // This aligns with ADR-007 which defines the canonical degradation levels.
 
 import { createLogger } from '../logger';
-import { getRedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { getRedisClient } from '../redis/client';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 import { dualPublish as dualPublishUtil } from './dual-publish';
 // S4.1.3-FIX: Import canonical DegradationLevel enum from cross-region-health (ADR-007)
 import { DegradationLevel } from '../monitoring/cross-region-health';

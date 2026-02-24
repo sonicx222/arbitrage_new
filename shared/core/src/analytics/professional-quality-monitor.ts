@@ -3,8 +3,8 @@
 // This is the single most important metric for measuring system professionalism
 
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { getRedisClient, RedisClient } from '../redis';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { getRedisClient, RedisClient } from '../redis/client';
 
 const logger = createLogger('professional-quality-monitor');
 

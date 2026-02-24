@@ -2,9 +2,9 @@
 // Automatically detects failures and orchestrates recovery
 
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { getRedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { getRedisClient } from '../redis/client';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 import { dualPublish as dualPublishUtil } from './dual-publish';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
 // P3-2 FIX: Import unified ServiceHealth from shared types

@@ -348,7 +348,7 @@ resource "oci_core_instance" "asia_fast_partition" {
       region_id         = "asia-southeast1"
       health_port       = var.partition_asia_fast.health_port
       memory_mb         = var.partition_asia_fast.memory_mb
-      redis_url         = var.redis_url
+      redis_password    = var.redis_password
       log_level         = var.log_level
       docker_image      = var.docker_image_asia_fast
       # Asia-fast partition chains
@@ -412,7 +412,7 @@ resource "oci_core_instance" "high_value_partition" {
       region_id         = "us-east1"
       health_port       = var.partition_high_value.health_port
       memory_mb         = var.partition_high_value.memory_mb
-      redis_url         = var.redis_url
+      redis_password    = var.redis_password
       log_level         = var.log_level
       docker_image      = var.docker_image_high_value
       # Not used for high-value partition
@@ -466,9 +466,9 @@ resource "oci_core_instance" "cross_chain_detector" {
   metadata = {
     ssh_authorized_keys = var.ssh_public_key
     user_data = base64encode(templatefile("${path.module}/scripts/cloud-init-cross-chain.yaml", {
-      redis_url    = var.redis_url
-      log_level    = var.log_level
-      docker_image = var.docker_image_cross_chain
+      redis_password = var.redis_password
+      log_level      = var.log_level
+      docker_image   = var.docker_image_cross_chain
     }))
   }
 

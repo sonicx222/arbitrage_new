@@ -6,7 +6,7 @@
  * - Fee structures
  * - Priority classifications: [C] Critical, [H] High, [M] Medium
  *
- * Total: 71 DEXes across 15 chains (50 EVM + 7 Solana + 14 Emerging L2s)
+ * Total: 78 DEXes across 15 chains (57 EVM + 7 Solana + 14 Emerging L2s)
  *
  * @see S2.2.1: Arbitrum DEX expansion (6→9)
  * @see S2.2.2: Base DEX expansion (5→7)
@@ -24,11 +24,11 @@ const BPS_DENOMINATOR = 10000;
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
 // =============================================================================
-// DEX CONFIGURATIONS - 71 DEXs
+// DEX CONFIGURATIONS - 78 DEXs
 // [C] = Critical, [H] = High Priority, [M] = Medium Priority
 // =============================================================================
 export const DEXES: Record<string, Dex[]> = {
-  // Arbitrum: 9 DEXs (highest fragmentation) - S2.2.1 expanded
+  // Arbitrum: 10 DEXs (highest fragmentation) - S2.2.1 + Phase 4 expanded
   arbitrum: [
     {
       name: 'uniswap_v3',       // [C]
@@ -95,6 +95,14 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cb98CB5B0722', // Chronos Factory
       routerAddress: '0xE708aA9E887980750C040a6A2Cb901c37Aa34f3b',  // Chronos Router
       feeBps: bps(30),
+    },
+    // === Phase 4: New DEXs (9 → 10) ===
+    {
+      name: 'uniswap_v2',       // [H] - V2 AMM, directly compatible with IDexRouter
+      chain: 'arbitrum',
+      factoryAddress: '0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9', // Uniswap V2 Factory on Arbitrum
+      routerAddress: '0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24',  // Uniswap V2 Router on Arbitrum
+      feeBps: bps(30),
     }
   ],
   // BSC: 8 DEXs (highest volume) - S2.2.3 expanded from 5 → 8
@@ -157,7 +165,7 @@ export const DEXES: Record<string, Dex[]> = {
       feeBps: bps(10),  // 0.1% competitive fee
     }
   ],
-  // Base: 7 DEXs (fastest growing) - S2.2.2 expanded from 5 → 7
+  // Base: 8 DEXs (fastest growing) - S2.2.2 + Phase 4 expanded
   base: [
     {
       name: 'uniswap_v3',       // [C]
@@ -208,6 +216,15 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7',
       routerAddress: '0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7',
       feeBps: bps(30),
+    },
+    // === Phase 4: PancakeSwap V3 ===
+    // Factory verified in shared/config/src/addresses.ts:125
+    {
+      name: 'pancakeswap_v3',   // [H] - Multi-chain V3 AMM
+      chain: 'base',
+      factoryAddress: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // PancakeSwap V3 Factory
+      routerAddress: '0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86',  // PancakeSwap V3 SmartRouter on Base
+      feeBps: bps(25),
     }
   ],
   // Polygon: 4 DEXs (low gas)
@@ -241,7 +258,7 @@ export const DEXES: Record<string, Dex[]> = {
       feeBps: bps(20),
     }
   ],
-  // Optimism: 3 DEXs (NEW - Phase 1)
+  // Optimism: 5 DEXs — expanded from 3 → 5 (Phase 4)
   optimism: [
     {
       name: 'uniswap_v3',       // [C]
@@ -263,6 +280,23 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0xFbc12984689e5f15626Bad03Ad60160Fe98B303C',
       routerAddress: '0x4C5D5234f232BD2D76B96aA33F5AE4FCF0E4BFAb',
       feeBps: bps(30),
+    },
+    // === Phase 4: New DEXs (3 → 5) ===
+    // Balancer V2 uses Vault model - verified in shared/config/src/addresses.ts:169
+    {
+      name: 'balancer_v2',      // [H] - Major liquidity protocol, 0% flash loan fees
+      chain: 'optimism',
+      factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault
+      routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',  // Vault is also router for swaps
+      feeBps: bps(30),  // Variable fees per pool, using default
+      enabled: true  // ENABLED: Uses BalancerV2Adapter from dex-adapters
+    },
+    {
+      name: 'curve',            // [H] - Major stablecoin DEX
+      chain: 'optimism',
+      factoryAddress: '0x2db0E83599a91b508Ac268a6197b8B14F5e72840', // Curve Factory on Optimism
+      routerAddress: '0xF0d4c12A5768D806021F80a262B4d39d26C58b8D',  // Curve Router (multi-chain)
+      feeBps: bps(4),  // 0.04% typical for stablecoin pools
     }
   ],
   // Ethereum: 5 DEXs (selective - large arbs only) — Phase 0 Item 3: expanded from 2 → 5
@@ -393,7 +427,7 @@ export const DEXES: Record<string, Dex[]> = {
       enabled: true  // ENABLED: Uses BalancerV2Adapter from dex-adapters
     }
   ],
-  // zkSync Era: 2 DEXs
+  // zkSync Era: 4 DEXs — expanded from 2 → 4 (Phase 4)
   zksync: [
     {
       name: 'syncswap',         // [C] - Largest on zkSync
@@ -408,9 +442,25 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0x40be1cBa6C5B47cDF9da7f963B6F761F4C60627D',
       routerAddress: '0x8B791913eB07C32779a16750e3868aA8495F5964',
       feeBps: bps(30),
+    },
+    // === Phase 4: New DEXs (2 → 4) ===
+    // PancakeSwap V3 factory verified in shared/config/src/addresses.ts:124
+    {
+      name: 'pancakeswap_v3',   // [H] - Multi-chain V3 AMM
+      chain: 'zksync',
+      factoryAddress: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB', // PancakeSwap V3 Factory (zkSync)
+      routerAddress: '0xf8b59f3c3Ab33200ec80a8A58b2aA5F5D2a8944C',  // PancakeSwap V3 SmartRouter (zkSync)
+      feeBps: bps(25),
+    },
+    {
+      name: 'spacefi',          // [M] - V2-compatible DEX on zkSync
+      chain: 'zksync',
+      factoryAddress: '0x0700Fb51560CfC8F896B2c812499D17c5B0bF6A7', // SpaceFi Factory
+      routerAddress: '0xbE7D1FD1f6748bbDefC4fbaCafBb11C6Fc506d1d',  // SpaceFi Router
+      feeBps: bps(30),
     }
   ],
-  // Linea: 2 DEXs
+  // Linea: 3 DEXs — expanded from 2 → 3 (Phase 4)
   linea: [
     {
       name: 'syncswap',         // [C] - Multi-chain presence
@@ -425,6 +475,15 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',
       routerAddress: '0x1d0188c4B276A09366D05d6Be06aF61a73bC7535', // Velocore Vault on Linea
       feeBps: bps(30),
+    },
+    // === Phase 4: PancakeSwap V3 ===
+    // Factory verified in shared/config/src/addresses.ts:127
+    {
+      name: 'pancakeswap_v3',   // [H] - Multi-chain V3 AMM
+      chain: 'linea',
+      factoryAddress: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // PancakeSwap V3 Factory
+      routerAddress: '0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86',  // PancakeSwap V3 SmartRouter on Linea
+      feeBps: bps(25),
     }
   ],
   // =============================================================================

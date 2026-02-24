@@ -16,7 +16,7 @@
  */
 
 import { ethers } from 'ethers';
-import { clearTimeoutSafe } from '../lifecycle-utils';
+import { clearTimeoutSafe } from '../async/lifecycle-utils';
 import { createLogger } from '../logger';
 import { Http2SessionPool } from './http2-session-pool';
 

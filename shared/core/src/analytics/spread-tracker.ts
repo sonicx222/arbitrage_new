@@ -63,6 +63,13 @@ interface SpreadState {
   previousSignal: SpreadSignal;
   /** Whether we're currently in a position (had an entry signal) */
   inPosition: boolean;
+  /**
+   * M1 FIX: Persists from inPosition true→false transition until getSignal() consumes it.
+   * Solves the gradual mean-reversion case where spread crosses back through multiple
+   * updates (outside → between band and middle → middle), which previously lost the
+   * exit signal because prevWasOutside was false at middle-crossing time.
+   */
+  pendingExit: boolean;
   /** Cached Bollinger Bands (invalidated on each addSpread) */
   cachedBands: BollingerBands | undefined;
   /** Last access timestamp for LRU eviction */
@@ -129,6 +136,7 @@ export class SpreadTracker {
         sampleCount: 0,
         previousSignal: 'none',
         inPosition: false,
+        pendingExit: false,
         cachedBands: undefined,
         lastAccessTime: Date.now(),
       };
@@ -149,6 +157,9 @@ export class SpreadTracker {
     if (state.cachedBands) {
       if (spread < state.cachedBands.lower || spread > state.cachedBands.upper) {
         state.inPosition = true;
+        // Clear any stale pendingExit from a previous position — a new entry
+        // supersedes any unconsumed exit signal.
+        state.pendingExit = false;
       }
       // Check for exit: spread crossed back through middle
       if (state.inPosition) {
@@ -159,6 +170,9 @@ export class SpreadTracker {
             (prevSpread > state.cachedBands.middle && spread <= state.cachedBands.middle);
           if (crossedMiddle) {
             state.inPosition = false;
+            // M1 FIX: Set pendingExit so getSignal() can return 'exit' even if
+            // the previous spread was between band and middle (gradual reversion).
+            state.pendingExit = true;
           }
         }
       }
@@ -192,17 +206,12 @@ export class SpreadTracker {
       return 'entry_short';
     }
 
-    // Exit signal: position was closed via middle-band crossing in addSpread().
-    // inPosition transitions from true→false only when spread crosses middle,
-    // so check if that transition just happened (previous spread was outside bands).
-    if (!state.inPosition) {
-      const prevSpread = this.getPreviousSpread(state);
-      if (prevSpread !== undefined) {
-        const prevWasOutside = prevSpread < bands.lower || prevSpread > bands.upper;
-        if (prevWasOutside) {
-          return 'exit';
-        }
-      }
+    // M1 FIX: Exit signal uses pendingExit flag set by addSpread() on middle crossing.
+    // This captures both direct (outside → middle) and gradual (outside → between → middle)
+    // mean-reversion patterns, where the old prevWasOutside check would miss the latter.
+    if (state.pendingExit) {
+      state.pendingExit = false;
+      return 'exit';
     }
 
     return 'none';

@@ -22,8 +22,8 @@ import {
   type SwapEvent,
   type MessageEvent,
 } from '@arbitrage/types';
-import { RedisStreamsClient, type StreamBatcher } from '../redis-streams';
-import type { RedisClient } from '../redis';
+import { RedisStreamsClient, type StreamBatcher } from '../redis/streams';
+import type { RedisClient } from '../redis/client';
 import type { ServiceLogger } from '../logging/types';
 import type { SwapEventFilter, WhaleAlert, VolumeAggregate } from '../analytics/swap-event-filter';
 // R7 Consolidation: Use shared retry utility

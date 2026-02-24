@@ -14,9 +14,9 @@
 // all consumers are reading from streams.
 
 import { createLogger } from '../logger';
-import { clearIntervalSafe, stopAndNullify } from '../lifecycle-utils';
-import { getRedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient, StreamConsumer, ConsumerGroupConfig } from '../redis-streams';
+import { clearIntervalSafe, stopAndNullify } from '../async/lifecycle-utils';
+import { getRedisClient } from '../redis/client';
+import { getRedisStreamsClient, RedisStreamsClient, StreamConsumer, ConsumerGroupConfig } from '../redis/streams';
 import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getEnhancedHealthMonitor } from '../monitoring/enhanced-health-monitor';

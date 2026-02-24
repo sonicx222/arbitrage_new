@@ -9,7 +9,7 @@
  *
  * Supported AMM models:
  * - Constant Product (x * y = k) — Uniswap V2 style (default)
- * - Concentrated Liquidity — Uniswap V3 style (single-tick approximation)
+ * - Concentrated Liquidity — Uniswap V3 style (single-tick or multi-tick traversal)
  * - StableSwap — Curve style (Newton's method for StableSwap invariant)
  *
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding T3.15
@@ -103,6 +103,8 @@ export interface PoolLiquidity {
   liquidity?: bigint;
   /** Tick spacing for fee tier (1, 10, 60, 200) */
   tickSpacing?: number;
+  /** Initialized tick liquidity data for multi-tick swap simulation */
+  ticks?: TickLiquidityData[];
   // --- Curve StableSwap fields ---
   /** Curve amplification parameter A (typically 100-2000) */
   amplificationParameter?: number;
@@ -112,6 +114,8 @@ export interface PoolLiquidity {
   inputIndex?: number;
   /** Index of output token in reserves array (for multi-token StableSwap) */
   outputIndex?: number;
+  /** Token decimals for each reserve in order (for multi-token StableSwap with mixed decimals, e.g. [18, 6, 6] for DAI/USDC/USDT) */
+  tokenDecimals?: number[];
 }
 
 /**
@@ -185,6 +189,22 @@ export interface LiquidityAnalyzerStats {
   poolEvictions: number;
 }
 
+/**
+ * Tick liquidity data for V3 multi-tick swap simulation.
+ *
+ * Each entry represents a tick boundary with the net liquidity change
+ * that occurs when the price crosses that tick. Used by the multi-tick
+ * swap model to accurately simulate slippage across tick boundaries.
+ *
+ * @see calculateV3SwapOutputMultiTick
+ */
+export interface TickLiquidityData {
+  /** Tick index (e.g., -887220 to 887220 for Uniswap V3) */
+  tickIndex: number;
+  /** Signed net liquidity: + when crossing upward, - when crossing downward */
+  liquidityNet: bigint;
+}
+
 // =============================================================================
 // Default Configuration
 // =============================================================================
@@ -210,6 +230,7 @@ export class LiquidityDepthAnalyzer {
   private config: LiquidityDepthConfig;
   private pools: Map<string, PoolLiquidity> = new Map();
   private depthCache: Map<string, { analysis: DepthAnalysis; timestamp: number }> = new Map();
+  private tickMapCache: Map<string, { ticks: TickLiquidityData[]; timestamp: number }> = new Map();
   private stats = {
     analysisCount: 0,
     totalAnalysisTimeMs: 0,
@@ -286,6 +307,7 @@ export class LiquidityDepthAnalyzer {
     }
 
     this.depthCache.delete(pool.poolAddress);
+    this.tickMapCache.delete(pool.poolAddress);
   }
 
   /**
@@ -477,6 +499,7 @@ export class LiquidityDepthAnalyzer {
   reset(): void {
     this.pools.clear();
     this.depthCache.clear();
+    this.tickMapCache.clear();
     this.stats = {
       analysisCount: 0,
       totalAnalysisTimeMs: 0,
@@ -548,6 +571,18 @@ export class LiquidityDepthAnalyzer {
           });
           return this.calculateSwapOutput(amountIn, reserveIn, reserveOut, pool.feeBps);
         }
+        // Use multi-tick model when tick data is available
+        if (pool.ticks != null && pool.ticks.length > 0) {
+          return this.calculateV3SwapOutputMultiTick(
+            amountIn,
+            pool.sqrtPriceX96,
+            pool.liquidity,
+            pool.ticks,
+            pool.feeBps,
+            direction,
+            pool.poolAddress
+          );
+        }
         return this.calculateV3SwapOutput(
           amountIn,
           pool.sqrtPriceX96,
@@ -571,7 +606,8 @@ export class LiquidityDepthAnalyzer {
             pool.inputIndex,
             pool.outputIndex,
             pool.feeBps,
-            pool.amplificationParameter
+            pool.amplificationParameter,
+            pool.tokenDecimals
           );
         }
         // 2-token pool: use reserve0/reserve1 as array
@@ -677,6 +713,238 @@ export class LiquidityDepthAnalyzer {
   }
 
   /**
+   * V3 Concentrated Liquidity swap calculation with multi-tick traversal.
+   *
+   * Unlike the single-tick approximation, this method simulates crossing
+   * tick boundaries where liquidity changes. For each tick range:
+   * 1. Compute the max input consumable within the current tick range
+   * 2. If remaining input fits, compute final output and break
+   * 3. Otherwise, consume all liquidity to the boundary, update L, continue
+   *
+   * This produces accurate slippage estimates for large trades that cross
+   * multiple tick boundaries where liquidity providers have different positions.
+   *
+   * Falls back to single-tick if tick data is stale (>30s) or malformed.
+   *
+   * @param amountIn - Input token amount (18-decimal scaled BigInt)
+   * @param sqrtPriceX96 - Current sqrt(price) in Q64.96 format
+   * @param liquidity - Active liquidity L at current tick
+   * @param ticks - Sorted tick liquidity data from pool
+   * @param feeBps - Fee in basis points
+   * @param direction - 'buy' (token0 -> token1) or 'sell' (token1 -> token0)
+   * @param poolAddress - Pool address for tick map cache key
+   * @returns amountOut and priceImpact
+   *
+   * @see https://uniswap.org/whitepaper-v3.pdf Section 6.2
+   */
+  private calculateV3SwapOutputMultiTick(
+    amountIn: bigint,
+    sqrtPriceX96: bigint,
+    liquidity: bigint,
+    ticks: TickLiquidityData[],
+    feeBps: number,
+    direction: 'buy' | 'sell',
+    poolAddress: string
+  ): { amountOut: bigint; priceImpact: number } {
+    if (amountIn <= 0n || sqrtPriceX96 <= 0n || liquidity <= 0n) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    const Q96 = 1n << 96n;
+
+    // Resolve tick data from cache or pool, enforcing 30s TTL
+    const resolvedTicks = this.resolveTickData(poolAddress, ticks);
+    if (resolvedTicks.length === 0) {
+      // No valid ticks — fall back to single-tick model
+      return this.calculateV3SwapOutput(amountIn, sqrtPriceX96, liquidity, feeBps, direction);
+    }
+
+    // Sort ticks by index ascending
+    const sortedTicks = [...resolvedTicks].sort((a, b) => a.tickIndex - b.tickIndex);
+
+    // Apply fee upfront (same as single-tick model for consistency)
+    const feeMultiplier = BigInt(10000 - feeBps);
+    const amountInAfterFee = (amountIn * feeMultiplier) / 10000n;
+
+    // Compute initial price for price impact calculation
+    const initialVR0 = (liquidity * Q96) / sqrtPriceX96;
+    const initialVR1 = (liquidity * sqrtPriceX96) / Q96;
+    const initialPriceScaled = direction === 'buy'
+      ? (initialVR1 * PRECISION) / initialVR0
+      : (initialVR0 * PRECISION) / initialVR1;
+
+    // Filter ticks relevant to the swap direction
+    // buy (token0 -> token1): price increases, we cross ticks upward (above current price)
+    // sell (token1 -> token0): price decreases, we cross ticks downward (below current price)
+    const currentTick = this.sqrtPriceToTick(sqrtPriceX96);
+
+    let relevantTicks: TickLiquidityData[];
+    if (direction === 'buy') {
+      // Buying token1: sqrtPrice increases, cross ticks above current
+      relevantTicks = sortedTicks.filter(t => t.tickIndex > currentTick);
+    } else {
+      // Selling token1: sqrtPrice decreases, cross ticks below current (reverse order)
+      relevantTicks = sortedTicks.filter(t => t.tickIndex <= currentTick).reverse();
+    }
+
+    let remainingIn = amountInAfterFee;
+    let totalOut = 0n;
+    let currentSqrtPrice = sqrtPriceX96;
+    let currentL = liquidity;
+
+    for (const tick of relevantTicks) {
+      if (remainingIn <= 0n || currentL <= 0n) break;
+
+      // Compute sqrtPrice at the tick boundary
+      const tickSqrtPrice = this.tickToSqrtPriceX96(tick.tickIndex);
+
+      // Compute max input consumable within current tick range
+      // Within a tick range, V3 acts as constant-product on virtual reserves
+      const vr0 = (currentL * Q96) / currentSqrtPrice;
+      const vr1 = (currentL * currentSqrtPrice) / Q96;
+
+      if (vr0 <= 0n || vr1 <= 0n) break;
+
+      // Compute the virtual reserves at the tick boundary
+      const boundaryVr0 = (currentL * Q96) / tickSqrtPrice;
+      const boundaryVr1 = (currentL * tickSqrtPrice) / Q96;
+
+      // Max input to reach tick boundary
+      let maxInputInRange: bigint;
+      let maxOutputInRange: bigint;
+
+      if (direction === 'buy') {
+        // Input is token0, consuming reserve0 up to boundary
+        maxInputInRange = boundaryVr0 > vr0 ? 0n : vr0 - boundaryVr0;
+        maxOutputInRange = boundaryVr1 > vr1 ? boundaryVr1 - vr1 : 0n;
+
+        // Use constant-product math for accuracy within the range
+        if (maxInputInRange <= 0n) {
+          // Boundary is at a higher reserve0 (unusual), skip
+          break;
+        }
+      } else {
+        // Input is token1, consuming reserve1 up to boundary
+        maxInputInRange = boundaryVr1 > vr1 ? 0n : vr1 - boundaryVr1;
+        maxOutputInRange = boundaryVr0 > vr0 ? boundaryVr0 - vr0 : 0n;
+
+        if (maxInputInRange <= 0n) {
+          break;
+        }
+      }
+
+      if (remainingIn <= maxInputInRange) {
+        // Trade fits within current tick range — compute exact output via x*y=k
+        const reserveIn = direction === 'buy' ? vr0 : vr1;
+        const reserveOut = direction === 'buy' ? vr1 : vr0;
+        const numerator = reserveOut * remainingIn;
+        const denominator = reserveIn + remainingIn;
+        if (denominator > 0n) {
+          totalOut += numerator / denominator;
+        }
+        remainingIn = 0n;
+        break;
+      }
+
+      // Consume all liquidity to tick boundary
+      totalOut += maxOutputInRange;
+      remainingIn -= maxInputInRange;
+
+      // Cross the tick: update liquidity
+      if (direction === 'buy') {
+        currentL += tick.liquidityNet;
+      } else {
+        currentL -= tick.liquidityNet;
+      }
+
+      // Guard against negative liquidity (malformed tick data)
+      if (currentL <= 0n) {
+        logger.debug('V3 multi-tick: liquidity depleted after crossing tick', {
+          poolAddress,
+          tickIndex: tick.tickIndex,
+          remainingIn: remainingIn.toString()
+        });
+        break;
+      }
+
+      currentSqrtPrice = tickSqrtPrice;
+    }
+
+    // If there's remaining input and we still have liquidity, compute within last range
+    if (remainingIn > 0n && currentL > 0n) {
+      const vr0 = (currentL * Q96) / currentSqrtPrice;
+      const vr1 = (currentL * currentSqrtPrice) / Q96;
+      const reserveIn = direction === 'buy' ? vr0 : vr1;
+      const reserveOut = direction === 'buy' ? vr1 : vr0;
+
+      if (reserveIn > 0n && reserveOut > 0n) {
+        const numerator = reserveOut * remainingIn;
+        const denominator = reserveIn + remainingIn;
+        if (denominator > 0n) {
+          totalOut += numerator / denominator;
+        }
+      }
+    }
+
+    // Calculate price impact
+    if (totalOut <= 0n) {
+      return { amountOut: 0n, priceImpact: 1 };
+    }
+
+    const effectivePriceScaled = (totalOut * PRECISION) / amountIn;
+    const priceImpact = initialPriceScaled > 0n
+      ? Number(PRECISION - (effectivePriceScaled * PRECISION) / initialPriceScaled) / Number(PRECISION)
+      : 1;
+
+    return { amountOut: totalOut, priceImpact: Math.max(0, priceImpact) };
+  }
+
+  /**
+   * Resolve tick data for a pool, using the tick map cache with 30s TTL.
+   * Returns cached ticks if fresh, otherwise stores the provided ticks.
+   */
+  private resolveTickData(poolAddress: string, ticks: TickLiquidityData[]): TickLiquidityData[] {
+    const now = Date.now();
+    const cached = this.tickMapCache.get(poolAddress);
+
+    if (cached && now - cached.timestamp < this.config.cacheTtlMs) {
+      return cached.ticks;
+    }
+
+    // Store fresh tick data
+    this.tickMapCache.set(poolAddress, { ticks, timestamp: now });
+    return ticks;
+  }
+
+  /**
+   * Convert tick index to sqrtPriceX96 using the V3 formula:
+   *   sqrtPrice = sqrt(1.0001^tick) * 2^96
+   *
+   * Uses floating-point math for the exponentiation, then converts to BigInt.
+   * Precision is sufficient for slippage estimation (not on-chain execution).
+   */
+  private tickToSqrtPriceX96(tick: number): bigint {
+    // sqrtPrice = 1.0001^(tick/2) = e^(tick * ln(1.0001) / 2)
+    const sqrtPrice = Math.pow(1.0001, tick / 2);
+    const Q96 = 2 ** 96;
+    // Convert to Q64.96 format
+    return BigInt(Math.round(sqrtPrice * Q96));
+  }
+
+  /**
+   * Convert sqrtPriceX96 to approximate tick index.
+   * tick = floor(log(price) / log(1.0001))
+   * where price = (sqrtPriceX96 / 2^96)^2
+   */
+  private sqrtPriceToTick(sqrtPriceX96: bigint): number {
+    const Q96 = 2 ** 96;
+    const sqrtPrice = Number(sqrtPriceX96) / Q96;
+    const price = sqrtPrice * sqrtPrice;
+    if (price <= 0) return 0;
+    return Math.floor(Math.log(price) / Math.log(1.0001));
+  }
+
+  /**
    * Curve StableSwap swap calculation using Newton's method.
    *
    * The StableSwap invariant for n=2 tokens:
@@ -700,12 +968,17 @@ export class LiquidityDepthAnalyzer {
   /**
    * Generalized StableSwap output for n-token pools (n=2,3,4).
    *
-   * @param amountIn - Input amount
-   * @param reserves - Array of all pool reserves (length 2, 3, or 4)
+   * When tokenDecimals is provided, reserves are normalized to 18-decimal
+   * precision before running Newton's method (matching Curve's _xp() pattern),
+   * then the output is de-normalized back to the output token's native decimals.
+   *
+   * @param amountIn - Input amount in native token decimals
+   * @param reserves - Array of all pool reserves (length 2, 3, or 4) in native decimals
    * @param inputIdx - Index of input token in reserves array
    * @param outputIdx - Index of output token in reserves array
    * @param feeBps - Fee in basis points
    * @param amplificationParameter - Curve A parameter
+   * @param tokenDecimals - Optional array of decimal counts per token (e.g. [18, 6, 6])
    */
   private calculateStableSwapOutput(
     amountIn: bigint,
@@ -713,7 +986,8 @@ export class LiquidityDepthAnalyzer {
     inputIdx: number,
     outputIdx: number,
     feeBps: number,
-    amplificationParameter: number
+    amplificationParameter: number,
+    tokenDecimals?: number[]
   ): { amountOut: bigint; priceImpact: number } {
     const n = reserves.length;
     if (amountIn <= 0n || n < 2 || inputIdx >= n || outputIdx >= n || inputIdx === outputIdx) {
@@ -723,7 +997,24 @@ export class LiquidityDepthAnalyzer {
       if (r <= 0n) return { amountOut: 0n, priceImpact: 1 };
     }
 
-    // Apply fee
+    // Normalize reserves to 18 decimals if tokenDecimals provided.
+    // This matches Curve's _xp() pattern: all math operates on a common scale.
+    // Note: amountIn from the caller (estimateSlippage) is already in 18-decimal
+    // format via floatToBigInt18(), so only reserves need normalization.
+    // Output stays in 18-decimal format to match the caller's expectation.
+    const needsNormalization = tokenDecimals && tokenDecimals.length === n;
+    let normalizedReserves: bigint[];
+
+    if (needsNormalization) {
+      normalizedReserves = reserves.map((r, i) => {
+        const scale = 18 - tokenDecimals[i];
+        return scale > 0 ? r * 10n ** BigInt(scale) : scale < 0 ? r / 10n ** BigInt(-scale) : r;
+      });
+    } else {
+      normalizedReserves = reserves;
+    }
+
+    // Apply fee (amountIn is already 18-decimal from caller)
     const feeMultiplier = BigInt(10000 - feeBps);
     const amountInWithFee = (amountIn * feeMultiplier) / 10000n;
 
@@ -735,8 +1026,8 @@ export class LiquidityDepthAnalyzer {
       Ann = Ann * nBig;
     }
 
-    // Step 1: Compute D (invariant) from current reserves
-    const D = this.computeStableSwapD(reserves, Ann);
+    // Step 1: Compute D (invariant) from normalized reserves
+    const D = this.computeStableSwapD(normalizedReserves, Ann);
     if (D <= 0n) {
       return { amountOut: 0n, priceImpact: 1 };
     }
@@ -745,25 +1036,24 @@ export class LiquidityDepthAnalyzer {
     const updatedReserves: bigint[] = [];
     for (let i = 0; i < n; i++) {
       if (i === inputIdx) {
-        updatedReserves.push(reserves[i] + amountInWithFee);
+        updatedReserves.push(normalizedReserves[i] + amountInWithFee);
       } else if (i !== outputIdx) {
-        updatedReserves.push(reserves[i]);
+        updatedReserves.push(normalizedReserves[i]);
       }
       // skip outputIdx — that's what we solve for
     }
 
     const newReserveOut = this.computeStableSwapY(updatedReserves, D, Ann, nBig);
-    if (newReserveOut <= 0n || newReserveOut >= reserves[outputIdx]) {
+    if (newReserveOut <= 0n || newReserveOut >= normalizedReserves[outputIdx]) {
       return { amountOut: 0n, priceImpact: 1 };
     }
 
-    // Step 3: amountOut = old_y - new_y
-    const amountOut = reserves[outputIdx] - newReserveOut;
+    // Step 3: amountOut = old_y - new_y (in 18-decimal space)
+    const amountOut = normalizedReserves[outputIdx] - newReserveOut;
 
-    // Calculate price impact
-    const reserveIn = reserves[inputIdx];
-    const reserveOut = reserves[outputIdx];
-    const initialPriceScaled = (reserveOut * PRECISION) / reserveIn;
+    // Calculate price impact using normalized (18-decimal) reserves and amounts.
+    // All values are in the same 18-decimal scale, so ratios are meaningful.
+    const initialPriceScaled = (normalizedReserves[outputIdx] * PRECISION) / normalizedReserves[inputIdx];
     const effectivePriceScaled = (amountOut * PRECISION) / amountIn;
 
     const priceImpact = initialPriceScaled > 0n
@@ -978,6 +1268,7 @@ export class LiquidityDepthAnalyzer {
     for (const key of oldest) {
       this.pools.delete(key);
       this.depthCache.delete(key);
+      this.tickMapCache.delete(key);
       this.stats.poolEvictions++;
     }
 

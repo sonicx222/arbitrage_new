@@ -417,7 +417,7 @@ describe('MevRiskAnalyzer', () => {
         { chain: 'ethereum', expected: 'flashbots' },
         { chain: 'bsc', expected: 'bloxroute' },
         { chain: 'polygon', expected: 'fastlane' },
-        { chain: 'arbitrum', expected: 'sequencer' },
+        { chain: 'arbitrum', expected: 'timeboost' },
         { chain: 'solana', expected: 'jito' },
       ];
 

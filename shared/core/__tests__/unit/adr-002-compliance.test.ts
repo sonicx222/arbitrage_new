@@ -129,7 +129,7 @@ describe('ADR-002: Message Flow Architecture', () => {
     ];
 
     // Check redis-streams.ts or constants
-    const streamsPath = path.join(__dirname, '../../src/redis-streams.ts');
+    const streamsPath = path.join(__dirname, '../../src/redis/streams.ts');
 
     // Read streams file synchronously for this test
     let streamsSource: string;
@@ -149,7 +149,7 @@ describe('ADR-002: Message Flow Architecture', () => {
     // Price updates and swap events need batching
     // Batching is now in the composition-based detector (chain-instance / unified-detector),
     // not the removed base-detector. Check redis-streams.ts for batch support.
-    const streamsPath = path.join(__dirname, '../../src/redis-streams.ts');
+    const streamsPath = path.join(__dirname, '../../src/redis/streams.ts');
     let streamsSource: string;
     try {
       const fsSync = require('fs');

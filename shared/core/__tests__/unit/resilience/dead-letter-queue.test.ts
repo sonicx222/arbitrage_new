@@ -15,7 +15,7 @@ import { DeadLetterQueue, FailedOperation, DLQConfig } from '../../../src/resili
 // clearMocks: true in jest.config.js wipes jest.fn() implementations between tests,
 // so factories use bare jest.fn() and implementations are set in beforeEach.
 
-jest.mock('../../../src/redis', () => {
+jest.mock('../../../src/redis/client', () => {
   // Uses shared factory from @arbitrage/test-utils for consistent Redis mock shape
   const { createInlineRedisMock } = require('@arbitrage/test-utils');
   const _mockRedis = createInlineRedisMock();
@@ -26,7 +26,7 @@ jest.mock('../../../src/redis', () => {
   };
 });
 
-jest.mock('../../../src/redis-streams', () => ({
+jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(),
   resetRedisStreamsInstance: jest.fn(),
   RedisStreamsClient: {
@@ -39,9 +39,9 @@ jest.mock('../../../src/resilience/dual-publish', () => ({
 }));
 
 // Retrieve mock modules for assertions and setup in tests
-const redisMod = require('../../../src/redis') as any;
+const redisMod = require('../../../src/redis/client') as any;
 const mockRedis = redisMod._mockRedis;
-const redisStreamsMod = require('../../../src/redis-streams') as any;
+const redisStreamsMod = require('../../../src/redis/streams') as any;
 const dualPublishMod = require('../../../src/resilience/dual-publish') as any;
 
 describe('DeadLetterQueue', () => {

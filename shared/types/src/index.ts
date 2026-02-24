@@ -22,7 +22,8 @@ export type FlashLoanProtocol =
   | 'pancakeswap_v3'
   | 'spookyswap'
   | 'syncswap'
-  | 'dai_flash_mint';
+  | 'dai_flash_mint'
+  | 'morpho';
 
 export interface Chain {
   id: number;

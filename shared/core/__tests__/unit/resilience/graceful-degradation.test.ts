@@ -40,7 +40,7 @@ jest.mock('../../../src/logger', () => ({
 
 // Mock Redis client - uses shared factory from @arbitrage/test-utils
 // Must create mock INSIDE jest.mock factory (hoisted above module-scope const)
-jest.mock('../../../src/redis', () => {
+jest.mock('../../../src/redis/client', () => {
   const { createInlineRedisMock } = require('@arbitrage/test-utils');
   return {
     getRedisClient: jest.fn(),
@@ -48,7 +48,7 @@ jest.mock('../../../src/redis', () => {
   };
 });
 
-const redisMod = require('../../../src/redis') as any;
+const redisMod = require('../../../src/redis/client') as any;
 const mockRedis = redisMod._mockRedis;
 
 // Mock Redis Streams client
@@ -57,7 +57,7 @@ const mockStreamsClient = {
   disconnect: jest.fn(() => Promise.resolve(undefined)),
 };
 
-jest.mock('../../../src/redis-streams', () => ({
+jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(),
   RedisStreamsClient: { STREAMS: {} },
 }));
@@ -141,7 +141,7 @@ describe('GracefulDegradationManager', () => {
 
     // Re-establish mock implementations after resetMocks wipes them
     redisMod.getRedisClient.mockResolvedValue(mockRedis);
-    const { getRedisStreamsClient } = require('../../../src/redis-streams') as any;
+    const { getRedisStreamsClient } = require('../../../src/redis/streams') as any;
     getRedisStreamsClient.mockResolvedValue(mockStreamsClient);
     mockRedis.set.mockResolvedValue(undefined);
     mockRedis.get.mockResolvedValue(null);

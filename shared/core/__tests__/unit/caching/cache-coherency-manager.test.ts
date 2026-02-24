@@ -28,13 +28,13 @@ const mockRedisClient = {
   subscribe: jest.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
 };
 
-jest.mock('../../../src/redis', () => ({
+jest.mock('../../../src/redis/client', () => ({
   getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient)),
 }));
 
 jest.mock('../../../src/logger');
 
-jest.mock('../../../src/lifecycle-utils', () => ({
+jest.mock('../../../src/async/lifecycle-utils', () => ({
   clearIntervalSafe: jest.fn((interval: any) => {
     if (interval) clearInterval(interval);
     return null;
@@ -67,7 +67,7 @@ describe('CacheCoherencyManager', () => {
 
     // Re-establish getRedisClient mock cleared by resetMocks: true
     const { getRedisClient } =
-      jest.requireMock<typeof import('../../../src/redis')>('../../../src/redis');
+      jest.requireMock<typeof import('../../../src/redis/client')>('../../../src/redis/client');
     (getRedisClient as jest.Mock).mockReturnValue(Promise.resolve(mockRedisClient));
 
     manager = new CacheCoherencyManager('node-1', {

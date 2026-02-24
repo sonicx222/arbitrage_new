@@ -12,5 +12,6 @@
 
 export * from './client';
 export * from './streams';
+export * from './stream-consumer';
 export * from './distributed-lock';
 export * from './utils';

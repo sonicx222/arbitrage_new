@@ -18,7 +18,7 @@
 import { EventEmitter } from 'events';
 import { Connection, PublicKey, Commitment, AccountInfo, Context } from '@solana/web3.js';
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
 
 // Import from extracted pool-parsers module
 import {

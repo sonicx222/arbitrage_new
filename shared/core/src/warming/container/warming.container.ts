@@ -47,9 +47,8 @@ import {
   ExportConfig,
 } from '../../';
 
-// Import ExportFormat directly to avoid circular dependency
-// (index.ts → warming/container → warming.container.ts → index.ts)
-import { ExportFormat } from '../../metrics/domain';
+// Import ExportFormat from @arbitrage/metrics (extracted package)
+import { ExportFormat } from '@arbitrage/metrics';
 
 /**
  * Warming strategy type

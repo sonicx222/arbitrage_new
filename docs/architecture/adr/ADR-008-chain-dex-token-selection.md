@@ -288,7 +288,7 @@ Token Addresses:
 | Oracle RAM | 8GB | 12GB | 18GB | 20GB |
 | Solana RPC (Helius) | - | - | ~50K/day | ~80K/day |
 
-All phases remain within free tier limits (Upstash 10K, Helius 100K).
+All phases remain within free tier limits (Helius 100K). Self-hosted Redis on Oracle ARM eliminates the former Upstash 10K/day constraint.
 
 ## Alternatives Considered
 

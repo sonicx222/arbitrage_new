@@ -1126,4 +1126,175 @@ describe('SimulationService', () => {
       );
     });
   });
+
+  // ===========================================================================
+  // Simulation Tiering Tests
+  // ===========================================================================
+
+  describe('getSimulationTier', () => {
+    test('should return "none" for profit below noSimulationThreshold', () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          noSimulationThreshold: 50,
+          lightSimulationThreshold: 500,
+        },
+      });
+
+      expect(service.getSimulationTier(30, 0)).toBe('none');
+      expect(service.getSimulationTier(0, 0)).toBe('none');
+      expect(service.getSimulationTier(49.99, 0)).toBe('none');
+    });
+
+    test('should return "light" for profit between thresholds', () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          noSimulationThreshold: 50,
+          lightSimulationThreshold: 500,
+        },
+      });
+
+      expect(service.getSimulationTier(50, 0)).toBe('light');
+      expect(service.getSimulationTier(200, 0)).toBe('light');
+      expect(service.getSimulationTier(499, 0)).toBe('light');
+    });
+
+    test('should return "full" for profit above lightSimulationThreshold', () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          noSimulationThreshold: 50,
+          lightSimulationThreshold: 500,
+        },
+      });
+
+      expect(service.getSimulationTier(500, 0)).toBe('full');
+      expect(service.getSimulationTier(1000, 0)).toBe('full');
+      expect(service.getSimulationTier(50000, 0)).toBe('full');
+    });
+
+    test('should return "none" for time-critical opportunities', () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          bypassForTimeCritical: true,
+          timeCriticalThresholdMs: 2000,
+          noSimulationThreshold: 50,
+          lightSimulationThreshold: 500,
+        },
+      });
+
+      // High profit but stale opportunity
+      expect(service.getSimulationTier(1000, 3000)).toBe('none');
+    });
+
+    test('should not bypass time-critical when disabled', () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          bypassForTimeCritical: false,
+          timeCriticalThresholdMs: 2000,
+          noSimulationThreshold: 50,
+          lightSimulationThreshold: 500,
+        },
+      });
+
+      expect(service.getSimulationTier(1000, 3000)).toBe('full');
+    });
+
+    test('should use default thresholds when not configured', () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+      });
+
+      // Default noSimulationThreshold is 50, lightSimulationThreshold is 500
+      expect(service.getSimulationTier(30, 0)).toBe('none');
+      expect(service.getSimulationTier(200, 0)).toBe('light');
+      expect(service.getSimulationTier(1000, 0)).toBe('full');
+    });
+  });
+
+  // ===========================================================================
+  // restrictToProviders Tests
+  // ===========================================================================
+
+  describe('restrictToProviders', () => {
+    test('should restrict simulation to specified providers only', async () => {
+      mockTenderlyProvider.getHealth.mockReturnValue({
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0,
+        averageLatencyMs: 50,
+        successRate: 1.0,
+      });
+
+      mockAlchemyProvider.getHealth.mockReturnValue({
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0,
+        averageLatencyMs: 100,
+        successRate: 1.0,
+      });
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider, mockAlchemyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: true,
+          providerPriority: ['tenderly', 'alchemy'],
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      // Restrict to alchemy only - tenderly should NOT be called
+      await service.simulate(request, ['alchemy']);
+
+      expect(mockAlchemyProvider.simulate).toHaveBeenCalled();
+      expect(mockTenderlyProvider.simulate).not.toHaveBeenCalled();
+    });
+
+    test('should return error when no restricted providers are available', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider, mockAlchemyProvider],
+        logger: mockLogger as any,
+      });
+
+      const request = createSimulationRequest();
+
+      // Restrict to local provider which isn't in the provider list
+      const result = await service.simulate(request, ['local']);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No simulation providers available');
+    });
+
+    test('should pass through unrestricted when parameter is omitted', async () => {
+      mockTenderlyProvider.getHealth.mockReturnValue({
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0,
+        averageLatencyMs: 50,
+        successRate: 1.0,
+      });
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider, mockAlchemyProvider],
+        logger: mockLogger as any,
+      });
+
+      const request = createSimulationRequest();
+      await service.simulate(request);
+
+      // Without restriction, should use best available (tenderly has lower latency)
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalled();
+    });
+  });
 });

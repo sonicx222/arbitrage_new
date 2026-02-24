@@ -100,11 +100,17 @@ export class L2SequencerProvider extends BaseMevProvider {
   constructor(config: MevProviderConfig) {
     super(config);
 
-    // Validate chain is an L2 with sequencer
-    if (CHAIN_MEV_STRATEGIES[config.chain] !== 'sequencer') {
+    // Validate chain is an L2 with sequencer support.
+    // Check L2_CHAIN_CONFIGS (contains all L2s) rather than CHAIN_MEV_STRATEGIES
+    // because some L2s (arbitrum, base) have enhanced primary strategies (timeboost,
+    // flashbots_protect) but still support sequencer as a fallback.
+    const strategy = CHAIN_MEV_STRATEGIES[config.chain];
+    const hasL2Config = config.chain in L2_CHAIN_CONFIGS;
+
+    if (!hasL2Config && strategy !== 'sequencer') {
       throw new Error(
         `L2SequencerProvider is only for sequencer-based L2s. ` +
-        `Chain "${config.chain}" uses strategy "${CHAIN_MEV_STRATEGIES[config.chain] || 'unknown'}"`
+        `Chain "${config.chain}" uses strategy "${strategy || 'unknown'}"`
       );
     }
 
@@ -413,10 +419,14 @@ export function createL2SequencerProvider(
 }
 
 /**
- * Check if a chain uses L2 sequencer MEV protection
+ * Check if a chain is an L2 with sequencer-based ordering.
+ *
+ * Returns true for all L2 chains that have sequencer support, including
+ * chains with enhanced primary strategies (e.g., arbitrum with timeboost,
+ * base with flashbots_protect) that fall back to sequencer.
  */
 export function isL2SequencerChain(chain: string): boolean {
-  return CHAIN_MEV_STRATEGIES[chain] === 'sequencer';
+  return chain in L2_CHAIN_CONFIGS;
 }
 
 /**

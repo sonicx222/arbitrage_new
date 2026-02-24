@@ -9,7 +9,7 @@
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { dualPublish } from '../../../src/resilience/dual-publish';
-import type { RedisStreamsClient } from '../../../src/redis-streams';
+import type { RedisStreamsClient } from '../../../src/redis/streams';
 import { createInlineRedisMock } from '@arbitrage/test-utils';
 
 // Mock the logger to suppress output and enable assertion on log calls

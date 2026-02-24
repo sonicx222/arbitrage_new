@@ -14,7 +14,7 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 // Mock Redis - getRedisClient returns a Promise that resolves to the client
-jest.mock('../../src/redis', () => ({
+jest.mock('../../src/redis/client', () => ({
   getRedisClient: () => Promise.resolve({
     ping: () => Promise.resolve(true),
     publish: () => Promise.resolve(1),
@@ -25,7 +25,7 @@ jest.mock('../../src/redis', () => ({
 }));
 
 // Mock Redis Streams
-jest.mock('../../src/redis-streams', () => ({
+jest.mock('../../src/redis/streams', () => ({
   getRedisStreamsClient: () => Promise.resolve({
     xadd: () => Promise.resolve('1234-0'),
     xread: () => Promise.resolve([])

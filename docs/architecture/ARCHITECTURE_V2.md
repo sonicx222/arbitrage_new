@@ -84,7 +84,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 
 | Constraint | Limit | Mitigation Strategy |
 |------------|-------|---------------------|
-| Upstash Redis | 10K commands/day | Aggressive batching (50:1 ratio) |
+| Redis | Self-hosted on Oracle ARM (512MB alloc) | Localhost deployment, no command limits |
 | Fly.io Memory | 256MB per instance | Streaming mode, no large buffers |
 | Oracle Cloud | 4 OCPU, 24GB total | Efficient partitioning |
 | RPC Rate Limits (EVM) | Varies by provider | Multi-provider rotation |
@@ -131,7 +131,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 │  │                            DATA PLANE (Global)                                 │   │
 │  │                                                                                │   │
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │   │
-│  │  │ Upstash Redis   │  │ Redis Cache     │  │ L1 Cache        │                │   │
+│  │  │ Redis 7         │  │ Redis Cache     │  │ L1 Cache        │                │   │
 │  │  │ Streams         │  │ (L2 Price Data) │  │ SharedArrayBuf  │                │   │
 │  │  │ (Event Backbone)│  │ (Cross-Partition│  │ (Per-Instance)  │                │   │
 │  │  └─────────────────┘  └─────────────────┘  └─────────────────┘                │   │
@@ -787,7 +787,7 @@ Within each partition, scale by:
 | Phase 2 | 9 | 45 | 110 | 350 | ~500 | ~7,000 |
 | Phase 3 | 11 (10 EVM + Solana) | 54 | 143 | 500 | ~1000 | ~9,500 |
 
-All phases remain within Upstash 10K/day limit due to batching.
+With self-hosted Redis on Oracle ARM, there are no command limits. Legacy Upstash deployments use batching to stay within 10K/day.
 
 **Solana Impact**:
 - Adds ~200 events/sec due to fast block times
@@ -809,7 +809,7 @@ All phases remain within Upstash 10K/day limit due to batching.
 | Render | Executor Backup | US-East | 512MB | $0 |
 | Koyeb | Coordinator | US-East | 256MB | $0 |
 | GCP | Standby Coordinator | US-Central | 1GB | $0 |
-| Upstash | Redis Streams + Cache | Global | 10K/day | $0 |
+| Self-hosted Redis 7 | Redis Streams + Cache | Per-instance (localhost) | No limit | $0 |
 | Vercel | Dashboard | Edge | 100GB-hrs | $0 |
 
 > **Note**: Original design included MongoDB Atlas for opportunity logging.
@@ -820,7 +820,14 @@ All phases remain within Upstash 10K/day limit due to batching.
 
 ### 7.2 Rate Limit Strategies
 
-**Upstash Redis (10K commands/day)**
+**Self-hosted Redis (recommended)**
+- No command limits (localhost, <0.1ms RTT)
+- Deployed as Docker sidecar on each Oracle ARM instance
+- AOF persistence with everysec fsync
+- 512MB maxmemory with allkeys-lru eviction
+- Set `REDIS_SELF_HOSTED=true` to enable
+
+**Upstash Redis (legacy, 10K commands/day)**
 - Batch ratio: 50 events → 1 command
 - Effective capacity: 500K events/day
 - Current usage: ~150K events/day (30%)

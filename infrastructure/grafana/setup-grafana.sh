@@ -11,8 +11,16 @@
 #   --grafana-url URL        Grafana URL (default: http://localhost:3000)
 #   --api-key KEY            Grafana API key
 #   --prometheus-uid UID     Prometheus datasource UID (default: prometheus)
+#   --cloud                  Use Grafana Cloud configuration (reads GRAFANA_CLOUD_* env vars)
 #   --dry-run                Show what would be done without making changes
 #   --help                   Show this help message
+#
+# Grafana Cloud env vars (used with --cloud):
+#   GRAFANA_CLOUD_URL          Grafana Cloud stack URL (e.g., https://your-stack.grafana.net)
+#   GRAFANA_CLOUD_API_KEY      Grafana Cloud API key with Admin permissions
+#   GRAFANA_CLOUD_STACK_ID     Grafana Cloud stack ID
+#   GRAFANA_CLOUD_PROM_URL     Prometheus remote write endpoint URL
+#   GRAFANA_CLOUD_PROM_USERNAME Prometheus remote write username
 
 set -euo pipefail
 
@@ -21,6 +29,14 @@ GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 GRAFANA_API_KEY="${GRAFANA_API_KEY:-}"
 PROMETHEUS_UID="${PROMETHEUS_UID:-prometheus}"
 DRY_RUN=false
+CLOUD_MODE=false
+
+# Grafana Cloud configuration (populated from env vars when --cloud is used)
+GRAFANA_CLOUD_URL="${GRAFANA_CLOUD_URL:-}"
+GRAFANA_CLOUD_API_KEY="${GRAFANA_CLOUD_API_KEY:-}"
+GRAFANA_CLOUD_STACK_ID="${GRAFANA_CLOUD_STACK_ID:-}"
+GRAFANA_CLOUD_PROM_URL="${GRAFANA_CLOUD_PROM_URL:-}"
+GRAFANA_CLOUD_PROM_USERNAME="${GRAFANA_CLOUD_PROM_USERNAME:-}"
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +77,10 @@ while [[ $# -gt 0 ]]; do
             PROMETHEUS_UID="$2"
             shift 2
             ;;
+        --cloud)
+            CLOUD_MODE=true
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -75,6 +95,37 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Apply cloud mode configuration
+if [[ "$CLOUD_MODE" == "true" ]]; then
+    log_info "Cloud mode enabled - configuring for Grafana Cloud"
+
+    # Validate required cloud env vars
+    if [[ -z "$GRAFANA_CLOUD_URL" ]]; then
+        log_error "GRAFANA_CLOUD_URL is required when using --cloud mode"
+        log_error "Set the GRAFANA_CLOUD_URL environment variable (e.g., https://your-stack.grafana.net)"
+        exit 1
+    fi
+
+    if [[ -z "$GRAFANA_CLOUD_API_KEY" ]]; then
+        log_error "GRAFANA_CLOUD_API_KEY is required when using --cloud mode"
+        log_error "Generate an API key from your Grafana Cloud stack settings"
+        exit 1
+    fi
+
+    # Override local defaults with cloud values
+    GRAFANA_URL="$GRAFANA_CLOUD_URL"
+    GRAFANA_API_KEY="$GRAFANA_CLOUD_API_KEY"
+    PROMETHEUS_UID="grafanacloud-prom"
+
+    if [[ -n "$GRAFANA_CLOUD_STACK_ID" ]]; then
+        log_info "  Stack ID: $GRAFANA_CLOUD_STACK_ID"
+    fi
+
+    if [[ -n "$GRAFANA_CLOUD_PROM_URL" ]]; then
+        log_info "  Prometheus URL: $GRAFANA_CLOUD_PROM_URL"
+    fi
+fi
 
 # Validate configuration
 if [[ -z "$GRAFANA_API_KEY" ]]; then
@@ -228,15 +279,118 @@ create_notification_channels() {
     fi
 }
 
+# Function to configure Prometheus remote write for Grafana Cloud
+configure_cloud_remote_write() {
+    if [[ "$CLOUD_MODE" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ -z "$GRAFANA_CLOUD_PROM_URL" ]]; then
+        log_warn "GRAFANA_CLOUD_PROM_URL not set, skipping remote write configuration"
+        return 0
+    fi
+
+    log_info "Configuring Prometheus remote write for Grafana Cloud..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "  [DRY RUN] Would configure remote write to: ${GRAFANA_CLOUD_PROM_URL}/api/prom/push"
+        return 0
+    fi
+
+    # Generate remote write config snippet for Prometheus
+    local remote_write_config
+    remote_write_config=$(cat <<REMOTE_WRITE_EOF
+# Grafana Cloud Remote Write Configuration
+# Add this to your prometheus.yml under 'remote_write:' section
+remote_write:
+  - url: "${GRAFANA_CLOUD_PROM_URL}/api/prom/push"
+    basic_auth:
+      username: "${GRAFANA_CLOUD_PROM_USERNAME}"
+      password: "${GRAFANA_CLOUD_API_KEY}"
+REMOTE_WRITE_EOF
+)
+
+    local config_file="${SCRIPT_DIR}/prometheus-remote-write.yml"
+    echo "$remote_write_config" > "$config_file"
+    log_info "✓ Remote write config written to: $config_file"
+    log_info "  Add this configuration to your prometheus.yml to push metrics to Grafana Cloud"
+}
+
+# Function to configure cloud datasource via API
+configure_cloud_datasource() {
+    if [[ "$CLOUD_MODE" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ -z "$GRAFANA_CLOUD_PROM_URL" ]]; then
+        return 0
+    fi
+
+    log_info "Configuring Grafana Cloud Prometheus datasource..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "  [DRY RUN] Would create/update datasource 'grafanacloud-prom'"
+        return 0
+    fi
+
+    local datasource_payload
+    datasource_payload=$(jq -n \
+        --arg name "Grafana Cloud Prometheus" \
+        --arg uid "grafanacloud-prom" \
+        --arg url "$GRAFANA_CLOUD_PROM_URL" \
+        --arg user "$GRAFANA_CLOUD_PROM_USERNAME" \
+        --arg password "$GRAFANA_CLOUD_API_KEY" \
+        '{
+            name: $name,
+            uid: $uid,
+            type: "prometheus",
+            url: $url,
+            access: "proxy",
+            isDefault: true,
+            basicAuth: true,
+            basicAuthUser: $user,
+            secureJsonData: {
+                basicAuthPassword: $password
+            }
+        }')
+
+    local response
+    response=$(curl -s -X POST \
+        -H "Authorization: Bearer ${GRAFANA_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$datasource_payload" \
+        "${GRAFANA_URL}/api/datasources" 2>&1)
+
+    if echo "$response" | grep -q '"id"'; then
+        log_info "✓ Grafana Cloud Prometheus datasource configured"
+    elif echo "$response" | grep -q '"message":"data source with the same name already exists"'; then
+        log_info "✓ Grafana Cloud Prometheus datasource already exists"
+    else
+        log_warn "Datasource creation response: $response"
+    fi
+}
+
 # Main setup flow
 main() {
     log_info "Starting Grafana setup for warming infrastructure..."
+    if [[ "$CLOUD_MODE" == "true" ]]; then
+        log_info "Mode: Grafana Cloud"
+    else
+        log_info "Mode: Local Grafana"
+    fi
     echo
 
     # Pre-flight checks
     check_grafana
     check_prometheus_datasource || log_warn "Continuing without Prometheus verification..."
     echo
+
+    # Cloud-specific: Configure datasource and remote write
+    if [[ "$CLOUD_MODE" == "true" ]]; then
+        configure_cloud_datasource
+        configure_cloud_remote_write
+        echo
+    fi
 
     # Import dashboards
     log_info "Importing dashboards..."
@@ -269,6 +423,9 @@ main() {
     log_info "2. Configure alert notification channels in Grafana UI"
     log_info "3. Copy alert-rules.yml to Grafana provisioning directory"
     log_info "4. Verify metrics are being collected from your services"
+    if [[ "$CLOUD_MODE" == "true" ]]; then
+        log_info "5. Add remote write config to your Prometheus (see prometheus-remote-write.yml)"
+    fi
     echo
     log_info "Dashboard URLs:"
     log_info "  - Warming Infrastructure: ${GRAFANA_URL}/d/warming-infrastructure"

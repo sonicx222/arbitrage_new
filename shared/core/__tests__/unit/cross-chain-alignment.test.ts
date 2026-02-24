@@ -72,12 +72,12 @@ let mockRedisClient: MockRedisClient;
 let mockStreamsClient: MockStreamsClient;
 
 // Mock modules
-jest.mock('../../src/redis', () => ({
+jest.mock('../../src/redis/client', () => ({
   getRedisClient: jest.fn().mockImplementation(() => Promise.resolve(mockRedisClient)),
   RedisClient: jest.fn()
 }));
 
-jest.mock('../../src/redis-streams', () => ({
+jest.mock('../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn().mockImplementation(() => Promise.resolve(mockStreamsClient)),
   RedisStreamsClient: {
     STREAMS: {

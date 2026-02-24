@@ -20,6 +20,7 @@ import type {
   SimulationResult,
   SimulationMetrics,
   SimulationProviderType,
+  SimulationTier,
 } from '../services/simulation/types';
 
 // =============================================================================
@@ -142,6 +143,7 @@ export function createMockSimulationService(
       gasUsed: BigInt(200000),
     } as SimulationResult),
     shouldSimulate: jest.fn().mockReturnValue(true),
+    getSimulationTier: jest.fn().mockReturnValue('full' as SimulationTier),
     getAggregatedMetrics: jest.fn().mockReturnValue({
       totalSimulations: 0,
       successfulSimulations: 0,

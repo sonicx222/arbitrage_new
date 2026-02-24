@@ -37,7 +37,8 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0x539bdE0d7Dbd336b79148AA742883198BBF60342', symbol: 'MAGIC', decimals: 18, chainId: 42161 },
     // High-volume
     { address: '0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a', symbol: 'GMX', decimals: 18, chainId: 42161 },
-    { address: '0x5979D7b546E38E414F7E9822514be443A4800529', symbol: 'wstETH', decimals: 18, chainId: 42161 }
+    { address: '0x5979D7b546E38E414F7E9822514be443A4800529', symbol: 'wstETH', decimals: 18, chainId: 42161 },
+    { address: '0x4186BFC76E2E237523CBC30FD220FE055156b41F', symbol: 'rsETH', decimals: 18, chainId: 42161 }  // KelpDAO rsETH
   ],
   // BSC: 10 tokens
   bsc: [
@@ -120,6 +121,9 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0xae78736Cd615f374D3085123A210448E74Fc6393', symbol: 'rETH', decimals: 18, chainId: 1 },
     { address: '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704', symbol: 'cbETH', decimals: 18, chainId: 1 },
     { address: '0xac3E018457B222d93114458476f3E3416Abbe38F', symbol: 'sfrxETH', decimals: 18, chainId: 1 }, // FIX: Corrected from Fraxtal chain address to Ethereum mainnet sfrxETH
+    { address: '0x35fA164735182de50811E8e2E824cFb9B6118ac2', symbol: 'eETH', decimals: 18, chainId: 1 },    // EtherFi eETH
+    { address: '0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7', symbol: 'rsETH', decimals: 18, chainId: 1 },   // KelpDAO rsETH
+    { address: '0xD9A442856C234a39a81a089C06451EBAa4306a72', symbol: 'pufETH', decimals: 18, chainId: 1 },  // Puffer pufETH
     // Core DeFi
     { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18, chainId: 1 },
     { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18, chainId: 1 }
@@ -339,6 +343,7 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
   // Liquid staking
   STETH: 3200, WSTETH: 3700, RETH: 3400, CBETH: 3300,
   stETH: 3200, wstETH: 3700, rETH: 3400, cbETH: 3300, // lowercase variants
+  eETH: 3200, rsETH: 3400, pufETH: 3200, sfrxETH: 3300, // LRT tokens
   // Solana LSTs
   mSOL: 180, jitoSOL: 180, BSOL: 175,
   // DEX/Protocol tokens

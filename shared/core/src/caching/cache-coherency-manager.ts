@@ -2,8 +2,8 @@
 // Maintains cache consistency across distributed nodes
 
 import { createLogger } from '../logger';
-import { clearIntervalSafe } from '../lifecycle-utils';
-import { getRedisClient } from '../redis';
+import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { getRedisClient } from '../redis/client';
 
 const logger = createLogger('cache-coherency');
 

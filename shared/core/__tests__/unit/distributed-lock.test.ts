@@ -49,8 +49,8 @@ import {
   DistributedLockManager,
   getDistributedLockManager,
   resetDistributedLockManager
-} from '../../src/distributed-lock';
-import type { LockConfig } from '../../src/distributed-lock';
+} from '../../src/redis/distributed-lock';
+import type { LockConfig } from '../../src/redis/distributed-lock';
 
 describe('DistributedLockManager', () => {
   let lockManager: DistributedLockManager;

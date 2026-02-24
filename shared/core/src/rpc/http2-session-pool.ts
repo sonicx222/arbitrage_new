@@ -344,4 +344,166 @@ export class Http2SessionPool {
     await Promise.all(closePromises);
     logger.debug('HTTP/2 session pool closed');
   }
+
+  /**
+   * Create an ethers.js-compatible FetchGetUrlFunc that uses HTTP/2 with fallback.
+   *
+   * Consolidates the inline HTTP/2 implementation previously in
+   * execution-engine/services/provider.service.ts. Uses the pool's managed
+   * sessions (with idle cleanup, ping keep-alive, connection timeouts) instead
+   * of a bare Map.
+   *
+   * @param defaultGetUrl - Fallback ethers.js URL fetcher for non-HTTPS or errors
+   * @returns FetchGetUrlFunc that uses HTTP/2 multiplexing
+   */
+  createEthersGetUrlFunc<
+    Req extends EthersFetchRequest,
+    Sig extends EthersFetchCancelSignal
+  >(
+    defaultGetUrl: (req: Req, signal?: Sig) => Promise<EthersGetUrlResponse>
+  ): (req: Req, signal?: Sig) => Promise<EthersGetUrlResponse> {
+    return async (req: Req, signal?: Sig) => {
+      const url = new URL(req.url);
+
+      // Only use HTTP/2 for HTTPS endpoints
+      if (url.protocol !== 'https:') {
+        return defaultGetUrl(req, signal);
+      }
+
+      const origin = url.origin;
+
+      let session: http2.ClientHttp2Session;
+      try {
+        session = await this.getOrCreateSession(origin);
+      } catch {
+        // Fallback to HTTP/1.1 if session creation fails
+        return defaultGetUrl(req, signal);
+      }
+
+      return new Promise<EthersGetUrlResponse>((resolve, reject) => {
+        const entry = this.sessions.get(origin);
+        if (entry) {
+          entry.activeStreams++;
+          entry.lastUsed = Date.now();
+          this.resetIdleTimer(origin, entry);
+        }
+
+        const headers: http2.OutgoingHttpHeaders = {
+          ':method': req.method || 'POST',
+          ':path': url.pathname + url.search,
+          'content-type': 'application/json',
+        };
+
+        // Copy request headers
+        for (const [key, value] of Object.entries(req.headers)) {
+          headers[key.toLowerCase()] = value;
+        }
+
+        const stream = session.request(headers);
+
+        let statusCode = 200;
+        const responseChunks: Buffer[] = [];
+
+        stream.on('response', (responseHeaders) => {
+          statusCode = (responseHeaders[':status'] as number) ?? 200;
+        });
+
+        stream.on('data', (chunk: Buffer) => {
+          responseChunks.push(chunk);
+        });
+
+        stream.on('end', () => {
+          if (entry) entry.activeStreams = Math.max(0, entry.activeStreams - 1);
+          const body = Buffer.concat(responseChunks);
+          resolve({ statusCode, statusMessage: '', headers: {}, body });
+        });
+
+        stream.on('error', (err: Error) => {
+          if (entry) entry.activeStreams = Math.max(0, entry.activeStreams - 1);
+          // On HTTP/2 error, fall back to default transport
+          defaultGetUrl(req, signal).then(resolve).catch(reject);
+        });
+
+        // Handle abort signal (ethers FetchCancelSignal uses addListener)
+        if (signal) {
+          signal.addListener(() => {
+            stream.close();
+            reject(new Error('Request aborted'));
+          });
+        }
+
+        // Write request body
+        const body = req.body;
+        if (body) {
+          stream.end(Buffer.from(body));
+        } else {
+          stream.end();
+        }
+      });
+    };
+  }
+}
+
+// =============================================================================
+// Ethers.js Integration Types
+// =============================================================================
+//
+// Minimal interfaces matching ethers v6 FetchRequest/FetchGetUrlFunc to avoid
+// a hard dependency on ethers in the shared/core package. The execution-engine
+// (which depends on ethers) passes the concrete types at call sites.
+// =============================================================================
+
+/** Minimal interface for ethers.js FetchRequest (what createEthersGetUrlFunc reads) */
+interface EthersFetchRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: Uint8Array | null;
+}
+
+/** Minimal interface for ethers.js FetchCancelSignal */
+interface EthersFetchCancelSignal {
+  addListener(listener: () => void): void;
+}
+
+/** Minimal interface for ethers.js GetUrlResponse */
+interface EthersGetUrlResponse {
+  statusCode: number;
+  statusMessage: string;
+  headers: Record<string, string>;
+  body: Uint8Array | null;
+}
+
+/** Type alias matching ethers.FetchGetUrlFunc signature */
+type EthersFetchGetUrlFunc = (
+  req: EthersFetchRequest,
+  signal?: EthersFetchCancelSignal
+) => Promise<EthersGetUrlResponse>;
+
+// =============================================================================
+// Module-level Singleton
+// =============================================================================
+
+let defaultPool: Http2SessionPool | null = null;
+
+/**
+ * Get or create the default HTTP/2 session pool singleton.
+ *
+ * Used by execution-engine's provider service for ethers.js HTTP/2 transport.
+ */
+export function getHttp2SessionPool(): Http2SessionPool {
+  if (!defaultPool) {
+    defaultPool = new Http2SessionPool();
+  }
+  return defaultPool;
+}
+
+/**
+ * Close all HTTP/2 sessions in the default pool (for graceful shutdown).
+ */
+export async function closeDefaultHttp2Pool(): Promise<void> {
+  if (defaultPool) {
+    await defaultPool.close();
+    defaultPool = null;
+  }
 }

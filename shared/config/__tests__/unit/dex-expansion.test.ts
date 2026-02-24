@@ -20,13 +20,13 @@ const isValidAddress = (address: string): boolean => {
   return /^0x[a-fA-F0-9]{40}$/.test(address);
 };
 
-describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
+describe('S2.2.1: Arbitrum DEX Expansion (6 → 10)', () => {
   const arbitrumDexes: Dex[] = DEXES.arbitrum;
 
   describe('DEX Count', () => {
-    it('should have exactly 9 DEXs configured', () => {
+    it('should have exactly 10 DEXs configured', () => {
       expect(arbitrumDexes).toBeDefined();
-      expect(arbitrumDexes.length).toBe(9);
+      expect(arbitrumDexes.length).toBe(10);
     });
   });
 
