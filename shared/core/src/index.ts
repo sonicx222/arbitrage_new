@@ -1966,7 +1966,7 @@ export {
   createPriceUpdate,
   createWhaleTransaction,
   createCoordinatorCommand
-} from './message-validators';
+} from './validation/message-validators';
 export type {
   PriceUpdate as ValidatedPriceUpdate,
   WhaleTransaction as ValidatedWhaleTransaction,
@@ -1975,7 +1975,7 @@ export type {
   CoordinatorCommand,
   ServiceHealthStatus,
   ValidationResult
-} from './message-validators';
+} from './validation/message-validators';
 
 // #############################################################################
 // #                                                                           #
