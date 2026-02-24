@@ -17,6 +17,19 @@ jest.mock('@arbitrage/core', () => ({
   createLogger: jest.fn(() => createMockLogger()),
 }));
 
+// Mock VersionedTransaction.deserialize used in the ALT detection path.
+// The test uses fake base64 data that can't be deserialized as a real
+// Solana VersionedTransaction. The mock returns a minimal object with
+// addressTableLookups = [] (no ALTs) to test the normal bundle path.
+jest.mock('@solana/web3.js', () => ({
+  __esModule: true,
+  VersionedTransaction: {
+    deserialize: jest.fn(() => ({
+      message: { addressTableLookups: [] },
+    })),
+  },
+}));
+
 function createMockLogger() {
   return {
     info: jest.fn(),
@@ -51,6 +64,12 @@ function createMockJitoProvider() {
     getMetrics: jest.fn(),
     resetMetrics: jest.fn(),
     healthCheck: jest.fn(),
+    // H2 fix requires keypair to be available — without it, the strategy
+    // returns ERR_NO_KEYPAIR instead of falling through to raw tx submission.
+    getWalletKeypair: jest.fn().mockReturnValue({
+      publicKey: { toBase58: () => 'testWalletPublicKey123' },
+      secretKey: new Uint8Array(64),
+    }),
   };
 }
 
@@ -134,8 +153,19 @@ describe('SolanaExecutionStrategy', () => {
   let mockContext: ReturnType<typeof createMockContext>;
 
   beforeEach(() => {
+    // Re-apply VersionedTransaction.deserialize mock after resetMocks clears it.
+    // jest.config.base.js has resetMocks: true, which clears factory implementations.
+    const { VersionedTransaction } = jest.requireMock<any>('@solana/web3.js');
+    (VersionedTransaction.deserialize as jest.Mock).mockReturnValue({
+      message: { addressTableLookups: [] },
+    });
+
     mockJupiterClient = createMockJupiterClient();
     mockTxBuilder = createMockTxBuilder();
+    // Default: buildBundleTransaction returns a serializable tx
+    mockTxBuilder.buildBundleTransaction.mockResolvedValue({
+      serialize: () => new Uint8Array([1, 2, 3]),
+    } as any);
     mockJitoProvider = createMockJitoProvider();
     mockContext = createMockContext();
 
@@ -373,6 +403,68 @@ describe('SolanaExecutionStrategy', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('[ERR_INVALID_OPPORTUNITY]');
+    });
+  });
+
+  // ===========================================================================
+  // ALT detection (C1 regression test)
+  // ===========================================================================
+
+  describe('ALT detection', () => {
+    it('should skip bundle building and use raw tx when Jupiter tx has ALTs', async () => {
+      const opportunity = createTestOpportunity();
+
+      mockJupiterClient.getQuote.mockResolvedValue(createTestQuote());
+      mockJupiterClient.getSwapTransaction.mockResolvedValue(createTestSwapResult());
+      mockJitoProvider.sendProtectedTransaction.mockResolvedValue({
+        success: true,
+        transactionHash: 'alt-tx-hash',
+        strategy: 'jito',
+        latencyMs: 500,
+        usedFallback: false,
+      });
+
+      // Override deserialize to return tx WITH ALTs for this test only
+      const { VersionedTransaction } = jest.requireMock<any>('@solana/web3.js');
+      (VersionedTransaction.deserialize as jest.Mock).mockReturnValueOnce({
+        message: {
+          addressTableLookups: [{ accountKey: 'alt-key-1' }],
+        },
+      });
+
+      // Also provide a keypair — bundle building should STILL be skipped due to ALTs
+      (mockJitoProvider as any).getWalletKeypair = jest.fn().mockReturnValue({
+        publicKey: { toBase58: () => 'testPubkey' },
+      });
+
+      const result = await strategy.execute(opportunity, mockContext);
+
+      expect(result.success).toBe(true);
+      // buildBundleTransaction should NOT have been called
+      expect(mockTxBuilder.buildBundleTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===========================================================================
+  // H2 regression test: No keypair = error (not unprotected submission)
+  // ===========================================================================
+
+  describe('MEV protection guard (H2)', () => {
+    it('should return ERR_NO_KEYPAIR when wallet keypair is unavailable and no ALTs', async () => {
+      const opportunity = createTestOpportunity();
+
+      mockJupiterClient.getQuote.mockResolvedValue(createTestQuote());
+      mockJupiterClient.getSwapTransaction.mockResolvedValue(createTestSwapResult());
+
+      // Remove keypair — simulates misconfigured wallet
+      (mockJitoProvider as any).getWalletKeypair = jest.fn().mockReturnValue(undefined);
+
+      const result = await strategy.execute(opportunity, mockContext);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('[ERR_NO_KEYPAIR]');
+      // Should NOT have called sendProtectedTransaction — aborted early
+      expect(mockJitoProvider.sendProtectedTransaction).not.toHaveBeenCalled();
     });
   });
 

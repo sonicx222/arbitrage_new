@@ -195,7 +195,7 @@ export class OrderflowPipelineConsumer {
     if (!this.predictor) {
       try {
         const mlModule = '@arbitrage/ml';
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
+         
         const ml = await (import(mlModule) as Promise<{ getOrderflowPredictor: () => IOrderflowPredictor }>);
         this.predictor = ml.getOrderflowPredictor();
       } catch (error) {

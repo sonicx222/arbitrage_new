@@ -313,7 +313,7 @@ describe('Worker Concurrent Reads Integration (Task #44)', () => {
 
       let totalReads = 0;
       let totalSuccessful = 0;
-      let latencies: number[] = [];
+      const latencies: number[] = [];
 
       while (Date.now() - startTime < durationMs) {
         const batchKeys = Array(200)

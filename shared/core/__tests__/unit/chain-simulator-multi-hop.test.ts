@@ -436,7 +436,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
     it('should emit multi-hop opportunities randomly (not every tick)', (done) => {
       const simulator = createMultiHopSimulator();
 
-      let opportunityTypes: string[] = [];
+      const opportunityTypes: string[] = [];
       let completed = false;
 
       const failTimeout = setTimeout(() => {

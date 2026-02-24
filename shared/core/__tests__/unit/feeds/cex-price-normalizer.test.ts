@@ -210,10 +210,10 @@ describe('CexPriceNormalizer', () => {
   // ===========================================================================
 
   describe('getSupportedSymbols()', () => {
-    it('should return all 8 default symbols', () => {
+    it('should return all 9 default symbols', () => {
       const symbols = normalizer.getSupportedSymbols();
 
-      expect(symbols.length).toBe(8);
+      expect(symbols.length).toBe(9);
       expect(symbols).toContain('BTCUSDT');
       expect(symbols).toContain('ETHUSDT');
       expect(symbols).toContain('BNBUSDT');
@@ -222,6 +222,7 @@ describe('CexPriceNormalizer', () => {
       expect(symbols).toContain('MATICUSDT');
       expect(symbols).toContain('ARBUSDT');
       expect(symbols).toContain('OPUSDT');
+      expect(symbols).toContain('FTMUSDT');
     });
 
     it('should include custom symbols', () => {
@@ -233,7 +234,7 @@ describe('CexPriceNormalizer', () => {
 
       const symbols = customNormalizer.getSupportedSymbols();
       expect(symbols).toContain('LINKUSDT');
-      expect(symbols.length).toBe(9); // 8 defaults + 1 custom
+      expect(symbols.length).toBe(10); // 9 defaults + 1 custom
     });
   });
 

@@ -60,6 +60,8 @@ interface PairCorrelationState {
   sumXY: number;
   /** Last access timestamp for LRU eviction */
   lastAccessTime: number;
+  /** Counter for periodic recomputation to combat FP drift */
+  updatesSinceRecompute: number;
 }
 
 // =============================================================================
@@ -71,6 +73,9 @@ const DEFAULT_CONFIG: CorrelationConfig = {
   minCorrelation: 0.7,
   maxPairs: 50,
 };
+
+/** Recompute running sums from scratch every N updates to combat FP drift */
+const RECOMPUTE_INTERVAL = 500;
 
 // =============================================================================
 // Pair Correlation Tracker
@@ -124,6 +129,7 @@ export class PairCorrelationTracker {
         sumY2: 0,
         sumXY: 0,
         lastAccessTime: timestamp,
+        updatesSinceRecompute: 0,
       };
       this.pairs.set(pairId, state);
     }
@@ -155,6 +161,12 @@ export class PairCorrelationTracker {
     // Advance write index (circular)
     state.writeIndex = (state.writeIndex + 1) % this.config.windowSize;
     state.sampleCount = Math.min(state.sampleCount + 1, this.config.windowSize);
+
+    // Periodic recomputation to combat floating-point accumulation drift
+    state.updatesSinceRecompute++;
+    if (state.updatesSinceRecompute >= RECOMPUTE_INTERVAL) {
+      this.recomputeRunningTotals(state);
+    }
   }
 
   /**
@@ -235,6 +247,34 @@ export class PairCorrelationTracker {
   // ===========================================================================
   // Private Helpers
   // ===========================================================================
+
+  /**
+   * Recompute running sums from scratch to eliminate floating-point drift.
+   * Called periodically (every RECOMPUTE_INTERVAL updates).
+   */
+  private recomputeRunningTotals(state: PairCorrelationState): void {
+    const n = state.sampleCount;
+    let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, sumXY = 0;
+    const startIdx = n < this.config.windowSize ? 0 : state.writeIndex;
+
+    for (let i = 0; i < n; i++) {
+      const idx = (startIdx + i) % this.config.windowSize;
+      const a = state.pricesA[idx];
+      const b = state.pricesB[idx];
+      sumX += a;
+      sumY += b;
+      sumX2 += a * a;
+      sumY2 += b * b;
+      sumXY += a * b;
+    }
+
+    state.sumX = sumX;
+    state.sumY = sumY;
+    state.sumX2 = sumX2;
+    state.sumY2 = sumY2;
+    state.sumXY = sumXY;
+    state.updatesSinceRecompute = 0;
+  }
 
   /**
    * Evict least recently used pairs if at max capacity.

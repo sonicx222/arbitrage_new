@@ -37,6 +37,9 @@ export interface RegimeConfig {
   hurstThresholdLow: number;
   /** Hurst exponent above this = trending (default: 0.6) */
   hurstThresholdHigh: number;
+  /** If true, isFavorable() returns true during warm-up (insufficient data).
+   *  Useful to avoid dead time at startup. Default: false */
+  favorableDuringWarmup: boolean;
 }
 
 /**
@@ -63,6 +66,7 @@ const DEFAULT_CONFIG: RegimeConfig = {
   windowSize: 100,
   hurstThresholdLow: 0.4,
   hurstThresholdHigh: 0.6,
+  favorableDuringWarmup: false,
 };
 
 /** Minimum subseries length for R/S calculation */
@@ -152,8 +156,7 @@ export class RegimeDetector {
       return state.cachedHurst;
     }
 
-    const series = this.getSamplesInOrder(state);
-    const hurst = this.computeHurstExponent(series);
+    const hurst = this.computeHurstFromBuffer(state);
     state.cachedHurst = hurst;
     state.dirty = false;
     return hurst;
@@ -165,6 +168,13 @@ export class RegimeDetector {
    * @returns true only if the regime is 'mean_reverting'
    */
   isFavorable(pairId: string): boolean {
+    // During warm-up, if configured, assume favorable to avoid dead time at startup
+    if (this.config.favorableDuringWarmup) {
+      const state = this.pairs.get(pairId);
+      if (!state || state.sampleCount < MIN_SUBSERIES_LENGTH * 2) {
+        return true;
+      }
+    }
     return this.getRegime(pairId) === 'mean_reverting';
   }
 
@@ -179,39 +189,20 @@ export class RegimeDetector {
   // Private Helpers
   // ===========================================================================
 
-  /**
-   * Extract samples from circular buffer in chronological order.
-   */
-  private getSamplesInOrder(state: RegimeState): number[] {
-    const result: number[] = [];
-    const count = state.sampleCount;
-    const startIndex = count < this.config.windowSize
-      ? 0
-      : state.writeIndex;
-
-    for (let i = 0; i < count; i++) {
-      const idx = (startIndex + i) % this.config.windowSize;
-      result.push(state.samples[idx]);
-    }
-
-    return result;
-  }
 
   /**
-   * Compute Hurst exponent via Rescaled Range (R/S) method.
-   *
-   * For each subseries length n (powers of 2 from MIN_SUBSERIES_LENGTH up to N/2):
-   * 1. Split series into floor(N/n) non-overlapping subseries
-   * 2. For each subseries: compute R/S ratio
-   * 3. Average R/S across all subseries for that n
-   *
-   * Then H = slope of log(mean R/S) vs log(n) via OLS linear regression.
+   * Compute Hurst exponent directly from circular buffer state.
+   * Avoids allocating arrays by indexing into the buffer directly.
    */
-  private computeHurstExponent(series: number[]): number | undefined {
-    const N = series.length;
+  private computeHurstFromBuffer(state: RegimeState): number | undefined {
+    const N = state.sampleCount;
     if (N < MIN_SUBSERIES_LENGTH * 2) {
       return undefined;
     }
+
+    // The chronological start index in the circular buffer
+    const bufStart = N < this.config.windowSize ? 0 : state.writeIndex;
+    const bufSize = this.config.windowSize;
 
     // Generate subseries lengths: 8, 16, 32, ... up to N/2
     const subserieLengths: number[] = [];
@@ -222,7 +213,6 @@ export class RegimeDetector {
     }
 
     if (subserieLengths.length < 2) {
-      // Need at least 2 points for linear regression
       return undefined;
     }
 
@@ -235,10 +225,10 @@ export class RegimeDetector {
       let validCount = 0;
 
       for (let s = 0; s < numSubseries; s++) {
-        const start = s * subLen;
-        const sub = series.slice(start, start + subLen);
-
-        const rs = this.computeRescaledRange(sub);
+        const chronStart = s * subLen;
+        const rs = this.computeRescaledRangeFromBuffer(
+          state.samples, bufStart, bufSize, chronStart, subLen,
+        );
         if (rs !== undefined && rs > 0) {
           totalRS += rs;
           validCount++;
@@ -256,45 +246,45 @@ export class RegimeDetector {
       return undefined;
     }
 
-    // Linear regression: logRS = H * logN + c
     const slope = this.linearRegressionSlope(logN, logRS);
-
-    // Clamp to [0, 1] range
     return Math.max(0, Math.min(1, slope));
   }
 
   /**
-   * Compute R/S (Rescaled Range) for a subseries.
+   * Compute R/S (Rescaled Range) for a subseries, reading directly from
+   * the circular buffer without allocating a sub-array.
    *
-   * 1. Compute mean of series
-   * 2. Create cumulative deviations from mean
-   * 3. R = max(cumulative) - min(cumulative)
-   * 4. S = standard deviation of original series
-   * 5. Return R/S
+   * @param buf - The circular buffer
+   * @param bufStart - Chronological start index in the buffer
+   * @param bufSize - Buffer capacity (windowSize)
+   * @param chronStart - Chronological offset of this subseries within the full series
+   * @param subLen - Length of this subseries
    */
-  private computeRescaledRange(sub: number[]): number | undefined {
-    const n = sub.length;
-    if (n < 2) {
+  private computeRescaledRangeFromBuffer(
+    buf: number[], bufStart: number, bufSize: number,
+    chronStart: number, subLen: number,
+  ): number | undefined {
+    if (subLen < 2) {
       return undefined;
     }
 
-    // Mean
+    // Compute mean
     let sum = 0;
-    for (let i = 0; i < n; i++) {
-      sum += sub[i];
+    for (let i = 0; i < subLen; i++) {
+      sum += buf[(bufStart + chronStart + i) % bufSize];
     }
-    const mean = sum / n;
+    const mean = sum / subLen;
 
     // Standard deviation (population)
     let sumSqDiff = 0;
-    for (let i = 0; i < n; i++) {
-      const diff = sub[i] - mean;
+    for (let i = 0; i < subLen; i++) {
+      const diff = buf[(bufStart + chronStart + i) % bufSize] - mean;
       sumSqDiff += diff * diff;
     }
-    const stdDev = Math.sqrt(sumSqDiff / n);
+    const stdDev = Math.sqrt(sumSqDiff / subLen);
 
     if (stdDev === 0) {
-      return undefined; // Constant series, can't compute R/S
+      return undefined;
     }
 
     // Cumulative deviation from mean
@@ -302,15 +292,13 @@ export class RegimeDetector {
     let maxCumDev = -Infinity;
     let minCumDev = Infinity;
 
-    for (let i = 0; i < n; i++) {
-      cumDev += sub[i] - mean;
+    for (let i = 0; i < subLen; i++) {
+      cumDev += buf[(bufStart + chronStart + i) % bufSize] - mean;
       if (cumDev > maxCumDev) maxCumDev = cumDev;
       if (cumDev < minCumDev) minCumDev = cumDev;
     }
 
-    const range = maxCumDev - minCumDev;
-
-    return range / stdDev;
+    return (maxCumDev - minCumDev) / stdDev;
   }
 
   /**

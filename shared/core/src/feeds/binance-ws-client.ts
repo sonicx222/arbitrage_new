@@ -103,13 +103,18 @@ export class BinanceWebSocketClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Periodic "last resort" reconnect timer after max attempts exhausted */
+  private lastResortTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
   private currentReconnectDelay: number;
   private connected = false;
   private intentionalDisconnect = false;
+  /** H3: Timestamp when WS became disconnected after max reconnect attempts (for health checks) */
+  private disconnectedSince: number | null = null;
 
   constructor(config: Partial<BinanceWsConfig> & { streams: string[] }) {
     super();
+    this.setMaxListeners(20);
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.currentReconnectDelay = this.config.reconnectDelayMs;
 
@@ -141,10 +146,20 @@ export class BinanceWebSocketClient extends EventEmitter {
         const url = this.buildStreamUrl();
         logger.info('Connecting to Binance WebSocket', { url });
 
+        // Clean up old WebSocket to prevent listener leaks on reconnect
+        if (this.ws) {
+          this.ws.removeAllListeners();
+          if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+            this.ws.terminate();
+          }
+          this.ws = null;
+        }
+
         this.ws = new WebSocket(url);
 
         this.ws.on('open', () => {
           this.connected = true;
+          this.disconnectedSince = null;
           this.reconnectAttempts = 0;
           this.currentReconnectDelay = this.config.reconnectDelayMs;
           this.startPingInterval();
@@ -201,6 +216,7 @@ export class BinanceWebSocketClient extends EventEmitter {
     this.intentionalDisconnect = true;
     this.stopPingInterval();
     this.cancelReconnect();
+    this.cancelLastResortReconnect();
 
     if (this.ws) {
       return new Promise<void>((resolve) => {
@@ -245,6 +261,15 @@ export class BinanceWebSocketClient extends EventEmitter {
    */
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * H3: Get the timestamp when the WS became disconnected after exhausting
+   * all reconnect attempts. Returns null if connected or still reconnecting.
+   * Use for health check indicators.
+   */
+  getDisconnectedSince(): number | null {
+    return this.disconnectedSince;
   }
 
   // ===========================================================================
@@ -332,13 +357,18 @@ export class BinanceWebSocketClient extends EventEmitter {
     }
 
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
-      logger.error('Max reconnect attempts reached, giving up', {
+      // H3: Track disconnection time for health check visibility
+      this.disconnectedSince = this.disconnectedSince ?? Date.now();
+      logger.error('Max reconnect attempts reached, starting periodic last-resort reconnect', {
         attempts: this.reconnectAttempts,
         maxAttempts: this.config.maxReconnectAttempts,
+        disconnectedSince: this.disconnectedSince,
       });
       this.emit('error', new Error(
         `Failed to reconnect after ${this.config.maxReconnectAttempts} attempts`
       ));
+      // Start periodic last-resort reconnect (every 5 minutes)
+      this.startLastResortReconnect();
       return;
     }
 
@@ -349,10 +379,8 @@ export class BinanceWebSocketClient extends EventEmitter {
       delayMs: this.currentReconnectDelay,
     });
 
-    this.reconnectTimer = setTimeout(async () => {
-      try {
-        await this.connect();
-      } catch (error) {
+    this.reconnectTimer = setTimeout(() => {
+      this.connect().catch((error) => {
         logger.error('Reconnect attempt failed', {
           attempt: this.reconnectAttempts,
           error: error instanceof Error ? error.message : String(error),
@@ -363,8 +391,43 @@ export class BinanceWebSocketClient extends EventEmitter {
           this.config.maxReconnectDelayMs
         );
         // scheduleReconnect will be called again from the 'close' handler
-      }
+      });
     }, this.currentReconnectDelay);
+  }
+
+  /**
+   * Start a periodic last-resort reconnect attempt (every 5 minutes).
+   * Used after all normal reconnect attempts are exhausted.
+   */
+  private startLastResortReconnect(): void {
+    this.cancelLastResortReconnect();
+    const intervalMs = 5 * 60 * 1000; // 5 minutes
+
+    this.lastResortTimer = setInterval(() => {
+      if (this.connected || this.intentionalDisconnect) {
+        this.cancelLastResortReconnect();
+        return;
+      }
+
+      logger.info('Attempting last-resort reconnect');
+      this.reconnectAttempts = 0;
+      this.currentReconnectDelay = this.config.reconnectDelayMs;
+      this.connect().catch((error) => {
+        logger.error('Last-resort reconnect failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, intervalMs);
+  }
+
+  /**
+   * Cancel the last-resort reconnect timer.
+   */
+  private cancelLastResortReconnect(): void {
+    if (this.lastResortTimer) {
+      clearInterval(this.lastResortTimer);
+      this.lastResortTimer = null;
+    }
   }
 
   /**

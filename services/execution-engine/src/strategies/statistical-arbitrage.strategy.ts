@@ -28,6 +28,7 @@ import {
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import { generateTraceId } from '@arbitrage/core/tracing/trace-context';
 
 // =============================================================================
 // Types
@@ -95,6 +96,8 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
     const chain = opportunity.chain ?? 'unknown';
     const dex = opportunity.buyDex ?? opportunity.sellDex ?? 'stat-arb';
     const oppId = opportunity.id ?? 'unknown';
+    // C3: Trace context for cross-service correlation
+    const traceId = generateTraceId();
 
     // ===========================================================================
     // Pre-execution Validation
@@ -104,6 +107,7 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
     const age = Date.now() - opportunity.timestamp;
     if (age > this.config.maxOpportunityAgeMs) {
       this.logger.warn('Statistical arb opportunity is stale', {
+        traceId,
         opportunityId: oppId,
         ageMs: age,
         maxAgeMs: this.config.maxOpportunityAgeMs,
@@ -119,6 +123,7 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
     // Check minimum confidence
     if (opportunity.confidence < this.config.minConfidence) {
       this.logger.warn('Statistical arb confidence too low', {
+        traceId,
         opportunityId: oppId,
         confidence: opportunity.confidence,
         minConfidence: this.config.minConfidence,
@@ -163,6 +168,7 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
 
     if (this.flashLoanStrategy) {
       this.logger.info('Delegating stat arb to flash loan strategy', {
+        traceId,
         opportunityId: oppId,
         chain,
         tokenIn: opportunity.tokenIn,
@@ -181,6 +187,7 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.error('Flash loan execution failed for stat arb', {
+          traceId,
           opportunityId: oppId,
           error: errorMsg,
         });
@@ -196,6 +203,7 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
     // No flash loan strategy available — report error instead of faking success.
     // Fake success would corrupt P&L tracking with phantom profits.
     this.logger.error('No flash loan strategy available for stat arb execution', {
+      traceId,
       opportunityId: oppId,
       chain,
     });

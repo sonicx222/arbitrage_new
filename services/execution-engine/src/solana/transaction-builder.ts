@@ -18,6 +18,7 @@ import {
   PublicKey,
   TransactionMessage,
   TransactionInstruction,
+  type AddressLookupTableAccount,
 } from '@solana/web3.js';
 import { createLogger, type Logger } from '@arbitrage/core';
 
@@ -67,12 +68,17 @@ export class SolanaTransactionBuilder {
    * @param jupiterSwapTxBase64 - Base64-encoded versioned transaction from Jupiter
    * @param walletKeypair - Wallet keypair for signing
    * @param tipLamports - Tip amount in lamports for Jito validator
+   * @param lookupTableAccounts - Address Lookup Table accounts for resolving compressed keys.
+   *   Required when Jupiter's swap tx uses ALTs (most complex routes do).
+   *   Fetch these from on-chain via connection.getAddressLookupTable() for each
+   *   ALT address in the original transaction's addressTableLookups.
    * @returns Signed versioned transaction ready for bundle submission
    */
   async buildBundleTransaction(
     jupiterSwapTxBase64: string,
     walletKeypair: Keypair,
     tipLamports: number,
+    lookupTableAccounts?: AddressLookupTableAccount[],
   ): Promise<VersionedTransaction> {
     this.logger.debug('Building bundle transaction', {
       tipLamports,
@@ -103,19 +109,25 @@ export class SolanaTransactionBuilder {
     // Get the existing instructions and address table lookups
     const addressTableLookups = originalMessage.addressTableLookups ?? [];
 
+    if (addressTableLookups.length > 0 && !lookupTableAccounts?.length) {
+      this.logger.warn('Jupiter tx uses Address Lookup Tables but none were provided — ALTs will be lost', {
+        altCount: addressTableLookups.length,
+      });
+    }
+
     // Build a new message with the tip instruction appended
     // We extract the compiled instructions and add the tip transfer
     const existingInstructions = this.decompileInstructions(originalMessage);
     const allInstructions = [...existingInstructions, tipInstruction];
 
-    // 4. Create new versioned transaction with all instructions
+    // 4. Create new versioned transaction with all instructions.
+    // Pass ALT accounts so compileToV0Message can compress addresses.
     const newMessage = new TransactionMessage({
       payerKey: walletKeypair.publicKey,
       recentBlockhash: originalMessage.recentBlockhash,
       instructions: allInstructions,
     }).compileToV0Message(
-      // Pass address table lookups if they exist
-      addressTableLookups.length > 0 ? undefined : undefined,
+      lookupTableAccounts?.length ? lookupTableAccounts : undefined,
     );
 
     const newTx = new VersionedTransaction(newMessage);

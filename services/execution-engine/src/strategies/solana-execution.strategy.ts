@@ -31,6 +31,8 @@ import type { ExecutionStrategy, StrategyContext, Logger } from '../types';
 import type { JupiterSwapClient } from '../solana/jupiter-client';
 import type { SolanaTransactionBuilder } from '../solana/transaction-builder';
 import type { ISolanaMevProvider } from '@arbitrage/core/mev-protection/types';
+import { VersionedTransaction } from '@solana/web3.js';
+import { generateTraceId } from '@arbitrage/core/tracing/trace-context';
 
 // =============================================================================
 // Types
@@ -112,8 +114,11 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
     const startTime = Date.now();
     const chain = opportunity.chain ?? 'solana';
     const dex = opportunity.buyDex ?? 'jupiter';
+    // C3: Trace context for cross-service correlation
+    const traceId = generateTraceId();
 
     this.logger.info('Executing Solana arbitrage opportunity', {
+      traceId,
       opportunityId: opportunity.id,
       tokenIn: opportunity.tokenIn,
       tokenOut: opportunity.tokenOut,
@@ -164,6 +169,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
 
           if (deviationPct > this.config.maxPriceDeviationPct) {
             this.logger.warn('Price deviation exceeds threshold, aborting', {
+              traceId,
               opportunityId: opportunity.id,
               deviationPct,
               maxDeviationPct: this.config.maxPriceDeviationPct,
@@ -191,6 +197,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
 
       if (netProfitLamports < this.config.minProfitLamports) {
         this.logger.warn('Net profit below minimum after tip, aborting', {
+          traceId,
           opportunityId: opportunity.id,
           grossProfitLamports: grossProfitLamports.toString(),
           tipLamports: this.config.tipLamports,
@@ -215,25 +222,65 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       );
 
       // -----------------------------------------------------------------------
-      // Step 5: Build bundle transaction with Jito tip
+      // Step 5: Build bundle transaction with Jito tip via SolanaTransactionBuilder
       // -----------------------------------------------------------------------
-      // Note: We need a Keypair for signing. The transaction builder requires it.
-      // In production, the keypair is loaded from env. Here we pass the base64 tx
-      // to the Jito provider which handles serialization.
+      // The txBuilder deserializes the Jupiter swap tx, appends a Jito tip
+      // instruction, and re-signs with the wallet keypair. This ensures the
+      // transaction has a valid signature (Jupiter txs require user signature).
       //
-      // For the MVP, we submit the Jupiter swap transaction directly via Jito
-      // without re-building (the tip is handled by Jito's sendProtectedTransaction).
-      const swapTxBuffer = Buffer.from(swapResult.swapTransaction, 'base64');
+      // Note: buildBundleTransaction requires a Keypair. The Jito provider's
+      // getWalletKeypair() provides it when available. If no keypair is available,
+      // fall back to submitting the raw Jupiter tx via sendProtectedTransaction
+      // (which handles signing internally for simple cases).
+      //
+      // ALT guard: When the Jupiter transaction uses Address Lookup Tables,
+      // decompileInstructions() only reads staticAccountKeys and ALT-resolved
+      // accounts become undefined, producing malformed transactions. Skip the
+      // bundle building path and use the raw Jupiter tx in this case.
+      let txLike: { serialize: () => Uint8Array };
 
-      // Create a minimal SolanaTransactionLike for the Jito provider
-      const txLike = {
-        serialize: () => swapTxBuffer,
-      };
+      // Check if Jupiter tx uses Address Lookup Tables (ALTs)
+      const swapTxBuffer = Buffer.from(swapResult.swapTransaction, 'base64');
+      const deserializedTx = VersionedTransaction.deserialize(swapTxBuffer);
+      const hasALTs = (deserializedTx.message.addressTableLookups?.length ?? 0) > 0;
+
+      const keypair = this.jitoProvider.getWalletKeypair?.();
+      if (keypair && !hasALTs) {
+        const bundleTx = await this.txBuilder.buildBundleTransaction(
+          swapResult.swapTransaction,
+          keypair,
+          this.config.tipLamports,
+        );
+        txLike = {
+          serialize: () => bundleTx.serialize(),
+        };
+      } else if (hasALTs) {
+        // Fallback: ALT transactions cannot be decompiled for bundle building.
+        // Submit raw Jupiter tx — Jito provider handles tip internally.
+        this.logger.warn('Jupiter tx uses Address Lookup Tables, skipping bundle building to avoid malformed instructions', {
+          traceId,
+          opportunityId: opportunity.id,
+          altCount: deserializedTx.message.addressTableLookups.length,
+        });
+        txLike = {
+          serialize: () => swapTxBuffer,
+        };
+      } else {
+        // H2: No keypair available and no ALTs — cannot build Jito bundle or add tip.
+        // Submitting without MEV protection risks sandwich attacks.
+        return createErrorResult(
+          opportunity.id,
+          '[ERR_NO_KEYPAIR] Wallet keypair unavailable — cannot build Jito bundle or guarantee MEV protection',
+          chain,
+          dex,
+        );
+      }
 
       // -----------------------------------------------------------------------
       // Step 6: Submit bundle via Jito provider
       // -----------------------------------------------------------------------
       this.logger.info('Submitting Solana transaction via Jito', {
+        traceId,
         opportunityId: opportunity.id,
         tipLamports: this.config.tipLamports,
       });
@@ -249,12 +296,19 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       const latencyMs = Date.now() - startTime;
 
       if (submissionResult.success) {
-        this.logger.info('Solana arbitrage executed successfully', {
+        // H1: Transaction submitted but not yet confirmed on-chain.
+        // Solana transactions may be dropped during slot leader changes.
+        // TODO: When Solana Connection is injected, poll getSignatureStatuses()
+        // up to lastValidBlockHeight for finality confirmation.
+        this.logger.info('Solana arbitrage submitted (pending confirmation)', {
+          traceId,
           opportunityId: opportunity.id,
           transactionHash: submissionResult.transactionHash,
           latencyMs,
           netProfitLamports: netProfitLamports.toString(),
           usedFallback: submissionResult.usedFallback,
+          lastValidBlockHeight: swapResult.lastValidBlockHeight,
+          confirmationStatus: 'unconfirmed',
         });
 
         return createSuccessResult(
@@ -271,6 +325,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       }
 
       this.logger.error('Solana arbitrage execution failed', {
+        traceId,
         opportunityId: opportunity.id,
         error: submissionResult.error,
         latencyMs,
@@ -288,6 +343,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       this.logger.error('Solana execution strategy error', {
+        traceId,
         opportunityId: opportunity.id,
         error: errorMessage,
         latencyMs,

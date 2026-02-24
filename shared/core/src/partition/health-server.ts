@@ -348,7 +348,16 @@ export async function shutdownPartitionService(
     // FIX #13: Reuse closeServerWithTimeout to eliminate duplicated shutdown logic
     await closeServerWithTimeout(healthServer, SHUTDOWN_TIMEOUT_MS, logger);
 
-    await detector.stop();
+    // H6: Wrap detector.stop() with timeout to prevent hanging on stuck WebSocket/RPC calls
+    await Promise.race([
+      detector.stop(),
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          logger.warn(`${serviceName} detector.stop() timed out after ${SHUTDOWN_TIMEOUT_MS}ms, proceeding with shutdown`);
+          resolve();
+        }, SHUTDOWN_TIMEOUT_MS);
+      }),
+    ]);
     logger.info(`${serviceName} shutdown complete`);
     process.exit(0);
   } catch (error) {

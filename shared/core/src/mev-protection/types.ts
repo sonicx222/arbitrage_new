@@ -19,6 +19,7 @@
  */
 
 import { ethers } from 'ethers';
+import type { Keypair } from '@solana/web3.js';
 
 // =============================================================================
 // Types
@@ -459,4 +460,16 @@ export interface ISolanaMevProvider {
    * Check connection/health of the Jito provider
    */
   healthCheck(): Promise<{ healthy: boolean; message: string }>;
+
+  /**
+   * Get the wallet keypair for bundle transaction signing (optional).
+   *
+   * When available, SolanaExecutionStrategy uses this to build signed
+   * bundle transactions via SolanaTransactionBuilder. When absent,
+   * the strategy falls back to submitting the raw Jupiter swap tx
+   * through sendProtectedTransaction (which handles signing internally).
+   *
+   * @returns Solana Keypair for signing, or undefined if not available
+   */
+  getWalletKeypair?(): Keypair | undefined;
 }

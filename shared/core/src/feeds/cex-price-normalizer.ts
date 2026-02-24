@@ -93,6 +93,10 @@ const DEFAULT_BINANCE_MAPPINGS: Record<string, TokenMapping> = {
     tokenId: 'OP',
     chains: ['optimism'],
   },
+  FTMUSDT: {
+    tokenId: 'WFTM',
+    chains: ['fantom'],
+  },
 };
 
 // =============================================================================

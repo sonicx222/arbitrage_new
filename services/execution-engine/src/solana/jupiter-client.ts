@@ -124,6 +124,13 @@ export class JupiterSwapClient {
 
     const data = await this.fetchWithRetry<JupiterQuote>(url, { method: 'GET' });
 
+    // Validate critical fields — Jupiter API may return unexpected shapes on error
+    if (!data.inAmount || !data.outAmount) {
+      throw new Error(
+        `Jupiter quote response missing required fields: inAmount=${data.inAmount}, outAmount=${data.outAmount}`,
+      );
+    }
+
     this.logger.debug('Jupiter quote received', {
       inAmount: data.inAmount,
       outAmount: data.outAmount,
@@ -167,9 +174,14 @@ export class JupiterSwapClient {
       }),
     });
 
+    // Validate critical fields — missing swapTransaction means Jupiter couldn't build the tx
+    if (!data.swapTransaction) {
+      throw new Error('Jupiter swap response missing swapTransaction field');
+    }
+
     this.logger.debug('Jupiter swap transaction received', {
       lastValidBlockHeight: data.lastValidBlockHeight,
-      txLength: data.swapTransaction?.length ?? 0,
+      txLength: data.swapTransaction.length,
     });
 
     return data;

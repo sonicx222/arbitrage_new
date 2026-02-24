@@ -233,7 +233,7 @@ describe('Load Testing - Production Scale', () => {
           await new Promise(resolve => setImmediate(resolve));
         }
       }
-      let normalElapsed = performance.now() - start;
+      const normalElapsed = performance.now() - start;
 
       // Spike load phase (5 seconds)
       console.log('Phase 2: Spike load (10x)...');
@@ -254,7 +254,7 @@ describe('Load Testing - Production Scale', () => {
           await new Promise(resolve => setImmediate(resolve));
         }
       }
-      let spikeElapsed = performance.now() - start;
+      const spikeElapsed = performance.now() - start;
 
       // Calculate statistics
       const normalAvg =

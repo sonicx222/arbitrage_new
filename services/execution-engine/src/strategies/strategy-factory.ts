@@ -4,19 +4,15 @@
  * Provides a clean factory pattern for strategy selection and dispatch.
  * Encapsulates the strategy selection logic that was previously in engine.ts.
  *
- * ## Fix 1.1: Chain Support Scope
+ * ## Chain Support Scope
  *
- * **IMPORTANT**: This execution engine currently supports EVM chains ONLY.
- * The architecture references "11 chains (10 EVM + Solana)" but:
+ * This execution engine supports both EVM chains and Solana:
  *
- * - **EVM Chains (supported)**: Ethereum, BSC, Arbitrum, Base, Polygon, Optimism,
- *   Avalanche, Fantom, zkSync, Linea - Use strategies in this directory
- * - **Solana (not supported here)**: Requires separate Solana-native execution
- *   logic due to fundamental differences (accounts model, SPL tokens, etc.)
+ * - **EVM Chains**: Ethereum, BSC, Arbitrum, Base, Polygon, Optimism,
+ *   Avalanche, Fantom, zkSync, Linea - Use flash loan and MEV strategies
+ * - **Solana**: Uses SolanaExecutionStrategy with Jupiter V6 + Jito bundles
  *
- * Solana detection is handled by `shared/core/src/solana/` but Solana execution
- * would require a separate SolanaExecutionEngine with program-based execution.
- * See ADR-025 (if exists) for Solana execution roadmap.
+ * @see ADR-034 for Solana execution architecture
  *
  * Benefits:
  * - Single Responsibility: Strategy selection logic in one place
@@ -435,6 +431,10 @@ export class ExecutionStrategyFactory {
 
     // Phase 3 #31: Statistical arbitrage
     if (opportunity.type === 'statistical') {
+      // H4: Statistical arb on Solana routes to EVM flash loan which doesn't exist on Solana
+      if (opportunity.chain === 'solana') {
+        throw new Error('[ERR_UNSUPPORTED] Statistical arbitrage on Solana is not supported — requires EVM flash loan infrastructure');
+      }
       if (!this.strategies.statistical) {
         throw new Error('[ERR_NO_STRATEGY] Statistical opportunity but no statistical strategy registered');
       }

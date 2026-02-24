@@ -282,7 +282,7 @@ export class SharedMemoryCache {
 
     // Use the tracked write cursor — always points to end of data.
     // This avoids scanning the buffer which breaks with tombstoned entries.
-    let dataOffset = this.nextWriteOffset;
+    const dataOffset = this.nextWriteOffset;
 
     // Serialize key and value
     const serializedKey = this.textEncoder.encode(key);

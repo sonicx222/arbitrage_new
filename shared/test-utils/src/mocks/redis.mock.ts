@@ -1080,7 +1080,7 @@ export class RedisMockState {
    * Create a mock Redis object that uses this shared state.
    * Uses 'any' to avoid Jest 29+ strict typing issues.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   createMockRedis(): any {
     const state = this;
 

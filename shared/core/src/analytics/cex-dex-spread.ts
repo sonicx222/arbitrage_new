@@ -293,9 +293,10 @@ export class CexDexSpreadCalculator extends EventEmitter {
 
     const now = Date.now();
 
-    // Reject stale CEX prices (e.g., Binance WebSocket disconnected)
+    // H3: Reject stale CEX prices (e.g., Binance WebSocket disconnected)
+    // Escalated from debug to warn so operators have visibility into spread blindness
     if (now - pairState.cexPrice.timestamp > this.config.maxCexPriceAgeMs) {
-      logger.debug('Skipping spread check: stale CEX price', {
+      logger.warn('Skipping spread check: stale CEX price', {
         key,
         cexPriceAge: now - pairState.cexPrice.timestamp,
         maxAge: this.config.maxCexPriceAgeMs,

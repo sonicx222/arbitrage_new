@@ -1035,7 +1035,10 @@ export class ExecutionEngineService {
 
     // Phase 3 #29: Solana execution via Jupiter/Jito (feature-flagged, dynamic import)
     if (process.env.FEATURE_SOLANA_EXECUTION === 'true') {
-      try {
+      // H7: Validate SOLANA_RPC_URL before proceeding — connection stubs throw at runtime
+      if (!process.env.SOLANA_RPC_URL) {
+        this.logger.error('FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set — skipping Solana strategy registration');
+      } else try {
         const { JupiterSwapClient } = await import('./solana/jupiter-client');
         const { SolanaTransactionBuilder } = await import('./solana/transaction-builder');
         const { SolanaExecutionStrategy } = await import('./strategies/solana-execution.strategy');
@@ -1106,6 +1109,8 @@ export class ExecutionEngineService {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    } else {
+      this.logger.info('Solana execution disabled (FEATURE_SOLANA_EXECUTION != true)');
     }
 
     // Phase 3 #31: Statistical arbitrage strategy (feature-flagged, dynamic import)

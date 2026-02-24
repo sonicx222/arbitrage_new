@@ -188,7 +188,7 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
     // =========================================================================
 
     // Helper to bypass strict jest.Mock<UnknownFunction> type inference
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const mock = (fn: unknown) => fn as jest.Mock<any>;
 
     // Override executeStart to return { success: true } after running the callback.

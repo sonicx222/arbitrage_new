@@ -55,7 +55,7 @@ import type { BridgeQuote, IBridgeRouter } from '../../src/bridge-router/types';
  * Create a typed mock function that accepts any resolved/rejected value.
  * Avoids @jest/globals strict typing where jest.fn() defaults to (...args: never[]) => never.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const typedMock = () => jest.fn() as jest.Mock<(...args: any[]) => any>;
 
 /**

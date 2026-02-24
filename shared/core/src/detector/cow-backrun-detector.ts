@@ -13,6 +13,15 @@
  *    emits an ArbitrageOpportunity with type 'backrun'
  * 4. The opportunity is routed to BackrunStrategy for execution via Flashbots
  *
+ * ## Type Routing
+ *
+ * Emits opportunities with `type: 'backrun'`, the same type used by
+ * MEV-Share backrun detection. CoW-originated opportunities are
+ * differentiated by `backrunTarget.source === 'cow_protocol'`.
+ * This means both MEV-Share and CoW backruns share the BackrunStrategy
+ * execution path. If separate execution logic is needed in the future,
+ * introduce a distinct `'cow_backrun'` type in @arbitrage/types.
+ *
  * ## Price Impact Estimation
  *
  * Uses the constant-product AMM formula to estimate price displacement:
@@ -51,10 +60,10 @@ const logger = createLogger('cow-backrun-detector');
 const DEFAULT_POOL_RESERVE_USD = 5_000_000;
 
 /**
- * Approximate ETH price in USD for trade size estimation.
- * This is a rough approximation; real implementation would use a price oracle.
+ * Default ETH price in USD for trade size estimation.
+ * Used as fallback when no price oracle is configured.
  */
-const APPROXIMATE_ETH_PRICE_USD = 2500;
+const DEFAULT_ETH_PRICE_USD = 2500;
 
 /**
  * Known stablecoin addresses on Ethereum mainnet (lowercase).
@@ -72,6 +81,15 @@ const STABLECOIN_ADDRESSES = new Set([
  */
 const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 
+/**
+ * USDC and USDT use 6 decimals. Module-level constant to avoid
+ * allocating a new Set on every stablecoinToUsd() call.
+ */
+const SIX_DECIMAL_STABLES = new Set([
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
+  '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
+]);
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -88,6 +106,8 @@ export interface CowBackrunConfig {
   minTradeSize: number;
   /** Assumed pool reserve in USD for price impact estimation (default: 5,000,000) */
   poolReserveUsd?: number;
+  /** Approximate ETH price in USD for WETH trade value estimation (default: 2500) */
+  ethPriceUsd?: number;
 }
 
 /**
@@ -121,11 +141,14 @@ export interface PriceImpactEstimate {
  */
 export class CowBackrunDetector extends EventEmitter {
   private readonly poolReserveUsd: number;
+  private readonly ethPriceUsd: number;
   private settlementHandler: ((settlement: CowSettlement) => void) | null = null;
 
   constructor(private readonly config: CowBackrunConfig) {
     super();
+    this.setMaxListeners(20);
     this.poolReserveUsd = config.poolReserveUsd ?? DEFAULT_POOL_RESERVE_USD;
+    this.ethPriceUsd = config.ethPriceUsd ?? DEFAULT_ETH_PRICE_USD;
   }
 
   /**
@@ -321,8 +344,9 @@ export class CowBackrunDetector extends EventEmitter {
     }
 
     // Unknown tokens: use a conservative minimum estimate
-    // Assume 18 decimals and $1 per token as a floor
-    return Number(trade.sellAmount) / 1e18;
+    // Assume 18 decimals and $1 per token as a floor.
+    // Use BigInt division first to avoid Number overflow for large amounts.
+    return this.bigintTo18DecimalNumber(trade.sellAmount);
   }
 
   /**
@@ -330,24 +354,30 @@ export class CowBackrunDetector extends EventEmitter {
    * Handles both 6-decimal (USDC, USDT) and 18-decimal (DAI, BUSD) stablecoins.
    */
   private stablecoinToUsd(amount: bigint, tokenAddress: string): number {
-    // USDC and USDT use 6 decimals
-    const sixDecimalStables = new Set([
-      '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
-      '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
-    ]);
-
-    if (sixDecimalStables.has(tokenAddress)) {
+    if (SIX_DECIMAL_STABLES.has(tokenAddress)) {
+      // 6-decimal amounts fit safely in Number (max ~$9 trillion)
       return Number(amount) / 1e6;
     }
 
-    // DAI, BUSD use 18 decimals
-    return Number(amount) / 1e18;
+    // DAI, BUSD use 18 decimals — use safe BigInt conversion
+    return this.bigintTo18DecimalNumber(amount);
   }
 
   /**
    * Convert WETH amount to approximate USD value.
    */
   private wethToUsd(amount: bigint): number {
-    return (Number(amount) / 1e18) * APPROXIMATE_ETH_PRICE_USD;
+    return this.bigintTo18DecimalNumber(amount) * this.ethPriceUsd;
+  }
+
+  /**
+   * Safely convert a BigInt with 18 decimals to a Number.
+   * Divides by 10^12 in BigInt space first, then by 10^6 in Number space,
+   * preserving 6 digits of decimal precision while avoiding Number overflow.
+   */
+  private bigintTo18DecimalNumber(amount: bigint): number {
+    // Divide by 10^12 in BigInt space (safe, no overflow)
+    // Then divide by 10^6 in Number space to get the full 18-decimal conversion
+    return Number(amount / 1_000_000_000_000n) / 1e6;
   }
 }

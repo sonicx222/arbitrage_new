@@ -178,6 +178,10 @@ contract DaiFlashMintArbitrage is
         // Prevents external actors from triggering callbacks
         if (initiator != address(this)) revert InvalidFlashLoanInitiator();
 
+        // Defense-in-depth: DssFlash should only callback with DAI, but verify
+        // in case of future DssFlash upgrades or misconfiguration
+        if (token != DAI) revert InvalidDaiAddress();
+
         // Decode user data
         (SwapStep[] memory swapPath, uint256 minProfit) = abi.decode(
             data,

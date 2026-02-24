@@ -145,6 +145,7 @@ export class CowSettlementWatcher extends EventEmitter {
 
   constructor(private readonly config: CowWatcherConfig = { minTrades: 1 }) {
     super();
+    this.setMaxListeners(20);
     this.pollIntervalMs = config.pollIntervalMs ?? 12000;
     this.lookbackBlocks = config.lookbackBlocks ?? 2;
   }
@@ -207,9 +208,12 @@ export class CowSettlementWatcher extends EventEmitter {
     this.isRunning = false;
     this.contract = null;
     this.provider = null;
-    this.lastProcessedBlock = 0;
+    // Preserve lastProcessedBlock so restart() doesn't miss settlements
+    // between stop and start. Reset to 0 only on explicit resetBlock().
 
-    logger.info('CowSettlementWatcher stopped');
+    logger.info('CowSettlementWatcher stopped', {
+      lastProcessedBlock: this.lastProcessedBlock,
+    });
   }
 
   /**

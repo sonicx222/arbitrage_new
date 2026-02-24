@@ -226,7 +226,7 @@ export function validateProductionConfig(): void {
  *
  * **Solana (Detection Only)**:
  * - ✅ Opportunity detection supported (Partition 4)
- * - ❌ Execution NOT implemented (different transaction model)
+ * - ✅ Execution supported via Jupiter V6 + Jito bundles (Phase 3 #29)
  * - Requires: @solana/web3.js, SPL tokens, Jito bundles
  * - See: docs/architecture/ARCHITECTURE_V2.md Section 4.7
  *
@@ -248,13 +248,14 @@ export const SUPPORTED_EXECUTION_CHAINS = new Set([
   'scroll',
   'mantle',
   'mode',
+  'solana',
 ]);
 
 /**
  * Check if a chain supports execution (transaction submission).
  *
  * FIX (Issue 2.4): Validates chain before execution attempts.
- * Returns false for detection-only chains like Solana.
+ * Returns false for chains not in SUPPORTED_EXECUTION_CHAINS.
  *
  * @param chain - Chain identifier (e.g., 'ethereum', 'solana')
  * @returns true if chain supports execution, false otherwise

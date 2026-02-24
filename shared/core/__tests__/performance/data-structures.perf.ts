@@ -49,7 +49,7 @@ describe('CircularBuffer benchmarks', () => {
       }
     }, ITERATIONS);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`CircularBuffer push: ${result.avgUs.toFixed(2)} us/op (${ITERATIONS} ops in ${result.totalMs.toFixed(1)} ms)`);
     // O(1) push should be well under 10us per operation
     expect(result.avgUs).toBeLessThan(100);
@@ -61,7 +61,7 @@ describe('CircularBuffer benchmarks', () => {
       buffer.pushOverwrite(Math.random());
     }, ITERATIONS);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`CircularBuffer pushOverwrite: ${result.avgUs.toFixed(2)} us/op (${ITERATIONS} ops in ${result.totalMs.toFixed(1)} ms)`);
     expect(result.avgUs).toBeLessThan(100);
   });
@@ -76,7 +76,7 @@ describe('CircularBuffer benchmarks', () => {
       buffer.countWhere(v => v > 0.5);
     }, 1000);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`CircularBuffer countWhere (n=${CAPACITY}): ${result.avgUs.toFixed(2)} us/op`);
     // O(n) scan of 1000 items should be under 1ms
     expect(result.avgUs).toBeLessThan(1000);
@@ -92,7 +92,7 @@ describe('CircularBuffer benchmarks', () => {
       buffer.toArray();
     }, 1000);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`CircularBuffer toArray (n=${CAPACITY}): ${result.avgUs.toFixed(2)} us/op`);
     expect(result.avgUs).toBeLessThan(1000);
   });
@@ -114,7 +114,7 @@ describe('LRUCache benchmarks', () => {
       cache.set(key++, 'value');
     }, ITERATIONS);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`LRUCache set: ${result.avgUs.toFixed(2)} us/op (${ITERATIONS} ops in ${result.totalMs.toFixed(1)} ms)`);
     expect(result.avgUs).toBeLessThan(100);
   });
@@ -131,7 +131,7 @@ describe('LRUCache benchmarks', () => {
       key++;
     }, ITERATIONS);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`LRUCache get (hit): ${result.avgUs.toFixed(2)} us/op (${ITERATIONS} ops in ${result.totalMs.toFixed(1)} ms)`);
     expect(result.avgUs).toBeLessThan(100);
   });
@@ -147,7 +147,7 @@ describe('LRUCache benchmarks', () => {
       cache.get(key++);
     }, ITERATIONS);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`LRUCache get (miss): ${result.avgUs.toFixed(2)} us/op (${ITERATIONS} ops in ${result.totalMs.toFixed(1)} ms)`);
     expect(result.avgUs).toBeLessThan(100);
   });
@@ -168,7 +168,7 @@ describe('MinHeap benchmarks', () => {
       heap.push(Math.random() * 10000);
     }, ITERATIONS);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`MinHeap push: ${result.avgUs.toFixed(2)} us/op (${ITERATIONS} ops in ${result.totalMs.toFixed(1)} ms)`);
     expect(result.avgUs).toBeLessThan(100);
   });
@@ -184,7 +184,7 @@ describe('MinHeap benchmarks', () => {
       heap.pop();
     }, HEAP_SIZE);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`MinHeap pop (n=${HEAP_SIZE}): ${result.avgUs.toFixed(2)} us/op`);
     expect(result.avgUs).toBeLessThan(100);
   });
@@ -198,7 +198,7 @@ describe('MinHeap benchmarks', () => {
       findKSmallest(data, K, numericCompare);
     }, 100);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`findKSmallest (n=${N}, k=${K}): ${result.avgUs.toFixed(2)} us/op`);
     // Should be significantly faster than full sort
     expect(result.avgUs).toBeLessThan(50_000);
@@ -213,7 +213,7 @@ describe('MinHeap benchmarks', () => {
       findKLargest(data, K, numericCompare);
     }, 100);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`findKLargest (n=${N}, k=${K}): ${result.avgUs.toFixed(2)} us/op`);
     expect(result.avgUs).toBeLessThan(50_000);
   });
@@ -232,7 +232,7 @@ describe('MinHeap benchmarks', () => {
       sorted.slice(0, K);
     }, 50);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`findKSmallest: ${heapResult.avgUs.toFixed(2)} us/op vs full sort: ${sortResult.avgUs.toFixed(2)} us/op (${(sortResult.avgUs / heapResult.avgUs).toFixed(1)}x faster)`);
 
     // Heap-based approach should be faster than full sort for small k

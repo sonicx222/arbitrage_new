@@ -316,7 +316,7 @@ export async function createLevel3TestSetup(
   const redis = await createIsolatedRedisClient('level3-e2e-test');
 
   // TODO: Start Anvil fork if configured
-  let anvil: any = undefined;
+  const anvil: any = undefined;
   if (config.fork) {
     // anvil = await startAnvilFork(config.fork);
   }

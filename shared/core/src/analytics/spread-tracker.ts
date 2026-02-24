@@ -63,6 +63,10 @@ interface SpreadState {
   previousSignal: SpreadSignal;
   /** Whether we're currently in a position (had an entry signal) */
   inPosition: boolean;
+  /** Cached Bollinger Bands (invalidated on each addSpread) */
+  cachedBands: BollingerBands | undefined;
+  /** Last access timestamp for LRU eviction */
+  lastAccessTime: number;
 }
 
 // =============================================================================
@@ -115,11 +119,8 @@ export class SpreadTracker {
     let state = this.pairs.get(pairId);
     if (!state) {
       if (this.pairs.size >= this.config.maxPairs) {
-        // Simple eviction: remove the first entry (oldest by insertion)
-        const firstKey = this.pairs.keys().next().value;
-        if (firstKey !== undefined) {
-          this.pairs.delete(firstKey);
-        }
+        // LRU eviction: remove the least-recently-used pair
+        this.evictLRUPair();
       }
 
       state = {
@@ -128,19 +129,25 @@ export class SpreadTracker {
         sampleCount: 0,
         previousSignal: 'none',
         inPosition: false,
+        cachedBands: undefined,
+        lastAccessTime: Date.now(),
       };
       this.pairs.set(pairId, state);
     }
+
+    state.lastAccessTime = Date.now();
 
     // Write to circular buffer
     state.spreads[state.writeIndex] = spread;
     state.writeIndex = (state.writeIndex + 1) % this.config.bollingerPeriod;
     state.sampleCount = Math.min(state.sampleCount + 1, this.config.bollingerPeriod);
 
+    // Compute and cache Bollinger Bands (avoids recomputing in getSignal)
+    state.cachedBands = this.computeBollingerBands(state);
+
     // Update position tracking based on new signal
-    const bands = this.computeBollingerBands(state);
-    if (bands) {
-      if (spread < bands.lower || spread > bands.upper) {
+    if (state.cachedBands) {
+      if (spread < state.cachedBands.lower || spread > state.cachedBands.upper) {
         state.inPosition = true;
       }
       // Check for exit: spread crossed back through middle
@@ -148,8 +155,8 @@ export class SpreadTracker {
         const prevSpread = this.getPreviousSpread(state);
         if (prevSpread !== undefined) {
           const crossedMiddle =
-            (prevSpread < bands.middle && spread >= bands.middle) ||
-            (prevSpread > bands.middle && spread <= bands.middle);
+            (prevSpread < state.cachedBands.middle && spread >= state.cachedBands.middle) ||
+            (prevSpread > state.cachedBands.middle && spread <= state.cachedBands.middle);
           if (crossedMiddle) {
             state.inPosition = false;
           }
@@ -169,7 +176,8 @@ export class SpreadTracker {
       return 'none';
     }
 
-    const bands = this.computeBollingerBands(state);
+    // Use cached bands from addSpread() — avoids recomputing
+    const bands = state.cachedBands;
     if (!bands) {
       return 'none';
     }
@@ -184,27 +192,16 @@ export class SpreadTracker {
       return 'entry_short';
     }
 
-    // Exit signal: if we were in a position and spread reverted to middle
-    // Check using previous spread crossing the middle band
-    if (state.inPosition === false && state.sampleCount >= this.config.bollingerPeriod) {
+    // Exit signal: position was closed via middle-band crossing in addSpread().
+    // inPosition transitions from true→false only when spread crosses middle,
+    // so check if that transition just happened (previous spread was outside bands).
+    if (!state.inPosition) {
       const prevSpread = this.getPreviousSpread(state);
       if (prevSpread !== undefined) {
         const prevWasOutside = prevSpread < bands.lower || prevSpread > bands.upper;
-        const nowNearMiddle = Math.abs(currentSpread - bands.middle) < Math.abs(bands.upper - bands.middle) * 0.5;
-        if (prevWasOutside && nowNearMiddle) {
+        if (prevWasOutside) {
           return 'exit';
         }
-      }
-    }
-
-    // Check for recent mean reversion (spread recently crossed middle)
-    const prevSpread = this.getPreviousSpread(state);
-    if (prevSpread !== undefined) {
-      const crossedMiddle =
-        (prevSpread < bands.middle && currentSpread >= bands.middle) ||
-        (prevSpread > bands.middle && currentSpread <= bands.middle);
-      if (crossedMiddle) {
-        return 'exit';
       }
     }
 
@@ -222,7 +219,8 @@ export class SpreadTracker {
       return undefined;
     }
 
-    return this.computeBollingerBands(state);
+    // Return cached bands from addSpread() — avoids recomputing
+    return state.cachedBands;
   }
 
   /**
@@ -249,6 +247,25 @@ export class SpreadTracker {
   // ===========================================================================
 
   /**
+   * Evict the least-recently-used pair to make room for new entries.
+   */
+  private evictLRUPair(): void {
+    let oldestKey: string | undefined;
+    let oldestTime = Infinity;
+
+    for (const [key, state] of this.pairs) {
+      if (state.lastAccessTime < oldestTime) {
+        oldestTime = state.lastAccessTime;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey !== undefined) {
+      this.pairs.delete(oldestKey);
+    }
+  }
+
+  /**
    * Compute Bollinger Bands from the spread state.
    */
   private computeBollingerBands(state: SpreadState): BollingerBands | undefined {
@@ -256,26 +273,30 @@ export class SpreadTracker {
       return undefined;
     }
 
-    const spreads = this.getSpreadsInOrder(state);
-    const n = spreads.length;
+    // Compute SMA and stddev directly from circular buffer — avoids array allocation.
+    const n = state.sampleCount;
+    const startIndex = n < this.config.bollingerPeriod ? 0 : state.writeIndex;
+    const period = this.config.bollingerPeriod;
 
     // SMA (middle band)
     let sum = 0;
     for (let i = 0; i < n; i++) {
-      sum += spreads[i];
+      sum += state.spreads[(startIndex + i) % period];
     }
     const middle = sum / n;
 
     // Standard deviation
     let sumSqDiff = 0;
     for (let i = 0; i < n; i++) {
-      const diff = spreads[i] - middle;
+      const diff = state.spreads[(startIndex + i) % period] - middle;
       sumSqDiff += diff * diff;
     }
     // Use population std dev for Bollinger Bands (N, not N-1)
     const stdDev = Math.sqrt(sumSqDiff / n);
 
-    const currentSpread = spreads[n - 1];
+    // Current spread is the last written value
+    const currentIdx = (state.writeIndex - 1 + period) % period;
+    const currentSpread = state.spreads[currentIdx];
 
     return {
       upper: middle + this.config.bollingerStdDev * stdDev,

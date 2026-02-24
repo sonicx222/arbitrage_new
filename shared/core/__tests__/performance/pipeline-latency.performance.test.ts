@@ -135,21 +135,21 @@ describe('Pipeline Latency Benchmark', () => {
     const max = latencies[latencies.length - 1];
 
     // Log statistics for analysis
-    // eslint-disable-next-line no-console
+     
     console.log('Pipeline Latency Statistics:');
-    // eslint-disable-next-line no-console
+     
     console.log(`  Iterations: ${ITERATIONS}`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  Min:  ${min.toFixed(3)}ms`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  Avg:  ${avg.toFixed(3)}ms`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  P50:  ${p50.toFixed(3)}ms`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  P95:  ${p95.toFixed(3)}ms`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  P99:  ${p99.toFixed(3)}ms`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  Max:  ${max.toFixed(3)}ms`);
 
     // Assert performance bounds
@@ -204,13 +204,13 @@ describe('Pipeline Latency Benchmark', () => {
     const avgWith = withLatencies.reduce((s, v) => s + v, 0) / ITERATIONS;
     const overheadMs = avgWith - avgWithout;
 
-    // eslint-disable-next-line no-console
+     
     console.log('PipelineTimestamps Overhead:');
-    // eslint-disable-next-line no-console
+     
     console.log(`  Without: ${avgWithout.toFixed(4)}ms avg`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  With:    ${avgWith.toFixed(4)}ms avg`);
-    // eslint-disable-next-line no-console
+     
     console.log(`  Overhead: ${overheadMs.toFixed(4)}ms (${((overheadMs / avgWithout) * 100).toFixed(1)}%)`);
 
     // Overhead should be negligible (< 1ms per operation)
