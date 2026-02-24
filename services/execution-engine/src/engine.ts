@@ -1104,6 +1104,28 @@ export class ExecutionEngineService {
       }
     }
 
+    // Phase 3 #31: Statistical arbitrage strategy (feature-flagged, dynamic import)
+    if (process.env.FEATURE_STATISTICAL_ARB === 'true') {
+      try {
+        const { StatisticalArbitrageStrategy } = await import('./strategies/statistical-arbitrage.strategy');
+        const statArbStrategy = new StatisticalArbitrageStrategy(
+          this.logger,
+          {
+            minConfidence: parseNumericEnv('STAT_ARB_MIN_CONFIDENCE') ?? 0.5,
+            maxOpportunityAgeMs: parseNumericEnv('STAT_ARB_MAX_AGE_MS') ?? 30_000,
+            minExpectedProfitUsd: parseNumericEnv('STAT_ARB_MIN_PROFIT_USD') ?? 10,
+          },
+          flashLoanStrategy ?? undefined,
+        );
+        this.strategyFactory.registerStatisticalStrategy(statArbStrategy);
+        this.logger.info('Statistical arbitrage strategy registered');
+      } catch (error) {
+        this.logger.error('Failed to initialize statistical arbitrage strategy', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     this.logger.info('Strategy factory initialized', {
       registeredTypes: this.strategyFactory.getRegisteredTypes(),
       simulationMode: this.isSimulationMode,
