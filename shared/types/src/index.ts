@@ -173,7 +173,9 @@ export interface SwapHop {
 export interface ArbitrageOpportunity {
   id: string;
   // P0 Fix #1: Added 'backrun' (MEV-Share) and 'uniswapx' (Dutch auction filler) types
-  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex' | 'flash-loan' | 'backrun' | 'uniswapx';
+  // Phase 3 #29: Added 'solana' for Solana-native execution via Jupiter/Jito
+  // Phase 3 #31: Added 'statistical' for statistical arbitrage (mean-reversion, cointegration)
+  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex' | 'flash-loan' | 'backrun' | 'uniswapx' | 'solana' | 'statistical';
   chain?: string;        // Single chain for same-chain arbitrage
   buyDex?: string;
   sellDex?: string;

@@ -78,7 +78,9 @@ import type {
  * swap paths via buildNHopSwapSteps().
  */
 // P0 Fix #1: Added 'backrun' and 'uniswapx' strategy types
-export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral' | 'backrun' | 'uniswapx';
+// Phase 3 #29: Added 'solana' for Solana-native execution via Jupiter/Jito
+// Phase 3 #31: Added 'statistical' for statistical arbitrage strategies
+export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral' | 'backrun' | 'uniswapx' | 'solana' | 'statistical';
 
 /**
  * Strategy resolution result
@@ -128,6 +130,10 @@ export interface RegisteredStrategies {
   backrun?: ExecutionStrategy;
   /** P0 Fix #1: UniswapX Dutch auction filler strategy */
   uniswapx?: ExecutionStrategy;
+  /** Phase 3 #29: Solana-native execution via Jupiter/Jito */
+  solana?: ExecutionStrategy;
+  /** Phase 3 #31: Statistical arbitrage (mean-reversion, cointegration) */
+  statistical?: ExecutionStrategy;
 }
 
 // =============================================================================
@@ -211,6 +217,22 @@ export class ExecutionStrategyFactory {
   }
 
   /**
+   * Phase 3 #29: Register the Solana execution strategy (Jupiter/Jito).
+   */
+  registerSolanaStrategy(strategy: ExecutionStrategy): void {
+    this.strategies.solana = strategy;
+    this.logger.debug('Registered solana strategy');
+  }
+
+  /**
+   * Phase 3 #31: Register the statistical arbitrage strategy.
+   */
+  registerStatisticalStrategy(strategy: ExecutionStrategy): void {
+    this.strategies.statistical = strategy;
+    this.logger.debug('Registered statistical strategy');
+  }
+
+  /**
    * Register multiple strategies at once.
    */
   registerStrategies(strategies: RegisteredStrategies): void {
@@ -231,6 +253,12 @@ export class ExecutionStrategyFactory {
     }
     if (strategies.uniswapx) {
       this.registerUniswapXStrategy(strategies.uniswapx);
+    }
+    if (strategies.solana) {
+      this.registerSolanaStrategy(strategies.solana);
+    }
+    if (strategies.statistical) {
+      this.registerStatisticalStrategy(strategies.statistical);
     }
   }
 
@@ -391,6 +419,32 @@ export class ExecutionStrategyFactory {
       };
     }
 
+    // Phase 3 #29: Solana-native execution (by type or chain)
+    if (opportunity.type === 'solana' || opportunity.chain === 'solana') {
+      if (!this.strategies.solana) {
+        throw new Error('[ERR_NO_STRATEGY] Solana opportunity but no Solana strategy registered');
+      }
+      return {
+        type: 'solana',
+        strategy: this.strategies.solana,
+        reason: opportunity.type === 'solana'
+          ? 'Solana-typed opportunity'
+          : 'Opportunity on Solana chain',
+      };
+    }
+
+    // Phase 3 #31: Statistical arbitrage
+    if (opportunity.type === 'statistical') {
+      if (!this.strategies.statistical) {
+        throw new Error('[ERR_NO_STRATEGY] Statistical opportunity but no statistical strategy registered');
+      }
+      return {
+        type: 'statistical',
+        strategy: this.strategies.statistical,
+        reason: 'Statistical arbitrage opportunity',
+      };
+    }
+
     // Priority 3: Cross-chain opportunities
     // Fix 1.3: Detect cross-chain implicitly from buyChain/sellChain mismatch
     const isExplicitCrossChain = opportunity.type === 'cross-chain';
@@ -475,6 +529,11 @@ export class ExecutionStrategyFactory {
         return !!this.strategies.backrun;
       case 'uniswapx':
         return !!this.strategies.uniswapx;
+      // Phase 3: New strategy types
+      case 'solana':
+        return !!this.strategies.solana;
+      case 'statistical':
+        return !!this.strategies.statistical;
       default:
         return false;
     }
@@ -492,6 +551,9 @@ export class ExecutionStrategyFactory {
     // P0 Fix #1: Include new strategy types
     if (this.strategies.backrun) types.push('backrun');
     if (this.strategies.uniswapx) types.push('uniswapx');
+    // Phase 3: Include new strategy types
+    if (this.strategies.solana) types.push('solana');
+    if (this.strategies.statistical) types.push('statistical');
     return types;
   }
 

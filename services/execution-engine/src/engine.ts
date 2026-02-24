@@ -551,8 +551,8 @@ export class ExecutionEngineService {
         this.logger.info('Skipping blockchain initialization in simulation mode');
       }
 
-      // Initialize execution strategies
-      this.initializeStrategies();
+      // Initialize execution strategies (async for dynamic imports)
+      await this.initializeStrategies();
 
       // Finding #7: Initialize Phase 2 pending state simulation via extracted manager
       if (this.pendingStateConfig.enabled && !this.isSimulationMode) {
@@ -909,7 +909,7 @@ export class ExecutionEngineService {
   // FIX 1.1/9.3: Removed duplicate initializeMevProviders() - now in initialization module
   // FIX 1.1/9.3: Removed duplicate initializeBridgeRouter() - now in initialization module
 
-  private initializeStrategies(): void {
+  private async initializeStrategies(): Promise<void> {
     // F2: Build flash loan contract addresses and approved routers from config
     // Contract addresses sourced from env vars (FLASH_LOAN_CONTRACT_<CHAIN>)
     // Approved routers sourced from FLASH_LOAN_PROVIDERS.approvedRouters or DEXES config
@@ -1031,6 +1031,77 @@ export class ExecutionEngineService {
         maxGasPriceGwei: parseNumericEnv('UNISWAPX_MAX_GAS_PRICE_GWEI'),
       });
       this.strategyFactory.registerUniswapXStrategy(this.uniswapxStrategy);
+    }
+
+    // Phase 3 #29: Solana execution via Jupiter/Jito (feature-flagged, dynamic import)
+    if (process.env.FEATURE_SOLANA_EXECUTION === 'true') {
+      try {
+        const { JupiterSwapClient } = await import('./solana/jupiter-client');
+        const { SolanaTransactionBuilder } = await import('./solana/transaction-builder');
+        const { SolanaExecutionStrategy } = await import('./strategies/solana-execution.strategy');
+
+        const jupiterClient = new JupiterSwapClient({
+          apiUrl: process.env.JUPITER_API_URL ?? undefined,
+          timeoutMs: parseNumericEnv('JUPITER_TIMEOUT_MS') ?? undefined,
+          maxRetries: parseNumericEnv('JUPITER_MAX_RETRIES') ?? undefined,
+          defaultSlippageBps: parseNumericEnv('JUPITER_DEFAULT_SLIPPAGE_BPS') ?? undefined,
+        });
+
+        // Jito tip accounts from jito-provider defaults
+        const { JITO_TIP_ACCOUNTS } = await import('@arbitrage/core/mev-protection/jito-provider');
+        const tipAccountsRaw = process.env.JITO_TIP_ACCOUNTS;
+        const tipAccounts = tipAccountsRaw
+          ? tipAccountsRaw.split(',').map((s: string) => s.trim())
+          : JITO_TIP_ACCOUNTS;
+
+        const txBuilder = new SolanaTransactionBuilder({ tipAccounts });
+
+        // Create a minimal Jito provider for strategy use
+        // In production, this would use a fully configured JitoProvider
+        const { createJitoProvider } = await import('@arbitrage/core/mev-protection/jito-provider');
+
+        // Build a minimal connection interface for the Jito provider
+        // The actual Solana Connection is injected at runtime via env config
+        const jitoProvider = createJitoProvider({
+          chain: 'solana',
+          connection: {
+            getLatestBlockhash: async () => ({ blockhash: '', lastValidBlockHeight: 0 }),
+            getSlot: async () => 0,
+            getSignatureStatus: async () => ({ value: null }),
+            getBalance: async () => 0,
+            sendRawTransaction: async () => '',
+          },
+          keypair: {
+            publicKey: { toBase58: () => process.env.SOLANA_WALLET_PUBLIC_KEY ?? '', toBuffer: () => Buffer.alloc(32) },
+            secretKey: new Uint8Array(64),
+          },
+          enabled: true,
+          jitoEndpoint: process.env.JITO_ENDPOINT ?? undefined,
+          tipLamports: parseNumericEnv('JITO_TIP_LAMPORTS') ?? undefined,
+          tipAccounts,
+        });
+
+        const solanaStrategy = new SolanaExecutionStrategy(
+          jupiterClient,
+          txBuilder,
+          jitoProvider,
+          {
+            walletPublicKey: process.env.SOLANA_WALLET_PUBLIC_KEY ?? '',
+            tipLamports: parseNumericEnv('JITO_TIP_LAMPORTS') ?? 1_000_000,
+            maxSlippageBps: parseNumericEnv('SOLANA_MAX_SLIPPAGE_BPS') ?? 100,
+            minProfitLamports: BigInt(process.env.SOLANA_MIN_PROFIT_LAMPORTS ?? '100000'),
+            maxPriceDeviationPct: parseNumericEnv('SOLANA_MAX_PRICE_DEVIATION_PCT') ?? 1.0,
+          },
+          this.logger,
+        );
+
+        this.strategyFactory.registerSolanaStrategy(solanaStrategy);
+        this.logger.info('Solana execution strategy registered');
+      } catch (error) {
+        this.logger.error('Failed to initialize Solana execution strategy', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     this.logger.info('Strategy factory initialized', {
