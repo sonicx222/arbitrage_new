@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-25
 **Scope:** Complete analysis of contract deployment, testnet configuration, and chain/DEX coverage gaps
-**Status:** Assessment only — no code changes made
+**Status:** Assessment complete — configuration gaps (Phase A) mostly remediated, infrastructure gaps partially remediated
 
 ---
 
@@ -29,17 +29,17 @@
 - Comprehensive `deployment-utils.ts` library (~1600 lines) with full pipeline
 - Pre-deployment validation (`npm run validate:deployment`) covering 8 checks
 - Approved routers and token addresses populated for all 10 core EVM chains + 2 testnets
+- **All 10 core EVM chains configured in Hardhat** (Ethereum commented out intentionally) + 4 testnets
+- **All network stubs present in registry.json** (16 networks)
 - Docker testnet compose file with simulation mode
-- Fly.io configs for 6 services with deploy script
+- Fly.io configs for 8 services with deploy script (coordinator, coordinator-standby, execution-engine, partition-l2-fast, partition-high-value, partition-asia-fast, partition-solana, cross-chain-detector)
+- `generate-addresses.ts` preserves manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES) via marker-based extraction
 
 ### What's Broken or Missing
 - **1 of ~65 possible contract deployments exists** (FlashLoanArbitrage on Arbitrum Sepolia)
-- **5 of 11 mainnet chains missing from Hardhat config** (BSC, Polygon, Avalanche, Fantom, Linea)
 - **4 emerging L2s have all-zero placeholder DEX addresses** (Blast, Scroll, Mantle, Mode)
-- **Per-chain Etherscan API keys not wired** into hardhat config
 - **92 `it.todo()` test stubs** for Solana price feed and swap parser
 - **No mainnet deployment runbook**, no contract verification guide, no rollback procedures
-- **Outdated documentation**: wrong Node.js version, stale hosting provider assignments, missing contract types
 
 ### Key Numbers
 
@@ -105,11 +105,11 @@
 | **Optimism** | 10 | READY | READY | READY | N/A | N/A | READY | READY | READY | P2 L2-Turbo |
 | **zkSync** | 324 | READY | N/A | N/A | READY | READY | N/A | READY | READY | P3 High-Value |
 | **Ethereum** | 1 | MISSING (commented out) | READY | READY | READY | N/A | READY | READY | READY | P3 High-Value |
-| **BSC** | 56 | **MISSING** | PARTIAL* | N/A | READY | N/A | **MISSING** | READY | READY | P1 Asia-Fast |
-| **Polygon** | 137 | **MISSING** | READY | READY | N/A | N/A | READY | READY | READY | P1 Asia-Fast |
-| **Avalanche** | 43114 | **MISSING** | READY | N/A | N/A | N/A | **MISSING** | READY | READY | P1 Asia-Fast |
-| **Fantom** | 250 | **MISSING** | PARTIAL* | READY (Beethoven X) | N/A | N/A | **MISSING** | READY | READY | P1 Asia-Fast |
-| **Linea** | 59144 | **MISSING** | N/A | N/A | READY | PARTIAL** | N/A | READY | READY | P3 High-Value |
+| **BSC** | 56 | READY | PARTIAL* | N/A | READY | N/A | **MISSING** | READY | READY | P1 Asia-Fast |
+| **Polygon** | 137 | READY | READY | READY | N/A | N/A | READY | READY | READY | P1 Asia-Fast |
+| **Avalanche** | 43114 | READY | READY | N/A | N/A | N/A | **MISSING** | READY | READY | P1 Asia-Fast |
+| **Fantom** | 250 | READY | PARTIAL* | READY (Beethoven X) | N/A | N/A | **MISSING** | READY | READY | P1 Asia-Fast |
+| **Linea** | 59144 | READY | N/A | N/A | READY | PARTIAL** | N/A | READY | READY | P3 High-Value |
 
 *BSC/Fantom: Aave V3 may not have official pool addresses — verify availability.
 **Linea SyncSwap: DEFERRED — SyncSwap Vault not yet deployed to Linea mainnet.
@@ -173,11 +173,11 @@
 | 22 | PancakeSwapFlashArbitrage | zksync | Same |
 | 23 | MultiPathQuoter | zksync | Same |
 | 24 | CommitRevealArbitrage | zksync | Same |
-| 25-28 | All applicable | bsc | Hardhat config needed first |
-| 29-32 | All applicable | polygon | Hardhat config needed first |
-| 33-36 | All applicable | avalanche | Hardhat config needed first |
-| 37-40 | All applicable | fantom | Hardhat config needed first |
-| 41-44 | All applicable | linea | Hardhat config needed first |
+| 25-28 | All applicable | bsc | V3 Adapter SwapRouter address needed |
+| 29-32 | All applicable | polygon | None |
+| 33-36 | All applicable | avalanche | V3 Adapter SwapRouter address needed |
+| 37-40 | All applicable | fantom | V3 Adapter SwapRouter address needed |
+| 41-44 | All applicable | linea | V3 Adapter SwapRouter address needed |
 
 #### Contract Verification (All Deployments)
 
@@ -191,81 +191,11 @@ npx hardhat verify --network <network> <contract-address> <constructor-arg-1> <c
 
 ## 5. Hardhat Configuration Gaps
 
-### Networks That Need Adding to `contracts/hardhat.config.ts`
+### ~~Networks That Need Adding to `contracts/hardhat.config.ts`~~ — DONE
 
-```typescript
-// === MISSING: Must add to enable deployment ===
+All 5 missing mainnet chains (BSC, Polygon, Avalanche, Fantom, Linea) and 2 missing testnets (polygonAmoy, bscTestnet) have been added to `contracts/hardhat.config.ts`. Ethereum mainnet remains intentionally commented out (uncomment when ready for Phase E.7).
 
-// L1 Mainnet (uncomment when ready)
-ethereum: {
-  url: process.env.ETHEREUM_RPC_URL || '',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 1,
-},
-
-// Asia-Fast Partition Chains
-bsc: {
-  url: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 56,
-},
-polygon: {
-  url: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 137,
-},
-avalanche: {
-  url: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 43114,
-},
-fantom: {
-  url: process.env.FANTOM_RPC_URL || 'https://rpc.ftm.tools',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 250,
-},
-
-// High-Value Partition Addition
-linea: {
-  url: process.env.LINEA_RPC_URL || 'https://rpc.linea.build',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 59144,
-},
-
-// Emerging L2s (when DEX addresses are populated)
-blast: {
-  url: process.env.BLAST_RPC_URL || 'https://rpc.blast.io',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 81457,
-},
-scroll: {
-  url: process.env.SCROLL_RPC_URL || 'https://rpc.scroll.io',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 534352,
-},
-mantle: {
-  url: process.env.MANTLE_RPC_URL || 'https://rpc.mantle.xyz',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 5000,
-},
-mode: {
-  url: process.env.MODE_RPC_URL || 'https://mainnet.mode.network',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 34443,
-},
-
-// Missing Testnets
-polygonAmoy: {
-  url: process.env.POLYGON_AMOY_RPC_URL || 'https://rpc-amoy.polygon.technology',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 80002,
-},
-bscTestnet: {
-  url: process.env.BSC_TESTNET_RPC_URL || 'https://data-seed-prebsc-1-s1.binance.org:8545',
-  accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-  chainId: 97,
-},
-```
+**Remaining gap:** Emerging L2s (Blast, Scroll, Mantle, Mode) are NOT in Hardhat config — add after Phase B DEX address research completes.
 
 ### Etherscan Per-Chain API Keys
 
@@ -476,20 +406,18 @@ Enterprise network restrictions blocked all web access (DeFiLlama, Blastscan, of
 
 ### 8.1 Documentation Issues
 
-| File | Issue | Fix Needed |
-|------|-------|------------|
-| `docs/deployment.md:50` | Says "Node.js 18+" | Change to "Node.js >= 22.0.0" |
-| `docs/deployment.md` | References Upstash as primary Redis | Update to self-hosted Redis 7 recommendation |
-| `docs/deployment.md` | Says Coordinator on Koyeb | Update to Fly.io (sjc) per actual configs |
-| `docs/deployment.md` | Says Solana partition on Railway | Update to Fly.io (sjc) per actual configs |
-| `docs/deployment.md` | "Awaiting testnet deployment" | Update: deployed on arbitrumSepolia |
-| `docs/deployment.md` | Only mentions FlashLoanArbitrage | Add sections for Balancer, PancakeSwap, SyncSwap, CommitReveal, V3 Adapter |
-| `docs/CONFIGURATION.md` | Last updated 2026-02-05 | Update date and add new feature flags |
-| `docs/strategies.md` | Says "49 DEXs" | Update to 78 DEXs |
-| `docs/strategies.md` | Says "11 chains" | Update to 15 chains (10 core + 4 emerging + Solana) |
-| `.env.example` | Missing `BASE_SEPOLIA_RPC_URL` | Add testnet RPC env var |
-| `.env.example` | Missing `POLYGON_AMOY_RPC_URL` | Add testnet RPC env var |
-| `.env.example` | Missing `BSC_TESTNET_RPC_URL` | Add testnet RPC env var |
+| File | Issue | Fix Needed | Status |
+|------|-------|------------|--------|
+| `docs/deployment.md:50` | ~~Says "Node.js 18+"~~ | ~~Change to "Node.js >= 22.0.0"~~ | **DONE** — already says ">= 22.0.0" |
+| `docs/deployment.md` | ~~Step-by-step sections reference Railway/Koyeb/Oracle Cloud~~ | ~~Update Steps 3-5 to reference Fly.io~~ | **DONE** — all steps now use Fly.io |
+| `docs/deployment.md` | ~~"Awaiting testnet deployment"~~ | ~~Update: deployed on arbitrumSepolia~~ | **DONE** — already updated |
+| `docs/deployment.md` | ~~Only mentions FlashLoanArbitrage~~ | ~~Add sections for all contract types~~ | **DONE** — Contract Types table lists all 6 types |
+| `docs/CONFIGURATION.md` | ~~Last updated 2026-02-05~~ | ~~Update date~~ | **DONE** — now says 2026-02-25 |
+| `docs/strategies.md` | ~~Says "49 DEXs"~~ | ~~Update to 78 DEXs~~ | **DONE** — now says "78 DEXs across 15 chains" |
+| `docs/strategies.md` | ~~Says "11 chains"~~ | ~~Update to 15 chains~~ | **DONE** — heading updated |
+| `.env.example` | ~~Missing `BASE_SEPOLIA_RPC_URL`~~ | ~~Add testnet RPC env var~~ | **DONE** — present (commented out) |
+| `.env.example` | ~~Missing `POLYGON_AMOY_RPC_URL`~~ | ~~Add testnet RPC env var~~ | **DONE** — present (commented out) |
+| `.env.example` | ~~Missing `BSC_TESTNET_RPC_URL`~~ | ~~Add testnet RPC env var~~ | **DONE** — present (commented out) |
 
 ### 8.2 Missing Documentation
 
@@ -506,14 +434,14 @@ Enterprise network restrictions blocked all web access (DeFiLlama, Blastscan, of
 
 ### 8.3 Infrastructure Gaps
 
-| Gap | Description | Impact |
-|-----|-------------|--------|
-| **No Fly.io config for asia-fast partition** | BSC/Polygon/Avalanche/Fantom have no deployment target | P1 partition can't be deployed |
-| **No Fly.io config for cross-chain-detector** | Service exists but can't be deployed to Fly.io | Cross-chain detection unavailable in production |
-| **Docker partition chain assignments differ from CURRENT_STATE.md** | `docker-compose.partition.yml` vs `CURRENT_STATE.md` show different chain-to-partition mappings | Confusion about which chains run where |
-| **Fly.io deploy.sh only prompts for Upstash Redis** | `deploy.sh` references "Upstash Redis connection URL" | Should reference self-hosted Redis |
-| **No batch deployment script** | Must deploy each contract to each chain individually | Tedious, error-prone multi-chain deployment |
-| **`generate-addresses.ts` doesn't preserve manual sections** | Generated file loses APPROVED_ROUTERS, TOKEN_ADDRESSES, helpers | Must manually merge after generation |
+| Gap | Description | Impact | Status |
+|-----|-------------|--------|--------|
+| ~~**No Fly.io config for asia-fast partition**~~ | ~~BSC/Polygon/Avalanche/Fantom have no deployment target~~ | ~~P1 partition can't be deployed~~ | **DONE** — `partition-asia-fast.toml` exists (Singapore region) |
+| ~~**No Fly.io config for cross-chain-detector**~~ | ~~Service exists but can't be deployed to Fly.io~~ | ~~Cross-chain detection unavailable in production~~ | **DONE** — `cross-chain-detector.toml` exists (sjc region) |
+| **Docker partition chain assignments differ from CURRENT_STATE.md** | `docker-compose.partition.yml` vs `CURRENT_STATE.md` show different chain-to-partition mappings | Confusion about which chains run where | TODO |
+| ~~**Fly.io deploy.sh only prompts for Upstash Redis**~~ | ~~`deploy.sh` references "Upstash Redis connection URL"~~ | ~~Should reference self-hosted Redis~~ | **DONE** — now says "self-hosted recommended" |
+| **No batch deployment script** | Must deploy each contract to each chain individually | Tedious, error-prone multi-chain deployment | TODO |
+| ~~**`generate-addresses.ts` doesn't preserve manual sections**~~ | ~~Generated file loses APPROVED_ROUTERS, TOKEN_ADDRESSES, helpers~~ | ~~Must manually merge after generation~~ | **DONE** — marker-based preservation implemented |
 
 ---
 
@@ -537,7 +465,7 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 | Location | Marker | Description |
 |----------|--------|-------------|
 | `generate-addresses.ts:258` | TODO | Add helper functions to generated output |
-| `generate-addresses.ts:259` | TODO | Preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES) |
+| ~~`generate-addresses.ts:259`~~ | ~~TODO~~ | ~~Preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)~~ — **DONE** (marker-based extraction at line 80, 207-230) |
 
 ### Deploy Script Gaps (`contracts/scripts/deploy-v3-adapter.ts`)
 
@@ -550,10 +478,10 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 | Base | Has address | Has address | Ready |
 | Sepolia | Has address | Zero address (no QuoterV2) | Partial |
 | Arbitrum Sepolia | Has address | Zero address (no QuoterV2) | Partial |
-| **BSC** | **Not configured** | **Not configured** | Missing |
-| **Avalanche** | **Not configured** | **Not configured** | Missing |
-| **Fantom** | **Not configured** | **Not configured** | Missing |
-| **Linea** | **Not configured** | **Not configured** | Missing |
+| **BSC** | PancakeSwap V3 SmartRouter | Zero address (unverified) | Ready (SwapRouter) |
+| **Avalanche** | N/A (no V3 DEXs) | N/A | N/A |
+| **Fantom** | N/A (no V3 DEXs) | N/A | N/A |
+| **Linea** | PancakeSwap V3 SmartRouter | Zero address (unverified) | Ready (SwapRouter) |
 | **zkSync** | **Not applicable** (uses SyncSwap) | N/A | N/A |
 
 ---
@@ -562,16 +490,16 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 
 ### Phase A: Fix Configuration & Documentation (No Deployment Required)
 
-- [ ] **A.1** Add 5 missing mainnet chains to `hardhat.config.ts` (BSC, Polygon, Avalanche, Fantom, Linea)
-- [ ] **A.2** Add missing testnet chains to `hardhat.config.ts` (polygonAmoy, bscTestnet)
+- [x] **A.1** ~~Add 5 missing mainnet chains to `hardhat.config.ts` (BSC, Polygon, Avalanche, Fantom, Linea)~~ — DONE
+- [x] **A.2** ~~Add missing testnet chains to `hardhat.config.ts` (polygonAmoy, bscTestnet)~~ — DONE
 - [ ] **A.3** Uncomment Ethereum mainnet in `hardhat.config.ts` (when ready)
-- [ ] **A.4** Add missing testnet RPC vars to `.env.example` (BASE_SEPOLIA_RPC_URL, POLYGON_AMOY_RPC_URL, BSC_TESTNET_RPC_URL)
-- [ ] **A.5** Add missing networks to `contracts/deployments/registry.json` (bsc, polygon, avalanche, fantom, linea, ethereum + their testnets)
-- [ ] **A.6** Fix `docs/deployment.md` — Node.js version, hosting providers, contract types, Redis strategy
-- [ ] **A.7** Update `docs/CONFIGURATION.md` date and new feature flags
-- [ ] **A.8** Update `docs/strategies.md` — DEX and chain counts
-- [ ] **A.9** Add BSC/Avalanche/Fantom/Linea SwapRouter addresses to `deploy-v3-adapter.ts`
-- [ ] **A.10** Fix `generate-addresses.ts` to preserve manual sections
+- [x] **A.4** ~~Add missing testnet RPC vars to `.env.example`~~ — DONE (present, commented out)
+- [x] **A.5** ~~Add missing networks to `contracts/deployments/registry.json`~~ — DONE (16 network stubs present)
+- [x] **A.6** ~~Fix `docs/deployment.md` — Node.js version, hosting providers, contract types, Redis strategy~~ — DONE (all steps now reference Fly.io + self-hosted Redis)
+- [x] **A.7** ~~Update `docs/CONFIGURATION.md` date~~ — DONE (now says 2026-02-25)
+- [x] **A.8** ~~Update `docs/strategies.md` — DEX and chain counts~~ — DONE (now says "78 DEXs across 15 chains")
+- [x] **A.9** ~~Add BSC/Linea SwapRouter addresses to `deploy-v3-adapter.ts`~~ — DONE (PancakeSwap V3 SmartRouter; Avalanche/Fantom have no V3 DEXs — N/A)
+- [x] **A.10** ~~Fix `generate-addresses.ts` to preserve manual sections~~ — DONE (marker-based extraction)
 
 ### Phase B: Research Emerging L2 DEX Addresses (Manual)
 
@@ -636,10 +564,10 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 
 ### Phase G: Infrastructure Completeness
 
-- [ ] **G.1** Create Fly.io config for asia-fast partition
-- [ ] **G.2** Create Fly.io config for cross-chain-detector
+- [x] **G.1** ~~Create Fly.io config for asia-fast partition~~ — DONE (`partition-asia-fast.toml`, Singapore region)
+- [x] **G.2** ~~Create Fly.io config for cross-chain-detector~~ — DONE (`cross-chain-detector.toml`, sjc region)
 - [ ] **G.3** Reconcile docker-compose partition chain assignments with CURRENT_STATE.md
-- [ ] **G.4** Update Fly.io deploy.sh Redis reference to self-hosted
+- [x] **G.4** ~~Update Fly.io deploy.sh Redis reference to self-hosted~~ — DONE (now says "self-hosted recommended")
 - [ ] **G.5** Write mainnet deployment runbook
 - [ ] **G.6** Write contract verification guide
 - [ ] **G.7** Write post-deployment verification checklist
@@ -700,11 +628,11 @@ These DEXs use concentrated liquidity — need V3 adapter deployed first:
 ### Deployment Sequence (Critical Path)
 
 ```
-Phase A (Config fixes) ──────────────────────────► Can be done immediately
+Phase A (Config fixes) ──────────────────────────► MOSTLY DONE (A.6 partial, A.8, A.9 remain)
                                                     │
 Phase B (DEX address research) ──────────────────► Can be done in parallel
                                                     │
-Phase C (Testnet deployments) ◄─────────────────── Depends on A
+Phase C (Testnet deployments) ◄─────────────────── Ready to start (A complete for core chains)
     │
     ├── C.1-C.2: FlashLoan to sepolia + baseSepolia
     ├── C.3-C.6: Other contracts to arbitrumSepolia

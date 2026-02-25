@@ -22,10 +22,10 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 
 | Partition ID | Chains | Optimal Region | Provider |
 |--------------|--------|----------------|----------|
-| `asia-fast` | BSC, Polygon, Avalanche | Singapore | Fly.io |
-| `l2-turbo` | Arbitrum, Optimism, Base, zkSync, Linea | US-East | Oracle Cloud |
-| `high-value` | Ethereum, Fantom | US-East | Oracle Cloud |
-| `solana` | Solana | US-West | Railway |
+| `asia-fast` | BSC, Polygon, Avalanche, Fantom | Singapore | Fly.io |
+| `l2-turbo` | Arbitrum, Optimism, Base | Singapore | Fly.io |
+| `high-value` | Ethereum, zkSync, Linea | US-East | Fly.io |
+| `solana` | Solana | US-West | Fly.io |
 
 ---
 
@@ -35,27 +35,25 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 |---------|--------|----------|------|
 | **Redis DB** | Per-instance | Self-hosted (Oracle ARM) | Free |
 | **unified-detector (asia-fast)** | Singapore | Fly.io | Free |
-| **unified-detector (l2-turbo)** | US-East | Oracle Cloud | Always Free |
-| **unified-detector (high-value)** | US-East | Oracle Cloud | Always Free |
-| **unified-detector (solana)** | US-West | Railway | Free |
-| **Cross-Chain Detector** | US-East | Oracle Cloud | Always Free |
-| **Coordinator** | US-East | Koyeb | Free |
-| **Execution Engine** | US-West | Railway | Trial/Free |
+| **unified-detector (l2-turbo)** | Singapore | Fly.io | Free |
+| **unified-detector (high-value)** | US-East | Fly.io | Free |
+| **unified-detector (solana)** | US-West | Fly.io | Free |
+| **Cross-Chain Detector** | US-East | Fly.io | Free |
+| **Coordinator** | US-East | Fly.io | Free |
+| **Execution Engine** | US-West | Fly.io | Free |
 
 ---
 
 ## Prerequisites
 
 ### System Requirements
-- Node.js 18+
+- Node.js >= 22.0.0
+- npm >= 9.0.0
 - Docker & Docker Compose
 
 ### Required Cloud Accounts
-- [Fly.io](https://fly.io/) (Detectors)
-- [Oracle Cloud](https://www.oracle.com/cloud/free/) (Heavy Computation)
-- [Railway](https://railway.app/) (Execution)
-- [Koyeb](https://www.koyeb.com/) (Coordinator)
-- [Upstash](https://upstash.com/) (Redis)
+- [Fly.io](https://fly.io/) (All services — coordinator, execution engine, all detector partitions)
+- [Upstash](https://upstash.com/) (Redis — if not self-hosting)
 
 ### RPC Providers (Free Tiers)
 See [RPC Research Report](./reports/RPC_RESEARCH_REPORT.md) for detailed provider analysis.
@@ -96,107 +94,167 @@ fly launch --name detector-asia-fast --region sin
 # Set environment variables
 fly secrets set \
   PARTITION_ID="asia-fast" \
-  UPSTASH_REDIS_REST_URL="..." \
-  UPSTASH_REDIS_REST_TOKEN="..." \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true" \
   BSC_RPC_URL="..." \
   POLYGON_RPC_URL="..." \
-  AVALANCHE_RPC_URL="..."
+  AVALANCHE_RPC_URL="..." \
+  FANTOM_RPC_URL="..."
 
 fly deploy
 ```
 
-#### L2-Turbo Partition (Oracle Cloud - US-East)
+#### L2-Turbo Partition (Fly.io - Singapore)
 ```bash
-# Deploy as container on Oracle Cloud Always Free tier
-# Uses ARM-based Ampere A1 instances (4 OCPUs, 24GB RAM free)
+fly launch --name detector-l2-turbo --region sin
 
-PARTITION_ID=l2-turbo \
-ENABLED_CHAINS=arbitrum,optimism,base,zksync,linea \
-docker-compose -f docker-compose.detector.yml up -d
+fly secrets set \
+  PARTITION_ID="l2-turbo" \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true" \
+  ARBITRUM_RPC_URL="..." \
+  OPTIMISM_RPC_URL="..." \
+  BASE_RPC_URL="..."
+
+fly deploy
 ```
 
-#### High-Value Partition (Oracle Cloud - US-East)
+#### High-Value Partition (Fly.io - US-East)
 ```bash
-PARTITION_ID=high-value \
-ENABLED_CHAINS=ethereum,fantom \
-docker-compose -f docker-compose.detector.yml up -d
+fly launch --name detector-high-value --region ewr
+
+fly secrets set \
+  PARTITION_ID="high-value" \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true" \
+  ETHEREUM_RPC_URL="..." \
+  ZKSYNC_RPC_URL="..." \
+  LINEA_RPC_URL="..."
+
+fly deploy
 ```
 
-#### Solana Partition (Railway - US-West)
+#### Solana Partition (Fly.io - US-West)
 ```bash
-# Railway deployment via GitHub integration
-# Set these environment variables in Railway dashboard:
-# - PARTITION_ID=solana
-# - ENABLED_CHAINS=solana
-# - SOLANA_RPC_URL=...
+fly launch --name detector-solana --region sjc
+
+fly secrets set \
+  PARTITION_ID="solana" \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true" \
+  SOLANA_RPC_URL="..."
+
+fly deploy
 ```
 
-### 3. Cross-Chain Detector (Oracle Cloud)
+### 3. Cross-Chain Detector (Fly.io - US-East)
 
 ```bash
 cd services/cross-chain-detector
-docker-compose up -d
+fly launch --name cross-chain-detector --region sjc
 
-# Environment variables:
-# - UPSTASH_REDIS_REST_URL
-# - UPSTASH_REDIS_REST_TOKEN
+fly secrets set \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true"
+
+fly deploy
 ```
 
-### 4. Execution Engine (Railway)
-
-1. Connect your GitHub repo to Railway.
-2. Add the `services/execution-engine` directory as a new service.
-3. Set environment variables:
+### 4. Execution Engine (Fly.io - US-West)
 
 ```bash
-# Required
-UPSTASH_REDIS_REST_URL="..."
-UPSTASH_REDIS_REST_TOKEN="..."
-PRIVATE_KEY="..."  # Use Railway's secret management
+cd services/execution-engine
+fly launch --name execution-engine --region sjc
 
-# Optional: A/B Testing (Task 3)
-AB_TESTING_ENABLED="false"  # Set to "true" to enable
-AB_TESTING_TRAFFIC_SPLIT="0.1"  # 10% variant traffic
-AB_TESTING_MIN_SAMPLE_SIZE="100"
+fly secrets set \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true" \
+  PRIVATE_KEY="..."
+
+# Optional: A/B Testing
+fly secrets set \
+  AB_TESTING_ENABLED="false" \
+  AB_TESTING_TRAFFIC_SPLIT="0.1" \
+  AB_TESTING_MIN_SAMPLE_SIZE="100"
 
 # Optional: Flash Loan
-FLASH_LOAN_CONTRACT_ADDRESS="..."  # After testnet deployment
+fly secrets set \
+  FLASH_LOAN_CONTRACT_ADDRESS="..."
+
+fly deploy
 ```
 
-### 5. Coordinator (Koyeb)
+### 5. Coordinator (Fly.io - US-East)
 
-1. Link your repo to Koyeb.
-2. Deploy `services/coordinator` in the US-East region.
-3. Access your dashboard at the assigned URL.
+```bash
+cd services/coordinator
+fly launch --name coordinator --region sjc
+
+fly secrets set \
+  REDIS_URL="redis://:password@localhost:6379" \
+  REDIS_SELF_HOSTED="true"
+
+fly deploy
+# Access your dashboard at the assigned URL
+```
 
 ---
 
 ## Flash Loan Contract Deployment
 
-> **Status:** Contracts ready, awaiting testnet deployment (Task 1 in FINAL_IMPLEMENTATION_PLAN.md)
+> **Status:** 1 contract deployed (FlashLoanArbitrage on Arbitrum Sepolia). 6 contract types across 15 chains remain.
+
+### Contract Types
+
+| Contract | Flash Loan Provider | Fee | Key Chains |
+|----------|-------------------|-----|------------|
+| **FlashLoanArbitrage** | Aave V3 | 0.09% | Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche |
+| **BalancerV2FlashArbitrage** | Balancer V2 | 0% | Ethereum, Arbitrum, Polygon, Optimism, Avalanche |
+| **PancakeSwapFlashArbitrage** | PancakeSwap V3 | Tier-based | BSC, Ethereum, Arbitrum, Base |
+| **SyncSwapFlashArbitrage** | SyncSwap (EIP-3156) | 0.3% | zkSync |
+| **CommitRevealArbitrage** | MEV protection | N/A | All chains |
+| **MultiPathQuoter** | Stateless quoter | N/A | All chains |
 
 ### Prerequisites
 - Testnet ETH (Sepolia faucet: https://sepoliafaucet.com/)
 - Testnet ARB (Arbitrum bridge: https://bridge.arbitrum.io/)
-- `DEPLOYER_PRIVATE_KEY` in environment
+- `DEPLOYER_PRIVATE_KEY` in environment (`.env.local`)
 
 ### Deployment Steps
 ```bash
 cd contracts
 
-# Deploy to Sepolia
-npm run deploy:sepolia
+# Aave V3 flash loan (primary)
+npx hardhat run scripts/deploy.ts --network sepolia
+npx hardhat run scripts/deploy.ts --network arbitrumSepolia
 
-# Deploy to Arbitrum Sepolia
-npm run deploy:arbitrum-sepolia
+# Balancer V2 flash loan (0% fee — preferred)
+npx hardhat run scripts/deploy-balancer.ts --network sepolia
 
-# Verify deployments
-npm run validate:addresses
+# PancakeSwap V3 flash loan
+npx hardhat run scripts/deploy-pancakeswap.ts --network bscTestnet
+
+# SyncSwap flash loan (zkSync only)
+DISABLE_VIA_IR=true npx hardhat run scripts/deploy-syncswap.ts --network zksync-testnet
+
+# Commit-Reveal MEV protection
+npx hardhat run scripts/deploy-commit-reveal.ts --network sepolia
+
+# MultiPathQuoter (stateless quoter)
+npx hardhat run scripts/deploy-multi-path-quoter.ts --network sepolia
+
+# Verify on block explorer
+npx hardhat verify --network sepolia DEPLOYED_ADDRESS
+
+# Auto-generate address constants
+npm run generate:addresses
 ```
 
 ### Post-Deployment
-1. Update `contracts/deployments/addresses.ts` with deployed addresses
-2. Update `FLASH_LOAN_CONTRACT_ADDRESS` in execution engine
+1. Run `npm run generate:addresses` to update `contracts/deployments/addresses.generated.ts`
+2. Review and merge generated addresses into `contracts/deployments/addresses.ts`
+3. Update `FLASH_LOAN_CONTRACT_ADDRESS` in execution engine environment
+4. Run `npx hardhat test` to verify contract interactions
 
 ---
 

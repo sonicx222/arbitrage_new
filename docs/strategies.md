@@ -1,6 +1,6 @@
 # Arbitrage Strategies & Token Selection
 
-> **Last Updated:** 2026-02-05
+> **Last Updated:** 2026-02-25
 > **Related ADRs:** [ADR-008](architecture/adr/ADR-008.md) (Chain/DEX/Token Selection), [ADR-021](architecture/adr/ADR-021.md) (Capital Risk Management)
 
 This document outlines the trading strategies and selection methodologies used to maximize profitability while minimizing risk.
@@ -134,12 +134,12 @@ Automatically finds the pool with lowest slippage for a given trade:
 
 The system focuses on high-liquidity pairings to ensure minimal slippage.
 
-### Supported Chains (11 Total)
+### Supported Chains (10 core EVM + 4 emerging L2s + Solana = 15)
 
 | Partition | Chains | Block Time | Rationale |
 |-----------|--------|------------|-----------|
 | **P1: Asia-Fast** | BSC, Polygon, Avalanche, Fantom | 2-3s | High throughput, low gas |
-| **P2: L2-Turbo** | Arbitrum, Optimism, Base | 250ms-2s | Sub-second confirmations |
+| **P2: L2-Turbo** | Arbitrum, Optimism, Base + Blast, Scroll, Mantle, Mode (emerging) | 250ms-2s | Sub-second confirmations |
 | **P3: High-Value** | Ethereum, zkSync, Linea | 12s / 1s | High-value, reliable |
 | **P4: Solana** | Solana | 400ms | Non-EVM, parallel processing |
 
@@ -151,11 +151,12 @@ The system focuses on high-liquidity pairings to ensure minimal slippage.
 | **Tier 2 (Ecosystem)** | CAKE, ARB, OP, GMX | High volatility, consistent opportunities |
 | **Tier 3 (Emerging)** | Top 200 by volume | Selected based on liquidity score |
 
-### DEX Coverage (49 DEXs)
+### DEX Coverage (78 DEXs across 15 chains)
 
-- **Uniswap V2/V3 forks**: 60% of coverage
-- **Native DEXs**: Raydium (Solana), Camelot (Arbitrum), etc.
+- **Uniswap V2/V3 forks**: ~60% of coverage
+- **Native DEXs**: Raydium (Solana), Camelot (Arbitrum), Aerodrome (Base), Velodrome (Optimism), SpookySwap (Fantom), etc.
 - **Aggregators**: 1inch integration for best execution
+- **Emerging L2 DEXs**: Thruster/Ambient (Blast), SyncSwap/SpaceFi (Scroll), Merchant Moe/Agni (Mantle), Kim/SwapMode (Mode) — addresses pending verification
 
 **Related**: [ADR-008](architecture/adr/ADR-008.md) (Chain/DEX/Token Selection Strategy)
 
