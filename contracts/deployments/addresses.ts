@@ -261,6 +261,13 @@ export const COMMIT_REVEAL_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
 };
 
+// === MANUAL SECTIONS (preserved by generate-addresses.ts) ===
+// =============================================================================
+// Everything below this marker is preserved during auto-generation from
+// registry.json. Contract address constants above are auto-generated;
+// APPROVED_ROUTERS, TOKEN_ADDRESSES, helpers, and validation below are manual.
+// =============================================================================
+
 // =============================================================================
 // Approved DEX Routers
 // =============================================================================
@@ -309,7 +316,7 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   ],
   base: [
     '0x327Df1E6de05895d2ab08513aaDD9313Fe505d86', // BaseSwap Router (V2-compatible)
-    '0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb', // Aerodrome Router (V2-compatible)
+    '0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43', // Aerodrome V2 Router (V2-compatible)
     // NOTE: Uniswap V3 (0x2626664c2603336E57B271c5C0b26F421741e481) NOT supported - uses different interface
   ],
   bsc: [
@@ -321,7 +328,7 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
     '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506', // SushiSwap Router
   ],
   optimism: [
-    '0x4A7b5Da61326A6379179b40d00F57E5bbDC962c2', // Velodrome Router (V2-compatible)
+    '0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858', // Velodrome V2 Router (V2-compatible)
   ],
   avalanche: [
     '0x60aE616a2155Ee3d9A68541Ba4544862310933d4', // Trader Joe Router
@@ -336,7 +343,7 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
     '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', // SyncSwap Router
   ],
   linea: [
-    '0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb', // Lynex Router
+    '0x80e38291e06339d10AAB483C65695D004dBD5C69', // SyncSwap Router (V2-compatible)
   ],
 };
 

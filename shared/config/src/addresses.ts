@@ -527,7 +527,7 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   },
   base: {
     baseswap: '0x327Df1E6de05895d2ab08513aaDD9313Fe505d86',
-    aerodrome: '0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb',
+    aerodrome: '0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43',
   },
   bsc: {
     pancakeswap_v2: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
@@ -536,6 +536,9 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   avalanche: {
     trader_joe: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
     pangolin: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
+  },
+  optimism: {
+    velodrome: '0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858',
   },
   fantom: {
     spookyswap: '0xF491e7B69E4244ad4002BC14e878a34207E38c29',
