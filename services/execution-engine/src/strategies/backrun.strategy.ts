@@ -32,7 +32,8 @@
 
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { generateTraceId, getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { generateTraceId } from '@arbitrage/core/tracing';
 import { BaseExecutionStrategy, getSwapDeadline } from './base.strategy';
 import type {
   ExecutionResult,

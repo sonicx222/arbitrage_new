@@ -29,7 +29,7 @@ import {
 import { BaseExecutionStrategy } from './base.strategy';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
 import { generateTraceId } from '@arbitrage/core/tracing/trace-context';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Types

@@ -23,13 +23,9 @@
  * @see docs/architecture/adr/ADR-002-redis-streams.md
  */
 
-import {
-  RedisStreamsClient,
-  ConsumerGroupConfig,
-  StreamConsumer,
-  getErrorMessage,
-  stopAndNullify,
-} from '@arbitrage/core';
+import { stopAndNullify } from '@arbitrage/core/async';
+import { RedisStreamsClient, ConsumerGroupConfig, StreamConsumer } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import {
   extractContext,
   createChildContext,

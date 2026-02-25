@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { unwrapBatchMessages } from '@arbitrage/core';
+import { unwrapBatchMessages } from '@arbitrage/core/redis';
 
 interface MockPriceUpdate {
   chain: string;

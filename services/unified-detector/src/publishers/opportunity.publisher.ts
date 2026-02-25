@@ -16,7 +16,8 @@
  * @see implementation_plan.md: Fix Missing Opportunity Publisher
  */
 
-import { RedisStreamsClient, createTraceContext, propagateContext } from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 import { ArbitrageOpportunity } from '@arbitrage/types';
 import type { Logger } from '../types';

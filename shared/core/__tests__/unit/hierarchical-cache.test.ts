@@ -60,7 +60,7 @@ jest.mock('../../src/caching/correlation-analyzer', () => ({
   getCorrelationAnalyzer: () => null
 }));
 
-import { HierarchicalCache, createHierarchicalCache } from '@arbitrage/core';
+import { HierarchicalCache, createHierarchicalCache } from '@arbitrage/core/caching';
 
 describe('HierarchicalCache (Map-based L1)', () => {
   let cache: HierarchicalCache;

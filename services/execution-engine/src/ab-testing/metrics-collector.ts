@@ -10,8 +10,8 @@
  * @see FINAL_IMPLEMENTATION_PLAN.md Task 3: A/B Testing Framework
  */
 
-import { clearTimeoutSafe } from '@arbitrage/core';
-import type { RedisClient } from '@arbitrage/core';
+import { clearTimeoutSafe } from '@arbitrage/core/async';
+import type { RedisClient } from '@arbitrage/core/redis';
 import type {
   ExperimentMetrics,
   ComputedMetrics,

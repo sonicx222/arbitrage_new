@@ -245,6 +245,12 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
       expect(content).toContain('deploy_l2_fast');
       expect(content).toContain('deploy_solana');
       expect(content).toContain('deploy_coordinator_standby');
+      expect(content).toContain('deploy_asia_fast');
+    });
+
+    it('should define generic deploy_service function', () => {
+      const content = readFile(scriptPath);
+      expect(content).toContain('deploy_service()');
     });
 
     it('should check for fly CLI', () => {

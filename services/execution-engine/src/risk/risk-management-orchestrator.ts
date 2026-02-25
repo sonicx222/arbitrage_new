@@ -21,7 +21,7 @@ import type {
   TradingAllowedResult,
   EVCalculation,
   PositionSize,
-} from '@arbitrage/core';
+} from '@arbitrage/core/risk';
 import { RISK_CONFIG } from '@arbitrage/config';
 import type { Logger, ExecutionStats } from '../types';
 

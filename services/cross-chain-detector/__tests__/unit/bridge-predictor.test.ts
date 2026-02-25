@@ -9,7 +9,7 @@ import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { BridgeLatencyPredictor } from '../../src/bridge-predictor';
 import { Logger } from '../../src/types';
 import { CrossChainBridge } from '@arbitrage/types';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Tests

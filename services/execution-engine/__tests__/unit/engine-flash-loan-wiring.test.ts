@@ -129,7 +129,8 @@ import { FlashLoanStrategy } from '../../src/strategies/flash-loan.strategy';
 import { createFlashLoanProviderFactory } from '../../src/strategies/flash-loan-providers/provider-factory';
 import { FEATURE_FLAGS } from '@arbitrage/config';
 
-import { getRedisClient, getRedisStreamsClient, getDistributedLockManager, getNonceManager } from '@arbitrage/core';
+import { getRedisClient, getRedisStreamsClient, getDistributedLockManager } from '@arbitrage/core/redis';
+import { getNonceManager } from '@arbitrage/core';
 import { initializeMevProviders, initializeBridgeRouter, initializeRiskManagement } from '../../src/initialization';
 import { SimulationStrategy } from '../../src/strategies/simulation.strategy';
 import { IntraChainStrategy } from '../../src/strategies/intra-chain.strategy';

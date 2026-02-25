@@ -13,7 +13,7 @@
 import fs from 'fs';
 import pathModule from 'path';
 import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity } from '@arbitrage/types';
-import { findKSmallest } from '@arbitrage/core';
+import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 

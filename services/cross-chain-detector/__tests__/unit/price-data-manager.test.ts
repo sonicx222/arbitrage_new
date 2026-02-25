@@ -11,7 +11,7 @@ import {
   Logger,
 } from '../../src/price-data-manager';
 import { PriceUpdate } from '@arbitrage/types';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Helper

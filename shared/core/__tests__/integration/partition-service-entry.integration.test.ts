@@ -63,11 +63,7 @@ jest.mock('@arbitrage/config', () => ({
 // Imports (after mocks)
 // =============================================================================
 
-import {
-  createPartitionEntry,
-  PartitionDetectorInterface,
-  PartitionEntryResult,
-} from '@arbitrage/core';
+import { createPartitionEntry, PartitionDetectorInterface, PartitionEntryResult } from '@arbitrage/core/partition';
 
 // =============================================================================
 // Mock Partition Data

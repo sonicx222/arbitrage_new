@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../interfaces/ISyncSwapVault.sol";
+import "../interfaces/IERC3156FlashLender.sol";
 
 /**
  * @title MockDssFlash
@@ -15,7 +15,7 @@ import "../interfaces/ISyncSwapVault.sol";
  *
  * @custom:version 1.0.0
  */
-contract MockDssFlash {
+contract MockDssFlash is IERC3156FlashLender {
     using SafeERC20 for IERC20;
 
     /// @notice Fee in basis points (1 bps = 0.01%)
@@ -51,7 +51,7 @@ contract MockDssFlash {
      * @param token The token address
      * @return Maximum flash loan amount (mock returns token balance)
      */
-    function maxFlashLoan(address token) external view returns (uint256) {
+    function maxFlashLoan(address token) external view override returns (uint256) {
         return IERC20(token).balanceOf(address(this));
     }
 
@@ -61,7 +61,7 @@ contract MockDssFlash {
      * @param amount The loan amount
      * @return The fee amount
      */
-    function flashFee(address token, uint256 amount) external view returns (uint256) {
+    function flashFee(address token, uint256 amount) external view override returns (uint256) {
         // Silence unused variable warning
         token;
         return (amount * feeBps) / BPS_DENOMINATOR;
@@ -80,7 +80,7 @@ contract MockDssFlash {
         address token,
         uint256 amount,
         bytes memory data
-    ) external returns (bool) {
+    ) external override returns (bool) {
         // Simulate failure if flag is set
         if (shouldFailFlashLoan) {
             return false;
@@ -102,6 +102,11 @@ contract MockDssFlash {
         IERC20(token).safeTransfer(address(receiver), amount);
 
         // Call receiver's callback
+        // Note on `initiator` parameter (msg.sender):
+        // In this mock, msg.sender is the arbitrage contract (which calls flashLoan on DssFlash).
+        // In production MakerDAO DssFlash, the initiator is also msg.sender per EIP-3156 spec.
+        // The arbitrage contract validates initiator == address(this) to prevent unauthorized callbacks.
+        // This mock accurately simulates production DssFlash behavior for this parameter.
         bytes32 result = receiver.onFlashLoan(
             msg.sender,
             token,

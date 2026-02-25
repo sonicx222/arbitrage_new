@@ -22,20 +22,13 @@
  */
 
 import { ethers } from 'ethers';
-import {
-  createPinoLogger,
-  type ILogger as ICoreLogger,
-  type ServiceStateManager,
-  type PerformanceLogger,
-  type RedisClient,
-  type RedisStreamsClient,
-  type DistributedLockManager,
-  type NonceManager,
-  type MevProviderFactory,
-  type BridgeRouterFactory,
-  type BatchProvider,
-  type TradeLoggerConfig,
-} from '@arbitrage/core';
+import type { BridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import { createPinoLogger, type ILogger as ICoreLogger } from '@arbitrage/core/logging';
+import type { MevProviderFactory } from '@arbitrage/core/mev-protection';
+import type { RedisClient, RedisStreamsClient, DistributedLockManager } from '@arbitrage/core/redis';
+import type { BatchProvider } from '@arbitrage/core/rpc';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import { type PerformanceLogger, type NonceManager, type TradeLoggerConfig } from '@arbitrage/core';
 // Fix 3.1: Import CHAINS from config to derive SUPPORTED_CHAINS dynamically
 import { CHAINS } from '@arbitrage/config';
 import type { ArbitrageOpportunity, ILogger } from '@arbitrage/types';
@@ -53,7 +46,7 @@ import {
 import type { ISimulationService } from './services/simulation/types';
 import type { ABTestingConfig } from './ab-testing/types';
 // P3 Optimization: Import orderflow signal type for execution integration
-import type { OrderflowSignal } from '@arbitrage/core';
+import type { OrderflowSignal } from '@arbitrage/core/analytics';
 
 // =============================================================================
 // Re-exports for backward compatibility (Phase 3)

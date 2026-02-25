@@ -19,15 +19,15 @@ import {
   SolanaPriceFeed,
   RAYDIUM_AMM_LAYOUT,
   RAYDIUM_CLMM_LAYOUT,
-  ORCA_WHIRLPOOL_LAYOUT
-} from '@arbitrage/core';
+  ORCA_WHIRLPOOL_LAYOUT,
+} from '@arbitrage/core/solana';
 import type {
   SolanaPriceFeedConfig,
   RaydiumAmmPoolState,
   RaydiumClmmPoolState,
   OrcaWhirlpoolState,
-  PoolSubscription
-} from '@arbitrage/core';
+  PoolSubscription,
+} from '@arbitrage/core/solana';
 
 // =============================================================================
 // Local Type Definitions for Test Helpers (compatible with implementation)

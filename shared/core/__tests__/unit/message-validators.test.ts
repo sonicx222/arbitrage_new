@@ -21,8 +21,8 @@ import {
   validateBatch,
   createPriceUpdate,
   createWhaleTransaction,
-  createCoordinatorCommand
-} from '@arbitrage/core';
+  createCoordinatorCommand,
+} from '@arbitrage/core/validation';
 
 // Import validated types from message-validators (different from shared/types)
 // These are the types the validators actually check against
@@ -32,8 +32,8 @@ import type {
   ValidatedSwapEvent as SwapEvent,
   ReserveUpdate,
   CoordinatorCommand,
-  ServiceHealthStatus
-} from '@arbitrage/core';
+  ServiceHealthStatus,
+} from '@arbitrage/core/validation';
 
 // =============================================================================
 // Test Data

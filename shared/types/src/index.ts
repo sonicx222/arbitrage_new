@@ -573,8 +573,7 @@ export interface ExecutionConfig extends ServiceConfig {
 // - services/execution-engine/src/types.ts (TimeoutError) - execution-specific version
 //
 // Migration:
-// - OLD: import { ArbitrageError } from '@arbitrage/core'
-// - NEW: import { ArbitrageError, TimeoutError } from '@arbitrage/types'
+// - OLD: import { ArbitrageError } from '@arbitrage/core/resilience';// - NEW: import { ArbitrageError, TimeoutError } from '@arbitrage/types'
 // =============================================================================
 
 /**

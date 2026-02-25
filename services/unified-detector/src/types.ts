@@ -10,10 +10,7 @@ import { TimeoutError, Pair } from '@arbitrage/types';
 import type { ILogger } from '@arbitrage/types';
 
 // FIX 6: Use shared price bounds constants from canonical source
-import {
-  MIN_SAFE_PRICE,
-  MAX_SAFE_PRICE,
-} from '@arbitrage/core';
+import { MIN_SAFE_PRICE, MAX_SAFE_PRICE } from '@arbitrage/core/utils';
 
 // =============================================================================
 // Logger Interface

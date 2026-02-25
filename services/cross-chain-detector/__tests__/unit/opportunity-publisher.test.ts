@@ -12,7 +12,7 @@ import {
   Logger,
 } from '../../src/opportunity-publisher';
 import { ArbitrageOpportunity } from '@arbitrage/types';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Helper

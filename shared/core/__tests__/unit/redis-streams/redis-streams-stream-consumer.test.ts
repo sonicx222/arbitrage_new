@@ -15,8 +15,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { RedisStreamsClient, StreamConsumer } from '@arbitrage/core';
-import type { StreamConsumerConfig, RedisStreamsConstructor } from '@arbitrage/core';
+import { RedisStreamsClient, StreamConsumer } from '@arbitrage/core/redis';
+import type { StreamConsumerConfig, RedisStreamsConstructor } from '@arbitrage/core/redis';
 import { createMockRedisConstructor, createMockHandler } from './test-helpers';
 
 describe('StreamConsumer', () => {

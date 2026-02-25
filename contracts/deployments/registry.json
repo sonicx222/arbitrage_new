@@ -80,5 +80,138 @@
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
+  },
+  "polygonAmoy": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "bscTestnet": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "_ethereum_note": "Ethereum mainnet deferred — high gas costs. Hardhat network config is commented out. Enable after L2 success. See hardhat.config.ts:184-189.",
+  "ethereum": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "arbitrum": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "base": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "optimism": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "bsc": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "polygon": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "avalanche": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "fantom": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "linea": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "zksync": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
   }
 }

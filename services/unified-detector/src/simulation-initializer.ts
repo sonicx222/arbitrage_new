@@ -19,11 +19,9 @@
  * @see simulation/chain.simulator.ts (ChainSimulationHandler implementation)
  */
 
-import {
-  PairActivityTracker,
-  ReserveCache,
-  stopAndNullify,
-} from '@arbitrage/core';
+import { PairActivityTracker } from '@arbitrage/core/analytics';
+import { stopAndNullify } from '@arbitrage/core/async';
+import { ReserveCache } from '@arbitrage/core/caching';
 
 import type {
   Dex,

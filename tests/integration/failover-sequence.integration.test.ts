@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import Redis from 'ioredis';
-import { DistributedLockManager } from '@arbitrage/core';
+import { DistributedLockManager } from '@arbitrage/core/redis';
 import { createTestRedisClient, delay } from '@arbitrage/test-utils';
 
 // Set required environment variables BEFORE any dynamic imports

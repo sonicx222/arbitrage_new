@@ -14,14 +14,7 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
-import {
-  PairDiscoveryService,
-  DiscoveredPair,
-  PairDiscoveryConfig,
-  PairDiscoveryStats,
-  getPairDiscoveryService,
-  resetPairDiscoveryService
-} from '@arbitrage/core';
+import { PairDiscoveryService, DiscoveredPair, PairDiscoveryConfig, PairDiscoveryStats, getPairDiscoveryService, resetPairDiscoveryService } from '@arbitrage/core';
 import type { Dex, FeeBasisPoints } from '@arbitrage/types';
 
 /** Helper to create typed FeeBasisPoints value */

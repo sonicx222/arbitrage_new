@@ -23,8 +23,16 @@
  * @see CrossChainStrategy.persistBridgeRecoveryState
  */
 
-import type { RedisClient, BridgeRouterFactory, SignedEnvelope } from '@arbitrage/core';
-import { getErrorMessage, hmacSign, hmacVerify, getHmacSigningKey, isSignedEnvelope } from '@arbitrage/core';
+import type { BridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import type { RedisClient } from '@arbitrage/core/redis';
+import type { SignedEnvelope } from '@arbitrage/core/utils';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import {
+  hmacSign,
+  hmacVerify,
+  getHmacSigningKey,
+  isSignedEnvelope,
+} from '@arbitrage/core/utils';
 import type {
   Logger,
   BridgeRecoveryState,

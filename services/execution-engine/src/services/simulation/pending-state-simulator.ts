@@ -16,7 +16,8 @@
  */
 
 import { ethers } from 'ethers';
-import { createPinoLogger, type ILogger, getErrorMessage } from '@arbitrage/core';
+import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 // Fix 9.3: Import shared SimulationLog type for consistent log typing
@@ -35,7 +36,7 @@ import {
 } from './types';
 
 // Fee utilities - import from canonical source
-import { type UniswapV3FeeTier, VALID_V3_FEE_TIERS, v3TierToDecimal } from '@arbitrage/core';
+import { VALID_V3_FEE_TIERS, v3TierToDecimal, type UniswapV3FeeTier } from '@arbitrage/core/utils';
 
 // =============================================================================
 // Default Logger (Fix 4.1)

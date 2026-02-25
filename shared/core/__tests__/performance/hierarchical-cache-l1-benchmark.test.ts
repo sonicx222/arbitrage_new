@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { HierarchicalCache, createHierarchicalCache } from '@arbitrage/core';
+import { HierarchicalCache, createHierarchicalCache } from '@arbitrage/core/caching';
 
 // Performance test timeout
 const PERF_TIMEOUT = 60000;

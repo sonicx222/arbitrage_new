@@ -25,13 +25,8 @@
  * @see ADR-014 - Modular Detector Components
  */
 
-import {
-  WebSocketManager,
-  WebSocketConfig,
-  FactorySubscriptionService,
-  PairCreatedEvent,
-  FactoryWebSocketManager,
-} from '@arbitrage/core';
+import { PairCreatedEvent } from '@arbitrage/core/factory-subscription';
+import { WebSocketManager, WebSocketConfig, FactorySubscriptionService, FactoryWebSocketManager } from '@arbitrage/core';
 
 import {
   EVENT_SIGNATURES,

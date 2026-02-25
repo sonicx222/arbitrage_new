@@ -40,7 +40,7 @@ import {
 } from '../../src/orderflow-features';
 
 // Get the mocked module and set up whale tracker implementation
-import { getWhaleActivityTracker } from '@arbitrage/core';
+import { getWhaleActivityTracker } from '@arbitrage/core/analytics';
 const mockedGetWhaleActivityTracker = jest.mocked(getWhaleActivityTracker);
 mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
 import type {

@@ -11,7 +11,7 @@
  * @see services/simulation/ (provider implementations)
  */
 
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ethers } from 'ethers';
 import type { ISimulationService, ISimulationProvider } from './simulation/types';
 import { SimulationService } from './simulation/simulation.service';

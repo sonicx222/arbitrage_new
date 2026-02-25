@@ -15,7 +15,7 @@
  */
 
 import Redis from 'ioredis';
-import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core';
+import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core/caching';
 import { CacheMetrics, CacheStats, CacheTestConfig, MetricsSnapshot } from '../types/cache-types';
 
 export class CacheTestHarness {

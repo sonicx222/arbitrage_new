@@ -88,7 +88,7 @@ primary_region = "sin"
   strategy = "rolling"
 
 # Secrets to configure (via fly secrets set):
-# REDIS_URL - Upstash Redis connection URL
+# REDIS_URL - Redis connection URL (self-hosted or Upstash)
 # ARBITRUM_WS_URL - Arbitrum WebSocket RPC
 # ARBITRUM_RPC_URL - Arbitrum HTTP RPC (fallback)
 # OPTIMISM_WS_URL - Optimism WebSocket RPC

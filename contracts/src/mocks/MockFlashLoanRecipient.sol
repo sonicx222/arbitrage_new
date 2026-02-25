@@ -21,6 +21,8 @@ import "../interfaces/IBalancerV2Vault.sol";
  * - setShouldRevert(bool) - Forces callback to revert
  * - approveToken(token, spender, amount) - Approve tokens for repayment
  * - Recording fields for asserting callback parameters in tests
+ *
+ * @custom:version 1.0.0
  */
 contract MockFlashLoanRecipient is IFlashLoanRecipient {
     using SafeERC20 for IERC20;

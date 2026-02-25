@@ -413,7 +413,7 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
   ethereum: {
     USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
     USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    DAI: '0x6B175474E89094C44Da98b954EedcdeCB5BAA7D3',
+    DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
   },
   polygon: {
     USDC: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // Native USDC

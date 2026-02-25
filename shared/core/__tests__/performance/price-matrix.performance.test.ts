@@ -9,10 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-import {
-  PriceMatrix,
-  resetPriceMatrix,
-} from '@arbitrage/core';
+import { PriceMatrix, resetPriceMatrix } from '@arbitrage/core/caching';
 
 // =============================================================================
 // Test Helpers

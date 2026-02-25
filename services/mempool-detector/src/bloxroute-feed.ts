@@ -15,7 +15,9 @@
 
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
-import { CircularBuffer, clearIntervalSafe, clearTimeoutSafe, type Logger } from '@arbitrage/core';
+import { clearIntervalSafe, clearTimeoutSafe } from '@arbitrage/core/async';
+import { CircularBuffer } from '@arbitrage/core/data-structures';
+import { type Logger } from '@arbitrage/core';
 import { CHAIN_NAME_TO_ID } from '@arbitrage/config';
 import type {
   BloXrouteFeedConfig,

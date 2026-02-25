@@ -195,7 +195,7 @@ contract SyncSwapFlashArbitrage is
         IERC20(token).forceApprove(address(VAULT), amountOwed);
 
         // Emit success event
-        emit ArbitrageExecuted(token, amount, profit, block.timestamp);
+        emit ArbitrageExecuted(token, amount, profit, block.timestamp, tx.origin);
 
         // Return EIP-3156 success code
         return ERC3156_CALLBACK_SUCCESS;

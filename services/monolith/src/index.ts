@@ -45,7 +45,8 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import * as os from 'os';
 import * as path from 'path';
-import { createLogger, getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createLogger } from '@arbitrage/core';
 import { WorkerManager, type ServiceWorkerConfig } from './worker-manager';
 
 const logger = createLogger('monolith');

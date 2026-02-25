@@ -141,7 +141,9 @@ jest.mock('../../src/ml-prediction-manager', () => ({
 
 // Import after mocks are set up
 import { CrossChainDetectorService } from '../../src/detector';
-import { getRedisClient, getRedisStreamsClient, getPriceOracle, disconnectWithTimeout } from '@arbitrage/core';
+import { getPriceOracle } from '@arbitrage/core/analytics';
+import { getRedisClient, getRedisStreamsClient } from '@arbitrage/core/redis';
+import { disconnectWithTimeout } from '@arbitrage/core/utils';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 import { createStreamConsumer } from '../../src/stream-consumer';
 import { createPriceDataManager } from '../../src/price-data-manager';

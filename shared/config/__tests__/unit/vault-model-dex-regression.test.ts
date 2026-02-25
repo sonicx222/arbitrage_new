@@ -23,10 +23,7 @@ import {
   DEXES
 } from '@arbitrage/config';
 
-import {
-  PairDiscoveryService,
-  resetPairDiscoveryService
-} from '@arbitrage/core';
+import { PairDiscoveryService, resetPairDiscoveryService } from '@arbitrage/core';
 
 // =============================================================================
 // Vault Model DEXs Registry

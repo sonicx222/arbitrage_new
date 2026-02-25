@@ -27,10 +27,7 @@ import {
   getNonEvmChains,
 } from '@arbitrage/config/partitions';
 
-import {
-  PARTITION_PORTS,
-  PARTITION_SERVICE_NAMES,
-} from '@arbitrage/core';
+import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from '@arbitrage/core/partition';
 
 // =============================================================================
 // Partition Service Ports

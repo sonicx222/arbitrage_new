@@ -84,6 +84,42 @@
     "./feeds": {
       "types": "./dist/feeds/index.d.ts",
       "default": "./dist/feeds/index.js"
+    },
+    "./redis": {
+      "types": "./dist/redis/index.d.ts",
+      "default": "./dist/redis/index.js"
+    },
+    "./partition": {
+      "types": "./dist/partition/index.d.ts",
+      "default": "./dist/partition/index.js"
+    },
+    "./service-lifecycle": {
+      "types": "./dist/service-lifecycle/index.d.ts",
+      "default": "./dist/service-lifecycle/index.js"
+    },
+    "./publishing": {
+      "types": "./dist/publishing/index.d.ts",
+      "default": "./dist/publishing/index.js"
+    },
+    "./simulation": {
+      "types": "./dist/simulation/index.d.ts",
+      "default": "./dist/simulation/index.js"
+    },
+    "./tracing": {
+      "types": "./dist/tracing/index.d.ts",
+      "default": "./dist/tracing/index.js"
+    },
+    "./circuit-breaker": {
+      "types": "./dist/circuit-breaker/index.d.ts",
+      "default": "./dist/circuit-breaker/index.js"
+    },
+    "./path-finding": {
+      "types": "./dist/path-finding/index.d.ts",
+      "default": "./dist/path-finding/index.js"
+    },
+    "./validation": {
+      "types": "./dist/validation/index.d.ts",
+      "default": "./dist/validation/index.js"
     }
   },
   "scripts": {

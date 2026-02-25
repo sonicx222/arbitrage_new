@@ -7,7 +7,7 @@
 
 import { jest } from '@jest/globals';
 import { EventEmitter } from 'events';
-import type { RedisStreamsConstructor } from '@arbitrage/core';
+import type { RedisStreamsConstructor } from '@arbitrage/core/redis';
 
 /**
  * Creates a mock Redis instance with all required methods for RedisStreamsClient.

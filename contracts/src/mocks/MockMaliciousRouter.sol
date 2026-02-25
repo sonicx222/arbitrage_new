@@ -25,6 +25,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * calldata if the signature string doesn't exactly match Solidity's ABI encoding rules.
  * A well-formed call ensures the revert comes from ReentrancyGuard, not from ABI
  * decoding failure.
+ *
+ * @custom:version 1.0.0
  */
 contract MockMaliciousRouter {
     using SafeERC20 for IERC20;
@@ -126,6 +128,25 @@ contract MockMaliciousRouter {
         return amounts;
     }
 
+    function swapTokensForExactTokens(
+        uint256 amountOut,
+        uint256 amountInMax,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts) {
+        amountInMax;
+        deadline;
+        amounts = new uint256[](path.length);
+        amounts[0] = amountOut;
+        amounts[path.length - 1] = amountOut;
+
+        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountOut);
+        IERC20(path[path.length - 1]).safeTransfer(to, amountOut);
+
+        return amounts;
+    }
+
     function getAmountsOut(uint256 amountIn, address[] calldata path)
         external
         pure
@@ -137,6 +158,26 @@ contract MockMaliciousRouter {
             amounts[i] = amountIn;
         }
         return amounts;
+    }
+
+    function getAmountsIn(uint256 amountOut, address[] calldata path)
+        external
+        pure
+        returns (uint256[] memory amounts)
+    {
+        amounts = new uint256[](path.length);
+        for (uint256 i = 0; i < path.length; i++) {
+            amounts[i] = amountOut;
+        }
+        return amounts;
+    }
+
+    function factory() external view returns (address) {
+        return address(this);
+    }
+
+    function WETH() external pure returns (address) {
+        return address(0);
     }
 
     receive() external payable {}

@@ -23,9 +23,7 @@ import {
   createTestRedisClient,
   ensureConsumerGroup,
 } from '@arbitrage/test-utils';
-import {
-  RedisStreamsClient,
-} from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
 
 // =============================================================================
 // Helpers

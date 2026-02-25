@@ -14,7 +14,8 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import type { Mock } from 'jest-mock';
 import { CoordinatorService, CoordinatorDependencies } from '../../src/coordinator';
-import { RedisStreamsClient, RedisClient, ServiceStateManager } from '@arbitrage/core';
+import { RedisStreamsClient, RedisClient } from '@arbitrage/core/redis';
+import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 import { createTestRedisClient, createMockLogger, createMockPerfLogger } from '@arbitrage/test-utils';
 import Redis from 'ioredis';
 import * as fs from 'fs';

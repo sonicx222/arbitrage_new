@@ -33,7 +33,8 @@ import type {
   RiskManagementComponents,
   BridgeRouterInitializationResult,
 } from './types';
-import { AsyncMutex, getErrorMessage } from '@arbitrage/core';
+import { AsyncMutex } from '@arbitrage/core/async';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 /**
  * Module-level state for initialization tracking.

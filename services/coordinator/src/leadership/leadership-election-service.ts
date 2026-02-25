@@ -16,7 +16,7 @@
  * @see P2-SERVICE from refactoring-roadmap.md
  */
 
-import { clearTimeoutSafe } from '@arbitrage/core';
+import { clearTimeoutSafe } from '@arbitrage/core/async';
 import type { ILogger } from '@arbitrage/types';
 
 /**

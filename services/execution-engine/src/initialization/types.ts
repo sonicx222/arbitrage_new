@@ -12,15 +12,15 @@
  * @see ADR-021: Capital Risk Management
  */
 
+import type { BridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import type { ServiceLogger } from '@arbitrage/core/logging';
+import type { MevProviderFactory } from '@arbitrage/core/mev-protection';
 import type {
-  MevProviderFactory,
   DrawdownCircuitBreaker,
   EVCalculator,
   KellyPositionSizer,
   ExecutionProbabilityTracker,
-  BridgeRouterFactory,
-  ServiceLogger,
-} from '@arbitrage/core';
+} from '@arbitrage/core/risk';
 
 /**
  * Logger interface for initialization operations.

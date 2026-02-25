@@ -41,9 +41,12 @@ loadDeploymentEnv();
  *
  * Networks configured:
  * - localhost: Local Hardhat node for development
- * - sepolia: Ethereum testnet for testing
- * - arbitrumSepolia: Arbitrum testnet
- * - mainnet/arbitrum/base/optimism: Production networks (commented out until needed)
+ * - sepolia, arbitrumSepolia, baseSepolia: Ethereum/L2 testnets
+ * - polygonAmoy, bscTestnet: Additional testnets
+ * - zksync, zksync-testnet: zkSync Era mainnet and testnet
+ * - arbitrum, base, optimism: L2 mainnet (primary deployment targets)
+ * - bsc, polygon, avalanche, fantom, linea: Additional mainnet chains
+ * - ethereum: L1 mainnet (commented out — enable after L2 success)
  *
  * @see implementation_plan_v2.md Task 3.1.1
  */
@@ -123,6 +126,17 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 300,
     },
+    // Testnets — additional chains
+    polygonAmoy: {
+      url: process.env.POLYGON_AMOY_RPC_URL || 'https://rpc-amoy.polygon.technology',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 80002,
+    },
+    bscTestnet: {
+      url: process.env.BSC_TESTNET_RPC_URL || 'https://data-seed-prebsc-1-s1.binance.org:8545',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 97,
+    },
     // Production L2 networks — enabled for deployment
     arbitrum: {
       url: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc',
@@ -138,6 +152,34 @@ const config: HardhatUserConfig = {
       url: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io',
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 10,
+    },
+    // Production L1 and additional mainnet chains
+    // Fallback URLs intentionally empty — Hardhat will fail if env var is missing,
+    // preventing accidental deploys through unreliable public RPCs.
+    bsc: {
+      url: process.env.BSC_RPC_URL || '',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 56,
+    },
+    polygon: {
+      url: process.env.POLYGON_RPC_URL || '',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 137,
+    },
+    avalanche: {
+      url: process.env.AVALANCHE_RPC_URL || '',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 43114,
+    },
+    fantom: {
+      url: process.env.FANTOM_RPC_URL || '',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 250,
+    },
+    linea: {
+      url: process.env.LINEA_RPC_URL || '',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 59144,
     },
     // Ethereum mainnet — high gas costs, enable only after L2 success
     // ethereum: {

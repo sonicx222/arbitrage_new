@@ -25,7 +25,9 @@
 
 import { ethers } from 'ethers';
 import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
-import { getErrorMessage, createPinoLogger, type ILogger, parseEnvIntSafe } from '@arbitrage/core';
+import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { parseEnvIntSafe } from '@arbitrage/core/utils';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
 import { CUSTOM_ERROR_SELECTORS } from './error-selectors.generated';

@@ -46,7 +46,7 @@
 // Import and re-export Resettable from @arbitrage/types for backwards compatibility
 // The canonical definition is now in @arbitrage/types since production code uses it
 import type { Resettable } from '@arbitrage/types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 export type { Resettable };
 
 

@@ -9,9 +9,9 @@
  */
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { EventProcessingWorkerPool } from '@arbitrage/core';
-import { createHierarchicalCache } from '@arbitrage/core';
-import { PriceMatrix } from '@arbitrage/core';
+import { EventProcessingWorkerPool } from '@arbitrage/core/async';
+import { createHierarchicalCache } from '@arbitrage/core/caching';
+import { PriceMatrix } from '@arbitrage/core/caching';
 
 describe('Worker SharedArrayBuffer Integration', () => {
   describe('EventProcessingWorkerPool with SharedArrayBuffer', () => {

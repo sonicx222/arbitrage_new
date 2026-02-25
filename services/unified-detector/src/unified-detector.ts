@@ -19,24 +19,18 @@
  */
 
 import { EventEmitter } from 'events';
+import { stopAndNullify, clearIntervalSafe } from '@arbitrage/core/async';
+import { FailoverEvent } from '@arbitrage/core/monitoring';
+import { PartitionDetectorInterface } from '@arbitrage/core/partition';
 import {
-  createLogger,
-  getPerformanceLogger,
-  PerformanceLogger,
-  ServiceStateManager,
-  ServiceState,
-  createServiceState,
   RedisClient,
   getRedisClient,
   RedisStreamsClient,
   getRedisStreamsClient,
-  GracefulDegradationManager,
-  getGracefulDegradationManager,
-  FailoverEvent,
-  PartitionDetectorInterface,
-  stopAndNullify,
-  clearIntervalSafe,
-} from '@arbitrage/core';
+} from '@arbitrage/core/redis';
+import { GracefulDegradationManager, getGracefulDegradationManager } from '@arbitrage/core/resilience';
+import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
+import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
 
 import {
   PartitionConfig,

@@ -16,26 +16,9 @@
  * @package services/unified-detector
  */
 
-import {
-  // Correlation tracking
-  CorrelationAnalyzer,
-  getCorrelationAnalyzer,
-  CorrelationTrackerImpl,
-  // Cache warming
-  HierarchicalCache,
-  HierarchicalCacheWarmer,
-  // Warming strategies
-  TopNStrategy,
-  AdaptiveStrategy,
-  // Metrics
-  PrometheusMetricsCollector,
-  PrometheusExporter,
-  MetricType,
-  ExportFormat,
-  // Logging
-  createLogger,
-  getErrorMessage,
-} from '@arbitrage/core';
+import { CorrelationAnalyzer, getCorrelationAnalyzer, HierarchicalCache } from '@arbitrage/core/caching';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { CorrelationTrackerImpl, HierarchicalCacheWarmer, TopNStrategy, AdaptiveStrategy, PrometheusMetricsCollector, PrometheusExporter, MetricType, ExportFormat, createLogger } from '@arbitrage/core';
 
 /**
  * Configuration for warming integration

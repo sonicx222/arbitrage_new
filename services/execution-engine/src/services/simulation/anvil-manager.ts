@@ -26,7 +26,7 @@ import { ethers } from 'ethers';
 // Fix 6.2: Import shared error message utility for consistent error handling
 // Fix 6.3: Import shared rolling average utility to eliminate duplication
 import { CHAIN_IDS, getSimulationErrorMessage, updateRollingAverage, extractRevertReason } from './types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Types

@@ -41,14 +41,12 @@
  * @see ADR-022 - Hot-Path Memory Optimization
  */
 
-import {
-  calculatePriceFromBigIntReserves,
-  type DexPool,
-} from '@arbitrage/core';
+import { calculatePriceFromBigIntReserves } from '@arbitrage/core/components';
+import type { DexPool } from '@arbitrage/core/path-finding';
 import type { PairSnapshot } from './simple-arbitrage-detector';
 
 // P0-2 FIX: Use centralized fee validation (FIX 9.3)
-import { validateFee } from '@arbitrage/core';
+import { validateFee } from '@arbitrage/core/utils';
 
 /**
  * Extended pair interface with reserve data.

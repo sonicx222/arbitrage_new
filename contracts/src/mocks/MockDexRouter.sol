@@ -22,6 +22,8 @@ import "../interfaces/IDexRouter.sol";
  * - Use amounts >= 1e18 for 18-decimal tokens
  * - Set rates that ensure non-zero output for your test amounts
  * - The contract now emits a warning event when output truncates to zero
+ *
+ * @custom:version 1.0.0
  */
 contract MockDexRouter is IDexRouter {
     using SafeERC20 for IERC20;

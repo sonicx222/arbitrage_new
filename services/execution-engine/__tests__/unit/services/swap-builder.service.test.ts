@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { SwapBuilder } from '../../../src/services/swap-builder.service';
 import { DexLookupService } from '../../../src/services/dex-lookup.service';
-import type { ILogger } from '@arbitrage/core';
+import type { ILogger } from '@arbitrage/core/logging';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 // Mock logger

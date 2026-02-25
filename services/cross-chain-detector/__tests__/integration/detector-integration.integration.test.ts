@@ -33,7 +33,7 @@ process.env.BASE_WS_URL = 'wss://mainnet.base.org';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 import { PriceUpdate } from '@arbitrage/types';
-import { RedisStreamsClient } from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
 import { createTestRedisClient } from '@arbitrage/test-utils';
 import { createPriceDataManager, PriceDataManager } from '../../src/price-data-manager';
 import { createOpportunityPublisher, OpportunityPublisher } from '../../src/opportunity-publisher';

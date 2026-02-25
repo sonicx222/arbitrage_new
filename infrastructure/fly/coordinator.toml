@@ -76,4 +76,4 @@ primary_region = "sjc"
   strategy = "rolling"
 
 # Secrets to configure (via fly secrets set):
-# REDIS_URL - Upstash Redis connection URL
+# REDIS_URL - Redis connection URL (self-hosted or Upstash)

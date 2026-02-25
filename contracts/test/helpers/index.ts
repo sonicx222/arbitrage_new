@@ -33,3 +33,9 @@ export {
   createCommitmentHash,
   mineBlocks,
 } from './commit-reveal';
+
+export {
+  deployBalancerV2Fixture,
+  BALANCER_AMOUNTS,
+  type BalancerV2Fixture,
+} from './balancer-v2';

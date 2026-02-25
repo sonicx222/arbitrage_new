@@ -14,20 +14,18 @@
  */
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { ExecutionEngineService, SimulationConfig } from './engine';
+import { getOrderflowPipelineConsumer } from '@arbitrage/core/analytics';
+import { getCrossRegionHealthManager, resetCrossRegionHealthManager } from '@arbitrage/core/monitoring';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import {
-  createLogger,
-  getCrossRegionHealthManager,
-  resetCrossRegionHealthManager,
-  parseEnvInt,
-  parseStandbyConfig,
   setupServiceShutdown,
   closeHealthServer,
   createSimpleHealthServer,
   runServiceMain,
-  getOrderflowPipelineConsumer,
-  getErrorMessage,
-} from '@arbitrage/core';
-import type { CrossRegionHealthConfig } from '@arbitrage/core';
+} from '@arbitrage/core/service-lifecycle';
+import { parseEnvInt } from '@arbitrage/core/utils';
+import { createLogger, parseStandbyConfig } from '@arbitrage/core';
+import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
 } from './api';

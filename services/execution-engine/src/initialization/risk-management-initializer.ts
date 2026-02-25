@@ -19,6 +19,7 @@
  * @see ADR-021: Capital Risk Management
  */
 
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import {
   DrawdownCircuitBreaker,
   getDrawdownCircuitBreaker,
@@ -28,12 +29,11 @@ import {
   getKellyPositionSizer,
   ExecutionProbabilityTracker,
   getExecutionProbabilityTracker,
-  getErrorMessage,
   type DrawdownConfig,
   type EVConfig,
   type PositionSizerConfig,
   type ExecutionProbabilityConfig,
-} from '@arbitrage/core';
+} from '@arbitrage/core/risk';
 import { RISK_CONFIG, validateRiskConfig } from '@arbitrage/config';
 import type { RiskManagementComponents, InitializationLogger, InitializationConfig } from './types';
 import { createDisabledRiskResult, createFailedRiskResult } from './types';

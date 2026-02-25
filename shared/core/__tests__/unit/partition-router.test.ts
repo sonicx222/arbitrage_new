@@ -11,6 +11,7 @@
  */
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { RecordingLogger } from '@arbitrage/core/logging';
 import {
   PartitionRouter,
   createDeprecationWarning,
@@ -19,9 +20,8 @@ import {
   warnIfDeprecated,
   PARTITION_PORTS,
   PARTITION_SERVICE_NAMES,
-  RecordingLogger
-} from '@arbitrage/core';
-import type { PartitionEndpoint } from '@arbitrage/core';
+} from '@arbitrage/core/partition';
+import type { PartitionEndpoint } from '@arbitrage/core/partition';
 import { PARTITION_IDS } from '@arbitrage/config';
 
 // =============================================================================

@@ -24,11 +24,8 @@ import {
   CORE_TOKENS,
   ARBITRAGE_CONFIG,
 } from '@arbitrage/config';
-import {
-  ServiceState,
-  DistributedLockManager,
-  createServiceState,
-} from '@arbitrage/core';
+import { DistributedLockManager } from '@arbitrage/core/redis';
+import { ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
 import {
   createSwapEvent,
   swapEvent,

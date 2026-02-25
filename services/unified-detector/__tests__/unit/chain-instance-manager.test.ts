@@ -15,7 +15,7 @@ import {
 } from '../../src/chain-instance-manager';
 import { ChainDetectorInstance } from '../../src/chain-instance';
 import type { ChainStats } from '../../src/types';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Mock Types

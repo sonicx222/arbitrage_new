@@ -243,7 +243,7 @@ contract PancakeSwapFlashArbitrage is
         // PancakeSwap V3 checks pool balance after callback to verify repayment
         IERC20(asset).safeTransfer(msg.sender, amountOwed);
 
-        emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
+        emit ArbitrageExecuted(asset, amount, profit, block.timestamp, tx.origin);
     }
 
     // Note: _executeSwaps and router management functions inherited from BaseFlashArbitrage

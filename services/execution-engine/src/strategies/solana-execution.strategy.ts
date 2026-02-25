@@ -33,7 +33,7 @@ import type { SolanaTransactionBuilder } from '../solana/transaction-builder';
 import type { ISolanaMevProvider } from '@arbitrage/core/mev-protection/types';
 import { VersionedTransaction } from '@solana/web3.js';
 import { generateTraceId } from '@arbitrage/core/tracing/trace-context';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Types

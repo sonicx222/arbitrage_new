@@ -19,10 +19,8 @@
  * @see ADR-014: Modular Detector Components
  */
 
-import {
-  RedisStreamsClient,
-  PerformanceLogger,
-} from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { PerformanceLogger } from '@arbitrage/core';
 import { ArbitrageOpportunity } from '@arbitrage/types';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating

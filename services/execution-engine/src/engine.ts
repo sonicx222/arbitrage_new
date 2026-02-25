@@ -15,26 +15,19 @@
  * @see ADR-007: Failover Strategy
  */
 
+import { stopAndNullify, clearIntervalSafe } from '@arbitrage/core/async';
+import { BridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import { MevProviderFactory } from '@arbitrage/core/mev-protection';
 import {
   getRedisClient,
   RedisClient,
-  createLogger,
-  getPerformanceLogger,
-  PerformanceLogger,
   RedisStreamsClient,
   getRedisStreamsClient,
-  ServiceStateManager,
-  ServiceState,
-  createServiceState,
   DistributedLockManager,
   getDistributedLockManager,
-  NonceManager,
-  getNonceManager,
-  MevProviderFactory,
-  BridgeRouterFactory,
-  getErrorMessage,
-  disconnectWithTimeout,
-  // Phase 3: Capital Risk Management (Task 3.4.5)
+} from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import {
   DrawdownCircuitBreaker,
   resetDrawdownCircuitBreaker,
   EVCalculator,
@@ -46,14 +39,10 @@ import {
   type TradingAllowedResult,
   type EVCalculation,
   type PositionSize,
-  stopAndNullify,
-  clearIntervalSafe,
-  TradeLogger,
-  type TradeLoggerConfig,
-  R2Uploader,
-  type R2UploaderConfig,
-  parseEnvIntSafe,
-} from '@arbitrage/core';
+} from '@arbitrage/core/risk';
+import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
+import { disconnectWithTimeout, parseEnvIntSafe } from '@arbitrage/core/utils';
+import { createLogger, getPerformanceLogger, PerformanceLogger, NonceManager, getNonceManager, TradeLogger, R2Uploader, type TradeLoggerConfig, type R2UploaderConfig } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
 import { FEATURE_FLAGS, DEXES, R2_CONFIG } from '@arbitrage/config';
@@ -104,7 +93,8 @@ import { UniswapXFillerStrategy } from './strategies/uniswapx-filler.strategy';
 // D2: Strategy initialization extracted to dedicated module
 import { initializeAllStrategies } from './initialization/strategy-initializer';
 // Fix #51: Import MEV-Share event listener for backrun opportunity wiring
-import type { MevShareEventListener, BackrunOpportunity, Logger as CoreLogger } from '@arbitrage/core';
+import type { MevShareEventListener, BackrunOpportunity } from '@arbitrage/core/mev-protection';
+import type { Logger as CoreLogger } from '@arbitrage/core';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import { FastLaneConsumer } from './consumers/fast-lane.consumer';
 import type { ISimulationService } from './services/simulation/types';

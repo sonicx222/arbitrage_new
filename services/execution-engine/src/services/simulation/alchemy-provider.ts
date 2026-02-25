@@ -24,7 +24,7 @@ import {
   getDeprecationWarning,
 } from './types';
 import { BaseSimulationProvider } from './base-simulation-provider';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Alchemy Chain URLs

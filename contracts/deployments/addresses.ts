@@ -301,6 +301,9 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   arbitrumSepolia: [
     '0x101F443B4d1b059569D643917553c771E1b9663E', // Uniswap V2 Router
   ],
+  // NOTE: baseSepolia, polygonAmoy, bscTestnet, zksync-testnet routers not yet configured.
+  // After deploying to these testnets, manually approve routers via addApprovedRouter() or
+  // add addresses here and re-deploy. Check testnet DEX documentation for router addresses.
 
   // Mainnets
   // NOTE: Only V2-style routers (swapExactTokensForTokens) are supported.

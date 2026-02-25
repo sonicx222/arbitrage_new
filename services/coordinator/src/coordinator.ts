@@ -24,26 +24,22 @@
  */
 import http from 'http';
 import express from 'express';
+import { SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
+import { findKSmallest } from '@arbitrage/core/data-structures';
+import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
 import {
   RedisClient,
   getRedisClient,
-  createLogger,
-  getPerformanceLogger,
-  PerformanceLogger,
   RedisStreamsClient,
   getRedisStreamsClient,
   ConsumerGroupConfig,
-  ServiceStateManager,
-  createServiceState,
   StreamConsumer,
-  getStreamHealthMonitor,
-  // R7 Consolidation: Use shared SimpleCircuitBreaker instead of inline implementation
-  SimpleCircuitBreaker,
-  disconnectWithTimeout,
-  findKSmallest,
   unwrapBatchMessages,
-  getErrorMessage,
-} from '@arbitrage/core';
+} from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { ServiceStateManager, createServiceState } from '@arbitrage/core/service-lifecycle';
+import { disconnectWithTimeout } from '@arbitrage/core/utils';
+import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
@@ -91,7 +87,7 @@ import { extractContext, createTraceContext, createChildContext } from '@arbitra
 import type { TraceContext } from '@arbitrage/core/tracing';
 
 // P2-11: Import IntervalManager for centralized interval lifecycle management
-import { IntervalManager } from '@arbitrage/core';
+import { IntervalManager } from '@arbitrage/core/async';
 // REFACTOR: Import extracted standby activation manager
 import { StandbyActivationManager } from './standby-activation-manager';
 

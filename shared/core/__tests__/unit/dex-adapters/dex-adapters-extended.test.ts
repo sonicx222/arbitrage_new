@@ -34,8 +34,8 @@ import {
   GMX_ADDRESSES,
   PLATYPUS_ADDRESSES,
   type AdapterConfig,
-  type DexAdapter
-} from '@arbitrage/core';
+  type DexAdapter,
+} from '@arbitrage/core/dex-adapters';
 
 // =============================================================================
 // Test Constants

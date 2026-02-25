@@ -14,8 +14,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { RedisStreamsClient } from '@arbitrage/core';
-import type { StreamMessage, RedisStreamsConstructor } from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import type { StreamMessage, RedisStreamsConstructor } from '@arbitrage/core/redis';
 import { createMockRedisConstructor } from './test-helpers';
 
 describe('RedisStreamsClient - Basic Operations', () => {

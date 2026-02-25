@@ -1,0 +1,83 @@
+# Fly.io Deployment Configuration for Cross-Chain Detector
+#
+# Service: Cross-Chain Detector
+# Region: sjc (San Jose, US-West — co-located with coordinator)
+# Purpose: Cross-chain opportunity detection
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   fly deploy -c infrastructure/fly/cross-chain-detector.toml
+#
+# Notes:
+# - Co-located with coordinator in sjc region for low-latency communication
+# - Monitors multiple chains for cross-chain arbitrage opportunities
+# - Health check on /health
+
+app = "arbitrage-cross-chain"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "services/cross-chain-detector/Dockerfile"
+  [build.args]
+    NODE_ENV = "production"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3006"
+  REGION_ID = "us-west1"
+  LOG_LEVEL = "info"
+  ENABLE_CROSS_REGION_HEALTH = "true"
+  HEALTH_CHECK_PORT = "3006"
+
+[http_service]
+  internal_port = 3006
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 40
+
+# NOTE: Using [http_service] and [checks] (Machines V2 syntax)
+
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    port = 3006
+    timeout = "5s"
+    type = "http"
+
+[processes]
+  app = "node dist/index.js"
+
+[deploy]
+  release_command = "echo 'Cross-Chain Detector deploying...'"
+  strategy = "rolling"
+
+# Secrets to configure (via fly secrets set):
+# REDIS_URL - Redis connection URL (self-hosted or Upstash)
+# ETHEREUM_RPC_URL - Ethereum HTTP RPC
+# ARBITRUM_RPC_URL - Arbitrum HTTP RPC
+# BASE_RPC_URL - Base HTTP RPC
+# OPTIMISM_RPC_URL - Optimism HTTP RPC
+# BSC_RPC_URL - BSC HTTP RPC
+# POLYGON_RPC_URL - Polygon HTTP RPC

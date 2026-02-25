@@ -7,11 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import {
-  ProviderHealthScorer,
-  getProviderHealthScorer,
-  resetProviderHealthScorer
-} from '@arbitrage/core';
+import { ProviderHealthScorer, getProviderHealthScorer, resetProviderHealthScorer } from '@arbitrage/core/monitoring';
 
 describe('ProviderHealthScorer', () => {
   let scorer: ProviderHealthScorer;

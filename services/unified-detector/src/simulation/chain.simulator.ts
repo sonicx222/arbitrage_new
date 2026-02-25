@@ -13,13 +13,13 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
+import { clearIntervalSafe } from '@arbitrage/core/async';
 import {
   ChainSimulator,
   getChainSimulator,
   stopChainSimulator,
   SimulatedPairConfig,
-  clearIntervalSafe,
-} from '@arbitrage/core';
+} from '@arbitrage/core/simulation';
 
 import { ArbitrageOpportunity, PriceUpdate } from '@arbitrage/types';
 import type { Logger } from '../types';

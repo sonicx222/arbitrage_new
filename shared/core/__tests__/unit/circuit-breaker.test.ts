@@ -27,8 +27,8 @@ import {
   CircuitBreakerError,
   CircuitBreakerRegistry,
   CircuitBreakerConfig,
-  resetCircuitBreakerRegistry,
-} from '@arbitrage/core';
+} from '@arbitrage/core/resilience';
+import { resetCircuitBreakerRegistry } from '@arbitrage/core';
 
 // Test configuration with short timeouts for fast tests
 const TEST_CONFIG: Omit<CircuitBreakerConfig, 'name'> = {

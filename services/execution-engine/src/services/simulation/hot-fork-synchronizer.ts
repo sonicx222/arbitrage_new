@@ -15,7 +15,10 @@
  */
 
 import { ethers } from 'ethers';
-import { createPinoLogger, CircularBuffer, clearIntervalSafe, clearTimeoutSafe, type ILogger, getErrorMessage } from '@arbitrage/core';
+import { clearIntervalSafe, clearTimeoutSafe } from '@arbitrage/core/async';
+import { CircularBuffer } from '@arbitrage/core/data-structures';
+import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 import type { BaseMetrics } from './types';

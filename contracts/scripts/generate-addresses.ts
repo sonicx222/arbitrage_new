@@ -69,6 +69,15 @@ interface AddressesByType {
 
 const REGISTRY_PATH = path.join(__dirname, '..', 'deployments', 'registry.json');
 const OUTPUT_PATH = path.join(__dirname, '..', 'deployments', 'addresses.generated.ts');
+const SOURCE_ADDRESSES_PATH = path.join(__dirname, '..', 'deployments', 'addresses.ts');
+
+/**
+ * Marker comment in addresses.ts that separates auto-generated contract address
+ * constants from manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES, helpers).
+ *
+ * Everything AFTER this marker in addresses.ts is preserved during generation.
+ */
+const MANUAL_SECTION_MARKER = '// === MANUAL SECTIONS (preserved by generate-addresses.ts) ===';
 
 /**
  * Contract types to extract from registry
@@ -183,18 +192,53 @@ function extractAddressesByType(registry: DeploymentRegistry): AddressesByType {
 }
 
 // =============================================================================
+// Manual Section Preservation
+// =============================================================================
+
+/**
+ * Extract manual sections from existing addresses.ts.
+ *
+ * Looks for MANUAL_SECTION_MARKER in the source file.
+ * Everything after that marker is considered a manual section and will be
+ * appended to the generated output.
+ *
+ * If addresses.ts doesn't exist or has no marker, returns empty string.
+ */
+function extractManualSections(): string {
+  let content: string;
+  try {
+    content = fs.readFileSync(SOURCE_ADDRESSES_PATH, 'utf8');
+  } catch {
+    console.log('  ℹ️  No existing addresses.ts found — skipping manual section preservation');
+    return '';
+  }
+
+  const markerIndex = content.indexOf(MANUAL_SECTION_MARKER);
+
+  if (markerIndex === -1) {
+    console.log('  ℹ️  No manual section marker found in addresses.ts');
+    console.log(`     To enable preservation, add this line before manual sections:`);
+    console.log(`     ${MANUAL_SECTION_MARKER}`);
+    return '';
+  }
+
+  const manualContent = content.substring(markerIndex);
+  const lineCount = (manualContent.match(/\n/g) ?? []).length + 1;
+  console.log(`  ✅ Extracted ${lineCount} lines of manual sections from addresses.ts`);
+
+  return manualContent;
+}
+
+// =============================================================================
 // Code Generation
 // =============================================================================
 
 /**
- * Generate TypeScript constant declarations from extracted addresses
+ * Generate TypeScript constant declarations from extracted addresses.
  *
  * Generates export const declarations with JSDoc comments and a warning banner.
- *
- * **Limitations**:
- * - Does not preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)
- * - Does not generate helper functions (hasDeployed*, get*, etc.)
- * - Output file is separate from addresses.ts (addresses.generated.ts)
+ * If addresses.ts contains a manual section marker, those sections are preserved
+ * and appended to the generated output.
  *
  * @param addresses - Addresses by type
  * @returns Generated TypeScript code
@@ -207,22 +251,23 @@ function generateTypeScriptCode(addresses: AddressesByType): string {
   let code = `/**
  * Contract Deployment Addresses
  *
- * ⚠️  AUTO-GENERATED FILE - DO NOT EDIT MANUALLY
+ * ⚠️  AUTO-GENERATED CONTRACT ADDRESSES - DO NOT EDIT THE SECTION ABOVE THE MARKER
  *
  * Generated from: registry.json
  * Generator: scripts/generate-addresses.ts
  * Last updated: ${timestamp}
  *
- * To update addresses:
- * 1. Deploy contract: npm run deploy:<chain>
+ * To update contract addresses:
+ * 1. Deploy contract: npx hardhat run scripts/deploy.ts --network <chain>
  * 2. Auto-generate: npm run generate:addresses
  * 3. Review changes and commit
  *
- * **DO NOT** manually edit this file. Changes will be overwritten.
+ * Manual sections below the marker (APPROVED_ROUTERS, TOKEN_ADDRESSES, helpers)
+ * are preserved automatically during generation.
  */
 
 // =============================================================================
-// Contract Address Constants
+// Contract Address Constants (auto-generated from registry.json)
 // =============================================================================
 
 `;
@@ -255,15 +300,27 @@ export const ${constantName}: Record<string, string> = ${JSON.stringify(
 `;
   }
 
-  // TODO: Add helper functions (hasDeployed*, get*, etc.)
-  // TODO: Preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)
+  // Preserve manual sections from existing addresses.ts
+  console.log('🔄 Checking for manual sections to preserve...');
+  const manualSections = extractManualSections();
 
-  code += `
+  if (manualSections) {
+    code += `\n${manualSections}`;
+  } else {
+    code += `
+${MANUAL_SECTION_MARKER}
 // =============================================================================
-// Note: Manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES) would be
-// preserved here in full implementation
+// Add manual sections below this marker. They will be preserved when
+// regenerating contract addresses from registry.json.
+//
+// Sections to add here:
+// - APPROVED_ROUTERS (per-chain router address lists)
+// - TOKEN_ADDRESSES (per-chain token addresses)
+// - Helper functions (hasDeployedContract, getContractAddress, etc.)
+// - Re-exports from @arbitrage/config
 // =============================================================================
 `;
+  }
 
   return code;
 }
@@ -387,4 +444,4 @@ if (require.main === module) {
 }
 
 // Export for testing
-export { loadRegistry, extractAddressesByType, generateTypeScriptCode, validateAddresses };
+export { loadRegistry, extractAddressesByType, generateTypeScriptCode, validateAddresses, extractManualSections };

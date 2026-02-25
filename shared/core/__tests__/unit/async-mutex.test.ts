@@ -15,8 +15,8 @@ import {
   AsyncMutex,
   namedMutex,
   clearNamedMutex,
-  clearAllNamedMutexes
-} from '@arbitrage/core';
+  clearAllNamedMutexes,
+} from '@arbitrage/core/async';
 
 describe('AsyncMutex', () => {
   let mutex: AsyncMutex;

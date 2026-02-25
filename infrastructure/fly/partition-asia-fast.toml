@@ -1,0 +1,99 @@
+# Fly.io Deployment Configuration for Asia-Fast Partition
+#
+# Partition: asia-fast
+# Chains: BSC, Polygon, Avalanche, Fantom
+# Region: asia-southeast1 (Singapore)
+# Resource Profile: heavy (768MB — 4 chains)
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   fly deploy -c infrastructure/fly/partition-asia-fast.toml
+#
+# Scaling:
+#   fly scale memory 768 -c infrastructure/fly/partition-asia-fast.toml
+
+app = "arbitrage-asia-fast"
+primary_region = "sin"
+
+[build]
+  dockerfile = "services/unified-detector/Dockerfile"
+  [build.args]
+    NODE_ENV = "production"
+
+[env]
+  NODE_ENV = "production"
+  PARTITION_ID = "asia-fast"
+  PARTITION_CHAINS = "bsc,polygon,avalanche,fantom"
+  REGION_ID = "asia-southeast1"
+  LOG_LEVEL = "info"
+  HEALTH_CHECK_PORT = "3001"
+  ENABLE_CROSS_REGION_HEALTH = "true"
+  # Chain-specific RPC URLs set via secrets
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+# NOTE: Removed legacy [[services]] section - using [http_service] and [checks] (Machines V2 syntax)
+# The [[services]] syntax is for Apps V1 and conflicts with the V2 configuration above
+
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 768
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    # FIX P1-1: Standardized to 15s interval per ADR-007 (was 10s)
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    port = 3001
+    timeout = "5s"
+    type = "http"
+
+  [checks.ready]
+    grace_period = "60s"
+    interval = "15s"
+    method = "GET"
+    path = "/ready"
+    port = 3001
+    timeout = "5s"
+    type = "http"
+
+# Processes
+[processes]
+  app = "node dist/index.js"
+
+# Deploy strategy
+[deploy]
+  release_command = "echo 'Asia-Fast partition deploying...'"
+  strategy = "rolling"
+
+# Secrets to configure (via fly secrets set):
+# REDIS_URL - Redis connection URL (self-hosted or Upstash)
+# BSC_WS_URL - BSC WebSocket RPC
+# BSC_RPC_URL - BSC HTTP RPC (fallback)
+# POLYGON_WS_URL - Polygon WebSocket RPC
+# POLYGON_RPC_URL - Polygon HTTP RPC (fallback)
+# AVALANCHE_WS_URL - Avalanche WebSocket RPC
+# AVALANCHE_RPC_URL - Avalanche HTTP RPC (fallback)
+# FANTOM_WS_URL - Fantom WebSocket RPC
+# FANTOM_RPC_URL - Fantom HTTP RPC (fallback)

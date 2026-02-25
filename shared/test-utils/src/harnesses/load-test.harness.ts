@@ -16,7 +16,7 @@
  */
 
 import { performance } from 'perf_hooks';
-import { clearIntervalSafe } from '@arbitrage/core';
+import { clearIntervalSafe } from '@arbitrage/core/async';
 import { LoadTestResult, MemoryMetrics, GCMetrics, LatencyMetrics } from '../types/cache-types';
 
 export interface LoadTestConfig {

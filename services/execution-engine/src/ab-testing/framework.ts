@@ -13,8 +13,9 @@
  * @see FINAL_IMPLEMENTATION_PLAN.md Task 3: A/B Testing Framework
  */
 
-import { clearIntervalSafe } from '@arbitrage/core';
-import type { RedisClient, ServiceLogger } from '@arbitrage/core';
+import { clearIntervalSafe } from '@arbitrage/core/async';
+import type { ServiceLogger } from '@arbitrage/core/logging';
+import type { RedisClient } from '@arbitrage/core/redis';
 import type {
   Experiment,
   ExperimentStatus,

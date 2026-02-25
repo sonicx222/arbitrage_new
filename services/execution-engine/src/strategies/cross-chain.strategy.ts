@@ -32,8 +32,17 @@
 
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getNativeTokenPrice, getTokenDecimals } from '@arbitrage/config';
-import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice, hmacSign, hmacVerify, getHmacSigningKey, isSignedEnvelope } from '@arbitrage/core';
-import type { BridgeStatusResult, SignedEnvelope } from '@arbitrage/core';
+import { getDefaultPrice } from '@arbitrage/core/analytics';
+import { BRIDGE_DEFAULTS } from '@arbitrage/core/bridge-router';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import {
+  hmacSign,
+  hmacVerify,
+  getHmacSigningKey,
+  isSignedEnvelope,
+} from '@arbitrage/core/utils';
+import type { BridgeStatusResult } from '@arbitrage/core/bridge-router';
+import type { SignedEnvelope } from '@arbitrage/core/utils';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger, BridgePollingResult, BridgeRecoveryState } from '../types';
 import {

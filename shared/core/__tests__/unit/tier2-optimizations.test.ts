@@ -269,7 +269,7 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
 // T2.6: Quadrilateral Arbitrage Tests
 // ===========================================================================
 
-import { CrossDexTriangularArbitrage, DexPool } from '@arbitrage/core';
+import { CrossDexTriangularArbitrage, DexPool } from '@arbitrage/core/path-finding';
 
 describe('T2.6: Quadrilateral Arbitrage', () => {
   // Create test pools for 4-hop arbitrage paths

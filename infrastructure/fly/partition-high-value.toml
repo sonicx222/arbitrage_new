@@ -2,8 +2,8 @@
 #
 # Partition: high-value
 # Chains: Ethereum, zkSync Era, Linea
-# Region: sjc (San Jose, US-West)
-# Resource Profile: heavy (512MB - Ethereum is memory-intensive)
+# Region: iad (Ashburn, US-East)
+# Resource Profile: heavy (768MB - Ethereum is memory-intensive)
 #
 # @see ADR-003: Partitioned Chain Detectors
 # @see ADR-006: Free Hosting Provider Selection
@@ -13,7 +13,7 @@
 #   fly deploy -c infrastructure/fly/partition-high-value.toml
 #
 # Scaling:
-#   fly scale memory 512 -c infrastructure/fly/partition-high-value.toml
+#   fly scale memory 768 -c infrastructure/fly/partition-high-value.toml
 #
 # Notes:
 # - Ethereum mainnet requires more memory due to large state and gas estimation
@@ -21,7 +21,7 @@
 # - Linea shares zkSync-style bridging patterns
 
 app = "arbitrage-high-value"
-primary_region = "sjc"
+primary_region = "iad"
 
 [build]
   dockerfile = "services/unified-detector/Dockerfile"
@@ -32,7 +32,7 @@ primary_region = "sjc"
   NODE_ENV = "production"
   PARTITION_ID = "high-value"
   PARTITION_CHAINS = "ethereum,zksync,linea"
-  REGION_ID = "us-west1"
+  REGION_ID = "us-east1"
   LOG_LEVEL = "info"
   HEALTH_CHECK_PORT = "3003"
   ENABLE_CROSS_REGION_HEALTH = "true"
@@ -56,7 +56,7 @@ primary_region = "sjc"
 [vm]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 512
+  memory_mb = 768
 
 [metrics]
   port = 9091
@@ -92,7 +92,7 @@ primary_region = "sjc"
   strategy = "rolling"
 
 # Secrets to configure (via fly secrets set):
-# REDIS_URL        - Upstash Redis connection URL
+# REDIS_URL        - Redis connection URL (self-hosted or Upstash)
 # ETHEREUM_WS_URL  - Ethereum WebSocket RPC
 # ETHEREUM_RPC_URL - Ethereum HTTP RPC (fallback)
 # ZKSYNC_WS_URL    - zkSync Era WebSocket RPC

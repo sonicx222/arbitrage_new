@@ -9,7 +9,7 @@
 
 import { EventEmitter } from 'events';
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 import type { Logger } from '@arbitrage/core';
 import {
   BloXrouteFeed,

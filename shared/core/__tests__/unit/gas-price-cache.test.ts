@@ -161,7 +161,7 @@ jest.mock('@arbitrage/config', () => ({
 // Imports - After mocks
 // =============================================================================
 
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 import {
   GasPriceCache,
   getGasPriceCache,

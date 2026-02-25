@@ -31,8 +31,8 @@ import {
   type SolanaPool,
   type SolanaDetectorRedisClient,
   type SolanaDetectorStreamsClient,
-  type SolanaDetectorDeps
-} from '@arbitrage/core';
+  type SolanaDetectorDeps,
+} from '@arbitrage/core/solana';
 
 // =============================================================================
 // Test Constants

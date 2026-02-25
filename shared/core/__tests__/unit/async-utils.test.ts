@@ -15,7 +15,6 @@ import {
   withTimeout,
   withTimeoutDefault,
   withTimeoutSafe,
-  withRetryAsync,
   sleep,
   createDeferred,
   mapConcurrent,
@@ -23,8 +22,9 @@ import {
   debounceAsync,
   throttleAsync,
   gracefulShutdown,
-  waitWithTimeouts
-} from '@arbitrage/core';
+  waitWithTimeouts,
+} from '@arbitrage/core/async';
+import { withRetryAsync } from '@arbitrage/core';
 
 // =============================================================================
 // Timeout Utilities Tests

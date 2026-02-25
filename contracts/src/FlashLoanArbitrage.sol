@@ -185,7 +185,7 @@ contract FlashLoanArbitrage is
         // and handle tokens that revert on non-zero to non-zero approval
         IERC20(asset).forceApprove(address(POOL), amountOwed);
 
-        emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
+        emit ArbitrageExecuted(asset, amount, profit, block.timestamp, tx.origin);
 
         return true;
     }

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 import type { Logger } from '@arbitrage/core';
 import type { RawPendingTransaction, PendingSwapIntent, SwapRouterType, SwapDecoder } from '../../src/types';
 

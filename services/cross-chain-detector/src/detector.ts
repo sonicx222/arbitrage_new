@@ -33,26 +33,18 @@
  * @see ADR-007: Failover Strategy
  */
 
+import { getPriceOracle, PriceOracle } from '@arbitrage/core/analytics';
+import { OperationGuard, clearIntervalSafe, clearTimeoutSafe } from '@arbitrage/core/async';
 import {
   getRedisClient,
   RedisClient,
-  createLogger,
-  getPerformanceLogger,
-  PerformanceLogger,
   RedisStreamsClient,
   getRedisStreamsClient,
   ConsumerGroupConfig,
-  ServiceStateManager,
-  ServiceState,
-  createServiceState,
-  getPriceOracle,
-  PriceOracle,
-  // P1-5 FIX: Reusable concurrency guard for detection and health loops
-  OperationGuard,
-  disconnectWithTimeout,
-  clearIntervalSafe,
-  clearTimeoutSafe,
-} from '@arbitrage/core';
+} from '@arbitrage/core/redis';
+import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
+import { disconnectWithTimeout } from '@arbitrage/core/utils';
+import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
 import {
   ARBITRAGE_CONFIG,
   // Used for individual token normalization in extractTokenFromPair, whale analysis, etc.
@@ -108,11 +100,7 @@ import {
 
 // Phase 3: Whale Activity Tracker imports
 // DEAD-CODE-REMOVED: PriceMomentumTracker, MomentumSignal - never used in detection
-import {
-  getWhaleActivityTracker,
-  WhaleActivityTracker,
-  WhaleActivitySummary,
-} from '@arbitrage/core';
+import { getWhaleActivityTracker, WhaleActivityTracker, WhaleActivitySummary } from '@arbitrage/core/analytics';
 // ML Predictor types - P0-3 FIX: getLSTMPredictor and LSTMPredictor now owned by MLPredictionManager
 import {
   PredictionResult,

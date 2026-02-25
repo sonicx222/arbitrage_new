@@ -9,13 +9,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import {
-  ExpertSelfHealingManager,
-  FailureSeverity,
-  // P1-14 FIX: Import renamed enum (was RecoveryStrategy, now RecoveryStrategyEnum)
-  RecoveryStrategyEnum as RecoveryStrategy
-} from '@arbitrage/core';
-import { getRedisClient, resetRedisInstance } from '@arbitrage/core';
+import { ExpertSelfHealingManager, FailureSeverity, RecoveryStrategyEnum as RecoveryStrategy } from '@arbitrage/core/resilience';
+import { getRedisClient, resetRedisInstance } from '@arbitrage/core/redis';
 
 // P2-FIX: Mock Redis Streams client for ADR-002 compliant messaging
 const mockStreamsClient = {

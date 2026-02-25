@@ -7,10 +7,8 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
-import {
-  createLogger,
-  exitWithConfigError,
-} from '@arbitrage/core';
+import { exitWithConfigError } from '@arbitrage/core/partition';
+import { createLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Environment Validation

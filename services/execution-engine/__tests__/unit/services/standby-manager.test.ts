@@ -21,13 +21,11 @@ import type { Logger, StandbyConfig } from '../../../src/types';
 import type { ProviderServiceImpl } from '../../../src/services/provider.service';
 import type { QueueServiceImpl } from '../../../src/services/queue.service';
 import type { ExecutionStrategyFactory } from '../../../src/strategies/strategy-factory';
-import type {
-  RedisStreamsClient,
-  NonceManager,
-  MevProviderFactory,
-  BridgeRouterFactory,
-  ServiceStateManager,
-} from '@arbitrage/core';
+import type { BridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import type { MevProviderFactory } from '@arbitrage/core/mev-protection';
+import type { RedisStreamsClient } from '@arbitrage/core/redis';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import type { NonceManager } from '@arbitrage/core';
 
 // =============================================================================
 // Mock initialization module

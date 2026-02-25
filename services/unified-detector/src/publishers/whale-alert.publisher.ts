@@ -13,7 +13,9 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
-import { RedisStreamsClient, WhaleAlert, safeBigIntToDecimal } from '@arbitrage/core';
+import { WhaleAlert } from '@arbitrage/core/analytics';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { safeBigIntToDecimal } from '@arbitrage/core/utils';
 import { SwapEvent, Token } from '@arbitrage/types';
 import type { Logger } from '../types';
 import { STABLECOIN_SYMBOLS_SET, DEFAULT_TOKEN_DECIMALS } from '../constants';

@@ -27,7 +27,8 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { createLogger, AsyncMutex } from '@arbitrage/core';
+import { AsyncMutex } from '@arbitrage/core/async';
+import { createLogger } from '@arbitrage/core';
 import {
   OrderflowFeatureExtractor,
   OrderflowFeatures,

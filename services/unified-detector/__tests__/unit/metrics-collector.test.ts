@@ -10,7 +10,7 @@ import {
 } from '../../src/metrics-collector';
 import type { UnifiedDetectorStats } from '../../src/unified-detector';
 import type { ChainStats } from '../../src/types';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Tests

@@ -19,6 +19,8 @@ import "../interfaces/ISwapRouterV3.sol";
  * ## Test Assertions
  *
  * Tracks `lastFee` so tests can verify the adapter passes the correct fee tier.
+ *
+ * @custom:version 1.0.0
  */
 contract MockUniswapV3Router is ISwapRouterV3 {
     using SafeERC20 for IERC20;

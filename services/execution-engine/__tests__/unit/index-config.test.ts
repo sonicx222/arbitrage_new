@@ -51,7 +51,7 @@ import {
   getCircuitBreakerConfigFromEnv,
   getStandbyConfigFromEnv,
 } from '../../src/index';
-import { getCrossRegionEnvConfig } from '@arbitrage/core';
+import { getCrossRegionEnvConfig } from '@arbitrage/core/utils';
 
 // Cast to jest.Mock for mock restoration in beforeEach
 const mockGetCrossRegionEnvConfig = getCrossRegionEnvConfig as jest.Mock;

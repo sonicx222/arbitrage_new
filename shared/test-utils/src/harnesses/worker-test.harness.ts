@@ -16,7 +16,7 @@
 
 import { Worker } from 'worker_threads';
 import { join } from 'path';
-import { PriceMatrix } from '@arbitrage/core';
+import { PriceMatrix } from '@arbitrage/core/caching';
 import { WorkerStats } from '../types/cache-types';
 
 export interface WorkerTestConfig {

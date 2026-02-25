@@ -14,13 +14,9 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  */
 
-import {
-  RedisStreamsClient,
-  ConsumerGroupConfig,
-  StreamConsumer,
-  getErrorMessage,
-  stopAndNullify,
-} from '@arbitrage/core';
+import { stopAndNullify } from '@arbitrage/core/async';
+import { RedisStreamsClient, ConsumerGroupConfig, StreamConsumer } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ARBITRAGE_CONFIG, FEATURE_FLAGS } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {

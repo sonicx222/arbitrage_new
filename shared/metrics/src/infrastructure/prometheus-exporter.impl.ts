@@ -27,7 +27,7 @@ import {
   MetricType,
   MetricSnapshot,
 } from '../domain/metrics-collector.interface';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 /**
  * Default export configuration

@@ -27,8 +27,8 @@ import {
   getErrorSeverity,
   formatErrorForLog,
   formatErrorForResponse,
-  ErrorAggregator
-} from '@arbitrage/core';
+  ErrorAggregator,
+} from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Custom Error Classes Tests

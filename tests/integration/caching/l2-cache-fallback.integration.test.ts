@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import Redis from 'ioredis';
 import { createTestRedisClient, delay } from '@arbitrage/test-utils';
-import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core';
+import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core/caching';
 
 const L2_PREFIX = 'cache:l2:';
 const L2_TTL_SECONDS = 60;

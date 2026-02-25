@@ -30,7 +30,7 @@
  */
 
 import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';
-import { createPartitionEntry, PartitionEnvironmentConfig } from '@arbitrage/core';
+import { createPartitionEntry, PartitionEnvironmentConfig } from '@arbitrage/core/partition';
 import { PARTITION_IDS } from '@arbitrage/config';
 
 // =============================================================================

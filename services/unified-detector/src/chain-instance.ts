@@ -14,59 +14,41 @@
 import { EventEmitter } from 'events';
 import { ethers } from 'ethers';
 import {
-  createLogger,
-  PerformanceLogger,
-  RedisStreamsClient,
-  WebSocketManager,
-  StreamBatcher,
-  // P0-1 FIX: Use precision-safe price calculation
-  calculatePriceFromBigIntReserves,
-  // Simulation mode support
-  isSimulationMode,
-  // REFACTOR: ChainSimulator imports moved to ./simulation module
-  // Triangular/Quadrilateral arbitrage detection
+  SwapEventFilter,
+  getSwapEventFilter,
+  WhaleAlert,
+  PairActivityTracker,
+  getPairActivityTracker,
+  PriceMomentumTracker,
+  getPriceMomentumTracker,
+  MLOpportunityScorer,
+  getMLOpportunityScorer,
+  LiquidityDepthAnalyzer,
+  getLiquidityDepthAnalyzer,
+} from '@arbitrage/core/analytics';
+import { stopAndNullify } from '@arbitrage/core/async';
+import {
+  ReserveCache,
+  getReserveCache,
+  HierarchicalCache,
+  createHierarchicalCache,
+} from '@arbitrage/core/caching';
+import { calculatePriceFromBigIntReserves, bpsToDecimal } from '@arbitrage/core/components';
+import { PairCreatedEvent } from '@arbitrage/core/factory-subscription';
+import {
   CrossDexTriangularArbitrage,
   DexPool,
   TriangularOpportunity,
   QuadrilateralOpportunity,
-  // Multi-leg path finding
   getMultiLegPathFinder,
   MultiLegPathFinder,
   MultiLegOpportunity,
-  // Swap event filtering and whale detection
-  SwapEventFilter,
-  getSwapEventFilter,
-  WhaleAlert,
-  // Pair activity tracking for volatility-based prioritization
-  PairActivityTracker,
-  getPairActivityTracker,
-  // ML Signal Integration: Momentum data recording for ML scoring pipeline
-  PriceMomentumTracker,
-  getPriceMomentumTracker,
-  // ML Signal Integration: Background signal pre-computation
-  MLOpportunityScorer,
-  getMLOpportunityScorer,
-  // Task 2.1.3: Factory subscription service for RPC reduction
-  FactorySubscriptionService,
-  PairCreatedEvent,
-  // P0-FIX: Import factory event signatures for event routing
-  FactoryEventSignatures,
-  AdditionalEventSignatures,
-  // ADR-022: Reserve cache for RPC reduction
-  ReserveCache,
-  getReserveCache,
-  // PHASE2-TASK36: Hierarchical cache with PriceMatrix L1
-  HierarchicalCache,
-  createHierarchicalCache,
-  // FIX (Issue 2.1): Import bpsToDecimal for fee conversion (replaces deprecated dexFeeToPercentage)
-  bpsToDecimal,
-  disconnectWithTimeout,
-  stopAndNullify,
-  getErrorMessage,
-  // Liquidity Depth: Optimal trade sizing from pool depth analysis
-  LiquidityDepthAnalyzer,
-  getLiquidityDepthAnalyzer,
-} from '@arbitrage/core';
+} from '@arbitrage/core/path-finding';
+import { RedisStreamsClient, StreamBatcher } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { isSimulationMode } from '@arbitrage/core/simulation';
+import { disconnectWithTimeout } from '@arbitrage/core/utils';
+import { createLogger, PerformanceLogger, WebSocketManager, FactorySubscriptionService, FactoryEventSignatures, AdditionalEventSignatures } from '@arbitrage/core';
 
 import {
   CHAINS,
@@ -110,7 +92,7 @@ import { initializePairs as initializePairsFromModule } from './pair-initializer
 // FIX Config 3.1/3.2: Import utility functions and constants
 import { parseIntEnvVar } from './types';
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
-import { validateFee } from '@arbitrage/core';
+import { validateFee } from '@arbitrage/core/utils';
 import {
   // R8 Refactor: UNSTABLE_WEBSOCKET_CHAINS, DEFAULT_WS_CONNECTION_TIMEOUT_MS,
   // EXTENDED_WS_CONNECTION_TIMEOUT_MS moved to subscription-manager.ts

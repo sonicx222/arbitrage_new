@@ -27,7 +27,8 @@ jest.mock('@arbitrage/core', () => ({
 
 import { initializePairs, generatePairAddress } from '../../src/pair-initializer';
 import type { PairInitializerConfig } from '../../src/pair-initializer';
-import { bpsToDecimal, validateFee } from '@arbitrage/core';
+import { bpsToDecimal } from '@arbitrage/core/components';
+import { validateFee } from '@arbitrage/core/utils';
 import type { Dex, Token } from '@arbitrage/types';
 
 // =============================================================================

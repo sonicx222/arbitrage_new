@@ -271,7 +271,7 @@ jest.mock('@arbitrage/core', () => {
 });
 
 // Import after mocks are set up
-import { resetRedisStreamsInstance } from '@arbitrage/core';
+import { resetRedisStreamsInstance } from '@arbitrage/core/redis';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 describe('Execution Flow Unit Tests', () => {

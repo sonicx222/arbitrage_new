@@ -18,7 +18,8 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as crypto from 'crypto';
 import * as path from 'path';
-import { createLogger, getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('model-persistence');
 

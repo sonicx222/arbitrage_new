@@ -17,16 +17,15 @@
 
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { UnifiedChainDetector, UnifiedDetectorConfig } from './unified-detector';
+import { parsePort } from '@arbitrage/core/partition';
+import { getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core/redis';
 import {
-  createLogger,
-  parsePort,
-  getRedisStreamsClient,
   createSimpleHealthServer,
   setupServiceShutdown,
   closeHealthServer,
   runServiceMain,
-  RedisStreamsClient,
-} from '@arbitrage/core';
+} from '@arbitrage/core/service-lifecycle';
+import { createLogger } from '@arbitrage/core';
 import { getPartition } from '@arbitrage/config';
 import { DEFAULT_HEALTH_CHECK_PORT } from './constants';
 import { OpportunityPublisher } from './publishers';

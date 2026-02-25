@@ -18,7 +18,9 @@
  * @see types.ts (DLQ_STREAM constant)
  */
 
-import { RedisStreamsClient, getErrorMessage, clearIntervalSafe } from '@arbitrage/core';
+import { clearIntervalSafe } from '@arbitrage/core/async';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger } from '../types';
 import { DLQ_STREAM } from '../types';
 

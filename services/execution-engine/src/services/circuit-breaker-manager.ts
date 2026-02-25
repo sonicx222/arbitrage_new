@@ -15,10 +15,8 @@
  * @see services/circuit-breaker.ts (implementation)
  */
 
-import {
-  getErrorMessage,
-  RedisStreamsClient,
-} from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import {
   createCircuitBreaker,
   type CircuitBreaker,

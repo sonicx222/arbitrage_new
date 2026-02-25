@@ -1,7 +1,7 @@
 # Configuration Reference
 
-> **Last Updated:** 2026-02-05
-> **Version:** 1.0
+> **Last Updated:** 2026-02-25
+> **Version:** 1.1
 
 This document provides a comprehensive reference for all configuration options in the arbitrage system.
 

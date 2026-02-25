@@ -15,8 +15,10 @@
  * @see docs/reports/implementation_plan_v3.md - Phase 4, Task 4.3.1
  */
 
-import { createLogger, getWhaleActivityTracker, getErrorMessage } from '@arbitrage/core';
-import type { WhaleActivitySummary } from '@arbitrage/core';
+import { getWhaleActivityTracker } from '@arbitrage/core/analytics';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createLogger } from '@arbitrage/core';
+import type { WhaleActivitySummary } from '@arbitrage/core/analytics';
 
 const logger = createLogger('orderflow-features');
 

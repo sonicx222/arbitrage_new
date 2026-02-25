@@ -14,7 +14,7 @@
  * @see implementation_plan_v3.md Phase 2
  */
 
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ethers } from 'ethers';
 import { AnvilForkManager, createAnvilForkManager } from './simulation/anvil-manager';
 import { PendingStateSimulator, createPendingStateSimulator } from './simulation/pending-state-simulator';

@@ -12,19 +12,15 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 // Import from package alias (new pattern per ADR-009)
-import {
-  SwapEventFilter,
-  getSwapEventFilter,
-  resetSwapEventFilter
-} from '@arbitrage/core';
+import { SwapEventFilter, getSwapEventFilter, resetSwapEventFilter } from '@arbitrage/core/analytics';
 
 import type { SwapEvent } from '@arbitrage/types';
 import type {
   SwapEventFilterConfig,
   FilterResult,
   VolumeAggregate,
-  WhaleAlert
-} from '@arbitrage/core';
+  WhaleAlert,
+} from '@arbitrage/core/analytics';
 
 // Helper to create mock swap events
 function createMockSwapEvent(overrides: Partial<SwapEvent> = {}): SwapEvent {

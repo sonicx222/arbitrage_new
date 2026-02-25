@@ -14,9 +14,7 @@
  * @see ADR-022: Hot-Path Performance
  */
 
-import {
-  getErrorMessage,
-} from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import { FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, BALANCER_V2_VAULTS } from '@arbitrage/config';
 import { IntraChainStrategy } from '../strategies/intra-chain.strategy';
 import { CrossChainStrategy } from '../strategies/cross-chain.strategy';

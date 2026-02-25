@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
-import { V8Profiler, profileHotPath } from '@arbitrage/core';
+import { V8Profiler, profileHotPath } from '@arbitrage/core/monitoring';
 import { CacheTestHarness } from '@arbitrage/test-utils';
 
 describe('Hot-Path Profiling (Task #46)', () => {

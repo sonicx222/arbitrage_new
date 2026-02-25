@@ -15,7 +15,7 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import { RedisStreamsClient, RedisStreamsClientDeps, RedisStreamsConstructor } from '@arbitrage/core';
+import { RedisStreamsClient, RedisStreamsClientDeps, RedisStreamsConstructor } from '@arbitrage/core/redis';
 import { RedisStreams } from '@arbitrage/types';
 
 // =============================================================================

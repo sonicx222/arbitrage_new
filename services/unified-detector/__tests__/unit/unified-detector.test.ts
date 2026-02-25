@@ -10,7 +10,8 @@
 import { EventEmitter } from 'events';
 import { UnifiedChainDetector } from '../../src/unified-detector';
 import { asLogger } from '../../src/types';
-import { RecordingLogger, ServiceStateManager } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
+import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 import { createMockLogger, createMockPerfLogger } from '@arbitrage/test-utils';
 
 // =============================================================================

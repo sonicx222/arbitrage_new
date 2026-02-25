@@ -17,10 +17,10 @@ import {
   PriceMatrix,
   PriceIndexMapper,
   getPriceMatrix,
-  resetPriceMatrix
-} from '@arbitrage/core';
+  resetPriceMatrix,
+} from '@arbitrage/core/caching';
 
-import type { PriceMatrixConfig, PriceEntry } from '@arbitrage/core';
+import type { PriceMatrixConfig, PriceEntry } from '@arbitrage/core/caching';
 
 // =============================================================================
 // Test Helpers

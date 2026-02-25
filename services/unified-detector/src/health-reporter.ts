@@ -17,13 +17,9 @@
  */
 
 import { EventEmitter } from 'events';
-import {
-  RedisStreamsClient,
-  CrossRegionHealthManager,
-  getCrossRegionHealthManager as defaultGetCrossRegionHealthManager,
-  ServiceStateManager,
-  FailoverEvent,
-} from '@arbitrage/core';
+import { CrossRegionHealthManager, getCrossRegionHealthManager as defaultGetCrossRegionHealthManager, FailoverEvent } from '@arbitrage/core/monitoring';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 
 import { PartitionConfig, PartitionHealth } from '@arbitrage/config';
 

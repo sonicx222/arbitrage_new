@@ -42,7 +42,7 @@ function bpsToDecimal(bps: number): number { return bps / BPS_DENOMINATOR; }
 function decimalToBps(decimal: number): number { return Math.round(decimal * BPS_DENOMINATOR); }
 
 // Import Solana DEX program constants
-import { SOLANA_DEX_PROGRAMS } from '@arbitrage/core';
+import { SOLANA_DEX_PROGRAMS } from '@arbitrage/core/solana';
 
 // =============================================================================
 // Constants and Test Data

@@ -13,8 +13,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { RedisStreamsClient } from '@arbitrage/core';
-import type { ConsumerGroupConfig, RedisStreamsConstructor } from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import type { ConsumerGroupConfig, RedisStreamsConstructor } from '@arbitrage/core/redis';
 import { createMockRedisConstructor } from './test-helpers';
 
 describe('RedisStreamsClient - Consumer Groups', () => {

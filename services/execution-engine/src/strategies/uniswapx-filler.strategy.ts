@@ -39,7 +39,8 @@
 
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { generateTraceId, CircuitBreaker, CircuitBreakerError, getErrorMessage } from '@arbitrage/core';
+import { CircuitBreaker, CircuitBreakerError, getErrorMessage } from '@arbitrage/core/resilience';
+import { generateTraceId } from '@arbitrage/core/tracing';
 import { getNativeTokenPrice, CHAINS } from '@arbitrage/config';
 import { BaseExecutionStrategy } from './base.strategy';
 import type {

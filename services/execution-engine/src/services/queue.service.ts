@@ -16,7 +16,8 @@
  */
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { CircularBuffer, getErrorMessage } from '@arbitrage/core';
+import { CircularBuffer } from '@arbitrage/core/data-structures';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger, QueueConfig, QueueService } from '../types';
 import { DEFAULT_QUEUE_CONFIG } from '../types';
 

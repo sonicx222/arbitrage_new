@@ -15,11 +15,8 @@
  * @see ADR-017: MEV Protection Enhancement
  */
 
-import {
-  MevProviderFactory,
-  MevGlobalConfig,
-  getErrorMessage,
-} from '@arbitrage/core';
+import { MevProviderFactory, MevGlobalConfig } from '@arbitrage/core/mev-protection';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import { MEV_CONFIG } from '@arbitrage/config';
 import type { ProviderServiceImpl } from '../services/provider.service';
 import type { MevInitializationResult, InitializationLogger } from './types';

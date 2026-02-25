@@ -16,19 +16,20 @@
 
 import { EventEmitter } from 'events';
 import { IncomingMessage, ServerResponse, Server } from 'http';
+import { CircularBuffer } from '@arbitrage/core/data-structures';
 import {
-  createLogger,
-  CircularBuffer,
   getRedisStreamsClient,
   resetRedisStreamsInstance,
+  type RedisStreamsClient,
+  type StreamBatcher,
+} from '@arbitrage/core/redis';
+import {
   setupServiceShutdown,
   runServiceMain,
   createSimpleHealthServer,
   closeHealthServer,
-  type Logger,
-  type RedisStreamsClient,
-  type StreamBatcher,
-} from '@arbitrage/core';
+} from '@arbitrage/core/service-lifecycle';
+import { createLogger, type Logger } from '@arbitrage/core';
 import {
   MEMPOOL_CONFIG,
   getEnabledMempoolChains,

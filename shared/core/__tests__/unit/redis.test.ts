@@ -15,8 +15,8 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import { EventEmitter } from 'events';
 
 // Import from package alias (new pattern per ADR-009)
-import { RedisClient, getRedisClient, resetRedisInstance } from '@arbitrage/core';
-import type { RedisConstructor } from '@arbitrage/core';
+import { RedisClient, getRedisClient, resetRedisInstance } from '@arbitrage/core/redis';
+import type { RedisConstructor } from '@arbitrage/core/redis';
 
 // =============================================================================
 // Mock Redis Implementation

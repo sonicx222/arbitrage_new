@@ -571,6 +571,30 @@ describe('UniswapV3Adapter', () => {
         adapterNoQuoter.getAmountsIn(ethers.parseEther('1'), [wethAddr, daiAddr]),
       ).to.be.revertedWithCustomError(adapterNoQuoter, 'QuoterNotConfigured');
     });
+
+    it('should document forward-quote approximation (getAmountsIn != exact inverse of getAmountsOut)', async () => {
+      // getAmountsIn uses quoteExactInputSingle in reverse direction as an approximation.
+      // Due to AMM curve non-linearity, a forward quote B→A ≠ required input A→B.
+      // This test documents the approximation gap.
+      const { adapter, wethAddr, daiAddr } = await loadFixture(deployAdapterFixture);
+
+      const desiredOutput = ethers.parseEther('10'); // Want 10 DAI
+
+      // getAmountsIn says: to get 10 DAI, you need ~9.6 WETH (reverse quote via DAI->WETH rate 0.96)
+      const amountsIn = await adapter.getAmountsIn(desiredOutput, [wethAddr, daiAddr]);
+      const estimatedInput = amountsIn[0]; // 9.6 WETH
+
+      // getAmountsOut says: 9.6 WETH gives you 10.08 DAI (forward quote via WETH->DAI rate 1.05)
+      const amountsOut = await adapter.getAmountsOut(estimatedInput, [wethAddr, daiAddr]);
+      const actualOutput = amountsOut[1]; // 10.08 DAI
+
+      // The approximation overshoots: using the estimated input produces MORE than desired output.
+      // In production, this means getAmountsIn may underestimate required input for some pairs
+      // and overestimate for others, depending on the rate asymmetry.
+      expect(actualOutput).to.not.equal(desiredOutput);
+      // The gap is non-trivial (0.8% in this case)
+      expect(actualOutput).to.be.greaterThan(desiredOutput);
+    });
   });
 
   // ==========================================================================

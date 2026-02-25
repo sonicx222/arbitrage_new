@@ -38,7 +38,8 @@
 
 import { Worker, type WorkerOptions } from 'worker_threads';
 import { EventEmitter } from 'events';
-import { createLogger, getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('worker-manager');
 

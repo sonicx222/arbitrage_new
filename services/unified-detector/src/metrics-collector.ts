@@ -15,7 +15,8 @@
  * - Error-resilient collection
  */
 
-import { PerformanceLogger, ServiceStateManager } from '@arbitrage/core';
+import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import { PerformanceLogger } from '@arbitrage/core';
 
 import { UnifiedDetectorStats } from './unified-detector';
 import { Logger } from './types';

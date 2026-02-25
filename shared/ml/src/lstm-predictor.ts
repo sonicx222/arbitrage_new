@@ -16,7 +16,9 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { createLogger, AsyncMutex, getErrorMessage } from '@arbitrage/core';
+import { AsyncMutex } from '@arbitrage/core/async';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createLogger } from '@arbitrage/core';
 import { getModelPersistence, type ModelMetadata } from './model-persistence';
 import {
   calculateSMA,

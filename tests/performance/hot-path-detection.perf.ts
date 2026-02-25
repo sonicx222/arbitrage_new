@@ -25,7 +25,7 @@ import {
   calculateSpreadSafe,
   calculateNetProfit,
   calculateProfitBetweenSources,
-} from '@arbitrage/core';
+} from '@arbitrage/core/components';
 
 // Local type definition matching @arbitrage/core/components/price-calculator
 interface PriceSource {

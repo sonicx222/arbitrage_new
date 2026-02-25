@@ -17,10 +17,11 @@
  * @see implementation_plan_v2.md Task 1.1.3
  */
 
-import type { PerformanceLogger, ServiceStateManager } from '@arbitrage/core';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import type { PerformanceLogger } from '@arbitrage/core';
 import type { ExecutionStats, Logger } from '../../types';
 import type { ISimulationService, SimulationProviderType } from './types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Constants

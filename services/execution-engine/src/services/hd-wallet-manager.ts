@@ -20,7 +20,7 @@
 
 import { ethers } from 'ethers';
 import type { Logger } from '../types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 /**
  * Stable chain-to-derivation-index mapping.

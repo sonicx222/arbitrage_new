@@ -20,15 +20,10 @@
 
 import { EventEmitter } from 'events';
 import { normalizeTokenForCrossChain, normalizeTokenForPricing } from '@arbitrage/config';
-import {
-  LRUCache,
-  NumericRollingWindow,
-  createSimpleCircuitBreaker,
-  type SimpleCircuitBreaker,
-  createTraceContext,
-  propagateContext,
-  getErrorMessage,
-} from '@arbitrage/core';
+import { createSimpleCircuitBreaker, type SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
+import { LRUCache, NumericRollingWindow } from '@arbitrage/core/data-structures';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 
 // Import extracted modules
 import { VersionedPoolStore } from './pool/versioned-pool-store';

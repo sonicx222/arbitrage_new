@@ -9,6 +9,8 @@ import "../interfaces/IBalancerV2Vault.sol";
  * @title MockBalancerVault
  * @dev Mock Balancer V2 Vault for testing flash loans
  * @notice Simulates Balancer V2 Vault flash loan functionality with 0% fees
+ *
+ * @custom:version 1.0.0
  */
 contract MockBalancerVault is IBalancerV2Vault {
     using SafeERC20 for IERC20;

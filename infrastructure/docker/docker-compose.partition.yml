@@ -151,6 +151,8 @@ services:
 
   # Partition: l2-turbo (Arbitrum + Optimism + Base)
   # Region: asia-southeast1, Provider: fly, Profile: standard
+  # NOTE: CURRENT_STATE.md lists Blast, Scroll, Mantle, Mode as future L2-Turbo chains.
+  # They have placeholder DEX addresses and are NOT included here until addresses are verified.
   partition-l2-turbo:
     build:
       context: ../..

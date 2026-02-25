@@ -209,7 +209,7 @@ contract BalancerV2FlashArbitrage is
         // Balancer V2 checks its balance after callback returns to verify repayment
         IERC20(asset).safeTransfer(address(VAULT), amountOwed);
 
-        emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
+        emit ArbitrageExecuted(asset, amount, profit, block.timestamp, tx.origin);
     }
 
     // Note: Common functions inherited from BaseFlashArbitrage

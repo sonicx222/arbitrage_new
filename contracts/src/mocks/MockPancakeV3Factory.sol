@@ -21,6 +21,8 @@ import "../interfaces/IPancakeV3FlashCallback.sol";
  * This prevents malicious contracts from:
  * - Calling pancakeV3FlashCallback() directly with fake fee amounts
  * - Draining funds by pretending to be a flash loan
+ *
+ * @custom:version 1.0.0
  */
 contract MockPancakeV3Factory is IPancakeV3Factory {
     // Mapping: tokenA => tokenB => fee => pool

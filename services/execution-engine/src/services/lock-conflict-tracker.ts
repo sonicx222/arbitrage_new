@@ -11,7 +11,7 @@
  * @see P0-FIX 1.7: Memory growth protection
  */
 
-import { findKSmallest } from '@arbitrage/core';
+import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { Logger } from '../types';
 
 /**

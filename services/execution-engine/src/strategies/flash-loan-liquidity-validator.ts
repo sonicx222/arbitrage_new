@@ -18,7 +18,7 @@ import type { IFlashLoanProvider, FlashLoanProtocol } from './flash-loan-provide
 import type { StrategyContext } from '../types';
 import type { Logger } from '../types';
 import { ethers } from 'ethers';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 /**
  * Cached liquidity data for a provider/asset pair

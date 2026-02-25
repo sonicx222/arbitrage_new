@@ -15,7 +15,8 @@
 
 import { ethers } from 'ethers';
 import { MEV_CONFIG } from '@arbitrage/config';
-import { getErrorMessage, type MevProviderFactory } from '@arbitrage/core';
+import type { MevProviderFactory } from '@arbitrage/core/mev-protection';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger, StrategyContext } from '../types';
 import { GasPriceOptimizer, type GasBaselineEntry } from './gas-price-optimizer';
 

@@ -21,7 +21,7 @@ import {
   DiscoveredPool,
   PoolReserves,
   GMX_ADDRESSES,
-} from '@arbitrage/core';
+} from '@arbitrage/core/dex-adapters';
 
 // =============================================================================
 // Mocks

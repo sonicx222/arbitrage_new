@@ -6,7 +6,7 @@
 
 import crypto from 'crypto';
 import { createLogger } from '@arbitrage/core';
-import { getRedisClient, RedisClient } from '@arbitrage/core';
+import { getRedisClient, RedisClient } from '@arbitrage/core/redis';
 
 const logger = createLogger('rate-limiter');
 

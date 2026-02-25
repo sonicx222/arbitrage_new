@@ -111,9 +111,19 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /// @notice Minimum blocks between commit and reveal (prevents same-block reveal)
     uint256 public constant MIN_DELAY_BLOCKS = 1;
 
-    /// @notice Maximum blocks for commitment validity (prevents staleness)
-    /// @dev 10 blocks = ~2 minutes on most chains (12s blocks)
-    uint256 public constant MAX_COMMIT_AGE_BLOCKS = 10;
+    /// @notice Default maximum blocks for commitment validity
+    uint256 public constant DEFAULT_MAX_COMMIT_AGE = 10;
+
+    /// @notice Minimum allowed value for maxCommitAgeBlocks (prevents too-short windows)
+    uint256 public constant MIN_COMMIT_AGE = 5;
+
+    /// @notice Maximum allowed value for maxCommitAgeBlocks (prevents stale commitments)
+    uint256 public constant MAX_COMMIT_AGE = 100;
+
+    /// @notice Maximum blocks for commitment validity (configurable per chain)
+    /// @dev 10 blocks = ~2 minutes on Ethereum (12s), ~2.5s on Arbitrum (0.25s).
+    ///      Owner should increase for fast L2 chains where 10 blocks is too short.
+    uint256 public maxCommitAgeBlocks;
 
     /// @notice Maximum number of commitments in a single batchCommit call
     /// @dev Prevents gas-limit DoS; consistent with MAX_BATCH_WHITELIST in PancakeSwapFlashArbitrage
@@ -125,19 +135,39 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     // State Variables (Protocol-Specific)
     // ==========================================================================
 
-    /// @notice Commitment storage: commitmentHash => commit block number
-    /// @dev Block number of 0 means commitment doesn't exist
-    mapping(bytes32 => uint256) public commitments;
+    /// @notice Packed commitment data: hash, block number, committer, revealed status
+    /// @dev Packed into a single storage slot (29 bytes): uint64 + address + bool
+    ///      Saves ~40k gas per commit vs 3 separate mappings (1 SSTORE vs 3).
+    ///      Use view functions commitments(), committers(), revealed() for external access.
+    struct CommitmentInfo {
+        uint64 blockNumber;   // 8 bytes — block when committed (0 = doesn't exist)
+        address committer;    // 20 bytes — who committed (prevents griefing)
+        bool revealed;        // 1 byte — replay protection
+    }
 
-    /// @notice Revealed commitments: commitmentHash => revealed status
-    /// @dev Prevents replay attacks (revealing same commitment twice)
-    mapping(bytes32 => bool) public revealed;
-
-    /// @notice Commitment committers: commitmentHash => committer address
-    /// @dev Prevents griefing attacks where others commit the same hash
-    mapping(bytes32 => address) public committers;
+    /// @dev Internal mapping — use commitments(), committers(), revealed() view functions
+    mapping(bytes32 => CommitmentInfo) internal _commitments;
 
     // Note: minimumProfit, approvedRouters (_approvedRouters EnumerableSet), SwapStep struct inherited from BaseFlashArbitrage
+
+    // ==========================================================================
+    // Backward-Compatible View Functions
+    // ==========================================================================
+
+    /// @notice Get commitment block number (backward-compatible with previous mapping getter)
+    function commitments(bytes32 hash) external view returns (uint256) {
+        return uint256(_commitments[hash].blockNumber);
+    }
+
+    /// @notice Get commitment committer address (backward-compatible with previous mapping getter)
+    function committers(bytes32 hash) external view returns (address) {
+        return _commitments[hash].committer;
+    }
+
+    /// @notice Get commitment revealed status (backward-compatible with previous mapping getter)
+    function revealed(bytes32 hash) external view returns (bool) {
+        return _commitments[hash].revealed;
+    }
 
     /**
      * @notice Parameters for reveal phase
@@ -181,6 +211,12 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /// @notice Emitted when a commitment is cancelled (gas refund)
     event CommitCancelled(bytes32 indexed commitmentHash, address indexed canceller);
 
+    /// @notice Emitted when maxCommitAgeBlocks is updated
+    event MaxCommitAgeBlocksUpdated(uint256 oldValue, uint256 newValue);
+
+    /// @notice Emitted when expired commitments are cleaned up
+    event CommitmentsCleanedUp(uint256 count);
+
     // Note: RouterAdded, RouterRemoved, MinimumProfitUpdated, etc. inherited from BaseFlashArbitrage
 
     // ==========================================================================
@@ -197,6 +233,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     error BatchTooLarge(uint256 provided, uint256 max);
     error BelowMinimumProfit();
     error InvalidDeadline();
+    error InvalidCommitAge();
     // Note: Common errors (RouterNotApproved, InsufficientProfit, InvalidRouterAddress,
     // InvalidAmount, EmptySwapPath, PathTooLong, InvalidSwapPath, SwapPathAssetMismatch,
     // InvalidOwnerAddress) inherited from BaseFlashArbitrage
@@ -215,6 +252,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         // MUST be configured by owner before use
         // Note: Commit+reveal gas cost ~315k gas (~$10 @ 20 gwei, $2500 ETH)
         // Recommend: 0.01 ETH (~$25) for mainnet, 0.005 ETH for L2s
+        maxCommitAgeBlocks = DEFAULT_MAX_COMMIT_AGE;
     }
 
     // ==========================================================================
@@ -225,7 +263,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * @notice Commit to an arbitrage opportunity
      * @dev Stores commitment hash to prevent frontrunning. Actual parameters hidden until reveal.
      *
-     * Gas cost: ~65,000 (2x SSTORE + event emission)
+     * Gas cost: ~68,000 (2x SSTORE + event emission + nonReentrant overhead)
      *
      * Requirements:
      * - Contract not paused
@@ -235,11 +273,14 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      *
      * @param commitmentHash Keccak256 hash of RevealParams
      */
-    function commit(bytes32 commitmentHash) external whenNotPaused {
-        if (commitments[commitmentHash] != 0) revert CommitmentAlreadyExists();
+    function commit(bytes32 commitmentHash) external nonReentrant whenNotPaused {
+        if (_commitments[commitmentHash].blockNumber != 0) revert CommitmentAlreadyExists();
 
-        commitments[commitmentHash] = block.number;
-        committers[commitmentHash] = msg.sender;
+        _commitments[commitmentHash] = CommitmentInfo({
+            blockNumber: uint64(block.number),
+            committer: msg.sender,
+            revealed: false
+        });
         emit Committed(commitmentHash, block.number, msg.sender);
     }
 
@@ -256,7 +297,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * @param commitmentHashes Array of commitment hashes
      * @return successCount Number of successfully committed hashes
      */
-    function batchCommit(bytes32[] calldata commitmentHashes) external whenNotPaused returns (uint256 successCount) {
+    function batchCommit(bytes32[] calldata commitmentHashes) external nonReentrant whenNotPaused returns (uint256 successCount) {
         uint256 len = commitmentHashes.length;
         if (len > MAX_BATCH_COMMITS) revert BatchTooLarge(len, MAX_BATCH_COMMITS);
         uint256 currentBlock = block.number;
@@ -265,9 +306,12 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
             bytes32 hash = commitmentHashes[i];
 
             // Skip if commitment already exists (don't revert entire batch)
-            if (commitments[hash] == 0) {
-                commitments[hash] = currentBlock;
-                committers[hash] = msg.sender;
+            if (_commitments[hash].blockNumber == 0) {
+                _commitments[hash] = CommitmentInfo({
+                    blockNumber: uint64(currentBlock),
+                    committer: msg.sender,
+                    revealed: false
+                });
                 emit Committed(hash, currentBlock, msg.sender);
                 successCount++;
             }
@@ -292,12 +336,12 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * @param commitmentHash Hash to cancel
      */
     function cancelCommit(bytes32 commitmentHash) external {
-        if (commitments[commitmentHash] == 0) revert CommitmentNotFound();
-        if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
-        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
+        CommitmentInfo storage info = _commitments[commitmentHash];
+        if (info.blockNumber == 0) revert CommitmentNotFound();
+        if (info.revealed) revert CommitmentAlreadyRevealed();
+        if (info.committer != msg.sender) revert UnauthorizedRevealer();
 
-        delete commitments[commitmentHash];
-        delete committers[commitmentHash];
+        delete _commitments[commitmentHash];
         emit CommitCancelled(commitmentHash, msg.sender);
     }
 
@@ -317,8 +361,9 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         uint256 commitBlock
     ) internal view {
         if (commitBlock == 0) revert CommitmentNotFound();
-        if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
-        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
+        CommitmentInfo storage info = _commitments[commitmentHash];
+        if (info.revealed) revert CommitmentAlreadyRevealed();
+        if (info.committer != msg.sender) revert UnauthorizedRevealer();
     }
 
     /**
@@ -332,9 +377,9 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         uint256 commitBlock,
         uint256 deadline
     ) internal view {
-        // Validate timing (must wait MIN_DELAY_BLOCKS, cannot exceed MAX_COMMIT_AGE_BLOCKS)
+        // Validate timing (must wait MIN_DELAY_BLOCKS, cannot exceed maxCommitAgeBlocks)
         if (block.number < commitBlock + MIN_DELAY_BLOCKS) revert CommitmentTooRecent();
-        if (block.number > commitBlock + MAX_COMMIT_AGE_BLOCKS) revert CommitmentExpired();
+        if (block.number > commitBlock + maxCommitAgeBlocks) revert CommitmentExpired();
 
         // Validate deadline is not expired and not too far in future
         if (block.timestamp > deadline) revert InvalidDeadline();
@@ -355,9 +400,11 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         RevealParams calldata params
     ) internal returns (uint256 profit) {
         // Mark as revealed and cleanup storage (reentrancy protection + gas refund)
-        revealed[commitmentHash] = true;
-        delete commitments[commitmentHash];
-        delete committers[commitmentHash];
+        // Preserve revealed=true for external queries; zero blockNumber/committer for gas refund
+        CommitmentInfo storage info = _commitments[commitmentHash];
+        info.revealed = true;
+        info.blockNumber = 0;
+        info.committer = address(0);
 
         // Execute multi-hop swaps using base contract's _executeSwaps (DRY)
         // Note: calldata SwapStep[] is implicitly copied to memory by Solidity compiler
@@ -420,7 +467,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     {
         // 1. Calculate commitment hash (includes msg.sender to prevent griefing)
         bytes32 commitmentHash = keccak256(abi.encodePacked(msg.sender, abi.encode(params)));
-        uint256 commitBlock = commitments[commitmentHash];
+        uint256 commitBlock = uint256(_commitments[commitmentHash].blockNumber);
 
         // 2. Validate commitment exists, not revealed, caller authorized
         _validateCommitment(commitmentHash, commitBlock);
@@ -494,7 +541,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /**
      * @notice Recover capital from an expired commitment
      * @dev Allows the original committer to recover tokens deposited for a commitment
-     *      that has expired past MAX_COMMIT_AGE_BLOCKS. This prevents capital from
+     *      that has expired past maxCommitAgeBlocks. This prevents capital from
      *      being permanently trapped when a reveal fails or is abandoned.
      *
      *      The committer must specify the asset and amount because the contract
@@ -503,7 +550,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * Security:
      * - Only the original committer can call (prevents unauthorized withdrawals)
      * - Commitment must exist and not be revealed
-     * - Commitment must be expired (past MAX_COMMIT_AGE_BLOCKS)
+     * - Commitment must be expired (past maxCommitAgeBlocks)
      * - nonReentrant prevents reentrancy via token transfer callbacks
      * - Contract must not be paused
      * - Commitment state is cleared before transfer (CEI pattern)
@@ -517,23 +564,23 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         address asset,
         uint256 amount
     ) external nonReentrant whenNotPaused {
-        uint256 commitBlock = commitments[commitmentHash];
+        CommitmentInfo storage info = _commitments[commitmentHash];
+        uint256 commitBlock = uint256(info.blockNumber);
 
         // Validate commitment exists
         if (commitBlock == 0) revert CommitmentNotFound();
 
         // Validate not already revealed
-        if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
+        if (info.revealed) revert CommitmentAlreadyRevealed();
 
         // Validate caller is the original committer
-        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
+        if (info.committer != msg.sender) revert UnauthorizedRevealer();
 
-        // Validate commitment is expired (past MAX_COMMIT_AGE_BLOCKS)
-        if (block.number <= commitBlock + MAX_COMMIT_AGE_BLOCKS) revert CommitmentNotExpired();
+        // Validate commitment is expired (past maxCommitAgeBlocks)
+        if (block.number <= commitBlock + maxCommitAgeBlocks) revert CommitmentNotExpired();
 
         // Clear commitment state before transfer (CEI pattern)
-        delete commitments[commitmentHash];
-        delete committers[commitmentHash];
+        delete _commitments[commitmentHash];
 
         // Transfer capital back to committer
         IERC20(asset).safeTransfer(msg.sender, amount);
@@ -547,7 +594,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
 
     /**
      * @notice Cleanup expired commitments to reclaim storage
-     * @dev Allows owner to delete commitments that are past MAX_COMMIT_AGE_BLOCKS.
+     * @dev Allows owner to delete commitments that are past maxCommitAgeBlocks.
      *      This is a storage hygiene function — expired commitments can never be revealed
      *      but still occupy storage slots. Deleting them provides gas refunds.
      *
@@ -568,14 +615,14 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         uint256 len = hashes.length;
         for (uint256 i = 0; i < len;) {
             bytes32 hash = hashes[i];
-            uint256 commitBlock = commitments[hash];
+            CommitmentInfo storage info = _commitments[hash];
+            uint256 commitBlock = uint256(info.blockNumber);
 
             // Skip non-existent or already-revealed commitments
-            if (commitBlock != 0 && !revealed[hash]) {
+            if (commitBlock != 0 && !info.revealed) {
                 // Only clean up if truly expired
-                if (block.number > commitBlock + MAX_COMMIT_AGE_BLOCKS) {
-                    delete commitments[hash];
-                    delete committers[hash];
+                if (block.number > commitBlock + maxCommitAgeBlocks) {
+                    delete _commitments[hash];
                     cleaned++;
                 }
             }
@@ -584,6 +631,27 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
                 ++i;
             }
         }
+
+        if (cleaned > 0) {
+            emit CommitmentsCleanedUp(cleaned);
+        }
+    }
+
+    /**
+     * @notice Set the maximum commit age in blocks
+     * @dev Allows owner to tune for different chains:
+     *      - Ethereum (12s blocks): 10 blocks = ~2 min (default)
+     *      - Arbitrum (0.25s blocks): 50+ blocks recommended (~12s)
+     *      - Base/Optimism (2s blocks): 20+ blocks recommended (~40s)
+     * @param _maxCommitAgeBlocks New maximum age in blocks [MIN_COMMIT_AGE..MAX_COMMIT_AGE]
+     */
+    function setMaxCommitAgeBlocks(uint256 _maxCommitAgeBlocks) external onlyOwner {
+        if (_maxCommitAgeBlocks < MIN_COMMIT_AGE || _maxCommitAgeBlocks > MAX_COMMIT_AGE) {
+            revert InvalidCommitAge();
+        }
+        uint256 oldValue = maxCommitAgeBlocks;
+        maxCommitAgeBlocks = _maxCommitAgeBlocks;
+        emit MaxCommitAgeBlocksUpdated(oldValue, _maxCommitAgeBlocks);
     }
 
     // Note: Router management (addApprovedRouter, removeApprovedRouter, etc.),

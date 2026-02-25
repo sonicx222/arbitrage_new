@@ -633,5 +633,80 @@ describe('CommitRevealArbitrage Security', () => {
       expect(await maliciousRouter.attackAttempted()).to.be.true;
       expect(await maliciousRouter.attackSucceeded()).to.be.false;
     });
+
+    it('should prevent cross-function reentrancy via commit() during reveal', async () => {
+      const { commitRevealArbitrage, dexRouter1, weth, dai, owner, user } =
+        await loadFixture(deployContractsFixture);
+
+      // Deploy mock router that tries to call commit() during swap
+      const CommitAttackFactory = await ethers.getContractFactory('MockCommitAttackRouter');
+      const commitAttackRouter = await CommitAttackFactory.deploy(
+        await commitRevealArbitrage.getAddress()
+      );
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await commitAttackRouter.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Fund the attack router (1:1 passthrough)
+      await weth.mint(await commitAttackRouter.getAddress(), ethers.parseEther('100'));
+      await dai.mint(await commitAttackRouter.getAddress(), ethers.parseEther('100'));
+
+      // Set profitable rate on dexRouter1 for 2nd hop
+      await dexRouter1.setExchangeRate(
+        await dai.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('1.01')
+      );
+
+      // Path: WETH→DAI (attack router, tries commit()) → DAI→WETH (normal, 1% profit)
+      const amountIn = ethers.parseEther('10');
+      const swapPath = [
+        {
+          router: await commitAttackRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await dai.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await dai.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        user.address,
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+      await mineBlocks(1);
+      await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
+
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn: amountIn,
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: salt
+      };
+
+      // During reveal(), the attack router tries to call commit() — blocked by nonReentrant
+      await commitRevealArbitrage.connect(user).reveal(revealParams);
+
+      // Verify the cross-function reentrancy attack was attempted and blocked
+      expect(await commitAttackRouter.attackAttempted()).to.be.true;
+      expect(await commitAttackRouter.attackSucceeded()).to.be.false;
+    });
   });
 });

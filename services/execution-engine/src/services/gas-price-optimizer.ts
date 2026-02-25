@@ -16,7 +16,8 @@
 
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getGasSpikeMultiplier } from '@arbitrage/config';
-import { createPinoLogger, type ILogger, getErrorMessage } from '@arbitrage/core';
+import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger, GasBaselineEntry } from '../types';
 import { updateGasPrice as updateGasPriceMetric } from './prometheus-metrics';
 

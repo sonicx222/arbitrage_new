@@ -11,7 +11,7 @@
 import { ethers } from 'ethers';
 import { type Logger, createServiceLogger } from '../../types';
 import { getMultiPathQuoterAddress } from '@arbitrage/config';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Types

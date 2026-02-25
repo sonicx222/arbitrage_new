@@ -11,10 +11,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import {
-  ProfessionalQualityMonitor
-} from '@arbitrage/core';
-import type { QualityMonitorRedis } from '@arbitrage/core';
+import { ProfessionalQualityMonitor } from '@arbitrage/core/analytics';
+import type { QualityMonitorRedis } from '@arbitrage/core/analytics';
 
 // =============================================================================
 // Performance Test Configuration

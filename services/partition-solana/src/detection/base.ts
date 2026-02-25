@@ -6,7 +6,8 @@
  * @see R1 - Solana Arbitrage Detection Modules extraction
  */
 
-import { bpsToDecimal, meetsThreshold, getDefaultPrice } from '@arbitrage/core';
+import { getDefaultPrice } from '@arbitrage/core/analytics';
+import { bpsToDecimal, meetsThreshold } from '@arbitrage/core/components';
 import type { InternalPoolInfo, SolanaArbitrageLogger } from '../types';
 
 // =============================================================================

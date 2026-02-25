@@ -9,7 +9,9 @@
 
 import { Router, Request, Response } from 'express';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
-import { findKLargest, getRedisClient, getStreamHealthMonitor } from '@arbitrage/core';
+import { findKLargest } from '@arbitrage/core/data-structures';
+import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { getRedisClient } from '@arbitrage/core/redis';
 import type { CoordinatorStateProvider } from '../types';
 
 /**

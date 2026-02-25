@@ -7,7 +7,7 @@
 import Redis from 'ioredis';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 /**
  * Get Redis URL, reading directly from config file if available.

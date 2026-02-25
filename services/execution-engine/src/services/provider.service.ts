@@ -17,8 +17,17 @@
 
 import { ethers } from 'ethers';
 import { CHAINS, FEATURE_FLAGS } from '@arbitrage/config';
-import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider, clearIntervalSafe, getHttp2SessionPool, closeDefaultHttp2Pool } from '@arbitrage/core';
-import type { ServiceStateManager, BatchProviderConfig } from '@arbitrage/core';
+import { clearIntervalSafe } from '@arbitrage/core/async';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import {
+  BatchProvider,
+  createBatchProvider,
+  getHttp2SessionPool,
+  closeDefaultHttp2Pool,
+} from '@arbitrage/core/rpc';
+import { NonceManager } from '@arbitrage/core';
+import type { BatchProviderConfig } from '@arbitrage/core/rpc';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 import type { Logger, ProviderHealth, ProviderService as IProviderService, ExecutionStats } from '../types';
 import {
   PROVIDER_CONNECTIVITY_TIMEOUT_MS,

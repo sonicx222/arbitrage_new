@@ -17,9 +17,7 @@
  * @see ADR-029 for batched quoting architecture
  */
 
-import {
-  getErrorMessage,
-} from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import {
   FEATURE_FLAGS,
   hasMultiPathQuoter,

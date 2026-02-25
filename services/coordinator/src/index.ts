@@ -25,17 +25,12 @@ export { CoordinatorService } from './coordinator';
 
 // Internal imports for bootstrapping
 import { CoordinatorService } from './coordinator';
-import {
-  createLogger,
-  getCrossRegionHealthManager,
-  resetCrossRegionHealthManager,
-  parseEnvInt,
-  parseStandbyConfig,
-  setupServiceShutdown,
-  runServiceMain,
-  getErrorMessage,
-} from '@arbitrage/core';
-import type { CrossRegionHealthConfig } from '@arbitrage/core';
+import { getCrossRegionHealthManager, resetCrossRegionHealthManager } from '@arbitrage/core/monitoring';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { setupServiceShutdown, runServiceMain } from '@arbitrage/core/service-lifecycle';
+import { parseEnvInt } from '@arbitrage/core/utils';
+import { createLogger, parseStandbyConfig } from '@arbitrage/core';
+import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 
 const logger = createLogger('coordinator');
 

@@ -2,12 +2,12 @@
 import { Server } from 'http';
 import { CrossChainDetectorService } from './detector';
 import {
-  createLogger,
   createSimpleHealthServer,
   setupServiceShutdown,
   closeHealthServer,
   runServiceMain,
-} from '@arbitrage/core';
+} from '@arbitrage/core/service-lifecycle';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('cross-chain-detector');
 

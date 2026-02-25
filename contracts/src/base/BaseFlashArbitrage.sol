@@ -154,7 +154,8 @@ abstract contract BaseFlashArbitrage is
         address indexed asset,
         uint256 amount,
         uint256 profit,
-        uint256 timestamp
+        uint256 timestamp,
+        address indexed executor
     );
 
     /// @notice Emitted when a router is added to the approved list
@@ -405,8 +406,8 @@ abstract contract BaseFlashArbitrage is
      *      CEI Pattern (Checks-Effects-Interactions):
      *      This function performs Checks (profit validation) and Effects (state updates).
      *      Derived contract callbacks MUST call this BEFORE any subsequent external interactions
-     *      (e.g., forceApprove for flash loan repayment). The calling function's nonReentrant
-     *      modifier provides the primary reentrancy protection; CEI ordering is defense-in-depth.
+     *      (e.g., forceApprove for flash loan repayment). Protected by the external entry point's
+     *      nonReentrant modifier, which provides the primary reentrancy protection; CEI ordering is defense-in-depth.
      *
      * @param profit The actual profit earned from the arbitrage
      * @param minProfit The per-trade minimum profit specified by the caller

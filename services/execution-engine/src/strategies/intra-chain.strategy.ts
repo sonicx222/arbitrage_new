@@ -21,7 +21,8 @@
 
 import { ethers } from 'ethers';
 import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract, getTokenDecimals, hasCommitRevealContract } from '@arbitrage/config';
-import { getErrorMessage, MevRiskAnalyzer, type TransactionContext } from '@arbitrage/core';
+import { MevRiskAnalyzer, type TransactionContext } from '@arbitrage/core/mev-protection';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
 import { createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';

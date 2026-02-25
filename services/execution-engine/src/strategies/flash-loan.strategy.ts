@@ -57,18 +57,9 @@ import {
   // F9: Configurable cache TTLs for flash loan aggregator
   FLASH_LOAN_AGGREGATOR_CONFIG,
 } from '@arbitrage/config';
-import {
-  getErrorMessage,
-  isValidPrice,
-  // Clean Architecture: Flash Loan Aggregation (Task 2.3)
-  type IFlashLoanAggregator,
-  type IAggregatorMetrics,
-  type IProviderInfo,
-  FlashLoanAggregatorImpl,
-  WeightedRankingStrategy,
-  OnChainLiquidityValidator,
-  InMemoryAggregatorMetrics,
-} from '@arbitrage/core';
+import { isValidPrice } from '@arbitrage/core/components';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { FlashLoanAggregatorImpl, WeightedRankingStrategy, OnChainLiquidityValidator, InMemoryAggregatorMetrics, type IFlashLoanAggregator, type IAggregatorMetrics, type IProviderInfo } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { FlashLoanProtocol } from './flash-loan-providers/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';

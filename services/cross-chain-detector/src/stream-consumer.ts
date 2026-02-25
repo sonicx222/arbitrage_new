@@ -38,12 +38,8 @@
  */
 
 import { EventEmitter } from 'events';
-import {
-  RedisStreamsClient,
-  ConsumerGroupConfig,
-  ServiceStateManager,
-  unwrapBatchMessages,
-} from '@arbitrage/core';
+import { RedisStreamsClient, ConsumerGroupConfig, unwrapBatchMessages } from '@arbitrage/core/redis';
+import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 import { PriceUpdate, WhaleTransaction, PendingOpportunity } from '@arbitrage/types';
 // TYPE-CONSOLIDATION: Import shared Logger type instead of duplicating
 import { Logger } from './types';

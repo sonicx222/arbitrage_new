@@ -56,7 +56,8 @@ describe('CommitRevealArbitrage', () => {
     it('should initialize with correct constants', async () => {
       const { commitRevealArbitrage } = await loadFixture(deployContractsFixture);
       expect(await commitRevealArbitrage.MIN_DELAY_BLOCKS()).to.equal(1);
-      expect(await commitRevealArbitrage.MAX_COMMIT_AGE_BLOCKS()).to.equal(10);
+      expect(await commitRevealArbitrage.maxCommitAgeBlocks()).to.equal(10);
+      expect(await commitRevealArbitrage.DEFAULT_MAX_COMMIT_AGE()).to.equal(10);
       expect(await commitRevealArbitrage.MAX_SWAP_DEADLINE()).to.equal(600);
       expect(await commitRevealArbitrage.MAX_SWAP_HOPS()).to.equal(5);
     });
@@ -872,6 +873,176 @@ describe('CommitRevealArbitrage', () => {
           )
         ).to.be.revertedWith('Pausable: paused');
       });
+    });
+  });
+
+  // ===========================================================================
+  // 5. Admin Functions - cleanupExpiredCommitments
+  // ===========================================================================
+  describe('5. Cleanup Expired Commitments', () => {
+    it('should clean up expired commitments and return count', async () => {
+      const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+      const hash1 = ethers.randomBytes(32);
+      const hash2 = ethers.randomBytes(32);
+      const hash3 = ethers.randomBytes(32);
+
+      await commitRevealArbitrage.connect(user).commit(hash1);
+      await commitRevealArbitrage.connect(user).commit(hash2);
+      await commitRevealArbitrage.connect(user).commit(hash3);
+
+      // Wait for expiry (maxCommitAgeBlocks = 10)
+      await mineBlocks(11);
+
+      const tx = await commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([hash1, hash2, hash3]);
+      const receipt = await tx.wait();
+
+      // Verify commitments were deleted
+      expect(await commitRevealArbitrage.commitments(hash1)).to.equal(0);
+      expect(await commitRevealArbitrage.commitments(hash2)).to.equal(0);
+      expect(await commitRevealArbitrage.commitments(hash3)).to.equal(0);
+    });
+
+    it('should emit CommitmentsCleanedUp event', async () => {
+      const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+      const hash1 = ethers.randomBytes(32);
+      const hash2 = ethers.randomBytes(32);
+
+      await commitRevealArbitrage.connect(user).commit(hash1);
+      await commitRevealArbitrage.connect(user).commit(hash2);
+
+      await mineBlocks(11);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([hash1, hash2])
+      ).to.emit(commitRevealArbitrage, 'CommitmentsCleanedUp').withArgs(2);
+    });
+
+    it('should skip non-existent commitments', async () => {
+      const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+      const hash1 = ethers.randomBytes(32);
+      const fakeHash = ethers.randomBytes(32);
+
+      await commitRevealArbitrage.connect(user).commit(hash1);
+      await mineBlocks(11);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([hash1, fakeHash])
+      ).to.emit(commitRevealArbitrage, 'CommitmentsCleanedUp').withArgs(1);
+    });
+
+    it('should skip non-expired commitments', async () => {
+      const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+      const expiredHash = ethers.randomBytes(32);
+      await commitRevealArbitrage.connect(user).commit(expiredHash);
+      await mineBlocks(11);
+
+      const freshHash = ethers.randomBytes(32);
+      await commitRevealArbitrage.connect(user).commit(freshHash);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([expiredHash, freshHash])
+      ).to.emit(commitRevealArbitrage, 'CommitmentsCleanedUp').withArgs(1);
+
+      // Fresh one should still exist
+      expect(await commitRevealArbitrage.commitments(freshHash)).to.be.gt(0);
+    });
+
+    it('should not emit event when no commitments cleaned', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      const fakeHash = ethers.randomBytes(32);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([fakeHash])
+      ).to.not.emit(commitRevealArbitrage, 'CommitmentsCleanedUp');
+    });
+
+    it('should revert when called by non-owner', async () => {
+      const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
+
+      const hash = ethers.randomBytes(32);
+      await commitRevealArbitrage.connect(user).commit(hash);
+      await mineBlocks(11);
+
+      await expect(
+        commitRevealArbitrage.connect(user).cleanupExpiredCommitments([hash])
+      ).to.be.revertedWith('Ownable: caller is not the owner');
+    });
+
+    it('should revert when contract is paused', async () => {
+      const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+      const hash = ethers.randomBytes(32);
+      await commitRevealArbitrage.connect(user).commit(hash);
+      await mineBlocks(11);
+
+      await commitRevealArbitrage.connect(owner).pause();
+
+      await expect(
+        commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([hash])
+      ).to.be.revertedWith('Pausable: paused');
+    });
+  });
+
+  // ===========================================================================
+  // 6. Admin Functions - setMaxCommitAgeBlocks
+  // ===========================================================================
+  describe('6. Set Max Commit Age Blocks', () => {
+    it('should set maxCommitAgeBlocks within valid range', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).setMaxCommitAgeBlocks(50);
+      expect(await commitRevealArbitrage.maxCommitAgeBlocks()).to.equal(50);
+    });
+
+    it('should emit MaxCommitAgeBlocksUpdated event', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).setMaxCommitAgeBlocks(50)
+      ).to.emit(commitRevealArbitrage, 'MaxCommitAgeBlocksUpdated').withArgs(10, 50);
+    });
+
+    it('should accept minimum value (MIN_COMMIT_AGE = 5)', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).setMaxCommitAgeBlocks(5);
+      expect(await commitRevealArbitrage.maxCommitAgeBlocks()).to.equal(5);
+    });
+
+    it('should accept maximum value (MAX_COMMIT_AGE = 100)', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).setMaxCommitAgeBlocks(100);
+      expect(await commitRevealArbitrage.maxCommitAgeBlocks()).to.equal(100);
+    });
+
+    it('should revert below minimum', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).setMaxCommitAgeBlocks(4)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InvalidCommitAge');
+    });
+
+    it('should revert above maximum', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).setMaxCommitAgeBlocks(101)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InvalidCommitAge');
+    });
+
+    it('should revert when called by non-owner', async () => {
+      const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        commitRevealArbitrage.connect(user).setMaxCommitAgeBlocks(50)
+      ).to.be.revertedWith('Ownable: caller is not the owner');
     });
   });
 });

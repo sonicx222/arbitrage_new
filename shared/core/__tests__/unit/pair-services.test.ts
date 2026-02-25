@@ -73,14 +73,12 @@ jest.mock('ethers', () => {
 
 // Import services after mocks are set up
 import {
-  PairDiscoveryService,
-  getPairDiscoveryService,
-  resetPairDiscoveryService,
   PairCacheService,
   getPairCacheService,
   resetPairCacheService,
-  type CachedPairData
-} from '@arbitrage/core';
+  type CachedPairData,
+} from '@arbitrage/core/caching';
+import { PairDiscoveryService, getPairDiscoveryService, resetPairDiscoveryService } from '@arbitrage/core';
 import { Dex, Token, FeeBasisPoints } from '@arbitrage/types';
 import { createResetHook } from '@arbitrage/test-utils';
 

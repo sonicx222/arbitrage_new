@@ -18,12 +18,9 @@
  */
 
 import { EventEmitter } from 'events';
-import {
-  PerformanceLogger,
-  RedisStreamsClient,
-  GracefulDegradationManager,
-  DegradationLevel,  // S4.1.3-FIX: Import canonical enum
-} from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { GracefulDegradationManager, DegradationLevel } from '@arbitrage/core/resilience';
+import { PerformanceLogger } from '@arbitrage/core';
 
 import { CHAINS } from '@arbitrage/config';
 

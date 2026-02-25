@@ -19,7 +19,7 @@
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { WarmingIntegration, WarmingIntegrationConfig } from '../../src/warming-integration';
-import { HierarchicalCache } from '@arbitrage/core';
+import { HierarchicalCache } from '@arbitrage/core/caching';
 
 describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
   let integration: WarmingIntegration;

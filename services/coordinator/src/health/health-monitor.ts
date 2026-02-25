@@ -13,7 +13,7 @@
 
 import type { ServiceHealth } from '@arbitrage/types';
 import type { SystemMetrics, Alert } from '../api/types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 /**
  * Logger interface for dependency injection

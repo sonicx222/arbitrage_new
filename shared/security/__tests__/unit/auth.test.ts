@@ -6,7 +6,7 @@
  * Uses DI pattern (P16) to inject mock dependencies instead of Jest mock hoisting.
  */
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Mock Setup

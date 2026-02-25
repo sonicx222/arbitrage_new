@@ -20,7 +20,7 @@ import {
   DiscoveredPool,
   PoolReserves,
   PLATYPUS_ADDRESSES,
-} from '@arbitrage/core';
+} from '@arbitrage/core/dex-adapters';
 
 // =============================================================================
 // Mocks

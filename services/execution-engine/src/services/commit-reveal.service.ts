@@ -21,7 +21,7 @@
 
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger, StrategyContext } from '../types';
 import type { Redis } from 'ioredis';
 

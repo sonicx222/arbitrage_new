@@ -18,7 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { CacheTestHarness, CacheFixtures } from '@arbitrage/test-utils';
-import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core';
+import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core/caching';
 
 describe('Unified Detector Cache Integration (Task #40)', () => {
   let harness: CacheTestHarness;

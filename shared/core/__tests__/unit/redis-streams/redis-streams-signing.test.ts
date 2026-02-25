@@ -16,8 +16,8 @@
 
 import crypto from 'crypto';
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { RedisStreamsClient } from '@arbitrage/core';
-import type { RedisStreamsConstructor } from '@arbitrage/core';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import type { RedisStreamsConstructor } from '@arbitrage/core/redis';
 import { createMockRedisConstructor } from './test-helpers';
 
 describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {

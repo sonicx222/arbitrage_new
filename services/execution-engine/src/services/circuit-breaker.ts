@@ -17,7 +17,7 @@
 
 import type { Logger } from '../types';
 import { DEFAULT_CIRCUIT_BREAKER_CONFIG } from '../types';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // Types

@@ -18,9 +18,9 @@ import {
   ServiceStateManager,
   ServiceState,
   createServiceState,
-  isServiceState
-} from '@arbitrage/core';
-import type { ServiceStateManagerDeps } from '@arbitrage/core';
+  isServiceState,
+} from '@arbitrage/core/service-lifecycle';
+import type { ServiceStateManagerDeps } from '@arbitrage/core/service-lifecycle';
 
 // =============================================================================
 // DI Mock Logger (P16 pattern)

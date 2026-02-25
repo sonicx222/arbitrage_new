@@ -18,15 +18,13 @@
  * @see docs/testing/integration-migration-guide.md
  */
 
+import { DistributedLockManager, AcquireOptions, LockHandle } from '@arbitrage/core/redis';
 import {
-  DistributedLockManager,
-  AcquireOptions,
-  LockHandle,
   ServiceStateManager,
   ServiceState,
   createServiceState,
-  StateTransitionResult
-} from '@arbitrage/core';
+  StateTransitionResult,
+} from '@arbitrage/core/service-lifecycle';
 
 import Redis from 'ioredis';
 import { createTestRedisClient, flushTestRedis } from '@arbitrage/test-utils';

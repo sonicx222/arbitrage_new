@@ -31,15 +31,8 @@
  * @see ADR-014 - Modular Detector Components
  */
 
-import {
-  // P0-1 FIX: Use precision-safe price calculation
-  calculatePriceFromBigIntReserves,
-  // FIX 6: Use shared price bounds constants
-  MIN_SAFE_PRICE,
-  MAX_SAFE_PRICE,
-  // HOT-PATH: Pre-normalized token order check (ADR-022)
-  isReverseOrderPreNormalized,
-} from '@arbitrage/core';
+import { calculatePriceFromBigIntReserves, isReverseOrderPreNormalized } from '@arbitrage/core/components';
+import { MIN_SAFE_PRICE, MAX_SAFE_PRICE } from '@arbitrage/core/utils';
 
 import { ARBITRAGE_CONFIG, DETECTOR_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';

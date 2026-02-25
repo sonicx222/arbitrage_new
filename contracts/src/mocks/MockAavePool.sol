@@ -25,6 +25,8 @@ import "../interfaces/IFlashLoanReceiver.sol";
  * Security check in FlashLoanArbitrage.executeOperation():
  * - `initiator == address(this)` ensures only self-initiated flash loans are processed
  * - This prevents attackers from triggering the callback directly
+ *
+ * @custom:version 1.0.0
  */
 contract MockAavePool is IPool {
     using SafeERC20 for IERC20;

@@ -45,13 +45,11 @@
  */
 
 import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';
-import {
-  createPartitionEntry,
-  createLogger,
-  getRedisStreamsClient,
-  getErrorMessage,
-} from '@arbitrage/core';
-import type { PartitionEnvironmentConfig, PartitionDetectorInterface } from '@arbitrage/core';
+import { createPartitionEntry } from '@arbitrage/core/partition';
+import { getRedisStreamsClient } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import { createLogger } from '@arbitrage/core';
+import type { PartitionEnvironmentConfig, PartitionDetectorInterface } from '@arbitrage/core/partition';
 import { PARTITION_IDS } from '@arbitrage/config';
 import { SolanaArbitrageDetector } from './arbitrage-detector';
 import { validateEnvironment } from './env-validation';

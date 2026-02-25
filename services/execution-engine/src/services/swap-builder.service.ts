@@ -8,7 +8,7 @@
  * @see Finding 10.2: Swap steps caching optimization
  */
 
-import type { ILogger } from '@arbitrage/core';
+import type { ILogger } from '@arbitrage/core/logging';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { DexLookupService } from './dex-lookup.service';
 import { getTokenDecimals } from '@arbitrage/config';

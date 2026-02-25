@@ -20,7 +20,7 @@ import {
   SwapQuote,
   BALANCER_VAULT_ADDRESSES,
   BALANCER_VAULT_ABI,
-} from '@arbitrage/core';
+} from '@arbitrage/core/dex-adapters';
 
 // =============================================================================
 // Mocks

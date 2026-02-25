@@ -1250,6 +1250,61 @@ describe('FlashLoanArbitrage', () => {
       });
     });
 
+    describe('setWithdrawGasLimit', () => {
+      it('should set gas limit within valid range', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.setWithdrawGasLimit(100000);
+        expect(await flashLoanArbitrage.withdrawGasLimit()).to.equal(100000);
+      });
+
+      it('should accept minimum value (2300)', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.setWithdrawGasLimit(2300);
+        expect(await flashLoanArbitrage.withdrawGasLimit()).to.equal(2300);
+      });
+
+      it('should accept maximum value (500000)', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.setWithdrawGasLimit(500000);
+        expect(await flashLoanArbitrage.withdrawGasLimit()).to.equal(500000);
+      });
+
+      it('should reject below minimum', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await expect(
+          flashLoanArbitrage.setWithdrawGasLimit(2299)
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidGasLimit');
+      });
+
+      it('should reject above maximum', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await expect(
+          flashLoanArbitrage.setWithdrawGasLimit(500001)
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidGasLimit');
+      });
+
+      it('should emit WithdrawGasLimitUpdated event', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await expect(flashLoanArbitrage.setWithdrawGasLimit(100000))
+          .to.emit(flashLoanArbitrage, 'WithdrawGasLimitUpdated')
+          .withArgs(50000, 100000); // old default, new value
+      });
+
+      it('should reject when called by non-owner', async () => {
+        const { flashLoanArbitrage, user } = await loadFixture(deployContractsFixture);
+
+        await expect(
+          flashLoanArbitrage.connect(user).setWithdrawGasLimit(100000)
+        ).to.be.revertedWith('Ownable: caller is not the owner');
+      });
+    });
+
     describe('EnumerableSet Router Storage', () => {
       it('should support O(1) router lookup via isApprovedRouter', async () => {
         const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);

@@ -12,7 +12,7 @@ import {
 } from '../../src/health-reporter';
 import type { ChainStats } from '../../src/types';
 import { PartitionHealth, ChainHealth } from '@arbitrage/config';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Mock Types

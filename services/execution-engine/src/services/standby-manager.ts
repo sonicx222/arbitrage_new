@@ -16,14 +16,12 @@
  * @see ADR-007: Failover Strategy
  */
 
-import {
-  getErrorMessage,
-  RedisStreamsClient,
-  type NonceManager,
-  type MevProviderFactory,
-  type BridgeRouterFactory,
-  type ServiceStateManager,
-} from '@arbitrage/core';
+import type { BridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import type { MevProviderFactory } from '@arbitrage/core/mev-protection';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import { type NonceManager } from '@arbitrage/core';
 import {
   initializeMevProviders,
   initializeBridgeRouter,

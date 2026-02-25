@@ -12,7 +12,8 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventEmitter } from 'events';
 import { Server, IncomingMessage, ServerResponse, createServer } from 'http';
-import { RecordingLogger, createLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
+import { createLogger } from '@arbitrage/core';
 
 // Type alias for the logger type expected by partition-service-utils
 type PartitionLogger = ReturnType<typeof createLogger>;
@@ -85,7 +86,7 @@ import {
   PartitionDetectorInterface,
   PartitionEnvironmentConfig,
   PartitionServiceRunnerOptions,
-} from '@arbitrage/core';
+} from '@arbitrage/core/partition';
 
 // =============================================================================
 // Test Helpers

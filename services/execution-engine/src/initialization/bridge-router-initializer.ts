@@ -9,10 +9,8 @@
  * @see ADR-007: Failover Strategy (cross-chain support)
  */
 
-import {
-  createBridgeRouterFactory,
-  getErrorMessage,
-} from '@arbitrage/core';
+import { createBridgeRouterFactory } from '@arbitrage/core/bridge-router';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { ProviderServiceImpl } from '../services/provider.service';
 import type { InitializationLogger, BridgeRouterInitializationResult } from './types';
 import { createFailedBridgeResult } from './types';

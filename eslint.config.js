@@ -76,6 +76,12 @@ export default [
       'prefer-const': 'warn',
       'no-var': 'error',
       'no-restricted-imports': ['warn', {
+        paths: [
+          {
+            name: '@arbitrage/core',
+            message: 'Import from specific sub-entry points (e.g., @arbitrage/core/caching, @arbitrage/core/resilience, @arbitrage/core/redis) for better tree-shaking. See shared/core/src/index.ts for available sub-entry points.'
+          }
+        ],
         patterns: [
           {
             group: ['../../../shared/*', '../../shared/*', '../../../../shared/*'],

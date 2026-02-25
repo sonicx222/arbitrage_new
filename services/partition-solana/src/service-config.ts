@@ -14,15 +14,15 @@
  */
 
 import {
-  createLogger,
   parsePort,
   validateAndFilterChains,
   exitWithConfigError,
   PARTITION_PORTS,
   PARTITION_SERVICE_NAMES,
   generateInstanceId,
-} from '@arbitrage/core';
-import type { PartitionServiceConfig } from '@arbitrage/core';
+} from '@arbitrage/core/partition';
+import { createLogger } from '@arbitrage/core';
+import type { PartitionServiceConfig } from '@arbitrage/core/partition';
 import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 import type { UnifiedDetectorConfig } from '@arbitrage/unified-detector';
 import type { SolanaArbitrageConfig } from './arbitrage-detector';

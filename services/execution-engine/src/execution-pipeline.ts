@@ -15,12 +15,10 @@
  * @see ADR-002 — Redis Streams architecture
  */
 
-import {
-  type ServiceStateManager,
-  type DistributedLockManager,
-  type PerformanceLogger,
-  getErrorMessage,
-} from '@arbitrage/core';
+import type { DistributedLockManager } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import { type PerformanceLogger } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import {
   type ExecutionStats,
@@ -42,7 +40,7 @@ import type {
   ABTestingFramework,
   VariantAssignment,
 } from './ab-testing';
-import type { EVCalculation, PositionSize, TradingAllowedResult } from '@arbitrage/core';
+import type { EVCalculation, PositionSize, TradingAllowedResult } from '@arbitrage/core/risk';
 
 // =============================================================================
 // Pipeline Dependencies Interface

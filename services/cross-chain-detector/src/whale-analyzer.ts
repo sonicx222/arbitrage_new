@@ -17,12 +17,8 @@
  * @see Finding #7 in services-deep-analysis.md
  */
 
-import {
-  type OperationGuard,
-  type WhaleActivityTracker,
-  type WhaleActivitySummary,
-  type TrackedWhaleTransaction,
-} from '@arbitrage/core';
+import type { WhaleActivityTracker, WhaleActivitySummary, TrackedWhaleTransaction } from '@arbitrage/core/analytics';
+import type { OperationGuard } from '@arbitrage/core/async';
 import {
   ARBITRAGE_CONFIG,
   normalizeTokenForCrossChain,

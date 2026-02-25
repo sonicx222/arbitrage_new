@@ -46,7 +46,7 @@ jest.mock('../../../src/services/simulation/batch-quoter.service', () => ({
 }));
 
 import { FEATURE_FLAGS, hasMultiPathQuoter } from '@arbitrage/config';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import { createBatchQuoterForChain } from '../../../src/services/simulation/batch-quoter.service';
 
 describe('BatchQuoteManager', () => {

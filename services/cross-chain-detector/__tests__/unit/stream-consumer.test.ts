@@ -12,7 +12,7 @@ import {
   Logger,
 } from '../../src/stream-consumer';
 import { PriceUpdate, WhaleTransaction, PendingOpportunity } from '@arbitrage/types';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Tests

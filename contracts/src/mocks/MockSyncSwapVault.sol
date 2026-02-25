@@ -9,6 +9,8 @@ import "../interfaces/ISyncSwapVault.sol";
  * @title MockSyncSwapVault
  * @dev Mock SyncSwap Vault for testing EIP-3156 flash loans
  * @notice Simulates SyncSwap Vault behavior with 0.3% flash loan fee
+ *
+ * @custom:version 1.0.0
  */
 contract MockSyncSwapVault is ISyncSwapVault {
     using SafeERC20 for IERC20;
@@ -102,6 +104,11 @@ contract MockSyncSwapVault is ISyncSwapVault {
         IERC20(token).safeTransfer(address(receiver), amount);
 
         // Call receiver's callback
+        // Note on `initiator` parameter (msg.sender):
+        // In this mock, msg.sender is the arbitrage contract (which calls flashLoan on the vault).
+        // In production SyncSwap, the vault also passes msg.sender as initiator.
+        // The arbitrage contract validates initiator == address(this) to prevent unauthorized callbacks.
+        // This mock accurately simulates production behavior for this parameter.
         bytes32 result = receiver.onFlashLoan(
             msg.sender,
             token,

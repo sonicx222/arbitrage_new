@@ -10,7 +10,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { getErrorMessage, clearIntervalSafe } from '@arbitrage/core';
+import { clearIntervalSafe } from '@arbitrage/core/async';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger } from '../../types';
 import {
   ISimulationService,

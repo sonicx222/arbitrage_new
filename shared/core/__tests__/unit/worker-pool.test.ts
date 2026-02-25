@@ -21,7 +21,7 @@ jest.mock('worker_threads', () => ({
   workerData: {}
 }));
 
-import { EventProcessingWorkerPool, Task, TaskResult } from '@arbitrage/core';
+import { EventProcessingWorkerPool, Task, TaskResult } from '@arbitrage/core/async';
 import { Worker } from 'worker_threads';
 
 // =============================================================================

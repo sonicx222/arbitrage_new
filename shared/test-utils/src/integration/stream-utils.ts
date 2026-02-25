@@ -3,7 +3,7 @@
  */
 
 import { IsolatedRedisClient } from './redis-pool';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage } from '@arbitrage/core/resilience';
 
 export interface StreamMessage {
   id: string;

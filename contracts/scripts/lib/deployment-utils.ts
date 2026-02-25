@@ -603,7 +603,7 @@ export function validateMinimumProfit(
   }
 
   // For mainnets (or unknown networks), REQUIRE a positive threshold
-  if (!minimumProfit || minimumProfit === 0n) {
+  if (minimumProfit == null || minimumProfit === 0n) {
     throw new Error(
       `[ERR_NO_PROFIT_THRESHOLD] Mainnet deployment requires positive minimum profit threshold.\n` +
       `Network: ${networkName} ${isKnownMainnet ? '(mainnet)' : '(unknown - treated as mainnet)'}\n` +
@@ -1576,7 +1576,7 @@ export async function deployContractPipeline(
   // Configure routers
   if (config.configureRouters !== false) {
     const { APPROVED_ROUTERS } = await import('../../deployments/addresses');
-    const routers = APPROVED_ROUTERS[networkName] || [];
+    const routers = APPROVED_ROUTERS[networkName] ?? [];
 
     if (routers.length > 0) {
       const approvalResult = await approveRouters(contract, routers, true);

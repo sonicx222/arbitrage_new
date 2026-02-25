@@ -51,10 +51,8 @@ import {
   getEnabledDexes,
 } from '@arbitrage/config';
 
-import {
-  DegradationLevel,
-  CrossRegionHealthConfig,
-} from '@arbitrage/core';
+import { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
+import { DegradationLevel } from '@arbitrage/core/resilience';
 
 // =============================================================================
 // PARTITIONS Constant

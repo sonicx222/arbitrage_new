@@ -47,15 +47,15 @@ jest.mock('@arbitrage/core', () => {
 // Imports After Mocking
 // =============================================================================
 
+import { AsyncMutex } from '@arbitrage/core/async';
 import {
   StargateRouter,
   createStargateRouter,
   BridgeRouterFactory,
   BRIDGE_DEFAULTS,
   STARGATE_CHAIN_IDS,
-  AsyncMutex,
   type BridgeStatusResult,
-} from '@arbitrage/core';
+} from '@arbitrage/core/bridge-router';
 
 // =============================================================================
 // Test-Only Type Definitions

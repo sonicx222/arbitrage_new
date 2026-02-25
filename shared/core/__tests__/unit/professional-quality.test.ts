@@ -13,11 +13,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import {
-  ProfessionalQualityMonitor,
-  ProfessionalQualityScore
-} from '@arbitrage/core';
-import type { QualityMonitorRedis } from '@arbitrage/core';
+import { ProfessionalQualityMonitor, ProfessionalQualityScore } from '@arbitrage/core/analytics';
+import type { QualityMonitorRedis } from '@arbitrage/core/analytics';
 
 // =============================================================================
 // Mock Redis Implementation for Quality Monitor

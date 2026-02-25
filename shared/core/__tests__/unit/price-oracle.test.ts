@@ -50,8 +50,8 @@ import {
   getPriceOracle,
   resetPriceOracle,
   getDefaultPrice,
-  hasDefaultPrice
-} from '@arbitrage/core';
+  hasDefaultPrice,
+} from '@arbitrage/core/analytics';
 
 describe('PriceOracle', () => {
   let oracle: PriceOracle;

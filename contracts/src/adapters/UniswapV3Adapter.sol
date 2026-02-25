@@ -227,7 +227,7 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
         uint256 currentAmount = amountIn;
 
         // Execute each hop sequentially
-        for (uint256 i = 0; i < path.length - 1; i++) {
+        for (uint256 i = 0; i < path.length - 1;) {
             address tokenIn = path[i];
             address tokenOut = path[i + 1];
             uint24 fee = _getFee(tokenIn, tokenOut);
@@ -258,6 +258,8 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
 
             amounts[i + 1] = amountOut;
             currentAmount = amountOut;
+
+            unchecked { ++i; }
         }
 
         // Verify final output meets minimum
@@ -301,7 +303,7 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
 
         uint256 currentAmount = amountInMax;
 
-        for (uint256 i = 0; i < path.length - 1; i++) {
+        for (uint256 i = 0; i < path.length - 1;) {
             address tokenIn = path[i];
             address tokenOut = path[i + 1];
             uint24 fee = _getFee(tokenIn, tokenOut);
@@ -327,6 +329,8 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
 
             amounts[i + 1] = swapOut;
             currentAmount = swapOut;
+
+            unchecked { ++i; }
         }
 
         uint256 finalAmount = amounts[amounts.length - 1];
@@ -359,7 +363,7 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
 
         uint256 currentAmount = amountIn;
 
-        for (uint256 i = 0; i < path.length - 1; i++) {
+        for (uint256 i = 0; i < path.length - 1;) {
             uint24 fee = _getFee(path[i], path[i + 1]);
 
             (uint256 amountOut,,,) = quoter.quoteExactInputSingle(
@@ -374,6 +378,8 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
 
             amounts[i + 1] = amountOut;
             currentAmount = amountOut;
+
+            unchecked { ++i; }
         }
 
         return amounts;
@@ -381,12 +387,29 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
 
     /**
      * @notice Get required input amounts for a desired output using QuoterV2
-     * @dev Simplified implementation using forward quotes.
-     *      For production, consider implementing V3's quoteExactOutputSingle.
+     *
+     * @dev WARNING: APPROXIMATION ONLY — NOT SUITABLE FOR TIGHT-MARGIN DECISIONS.
+     *
+     * This implementation uses `quoteExactInputSingle` (forward quote) in the reverse
+     * direction as an approximation for `quoteExactOutputSingle`. Due to AMM curve
+     * non-linearity, a forward quote from tokenB → tokenA does NOT equal the required
+     * input from tokenA → tokenB for a given output. The error grows with:
+     * - Larger trade sizes relative to pool liquidity
+     * - Higher fee tiers
+     * - Concentrated liquidity positions (V3-specific)
+     *
+     * Callers MUST NOT use these results for:
+     * - Profit threshold decisions in tight-margin arbitrage
+     * - Exact input calculations for `swapTokensForExactTokens`
+     * - Any scenario where over/under-estimation causes financial loss
+     *
+     * For production precision, either:
+     * 1. Implement `quoteExactOutputSingle` (requires IQuoterV2 support)
+     * 2. Use off-chain simulation with full pool state
      *
      * @param amountOut The desired output amount
      * @param path Token swap path
-     * @return amounts Required amounts at each step
+     * @return amounts Estimated (not exact) required amounts at each step
      */
     function getAmountsIn(uint256 amountOut, address[] calldata path)
         external

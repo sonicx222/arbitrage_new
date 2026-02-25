@@ -4,7 +4,7 @@
  * @see ADR-009: Test Architecture
  */
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import { RecordingLogger } from '@arbitrage/core';
+import { RecordingLogger } from '@arbitrage/core/logging';
 
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};

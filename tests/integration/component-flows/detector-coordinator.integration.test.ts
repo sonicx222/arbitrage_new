@@ -24,7 +24,8 @@ import Redis from 'ioredis';
 import * as fs from 'fs';
 import * as path from 'path';
 import { RedisStreams } from '@arbitrage/types';
-import { PublishingService, RedisStreamsClient } from '@arbitrage/core';
+import { PublishingService } from '@arbitrage/core/publishing';
+import { RedisStreamsClient } from '@arbitrage/core/redis';
 import {
   resetRedisStreamsInstance,
   resetRedisInstance,

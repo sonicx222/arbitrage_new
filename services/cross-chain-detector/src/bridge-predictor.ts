@@ -1,7 +1,7 @@
 // Bridge Latency Prediction Engine
 // Uses machine learning to predict cross-chain bridge times and costs
 
-import { CircularBuffer } from '@arbitrage/core';
+import { CircularBuffer } from '@arbitrage/core/data-structures';
 import { BridgeLatencyData, CrossChainBridge } from '@arbitrage/types';
 // FIX #21: Import Logger type for DI instead of module-level createLogger
 import { Logger } from './types';

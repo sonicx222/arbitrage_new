@@ -206,7 +206,7 @@ export const MEV_CONFIG = {
  *
  * @example
  * ```typescript
- * import { validateConfigSync } from '@arbitrage/core';
+ * import { validateConfigSync } from '@arbitrage/core/mev-protection';
  * import { getMevChainConfigForValidation } from '@arbitrage/config';
  *
  * const result = validateConfigSync(getMevChainConfigForValidation());
@@ -231,7 +231,7 @@ export function getMevChainConfigForValidation(): Array<{ chain: string; priorit
  *
  * To validate synchronization, call:
  * ```typescript
- * import { validateConfigSync } from '@arbitrage/core';
+ * import { validateConfigSync } from '@arbitrage/core/mev-protection';
  * import { getMevChainConfigForValidation } from '@arbitrage/config';
  * const result = validateConfigSync(getMevChainConfigForValidation());
  * ```

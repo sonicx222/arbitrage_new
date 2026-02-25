@@ -16,13 +16,8 @@ import Redis from 'ioredis';
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};
 
-import {
-  RedisStreamsClient,
-  StreamBatcher,
-  resetRedisStreamsInstance,
-  StreamHealthMonitor,
-  resetStreamHealthMonitor
-} from '@arbitrage/core';
+import { StreamHealthMonitor, resetStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { RedisStreamsClient, StreamBatcher, resetRedisStreamsInstance } from '@arbitrage/core/redis';
 
 import { createTestRedisClient } from '@arbitrage/test-utils';
 import { delay, createMockPriceUpdate, createMockSwapEvent } from '../../shared/test-utils/src';

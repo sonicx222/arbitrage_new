@@ -26,6 +26,8 @@ import "../interfaces/IPancakeV3FlashCallback.sol";
  * - Callback caller must be verified to be a legitimate pool
  * - Factory contract maintains registry of valid pools
  * - Flash loan recipient must repay amount + fee before transaction ends
+ *
+ * @custom:version 1.0.0
  */
 contract MockPancakeV3Pool is IPancakeV3Pool {
     using SafeERC20 for IERC20;
@@ -86,7 +88,7 @@ contract MockPancakeV3Pool is IPancakeV3Pool {
     ) external override {
         require(amount0 > 0 || amount1 > 0, "Both amounts cannot be zero");
 
-        // Calculate fees (fee is in hundredths of a bip, so divide by 1e6)
+        // Fee is in hundredths of a basis point (e.g., 2500 = 0.25%). Divide by 1e6 to get fraction.
         uint256 fee0 = (amount0 * fee) / 1e6;
         uint256 fee1 = (amount1 * fee) / 1e6;
 

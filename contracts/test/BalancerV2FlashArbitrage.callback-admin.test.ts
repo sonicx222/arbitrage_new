@@ -3,12 +3,11 @@ import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { BalancerV2FlashArbitrage, MockDexRouter, MockERC20, MockBalancerVault } from '../typechain-types';
 import {
-  deployBaseFixture,
-  fundProvider,
   RATE_USDC_TO_WETH_1PCT_PROFIT,
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,
   getDeadline,
+  deployBalancerV2Fixture,
 } from './helpers';
 
 /**
@@ -29,26 +28,8 @@ import {
  * @see contracts/src/BalancerV2FlashArbitrage.sol
  */
 describe('BalancerV2FlashArbitrage Callback & Admin', () => {
-  async function deployContractsFixture() {
-    const BALANCER_AMOUNTS = {
-      wethPerRouter: ethers.parseEther('10000'),
-      usdcPerRouter: ethers.parseUnits('10000000', 6),
-      daiPerRouter: ethers.parseEther('10000000'),
-    };
-    const base = await deployBaseFixture(BALANCER_AMOUNTS);
-
-    const MockBalancerVaultFactory = await ethers.getContractFactory('MockBalancerVault');
-    const vault = await MockBalancerVaultFactory.deploy();
-    await fundProvider(base, await vault.getAddress(), BALANCER_AMOUNTS);
-
-    const BalancerV2FlashArbitrageFactory = await ethers.getContractFactory('BalancerV2FlashArbitrage');
-    const arbitrage = await BalancerV2FlashArbitrageFactory.deploy(
-      await vault.getAddress(),
-      base.owner.address
-    );
-
-    return { arbitrage, vault, ...base };
-  }
+  // Use shared fixture from helpers/balancer-v2.ts
+  const deployContractsFixture = deployBalancerV2Fixture;
 
   // ===========================================================================
   // 5. Flash Loan Callback Tests

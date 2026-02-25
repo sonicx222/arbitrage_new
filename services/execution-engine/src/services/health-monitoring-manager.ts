@@ -18,14 +18,11 @@
  * @see REFACTORING_ANALYSIS.md P0
  */
 
-import {
-  RedisStreamsClient,
-  getErrorMessage,
-  type PerformanceLogger,
-  type ServiceStateManager,
-  type RedisClient,
-  clearIntervalSafe,
-} from '@arbitrage/core';
+import { clearIntervalSafe } from '@arbitrage/core/async';
+import { RedisStreamsClient, type RedisClient } from '@arbitrage/core/redis';
+import { getErrorMessage } from '@arbitrage/core/resilience';
+import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import { type PerformanceLogger } from '@arbitrage/core';
 import type { ServiceHealth } from '@arbitrage/types';
 import type {
   Logger,

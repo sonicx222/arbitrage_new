@@ -21,12 +21,8 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from '@jest/globals';
 import Redis from 'ioredis';
 import { createTestRedisClient, delay } from '@arbitrage/test-utils';
-import {
-  CircuitBreaker,
-  CircuitState,
-  CircuitBreakerError,
-  resetCircuitBreakerRegistry,
-} from '@arbitrage/core';
+import { CircuitBreaker, CircuitState, CircuitBreakerError } from '@arbitrage/core/resilience';
+import { resetCircuitBreakerRegistry } from '@arbitrage/core';
 
 // Short timeouts for fast tests
 const BREAKER_CONFIG = {

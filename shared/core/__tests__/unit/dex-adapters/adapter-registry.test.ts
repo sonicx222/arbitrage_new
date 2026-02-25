@@ -23,7 +23,7 @@ import {
   BALANCER_VAULT_ADDRESSES,
   GMX_ADDRESSES,
   PLATYPUS_ADDRESSES,
-} from '@arbitrage/core';
+} from '@arbitrage/core/dex-adapters';
 
 // =============================================================================
 // Mocks

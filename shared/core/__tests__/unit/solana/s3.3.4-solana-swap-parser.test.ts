@@ -26,13 +26,13 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from '@jest/gl
 // =============================================================================
 
 // Import types and constants from the actual implementation to prevent drift
+import type { SolanaTransaction } from '@arbitrage/core/mev-protection';
 import type {
   SolanaInstruction,
-  SolanaTransaction,
   ParsedSolanaSwap,
   SwapParserConfig,
-  ParserStats
-} from '@arbitrage/core';
+  ParserStats,
+} from '@arbitrage/core/solana';
 
 // Import the actual implementation for integration testing
 import {
@@ -42,8 +42,8 @@ import {
   SOLANA_DEX_PROGRAM_IDS,
   PROGRAM_ID_TO_DEX,
   SWAP_DISCRIMINATORS as IMPL_SWAP_DISCRIMINATORS,
-  DISABLED_DEXES
-} from '@arbitrage/core';
+  DISABLED_DEXES,
+} from '@arbitrage/core/solana';
 
 // =============================================================================
 // Test Constants - Solana DEX Program IDs
