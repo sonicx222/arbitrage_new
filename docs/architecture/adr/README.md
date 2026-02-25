@@ -81,7 +81,7 @@ An Architecture Decision Record captures an important architectural decision mad
 5. **Caching Strategy** (ADR-005)
    - L1: SharedArrayBuffer (sub-microsecond)
    - L2: Redis (milliseconds)
-   - L3: MongoDB (persistent)
+   - L3: RPC Fallback (on-chain queries when cache stale)
 
 ### Infrastructure Decisions
 
@@ -100,9 +100,9 @@ An Architecture Decision Record captures an important architectural decision mad
 ### Coverage Strategy
 
 8. **Chain/DEX/Token Selection** (ADR-008)
-   - 10 chains prioritized by arbitrage score
-   - 55 DEXs across all chains
-   - 150 tokens creating ~500 pairs
+   - 11 chains prioritized by arbitrage score
+   - 64 DEXs across all chains
+   - 128 tokens creating ~500 pairs
    - 3-phase rollout for risk management
 
 ### Connection Resilience

@@ -15,7 +15,7 @@
 # - Primary coordinator instance (IS_STANDBY=false)
 # - Uses Redis-based leader election for failover with standby
 # - Exposes port 3000 for dashboard and API access
-# - Health check on /health (matches coordinator Dockerfile)
+# - Health check on /api/health (coordinator uses Express with '/api' prefix)
 
 app = "arbitrage-coordinator"
 primary_region = "sjc"
@@ -63,7 +63,7 @@ primary_region = "sjc"
     grace_period = "30s"
     interval = "15s"
     method = "GET"
-    path = "/health"
+    path = "/api/health"
     port = 3000
     timeout = "5s"
     type = "http"

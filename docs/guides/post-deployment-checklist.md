@@ -202,8 +202,11 @@ curl http://localhost:3005/health | jq '.contracts'
 
 ```bash
 # Verify commit-reveal parameters
-> await contract.commitWindow()     # Time window for commits
-> await contract.revealWindow()     # Time window for reveals
+> await contract.maxCommitAgeBlocks()     # Max blocks for commitment validity (configurable, default 10)
+> await contract.MIN_DELAY_BLOCKS()       # Minimum blocks between commit and reveal (constant = 1)
+> await contract.DEFAULT_MAX_COMMIT_AGE() # Default max commit age (constant = 10)
+> await contract.MIN_COMMIT_AGE()         # Minimum allowed maxCommitAgeBlocks (constant = 5)
+> await contract.MAX_COMMIT_AGE()         # Maximum allowed maxCommitAgeBlocks (constant = 100)
 ```
 
 Check feature flags are enabled in the environment:

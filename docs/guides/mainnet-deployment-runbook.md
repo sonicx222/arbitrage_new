@@ -25,16 +25,16 @@ Deploy to L2 chains first (low gas), then L1 last (highest gas):
 
 | Priority | Chain | Contracts to Deploy | Gas Token |
 |----------|-------|-------------------|-----------|
-| 1st | **Arbitrum** | FlashLoan, Balancer, PancakeSwap, MultiPathQuoter, CommitReveal, V3Adapter | ETH |
-| 2nd | **Base** | FlashLoan, Balancer, PancakeSwap, MultiPathQuoter, CommitReveal, V3Adapter | ETH |
-| 3rd | **Optimism** | FlashLoan, Balancer, MultiPathQuoter, CommitReveal, V3Adapter | ETH |
-| 4th | **Polygon** | FlashLoan, Balancer, MultiPathQuoter, CommitReveal, V3Adapter | MATIC |
-| 5th | **BSC** | PancakeSwap, MultiPathQuoter, CommitReveal, V3Adapter | BNB |
-| 6th | **Avalanche** | FlashLoan, MultiPathQuoter, CommitReveal | AVAX |
-| 7th | **Fantom** | Balancer (Beethoven X), MultiPathQuoter, CommitReveal | FTM |
-| 8th | **zkSync** | SyncSwap, PancakeSwap, MultiPathQuoter, CommitReveal | ETH |
-| 9th | **Linea** | PancakeSwap, MultiPathQuoter, CommitReveal, V3Adapter | ETH |
-| Last | **Ethereum** | All contract types | ETH |
+| 1st | **Arbitrum** | FlashLoan, Balancer, PancakeSwap, CommitReveal, MultiPathQuoter, V3Adapter | ETH |
+| 2nd | **Base** | FlashLoan, Balancer, PancakeSwap, CommitReveal, MultiPathQuoter, V3Adapter | ETH |
+| 3rd | **Optimism** | FlashLoan, Balancer, CommitReveal, MultiPathQuoter, V3Adapter | ETH |
+| 4th | **Polygon** | FlashLoan, Balancer, CommitReveal, MultiPathQuoter, V3Adapter | MATIC |
+| 5th | **BSC** | PancakeSwap, CommitReveal, MultiPathQuoter, V3Adapter | BNB |
+| 6th | **Avalanche** | FlashLoan, CommitReveal, MultiPathQuoter | AVAX |
+| 7th | **Fantom** | CommitReveal, MultiPathQuoter | FTM |
+| 8th | **zkSync** | SyncSwap, CommitReveal, MultiPathQuoter | ETH |
+| 9th | **Linea** | CommitReveal, MultiPathQuoter, V3Adapter | ETH |
+| Last | **Ethereum** | All contract types (commented out in hardhat.config.ts — enable after L2 success) | ETH |
 
 ### Per-Contract Deploy Order Within Each Chain
 
@@ -184,6 +184,10 @@ Each script will:
 8. Run smoke tests
 9. Save to `registry.json`
 10. Print deployment summary and next steps
+
+> **Exceptions:**
+> - **CommitRevealArbitrage** skips steps 5-6 (`configureMinProfit: false`, `configureRouters: false`). Routers are configured manually post-deployment. See `contracts/scripts/deploy-commit-reveal.ts`.
+> - **UniswapV3Adapter** uses its own deployment flow (`deploy-v3-adapter.ts`), not the shared pipeline. It requires `V3_SWAP_ROUTER` and optionally `FLASH_LOAN_CONTRACT_ADDRESS` for router registration.
 
 ### 4.3 Record Keeping
 

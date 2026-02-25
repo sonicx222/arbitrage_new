@@ -26,7 +26,7 @@ Detecting price discrepancies for the same token pair across different Decentral
 
 - **Execution**: Instant swap on DEX A, sell on DEX B
 - **Key Metric**: Net profit after gas and slippage
-- **Module**: `services/unified-detector/src/detection/simple-arbitrage.ts`, wired via `services/unified-detector/src/chain-instance.ts`
+- **Module**: `services/unified-detector/src/detection/simple-arbitrage-detector.ts`, wired via `services/unified-detector/src/chain-instance.ts`
 
 ### 2. Triangular Arbitrage
 
@@ -34,7 +34,7 @@ Exploiting price imbalances between three different assets on the same exchange 
 
 - **Benefit**: No cross-exchange latency, single transaction execution
 - **Complexity**: High mathematical search space (O(n³))
-- **Module**: `shared/core/src/cross-dex-triangular-arbitrage.ts`
+- **Module**: `shared/core/src/path-finding/cross-dex-triangular-arbitrage.ts`
 
 ### 3. Cross-Chain Arbitrage
 
@@ -61,7 +61,7 @@ Discovery of 5-7 token arbitrage cycles using depth-first search with pruning.
   - Dynamic slippage based on pool reserves
   - ExecutionContext for concurrent safety
   - Configurable timeout and profit thresholds
-- **Module**: `shared/core/src/multi-leg-path-finder.ts`
+- **Module**: `shared/core/src/path-finding/multi-leg-path-finder.ts`
 - **Related**: [ADR-012](architecture/adr/ADR-012.md) (Worker Thread Path Finding)
 
 ---
@@ -93,7 +93,7 @@ Professional-grade whale tracking for early opportunity detection.
 | Super whale bonus (>$500K) | +0.15 |
 | Historical accuracy | ±0.10 |
 
-**Module**: `shared/core/src/whale-activity-tracker.ts`
+**Module**: `shared/core/src/analytics/whale-activity-tracker.ts`
 
 ---
 
@@ -126,7 +126,7 @@ Automatically finds the pool with lowest slippage for a given trade:
 - Returns pool address and expected slippage
 - Considers DEX-specific fee tiers
 
-**Module**: `shared/core/src/liquidity-depth-analyzer.ts`
+**Module**: `shared/core/src/analytics/liquidity-depth-analyzer.ts`
 
 ---
 

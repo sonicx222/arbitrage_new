@@ -83,6 +83,11 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
     ],
   },
   {
+    contract: 'DaiFlashMintArbitrage',
+    script: 'scripts/deploy-dai-flash-mint.ts',
+    networks: ['ethereum'],
+  },
+  {
     contract: 'SyncSwapFlashArbitrage',
     script: 'scripts/deploy-syncswap.ts',
     networks: ['zksync-testnet', 'zksync'],

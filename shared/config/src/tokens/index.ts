@@ -6,7 +6,7 @@
  * - TOKEN_METADATA: Chain-specific token addresses for USD estimation
  *
  * Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
- * Total: 122 tokens across 15 chains
+ * Total: 128 tokens across 15 chains
  *
  * @see S3.1.2: New chain tokens
  * @see S3.2.1: Avalanche token expansion
@@ -16,7 +16,7 @@
 import { Token } from '../../../types';
 
 // =============================================================================
-// TOKEN CONFIGURATIONS - 122 Tokens
+// TOKEN CONFIGURATIONS - 128 Tokens
 // Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
 // =============================================================================
 export const CORE_TOKENS: Record<string, Token[]> = {

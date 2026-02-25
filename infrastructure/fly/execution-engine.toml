@@ -17,7 +17,7 @@
 # Notes:
 # - Hot-path service: latency-critical (<50ms target)
 # - Requires wallet private keys via secrets (NEVER in env/toml)
-# - Internal port 8080 matches execution-engine Dockerfile EXPOSE
+# - Internal port 8080 (overrides code default of 3005 via HEALTH_CHECK_PORT env var)
 # - 384MB RAM for multi-chain transaction signing and gas estimation
 
 app = "arbitrage-execution-engine"

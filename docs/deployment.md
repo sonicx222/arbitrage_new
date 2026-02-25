@@ -38,8 +38,8 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 | **unified-detector (l2-turbo)** | Singapore | Fly.io | Free |
 | **unified-detector (high-value)** | US-East | Fly.io | Free |
 | **unified-detector (solana)** | US-West | Fly.io | Free |
-| **Cross-Chain Detector** | US-East | Fly.io | Free |
-| **Coordinator** | US-East | Fly.io | Free |
+| **Cross-Chain Detector** | US-West | Fly.io | Free |
+| **Coordinator** | US-West | Fly.io | Free |
 | **Execution Engine** | US-West | Fly.io | Free |
 
 ---
@@ -121,7 +121,7 @@ fly deploy
 
 #### High-Value Partition (Fly.io - US-East)
 ```bash
-fly launch --name detector-high-value --region ewr
+fly launch --name detector-high-value --region iad
 
 fly secrets set \
   PARTITION_ID="high-value" \
@@ -147,7 +147,7 @@ fly secrets set \
 fly deploy
 ```
 
-### 3. Cross-Chain Detector (Fly.io - US-East)
+### 3. Cross-Chain Detector (Fly.io - US-West)
 
 ```bash
 cd services/cross-chain-detector
@@ -184,7 +184,7 @@ fly secrets set \
 fly deploy
 ```
 
-### 5. Coordinator (Fly.io - US-East)
+### 5. Coordinator (Fly.io - US-West)
 
 ```bash
 cd services/coordinator
@@ -209,9 +209,10 @@ fly deploy
 | Contract | Flash Loan Provider | Fee | Key Chains |
 |----------|-------------------|-----|------------|
 | **FlashLoanArbitrage** | Aave V3 | 0.09% | Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche |
-| **BalancerV2FlashArbitrage** | Balancer V2 | 0% | Ethereum, Arbitrum, Polygon, Optimism, Avalanche |
-| **PancakeSwapFlashArbitrage** | PancakeSwap V3 | Tier-based | BSC, Ethereum, Arbitrum, Base |
+| **BalancerV2FlashArbitrage** | Balancer V2 | 0% | Ethereum, Polygon, Arbitrum, Optimism, Base, Fantom (Beethoven X) |
+| **PancakeSwapFlashArbitrage** | PancakeSwap V3 | Tier-based | BSC, Ethereum, Arbitrum, zkSync, Base, opBNB, Linea |
 | **SyncSwapFlashArbitrage** | SyncSwap (EIP-3156) | 0.3% | zkSync |
+| **DaiFlashMintArbitrage** | MakerDAO DssFlash (EIP-3156) | 0.01% | Ethereum only |
 | **CommitRevealArbitrage** | MEV protection | N/A | All chains |
 | **MultiPathQuoter** | Stateless quoter | N/A | All chains |
 
@@ -229,10 +230,10 @@ npx hardhat run scripts/deploy.ts --network sepolia
 npx hardhat run scripts/deploy.ts --network arbitrumSepolia
 
 # Balancer V2 flash loan (0% fee — preferred)
-npx hardhat run scripts/deploy-balancer.ts --network sepolia
+npx hardhat run scripts/deploy-balancer.ts --network arbitrumSepolia
 
-# PancakeSwap V3 flash loan
-npx hardhat run scripts/deploy-pancakeswap.ts --network bscTestnet
+# PancakeSwap V3 flash loan (testnet: arbitrumSepolia — bscTestnet has no configured factory)
+npx hardhat run scripts/deploy-pancakeswap.ts --network arbitrumSepolia
 
 # SyncSwap flash loan (zkSync only)
 DISABLE_VIA_IR=true npx hardhat run scripts/deploy-syncswap.ts --network zksync-testnet

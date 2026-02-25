@@ -139,10 +139,11 @@ docker --version  # Optional: Should show Docker version
 | P1 Asia-Fast Detector | 3001 | `P1_ASIA_FAST_PORT` | `npm run dev:partition:asia:fast` |
 | P2 L2-Turbo Detector | 3002 | `P2_L2_TURBO_PORT` | `npm run dev:partition:l2:fast` |
 | P3 High-Value Detector | 3003 | `P3_HIGH_VALUE_PORT` | `npm run dev:partition:high:fast` |
-| P4 Solana Detector | 3004 | `P4_SOLANA_PORT` | (optional, see below) |
+| P4 Solana Detector | 3004 | `P4_SOLANA_PORT` | `npm run dev:partition:solana:fast` (optional) |
 | Execution Engine | 3005 | `EXECUTION_ENGINE_PORT` | `npm run dev:execution:fast` |
 | Cross-Chain Detector | 3006 | `CROSS_CHAIN_DETECTOR_PORT` | `npm run dev:cross-chain:fast` |
-| Unified Detector | 3007 | `UNIFIED_DETECTOR_PORT` | `npm run dev:detector:fast` (deprecated) |
+| Unified Detector | 3007 | `UNIFIED_DETECTOR_PORT` | Library/factory for P1-P3 partitions (not standalone) |
+| Mempool Detector | 3008 | `MEMPOOL_DETECTOR_PORT` | `npm run dev:mempool:fast` (optional, requires bloXroute) |
 | Redis Commander (debug) | 8081 | - | `npm run dev:redis:ui` |
 
 ---
@@ -171,26 +172,32 @@ npm run dev:setup
 # Windows: copy .env.example .env
 ```
 
-The `.env.local` includes:
-- Free public RPC endpoints for all supported chains
+This creates a `.env` file (copied from `.env.example`) which includes:
 - Local Redis configuration
-- Sensible defaults for development
+- Simulation mode enabled by default (safe for development)
+- Sensible defaults for all services
+
+> **Note**: `dev:setup` creates `.env`, not `.env.local`. To add personal overrides (private keys, API tokens), manually create a `.env.local` file — it is gitignored and takes precedence over `.env`.
 
 #### Environment File Priority
 
 The system loads environment variables in this order (highest to lowest priority):
 
-1. **`.env.local`** (gitignored) - Your local overrides
+1. **Existing `process.env` values** (shell/CI) - Highest priority
+   - Set via shell exports, CI secrets, or test harnesses
+   - Never overwritten by file-based values
+
+2. **`.env.local`** (gitignored) - Your local overrides
    - Never committed to git
    - Put sensitive values here (private keys, API tokens)
-   - Loaded with `override: true`, so values here ALWAYS win
+   - Overrides `.env` values for any key present in both files
 
-2. **`.env`** - Base configuration
+3. **`.env`** - Base configuration
    - Created by `npm run dev:setup` from `.env.example`
    - Can be committed (if no sensitive data)
    - Team-shared defaults
 
-3. **Code defaults** - Fallback values in code
+4. **Code defaults** - Fallback values in code
 
 **Example**:
 ```bash
@@ -205,10 +212,19 @@ PRIVATE_KEY=0x...  # ← Only in .env.local, never in .env
 
 **How Loading Works** (technical detail):
 ```javascript
-// scripts/lib/services-config.js
-dotenv.config({ path: '.env' });              // Load base
-dotenv.config({ path: '.env.local', override: true });  // Override with local
+// scripts/lib/load-env.js
+const baseEnv = parseEnvFile('.env');         // Parse base config
+const localEnv = parseEnvFile('.env.local');  // Parse local overrides
+const merged = { ...baseEnv, ...localEnv };  // .env.local wins over .env
+
+for (const [key, value] of Object.entries(merged)) {
+  if (process.env[key] === undefined) {       // Existing env vars take highest priority
+    process.env[key] = value;
+  }
+}
 ```
+
+> **Note**: Existing `process.env` values (set via shell, CI, or test harness) are never overwritten. This means shell-level exports and CI secrets always take precedence over file-based values.
 
 **Why This Design**:
 - Allows team defaults in `.env` (committed)
@@ -436,9 +452,9 @@ npm run dev:simulate
 
 Or set in `.env`:
 ```env
-SIMULATION_MODE=true
-SIMULATION_VOLATILITY=0.02          # 2% price volatility
-SIMULATION_UPDATE_INTERVAL_MS=1000  # Update every second
+SIMULATION_MODE=true                     # .env.example defaults to true for safety
+SIMULATION_VOLATILITY=0.02               # 2% price volatility
+SIMULATION_UPDATE_INTERVAL_MS=5000       # Update every 5 seconds (per .env.example)
 ```
 
 **Benefits:**
@@ -457,7 +473,7 @@ npm run dev:simulate:execution
 
 Or set in `.env`:
 ```env
-EXECUTION_SIMULATION_MODE=true
+EXECUTION_SIMULATION_MODE=true               # .env.example defaults to true for safety
 EXECUTION_SIMULATION_SUCCESS_RATE=0.85      # 85% success rate
 EXECUTION_SIMULATION_LATENCY_MS=500         # 500ms simulated latency
 ```
@@ -534,8 +550,8 @@ npm run test:smoke         # Smoke tests
 # Run tests only for files changed since last commit
 npm run test:changed
 
-# Run tests related to specific files
-npm run test:related shared/core/src/redis.ts
+# Run tests related to specific files (use -- separator on npm 9+)
+npm run test:related -- shared/core/src/redis.ts
 
 # Watch mode (re-runs on file changes)
 npm run test:watch
@@ -722,6 +738,8 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 | `npm run dev:partition:high:fast` | 3003 | P3 High-Value with hot reload |
 | `npm run dev:cross-chain:fast` | 3006 | Cross-Chain with hot reload |
 | `npm run dev:execution:fast` | 3005 | Execution Engine with hot reload |
+| `npm run dev:partition:solana:fast` | 3004 | P4 Solana with hot reload (optional) |
+| `npm run dev:mempool:fast` | 3008 | Mempool Detector with hot reload (optional, requires bloXroute) |
 | `npm run dev:detector:fast` | 3007 | Unified Detector with hot reload (deprecated) |
 
 ### Service Management (Standard)
@@ -734,6 +752,8 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 | `npm run dev:partition:high` | 3003 | P3 High-Value (ts-node) |
 | `npm run dev:cross-chain` | 3006 | Cross-Chain Detector (ts-node) |
 | `npm run dev:execution` | 3005 | Execution Engine (ts-node) |
+| `npm run dev:partition:solana` | 3004 | P4 Solana (ts-node, optional) |
+| `npm run dev:mempool` | 3008 | Mempool Detector (ts-node, optional) |
 | `npm run dev:start` | - | Start all services (legacy) |
 | `npm run dev:stop` | - | Stop all services |
 | `npm run dev:status` | - | Check status of all services |
@@ -746,6 +766,7 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 | `npm run dev:simulate` | Start with price simulation |
 | `npm run dev:simulate:execution` | Start with execution simulation |
 | `npm run dev:simulate:full` | Start with both simulations |
+| `npm run dev:simulate:full:memory` | Full simulation without Docker Redis (in-memory) |
 
 ### Docker Partitions
 
@@ -776,8 +797,9 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 | `npm run test:unit` | Run unit tests |
 | `npm run test:integration` | Run integration tests |
 | `npm run test:e2e` | Run end-to-end tests |
+| `npm run test:ml` | Run ML test suite |
 | `npm run test:changed` | Run tests for changed files only |
-| `npm run test:related <file>` | Run tests related to specific files |
+| `npm run test:related -- <file>` | Run tests related to specific files |
 | `npm run test:watch` | Watch mode tests |
 | `npm run test:coverage` | Tests with coverage report |
 | `npm run test:debug` | Run tests with debug output |
@@ -789,12 +811,14 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 | `npm run lint` | Run ESLint |
 | `npm run lint:fix` | Fix ESLint errors |
 | `npm run validate` | Run tests + lint |
+| `npm run check:circular` | Check for circular dependencies (via madge) |
+| `npm run security:audit` | Run security audit |
 
 ---
 
 ## Environment Variables
 
-Key environment variables in `.env.local`:
+Key environment variables (configured in `.env`, override in `.env.local`):
 
 ```env
 # Node Environment
@@ -822,12 +846,12 @@ INSTANCE_ID=local-dev-1
 REGION_ID=local
 
 # Price Simulation
-SIMULATION_MODE=false
+SIMULATION_MODE=true              # .env.example defaults to true for safety; set false for live data
 SIMULATION_VOLATILITY=0.02
-SIMULATION_UPDATE_INTERVAL_MS=1000
+SIMULATION_UPDATE_INTERVAL_MS=5000
 
 # Execution Simulation
-EXECUTION_SIMULATION_MODE=false
+EXECUTION_SIMULATION_MODE=true    # .env.example defaults to true for safety; set false for live trading
 EXECUTION_SIMULATION_SUCCESS_RATE=0.85
 EXECUTION_SIMULATION_LATENCY_MS=500
 

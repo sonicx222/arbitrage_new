@@ -1,6 +1,6 @@
 # Fly.io Deployment Configuration for L2-Fast Partition
 #
-# Partition: l2-fast
+# Partition: l2-turbo (file named l2-fast for historical reasons; PARTITION_ID=l2-turbo)
 # Chains: Arbitrum, Optimism, Base
 # Region: asia-southeast1 (Singapore)
 # Resource Profile: standard (384MB)

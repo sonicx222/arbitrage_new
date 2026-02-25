@@ -41,7 +41,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 - **Partition ID:** `asia-fast`
 - **Chains:** BSC, Polygon, Avalanche, Fantom
 - **Region:** Singapore (Fly.io)
-- **Resource Profile:** Standard (512MB)
+- **Resource Profile:** Heavy (768MB)
 - **Rationale:** High-throughput Asian chains with fast block times
 
 ### P2: L2-Turbo
@@ -50,7 +50,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 - **Region:** Singapore (Fly.io)
 - **Resource Profile:** Standard (512MB)
 - **Rationale:** Ethereum L2 rollups with sub-second confirmations
-- **Future:** Blast, Scroll, Mantle, Mode will be added when their DEX addresses are verified (currently placeholders)
+- **Note:** Blast, Scroll, Mantle, Mode were planned but removed — all have placeholder DEX addresses. Will be re-added when real factory addresses are configured in `dexes/index.ts`.
 
 ### P3: High-Value
 - **Partition ID:** `high-value`
@@ -100,10 +100,10 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 | Service | Endpoint | Response |
 |---------|----------|----------|
-| Coordinator | `/api/health` | `{ status, services, leader }` |
-| Partition Detectors | `/health` | `{ status, chains, blocksProcessed }` |
-| Cross-Chain Detector | `/health` | `{ status, opportunities }` |
-| Execution Engine | `/health` | `{ status, trades, pending }` |
+| Coordinator | `/api/health` | `{ status, isLeader, instanceId, systemHealth, services, timestamp }` |
+| Partition Detectors | `/health` | `{ status, partitionId, chains, healthyChains, uptime, eventsProcessed, memoryMB, region }` |
+| Cross-Chain Detector | `/health` | `{ status, uptime, memoryMB }` |
+| Execution Engine | `/health` | `{ status, simulationMode, redisConnected, healthyProviders, queueSize, activeExecutions, successRate, dlqLength, uptime, memoryMB }` |
 | Mempool Detector | `/health` | `{ status, feeds, stats, uptime }` |
 
 ### Health Status Values
@@ -193,9 +193,9 @@ ETHEREUM_WS_URL=wss://...
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Chains | 15 (14 EVM + Solana) | 15 |
-| DEXes | 71 (64 EVM + 7 Solana) | 75 |
-| Tokens | 112+ | 150 |
+| Chains | 11 (10 EVM + Solana) | 15 |
+| DEXes | 64 (57 EVM + 7 Solana) | 75 |
+| Tokens | 128 | 150 |
 | Strategies | 6 (Intra-chain, Cross-chain, Flash Loan, Statistical Arb, CoW Backrun, Solana/Jito) | 7+ |
 | Data Sources | DEX feeds + Binance CEX feed + CoW Settlement watcher | Multi-CEX |
 | Target Opportunities/day | 500 | 750 |
@@ -251,8 +251,8 @@ ETHEREUM_WS_URL=wss://...
 | 2026-02-04 | ML model lifecycle management | ADR-025 |
 | 2026-02-04 | Integration test consolidation (34→18 files) | ADR-026 |
 | 2026-02-04 | Nonce pre-allocation pool (5-10ms savings) | ADR-027 |
-| 2026-02-24 | 4 emerging L2 chains added (Blast, Scroll, Mantle, Mode) | ADR-003 |
-| 2026-02-24 | P2 partition expanded from 3 to 7 chains | ADR-003 |
+| 2026-02-24 | 4 emerging L2 chains planned (Blast, Scroll, Mantle, Mode) — reverted, placeholder addresses | ADR-003 |
+| 2026-02-24 | P2 partition remains at 3 chains (emerging L2s removed pending real DEX addresses) | ADR-003 |
 | 2026-02-24 | Solana execution via Jupiter V6 + Jito bundles | ADR-034 |
 | 2026-02-24 | Statistical arbitrage strategy (triple-gate signals) | ADR-035 |
 | 2026-02-24 | Binance CEX price signal integration | ADR-036 |

@@ -26,14 +26,14 @@ These must be set for the system to start:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `REDIS_URL` | Redis connection URL | `redis://:password@localhost:6379` |
+| `REDIS_URL` | Redis connection URL (required in production; local dev can use in-memory Redis via `npm run dev:redis:memory`) | `redis://:password@localhost:6379` |
 | `PARTITION_ID` | Partition this service belongs to | `asia-fast` |
 
 ### Redis Configuration
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `REDIS_URL` | Redis connection URL | Required |
+| `REDIS_URL` | Redis connection URL | Required in production (local dev can use `npm run dev:redis:memory`) |
 | `REDIS_PASSWORD` | Redis authentication password | - |
 | `REDIS_SELF_HOSTED` | Enable self-hosted Redis mode (permits localhost in production) | `false` |
 
@@ -131,11 +131,13 @@ See `services/execution-engine/src/services/hd-wallet-manager.ts` for implementa
 | Variable | Description | Default | ADR |
 |----------|-------------|---------|-----|
 | `FEATURE_BATCHED_QUOTER` | Enable batched quote fetching | `false` | ADR-029 |
-| `FEATURE_FLASH_LOAN_AGGREGATOR` | Enable dynamic flash loan provider selection | `true` | ADR-032 |
-| `FEATURE_COMMIT_REVEAL` | Enable commit-reveal MEV protection | `true` | Task 3.1 |
+| `FEATURE_FLASH_LOAN_AGGREGATOR` | Enable dynamic flash loan provider selection | `false` | ADR-032 |
+| `FEATURE_COMMIT_REVEAL` | Enable commit-reveal MEV protection | `false` | Task 3.1 |
 | `FEATURE_COMMIT_REVEAL_REDIS` | Use Redis for commitment storage | `false` | Task 3.1 |
 | `COMMIT_REVEAL_VALIDATE_PROFIT` | Re-validate profit before reveal | `true` | Task 3.1 |
 | `FEATURE_DEST_CHAIN_FLASH_LOAN` | Enable flash loans on destination chain for cross-chain arbs | `false` | FE-001 |
+
+**Note on feature flag defaults:** `FEATURE_FLASH_LOAN_AGGREGATOR`, `FEATURE_COMMIT_REVEAL`, and other feature flags use the `=== 'true'` pattern in code. When the env var is unset, the code default is `false`. The `.env.example` file may set some flags to `true` for local development convenience, but this does not change the code default.
 
 **Batched Quote Fetching** (ADR-029):
 - Reduces quote latency by 75-83% (150ms → 30-50ms)
@@ -201,7 +203,12 @@ See [docs/TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md](TASK_3.1_COMMIT_REVE
 
 **Flash Loan Contract Configuration:**
 
-Deploy with: `npx hardhat run scripts/deploy-flash-loan.ts --network <chain>`
+Deploy with chain-specific scripts:
+- Aave V3: `npx hardhat run scripts/deploy.ts --network <chain>`
+- Balancer V2: `npx hardhat run scripts/deploy-balancer.ts --network <chain>`
+- PancakeSwap V3: `npx hardhat run scripts/deploy-pancakeswap.ts --network <chain>`
+- SyncSwap: `npx hardhat run scripts/deploy-syncswap.ts --network <chain>`
+- DAI Flash Mint: `npx hardhat run scripts/deploy-dai-flash-mint.ts --network <chain>`
 
 | Variable | Chain | Example |
 |----------|-------|---------|
@@ -219,8 +226,8 @@ See [docs/research/FUTURE_ENHANCEMENTS.md](research/FUTURE_ENHANCEMENTS.md#FE-00
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `TENDERLY_ACCESS_KEY` | Tenderly API for simulation | Optional |
-| `TENDERLY_PROJECT` | Tenderly project slug | With access key |
+| `TENDERLY_API_KEY` | Tenderly API for simulation | Optional |
+| `TENDERLY_PROJECT_SLUG` | Tenderly project slug | With API key |
 | `FLASHBOTS_AUTH_KEY` | Flashbots relay authentication | Optional |
 | `BLOXROUTE_AUTH_HEADER` | bloXroute BDN access | Optional |
 | `HELIUS_API_KEY` | Helius Solana RPC | Optional |
@@ -234,28 +241,61 @@ See [docs/research/FUTURE_ENHANCEMENTS.md](research/FUTURE_ENHANCEMENTS.md#FE-00
 Each partition is configured in `shared/config/src/partitions.ts`:
 
 ```typescript
-export const PARTITIONS = {
-  'asia-fast': {
+// PARTITIONS is an array of PartitionConfig objects
+export const PARTITIONS: PartitionConfig[] = [
+  {
+    partitionId: 'asia-fast',
+    name: 'Asia Fast Chains',
     chains: ['bsc', 'polygon', 'avalanche', 'fantom'],
-    region: 'asia-southeast-1',
-    memory: '768MB'
+    region: 'asia-southeast1',
+    provider: 'fly',
+    resourceProfile: 'heavy',
+    priority: 1,
+    maxMemoryMB: 768,
+    enabled: true,
+    healthCheckIntervalMs: 15000,
+    failoverTimeoutMs: 60000
   },
-  'l2-turbo': {
+  {
+    partitionId: 'l2-turbo',
+    name: 'L2 Turbo Chains',
     chains: ['arbitrum', 'optimism', 'base'],
-    region: 'asia-southeast-1',
-    memory: '512MB'
+    region: 'asia-southeast1',
+    provider: 'fly',
+    resourceProfile: 'standard',
+    priority: 1,
+    maxMemoryMB: 512,
+    enabled: true,
+    healthCheckIntervalMs: 10000,
+    failoverTimeoutMs: 45000
   },
-  'high-value': {
+  {
+    partitionId: 'high-value',
+    name: 'High Value Chains',
     chains: ['ethereum', 'zksync', 'linea'],
-    region: 'us-east-1',
-    memory: '768MB'
+    region: 'us-east1',
+    provider: 'fly',
+    resourceProfile: 'heavy',
+    priority: 2,
+    maxMemoryMB: 768,
+    enabled: true,
+    healthCheckIntervalMs: 30000,
+    failoverTimeoutMs: 60000
   },
-  'solana-native': {
+  {
+    partitionId: 'solana-native',
+    name: 'Solana Native',
     chains: ['solana'],
-    region: 'us-west-1',
-    memory: '512MB'
+    region: 'us-west1',
+    provider: 'fly',
+    resourceProfile: 'heavy',
+    priority: 2,
+    maxMemoryMB: 512,
+    enabled: true,
+    healthCheckIntervalMs: 10000,
+    failoverTimeoutMs: 45000
   }
-};
+];
 ```
 
 ### Service Ports
@@ -269,13 +309,14 @@ export const PARTITIONS = {
 | Partition Solana | 3004 |
 | Execution Engine | 3005 |
 | Cross-Chain Detector | 3006 |
-| Mempool Detector | 3007 |
+| Unified Detector | 3007 |
+| Mempool Detector | 3008 |
 
 ---
 
 ## Chain Configuration
 
-Chain configuration is in `shared/config/src/chains.ts`:
+Chain configuration is in `shared/config/src/chains/index.ts`:
 
 ### Chain Properties
 
@@ -318,7 +359,7 @@ export const CHAINS = {
 
 ## DEX Configuration
 
-DEX configuration is in `shared/config/src/dexes.ts`:
+DEX configuration is in `shared/config/src/dexes/index.ts`:
 
 ### DEX Properties
 
@@ -360,7 +401,7 @@ export const DEXES = {
 
 ### Hot-Path Settings
 
-Located in `shared/config/src/performance.ts`:
+These settings are configured via environment variables and code defaults:
 
 | Setting | Description | Default | ADR |
 |---------|-------------|---------|-----|
@@ -420,7 +461,7 @@ See [SECRETS_MANAGEMENT.md](security/SECRETS_MANAGEMENT.md) for detailed guidanc
 |--------|---------|----------|
 | `PRIVATE_KEY` | Environment variable | Manual |
 | `REDIS_URL` | Environment variable | On compromise |
-| `TENDERLY_ACCESS_KEY` | Environment variable | Quarterly |
+| `TENDERLY_API_KEY` | Environment variable | Quarterly |
 | `FLASHBOTS_AUTH_KEY` | Environment variable | On compromise |
 
 ### MEV Protection
@@ -570,9 +611,9 @@ mev_fallback_submissions_total{chain="bsc",reason="bloxroute_timeout"}
 
 | Setting | Description | Default | ADR |
 |---------|-------------|---------|-----|
-| `CIRCUIT_FAILURE_THRESHOLD` | Failures to open | `5` | ADR-018 |
-| `CIRCUIT_RESET_TIMEOUT_MS` | Time before half-open | `60000` | ADR-018 |
-| `CIRCUIT_HALF_OPEN_REQUESTS` | Test requests | `3` | ADR-018 |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Failures to open | `5` | ADR-018 |
+| `CIRCUIT_BREAKER_COOLDOWN_MS` | Time before half-open | `300000` | ADR-018 |
+| `CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS` | Test requests in half-open state | `1` | ADR-018 |
 
 ---
 
@@ -589,9 +630,12 @@ mev_fallback_submissions_total{chain="bsc",reason="bloxroute_timeout"}
 
 ### Loading Order
 
-1. `.env` file (if exists)
-2. Environment variables (override .env)
-3. TypeScript defaults (fallback)
+Implemented in `scripts/lib/load-env.js`. Precedence (highest to lowest):
+
+1. Existing `process.env` values (shell/CI overrides) -- highest priority
+2. `.env.local` values (override `.env`, gitignored)
+3. `.env` values (base configuration)
+4. Code defaults (TypeScript fallbacks)
 
 ---
 
@@ -600,14 +644,15 @@ mev_fallback_submissions_total{chain="bsc",reason="bloxroute_timeout"}
 The system validates configuration on startup:
 
 ```bash
-npm run validate:config
+npm run validate:deployment
 ```
 
 This checks:
 - All required environment variables are set
 - RPC URLs are reachable
-- Chain IDs match expected values
-- Wallet has sufficient balance
+- Redis connectivity
+- Contract addresses are configured
+- Gas price sanity checks
 
 ---
 

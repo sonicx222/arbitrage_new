@@ -85,12 +85,17 @@ The monitoring stack provides comprehensive observability for the arbitrage syst
 
 ### Service Requirements
 
-All arbitrage services must expose metrics at `/metrics` endpoint:
+Each service exposes Prometheus metrics at its own endpoint:
 
 ```bash
-# Check metrics endpoint
-curl http://localhost:3000/metrics
-# Should return Prometheus format metrics
+# Coordinator (Express app — metrics at /api/metrics/prometheus)
+curl http://localhost:3000/api/metrics/prometheus
+
+# Execution Engine (createSimpleHealthServer — metrics at /metrics)
+curl http://localhost:3005/metrics
+
+# Partition Detectors have /health and /stats but no /metrics endpoint
+# Scrape /stats for operational data or rely on OpenTelemetry export
 ```
 
 ### Access Requirements
@@ -188,11 +193,11 @@ rule_files:
 
 # Scrape configurations
 scrape_configs:
-  # Coordinator service
+  # Coordinator service (Express — metrics at /api/metrics/prometheus)
   - job_name: 'arbitrage-coordinator'
     static_configs:
       - targets: ['host.docker.internal:3000']
-    metrics_path: '/metrics'
+    metrics_path: '/api/metrics/prometheus'
 
   # Partition detectors (4 instances)
   - job_name: 'arbitrage-partition-asia'
@@ -227,10 +232,10 @@ scrape_configs:
       - targets: ['host.docker.internal:3006']
     metrics_path: '/metrics'
 
-  # Mempool detector
+  # Mempool detector (optional, port 3008)
   - job_name: 'arbitrage-mempool'
     static_configs:
-      - targets: ['host.docker.internal:3007']
+      - targets: ['host.docker.internal:3008']
     metrics_path: '/metrics'
 
   # Prometheus self-monitoring

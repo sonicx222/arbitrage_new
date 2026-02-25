@@ -5,7 +5,7 @@ Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading
 # System Overview
 
 **Chains:** 11 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Solana)
-**DEXs:** 44+ across all chains
+**DEXs:** 64 operational (57 EVM + 7 Solana)
 **Architecture:** Partitioned detectors (4 partitions), Redis Streams (ADR-002), L1 Price Matrix with SharedArrayBuffer (ADR-005), Worker threads for path finding (ADR-012), Circuit breakers (ADR-018)
 **Stack:** TypeScript, Node.js, Solidity ^0.8.19, Hardhat, ethers v6, Jest, OpenZeppelin 4.9.6
 
@@ -257,7 +257,7 @@ When making changes:
 - `forceApprove` handles non-zero to non-zero approvals safely (USDT pattern)
 - Flash loan callbacks are implicitly protected by calling function's `nonReentrant`
 - `totalProfits` accumulator mixes denominations (legacy) -- use `tokenProfits` per-asset mapping instead
-- Token address configs vary by chain -- check `contracts/scripts/lib/addresses.ts` for coverage gaps
+- Token address configs vary by chain -- check `contracts/deployments/addresses.ts` for coverage gaps
 - `minimumProfit` is enforced non-zero (setter rejects 0) -- prevents grief attacks via break-even paths
 - Router validation is per-step (no caching) -- each step independently checks `approvedRouters.contains()`
 - Profit tracking follows CEI pattern -- state updates before external interactions

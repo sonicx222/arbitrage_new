@@ -28,9 +28,9 @@ export type { FlashLoanProtocol } from '@arbitrage/types';
  * Flash loan protocol availability per chain
  *
  * Key insights:
- * - Aave V3: Best coverage on major EVM chains (8 chains)
+ * - Aave V3: Best coverage on major EVM chains (6 mainnet chains)
  * - Balancer V2: Strong on Ethereum L1 and major L2s (6 chains)
- * - PancakeSwap V3: Best for BSC and zkSync ecosystems (7 chains)
+ * - PancakeSwap V3: Best for BSC and zkSync ecosystems (6 mainnet chains)
  * - SyncSwap: zkSync Era only (1 chain, Linea planned)
  *
  * Updated: 2026-02-11
@@ -333,12 +333,13 @@ export function validateFlashLoanSupport(
 /**
  * Get the best available flash loan protocol for a chain
  *
- * Preference order (by fee, lowest first):
+ * Preference order (by fee, lowest first, only protocols with deployed contracts):
  * 1. Balancer V2 (0% fee)
  * 2. DAI Flash Mint (0.01% fee, Ethereum-only, DAI-only)
  * 3. Aave V3 (0.09% fee)
  * 4. PancakeSwap V3 (0.01-1% fee, pool-dependent)
  * 5. SyncSwap (0.3% fee)
+ * 6. Morpho (0% fee — demoted until MorphoFlashArbitrage.sol is implemented)
  *
  * @param chain - Chain identifier
  * @returns Preferred protocol or null if none available
@@ -352,12 +353,12 @@ export function validateFlashLoanSupport(
  */
 export function getPreferredProtocol(chain: string): FlashLoanProtocol | null {
   const preferences: FlashLoanProtocol[] = [
-    'morpho', // 0% fee - zero-fee flash loans (Ethereum + Base)
     'balancer_v2', // 0% fee - always best if available
     'dai_flash_mint', // 0.01% fee - Ethereum-only, DAI-only
-    'aave_v3', // 0.09% fee - second best
+    'aave_v3', // 0.09% fee - widely available
     'pancakeswap_v3', // 0.01-1% fee - varies by pool
     'syncswap', // 0.3% fee - higher than Aave
+    'morpho', // 0% fee - demoted: no MorphoFlashArbitrage.sol contract yet
   ];
 
   for (const protocol of preferences) {
