@@ -428,7 +428,7 @@ export function createChainInstance(chainId: string): ChainInstance | null {
   }
 
   const dexes = getEnabledDexes(chainId);
-  const tokens = CORE_TOKENS[chainId] || [];
+  const tokens = CORE_TOKENS[chainId] ?? [];
 
   // FIX: Use wsFallbackUrls if primary wsUrl is missing (rpcUrl won't work for WebSocket)
   const effectiveWsUrl = chain.wsUrl ||
@@ -492,7 +492,7 @@ export function calculatePartitionResources(partitionId: string): {
   // Token factor
   let totalTokens = 0;
   for (const chainId of partition.chains) {
-    const tokens = CORE_TOKENS[chainId] || [];
+    const tokens = CORE_TOKENS[chainId] ?? [];
     totalTokens += tokens.length;
   }
   const tokenMemory = totalTokens * 2; // 2MB per token
@@ -503,7 +503,7 @@ export function calculatePartitionResources(partitionId: string): {
     let totalBlockTime = 0;
     for (const chainId of partition.chains) {
       const chain = CHAINS[chainId];
-      totalBlockTime += chain?.blockTime || 10;
+      totalBlockTime += chain?.blockTime ?? 10;
     }
     avgBlockTime = totalBlockTime / partition.chains.length;
   }

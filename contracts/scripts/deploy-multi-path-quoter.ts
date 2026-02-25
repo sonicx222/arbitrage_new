@@ -108,8 +108,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(PIPELINE_CONFIG);
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'multi-path-quoter-registry.json', 'MultiPathQuoter');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'multi-path-quoter-registry.json', 'MultiPathQuoter');
+  printDeploymentSummary(result);
   printMultiPathQuoterNextSteps(result);
 
   console.log('Deployment complete!');

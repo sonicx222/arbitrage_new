@@ -141,8 +141,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(buildConfig(factoryAddress));
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'pancakeswap-registry.json', 'PancakeSwapFlashArbitrage');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'pancakeswap-registry.json', 'PancakeSwapFlashArbitrage');
+  printDeploymentSummary(result);
   printNextSteps(result, networkName);
 }
 

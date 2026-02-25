@@ -1143,7 +1143,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       // Context is now passed via calldata, so invalid/empty data causes decode revert
       await expect(
         flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(100, 0, '0x')
-      ).to.be.reverted;
+      ).to.be.revertedWithoutReason();
 
       await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
     });

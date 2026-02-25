@@ -106,7 +106,6 @@ contract PancakeSwapFlashArbitrage is
     error PoolAlreadyWhitelisted();
     error PoolNotWhitelisted();
     error EmptyPoolsArray();
-    error PoolNotFound();
     error PoolNotFromFactory();
     error InsufficientPoolLiquidity();
     error BatchTooLarge(uint256 requested, uint256 maximum);

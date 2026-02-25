@@ -752,11 +752,9 @@ describe('CommitRevealArbitrage Execution', () => {
       expect(revealedEvent).to.not.be.undefined;
     });
 
-    it('should enforce profit threshold via InsufficientProfit (not BelowMinimumProfit)', async () => {
-      // Note: BelowMinimumProfit is declared at CommitRevealArbitrage.sol:183 but is unused.
+    it('should enforce profit threshold via InsufficientProfit', async () => {
       // BaseFlashArbitrage._verifyAndTrackProfit() uses InsufficientProfit for all profit
-      // threshold checks. This test documents that the contract-level minimumProfit
-      // enforcement uses InsufficientProfit, not BelowMinimumProfit.
+      // threshold checks, including the contract-level minimumProfit enforcement.
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
       await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
@@ -819,7 +817,7 @@ describe('CommitRevealArbitrage Execution', () => {
         salt: salt,
       };
 
-      // The profit check uses InsufficientProfit from BaseFlashArbitrage, not BelowMinimumProfit
+      // The profit check uses InsufficientProfit from BaseFlashArbitrage
       await expect(
         commitRevealArbitrage.connect(user).reveal(revealParams)
       ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InsufficientProfit');

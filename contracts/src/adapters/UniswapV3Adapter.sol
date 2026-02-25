@@ -248,7 +248,12 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
                     recipient: recipient,
                     deadline: deadline,
                     amountIn: currentAmount,
-                    amountOutMinimum: 0, // We check total output at the end
+                    // Known trade-off: intermediate hops use 0 slippage protection.
+                    // MEV could sandwich individual hops, but final output is validated
+                    // against amountOutMin in the calling contract. Per-hop minimums would
+                    // need off-chain quote simulation with marginal benefit since the
+                    // overall arbitrage profit check catches net losses.
+                    amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0  // No price limit
                 })
             );

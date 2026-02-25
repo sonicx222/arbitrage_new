@@ -493,12 +493,9 @@ describe('CommitRevealArbitrage Security', () => {
       ).to.be.revertedWithCustomError(commitRevealArbitrage, 'RouterNotApproved');
     });
 
-    it('should revert with CommitmentNotFound (not InvalidCommitmentHash) on wrong reveal params', async () => {
-      // Note: InvalidCommitmentHash is declared at CommitRevealArbitrage.sol:180 but is
-      // unreachable. When reveal params differ from the committed params, the keccak256
-      // hash of the reveal params produces a completely different hash that does not match
-      // any stored commitment, so the lookup hits CommitmentNotFound before
-      // InvalidCommitmentHash could ever be reached. This test documents that behavior.
+    it('should revert with CommitmentNotFound on wrong reveal params', async () => {
+      // When reveal params differ from the committed params, the keccak256 hash produces
+      // a different key that doesn't match any stored commitment, so CommitmentNotFound fires.
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
       await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());

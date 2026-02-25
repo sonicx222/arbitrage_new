@@ -116,8 +116,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(buildConfig(aavePoolAddress));
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'registry.json', 'FlashLoanArbitrage');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'registry.json', 'FlashLoanArbitrage');
+  printDeploymentSummary(result);
   printNextSteps(result, networkName);
 }
 

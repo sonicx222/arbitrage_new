@@ -228,10 +228,8 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     error CommitmentAlreadyRevealed();
     error CommitmentTooRecent();
     error CommitmentExpired();
-    error InvalidCommitmentHash();
     error UnauthorizedRevealer();
     error BatchTooLarge(uint256 provided, uint256 max);
-    error BelowMinimumProfit();
     error InvalidDeadline();
     error InvalidCommitAge();
     // Note: Common errors (RouterNotApproved, InsufficientProfit, InvalidRouterAddress,
@@ -248,8 +246,8 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      */
     constructor(address _owner) BaseFlashArbitrage(_owner) {
         // Zero-address validation handled by BaseFlashArbitrage constructor
-        // minimumProfit inherited from BaseFlashArbitrage (defaults to 0)
-        // MUST be configured by owner before use
+        // minimumProfit inherited from BaseFlashArbitrage (defaults to 1e14 = 0.0001 ETH)
+        // Reconfigure via setMinimumProfit() for chain-specific thresholds
         // Note: Commit+reveal gas cost ~315k gas (~$10 @ 20 gwei, $2500 ETH)
         // Recommend: 0.01 ETH (~$25) for mainnet, 0.005 ETH for L2s
         maxCommitAgeBlocks = DEFAULT_MAX_COMMIT_AGE;
@@ -400,7 +398,11 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         RevealParams calldata params
     ) internal returns (uint256 profit) {
         // Mark as revealed and cleanup storage (reentrancy protection + gas refund)
-        // Preserve revealed=true for external queries; zero blockNumber/committer for gas refund
+        // Note: `revealed` is redundant for internal logic (blockNumber=0 catches revealed
+        // entries in all code paths), but preserved for the external revealed() view function
+        // used by off-chain indexers. All 3 fields pack into one 32-byte slot (29 bytes).
+        // To fully reclaim the storage refund, replace with `delete _commitments[commitmentHash]`
+        // and remove the revealed() view function.
         CommitmentInfo storage info = _commitments[commitmentHash];
         info.revealed = true;
         info.blockNumber = 0;

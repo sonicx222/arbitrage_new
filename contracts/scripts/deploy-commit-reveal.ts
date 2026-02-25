@@ -156,8 +156,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(buildConfig());
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'commit-reveal-registry.json', 'CommitRevealArbitrage');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'commit-reveal-registry.json', 'CommitRevealArbitrage');
+  printDeploymentSummary(result);
   printCommitRevealNextSteps(result);
 
   console.log('Deployment complete!');

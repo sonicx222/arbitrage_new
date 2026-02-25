@@ -18,11 +18,12 @@ import "../interfaces/IDexRouter.sol";
  *
  * ## Refactoring Benefits (v2.0.0)
  *
- * This base contract eliminates 1,135 lines of duplicate code across 5 flash arbitrage contracts:
+ * This base contract eliminates 1,135 lines of duplicate code across 6 flash arbitrage contracts:
  * - FlashLoanArbitrage (Aave V3)
- * - PancakeSwapFlashArbitrage (PancakeSwap V3)
  * - BalancerV2FlashArbitrage (Balancer V2 Vault)
+ * - PancakeSwapFlashArbitrage (PancakeSwap V3)
  * - SyncSwapFlashArbitrage (SyncSwap/zkSync Era)
+ * - DaiFlashMintArbitrage (MakerDAO DssFlash, EIP-3156)
  * - CommitRevealArbitrage (Commit-reveal MEV protection)
  *
  * ## Common Features
@@ -200,7 +201,6 @@ abstract contract BaseFlashArbitrage is
     error TransactionTooOld();
     error InvalidMinimumProfit();
     error InvalidGasLimit();
-    error InvalidAmountsLength();
 
     // ==========================================================================
     // Constructor

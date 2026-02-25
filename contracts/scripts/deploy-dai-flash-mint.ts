@@ -162,8 +162,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(buildConfig(dssFlashAddress, daiAddress));
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'dai-flash-mint-registry.json', 'DaiFlashMintArbitrage');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'dai-flash-mint-registry.json', 'DaiFlashMintArbitrage');
+  printDeploymentSummary(result);
   printNextSteps(result, networkName);
 }
 

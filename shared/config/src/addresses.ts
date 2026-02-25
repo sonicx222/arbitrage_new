@@ -277,6 +277,37 @@ export function hasMorphoBlue(chain: string): boolean {
 }
 
 // =============================================================================
+// MakerDAO DssFlash Addresses
+// =============================================================================
+
+/**
+ * MakerDAO DssFlash addresses by chain.
+ * EIP-3156 flash lending facility for DAI (0.01% fee).
+ * DAI-only — mints DAI via flash loan rather than borrowing from a pool.
+ *
+ * @see https://docs.makerdao.com/smart-contract-modules/flash-mint-module
+ * @see contracts/scripts/deploy-dai-flash-mint.ts
+ */
+export const DSS_FLASH_ADDRESSES: Readonly<Record<string, string>> = {
+  ethereum: '0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853',
+} as const;
+
+/**
+ * Get DssFlash address for a chain.
+ * @returns DssFlash address or undefined if not available
+ */
+export function getDssFlash(chain: string): string | undefined {
+  return DSS_FLASH_ADDRESSES[chain];
+}
+
+/**
+ * Check if DssFlash (DAI Flash Mint) is available on a chain.
+ */
+export function hasDssFlash(chain: string): boolean {
+  return chain in DSS_FLASH_ADDRESSES;
+}
+
+// =============================================================================
 // Address Validation Helpers (FIX: Issue 1.2)
 // =============================================================================
 
@@ -346,7 +377,7 @@ export const COMMIT_REVEAL_CONTRACTS: Readonly<Record<string, string>> = {
  * @returns Contract address or empty string if not deployed
  */
 export function getCommitRevealContract(chain: string): string {
-  return COMMIT_REVEAL_CONTRACTS[chain] || '';
+  return COMMIT_REVEAL_CONTRACTS[chain] ?? '';
 }
 
 /**

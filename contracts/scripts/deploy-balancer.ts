@@ -131,8 +131,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(buildConfig(vaultAddress));
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
+  printDeploymentSummary(result);
   printNextSteps(result, networkName);
 }
 

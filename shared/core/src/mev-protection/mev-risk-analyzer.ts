@@ -541,7 +541,7 @@ export function createMevRiskAnalyzer(config?: MevRiskAnalyzerConfig): MevRiskAn
 
   try {
     // require() is intentional — synchronous loading for CommonJS target.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { MEV_CONFIG } = require('@arbitrage/config');
 
     if (MEV_CONFIG.adaptiveRiskScoring.enabled) {

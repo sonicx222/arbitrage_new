@@ -1467,7 +1467,7 @@ export interface DeploymentPipelineConfig {
  * Pipeline result containing the deployment data and deployed contract instance
  */
 export interface DeploymentPipelineResult {
-  result: Record<string, any>;
+  result: DeploymentResult;
   contract: any;
 }
 
@@ -1623,7 +1623,7 @@ export async function deployContractPipeline(
   }
 
   // Build result
-  const result: Record<string, any> = {
+  const result: DeploymentResult = {
     network: networkName,
     chainId,
     contractAddress,

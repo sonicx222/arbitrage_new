@@ -135,8 +135,8 @@ async function main(): Promise<void> {
   const { result } = await deployContractPipeline(buildConfig(vaultAddress));
 
   // Save and print summary
-  await saveDeploymentResult(result as any, 'syncswap-registry.json', 'SyncSwapFlashArbitrage');
-  printDeploymentSummary(result as any);
+  await saveDeploymentResult(result, 'syncswap-registry.json', 'SyncSwapFlashArbitrage');
+  printDeploymentSummary(result);
   printNextSteps(result, networkName);
 }
 
