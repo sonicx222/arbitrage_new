@@ -41,6 +41,7 @@ interface NetworkDeployment {
   PancakeSwapFlashArbitrage?: string | null;
   BalancerV2FlashArbitrage?: string | null;
   SyncSwapFlashArbitrage?: string | null;
+  DaiFlashMintArbitrage?: string | null;
   CommitRevealArbitrage?: string | null;
   MultiPathQuoter?: string | null;
   deployedAt?: number | null;
@@ -87,6 +88,7 @@ const CONTRACT_TYPES = [
   'PancakeSwapFlashArbitrage',
   'BalancerV2FlashArbitrage',
   'SyncSwapFlashArbitrage',
+  'DaiFlashMintArbitrage',
   'CommitRevealArbitrage',
   'MultiPathQuoter',
 ] as const;
@@ -279,6 +281,7 @@ function generateTypeScriptCode(addresses: AddressesByType): string {
     PancakeSwapFlashArbitrage: 'PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES',
     BalancerV2FlashArbitrage: 'BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES',
     SyncSwapFlashArbitrage: 'SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES',
+    DaiFlashMintArbitrage: 'DAI_FLASH_MINT_ARBITRAGE_ADDRESSES',
     CommitRevealArbitrage: 'COMMIT_REVEAL_ARBITRAGE_ADDRESSES',
   };
 

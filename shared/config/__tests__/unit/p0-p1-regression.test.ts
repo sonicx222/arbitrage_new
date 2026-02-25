@@ -177,7 +177,7 @@ describe('Fix 5: mainnetChains count', () => {
   it('should match actual mainnet entry count in FLASH_LOAN_AVAILABILITY', () => {
     const testnetPatterns = ['sepolia', 'devnet', 'testnet', 'goerli'];
     const mainnetCount = Object.keys(FLASH_LOAN_AVAILABILITY).filter(
-      (key) => !testnetPatterns.some((pattern) => key.includes(pattern))
+      (key) => !testnetPatterns.some((pattern) => key.toLowerCase().includes(pattern))
     ).length;
     expect(FLASH_LOAN_STATS.mainnetChains).toBe(mainnetCount);
   });

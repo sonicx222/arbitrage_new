@@ -216,7 +216,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     morpho: false,
   },
 
-  'arbitrum-sepolia': {
+  arbitrumSepolia: {
     aave_v3: true, // Aave V3 Pool: 0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff
     balancer_v2: false,
     pancakeswap_v3: false,
@@ -386,7 +386,7 @@ export class FlashLoanNotSupportedError extends Error {
 /**
  * Testnet chain identifiers used for statistics computation.
  */
-const TESTNET_CHAINS = new Set(['sepolia', 'arbitrum-sepolia', 'zksync-sepolia', 'solana-devnet']);
+const TESTNET_CHAINS = new Set(['sepolia', 'arbitrumSepolia', 'zksync-sepolia', 'solana-devnet']);
 
 /**
  * Flash loan protocol statistics (for monitoring and planning)

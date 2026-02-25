@@ -530,7 +530,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /// @notice Emitted when capital is recovered from an expired commitment
     event CommitmentRecovered(
         bytes32 indexed commitmentHash,
-        address indexed committer,
+        address indexed recipient,
         address indexed asset,
         uint256 amount
     );
@@ -538,17 +538,19 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /// @notice Thrown when attempting to recover a commitment that hasn't expired yet
     error CommitmentNotExpired();
 
+    /// @notice Thrown when recipient address is zero
+    error ZeroAddress();
+
     /**
      * @notice Recover capital from an expired commitment
-     * @dev Allows the original committer to recover tokens deposited for a commitment
-     *      that has expired past maxCommitAgeBlocks. This prevents capital from
-     *      being permanently trapped when a reveal fails or is abandoned.
-     *
-     *      The committer must specify the asset and amount because the contract
-     *      only stores the commitment hash and block number, not the deposit details.
+     * @dev Allows the contract owner to recover tokens from an expired commitment.
+     *      Restricted to onlyOwner because the contract only stores the commitment
+     *      hash and block number — not the deposited asset/amount. Without deposit
+     *      tracking, an open-access version would allow an attacker with any expired
+     *      commitment to specify arbitrary asset/amount and drain contract funds.
      *
      * Security:
-     * - Only the original committer can call (prevents unauthorized withdrawals)
+     * - onlyOwner prevents arbitrary token drain (SEC-003)
      * - Commitment must exist and not be revealed
      * - Commitment must be expired (past maxCommitAgeBlocks)
      * - nonReentrant prevents reentrancy via token transfer callbacks
@@ -558,12 +560,14 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * @param commitmentHash The hash of the expired commitment
      * @param asset The token address to recover
      * @param amount The amount of tokens to recover
+     * @param recipient The address to send recovered tokens to
      */
     function recoverCommitment(
         bytes32 commitmentHash,
         address asset,
-        uint256 amount
-    ) external nonReentrant whenNotPaused {
+        uint256 amount,
+        address recipient
+    ) external onlyOwner nonReentrant whenNotPaused {
         CommitmentInfo storage info = _commitments[commitmentHash];
         uint256 commitBlock = uint256(info.blockNumber);
 
@@ -573,19 +577,19 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         // Validate not already revealed
         if (info.revealed) revert CommitmentAlreadyRevealed();
 
-        // Validate caller is the original committer
-        if (info.committer != msg.sender) revert UnauthorizedRevealer();
-
         // Validate commitment is expired (past maxCommitAgeBlocks)
         if (block.number <= commitBlock + maxCommitAgeBlocks) revert CommitmentNotExpired();
+
+        // Validate recipient
+        if (recipient == address(0)) revert ZeroAddress();
 
         // Clear commitment state before transfer (CEI pattern)
         delete _commitments[commitmentHash];
 
-        // Transfer capital back to committer
-        IERC20(asset).safeTransfer(msg.sender, amount);
+        // Transfer capital to specified recipient (typically the original committer)
+        IERC20(asset).safeTransfer(recipient, amount);
 
-        emit CommitmentRecovered(commitmentHash, msg.sender, asset, amount);
+        emit CommitmentRecovered(commitmentHash, recipient, asset, amount);
     }
 
     // ==========================================================================
