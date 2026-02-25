@@ -1,8 +1,8 @@
 # Current Architecture State
 
-**Date:** February 24, 2026
-**Version:** 1.2
-**Last Updated:** 2026-02-24
+**Date:** February 25, 2026
+**Version:** 1.3
+**Last Updated:** 2026-02-25
 
 ---
 
@@ -22,7 +22,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 |---------|---------------|---------------|------|-------------|
 | **Coordinator** | 3000 | 3000 | Core | Orchestrates all services, manages leader election |
 | **Partition Asia-Fast** | 3001 | 3011 | Detector | P1: BSC, Polygon, Avalanche, Fantom (Unified Detector) |
-| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode (Unified Detector) |
+| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base (Unified Detector) |
 | **Partition High-Value** | 3003 | 3013 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
 | **Partition Solana** | 3004 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3005 | 3015 | Core | Trade execution and MEV protection |
@@ -40,32 +40,29 @@ This document provides a snapshot of the current arbitrage trading system archit
 ### P1: Asia-Fast
 - **Partition ID:** `asia-fast`
 - **Chains:** BSC, Polygon, Avalanche, Fantom
-- **Region:** Asia-Southeast-1 (Oracle Cloud)
-- **Standby:** US-West-1 (Render)
-- **Resource Profile:** Heavy (768MB)
+- **Region:** Singapore (Fly.io)
+- **Resource Profile:** Standard (512MB)
 - **Rationale:** High-throughput Asian chains with fast block times
 
 ### P2: L2-Turbo
 - **Partition ID:** `l2-turbo`
-- **Chains:** Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode
-- **Region:** Asia-Southeast-1 (Fly.io)
-- **Standby:** US-East-1 (Railway)
-- **Resource Profile:** Heavy (768MB) -- upgraded from Standard due to 7 chains
-- **Rationale:** Ethereum L2 rollups with sub-second confirmations, including 4 emerging L2s (Blast, Scroll, Mantle, Mode)
+- **Chains:** Arbitrum, Optimism, Base
+- **Region:** Singapore (Fly.io)
+- **Resource Profile:** Standard (512MB)
+- **Rationale:** Ethereum L2 rollups with sub-second confirmations
+- **Future:** Blast, Scroll, Mantle, Mode will be added when their DEX addresses are verified (currently placeholders)
 
 ### P3: High-Value
 - **Partition ID:** `high-value`
 - **Chains:** Ethereum, zkSync, Linea
-- **Region:** US-East-1 (Oracle Cloud)
-- **Standby:** EU-West-1 (GCP)
+- **Region:** US-East (Fly.io)
 - **Resource Profile:** Heavy (768MB)
 - **Rationale:** High-value transactions requiring reliability
 
 ### P4: Solana-Native
 - **Partition ID:** `solana-native`
 - **Chains:** Solana
-- **Region:** US-West-1 (Fly.io)
-- **Standby:** US-East-1 (Railway)
+- **Region:** US-West (Fly.io)
 - **Resource Profile:** Heavy (512MB)
 - **Rationale:** Non-EVM chain requiring dedicated handling
 - **Execution:** Supported via Jupiter V6 + Jito bundles when `FEATURE_SOLANA_EXECUTION=true` (ADR-034)

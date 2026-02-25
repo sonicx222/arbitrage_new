@@ -438,9 +438,9 @@ Enterprise network restrictions blocked all web access (DeFiLlama, Blastscan, of
 |-----|-------------|--------|--------|
 | ~~**No Fly.io config for asia-fast partition**~~ | ~~BSC/Polygon/Avalanche/Fantom have no deployment target~~ | ~~P1 partition can't be deployed~~ | **DONE** — `partition-asia-fast.toml` exists (Singapore region) |
 | ~~**No Fly.io config for cross-chain-detector**~~ | ~~Service exists but can't be deployed to Fly.io~~ | ~~Cross-chain detection unavailable in production~~ | **DONE** — `cross-chain-detector.toml` exists (sjc region) |
-| **Docker partition chain assignments differ from CURRENT_STATE.md** | `docker-compose.partition.yml` vs `CURRENT_STATE.md` show different chain-to-partition mappings | Confusion about which chains run where | TODO |
+| ~~**Docker partition chain assignments differ from CURRENT_STATE.md**~~ | ~~`docker-compose.partition.yml` vs `CURRENT_STATE.md` show different chain-to-partition mappings~~ | ~~Confusion about which chains run where~~ | **DONE** — CURRENT_STATE.md updated to match |
 | ~~**Fly.io deploy.sh only prompts for Upstash Redis**~~ | ~~`deploy.sh` references "Upstash Redis connection URL"~~ | ~~Should reference self-hosted Redis~~ | **DONE** — now says "self-hosted recommended" |
-| **No batch deployment script** | Must deploy each contract to each chain individually | Tedious, error-prone multi-chain deployment | TODO |
+| ~~**No batch deployment script**~~ | ~~Must deploy each contract to each chain individually~~ | ~~Tedious, error-prone multi-chain deployment~~ | **DONE** — `contracts/scripts/deploy-batch.ts` |
 | ~~**`generate-addresses.ts` doesn't preserve manual sections**~~ | ~~Generated file loses APPROVED_ROUTERS, TOKEN_ADDRESSES, helpers~~ | ~~Must manually merge after generation~~ | **DONE** — marker-based preservation implemented |
 
 ---
@@ -501,7 +501,11 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 - [x] **A.9** ~~Add BSC/Linea SwapRouter addresses to `deploy-v3-adapter.ts`~~ — DONE (PancakeSwap V3 SmartRouter; Avalanche/Fantom have no V3 DEXs — N/A)
 - [x] **A.10** ~~Fix `generate-addresses.ts` to preserve manual sections~~ — DONE (marker-based extraction)
 
-### Phase B: Research Emerging L2 DEX Addresses (Manual)
+### Phase B: Research Emerging L2 DEX Addresses (Manual — BLOCKED by enterprise network restrictions)
+
+> **Note:** Automated research attempted 2026-02-25 but all block explorer and documentation sites
+> (Blastscan, Scrollscan, Mantlescan, Modescan, DeFiLlama, protocol docs) are blocked by enterprise
+> network restrictions. These items require manual browser research from an unrestricted environment.
 
 - [ ] **B.1** Research Blast DEX addresses (Thruster V3, Thruster V2, BladeSwap, Ring Protocol)
 - [ ] **B.2** Research Scroll DEX addresses (SyncSwap + Vault, SpaceFi, Ambient, Zebra)
@@ -566,12 +570,12 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 
 - [x] **G.1** ~~Create Fly.io config for asia-fast partition~~ — DONE (`partition-asia-fast.toml`, Singapore region)
 - [x] **G.2** ~~Create Fly.io config for cross-chain-detector~~ — DONE (`cross-chain-detector.toml`, sjc region)
-- [ ] **G.3** Reconcile docker-compose partition chain assignments with CURRENT_STATE.md
+- [x] **G.3** ~~Reconcile docker-compose partition chain assignments with CURRENT_STATE.md~~ — DONE (CURRENT_STATE.md updated: L2-Turbo now shows 3 chains, emerging L2s noted as future, regions updated to Fly.io)
 - [x] **G.4** ~~Update Fly.io deploy.sh Redis reference to self-hosted~~ — DONE (now says "self-hosted recommended")
 - [ ] **G.5** Write mainnet deployment runbook
 - [ ] **G.6** Write contract verification guide
 - [ ] **G.7** Write post-deployment verification checklist
-- [ ] **G.8** Create batch deployment script for multi-chain deployment
+- [x] **G.8** ~~Create batch deployment script for multi-chain deployment~~ — DONE (`contracts/scripts/deploy-batch.ts` with manifest, dry-run, network/contract filtering, registry skip)
 - [ ] **G.9** Document ownership transfer to multi-sig procedure
 
 ---
