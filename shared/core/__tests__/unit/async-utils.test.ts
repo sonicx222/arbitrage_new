@@ -24,7 +24,7 @@ import {
   gracefulShutdown,
   waitWithTimeouts,
 } from '@arbitrage/core/async';
-import { withRetryAsync } from '@arbitrage/core';
+import { withRetryAsync } from '@arbitrage/core/async';
 
 // =============================================================================
 // Timeout Utilities Tests
