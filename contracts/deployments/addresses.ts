@@ -30,7 +30,7 @@ import {
  *
  * P1-006 FIX: Added 'baseSepolia' (referenced in deploy scripts but missing from type)
  */
-export type TestnetChain = 'sepolia' | 'arbitrumSepolia' | 'baseSepolia' | 'zksync-testnet' | 'zksync-sepolia';
+export type TestnetChain = 'sepolia' | 'arbitrumSepolia' | 'baseSepolia' | 'bscTestnet' | 'polygonAmoy' | 'zksync-testnet' | 'zksync-sepolia';
 
 /**
  * EVM mainnet chain identifiers
@@ -87,6 +87,8 @@ export const TESTNET_CHAINS: readonly TestnetChain[] = [
   'sepolia',
   'arbitrumSepolia',
   'baseSepolia',  // P1-006 FIX: Base Sepolia testnet
+  'bscTestnet',
+  'polygonAmoy',
   'zksync-testnet',
   'zksync-sepolia',  // Alias for zksync-testnet (zkSync Era Sepolia)
 ] as const;

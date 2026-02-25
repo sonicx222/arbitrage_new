@@ -14,12 +14,24 @@ import "../interfaces/ISwapRouterV3.sol";
  *
  * Same formula as MockDexRouter and MockUniswapV3Router for consistency.
  *
+ * ## Known Limitation: Linear Pricing
+ *
+ * This mock uses a linear pricing formula, which perfectly masks the getAmountsIn()
+ * approximation error in BaseFlashArbitrage. Real Uniswap V3 AMM curves are nonlinear —
+ * forward and reverse quotes differ by 0.1-5% depending on pool depth and tick spacing.
+ * Tests pass with this mock but would show different behavior on mainnet. If testing
+ * price impact accuracy, consider creating a nonlinear mock with sqrt-price curves.
+ *
+ * See: Finding #10 in docs/reports/DEEP_ANALYSIS_GIT_DIFF_2026-02-25.md
+ *
  * ## Note on quoteExactInputSingle
  *
  * The real QuoterV2 is NOT a view function (it uses state-modifying calls internally
  * and reverts to return results). Our interface declares it as `view` to satisfy
  * IDexRouter's view constraint on getAmountsOut/getAmountsIn. The mock is naturally
  * view-compatible since it only reads from storage mappings.
+ *
+ * @custom:version 1.0.0
  */
 contract MockQuoterV2 is IQuoterV2 {
     // Exchange rates: tokenIn => tokenOut => rate (output per 1e18 input)

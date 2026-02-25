@@ -668,4 +668,210 @@ describe('CommitRevealArbitrage', () => {
         .to.emit(commitRevealArbitrage, 'Revealed');
     });
   });
+
+  // ===========================================================================
+  // 4. Recover Commitment Tests
+  // ===========================================================================
+  describe('4. Recover Commitment', () => {
+    describe('recoverCommitment()', () => {
+      it('should allow committer to recover capital from expired commitment', async () => {
+        const { commitRevealArbitrage, weth, user } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        // Fund the contract with tokens (simulating a deposit for the commitment)
+        const amount = ethers.parseEther('1');
+        await weth.mint(await commitRevealArbitrage.getAddress(), amount);
+
+        // Wait for commitment to expire (MAX_COMMIT_AGE_BLOCKS = 10)
+        await mineBlocks(11);
+
+        const balanceBefore = await weth.balanceOf(user.address);
+
+        // Recover
+        await commitRevealArbitrage.connect(user).recoverCommitment(
+          commitmentHash,
+          await weth.getAddress(),
+          amount
+        );
+
+        // Verify tokens returned
+        const balanceAfter = await weth.balanceOf(user.address);
+        expect(balanceAfter - balanceBefore).to.equal(amount);
+
+        // Verify commitment state is cleared
+        expect(await commitRevealArbitrage.commitments(commitmentHash)).to.equal(0);
+        expect(await commitRevealArbitrage.committers(commitmentHash)).to.equal(ethers.ZeroAddress);
+      });
+
+      it('should emit CommitmentRecovered event', async () => {
+        const { commitRevealArbitrage, weth, user } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        const amount = ethers.parseEther('1');
+        await weth.mint(await commitRevealArbitrage.getAddress(), amount);
+
+        // Wait for expiry
+        await mineBlocks(11);
+
+        await expect(
+          commitRevealArbitrage.connect(user).recoverCommitment(
+            commitmentHash,
+            await weth.getAddress(),
+            amount
+          )
+        )
+          .to.emit(commitRevealArbitrage, 'CommitmentRecovered')
+          .withArgs(commitmentHash, user.address, await weth.getAddress(), amount);
+      });
+
+      it('should revert when non-committer tries to recover', async () => {
+        const { commitRevealArbitrage, weth, user, attacker } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        await weth.mint(await commitRevealArbitrage.getAddress(), ethers.parseEther('1'));
+        await mineBlocks(11);
+
+        await expect(
+          commitRevealArbitrage.connect(attacker).recoverCommitment(
+            commitmentHash,
+            await weth.getAddress(),
+            ethers.parseEther('1')
+          )
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'UnauthorizedRevealer');
+      });
+
+      it('should revert when commitment has not expired', async () => {
+        const { commitRevealArbitrage, weth, user } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        await weth.mint(await commitRevealArbitrage.getAddress(), ethers.parseEther('1'));
+
+        // Only wait 5 blocks (MAX_COMMIT_AGE_BLOCKS = 10, need > 10)
+        await mineBlocks(5);
+
+        await expect(
+          commitRevealArbitrage.connect(user).recoverCommitment(
+            commitmentHash,
+            await weth.getAddress(),
+            ethers.parseEther('1')
+          )
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotExpired');
+      });
+
+      it('should revert when commitment has already been revealed', async () => {
+        const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+        // Setup for reveal
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+        await dexRouter1.setExchangeRate(
+          await weth.getAddress(),
+          await usdc.getAddress(),
+          ethers.parseUnits('2000', 6)
+        );
+        await dexRouter1.setExchangeRate(
+          await usdc.getAddress(),
+          await weth.getAddress(),
+          RATE_USDC_TO_WETH_1PCT_PROFIT
+        );
+
+        const amountIn = ethers.parseEther('1');
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: ethers.parseUnits('1900', 6),
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: ethers.parseEther('0.99'),
+          },
+        ];
+
+        const deadline = await getDeadline(500);
+        const salt = ethers.randomBytes(32);
+
+        const commitmentHash = createCommitmentHash(
+          user.address,
+          await weth.getAddress(),
+          amountIn,
+          swapPath,
+          0n,
+          deadline,
+          ethers.hexlify(salt)
+        );
+
+        // Commit and reveal
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+        await mineBlocks(1);
+        await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
+
+        await commitRevealArbitrage.connect(user).reveal({
+          asset: await weth.getAddress(),
+          amountIn,
+          swapPath,
+          minProfit: 0n,
+          deadline,
+          salt,
+        });
+
+        // Wait for expiry after reveal
+        await mineBlocks(11);
+
+        // Try to recover a revealed commitment — should fail with CommitmentNotFound
+        // because reveal() deletes the commitment entry
+        await expect(
+          commitRevealArbitrage.connect(user).recoverCommitment(
+            commitmentHash,
+            await weth.getAddress(),
+            amountIn
+          )
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
+      });
+
+      it('should revert on non-existent commitment', async () => {
+        const { commitRevealArbitrage, weth, user } = await loadFixture(deployContractsFixture);
+
+        const fakeHash = ethers.randomBytes(32);
+
+        await expect(
+          commitRevealArbitrage.connect(user).recoverCommitment(
+            fakeHash,
+            await weth.getAddress(),
+            ethers.parseEther('1')
+          )
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
+      });
+
+      it('should revert when contract is paused', async () => {
+        const { commitRevealArbitrage, weth, owner, user } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        await weth.mint(await commitRevealArbitrage.getAddress(), ethers.parseEther('1'));
+        await mineBlocks(11);
+
+        await commitRevealArbitrage.connect(owner).pause();
+
+        await expect(
+          commitRevealArbitrage.connect(user).recoverCommitment(
+            commitmentHash,
+            await weth.getAddress(),
+            ethers.parseEther('1')
+          )
+        ).to.be.revertedWith('Pausable: paused');
+      });
+    });
+  });
 });

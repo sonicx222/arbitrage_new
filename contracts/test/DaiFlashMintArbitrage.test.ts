@@ -794,6 +794,71 @@ describe('DaiFlashMintArbitrage', () => {
   });
 
   // ==========================================================================
+  // Security Tests - Reentrancy
+  // ==========================================================================
+  describe('Security - Reentrancy', () => {
+    it('should prevent reentrancy attacks via malicious router', async () => {
+      const {
+        daiArbitrage,
+        dexRouter1,
+        dai,
+        weth,
+        owner,
+        user,
+      } = await loadFixture(deployContractsFixture);
+
+      // Deploy malicious router that tries reentrancy during swap execution
+      const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
+      const maliciousRouter = await MaliciousRouterFactory.deploy(
+        await daiArbitrage.getAddress()
+      );
+
+      await daiArbitrage.connect(owner).addApprovedRouter(await maliciousRouter.getAddress());
+      await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Fund the malicious router with enough tokens (1:1 passthrough — needs matching amounts)
+      await dai.mint(await maliciousRouter.getAddress(), ethers.parseEther('100000'));
+      await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100000'));
+
+      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
+      // The malicious router does 1:1 passthrough, so we need the 2nd hop to be profitable
+      // to cover DssFlash's 0.01% fee (1 bps).
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await dai.getAddress(),
+        ethers.parseEther('2100')
+      );
+
+      // Path: DAI→WETH (malicious, 1:1 + reentrancy) → WETH→DAI (normal, profit)
+      // Use 100 DAI to stay within router funding limits (1:1 + 2100x = 210k DAI < 1M)
+      const amountIn = ethers.parseEther('100');
+      const swapPath = [
+        {
+          router: await maliciousRouter.getAddress(),
+          tokenIn: await dai.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await dai.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      await daiArbitrage
+        .connect(user)
+        .executeArbitrage(amountIn, swapPath, 0n, deadline);
+
+      // Verify the attack was actually attempted and blocked
+      expect(await maliciousRouter.attackAttempted()).to.be.true;
+      expect(await maliciousRouter.attackSucceeded()).to.be.false;
+    });
+  });
+
+  // ==========================================================================
   // 4. Pause Functionality Tests
   // ==========================================================================
   describe('4. Pause Functionality', () => {

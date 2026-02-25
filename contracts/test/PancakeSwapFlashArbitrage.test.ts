@@ -816,6 +816,64 @@ describe('PancakeSwapFlashArbitrage', () => {
       ).to.be.revertedWithCustomError(flashArbitrage, 'RouterNotApproved');
     });
 
+    it('should prevent reentrancy attacks via malicious router', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc, owner } =
+        await loadFixture(deployContractsFixture);
+
+      // Deploy malicious router that tries reentrancy during swap execution
+      const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
+      const maliciousRouter = await MaliciousRouterFactory.deploy(
+        await flashArbitrage.getAddress()
+      );
+
+      await flashArbitrage.addApprovedRouter(await maliciousRouter.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Fund the malicious router with enough tokens (1:1 passthrough)
+      await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
+      await usdc.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
+
+      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
+      // The malicious router does 1:1 passthrough, so we need the 2nd hop to be profitable
+      // to cover PancakeSwap's 0.25% flash loan fee (2500 bps).
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('1.01')
+      );
+
+      // Path: WETH→USDC (malicious, 1:1 + reentrancy) → USDC→WETH (normal, 1% profit)
+      const swapPath = [
+        {
+          router: await maliciousRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      await flashArbitrage.executeArbitrage(
+        await wethUsdcPool.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('1'),
+        swapPath,
+        0,
+        deadline
+      );
+
+      // Verify the attack was actually attempted and blocked
+      expect(await maliciousRouter.attackAttempted()).to.be.true;
+      expect(await maliciousRouter.attackSucceeded()).to.be.false;
+    });
+
     it('should enforce minimum slippage protection', async () => {
       const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc } =
         await loadFixture(deployContractsFixture);
@@ -1067,7 +1125,7 @@ describe('PancakeSwapFlashArbitrage', () => {
   // FlashLoanNotActive Security Test
   // ===========================================================================
   describe('Flash Loan Context Guard', () => {
-    it('should revert when callback called without active flash loan context', async () => {
+    it('should revert when callback called with invalid data by whitelisted pool', async () => {
       const { flashArbitrage, wethUsdcPool, owner } = await loadFixture(
         deployContractsFixture
       );
@@ -1081,10 +1139,11 @@ describe('PancakeSwapFlashArbitrage', () => {
       await owner.sendTransaction({ to: poolAddress, value: ethers.parseEther('1') });
       const poolSigner = await ethers.getSigner(poolAddress);
 
-      // Call callback directly — _flashContext.active is false
+      // Call callback directly with empty data — abi.decode fails
+      // Context is now passed via calldata, so invalid/empty data causes decode revert
       await expect(
         flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(100, 0, '0x')
-      ).to.be.revertedWithCustomError(flashArbitrage, 'FlashLoanNotActive');
+      ).to.be.reverted;
 
       await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
     });

@@ -23,6 +23,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * - Access control for router approval and fund withdrawal
  * - Emergency pause functionality
  * - Pool whitelist security (prevents malicious pool callbacks)
+ * - Calldata-based context passing (gas-optimized, no storage for flash context)
  *
  * @custom:security-contact security@arbitrage.system
  * @custom:version 2.1.0
@@ -87,25 +88,6 @@ contract PancakeSwapFlashArbitrage is
     /// @dev Critical security: Only whitelisted pools can call pancakeV3FlashCallback
     EnumerableSet.AddressSet private _whitelistedPools;
 
-    /// @notice Temporary storage for flash loan context (cleared after callback)
-    /// @dev Used to pass context from executeArbitrage to pancakeV3FlashCallback
-    FlashLoanContext private _flashContext;
-
-    // ==========================================================================
-    // Structs (Protocol-Specific)
-    // ==========================================================================
-
-    /**
-     * @notice Flash loan context passed from executeArbitrage to callback
-     * @dev Stored temporarily in contract storage, cleared after callback
-     */
-    struct FlashLoanContext {
-        address asset;           // The flash-loaned asset
-        uint256 amount;          // The flash-loaned amount
-        uint256 minProfit;       // Minimum required profit
-        bool active;             // Whether a flash loan is active (reentrancy check)
-    }
-
     // ==========================================================================
     // Events (Protocol-Specific)
     // ==========================================================================
@@ -124,8 +106,6 @@ contract PancakeSwapFlashArbitrage is
     error PoolAlreadyWhitelisted();
     error PoolNotWhitelisted();
     error EmptyPoolsArray();
-    error FlashLoanNotActive();
-    error FlashLoanAlreadyActive();
     error PoolNotFound();
     error PoolNotFromFactory();
     error InsufficientPoolLiquidity();
@@ -182,19 +162,11 @@ contract PancakeSwapFlashArbitrage is
         // Validate pool is whitelisted (security critical)
         if (!_whitelistedPools.contains(pool)) revert PoolNotWhitelisted();
 
-        // Verify flash loan is not already active (reentrancy protection)
-        if (_flashContext.active) revert FlashLoanAlreadyActive();
-
-        // Store flash loan context for callback
-        _flashContext = FlashLoanContext({
-            asset: asset,
-            amount: amount,
-            minProfit: minProfit,
-            active: true
-        });
-
-        // Encode the swap path for the callback
-        bytes memory data = abi.encode(swapPath);
+        // Encode the full flash loan context in calldata (gas optimization)
+        // Context is passed via the data parameter instead of using storage slots,
+        // saving ~20k gas per execution (avoids SSTORE/SLOAD/SSTORE-zero).
+        // This matches the pattern used by FlashLoanArbitrage and BalancerV2FlashArbitrage.
+        bytes memory data = abi.encode(swapPath, asset, amount, minProfit);
 
         // Determine which token is token0 and which is token1 in the pool
         IPancakeV3Pool poolContract = IPancakeV3Pool(pool);
@@ -229,9 +201,6 @@ contract PancakeSwapFlashArbitrage is
 
         // Initiate flash loan
         poolContract.flash(address(this), amount0, amount1, data);
-
-        // Clear flash loan context after successful execution
-        delete _flashContext;
     }
 
     /**
@@ -239,7 +208,7 @@ contract PancakeSwapFlashArbitrage is
      * @dev Must repay loan + fee to the pool for success
      * @param fee0 The fee amount in token0 due to the pool
      * @param fee1 The fee amount in token1 due to the pool
-     * @param data Encoded swap path
+     * @param data Encoded swap path, asset, amount, and minProfit
      */
     function pancakeV3FlashCallback(
         uint256 fee0,
@@ -249,37 +218,32 @@ contract PancakeSwapFlashArbitrage is
         // Security: Verify caller is a whitelisted PancakeSwap V3 pool
         if (!_whitelistedPools.contains(msg.sender)) revert InvalidFlashLoanCaller();
 
-        // Security: Verify flash loan is active (prevents direct calls)
-        if (!_flashContext.active) revert FlashLoanNotActive();
-
-        // Load flash context from storage
-        FlashLoanContext memory context = _flashContext;
-
-        // Decode swap path
-        SwapStep[] memory swapPath = abi.decode(data, (SwapStep[]));
+        // Decode flash loan context from calldata (gas optimization over storage)
+        (SwapStep[] memory swapPath, address asset, uint256 amount, uint256 minProfit) =
+            abi.decode(data, (SwapStep[], address, uint256, uint256));
 
         // Determine the fee amount based on which asset was borrowed
         IPancakeV3Pool pool = IPancakeV3Pool(msg.sender);
         address token0 = pool.token0();
-        uint256 feeAmount = (context.asset == token0) ? fee0 : fee1;
+        uint256 feeAmount = (asset == token0) ? fee0 : fee1;
 
         // Execute multi-hop swaps
-        uint256 amountReceived = _executeSwaps(context.asset, context.amount, swapPath, _getSwapDeadline());
+        uint256 amountReceived = _executeSwaps(asset, amount, swapPath, _getSwapDeadline());
 
         // Calculate required repayment and profit
-        uint256 amountOwed = context.amount + feeAmount;
+        uint256 amountOwed = amount + feeAmount;
         if (amountReceived < amountOwed) revert InsufficientProfit();
 
         uint256 profit = amountReceived - amountOwed;
 
         // Verify profit meets thresholds and update tracking (base contract)
-        _verifyAndTrackProfit(profit, context.minProfit, context.asset);
+        _verifyAndTrackProfit(profit, minProfit, asset);
 
         // Repayment: PUSH pattern - we transfer tokens directly to pool
         // PancakeSwap V3 checks pool balance after callback to verify repayment
-        IERC20(context.asset).safeTransfer(msg.sender, amountOwed);
+        IERC20(asset).safeTransfer(msg.sender, amountOwed);
 
-        emit ArbitrageExecuted(context.asset, context.amount, profit, block.timestamp);
+        emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
     }
 
     // Note: _executeSwaps and router management functions inherited from BaseFlashArbitrage
