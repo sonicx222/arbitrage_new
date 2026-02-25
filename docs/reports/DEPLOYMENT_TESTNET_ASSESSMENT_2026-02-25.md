@@ -37,9 +37,8 @@
 
 ### What's Broken or Missing
 - **1 of ~65 possible contract deployments exists** (FlashLoanArbitrage on Arbitrum Sepolia)
-- **4 emerging L2s have all-zero placeholder DEX addresses** (Blast, Scroll, Mantle, Mode)
+- **4 emerging L2s have all-zero placeholder DEX addresses** (Blast, Scroll, Mantle, Mode) — blocked by enterprise network restrictions
 - **92 `it.todo()` test stubs** for Solana price feed and swap parser
-- **No mainnet deployment runbook**, no contract verification guide, no rollback procedures
 
 ### Key Numbers
 
@@ -421,16 +420,16 @@ Enterprise network restrictions blocked all web access (DeFiLlama, Blastscan, of
 
 ### 8.2 Missing Documentation
 
-| Document | Purpose | Priority |
-|----------|---------|----------|
-| **Mainnet Deployment Runbook** | Step-by-step mainnet deployment procedure per chain | HIGH |
-| **Contract Verification Guide** | How to verify contracts on each chain's block explorer | HIGH |
-| **Post-Deployment Verification Checklist** | End-to-end validation after deployment | HIGH |
-| **Rollback Procedures** | How to roll back failed service/contract deployments | MEDIUM |
-| **Multi-sig/Ownership Transfer Guide** | Transfer contract ownership to multi-sig | MEDIUM |
-| **Gas Budget Documentation** | Expected gas costs per chain for deploy + execute | MEDIUM |
-| **CI/CD Pipeline Docs** | Automated testing and deployment pipeline | LOW |
-| **Disaster Recovery Plan** | Redis data loss, key compromise, contract pause | LOW |
+| Document | Purpose | Priority | Status |
+|----------|---------|----------|--------|
+| ~~**Mainnet Deployment Runbook**~~ | ~~Step-by-step mainnet deployment procedure per chain~~ | ~~HIGH~~ | **DONE** — `docs/guides/mainnet-deployment-runbook.md` |
+| ~~**Contract Verification Guide**~~ | ~~How to verify contracts on each chain's block explorer~~ | ~~HIGH~~ | **DONE** — `docs/guides/contract-verification-guide.md` |
+| ~~**Post-Deployment Verification Checklist**~~ | ~~End-to-end validation after deployment~~ | ~~HIGH~~ | **DONE** — `docs/guides/post-deployment-checklist.md` |
+| ~~**Rollback Procedures**~~ | ~~How to roll back failed service/contract deployments~~ | ~~MEDIUM~~ | **DONE** — included in mainnet runbook Section 6 |
+| ~~**Multi-sig/Ownership Transfer Guide**~~ | ~~Transfer contract ownership to multi-sig~~ | ~~MEDIUM~~ | **DONE** — `docs/guides/ownership-transfer-multisig.md` |
+| ~~**Gas Budget Documentation**~~ | ~~Expected gas costs per chain for deploy + execute~~ | ~~MEDIUM~~ | **DONE** — included in mainnet runbook Section 2.3 |
+| **CI/CD Pipeline Docs** | Automated testing and deployment pipeline | LOW | TODO |
+| **Disaster Recovery Plan** | Redis data loss, key compromise, contract pause | LOW | TODO |
 
 ### 8.3 Infrastructure Gaps
 
@@ -572,11 +571,11 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 - [x] **G.2** ~~Create Fly.io config for cross-chain-detector~~ — DONE (`cross-chain-detector.toml`, sjc region)
 - [x] **G.3** ~~Reconcile docker-compose partition chain assignments with CURRENT_STATE.md~~ — DONE (CURRENT_STATE.md updated: L2-Turbo now shows 3 chains, emerging L2s noted as future, regions updated to Fly.io)
 - [x] **G.4** ~~Update Fly.io deploy.sh Redis reference to self-hosted~~ — DONE (now says "self-hosted recommended")
-- [ ] **G.5** Write mainnet deployment runbook
-- [ ] **G.6** Write contract verification guide
-- [ ] **G.7** Write post-deployment verification checklist
+- [x] **G.5** ~~Write mainnet deployment runbook~~ — DONE (`docs/guides/mainnet-deployment-runbook.md`)
+- [x] **G.6** ~~Write contract verification guide~~ — DONE (`docs/guides/contract-verification-guide.md`)
+- [x] **G.7** ~~Write post-deployment verification checklist~~ — DONE (`docs/guides/post-deployment-checklist.md`)
 - [x] **G.8** ~~Create batch deployment script for multi-chain deployment~~ — DONE (`contracts/scripts/deploy-batch.ts` with manifest, dry-run, network/contract filtering, registry skip)
-- [ ] **G.9** Document ownership transfer to multi-sig procedure
+- [x] **G.9** ~~Document ownership transfer to multi-sig procedure~~ — DONE (`docs/guides/ownership-transfer-multisig.md`)
 
 ---
 
