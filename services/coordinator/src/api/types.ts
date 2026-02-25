@@ -7,7 +7,7 @@
  * @see coordinator.ts (main service)
  */
 
-import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
+import type { ServiceHealth, ArbitrageOpportunity, ILogger } from '@arbitrage/types';
 
 // =============================================================================
 // Alert Types (consolidated - single source of truth)
@@ -126,35 +126,23 @@ export interface CoordinatorStateProvider {
  * - Middleware functions
  * - External API integrations
  *
- * Use `object` instead of `unknown` for meta because:
- * - Meta should always be a key-value structure (not primitives)
- * - Provides better type safety for structured logging
- * - Consistent with Pino logger signatures
+ * Uses Record<string, unknown> for meta to be compatible with ILogger
+ * from @arbitrage/types (Task A1 consolidation).
  */
 export interface MinimalLogger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug?: (message: string, meta?: object) => void;
+  info: (message: string, meta?: Record<string, unknown>) => void;
+  error: (message: string, meta?: Record<string, unknown>) => void;
+  warn: (message: string, meta?: Record<string, unknown>) => void;
+  debug?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
 /**
  * Full logger interface for internal service operations.
  *
- * Requires debug method for detailed operational logging. Use this for:
- * - CoordinatorService internal logic
- * - Stream message handlers
- * - Background tasks and monitoring
- * - Any code requiring detailed debug logging
- *
- * Matches unified-detector's Logger interface signature.
+ * Now re-exported from @arbitrage/types for consolidation (Task A1).
+ * ILogger uses Record<string, unknown> meta — compatible with object meta.
  */
-export interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+export type Logger = ILogger;
 
 /**
  * @deprecated Use MinimalLogger instead for better clarity

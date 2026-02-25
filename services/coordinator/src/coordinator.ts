@@ -1833,7 +1833,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Log and send alert
-    this.logger.warn('Alert triggered', alert);
+    this.logger.warn('Alert triggered', { ...alert });
 
     // Send to external channels (Discord/Slack) via AlertNotifier
     if (this.alertNotifier) {

@@ -24,7 +24,7 @@
 import { ethers } from 'ethers';
 import {
   createPinoLogger,
-  type ILogger,
+  type ILogger as ICoreLogger,
   type ServiceStateManager,
   type PerformanceLogger,
   type RedisClient,
@@ -38,7 +38,7 @@ import {
 } from '@arbitrage/core';
 // Fix 3.1: Import CHAINS from config to derive SUPPORTED_CHAINS dynamically
 import { CHAINS } from '@arbitrage/config';
-import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { ArbitrageOpportunity, ILogger } from '@arbitrage/types';
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
 import { TimeoutError, RedisStreams } from '@arbitrage/types';
 // Phase 3: Import consolidated types from @arbitrage/types
@@ -140,8 +140,8 @@ export function isNHopOpportunity(
 }
 
 // Lazy-initialized logger for module-level utilities
-let _typesLogger: ILogger | null = null;
-function getTypesLogger(): ILogger {
+let _typesLogger: ICoreLogger | null = null;
+function getTypesLogger(): ICoreLogger {
   if (!_typesLogger) {
     _typesLogger = createPinoLogger('execution-engine-types');
   }
@@ -512,14 +512,10 @@ export function createInitialStats(): ExecutionStats {
 
 // =============================================================================
 // Logger Interface (for DI)
+// Now re-exported from @arbitrage/types for consolidation (Task A1).
 // =============================================================================
 
-export interface Logger {
-  info: (message: string, meta?: Record<string, unknown>) => void;
-  error: (message: string, meta?: Record<string, unknown>) => void;
-  warn: (message: string, meta?: Record<string, unknown>) => void;
-  debug: (message: string, meta?: Record<string, unknown>) => void;
-}
+export type Logger = ILogger;
 
 /**
  * Create a service logger with the specified name.

@@ -136,11 +136,12 @@ Rules for hot-path code (ADR-022):
 
 # Contract Architecture
 
-**Inheritance:** `BaseFlashArbitrage` (abstract, 1135 lines) -> 5 derived contracts:
+**Inheritance:** `BaseFlashArbitrage` (abstract, 1135 lines) -> 6 derived contracts:
 - `FlashLoanArbitrage` (Aave V3) - executeOperation callback
 - `BalancerV2FlashArbitrage` (Balancer V2) - receiveFlashLoan callback
 - `PancakeSwapFlashArbitrage` (PancakeSwap V3) - pancakeV3FlashCallback
 - `SyncSwapFlashArbitrage` (SyncSwap/zkSync) - onFlashLoan (EIP-3156)
+- `DaiFlashMintArbitrage` (MakerDAO DssFlash) - onFlashLoan (EIP-3156, DAI only)
 - `CommitRevealArbitrage` - MEV-protected with commit-reveal scheme
 
 **Utility:** `MultiPathQuoter` - Stateless batch quoting contract
@@ -271,9 +272,9 @@ When making changes:
 
 **Partition Service Architecture:**
 - P1-P3 entry points are thin wrappers (~63 lines) calling `createPartitionEntry()` from `@arbitrage/core`
-- Real logic lives in `shared/core/src/partition-service-utils.ts` (~1288 lines): health server, shutdown, event handlers, env config
-- P4 (partition-solana) does NOT use the factory -- manual 503-line `index.ts` with Solana-specific RPC handling
-- Shared test mocks in `shared/test-utils/src/mocks/partition-service.mock.ts` exist but are incomplete (missing `createPartitionEntry`, `runPartitionService`) -- tests use inline mocks instead
+- Real logic lives in `shared/core/src/partition/` (6 files: config, handlers, health-server, index, router, runner)
+- P4 (partition-solana) uses `createPartitionEntry()` with lifecycle hooks (onStarted, onStartupError, additionalCleanup) for Solana-specific wiring (240 lines vs 62-68 for P1-P3)
+- Shared test mocks in `shared/test-utils/src/mocks/partition-service.mock.ts` provide `createPartitionEntry`, `runPartitionService`, and `createPartitionServiceRunner` mocks
 
 **Testing Patterns (Hardhat for contracts):**
 - Use `loadFixture(deployContractsFixture)` for every test (snapshot/restore)

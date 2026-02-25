@@ -22,7 +22,6 @@ jest.mock('@arbitrage/config', () => {
       const dexes = originalModule.DEXES[chainId] || [];
       return dexes.filter((d: any) => d.enabled !== false);
     },
-    dexFeeToPercentage: (feeBasisPoints: number) => feeBasisPoints / 10000
   };
 });
 

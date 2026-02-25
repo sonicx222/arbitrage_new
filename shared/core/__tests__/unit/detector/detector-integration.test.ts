@@ -98,7 +98,6 @@ import { createFactorySubscriptionService } from '../../../src/factory-subscript
 jest.mock('@arbitrage/config', () => ({
   getAllFactoryAddresses: jest.fn().mockReturnValue([]),
   validateFactoryRegistry: jest.fn().mockReturnValue([]),
-  dexFeeToPercentage: jest.fn((bps: number) => bps / 10000),
   EVENT_CONFIG: {
     syncEvents: { enabled: true },
     swapEvents: { enabled: true },

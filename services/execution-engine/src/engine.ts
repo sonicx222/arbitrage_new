@@ -52,6 +52,7 @@ import {
   type TradeLoggerConfig,
   R2Uploader,
   type R2UploaderConfig,
+  parseEnvIntSafe,
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
@@ -473,19 +474,13 @@ export class ExecutionEngineService {
       // Initialize nonce manager
       // Tier 2 Enhancement: Explicit pool configuration for burst submissions
       // Pool pre-allocates nonces for 5-10ms latency reduction during bursts
-      // P1-5 FIX: Validate parseInt results to prevent NaN propagation
-      const parseEnvInt = (envVar: string, fallback: number, min = 1): number => {
-        const raw = parseInt(process.env[envVar] ?? String(fallback), 10);
-        return (!Number.isNaN(raw) && raw >= min) ? raw : fallback;
-      };
-
       this.nonceManager = getNonceManager({
         syncIntervalMs: 30000,
         pendingTimeoutMs: 300000,
-        maxPendingPerChain: parseEnvInt('NONCE_MAX_PENDING', 10),
+        maxPendingPerChain: parseEnvIntSafe('NONCE_MAX_PENDING', 10, 1),
         // Tier 2: Pre-allocation pool for instant nonce access during bursts
-        preAllocationPoolSize: parseEnvInt('NONCE_POOL_SIZE', 5),
-        poolReplenishThreshold: parseEnvInt('NONCE_POOL_REPLENISH_THRESHOLD', 2),
+        preAllocationPoolSize: parseEnvIntSafe('NONCE_POOL_SIZE', 5, 1),
+        poolReplenishThreshold: parseEnvIntSafe('NONCE_POOL_REPLENISH_THRESHOLD', 2, 1),
       });
 
       // Initialize provider service
@@ -498,9 +493,9 @@ export class ExecutionEngineService {
         stats: this.stats,
         enableBatching,
         batchConfig: enableBatching ? {
-          maxBatchSize: parseEnvInt('RPC_BATCH_MAX_SIZE', 10),
-          batchTimeoutMs: parseEnvInt('RPC_BATCH_TIMEOUT_MS', 10),
-          maxQueueSize: parseEnvInt('RPC_BATCH_MAX_QUEUE', 100),
+          maxBatchSize: parseEnvIntSafe('RPC_BATCH_MAX_SIZE', 10, 1),
+          batchTimeoutMs: parseEnvIntSafe('RPC_BATCH_TIMEOUT_MS', 10, 1),
+          maxQueueSize: parseEnvIntSafe('RPC_BATCH_MAX_QUEUE', 100, 1),
           enabled: true,
         } : undefined,
       });
@@ -683,8 +678,8 @@ export class ExecutionEngineService {
           bridgeRouterFactory: this.bridgeRouterFactory,
           config: {
             enabled: process.env.BRIDGE_RECOVERY_ENABLED !== 'false',
-            checkIntervalMs: parseEnvInt('BRIDGE_RECOVERY_CHECK_INTERVAL_MS', 60000, 5000),
-            maxConcurrentRecoveries: parseEnvInt('BRIDGE_RECOVERY_MAX_CONCURRENT', 3),
+            checkIntervalMs: parseEnvIntSafe('BRIDGE_RECOVERY_CHECK_INTERVAL_MS', 60000, 5000),
+            maxConcurrentRecoveries: parseEnvIntSafe('BRIDGE_RECOVERY_MAX_CONCURRENT', 3, 1),
           },
         });
         const recoveredCount = await this.bridgeRecoveryManager.start();
@@ -701,7 +696,7 @@ export class ExecutionEngineService {
           getWallets: () => this.providerService?.getWallets() ?? new Map(),
           config: {
             enabled: process.env.BALANCE_MONITOR_ENABLED !== 'false',
-            checkIntervalMs: parseEnvInt('BALANCE_MONITOR_INTERVAL_MS', 60000, 5000),
+            checkIntervalMs: parseEnvIntSafe('BALANCE_MONITOR_INTERVAL_MS', 60000, 5000),
             lowBalanceThresholdEth: parseFloat(process.env.BALANCE_MONITOR_LOW_THRESHOLD_ETH ?? '0.01'),
           },
         });

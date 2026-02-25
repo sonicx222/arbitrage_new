@@ -24,7 +24,7 @@ import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract,
 import { getErrorMessage, MevRiskAnalyzer, type TransactionContext } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult, createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';
+import { createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';
 import { BaseExecutionStrategy, DEXES_BY_CHAIN_AND_NAME, getSwapDeadline } from './base.strategy';
 import { CommitRevealService, type CommitRevealParams } from '../services/commit-reveal.service';
 
@@ -63,41 +63,35 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     // FIX-6.1: Use ExecutionErrorCode enum for standardized error codes
     const chain = opportunity.buyChain;
     if (!chain) {
-      return createErrorResult(
-        opportunity.id,
-        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.NO_CHAIN, 'buyChain is required'),
-        'unknown',
-        opportunity.buyDex || 'unknown'
+        'unknown'
       );
     }
 
     // Validate this is actually an intra-chain opportunity
     // sellChain should either be undefined (same as buyChain) or equal to buyChain
     if (opportunity.sellChain && opportunity.sellChain !== chain) {
-      return createErrorResult(
-        opportunity.id,
-        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.CROSS_CHAIN_MISMATCH,
           `buy: ${chain}, sell: ${opportunity.sellChain}. Use CrossChainStrategy instead.`
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
     // Validate required fields for DEX swap
     if (!opportunity.tokenIn || !opportunity.tokenOut || !opportunity.amountIn) {
-      return createErrorResult(
-        opportunity.id,
-        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.INVALID_OPPORTUNITY,
           'Missing required fields (tokenIn, tokenOut, amountIn)'
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
@@ -105,11 +99,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     // This consolidates the common wallet/provider check pattern
     const validation = this.validateContext(chain, ctx);
     if (!validation.valid) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         validation.error,
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
     // Fix Bug 4.3: No need to destructure wallet/provider - they are accessed via ctx
@@ -143,11 +136,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
           currentProfit: priceVerification.currentProfit
         });
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.PRICE_VERIFICATION, priceVerification.reason),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -165,11 +157,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
             ctx
           );
         } catch (approvalError) {
-          return createErrorResult(
-            opportunity.id,
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(ExecutionErrorCode.APPROVAL_FAILED, getErrorMessage(approvalError)),
-            chain,
-            opportunity.buyDex || 'unknown'
+            chain
           );
         }
       } else if (allowanceStatus.sufficient) {
@@ -196,12 +187,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
           provider: simulationResult.provider,
         });
 
-        return createErrorResult(
-          opportunity.id,
-          // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, simulationResult.revertReason || 'unknown reason'),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -249,12 +238,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       });
 
       if (!submitResult.success) {
-        return createErrorResult(
-          opportunity.id,
-          // Fix 6.1: Use formatExecutionError for consistent error formatting
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, submitResult.error || 'Transaction submission failed'),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -299,12 +286,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         error: errorMessage,
       });
 
-      return createErrorResult(
-        opportunity.id,
-        // Fix 6.1: Use formatExecutionError for consistent error formatting
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, errorMessage || 'Unknown error during execution'),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
   }
@@ -411,21 +396,19 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
   ): Promise<ExecutionResult> {
     const contractAddress = getCommitRevealContract(chain);
     if (!contractAddress) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Commit-reveal contract address not found'),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
     const routerAddress = getRouterAddress(chain, opportunity.sellDex);
     if (!routerAddress) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Router address not found'),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
@@ -433,11 +416,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       // Prepare commit-reveal parameters
       // Validate and convert amountIn (should be wei string from opportunity)
       if (!opportunity.amountIn || opportunity.amountIn === '0') {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Invalid amountIn: must be non-zero'),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -446,14 +428,13 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         // Convert string to bigint (amountIn is in wei as string)
         amountIn = BigInt(opportunity.amountIn);
       } catch (conversionError) {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(
             ExecutionErrorCode.EXECUTION_ERROR,
             `Invalid amountIn format: ${opportunity.amountIn} - ${getErrorMessage(conversionError)}`
           ),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -465,14 +446,13 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       // FIX 8: Defense-in-depth guard — if resolved tokens are empty despite early validation,
       // fail fast rather than sending empty addresses to contract calls
       if (!tokenIn || !tokenOut) {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(
             ExecutionErrorCode.INVALID_OPPORTUNITY,
             `Resolved token address is empty (tokenIn: "${tokenIn}", tokenOut: "${tokenOut}")`
           ),
-          chain,
-          opportunity.buyDex ?? 'unknown'
+          chain
         );
       }
 
@@ -537,11 +517,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       );
 
       if (!commitResult.success) {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Commit failed: ${commitResult.error}`),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -570,11 +549,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
             });
           });
 
-          return createErrorResult(
-            opportunity.id,
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Block wait failed: ${waitResult.error}`),
-            chain,
-            opportunity.buyDex || 'unknown'
+            chain
           );
         }
       }
@@ -595,11 +573,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
           });
         });
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Reveal failed: ${revealResult.error}`),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -627,11 +604,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         error: errorMessage,
       });
 
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Commit-reveal error: ${errorMessage}`),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
   }

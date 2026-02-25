@@ -48,7 +48,7 @@ import {
 import type { PairSnapshot } from './simple-arbitrage-detector';
 
 // P0-2 FIX: Use centralized fee validation (FIX 9.3)
-import { validateFee } from '../types';
+import { validateFee } from '@arbitrage/core';
 
 /**
  * Extended pair interface with reserve data.

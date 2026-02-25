@@ -17,16 +17,7 @@
  */
 
 import type { LeadershipElectionService } from './leadership';
-
-/**
- * Logger interface matching coordinator's Logger type.
- */
-interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+import type { ILogger } from '@arbitrage/types';
 
 /**
  * Dependencies for StandbyActivationManager construction.
@@ -34,7 +25,7 @@ interface Logger {
  * Uses getter functions for mutable state that may change between calls.
  */
 export interface StandbyActivationManagerDeps {
-  logger: Logger;
+  logger: ILogger;
 
   /** Get leadership election service (may not be initialized yet) */
   getLeadershipElection: () => LeadershipElectionService | null;

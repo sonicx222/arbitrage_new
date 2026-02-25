@@ -17,11 +17,6 @@ import {
   V3_FEE_DENOMINATOR,
   PERCENT_DENOMINATOR,
   FEE_CONSTANTS,
-  FEE_UNISWAP_V2_DECIMAL,
-  FEE_UNISWAP_V3_LOW_DECIMAL,
-  FEE_UNISWAP_V3_MEDIUM_DECIMAL,
-  FEE_UNISWAP_V3_HIGH_DECIMAL,
-  FEE_DEFAULT_DECIMAL,
   VALID_V3_FEE_TIERS,
   LOW_FEE_DEXES,
 
@@ -32,14 +27,6 @@ import {
   decimalToV3Tier,
   percentToDecimal,
   decimalToPercent,
-
-  // Backward compatibility aliases
-  basisPointsToDecimal,
-  decimalToBasisPoints,
-  dexFeeToPercentage,
-  percentageToBasisPoints,
-  perMillionToDecimal,
-  percentageToDecimal,
 
   // Validation
   isValidV3FeeTier,
@@ -75,14 +62,6 @@ describe('Fee Utilities', () => {
       expect(FEE_CONSTANTS.LOW_FEE).toBe(0.0004);
       expect(FEE_CONSTANTS.DEFAULT).toBe(0.003);
       expect(FEE_CONSTANTS.ZERO).toBe(0);
-    });
-
-    it('should have backward compatible constant exports', () => {
-      expect(FEE_UNISWAP_V2_DECIMAL).toBe(FEE_CONSTANTS.UNISWAP_V2);
-      expect(FEE_UNISWAP_V3_LOW_DECIMAL).toBe(FEE_CONSTANTS.V3_LOWEST);
-      expect(FEE_UNISWAP_V3_MEDIUM_DECIMAL).toBe(FEE_CONSTANTS.V3_LOW);
-      expect(FEE_UNISWAP_V3_HIGH_DECIMAL).toBe(FEE_CONSTANTS.V3_MEDIUM);
-      expect(FEE_DEFAULT_DECIMAL).toBe(FEE_CONSTANTS.DEFAULT);
     });
 
     it('should have valid V3 fee tier set', () => {
@@ -228,36 +207,6 @@ describe('Fee Utilities', () => {
   });
 
   // ===========================================================================
-  // Backward Compatibility Aliases
-  // ===========================================================================
-
-  describe('Backward Compatibility Aliases', () => {
-    it('basisPointsToDecimal should work like bpsToDecimal', () => {
-      expect(basisPointsToDecimal(30)).toBe(bpsToDecimal(30));
-    });
-
-    it('decimalToBasisPoints should work like decimalToBps', () => {
-      expect(decimalToBasisPoints(0.003)).toBe(decimalToBps(0.003));
-    });
-
-    it('dexFeeToPercentage should work like bpsToDecimal', () => {
-      expect(dexFeeToPercentage(30)).toBe(bpsToDecimal(30));
-    });
-
-    it('percentageToBasisPoints should work like decimalToBps', () => {
-      expect(percentageToBasisPoints(0.003)).toBe(decimalToBps(0.003));
-    });
-
-    it('perMillionToDecimal should work like v3TierToDecimal', () => {
-      expect(perMillionToDecimal(3000)).toBe(v3TierToDecimal(3000));
-    });
-
-    it('percentageToDecimal should work like percentToDecimal', () => {
-      expect(percentageToDecimal(0.3)).toBe(percentToDecimal(0.3));
-    });
-  });
-
-  // ===========================================================================
   // Validation Functions
   // ===========================================================================
 
@@ -320,16 +269,16 @@ describe('Fee Utilities', () => {
     });
 
     it('should return default for undefined/null', () => {
-      expect(validateFee(undefined)).toBe(FEE_DEFAULT_DECIMAL);
-      expect(validateFee(null)).toBe(FEE_DEFAULT_DECIMAL);
+      expect(validateFee(undefined)).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(validateFee(null)).toBe(FEE_CONSTANTS.DEFAULT);
     });
 
     it('should return default for invalid values', () => {
-      expect(validateFee(NaN)).toBe(FEE_DEFAULT_DECIMAL);
-      expect(validateFee(Infinity)).toBe(FEE_DEFAULT_DECIMAL);
-      expect(validateFee(-Infinity)).toBe(FEE_DEFAULT_DECIMAL);
-      expect(validateFee(-0.01)).toBe(FEE_DEFAULT_DECIMAL);
-      expect(validateFee(1.5)).toBe(FEE_DEFAULT_DECIMAL);
+      expect(validateFee(NaN)).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(validateFee(Infinity)).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(validateFee(-Infinity)).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(validateFee(-0.01)).toBe(FEE_CONSTANTS.DEFAULT);
+      expect(validateFee(1.5)).toBe(FEE_CONSTANTS.DEFAULT);
     });
 
     it('should use custom default when provided', () => {

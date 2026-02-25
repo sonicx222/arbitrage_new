@@ -13,7 +13,7 @@
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { meetsThreshold } from '../components/price-calculator';
-import { basisPointsToDecimal } from '../utils/fee-utils';
+import { bpsToDecimal } from '../utils/fee-utils';
 import type { SolanaDetectorLogger, SolanaPool } from './solana-types';
 import { SOLANA_DEFAULT_GAS_ESTIMATE } from './solana-types';
 
@@ -90,8 +90,8 @@ export function createSolanaArbitrageDetector(
     const maxPrice = Math.max(pool1.price, pool2.price);
     const grossDiff = (maxPrice - minPrice) / minPrice;
 
-    const fee1 = basisPointsToDecimal(pool1.fee);
-    const fee2 = basisPointsToDecimal(pool2.fee);
+    const fee1 = bpsToDecimal(pool1.fee);
+    const fee2 = bpsToDecimal(pool2.fee);
     const totalFees = fee1 + fee2;
 
     const netProfit = grossDiff - totalFees;

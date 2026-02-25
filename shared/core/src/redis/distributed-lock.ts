@@ -16,27 +16,12 @@
 
 import { RedisClient, getRedisClient } from './client';
 import { createLogger } from '../logger';
+import type { ILogger } from '@arbitrage/types';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/**
- * Logger interface for dependency injection.
- *
- * Fix 6.2: This minimal interface is kept for backwards compatibility with test mocks
- * that may not implement the full ILogger interface (e.g., missing child(), fatal()).
- * For production code, prefer using `ILogger` from '@arbitrage/core/logging/types'.
- *
- * @see shared/core/src/logging/types.ts - Canonical ILogger interface
- * @see shared/core/src/logging/testing-logger.ts - RecordingLogger, NullLogger for tests
- */
-interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
 
 export interface LockConfig {
   /** Lock key prefix (default: 'lock:') */
@@ -48,7 +33,7 @@ export interface LockConfig {
   /** Auto-extend interval in ms (should be < TTL/2) */
   autoExtendIntervalMs?: number;
   /** Optional logger for testing (defaults to createLogger) */
-  logger?: Logger;
+  logger?: ILogger;
 }
 
 export interface AcquireOptions {
@@ -149,7 +134,7 @@ end
 
 export class DistributedLockManager {
   private redis: RedisClient | null = null;
-  private logger: Logger;
+  private logger: ILogger;
   private instanceId: string;
   private config: Required<Omit<LockConfig, 'logger'>>;
   private heldLocks: Map<string, { value: string; extendInterval?: NodeJS.Timeout }> = new Map();

@@ -164,7 +164,7 @@ export {
 // =============================================================================
 // DEX CONFIGURATIONS
 // =============================================================================
-export { DEXES, getEnabledDexes, dexFeeToPercentage, percentageToBasisPoints } from './dexes';
+export { DEXES, getEnabledDexes } from './dexes';
 
 // =============================================================================
 // DEX FACTORY REGISTRY (Phase 2.1.1)

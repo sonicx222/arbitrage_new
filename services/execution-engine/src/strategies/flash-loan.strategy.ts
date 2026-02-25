@@ -73,7 +73,6 @@ import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { FlashLoanProtocol } from './flash-loan-providers/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
 import {
-  createErrorResult,
   createSuccessResult,
   ExecutionErrorCode,
   formatExecutionError,
@@ -578,11 +577,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // Fix 6.1: Use ExecutionErrorCode enum for standardized error codes
     const chain = opportunity.buyChain;
     if (!chain) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         ExecutionErrorCode.NO_CHAIN,
-        'unknown',
-        opportunity.buyDex || 'unknown'
+        'unknown'
       );
     }
 
@@ -596,53 +594,49 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         protocol,
         supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
       });
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
           `Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Supported protocols: ${Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS).join(', ')}.`
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
     // Fix 6.2 & 9.1: Use validateContext helper to reduce code duplication
     const validation = this.validateContext(chain, ctx);
     if (!validation.valid) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         validation.error,
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
     const { wallet, provider } = validation;
 
     // Validate opportunity fields
     if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.tokenOut) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.INVALID_OPPORTUNITY,
           'Missing required fields (tokenIn, amountIn, tokenOut)'
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
     // Validate amount is non-zero
     const amountIn = BigInt(opportunity.amountIn);
     if (amountIn === 0n) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.INVALID_OPPORTUNITY,
           'amountIn is zero'
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
@@ -656,14 +650,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         buyPrice: opportunity.buyPrice,
         chain,
       });
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.INVALID_OPPORTUNITY,
           `Invalid buyPrice: ${opportunity.buyPrice}. Cannot calculate profit in token units.`
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 
@@ -684,11 +677,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           reason: priceVerification.reason,
         });
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.PRICE_VERIFICATION, priceVerification.reason),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -764,14 +756,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           breakdown: profitAnalysis.breakdown,
         });
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(
             ExecutionErrorCode.HIGH_FEES,
             `Opportunity unprofitable after fees: net ${profitAnalysis.netProfitUsd.toFixed(2)} USD`
           ),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -793,14 +784,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           simulationLatencyMs: simulationResult.latencyMs,
         });
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(
             ExecutionErrorCode.SIMULATION_REVERT,
             simulationResult.revertReason || 'unknown reason'
           ),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         );
       }
 
@@ -827,14 +817,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
             breakdown: revalidatedProfit.breakdown,
           });
 
-          return createErrorResult(
-            opportunity.id,
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(
               ExecutionErrorCode.HIGH_FEES,
               `Simulation revealed higher gas (${simulatedGasUnits}), making trade unprofitable: net ${revalidatedProfit.netProfitUsd.toFixed(2)} USD`
             ),
-            chain,
-            opportunity.buyDex || 'unknown'
+            chain
           );
         }
       }
@@ -877,14 +866,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         });
       }
 
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.FLASH_LOAN_ERROR,
           errorMessage || 'Unknown error during flash loan execution'
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
   }
@@ -928,14 +916,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         return {
           selectedProvider: null,
-          errorResult: createErrorResult(
-            opportunity.id,
+          errorResult: BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(
               ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
               `No suitable flash loan provider: ${providerSelection.selectionReason}`
             ),
-            chain,
-            opportunity.buyDex || 'unknown'
+            chain
           ),
         };
       }
@@ -951,14 +938,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         });
         return {
           selectedProvider: null,
-          errorResult: createErrorResult(
-            opportunity.id,
+          errorResult: BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(
               ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
               `Flash loan provider not configured for chain: ${chain}`
             ),
-            chain,
-            opportunity.buyDex || 'unknown'
+            chain
           ),
         };
       }
@@ -989,14 +975,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         return {
           selectedProvider: null,
-          errorResult: createErrorResult(
-            opportunity.id,
+          errorResult: BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(
               ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
               `Selected protocol '${selectedProtocol}' not supported by this strategy`
             ),
-            chain,
-            opportunity.buyDex || 'unknown'
+            chain
           ),
         };
       }
@@ -1010,14 +995,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
       return {
         selectedProvider: null,
-        errorResult: createErrorResult(
-          opportunity.id,
+        errorResult: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(
             ExecutionErrorCode.FLASH_LOAN_ERROR,
             `Provider selection failed: ${getErrorMessage(error)}`
           ),
-          chain,
-          opportunity.buyDex || 'unknown'
+          chain
         ),
       };
     }
@@ -1053,14 +1037,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         });
       }
 
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.FLASH_LOAN_ERROR,
           submitResult.error || 'Transaction submission failed'
         ),
-        chain,
-        opportunity.buyDex || 'unknown'
+        chain
       );
     }
 

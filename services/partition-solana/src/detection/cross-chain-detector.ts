@@ -24,7 +24,7 @@ import type {
 import {
   isValidPrice,
   isPriceStale,
-  basisPointsToDecimal,
+  bpsToDecimal,
   meetsThreshold,
   getDefaultPrice,
   getEvmGasCostUsd,
@@ -195,10 +195,10 @@ export function detectCrossChainArbitrage(
   for (const comparison of comparisons) {
     // Calculate net profit after accounting for all costs
     const solanaFeeDecimal = comparison.solanaFee !== undefined
-      ? basisPointsToDecimal(comparison.solanaFee)
+      ? bpsToDecimal(comparison.solanaFee)
       : 0.003; // Default 0.3%
     const evmFeeDecimal = comparison.evmFee !== undefined
-      ? basisPointsToDecimal(comparison.evmFee)
+      ? bpsToDecimal(comparison.evmFee)
       : 0.003; // Default 0.3%
 
     // Total costs:

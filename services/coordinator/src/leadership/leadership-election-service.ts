@@ -17,17 +17,7 @@
  */
 
 import { clearTimeoutSafe } from '@arbitrage/core';
-
-/**
- * Minimal logger interface for dependency injection.
- * Using a local interface to avoid circular dependencies with shared packages.
- */
-interface Logger {
-  debug(message: string, meta?: Record<string, unknown>): void;
-  info(message: string, meta?: Record<string, unknown>): void;
-  warn(message: string, meta?: Record<string, unknown>): void;
-  error(message: string, meta?: Record<string, unknown>): void;
-}
+import type { ILogger } from '@arbitrage/types';
 
 /**
  * Configuration for leadership election
@@ -75,7 +65,7 @@ export interface LeadershipElectionOptions {
   /** Redis client for distributed locking */
   redis: LeadershipRedisClient;
   /** Logger instance */
-  logger: Logger;
+  logger: ILogger;
   /** Whether this instance is in standby mode (ADR-007) */
   isStandby?: boolean;
   /** Whether this instance is allowed to become leader */
@@ -99,7 +89,7 @@ export interface LeadershipElectionOptions {
 export class LeadershipElectionService {
   private readonly config: LeadershipElectionConfig;
   private readonly redis: LeadershipRedisClient;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   // P1 FIX #4: Removed readonly - isStandby must be mutable so activated
   // standby instances can re-acquire leadership if lost after activation.
   private isStandby: boolean;

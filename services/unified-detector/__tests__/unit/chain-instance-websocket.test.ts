@@ -126,6 +126,7 @@ jest.mock('@arbitrage/core', () => {
     updatePoolLiquidity: jest.fn(),
     analyzeDepth: jest.fn().mockReturnValue(null),
   }),
+  validateFee: jest.fn().mockImplementation((fee?: number) => fee ?? 0.003),
 };
 });
 
@@ -247,7 +248,6 @@ jest.mock('../../src/types', () => ({
     originalUrl: url,
   })),
   isUnstableChain: jest.fn().mockReturnValue(false),
-  validateFee: jest.fn().mockImplementation((fee?: number) => fee ?? 0.003),
   parseIntEnvVar: jest.fn().mockImplementation((_val: any, def: number) => def),
   parseFloatEnvVar: jest.fn().mockImplementation((_val: any, def: number) => def),
 }));
@@ -416,9 +416,11 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       originalUrl: url,
     }));
     types.isUnstableChain.mockReturnValue(false);
-    types.validateFee.mockImplementation((fee?: number) => fee ?? 0.003);
     types.parseIntEnvVar.mockImplementation((_val: any, def: number) => def);
     types.parseFloatEnvVar.mockImplementation((_val: any, def: number) => def);
+
+    // validateFee now imported from @arbitrage/core by chain-instance.ts
+    core.validateFee.mockImplementation((fee?: number) => fee ?? 0.003);
 
     // Re-establish ethers mock implementations
     const { ethers } = require('ethers');

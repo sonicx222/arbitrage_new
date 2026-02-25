@@ -25,7 +25,7 @@
 
 import { ethers } from 'ethers';
 import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
-import { getErrorMessage, createPinoLogger, type ILogger } from '@arbitrage/core';
+import { getErrorMessage, createPinoLogger, type ILogger, parseEnvIntSafe } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
 import { CUSTOM_ERROR_SELECTORS } from './error-selectors.generated';
@@ -71,7 +71,7 @@ import type {
   StrategyContext,
   ExecutionResult,
 } from '../types';
-import { TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
+import { createErrorResult, TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
 import type { SimulationRequest, SimulationResult, SimulationTier } from '../services/simulation/types';
 
 // =============================================================================
@@ -142,23 +142,6 @@ const ERC20_APPROVE_ABI = [
 const SWAP_DEADLINE_SECONDS = parseInt(process.env.SWAP_DEADLINE_SECONDS || '300', 10);
 
 /**
- * Parse and validate an integer environment variable with bounds checking.
- * Returns defaultValue if env var is missing, NaN, or out of bounds.
- */
-function parseValidatedEnvInt(
-  envValue: string | undefined,
-  defaultValue: number,
-  min: number,
-  max: number
-): number {
-  const parsed = parseInt(envValue || String(defaultValue), 10);
-  if (Number.isNaN(parsed) || parsed < min || parsed > max) {
-    return defaultValue;
-  }
-  return parsed;
-}
-
-/**
  * Phase 2 Enhancement: Default RBF retry configuration.
  * Enables automatic retry with gas bumping for transient failures.
  *
@@ -167,8 +150,8 @@ function parseValidatedEnvInt(
  * - gasBumpPercent: 1-100 (must be positive, capped at 100% per retry)
  */
 const DEFAULT_RBF_CONFIG: RbfRetryConfig = {
-  maxRetries: parseValidatedEnvInt(process.env.RBF_MAX_RETRIES, 3, 0, 10),
-  gasBumpPercent: parseValidatedEnvInt(process.env.RBF_GAS_BUMP_PERCENT, 10, 1, 100),
+  maxRetries: Math.min(parseEnvIntSafe('RBF_MAX_RETRIES', 3, 0), 10),
+  gasBumpPercent: Math.min(parseEnvIntSafe('RBF_GAS_BUMP_PERCENT', 10, 1), 100),
   retryableErrorPatterns: [
     /replacement transaction underpriced/i,
     /nonce.*too low/i,
@@ -306,6 +289,33 @@ export abstract class BaseExecutionStrategy {
     this.dexLookup = new DexLookupService();
     // Cast Logger to ILogger - Logger interface is a subset of ILogger
     this.swapBuilder = new SwapBuilder(this.dexLookup, logger as unknown as ILogger);
+  }
+
+  /**
+   * Create an error ExecutionResult from an ArbitrageOpportunity.
+   *
+   * Eliminates the repeated pattern of extracting opportunity.id and
+   * opportunity.buyDex across strategy files.
+   *
+   * @param opportunity - The arbitrage opportunity that failed
+   * @param error - Error message or formatted error string
+   * @param chain - Chain where the error occurred
+   * @param transactionHash - Optional transaction hash if available
+   * @returns ExecutionResult with success=false
+   */
+  static createOpportunityError(
+    opportunity: ArbitrageOpportunity,
+    error: string,
+    chain: string,
+    transactionHash?: string
+  ): ExecutionResult {
+    return createErrorResult(
+      opportunity.id,
+      error,
+      chain,
+      opportunity.buyDex ?? 'unknown',
+      transactionHash
+    );
   }
 
   /**

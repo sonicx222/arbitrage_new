@@ -1228,20 +1228,14 @@ export {
   areValidReserves,
   isValidFee,
 
-  // Chain constants
-  BLOCK_TIMES_MS,
-  getBlockTimeMs,
-
   // Error class
   PriceCalculationError,
 } from './components/price-calculator';
 
-// Fee utilities - re-exported from canonical source (fee-utils.ts)
+// Fee utility aliases - backward compatibility
 export {
   getDefaultFeeForDex as getDefaultFee,
   resolveFeeValue as resolveFee,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
 } from './utils/fee-utils';
 
 export type {
@@ -1330,15 +1324,10 @@ export {
   V3_FEE_DENOMINATOR,
   PERCENT_DENOMINATOR,
   FEE_CONSTANTS,
-  FEE_UNISWAP_V2_DECIMAL,
-  FEE_UNISWAP_V3_LOW_DECIMAL,
-  FEE_UNISWAP_V3_MEDIUM_DECIMAL,
-  FEE_UNISWAP_V3_HIGH_DECIMAL,
-  FEE_DEFAULT_DECIMAL,
   VALID_V3_FEE_TIERS,
   LOW_FEE_DEXES,
 
-  // Primary Conversion Functions (canonical names)
+  // Conversion Functions (canonical names)
   bpsToDecimal,
   decimalToBps,
   v3TierToDecimal,

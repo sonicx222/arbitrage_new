@@ -7,16 +7,10 @@
 
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
 import { TimeoutError, Pair } from '@arbitrage/types';
+import type { ILogger } from '@arbitrage/types';
 
-// Fee utilities and price bounds - import from canonical source (@arbitrage/core)
+// FIX 6: Use shared price bounds constants from canonical source
 import {
-  type FeeBasisPoints,
-  type FeeDecimal,
-  bpsToDecimal,
-  decimalToBps,
-  validateFee as canonicalValidateFee,
-  FEE_CONSTANTS,
-  // FIX 6: Use shared price bounds constants
   MIN_SAFE_PRICE,
   MAX_SAFE_PRICE,
 } from '@arbitrage/core';
@@ -27,14 +21,10 @@ import {
 
 /**
  * Logger interface for dependency injection.
- * Compatible with Pino and @arbitrage/core createLogger.
+ * Now re-exported from @arbitrage/types for consolidation (Task A1).
+ * ILogger uses Record<string, unknown> meta — compatible with object meta.
  */
-export interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+export type Logger = ILogger;
 
 // =============================================================================
 // Chain Stats Interface
@@ -116,13 +106,6 @@ export interface ExtendedPair extends Pair {
 export function asLogger<T extends Logger>(logger: T): Logger {
   return logger as Logger;
 }
-
-// =============================================================================
-// Fee Types and Constants
-// =============================================================================
-
-// Re-export branded types from canonical source for internal use
-export type { FeeBasisPoints, FeeDecimal };
 
 // =============================================================================
 // Environment Variable Utilities
@@ -341,19 +324,6 @@ export async function withTimeoutResult<T>(
   }
 }
 
-// =============================================================================
-// Fee Validation Utilities (FIX 9.3: Centralized Fee Handling)
-// Now delegates to canonical implementation in @arbitrage/core
-// =============================================================================
-
-/**
- * Validate and sanitize a fee value for safe calculations.
- * @deprecated Import validateFee from '@arbitrage/core' instead
- */
-export function validateFee(fee: number | undefined | null, defaultFee: number = FEE_CONSTANTS.DEFAULT): number {
-  return canonicalValidateFee(fee, defaultFee);
-}
-
 /**
  * Validate a price value for safe arithmetic operations.
  * FIX 4.1: Guards against values that would cause division by zero or overflow.
@@ -383,14 +353,3 @@ export function isValidPrice(price: number): boolean {
   return true;
 }
 
-// =============================================================================
-// Data Structure Utilities (FIX 10.5: Consolidated to @arbitrage/core)
-// =============================================================================
-
-/**
- * Re-export MinHeap and related utilities from @arbitrage/core.
- * FIX 10.5: Consolidated to avoid code duplication across services.
- *
- * @see shared/core/src/data-structures/min-heap.ts for implementation
- */
-export { MinHeap, findKSmallest, findKLargest } from '@arbitrage/core';

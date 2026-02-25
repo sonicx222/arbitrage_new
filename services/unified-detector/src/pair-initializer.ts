@@ -13,9 +13,8 @@
  */
 
 import { ethers } from 'ethers';
-import { bpsToDecimal } from '@arbitrage/core';
+import { bpsToDecimal, validateFee } from '@arbitrage/core';
 import type { Dex, Token } from '@arbitrage/types';
-import { validateFee } from './types';
 import type { ExtendedPair } from './types';
 
 // =============================================================================

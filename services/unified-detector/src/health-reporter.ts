@@ -161,7 +161,7 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
 
     // Listen for failover events and forward them
     crossRegionHealth.on('failoverEvent', (event: FailoverEvent) => {
-      logger.info('Received failover event', event);
+      logger.info('Received failover event', { ...event });
       emitter.emit('failoverEvent', event);
     });
   }

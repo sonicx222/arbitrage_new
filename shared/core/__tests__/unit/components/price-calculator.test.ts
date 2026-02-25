@@ -34,8 +34,8 @@ import {
 import {
   getDefaultFeeForDex as getDefaultFee,
   resolveFeeValue as resolveFee,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
+  bpsToDecimal,
+  decimalToBps,
 } from '../../../src/utils/fee-utils';
 
 describe('PriceCalculator', () => {
@@ -377,19 +377,19 @@ describe('PriceCalculator', () => {
       });
     });
 
-    describe('basisPointsToDecimal', () => {
+    describe('bpsToDecimal', () => {
       it('should convert basis points to decimal', () => {
-        expect(basisPointsToDecimal(30)).toBe(0.003);
-        expect(basisPointsToDecimal(100)).toBe(0.01);
-        expect(basisPointsToDecimal(4)).toBe(0.0004);
+        expect(bpsToDecimal(30)).toBe(0.003);
+        expect(bpsToDecimal(100)).toBe(0.01);
+        expect(bpsToDecimal(4)).toBe(0.0004);
       });
     });
 
-    describe('decimalToBasisPoints', () => {
+    describe('decimalToBps', () => {
       it('should convert decimal to basis points', () => {
-        expect(decimalToBasisPoints(0.003)).toBe(30);
-        expect(decimalToBasisPoints(0.01)).toBe(100);
-        expect(decimalToBasisPoints(0.0004)).toBe(4);
+        expect(decimalToBps(0.003)).toBe(30);
+        expect(decimalToBps(0.01)).toBe(100);
+        expect(decimalToBps(0.0004)).toBe(4);
       });
     });
   });
@@ -577,15 +577,15 @@ describe('PriceCalculator', () => {
         // Verify the re-exported functions work correctly
         expect(typeof getDefaultFee).toBe('function');
         expect(typeof resolveFee).toBe('function');
-        expect(typeof basisPointsToDecimal).toBe('function');
-        expect(typeof decimalToBasisPoints).toBe('function');
+        expect(typeof bpsToDecimal).toBe('function');
+        expect(typeof decimalToBps).toBe('function');
       });
 
       it('should resolve fees correctly via re-exported functions', () => {
         expect(resolveFee(0.001, 'uniswap')).toBe(0.001);
         expect(resolveFee(undefined, 'curve')).toBe(0.0004);
-        expect(basisPointsToDecimal(30)).toBe(0.003);
-        expect(decimalToBasisPoints(0.003)).toBe(30);
+        expect(bpsToDecimal(30)).toBe(0.003);
+        expect(decimalToBps(0.003)).toBe(30);
       });
     });
   });

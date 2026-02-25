@@ -88,37 +88,8 @@ export class PriceCalculationError extends Error {
 const PRICE_PRECISION = 10n ** 18n;
 const PRICE_PRECISION_NUMBER = 1e18;
 
-// =============================================================================
-// Chain Constants (Re-exported from @arbitrage/config)
-// Single source of truth: shared/config/src/chains/index.ts
-// =============================================================================
-
-// Import from config module - the canonical source of truth
-import {
-  BLOCK_TIMES_MS as CONFIG_BLOCK_TIMES_MS,
-  getBlockTimeMs as configGetBlockTimeMs,
-} from '../../../config/src';
-
-/**
- * Block times in milliseconds for different chains.
- * Used for calculating data freshness/staleness in confidence scoring.
- *
- * @deprecated Since v1.1.0. Import BLOCK_TIMES_MS from '@arbitrage/config' instead.
- * This re-export is kept for backward compatibility.
- */
-export const BLOCK_TIMES_MS = CONFIG_BLOCK_TIMES_MS;
-
-/**
- * Get block time for a chain in milliseconds.
- * Defaults to Ethereum block time (12s) for unknown chains.
- *
- * @deprecated Since v1.1.0. Import getBlockTimeMs from '@arbitrage/config' instead.
- * This re-export is kept for backward compatibility.
- *
- * @param chain - Chain name (case-insensitive)
- * @returns Block time in milliseconds
- */
-export const getBlockTimeMs = configGetBlockTimeMs;
+// Chain constants (BLOCK_TIMES_MS, getBlockTimeMs) removed in A6 refactoring.
+// Import directly from '@arbitrage/config' instead.
 
 // =============================================================================
 // Core Price Calculations

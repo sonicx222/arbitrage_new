@@ -15,14 +15,14 @@ jest.mock('../../../src/components/price-calculator', () => ({
 }));
 
 jest.mock('../../../src/utils/fee-utils', () => ({
-  basisPointsToDecimal: jest.fn()
+  bpsToDecimal: jest.fn()
 }));
 
 // Get references to mocked functions for re-implementation in beforeEach
 const { meetsThreshold } = jest.requireMock<{ meetsThreshold: jest.Mock }>(
   '../../../src/components/price-calculator'
 );
-const { basisPointsToDecimal } = jest.requireMock<{ basisPointsToDecimal: jest.Mock }>(
+const { bpsToDecimal } = jest.requireMock<{ bpsToDecimal: jest.Mock }>(
   '../../../src/utils/fee-utils'
 );
 
@@ -42,7 +42,7 @@ describe('SolanaArbitrageDetector', () => {
     meetsThreshold.mockImplementation(
       (netProfit: number, threshold: number) => netProfit >= threshold
     );
-    basisPointsToDecimal.mockImplementation(
+    bpsToDecimal.mockImplementation(
       (bps: number) => bps / 10000
     );
 

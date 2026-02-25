@@ -35,7 +35,6 @@ jest.mock('../../../src/factory-subscription', () => ({
 jest.mock('@arbitrage/config', () => ({
   getAllFactoryAddresses: jest.fn(),
   validateFactoryRegistry: jest.fn(),
-  dexFeeToPercentage: jest.fn((basisPoints: number) => basisPoints / 10000),
   EVENT_CONFIG: {
     syncEvents: { enabled: true },
     swapEvents: { enabled: true },
@@ -50,7 +49,6 @@ import { createFactorySubscriptionService } from '../../../src/factory-subscript
 import {
   getAllFactoryAddresses,
   validateFactoryRegistry,
-  dexFeeToPercentage,
 } from '@arbitrage/config';
 
 describe('FactoryIntegrationService', () => {
@@ -124,7 +122,6 @@ describe('FactoryIntegrationService', () => {
     (createFactorySubscriptionService as jest.Mock).mockReturnValue(mockFactoryService);
     (validateFactoryRegistry as jest.Mock).mockReturnValue([]);
     (getAllFactoryAddresses as jest.Mock).mockReturnValue([]);
-    (dexFeeToPercentage as jest.Mock).mockImplementation((basisPoints: number) => basisPoints / 10000);
   });
 
   const createMockDeps = (): FactoryIntegrationDeps => ({

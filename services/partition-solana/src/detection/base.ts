@@ -6,7 +6,7 @@
  * @see R1 - Solana Arbitrage Detection Modules extraction
  */
 
-import { basisPointsToDecimal, meetsThreshold, getDefaultPrice } from '@arbitrage/core';
+import { bpsToDecimal, meetsThreshold, getDefaultPrice } from '@arbitrage/core';
 import type { InternalPoolInfo, SolanaArbitrageLogger } from '../types';
 
 // =============================================================================
@@ -264,4 +264,4 @@ export function estimateGasCost(
 // Re-exports from @arbitrage/core
 // =============================================================================
 
-export { basisPointsToDecimal, meetsThreshold, getDefaultPrice };
+export { bpsToDecimal, meetsThreshold, getDefaultPrice };

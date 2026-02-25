@@ -22,16 +22,12 @@ jest.mock('ethers', () => ({
 
 jest.mock('@arbitrage/core', () => ({
   bpsToDecimal: jest.fn((bps: number) => bps / 10000),
-}));
-
-jest.mock('../../src/types', () => ({
   validateFee: jest.fn((fee: number) => fee),
 }));
 
 import { initializePairs, generatePairAddress } from '../../src/pair-initializer';
 import type { PairInitializerConfig } from '../../src/pair-initializer';
-import { bpsToDecimal } from '@arbitrage/core';
-import { validateFee } from '../../src/types';
+import { bpsToDecimal, validateFee } from '@arbitrage/core';
 import type { Dex, Token } from '@arbitrage/types';
 
 // =============================================================================

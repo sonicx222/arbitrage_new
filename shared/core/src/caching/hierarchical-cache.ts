@@ -1299,18 +1299,23 @@ export class HierarchicalCache {
         }
 
         // Plain object: 32 byte header + property sizes
-        const entries = Object.entries(obj as Record<string, unknown>);
+        // Uses for...in instead of Object.entries() to avoid allocating a [key, value] tuple array
+        // on every call (this runs on every L1 cache write, 500-1000/sec)
+        const record = obj as Record<string, unknown>;
         let size = 32;
-        // Sample up to 5 properties
-        const sampleCount = Math.min(entries.length, 5);
+        let sampleCount = 0;
         let sampleTotal = 0;
-        for (let i = 0; i < sampleCount; i++) {
-          const [key, val] = entries[i];
-          sampleTotal += key.length * 2 + 16; // Key size
-          sampleTotal += this.estimateSizeRecursive(val, depth + 1); // Value size
+        let totalKeys = 0;
+        for (const key in record) {
+          totalKeys++;
+          if (sampleCount < 5) {
+            sampleTotal += key.length * 2 + 16; // Key size
+            sampleTotal += this.estimateSizeRecursive(record[key], depth + 1); // Value size
+            sampleCount++;
+          }
         }
         if (sampleCount > 0) {
-          size += (sampleTotal / sampleCount) * entries.length;
+          size += (sampleTotal / sampleCount) * totalKeys;
         }
         return size;
       }

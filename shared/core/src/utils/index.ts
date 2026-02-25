@@ -55,29 +55,16 @@ export {
   V3_FEE_DENOMINATOR,
   PERCENT_DENOMINATOR,
   FEE_CONSTANTS,
-  FEE_UNISWAP_V2_DECIMAL,
-  FEE_UNISWAP_V3_LOW_DECIMAL,
-  FEE_UNISWAP_V3_MEDIUM_DECIMAL,
-  FEE_UNISWAP_V3_HIGH_DECIMAL,
-  FEE_DEFAULT_DECIMAL,
   VALID_V3_FEE_TIERS,
   LOW_FEE_DEXES,
 
-  // Primary Conversion Functions
+  // Conversion Functions
   bpsToDecimal,
   decimalToBps,
   v3TierToDecimal,
   decimalToV3Tier,
   percentToDecimal,
   decimalToPercent,
-
-  // Backward Compatibility Aliases
-  basisPointsToDecimal,
-  decimalToBasisPoints,
-  dexFeeToPercentage,
-  percentageToBasisPoints,
-  perMillionToDecimal,
-  percentageToDecimal,
 
   // Validation
   isValidV3FeeTier,

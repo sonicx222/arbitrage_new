@@ -6,7 +6,7 @@
  * - Chain-specific DEX counts and expected DEXes
  * - Solana-specific tests (base58 addresses, DEX types, enable/disable)
  * - BSC-specific tests (fee strategy, arbitrage math, cross-DEX matrix)
- * - Fee helper functions (dexFeeToPercentage, percentageToBasisPoints)
+ * - Fee helper functions (bpsToDecimal, decimalToBps)
  * - System-wide DEX count and PHASE_METRICS consistency
  * - Regression tests (nullish coalescing, fee unit consistency)
  *
@@ -28,15 +28,18 @@ const config = require('@arbitrage/config') as {
   DETECTOR_CONFIG: Record<string, { batchSize: number; batchTimeout: number; confidence?: number; expiryMs?: number; gasEstimate?: number; whaleThreshold?: number }>;
   PHASE_METRICS: { targets: { phase1: { dexes: number; chains: number; tokens: number } }; current: { dexes: number; chains: number; tokens: number } };
   getEnabledDexes: (chainId: string) => Dex[];
-  dexFeeToPercentage: (feeBasisPoints: number) => number;
-  percentageToBasisPoints: (percentage: number) => number;
 };
 
 const {
   CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, TOKEN_METADATA,
   DETECTOR_CONFIG, PHASE_METRICS,
-  getEnabledDexes, dexFeeToPercentage, percentageToBasisPoints
+  getEnabledDexes,
 } = config;
+
+// Fee conversion helpers (canonical functions from @arbitrage/core)
+const BPS_DENOMINATOR = 10000;
+function bpsToDecimal(bps: number): number { return bps / BPS_DENOMINATOR; }
+function decimalToBps(decimal: number): number { return Math.round(decimal * BPS_DENOMINATOR); }
 
 // Import Solana DEX program constants
 import { SOLANA_DEX_PROGRAMS } from '@arbitrage/core';
@@ -392,10 +395,10 @@ describe('BSC DEX Specific Tests', () => {
 
     it('should convert fees correctly with round-trip', () => {
       bscDexes.forEach((dex: Dex) => {
-        const pct = dexFeeToPercentage(dex.feeBps);
+        const pct = bpsToDecimal(dex.feeBps);
         expect(pct).toBeLessThan(1);
         expect(pct).toBeGreaterThan(0);
-        expect(percentageToBasisPoints(pct)).toBe(dex.feeBps);
+        expect(decimalToBps(pct)).toBe(dex.feeBps);
       });
     });
   });
@@ -424,14 +427,14 @@ describe('BSC DEX Specific Tests', () => {
     it('should support low-spread stablecoin arbitrage via Ellipsis', () => {
       const ellipsis = bscDexes.find((d: Dex) => d.name === 'ellipsis');
       const pancakeV3 = bscDexes.find((d: Dex) => d.name === 'pancakeswap_v3');
-      const totalFees = dexFeeToPercentage(ellipsis!.feeBps) + dexFeeToPercentage(pancakeV3!.feeBps);
+      const totalFees = bpsToDecimal(ellipsis!.feeBps) + bpsToDecimal(pancakeV3!.feeBps);
       const minSpread = totalFees + ARBITRAGE_CONFIG.chainMinProfits.bsc;
       expect(minSpread).toBeLessThan(0.006);
     });
 
     it('should enable Biswap <-> Nomiswap arbitrage at 0.2% total fees', () => {
-      const biswapFee = dexFeeToPercentage(10);
-      const nomiswapFee = dexFeeToPercentage(10);
+      const biswapFee = bpsToDecimal(10);
+      const nomiswapFee = bpsToDecimal(10);
       expect(biswapFee + nomiswapFee).toBe(0.002);
     });
 
@@ -453,8 +456,8 @@ describe('BSC DEX Specific Tests', () => {
 
       for (let i = 0; i < bscDexes.length; i++) {
         for (let j = i + 1; j < bscDexes.length; j++) {
-          const fee1 = dexFeeToPercentage(bscDexes[i].feeBps);
-          const fee2 = dexFeeToPercentage(bscDexes[j].feeBps);
+          const fee1 = bpsToDecimal(bscDexes[i].feeBps);
+          const fee2 = bpsToDecimal(bscDexes[j].feeBps);
           paths.push({
             path: `${bscDexes[i].name}<->${bscDexes[j].name}`,
             minSpread: fee1 + fee2 + minProfit,
@@ -552,16 +555,16 @@ describe('Cross-chain DEX Consistency', () => {
 
 describe('Fee Helper Functions', () => {
   it('should convert basis points to decimal percentage', () => {
-    expect(dexFeeToPercentage(25)).toBeCloseTo(0.0025, 6);
-    expect(dexFeeToPercentage(30)).toBeCloseTo(0.003, 6);
-    expect(dexFeeToPercentage(4)).toBeCloseTo(0.0004, 6);
-    expect(dexFeeToPercentage(0)).toBe(0);
+    expect(bpsToDecimal(25)).toBeCloseTo(0.0025, 6);
+    expect(bpsToDecimal(30)).toBeCloseTo(0.003, 6);
+    expect(bpsToDecimal(4)).toBeCloseTo(0.0004, 6);
+    expect(bpsToDecimal(0)).toBe(0);
   });
 
   it('should convert decimal percentage to basis points', () => {
-    expect(percentageToBasisPoints(0.0025)).toBe(25);
-    expect(percentageToBasisPoints(0.003)).toBe(30);
-    expect(percentageToBasisPoints(0.0004)).toBe(4);
+    expect(decimalToBps(0.0025)).toBe(25);
+    expect(decimalToBps(0.003)).toBe(30);
+    expect(decimalToBps(0.0004)).toBe(4);
   });
 });
 
@@ -576,7 +579,7 @@ describe('DEX Lookup Performance', () => {
     for (let i = 0; i < 10000; i++) {
       const dexes = getEnabledDexes('bsc');
       const mdex = dexes.find((d: Dex) => d.name === 'mdex');
-      if (mdex) dexFeeToPercentage(mdex.feeBps);
+      if (mdex) bpsToDecimal(mdex.feeBps);
     }
 
     expect(performance.now() - startTime).toBeLessThan(200);
@@ -626,12 +629,12 @@ describe('Regression: Nullish Coalescing for Fees', () => {
     expect(zeroProfit || defaultProfit).toBe(defaultProfit);
   });
 
-  it('should call dexFeeToPercentage even for fee:0 with ?? operator', () => {
+  it('should call bpsToDecimal even for fee:0 with ?? operator', () => {
     const zeroFee: number | null = 0;
     const nonZeroFee: number | null = 30;
-    expect(dexFeeToPercentage(zeroFee ?? 30)).toBe(dexFeeToPercentage(0));
-    expect(dexFeeToPercentage(nonZeroFee ?? 30)).toBe(dexFeeToPercentage(30));
-    expect(dexFeeToPercentage(0)).toBe(0);
+    expect(bpsToDecimal(zeroFee ?? 30)).toBe(bpsToDecimal(0));
+    expect(bpsToDecimal(nonZeroFee ?? 30)).toBe(bpsToDecimal(30));
+    expect(bpsToDecimal(0)).toBe(0);
   });
 });
 
@@ -639,8 +642,8 @@ describe('Regression: Profit Calculation', () => {
   it('should calculate NET profit (not gross) for opportunities', () => {
     const price1 = 300;
     const price2 = 305;
-    const fee1 = dexFeeToPercentage(25);
-    const fee2 = dexFeeToPercentage(30);
+    const fee1 = bpsToDecimal(25);
+    const fee2 = bpsToDecimal(30);
 
     const grossProfit = Math.abs(price1 - price2) / Math.min(price1, price2);
     const netProfit = grossProfit - (fee1 + fee2);

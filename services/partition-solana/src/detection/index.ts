@@ -24,7 +24,7 @@ export {
   isPriceStale,
   calculatePriorityFee,
   estimateGasCost,
-  basisPointsToDecimal,
+  bpsToDecimal,
   meetsThreshold,
   getDefaultPrice,
 } from './base';

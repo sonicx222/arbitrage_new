@@ -31,7 +31,7 @@
  *   decimalToBps,
  *   v3TierToDecimal,
  *   validateFee,
- *   FEE_DEFAULT_DECIMAL,
+ *   FEE_CONSTANTS,
  *   type FeeBasisPoints,
  *   type FeeDecimal,
  *   type UniswapV3FeeTier
@@ -136,26 +136,8 @@ export const FEE_CONSTANTS = {
   ZERO: 0 as FeeDecimal,
 } as const;
 
-// Individual exports for backward compatibility
-//
-// NOTE: These legacy names predate the V3_LOWEST (0.01%) tier being added.
-// The naming shifted by one tier but was kept for backward compatibility:
-//   "LOW"    (legacy) → V3_LOWEST  = 0.0001 (0.01%, tier 100)
-//   "MEDIUM" (legacy) → V3_LOW     = 0.0005 (0.05%, tier 500)
-//   "HIGH"   (legacy) → V3_MEDIUM  = 0.003  (0.30%, tier 3000)
-//
-// Prefer FEE_CONSTANTS.V3_LOWEST / V3_LOW / V3_MEDIUM / V3_HIGH for clarity.
-
-/** @deprecated Use FEE_CONSTANTS.UNISWAP_V2 (0.003 = 0.30%) */
-export const FEE_UNISWAP_V2_DECIMAL = FEE_CONSTANTS.UNISWAP_V2;
-/** @deprecated Use FEE_CONSTANTS.V3_LOWEST — despite the name, this is 0.0001 (0.01%, tier 100) */
-export const FEE_UNISWAP_V3_LOW_DECIMAL = FEE_CONSTANTS.V3_LOWEST;
-/** @deprecated Use FEE_CONSTANTS.V3_LOW — despite the name, this is 0.0005 (0.05%, tier 500) */
-export const FEE_UNISWAP_V3_MEDIUM_DECIMAL = FEE_CONSTANTS.V3_LOW;
-/** @deprecated Use FEE_CONSTANTS.V3_MEDIUM — despite the name, this is 0.003 (0.30%, tier 3000) */
-export const FEE_UNISWAP_V3_HIGH_DECIMAL = FEE_CONSTANTS.V3_MEDIUM;
-/** @deprecated Use FEE_CONSTANTS.DEFAULT (0.003 = 0.30%) */
-export const FEE_DEFAULT_DECIMAL = FEE_CONSTANTS.DEFAULT;
+// Legacy individual constant exports removed in A6 refactoring.
+// Use FEE_CONSTANTS.UNISWAP_V2 / V3_LOWEST / V3_LOW / V3_MEDIUM / V3_HIGH / DEFAULT instead.
 
 /**
  * Valid Uniswap V3 fee tiers as a Set for O(1) validation.
@@ -257,51 +239,8 @@ export function decimalToPercent(decimal: number): number {
   return decimal * PERCENT_DENOMINATOR;
 }
 
-// =============================================================================
-// Backward Compatibility Aliases
-// =============================================================================
-
-/**
- * @deprecated Use bpsToDecimal instead
- */
-export const basisPointsToDecimal = bpsToDecimal;
-
-/**
- * @deprecated Use decimalToBps instead
- */
-export const decimalToBasisPoints = decimalToBps;
-
-/**
- * @deprecated Use bpsToDecimal instead
- * Convert DEX fee from basis points to percentage (decimal).
- */
-export function dexFeeToPercentage(feeBasisPoints: number): number {
-  return bpsToDecimal(feeBasisPoints);
-}
-
-/**
- * @deprecated Use decimalToBps instead
- * Convert percentage (decimal) to basis points.
- */
-export function percentageToBasisPoints(percentage: number): number {
-  return decimalToBps(percentage);
-}
-
-/**
- * @deprecated Use v3TierToDecimal instead
- * Convert Uniswap V3 per-million fee to decimal.
- */
-export function perMillionToDecimal(perMillion: number): number {
-  return v3TierToDecimal(perMillion);
-}
-
-/**
- * @deprecated Use percentToDecimal instead
- * Convert percentage to decimal.
- */
-export function percentageToDecimal(percentage: number): number {
-  return percentToDecimal(percentage);
-}
+// Backward compatibility aliases removed in A6 refactoring.
+// Use the canonical function names: bpsToDecimal, decimalToBps, v3TierToDecimal, percentToDecimal.
 
 // =============================================================================
 // Validation Functions
@@ -366,7 +305,7 @@ export function isValidFeeBps(bps: number): boolean {
  */
 export function validateFee(
   fee: number | undefined | null,
-  defaultFee: number = FEE_DEFAULT_DECIMAL
+  defaultFee: number = FEE_CONSTANTS.DEFAULT
 ): FeeDecimal {
   if (fee === undefined || fee === null) {
     return defaultFee as FeeDecimal;

@@ -26,7 +26,7 @@ import {
   isValidPrice,
   isValidDecimalFee,
   isPriceStale,
-  basisPointsToDecimal,
+  bpsToDecimal,
   MIN_VALID_PRICE,
   MAX_PATHS_PER_LEVEL,
   MAX_MEMO_CACHE_SIZE,
@@ -109,7 +109,7 @@ export function buildAdjacencyGraph(
 
     const token0 = pool.normalizedToken0;
     const token1 = pool.normalizedToken1;
-    const fee = basisPointsToDecimal(pool.fee);
+    const fee = bpsToDecimal(pool.fee);
 
     // Add edge token0 -> token1
     if (!graph.has(token0)) graph.set(token0, []);

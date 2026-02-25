@@ -34,7 +34,7 @@ export interface ActivePairInfo {
 
 /** Minimal logger interface for the tracker */
 export interface ActivePairsLogger {
-  debug: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: Record<string, unknown>) => void;
 }
 
 // =============================================================================

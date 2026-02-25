@@ -25,7 +25,7 @@ import {
   isValidFee,
   isPriceStale,
   estimateGasCost,
-  basisPointsToDecimal,
+  bpsToDecimal,
   meetsThreshold,
   COMPUTE_UNITS,
   MAX_COMPARISONS_PER_PAIR,
@@ -189,8 +189,8 @@ function calculateOpportunity(
   const grossDiff = (maxPrice - minPrice) / minPrice;
 
   // Calculate fees
-  const fee1 = basisPointsToDecimal(pool1.fee);
-  const fee2 = basisPointsToDecimal(pool2.fee);
+  const fee1 = bpsToDecimal(pool1.fee);
+  const fee2 = bpsToDecimal(pool2.fee);
   const totalFees = fee1 + fee2;
 
   // Net profit after fees

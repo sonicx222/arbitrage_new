@@ -28,7 +28,7 @@ import {
   normalizeTokenForCrossChain,
   getDefaultQuoteToken,
 } from '@arbitrage/config';
-import type { WhaleTransaction } from '@arbitrage/types';
+import type { WhaleTransaction, ILogger } from '@arbitrage/types';
 import type { PriceDataManager, PricePoint } from './price-data-manager';
 import type {
   CrossChainOpportunity,
@@ -40,13 +40,6 @@ import { TOKEN_PAIR_INTERNAL_SEPARATOR } from './types';
 // Types
 // =============================================================================
 
-/** Logger interface matching detector's logger shape */
-interface Logger {
-  debug(msg: string, meta?: Record<string, unknown>): void;
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-  error(msg: string, meta?: Record<string, unknown>): void;
-}
 
 /**
  * Dependencies for WhaleAnalyzer.
@@ -58,7 +51,7 @@ interface Logger {
  */
 export interface WhaleAnalyzerDeps {
   /** Logger instance */
-  logger: Logger;
+  logger: ILogger;
   /** Whale analysis config (thresholds, boosts) */
   whaleConfig: WhaleAnalysisConfig;
   /** Whale detection rate limiter */
@@ -105,7 +98,7 @@ export interface WhaleAnalyzerDeps {
  * - detectWhaleInducedOpportunities is NOT on hot path (rate-limited, async)
  */
 export class WhaleAnalyzer {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly whaleConfig: WhaleAnalysisConfig;
   private readonly whaleGuard: OperationGuard;
   private readonly getWhaleTracker: () => WhaleActivityTracker | null;

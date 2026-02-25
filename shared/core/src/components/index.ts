@@ -41,10 +41,6 @@ export {
   areValidReserves,
   isValidFee,
 
-  // Chain constants
-  BLOCK_TIMES_MS,
-  getBlockTimeMs,
-
   // Error class
   PriceCalculationError,
 } from './price-calculator';
@@ -146,6 +142,6 @@ export {
 export {
   getDefaultFeeForDex as getDefaultFee,
   resolveFeeValue as resolveFee,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
+  bpsToDecimal,
+  decimalToBps,
 } from '../utils/fee-utils';

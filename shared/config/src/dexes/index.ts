@@ -703,26 +703,5 @@ export function getEnabledDexes(chainId: string): Dex[] {
   return ENABLED_DEXES_CACHE[chainId] || [];
 }
 
-/**
- * Convert DEX fee from basis points to percentage.
- * Config stores fees in basis points (e.g., 30 = 0.30%), calculations use percentage.
- *
- * @deprecated Use bpsToDecimal from '@arbitrage/core' instead
- * @param feeBasisPoints - Fee in basis points (e.g., 30 for 0.30%)
- * @returns Fee as a decimal percentage (e.g., 0.003 for 0.30%)
- */
-export function dexFeeToPercentage(feeBasisPoints: number): number {
-  return feeBasisPoints / BPS_DENOMINATOR;
-}
-
-/**
- * Convert percentage to basis points.
- * Inverse of dexFeeToPercentage.
- *
- * @deprecated Use decimalToBps from '@arbitrage/core' instead
- * @param percentage - Fee as decimal (e.g., 0.003 for 0.30%)
- * @returns Fee in basis points (e.g., 30 for 0.30%)
- */
-export function percentageToBasisPoints(percentage: number): number {
-  return Math.round(percentage * BPS_DENOMINATOR);
-}
+// Deprecated dexFeeToPercentage and percentageToBasisPoints removed in A6 refactoring.
+// Use bpsToDecimal and decimalToBps from '@arbitrage/core' instead.

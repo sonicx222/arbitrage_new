@@ -49,10 +49,10 @@ export {
 
 export {
   type Logger,
-  type FeeBasisPoints,
-  type FeeDecimal,
   asLogger,
 } from './types';
+
+export type { FeeBasisPoints, FeeDecimal } from '@arbitrage/core';
 
 // =============================================================================
 // Constants

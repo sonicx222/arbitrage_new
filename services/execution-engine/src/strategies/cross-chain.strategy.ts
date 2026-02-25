@@ -195,14 +195,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     // Check if flash loan strategy is available
     if (!flashLoanStrategy) {
-      return createErrorResult(
-        sellOpportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        sellOpportunity,
         formatExecutionError(
           ExecutionErrorCode.NO_STRATEGY,
           'FlashLoanStrategy not configured for destination chain execution'
         ),
-        destChain,
-        sellOpportunity.buyDex || 'unknown'
+        destChain
       );
     }
 
@@ -246,14 +245,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         error: getErrorMessage(error),
       });
 
-      return createErrorResult(
-        sellOpportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        sellOpportunity,
         formatExecutionError(
           ExecutionErrorCode.FLASH_LOAN_ERROR,
           `Destination flash loan failed: ${getErrorMessage(error)}`
         ),
-        destChain,
-        sellOpportunity.buyDex || 'unknown'
+        destChain
       );
     }
   }
@@ -370,32 +368,27 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     // FIX-6.1: Use ExecutionErrorCode enum for standardized error codes
     if (!sourceChain || !destChain) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.NO_CHAIN, 'Missing source or destination chain'),
-        sourceChain || 'unknown',
-        opportunity.buyDex || 'unknown'
+        sourceChain || 'unknown'
       );
     }
 
     if (sourceChain === destChain) {
-      return createErrorResult(
-        opportunity.id,
-        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.SAME_CHAIN, 'Cross-chain requires different chains'),
-        sourceChain,
-        opportunity.buyDex || 'unknown'
+        sourceChain
       );
     }
 
     // Validate bridge router is available
     if (!ctx.bridgeRouterFactory) {
-      return createErrorResult(
-        opportunity.id,
-        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.NO_BRIDGE, 'Bridge router factory not initialized'),
-        sourceChain,
-        opportunity.buyDex || 'unknown'
+        sourceChain
       );
     }
 
@@ -422,11 +415,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         opportunityId: opportunity.id,
         route: this.bridgeRouteKey(sourceChain, destChain, bridgeToken),
       });
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.BRIDGE_EXEC, 'Bridge route is in cooldown after consecutive failures'),
-        sourceChain,
-        opportunity.buyDex || 'unknown'
+        sourceChain
       );
     }
 
@@ -435,14 +427,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(sourceChain, destChain, bridgeToken, tradeSizeUsd);
 
     if (!bridgeRouter) {
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(
           ExecutionErrorCode.NO_ROUTE,
           `${sourceChain} -> ${destChain} for ${bridgeToken}`
         ),
-        sourceChain,
-        opportunity.buyDex || 'unknown'
+        sourceChain
       );
     }
 
@@ -470,12 +461,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
             sourceChain,
             error: errorMessage,
           });
-          return createErrorResult(
-            opportunity.id,
-            // Fix 6.1: Use formatExecutionError for consistent error formatting
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(ExecutionErrorCode.GAS_SPIKE, `on ${sourceChain}: ${errorMessage}`),
-            sourceChain,
-            opportunity.buyDex || 'unknown'
+            sourceChain
           );
         }
         // Non-spike error - log and continue (fallback gas price will be used)
@@ -509,11 +498,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
               sourceChain,
             });
 
-            return createErrorResult(
-              opportunity.id,
+            return BaseExecutionStrategy.createOpportunityError(
+              opportunity,
               formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `source buy simulation predicted revert - ${buySimResult.revertReason || 'unknown reason'}`),
-              sourceChain,
-              opportunity.buyDex || 'unknown'
+              sourceChain
             );
           }
         } catch (simError) {
@@ -527,11 +515,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       // Step 1: Validate bridge amount and get bridge quote
       if (!opportunity.amountIn || opportunity.amountIn === '0') {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Invalid amountIn: must be non-zero for bridge quote'),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
       const bridgeAmount = opportunity.amountIn;
@@ -544,11 +531,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
 
       if (!bridgeQuote.valid) {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.BRIDGE_QUOTE, bridgeQuote.error),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
 
@@ -597,11 +583,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           gasFeeType: typeof bridgeQuote.gasFee,
           error: getErrorMessage(error),
         });
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.BRIDGE_QUOTE, `Invalid bridge gasFee format: ${bridgeQuote.gasFee}`),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
 
@@ -622,11 +607,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           feePercentage: bridgeProfitability.feePercentageOfProfit.toFixed(2),
         });
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.HIGH_FEES, bridgeProfitability.reason),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
 
@@ -637,11 +621,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Step 2: Validate source chain context using helper (Fix 6.2 & 9.1)
       const sourceValidation = this.validateContext(sourceChain, ctx);
       if (!sourceValidation.valid) {
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.NO_WALLET, sourceValidation.error),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
       const { wallet: sourceWallet, provider: sourceProvider } = sourceValidation;
@@ -660,11 +643,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
             error: errorMessage,
           });
           // Fix 4.3: Return error instead of continuing with undefined nonce
-          return createErrorResult(
-            opportunity.id,
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
             formatExecutionError(ExecutionErrorCode.NONCE_ERROR, `Failed to get nonce for bridge transaction: ${errorMessage}`),
-            sourceChain,
-            opportunity.buyDex || 'unknown'
+            sourceChain
           );
         }
       }
@@ -675,13 +657,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           ctx.nonceManager.failTransaction(sourceChain, bridgeNonce, 'Quote expired');
         }
 
-        return createErrorResult(
-          opportunity.id,
-          // Fix 6.1: formatExecutionError already returns the full error message for enum values
-          // but using the helper ensures consistent pattern across the codebase
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.QUOTE_EXPIRED, 'Bridge quote expired before execution'),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
 
@@ -715,11 +694,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
               destChain,
             });
 
-            return createErrorResult(
-              opportunity.id,
+            return BaseExecutionStrategy.createOpportunityError(
+              opportunity,
               formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`),
-              sourceChain,
-              opportunity.buyDex || 'unknown'
+              sourceChain
             );
           }
         } catch (simError) {
@@ -781,11 +759,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         // Fix W2-6: Record bridge failure for route circuit breaker
         this.recordBridgeRouteFailure(sourceChain, destChain, bridgeToken);
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(ExecutionErrorCode.BRIDGE_EXEC, bridgeResult.error),
-          sourceChain,
-          opportunity.buyDex || 'unknown'
+          sourceChain
         );
       }
 
@@ -832,11 +809,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         const errorMessage = pollingResult.error?.message ?? 'Bridge polling failed with no error details';
         const errorSourceTxHash = pollingResult.error?.sourceTxHash;
 
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(errorCode, errorMessage),
           sourceChain,
-          opportunity.buyDex || 'unknown',
           errorSourceTxHash
         );
       }
@@ -851,14 +827,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           bridgeId,
           destTxHash: pollingResult.destTxHash,
         });
-        return createErrorResult(
-          opportunity.id,
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
           formatExecutionError(
             ExecutionErrorCode.BRIDGE_EXEC,
             'Bridge completed but amountReceived not reported - cannot proceed with sell'
           ),
           sourceChain,
-          opportunity.buyDex || 'unknown',
           bridgeResult.sourceTxHash
         );
       }
@@ -1076,11 +1051,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         error: getErrorMessage(error),
       });
 
-      return createErrorResult(
-        opportunity.id,
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
         formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Cross-chain execution error: ${getErrorMessage(error)}`),
-        sourceChain,
-        opportunity.buyDex || 'unknown'
+        sourceChain
       );
     }
   }

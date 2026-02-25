@@ -360,7 +360,7 @@ export class AlertNotifier {
 
     if (configuredChannels.length === 0) {
       // No channels configured - just log
-      this.logger.warn('Alert triggered (no notification channels)', alert);
+      this.logger.warn('Alert triggered (no notification channels)', { ...alert });
       return;
     }
 

@@ -38,7 +38,7 @@ export interface SolanaTokenInfo {
  * Fee Documentation:
  * The `fee` field is in basis points (1 basis point = 0.01%).
  * Example: fee=25 means 0.25% trading fee.
- * Use basisPointsToDecimal(fee) to convert to decimal (25 → 0.0025).
+ * Use bpsToDecimal(fee) to convert to decimal (25 → 0.0025).
  */
 export interface SolanaPoolInfo {
   /** Pool program address */
@@ -157,7 +157,7 @@ export interface SolanaArbitrageOpportunity {
  *
  * Fee Format Note:
  * The `fee` field is in DECIMAL format (not basis points), as it's already
- * converted via basisPointsToDecimal() when building the adjacency graph.
+ * converted via bpsToDecimal() when building the adjacency graph.
  * - 0.003 = 0.3% (typical AMM fee)
  * - 0.0025 = 0.25% (Raydium default)
  */

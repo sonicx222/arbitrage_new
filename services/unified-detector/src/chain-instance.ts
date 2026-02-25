@@ -108,11 +108,9 @@ import { createSubscriptionManager } from './subscription';
 import type { SubscriptionCallbacks, SubscriptionStats } from './subscription';
 import { initializePairs as initializePairsFromModule } from './pair-initializer';
 // FIX Config 3.1/3.2: Import utility functions and constants
+import { parseIntEnvVar } from './types';
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
-import {
-  validateFee,
-  parseIntEnvVar,
-} from './types';
+import { validateFee } from '@arbitrage/core';
 import {
   // R8 Refactor: UNSTABLE_WEBSOCKET_CHAINS, DEFAULT_WS_CONNECTION_TIMEOUT_MS,
   // EXTENDED_WS_CONNECTION_TIMEOUT_MS moved to subscription-manager.ts
