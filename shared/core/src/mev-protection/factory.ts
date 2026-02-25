@@ -23,7 +23,7 @@ import { TimeboostProvider, createTimeboostProvider } from './timeboost-provider
 import { FlashbotsProtectL2Provider, createFlashbotsProtectL2Provider } from './flashbots-protect-l2.provider';
 import { AsyncMutex } from '../async/async-mutex';
 import { createLogger } from '../logger';
-
+import { getErrorMessage } from '../resilience/error-handling';
 const logger = createLogger('mev-provider-factory');
 
 // =============================================================================
@@ -334,7 +334,7 @@ export class MevProviderFactory {
         logger.debug('Failed to create MEV provider for fallback strategy', {
           chain,
           strategy,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -524,7 +524,7 @@ export class MevProviderFactory {
         } catch (error) {
           results[chain] = {
             healthy: false,
-            message: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
+            message: `Health check failed: ${getErrorMessage(error)}`,
           };
         }
       }

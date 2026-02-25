@@ -600,7 +600,7 @@ export class ExecutionEngineService {
         this.r2DailyUploadInterval = setInterval(() => {
           this.r2Uploader?.uploadPreviousDayLogs(tradeLogDir).catch((err: unknown) => {
             this.logger.warn('R2 daily upload failed', {
-              error: err instanceof Error ? err.message : String(err),
+              error: getErrorMessage(err),
             });
           });
         }, TWENTY_FOUR_HOURS_MS);
@@ -825,7 +825,7 @@ export class ExecutionEngineService {
         const tradeLogDir = this.tradeLogger.getLogPath().replace(/[/\\][^/\\]+$/, '');
         await this.r2Uploader.uploadDayLogs(tradeLogDir, new Date()).catch((err: unknown) => {
           this.logger.warn('R2 shutdown upload failed', {
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           });
         });
       }
@@ -934,7 +934,7 @@ export class ExecutionEngineService {
           await this.probabilityTracker.destroy();
         } catch (error) {
           this.logger.warn('Failed to destroy probability tracker on shutdown', {
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
           });
         }
       }
@@ -1243,7 +1243,7 @@ export class ExecutionEngineService {
         this.logger.info('Solana execution strategy registered');
       } catch (error) {
         this.logger.error('Failed to initialize Solana execution strategy', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     } else {
@@ -1267,7 +1267,7 @@ export class ExecutionEngineService {
         this.logger.info('Statistical arbitrage strategy registered');
       } catch (error) {
         this.logger.error('Failed to initialize statistical arbitrage strategy', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -1529,7 +1529,7 @@ export class ExecutionEngineService {
             this.logger.error('Execution failed for opportunity', {
               opportunityId: opportunity.id,
               traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
-              error: error instanceof Error ? error.message : String(error),
+              error: getErrorMessage(error),
             });
           })
           .finally(() => {

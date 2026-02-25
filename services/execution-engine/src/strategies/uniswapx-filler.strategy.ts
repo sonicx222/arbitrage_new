@@ -39,7 +39,7 @@
 
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { generateTraceId, CircuitBreaker, CircuitBreakerError } from '@arbitrage/core';
+import { generateTraceId, CircuitBreaker, CircuitBreakerError, getErrorMessage } from '@arbitrage/core';
 import { getNativeTokenPrice, CHAINS } from '@arbitrage/config';
 import { BaseExecutionStrategy } from './base.strategy';
 import type {
@@ -468,7 +468,7 @@ export class UniswapXFillerStrategy extends BaseExecutionStrategy {
       }
 
       this.metrics.fillsFailed++;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
 
       this.logger.error('UniswapX fill execution error', {
         opportunityId: opportunity.id,

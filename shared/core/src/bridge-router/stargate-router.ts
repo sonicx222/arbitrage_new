@@ -37,7 +37,7 @@ import {
   GAS_BUFFER_DENOMINATOR,
   ERC20_ABI,
 } from './abstract-bridge-router';
-
+import { getErrorMessage } from '../resilience/error-handling';
 /** Stargate V1 bridge fee: 0.06% of bridged amount */
 const STARGATE_BRIDGE_FEE_BPS = 6n;
 
@@ -203,11 +203,11 @@ export class StargateRouter extends AbstractBridgeRouter {
         sourceChain,
         destChain,
         token,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
 
       return this.createInvalidQuote(sourceChain, destChain, token, amount,
-        `Quote failed: ${error instanceof Error ? error.message : String(error)}`);
+        `Quote failed: ${getErrorMessage(error)}`);
     }
   }
 
@@ -407,12 +407,12 @@ export class StargateRouter extends AbstractBridgeRouter {
       this.logger.error('Stargate bridge execution failed', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
 
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -483,7 +483,7 @@ export class StargateRouter extends AbstractBridgeRouter {
     } catch (error) {
       return {
         healthy: false,
-        message: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Health check failed: ${getErrorMessage(error)}`,
       };
     }
   }
@@ -536,7 +536,7 @@ export class StargateRouter extends AbstractBridgeRouter {
             });
           } catch (callbackError) {
             this.logger.debug('Pool alert callback error (non-critical)', {
-              error: callbackError instanceof Error ? callbackError.message : String(callbackError),
+              error: getErrorMessage(callbackError),
             });
           }
         }
@@ -550,7 +550,7 @@ export class StargateRouter extends AbstractBridgeRouter {
       // Non-critical -- don't fail health check if liquidity query fails
       this.logger.debug('Pool liquidity check failed (non-critical)', {
         chain,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return null;
     }

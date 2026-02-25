@@ -17,6 +17,7 @@
 
 import type { Logger } from '../types';
 import { DEFAULT_CIRCUIT_BREAKER_CONFIG } from '../types';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Types
@@ -228,7 +229,7 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
       onStateChange(event);
     } catch (error) {
       logger.error('Failed to emit circuit breaker event', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         event,
       });
     }

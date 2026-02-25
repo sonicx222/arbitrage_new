@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../resilience/error-handling';
 /**
  * Interval Manager
  *
@@ -95,13 +96,13 @@ export class IntervalManager {
         if (result instanceof Promise) {
           result.catch((error: unknown) => {
             if (typeof console !== 'undefined') {
-              console.error(`[IntervalManager] Async callback '${name}' error:`, error instanceof Error ? error.message : String(error));
+              console.error(`[IntervalManager] Async callback '${name}' error:`, getErrorMessage(error));
             }
           });
         }
       } catch (error: unknown) {
         if (typeof console !== 'undefined') {
-          console.error(`[IntervalManager] Sync callback '${name}' error:`, error instanceof Error ? error.message : String(error));
+          console.error(`[IntervalManager] Sync callback '${name}' error:`, getErrorMessage(error));
         }
       }
     };

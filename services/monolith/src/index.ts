@@ -45,7 +45,7 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import * as os from 'os';
 import * as path from 'path';
-import { createLogger } from '@arbitrage/core';
+import { createLogger, getErrorMessage } from '@arbitrage/core';
 import { WorkerManager, type ServiceWorkerConfig } from './worker-manager';
 
 const logger = createLogger('monolith');
@@ -337,7 +337,7 @@ process.on('uncaughtException', (error: Error) => {
 
 process.on('unhandledRejection', (reason: unknown) => {
   logger.error('Monolith unhandled rejection', {
-    reason: reason instanceof Error ? reason.message : String(reason),
+    reason: getErrorMessage(reason),
     stack: reason instanceof Error ? reason.stack : undefined,
   });
   // In Node 22, unhandled rejections throw uncaughtException by default.
@@ -346,7 +346,7 @@ process.on('unhandledRejection', (reason: unknown) => {
 
 main().catch((error) => {
   logger.error('Failed to start Monolith Service', {
-    error: error instanceof Error ? error.message : String(error),
+    error: getErrorMessage(error),
   });
   process.exit(1);
 });

@@ -30,9 +30,10 @@ import {
   getCrossRegionHealthManager,
   resetCrossRegionHealthManager,
   parseEnvInt,
-  getCrossRegionEnvConfig,
+  parseStandbyConfig,
   setupServiceShutdown,
   runServiceMain,
+  getErrorMessage,
 } from '@arbitrage/core';
 import type { CrossRegionHealthConfig } from '@arbitrage/core';
 
@@ -48,37 +49,20 @@ const logger = createLogger('coordinator');
  * FIX: Added validation for numeric env vars to catch misconfigurations early.
  */
 function getStandbyConfigFromEnv() {
-  const isStandby = process.env.IS_STANDBY === 'true';
+  const base = parseStandbyConfig('coordinator');
   const canBecomeLeader = process.env.CAN_BECOME_LEADER !== 'false'; // Default true
-  const instanceRole = process.env.INSTANCE_ROLE || (isStandby ? 'standby' : 'primary');
-
-  // Shared cross-region health settings (S-6 consolidation)
-  const crossRegion = getCrossRegionEnvConfig('coordinator');
-
-  // Coordinator-specific: Leader lock key
+  const instanceRole = process.env.INSTANCE_ROLE || (base.isStandby ? 'standby' : 'primary');
   const leaderLockKey = process.env.LEADER_LOCK_KEY || 'coordinator:leader:lock';
 
   // Validate heartbeat is less than lock TTL (per ADR-007: should be ~1/3 of TTL)
-  if (crossRegion.leaderHeartbeatIntervalMs >= crossRegion.leaderLockTtlMs) {
+  if (base.leaderHeartbeatIntervalMs >= base.leaderLockTtlMs) {
     throw new Error(
-      `Invalid configuration: LEADER_HEARTBEAT_INTERVAL_MS (${crossRegion.leaderHeartbeatIntervalMs}) ` +
-      `must be less than LEADER_LOCK_TTL_MS (${crossRegion.leaderLockTtlMs})`
+      `Invalid configuration: LEADER_HEARTBEAT_INTERVAL_MS (${base.leaderHeartbeatIntervalMs}) ` +
+      `must be less than LEADER_LOCK_TTL_MS (${base.leaderLockTtlMs})`
     );
   }
 
-  return {
-    isStandby,
-    canBecomeLeader,
-    regionId: crossRegion.regionId,
-    instanceRole,
-    serviceName: crossRegion.serviceName,
-    leaderLockKey,
-    leaderLockTtlMs: crossRegion.leaderLockTtlMs,
-    leaderHeartbeatIntervalMs: crossRegion.leaderHeartbeatIntervalMs,
-    healthCheckIntervalMs: crossRegion.healthCheckIntervalMs,
-    failoverThreshold: crossRegion.failoverThreshold,
-    failoverTimeoutMs: crossRegion.failoverTimeoutMs,
-  };
+  return { ...base, canBecomeLeader, instanceRole, leaderLockKey };
 }
 
 async function main() {
@@ -189,7 +173,7 @@ async function main() {
         }
       } catch (error) {
         logger.error('Error during standby activation', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           failedRegion: event.failedRegion
         });
       }

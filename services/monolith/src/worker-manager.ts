@@ -38,7 +38,7 @@
 
 import { Worker, type WorkerOptions } from 'worker_threads';
 import { EventEmitter } from 'events';
-import { createLogger } from '@arbitrage/core';
+import { createLogger, getErrorMessage } from '@arbitrage/core';
 
 const logger = createLogger('worker-manager');
 
@@ -316,7 +316,7 @@ export class WorkerManager extends EventEmitter {
               if (!this.isShuttingDown) {
                 this.spawnWorker(name, managed).catch((err) => {
                   logger.error(`Failed to restart worker: ${name}`, {
-                    error: err instanceof Error ? err.message : String(err),
+                    error: getErrorMessage(err),
                   });
                 });
               }
@@ -339,7 +339,7 @@ export class WorkerManager extends EventEmitter {
     } catch (error) {
       logger.error(`Failed to spawn worker: ${name}`, {
         scriptPath: config.scriptPath,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       managed.healthy = false;
       throw error;

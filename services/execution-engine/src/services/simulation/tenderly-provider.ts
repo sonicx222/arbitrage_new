@@ -24,6 +24,7 @@ import {
   getDeprecationWarning,
 } from './types';
 import { BaseSimulationProvider } from './base-simulation-provider';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Tenderly Provider Implementation
@@ -169,7 +170,7 @@ export class TenderlyProvider extends BaseSimulationProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach Tenderly API: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach Tenderly API: ${getErrorMessage(error)}`,
       };
     }
   }

@@ -28,6 +28,8 @@
       "@arbitrage/types/*": ["../types/src/*"],
       "@arbitrage/config": ["../config/src"],
       "@arbitrage/config/*": ["../config/src/*"],
+      "@arbitrage/core": ["../core/src"],
+      "@arbitrage/core/*": ["../core/src/*"],
       "@arbitrage/test-utils": ["./src"],
       "@arbitrage/test-utils/*": ["./src/*"]
     },
@@ -37,6 +39,7 @@
   "exclude": ["node_modules", "dist"],
   "references": [
     { "path": "../types" },
-    { "path": "../config" }
+    { "path": "../config" },
+    { "path": "../core" }
   ]
 }

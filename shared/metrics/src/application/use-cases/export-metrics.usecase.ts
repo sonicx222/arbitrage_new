@@ -13,6 +13,7 @@
 
 import { IMetricsExporter, ExportFormat } from '../../domain';
 import { ExportMetricsRequest, ExportMetricsResponse } from '../dtos/export-metrics.dto';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Use Case: Export metrics to monitoring systems
@@ -102,7 +103,7 @@ export class ExportMetricsUseCase {
     } catch (error) {
       // Handle errors gracefully
       const durationMs = performance.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return ExportMetricsResponse.failure(
         request.format,
         [errorMessage],

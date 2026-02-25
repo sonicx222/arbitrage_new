@@ -3,6 +3,7 @@
  */
 
 import { IsolatedRedisClient } from './redis-pool';
+import { getErrorMessage } from '@arbitrage/core';
 
 export interface StreamMessage {
   id: string;
@@ -169,7 +170,7 @@ export class StreamCollector {
     try {
       await this.redis.xgroup('CREATE', this.stream, this.group, '0', 'MKSTREAM');
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = getErrorMessage(e);
       if (!errorMessage.includes('BUSYGROUP')) throw e;
     }
 

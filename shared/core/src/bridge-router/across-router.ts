@@ -34,7 +34,7 @@ import {
   GAS_BUFFER_DENOMINATOR,
   ERC20_ABI,
 } from './abstract-bridge-router';
-
+import { getErrorMessage } from '../resilience/error-handling';
 /** Default fill deadline for Across deposits (5 hours from now) */
 const FILL_DEADLINE_SECONDS = 18000;
 
@@ -259,11 +259,11 @@ export class AcrossRouter extends AbstractBridgeRouter {
         sourceChain,
         destChain,
         token,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
 
       return this.createInvalidQuote(sourceChain, destChain, token, amount,
-        `Quote failed: ${error instanceof Error ? error.message : String(error)}`);
+        `Quote failed: ${getErrorMessage(error)}`);
     }
   }
 
@@ -420,12 +420,12 @@ export class AcrossRouter extends AbstractBridgeRouter {
       this.logger.error('Across bridge execution failed', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
 
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }

@@ -15,7 +15,7 @@
  * @see docs/reports/implementation_plan_v3.md - Phase 4, Task 4.3.1
  */
 
-import { createLogger, getWhaleActivityTracker } from '@arbitrage/core';
+import { createLogger, getWhaleActivityTracker, getErrorMessage } from '@arbitrage/core';
 import type { WhaleActivitySummary } from '@arbitrage/core';
 
 const logger = createLogger('orderflow-features');
@@ -439,7 +439,7 @@ export class OrderflowFeatureExtractor {
       logger.warn('Failed to extract whale count, using default', {
         pairKey,
         chain,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
       return 0;
     }
@@ -468,7 +468,7 @@ export class OrderflowFeatureExtractor {
       logger.warn('Failed to extract whale direction, using neutral', {
         pairKey,
         chain,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
       return 'neutral';
     }

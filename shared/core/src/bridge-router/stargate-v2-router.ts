@@ -36,7 +36,7 @@ import {
   GAS_BUFFER_DENOMINATOR,
   ERC20_ABI,
 } from './abstract-bridge-router';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Stargate V2 Pool ABI (OFT standard)
 // =============================================================================
@@ -291,11 +291,11 @@ export class StargateV2Router extends AbstractBridgeRouter {
         sourceChain,
         destChain,
         token,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
 
       return this.createInvalidQuote(sourceChain, destChain, token, amount,
-        `Quote failed: ${error instanceof Error ? error.message : String(error)}`);
+        `Quote failed: ${getErrorMessage(error)}`);
     }
   }
 
@@ -464,12 +464,12 @@ export class StargateV2Router extends AbstractBridgeRouter {
       this.logger.error('Stargate V2 bridge execution failed', {
         sourceChain: quote.sourceChain,
         destChain: quote.destChain,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
 
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }

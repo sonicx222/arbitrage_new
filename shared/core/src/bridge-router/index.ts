@@ -84,7 +84,7 @@ import { StargateRouter } from './stargate-router';
 import { AcrossRouter } from './across-router';
 import { StargateV2Router } from './stargate-v2-router';
 import { selectOptimalBridge, type BridgeUrgency } from '@arbitrage/config';
-
+import { getErrorMessage } from '../resilience/error-handling';
 /**
  * Configuration for bridge router factory
  */
@@ -235,7 +235,7 @@ export class BridgeRouterFactory {
           ),
         ]);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
         result = { healthy: false, message };
       }
 

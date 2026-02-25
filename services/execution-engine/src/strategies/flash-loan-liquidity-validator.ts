@@ -18,6 +18,7 @@ import type { IFlashLoanProvider, FlashLoanProtocol } from './flash-loan-provide
 import type { StrategyContext } from '../types';
 import type { Logger } from '../types';
 import { ethers } from 'ethers';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Cached liquidity data for a provider/asset pair
@@ -259,7 +260,7 @@ export class FlashLoanLiquidityValidator {
       this.logger.warn('[LiquidityValidator] On-chain check failed', {
         protocol: provider.protocol,
         asset,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         latencyMs: latency,
       });
 

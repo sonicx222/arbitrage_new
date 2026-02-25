@@ -21,7 +21,7 @@ import * as path from 'path';
 import type { ServiceLogger } from '../logging/types';
 import type { ExecutionResult } from '@arbitrage/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Types
 // =============================================================================
@@ -165,7 +165,7 @@ export class TradeLogger {
       // Never crash the execution engine due to logging failures
       this.logger.warn('Failed to write trade log entry', {
         opportunityId: result.opportunityId,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }
@@ -229,7 +229,7 @@ export class TradeLogger {
       this.dirEnsured = true;
       this.logger.info('Trade log directory validated', { outputDir: this.config.outputDir });
     } catch (error) {
-      const msg = `Trade log directory not writable: ${this.config.outputDir} — ${error instanceof Error ? error.message : String(error)}`;
+      const msg = `Trade log directory not writable: ${this.config.outputDir} — ${getErrorMessage(error)}`;
       this.logger.error(msg);
       throw new Error(msg);
     }

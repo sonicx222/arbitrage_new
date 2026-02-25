@@ -29,6 +29,7 @@ import {
 import { BaseExecutionStrategy } from './base.strategy';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
 import { generateTraceId } from '@arbitrage/core/tracing/trace-context';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Types
@@ -185,7 +186,7 @@ export class StatisticalArbitrageStrategy extends BaseExecutionStrategy {
       try {
         return await this.flashLoanStrategy.execute(flashLoanOpp, ctx);
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = getErrorMessage(error);
         this.logger.error('Flash loan execution failed for stat arb', {
           traceId,
           opportunityId: oppId,

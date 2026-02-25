@@ -23,7 +23,7 @@ import {
 } from './types';
 import { BaseMevProvider } from './base-provider';
 import { createLogger } from '../logger';
-
+import { getErrorMessage } from '../resilience/error-handling';
 const logger = createLogger('flashbots-protect-l2-provider');
 
 // =============================================================================
@@ -158,7 +158,7 @@ export class FlashbotsProtectL2Provider extends BaseMevProvider {
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         false
       );
@@ -182,7 +182,7 @@ export class FlashbotsProtectL2Provider extends BaseMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -220,7 +220,7 @@ export class FlashbotsProtectL2Provider extends BaseMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach Base sequencer: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach Base sequencer: ${getErrorMessage(error)}`,
       };
     }
   }
@@ -351,7 +351,7 @@ export class FlashbotsProtectL2Provider extends BaseMevProvider {
       );
     } catch (error) {
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         false
       );
@@ -400,7 +400,7 @@ export class FlashbotsProtectL2Provider extends BaseMevProvider {
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         usedFallback
       );
@@ -470,7 +470,7 @@ export class FlashbotsProtectL2Provider extends BaseMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach Protect endpoint: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach Protect endpoint: ${getErrorMessage(error)}`,
       };
     } finally {
       clearTimeout(timeoutId);

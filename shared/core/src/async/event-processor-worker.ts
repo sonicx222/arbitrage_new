@@ -4,7 +4,7 @@
 import { parentPort, workerData } from 'worker_threads';
 import { PriceMatrix } from '../caching/price-matrix';
 import { createLogger } from '../logger';
-
+import { getErrorMessage } from '../resilience/error-handling';
 const logger = createLogger('event-processor-worker');
 
 const { workerId, priceBuffer, keyRegistryBuffer } = workerData;
@@ -300,7 +300,7 @@ function processBatchJsonParsing(data: { jsonStrings: string[] }): {
       totalParseTimeUs += result.parseTimeUs;
       successCount++;
     } catch (error) {
-      results.push({ error: error instanceof Error ? error.message : String(error) });
+      results.push({ error: getErrorMessage(error) });
       errorCount++;
     }
   }

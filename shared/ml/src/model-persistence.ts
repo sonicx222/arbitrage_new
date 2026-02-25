@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as crypto from 'crypto';
 import * as path from 'path';
-import { createLogger } from '@arbitrage/core';
+import { createLogger, getErrorMessage } from '@arbitrage/core';
 
 const logger = createLogger('model-persistence');
 
@@ -330,7 +330,7 @@ export class ModelPersistence {
     } catch (error) {
       logger.error('Failed to load metadata', {
         modelId,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
       return null;
     }
@@ -370,7 +370,7 @@ export class ModelPersistence {
     } catch (error) {
       logger.error('Failed to delete model', {
         modelId,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
       return false;
     }
@@ -394,7 +394,7 @@ export class ModelPersistence {
         .map(entry => entry.name);
     } catch (error) {
       logger.error('Failed to list models', {
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
       return [];
     }
@@ -538,7 +538,7 @@ export class ModelPersistence {
       logger.warn('Failed to archive version', {
         modelId,
         version,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
     }
   }
@@ -565,7 +565,7 @@ export class ModelPersistence {
     } catch (error) {
       logger.warn('Failed to clean old versions', {
         modelId,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
     }
   }

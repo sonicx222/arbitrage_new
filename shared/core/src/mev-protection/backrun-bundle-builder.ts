@@ -28,7 +28,7 @@ import { ethers } from 'ethers';
 import type { Logger } from '../logger';
 import { CircuitBreaker, CircuitBreakerError } from '../resilience/circuit-breaker';
 import type { BackrunOpportunity } from './mev-share-event-listener';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Types
 // =============================================================================
@@ -256,7 +256,7 @@ export class BackrunBundleBuilder {
         // Fix #57: Log gas estimation fallback instead of silently swallowing
         this.logger.debug('Gas estimation failed, using fallback gas limit', {
           fallbackGasLimit: 300000,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
         preparedTx.gasLimit = 300000n;
       }
@@ -364,7 +364,7 @@ export class BackrunBundleBuilder {
         // with the primary retry logic below. Instead, create a failure result from the error.
         result = {
           success: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           targetTxHash: bundle.targetTxHash,
           latencyMs: Date.now() - startTime,
         };
@@ -397,7 +397,7 @@ export class BackrunBundleBuilder {
         } catch (retryError) {
           // CB open or retry failed — continue to fallback relays
           this.logger.warn('Primary relay retry failed', {
-            error: retryError instanceof Error ? retryError.message : String(retryError),
+            error: getErrorMessage(retryError),
             relayUrl,
             targetTxHash: bundle.targetTxHash,
           });
@@ -500,7 +500,7 @@ export class BackrunBundleBuilder {
 
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         targetTxHash: bundle.targetTxHash,
         latencyMs,
       };

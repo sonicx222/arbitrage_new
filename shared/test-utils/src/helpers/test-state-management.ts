@@ -46,6 +46,7 @@
 // Import and re-export Resettable from @arbitrage/types for backwards compatibility
 // The canonical definition is now in @arbitrage/types since production code uses it
 import type { Resettable } from '@arbitrage/types';
+import { getErrorMessage } from '@arbitrage/core';
 export type { Resettable };
 
 
@@ -170,7 +171,7 @@ export function createResetHook<T extends Resettable>(
       } catch (error) {
         const className = instance.constructor?.name || 'Unknown';
         throw new Error(
-          `Failed to reset state for ${className}: ${error instanceof Error ? error.message : String(error)}`
+          `Failed to reset state for ${className}: ${getErrorMessage(error)}`
         );
       }
     }

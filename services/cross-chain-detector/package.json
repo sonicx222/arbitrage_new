@@ -2,7 +2,12 @@
   "name": "@arbitrage/cross-chain-detector",
   "version": "1.0.0",
   "description": "Cross-chain arbitrage detector service with ML prediction",
-  "main": "dist/index.js",
+  "main": "dist/exports.js",
+  "types": "dist/exports.d.ts",
+  "exports": {
+    ".": "./dist/exports.js",
+    "./service": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",

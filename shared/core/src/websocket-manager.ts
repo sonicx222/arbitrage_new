@@ -16,7 +16,7 @@ import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
 // CQ8-ALT: Extracted cold-path classes
 import { ProviderRotationStrategy } from './rpc/provider-rotation-strategy';
 import { ProviderHealthTracker } from './monitoring/provider-health-tracker';
-
+import { getErrorMessage } from './resilience/error-handling';
 export interface WebSocketConfig {
   url: string;
   /** Fallback URLs to try if primary URL fails */
@@ -883,7 +883,7 @@ export class WebSocketManager {
       })
       .catch(error => {
         this.logger.error('Worker thread JSON parse failed', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           dataPreview: dataString.slice(0, 200)
         });
         this.healthTracker.qualityMetrics.errorsEncountered++;
@@ -922,7 +922,7 @@ export class WebSocketManager {
         this.workerPoolStarting = false;
         this.logger.error('Failed to start worker pool, disabling worker parsing', {
           chainId: this.chainId,
-          error: error instanceof Error ? error.message : String(error)
+          error: getErrorMessage(error)
         });
         // Disable worker parsing on failure
         this.useWorkerParsing = false;
@@ -1315,7 +1315,7 @@ export class WebSocketManager {
       if (this.logger.isLevelEnabled?.('debug') ?? false) {
         this.logger.debug('Proactive gap detection failed (falling back to passive)', {
           chainId: this.chainId,
-          error: error instanceof Error ? error.message : String(error)
+          error: getErrorMessage(error)
         });
       }
       return null;

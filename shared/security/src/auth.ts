@@ -4,7 +4,7 @@
 import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';  // BUG-FIX: Import at module level (was require per call)
-import { createLogger } from '@arbitrage/core';
+import { createLogger, getErrorMessage } from '@arbitrage/core';
 import { getRedisClient } from '@arbitrage/core';
 
 // =============================================================================
@@ -222,7 +222,7 @@ export class AuthService {
     } catch (error) {
       // FAIL-CLOSED: Any token validation error denies access (returns null → 401)
       // This is intentional — see Task 2.4 FailOpen/FailClosed audit
-      this.logger.debug('Token validation failed', { error: error instanceof Error ? error.message : String(error) });
+      this.logger.debug('Token validation failed', { error: getErrorMessage(error) });
       return null;
     }
   }
@@ -760,7 +760,7 @@ export function apiAuth(options: AuthOptions = {}) {
             }
           } catch (error) {
             // JWT validation failed - continue
-            moduleLogger.debug('JWT validation failed', { error: error instanceof Error ? error.message : String(error) });
+            moduleLogger.debug('JWT validation failed', { error: getErrorMessage(error) });
           }
         }
       }

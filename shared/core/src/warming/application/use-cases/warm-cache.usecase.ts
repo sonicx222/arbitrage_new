@@ -13,7 +13,7 @@
 
 import { ICacheWarmer, ICorrelationTracker } from '../../domain';
 import { WarmCacheRequest, WarmCacheResponse } from '../dtos/warm-cache.dto';
-
+import { getErrorMessage } from '../../../resilience/error-handling';
 /**
  * Use Case: Warm cache for correlated trading pairs
  *
@@ -115,7 +115,7 @@ export class WarmCacheUseCase {
     } catch (error) {
       // Handle errors gracefully
       const durationMs = performance.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return WarmCacheResponse.failure(
         request.sourcePair,
         errorMessage,

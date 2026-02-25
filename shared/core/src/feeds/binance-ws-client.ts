@@ -17,7 +17,7 @@
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
 import { createLogger } from '../logger';
-
+import { getErrorMessage } from '../resilience/error-handling';
 const logger = createLogger('binance-ws');
 
 // =============================================================================
@@ -319,7 +319,7 @@ export class BinanceWebSocketClient extends EventEmitter {
       this.emit('trade', trade);
     } catch (error) {
       logger.warn('Failed to parse Binance message', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }
@@ -383,7 +383,7 @@ export class BinanceWebSocketClient extends EventEmitter {
       this.connect().catch((error) => {
         logger.error('Reconnect attempt failed', {
           attempt: this.reconnectAttempts,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
         // Exponential backoff: double the delay, cap at max
         this.currentReconnectDelay = Math.min(
@@ -414,7 +414,7 @@ export class BinanceWebSocketClient extends EventEmitter {
       this.currentReconnectDelay = this.config.reconnectDelayMs;
       this.connect().catch((error) => {
         logger.error('Last-resort reconnect failed', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       });
     }, intervalMs);

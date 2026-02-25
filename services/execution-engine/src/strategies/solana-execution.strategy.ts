@@ -33,6 +33,7 @@ import type { SolanaTransactionBuilder } from '../solana/transaction-builder';
 import type { ISolanaMevProvider } from '@arbitrage/core/mev-protection/types';
 import { VersionedTransaction } from '@solana/web3.js';
 import { generateTraceId } from '@arbitrage/core/tracing/trace-context';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Types
@@ -408,7 +409,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
       );
     } catch (error) {
       const latencyMs = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
 
       this.logger.error('Solana execution strategy error', {
         traceId,
@@ -471,7 +472,7 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
           traceId,
           opportunityId,
           signature,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
         // Continue polling — transient RPC errors shouldn't abort confirmation
       }

@@ -13,6 +13,7 @@
 
 import { IMetricsCollector, MetricType } from '../../domain';
 import { RecordMetricRequest, RecordMetricResponse } from '../dtos/collect-metrics.dto';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Use Case: Collect performance metrics
@@ -126,7 +127,7 @@ export class CollectMetricsUseCase {
       // Minimal error handling for hot path
       const durationMs = performance.now() - startTime;
       const durationUs = durationMs * 1000;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return RecordMetricResponse.failure(request.name, errorMessage, durationUs);
     }
   }

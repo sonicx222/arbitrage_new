@@ -11,6 +11,7 @@
 import { ethers } from 'ethers';
 import { type Logger, createServiceLogger } from '../../types';
 import { getMultiPathQuoterAddress } from '@arbitrage/config';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Types
@@ -244,7 +245,7 @@ export class BatchQuoterService {
       this.metrics.failedQuotes += requests.length;
       this.updateAverageLatency(latencyMs);
       this.logger.error('Failed to get batched quotes', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         requestCount: requests.length,
       });
       throw error;
@@ -314,7 +315,7 @@ export class BatchQuoterService {
       this.metrics.failedQuotes += requests.length;
       this.updateAverageLatency(latencyMs);
       this.logger.error('Failed to simulate arbitrage path', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         requestCount: requests.length,
       });
       throw error;
@@ -404,7 +405,7 @@ export class BatchQuoterService {
     } catch (error) {
       this.metrics.failedQuotes += totalQuotes;
       this.logger.error('Failed to compare arbitrage paths', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         pathCount: paths.length,
       });
       throw error;

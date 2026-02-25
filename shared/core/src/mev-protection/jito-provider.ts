@@ -20,7 +20,7 @@ import {
   MevMetrics,
 } from './types';
 import { MevMetricsManager } from './metrics-manager';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Jito Configuration
 // =============================================================================
@@ -245,7 +245,7 @@ export class JitoProvider implements ISolanaMevProvider {
       await this.metricsManager.increment('failedSubmissions');
       return {
         success: false,
-        error: `Transaction serialization failed: ${serializeError instanceof Error ? serializeError.message : String(serializeError)}`,
+        error: `Transaction serialization failed: ${getErrorMessage(serializeError)}`,
         strategy: 'jito',
         latencyMs: Date.now() - startTime,
         usedFallback: false,
@@ -314,7 +314,7 @@ export class JitoProvider implements ISolanaMevProvider {
     } catch (error) {
       // Note: Don't increment failedSubmissions here - fallbackToPublicWithSerialized handles it
       // to avoid double-counting when fallback is disabled
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       // PERFORMANCE-FIX: Use pre-serialized transaction (serializedTx is now always available)
       return this.fallbackToPublicWithSerialized(serializedTx, startTime, errorMessage);
     }
@@ -336,7 +336,7 @@ export class JitoProvider implements ISolanaMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -383,7 +383,7 @@ export class JitoProvider implements ISolanaMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -433,7 +433,7 @@ export class JitoProvider implements ISolanaMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach Jito Block Engine: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach Jito Block Engine: ${getErrorMessage(error)}`,
       };
     }
   }
@@ -498,7 +498,7 @@ export class JitoProvider implements ISolanaMevProvider {
         if (attempt < maxRetries - 1) continue;
         return {
           success: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         };
       }
     }
@@ -661,7 +661,7 @@ export class JitoProvider implements ISolanaMevProvider {
       await this.metricsManager.increment('failedSubmissions');
       return {
         success: false,
-        error: `Jito and fallback both failed. Original: ${reason}. Fallback: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Jito and fallback both failed. Original: ${reason}. Fallback: ${getErrorMessage(error)}`,
         strategy: 'jito',
         latencyMs: Date.now() - startTime,
         usedFallback: true,

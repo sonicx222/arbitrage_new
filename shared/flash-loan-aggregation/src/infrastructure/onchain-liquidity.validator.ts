@@ -38,6 +38,7 @@ export interface Logger {
 }
 import { withTimeout } from './with-timeout';
 import { CoalescingMap } from './coalescing-map';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Minimal interface for RPC providers that support eth_call.
@@ -251,7 +252,7 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       return check;
     } catch (error) {
       const latency = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
 
       // M3 Fix: Record failure for circuit breaker
       this.recordFailure();

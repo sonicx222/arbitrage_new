@@ -27,6 +27,7 @@ import {
   MetricType,
   MetricSnapshot,
 } from '../domain/metrics-collector.interface';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Default export configuration
@@ -163,7 +164,7 @@ export class PrometheusExporter implements IMetricsExporter {
         metricsExported: 0,
         durationMs,
         timestamp: Date.now(),
-        errors: [error instanceof Error ? error.message : String(error)],
+        errors: [getErrorMessage(error)],
       };
     }
   }

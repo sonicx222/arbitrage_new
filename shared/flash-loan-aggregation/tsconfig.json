@@ -25,13 +25,16 @@
     "baseUrl": ".",
     "paths": {
       "@arbitrage/types": ["../types/src"],
-      "@arbitrage/types/*": ["../types/src/*"]
+      "@arbitrage/types/*": ["../types/src/*"],
+      "@arbitrage/core": ["../core/src"],
+      "@arbitrage/core/*": ["../core/src/*"]
     },
     "types": ["node", "jest"]
   },
   "include": ["./src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**"],
   "references": [
-    { "path": "../types" }
+    { "path": "../types" },
+    { "path": "../core" }
   ]
 }

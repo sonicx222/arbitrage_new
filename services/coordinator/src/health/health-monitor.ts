@@ -13,6 +13,7 @@
 
 import type { ServiceHealth } from '@arbitrage/types';
 import type { SystemMetrics, Alert } from '../api/types';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Logger interface for dependency injection
@@ -356,7 +357,7 @@ export class HealthMonitor {
     } catch (error) {
       this.logger.error('Failed to send alert via callback', {
         alertType: alert.type,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

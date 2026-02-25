@@ -12,7 +12,7 @@
  */
 
 import { ethers } from 'ethers';
-import { clearIntervalSafe } from '@arbitrage/core';
+import { clearIntervalSafe, getErrorMessage } from '@arbitrage/core';
 import type { Logger } from '../types';
 
 // =============================================================================
@@ -113,7 +113,7 @@ export class BalanceMonitor {
     this.checkInterval = setInterval(() => {
       this.checkAllBalances().catch((error) => {
         this.logger.error('Balance check cycle failed', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       });
     }, this.checkIntervalMs);
@@ -206,12 +206,12 @@ export class BalanceMonitor {
           balanceWei: '0',
           lastCheckedAt: Date.now(),
           healthy: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
 
         this.logger.warn('Failed to query balance', {
           chain,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     });

@@ -49,6 +49,7 @@ import {
   createPartitionEntry,
   createLogger,
   getRedisStreamsClient,
+  getErrorMessage,
 } from '@arbitrage/core';
 import type { PartitionEnvironmentConfig, PartitionDetectorInterface } from '@arbitrage/core';
 import { PARTITION_IDS } from '@arbitrage/config';
@@ -166,7 +167,7 @@ solanaArbitrageDetector.on('opportunity', async (opportunity) => {
   } catch (error) {
     // Log error but don't crash - opportunity was already detected and logged
     // Redis publishing failure shouldn't stop the detection service
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     entry.logger.error('Failed to publish opportunity to Redis Streams', {
       opportunityId: opportunity.id,
       error: errorMessage,

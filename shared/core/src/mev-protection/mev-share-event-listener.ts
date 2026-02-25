@@ -28,7 +28,7 @@ import { EventEmitter } from 'events';
 import { generateTraceId } from '../tracing/trace-context';
 import { CircuitBreaker, CircuitBreakerError } from '../resilience/circuit-breaker';
 import type { Logger } from '../logger';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Types
 // =============================================================================
@@ -352,7 +352,7 @@ export class MevShareEventListener extends EventEmitter {
           return;
         }
 
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = getErrorMessage(error);
 
         // Don't log abort errors during shutdown
         if (errorMessage.includes('abort')) {

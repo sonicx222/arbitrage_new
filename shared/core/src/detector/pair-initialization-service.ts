@@ -23,7 +23,7 @@ import type {
 } from './types';
 // FIX (Issue 2.1): Use bpsToDecimal instead of deprecated dexFeeToPercentage
 import { bpsToDecimal } from '../utils/fee-utils';
-
+import { getErrorMessage } from '../resilience/error-handling';
 /**
  * Initialize trading pairs for a detector.
  *
@@ -104,7 +104,7 @@ export async function initializePairs(
         } catch (error) {
           pairsFailed++;
           logger.warn(`Failed to get pair address for ${token0.symbol}/${token1.symbol} on ${dex.name}`, {
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
           });
         }
       }
@@ -232,7 +232,7 @@ export async function resolvePairAddress(
     return null;
   } catch (error) {
     logger.error(`Error getting pair address for ${dex.name}`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
       token0: token0.symbol,
       token1: token1.symbol,
     });

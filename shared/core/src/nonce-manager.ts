@@ -17,7 +17,7 @@
 import { ethers } from 'ethers';
 import { createLogger } from './logger';
 import { clearIntervalSafe } from './async/lifecycle-utils';
-
+import { getErrorMessage } from './resilience/error-handling';
 const logger = createLogger('nonce-manager');
 
 // =============================================================================
@@ -383,7 +383,7 @@ export class NonceManager {
     } catch (error) {
       logger.error('Failed to replenish nonce pool', {
         chain,
-        error: error instanceof Error ? error.message : String(error)
+        error: getErrorMessage(error)
       });
     } finally {
       state.isReplenishing = false;

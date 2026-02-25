@@ -544,7 +544,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
           // Cancel commitment for gas refund
           await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch((err) => {
             this.logger.warn('Commit-reveal cancel failed', {
-              error: err instanceof Error ? err.message : String(err),
+              error: getErrorMessage(err),
               commitmentHash: commitResult.commitmentHash,
             });
           });
@@ -568,7 +568,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         // Attempt to cancel commitment for gas refund
         await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch((err) => {
           this.logger.warn('Commit-reveal cancel failed', {
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
             commitmentHash: commitResult.commitmentHash,
           });
         });

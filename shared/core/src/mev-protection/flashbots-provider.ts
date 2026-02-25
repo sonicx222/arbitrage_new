@@ -17,7 +17,7 @@ import {
   MEV_DEFAULTS,
 } from './types';
 import { BaseMevProvider } from './base-provider';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Flashbots Provider Implementation
 // =============================================================================
@@ -195,7 +195,7 @@ export class FlashbotsProvider extends BaseMevProvider {
       // METRICS-FIX: Don't increment failedSubmissions here - fallbackToPublic handles it.
       // This prevents double-counting when fallback is disabled or when fallback also fails.
       // Matches JitoProvider pattern for consistent metrics across all providers.
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       // Use preparedTx if available (preserves nonce), otherwise fall back to original tx
       return this.fallbackToPublic(preparedTx || tx, startTime, errorMessage);
     }
@@ -216,7 +216,7 @@ export class FlashbotsProvider extends BaseMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -251,7 +251,7 @@ export class FlashbotsProvider extends BaseMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach Flashbots relay: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach Flashbots relay: ${getErrorMessage(error)}`,
       };
     }
   }
@@ -382,7 +382,7 @@ export class FlashbotsProvider extends BaseMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -460,7 +460,7 @@ export class FlashbotsProvider extends BaseMevProvider {
 
           lastError = `Block ${targetBlock}, retry ${retry}: Bundle not included`;
         } catch (error) {
-          lastError = `Block ${targetBlock}, retry ${retry}: ${error instanceof Error ? error.message : String(error)}`;
+          lastError = `Block ${targetBlock}, retry ${retry}: ${getErrorMessage(error)}`;
         }
       }
     }
@@ -725,7 +725,7 @@ export class FlashbotsProvider extends BaseMevProvider {
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
       return this.createFailureResult(
-        `Protected and fallback both failed. Original: ${reason}. Fallback: ${error instanceof Error ? error.message : String(error)}`,
+        `Protected and fallback both failed. Original: ${reason}. Fallback: ${getErrorMessage(error)}`,
         startTime,
         true
       );

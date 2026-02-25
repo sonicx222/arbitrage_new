@@ -7,6 +7,7 @@
 import Redis from 'ioredis';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Get Redis URL, reading directly from config file if available.
@@ -46,7 +47,7 @@ export async function createTestRedisClient(): Promise<Redis> {
     await redis.connect();
   } catch (error) {
     // Add URL context to connection errors for easier debugging
-    const originalMessage = error instanceof Error ? error.message : String(error);
+    const originalMessage = getErrorMessage(error);
     throw new Error(`Failed to connect to Redis at ${url}: ${originalMessage}`);
   }
 
@@ -171,7 +172,7 @@ export async function ensureConsumerGroup(
     await redis.xgroup('CREATE', stream, group, '0', 'MKSTREAM');
   } catch (error: unknown) {
     // Ignore "BUSYGROUP" error (group already exists)
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     if (!errorMessage.includes('BUSYGROUP')) {
       throw error;
     }

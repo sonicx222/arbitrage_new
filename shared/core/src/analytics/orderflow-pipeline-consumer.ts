@@ -19,7 +19,7 @@ import { ReserveCache, getReserveCache } from '../caching/reserve-cache';
 import type { Logger } from '../logger';
 import type { StreamMessage, ConsumerGroupConfig } from '../redis/streams';
 import type { PendingOpportunity, PendingSwapIntent } from '@arbitrage/types';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // ---------------------------------------------------------------------------
 // Local type definitions (structurally compatible with @arbitrage/ml exports)
 // to break circular @arbitrage/core ↔ @arbitrage/ml build dependency.
@@ -335,7 +335,7 @@ export class OrderflowPipelineConsumer {
       } catch (error) {
         this.logger.warn('Failed to process pending opportunity message', {
           messageId: message.id,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }

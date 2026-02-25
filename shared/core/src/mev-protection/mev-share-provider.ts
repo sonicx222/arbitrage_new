@@ -19,7 +19,7 @@ import {
   MevShareSubmissionResult,
   MEV_DEFAULTS,
 } from './types';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // MEV-Share Provider Implementation
 // =============================================================================
@@ -254,7 +254,7 @@ export class MevShareProvider extends FlashbotsProvider {
         bundleResult.error ?? 'Flashbots bundle not included after MEV-Share failure'
       );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return this.fallbackToPublicWithRebate(preparedTx || tx, startTime, errorMessage);
     }
   }
@@ -320,7 +320,7 @@ export class MevShareProvider extends FlashbotsProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }

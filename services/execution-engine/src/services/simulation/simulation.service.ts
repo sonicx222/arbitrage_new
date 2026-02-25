@@ -230,7 +230,7 @@ export class SimulationService implements ISimulationService {
               // Non-fatal: log and continue - provider will be marked unhealthy
               this.logger.warn('Provider health check warmup failed', {
                 provider: type,
-                error: err instanceof Error ? err.message : String(err),
+                error: getErrorMessage(err),
               });
             })
         );

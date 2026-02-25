@@ -771,7 +771,7 @@ export class RedisStreamsClient {
       return this.parseStreamInfo(result as unknown[]);
     } catch (error: unknown) {
       // ERR no such key - stream doesn't exist yet (common during startup)
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = getErrorMessage(error);
       if (errMsg.includes('no such key') || errMsg.includes('ERR')) {
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Stream does not exist yet', { streamName });
@@ -816,7 +816,7 @@ export class RedisStreamsClient {
     } catch (error: unknown) {
       // NOGROUP - consumer group doesn't exist yet (common during startup)
       // ERR no such key - stream doesn't exist yet
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = getErrorMessage(error);
       if (errMsg.includes('NOGROUP') || errMsg.includes('no such key')) {
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Consumer group or stream does not exist yet', { streamName, groupName });
@@ -940,7 +940,7 @@ export class RedisStreamsClient {
         deliveryCount: entry[3] as number,
       }));
     } catch (error: unknown) {
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = getErrorMessage(error);
       if (errMsg.includes('NOGROUP') || errMsg.includes('no such key')) {
         return [];
       }
@@ -1218,7 +1218,7 @@ let streamsInstance: RedisStreamsClient | null = null;
 let initializingPromise: Promise<RedisStreamsClient> | null = null; // Race condition guard
 
 import { resolveRedisPassword } from './utils';
-
+import { getErrorMessage } from '../resilience/error-handling';
 export async function getRedisStreamsClient(url?: string, password?: string): Promise<RedisStreamsClient> {
   // Return existing instance if available
   if (streamsInstance) {

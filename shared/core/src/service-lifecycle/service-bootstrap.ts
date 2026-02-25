@@ -14,7 +14,7 @@ import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { parentPort } from 'worker_threads';
 import type { Logger } from '../logger';
 import { setupParentPortListener } from '../async/lifecycle-utils';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Types
 // =============================================================================
@@ -153,7 +153,7 @@ export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShut
     } catch (error) {
       clearTimeout(forceExitTimer);
       logger.error(`Error during ${serviceName} shutdown`, {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
       process.exit(1);

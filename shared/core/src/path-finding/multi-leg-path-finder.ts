@@ -32,7 +32,7 @@ import {
   DEFAULT_SLIPPAGE_CONFIG,
 } from '../utils/amm-math';
 import type { DynamicSlippageConfig } from '../utils/amm-math';
-
+import { getErrorMessage } from '../resilience/error-handling';
 const logger = createLogger('multi-leg-path-finder');
 let hasLoggedWorkerFallback = false;
 
@@ -906,7 +906,7 @@ export class MultiLegPathFinder {
         await pool.start();
         health = pool.getHealthStatus?.();
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = getErrorMessage(error);
         logger.warn('Failed to start worker pool for multi-leg path finding', { error: errorMessage });
       }
     }

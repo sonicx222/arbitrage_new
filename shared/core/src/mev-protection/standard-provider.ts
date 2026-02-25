@@ -21,7 +21,7 @@ import {
   MEV_DEFAULTS,
 } from './types';
 import { BaseMevProvider } from './base-provider';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Standard Provider Implementation
 // =============================================================================
@@ -172,7 +172,7 @@ export class StandardProvider extends BaseMevProvider {
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         false
       );
@@ -196,7 +196,7 @@ export class StandardProvider extends BaseMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -226,7 +226,7 @@ export class StandardProvider extends BaseMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach ${this.chain} provider: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach ${this.chain} provider: ${getErrorMessage(error)}`,
       };
     }
   }
@@ -330,7 +330,7 @@ export class StandardProvider extends BaseMevProvider {
       );
     } catch (error) {
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         false
       );
@@ -380,7 +380,7 @@ export class StandardProvider extends BaseMevProvider {
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         !!this.privateRpcUrl
       );
@@ -520,7 +520,7 @@ export class StandardProvider extends BaseMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach private RPC: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach private RPC: ${getErrorMessage(error)}`,
       };
     }
   }

@@ -16,7 +16,7 @@
 
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getGasSpikeMultiplier } from '@arbitrage/config';
-import { createPinoLogger, type ILogger } from '@arbitrage/core';
+import { createPinoLogger, type ILogger, getErrorMessage } from '@arbitrage/core';
 import type { Logger, GasBaselineEntry } from '../types';
 import { updateGasPrice as updateGasPriceMetric } from './prometheus-metrics';
 
@@ -454,7 +454,7 @@ export class GasPriceOptimizer {
       return currentPrice;
     } catch (error) {
       // Re-throw gas spike errors
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       if (errorMessage.includes('Gas price spike')) {
         throw error;
       }
@@ -535,7 +535,7 @@ export class GasPriceOptimizer {
       return currentPrice;
     } catch (error) {
       // Re-throw gas spike errors (they're intentional aborts)
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       if (errorMessage.includes('[ERR_GAS_SPIKE]')) {
         throw error;
       }

@@ -18,7 +18,7 @@ import {
   GetCorrelatedPairsRequest,
   GetCorrelatedPairsResponse,
 } from '../dtos/track-correlation.dto';
-
+import { getErrorMessage } from '../../../resilience/error-handling';
 /**
  * Use Case: Track correlation between trading pairs
  *
@@ -95,7 +95,7 @@ export class TrackCorrelationUseCase {
       // Minimal error handling for hot path
       const durationMs = performance.now() - startTime;
       const durationUs = durationMs * 1000;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return TrackCorrelationResponse.failure(request.pair, errorMessage, durationUs);
     }
   }

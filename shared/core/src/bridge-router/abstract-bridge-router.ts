@@ -33,7 +33,7 @@ import {
 import type { Logger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { AsyncMutex } from '../async/async-mutex';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Shared Constants
 // =============================================================================
@@ -314,7 +314,7 @@ export abstract class AbstractBridgeRouter implements IBridgeRouter {
     } catch (error) {
       return {
         healthy: false,
-        message: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Health check failed: ${getErrorMessage(error)}`,
       };
     }
   }
@@ -452,7 +452,7 @@ export abstract class AbstractBridgeRouter implements IBridgeRouter {
     } catch (error) {
       this.logger.error('Token approval error', {
         token: tokenAddress,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return false;
     }
@@ -499,7 +499,7 @@ export abstract class AbstractBridgeRouter implements IBridgeRouter {
 
     this.cleanupTimer = setInterval(() => {
       this.cleanup(24 * 60 * 60 * 1000).catch(err => {
-        this.logger.error('Auto-cleanup failed', { error: err instanceof Error ? err.message : String(err) });
+        this.logger.error('Auto-cleanup failed', { error: getErrorMessage(err) });
       });
     }, CLEANUP_INTERVAL_MS);
 

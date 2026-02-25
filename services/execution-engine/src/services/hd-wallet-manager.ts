@@ -20,6 +20,7 @@
 
 import { ethers } from 'ethers';
 import type { Logger } from '../types';
+import { getErrorMessage } from '@arbitrage/core';
 
 /**
  * Stable chain-to-derivation-index mapping.
@@ -84,7 +85,7 @@ export function derivePerChainWallets(
   } catch (error) {
     logger.error('Invalid HD wallet mnemonic', {
       wordCount: config.mnemonic.trim().split(/\s+/).length,
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
     });
     throw new Error('Invalid WALLET_MNEMONIC: mnemonic phrase is not valid BIP-39');
   }
@@ -124,7 +125,7 @@ export function derivePerChainWallets(
     } catch (error) {
       logger.error(`Failed to derive HD wallet for ${chainName}`, {
         path: derivationPath,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

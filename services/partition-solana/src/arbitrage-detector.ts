@@ -27,6 +27,7 @@ import {
   type SimpleCircuitBreaker,
   createTraceContext,
   propagateContext,
+  getErrorMessage,
 } from '@arbitrage/core';
 
 // Import extracted modules
@@ -567,7 +568,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
     } catch (error) {
       this.recordDetectionFailure(error);
       this.logger.error('Error in intra-Solana arbitrage detection', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       throw error;
     }
@@ -600,7 +601,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
     } catch (error) {
       this.recordDetectionFailure(error);
       this.logger.error('Error in triangular arbitrage detection', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       throw error;
     }
@@ -672,7 +673,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
     } catch (error) {
       this.recordDetectionFailure(error);
       this.logger.error('Error in cross-chain arbitrage detection', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       throw error;
     }
@@ -830,7 +831,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
 
           // Log the error after all retries exhausted
           this.logger.error('Failed to publish opportunity to Redis Streams', {
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
             opportunityId: opportunity.id,
             attempts: REDIS_RETRY.MAX_ATTEMPTS,
           });

@@ -34,6 +34,7 @@ import {
   ExportFormat,
   // Logging
   createLogger,
+  getErrorMessage,
 } from '@arbitrage/core';
 
 /**
@@ -416,7 +417,7 @@ export class WarmingIntegration {
           this.logger.warn('Cache warming failed (non-fatal)', {
             pair: pairAddress,
             chain: chainId,
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
             stack: error instanceof Error ? error.stack : undefined,
             timestamp: new Date().toISOString(),
           });

@@ -15,7 +15,7 @@
  */
 
 import { ethers } from 'ethers';
-import { createPinoLogger, CircularBuffer, clearIntervalSafe, clearTimeoutSafe, type ILogger } from '@arbitrage/core';
+import { createPinoLogger, CircularBuffer, clearIntervalSafe, clearTimeoutSafe, type ILogger, getErrorMessage } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 import type { BaseMetrics } from './types';
@@ -187,7 +187,7 @@ export class HotForkSynchronizer {
       this.startPromise = this.start()
         .catch((err) => {
           this.logger.error('Auto-start failed', {
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           });
           this.state = 'error';
         })
@@ -257,7 +257,7 @@ export class HotForkSynchronizer {
         this.syncToLatestBlock().catch((err) => {
           // Fix 3.2: Use logger instead of console.error
           this.logger.error('Sync error', {
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           });
         });
       }, this.baseSyncIntervalMs);
@@ -304,7 +304,7 @@ export class HotForkSynchronizer {
       this.syncToLatestBlock().catch((err) => {
         // Fix 3.2: Use logger instead of console.error
         this.logger.error('Resume sync error', {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       });
     }
@@ -421,7 +421,7 @@ export class HotForkSynchronizer {
         this.logger.error('Pausing after consecutive failures', {
           consecutiveFailures: this.metrics.consecutiveFailures,
           maxConsecutiveFailures: this.maxConsecutiveFailures,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
         this.state = 'paused';
       }
@@ -449,7 +449,7 @@ export class HotForkSynchronizer {
         await this.syncToLatestBlock();
       } catch (err) {
         this.logger.error('Adaptive sync error', {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }
 

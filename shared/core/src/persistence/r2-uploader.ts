@@ -19,7 +19,7 @@
 import { createHmac, createHash } from 'crypto';
 import { stat, readdir, readFile } from 'fs/promises';
 import { join } from 'path';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Types
 // =============================================================================
@@ -266,7 +266,7 @@ export class R2Uploader {
       this.logger.warn('R2 upload failed', {
         localPath,
         remoteKey,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return false;
     }
@@ -313,7 +313,7 @@ export class R2Uploader {
     } catch (error) {
       this.logger.warn('Failed to upload previous day logs', {
         tradeLogDir,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }
@@ -351,7 +351,7 @@ export class R2Uploader {
       this.logger.warn('Failed to upload day logs', {
         tradeLogDir,
         date: date.toISOString(),
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

@@ -161,7 +161,7 @@ export class ExecutionPipeline {
             this.deps.logger.error('Execution failed for opportunity', {
               opportunityId: opportunity.id,
               traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
-              error: error instanceof Error ? error.message : String(error),
+              error: getErrorMessage(error),
             });
           })
           .finally(() => {

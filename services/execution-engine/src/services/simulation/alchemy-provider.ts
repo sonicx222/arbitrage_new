@@ -24,6 +24,7 @@ import {
   getDeprecationWarning,
 } from './types';
 import { BaseSimulationProvider } from './base-simulation-provider';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Alchemy Chain URLs
@@ -169,7 +170,7 @@ export class AlchemySimulationProvider extends BaseSimulationProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach Alchemy API: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach Alchemy API: ${getErrorMessage(error)}`,
       };
     }
   }

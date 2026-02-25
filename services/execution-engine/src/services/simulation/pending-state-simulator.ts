@@ -16,7 +16,7 @@
  */
 
 import { ethers } from 'ethers';
-import { createPinoLogger, type ILogger } from '@arbitrage/core';
+import { createPinoLogger, type ILogger, getErrorMessage } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 // Fix 9.3: Import shared SimulationLog type for consistent log typing
@@ -487,7 +487,7 @@ export class PendingStateSimulator {
 
       return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       this.metrics.failedSimulations++;
 
       return {
@@ -559,7 +559,7 @@ export class PendingStateSimulator {
     try {
       return await Promise.race([batchOperation(), timeoutPromise]);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       // Return partial results with timeout error
       results.push({
         success: false,
@@ -797,7 +797,7 @@ export class PendingStateSimulator {
         };
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
 
       // Try to stop impersonation even on error
       try {
@@ -832,7 +832,7 @@ export class PendingStateSimulator {
       result.latencyMs = Date.now() - startTime;
       return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return {
         success: false,
         predictedReserves: new Map(),

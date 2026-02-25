@@ -32,7 +32,7 @@
 
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { generateTraceId } from '@arbitrage/core';
+import { generateTraceId, getErrorMessage } from '@arbitrage/core';
 import { BaseExecutionStrategy, getSwapDeadline } from './base.strategy';
 import type {
   ExecutionResult,
@@ -331,7 +331,7 @@ export class BackrunStrategy extends BaseExecutionStrategy {
       );
     } catch (error) {
       this.metrics.backrunsFailed++;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
 
       this.logger.error('Backrun execution error', {
         opportunityId: opportunity.id,

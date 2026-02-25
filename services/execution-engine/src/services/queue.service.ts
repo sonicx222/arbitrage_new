@@ -16,7 +16,7 @@
  */
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { CircularBuffer } from '@arbitrage/core';
+import { CircularBuffer, getErrorMessage } from '@arbitrage/core';
 import type { Logger, QueueConfig, QueueService } from '../types';
 import { DEFAULT_QUEUE_CONFIG } from '../types';
 
@@ -209,7 +209,7 @@ export class QueueServiceImpl implements QueueService {
       } catch (error) {
         // Fix 10.1: Log but don't throw - item is already in queue
         this.logger.error('itemAvailableCallback threw an exception', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           queueSize: this.queue.length,
         });
       }

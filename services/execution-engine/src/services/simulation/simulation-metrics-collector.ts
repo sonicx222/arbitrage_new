@@ -20,6 +20,7 @@
 import type { PerformanceLogger, ServiceStateManager } from '@arbitrage/core';
 import type { ExecutionStats, Logger } from '../../types';
 import type { ISimulationService, SimulationProviderType } from './types';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Constants
@@ -230,7 +231,7 @@ export function createSimulationMetricsCollector(
       });
     } catch (error) {
       logger.error('Simulation metrics collection error', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

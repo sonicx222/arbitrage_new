@@ -1831,6 +1831,9 @@ export {
 } from './utils/env-utils';
 export type { CrossRegionEnvConfig } from './utils/env-utils';
 
+export { parseStandbyConfig } from './cross-region/bootstrap';
+export type { StandbyBaseConfig } from './cross-region/bootstrap';
+
 // =============================================================================
 // 14.0.1 Disconnect Utilities (C-2 Consolidation)
 // =============================================================================
@@ -2029,14 +2032,6 @@ export type { NormalizedCexPrice, TokenMapping, CexNormalizerConfig } from './fe
 // #                                                                           #
 // #############################################################################
 
-/**
- * Internal API Re-exports
- *
- * For new code, prefer importing from '@arbitrage/core/internal':
- * ```typescript
- * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core/internal';
- * ```
- *
- * @see internal/index.ts for the full list of internal exports
- */
-export * from './internal';
+// Internal exports have been removed from the public API.
+// Import from '@arbitrage/core/internal' instead.
+// @see shared/core/src/internal/index.ts for the full list of internal exports

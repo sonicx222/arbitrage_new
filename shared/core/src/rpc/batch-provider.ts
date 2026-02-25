@@ -27,7 +27,7 @@ import {
   getRateLimitConfig,
   isRateLimitExempt,
 } from './rate-limiter';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // Types
 // =============================================================================
@@ -670,7 +670,7 @@ export class BatchProvider {
       } catch (h2Error) {
         // Fall back to HTTP/1.1 fetch
         logger.debug('HTTP/2 request failed, falling back to fetch', {
-          error: h2Error instanceof Error ? h2Error.message : String(h2Error),
+          error: getErrorMessage(h2Error),
         });
       }
     }

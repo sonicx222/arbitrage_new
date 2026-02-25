@@ -24,7 +24,7 @@ import {
   CHAIN_MEV_STRATEGIES,
 } from './types';
 import { BaseMevProvider } from './base-provider';
-
+import { getErrorMessage } from '../resilience/error-handling';
 // =============================================================================
 // L2 Chain Configuration
 // =============================================================================
@@ -215,7 +215,7 @@ export class L2SequencerProvider extends BaseMevProvider {
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
       return this.createFailureResult(
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
         startTime,
         false
       );
@@ -242,7 +242,7 @@ export class L2SequencerProvider extends BaseMevProvider {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }
@@ -274,7 +274,7 @@ export class L2SequencerProvider extends BaseMevProvider {
     } catch (error) {
       return {
         healthy: false,
-        message: `Failed to reach ${this.l2Config.name} sequencer: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to reach ${this.l2Config.name} sequencer: ${getErrorMessage(error)}`,
       };
     }
   }

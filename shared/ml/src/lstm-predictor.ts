@@ -16,7 +16,7 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { createLogger, AsyncMutex } from '@arbitrage/core';
+import { createLogger, AsyncMutex, getErrorMessage } from '@arbitrage/core';
 import { getModelPersistence, type ModelMetadata } from './model-persistence';
 import {
   calculateSMA,
@@ -326,7 +326,7 @@ export class LSTMPredictor {
     } catch (error) {
       logger.warn('Error loading persisted model, will create fresh model', {
         modelId: this.config.modelId,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return false;
     }
@@ -371,7 +371,7 @@ export class LSTMPredictor {
     } catch (error) {
       logger.warn('Error saving model to persistence', {
         modelId: this.config.modelId,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

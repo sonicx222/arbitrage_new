@@ -127,9 +127,9 @@ describe('P1: Asia-Fast Partition', () => {
     expect(partition!.chains).toEqual(['bsc', 'polygon', 'avalanche', 'fantom']);
   });
 
-  it('should be deployed to asia-southeast1 on Oracle Cloud', () => {
+  it('should be deployed to asia-southeast1 on Fly.io', () => {
     expect(partition!.region).toBe('asia-southeast1');
-    expect(partition!.provider).toBe('oracle');
+    expect(partition!.provider).toBe('fly');
   });
 
   it('should have heavy resource profile with sufficient memory', () => {
@@ -189,9 +189,9 @@ describe('P3: High-Value Partition', () => {
     expect(partition!.chains).toEqual(['ethereum', 'zksync', 'linea']);
   });
 
-  it('should be deployed to us-east1 on Oracle Cloud', () => {
+  it('should be deployed to us-east1 on Fly.io', () => {
     expect(partition!.region).toBe('us-east1');
-    expect(partition!.provider).toBe('oracle');
+    expect(partition!.provider).toBe('fly');
   });
 
   it('should have heavy resource profile with 768MB memory', () => {

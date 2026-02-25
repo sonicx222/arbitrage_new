@@ -26,6 +26,7 @@ import { ethers } from 'ethers';
 // Fix 6.2: Import shared error message utility for consistent error handling
 // Fix 6.3: Import shared rolling average utility to eliminate duplication
 import { CHAIN_IDS, getSimulationErrorMessage, updateRollingAverage, extractRevertReason } from './types';
+import { getErrorMessage } from '@arbitrage/core';
 
 // =============================================================================
 // Types
@@ -217,7 +218,7 @@ export class AnvilForkManager {
       this.state = 'starting';
       this.startPromise = this.doStartFork(DEFAULT_START_TIMEOUT_MS)
         .catch((err) => {
-          this.lastError = err instanceof Error ? err.message : String(err);
+          this.lastError = getErrorMessage(err);
           this.state = 'error';
         })
         .finally(() => {

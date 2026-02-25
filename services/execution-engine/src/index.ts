@@ -19,12 +19,13 @@ import {
   getCrossRegionHealthManager,
   resetCrossRegionHealthManager,
   parseEnvInt,
-  getCrossRegionEnvConfig,
+  parseStandbyConfig,
   setupServiceShutdown,
   closeHealthServer,
   createSimpleHealthServer,
   runServiceMain,
   getOrderflowPipelineConsumer,
+  getErrorMessage,
 } from '@arbitrage/core';
 import type { CrossRegionHealthConfig } from '@arbitrage/core';
 import {
@@ -94,23 +95,9 @@ export function getCircuitBreakerConfigFromEnv() {
  * Exported for unit testing -- not part of the public service API.
  */
 export function getStandbyConfigFromEnv() {
-  const isStandby = process.env.IS_STANDBY === 'true';
+  const base = parseStandbyConfig('execution-engine');
   const queuePausedOnStart = process.env.QUEUE_PAUSED_ON_START === 'true';
-
-  // Shared cross-region health settings (S-6 consolidation)
-  const crossRegion = getCrossRegionEnvConfig('execution-engine');
-
-  return {
-    isStandby,
-    queuePausedOnStart,
-    regionId: crossRegion.regionId,
-    serviceName: crossRegion.serviceName,
-    healthCheckIntervalMs: crossRegion.healthCheckIntervalMs,
-    failoverThreshold: crossRegion.failoverThreshold,
-    failoverTimeoutMs: crossRegion.failoverTimeoutMs,
-    leaderHeartbeatIntervalMs: crossRegion.leaderHeartbeatIntervalMs,
-    leaderLockTtlMs: crossRegion.leaderLockTtlMs,
-  };
+  return { ...base, queuePausedOnStart };
 }
 
 /**
@@ -314,7 +301,7 @@ async function main() {
           }
         } catch (error) {
           logger.error('Error during standby activation', {
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
             failedRegion: event.failedRegion
           });
         }

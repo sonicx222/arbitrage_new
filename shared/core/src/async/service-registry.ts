@@ -40,7 +40,7 @@
  */
 
 import { createLogger } from '../logger';
-
+import { getErrorMessage } from '../resilience/error-handling';
 const logger = createLogger('service-registry');
 
 // =============================================================================
@@ -248,7 +248,7 @@ export class ServiceRegistry {
         logger.debug(`Service cleaned up: ${name}`);
       } catch (error) {
         logger.warn(`Service cleanup failed: ${name}`, {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -299,7 +299,7 @@ export class ServiceRegistry {
         await this.reset(name);
       } catch (error) {
         logger.warn(`Failed to reset service: ${name}`, {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
         // Continue with remaining services
       }
@@ -357,7 +357,7 @@ export class ServiceRegistry {
             }
           } catch (error) {
             health.healthy = false;
-            health.error = error instanceof Error ? error.message : String(error);
+            health.error = getErrorMessage(error);
           }
         } else {
           // No health check defined - assume healthy if initialized

@@ -42,6 +42,7 @@ import {
   disconnectWithTimeout,
   findKSmallest,
   unwrapBatchMessages,
+  getErrorMessage,
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams } from '@arbitrage/types';
@@ -410,7 +411,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.alertNotifier = new AlertNotifier(this.logger);
     } catch (error) {
       this.logger.error('Failed to initialize AlertNotifier, alerts will be logged only', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
       // Keep alertNotifier as null - alerts will still be logged via sendAlert()
