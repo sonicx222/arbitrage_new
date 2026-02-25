@@ -574,91 +574,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     ctx: StrategyContext
   ): Promise<ExecutionResult> {
-    // Fix 6.1: Use ExecutionErrorCode enum for standardized error codes
-    const chain = opportunity.buyChain;
-    if (!chain) {
-      return BaseExecutionStrategy.createOpportunityError(
-        opportunity,
-        ExecutionErrorCode.NO_CHAIN,
-        'unknown'
-      );
+    // D3: Input validation (chain, protocol, context, opportunity fields, buyPrice)
+    const inputResult = this.validateFlashLoanInputs(opportunity, ctx);
+    if (inputResult.error) {
+      return inputResult.error;
     }
-
-    // Issue 4.1 Fix: Validate protocol support before execution
-    // Supported: aave_v3, balancer_v2, pancakeswap_v3, syncswap
-    if (!this.isProtocolSupported(chain)) {
-      const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
-      const protocol = flashLoanConfig?.protocol || 'unknown';
-      this.logger.warn('Unsupported flash loan protocol for chain', {
-        chain,
-        protocol,
-        supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
-      });
-      return BaseExecutionStrategy.createOpportunityError(
-        opportunity,
-        formatExecutionError(
-          ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
-          `Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Supported protocols: ${Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS).join(', ')}.`
-        ),
-        chain
-      );
-    }
-
-    // Fix 6.2 & 9.1: Use validateContext helper to reduce code duplication
-    const validation = this.validateContext(chain, ctx);
-    if (!validation.valid) {
-      return BaseExecutionStrategy.createOpportunityError(
-        opportunity,
-        validation.error,
-        chain
-      );
-    }
-    const { wallet, provider } = validation;
-
-    // Validate opportunity fields
-    if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.tokenOut) {
-      return BaseExecutionStrategy.createOpportunityError(
-        opportunity,
-        formatExecutionError(
-          ExecutionErrorCode.INVALID_OPPORTUNITY,
-          'Missing required fields (tokenIn, amountIn, tokenOut)'
-        ),
-        chain
-      );
-    }
-
-    // Validate amount is non-zero
-    const amountIn = BigInt(opportunity.amountIn);
-    if (amountIn === 0n) {
-      return BaseExecutionStrategy.createOpportunityError(
-        opportunity,
-        formatExecutionError(
-          ExecutionErrorCode.INVALID_OPPORTUNITY,
-          'amountIn is zero'
-        ),
-        chain
-      );
-    }
-
-    // Bug 4.1 Fix: Validate buyPrice is valid before execution
-    // Invalid price would cause division by zero or wildly incorrect calculations
-    // in profit conversion (USD -> token units). Abort early instead of using fallback.
-    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
-    if (!isValidPrice(opportunity.buyPrice)) {
-      this.logger.error('[ERR_INVALID_PRICE] Cannot execute flash loan with invalid buyPrice', {
-        opportunityId: opportunity.id,
-        buyPrice: opportunity.buyPrice,
-        chain,
-      });
-      return BaseExecutionStrategy.createOpportunityError(
-        opportunity,
-        formatExecutionError(
-          ExecutionErrorCode.INVALID_OPPORTUNITY,
-          `Invalid buyPrice: ${opportunity.buyPrice}. Cannot calculate profit in token units.`
-        ),
-        chain
-      );
-    }
+    const { chain, amountIn } = inputResult;
 
     // Task 2.3: Declare selectedProvider at function scope for metrics tracking
     let selectedProvider: IProviderInfo | null = null;
@@ -706,37 +627,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // Issue 6.2 Fix: Use getNativeTokenPrice() for accurate ETH/native token price
       // The previous code incorrectly used opportunity.buyPrice (token price, not ETH)
       const nativeTokenPriceUsd = getNativeTokenPrice(chain, { suppressWarning: true });
-      if (onChainProfit) {
-        const onChainProfitEth = parseFloat(ethers.formatEther(onChainProfit.expectedProfit));
-        const onChainProfitUsd = onChainProfitEth * nativeTokenPriceUsd;
 
-        // If on-chain profit is significantly lower than expected, log warning
-        // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
-        const offChainProfit = opportunity.expectedProfit ?? 0;
-        const profitDivergence = offChainProfit > 0
-          ? Math.abs(onChainProfitUsd - offChainProfit) / offChainProfit
-          : 0;
-
-        if (profitDivergence > 0.2) { // >20% divergence
-          this.logger.warn('On-chain profit diverges from expected', {
-            opportunityId: opportunity.id,
-            offChainProfitUsd: offChainProfit,
-            onChainProfitUsd,
-            divergencePercent: (profitDivergence * 100).toFixed(1),
-          });
-        }
-
-        // Use on-chain profit for profitability analysis if available
-        // (it's more accurate than off-chain estimation)
-        if (onChainProfitUsd < offChainProfit * 0.5) {
-          // On-chain profit is less than 50% of expected - likely unprofitable
-          this.logger.warn('On-chain profit significantly lower than expected', {
-            opportunityId: opportunity.id,
-            offChainProfitUsd: offChainProfit,
-            onChainProfitUsd,
-          });
-        }
-      }
+      // D3: Log warnings if on-chain profit diverges from expected
+      this.verifyOnChainProfitDivergence(opportunity, onChainProfit, nativeTokenPriceUsd);
 
       // Analyze profitability (flash loan vs direct, accounting for fees)
       // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
@@ -766,66 +659,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         );
       }
 
-      // Transaction already prepared above (Issue 10.3 fix)
-
-      // Pre-flight simulation
-      const simulationResult = await this.performSimulation(
-        opportunity,
-        flashLoanTx,
-        chain,
-        ctx
+      // D3: Pre-flight simulation + enhanced profit revalidation with actual gas
+      const simError = await this.simulateAndRevalidateProfitability(
+        opportunity, flashLoanTx, chain, ctx, amountIn, estimatedGas, gasPrice, nativeTokenPriceUsd
       );
-
-      if (simulationResult?.wouldRevert) {
-        ctx.stats.simulationPredictedReverts++;
-        this.logger.warn('Aborting execution: simulation predicted revert', {
-          opportunityId: opportunity.id,
-          revertReason: simulationResult.revertReason,
-          simulationLatencyMs: simulationResult.latencyMs,
-        });
-
-        return BaseExecutionStrategy.createOpportunityError(
-          opportunity,
-          formatExecutionError(
-            ExecutionErrorCode.SIMULATION_REVERT,
-            simulationResult.revertReason || 'unknown reason'
-          ),
-          chain
-        );
-      }
-
-      // Phase 2.3: Enhanced profit validation from simulation result
-      // If simulation succeeded and returned gas estimates, verify profitability with actual gas
-      if (simulationResult?.success && simulationResult.gasUsed) {
-        const simulatedGasUnits = BigInt(simulationResult.gasUsed);
-        const revalidatedProfit = this.analyzeProfitability({
-          expectedProfitUsd: opportunity.expectedProfit ?? 0,
-          flashLoanAmountWei: amountIn,
-          estimatedGasUnits: simulatedGasUnits,
-          gasPriceWei: gasPrice,
-          chain,
-          ethPriceUsd: nativeTokenPriceUsd,
-        });
-
-        if (!revalidatedProfit.isProfitable) {
-          ctx.stats.simulationProfitabilityRejections++;
-          this.logger.warn('Aborting execution: simulation gas estimate makes trade unprofitable', {
-            opportunityId: opportunity.id,
-            estimatedGas: estimatedGas.toString(),
-            simulatedGas: simulatedGasUnits.toString(),
-            netProfitUsd: revalidatedProfit.netProfitUsd,
-            breakdown: revalidatedProfit.breakdown,
-          });
-
-          return BaseExecutionStrategy.createOpportunityError(
-            opportunity,
-            formatExecutionError(
-              ExecutionErrorCode.HIGH_FEES,
-              `Simulation revealed higher gas (${simulatedGasUnits}), making trade unprofitable: net ${revalidatedProfit.netProfitUsd.toFixed(2)} USD`
-            ),
-            chain
-          );
-        }
+      if (simError) {
+        return simError;
       }
 
       // Apply MEV protection
@@ -852,7 +691,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
       this.logger.error('Flash loan arbitrage execution failed', {
         opportunityId: opportunity.id,
-        chain,
+        chain: opportunity.buyChain,
         error: errorMessage,
       });
 
@@ -872,9 +711,257 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           ExecutionErrorCode.FLASH_LOAN_ERROR,
           errorMessage || 'Unknown error during flash loan execution'
         ),
+        opportunity.buyChain || 'unknown'
+      );
+    }
+  }
+
+  // ===========================================================================
+  // D3: Extracted Sub-Methods for execute() Orchestrator
+  // ===========================================================================
+
+  /**
+   * D3: Validate all flash loan inputs before the try block.
+   *
+   * Checks: chain present, protocol supported, wallet/provider context,
+   * required opportunity fields (tokenIn, amountIn, tokenOut), non-zero amount,
+   * and valid buyPrice.
+   *
+   * Returns the validated chain and parsed amountIn on success, or an error result.
+   */
+  private validateFlashLoanInputs(
+    opportunity: ArbitrageOpportunity,
+    ctx: StrategyContext,
+  ): { chain: string; amountIn: bigint; error?: undefined } | { error: ExecutionResult; chain?: undefined; amountIn?: undefined } {
+    // Fix 6.1: Use ExecutionErrorCode enum for standardized error codes
+    const chain = opportunity.buyChain;
+    if (!chain) {
+      return {
+        error: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          ExecutionErrorCode.NO_CHAIN,
+          'unknown'
+        ),
+      };
+    }
+
+    // Issue 4.1 Fix: Validate protocol support before execution
+    // Supported: aave_v3, balancer_v2, pancakeswap_v3, syncswap
+    if (!this.isProtocolSupported(chain)) {
+      const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
+      const protocol = flashLoanConfig?.protocol || 'unknown';
+      this.logger.warn('Unsupported flash loan protocol for chain', {
+        chain,
+        protocol,
+        supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
+      });
+      return {
+        error: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          formatExecutionError(
+            ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+            `Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Supported protocols: ${Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS).join(', ')}.`
+          ),
+          chain
+        ),
+      };
+    }
+
+    // Fix 6.2 & 9.1: Use validateContext helper to reduce code duplication
+    const validation = this.validateContext(chain, ctx);
+    if (!validation.valid) {
+      return {
+        error: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          validation.error,
+          chain
+        ),
+      };
+    }
+
+    // Validate opportunity fields
+    if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.tokenOut) {
+      return {
+        error: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          formatExecutionError(
+            ExecutionErrorCode.INVALID_OPPORTUNITY,
+            'Missing required fields (tokenIn, amountIn, tokenOut)'
+          ),
+          chain
+        ),
+      };
+    }
+
+    // Validate amount is non-zero
+    const amountIn = BigInt(opportunity.amountIn);
+    if (amountIn === 0n) {
+      return {
+        error: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          formatExecutionError(
+            ExecutionErrorCode.INVALID_OPPORTUNITY,
+            'amountIn is zero'
+          ),
+          chain
+        ),
+      };
+    }
+
+    // Bug 4.1 Fix: Validate buyPrice is valid before execution
+    // Invalid price would cause division by zero or wildly incorrect calculations
+    // in profit conversion (USD -> token units). Abort early instead of using fallback.
+    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
+    if (!isValidPrice(opportunity.buyPrice)) {
+      this.logger.error('[ERR_INVALID_PRICE] Cannot execute flash loan with invalid buyPrice', {
+        opportunityId: opportunity.id,
+        buyPrice: opportunity.buyPrice,
+        chain,
+      });
+      return {
+        error: BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          formatExecutionError(
+            ExecutionErrorCode.INVALID_OPPORTUNITY,
+            `Invalid buyPrice: ${opportunity.buyPrice}. Cannot calculate profit in token units.`
+          ),
+          chain
+        ),
+      };
+    }
+
+    return { chain, amountIn };
+  }
+
+  /**
+   * D3: Log warnings if on-chain profit diverges from expected off-chain profit.
+   *
+   * Compares on-chain batched quote profit against the opportunity's expected profit.
+   * Logs warnings at >20% divergence and when on-chain is <50% of expected.
+   *
+   * No return value — purely diagnostic logging.
+   */
+  private verifyOnChainProfitDivergence(
+    opportunity: ArbitrageOpportunity,
+    onChainProfit: { expectedProfit: bigint } | null,
+    nativeTokenPriceUsd: number,
+  ): void {
+    if (!onChainProfit) {
+      return;
+    }
+
+    const onChainProfitEth = parseFloat(ethers.formatEther(onChainProfit.expectedProfit));
+    const onChainProfitUsd = onChainProfitEth * nativeTokenPriceUsd;
+
+    // If on-chain profit is significantly lower than expected, log warning
+    // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
+    const offChainProfit = opportunity.expectedProfit ?? 0;
+    const profitDivergence = offChainProfit > 0
+      ? Math.abs(onChainProfitUsd - offChainProfit) / offChainProfit
+      : 0;
+
+    if (profitDivergence > 0.2) { // >20% divergence
+      this.logger.warn('On-chain profit diverges from expected', {
+        opportunityId: opportunity.id,
+        offChainProfitUsd: offChainProfit,
+        onChainProfitUsd,
+        divergencePercent: (profitDivergence * 100).toFixed(1),
+      });
+    }
+
+    // Use on-chain profit for profitability analysis if available
+    // (it's more accurate than off-chain estimation)
+    if (onChainProfitUsd < offChainProfit * 0.5) {
+      // On-chain profit is less than 50% of expected - likely unprofitable
+      this.logger.warn('On-chain profit significantly lower than expected', {
+        opportunityId: opportunity.id,
+        offChainProfitUsd: offChainProfit,
+        onChainProfitUsd,
+      });
+    }
+  }
+
+  /**
+   * D3: Run pre-flight simulation and revalidate profitability with actual gas.
+   *
+   * Performs simulation of the flash loan transaction, checks for predicted revert,
+   * and if the simulation succeeds with gas estimates, re-runs profitability analysis
+   * using the more accurate simulated gas units.
+   *
+   * Returns an error result if simulation predicts revert or makes trade unprofitable,
+   * null otherwise.
+   */
+  private async simulateAndRevalidateProfitability(
+    opportunity: ArbitrageOpportunity,
+    flashLoanTx: ethers.TransactionRequest,
+    chain: string,
+    ctx: StrategyContext,
+    amountIn: bigint,
+    estimatedGas: bigint,
+    gasPrice: bigint,
+    nativeTokenPriceUsd: number,
+  ): Promise<ExecutionResult | null> {
+    // Pre-flight simulation
+    const simulationResult = await this.performSimulation(
+      opportunity,
+      flashLoanTx,
+      chain,
+      ctx
+    );
+
+    if (simulationResult?.wouldRevert) {
+      ctx.stats.simulationPredictedReverts++;
+      this.logger.warn('Aborting execution: simulation predicted revert', {
+        opportunityId: opportunity.id,
+        revertReason: simulationResult.revertReason,
+        simulationLatencyMs: simulationResult.latencyMs,
+      });
+
+      return BaseExecutionStrategy.createOpportunityError(
+        opportunity,
+        formatExecutionError(
+          ExecutionErrorCode.SIMULATION_REVERT,
+          simulationResult.revertReason || 'unknown reason'
+        ),
         chain
       );
     }
+
+    // Phase 2.3: Enhanced profit validation from simulation result
+    // If simulation succeeded and returned gas estimates, verify profitability with actual gas
+    if (simulationResult?.success && simulationResult.gasUsed) {
+      const simulatedGasUnits = BigInt(simulationResult.gasUsed);
+      const revalidatedProfit = this.analyzeProfitability({
+        expectedProfitUsd: opportunity.expectedProfit ?? 0,
+        flashLoanAmountWei: amountIn,
+        estimatedGasUnits: simulatedGasUnits,
+        gasPriceWei: gasPrice,
+        chain,
+        ethPriceUsd: nativeTokenPriceUsd,
+      });
+
+      if (!revalidatedProfit.isProfitable) {
+        ctx.stats.simulationProfitabilityRejections++;
+        this.logger.warn('Aborting execution: simulation gas estimate makes trade unprofitable', {
+          opportunityId: opportunity.id,
+          estimatedGas: estimatedGas.toString(),
+          simulatedGas: simulatedGasUnits.toString(),
+          netProfitUsd: revalidatedProfit.netProfitUsd,
+          breakdown: revalidatedProfit.breakdown,
+        });
+
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          formatExecutionError(
+            ExecutionErrorCode.HIGH_FEES,
+            `Simulation revealed higher gas (${simulatedGasUnits}), making trade unprofitable: net ${revalidatedProfit.netProfitUsd.toFixed(2)} USD`
+          ),
+          chain
+        );
+      }
+    }
+
+    return null;
   }
 
   // ===========================================================================

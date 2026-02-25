@@ -25,6 +25,9 @@ export {
 export { initializeMevProviders } from './mev-initializer';
 export { initializeRiskManagement } from './risk-management-initializer';
 export { initializeBridgeRouter } from './bridge-router-initializer';
+// D2: Strategy initialization extracted from engine.ts
+export { initializeAllStrategies } from './strategy-initializer';
+export type { StrategyInitDeps, StrategyInitResult } from './strategy-initializer';
 
 // Types
 export type {

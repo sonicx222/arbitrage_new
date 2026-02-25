@@ -56,7 +56,7 @@ import {
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
-import { RISK_CONFIG, FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, R2_CONFIG, BALANCER_V2_VAULTS } from '@arbitrage/config';
+import { FEATURE_FLAGS, DEXES, R2_CONFIG } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
 import {
   initializeMevProviders,
@@ -97,12 +97,12 @@ import { QueueServiceImpl } from './services/queue.service';
 import { IntraChainStrategy } from './strategies/intra-chain.strategy';
 import { CrossChainStrategy } from './strategies/cross-chain.strategy';
 import { SimulationStrategy } from './strategies/simulation.strategy';
-import { FlashLoanStrategy } from './strategies/flash-loan.strategy';
-import { createFlashLoanProviderFactory } from './strategies/flash-loan-providers/provider-factory';
-import { ExecutionStrategyFactory, createStrategyFactory } from './strategies/strategy-factory';
+import { ExecutionStrategyFactory } from './strategies/strategy-factory';
 // P0 Fix #1: Import backrun and UniswapX strategies for registration
 import { BackrunStrategy } from './strategies/backrun.strategy';
 import { UniswapXFillerStrategy } from './strategies/uniswapx-filler.strategy';
+// D2: Strategy initialization extracted to dedicated module
+import { initializeAllStrategies } from './initialization/strategy-initializer';
 // Fix #51: Import MEV-Share event listener for backrun opportunity wiring
 import type { MevShareEventListener, BackrunOpportunity, Logger as CoreLogger } from '@arbitrage/core';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
@@ -138,8 +138,7 @@ import {
   PendingStateManager,
   createPendingStateManager,
 } from './services/pending-state-manager';
-// Finding #7: TX simulation init extracted from engine.ts
-import { initializeTxSimulationService } from './services/tx-simulation-initializer';
+// Finding #7: TX simulation init extracted to strategy-initializer (D2)
 // S6: Standby management extracted from engine.ts
 import {
   StandbyManager,
@@ -972,316 +971,27 @@ export class ExecutionEngineService {
   // FIX 1.1/9.3: Removed duplicate initializeMevProviders() - now in initialization module
   // FIX 1.1/9.3: Removed duplicate initializeBridgeRouter() - now in initialization module
 
+  /**
+   * D2: Strategy initialization delegated to extracted module.
+   *
+   * @see ./initialization/strategy-initializer.ts
+   * @see ADR-022: Hot-Path Performance (NOT part of hot path)
+   */
   private async initializeStrategies(): Promise<void> {
-    // F2: Build flash loan contract addresses and approved routers from config
-    // Contract addresses sourced from env vars (FLASH_LOAN_CONTRACT_<CHAIN>)
-    // Approved routers sourced from FLASH_LOAN_PROVIDERS.approvedRouters or DEXES config
-    const contractAddresses: Record<string, string> = {};
-    const approvedRouters: Record<string, string[]> = {};
-    // Phase 5: Provider overrides for cheaper flash loan protocols (Balancer V2 at 0% > Aave V3 at 0.09%)
-    const providerOverrides: Record<string, { address: string; protocol: string; fee: number }> = {};
-
-    for (const chain of Object.keys(FLASH_LOAN_PROVIDERS)) {
-      // Phase 5: Prefer Balancer V2 (0% fee) over default provider when deployed
-      const balancerEnvKey = `BALANCER_V2_CONTRACT_${chain.toUpperCase()}`;
-      const balancerAddress = process.env[balancerEnvKey];
-      const vaultAddress = BALANCER_V2_VAULTS[chain as keyof typeof BALANCER_V2_VAULTS];
-
-      if (balancerAddress && vaultAddress) {
-        contractAddresses[chain] = balancerAddress;
-        providerOverrides[chain] = {
-          address: vaultAddress,
-          protocol: 'balancer_v2',
-          fee: 0,
-        };
-        this.logger.info('Preferring Balancer V2 (0% fee) over default provider', {
-          chain,
-          defaultProtocol: FLASH_LOAN_PROVIDERS[chain].protocol,
-          defaultFee: FLASH_LOAN_PROVIDERS[chain].fee,
-          contract: balancerAddress,
-        });
-      } else {
-        // Fall back to generic flash loan contract
-        const envKey = `FLASH_LOAN_CONTRACT_${chain.toUpperCase()}`;
-        const address = process.env[envKey];
-        if (address) {
-          contractAddresses[chain] = address;
-        }
-      }
-
-      if (contractAddresses[chain]) {
-        // Source approved routers: prefer explicit config, fallback to DEXES router addresses
-        const providerConfig = FLASH_LOAN_PROVIDERS[chain];
-        if (providerConfig.approvedRouters && providerConfig.approvedRouters.length > 0) {
-          approvedRouters[chain] = providerConfig.approvedRouters;
-        } else if (DEXES[chain]) {
-          approvedRouters[chain] = DEXES[chain]
-            .map(dex => dex.routerAddress)
-            .filter(Boolean);
-        }
-      }
-    }
-
-    // Create FlashLoanStrategy and FlashLoanProviderFactory if contract addresses are configured
-    let flashLoanStrategy: FlashLoanStrategy | undefined;
-    let flashLoanProviderFactory: ReturnType<typeof createFlashLoanProviderFactory> | undefined;
-
-    if (Object.keys(contractAddresses).length > 0) {
-      try {
-        // Build fee overrides from provider overrides (e.g., Balancer V2 at 0%)
-        const feeOverrides: Record<string, number> = {};
-        for (const [chain, override] of Object.entries(providerOverrides)) {
-          feeOverrides[chain] = override.fee;
-        }
-
-        flashLoanStrategy = new FlashLoanStrategy(this.logger, {
-          contractAddresses,
-          approvedRouters,
-          feeOverrides: Object.keys(feeOverrides).length > 0 ? feeOverrides : undefined,
-          enableAggregator: FEATURE_FLAGS.useFlashLoanAggregator,
-        });
-
-        flashLoanProviderFactory = createFlashLoanProviderFactory(this.logger, {
-          contractAddresses,
-          approvedRouters,
-          providerOverrides: Object.keys(providerOverrides).length > 0 ? providerOverrides : undefined,
-        });
-
-        this.logger.info('FlashLoanStrategy initialized', {
-          chains: Object.keys(contractAddresses),
-          aggregatorEnabled: FEATURE_FLAGS.useFlashLoanAggregator,
-        });
-      } catch (error) {
-        this.logger.warn('Failed to initialize FlashLoanStrategy', {
-          error: getErrorMessage(error),
-        });
-      }
-    } else {
-      this.logger.debug('FlashLoanStrategy not registered - no contract addresses configured');
-    }
-
-    // Create strategy instances
-    this.intraChainStrategy = new IntraChainStrategy(this.logger);
-    this.simulationStrategy = new SimulationStrategy(this.logger, this.simulationConfig);
-
-    // FE-001: Wire flash loan dependencies into CrossChainStrategy when feature flag enabled
-    if (FEATURE_FLAGS.useDestChainFlashLoan && flashLoanProviderFactory && flashLoanStrategy) {
-      this.crossChainStrategy = new CrossChainStrategy(
-        this.logger,
-        flashLoanProviderFactory,
-        flashLoanStrategy,
-      );
-      this.logger.info('CrossChainStrategy initialized with destination flash loan support', {
-        supportedChains: Object.keys(contractAddresses),
-      });
-    } else {
-      this.crossChainStrategy = new CrossChainStrategy(this.logger);
-      if (FEATURE_FLAGS.useDestChainFlashLoan) {
-        this.logger.warn('Destination flash loan feature enabled but no flash loan contracts configured');
-      }
-    }
-
-    // Create strategy factory and register strategies
-    this.strategyFactory = createStrategyFactory({
+    const result = await initializeAllStrategies({
       logger: this.logger,
+      simulationConfig: this.simulationConfig,
       isSimulationMode: this.isSimulationMode,
+      providerService: this.providerService,
     });
 
-    this.strategyFactory.registerStrategies({
-      simulation: this.simulationStrategy,
-      crossChain: this.crossChainStrategy,
-      intraChain: this.intraChainStrategy,
-    });
-
-    // Register FlashLoanStrategy with factory for direct flash loan opportunities
-    if (flashLoanStrategy) {
-      this.strategyFactory.registerFlashLoanStrategy(flashLoanStrategy);
-    }
-
-    // FIX 2: Respect feature flags for strategy registration.
-    // Feature flags documentation states: "When disabled: BackrunStrategy is not registered."
-    // Previous code always registered regardless of flag, contradicting the flag contract.
-    // Fix 9: Wire env var configuration to strategy thresholds.
-    // Fix 4: Store references for metrics exposure via health endpoint.
-    // Regression guard CAUTION: validate numeric env vars to prevent NaN (which silently disables thresholds).
-    const parseNumericEnv = (key: string): number | undefined => {
-      const raw = process.env[key];
-      if (!raw) return undefined;
-      const parsed = Number(raw);
-      if (isNaN(parsed)) {
-        this.logger.warn(`Invalid numeric env var ${key}='${raw}', ignoring (using default)`);
-        return undefined;
-      }
-      return parsed;
-    };
-    if (FEATURE_FLAGS.useBackrunStrategy) {
-      this.backrunStrategy = new BackrunStrategy(this.logger, {
-        minProfitUsd: parseNumericEnv('BACKRUN_MIN_PROFIT_USD'),
-        maxGasPriceGwei: parseNumericEnv('BACKRUN_MAX_GAS_PRICE_GWEI'),
-      });
-      this.strategyFactory.registerBackrunStrategy(this.backrunStrategy);
-    }
-    if (FEATURE_FLAGS.useUniswapxFiller) {
-      this.uniswapxStrategy = new UniswapXFillerStrategy(this.logger, {
-        minProfitUsd: parseNumericEnv('UNISWAPX_MIN_PROFIT_USD'),
-        maxGasPriceGwei: parseNumericEnv('UNISWAPX_MAX_GAS_PRICE_GWEI'),
-      });
-      this.strategyFactory.registerUniswapXStrategy(this.uniswapxStrategy);
-    }
-
-    // Phase 3 #29: Solana execution via Jupiter/Jito (feature-flagged, dynamic import)
-    if (process.env.FEATURE_SOLANA_EXECUTION === 'true') {
-      // H7: Validate SOLANA_RPC_URL before proceeding — connection stubs throw at runtime
-      if (!process.env.SOLANA_RPC_URL) {
-        this.logger.error('FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set — skipping Solana strategy registration');
-      } else try {
-        const { JupiterSwapClient } = await import('./solana/jupiter-client');
-        const { SolanaTransactionBuilder } = await import('./solana/transaction-builder');
-        const { SolanaExecutionStrategy } = await import('./strategies/solana-execution.strategy');
-
-        const jupiterClient = new JupiterSwapClient({
-          apiUrl: process.env.JUPITER_API_URL ?? undefined,
-          timeoutMs: parseNumericEnv('JUPITER_TIMEOUT_MS') ?? undefined,
-          maxRetries: parseNumericEnv('JUPITER_MAX_RETRIES') ?? undefined,
-          defaultSlippageBps: parseNumericEnv('JUPITER_DEFAULT_SLIPPAGE_BPS') ?? undefined,
-        });
-
-        // Jito tip accounts from jito-provider defaults
-        const { JITO_TIP_ACCOUNTS } = await import('@arbitrage/core/mev-protection/jito-provider');
-        const tipAccountsRaw = process.env.JITO_TIP_ACCOUNTS;
-        const tipAccounts = tipAccountsRaw
-          ? tipAccountsRaw.split(',').map((s: string) => s.trim())
-          : JITO_TIP_ACCOUNTS;
-
-        const txBuilder = new SolanaTransactionBuilder({ tipAccounts });
-
-        // Create a minimal Jito provider for strategy use
-        // In production, this would use a fully configured JitoProvider
-        const { createJitoProvider } = await import('@arbitrage/core/mev-protection/jito-provider');
-
-        // Build a connection interface for the Jito provider.
-        // Stubs throw descriptive errors instead of returning empty values
-        // to make misconfiguration visible. Configure SOLANA_RPC_URL for production.
-        const notConfigured = (method: string) => async () => {
-          throw new Error(`Solana connection not configured: ${method}() requires SOLANA_RPC_URL`);
-        };
-        const jitoProvider = createJitoProvider({
-          chain: 'solana',
-          connection: {
-            getLatestBlockhash: notConfigured('getLatestBlockhash'),
-            getSlot: notConfigured('getSlot'),
-            getSignatureStatus: notConfigured('getSignatureStatus'),
-            getBalance: notConfigured('getBalance'),
-            sendRawTransaction: notConfigured('sendRawTransaction'),
-          },
-          keypair: {
-            publicKey: { toBase58: () => process.env.SOLANA_WALLET_PUBLIC_KEY ?? '', toBuffer: () => Buffer.alloc(32) },
-            secretKey: new Uint8Array(64),
-          },
-          enabled: true,
-          jitoEndpoint: process.env.JITO_ENDPOINT ?? undefined,
-          tipLamports: parseNumericEnv('JITO_TIP_LAMPORTS') ?? undefined,
-          tipAccounts,
-        });
-
-        // H1: Build confirmation client from Solana RPC for transaction
-        // finality polling. Uses direct JSON-RPC calls to avoid importing
-        // @solana/web3.js at the engine level.
-        const solanaRpcUrl = process.env.SOLANA_RPC_URL!;
-        const confirmationClient = {
-          async getSignatureStatus(signature: string) {
-            const response = await fetch(solanaRpcUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'getSignatureStatuses',
-                params: [[signature]],
-              }),
-            });
-            const data = (await response.json()) as {
-              result?: { value?: Array<{ confirmationStatus: string; slot?: number } | null> };
-            };
-            const statuses = data.result?.value;
-            return { value: statuses?.[0] ?? null };
-          },
-          async getBlockHeight() {
-            const response = await fetch(solanaRpcUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'getBlockHeight',
-                params: [],
-              }),
-            });
-            const data = (await response.json()) as { result?: number };
-            return data.result ?? 0;
-          },
-        };
-
-        const solanaStrategy = new SolanaExecutionStrategy(
-          jupiterClient,
-          txBuilder,
-          jitoProvider,
-          {
-            walletPublicKey: process.env.SOLANA_WALLET_PUBLIC_KEY ?? '',
-            tipLamports: parseNumericEnv('JITO_TIP_LAMPORTS') ?? 1_000_000,
-            maxSlippageBps: parseNumericEnv('SOLANA_MAX_SLIPPAGE_BPS') ?? 100,
-            minProfitLamports: BigInt(process.env.SOLANA_MIN_PROFIT_LAMPORTS ?? '100000'),
-            maxPriceDeviationPct: parseNumericEnv('SOLANA_MAX_PRICE_DEVIATION_PCT') ?? 1.0,
-            confirmationTimeoutMs: parseNumericEnv('SOLANA_CONFIRMATION_TIMEOUT_MS') ?? undefined,
-            confirmationPollIntervalMs: parseNumericEnv('SOLANA_CONFIRMATION_POLL_INTERVAL_MS') ?? undefined,
-          },
-          this.logger,
-          confirmationClient,
-        );
-
-        this.strategyFactory.registerSolanaStrategy(solanaStrategy);
-        this.logger.info('Solana execution strategy registered');
-      } catch (error) {
-        this.logger.error('Failed to initialize Solana execution strategy', {
-          error: getErrorMessage(error),
-        });
-      }
-    } else {
-      this.logger.info('Solana execution disabled (FEATURE_SOLANA_EXECUTION != true)');
-    }
-
-    // Phase 3 #31: Statistical arbitrage strategy (feature-flagged, dynamic import)
-    if (process.env.FEATURE_STATISTICAL_ARB === 'true') {
-      try {
-        const { StatisticalArbitrageStrategy } = await import('./strategies/statistical-arbitrage.strategy');
-        const statArbStrategy = new StatisticalArbitrageStrategy(
-          this.logger,
-          {
-            minConfidence: parseNumericEnv('STAT_ARB_MIN_CONFIDENCE') ?? 0.5,
-            maxOpportunityAgeMs: parseNumericEnv('STAT_ARB_MAX_AGE_MS') ?? 30_000,
-            minExpectedProfitUsd: parseNumericEnv('STAT_ARB_MIN_PROFIT_USD') ?? 5,
-          },
-          flashLoanStrategy ?? undefined,
-        );
-        this.strategyFactory.registerStatisticalStrategy(statArbStrategy);
-        this.logger.info('Statistical arbitrage strategy registered');
-      } catch (error) {
-        this.logger.error('Failed to initialize statistical arbitrage strategy', {
-          error: getErrorMessage(error),
-        });
-      }
-    }
-
-    this.logger.info('Strategy factory initialized', {
-      registeredTypes: this.strategyFactory.getRegisteredTypes(),
-      simulationMode: this.isSimulationMode,
-      destChainFlashLoan: FEATURE_FLAGS.useDestChainFlashLoan,
-    });
-
-    // Finding #7: Initialize tx simulation service via extracted function
-    if (!this.isSimulationMode && this.providerService) {
-      this.txSimulationService = initializeTxSimulationService(this.providerService, this.logger);
-    }
+    this.strategyFactory = result.strategyFactory;
+    this.intraChainStrategy = result.intraChainStrategy;
+    this.crossChainStrategy = result.crossChainStrategy;
+    this.simulationStrategy = result.simulationStrategy;
+    this.backrunStrategy = result.backrunStrategy;
+    this.uniswapxStrategy = result.uniswapxStrategy;
+    this.txSimulationService = result.txSimulationService;
   }
 
   /**
