@@ -49,7 +49,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: true, // DAI DssFlash: 0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853 (0.01% fee)
-    morpho: true, // Morpho Blue: 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb (zero-fee, EIP-3156)
+    morpho: false, // Morpho Blue: 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb — no MorphoFlashArbitrage contract yet
   },
 
   polygon: {
@@ -79,7 +79,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     spookyswap: false,
     syncswap: false,
     dai_flash_mint: false,
-    morpho: true, // Morpho Blue: 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb (zero-fee, EIP-3156)
+    morpho: false, // Morpho Blue: 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb — no MorphoFlashArbitrage contract yet
   },
 
   optimism: {

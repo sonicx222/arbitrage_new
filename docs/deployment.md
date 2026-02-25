@@ -139,7 +139,7 @@ fly deploy
 fly launch --name detector-solana --region sjc
 
 fly secrets set \
-  PARTITION_ID="solana" \
+  PARTITION_ID="solana-native" \
   REDIS_URL="redis://:password@localhost:6379" \
   REDIS_SELF_HOSTED="true" \
   SOLANA_RPC_URL="..."
@@ -295,7 +295,7 @@ NODE_ENV=production         # development, production
 
 ### Detector Services
 ```bash
-PARTITION_ID=               # asia-fast, l2-turbo, high-value, solana
+PARTITION_ID=               # asia-fast, l2-turbo, high-value, solana-native
 ENABLED_CHAINS=             # Comma-separated chain list (overrides partition)
 MIN_PROFIT_THRESHOLD=0.5    # Minimum profit percentage
 PRICE_STALENESS_MS=30000    # Max age for price data

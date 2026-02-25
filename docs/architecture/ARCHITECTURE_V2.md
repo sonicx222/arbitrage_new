@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **15 blockchains** (14 EVM + Solana) with **71 DEXs** (current) and **112+ tokens** (current)
+- Monitor **11 blockchains** active (10 EVM + Solana), **4 emerging L2s** configured (Blast, Scroll, Mantle, Mode), with **71 DEXs** (current) and **112+ tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -227,8 +227,8 @@ The architecture combines two patterns:
 │  │   ├── SwapBuilder (Cached swap step construction) ✅ NEW                     │
 │  │   └── Strategy Factory (Intra-chain, Cross-chain, Flash Loan)                │
 │  ├── Execution Engine Backup (Failover - **EVM ONLY**)                          │
-│  ├── Flash Loan Strategy (Aave V3, Balancer V2, PancakeSwap V3, SyncSwap) ✅    │
-│  ├── Flash Loan Contracts (5 variants — see §10.6) ✅                           │
+│  ├── Flash Loan Strategy (Aave V3, Balancer V2, PancakeSwap V3, SyncSwap, DAI Flash Mint) ✅ │
+│  ├── Flash Loan Contracts (6 variants — see §10.6) ✅                           │
 │  ├── CommitRevealArbitrage (MEV-protected commit-reveal scheme) ✅ NEW          │
 │  └── Solana Executor (Jito bundles, priority fees) ⚠️ **DETECTION ONLY**       │
 │                                                                                  │
@@ -1084,26 +1084,31 @@ SimulationService now routes requests based on chain:
 
 **Supported Protocols**:
 1. **Aave V3** (0.09% fee)
-   - Chains: Ethereum, Polygon, Arbitrum, Optimism, Base
+   - Chains: Ethereum, Polygon, Arbitrum, Optimism, Base, Avalanche
    - Contract: `FlashLoanArbitrage.sol`
    - Largest liquidity pools
 
 2. **Balancer V2** (0% fee)
-   - Chains: Ethereum, Polygon, Arbitrum
+   - Chains: Ethereum, Polygon, Arbitrum, Base, Optimism, Fantom
    - Contract: `BalancerV2FlashArbitrage.sol`
    - Zero-fee flash loans via vault
 
-3. **PancakeSwap V3** (0% fee)
+3. **PancakeSwap V3** (Pool-dependent: 0.01-1%)
    - Chains: BSC, Ethereum (limited liquidity)
    - Contract: `PancakeSwapFlashArbitrage.sol`
-   - Zero-cost flash loans when liquidity available
+   - Fee varies by pool tier (100/500/2500/10000 bps)
 
 4. **SyncSwap** (0.3% fee, EIP-3156)
    - Chains: zkSync Era
    - Contract: `SyncSwapFlashArbitrage.sol`
    - EIP-3156 compliant flash loan interface
 
-5. **CommitRevealArbitrage** (MEV-protected)
+5. **DAI Flash Mint** (0.01% fee, EIP-3156)
+   - Chains: Ethereum only (DAI-only)
+   - Contract: `DaiFlashMintArbitrage.sol`
+   - MakerDAO DssFlash — mint DAI via flash loan at 0.01% fee
+
+6. **CommitRevealArbitrage** (MEV-protected)
    - Chains: All EVM chains
    - Contract: `CommitRevealArbitrage.sol`
    - Two-phase commit-reveal pattern for MEV protection when private mempools unavailable
@@ -1117,13 +1122,14 @@ SimulationService now routes requests based on chain:
 - `contracts/src/BalancerV2FlashArbitrage.sol`
 - `contracts/src/PancakeSwapFlashArbitrage.sol`
 - `contracts/src/SyncSwapFlashArbitrage.sol`
+- `contracts/src/DaiFlashMintArbitrage.sol`
 - `contracts/src/CommitRevealArbitrage.sol`
 - `services/execution-engine/src/strategies/flash-loan.strategy.ts`
 - `services/execution-engine/src/strategies/flash-loan-providers/`
 
 #### 10.6.1 Flash Loan Provider Aggregation (ADR-032) ✅ IMPLEMENTED
 
-**Problem**: With 5 flash loan protocols across 10+ chains, static provider assignment leads to suboptimal fee selection, missed fallback opportunities, and no adaptation to liquidity/reliability changes.
+**Problem**: With 6 flash loan protocols across 10+ chains, static provider assignment leads to suboptimal fee selection, missed fallback opportunities, and no adaptation to liquidity/reliability changes.
 
 **Solution**: Intelligent provider aggregation layer using Clean Architecture (DDD) at `shared/core/src/flash-loan-aggregation/`. Selects the optimal provider per opportunity based on weighted scoring (fees, liquidity, reliability, latency), validates on-chain liquidity for large trades, and caches rankings for performance.
 

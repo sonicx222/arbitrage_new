@@ -269,7 +269,7 @@ An Architecture Decision Record captures an important architectural decision mad
     - Binance public WebSocket trade stream (no API key required)
     - Symbol normalization layer maps CEX symbols to internal token IDs
     - CEX-DEX spread calculator for spread-based opportunity detection
-    - Feature flag controlled (`FEATURE_CEX_PRICE_SIGNALS=true`)
+    - Feature flag controlled (`FEATURE_CEX_PRICE_SIGNALS=true`) — **NOTE: flag not yet implemented in code**
 
 ## How to Use These ADRs
 
