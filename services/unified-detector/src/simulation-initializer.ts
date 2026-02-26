@@ -21,7 +21,6 @@
 
 import { PairActivityTracker } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
-import { ReserveCache } from '@arbitrage/core/caching';
 
 import type {
   Dex,
@@ -71,9 +70,6 @@ export interface SimulationInitializerDeps {
 
   activityTracker: PairActivityTracker;
   snapshotManager: SnapshotManager;
-
-  /** Getter for nullable reserve cache (may not be initialized) */
-  getReserveCache: () => ReserveCache | null;
 
   // Callbacks to parent for state mutation and event emission
   emit: (event: string, data: unknown) => void;
@@ -273,10 +269,10 @@ export class SimulationInitializer {
   /**
    * Handle simulated Sync events from the ChainSimulationHandler.
    * Aligned with production handleSyncEvent() to ensure consistent behavior:
-   * eventsProcessed, BigInt reserves, reserveCache, activityTracker, checkArbitrageOpportunity.
+   * eventsProcessed, BigInt reserves, activityTracker, checkArbitrageOpportunity.
    */
   private handleSimulatedSyncEvent(event: { address: string; reserve0: string; reserve1: string; blockNumber: number }): void {
-    const { chainId, logger, pairsByAddress, activityTracker, snapshotManager, getReserveCache } = this.deps;
+    const { chainId, logger, pairsByAddress, activityTracker, snapshotManager } = this.deps;
     const pairAddress = event.address.toLowerCase();
     const pair = pairsByAddress.get(pairAddress);
 
@@ -290,12 +286,6 @@ export class SimulationInitializer {
       // P1-FIX: Parse BigInt reserves BEFORE recording activity (matches production order)
       const reserve0BigInt = BigInt(reserve0);
       const reserve1BigInt = BigInt(reserve1);
-
-      // P1-FIX: Update reserve cache (matches production handleSyncEvent)
-      const reserveCache = getReserveCache();
-      if (reserveCache) {
-        reserveCache.onSyncEvent(chainId, pairAddress, reserve0, reserve1, blockNumber);
-      }
 
       // P1-FIX: Record activity AFTER successful parsing (matches production order)
       activityTracker.recordUpdate(pair.chainPairKey ?? `${chainId}:${pairAddress}`);

@@ -107,11 +107,6 @@ jest.mock('@arbitrage/core', () => {
     POOL_CREATED: '0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118',
   },
   FactoryWebSocketManager: jest.fn(),
-  ReserveCache: jest.fn(),
-  getReserveCache: jest.fn().mockReturnValue({
-    onSyncEvent: jest.fn(),
-    getStats: jest.fn().mockReturnValue({ hits: 0, misses: 0 }),
-  }),
   HierarchicalCache: jest.fn(),
   createHierarchicalCache: jest.fn().mockReturnValue({
     get: jest.fn(),
@@ -353,10 +348,6 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       getSubscriptionCount: mockGetSubscriptionCount,
       stop: mockFactoryStop,
     }));
-    core.getReserveCache.mockReturnValue({
-      onSyncEvent: jest.fn(),
-      getStats: jest.fn().mockReturnValue({ hits: 0, misses: 0 }),
-    });
     core.createHierarchicalCache.mockReturnValue({
       get: jest.fn(),
       set: jest.fn(),
@@ -427,45 +418,6 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
     ethers.JsonRpcProvider.mockImplementation(() => ({}));
     ethers.keccak256.mockReturnValue('0x' + 'ab'.repeat(32));
     ethers.solidityPacked.mockReturnValue('0x1234');
-  });
-
-  // ===========================================================================
-  // shouldUseReserveCache (private, accessed via any)
-  // Note: shouldUseFactorySubscriptions tests moved to subscription-manager.test.ts
-  // ===========================================================================
-
-  describe('shouldUseReserveCache', () => {
-    it('should return false when useReserveCache is disabled', () => {
-      const instance = createInstance({ useReserveCache: false });
-      expect((instance as any).shouldUseReserveCache()).toBe(false);
-    });
-
-    it('should return true when chain is in enabled list', () => {
-      const instance = createInstance({
-        chainId: 'ethereum',
-        useReserveCache: true,
-        reserveCacheEnabledChains: ['ethereum'],
-      });
-      expect((instance as any).shouldUseReserveCache()).toBe(true);
-    });
-
-    it('should return false when chain is not in enabled list', () => {
-      const instance = createInstance({
-        chainId: 'ethereum',
-        useReserveCache: true,
-        reserveCacheEnabledChains: ['polygon'],
-      });
-      expect((instance as any).shouldUseReserveCache()).toBe(false);
-    });
-
-    it('should use rollout percentage when no explicit chain list', () => {
-      const instance = createInstance({
-        useReserveCache: true,
-        reserveCacheEnabledChains: [],
-        reserveCacheRolloutPercent: 100,
-      });
-      expect((instance as any).shouldUseReserveCache()).toBe(true);
-    });
   });
 
   // ===========================================================================

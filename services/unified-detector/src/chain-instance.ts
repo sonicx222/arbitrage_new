@@ -29,8 +29,6 @@ import {
 } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
 import {
-  ReserveCache,
-  getReserveCache,
   HierarchicalCache,
   createHierarchicalCache,
 } from '@arbitrage/core/caching';
@@ -106,12 +104,6 @@ import {
   DEFAULT_USE_FACTORY_SUBSCRIPTIONS,
   FACTORY_SUBSCRIPTION_ENABLED_CHAINS,
   DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT,
-  // ADR-022: Reserve cache config
-  DEFAULT_USE_RESERVE_CACHE,
-  RESERVE_CACHE_ENABLED_CHAINS,
-  DEFAULT_RESERVE_CACHE_ROLLOUT_PERCENT,
-  RESERVE_CACHE_TTL_MS,
-  RESERVE_CACHE_MAX_ENTRIES,
 } from './constants';
 
 const MULTI_LEG_TIMEOUT_MS = parseIntEnvVar(
@@ -167,26 +159,6 @@ export interface ChainInstanceConfig {
    * Uses deterministic hash for consistent rollout across restarts.
    */
   factorySubscriptionRolloutPercent?: number;
-
-  // ADR-022: Reserve Cache Configuration
-  /**
-   * When true, cache reserve data from Sync events for RPC reduction.
-   * Expected 60-80% reduction in eth_call(getReserves) RPC calls.
-   * Default: false (disabled for safe rollout)
-   */
-  useReserveCache?: boolean;
-
-  /**
-   * Specific chains to enable reserve cache for (overrides rollout percent).
-   * Used for gradual rollout across partitions.
-   */
-  reserveCacheEnabledChains?: string[];
-
-  /**
-   * Percentage of chains to enable reserve cache for (0-100).
-   * Uses deterministic hash for consistent rollout across restarts.
-   */
-  reserveCacheRolloutPercent?: number;
 
   // PHASE2-TASK36: Hierarchical Price Cache Configuration
   /**
@@ -382,14 +354,6 @@ export class ChainDetectorInstance extends EventEmitter {
     rpcReductionRatio: 1
   };
 
-  // ADR-022: Reserve cache for RPC reduction
-  private reserveCache: ReserveCache | null = null;
-  private reserveCacheConfig: {
-    useReserveCache: boolean;
-    reserveCacheEnabledChains: string[];
-    reserveCacheRolloutPercent: number;
-  };
-
   // PHASE2-TASK36: Hierarchical price cache with PriceMatrix L1
   // Optional enhancement for persistent caching and monitoring
   // Does NOT replace hot-path pairsByAddress Map (still O(1) at ~50ns)
@@ -488,27 +452,6 @@ export class ChainDetectorInstance extends EventEmitter {
       factorySubscriptionEnabledChains: config.factorySubscriptionEnabledChains ?? [...FACTORY_SUBSCRIPTION_ENABLED_CHAINS],
       factorySubscriptionRolloutPercent: config.factorySubscriptionRolloutPercent ?? DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT
     };
-
-    // ADR-022: Initialize reserve cache config from constructor config or defaults
-    this.reserveCacheConfig = {
-      useReserveCache: config.useReserveCache ?? DEFAULT_USE_RESERVE_CACHE,
-      reserveCacheEnabledChains: config.reserveCacheEnabledChains ?? [...RESERVE_CACHE_ENABLED_CHAINS],
-      reserveCacheRolloutPercent: config.reserveCacheRolloutPercent ?? DEFAULT_RESERVE_CACHE_ROLLOUT_PERCENT
-    };
-
-    // Initialize reserve cache if enabled for this chain
-    if (this.shouldUseReserveCache()) {
-      this.reserveCache = getReserveCache({
-        maxEntries: RESERVE_CACHE_MAX_ENTRIES,
-        ttlMs: RESERVE_CACHE_TTL_MS,
-        enableMetrics: true,
-      });
-      this.logger.debug('Reserve cache enabled for chain', {
-        chainId: this.chainId,
-        maxEntries: RESERVE_CACHE_MAX_ENTRIES,
-        ttlMs: RESERVE_CACHE_TTL_MS,
-      });
-    }
 
     // P0-FIX 1.1: Eagerly initialize factory event signature set to prevent race condition
     // Previously this was lazily initialized in isFactoryEventSignature(), which could cause
@@ -926,7 +869,6 @@ export class ChainDetectorInstance extends EventEmitter {
       pairsByAddress: this.pairsByAddress,
       activityTracker: this.activityTracker,
       snapshotManager: this.snapshotManager,
-      getReserveCache: () => this.reserveCache,
       emit: (event, data) => this.emit(event, data),
       emitPriceUpdate: (pair) => this.emitPriceUpdate(pair),
       checkArbitrageOpportunity: (pair) => this.checkArbitrageOpportunity(pair),
@@ -1103,47 +1045,6 @@ export class ChainDetectorInstance extends EventEmitter {
   // shouldUseFactorySubscriptions(), hashChainName(), subscribeToEvents(),
   // subscribeViaFactoryMode(), subscribeViaLegacyMode() are now in SubscriptionManager.
   // initializeWebSocket() is merged into initializeWebSocketAndSubscribe().
-
-  /**
-   * Deterministic hash for chain name (for rollout percentage).
-   * Used by shouldUseReserveCache() for consistent rollout.
-   * Duplicated from SubscriptionManager since it's a pure utility (6 lines).
-   */
-  private static hashChainName(chain: string): number {
-    let hash = 0;
-    for (let i = 0; i < chain.length; i++) {
-      hash = ((hash << 5) - hash + chain.charCodeAt(i)) | 0;
-    }
-    return Math.abs(hash);
-  }
-
-  /**
-   * ADR-022: Determine if reserve caching should be used for this chain.
-   * Supports gradual rollout via explicit chain list or percentage-based rollout.
-   */
-  private shouldUseReserveCache(): boolean {
-    // Check if explicitly disabled via config flag
-    if (!this.reserveCacheConfig.useReserveCache) {
-      return false;
-    }
-
-    // If explicit chain list is provided, only enable for those chains
-    const enabledChains = this.reserveCacheConfig.reserveCacheEnabledChains;
-    if (enabledChains && enabledChains.length > 0) {
-      return enabledChains.includes(this.chainId);
-    }
-
-    // Check rollout percentage
-    const rolloutPercent = this.reserveCacheConfig.reserveCacheRolloutPercent;
-    if (rolloutPercent !== undefined && rolloutPercent < 100) {
-      // Use deterministic hash of chain name for consistent rollout
-      const chainHash = ChainDetectorInstance.hashChainName(this.chainId);
-      return (chainHash % 100) < rolloutPercent;
-    }
-
-    // Default: if flag is true but no specific config, enable for all
-    return this.reserveCacheConfig.useReserveCache;
-  }
 
   // R8 Refactor: subscribeToEvents(), subscribeViaFactoryMode(), subscribeViaLegacyMode()
   // moved to subscription/subscription-manager.ts
@@ -1385,12 +1286,6 @@ export class ChainDetectorInstance extends EventEmitter {
         const reserve0 = reserve0BigInt.toString();
         const reserve1 = reserve1BigInt.toString();
         const blockNumber = parseInt(log.blockNumber, 16);
-
-        // ADR-022: Update reserve cache (event-driven invalidation)
-        // This is the primary update path - reserves from Sync events are always fresh
-        if (this.reserveCache) {
-          this.reserveCache.onSyncEvent(this.chainId, pairAddress, reserve0, reserve1, blockNumber);
-        }
 
         // Record activity AFTER successful parsing (race condition fix)
         // FIX Perf 10.2: Use cached chainPairKey to avoid string allocation on every Sync event
