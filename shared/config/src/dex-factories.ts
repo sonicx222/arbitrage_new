@@ -821,6 +821,70 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       hasFeeTiers: true,
     },
   ],
+
+  // =========================================================================
+  // Emerging L2s (RPC-verified 2026-02-26)
+  // =========================================================================
+
+  // Blast: 4 factories
+  blast: [
+    {
+      address: '0xb4A7D971D0ADea1c73198C97d7ab3f9CE4aaFA13',
+      dexName: 'thruster_v2',
+      type: 'uniswap_v2',
+      chain: 'blast',
+    },
+    {
+      address: '0x71b08f13B3c3aF35aAdEb3949AFEb1ded1016127',
+      dexName: 'thruster_v3',
+      type: 'uniswap_v3',
+      chain: 'blast',
+      hasFeeTiers: true,
+    },
+    {
+      address: '0x5C346464d33F90bABaf70dB6388507CC889C1070',
+      dexName: 'bladeswap',
+      type: 'uniswap_v2',
+      chain: 'blast',
+    },
+    {
+      address: '0xa19C51D91891D3DF7C13Ed22a2f89d328A82950f',
+      dexName: 'fenix_finance',
+      type: 'solidly',
+      chain: 'blast',
+    },
+  ],
+
+  // Scroll: 4 factories
+  scroll: [
+    {
+      address: '0x37BAc764494c8db4e54BDE72f6965beA9fa0AC2d',
+      dexName: 'syncswap',
+      type: 'uniswap_v2',
+      chain: 'scroll',
+    },
+    {
+      address: '0x70C62C8b8e801124A4Aa81ce07b637A3e83cb919',
+      dexName: 'uniswap_v3',
+      type: 'uniswap_v3',
+      chain: 'scroll',
+      hasFeeTiers: true,
+    },
+    {
+      address: '0x46B3fDF7b5CDe91Ac049936bF0bDb12c5d22202e',
+      dexName: 'sushiswap_v3',
+      type: 'uniswap_v3',
+      chain: 'scroll',
+      hasFeeTiers: true,
+    },
+    {
+      address: '0xaaaaAAAACB71BF2C8CaE522EA5fa455571A74106',
+      dexName: 'ambient',
+      type: 'uniswap_v2', // CrocSwap uses custom AMM but closest category
+      chain: 'scroll',
+      supportsFactoryEvents: false, // Single-contract DEX, no factory events
+    },
+  ],
 };
 
 // =============================================================================

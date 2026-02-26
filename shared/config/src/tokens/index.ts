@@ -196,19 +196,30 @@ export const CORE_TOKENS: Record<string, Token[]> = {
   // =============================================================================
   // Emerging L2s: Blast, Scroll, Mantle, Mode
   // =============================================================================
-  // Blast: 2 tokens
+  // Blast: 5 tokens (RPC-verified 2026-02-26)
   blast: [
     // Anchor tokens
     { address: '0x4300000000000000000000000000000000000004', symbol: 'WETH', decimals: 18, chainId: 81457 },
     // Blast native stablecoin
     { address: '0x4300000000000000000000000000000000000003', symbol: 'USDB', decimals: 18, chainId: 81457 },
+    // Chain governance
+    { address: '0xb1a5700fA2358173Fe465e6eA4Ff52E36e88E2ad', symbol: 'BLAST', decimals: 18, chainId: 81457 },
+    // Core DeFi
+    { address: '0xF7bc58b8D8f97ADC129cfC4c9f45Ce3C0E1D2692', symbol: 'WBTC', decimals: 8, chainId: 81457 },
+    { address: '0x76DA31D7C9CbEAE102aff34D3398bC450c8374c1', symbol: 'MIM', decimals: 18, chainId: 81457 },
   ],
-  // Scroll: 3 tokens
+  // Scroll: 7 tokens (RPC-verified 2026-02-26)
   scroll: [
     // Anchor tokens
     { address: '0x5300000000000000000000000000000000000004', symbol: 'WETH', decimals: 18, chainId: 534352 },
     { address: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4', symbol: 'USDC', decimals: 6, chainId: 534352 },
     { address: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', symbol: 'USDT', decimals: 6, chainId: 534352 },
+    { address: '0xcA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97', symbol: 'DAI', decimals: 18, chainId: 534352 },
+    { address: '0x3C1BCa5a656e69edCD0D4E36BEbb3FcDAcA60Cf1', symbol: 'WBTC', decimals: 8, chainId: 534352 },
+    // LST tokens
+    { address: '0xf610A9dfB7C89644979b4A0f27063E9e7d7Cda32', symbol: 'wstETH', decimals: 18, chainId: 534352 },
+    // Chain governance
+    { address: '0xd29687c813D741E2F938F4aC377128810E217b1b', symbol: 'SCR', decimals: 18, chainId: 534352 },
   ],
   // Mantle: 3 tokens
   mantle: [
@@ -583,7 +594,8 @@ export const TOKEN_METADATA: Record<string, {
     nativeWrapper: '0x5300000000000000000000000000000000000004', // WETH (native is ETH)
     stablecoins: [
       { address: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4', symbol: 'USDC', decimals: 6 },
-      { address: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', symbol: 'USDT', decimals: 6 }
+      { address: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', symbol: 'USDT', decimals: 6 },
+      { address: '0xcA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97', symbol: 'DAI', decimals: 18 }
     ]
   },
   mantle: {

@@ -76,20 +76,48 @@ describe('Fix 2: Chain ID mappings', () => {
     expect(CHAIN_NAME_TO_ID['solana']).toBe(101);
   });
 
+  it('should resolve Blast to chain ID 81457', () => {
+    expect(resolveChainId('blast')).toBe(81457);
+    expect(CHAIN_NAME_TO_ID['blast']).toBe(81457);
+  });
+
+  it('should resolve Scroll to chain ID 534352', () => {
+    expect(resolveChainId('scroll')).toBe(534352);
+    expect(CHAIN_NAME_TO_ID['scroll']).toBe(534352);
+  });
+
+  it('should resolve Mantle to chain ID 5000', () => {
+    expect(resolveChainId('mantle')).toBe(5000);
+    expect(CHAIN_NAME_TO_ID['mantle']).toBe(5000);
+  });
+
+  it('should resolve Mode to chain ID 34443', () => {
+    expect(resolveChainId('mode')).toBe(34443);
+    expect(CHAIN_NAME_TO_ID['mode']).toBe(34443);
+  });
+
   it('should NOT return default chain ID 1 for known chains', () => {
     // This was the exact bug: resolveChainId('zksync') returned 1 (Ethereum)
     expect(resolveChainId('zksync')).not.toBe(1);
     expect(resolveChainId('linea')).not.toBe(1);
     expect(resolveChainId('solana')).not.toBe(1);
+    expect(resolveChainId('blast')).not.toBe(1);
+    expect(resolveChainId('scroll')).not.toBe(1);
+    expect(resolveChainId('mantle')).not.toBe(1);
+    expect(resolveChainId('mode')).not.toBe(1);
   });
 
   it('should reverse-resolve chain IDs back to names', () => {
     expect(getChainName(324)).toBe('zksync');
     expect(getChainName(59144)).toBe('linea');
     expect(getChainName(101)).toBe('solana');
+    expect(getChainName(81457)).toBe('blast');
+    expect(getChainName(534352)).toBe('scroll');
+    expect(getChainName(5000)).toBe('mantle');
+    expect(getChainName(34443)).toBe('mode');
   });
 
-  it('should have bidirectional consistency for all 11 chains', () => {
+  it('should have bidirectional consistency for all 15 chains', () => {
     const expectedChains: [string, number][] = [
       ['ethereum', 1],
       ['bsc', 56],
@@ -101,6 +129,10 @@ describe('Fix 2: Chain ID mappings', () => {
       ['fantom', 250],
       ['zksync', 324],
       ['linea', 59144],
+      ['blast', 81457],
+      ['scroll', 534352],
+      ['mantle', 5000],
+      ['mode', 34443],
       ['solana', 101],
     ];
 

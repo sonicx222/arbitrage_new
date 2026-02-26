@@ -7,6 +7,8 @@
  * @see Phase 2: MEV Protection
  */
 
+import { safeParseFloat, safeParseInt } from './utils/env-parsing';
+
 // =============================================================================
 // MEV PROTECTION CONFIGURATION (Phase 2)
 // Flashbots, BloXroute, Fastlane, and L2 Sequencer settings
@@ -46,10 +48,10 @@ export const MEV_CONFIG = {
   fastlaneUrl: process.env.FASTLANE_URL || 'https://fastlane-rpc.polygon.technology',
 
   /** Submission timeout in milliseconds */
-  submissionTimeoutMs: parseInt(process.env.MEV_SUBMISSION_TIMEOUT_MS || '30000'),
+  submissionTimeoutMs: safeParseInt(process.env.MEV_SUBMISSION_TIMEOUT_MS, 30000),
 
   /** Maximum retries for bundle submission */
-  maxRetries: parseInt(process.env.MEV_MAX_RETRIES || '3'),
+  maxRetries: safeParseInt(process.env.MEV_MAX_RETRIES, 3),
 
   /** Fallback to public mempool if protected submission fails */
   fallbackToPublic: process.env.MEV_FALLBACK_TO_PUBLIC === 'true', // Default false -- public mempool exposes to sandwich attacks
@@ -176,22 +178,22 @@ export const MEV_CONFIG = {
     enabled: process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true',
 
     /** Attack count threshold to trigger adaptation (default: 5) */
-    attackThreshold: parseInt(process.env.ADAPTIVE_ATTACK_THRESHOLD || '5'),
+    attackThreshold: safeParseInt(process.env.ADAPTIVE_ATTACK_THRESHOLD, 5),
 
     /** Active window for counting attacks in hours (default: 24h) */
-    activeWindowHours: parseInt(process.env.ADAPTIVE_ACTIVE_WINDOW_HOURS || '24'),
+    activeWindowHours: safeParseInt(process.env.ADAPTIVE_ACTIVE_WINDOW_HOURS, 24),
 
     /** Threshold reduction percentage when attacks detected (default: 30%) */
-    reductionPercent: parseFloat(process.env.ADAPTIVE_REDUCTION_PERCENT || '0.30'),
+    reductionPercent: safeParseFloat(process.env.ADAPTIVE_REDUCTION_PERCENT, 0.30),
 
     /** Decay rate per day when no attacks (default: 10% per day) */
-    decayRatePerDay: parseFloat(process.env.ADAPTIVE_DECAY_RATE_PER_DAY || '0.10'),
+    decayRatePerDay: safeParseFloat(process.env.ADAPTIVE_DECAY_RATE_PER_DAY, 0.10),
 
     /** Maximum events to store (FIFO pruning, default: 10000) */
-    maxEvents: parseInt(process.env.ADAPTIVE_MAX_EVENTS || '10000'),
+    maxEvents: safeParseInt(process.env.ADAPTIVE_MAX_EVENTS, 10000),
 
     /** Event retention period in days (default: 7 days) */
-    retentionDays: parseInt(process.env.ADAPTIVE_RETENTION_DAYS || '7'),
+    retentionDays: safeParseInt(process.env.ADAPTIVE_RETENTION_DAYS, 7),
   },
 };
 

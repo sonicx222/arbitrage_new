@@ -76,28 +76,22 @@ const sharedMockPerfLogger = {
   getMetrics: jest.fn().mockReturnValue({}),
 };
 
+// Mock @arbitrage/core barrel (createLogger, getPerformanceLogger)
 jest.mock('@arbitrage/core', () => ({
-  getRedisClient: jest.fn<any>(),
-  getRedisStreamsClient: jest.fn<any>(),
-  getPriceOracle: jest.fn<any>(),
-  getWhaleActivityTracker: jest.fn<any>(),
   createLogger: jest.fn(() => sharedMockLogger),
   getPerformanceLogger: jest.fn(() => sharedMockPerfLogger),
-  createServiceState: jest.fn<any>(),
-  disconnectWithTimeout: jest.fn<any>().mockResolvedValue(undefined),
-  clearIntervalSafe: jest.fn((interval: any) => {
-    if (interval) clearInterval(interval);
-    return null;
-  }),
-  clearTimeoutSafe: jest.fn((timeout: any) => {
-    if (timeout) clearTimeout(timeout);
-    return null;
-  }),
-  OperationGuard: jest.fn().mockImplementation(() => ({
-    tryAcquire: jest.fn().mockReturnValue(true),
-    release: jest.fn(),
-    forceRelease: jest.fn(),
-  })),
+  RecordingLogger: jest.fn(),
+}));
+
+// Mock sub-path imports — the detector imports from sub-paths, not the barrel
+jest.mock('@arbitrage/core/analytics', () => ({
+  getPriceOracle: jest.fn<any>(),
+  getWhaleActivityTracker: jest.fn<any>(),
+}));
+
+jest.mock('@arbitrage/core/redis', () => ({
+  getRedisClient: jest.fn<any>(),
+  getRedisStreamsClient: jest.fn<any>(),
   RedisStreamsClient: {
     STREAMS: {
       PRICE_UPDATES: 'stream:price-updates',
@@ -107,7 +101,37 @@ jest.mock('@arbitrage/core', () => ({
       PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
     },
   },
-  RecordingLogger: jest.fn(),
+}));
+
+jest.mock('@arbitrage/core/async', () => ({
+  OperationGuard: jest.fn().mockImplementation(() => ({
+    tryAcquire: jest.fn().mockReturnValue(true),
+    release: jest.fn(),
+    forceRelease: jest.fn(),
+  })),
+  clearIntervalSafe: jest.fn((interval: any) => {
+    if (interval) clearInterval(interval);
+    return null;
+  }),
+  clearTimeoutSafe: jest.fn((timeout: any) => {
+    if (timeout) clearTimeout(timeout);
+    return null;
+  }),
+}));
+
+jest.mock('@arbitrage/core/service-lifecycle', () => ({
+  createServiceState: jest.fn<any>(),
+  ServiceState: {
+    STOPPED: 'stopped',
+    STARTING: 'starting',
+    RUNNING: 'running',
+    STOPPING: 'stopping',
+    ERROR: 'error',
+  },
+}));
+
+jest.mock('@arbitrage/core/utils', () => ({
+  disconnectWithTimeout: jest.fn<any>().mockResolvedValue(undefined),
 }));
 
 // Mock @arbitrage/ml
@@ -183,31 +207,41 @@ describe('CrossChainDetectorService', () => {
     mockMLPredictionManager = createMockMLPredictionManager();
     mockStateManager = createMockStateManager();
 
-    // Wire up @arbitrage/core mocks that need to return specific values
+    // Wire up sub-path module mocks — detector imports from @arbitrage/core/*
     // NOTE: setupTests.ts calls jest.resetAllMocks() in afterEach, which clears
     // all mockImplementation/mockReturnValue. We must re-wire EVERYTHING here.
     const core = jest.requireMock('@arbitrage/core') as any;
-    core.getRedisClient.mockResolvedValue(mockRedisClient);
-    core.getRedisStreamsClient.mockResolvedValue(mockStreamsClient);
-    core.getPriceOracle.mockResolvedValue(mockPriceOracle);
-    core.getWhaleActivityTracker.mockReturnValue(mockWhaleTracker);
-    core.createServiceState.mockReturnValue(mockStateManager);
     core.createLogger.mockReturnValue(sharedMockLogger);
     core.getPerformanceLogger.mockReturnValue(sharedMockPerfLogger);
-    core.disconnectWithTimeout.mockResolvedValue(undefined);
-    core.clearIntervalSafe.mockImplementation((interval: any) => {
+
+    const analytics = jest.requireMock('@arbitrage/core/analytics') as any;
+    analytics.getPriceOracle.mockResolvedValue(mockPriceOracle);
+    analytics.getWhaleActivityTracker.mockReturnValue(mockWhaleTracker);
+
+    const redis = jest.requireMock('@arbitrage/core/redis') as any;
+    redis.getRedisClient.mockResolvedValue(mockRedisClient);
+    redis.getRedisStreamsClient.mockResolvedValue(mockStreamsClient);
+
+    const asyncMod = jest.requireMock('@arbitrage/core/async') as any;
+    asyncMod.clearIntervalSafe.mockImplementation((interval: any) => {
       if (interval) clearInterval(interval);
       return null;
     });
-    core.clearTimeoutSafe.mockImplementation((timeout: any) => {
+    asyncMod.clearTimeoutSafe.mockImplementation((timeout: any) => {
       if (timeout) clearTimeout(timeout);
       return null;
     });
-    core.OperationGuard.mockImplementation(() => ({
+    asyncMod.OperationGuard.mockImplementation(() => ({
       tryAcquire: jest.fn().mockReturnValue(true),
       release: jest.fn(),
       forceRelease: jest.fn(),
     }));
+
+    const lifecycle = jest.requireMock('@arbitrage/core/service-lifecycle') as any;
+    lifecycle.createServiceState.mockReturnValue(mockStateManager);
+
+    const utils = jest.requireMock('@arbitrage/core/utils') as any;
+    utils.disconnectWithTimeout.mockResolvedValue(undefined);
 
     // Wire factory mocks
     (createStreamConsumer as jest.Mock).mockReturnValue(mockStreamConsumer);
@@ -220,7 +254,10 @@ describe('CrossChainDetectorService', () => {
   });
 
   afterEach(async () => {
-    // Clean up service if still running
+    // Restore real timers BEFORE async cleanup — service.stop() uses
+    // disconnectWithTimeout() which relies on real setTimeout. With fake
+    // timers active, stop() hangs until Jest's 10s timeout kills the test.
+    jest.useRealTimers();
     try {
       if (service) {
         await service.stop();
@@ -228,7 +265,6 @@ describe('CrossChainDetectorService', () => {
     } catch (e) {
       // Ignore cleanup errors
     }
-    jest.useRealTimers();
   });
 
   // ===========================================================================
@@ -270,8 +306,8 @@ describe('CrossChainDetectorService', () => {
     });
 
     it('should throw when Redis client returns null', async () => {
-      const core = jest.requireMock('@arbitrage/core') as any;
-      core.getRedisClient.mockResolvedValue(null);
+      const redis = jest.requireMock('@arbitrage/core/redis') as any;
+      redis.getRedisClient.mockResolvedValue(null);
 
       await expect(service.start()).rejects.toThrow(
         'Failed to initialize Redis client - returned null'
@@ -279,8 +315,8 @@ describe('CrossChainDetectorService', () => {
     });
 
     it('should throw when Redis Streams client returns null', async () => {
-      const core = jest.requireMock('@arbitrage/core') as any;
-      core.getRedisStreamsClient.mockResolvedValue(null);
+      const redis = jest.requireMock('@arbitrage/core/redis') as any;
+      redis.getRedisStreamsClient.mockResolvedValue(null);
 
       await expect(service.start()).rejects.toThrow(
         'Failed to initialize Redis Streams client - returned null'
@@ -288,8 +324,8 @@ describe('CrossChainDetectorService', () => {
     });
 
     it('should throw when Price Oracle returns null', async () => {
-      const core = jest.requireMock('@arbitrage/core') as any;
-      core.getPriceOracle.mockResolvedValue(null);
+      const analytics = jest.requireMock('@arbitrage/core/analytics') as any;
+      analytics.getPriceOracle.mockResolvedValue(null);
 
       await expect(service.start()).rejects.toThrow(
         'Failed to initialize Price Oracle - returned null'
@@ -403,12 +439,13 @@ describe('CrossChainDetectorService', () => {
     it('should allow restart after stop', async () => {
       await service.stop();
 
-      // Re-wire core mocks for second start (stop() nulled the service's internal refs)
-      const core = jest.requireMock('@arbitrage/core') as any;
-      core.getRedisClient.mockResolvedValue(mockRedisClient);
-      core.getRedisStreamsClient.mockResolvedValue(mockStreamsClient);
-      core.getPriceOracle.mockResolvedValue(mockPriceOracle);
-      core.getWhaleActivityTracker.mockReturnValue(mockWhaleTracker);
+      // Re-wire sub-path mocks for second start (stop() nulled the service's internal refs)
+      const redis = jest.requireMock('@arbitrage/core/redis') as any;
+      redis.getRedisClient.mockResolvedValue(mockRedisClient);
+      redis.getRedisStreamsClient.mockResolvedValue(mockStreamsClient);
+      const analytics = jest.requireMock('@arbitrage/core/analytics') as any;
+      analytics.getPriceOracle.mockResolvedValue(mockPriceOracle);
+      analytics.getWhaleActivityTracker.mockReturnValue(mockWhaleTracker);
 
       // Re-create module mocks for second initialization
       mockStreamConsumer = createMockStreamConsumer();

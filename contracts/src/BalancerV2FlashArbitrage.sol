@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IBalancerV2Vault.sol";
-import "./interfaces/IFlashLoanErrors.sol";
 import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for getAmountsOut()
 
 /**
@@ -64,8 +63,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  */
 contract BalancerV2FlashArbitrage is
     BaseFlashArbitrage,
-    IFlashLoanRecipient,
-    IFlashLoanErrors
+    IFlashLoanRecipient
 {
     using SafeERC20 for IERC20;
 
@@ -102,11 +100,7 @@ contract BalancerV2FlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _vault, address _owner) BaseFlashArbitrage(_owner) {
-        if (_vault == address(0)) revert InvalidProtocolAddress();
-
-        // Verify vault is a contract (has code deployed)
-        // Protection against typos or EOA addresses during deployment
-        if (_vault.code.length == 0) revert InvalidProtocolAddress();
+        _validateContractAddress(_vault);
 
         VAULT = IBalancerV2Vault(_vault);
     }

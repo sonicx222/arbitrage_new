@@ -38,7 +38,7 @@ export interface Logger {
 }
 import { withTimeout } from './with-timeout';
 import { CoalescingMap } from './coalescing-map';
-import { getErrorMessage } from '@arbitrage/core/resilience';
+import { getErrorMessage } from '@arbitrage/types';
 
 /**
  * Minimal interface for RPC providers that support eth_call.

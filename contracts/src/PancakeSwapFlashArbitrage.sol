@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./interfaces/IPancakeV3FlashCallback.sol";
-import "./interfaces/IFlashLoanErrors.sol";
 import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for getAmountsOut()
 
 /**
@@ -62,8 +61,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  */
 contract PancakeSwapFlashArbitrage is
     BaseFlashArbitrage,
-    IPancakeV3FlashCallback,
-    IFlashLoanErrors
+    IPancakeV3FlashCallback
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -120,11 +118,7 @@ contract PancakeSwapFlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _factory, address _owner) BaseFlashArbitrage(_owner) {
-        if (_factory == address(0)) revert InvalidProtocolAddress();
-
-        // Verify factory is a contract (has code deployed)
-        // Protection against typos or EOA addresses during deployment
-        if (_factory.code.length == 0) revert InvalidProtocolAddress();
+        _validateContractAddress(_factory);
 
         FACTORY = IPancakeV3Factory(_factory);
     }

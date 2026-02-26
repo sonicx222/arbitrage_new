@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IERC3156FlashLender.sol";
 import "./interfaces/ISyncSwapVault.sol";
-import "./interfaces/IFlashLoanErrors.sol";
 import "./interfaces/IDexRouter.sol";
 
 /**
@@ -52,19 +51,11 @@ import "./interfaces/IDexRouter.sol";
  */
 contract DaiFlashMintArbitrage is
     BaseFlashArbitrage,
-    IERC3156FlashBorrower,
-    IFlashLoanErrors
+    IERC3156FlashBorrower
 {
     using SafeERC20 for IERC20;
 
-    // ==========================================================================
-    // Constants (Protocol-Specific)
-    // ==========================================================================
-
-    /// @notice EIP-3156 success return value
-    /// @dev Must return this exact value from onFlashLoan() to signal success
-    bytes32 private constant ERC3156_CALLBACK_SUCCESS =
-        keccak256("ERC3156FlashBorrower.onFlashLoan");
+    // Note: ERC3156_CALLBACK_SUCCESS inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // State Variables (Protocol-Specific)
@@ -100,15 +91,9 @@ contract DaiFlashMintArbitrage is
         address _dai,
         address _owner
     ) BaseFlashArbitrage(_owner) {
-        if (_dssFlash == address(0)) revert InvalidProtocolAddress();
-
-        // Verify DssFlash is a contract (has code deployed)
-        // Protection against typos or EOA addresses during deployment
-        if (_dssFlash.code.length == 0) revert InvalidProtocolAddress();
+        _validateContractAddress(_dssFlash);
 
         if (_dai == address(0)) revert InvalidDaiAddress();
-
-        // Verify DAI is a contract
         if (_dai.code.length == 0) revert InvalidDaiAddress();
 
         DSS_FLASH = IERC3156FlashLender(_dssFlash);

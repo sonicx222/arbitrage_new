@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IFlashLoanReceiver.sol";
-import "./interfaces/IFlashLoanErrors.sol";
 import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for getAmountsOut()
 
 /**
@@ -63,17 +62,11 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  */
 contract FlashLoanArbitrage is
     BaseFlashArbitrage,
-    IFlashLoanSimpleReceiver,
-    IFlashLoanErrors
+    IFlashLoanSimpleReceiver
 {
     using SafeERC20 for IERC20;
 
-    // ==========================================================================
-    // Constants
-    // ==========================================================================
-
-    /// @notice Denominator for basis points calculations (10000 bps = 100%)
-    uint256 private constant BPS_DENOMINATOR = 10000;
+    // Note: BPS_DENOMINATOR inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // State Variables
@@ -95,11 +88,7 @@ contract FlashLoanArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _pool, address _owner) BaseFlashArbitrage(_owner) {
-        if (_pool == address(0)) revert InvalidProtocolAddress();
-
-        // Verify pool is a contract (has code deployed)
-        // Protection against typos or EOA addresses during deployment
-        if (_pool.code.length == 0) revert InvalidProtocolAddress();
+        _validateContractAddress(_pool);
 
         POOL = IPool(_pool);
     }

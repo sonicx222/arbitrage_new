@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/ISyncSwapVault.sol";
-import "./interfaces/IFlashLoanErrors.sol";
 import "./interfaces/IDexRouter.sol";
 
 /**
@@ -56,19 +55,11 @@ import "./interfaces/IDexRouter.sol";
  */
 contract SyncSwapFlashArbitrage is
     BaseFlashArbitrage,
-    IERC3156FlashBorrower,
-    IFlashLoanErrors
+    IERC3156FlashBorrower
 {
     using SafeERC20 for IERC20;
 
-    // ==========================================================================
-    // Constants (Protocol-Specific)
-    // ==========================================================================
-
-    /// @notice EIP-3156 success return value
-    /// @dev Must return this exact value from onFlashLoan() to signal success
-    bytes32 private constant ERC3156_CALLBACK_SUCCESS =
-        keccak256("ERC3156FlashBorrower.onFlashLoan");
+    // Note: ERC3156_CALLBACK_SUCCESS inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // State Variables (Protocol-Specific)
@@ -95,11 +86,7 @@ contract SyncSwapFlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _vault, address _owner) BaseFlashArbitrage(_owner) {
-        if (_vault == address(0)) revert InvalidProtocolAddress();
-
-        // Verify vault is a contract (has code deployed)
-        // Protection against typos or EOA addresses during deployment
-        if (_vault.code.length == 0) revert InvalidProtocolAddress();
+        _validateContractAddress(_vault);
 
         VAULT = ISyncSwapVault(_vault);
     }

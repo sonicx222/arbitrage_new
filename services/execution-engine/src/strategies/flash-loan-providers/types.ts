@@ -196,6 +196,16 @@ export interface IFlashLoanProvider {
    * @returns Validation result with error message if invalid
    */
   validate(request: FlashLoanRequest): { valid: boolean; error?: string };
+
+  /**
+   * Get the contract address for this provider
+   */
+  getContractAddress(): string;
+
+  /**
+   * Get a copy of the approved router addresses
+   */
+  getApprovedRouters(): string[];
 }
 
 /**

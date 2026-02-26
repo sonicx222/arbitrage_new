@@ -243,16 +243,16 @@ export const PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    // Removed blast, scroll, mantle, mode -- all have placeholder DEX addresses (0x000...)
-    // Re-add when real factory addresses are configured in dexes/index.ts
-    chains: ['arbitrum', 'optimism', 'base'],
+    // Scroll and Blast re-added: real factory addresses configured (RPC-verified 2026-02-26)
+    // Mantle and Mode remain stubs -- re-add when factory addresses verified
+    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'standard', // 3 chains (was 'heavy' for 7)
+    resourceProfile: 'standard', // 5 chains
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 512, // 3 chains (was 768 for 7)
+    maxMemoryMB: 640, // 5 chains (increased from 512 for 3)
     enabled: true,
     healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000
@@ -318,7 +318,7 @@ export const FUTURE_PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'high-value-expanded',
     name: 'High Value Chains (Expanded)',
-    chains: ['ethereum', 'zksync', 'linea', 'scroll'],
+    chains: ['ethereum', 'zksync', 'linea'], // scroll moved to l2-turbo (P2)
     region: 'us-east1',
     provider: 'oracle',
     resourceProfile: 'heavy',

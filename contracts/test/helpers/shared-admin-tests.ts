@@ -224,6 +224,13 @@ export function testSwapDeadlineConfig(config: AdminTestConfig): void {
     it('should allow owner to update swap deadline', async () => {
       const { contract, owner } = await getFixture();
 
+      await contract.connect(owner).setSwapDeadline(300);
+      expect(await contract.swapDeadline()).to.equal(300);
+    });
+
+    it('should accept exactly MAX_SWAP_DEADLINE (boundary)', async () => {
+      const { contract, owner } = await getFixture();
+
       await contract.connect(owner).setSwapDeadline(maxSwapDeadline);
       expect(await contract.swapDeadline()).to.equal(maxSwapDeadline);
     });

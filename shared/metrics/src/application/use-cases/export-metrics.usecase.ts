@@ -13,7 +13,7 @@
 
 import { IMetricsExporter, ExportFormat } from '../../domain';
 import { ExportMetricsRequest, ExportMetricsResponse } from '../dtos/export-metrics.dto';
-import { getErrorMessage } from '@arbitrage/core/resilience';
+import { getErrorMessage } from '@arbitrage/types';
 
 /**
  * Use Case: Export metrics to monitoring systems

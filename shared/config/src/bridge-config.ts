@@ -85,10 +85,18 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'ethereum', dst: 'base', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.97 },
     { src: 'ethereum', dst: 'zksync', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.96 },
     { src: 'ethereum', dst: 'linea', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.97 },
+    { src: 'ethereum', dst: 'scroll', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.96 },
+    { src: 'ethereum', dst: 'blast', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.96 },
     { src: 'arbitrum', dst: 'ethereum', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.97 },
     { src: 'arbitrum', dst: 'optimism', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.97 },
+    { src: 'arbitrum', dst: 'scroll', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'blast', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.96 },
     { src: 'optimism', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.97 },
     { src: 'base', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.97 },
+    { src: 'scroll', dst: 'ethereum', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.96 },
+    { src: 'scroll', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.96 },
+    { src: 'blast', dst: 'ethereum', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.96 },
+    { src: 'blast', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.96 },
     { src: 'zksync', dst: 'ethereum', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.96 },
     { src: 'linea', dst: 'ethereum', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.97 },
   ]},
@@ -121,6 +129,18 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'bsc', dst: 'optimism', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
     { src: 'bsc', dst: 'polygon', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
     { src: 'bsc', dst: 'avalanche', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    // Scroll routes (Stargate V2 supports Scroll)
+    { src: 'ethereum', dst: 'scroll', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.96 },
+    { src: 'scroll', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.96 },
+    { src: 'arbitrum', dst: 'scroll', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'scroll', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'base', dst: 'scroll', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    { src: 'scroll', dst: 'base', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.96 },
+    // Blast routes (Stargate V2 supports Blast)
+    { src: 'ethereum', dst: 'blast', feeBps: 4, minFeeUsd: 0.5, latency: 120, reliability: 0.95 },
+    { src: 'blast', dst: 'ethereum', feeBps: 4, minFeeUsd: 0.3, latency: 120, reliability: 0.95 },
+    { src: 'arbitrum', dst: 'blast', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.95 },
+    { src: 'blast', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.2, latency: 60, reliability: 0.95 },
   ]},
   // Native bridges (L2 -> L1 are slower)
   { bridge: 'native', routes: [
@@ -131,6 +151,12 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'zksync', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 86400, reliability: 0.99 },      // ~24 hours
     { src: 'ethereum', dst: 'linea', feeBps: 0, minFeeUsd: 3, latency: 1200, reliability: 0.99 },        // ~20 min
     { src: 'linea', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 28800, reliability: 0.99 },       // ~8 hours
+    // Scroll native bridge (optimistic rollup, ~7 day withdrawal)
+    { src: 'ethereum', dst: 'scroll', feeBps: 0, minFeeUsd: 3, latency: 1200, reliability: 0.99 },       // ~20 min deposit
+    { src: 'scroll', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 604800, reliability: 0.99 },     // ~7 days withdrawal
+    // Blast native bridge (optimistic rollup, ~14 day withdrawal)
+    { src: 'ethereum', dst: 'blast', feeBps: 0, minFeeUsd: 3, latency: 600, reliability: 0.99 },         // ~10 min deposit
+    { src: 'blast', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 1209600, reliability: 0.99 },     // ~14 days withdrawal
   ]},
   // Wormhole - Primary Solana <-> EVM bridge
   { bridge: 'wormhole', routes: [

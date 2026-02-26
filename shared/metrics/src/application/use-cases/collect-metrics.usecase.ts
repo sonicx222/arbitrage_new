@@ -13,7 +13,7 @@
 
 import { IMetricsCollector, MetricType } from '../../domain';
 import { RecordMetricRequest, RecordMetricResponse } from '../dtos/collect-metrics.dto';
-import { getErrorMessage } from '@arbitrage/core/resilience';
+import { getErrorMessage } from '@arbitrage/types';
 
 /**
  * Use Case: Collect performance metrics

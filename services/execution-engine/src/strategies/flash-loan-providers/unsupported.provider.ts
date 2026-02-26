@@ -147,6 +147,20 @@ export class UnsupportedFlashLoanProvider implements IFlashLoanProvider {
   }
 
   /**
+   * Get the contract address (pool address for unsupported providers)
+   */
+  getContractAddress(): string {
+    return this.poolAddress;
+  }
+
+  /**
+   * Get approved routers - returns empty array for unsupported providers
+   */
+  getApprovedRouters(): string[] {
+    return [];
+  }
+
+  /**
    * Get detailed not-implemented message with roadmap
    */
   private getNotImplementedMessage(): string {

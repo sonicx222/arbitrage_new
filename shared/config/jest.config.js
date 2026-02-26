@@ -28,6 +28,8 @@ module.exports = {
 
   // Module name mapper for package aliases
   moduleNameMapper: {
+    '^@arbitrage/config$': '<rootDir>/src',
+    '^@arbitrage/config/(.*)$': '<rootDir>/src/$1',
     '^@arbitrage/types$': '<rootDir>/../types',
     '^@arbitrage/types/(.*)$': '<rootDir>/../types/$1'
   },

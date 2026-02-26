@@ -46,7 +46,11 @@ export type EVMChainId =
   | 'avalanche'
   | 'fantom'
   | 'zksync'
-  | 'linea';
+  | 'linea'
+  | 'blast'
+  | 'scroll'
+  | 'mantle'
+  | 'mode';
 
 /**
  * All chain identifiers including non-EVM.
@@ -79,6 +83,7 @@ export const AAVE_V3_POOLS: Readonly<Record<string, string>> = {
   base: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
   optimism: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
   avalanche: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
+  scroll: '0x11fCfe756c05AD438e312a7fd934381537D3cFfe', // RPC-verified 2026-02-26
 
   // Testnets
   sepolia: '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951',
@@ -211,6 +216,7 @@ export function hasBalancerV2(chain: string): boolean {
  */
 export const SYNCSWAP_VAULTS: Readonly<Record<string, string>> = {
   zksync: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // zkSync Era Mainnet
+  scroll: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',  // Scroll Mainnet (RPC-verified 2026-02-26)
   // linea: TBD - To be added when deploying to Linea
 } as const;
 
@@ -356,20 +362,20 @@ export function isValidContractAddress(address: string | undefined): boolean {
  */
 export const COMMIT_REVEAL_CONTRACTS: Readonly<Record<string, string>> = {
   // Phase 1 (Week 1-2) - MVP Deployment
-  ethereum: process.env.COMMIT_REVEAL_CONTRACT_ETHEREUM || '',
-  arbitrum: process.env.COMMIT_REVEAL_CONTRACT_ARBITRUM || '',
-  bsc: process.env.COMMIT_REVEAL_CONTRACT_BSC || '',
+  ethereum: process.env.COMMIT_REVEAL_CONTRACT_ETHEREUM ?? '',
+  arbitrum: process.env.COMMIT_REVEAL_CONTRACT_ARBITRUM ?? '',
+  bsc: process.env.COMMIT_REVEAL_CONTRACT_BSC ?? '',
 
   // Phase 2 (Week 3) - Extended Deployment
-  polygon: process.env.COMMIT_REVEAL_CONTRACT_POLYGON || '',
-  optimism: process.env.COMMIT_REVEAL_CONTRACT_OPTIMISM || '',
-  base: process.env.COMMIT_REVEAL_CONTRACT_BASE || '',
-  avalanche: process.env.COMMIT_REVEAL_CONTRACT_AVALANCHE || '',
-  fantom: process.env.COMMIT_REVEAL_CONTRACT_FANTOM || '',
-  zksync: process.env.COMMIT_REVEAL_CONTRACT_ZKSYNC || '',
+  polygon: process.env.COMMIT_REVEAL_CONTRACT_POLYGON ?? '',
+  optimism: process.env.COMMIT_REVEAL_CONTRACT_OPTIMISM ?? '',
+  base: process.env.COMMIT_REVEAL_CONTRACT_BASE ?? '',
+  avalanche: process.env.COMMIT_REVEAL_CONTRACT_AVALANCHE ?? '',
+  fantom: process.env.COMMIT_REVEAL_CONTRACT_FANTOM ?? '',
+  zksync: process.env.COMMIT_REVEAL_CONTRACT_ZKSYNC ?? '',
 
   // Phase 3 (Week 4) - Final Deployment
-  linea: process.env.COMMIT_REVEAL_CONTRACT_LINEA || '',
+  linea: process.env.COMMIT_REVEAL_CONTRACT_LINEA ?? '',
 } as const;
 
 /**
@@ -409,6 +415,8 @@ export const NATIVE_TOKENS: Readonly<Record<string, string>> = {
   fantom: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', // WFTM
   zksync: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH
   linea: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH
+  scroll: '0x5300000000000000000000000000000000000004', // WETH (RPC-verified)
+  blast: '0x4300000000000000000000000000000000000004', // WETH (RPC-verified)
 
   // Solana (Wrapped SOL)
   solana: 'So11111111111111111111111111111111111111112',
@@ -496,6 +504,14 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
     USDT: '0xA219439258ca9da29E9Cc4cE5596924745e12B93',
     DAI: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5',
   },
+  scroll: {
+    USDC: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4', // RPC-verified, 6 decimals
+    USDT: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', // RPC-verified, 6 decimals
+    DAI: '0xcA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97',  // RPC-verified, 18 decimals
+  },
+  blast: {
+    USDB: '0x4300000000000000000000000000000000000003', // Blast native stablecoin, 18 decimals
+  },
   solana: {
     USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     USDT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
@@ -582,6 +598,15 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   linea: {
     syncswap: '0x80e38291e06339d10AAB483C65695D004dBD5C69',
     velocore: '0xf18ee42626F6a6A0FdE5C8F1ef9d61e98DE8Fd9e',
+  },
+  scroll: {
+    syncswap: '0x80e38291e06339d10AAB483C65695D004dBD5C69',  // RPC-verified
+    uniswap_v3: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45', // SwapRouter02 (RPC-verified)
+    sushiswap_v3: '0x734583f62Bb6ACe3c9bA9bd5A53143CA2Ce8C55A', // RouteProcessor (RPC-verified)
+  },
+  blast: {
+    thruster_v2: '0x98994a9A7a2570367554589189dC9772241650f6', // RPC-verified
+    thruster_v3: '0x337827814155ECBf24D20231fCA4444F530C0555', // RPC-verified
   },
 } as const;
 

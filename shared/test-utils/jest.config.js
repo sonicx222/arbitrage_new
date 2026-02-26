@@ -12,7 +12,7 @@ module.exports = {
       'ts-jest',
       {
         useESM: false,
-        tsconfig: '<rootDir>/tsconfig.json',
+        tsconfig: '<rootDir>/../../tsconfig.test.json',
         diagnostics: {
           ignoreCodes: [151001]
         }

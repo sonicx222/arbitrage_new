@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "../libraries/SwapHelpers.sol";
 import "../interfaces/IDexRouter.sol";
+import "../interfaces/IFlashLoanErrors.sol";
 
 /**
  * @title BaseFlashArbitrage
@@ -71,7 +72,8 @@ import "../interfaces/IDexRouter.sol";
 abstract contract BaseFlashArbitrage is
     Ownable2Step,
     Pausable,
-    ReentrancyGuard
+    ReentrancyGuard,
+    IFlashLoanErrors
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -98,6 +100,17 @@ abstract contract BaseFlashArbitrage is
     /// @notice Maximum number of hops in a swap path (prevents DoS via gas exhaustion)
     /// @dev Limit chosen based on gas analysis: 5 hops = ~700k gas (within block gas limit)
     uint256 public constant MAX_SWAP_HOPS = 5;
+
+    /// @notice Denominator for basis points calculations (10000 bps = 100%)
+    /// @dev Used by derived contracts for flash loan fee calculations (e.g., Aave V3 premium).
+    ///      MultiPathQuoter and mock contracts maintain independent copies (not derived from Base).
+    uint256 internal constant BPS_DENOMINATOR = 10000;
+
+    /// @notice ERC-3156 flash loan callback success return value
+    /// @dev Used by EIP-3156-compliant derived contracts (SyncSwap, DaiFlashMint).
+    ///      Defined here to eliminate duplication across multiple ERC-3156 implementations.
+    bytes32 internal constant ERC3156_CALLBACK_SUCCESS =
+        keccak256("ERC3156FlashBorrower.onFlashLoan");
 
     // ==========================================================================
     // State Variables
@@ -599,6 +612,17 @@ abstract contract BaseFlashArbitrage is
      */
     function _getSwapDeadline() internal view returns (uint256) {
         return block.timestamp + swapDeadline;
+    }
+
+    /**
+     * @notice Validates that an address is a deployed contract (not zero, not EOA)
+     * @dev Shared validation for protocol addresses in derived contract constructors.
+     *      Reverts with InvalidProtocolAddress (from IFlashLoanErrors) on failure.
+     * @param addr The address to validate
+     */
+    function _validateContractAddress(address addr) internal view {
+        if (addr == address(0)) revert InvalidProtocolAddress();
+        if (addr.code.length == 0) revert InvalidProtocolAddress();
     }
 
     /**

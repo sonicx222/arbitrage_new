@@ -14,6 +14,8 @@
  * @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 5.3
  */
 
+import { safeParseInt } from './utils/env-parsing';
+
 // =============================================================================
 // Platform Detection
 // =============================================================================
@@ -65,19 +67,19 @@ export interface WorkerPoolConfig {
  * All values can be overridden via environment variables.
  */
 function resolvePoolSize(): number {
-  const envValue = parseInt(process.env.WORKER_POOL_SIZE ?? '', 10);
+  const envValue = safeParseInt(process.env.WORKER_POOL_SIZE, 0);
   if (envValue > 0) return envValue;
   return IS_FLY_IO ? 2 : IS_CONSTRAINED_HOST ? 3 : 4;
 }
 
 function resolveMaxQueueSize(): number {
-  const envValue = parseInt(process.env.WORKER_POOL_MAX_QUEUE_SIZE ?? '', 10);
+  const envValue = safeParseInt(process.env.WORKER_POOL_MAX_QUEUE_SIZE, 0);
   if (envValue > 0) return envValue;
   return IS_CONSTRAINED_HOST ? 300 : 1000;
 }
 
 function resolveTaskTimeout(): number {
-  const envValue = parseInt(process.env.WORKER_POOL_TASK_TIMEOUT_MS ?? '', 10);
+  const envValue = safeParseInt(process.env.WORKER_POOL_TASK_TIMEOUT_MS, 0);
   if (envValue > 0) return envValue;
   return 30000;
 }

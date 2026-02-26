@@ -28,13 +28,11 @@ import {
   isExecutionSupported,
   MEV_CONFIG,
   NATIVE_TOKEN_PRICES,
-} from '@arbitrage/config';
-
-import {
   assignChainToPartition,
-} from '@arbitrage/config/partitions';
-
-import { PARTITION_IDS } from '@arbitrage/config';
+  PARTITION_IDS,
+  getBridgeCost,
+  getAllBridgeOptions,
+} from '@arbitrage/config';
 
 // =============================================================================
 // Test Data
@@ -60,8 +58,8 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     nativeToken: 'ETH',
     blockTime: 2,
     minDexCount: 3,
-    minTokenCount: 2,
-    requiredTokenSymbols: ['WETH', 'USDB'],
+    minTokenCount: 5,
+    requiredTokenSymbols: ['WETH', 'USDB', 'BLAST', 'WBTC', 'MIM'],
     mevStrategy: 'sequencer',
   },
   {
@@ -71,8 +69,8 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     nativeToken: 'ETH',
     blockTime: 3,
     minDexCount: 3,
-    minTokenCount: 2,
-    requiredTokenSymbols: ['WETH', 'USDC'],
+    minTokenCount: 7,
+    requiredTokenSymbols: ['WETH', 'USDC', 'USDT', 'DAI', 'WBTC', 'wstETH', 'SCR'],
     mevStrategy: 'sequencer',
   },
   {
@@ -266,14 +264,16 @@ describe('Emerging L2s Configuration', () => {
       // Partition Assignment
       // -----------------------------------------------------------------------
       describe('Partition assignment', () => {
-        it('defaults to P3 (high-value) partition (removed from P2 due to placeholder DEX addresses)', () => {
-          // NOTE: These chains were removed from P2 (l2-turbo) because they have placeholder DEX addresses (0x000...).
-          // They will be re-added to P2 when real factory addresses are configured in dexes/index.ts.
-          // Until then, they fall through to the default HIGH_VALUE partition per assignChainToPartition() logic.
-          // @see shared/config/src/partitions.ts line 246-247
+        it('is assigned to expected partition', () => {
           const partition = assignChainToPartition(chainData.chainKey);
           expect(partition).not.toBeNull();
-          expect(partition!.partitionId).toBe(PARTITION_IDS.HIGH_VALUE);
+          // Scroll and Blast are fully supported in P2 (l2-turbo) with real DEX addresses
+          // Mantle and Mode remain stubs — they fall through to HIGH_VALUE default
+          if (chainData.chainKey === 'scroll' || chainData.chainKey === 'blast') {
+            expect(partition!.partitionId).toBe(PARTITION_IDS.L2_TURBO);
+          } else {
+            expect(partition!.partitionId).toBe(PARTITION_IDS.HIGH_VALUE);
+          }
         });
       });
 
@@ -334,34 +334,55 @@ describe('Emerging L2s Configuration', () => {
       expect(MAINNET_CHAIN_IDS.length).toBe(15);
     });
 
-    it('P2 partition has 3 chains (emerging L2s temporarily removed)', () => {
-      // P2 partition: arbitrum, optimism, base
-      // blast, scroll, mantle, mode were removed due to placeholder DEX addresses (0x000...)
-      // They will be re-added when real factory addresses are configured
-      // @see shared/config/src/partitions.ts line 246-247
+    it('P2 partition has 5 chains (Scroll and Blast added with real DEX addresses)', () => {
       const p2 = assignChainToPartition('arbitrum');
       expect(p2).not.toBeNull();
-      expect(p2!.chains.length).toBe(3);
+      expect(p2!.chains.length).toBe(5);
       expect(p2!.chains).toContain('arbitrum');
       expect(p2!.chains).toContain('optimism');
       expect(p2!.chains).toContain('base');
-      // Emerging L2s NOT in P2 currently:
-      expect(p2!.chains).not.toContain('blast');
-      expect(p2!.chains).not.toContain('scroll');
+      expect(p2!.chains).toContain('scroll');
+      expect(p2!.chains).toContain('blast');
+      // Mantle and Mode remain stubs — not in P2:
       expect(p2!.chains).not.toContain('mantle');
       expect(p2!.chains).not.toContain('mode');
     });
 
-    it('Scroll has SyncSwap flash loan support', () => {
+    it('Scroll has SyncSwap and Aave V3 flash loan support', () => {
       expect(FLASH_LOAN_AVAILABILITY['scroll']?.syncswap).toBe(true);
+      expect(FLASH_LOAN_AVAILABILITY['scroll']?.aave_v3).toBe(true);
     });
 
-    it('other emerging L2s have no flash loan support', () => {
+    it('Blast, Mantle, Mode have no flash loan support', () => {
       for (const chain of ['blast', 'mantle', 'mode']) {
         const entry = FLASH_LOAN_AVAILABILITY[chain];
         const hasAnySupport = Object.values(entry).some(v => v === true);
         expect(hasAnySupport).toBe(false);
       }
+    });
+
+    it('Scroll has bridge routes configured', () => {
+      const scrollFromEth = getBridgeCost('ethereum', 'scroll');
+      expect(scrollFromEth).toBeDefined();
+      expect(scrollFromEth!.feeBps).toBeGreaterThanOrEqual(0);
+
+      const scrollToEth = getBridgeCost('scroll', 'ethereum');
+      expect(scrollToEth).toBeDefined();
+
+      const allScrollFromEth = getAllBridgeOptions('ethereum', 'scroll');
+      expect(allScrollFromEth.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('Blast has bridge routes configured', () => {
+      const blastFromEth = getBridgeCost('ethereum', 'blast');
+      expect(blastFromEth).toBeDefined();
+      expect(blastFromEth!.feeBps).toBeGreaterThanOrEqual(0);
+
+      const blastToEth = getBridgeCost('blast', 'ethereum');
+      expect(blastToEth).toBeDefined();
+
+      const allBlastFromEth = getAllBridgeOptions('ethereum', 'blast');
+      expect(allBlastFromEth.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

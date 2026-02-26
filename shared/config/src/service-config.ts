@@ -7,6 +7,7 @@
  */
 
 import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, MORPHO_BLUE_POOLS, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_VAULTS } from './addresses';
+import { safeParseFloat, safeParseInt } from './utils/env-parsing';
 
 // =============================================================================
 // SERVICE CONFIGURATIONS
@@ -92,7 +93,7 @@ export const SERVICE_CONFIGS = {
   },
   monitoring: {
     enabled: process.env.MONITORING_ENABLED === 'true',
-    interval: parseInt(process.env.MONITORING_INTERVAL || '30000'),
+    interval: safeParseInt(process.env.MONITORING_INTERVAL, 30000),
     endpoints: (process.env.MONITORING_ENDPOINTS || '').split(',').filter(Boolean),
   },
   /** Indicates if configuration is suitable for production use */
@@ -451,6 +452,13 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     protocol: 'syncswap',
     fee: 30  // 0.3% flash loan fee (30 bps)
   },
+  // Scroll: Aave V3 preferred (0.09% fee) over SyncSwap (0.3% fee)
+  // Both protocols available; SyncSwap Vault at SYNCSWAP_VAULTS.scroll as fallback
+  scroll: {
+    address: AAVE_V3_POOLS.scroll,  // Aave V3 Pool: 0x11fCfe756c05AD438e312a7fd934381537D3cFfe (RPC-verified)
+    protocol: 'aave_v3',
+    fee: 9  // 0.09% flash loan fee
+  },
   // T-NEW-6 DEFERRED: Linea - SyncSwap flash loans via Vault (EIP-3156)
   // Blocked on: SyncSwap Vault deployment to Linea mainnet (no contract address available).
   // When available: uncomment linea entry below, add address to SYNCSWAP_VAULTS,
@@ -626,9 +634,9 @@ export function getMultiPathQuoterAddress(chainId: string): string | undefined {
  */
 export const FAST_LANE_CONFIG = {
   /** Minimum confidence score to qualify for fast lane (0-1) */
-  minConfidence: parseFloat(process.env.FAST_LANE_MIN_CONFIDENCE ?? '0.90'),
+  minConfidence: safeParseFloat(process.env.FAST_LANE_MIN_CONFIDENCE, 0.90),
   /** Minimum expected profit in USD to qualify for fast lane */
-  minProfitUsd: parseFloat(process.env.FAST_LANE_MIN_PROFIT_USD ?? '100'),
+  minProfitUsd: safeParseFloat(process.env.FAST_LANE_MIN_PROFIT_USD, 100),
 };
 
 export const R2_CONFIG = {

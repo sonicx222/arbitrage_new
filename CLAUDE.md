@@ -4,8 +4,8 @@ Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading
 
 # System Overview
 
-**Chains:** 11 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Solana)
-**DEXs:** 64 operational (57 EVM + 7 Solana)
+**Chains:** 16 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Blast, Scroll, Mantle, Mode + Solana). Blast and Scroll are fully operational with real DEX addresses, flash loan support (Scroll), and bridge routes. Mantle and Mode remain stubs — config present but missing verified DEX factories.
+**DEXs:** 72 operational (65 EVM + 7 Solana)
 **Architecture:** Partitioned detectors (4 partitions), Redis Streams (ADR-002), L1 Price Matrix with SharedArrayBuffer (ADR-005), Worker threads for path finding (ADR-012), Circuit breakers (ADR-018)
 **Stack:** TypeScript, Node.js, Solidity ^0.8.19, Hardhat, ethers v6, Jest, OpenZeppelin 4.9.6
 

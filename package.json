@@ -30,7 +30,7 @@
     "lint:fix": "eslint . --fix",
     "prebuild": "node scripts/validate-build.js",
     "build": "npm run build:deps && tsc -p tsconfig.json",
-    "build:deps": "npm run build:types && npm run build:config && npm run build:core && npm run build:ml",
+    "build:deps": "npm run build:types && npm run build:config && npm run build:flash-loan-aggregation && npm run build:metrics && npm run build:core && npm run build:ml",
     "postbuild:deps": "npm run generate:error-selectors --if-present || node -e \"process.exit(0)\"",
     "build:types": "cd shared/types && npm run build",
     "build:config": "cd shared/config && npm run build",

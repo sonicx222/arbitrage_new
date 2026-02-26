@@ -8,6 +8,7 @@
 
 import { COMMIT_REVEAL_CONTRACTS, hasCommitRevealContract } from './addresses';
 import { MULTI_PATH_QUOTER_ADDRESSES, hasMultiPathQuoter, isProduction } from './service-config';
+import { safeParseFloat, safeParseInt } from './utils/env-parsing';
 
 // =============================================================================
 // FEATURE FLAGS (Task 1.2: Batched Quoting)
@@ -335,10 +336,10 @@ export const FLASH_LOAN_AGGREGATOR_CONFIG = {
    * Controls how providers are ranked
    */
   weights: {
-    fees: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_FEES ?? '0.5'),
-    liquidity: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY ?? '0.3'),
-    reliability: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY ?? '0.15'),
-    latency: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY ?? '0.05'),
+    fees: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_FEES, 0.5),
+    liquidity: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY, 0.3),
+    reliability: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY, 0.15),
+    latency: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY, 0.05),
   },
 
   /**
@@ -346,7 +347,7 @@ export const FLASH_LOAN_AGGREGATOR_CONFIG = {
    * Higher = more options but slower selection
    * @default 3
    */
-  maxProvidersToRank: parseInt(process.env.FLASH_LOAN_AGGREGATOR_MAX_PROVIDERS ?? '3', 10),
+  maxProvidersToRank: safeParseInt(process.env.FLASH_LOAN_AGGREGATOR_MAX_PROVIDERS, 3),
 
   /**
    * Enable on-chain liquidity validation
@@ -360,21 +361,21 @@ export const FLASH_LOAN_AGGREGATOR_CONFIG = {
    * Only check liquidity for opportunities above this value
    * @default 100000 ($100K)
    */
-  liquidityCheckThresholdUsd: parseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_THRESHOLD_USD ?? '100000', 10),
+  liquidityCheckThresholdUsd: safeParseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_THRESHOLD_USD, 100000),
 
   /**
    * Ranking cache TTL in milliseconds
    * How long cached provider rankings remain valid before re-ranking
    * @default 30000 (30 seconds)
    */
-  rankingCacheTtlMs: parseInt(process.env.FLASH_LOAN_AGGREGATOR_RANKING_CACHE_TTL_MS ?? '30000', 10),
+  rankingCacheTtlMs: safeParseInt(process.env.FLASH_LOAN_AGGREGATOR_RANKING_CACHE_TTL_MS, 30000),
 
   /**
    * Liquidity cache TTL in milliseconds
    * How long cached on-chain liquidity checks remain valid
    * @default 300000 (5 minutes)
    */
-  liquidityCacheTtlMs: parseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_CACHE_TTL_MS ?? '300000', 10),
+  liquidityCacheTtlMs: safeParseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_CACHE_TTL_MS, 300000),
 };
 
 /**

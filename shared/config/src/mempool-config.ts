@@ -7,6 +7,8 @@
  * @see Phase 1: Mempool Detection Service (Implementation Plan v3.0)
  */
 
+import { safeParseFloat, safeParseInt } from './utils/env-parsing';
+
 // =============================================================================
 // MEMPOOL DETECTION CONFIGURATION
 // =============================================================================
@@ -26,40 +28,40 @@ export const MEMPOOL_CONFIG = {
     /** Enable bloXroute feed */
     enabled: process.env.BLOXROUTE_ENABLED === 'true',
     /** Connection timeout in ms */
-    connectionTimeout: parseInt(process.env.BLOXROUTE_CONNECTION_TIMEOUT || '10000', 10),
+    connectionTimeout: safeParseInt(process.env.BLOXROUTE_CONNECTION_TIMEOUT, 10000),
     /** Heartbeat interval in ms */
-    heartbeatInterval: parseInt(process.env.BLOXROUTE_HEARTBEAT_INTERVAL || '30000', 10),
+    heartbeatInterval: safeParseInt(process.env.BLOXROUTE_HEARTBEAT_INTERVAL, 30000),
     /** Reconnect settings */
     reconnect: {
       /** Base reconnect interval in ms */
-      interval: parseInt(process.env.BLOXROUTE_RECONNECT_INTERVAL || '1000', 10),
+      interval: safeParseInt(process.env.BLOXROUTE_RECONNECT_INTERVAL, 1000),
       /** Maximum reconnect attempts */
-      maxAttempts: parseInt(process.env.BLOXROUTE_MAX_RECONNECT_ATTEMPTS || '10', 10),
+      maxAttempts: safeParseInt(process.env.BLOXROUTE_MAX_RECONNECT_ATTEMPTS, 10),
       /** Backoff multiplier */
-      backoffMultiplier: parseFloat(process.env.BLOXROUTE_BACKOFF_MULTIPLIER || '2.0'),
+      backoffMultiplier: safeParseFloat(process.env.BLOXROUTE_BACKOFF_MULTIPLIER, 2.0),
       /** Maximum delay in ms */
-      maxDelay: parseInt(process.env.BLOXROUTE_MAX_RECONNECT_DELAY || '60000', 10),
+      maxDelay: safeParseInt(process.env.BLOXROUTE_MAX_RECONNECT_DELAY, 60000),
     },
   },
 
   /** Service configuration */
   service: {
     /** Health check port */
-    port: parseInt(process.env.MEMPOOL_DETECTOR_PORT || '3008', 10),
+    port: safeParseInt(process.env.MEMPOOL_DETECTOR_PORT, 3008),
     /** Instance ID */
     instanceId: process.env.MEMPOOL_INSTANCE_ID || `mempool-detector-${Date.now()}`,
     /** Maximum pending transactions in buffer */
-    maxBufferSize: parseInt(process.env.MEMPOOL_MAX_BUFFER_SIZE || '10000', 10),
+    maxBufferSize: safeParseInt(process.env.MEMPOOL_MAX_BUFFER_SIZE, 10000),
     /** Processing batch size */
-    batchSize: parseInt(process.env.MEMPOOL_BATCH_SIZE || '100', 10),
+    batchSize: safeParseInt(process.env.MEMPOOL_BATCH_SIZE, 100),
     /** Processing batch timeout in ms */
-    batchTimeoutMs: parseInt(process.env.MEMPOOL_BATCH_TIMEOUT_MS || '50', 10),
+    batchTimeoutMs: safeParseInt(process.env.MEMPOOL_BATCH_TIMEOUT_MS, 50),
   },
 
   /** Filtering configuration */
   filters: {
     /** Minimum swap size in USD to process */
-    minSwapSizeUsd: parseInt(process.env.MEMPOOL_MIN_SWAP_SIZE_USD || '1000', 10),
+    minSwapSizeUsd: safeParseInt(process.env.MEMPOOL_MIN_SWAP_SIZE_USD, 1000),
     /** Filter for known arbitrage bot addresses (optional) */
     includeTraders: process.env.MEMPOOL_INCLUDE_TRADERS?.split(',').filter(Boolean) || [],
     /** Filter for specific router addresses (optional) */
@@ -73,7 +75,7 @@ export const MEMPOOL_CONFIG = {
     /** Consumer group name */
     consumerGroup: process.env.MEMPOOL_CONSUMER_GROUP || 'mempool-detector-group',
     /** Maximum stream length (approximate) */
-    maxStreamLength: parseInt(process.env.MEMPOOL_MAX_STREAM_LENGTH || '100000', 10),
+    maxStreamLength: safeParseInt(process.env.MEMPOOL_MAX_STREAM_LENGTH, 100000),
   },
 
   /** Chain-specific mempool settings */
@@ -153,6 +155,38 @@ export const MEMPOOL_CONFIG = {
       feedType: 'rpc' as const,
       endpoint: '',
       /** Linea block time ~2-5s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    blast: {
+      enabled: false, // Blast sequencer-based L2
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Blast block time ~2s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    scroll: {
+      enabled: false, // Scroll sequencer-based L2
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Scroll block time ~3s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    mantle: {
+      enabled: false, // Mantle sequencer-based L2
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Mantle block time ~2s */
+      pollIntervalMs: 50,
+      expectedLatencyMs: 50,
+    },
+    mode: {
+      enabled: false, // Mode sequencer-based L2
+      feedType: 'rpc' as const,
+      endpoint: '',
+      /** Mode block time ~2s */
       pollIntervalMs: 50,
       expectedLatencyMs: 50,
     },
@@ -410,6 +444,10 @@ export const CHAIN_NAME_TO_ID: Record<string, number> = {
   fantom: 250,
   zksync: 324,
   linea: 59144,
+  blast: 81457,
+  scroll: 534352,
+  mantle: 5000,
+  mode: 34443,
   solana: 101,
   // Add aliases
   mainnet: 1,
@@ -435,6 +473,10 @@ export const CHAIN_ID_TO_NAME: Record<number, string> = {
   250: 'fantom',
   324: 'zksync',
   59144: 'linea',
+  81457: 'blast',
+  534352: 'scroll',
+  5000: 'mantle',
+  34443: 'mode',
   101: 'solana',
 };
 

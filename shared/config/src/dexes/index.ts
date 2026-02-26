@@ -490,68 +490,66 @@ export const DEXES: Record<string, Dex[]> = {
   // Emerging L2s: Blast, Scroll, Mantle, Mode
   // TODO: Verify on-chain addresses before mainnet
   // =============================================================================
-  // Blast: 4 DEXs
-  // TODO: Verify on-chain addresses before mainnet
+  // Blast: 4 DEXs (RPC-verified 2026-02-26)
   blast: [
     {
-      name: 'thruster_v3',       // [C] - Dominant on Blast
+      name: 'thruster_v3',       // [C] - Dominant on Blast (concentrated liquidity)
       chain: 'blast',
-      factoryAddress: '0x0000000000000000000000000000000000000001',
-      routerAddress: '0x0000000000000000000000000000000000000002',
+      factoryAddress: '0x71b08f13B3c3aF35aAdEb3949AFEb1ded1016127',
+      routerAddress: '0x337827814155ECBf24D20231fCA4444F530C0555',
       feeBps: bps(30),
     },
     {
       name: 'thruster_v2',       // [C] - V2 AMM on Blast
       chain: 'blast',
-      factoryAddress: '0x0000000000000000000000000000000000000003',
-      routerAddress: '0x0000000000000000000000000000000000000004',
+      factoryAddress: '0xb4A7D971D0ADea1c73198C97d7ab3f9CE4aaFA13',
+      routerAddress: '0x98994a9A7a2570367554589189dC9772241650f6',
       feeBps: bps(30),
     },
     {
       name: 'bladeswap',         // [H] - Native Blast DEX
       chain: 'blast',
-      factoryAddress: '0x0000000000000000000000000000000000000005',
-      routerAddress: '0x0000000000000000000000000000000000000006',
+      factoryAddress: '0x5C346464d33F90bABaf70dB6388507CC889C1070',
+      routerAddress: '0x5C346464d33F90bABaf70dB6388507CC889C1070', // Factory serves as entry point
       feeBps: bps(30),
     },
     {
-      name: 'ring_protocol',     // [M] - Ring Protocol on Blast
+      name: 'fenix_finance',     // [H] - Fenix Finance (Solidly fork) on Blast
       chain: 'blast',
-      factoryAddress: '0x0000000000000000000000000000000000000007',
-      routerAddress: '0x0000000000000000000000000000000000000008',
+      factoryAddress: '0xa19C51D91891D3DF7C13Ed22a2f89d328A82950f',
+      routerAddress: '0xa19C51D91891D3DF7C13Ed22a2f89d328A82950f', // Factory serves as entry point
       feeBps: bps(30),
     }
   ],
-  // Scroll: 4 DEXs
-  // TODO: Verify on-chain addresses before mainnet
+  // Scroll: 4 DEXs (RPC-verified 2026-02-26)
   scroll: [
     {
       name: 'syncswap',          // [C] - Multi-chain presence on Scroll
       chain: 'scroll',
-      factoryAddress: '0x0000000000000000000000000000000000000009',
-      routerAddress: '0x000000000000000000000000000000000000000a',
+      factoryAddress: '0x37BAc764494c8db4e54BDE72f6965beA9fa0AC2d',
+      routerAddress: '0x80e38291e06339d10AAB483C65695D004dBD5C69',
       feeBps: bps(30),
     },
     {
-      name: 'spacefi',           // [H] - Native Scroll DEX
+      name: 'uniswap_v3',        // [C] - Uniswap V3 on Scroll
       chain: 'scroll',
-      factoryAddress: '0x000000000000000000000000000000000000000b',
-      routerAddress: '0x000000000000000000000000000000000000000c',
+      factoryAddress: '0x70C62C8b8e801124A4Aa81ce07b637A3e83cb919',
+      routerAddress: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
       feeBps: bps(30),
     },
     {
-      name: 'ambient',           // [H] - CrocSwap/Ambient on Scroll
+      name: 'sushiswap_v3',      // [H] - SushiSwap V3 on Scroll
       chain: 'scroll',
-      factoryAddress: '0x000000000000000000000000000000000000000d',
-      routerAddress: '0x000000000000000000000000000000000000000e',
+      factoryAddress: '0x46B3fDF7b5CDe91Ac049936bF0bDb12c5d22202e',
+      routerAddress: '0x734583f62Bb6ACe3c9bA9bd5A53143CA2Ce8C55A',
       feeBps: bps(30),
     },
     {
-      name: 'zebra',             // [M] - Zebra DEX on Scroll
+      name: 'ambient',           // [H] - CrocSwap/Ambient on Scroll (single-contract DEX)
       chain: 'scroll',
-      factoryAddress: '0x000000000000000000000000000000000000000f',
-      routerAddress: '0x0000000000000000000000000000000000000010',
-      feeBps: bps(30),
+      factoryAddress: '0xaaaaAAAACB71BF2C8CaE522EA5fa455571A74106',
+      routerAddress: '0xaaaaAAAACB71BF2C8CaE522EA5fa455571A74106', // Single contract serves as both
+      feeBps: bps(5),  // Ambient has lower base fees
     }
   ],
   // Mantle: 3 DEXs

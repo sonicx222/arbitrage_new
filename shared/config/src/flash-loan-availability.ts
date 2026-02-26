@@ -157,11 +157,11 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
   },
 
   scroll: {
-    aave_v3: false,
+    aave_v3: true, // Aave V3 Pool deployed on Scroll: 0x11fCfe756c05AD438e312a7fd934381537D3cFfe (RPC-verified)
     balancer_v2: false,
     pancakeswap_v3: false,
     spookyswap: false,
-    syncswap: true, // SyncSwap deployed on Scroll
+    syncswap: true, // SyncSwap Vault deployed on Scroll: 0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B (RPC-verified)
     dai_flash_mint: false,
     morpho: false,
   },
