@@ -152,6 +152,8 @@ export interface PriceUpdate {
   fee?: number;
   /** Phase 0 instrumentation: pipeline latency tracking */
   pipelineTimestamps?: PipelineTimestamps;
+  /** Whether this update originated from simulation or live data */
+  source?: 'simulation' | 'live';
 }
 
 /**

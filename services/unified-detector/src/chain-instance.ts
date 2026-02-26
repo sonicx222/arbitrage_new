@@ -704,7 +704,8 @@ export class ChainDetectorInstance extends EventEmitter {
         chainId: this.chainId,
         logger: this.logger,
         streamsClient: this.streamsClient,
-        tokens: this.tokens
+        tokens: this.tokens,
+        simulationMode: this.simulationMode,
       });
 
       // Register whale alert handler to publish to Redis Streams
@@ -1618,6 +1619,7 @@ export class ChainDetectorInstance extends EventEmitter {
         wsReceivedAt: this.lastWsReceivedAt,
         publishedAt: Date.now(),
       },
+      source: this.simulationMode ? 'simulation' as const : 'live' as const,
     };
 
     // Publish to Redis Streams

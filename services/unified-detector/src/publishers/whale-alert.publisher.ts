@@ -29,6 +29,7 @@ export interface WhaleAlertPublisherConfig {
   logger: Logger;
   streamsClient: RedisStreamsClient;
   tokens: Token[];
+  simulationMode?: boolean;
 }
 
 export interface ExtendedPairInfo {
@@ -49,6 +50,7 @@ export class WhaleAlertPublisher {
   private readonly chainId: string;
   private readonly streamsClient: RedisStreamsClient;
   private readonly tokens: Token[];
+  private readonly simulationMode: boolean;
   // PERF-OPT: O(1) token lookup by address (instead of O(N) array.find)
   private readonly tokensByAddress: Map<string, Token>;
 
@@ -57,6 +59,7 @@ export class WhaleAlertPublisher {
     this.logger = config.logger;
     this.streamsClient = config.streamsClient;
     this.tokens = config.tokens;
+    this.simulationMode = config.simulationMode ?? false;
 
     // PERF-OPT: Build O(1) token lookup map at construction time
     this.tokensByAddress = new Map();
@@ -84,7 +87,8 @@ export class WhaleAlertPublisher {
         dex: alert.dex,
         chain: this.chainId,
         timestamp: alert.timestamp,
-        impact: 0
+        impact: 0,
+        source: this.simulationMode ? 'simulation' as const : 'live' as const,
       };
 
       // ADR-002: Use xaddWithLimit to prevent unbounded stream growth

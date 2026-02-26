@@ -580,6 +580,79 @@ describe('WhaleAlertPublisher', () => {
   });
 
   // ===========================================================================
+  // Simulation Tagging
+  // ===========================================================================
+
+  describe('simulation tagging', () => {
+    const createWhaleAlert = () => ({
+      event: {
+        pairAddress: '0xpair123',
+        transactionHash: '0xtx123',
+        sender: '0xsender',
+        recipient: '0xrecipient',
+        to: '0xto',
+        amount0In: '1000000000000000000',
+        amount1In: '0',
+        amount0Out: '0',
+        amount1Out: '3000000000',
+        timestamp: Date.now(),
+        blockNumber: 12345678,
+        dex: 'uniswap',
+        chain: 'ethereum'
+      },
+      pairAddress: '0xpair123',
+      dex: 'uniswap',
+      chain: 'ethereum',
+      usdValue: 100000,
+      timestamp: Date.now()
+    });
+
+    it('should include source "simulation" when in simulation mode', async () => {
+      const simPublisher = new WhaleAlertPublisher({
+        chainId: 'ethereum',
+        logger,
+        streamsClient: mockStreamsClient as any,
+        tokens,
+        simulationMode: true
+      });
+
+      await simPublisher.publishWhaleAlert(createWhaleAlert());
+
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ source: 'simulation' })
+      );
+    });
+
+    it('should include source "live" when not in simulation mode', async () => {
+      const livePublisher = new WhaleAlertPublisher({
+        chainId: 'ethereum',
+        logger,
+        streamsClient: mockStreamsClient as any,
+        tokens,
+        simulationMode: false
+      });
+
+      await livePublisher.publishWhaleAlert(createWhaleAlert());
+
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ source: 'live' })
+      );
+    });
+
+    it('should default to "live" when simulationMode not provided', async () => {
+      // The default publisher from beforeEach() has no simulationMode set
+      await publisher.publishWhaleAlert(createWhaleAlert());
+
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ source: 'live' })
+      );
+    });
+  });
+
+  // ===========================================================================
   // Performance (O(1) Lookups)
   // ===========================================================================
 
