@@ -175,6 +175,10 @@ export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShut
     logger.error(`Unhandled rejection in ${serviceName}`, { reason });
   };
 
+  // Prevent MaxListenersExceededWarning — services register 4 process handlers
+  // plus Pino transport exit handlers (ADR-015)
+  process.setMaxListeners(Math.max(process.getMaxListeners(), 15));
+
   process.on('SIGTERM', sigtermHandler);
   process.on('SIGINT', sigintHandler);
   process.on('uncaughtException', uncaughtHandler);
