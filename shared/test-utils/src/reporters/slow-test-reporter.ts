@@ -161,12 +161,15 @@ export default class SlowTestReporter implements Reporter {
   }
 
   private detectProject(testPath: string): string {
-    if (testPath.includes('/__tests__/unit/')) return 'unit';
-    if (testPath.includes('/__tests__/integration/')) return 'integration';
-    if (testPath.includes('/tests/e2e/')) return 'e2e';
-    if (testPath.includes('/tests/integration/')) return 'integration';
-    if (testPath.includes('/tests/performance/')) return 'performance';
-    if (testPath.includes('/tests/smoke/')) return 'smoke';
+    // Normalize to forward slashes for cross-platform compatibility (Windows uses backslashes)
+    const normalized = testPath.replace(/\\/g, '/');
+    if (normalized.includes('/__tests__/unit/')) return 'unit';
+    if (normalized.includes('/__tests__/integration/')) return 'integration';
+    if (normalized.includes('/__tests__/performance/')) return 'performance';
+    if (normalized.includes('/tests/e2e/')) return 'e2e';
+    if (normalized.includes('/tests/integration/')) return 'integration';
+    if (normalized.includes('/tests/performance/')) return 'performance';
+    if (normalized.includes('/tests/smoke/')) return 'smoke';
     return 'unknown';
   }
 

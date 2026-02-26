@@ -19,10 +19,14 @@ const projectConfig = {
   preset: 'ts-jest',
   testEnvironment: 'node',
 
-  // Transform configuration
+  // Cache directory for transformed files — deterministic path for CI caching
+  cacheDirectory: '<rootDir>/node_modules/.cache/jest',
+
+  // Transform configuration — uses tsconfig.test.json for faster compilation
+  // (no declarations/sourcemaps) and isolatedModules for transpile-only mode
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
-      tsconfig: 'tsconfig.json',
+      tsconfig: 'tsconfig.test.json',
       diagnostics: {
         ignoreCodes: [151001]
       }

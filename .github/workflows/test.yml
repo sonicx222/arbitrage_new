@@ -32,19 +32,28 @@ concurrency:
 
 jobs:
   # ===========================================================================
-  # Unit Tests - Shard across 3 jobs for maximum parallelism
+  # Unit Tests - Shard across 5 jobs for maximum parallelism
+  # PRs: --changedSince to only test affected files (saves 30-50%)
+  # Push/schedule: full suite
   # ===========================================================================
   unit-tests:
-    name: Unit Tests (Shard ${{ matrix.shard }}/3)
+    name: Unit Tests (Shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false  # Run all shards even if one fails
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Fetch enough history for --changedSince to compare against base branch
+          fetch-depth: ${{ github.event_name == 'pull_request' && 100 || 1 }}
+
+      - name: Fetch base branch for PR diff
+        if: github.event_name == 'pull_request'
+        run: git fetch origin ${{ github.base_ref }} --depth=1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -60,9 +69,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Restore Jest cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/jest
+          key: jest-unit-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('tsconfig.test.json', 'jest.config.base.js') }}
+          restore-keys: |
+            jest-unit-${{ matrix.shard }}-${{ runner.os }}-
 
-      - name: Run Unit Tests (Shard ${{ matrix.shard }}/3)
-        run: npm test -- --selectProjects unit --shard=${{ matrix.shard }}/3 --ci --coverage
+      - name: Run Unit Tests (Shard ${{ matrix.shard }}/5)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm test -- --selectProjects unit --shard=${{ matrix.shard }}/5 --ci --coverage \
+              --changedSince=origin/${{ github.base_ref }} --passWithNoTests
+          else
+            npm test -- --selectProjects unit --shard=${{ matrix.shard }}/5 --ci --coverage
+          fi
         env:
           CI: true
 
@@ -85,6 +107,7 @@ jobs:
 
   # ===========================================================================
   # Integration Tests - Shard across 2 jobs with Redis service
+  # PRs: --changedSince to only test affected files
   # ===========================================================================
   integration-tests:
     name: Integration Tests (Shard ${{ matrix.shard }}/2)
@@ -107,6 +130,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 100 || 1 }}
+
+      - name: Fetch base branch for PR diff
+        if: github.event_name == 'pull_request'
+        run: git fetch origin ${{ github.base_ref }} --depth=1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -122,6 +151,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Restore Jest cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/jest
+          key: jest-integration-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('tsconfig.test.json', 'jest.config.base.js') }}
+          restore-keys: |
+            jest-integration-${{ matrix.shard }}-${{ runner.os }}-
+
       - name: Install Redis CLI
         run: sudo apt-get update && sudo apt-get install -y redis-tools
 
@@ -130,7 +167,13 @@ jobs:
           redis-cli -h localhost -p 6379 ping
 
       - name: Run Integration Tests (Shard ${{ matrix.shard }}/2)
-        run: npm test -- --selectProjects integration --shard=${{ matrix.shard }}/2 --ci --coverage
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm test -- --selectProjects integration --shard=${{ matrix.shard }}/2 --ci --coverage \
+              --changedSince=origin/${{ github.base_ref }} --passWithNoTests
+          else
+            npm test -- --selectProjects integration --shard=${{ matrix.shard }}/2 --ci --coverage
+          fi
         env:
           CI: true
           REDIS_URL: redis://localhost:6379
@@ -189,8 +232,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Redis CLI
-        run: sudo apt-get update && sudo apt-get install -y redis-tools
+      - name: Restore Jest cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/jest
+          key: jest-e2e-${{ runner.os }}-${{ hashFiles('tsconfig.test.json', 'jest.config.base.js') }}
+          restore-keys: |
+            jest-e2e-${{ runner.os }}-
 
       - name: Run E2E Tests
         run: npm test -- --selectProjects e2e --ci --coverage
@@ -232,6 +280,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Restore Jest cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/jest
+          key: jest-perf-${{ runner.os }}-${{ hashFiles('tsconfig.test.json', 'jest.config.base.js') }}
+          restore-keys: |
+            jest-perf-${{ runner.os }}-
 
       - name: Run Performance Tests
         run: npm test -- --selectProjects performance --ci
@@ -283,6 +339,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Restore Jest cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/jest
+          key: jest-smoke-${{ runner.os }}-${{ hashFiles('tsconfig.test.json', 'jest.config.base.js') }}
+          restore-keys: |
+            jest-smoke-${{ runner.os }}-
 
       - name: Run Smoke Tests
         run: npm test -- --selectProjects smoke --ci
