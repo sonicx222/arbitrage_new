@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import {
   createStreamConsumer,
+  getPriceUpdateRejectionReason,
   StreamConsumer,
   Logger,
 } from '../../src/stream-consumer';
@@ -230,6 +231,168 @@ describe('StreamConsumer', () => {
       expect(logger.hasLogMatching('warn', /invalid/i)).toBe(true);
       // Should still ack invalid messages to prevent replay
       expect(mockStreamsClient.xack).toHaveBeenCalled();
+    });
+  });
+
+  // ===========================================================================
+  // Price Update Rejection Reason (Task 6)
+  // ===========================================================================
+
+  describe('getPriceUpdateRejectionReason', () => {
+    it('should return null for a valid price update', () => {
+      const valid: PriceUpdate = {
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairKey: 'WETH-USDC',
+        price: 2500,
+        timestamp: Date.now(),
+        token0: 'WETH',
+        token1: 'USDC',
+        reserve0: '1000000000000000000',
+        reserve1: '2500000000',
+        blockNumber: 12345,
+        latency: 50,
+      };
+      expect(getPriceUpdateRejectionReason(valid)).toBeNull();
+    });
+
+    it('should return missing_or_invalid_chain when chain is missing', () => {
+      const update = { dex: 'uniswap', pairKey: 'WETH-USDC', price: 2500, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('missing_or_invalid_chain');
+    });
+
+    it('should return missing_or_invalid_dex when dex is missing', () => {
+      const update = { chain: 'ethereum', pairKey: 'WETH-USDC', price: 2500, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('missing_or_invalid_dex');
+    });
+
+    it('should return missing_or_invalid_pairKey when pairKey is missing', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', price: 2500, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('missing_or_invalid_pairKey');
+    });
+
+    it('should return invalid_price when price is NaN', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: NaN, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('invalid_price');
+    });
+
+    it('should return invalid_price when price is zero', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: 0, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('invalid_price');
+    });
+
+    it('should return invalid_price when price is negative', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: -5, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('invalid_price');
+    });
+
+    it('should return price_out_of_bounds when price exceeds max', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: 1e13, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('price_out_of_bounds');
+    });
+
+    it('should return price_out_of_bounds when price is below min', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: 1e-13, timestamp: Date.now() };
+      expect(getPriceUpdateRejectionReason(update)).toBe('price_out_of_bounds');
+    });
+
+    it('should return invalid_timestamp when timestamp is missing', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: 2500 };
+      expect(getPriceUpdateRejectionReason(update)).toBe('invalid_timestamp');
+    });
+
+    it('should return invalid_timestamp when timestamp is zero', () => {
+      const update = { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH-USDC', price: 2500, timestamp: 0 };
+      expect(getPriceUpdateRejectionReason(update)).toBe('invalid_timestamp');
+    });
+
+    it('should return missing_or_invalid_chain for null input', () => {
+      expect(getPriceUpdateRejectionReason(null)).toBe('missing_or_invalid_chain');
+    });
+
+    it('should return missing_or_invalid_chain for non-object input', () => {
+      expect(getPriceUpdateRejectionReason('not-an-object')).toBe('missing_or_invalid_chain');
+    });
+  });
+
+  describe('price update rejection reason in warn log', () => {
+    it('should include reason field in warn log when price update is missing dex', async () => {
+      const invalidUpdate = {
+        chain: 'ethereum',
+        // dex is missing
+        pairKey: 'WETH-USDC',
+        price: 2500,
+        timestamp: Date.now(),
+      };
+
+      mockStreamsClient.xreadgroup.mockResolvedValueOnce([
+        { id: '123-0', data: invalidUpdate },
+      ]);
+
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Verify the warn log includes the specific reason field
+      expect(logger.hasLogWithMeta('warn', { reason: 'missing_or_invalid_dex' })).toBe(true);
+    });
+
+    it('should include reason field in warn log when price is out of bounds', async () => {
+      const invalidUpdate = {
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairKey: 'WETH-USDC',
+        price: 1e15, // exceeds max
+        timestamp: Date.now(),
+      };
+
+      mockStreamsClient.xreadgroup.mockResolvedValueOnce([
+        { id: '124-0', data: invalidUpdate },
+      ]);
+
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logger.hasLogWithMeta('warn', { reason: 'price_out_of_bounds' })).toBe(true);
+    });
+
+    it('should include reason field in warn log when timestamp is invalid', async () => {
+      const invalidUpdate = {
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairKey: 'WETH-USDC',
+        price: 2500,
+        timestamp: -1,
+      };
+
+      mockStreamsClient.xreadgroup.mockResolvedValueOnce([
+        { id: '125-0', data: invalidUpdate },
+      ]);
+
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logger.hasLogWithMeta('warn', { reason: 'invalid_timestamp' })).toBe(true);
     });
   });
 

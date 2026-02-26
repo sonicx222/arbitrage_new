@@ -126,6 +126,56 @@ const DEFAULT_MIN_VALID_PRICE = 1e-12;
 const DEFAULT_MAX_VALID_PRICE = 1e12;
 
 // =============================================================================
+// Diagnostic Functions
+// =============================================================================
+
+/**
+ * Diagnose why a price update message failed validation.
+ *
+ * Returns a human-readable reason string identifying which specific field
+ * failed validation, or null if the update is valid. This enables field-level
+ * logging when price updates are rejected, replacing the opaque
+ * "Skipping invalid price update message" log.
+ *
+ * @param update - The raw message data to diagnose
+ * @param minPrice - Minimum valid price bound (default: 1e-12)
+ * @param maxPrice - Maximum valid price bound (default: 1e12)
+ * @returns Reason string or null if valid
+ */
+export function getPriceUpdateRejectionReason(
+  update: unknown,
+  minPrice: number = DEFAULT_MIN_VALID_PRICE,
+  maxPrice: number = DEFAULT_MAX_VALID_PRICE,
+): string | null {
+  if (!update || typeof update !== 'object') {
+    return 'missing_or_invalid_chain';
+  }
+
+  const u = update as Record<string, unknown>;
+
+  if (typeof u.chain !== 'string' || !u.chain) {
+    return 'missing_or_invalid_chain';
+  }
+  if (typeof u.dex !== 'string' || !u.dex) {
+    return 'missing_or_invalid_dex';
+  }
+  if (typeof u.pairKey !== 'string' || !u.pairKey) {
+    return 'missing_or_invalid_pairKey';
+  }
+  if (typeof u.price !== 'number' || isNaN(u.price) || u.price <= 0) {
+    return 'invalid_price';
+  }
+  if (u.price < minPrice || u.price > maxPrice) {
+    return 'price_out_of_bounds';
+  }
+  if (typeof u.timestamp !== 'number' || u.timestamp <= 0) {
+    return 'invalid_timestamp';
+  }
+
+  return null;
+}
+
+// =============================================================================
 // Implementation
 // =============================================================================
 
@@ -351,6 +401,8 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
    * @param validator - Type guard function to validate messages
    * @param eventName - Event name to emit for valid messages
    * @param errorLabel - Label for error log messages
+   * @param onValidated - Optional callback invoked after validation succeeds
+   * @param diagnosticFn - Optional function to diagnose why validation failed
    */
   async function consumeStream<T>(
     streamName: string,
@@ -358,7 +410,8 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     validator: (data: T | null | undefined) => data is T,
     eventName: string,
     errorLabel: string,
-    onValidated?: (data: T) => void
+    onValidated?: (data: T) => void,
+    diagnosticFn?: (data: unknown) => string | null
   ): Promise<void> {
     const config = consumerGroupMap.get(streamName);
     if (!config) return;
@@ -376,7 +429,11 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
         const items = unwrapBatchMessages<T>(message.data);
         for (const data of items) {
           if (!validator(data)) {
-            logger.warn(`Skipping invalid ${errorLabel} message`, { messageId: message.id });
+            const reason = diagnosticFn ? diagnosticFn(data) : undefined;
+            logger.warn(`Skipping invalid ${errorLabel} message`, {
+              messageId: message.id,
+              ...(reason ? { reason } : {}),
+            });
             continue;
           }
           if (onValidated) {
@@ -417,7 +474,8 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
         const timestamps = update.pipelineTimestamps ?? {};
         timestamps.consumedAt = Date.now();
         update.pipelineTimestamps = timestamps;
-      }
+      },
+      (data: unknown) => getPriceUpdateRejectionReason(data, minValidPrice, maxValidPrice)
     );
   }
 
