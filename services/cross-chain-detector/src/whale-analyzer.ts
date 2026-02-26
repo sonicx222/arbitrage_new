@@ -230,11 +230,13 @@ export class WhaleAnalyzer {
         }
 
         try {
-          this.logger.info('Super whale detected, triggering immediate opportunity scan', {
+          const isSuperWhale = whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd;
+          const triggerType = isSuperWhale ? 'Super whale' : 'Significant whale activity';
+          this.logger.info(`${triggerType} detected, triggering immediate opportunity scan`, {
             token: whaleTx.token,
             chain: whaleTx.chain,
             usdValue: whaleTx.usdValue,
-            isSuperWhale: whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd
+            isSuperWhale,
           });
 
           // Trigger immediate cross-chain detection for this token
