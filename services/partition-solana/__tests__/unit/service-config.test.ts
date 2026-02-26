@@ -47,6 +47,9 @@ const mockGenerateInstanceId = jest.fn().mockImplementation(
 
 jest.mock('@arbitrage/core', () => ({
   createLogger: jest.fn().mockReturnValue(mockLogger),
+}));
+
+jest.mock('@arbitrage/core/partition', () => ({
   parsePort: mockParsePort,
   validateAndFilterChains: mockValidateAndFilterChains,
   exitWithConfigError: mockExitWithConfigError,

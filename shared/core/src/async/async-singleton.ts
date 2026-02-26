@@ -249,13 +249,13 @@ export function singleton<T>(): MethodDecorator {
   let instancePromise: Promise<T> | null = null;
 
   return function (
-    _target: any,
+    _target: object,
     _propertyKey: string | symbol,
     descriptor: PropertyDescriptor
   ) {
     const originalMethod = descriptor.value;
 
-    descriptor.value = async function (...args: any[]) {
+    descriptor.value = async function (this: unknown, ...args: unknown[]) {
       if (!instancePromise) {
         const promise = originalMethod.apply(this, args);
         instancePromise = promise;

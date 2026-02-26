@@ -24,8 +24,8 @@ import {
 let capturedHandler: ((message: { id: string; data: unknown }) => Promise<void>) | null = null;
 let lastMockConsumer: any = null;
 
-jest.mock('@arbitrage/core', () => {
-  const actual = jest.requireActual('@arbitrage/core');
+jest.mock('@arbitrage/core/redis', () => {
+  const actual = jest.requireActual('@arbitrage/core/redis');
   return {
     ...actual,
     StreamConsumer: jest.fn().mockImplementation((_client: unknown, opts: any) => {
@@ -38,6 +38,13 @@ jest.mock('@arbitrage/core', () => {
       };
       return lastMockConsumer;
     }),
+  };
+});
+
+jest.mock('@arbitrage/core/async', () => {
+  const actual = jest.requireActual('@arbitrage/core/async');
+  return {
+    ...actual,
     stopAndNullify: jest.fn().mockImplementation(async (obj: any) => {
       if (obj && typeof obj.stop === 'function') {
         await obj.stop();
@@ -96,8 +103,12 @@ describe('FastLaneConsumer', () => {
     capturedHandler = null;
     lastMockConsumer = null;
     mockFeatureFlags.useFastLane = true;
+
+    // Clear mocks but preserve the implementation
+    jest.clearAllMocks();
+
     // Re-set the mock implementation after clearAllMocks
-    const { StreamConsumer } = require('@arbitrage/core');
+    const { StreamConsumer } = require('@arbitrage/core/redis');
     (StreamConsumer as jest.Mock).mockImplementation((_client: unknown, opts: any) => {
       capturedHandler = opts.handler;
       lastMockConsumer = {
@@ -108,7 +119,7 @@ describe('FastLaneConsumer', () => {
       };
       return lastMockConsumer;
     });
-    const { stopAndNullify } = require('@arbitrage/core');
+    const { stopAndNullify } = require('@arbitrage/core/async');
     (stopAndNullify as jest.Mock).mockImplementation(async (obj: any) => {
       if (obj && typeof obj.stop === 'function') {
         await obj.stop();

@@ -22,13 +22,22 @@ export enum ErrorCategory {
 /**
  * P1-2 fix: Classify an error to determine if it should be retried.
  */
-export function classifyError(error: any): ErrorCategory {
+export function classifyError(error: unknown): ErrorCategory {
   if (!error) return ErrorCategory.PERMANENT;
 
-  const errorName = error.name || error.constructor?.name || '';
-  const errorCode = error.code;
-  const statusCode = error.status || error.statusCode;
-  const message = (error.message || '').toLowerCase();
+  const err = error as {
+    name?: string;
+    constructor?: { name?: string };
+    code?: string | number;
+    status?: number;
+    statusCode?: number;
+    message?: string;
+  };
+
+  const errorName = err.name ?? err.constructor?.name ?? '';
+  const errorCode = err.code;
+  const statusCode = err.status ?? err.statusCode;
+  const message = (err.message ?? '').toLowerCase();
 
   // Permanent errors - never retry
   // P1-10 FIX: Use exact matching instead of .includes() to prevent false positives
@@ -52,7 +61,7 @@ export function classifyError(error: any): ErrorCategory {
     'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED',
     'EAI_AGAIN', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH'
   ];
-  if (errorCode && transientCodes.includes(errorCode)) {
+  if (errorCode && typeof errorCode === 'string' && transientCodes.includes(errorCode)) {
     return ErrorCategory.TRANSIENT;
   }
 
@@ -81,7 +90,7 @@ export function classifyError(error: any): ErrorCategory {
     -32005, // Rate limit exceeded
     -32603  // Internal error (often transient node issues)
   ];
-  if (errorCode && rpcTransientCodes.includes(errorCode)) {
+  if (errorCode && typeof errorCode === 'number' && rpcTransientCodes.includes(errorCode)) {
     return ErrorCategory.TRANSIENT;
   }
 
@@ -92,7 +101,7 @@ export function classifyError(error: any): ErrorCategory {
 /**
  * P1-2 fix: Check if an error should be retried based on classification.
  */
-export function isRetryableError(error: any): boolean {
+export function isRetryableError(error: unknown): boolean {
   const category = classifyError(error);
   return category !== ErrorCategory.PERMANENT;
 }
@@ -103,14 +112,14 @@ export interface RetryConfig {
   maxDelay: number;           // Maximum delay between retries
   backoffMultiplier: number;  // Exponential backoff multiplier
   jitter: boolean;           // Add random jitter to prevent thundering herd
-  retryCondition?: (error: any) => boolean; // Function to determine if error is retryable
-  onRetry?: (attempt: number, error: any, delay: number) => void; // Callback before retry
+  retryCondition?: (error: unknown) => boolean; // Function to determine if error is retryable
+  onRetry?: (attempt: number, error: unknown, delay: number) => void; // Callback before retry
 }
 
 export interface RetryResult<T> {
   success: boolean;
   result?: T;
-  error?: any;
+  error?: unknown;
   attempts: number;
   totalDelay: number;
 }
@@ -134,7 +143,7 @@ export class RetryMechanism {
 
   // Execute a function with retry logic
   async execute<T>(fn: () => Promise<T>): Promise<RetryResult<T>> {
-    let lastError: any;
+    let lastError: unknown;
     let totalDelay = 0;
 
     let attempt = 1;
@@ -147,12 +156,13 @@ export class RetryMechanism {
           attempts: attempt,
           totalDelay
         };
-      } catch (error: any) {
+      } catch (error) {
         lastError = error;
 
         // Check if we should retry this error
         if (!this.config.retryCondition(error)) {
-          logger.debug('Error not retryable, giving up', { error: error.message, attempt });
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logger.debug('Error not retryable, giving up', { error: errorMsg, attempt });
           break;
         }
 
@@ -164,8 +174,9 @@ export class RetryMechanism {
         // Calculate delay for next attempt
         const delay = this.calculateDelay(attempt);
 
+        const errorMsg = error instanceof Error ? error.message : String(error);
         logger.warn(`Attempt ${attempt} failed, retrying in ${delay}ms`, {
-          error: error.message,
+          error: errorMsg,
           attempt,
           maxAttempts: this.config.maxAttempts
         });
@@ -240,7 +251,7 @@ export class RetryMechanism {
    *
    * Now delegates to isRetryableError() which uses classifyError() internally.
    */
-  private defaultRetryCondition(error: any): boolean {
+  private defaultRetryCondition(error: unknown): boolean {
     // P0-8 FIX: Use single source of truth for error classification
     return isRetryableError(error);
   }
@@ -294,10 +305,10 @@ export class RetryPresets {
 export function withRetry(config?: Partial<RetryConfig>) {
   const retryMechanism = new RetryMechanism(config);
 
-  return function (target: any, propertyName: string, descriptor: PropertyDescriptor) {
+  return function (target: unknown, propertyName: string, descriptor: PropertyDescriptor) {
     const method = descriptor.value;
 
-    descriptor.value = async function (...args: any[]) {
+    descriptor.value = async function (...args: unknown[]) {
       const result = await retryMechanism.execute(() => method.apply(this, args));
 
       if (result.success) {
@@ -332,8 +343,8 @@ export async function retryAdvanced<T>(
   options: {
     maxAttempts?: number;
     delayFn?: (attempt: number) => number;
-    shouldRetry?: (error: any, attempt: number) => boolean;
-    onRetry?: (error: any, attempt: number) => void;
+    shouldRetry?: (error: unknown, attempt: number) => boolean;
+    onRetry?: (error: unknown, attempt: number) => void;
   } = {}
 ): Promise<T> {
   const {
@@ -343,7 +354,7 @@ export async function retryAdvanced<T>(
     onRetry = () => { }
   } = options;
 
-  let lastError: any;
+  let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {

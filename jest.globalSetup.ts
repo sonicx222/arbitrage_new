@@ -18,7 +18,7 @@ const REDIS_CONFIG_FILE = path.join(__dirname, '.redis-test-config.json');
 //   - setupFilesAfterEnv runs in each test worker process (for test code)
 //   - Both need the polyfill in their respective process contexts
 if (typeof (BigInt.prototype as any).toJSON === 'undefined') {
-  (BigInt.prototype as any).toJSON = function (this: bigint) {
+  (BigInt.prototype as any).toJSON = function () {
     return this.toString();
   };
 }

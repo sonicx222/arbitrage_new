@@ -590,7 +590,7 @@ export class PrometheusExporter implements IMetricsExporter {
 
       // Add thresholds if specified
       if (panel.thresholds) {
-        (basePanel.fieldConfig.defaults as any).thresholds = {
+        (basePanel.fieldConfig.defaults as Record<string, unknown>).thresholds = {
           mode: 'absolute',
           steps: [
             {

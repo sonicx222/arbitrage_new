@@ -9,6 +9,7 @@
 
 import { createLogger } from '../logger';
 import type { RedisStreamsClient } from '../redis/streams';
+import type { RedisClient } from '../redis/client';
 
 const logger = createLogger('dual-publish');
 
@@ -23,10 +24,10 @@ const logger = createLogger('dual-publish');
  */
 export async function dualPublish(
   streamsClient: RedisStreamsClient | null,
-  redis: { publish: (channel: string, message: any) => Promise<any> },
+  redis: RedisClient,
   streamName: string,
   pubsubChannel: string,
-  message: Record<string, any>
+  message: Record<string, unknown>
 ): Promise<void> {
   // Primary: Redis Streams (ADR-002 compliant)
   if (streamsClient) {
@@ -39,7 +40,7 @@ export async function dualPublish(
 
   // Secondary: Pub/Sub (backwards compatibility)
   try {
-    await redis.publish(pubsubChannel, message as any);
+    await redis.publish(pubsubChannel, message as unknown as import('@arbitrage/types').MessageEvent);
   } catch (error) {
     logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
   }

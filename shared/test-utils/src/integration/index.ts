@@ -11,6 +11,7 @@ export type { TestComponent } from './harness';
 export {
   createTestRedisClient,
   flushTestRedis,
+  getTestRedisUrl,
   setupRedisTestLifecycle,
   waitForStreamMessage,
   publishToStream,

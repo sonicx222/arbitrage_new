@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { parseV3PoolCreatedEvent } from '../../../../src/factory-subscription/parsers/v3-pool-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -171,15 +172,15 @@ describe('parseV3PoolCreatedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseV3PoolCreatedEvent(null)).toBeNull();
+      expect(parseV3PoolCreatedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseV3PoolCreatedEvent(undefined)).toBeNull();
+      expect(parseV3PoolCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseV3PoolCreatedEvent({})).toBeNull();
+      expect(parseV3PoolCreatedEvent({} as RawEventLog)).toBeNull();
     });
   });
 

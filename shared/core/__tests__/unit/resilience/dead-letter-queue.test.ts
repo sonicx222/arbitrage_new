@@ -170,7 +170,7 @@ describe('DeadLetterQueue', () => {
     it('should truncate oversized payloads', async () => {
       // Create a payload larger than 1MB
       const largePayload = 'x'.repeat(1024 * 1024 + 100);
-      const op = createFailedOp({ payload: largePayload });
+      const op = createFailedOp({ payload: { data: largePayload } });
       await dlq.enqueue(op);
 
       // The stored operation should have truncated payload

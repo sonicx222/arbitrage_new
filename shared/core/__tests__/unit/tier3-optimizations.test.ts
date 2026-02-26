@@ -1468,8 +1468,8 @@ describe('T3.15: Liquidity Depth Analysis', () => {
 
       analyzer.analyzeDepth(pool.poolAddress);
 
-      // Update pool
-      analyzer.updatePoolLiquidity({ ...pool, liquidityUsd: pool.liquidityUsd * 2 });
+      // Update pool — must change reserves (not just liquidityUsd) to trigger cache invalidation
+      analyzer.updatePoolLiquidity({ ...pool, reserve0: pool.reserve0 * 2n, liquidityUsd: pool.liquidityUsd * 2 });
 
       // Should miss cache after update
       analyzer.analyzeDepth(pool.poolAddress);

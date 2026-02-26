@@ -13,6 +13,11 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 // Mock logger before importing worker-pool
 jest.mock('../../src/logger');
 
+// Mock fs/promises to allow workerPath access check to pass
+jest.mock('fs/promises', () => ({
+  access: jest.fn(() => Promise.resolve()),
+}));
+
 // Mock worker_threads
 jest.mock('worker_threads', () => ({
   Worker: jest.fn(),

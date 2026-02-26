@@ -52,15 +52,18 @@ export type { SolanaDetectorLogger };
 
 /**
  * Performance logger interface for SolanaDetector.
- * Uses `any` for status/metadata parameters to remain compatible with the
- * PerformanceLogger union type in SolanaDetectorDeps.
- * TODO: Consolidate with SolanaDetectorPerfLogger in solana-types.ts when
- * PerformanceLogger is updated to use Record<string, unknown> parameter types.
+ * Uses `any` for status/meta parameters to remain compatible with the
+ * PerformanceLogger class (which uses LogMeta = Record<string, unknown>).
+ * Parameter name `meta` (not `metadata`) matches IPerformanceLogger.logEventLatency.
+ *
+ * Note: `any` is required here for contravariant parameter compatibility.
+ * LogMeta (Record<string, unknown>) is not assignable to unknown in function parameters.
+ * TODO: Consolidate with SolanaDetectorPerfLogger in solana-types.ts.
  */
 export interface SolanaDetectorPerfLogger {
-  logHealthCheck: (service: string, status: any) => void;
-  logEventLatency?: (operation: string, latency: number, metadata?: any) => void;
-  logArbitrageOpportunity?: (opportunity: any) => void;
+  logHealthCheck: (service: string, status: Record<string, unknown>) => void;
+  logEventLatency?: (operation: string, latency: number, meta?: Record<string, unknown>) => void;
+  logArbitrageOpportunity?: (opportunity: Record<string, unknown>) => void;
 }
 
 /**
@@ -70,7 +73,7 @@ export interface SolanaDetectorPerfLogger {
 export interface SolanaDetectorRedisClient {
   ping(): Promise<string>;
   disconnect(): Promise<void>;
-  updateServiceHealth?(serviceName: string, status: any): Promise<void>;
+  updateServiceHealth?(serviceName: string, status: unknown): Promise<void>;
 }
 
 /**
@@ -79,8 +82,8 @@ export interface SolanaDetectorRedisClient {
  */
 export interface SolanaDetectorStreamsClient {
   disconnect(): Promise<void>;
-  createBatcher(streamName: string, config: any): {
-    add(message: any): void;
+  createBatcher(streamName: string, config: Record<string, unknown>): {
+    add(message: unknown): void;
     destroy(): Promise<void>;
     getStats(): { currentQueueSize: number; batchesSent: number };
   };
@@ -1042,11 +1045,11 @@ export class SolanaDetector extends EventEmitter {
   /**
    * Simulate an account update (for testing).
    */
-  simulateAccountUpdate(programId: string, data: any): void {
+  simulateAccountUpdate(programId: string, data: Record<string, unknown>): void {
     this.emit('accountUpdate', {
       programId,
       accountId: data.accountId,
-      data: data.accountInfo?.data,
+      data: (data.accountInfo as Record<string, unknown> | undefined)?.data,
       slot: this.currentSlot + 1
     });
   }
@@ -1410,7 +1413,7 @@ export class SolanaDetector extends EventEmitter {
 
         // Get and log health
         const health = await this.getHealth();
-        this.perfLogger.logHealthCheck('solana-detector', health);
+        this.perfLogger.logHealthCheck('solana-detector', { ...health });
 
         // Update Redis
         if (this.redis) {

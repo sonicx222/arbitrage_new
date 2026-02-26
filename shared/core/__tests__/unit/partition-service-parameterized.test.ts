@@ -146,6 +146,12 @@ jest.mock('@arbitrage/core', () => {
   return mocks;
 });
 
+// Sub-entry point mock: partition services import from @arbitrage/core/partition
+jest.mock('@arbitrage/core/partition', () => {
+  const core = jest.requireMock('@arbitrage/core') as Record<string, unknown>;
+  return core;
+});
+
 jest.mock('@arbitrage/config', () => {
   // Dynamic config that reads currentPartitionConfig at call time
   return {
@@ -291,10 +297,17 @@ describe.each(PARTITION_CONFIGS)(
         process.env.PARTITION_CHAINS = partitionConfig.chainsSubset.join(',');
 
         jest.resetModules();
+        // Update currentPartitionConfig chains to match the subset
+        const originalChains = currentPartitionConfig.chains;
+        currentPartitionConfig = { ...currentPartitionConfig, chains: partitionConfig.chainsSubset };
+
         const mod = await importPartitionModule(partitionConfig.partitionId);
         cleanupFn = mod.cleanupProcessHandlers as () => void;
 
         expect((mod.config as { chains: string[] }).chains).toEqual(partitionConfig.chainsSubset);
+
+        // Restore original chains
+        currentPartitionConfig = { ...currentPartitionConfig, chains: originalChains };
       });
     });
 

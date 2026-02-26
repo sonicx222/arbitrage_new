@@ -127,18 +127,19 @@ export function parseSignedInt24(hexValue: string): number {
  * @returns True if log is valid, false otherwise
  */
 export function validateLogStructure(
-  log: any,
+  log: unknown,
   minTopics: number,
   minDataWords: number
 ): boolean {
-  if (!log || !log.topics || !log.data) {
+  const logObj = log as { topics?: string[]; data?: string };
+  if (!logObj || !logObj.topics || !logObj.data) {
     return false;
   }
-  if (log.topics.length < minTopics) {
+  if (logObj.topics.length < minTopics) {
     return false;
   }
   const minDataLength = HEX_PREFIX_LENGTH + (minDataWords * WORD_SIZE_HEX);
-  if (log.data.length < minDataLength) {
+  if (logObj.data.length < minDataLength) {
     return false;
   }
   return true;

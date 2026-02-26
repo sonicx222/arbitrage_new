@@ -28,7 +28,7 @@ const logger = createLogger('dead-letter-queue');
 export interface FailedOperation {
   id: string;
   operation: string;
-  payload: any;
+  payload: Record<string, unknown>;
   error: {
     message: string;
     code?: string;
@@ -150,7 +150,7 @@ export class DeadLetterQueue {
   private async dualPublish(
     streamName: string,
     pubsubChannel: string,
-    message: Record<string, any>
+    message: Record<string, unknown>
   ): Promise<void> {
     await this.initPromise;
     const redis = await this.redis;
@@ -578,15 +578,16 @@ export class DeadLetterQueue {
     } catch (error) {
       operation.retryCount++;
 
-      const shouldRetry = operation.retryCount < operation.maxRetries && this.shouldRetry(operation, error);
+      const shouldRetry = operation.retryCount < operation.maxRetries && await this.shouldRetry(operation, error);
       return { success: false, retry: shouldRetry };
     }
   }
 
-  private shouldRetry(operation: FailedOperation, error: any): boolean {
+  private async shouldRetry(operation: FailedOperation, error: unknown): Promise<boolean> {
     // Don't retry certain types of errors
-    if (error.message?.includes('Authentication failed')) return false;
-    if (error.message?.includes('Invalid input')) return false;
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Authentication failed')) return false;
+    if (message.includes('Invalid input')) return false;
     if (operation.retryCount >= operation.maxRetries) return false;
 
     return true;

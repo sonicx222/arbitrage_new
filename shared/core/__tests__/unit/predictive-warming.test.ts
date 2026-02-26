@@ -25,8 +25,18 @@ const mockRedis = {
     return redisInstance.set(key, value);
   }),
   setex: jest.fn<any>((key: string, ttl: number, value: any) => redisInstance.setex(key, ttl, value)),
-  del: jest.fn<any>((key: string) => redisInstance.del(key)),
+  del: jest.fn<any>((...keys: string[]) => {
+    for (const key of keys) {
+      redisInstance.del(key);
+    }
+    return Promise.resolve(keys.length);
+  }),
   keys: jest.fn<any>((pattern: string) => redisInstance.keys(pattern)),
+  scan: jest.fn<any>((cursor: string, _matchArg: string, pattern: string, _countArg: string, _count: number) => {
+    if (cursor !== '0') return Promise.resolve(['0', []]);
+    const allKeys = redisInstance.keys(pattern);
+    return Promise.resolve(['0', allKeys]);
+  }),
   clear: jest.fn<any>(() => redisInstance.clear()),
   ping: jest.fn<any>(() => Promise.resolve('PONG'))
 };
@@ -69,13 +79,29 @@ const mockLogger = createLogger('test') as unknown as {
   info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock;
 };
 
-// Helper to flush pending microtasks and macrotasks without real delays
-const flushPromises = () => new Promise<void>(resolve => setImmediate(resolve));
+// Helper to flush pending microtasks and macrotasks.
+// Uses jest fake-timer runAllImmediates() when fake timers are active (fast),
+// then drains multiple rounds of microtasks so deeply-nested async chains
+// (e.g., triggerPredictiveWarming -> get -> redisPromise -> redis.get) settle.
+const flushPromises = async () => {
+  // Fire all pending setImmediate callbacks (starts async warming chains)
+  jest.runAllImmediates();
+  // Drain several rounds of microtasks to let multi-level awaits resolve
+  for (let i = 0; i < 10; i++) {
+    await new Promise<void>(resolve => resolve());
+  }
+  // Fire any setImmediates that were scheduled during microtask processing
+  jest.runAllImmediates();
+  for (let i = 0; i < 5; i++) {
+    await new Promise<void>(resolve => resolve());
+  }
+};
 
 describe('Predictive Cache Warming (Task 2.2.2)', () => {
   let cache: HierarchicalCache;
 
   beforeEach(() => {
+    jest.useFakeTimers({ legacyFakeTimers: true });
     jest.clearAllMocks();
     mockRedis.clear();
     // Re-establish ALL mock implementations (resetMocks: true clears jest.fn() implementations)
@@ -88,8 +114,16 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       return redisInstance.set(key, value);
     });
     mockRedis.setex.mockImplementation((key: string, ttl: number, value: any) => redisInstance.setex(key, ttl, value));
-    mockRedis.del.mockImplementation((key: string) => redisInstance.del(key));
+    mockRedis.del.mockImplementation((...keys: string[]) => {
+      for (const key of keys) { redisInstance.del(key); }
+      return Promise.resolve(keys.length);
+    });
     mockRedis.keys.mockImplementation((pattern: string) => redisInstance.keys(pattern));
+    mockRedis.scan.mockImplementation((cursor: string, _matchArg: string, pattern: string, _countArg: string, _count: number) => {
+      if (cursor !== '0') return Promise.resolve(['0', []]);
+      const allKeys = redisInstance.keys(pattern);
+      return Promise.resolve(['0', allKeys]);
+    });
     mockRedis.ping.mockImplementation(() => Promise.resolve('PONG'));
     mockCorrelationAnalyzer.getPairsToWarm.mockReturnValue([]);
     mockCorrelationAnalyzer.recordPriceUpdate.mockReturnValue(undefined);
@@ -179,7 +213,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set(pairKey, { reserve0: '1000', reserve1: '2000' });
 
       // Wait for setImmediate callback
-      await new Promise(resolve => setImmediate(resolve));
+      await flushPromises();
 
       expect(mockCorrelationAnalyzer.recordPriceUpdate).toHaveBeenCalledWith('0x1234');
     });
@@ -191,7 +225,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set(pairKey, { reserve0: '1000', reserve1: '2000' });
 
       // Wait for setImmediate callback
-      await new Promise(resolve => setImmediate(resolve));
+      await flushPromises();
 
       expect(mockCorrelationAnalyzer.getPairsToWarm).toHaveBeenCalledWith('0x1234');
     });
@@ -200,7 +234,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       await cache.set('config:settings', { value: 'test' });
 
       // Wait for setImmediate callback
-      await new Promise(resolve => setImmediate(resolve));
+      await flushPromises();
 
       expect(mockCorrelationAnalyzer.recordPriceUpdate).not.toHaveBeenCalled();
       expect(mockCorrelationAnalyzer.getPairsToWarm).not.toHaveBeenCalled();
@@ -474,10 +508,17 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
   describe('Integration with Cache Lifecycle', () => {
     it('should not warm when cache is clearing', async () => {
+      // Make L2 scan resolve on a delayed tick so isClearing stays true during set
+      let resolveL2Scan: ((value: [string, string[]]) => void) | null = null;
+      mockRedis.scan.mockImplementationOnce(() =>
+        new Promise<[string, string[]]>((resolve) => { resolveL2Scan = resolve; })
+      );
+
       cache = createHierarchicalCache({
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false, // Skip PriceMatrix allocation for speed
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -486,17 +527,19 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
 
       mockCorrelationAnalyzer.getPairsToWarm.mockReturnValue(['0x5678']);
 
-      // Start clear operation
+      // Start clear operation — this will block on the L2 scan
       const clearPromise = cache.clear();
 
-      // Try to set (should not trigger warming during clear)
+      // Set while clear is still in progress (isClearing = true)
       await cache.set('pair:0x1234', { reserve0: '1000' });
-
-      await clearPromise;
       await flushPromises();
 
-      // Warming should not have been triggered
+      // Warming should not have been triggered during clear
       expect(mockCorrelationAnalyzer.getPairsToWarm).not.toHaveBeenCalled();
+
+      // Unblock the clear
+      resolveL2Scan!(['0', []]);
+      await clearPromise;
     });
 
     it('should warm across multiple cache set operations', async () => {
@@ -671,8 +714,9 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       expect(stats.predictiveWarming).toHaveProperty('correlationStats');
       // correlationStats should be from the mock
       expect(stats.predictiveWarming?.correlationStats).not.toBeNull();
-      expect(stats.predictiveWarming?.correlationStats?.trackedPairs).toBe(5);
-      expect(stats.predictiveWarming?.correlationStats?.estimatedMemoryBytes).toBe(1024);
+      const correlationStats = stats.predictiveWarming?.correlationStats as { trackedPairs?: number; estimatedMemoryBytes?: number } | undefined;
+      expect(correlationStats?.trackedPairs).toBe(5);
+      expect(correlationStats?.estimatedMemoryBytes).toBe(1024);
     });
   });
 });

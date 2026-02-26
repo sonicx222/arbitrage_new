@@ -8,7 +8,7 @@
  * @module factory-subscription/parsers/trader-joe-parser
  */
 
-import { PairCreatedEvent } from './types';
+import { PairCreatedEvent, type RawEventLog } from './types';
 import {
   extractAddressFromTopic,
   HEX_PREFIX_LENGTH,
@@ -25,7 +25,7 @@ import {
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseTraderJoePairCreatedEvent(log: any): PairCreatedEvent | null {
+export function parseTraderJoePairCreatedEvent(log: RawEventLog): PairCreatedEvent | null {
   try {
     // Validate: need 4 topics (signature + 3 indexed) and 2 words of data
     // Data: 0x prefix (2) + LBPair address word (64) + pid word (64) = 130 minimum

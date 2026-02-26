@@ -133,7 +133,7 @@ export interface HealthThreshold {
 
 export interface AlertRule {
   name: string;
-  condition: (metrics: HealthMetric[], context: any) => boolean | Promise<boolean>;
+  condition: (metrics: HealthMetric[], context: unknown) => boolean | Promise<boolean>;
   severity: 'info' | 'warning' | 'error' | 'critical';
   message: string;
   cooldown: number; // Minimum time between alerts (ms)
@@ -215,7 +215,7 @@ export interface EnhancedHealthMonitorDeps {
   dlq?: ReturnType<typeof getDeadLetterQueue>;
   degradationManager?: ReturnType<typeof getGracefulDegradationManager>;
   streamHealthMonitor?: { getSummary: () => Promise<StreamHealthSummary> };
-  recoveryHealthChecker?: () => Promise<any>;
+  recoveryHealthChecker?: () => Promise<RecoveryHealthStatus>;
 }
 
 export class EnhancedHealthMonitor {
@@ -225,7 +225,7 @@ export class EnhancedHealthMonitor {
   private dlq: ReturnType<typeof getDeadLetterQueue>;
   private degradationManager: ReturnType<typeof getGracefulDegradationManager>;
   private streamHealthMonitor?: { getSummary: () => Promise<StreamHealthSummary> };
-  private recoveryHealthChecker: () => Promise<any>;
+  private recoveryHealthChecker: () => Promise<RecoveryHealthStatus>;
   private alertRules: AlertRule[] = [];
   private lastAlerts: Map<string, number> = new Map();
   private metricsBuffer: HealthMetric[] = [];
@@ -292,7 +292,7 @@ export class EnhancedHealthMonitor {
    */
   private async publishToStream(
     streamName: string,
-    message: Record<string, any>
+    message: Record<string, unknown>
   ): Promise<void> {
     await this.ensureStreamsInitialized();
     if (this.streamsClient) {
@@ -405,7 +405,7 @@ export class EnhancedHealthMonitor {
       name: 'circuit_breaker_open',
       condition: () => {
         const breakerStats = this.circuitBreakers.getAllStats();
-        return Object.values(breakerStats).some((stats: any) => stats.state === 'OPEN');
+        return Object.values(breakerStats).some((stats: CircuitBreakerStats) => stats.state === 'OPEN');
       },
       severity: 'warning',
       message: 'Circuit breaker opened - service isolation active',
@@ -827,7 +827,7 @@ export class EnhancedHealthMonitor {
         }
         break;
 
-      case 'clear_caches':
+      case 'clear_caches': {
         // Signal to clear internal caches - emit event for handlers to pick up
         logger.info('Cache clear requested', { rule: rule.name });
         // Publish cache clear request for services to handle
@@ -843,6 +843,7 @@ export class EnhancedHealthMonitor {
         };
         await this.publishToStream('stream:system-commands', cacheMessage);
         break;
+      }
 
       default:
         logger.warn('Unknown alert action', { action });

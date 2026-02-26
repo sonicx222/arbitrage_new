@@ -68,7 +68,7 @@ export interface FailureEvent {
   component: string;
   error: Error;
   severity: FailureSeverity;
-  context: any;
+  context: Record<string, unknown>;
   timestamp: number;
   recoveryAttempts: number;
   lastRecoveryAttempt?: number;
@@ -174,7 +174,7 @@ export class ExpertSelfHealingManager {
   private async publishControlMessage(
     streamName: string,
     pubsubChannel: string,
-    message: Record<string, any>
+    message: Record<string, unknown>
   ): Promise<void> {
     const redis = await this.redis;
 
@@ -195,7 +195,7 @@ export class ExpertSelfHealingManager {
     // P0-10 FIX: Skip Pub/Sub if migration flag is set (all consumers on streams)
     if (!DISABLE_PUBSUB_FALLBACK) {
       try {
-        await redis.publish(pubsubChannel, message as any);
+        await redis.publish(pubsubChannel, message as unknown as import('@arbitrage/types').MessageEvent);
       } catch (error) {
         logger.error('Failed to publish to pub/sub', {
           channel: pubsubChannel,
@@ -259,7 +259,7 @@ export class ExpertSelfHealingManager {
     serviceName: string,
     component: string,
     error: Error,
-    context: any = {}
+    context: Record<string, unknown> = {}
   ): Promise<void> {
     const failure: FailureEvent = {
       id: `failure_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
@@ -313,7 +313,7 @@ export class ExpertSelfHealingManager {
   }
 
   // Assess failure severity based on error type and context
-  private assessFailureSeverity(error: Error, context: any): FailureSeverity {
+  private assessFailureSeverity(error: Error, context: Record<string, unknown>): FailureSeverity {
     // Guard against null/undefined error
     const message = error?.message ?? '';
 
@@ -327,7 +327,7 @@ export class ExpertSelfHealingManager {
     // Memory/CPU resource issues
     if (message.includes('out of memory') ||
       message.includes('heap limit') ||
-      context?.memoryUsage > 0.9) { // 90% memory usage
+      ((context?.memoryUsage as number | undefined) ?? 0) > 0.9) { // 90% memory usage
       return FailureSeverity.HIGH;
     }
 
@@ -337,7 +337,7 @@ export class ExpertSelfHealingManager {
     }
 
     // Circuit breaker trips
-    if (context?.circuitBreakerTripped) {
+    if (context?.circuitBreakerTripped === true) {
       return FailureSeverity.MEDIUM;
     }
 
@@ -350,7 +350,7 @@ export class ExpertSelfHealingManager {
     // Data corruption or critical logic failures
     if (message.includes('corrupt') ||
       message.includes('invalid') ||
-      context?.dataIntegrityFailure) {
+      context?.dataIntegrityFailure === true) {
       return FailureSeverity.CRITICAL;
     }
 
@@ -868,21 +868,22 @@ export class ExpertSelfHealingManager {
         config: consumerConfig,
         handler: async (message) => {
           try {
-            const event = message.data as any;
+            const event = message.data as Record<string, unknown>;
+            const eventData = event.data as Record<string, unknown> | undefined;
             logger.debug('Received failure event from stream', {
               messageId: message.id,
               eventType: event.type,
-              serviceName: event.data?.serviceName
+              serviceName: eventData?.serviceName
             });
 
             // Process the failure event
-            if (event.type === 'failure_reported' && event.data) {
+            if (event.type === 'failure_reported' && eventData) {
               // Note: External failure events are logged but not re-analyzed
               // to avoid infinite loops (we already reported this failure)
               logger.info('External failure event received', {
-                serviceName: event.data.serviceName,
-                component: event.data.component,
-                severity: event.data.severity
+                serviceName: eventData.serviceName,
+                component: eventData.component,
+                severity: eventData.severity
               });
             }
           } catch (error) {
@@ -970,7 +971,19 @@ export class ExpertSelfHealingManager {
   }
 
   // Get system health overview
-  async getSystemHealthOverview(): Promise<any> {
+  async getSystemHealthOverview(): Promise<{
+    overallHealth: number;
+    serviceCount: number;
+    criticalServices: number;
+    activeRecoveries: number;
+    lastUpdate: number;
+    services: Array<{
+      name: string;
+      health: number;
+      failures: number;
+      activeActions: number;
+    }>;
+  }> {
     const services = Array.from(this.serviceHealthStates.values());
     const totalHealth = services.reduce((sum, s) => sum + s.healthScore, 0) / services.length;
 

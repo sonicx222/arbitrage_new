@@ -20,7 +20,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import Redis from 'ioredis';
-import { createTestRedisClient, delay } from '@arbitrage/test-utils';
+import { createTestRedisClient, delay, getTestRedisUrl } from '@arbitrage/test-utils';
 import { createHierarchicalCache, HierarchicalCache } from '@arbitrage/core/caching';
 
 const L2_PREFIX = 'cache:l2:';
@@ -30,6 +30,9 @@ describe('[Integration] L2 Redis Cache Fallback (ADR-005)', () => {
   let redis: Redis;
 
   beforeAll(async () => {
+    // Point the getRedisClient() singleton to the test Redis server
+    // so that createHierarchicalCache's L2 layer connects correctly.
+    process.env.REDIS_URL = getTestRedisUrl();
     redis = await createTestRedisClient();
   });
 

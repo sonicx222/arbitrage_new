@@ -27,8 +27,10 @@ const mockRedis = {
 };
 
 // Mock Redis BEFORE service import
+// The source code does: (client as unknown as { client: Redis }).client
+// So getRedisClient must return an object with a `client` property.
 jest.mock('../../../src/redis/client', () => ({
-  getRedisClient: () => Promise.resolve(mockRedis)
+  getRedisClient: () => Promise.resolve({ client: mockRedis })
 }));
 
 import {
@@ -378,6 +380,7 @@ describe('AdaptiveThresholdService', () => {
     it('should return empty on Redis error', async () => {
       mockRedis.scanStream.mockReturnValueOnce({
         [Symbol.asyncIterator]: async function* () {
+          yield; // satisfy require-yield before throwing
           throw new Error('Redis error');
         },
       });

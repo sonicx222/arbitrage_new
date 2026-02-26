@@ -356,11 +356,13 @@ export class ProviderRotationStrategy {
    * S3.3: Check if an error indicates rate limiting by the RPC provider.
    * Detects common rate limit patterns from various providers.
    */
-  isRateLimitError(error: any): boolean {
+  isRateLimitError(error: unknown): boolean {
     if (!error) return false;
 
-    const message = (error?.message || '').toLowerCase();
-    const code = error?.code;
+    // Type guard for error-like objects
+    const errorObj = error as { message?: string; code?: number | string };
+    const message = (errorObj.message || '').toLowerCase();
+    const code = errorObj.code;
 
     // JSON-RPC rate limit error codes
     if (code === -32005 || code === -32016) return true;

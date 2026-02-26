@@ -1001,6 +1001,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // P2 FIX: Use StreamMessage type instead of any
   private async handleHealthMessage(message: StreamMessage): Promise<void> {
     const data = message.data;
+    if (!data || typeof data !== 'object') {
+      this.logger.debug('Skipping health message - null or invalid data', { messageId: message.id });
+      return;
+    }
     // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
     const serviceName = getString(data as Record<string, unknown>, 'name', '') ||
                         getString(data as Record<string, unknown>, 'service', '');

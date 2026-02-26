@@ -1329,7 +1329,7 @@ export class ChainDetectorInstance extends EventEmitter {
               // FIX Bug 4.4: Wrap factory event handling in try-catch
               // If handleFactoryEvent throws, don't crash the entire message handler
               try {
-                this.factorySubscriptionService.handleFactoryEvent(result);
+                this.factorySubscriptionService.handleFactoryEvent(result as unknown as import('@arbitrage/core/factory-subscription').RawEventLog);
               } catch (factoryError) {
                 this.logger.error('Factory event handling failed', {
                   error: (factoryError as Error).message,
@@ -1689,7 +1689,7 @@ export class ChainDetectorInstance extends EventEmitter {
 
     const cacheKey = `price:${this.chainId}:${pairAddress.toLowerCase()}`;
     try {
-      return await this.priceCache.get(cacheKey);
+      return (await this.priceCache.get(cacheKey)) as CachedPriceData | null;
     } catch (error) {
       this.logger.warn('Failed to read from price cache', { error, cacheKey });
       return null;

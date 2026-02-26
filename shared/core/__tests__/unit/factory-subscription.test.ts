@@ -29,6 +29,7 @@ import {
   parseCurvePoolCreatedEvent,
   parseBalancerPoolRegisteredEvent,
   parseBalancerTokensRegisteredEvent,
+  type RawEventLog,
 } from '../../src/factory-subscription';
 import { RecordingLogger } from '../../src/logging';
 
@@ -296,6 +297,7 @@ describe('parseV2PairCreatedEvent', () => {
       topics: [FactoryEventSignatures.uniswap_v2, '0x' + '0'.repeat(64)],
       data: '0x' + '0'.repeat(128),
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseV2PairCreatedEvent(log)).toBeNull();
   });
@@ -310,12 +312,13 @@ describe('parseV2PairCreatedEvent', () => {
       ],
       data: '0x' + '0'.repeat(32), // Too short
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseV2PairCreatedEvent(log)).toBeNull();
   });
 
   it('should return null for null log', () => {
-    expect(parseV2PairCreatedEvent(null)).toBeNull();
+    expect(parseV2PairCreatedEvent(null as unknown as RawEventLog)).toBeNull();
   });
 });
 
@@ -352,6 +355,7 @@ describe('parseV3PoolCreatedEvent', () => {
       ], // Missing fee topic
       data: '0x' + '0'.repeat(128),
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseV3PoolCreatedEvent(log)).toBeNull();
   });
@@ -385,6 +389,7 @@ describe('parseSolidlyPairCreatedEvent', () => {
       ],
       data: '0x' + '0'.repeat(64), // Only 1 word, need 3
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseSolidlyPairCreatedEvent(log)).toBeNull();
   });
@@ -426,6 +431,7 @@ describe('parseTraderJoePairCreatedEvent', () => {
       ], // Missing binStep topic
       data: '0x' + '0'.repeat(128),
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseTraderJoePairCreatedEvent(log)).toBeNull();
   });
@@ -721,9 +727,9 @@ describe('FactorySubscriptionService', () => {
 
 describe('Edge Cases and Error Handling', () => {
   it('should handle malformed log data gracefully', () => {
-    expect(parseV2PairCreatedEvent({ data: null, topics: [] })).toBeNull();
-    expect(parseV2PairCreatedEvent({ data: '', topics: null })).toBeNull();
-    expect(parseV2PairCreatedEvent(undefined)).toBeNull();
+    expect(parseV2PairCreatedEvent({ data: null, topics: [] } as unknown as RawEventLog)).toBeNull();
+    expect(parseV2PairCreatedEvent({ data: '', topics: null } as unknown as RawEventLog)).toBeNull();
+    expect(parseV2PairCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
   });
 
   it('should handle callback errors without crashing', async () => {
@@ -1009,12 +1015,13 @@ describe('parseCurvePlainPoolDeployedEvent', () => {
       topics: [FactoryEventSignatures.curve],
       data: '0x' + '0'.repeat(128), // Too short (need 512 hex chars)
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseCurvePlainPoolDeployedEvent(log)).toBeNull();
   });
 
   it('should return null for null log', () => {
-    expect(parseCurvePlainPoolDeployedEvent(null)).toBeNull();
+    expect(parseCurvePlainPoolDeployedEvent(null as unknown as RawEventLog)).toBeNull();
   });
 });
 
@@ -1076,6 +1083,7 @@ describe('parseCurveMetaPoolDeployedEvent', () => {
       topics: [AdditionalEventSignatures.curve_metapool],
       data: '0x' + '0'.repeat(128), // Too short (need 384 hex chars)
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseCurveMetaPoolDeployedEvent(log)).toBeNull();
   });
@@ -1115,8 +1123,8 @@ describe('parseCurvePoolCreatedEvent', () => {
   });
 
   it('should return null for invalid log', () => {
-    expect(parseCurvePoolCreatedEvent(null)).toBeNull();
-    expect(parseCurvePoolCreatedEvent({ topics: [], data: null })).toBeNull();
+    expect(parseCurvePoolCreatedEvent(null as unknown as RawEventLog)).toBeNull();
+    expect(parseCurvePoolCreatedEvent({ topics: [], data: null } as unknown as RawEventLog)).toBeNull();
   });
 });
 
@@ -1185,6 +1193,7 @@ describe('parseBalancerPoolRegisteredEvent', () => {
       topics: [FactoryEventSignatures.balancer_v2, TEST_POOL_ID], // Missing poolAddress topic
       data: '0x' + '0'.repeat(64),
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseBalancerPoolRegisteredEvent(log)).toBeNull();
   });
@@ -1199,12 +1208,13 @@ describe('parseBalancerPoolRegisteredEvent', () => {
       ],
       data: '0x' + '0'.repeat(32), // Too short
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseBalancerPoolRegisteredEvent(log)).toBeNull();
   });
 
   it('should return null for null log', () => {
-    expect(parseBalancerPoolRegisteredEvent(null)).toBeNull();
+    expect(parseBalancerPoolRegisteredEvent(null as unknown as RawEventLog)).toBeNull();
   });
 });
 
@@ -1238,11 +1248,12 @@ describe('parseBalancerTokensRegisteredEvent', () => {
       topics: [AdditionalEventSignatures.balancer_tokens_registered], // Missing poolId topic
       data: '0x' + '0'.repeat(256),
       blockNumber: 12345678,
+      transactionHash: '0x' + '0'.repeat(64),
     };
     expect(parseBalancerTokensRegisteredEvent(log)).toBeNull();
   });
 
   it('should return null for null log', () => {
-    expect(parseBalancerTokensRegisteredEvent(null)).toBeNull();
+    expect(parseBalancerTokensRegisteredEvent(null as unknown as RawEventLog)).toBeNull();
   });
 });

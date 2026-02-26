@@ -27,10 +27,14 @@ export type SolanaDetectorLogger = ServiceLogger;
 /**
  * Performance logger interface for SolanaDetector modules.
  * Minimal interface for dependency injection.
+ * Parameter name `meta` (not `metadata`) matches IPerformanceLogger.logEventLatency.
+ *
+ * Uses Record<string, unknown> for status/meta parameters to remain compatible
+ * with PerformanceLogger (which uses LogMeta = Record<string, unknown>).
  */
 export interface SolanaDetectorPerfLogger {
   logHealthCheck: (service: string, status: Record<string, unknown>) => void;
-  logEventLatency?: (operation: string, latency: number, metadata?: Record<string, unknown>) => void;
+  logEventLatency?: (operation: string, latency: number, meta?: Record<string, unknown>) => void;
   logArbitrageOpportunity?: (opportunity: Record<string, unknown>) => void;
 }
 

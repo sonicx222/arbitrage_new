@@ -18,6 +18,35 @@ import {
 } from './types';
 import { BaseMevProvider } from './base-provider';
 import { getErrorMessage } from '../resilience/error-handling';
+
+// =============================================================================
+// Flashbots Response Types
+// =============================================================================
+
+/**
+ * Flashbots relay JSON-RPC response structure
+ */
+interface FlashbotsRelayResponse {
+  result?: {
+    bundleHash?: string;
+    isSimulated?: boolean;
+    consideredByBuildersAt?: number[];
+    coinbaseDiff?: string;
+    totalGasUsed?: string | number;
+    gasFees?: string;
+    results?: Array<{
+      txHash?: string;
+      gasUsed?: string | number;
+      error?: string;
+      revert?: string;
+    }>;
+  };
+  error?: {
+    message?: string;
+    code?: number;
+  };
+}
+
 // =============================================================================
 // Flashbots Provider Implementation
 // =============================================================================
@@ -346,6 +375,13 @@ export class FlashbotsProvider extends BaseMevProvider {
 
       const result = response.result;
 
+      if (!result) {
+        return {
+          success: false,
+          error: 'No result in simulation response',
+        };
+      }
+
       // Check if any transaction reverted
       if (result.results) {
         for (const txResult of result.results) {
@@ -353,7 +389,7 @@ export class FlashbotsProvider extends BaseMevProvider {
             return {
               success: false,
               error: txResult.revert || txResult.error || 'Transaction reverted',
-              results: result.results.map((r: any) => ({
+              results: result.results.map((r: { txHash?: string; gasUsed?: string | number; error?: string; revert?: string }) => ({
                 txHash: r.txHash || '',
                 gasUsed: BigInt(r.gasUsed ?? 0),
                 success: !r.error && !r.revert,
@@ -372,7 +408,7 @@ export class FlashbotsProvider extends BaseMevProvider {
           ? BigInt(result.gasFees) / BigInt(result.totalGasUsed ?? 1)
           : undefined,
         coinbaseDiff: result.coinbaseDiff ? BigInt(result.coinbaseDiff) : undefined,
-        results: result.results?.map((r: any) => ({
+        results: result.results?.map((r: { txHash?: string; gasUsed?: string | number; error?: string; revert?: string }) => ({
           txHash: r.txHash || '',
           gasUsed: BigInt(r.gasUsed ?? 0),
           success: !r.error && !r.revert,
@@ -579,7 +615,7 @@ export class FlashbotsProvider extends BaseMevProvider {
     body: object,
     timeoutMs?: number,
     url?: string
-  ): Promise<any> {
+  ): Promise<FlashbotsRelayResponse> {
     const bodyString = JSON.stringify(body);
     const headers = await this.getAuthHeaders(bodyString);
 
@@ -595,7 +631,7 @@ export class FlashbotsProvider extends BaseMevProvider {
         signal: controller.signal,
       });
 
-      return await response.json();
+      return (await response.json()) as FlashbotsRelayResponse;
     } finally {
       clearTimeout(timeoutId);
     }

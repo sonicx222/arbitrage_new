@@ -44,7 +44,7 @@ jest.mock('../../src/initialization/bridge-router-initializer', () => ({
 let mockMutexRunExclusive: jest.Mock;
 const mockMutexInstances: Array<{ runExclusive: jest.Mock }> = [];
 
-jest.mock('@arbitrage/core', () => ({
+jest.mock('@arbitrage/core/async', () => ({
   AsyncMutex: jest.fn().mockImplementation(() => {
     const instance = {
       runExclusive: jest.fn().mockImplementation((fn: any) => fn()),
@@ -53,6 +53,9 @@ jest.mock('@arbitrage/core', () => ({
     mockMutexRunExclusive = instance.runExclusive;
     return instance;
   }),
+}));
+
+jest.mock('@arbitrage/core/resilience', () => ({
   getErrorMessage: jest.fn().mockImplementation((e: unknown) =>
     e instanceof Error ? e.message : String(e)
   ),
@@ -156,7 +159,7 @@ describe('Execution Engine Initializer', () => {
     }
 
     // Restore getErrorMessage implementation (also cleared by resetAllMocks)
-    const { getErrorMessage } = require('@arbitrage/core');
+    const { getErrorMessage } = require('@arbitrage/core/resilience');
     (getErrorMessage as jest.Mock).mockImplementation((e: unknown) =>
       e instanceof Error ? e.message : String(e)
     );

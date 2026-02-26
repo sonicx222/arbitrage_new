@@ -20,6 +20,27 @@ import {
   MEV_DEFAULTS,
 } from './types';
 import { getErrorMessage } from '../resilience/error-handling';
+
+// =============================================================================
+// MEV-Share Response Types
+// =============================================================================
+
+/**
+ * MEV-Share endpoint JSON-RPC response structure
+ */
+interface MevShareResponse {
+  result?: {
+    bundleHash?: string;
+    bundleId?: string;
+    rebateAmount?: string | number;
+    rebatePercent?: number;
+  };
+  error?: {
+    message?: string;
+    code?: number;
+  };
+}
+
 // =============================================================================
 // MEV-Share Provider Implementation
 // =============================================================================
@@ -336,8 +357,8 @@ export class MevShareProvider extends FlashbotsProvider {
   private async sendMevShareRequest(
     body: object,
     timeoutMs?: number
-  ): Promise<any> {
-    return this.sendRelayRequest(body, timeoutMs, this.mevShareRelayUrl);
+  ): Promise<MevShareResponse> {
+    return this.sendRelayRequest(body, timeoutMs, this.mevShareRelayUrl) as Promise<MevShareResponse>;
   }
 
   /**

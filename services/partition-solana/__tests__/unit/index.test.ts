@@ -45,6 +45,109 @@ let mockSolanaArbitrageInstance: MockSolanaArbitrageDetector;
 
 jest.mock('@arbitrage/core', () => createCoreMocks(mockLogger, mockStateManager));
 
+// Mock sub-entry points used by source imports (immune to resetMocks via plain functions)
+jest.mock('@arbitrage/core/partition', () => {
+  const PORTS: Record<string, number> = { 'asia-fast': 3001, 'l2-turbo': 3002, 'high-value': 3003, 'solana-native': 3004 };
+  const SERVICE_NAMES: Record<string, string> = { 'asia-fast': 'partition-asia-fast', 'l2-turbo': 'partition-l2-turbo', 'high-value': 'partition-high-value', 'solana-native': 'partition-solana' };
+
+  const _createPartitionEntryCalls: any[][] = [];
+
+  function createPartitionEntry(
+    partitionId: string,
+    createDetector: (cfg: unknown) => unknown,
+    hooks?: { onStarted?: Function; onStartupError?: Function; additionalCleanup?: () => void }
+  ) {
+    _createPartitionEntryCalls.push([partitionId, createDetector, hooks]);
+    const { getPartition } = require('@arbitrage/config');
+    const partitionConfig = getPartition(partitionId);
+    const chains: string[] = partitionConfig?.chains ?? [];
+    const region: string = partitionConfig?.region ?? 'us-east1';
+    const defaultPort = PORTS[partitionId] ?? 3000;
+    const serviceName = SERVICE_NAMES[partitionId] ?? `partition-${partitionId}`;
+
+    const envConfig = {
+      redisUrl: process.env.REDIS_URL,
+      partitionChains: process.env.PARTITION_CHAINS,
+      healthCheckPort: process.env.HEALTH_CHECK_PORT,
+      instanceId: process.env.INSTANCE_ID,
+      regionId: process.env.REGION_ID,
+      enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+      nodeEnv: process.env.NODE_ENV ?? 'development',
+      rpcUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+      wsUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+    };
+
+    const instanceId = envConfig.instanceId ?? `${partitionId}-${process.env.HOSTNAME ?? 'local'}-${Date.now()}`;
+    const healthCheckPort = envConfig.healthCheckPort ? (parseInt(envConfig.healthCheckPort, 10) || defaultPort) : defaultPort;
+
+    let resolvedChains = [...chains];
+    if (envConfig.partitionChains) {
+      resolvedChains = envConfig.partitionChains.split(',').map((c: string) => c.trim().toLowerCase());
+    }
+
+    const detectorConfig = {
+      partitionId, chains: resolvedChains, instanceId,
+      regionId: envConfig.regionId ?? region,
+      enableCrossRegionHealth: envConfig.enableCrossRegionHealth ?? true,
+      healthCheckPort,
+    };
+
+    const detector = createDetector(detectorConfig);
+
+    // Compose cleanup: standard runner cleanup + optional additional cleanup from hooks
+    const cleanupProcessHandlers = hooks?.additionalCleanup
+      ? () => { hooks.additionalCleanup!(); }
+      : () => {};
+
+    return {
+      detector, config: detectorConfig, partitionId, chains, region,
+      cleanupProcessHandlers,
+      envConfig,
+      runner: { detector, start: async () => {}, getState: () => 'idle', cleanup: () => {}, healthServer: { current: null } },
+      serviceConfig: { partitionId, serviceName, defaultChains: chains, defaultPort, region, provider: partitionConfig?.provider ?? 'oracle' },
+      logger: mockLogger,
+    };
+  }
+
+  // Attach calls tracker for test assertions
+  (createPartitionEntry as any)._calls = _createPartitionEntryCalls;
+
+  return {
+    createPartitionEntry,
+    parsePartitionEnvironmentConfig: (chainNames: readonly string[]) => ({
+      redisUrl: process.env.REDIS_URL,
+      partitionChains: process.env.PARTITION_CHAINS,
+      healthCheckPort: process.env.HEALTH_CHECK_PORT,
+      instanceId: process.env.INSTANCE_ID,
+      regionId: process.env.REGION_ID,
+      enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+      nodeEnv: process.env.NODE_ENV ?? 'development',
+      rpcUrls: Object.fromEntries([...chainNames].map(c => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+      wsUrls: Object.fromEntries([...chainNames].map(c => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+    }),
+    validatePartitionEnvironmentConfig: () => {},
+    validateAndFilterChains: (chainsEnv: string | undefined, defaultChains: readonly string[]) => {
+      if (!chainsEnv) return [...defaultChains];
+      return chainsEnv.split(',').map((c: string) => c.trim().toLowerCase());
+    },
+    generateInstanceId: (pid: string, id?: string) => id ?? `${pid}-${process.env.HOSTNAME ?? 'local'}-${Date.now()}`,
+    exitWithConfigError: (msg: string) => { throw new Error(msg); },
+    PARTITION_PORTS: PORTS,
+    PARTITION_SERVICE_NAMES: SERVICE_NAMES,
+  };
+});
+
+jest.mock('@arbitrage/core/redis', () => ({
+  getRedisStreamsClient: async () => ({
+    xadd: jest.fn().mockResolvedValue('stream-id'),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+jest.mock('@arbitrage/core/resilience', () => ({
+  getErrorMessage: (e: unknown) => e instanceof Error ? e.message : String(e),
+}));
+
 jest.mock('@arbitrage/config', () => createConfigMocks({
   partitionId: 'solana-native',
   name: 'Solana Native',
@@ -246,16 +349,17 @@ describe('P4 Solana-Native Partition Service - index.ts', () => {
     it('should call createPartitionEntry with solana-native ID', async () => {
       const mod = await importIndexModule();
       cleanupFn = mod.cleanupProcessHandlers;
-      const { createPartitionEntry } = jest.requireMock('@arbitrage/core');
-      expect(createPartitionEntry).toHaveBeenCalledWith(
-        'solana-native',
-        expect.any(Function),
-        expect.objectContaining({
-          onStarted: expect.any(Function),
-          onStartupError: expect.any(Function),
-          additionalCleanup: expect.any(Function),
-        })
-      );
+      const { createPartitionEntry } = jest.requireMock('@arbitrage/core/partition');
+      // Plain function tracks calls via _calls array (immune to resetMocks)
+      const calls = (createPartitionEntry as any)._calls;
+      const matchingCall = calls.find((c: any[]) => c[0] === 'solana-native');
+      expect(matchingCall).toBeDefined();
+      expect(typeof matchingCall[1]).toBe('function');
+      expect(matchingCall[2]).toEqual(expect.objectContaining({
+        onStarted: expect.any(Function),
+        onStartupError: expect.any(Function),
+        additionalCleanup: expect.any(Function),
+      }));
     });
 
     it('should call connectToSolanaDetector on arbitrage detector', async () => {

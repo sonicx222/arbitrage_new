@@ -25,6 +25,17 @@ import type { InitializationLogger } from '../../../src/initialization/types';
 // Mock Dependencies
 // =============================================================================
 
+// Mock strategy-initializer to prevent deep transitive imports into
+// base.strategy.ts (which needs ARBITRAGE_CONFIG.slippageTolerance at module level)
+jest.mock('../../../src/initialization/strategy-initializer', () => ({
+  initializeAllStrategies: jest.fn().mockReturnValue({
+    strategies: new Map(),
+    strategyFactory: null,
+    txSimService: null,
+    success: true,
+  }),
+}));
+
 // Mock the entire @arbitrage/config module
 // NOTE: MEV_CONFIG.enabled defaults to false to match production (MEV_PROTECTION_ENABLED !== 'true')
 jest.mock('@arbitrage/config', () => ({
@@ -47,6 +58,11 @@ jest.mock('@arbitrage/config', () => ({
       polygon: { enabled: true, strategy: 'fastlane' },
       solana: { enabled: true, strategy: 'jito' }, // Should be skipped (non-EVM)
     },
+  },
+  ARBITRAGE_CONFIG: {
+    gasPriceSpikeMultiplier: 1.5,
+    confidenceThreshold: 0.5,
+    minProfitPercentage: 0.1,
   },
   RISK_CONFIG: {
     enabled: true,
@@ -149,6 +165,92 @@ jest.mock('@arbitrage/core', () => {
     ServiceLogger: {},
   };
 });
+
+// Mock sub-entry points used by initialization source files
+jest.mock('@arbitrage/core/resilience', () => ({
+  getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+}));
+
+jest.mock('@arbitrage/core/async', () => ({
+  AsyncMutex: jest.fn().mockImplementation(() => ({
+    runExclusive: <T>(fn: () => Promise<T>) => fn(),
+  })),
+}));
+
+jest.mock('@arbitrage/core/mev-protection', () => {
+  const mockMevProvider = {
+    strategy: 'flashbots',
+    isEnabled: () => true,
+    submitBundle: jest.fn(),
+    simulateBundle: jest.fn(),
+  };
+  return {
+    MevProviderFactory: jest.fn().mockImplementation(() => {
+      const providers = new Map();
+      return {
+        createProviderAsync: jest.fn().mockImplementation(async (opts: any) => {
+          providers.set(opts.chain, mockMevProvider);
+          return mockMevProvider;
+        }),
+        getProvider: jest.fn().mockImplementation((chain: string) => providers.get(chain)),
+        getProviders: jest.fn().mockImplementation(() => providers),
+        clearProviders: jest.fn().mockImplementation(() => providers.clear()),
+      };
+    }),
+    MevGlobalConfig: {},
+  };
+});
+
+jest.mock('@arbitrage/core/bridge-router', () => ({
+  createBridgeRouterFactory: jest.fn().mockReturnValue({
+    getAvailableProtocols: () => ['stargate', 'across'],
+    getDefaultRouter: () => ({}),
+    getRouter: jest.fn(),
+  }),
+}));
+
+jest.mock('@arbitrage/core/risk', () => ({
+  getExecutionProbabilityTracker: jest.fn().mockReturnValue({
+    getWinProbability: jest.fn().mockReturnValue(0.5),
+    recordOutcome: jest.fn(),
+    getStats: jest.fn().mockReturnValue({ totalOutcomes: 0 }),
+  }),
+  getEVCalculator: jest.fn().mockReturnValue({
+    calculate: jest.fn().mockReturnValue({
+      shouldExecute: true,
+      expectedValue: BigInt(1000),
+      winProbability: 0.5,
+    }),
+    getStats: jest.fn().mockReturnValue({ totalCalculations: 0 }),
+  }),
+  getKellyPositionSizer: jest.fn().mockReturnValue({
+    calculateSize: jest.fn().mockReturnValue({
+      recommendedSize: BigInt(1000),
+      shouldTrade: true,
+    }),
+    getStats: jest.fn().mockReturnValue({ totalCalculations: 0 }),
+  }),
+  getDrawdownCircuitBreaker: jest.fn().mockReturnValue({
+    isTradingAllowed: jest.fn().mockReturnValue({ allowed: true, state: 'NORMAL' }),
+    recordTradeResult: jest.fn(),
+    getState: jest.fn().mockReturnValue({ state: 'NORMAL' }),
+    getStats: jest.fn().mockReturnValue({ totalTrades: 0 }),
+  }),
+  DrawdownCircuitBreaker: jest.fn(),
+  EVCalculator: jest.fn(),
+  KellyPositionSizer: jest.fn(),
+  ExecutionProbabilityTracker: jest.fn(),
+}));
+
+jest.mock('@arbitrage/core/logging', () => ({
+  createPinoLogger: jest.fn().mockReturnValue({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  }),
+  ServiceLogger: {},
+}));
 
 // =============================================================================
 // Test Helpers

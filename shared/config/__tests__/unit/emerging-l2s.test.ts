@@ -266,10 +266,14 @@ describe('Emerging L2s Configuration', () => {
       // Partition Assignment
       // -----------------------------------------------------------------------
       describe('Partition assignment', () => {
-        it('is assigned to P2 (l2-turbo) partition', () => {
+        it('defaults to P3 (high-value) partition (removed from P2 due to placeholder DEX addresses)', () => {
+          // NOTE: These chains were removed from P2 (l2-turbo) because they have placeholder DEX addresses (0x000...).
+          // They will be re-added to P2 when real factory addresses are configured in dexes/index.ts.
+          // Until then, they fall through to the default HIGH_VALUE partition per assignChainToPartition() logic.
+          // @see shared/config/src/partitions.ts line 246-247
           const partition = assignChainToPartition(chainData.chainKey);
           expect(partition).not.toBeNull();
-          expect(partition!.partitionId).toBe(PARTITION_IDS.L2_TURBO);
+          expect(partition!.partitionId).toBe(PARTITION_IDS.HIGH_VALUE);
         });
       });
 
@@ -330,17 +334,22 @@ describe('Emerging L2s Configuration', () => {
       expect(MAINNET_CHAIN_IDS.length).toBe(15);
     });
 
-    it('P2 partition has 7 chains', () => {
-      const p2 = assignChainToPartition('blast');
+    it('P2 partition has 3 chains (emerging L2s temporarily removed)', () => {
+      // P2 partition: arbitrum, optimism, base
+      // blast, scroll, mantle, mode were removed due to placeholder DEX addresses (0x000...)
+      // They will be re-added when real factory addresses are configured
+      // @see shared/config/src/partitions.ts line 246-247
+      const p2 = assignChainToPartition('arbitrum');
       expect(p2).not.toBeNull();
-      expect(p2!.chains.length).toBe(7);
+      expect(p2!.chains.length).toBe(3);
       expect(p2!.chains).toContain('arbitrum');
       expect(p2!.chains).toContain('optimism');
       expect(p2!.chains).toContain('base');
-      expect(p2!.chains).toContain('blast');
-      expect(p2!.chains).toContain('scroll');
-      expect(p2!.chains).toContain('mantle');
-      expect(p2!.chains).toContain('mode');
+      // Emerging L2s NOT in P2 currently:
+      expect(p2!.chains).not.toContain('blast');
+      expect(p2!.chains).not.toContain('scroll');
+      expect(p2!.chains).not.toContain('mantle');
+      expect(p2!.chains).not.toContain('mode');
     });
 
     it('Scroll has SyncSwap flash loan support', () => {

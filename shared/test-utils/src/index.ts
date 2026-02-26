@@ -122,6 +122,7 @@ export {
   // Redis helpers
   createTestRedisClient,
   flushTestRedis,
+  getTestRedisUrl,
   setupRedisTestLifecycle,
   waitForStreamMessage,
   publishToStream,

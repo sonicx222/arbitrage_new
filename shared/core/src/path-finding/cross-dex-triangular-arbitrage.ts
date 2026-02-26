@@ -524,11 +524,11 @@ export class CrossDexTriangularArbitrage {
 
       return opportunity;
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.debug('Quadrilateral simulation failed', {
         tokens,
         dexes: pools.map(p => p.dex),
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return null;
     }
@@ -722,11 +722,11 @@ export class CrossDexTriangularArbitrage {
 
       return opportunity;
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.debug('Triangle simulation failed', {
         tokens,
         dexes: pools.map(p => p.dex),
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return null;
     }
@@ -950,7 +950,7 @@ export class CrossDexTriangularArbitrage {
   }
 
   // Get arbitrage statistics
-  getStatistics(): any {
+  getStatistics(): Record<string, unknown> {
     return {
       minProfitThreshold: this.minProfitThreshold,
       maxSlippage: this.maxSlippage,

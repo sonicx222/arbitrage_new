@@ -767,8 +767,11 @@ export class CrossRegionHealthManager extends EventEmitter {
     // Fallback: Pub/Sub (only if Streams unavailable)
     if (!this.redis) return;
     try {
-      await this.redis.subscribe(this.FAILOVER_CHANNEL, (message: any) => {
-        this.handleFailoverEvent(message.data as FailoverEvent);
+      await this.redis.subscribe(this.FAILOVER_CHANNEL, (message: unknown) => {
+        const msgData = message as { data?: unknown };
+        if (msgData.data) {
+          this.handleFailoverEvent(msgData.data as FailoverEvent);
+        }
       });
     } catch (error) {
       this.logger.error('Failed to subscribe to failover events', { error });

@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { parseV2PairCreatedEvent } from '../../../../src/factory-subscription/parsers/v2-pair-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -121,15 +122,15 @@ describe('parseV2PairCreatedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseV2PairCreatedEvent(null)).toBeNull();
+      expect(parseV2PairCreatedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseV2PairCreatedEvent(undefined)).toBeNull();
+      expect(parseV2PairCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseV2PairCreatedEvent({})).toBeNull();
+      expect(parseV2PairCreatedEvent({} as RawEventLog)).toBeNull();
     });
   });
 

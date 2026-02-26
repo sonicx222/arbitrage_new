@@ -87,7 +87,9 @@ export class WorkerTestHarness {
    */
   async spawnWorkers(count?: number): Promise<void> {
     const workerCount = count ?? this.config.workerCount;
-    const workerPath = join(__dirname, '../../../core/src/event-processor-worker.ts');
+    // Use compiled JS for worker threads since Node's worker_threads
+    // doesn't support .ts files directly (no ts-jest transform)
+    const workerPath = join(__dirname, '../../../core/dist/async/event-processor-worker.js');
 
     for (let i = 0; i < workerCount; i++) {
       const worker = new Worker(workerPath, {

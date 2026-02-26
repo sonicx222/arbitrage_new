@@ -24,7 +24,9 @@
       "@arbitrage/core": ["../../shared/core/src"],
       "@arbitrage/core/*": ["../../shared/core/src/*"],
       "@arbitrage/metrics": ["../../shared/metrics/src"],
-      "@arbitrage/metrics/*": ["../../shared/metrics/src/*"]
+      "@arbitrage/metrics/*": ["../../shared/metrics/src/*"],
+      "@arbitrage/flash-loan-aggregation": ["../../shared/flash-loan-aggregation/src"],
+      "@arbitrage/flash-loan-aggregation/*": ["../../shared/flash-loan-aggregation/src/*"]
     }
   },
   "include": ["src/**/*"],

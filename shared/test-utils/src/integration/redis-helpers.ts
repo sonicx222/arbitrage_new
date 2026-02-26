@@ -13,7 +13,7 @@ import { getErrorMessage } from '@arbitrage/core/resilience';
  * Get Redis URL, reading directly from config file if available.
  * This is called at runtime (not module load time) to ensure we get the correct URL.
  */
-function getTestRedisUrl(): string {
+export function getTestRedisUrl(): string {
   // Try to read from config file (written by jest.globalSetup.ts)
   const configFile = path.resolve(__dirname, '../../../../.redis-test-config.json');
 

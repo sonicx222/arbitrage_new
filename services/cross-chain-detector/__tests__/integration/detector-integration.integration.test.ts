@@ -61,14 +61,14 @@ const createMockPerfLogger = () => ({
 // =============================================================================
 
 function getTestRedisUrl(): string {
-  const configFile = path.resolve(__dirname, '../../../../../.redis-test-config.json');
+  const configFile = path.resolve(__dirname, '../../../../.redis-test-config.json');
   if (fs.existsSync(configFile)) {
     try {
       const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
       if (config.url) return config.url;
     } catch { /* fall through */ }
   }
-  return process.env.REDIS_URL ?? 'redis://localhost:6379';
+  return process.env.REDIS_TEST_URL ?? process.env.REDIS_URL ?? 'redis://localhost:6379';
 }
 
 function createRealStreamsClient(): RedisStreamsClient {

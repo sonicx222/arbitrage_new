@@ -60,10 +60,86 @@ function createMockChainInstance(chainId: string, shouldFail = false): MockChain
 // Mocks
 // =============================================================================
 
-// Mock @arbitrage/core
+// Mock @arbitrage/core sub-entry points (NOT covered by jest.mock('@arbitrage/core'))
+// The unified-detector imports from sub-entry points like @arbitrage/core/resilience,
+// @arbitrage/core/redis, etc. which are separate module identifiers in Jest's module system.
+
+jest.mock('@arbitrage/core/resilience', () => ({
+  getGracefulDegradationManager: jest.fn().mockImplementation(() => ({
+    registerCapabilities: jest.fn(),
+    triggerDegradation: jest.fn(),
+  })),
+  GracefulDegradationManager: jest.fn(),
+  DegradationLevel: { NONE: 'none', PARTIAL: 'partial', FULL: 'full' },
+  getErrorMessage: jest.fn().mockImplementation((e: unknown) => e instanceof Error ? e.message : String(e)),
+}));
+
+jest.mock('@arbitrage/core/redis', () => ({
+  getRedisClient: jest.fn().mockResolvedValue({
+    disconnect: jest.fn().mockResolvedValue(undefined),
+  }),
+  getRedisStreamsClient: jest.fn().mockResolvedValue({
+    xadd: jest.fn().mockResolvedValue('stream-id'),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+  }),
+  RedisClient: jest.fn(),
+  RedisStreamsClient: jest.fn(),
+  DistributedLockManager: jest.fn(),
+  StreamBatcher: jest.fn(),
+}));
+
+jest.mock('@arbitrage/core/monitoring', () => ({
+  CrossRegionHealthManager: jest.fn(),
+  getCrossRegionHealthManager: jest.fn().mockImplementation(() => ({
+    start: jest.fn().mockResolvedValue(undefined),
+    stop: jest.fn().mockResolvedValue(undefined),
+    on: jest.fn(),
+    removeAllListeners: jest.fn(),
+  })),
+  FailoverEvent: {},
+}));
+
+jest.mock('@arbitrage/core/service-lifecycle', () => {
+  const actual = jest.requireActual('@arbitrage/core/service-lifecycle');
+  return {
+    ...actual,
+    createServiceState: jest.fn().mockImplementation(() => ({
+      executeStart: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
+        try { await fn(); return { success: true }; }
+        catch (error) { return { success: false, error }; }
+      }),
+      executeStop: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
+        try { await fn(); return { success: true }; }
+        catch (error) { return { success: false, error }; }
+      }),
+      isRunning: jest.fn().mockReturnValue(true),
+      getState: jest.fn().mockReturnValue('running'),
+      transitionTo: jest.fn().mockResolvedValue({ success: true }),
+    })),
+  };
+});
+
+jest.mock('@arbitrage/core/async', () => ({
+  stopAndNullify: jest.fn().mockImplementation(async (obj: any) => {
+    if (obj && typeof obj.stop === 'function') {
+      await obj.stop();
+    }
+  }),
+  clearIntervalSafe: jest.fn().mockImplementation((interval: any) => {
+    if (interval) clearInterval(interval);
+    return null;
+  }),
+}));
+
+jest.mock('@arbitrage/core/partition', () => ({
+  PartitionDetectorInterface: jest.fn(),
+  parsePort: jest.fn().mockReturnValue(3001),
+}));
+
+// Mock @arbitrage/core (barrel export)
 // FIX: Create mock state manager factory that returns fresh mocks each time
 const createMockStateManager = () => ({
-  executeStart: jest.fn().mockImplementation(async (fn) => {
+  executeStart: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
     try {
       await fn();
       return { success: true };
@@ -71,7 +147,7 @@ const createMockStateManager = () => ({
       return { success: false, error };
     }
   }),
-  executeStop: jest.fn().mockImplementation(async (fn) => {
+  executeStop: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
     try {
       await fn();
       return { success: true };
@@ -181,7 +257,85 @@ describe('UnifiedChainDetector', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
+    jest.useFakeTimers({ legacyFakeTimers: true });
+
+    // FIX: Restore sub-entry point mock implementations after resetAllMocks()
+    // The global afterEach in setupTests.ts calls jest.resetAllMocks() which removes
+    // all mock implementations. We must re-apply them here.
+    const resilience = jest.requireMock('@arbitrage/core/resilience');
+    resilience.getGracefulDegradationManager.mockImplementation(() => ({
+      registerCapabilities: jest.fn(),
+      triggerDegradation: jest.fn(),
+    }));
+    if (resilience.getErrorMessage) {
+      resilience.getErrorMessage.mockImplementation((e: unknown) => e instanceof Error ? e.message : String(e));
+    }
+
+    const redis = jest.requireMock('@arbitrage/core/redis');
+    redis.getRedisClient.mockResolvedValue({
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    });
+    redis.getRedisStreamsClient.mockResolvedValue({
+      xadd: jest.fn().mockResolvedValue('stream-id'),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const monitoring = jest.requireMock('@arbitrage/core/monitoring');
+    monitoring.getCrossRegionHealthManager.mockImplementation(() => ({
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      on: jest.fn(),
+      removeAllListeners: jest.fn(),
+    }));
+
+    const serviceLifecycle = jest.requireMock('@arbitrage/core/service-lifecycle');
+    serviceLifecycle.createServiceState.mockImplementation(() => ({
+      executeStart: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
+        try { await fn(); return { success: true }; }
+        catch (error) { return { success: false, error }; }
+      }),
+      executeStop: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
+        try { await fn(); return { success: true }; }
+        catch (error) { return { success: false, error }; }
+      }),
+      isRunning: jest.fn().mockReturnValue(true),
+      getState: jest.fn().mockReturnValue('running'),
+      transitionTo: jest.fn().mockResolvedValue({ success: true }),
+    }));
+
+    const asyncMock = jest.requireMock('@arbitrage/core/async');
+    asyncMock.stopAndNullify.mockImplementation(async (obj: any) => {
+      if (obj && typeof obj.stop === 'function') {
+        await obj.stop();
+      }
+    });
+    asyncMock.clearIntervalSafe.mockImplementation((interval: any) => {
+      if (interval) clearInterval(interval);
+      return null;
+    });
+
+    const core = jest.requireMock('@arbitrage/core');
+    core.createLogger.mockReturnValue({
+      info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(),
+    });
+    core.getPerformanceLogger.mockReturnValue({
+      logHealthCheck: jest.fn(),
+    });
+
+    const configMock = jest.requireMock('@arbitrage/config');
+    configMock.getPartitionFromEnv.mockImplementation(() => ({
+      partitionId: 'test-partition',
+      chains: ['ethereum', 'polygon'],
+      region: 'us-east1',
+      healthCheckIntervalMs: 30000,
+    }));
+    configMock.getChainsFromEnv.mockImplementation(() => ['ethereum', 'polygon']);
+    configMock.getPartition.mockImplementation((partitionId: string) => ({
+      partitionId,
+      chains: ['ethereum', 'polygon'],
+      region: 'us-east1',
+      healthCheckIntervalMs: 30000,
+    }));
 
     logger = new RecordingLogger();
 

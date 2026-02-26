@@ -74,14 +74,14 @@ const RETRY_GAS_BUMP_PERCENT = 10;
  * Allows dependency injection for better testability
  */
 export interface ContractFactory {
-  createContract(address: string, abi: any, signerOrProvider: any): any;
+  createContract(address: string, abi: ethers.InterfaceAbi, signerOrProvider: ethers.Signer | ethers.Provider): ethers.Contract;
 }
 
 /**
  * Default contract factory implementation using ethers.Contract
  */
 export const defaultContractFactory: ContractFactory = {
-  createContract: (address: string, abi: any, signerOrProvider: any) => {
+  createContract: (address: string, abi: ethers.InterfaceAbi, signerOrProvider: ethers.Signer | ethers.Provider) => {
     return new ethers.Contract(address, abi, signerOrProvider);
   }
 };
@@ -759,7 +759,7 @@ export class CommitRevealService {
                 ...parsed.params,
                 amountIn: BigInt(parsed.params.amountIn),
                 minProfit: BigInt(parsed.params.minProfit),
-                swapPath: parsed.params.swapPath.map((step: any) => ({
+                swapPath: parsed.params.swapPath.map((step: { router: string; tokenIn: string; tokenOut: string; amountOutMin: string }) => ({
                   ...step,
                   amountOutMin: BigInt(step.amountOutMin)
                 }))
@@ -784,7 +784,7 @@ export class CommitRevealService {
           ...parsed.params,
           amountIn: BigInt(parsed.params.amountIn),
           minProfit: BigInt(parsed.params.minProfit),
-          swapPath: parsed.params.swapPath.map((step: any) => ({
+          swapPath: parsed.params.swapPath.map((step: { router: string; tokenIn: string; tokenOut: string; amountOutMin: string }) => ({
             ...step,
             amountOutMin: BigInt(step.amountOutMin)
           }))

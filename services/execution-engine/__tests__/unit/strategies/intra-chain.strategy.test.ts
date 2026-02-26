@@ -45,6 +45,7 @@ const createMockSimulationService = (
     gasUsed: BigInt(200000),
   } as SimulationResult),
   shouldSimulate: jest.fn().mockReturnValue(true),
+  getSimulationTier: jest.fn().mockReturnValue('full' as const) as any,
   getAggregatedMetrics: jest.fn().mockReturnValue({
     totalSimulations: 0,
     successfulSimulations: 0,
@@ -176,49 +177,50 @@ describe('IntraChainStrategy - Simulation Integration', () => {
     mockStrategyMethods(strategy);
   });
 
-  describe('shouldSimulate decision', () => {
-    it('should call simulation service shouldSimulate method', async () => {
+  describe('simulation tier decision', () => {
+    it('should call simulation service getSimulationTier method', async () => {
       const mockSimService = createMockSimulationService();
       const ctx = createMockContext({ simulationService: mockSimService });
       const opportunity = createMockOpportunity({ expectedProfit: 100 });
 
-      // Execute will call shouldSimulate internally
+      // Execute will call getSimulationTier internally
       await strategy.execute(opportunity, ctx);
 
-      expect(mockSimService.shouldSimulate).toHaveBeenCalled();
+      expect(mockSimService.getSimulationTier).toHaveBeenCalled();
     });
 
-    it('should skip simulation for opportunities below threshold', async () => {
+    it('should skip simulation for opportunities below threshold (tier: none)', async () => {
       const mockSimService = createMockSimulationService({
-        shouldSimulate: jest.fn().mockReturnValue(false), // Below $50 threshold
+        getSimulationTier: jest.fn().mockReturnValue('none'), // Below threshold
       });
       const ctx = createMockContext({ simulationService: mockSimService });
       const opportunity = createMockOpportunity({ expectedProfit: 25 }); // $25 - below threshold
 
       const result = await strategy.execute(opportunity, ctx);
 
-      // Should NOT call simulate() when shouldSimulate returns false
+      // Should NOT call simulate() when tier is 'none'
       expect(mockSimService.simulate).not.toHaveBeenCalled();
       // Execution should still proceed
       expect(result.success).toBe(true);
+      expect(ctx.stats.simulationsSkipped).toBe(1);
     });
 
-    it('should perform simulation for high-value opportunities', async () => {
+    it('should perform simulation for high-value opportunities (tier: full)', async () => {
       const mockSimService = createMockSimulationService({
-        shouldSimulate: jest.fn().mockReturnValue(true),
+        getSimulationTier: jest.fn().mockReturnValue('full'),
       });
       const ctx = createMockContext({ simulationService: mockSimService });
       const opportunity = createMockOpportunity({ expectedProfit: 200 }); // $200 - above threshold
 
       await strategy.execute(opportunity, ctx);
 
-      // Should call simulate() when shouldSimulate returns true
+      // Should call simulate() when tier is 'full'
       expect(mockSimService.simulate).toHaveBeenCalled();
     });
 
-    it('should bypass simulation for time-critical opportunities', async () => {
+    it('should use light simulation for time-critical opportunities (tier: light)', async () => {
       const mockSimService = createMockSimulationService({
-        shouldSimulate: jest.fn().mockReturnValue(false), // Time-critical bypass
+        getSimulationTier: jest.fn().mockReturnValue('light'), // Light tier for time-critical
       });
       const ctx = createMockContext({ simulationService: mockSimService });
       // Opportunity is 3 seconds old (stale)
@@ -229,11 +231,13 @@ describe('IntraChainStrategy - Simulation Integration', () => {
 
       await strategy.execute(opportunity, ctx);
 
-      // shouldSimulate should be called with opportunity age
-      expect(mockSimService.shouldSimulate).toHaveBeenCalledWith(
-        expect.any(Number),
+      // getSimulationTier should be called with profit and opportunity age
+      expect(mockSimService.getSimulationTier).toHaveBeenCalledWith(
+        200, // expectedProfit
         expect.any(Number) // opportunityAge
       );
+      // Should still call simulate() but with light tier
+      expect(mockSimService.simulate).toHaveBeenCalled();
     });
   });
 
@@ -402,9 +406,9 @@ describe('IntraChainStrategy - Simulation Integration', () => {
       expect(ctx.stats.simulationsPerformed).toBe(1);
     });
 
-    it('should increment simulationsSkipped when simulation is skipped', async () => {
+    it('should increment simulationsSkipped when simulation is skipped (tier: none)', async () => {
       const mockSimService = createMockSimulationService({
-        shouldSimulate: jest.fn().mockReturnValue(false),
+        getSimulationTier: jest.fn().mockReturnValue('none'),
       });
       const ctx = createMockContext({ simulationService: mockSimService });
       const opportunity = createMockOpportunity();
@@ -556,7 +560,7 @@ describe('IntraChainStrategy - Edge Cases', () => {
 
   it('should pass correct parameters to simulation service', async () => {
     const mockSimService = createMockSimulationService({
-      shouldSimulate: jest.fn().mockReturnValue(true),
+      getSimulationTier: jest.fn().mockReturnValue('full'),
     });
 
     // Create context with arbitrum provider and wallet
@@ -580,8 +584,8 @@ describe('IntraChainStrategy - Edge Cases', () => {
 
     await strategy.execute(opportunity, ctx);
 
-    // Verify shouldSimulate was called with correct params
-    expect(mockSimService.shouldSimulate).toHaveBeenCalledWith(
+    // Verify getSimulationTier was called with correct params
+    expect(mockSimService.getSimulationTier).toHaveBeenCalledWith(
       150, // expectedProfit
       expect.any(Number) // opportunityAge
     );

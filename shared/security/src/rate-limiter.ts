@@ -5,6 +5,7 @@
 // P1-3 FIX: Replace KEYS with SCAN in cleanup()
 
 import crypto from 'crypto';
+import { Request, Response, NextFunction } from 'express';
 import { createLogger } from '@arbitrage/core';
 import { getRedisClient, RedisClient } from '@arbitrage/core/redis';
 
@@ -138,11 +139,11 @@ export class RateLimiter {
       // BUG-007 FIX: Check for individual MULTI command errors. If ZCARD fails,
       // results[2] could be [error, null], and null >= maxRequests evaluates to
       // false, silently allowing all requests (fail-open).
-      const zcardResult = results[2];
+      const zcardResult = results[2] as [Error | null, number];
       if (zcardResult[0]) {
-        throw zcardResult[0] as Error;
+        throw zcardResult[0];
       }
-      const currentCount = zcardResult[1] as number;
+      const currentCount = zcardResult[1];
 
       const remaining = Math.max(0, config.maxRequests - currentCount);
       // BUG-002 FIX: Use > instead of >= because currentCount includes the current
@@ -212,7 +213,7 @@ export class RateLimiter {
 
   // Middleware for Express
   middleware(config?: Partial<RateLimitConfig>) {
-    return async (req: any, res: any, next: any) => {
+    return async (req: Request & { user?: { id: string }; rateLimit?: RateLimitInfo }, res: Response, next: NextFunction) => {
       try {
         const identifier = this.getIdentifier(req);
         const finalConfig = { ...this.config, ...config };
@@ -260,7 +261,7 @@ export class RateLimiter {
   }
 
   // Different identifier strategies
-  private getIdentifier(req: any): string {
+  private getIdentifier(req: Request & { user?: { id: string }; ip?: string; connection?: { remoteAddress?: string }; socket?: { remoteAddress?: string }; headers: { 'x-api-key'?: string } }): string {
     // Primary: API key from header
     // S-NEW-1 FIX: Hash API key with SHA-256 to avoid exposing plaintext keys in Redis.
     // Anyone with Redis access could previously read raw API keys from rate-limit keys.
@@ -302,8 +303,8 @@ export class RateLimiter {
         throw new Error('Redis transaction aborted');
       }
 
-      const currentCount = results[1][1];
-      const oldestRequest = results[2][1];
+      const currentCount = (results[1] as [Error | null, number])[1];
+      const oldestRequest = (results[2] as [Error | null, string[]])[1];
 
       const resetTime = oldestRequest.length > 0
         ? parseInt(oldestRequest[1]) + this.config.windowMs

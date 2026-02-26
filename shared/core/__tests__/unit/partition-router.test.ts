@@ -190,9 +190,10 @@ describe('PartitionRouter', () => {
   });
 
   describe('getRoutableChains', () => {
-    it('should return all 11 chains', () => {
+    it('should return all 15 chains', () => {
       const chains = PartitionRouter.getRoutableChains();
-      expect(chains).toHaveLength(11);
+      // 15 chains total: 11 original (bsc, polygon, avalanche, fantom, arbitrum, optimism, base, ethereum, zksync, linea, solana) + 4 emerging L2s (blast, scroll, mantle, mode)
+      expect(chains).toHaveLength(15);
     });
 
     it('should include key chains', () => {

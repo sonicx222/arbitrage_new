@@ -24,7 +24,7 @@ import {
   PARTITION_PORTS,
   SERVICE_PORTS,
   PARTITION_SERVICE_NAMES
-} from '../../../core/src/partition-router';
+} from '../../../core/src/partition/router';
 
 describe('Configuration Consistency - Service Ports', () => {
   describe('JSON config structure', () => {

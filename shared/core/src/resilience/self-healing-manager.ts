@@ -119,7 +119,7 @@ export class SelfHealingManager {
   private async dualPublish(
     streamName: string,
     pubsubChannel: string,
-    message: Record<string, any>
+    message: Record<string, unknown>
   ): Promise<void> {
     const redis = await this.redis;
     await dualPublishUtil(this.streamsClient, redis, streamName, pubsubChannel, message);
@@ -568,7 +568,7 @@ export class SelfHealingManager {
       // Update Redis with health status
       await this.updateHealthInRedis(serviceName, health);
 
-    } catch (error: any) {
+    } catch (error) {
       // P2-FIX: Atomic error state update
       // P3-2 FIX: Add default values for optional fields
       const newFailureCount = (health.consecutiveFailures ?? 0) + 1;
@@ -579,11 +579,12 @@ export class SelfHealingManager {
           error: 'Health check circuit breaker open'
         });
       } else {
+        const errorMsg = error instanceof Error ? error.message : String(error);
         logger.error(`Health check failed for ${serviceName}`, { error });
         Object.assign(health, {
           status: 'unhealthy' as const,
           consecutiveFailures: newFailureCount,
-          error: error.message
+          error: errorMsg
         });
       }
     } finally {
@@ -696,15 +697,17 @@ export class SelfHealingManager {
     });
   }
 
-  private handleHealthUpdate(update: any): void {
+  private handleHealthUpdate(update: unknown): void {
     // P1-12 FIX: Validate health update payload from Redis Pub/Sub
     if (!update || typeof update !== 'object') {
       logger.warn('Invalid health update: not an object', { update });
       return;
     }
 
+    const updateObj = update as Record<string, unknown>;
+
     // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
-    const serviceName = update?.name ?? update?.service;
+    const serviceName = updateObj.name ?? updateObj.service;
     if (!serviceName || typeof serviceName !== 'string') {
       logger.warn('Invalid health update: missing service name', { update });
       return;
@@ -717,10 +720,10 @@ export class SelfHealingManager {
 
     // P1-12 FIX: Only apply known/safe fields to prevent prototype pollution
     const allowedFields = ['status', 'lastHeartbeat', 'consecutiveFailures', 'restartCount', 'uptime', 'memoryUsage', 'cpuUsage', 'error'];
-    const sanitized: Record<string, any> = {};
+    const sanitized: Record<string, unknown> = {};
     for (const field of allowedFields) {
-      if (field in update) {
-        sanitized[field] = update[field];
+      if (field in updateObj) {
+        sanitized[field] = updateObj[field];
       }
     }
     Object.assign(existingHealth, sanitized);

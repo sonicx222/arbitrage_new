@@ -16,6 +16,9 @@ const mockCreateLogger = jest.fn();
 
 jest.mock('@arbitrage/core', () => ({
   createLogger: mockCreateLogger,
+}));
+
+jest.mock('@arbitrage/core/partition', () => ({
   exitWithConfigError: mockExitWithConfigError,
 }));
 

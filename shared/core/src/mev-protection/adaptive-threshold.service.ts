@@ -15,6 +15,7 @@
  * @module mev-protection/adaptive-threshold-service
  */
 
+import { Redis } from 'ioredis';
 import { createLogger } from '../logger';
 import { getRedisClient } from '../redis/client';
 
@@ -137,7 +138,7 @@ export const ADAPTIVE_THRESHOLD_DEFAULTS: AdaptiveThresholdConfig = {
  */
 export class AdaptiveThresholdService {
   private readonly config: AdaptiveThresholdConfig;
-  private readonly redis: Promise<any>;
+  private readonly redis: Promise<Redis>;
 
   // Redis key prefixes
   private readonly EVENTS_KEY = 'adaptive:sandwich_attacks';
@@ -148,7 +149,8 @@ export class AdaptiveThresholdService {
       ...ADAPTIVE_THRESHOLD_DEFAULTS,
       ...config,
     };
-    this.redis = getRedisClient();
+    // Access the underlying Redis client for advanced operations (zpopmin, scanStream, etc.)
+    this.redis = getRedisClient().then(client => (client as unknown as { client: Redis }).client);
   }
 
   /**
@@ -180,7 +182,7 @@ export class AdaptiveThresholdService {
 
       // Prune old events (beyond retention window)
       const cutoff = now - this.config.retentionMs;
-      await redis.zremrangebyscore(this.EVENTS_KEY, '-inf', cutoff);
+      await redis.zremrangebyscore(this.EVENTS_KEY, '-inf', cutoff.toString());
 
       // Prune by count (FIFO if over max)
       const count = await redis.zcard(this.EVENTS_KEY);
@@ -339,8 +341,8 @@ export class AdaptiveThresholdService {
       // Get all events in active window
       const events = await redis.zrangebyscore(
         this.EVENTS_KEY,
-        windowStart,
-        now,
+        windowStart.toString(),
+        now.toString(),
         'WITHSCORES'
       );
 
@@ -388,7 +390,7 @@ export class AdaptiveThresholdService {
       // Store adjustment with TTL
       const key = `${this.ADJUSTMENTS_KEY}:${chain}:${dex}`;
       const ttlSeconds = Math.ceil(this.config.activeWindowMs / 1000) + 3600; // +1h buffer
-      await redis.set(key, JSON.stringify(adjustment), 'EX', ttlSeconds);
+      await redis.setex(key, ttlSeconds, JSON.stringify(adjustment));
     } catch (error) {
       logger.error('Failed to update threshold adjustment', { error, chain, dex });
       // Don't throw - this is a best-effort update

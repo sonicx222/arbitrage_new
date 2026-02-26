@@ -12,6 +12,7 @@ import {
   parseBalancerTokensRegisteredEvent,
   BALANCER_TOKENS_REGISTERED_SIGNATURE,
 } from '../../../../src/factory-subscription/parsers/balancer-v2-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -192,15 +193,15 @@ describe('parseBalancerPoolRegisteredEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseBalancerPoolRegisteredEvent(null)).toBeNull();
+      expect(parseBalancerPoolRegisteredEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseBalancerPoolRegisteredEvent(undefined)).toBeNull();
+      expect(parseBalancerPoolRegisteredEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseBalancerPoolRegisteredEvent({})).toBeNull();
+      expect(parseBalancerPoolRegisteredEvent({} as RawEventLog)).toBeNull();
     });
   });
 });
@@ -264,15 +265,15 @@ describe('parseBalancerTokensRegisteredEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseBalancerTokensRegisteredEvent(null)).toBeNull();
+      expect(parseBalancerTokensRegisteredEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseBalancerTokensRegisteredEvent(undefined)).toBeNull();
+      expect(parseBalancerTokensRegisteredEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseBalancerTokensRegisteredEvent({})).toBeNull();
+      expect(parseBalancerTokensRegisteredEvent({} as RawEventLog)).toBeNull();
     });
   });
 

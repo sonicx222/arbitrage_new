@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import Redis from 'ioredis';
 import { createTestRedisClient, delay } from '@arbitrage/test-utils';
 import { CircuitBreaker, CircuitState, CircuitBreakerError } from '@arbitrage/core/resilience';
-import { resetCircuitBreakerRegistry } from '@arbitrage/core/circuit-breaker';
+import { resetCircuitBreakerRegistry } from '@arbitrage/core/resilience/circuit-breaker';
 
 // Short timeouts for fast tests
 const BREAKER_CONFIG = {

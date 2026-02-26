@@ -412,6 +412,12 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
   // Arbitrum: 9 factories
   arbitrum: [
     {
+      address: '0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9',
+      dexName: 'uniswap_v2',
+      type: 'uniswap_v2',
+      chain: 'arbitrum',
+    },
+    {
       address: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
       dexName: 'uniswap_v3',
       type: 'uniswap_v3',
@@ -529,6 +535,13 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
   // Base: 7 factories
   base: [
     {
+      address: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+      dexName: 'pancakeswap_v3',
+      type: 'uniswap_v3',
+      chain: 'base',
+      hasFeeTiers: true,
+    },
+    {
       address: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
       dexName: 'uniswap_v3',
       type: 'uniswap_v3',
@@ -624,6 +637,12 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       address: '0xFbc12984689e5f15626Bad03Ad60160Fe98B303C',
       dexName: 'sushiswap',
       type: 'uniswap_v2',
+      chain: 'optimism',
+    },
+    {
+      address: '0x2db0E83599a91b508Ac268a6197b8B14F5e72840',
+      dexName: 'curve',
+      type: 'curve',
       chain: 'optimism',
     },
   ],
@@ -751,7 +770,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
     },
   ],
 
-  // zkSync Era: 2 factories
+  // zkSync Era: 4 factories
   zksync: [
     {
       address: '0xf2DAd89f2788a8CD54625C60b55cD3d2D0ACa7Cb',
@@ -765,9 +784,22 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       type: 'uniswap_v2',
       chain: 'zksync',
     },
+    {
+      address: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
+      dexName: 'pancakeswap_v3',
+      type: 'uniswap_v3',
+      chain: 'zksync',
+      hasFeeTiers: true,
+    },
+    {
+      address: '0x0700Fb51560CfC8F896B2c812499D17c5B0bF6A7',
+      dexName: 'spacefi',
+      type: 'uniswap_v2',
+      chain: 'zksync',
+    },
   ],
 
-  // Linea: 2 factories
+  // Linea: 3 factories
   linea: [
     {
       address: '0x37BAc764494c8db4e54BDE72f6965beA9fa0AC2d',
@@ -780,6 +812,13 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       dexName: 'velocore',
       type: 'solidly',
       chain: 'linea',
+    },
+    {
+      address: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+      dexName: 'pancakeswap_v3',
+      type: 'uniswap_v3',
+      chain: 'linea',
+      hasFeeTiers: true,
     },
   ],
 };
@@ -1098,8 +1137,8 @@ export function createFactoryTypeChecker(targetType: FactoryType): (chain: strin
  * @returns true if factory matches the target type
  */
 export function isFactoryType(targetType: FactoryType, ref: FactoryReference): boolean;
-export function isFactoryType(targetType: FactoryType, chain: string, address: string): boolean;
-export function isFactoryType(
+export function isFactoryType(targetType: FactoryType, chain: string, address: string): boolean; // eslint-disable-line no-redeclare
+export function isFactoryType( // eslint-disable-line no-redeclare
   targetType: FactoryType,
   chainOrRef: string | FactoryReference,
   address?: string

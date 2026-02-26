@@ -38,7 +38,7 @@ export interface DegradationLevelConfig {
 export interface ServiceCapability {
   name: string;
   required: boolean; // If true, service cannot operate without this
-  fallback?: any;    // Fallback implementation when capability fails
+  fallback?: unknown;    // Fallback implementation when capability fails
   /** S4.1.3-FIX: Use canonical DegradationLevel enum instead of string */
   degradationLevel: DegradationLevel;
 }
@@ -101,7 +101,7 @@ export class GracefulDegradationManager {
   private async dualPublish(
     streamName: string,
     pubsubChannel: string,
-    message: Record<string, any>
+    message: Record<string, unknown>
   ): Promise<void> {
     await this.initPromise;
     const redis = await this.redis;
@@ -261,7 +261,7 @@ export class GracefulDegradationManager {
   }
 
   // Get fallback implementation for a capability
-  getCapabilityFallback(serviceName: string, capabilityName: string): any {
+  getCapabilityFallback(serviceName: string, capabilityName: string): unknown {
     const capabilities = this.serviceCapabilities.get(serviceName);
     if (!capabilities) return null;
 
@@ -558,7 +558,7 @@ export function getGracefulDegradationManager(): GracefulDegradationManager {
 export function resetGracefulDegradationManager(): void {
   if (globalDegradationManager) {
     // Clear all recovery timers to prevent leaks
-    const manager = globalDegradationManager as any;
+    const manager = globalDegradationManager as unknown as { recoveryTimers?: Map<string, NodeJS.Timeout> };
     if (manager.recoveryTimers) {
       for (const timer of manager.recoveryTimers.values()) {
         clearTimeout(timer);
@@ -582,6 +582,6 @@ export function isFeatureEnabled(serviceName: string, featureName: string): bool
   return getGracefulDegradationManager().isFeatureEnabled(serviceName, featureName);
 }
 
-export function getCapabilityFallback(serviceName: string, capabilityName: string): any {
+export function getCapabilityFallback(serviceName: string, capabilityName: string): unknown {
   return getGracefulDegradationManager().getCapabilityFallback(serviceName, capabilityName);
 }

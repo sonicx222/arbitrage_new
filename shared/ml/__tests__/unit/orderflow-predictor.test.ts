@@ -97,6 +97,11 @@ jest.mock('@arbitrage/core', () => {
   };
 });
 
+// Mock the sub-entry point that the source actually imports from
+jest.mock('@arbitrage/core/analytics', () => ({
+  getWhaleActivityTracker: jest.fn(),
+}));
+
 // Import after mocking
 import {
   OrderflowPredictor,
@@ -106,7 +111,7 @@ import {
 
 // Get the mocked module and set up whale tracker implementation
 import { getWhaleActivityTracker } from '@arbitrage/core/analytics';
-const mockedGetWhaleActivityTracker = jest.mocked(getWhaleActivityTracker);
+const mockedGetWhaleActivityTracker = getWhaleActivityTracker as jest.Mock;
 mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
 import type {
   OrderflowPrediction,

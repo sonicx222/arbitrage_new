@@ -28,7 +28,6 @@ import {
   CircuitBreakerRegistry,
   CircuitBreakerConfig,
 } from '@arbitrage/core/resilience';
-import { resetCircuitBreakerRegistry } from '@arbitrage/core/circuit-breaker';
 
 // Test configuration with short timeouts for fast tests
 const TEST_CONFIG: Omit<CircuitBreakerConfig, 'name'> = {
@@ -58,7 +57,7 @@ describe('[Integration] Circuit Breaker State Machine', () => {
 
   beforeEach(() => {
     // Reset global registry before each test
-    resetCircuitBreakerRegistry();
+    // Note: resetCircuitBreakerRegistry is not exported, but we can create a fresh registry
     registry = new CircuitBreakerRegistry();
   });
 

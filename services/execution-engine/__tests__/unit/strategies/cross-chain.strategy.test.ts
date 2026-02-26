@@ -49,6 +49,7 @@ const createMockSimulationService = (
     gasUsed: BigInt(200000),
   } as SimulationResult),
   shouldSimulate: jest.fn().mockReturnValue(true),
+  getSimulationTier: jest.fn().mockReturnValue('full' as const) as any,
   getAggregatedMetrics: jest.fn().mockReturnValue({
     totalSimulations: 0,
     successfulSimulations: 0,

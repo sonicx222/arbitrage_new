@@ -65,7 +65,7 @@ import {
 function createMockRequest(options: {
   headers?: Record<string, string>;
   user?: any;
-} = {}) {
+} = {}): any {
   return {
     headers: options.headers || {},
     user: options.user,

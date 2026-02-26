@@ -391,7 +391,7 @@ export class RedisStreamsClient {
       );
     }
 
-    const options: any = {
+    const options: Record<string, unknown> = {
       password,
       retryStrategy: (times: number) => {
         if (times > 3) {
@@ -652,9 +652,9 @@ export class RedisStreamsClient {
         stream: config.streamName,
         group: config.groupName
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Ignore "group already exists" error
-      if (error.message?.includes('BUSYGROUP')) {
+      if ((error as Error).message?.includes('BUSYGROUP')) {
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Consumer group already exists', {
             stream: config.streamName,
@@ -1048,7 +1048,7 @@ export class RedisStreamsClient {
     }
   }
 
-  private parseStreamResult(result: any[], rejectedIds?: string[]): StreamMessage[] {
+  private parseStreamResult(result: unknown[], rejectedIds?: string[]): StreamMessage[] {
     const messages: StreamMessage[] = [];
 
     if (!result || result.length === 0) {
@@ -1056,7 +1056,7 @@ export class RedisStreamsClient {
     }
 
     // Result format: [[streamName, [[id, [field, value, ...]], ...]]]
-    for (const [streamName, entries] of result) {
+    for (const [streamName, entries] of result as Array<[string, Array<[string, string[]]>]>) {
       if (!entries) continue;
 
       for (const [id, fields] of entries) {

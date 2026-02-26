@@ -18,7 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { WorkerTestHarness } from '@arbitrage/test-utils';
-import { PriceMatrix } from '../../src/price-matrix';
+import { PriceMatrix } from '../../src/caching/price-matrix';
 
 describe('Worker PriceMatrix Integration (Task #44)', () => {
   let harness: WorkerTestHarness;

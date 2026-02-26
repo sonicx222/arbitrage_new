@@ -17,32 +17,12 @@
  */
 
 import Redis from 'ioredis';
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   createTestRedisClient,
   ensureConsumerGroup,
+  getTestRedisUrl,
 } from '@arbitrage/test-utils';
 import { RedisStreamsClient } from '@arbitrage/core/redis';
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-/**
- * Get Redis URL from the config file written by jest.globalSetup.ts.
- * This is the same resolution strategy used by createTestRedisClient.
- */
-function getTestRedisUrl(): string {
-  const configFile = path.resolve(__dirname, '../../../../.redis-test-config.json');
-  if (fs.existsSync(configFile)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-      if (config.url) return config.url;
-    } catch { /* fall through */ }
-  }
-  return process.env.REDIS_URL || 'redis://localhost:6379';
-}
 
 // =============================================================================
 // Test Suite

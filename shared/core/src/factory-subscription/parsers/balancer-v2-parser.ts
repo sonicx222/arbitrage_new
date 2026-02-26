@@ -9,7 +9,7 @@
  * @module factory-subscription/parsers/balancer-v2-parser
  */
 
-import { PairCreatedEvent } from './types';
+import { PairCreatedEvent, type RawEventLog } from './types';
 import {
   extractAddressFromTopic,
   extractUint256FromDataWord,
@@ -43,7 +43,7 @@ export const BALANCER_TOKENS_REGISTERED_SIGNATURE = '0xf5847d3f2197b16cdcd2098ec
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseBalancerPoolRegisteredEvent(log: any): PairCreatedEvent | null {
+export function parseBalancerPoolRegisteredEvent(log: RawEventLog): PairCreatedEvent | null {
   try {
     // Validate: need 3 topics (signature + 2 indexed) and at least 1 word of data
     // Data: 0x prefix (2) + specialization word (64) = 66 minimum
@@ -106,7 +106,7 @@ export interface BalancerTokensRegisteredResult {
  * @param log - The raw log data
  * @returns Partial event data with tokens or null if invalid
  */
-export function parseBalancerTokensRegisteredEvent(log: any): BalancerTokensRegisteredResult | null {
+export function parseBalancerTokensRegisteredEvent(log: RawEventLog): BalancerTokensRegisteredResult | null {
   try {
     // Validate: need 2 topics (signature + poolId indexed)
     if (!log?.topics || log.topics.length < 2 || !log.data) {

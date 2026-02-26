@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { parseTraderJoePairCreatedEvent } from '../../../../src/factory-subscription/parsers/trader-joe-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -146,15 +147,15 @@ describe('parseTraderJoePairCreatedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseTraderJoePairCreatedEvent(null)).toBeNull();
+      expect(parseTraderJoePairCreatedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseTraderJoePairCreatedEvent(undefined)).toBeNull();
+      expect(parseTraderJoePairCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseTraderJoePairCreatedEvent({})).toBeNull();
+      expect(parseTraderJoePairCreatedEvent({} as RawEventLog)).toBeNull();
     });
   });
 

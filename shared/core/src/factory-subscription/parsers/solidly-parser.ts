@@ -8,7 +8,7 @@
  * @module factory-subscription/parsers/solidly-parser
  */
 
-import { PairCreatedEvent } from './types';
+import { PairCreatedEvent, type RawEventLog } from './types';
 import {
   extractAddressFromTopic,
   HEX_PREFIX_LENGTH,
@@ -25,7 +25,7 @@ import {
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseSolidlyPairCreatedEvent(log: any): PairCreatedEvent | null {
+export function parseSolidlyPairCreatedEvent(log: RawEventLog): PairCreatedEvent | null {
   try {
     // Validate: need 3 topics (signature + 2 indexed) and 3 words of data
     // Data: 0x prefix (2) + stable bool (64) + pair address (64) + index (64) = 194 minimum

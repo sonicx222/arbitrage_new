@@ -30,10 +30,17 @@ jest.mock('@arbitrage/core', () => {
   const actual = jest.requireActual<Record<string, unknown>>('@arbitrage/core');
   return {
     ...actual,
+    getNonceManager: jest.fn(),
+  };
+});
+
+jest.mock('@arbitrage/core/redis', () => {
+  const actual = jest.requireActual<Record<string, unknown>>('@arbitrage/core/redis');
+  return {
+    ...actual,
     getRedisClient: jest.fn(),
     getRedisStreamsClient: jest.fn(),
     getDistributedLockManager: jest.fn(),
-    getNonceManager: jest.fn(),
   };
 });
 
@@ -188,15 +195,11 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
     // Re-establish mock implementations (resetMocks: true clears these each test)
     // =========================================================================
 
-    // Helper to bypass strict jest.Mock<UnknownFunction> type inference
-     
-    const mock = (fn: unknown) => fn as jest.Mock<any>;
-
     // Override executeStart to return { success: true } after running the callback.
     // The default mock from createMockExecutionStateManager calls fn() but returns
     // Promise<void> (undefined). engine.ts:612 checks result.success.
-    mock(mockStateManager.executeStart).mockImplementation(
-      async (fn: () => Promise<void>) => { await fn(); return { success: true }; }
+    (mockStateManager.executeStart as jest.Mock as unknown as jest.Mock).mockImplementation(
+      async (fn: any) => { await fn(); return { success: true }; }
     );
 
     // Infrastructure mocks
@@ -205,15 +208,19 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
     const mockLockMgr = { acquireLock: jest.fn(), releaseLock: jest.fn(), disconnect: jest.fn() };
     const mockNonceMgr = { start: jest.fn(), stop: jest.fn(), getNonce: jest.fn() };
 
-    mock(getRedisClient).mockResolvedValue(mockRedis);
-    mock(getRedisStreamsClient).mockResolvedValue(mockStreams);
-    mock(getDistributedLockManager).mockResolvedValue(mockLockMgr);
-    mock(getNonceManager).mockReturnValue(mockNonceMgr);
+    // @ts-expect-error - mock return type inference issue
+    (getRedisClient as unknown as jest.Mock).mockResolvedValue(mockRedis);
+    // @ts-expect-error - mock return type inference issue
+    (getRedisStreamsClient as unknown as jest.Mock).mockResolvedValue(mockStreams);
+    // @ts-expect-error - mock return type inference issue
+    (getDistributedLockManager as unknown as jest.Mock).mockResolvedValue(mockLockMgr);
+    (getNonceManager as unknown as jest.Mock).mockReturnValue(mockNonceMgr);
 
     // Initialization mocks
-    mock(initializeMevProviders).mockResolvedValue({ factory: null, success: true });
-    mock(initializeBridgeRouter).mockReturnValue({ factory: null, success: true });
-    mock(initializeRiskManagement).mockReturnValue({
+    // @ts-expect-error - mock return type inference issue
+    (initializeMevProviders as unknown as jest.Mock).mockResolvedValue({ factory: null, success: true });
+    (initializeBridgeRouter as unknown as jest.Mock).mockReturnValue({ factory: null, success: true });
+    (initializeRiskManagement as unknown as jest.Mock).mockReturnValue({
       drawdownBreaker: null,
       evCalculator: null,
       positionSizer: null,
@@ -224,27 +231,27 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
     });
 
     // Strategy mocks
-    mock(CrossChainStrategy).mockImplementation((...args: unknown[]) => {
+    (CrossChainStrategy as unknown as jest.Mock).mockImplementation(((...args: any[]) => {
       mockCrossChainConstructor(...args);
       return {
         execute: jest.fn(),
         executeSellOnDestination: jest.fn(),
         isDestinationFlashLoanSupported: jest.fn().mockReturnValue(false),
       };
-    });
+    }) as any);
 
-    mock(FlashLoanStrategy).mockImplementation(() => mockFlashLoanStrategyInstance);
-    mock(createFlashLoanProviderFactory).mockReturnValue(mockProviderFactoryInstance);
+    (FlashLoanStrategy as unknown as jest.Mock).mockImplementation((() => mockFlashLoanStrategyInstance) as any);
+    (createFlashLoanProviderFactory as unknown as jest.Mock).mockReturnValue(mockProviderFactoryInstance);
 
-    mock(SimulationStrategy).mockImplementation(() => ({
+    (SimulationStrategy as unknown as jest.Mock).mockImplementation((() => ({
       execute: jest.fn(),
-    }));
+    })) as any);
 
-    mock(IntraChainStrategy).mockImplementation(() => ({
+    (IntraChainStrategy as unknown as jest.Mock).mockImplementation((() => ({
       execute: jest.fn(),
-    }));
+    })) as any);
 
-    mock(createStrategyFactory).mockReturnValue({
+    (createStrategyFactory as unknown as jest.Mock).mockReturnValue({
       registerStrategies: jest.fn(),
       registerFlashLoanStrategy: jest.fn(),
       getRegisteredTypes: jest.fn().mockReturnValue(['simulation', 'intraChain', 'crossChain']),
@@ -252,7 +259,7 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
     });
 
     // Service mocks
-    mock(ProviderServiceImpl).mockImplementation(() => ({
+    (ProviderServiceImpl as unknown as jest.Mock).mockImplementation((() => ({
       initialize: jest.fn(async () => {}),
       initializeWallets: jest.fn(),
       validateConnectivity: jest.fn(async () => {}),
@@ -260,23 +267,23 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
       onProviderReconnect: jest.fn(),
       stop: jest.fn(async () => {}),
       getProviderHealth: jest.fn(() => ({})),
-    }));
+    })) as any);
 
-    mock(QueueServiceImpl).mockImplementation(() => ({
+    (QueueServiceImpl as unknown as jest.Mock).mockImplementation((() => ({
       pause: jest.fn(),
       resume: jest.fn(),
       enqueue: jest.fn(),
       size: jest.fn().mockReturnValue(0),
       stop: jest.fn(),
       onItemAvailable: jest.fn(),
-    }));
+    })) as any);
 
-    mock(createHealthMonitoringManager).mockReturnValue({
+    (createHealthMonitoringManager as unknown as jest.Mock).mockReturnValue({
       start: jest.fn(),
       stop: jest.fn(),
     });
 
-    mock(createCircuitBreakerManager).mockReturnValue({
+    (createCircuitBreakerManager as unknown as jest.Mock).mockReturnValue({
       initialize: jest.fn(),
       getStatus: jest.fn().mockReturnValue({ state: 'CLOSED' }),
       recordSuccess: jest.fn(),
@@ -285,28 +292,28 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
       forceClose: jest.fn(),
     });
 
-    mock(createPendingStateManager).mockReturnValue(null);
-    mock(initializeTxSimulationService).mockReturnValue(null);
+    (createPendingStateManager as unknown as jest.Mock).mockReturnValue(null);
+    (initializeTxSimulationService as unknown as jest.Mock).mockReturnValue(null);
 
-    mock(OpportunityConsumer).mockImplementation(() => ({
+    (OpportunityConsumer as unknown as jest.Mock).mockImplementation((() => ({
       createConsumerGroup: jest.fn(async () => {}),
       start: jest.fn(async () => {}),
       stop: jest.fn(async () => {}),
-    }));
+    })) as any);
 
-    mock(createRiskOrchestrator).mockReturnValue(null);
-    mock(createABTestingFramework).mockReturnValue(null);
-    mock(createSimulationMetricsCollector).mockReturnValue({
+    (createRiskOrchestrator as unknown as jest.Mock).mockReturnValue(null);
+    (createABTestingFramework as unknown as jest.Mock).mockReturnValue(null);
+    (createSimulationMetricsCollector as unknown as jest.Mock).mockReturnValue({
       start: jest.fn(),
       stop: jest.fn(),
       getSnapshot: jest.fn().mockReturnValue(null),
     });
 
-    mock(LockConflictTracker).mockImplementation(() => ({
+    (LockConflictTracker as unknown as jest.Mock).mockImplementation((() => ({
       recordConflict: jest.fn(),
       getConflictCount: jest.fn().mockReturnValue(0),
       reset: jest.fn(),
-    }));
+    })) as any);
   });
 
   afterEach(() => {
@@ -315,7 +322,7 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
   });
 
   function getLogMessages(level: 'info' | 'warn' | 'debug' | 'error'): string[] {
-    return (mockLogger[level] as jest.Mock).mock.calls
+    return (mockLogger[level] as unknown as jest.Mock).mock.calls
       .map((call: unknown[]) => (typeof call[0] === 'string' ? call[0] : ''));
   }
 
@@ -430,7 +437,7 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
     process.env.FLASH_LOAN_CONTRACT_ETHEREUM = '0x1234567890123456789012345678901234567890';
 
     // Make FlashLoanStrategy constructor throw
-    (FlashLoanStrategy as jest.Mock<any>).mockImplementation(() => {
+    (FlashLoanStrategy as unknown as jest.Mock<any> as unknown as jest.Mock).mockImplementation(() => {
       throw new Error('Flash loan init failed');
     });
 

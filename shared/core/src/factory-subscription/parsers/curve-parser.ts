@@ -7,7 +7,7 @@
  * @module factory-subscription/parsers/curve-parser
  */
 
-import { PairCreatedEvent } from './types';
+import { PairCreatedEvent, type RawEventLog } from './types';
 import {
   extractAddressFromDataWord,
   extractUint256FromDataWord,
@@ -43,7 +43,7 @@ export const CURVE_META_POOL_SIGNATURE = '0x01f31cd2abdec67d966a3f6d992026644a57
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseCurvePlainPoolDeployedEvent(log: any): PairCreatedEvent | null {
+export function parseCurvePlainPoolDeployedEvent(log: RawEventLog): PairCreatedEvent | null {
   try {
     // Validate: need 1 topic (signature only, no indexed params) and 8 words of data
     // Data: 0x prefix (2) + 8 * 64 = 514 minimum
@@ -110,7 +110,7 @@ export function parseCurvePlainPoolDeployedEvent(log: any): PairCreatedEvent | n
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseCurveMetaPoolDeployedEvent(log: any): PairCreatedEvent | null {
+export function parseCurveMetaPoolDeployedEvent(log: RawEventLog): PairCreatedEvent | null {
   try {
     // Validate: need 1 topic (signature only, no indexed params) and 6 words of data
     // Data: 0x prefix (2) + 6 * 64 = 386 minimum
@@ -169,7 +169,7 @@ export function parseCurveMetaPoolDeployedEvent(log: any): PairCreatedEvent | nu
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseCurvePoolCreatedEvent(log: any): PairCreatedEvent | null {
+export function parseCurvePoolCreatedEvent(log: RawEventLog): PairCreatedEvent | null {
   if (!log || !log.topics || log.topics.length < 1 || !log.data) {
     return null;
   }

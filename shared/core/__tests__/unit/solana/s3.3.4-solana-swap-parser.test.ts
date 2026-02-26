@@ -26,8 +26,8 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from '@jest/gl
 // =============================================================================
 
 // Import types and constants from the actual implementation to prevent drift
-import type { SolanaTransaction } from '@arbitrage/core/mev-protection';
 import type {
+  SolanaTransaction,
   SolanaInstruction,
   ParsedSolanaSwap,
   SwapParserConfig,

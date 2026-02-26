@@ -160,7 +160,7 @@ describe('CrossChainDetectorService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
+    jest.useFakeTimers({ legacyFakeTimers: false });
 
     // Restore shared mock functions after clearAllMocks
     sharedMockLogger.info = jest.fn();
@@ -220,6 +220,14 @@ describe('CrossChainDetectorService', () => {
   });
 
   afterEach(async () => {
+    // Clean up service if still running
+    try {
+      if (service) {
+        await service.stop();
+      }
+    } catch (e) {
+      // Ignore cleanup errors
+    }
     jest.useRealTimers();
   });
 

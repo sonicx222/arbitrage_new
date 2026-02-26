@@ -7,7 +7,7 @@
  * @module factory-subscription/parsers/v2-pair-parser
  */
 
-import { PairCreatedEvent } from './types';
+import { PairCreatedEvent, type RawEventLog } from './types';
 import {
   extractAddressFromTopic,
   HEX_PREFIX_LENGTH,
@@ -24,7 +24,7 @@ import {
  * @param log - The raw log data
  * @returns Parsed event data or null if invalid
  */
-export function parseV2PairCreatedEvent(log: any): PairCreatedEvent | null {
+export function parseV2PairCreatedEvent(log: RawEventLog): PairCreatedEvent | null {
   try {
     // Validate: need 3 topics (signature + 2 indexed) and at least 1 word of data
     // Data: 0x prefix (2) + pair address word (64) = 66 minimum

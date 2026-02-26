@@ -118,7 +118,7 @@ export interface SolanaTransaction {
   blockTime: number;
   instructions: SolanaInstruction[];
   meta: {
-    err: any;
+    err: unknown;
     fee: number;
     preBalances: number[];
     postBalances: number[];

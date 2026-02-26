@@ -530,13 +530,16 @@ describeIfSAB('SharedMemoryCache', () => {
 
   describe('TTL', () => {
     it('should return value before TTL expires', () => {
+      const setTime = Date.now();
       cache.set('ttl-key', 'temporary', 2); // 2 second TTL
+      // Immediately after set, should still be valid
       expect(cache.get('ttl-key')).toBe('temporary');
     });
 
     it('should return null after TTL expires', () => {
+      const setTime = Date.now();
       cache.set('ttl-key', 'temporary', 2); // 2 second TTL
-      jest.advanceTimersByTime(3000);
+      jest.advanceTimersByTime(2001); // Advance just past 2 seconds
       expect(cache.get('ttl-key')).toBeNull();
     });
 
@@ -626,7 +629,7 @@ describeIfSAB('SharedMemoryCache', () => {
     it('should remove expired entries', () => {
       cache.set('expired', 'old', 1); // 1 second TTL
       cache.set('alive', 'new', 60); // 60 second TTL
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(1001); // Advance just past 1 second
       cache.cleanup();
       expect(cache.has('expired')).toBe(false);
       expect(cache.has('alive')).toBe(true);
@@ -644,7 +647,7 @@ describeIfSAB('SharedMemoryCache', () => {
       cache.set('expired2', 'old2', 1);
       cache.set('alive', 'new');
       expect(cache.size()).toBe(3);
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(1001); // Advance just past 1 second
       cache.cleanup();
       expect(cache.size()).toBe(1);
     });

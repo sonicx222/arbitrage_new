@@ -425,7 +425,7 @@ export interface PendingOpportunity {
 
 export interface MessageEvent {
   type: string;
-  data: any;
+  data: unknown;
   timestamp: number;
   source: string;
   correlationId?: string;

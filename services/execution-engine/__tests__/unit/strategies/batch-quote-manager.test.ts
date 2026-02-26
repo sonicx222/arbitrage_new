@@ -33,8 +33,8 @@ jest.mock('@arbitrage/config', () => ({
   CHAINS: { ethereum: { id: 1 }, bsc: { id: 56 }, arbitrum: { id: 42161 } },
 }));
 
-// Mock @arbitrage/core for getErrorMessage
-jest.mock('@arbitrage/core', () => ({
+// Mock @arbitrage/core/resilience for getErrorMessage
+jest.mock('@arbitrage/core/resilience', () => ({
   getErrorMessage: jest.fn((e: unknown) =>
     e instanceof Error ? e.message : String(e)
   ),

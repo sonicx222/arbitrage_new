@@ -244,7 +244,7 @@ export class SubscriptionManager {
 
     wsManager.on('error', (error) => {
       logger.error('WebSocket error', { error });
-      callbacks.onError(error);
+      callbacks.onError(error instanceof Error ? error : new Error(String(error)));
     });
 
     wsManager.on('disconnected', () => {

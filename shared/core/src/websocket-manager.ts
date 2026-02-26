@@ -88,25 +88,25 @@ export interface WebSocketConfig {
 export interface WebSocketSubscription {
   id: number;
   method: string;
-  params: any[];
+  params: unknown[];
   type?: string; // Optional subscription type (e.g., 'logs', 'newHeads', 'sync')
   topics?: string[]; // Optional topics for log subscriptions
-  callback?: (data: any) => void; // Optional callback for subscription results
+  callback?: (data: unknown) => void; // Optional callback for subscription results
 }
 
 export interface WebSocketMessage {
   jsonrpc?: string;
   id?: number;
   method?: string;
-  params?: any;
-  result?: any;
-  error?: any;
+  params?: unknown;
+  result?: unknown;
+  error?: unknown;
 }
 
 export type WebSocketEventHandler = (data: WebSocketMessage) => void;
 export type ConnectionStateHandler = (connected: boolean) => void;
 export type ErrorEventHandler = (error: Error) => void;
-export type GenericEventHandler = (...args: any[]) => void;
+export type GenericEventHandler = (...args: unknown[]) => void;
 
 export class WebSocketManager {
   /** PERF-001: Maximum handlers per handler set to prevent unbounded listener accumulation */
@@ -748,7 +748,7 @@ export class WebSocketManager {
   /**
    * Emit an event to all registered handlers.
    */
-  private emit(event: string, ...args: any[]): void {
+  private emit(event: string, ...args: unknown[]): void {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
       handlers.forEach(handler => {
@@ -765,7 +765,7 @@ export class WebSocketManager {
     return this.isConnected && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  getConnectionStats(): any {
+  getConnectionStats(): Record<string, unknown> {
     return {
       connected: this.isConnected,
       connecting: this.isConnecting,
@@ -947,7 +947,10 @@ export class WebSocketManager {
       const confirmation = this.pendingConfirmations.get(message.id);
       if (confirmation) {
         if (message.error) {
-          confirmation.reject(new Error(message.error.message || 'Subscription error'));
+          const errorMsg = typeof message.error === 'object' && message.error !== null && 'message' in message.error
+            ? String((message.error as { message: unknown }).message)
+            : 'Subscription error';
+          confirmation.reject(new Error(errorMsg));
         } else {
           confirmation.resolve();
         }
@@ -962,7 +965,10 @@ export class WebSocketManager {
       clearTimeout(pending.timeout);
 
       if (message.error) {
-        pending.reject(new Error(message.error.message || `RPC error: ${JSON.stringify(message.error)}`));
+        const errorMsg = typeof message.error === 'object' && message.error !== null && 'message' in message.error
+          ? String((message.error as { message: unknown }).message)
+          : `RPC error: ${JSON.stringify(message.error)}`;
+        pending.reject(new Error(errorMsg));
       } else {
         pending.resolve(message.result);
       }
@@ -977,21 +983,24 @@ export class WebSocketManager {
     }
 
     // S3.3: Track block numbers from newHeads subscriptions
-    if (message.params?.result?.number) {
-      const blockNumber = parseInt(message.params.result.number, 16);
-      if (!isNaN(blockNumber)) {
-        // CQ8-ALT: Check for data gaps via health tracker
-        const gap = this.healthTracker.checkForDataGap(blockNumber);
-        if (gap) {
-          this.emit('dataGap', {
-            chainId: this.chainId,
-            ...gap,
-            url: this.getCurrentUrl()
-          });
+    if (typeof message.params === 'object' && message.params !== null && 'result' in message.params) {
+      const result = (message.params as { result: unknown }).result;
+      if (typeof result === 'object' && result !== null && 'number' in result) {
+        const blockNumber = parseInt(String((result as { number: unknown }).number), 16);
+        if (!isNaN(blockNumber)) {
+          // CQ8-ALT: Check for data gaps via health tracker
+          const gap = this.healthTracker.checkForDataGap(blockNumber);
+          if (gap) {
+            this.emit('dataGap', {
+              chainId: this.chainId,
+              ...gap,
+              url: this.getCurrentUrl()
+            });
+          }
+          this.healthTracker.qualityMetrics.lastBlockNumber = blockNumber;
+          // Report to health scorer for freshness tracking
+          this.rotationStrategy.getHealthScorer().recordBlock(this.getCurrentUrl(), this.chainId, blockNumber);
         }
-        this.healthTracker.qualityMetrics.lastBlockNumber = blockNumber;
-        // Report to health scorer for freshness tracking
-        this.rotationStrategy.getHealthScorer().recordBlock(this.getCurrentUrl(), this.chainId, blockNumber);
       }
     }
 
@@ -1336,7 +1345,7 @@ export class WebSocketManager {
    * S3.3: Check if an error indicates rate limiting.
    * CQ8-ALT: Delegates to ProviderRotationStrategy.
    */
-  isRateLimitError(error: any): boolean {
+  isRateLimitError(error: unknown): boolean {
     return this.rotationStrategy.isRateLimitError(error);
   }
 

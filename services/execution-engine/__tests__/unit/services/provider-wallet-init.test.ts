@@ -34,6 +34,7 @@ jest.mock('ethers', () => ({
     JsonRpcProvider: MockJsonRpcProvider,
     isAddress: jest.fn().mockReturnValue(true),
     ZeroAddress: '0x0000000000000000000000000000000000000000',
+    AbstractSigner: class AbstractSigner {}, // Needed for KmsSigner
   },
 }));
 
@@ -43,6 +44,12 @@ jest.mock('@arbitrage/config', () => ({
   CHAINS: {
     ethereum: { id: 1, name: 'Ethereum', rpcUrl: 'https://eth.example.com', nativeToken: 'ETH' },
     arbitrum: { id: 42161, name: 'Arbitrum', rpcUrl: 'https://arb.example.com', nativeToken: 'ETH' },
+  },
+  FEATURE_FLAGS: {
+    useKmsSigning: false,
+    useFlashLoanAggregator: false,
+    useCommitReveal: false,
+    useCommitRevealRedis: false,
   },
 }));
 
@@ -54,6 +61,23 @@ jest.mock('@arbitrage/core', () => ({
   BatchProvider: jest.fn(),
   createBatchProvider: jest.fn(),
   clearIntervalSafe: jest.fn().mockReturnValue(null),
+}));
+
+// Mock sub-entry points used by provider.service.ts
+jest.mock('@arbitrage/core/async', () => ({
+  __esModule: true,
+  clearIntervalSafe: jest.fn().mockReturnValue(null),
+}));
+
+jest.mock('@arbitrage/core/resilience', () => ({
+  __esModule: true,
+  getErrorMessage: jest.fn((e: unknown) => (e instanceof Error ? e.message : String(e))),
+}));
+
+jest.mock('@arbitrage/core/rpc', () => ({
+  __esModule: true,
+  BatchProvider: jest.fn(),
+  createBatchProvider: jest.fn(),
 }));
 
 // Mock hd-wallet-manager

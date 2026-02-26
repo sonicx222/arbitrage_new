@@ -57,9 +57,10 @@ describe('S2.2.4 Token Coverage Verification', () => {
       // 15 chains with tokens: original 6 + 5 S3.1.2 chains + 4 emerging L2s
       // S3.2.1: Avalanche expanded to 15, Fantom to 10
       // S3.3.3: Solana expanded to 15 → Total 112
-      // Phase 0 Item 2: Added cbETH, sfrxETH to Ethereum → Total 114
-      // Emerging L2s: Blast 2, Scroll 3, Mantle 3, Mode 2 → Total 124
-      expect(totalTokens).toBe(124);
+      // Phase 0 Item 2: Expanded Ethereum LSTs (eETH, rsETH, pufETH added to existing wstETH, rETH, cbETH, sfrxETH) → Total 117
+      // Emerging L2s: Blast 2, Scroll 3, Mantle 3, Mode 2 → Total 127
+      // Arbitrum: Added rsETH → Total 128
+      expect(totalTokens).toBe(128);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -83,12 +84,12 @@ describe('S2.2.4 Token Coverage Verification', () => {
     // S3.3.3: Expanded Solana to 15
     const expectedCounts: Record<string, number> = {
       // Original 6 chains
-      arbitrum: 12,
+      arbitrum: 13,  // Phase 0 Item 2: +1 (rsETH added)
       bsc: 10,
       base: 10,
       polygon: 10,
       optimism: 10,
-      ethereum: 10,  // Phase 0 Item 2: +2 (cbETH, sfrxETH)
+      ethereum: 13,  // Phase 0 Item 2: Expanded LSTs (wstETH, rETH, cbETH, sfrxETH, eETH, rsETH, pufETH + UNI, LINK = 9 DeFi, total 13)
       // S3.1.2: New chains (S3.2.1: avalanche expanded to 15, fantom to 10, S3.3.3: solana to 15)
       avalanche: 15,
       fantom: 10,

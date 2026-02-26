@@ -25,8 +25,8 @@ jest.mock('../../../src/logger', () => ({
 }));
 
 describe('dualPublish', () => {
-  // Mock Redis Pub/Sub client
-  let mockRedis: { publish: jest.Mock<(...args: any[]) => Promise<any>> };
+  // Mock Redis Pub/Sub client - needs to satisfy RedisClient interface
+  let mockRedis: ReturnType<typeof createInlineRedisMock>;
 
   // Mock Redis Streams client
   let mockStreamsClient: { xadd: jest.Mock<(...args: any[]) => Promise<any>> };
@@ -36,7 +36,7 @@ describe('dualPublish', () => {
   const testMessage = { type: 'test', data: { foo: 'bar' }, timestamp: Date.now() };
 
   beforeEach(() => {
-    mockRedis = createInlineRedisMock() as any;
+    mockRedis = createInlineRedisMock();
 
     mockStreamsClient = {
       xadd: jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue('1234567890-0'),
@@ -51,7 +51,7 @@ describe('dualPublish', () => {
     it('should return a Promise', () => {
       const result = dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -64,7 +64,7 @@ describe('dualPublish', () => {
       await expect(
         dualPublish(
           mockStreamsClient as unknown as RedisStreamsClient,
-          mockRedis,
+          mockRedis as any,
           testStreamName,
           testPubsubChannel,
           testMessage
@@ -77,7 +77,7 @@ describe('dualPublish', () => {
     it('should publish to Redis Streams when streams client is available', async () => {
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -90,7 +90,7 @@ describe('dualPublish', () => {
     it('should publish to Pub/Sub channel', async () => {
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -103,7 +103,7 @@ describe('dualPublish', () => {
     it('should publish to both targets when both clients are available', async () => {
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -119,7 +119,7 @@ describe('dualPublish', () => {
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         customStream,
         customChannel,
         testMessage
@@ -136,7 +136,7 @@ describe('dualPublish', () => {
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -153,7 +153,7 @@ describe('dualPublish', () => {
       await expect(
         dualPublish(
           mockStreamsClient as unknown as RedisStreamsClient,
-          mockRedis,
+          mockRedis as any,
           testStreamName,
           testPubsubChannel,
           testMessage
@@ -166,7 +166,7 @@ describe('dualPublish', () => {
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -183,7 +183,7 @@ describe('dualPublish', () => {
       await expect(
         dualPublish(
           mockStreamsClient as unknown as RedisStreamsClient,
-          mockRedis,
+          mockRedis as any,
           testStreamName,
           testPubsubChannel,
           testMessage
@@ -200,7 +200,7 @@ describe('dualPublish', () => {
       await expect(
         dualPublish(
           mockStreamsClient as unknown as RedisStreamsClient,
-          mockRedis,
+          mockRedis as any,
           testStreamName,
           testPubsubChannel,
           testMessage
@@ -214,7 +214,7 @@ describe('dualPublish', () => {
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -229,7 +229,7 @@ describe('dualPublish', () => {
     it('should skip Streams publish when streams client is null', async () => {
       await dualPublish(
         null,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         testMessage
@@ -241,7 +241,7 @@ describe('dualPublish', () => {
 
     it('should not throw when streams client is null and Pub/Sub succeeds', async () => {
       await expect(
-        dualPublish(null, mockRedis, testStreamName, testPubsubChannel, testMessage)
+        dualPublish(null, mockRedis as any, testStreamName, testPubsubChannel, testMessage)
       ).resolves.toBeUndefined();
     });
 
@@ -249,7 +249,7 @@ describe('dualPublish', () => {
       mockRedis.publish.mockRejectedValueOnce(new Error('Pub/Sub unavailable'));
 
       await expect(
-        dualPublish(null, mockRedis, testStreamName, testPubsubChannel, testMessage)
+        dualPublish(null, mockRedis as any, testStreamName, testPubsubChannel, testMessage)
       ).resolves.toBeUndefined();
     });
   });
@@ -269,7 +269,7 @@ describe('dualPublish', () => {
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         complexMessage
@@ -284,7 +284,7 @@ describe('dualPublish', () => {
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
-        mockRedis,
+        mockRedis as any,
         testStreamName,
         testPubsubChannel,
         emptyMessage

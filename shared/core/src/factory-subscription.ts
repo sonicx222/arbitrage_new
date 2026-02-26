@@ -35,7 +35,7 @@ import { AsyncMutex } from './async/async-mutex';
 // =============================================================================
 
 // Re-export types
-export { PairCreatedEvent, RawEventLog } from './factory-subscription/parsers/types';
+export { PairCreatedEvent, type RawEventLog } from './factory-subscription/parsers/types';
 
 // Re-export all parsers for backward compatibility
 export {
@@ -57,6 +57,7 @@ export {
 // Import parsers for internal use
 import {
   PairCreatedEvent,
+  type RawEventLog,
   parseV2PairCreatedEvent,
   parseV3PoolCreatedEvent,
   parseSolidlyPairCreatedEvent,
@@ -121,10 +122,10 @@ export type FactorySubscriptionLogger = ServiceLogger;
 export interface FactoryWebSocketManager {
   subscribe: (params: {
     method: string;
-    params: any[];
+    params: unknown[];
     type?: string;      // Optional: subscription type for categorization
     topics?: string[];  // Optional: event topics for filtering
-    callback?: (data: any) => void;  // Optional: per-subscription callback
+    callback?: (data: unknown) => void;  // Optional: per-subscription callback
   }) => number | void;
   unsubscribe?: (subscriptionId: string) => void;  // Only string for compatibility
   isConnected(): boolean;  // Method signature (not private access)
@@ -473,7 +474,7 @@ export class FactorySubscriptionService {
    * 1. PoolRegistered event → stored in pending map (no tokens)
    * 2. TokensRegistered event → merged with pending pool → emit complete event
    */
-  handleFactoryEvent(log: any): void {
+  handleFactoryEvent(log: RawEventLog): void {
     if (!this.subscribed) {
       return;
     }
@@ -560,7 +561,7 @@ export class FactorySubscriptionService {
    * P1-1 FIX: Handle Balancer TokensRegistered event.
    * Merges token addresses with pending pool and emits complete event.
    */
-  private handleBalancerTokensRegistered(log: any): void {
+  private handleBalancerTokensRegistered(log: RawEventLog): void {
     const tokenData = parseBalancerTokensRegisteredEvent(log);
     if (!tokenData || tokenData.tokens.length < 2) {
       this.logger.debug('Invalid TokensRegistered event', { log: log?.address });
@@ -624,7 +625,7 @@ export class FactorySubscriptionService {
    * Parse a factory event based on factory type.
    * Uses exhaustive switch to ensure all factory types are handled.
    */
-  private parseFactoryEvent(log: any, factory: FactoryConfig): PairCreatedEvent | null {
+  private parseFactoryEvent(log: RawEventLog, factory: FactoryConfig): PairCreatedEvent | null {
     const factoryType: FactoryType = factory.type;
 
     switch (factoryType) {

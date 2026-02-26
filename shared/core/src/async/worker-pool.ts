@@ -46,7 +46,7 @@ async function resolveWorkerScriptPath(): Promise<string> {
 export interface Task {
   id: string;
   type: string;
-  data: any;
+  data: unknown;
   priority: number;
   timeout?: number;
 }
@@ -54,7 +54,7 @@ export interface Task {
 export interface TaskResult {
   taskId: string;
   success: boolean;
-  result?: any;
+  result?: unknown;
   error?: string;
   processingTime: number;
 }
@@ -438,7 +438,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
         this.activeTasks.delete(task.id);
         // P1-FIX: Mark task as cancelled so dispatch loop skips it in the priority queue
         this.cancelledTaskIds.add(task.id);
-        reject(new Error(`Task ${task.id} timed out after ${this.taskTimeout}ms`) as any);
+        reject(new Error(`Task ${task.id} timed out after ${this.taskTimeout}ms`));
       }, this.taskTimeout);
 
       this.activeTasks.set(task.id, {
@@ -610,7 +610,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     this.emit('taskAssigned', { workerId, task });
   }
 
-  private handleWorkerMessage(message: any, workerId: number): void {
+  private handleWorkerMessage(message: { taskId: string; success: boolean; result?: unknown; error?: string; processingTime: number }, workerId: number): void {
     const { taskId, success, result, error, processingTime } = message;
 
     // Update worker stats
@@ -647,7 +647,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
       if (success) {
         taskPromise.resolve(taskResult);
       } else {
-        taskPromise.reject(new Error(error || 'Task failed') as any);
+        taskPromise.reject(new Error(error ?? 'Task failed'));
       }
 
       this.emit('taskCompleted', { workerId, taskResult });
@@ -661,7 +661,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
   }
 
   private handleWorkerError(error: Error, workerId: number): void {
-    logger.error(`Worker ${workerId} error:`, error);
+    logger.error(`Worker ${workerId} error:`, { error: error.message, stack: error.stack });
 
     // Update worker stats
     const stats = this.workerStats.get(workerId);
@@ -701,12 +701,12 @@ export class EventProcessingWorkerPool extends EventEmitter {
         worker.removeAllListeners('error');
         worker.removeAllListeners('exit');
       } catch (error) {
-        logger.warn(`Failed to remove listeners from worker ${workerId}:`, error);
+        logger.warn(`Failed to remove listeners from worker ${workerId}:`, { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
     // Mark worker as dead
-    this.workers[workerId] = null as any;
+    this.workers[workerId] = null as unknown as Worker;
     this.availableWorkers.delete(workerId);
   }
 
@@ -762,7 +762,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
       this.scheduleDispatch();
 
     } catch (error) {
-      logger.error(`Failed to restart worker ${workerId} (attempt ${restartCount}/${EventProcessingWorkerPool.MAX_RESTART_RETRIES}):`, error);
+      logger.error(`Failed to restart worker ${workerId} (attempt ${restartCount}/${EventProcessingWorkerPool.MAX_RESTART_RETRIES}):`, { error: error instanceof Error ? error.message : String(error) });
 
       // P1-FIX: Exponential backoff capped at MAX_RESTART_DELAY_MS
       const delay = Math.min(

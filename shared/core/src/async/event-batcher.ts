@@ -15,7 +15,7 @@ function parseEventBatcherTimeoutMs(defaultMs: number = 1): number {
   return Number.isNaN(parsed) ? defaultMs : parsed;
 }
 
-export interface BatchedEvent<T = any> {
+export interface BatchedEvent<T = unknown> {
   pairKey: string;
   events: T[];
   timestamp: number;
@@ -31,7 +31,7 @@ export interface BatchConfig {
   maxQueueSize?: number;
 }
 
-export class EventBatcher<T = any> {
+export class EventBatcher<T = unknown> {
   private batches: Map<string, {
     events: T[];
     keys: Set<string>; // P1-2 FIX: O(1) dedup lookup instead of O(n) array scan
@@ -221,9 +221,9 @@ export class EventBatcher<T = any> {
 
   private extractPairKey(event: T): string {
     // Duck-typing: inspect event shape at runtime to extract pair key
-    const e = event as Record<string, any>;
+    const e = event as Record<string, unknown>;
     if (e.pairKey) {
-      return e.pairKey;
+      return e.pairKey as string;
     }
 
     if (e.address && e.topics) {
@@ -235,13 +235,13 @@ export class EventBatcher<T = any> {
 
   private getEventKey(event: T): string {
     // Duck-typing: inspect event shape at runtime for dedup key
-    const e = event as Record<string, any>;
+    const e = event as Record<string, unknown>;
     if (e.transactionHash && e.logIndex !== undefined) {
       return `${e.transactionHash}_${e.logIndex}`;
     }
 
     if (e.id) {
-      return e.id;
+      return e.id as string;
     }
 
     // FIX #3: Intermediate field checks before expensive JSON.stringify fallback
@@ -405,7 +405,7 @@ export class EventBatcher<T = any> {
 }
 
 // Factory function for creating configured batchers
-export function createEventBatcher<T = any>(
+export function createEventBatcher<T = unknown>(
   config: Partial<BatchConfig>,
   onBatchReady: (batch: BatchedEvent<T>) => void
 ): EventBatcher<T> {

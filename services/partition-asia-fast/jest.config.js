@@ -16,6 +16,7 @@ module.exports = {
   // Module resolution for workspace packages
   moduleNameMapper: {
     '^@arbitrage/core$': '<rootDir>/../../shared/core/src/index.ts',
+    '^@arbitrage/core/(.*)$': '<rootDir>/../../shared/core/src/$1',
     '^@arbitrage/types$': '<rootDir>/../../shared/types/index.ts',
     '^@arbitrage/config$': '<rootDir>/../../shared/config/src/index.ts',
     '^@arbitrage/unified-detector$': '<rootDir>/../unified-detector/src/index.ts',

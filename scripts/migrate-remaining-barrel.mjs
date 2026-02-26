@@ -6,7 +6,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const ROOT = process.cwd();

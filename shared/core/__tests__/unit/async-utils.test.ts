@@ -15,6 +15,7 @@ import {
   withTimeout,
   withTimeoutDefault,
   withTimeoutSafe,
+  withRetry,
   sleep,
   createDeferred,
   mapConcurrent,
@@ -24,7 +25,6 @@ import {
   gracefulShutdown,
   waitWithTimeouts,
 } from '@arbitrage/core/async';
-import { withRetryAsync } from '@arbitrage/core/async';
 
 // =============================================================================
 // Timeout Utilities Tests
@@ -146,11 +146,11 @@ describe('Timeout Utilities', () => {
 // =============================================================================
 
 describe('Retry Utilities', () => {
-  describe('withRetryAsync()', () => {
+  describe('withRetry()', () => {
     it('should return result on first success', async () => {
       const fn = jest.fn<() => Promise<string>>().mockResolvedValue('success');
 
-      const result = await withRetryAsync(fn);
+      const result = await withRetry(fn);
 
       expect(result).toBe('success');
       expect(fn).toHaveBeenCalledTimes(1);
@@ -162,7 +162,7 @@ describe('Retry Utilities', () => {
         .mockRejectedValueOnce(new Error('Fail 2'))
         .mockResolvedValue('success');
 
-      const result = await withRetryAsync(fn, {
+      const result = await withRetry(fn, {
         maxAttempts: 3,
         baseDelayMs: 10
       });
@@ -174,7 +174,7 @@ describe('Retry Utilities', () => {
     it('should throw after max attempts', async () => {
       const fn = jest.fn<() => Promise<string>>().mockRejectedValue(new Error('Always fails'));
 
-      await expect(withRetryAsync(fn, {
+      await expect(withRetry(fn, {
         maxAttempts: 3,
         baseDelayMs: 10
       })).rejects.toThrow('Always fails');
@@ -186,7 +186,7 @@ describe('Retry Utilities', () => {
       const nonRetryableError = new Error('Not retryable');
       const fn = jest.fn<() => Promise<string>>().mockRejectedValue(nonRetryableError);
 
-      await expect(withRetryAsync(fn, {
+      await expect(withRetry(fn, {
         maxAttempts: 3,
         baseDelayMs: 10,
         isRetryable: () => false
@@ -201,7 +201,7 @@ describe('Retry Utilities', () => {
         .mockRejectedValueOnce(new Error('Fail'))
         .mockResolvedValue('success');
 
-      await withRetryAsync(fn, {
+      await withRetry(fn, {
         maxAttempts: 2,
         baseDelayMs: 10,
         onRetry
@@ -221,7 +221,7 @@ describe('Retry Utilities', () => {
         .mockRejectedValueOnce(new Error('Fail'))
         .mockResolvedValue('success');
 
-      await withRetryAsync(fn, {
+      await withRetry(fn, {
         maxAttempts: 3,
         baseDelayMs: 100,
         exponential: true,
@@ -450,28 +450,28 @@ describe('Error Paths', () => {
     });
   });
 
-  describe('withRetryAsync() input validation', () => {
+  describe('withRetry() input validation', () => {
     it('should reject zero maxAttempts', async () => {
       await expect(
-        withRetryAsync(async () => 'ok', { maxAttempts: 0 })
+        withRetry(async () => 'ok', { maxAttempts: 0 })
       ).rejects.toThrow(TypeError);
     });
 
     it('should reject negative maxAttempts', async () => {
       await expect(
-        withRetryAsync(async () => 'ok', { maxAttempts: -1 })
+        withRetry(async () => 'ok', { maxAttempts: -1 })
       ).rejects.toThrow(TypeError);
     });
 
     it('should reject negative baseDelayMs', async () => {
       await expect(
-        withRetryAsync(async () => 'ok', { baseDelayMs: -100 })
+        withRetry(async () => 'ok', { baseDelayMs: -100 })
       ).rejects.toThrow(TypeError);
     });
 
     it('should reject NaN maxAttempts', async () => {
       await expect(
-        withRetryAsync(async () => 'ok', { maxAttempts: NaN })
+        withRetry(async () => 'ok', { maxAttempts: NaN })
       ).rejects.toThrow(TypeError);
     });
   });

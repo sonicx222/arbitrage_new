@@ -27,6 +27,81 @@ const mockStateManager = createMockStateManager();
 // FIX #6: Use shared createCoreMocks() to replace ~148 lines of inline mock definitions
 jest.mock('@arbitrage/core', () => createCoreMocks(mockLogger, mockStateManager));
 
+// Mock sub-entry point @arbitrage/core/partition used by source imports.
+// Uses plain functions (closures) instead of jest.fn() so resetMocks: true
+// does not clear their implementations between tests.
+jest.mock('@arbitrage/core/partition', () => {
+  const PORTS: Record<string, number> = { 'asia-fast': 3001, 'l2-turbo': 3002, 'high-value': 3003, 'solana-native': 3004 };
+  const SERVICE_NAMES: Record<string, string> = { 'asia-fast': 'partition-asia-fast', 'l2-turbo': 'partition-l2-turbo', 'high-value': 'partition-high-value', 'solana-native': 'partition-solana' };
+
+  // Track calls for assertion without jest.fn (immune to resetMocks)
+  const _calls: any[][] = [];
+
+  function createPartitionEntry(
+    partitionId: string,
+    createDetector: (cfg: unknown) => unknown,
+    hooks?: { onStarted?: Function; onStartupError?: Function; additionalCleanup?: () => void }
+  ) {
+    _calls.push([partitionId, createDetector, hooks]);
+    const { getPartition } = require('@arbitrage/config');
+    const partitionConfig = getPartition(partitionId);
+    const chains: string[] = partitionConfig?.chains ?? [];
+    const region: string = partitionConfig?.region ?? 'us-east1';
+    const defaultPort = PORTS[partitionId] ?? 3000;
+    const serviceName = SERVICE_NAMES[partitionId] ?? `partition-${partitionId}`;
+
+    const envConfig = {
+      redisUrl: process.env.REDIS_URL,
+      partitionChains: process.env.PARTITION_CHAINS,
+      healthCheckPort: process.env.HEALTH_CHECK_PORT,
+      instanceId: process.env.INSTANCE_ID,
+      regionId: process.env.REGION_ID,
+      enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+      nodeEnv: process.env.NODE_ENV ?? 'development',
+      rpcUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+      wsUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+    };
+
+    const instanceId = envConfig.instanceId ?? `${partitionId}-${process.env.HOSTNAME ?? 'local'}-${Date.now()}`;
+    const healthCheckPort = envConfig.healthCheckPort ? (parseInt(envConfig.healthCheckPort, 10) || defaultPort) : defaultPort;
+
+    let resolvedChains = [...chains];
+    if (envConfig.partitionChains) {
+      resolvedChains = envConfig.partitionChains.split(',').map((c: string) => c.trim().toLowerCase());
+    }
+
+    const detectorConfig = {
+      partitionId, chains: resolvedChains, instanceId,
+      regionId: envConfig.regionId ?? region,
+      enableCrossRegionHealth: envConfig.enableCrossRegionHealth ?? true,
+      healthCheckPort,
+    };
+
+    const detector = createDetector(detectorConfig);
+
+    return {
+      detector, config: detectorConfig, partitionId, chains, region,
+      cleanupProcessHandlers: () => {},
+      envConfig,
+      runner: { detector, start: async () => {}, getState: () => 'idle', cleanup: () => {}, healthServer: { current: null } },
+      serviceConfig: { partitionId, serviceName, defaultChains: chains, defaultPort, region, provider: partitionConfig?.provider ?? 'oracle' },
+      logger: mockLogger,
+    };
+  }
+  // Attach _calls for test assertions
+  (createPartitionEntry as any)._calls = _calls;
+
+  return {
+    createPartitionEntry,
+    parsePartitionEnvironmentConfig: () => ({}),
+    validatePartitionEnvironmentConfig: () => {},
+    generateInstanceId: (pid: string, id?: string) => id ?? `${pid}-local-${Date.now()}`,
+    exitWithConfigError: (msg: string) => { throw new Error(`Config error: ${msg}`); },
+    PARTITION_PORTS: PORTS,
+    PARTITION_SERVICE_NAMES: SERVICE_NAMES,
+  };
+});
+
 // Mock @arbitrage/config with Asia-Fast partition configuration
 jest.mock('@arbitrage/config', () => createConfigMocks({
   partitionId: 'asia-fast',
@@ -140,8 +215,12 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
     const { cleanupProcessHandlers } = await import('../../src/index');
     cleanupFn = cleanupProcessHandlers;
 
-    const { createPartitionEntry } = jest.requireMock('@arbitrage/core');
-    expect(createPartitionEntry).toHaveBeenCalledWith('asia-fast', expect.any(Function));
+    const { createPartitionEntry } = jest.requireMock('@arbitrage/core/partition');
+    // Plain function tracks calls via _calls array (immune to resetMocks)
+    const calls = (createPartitionEntry as any)._calls;
+    const matchingCall = calls.find((c: any[]) => c[0] === 'asia-fast');
+    expect(matchingCall).toBeDefined();
+    expect(typeof matchingCall[1]).toBe('function');
   });
 
   it('should use createPartitionEntry factory from shared utilities', async () => {

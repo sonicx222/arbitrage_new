@@ -7,7 +7,7 @@
  * @see coordinator.ts (parent service)
  */
 
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import type { CoordinatorStateProvider } from '../types';
@@ -122,10 +122,10 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
    */
   router.post(
     '/services/:service/restart',
-    strictLimiter,
-    writeAuth,
-    apiAuthorize('services', 'write'),
-    validateServiceRestart,
+    strictLimiter as RequestHandler,
+    writeAuth as unknown as RequestHandler,
+    apiAuthorize('services', 'write') as unknown as RequestHandler,
+    validateServiceRestart as RequestHandler,
     async (req: Request, res: Response) => {
       const { service } = req.params;
       const logger = state.getLogger();
@@ -134,7 +134,7 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
         logger.info(`Restarting service: ${service}`);
         // In production, implement service restart logic via orchestration
         res.json({ success: true, message: `Restart requested for ${service}` });
-      } catch (error) {
+      } catch (_error) {
         res.status(500).json({ success: false, error: 'Internal server error' });
       }
     }
@@ -146,10 +146,10 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
    */
   router.post(
     '/alerts/:alert/acknowledge',
-    strictLimiter,
-    writeAuth,
-    apiAuthorize('alerts', 'write'),
-    validateAlertAcknowledge,
+    strictLimiter as RequestHandler,
+    writeAuth as unknown as RequestHandler,
+    apiAuthorize('alerts', 'write') as unknown as RequestHandler,
+    validateAlertAcknowledge as RequestHandler,
     (req: Request, res: Response) => {
       const { alert } = req.params;
 

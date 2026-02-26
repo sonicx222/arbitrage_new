@@ -190,7 +190,7 @@ describe('HierarchicalCache (Map-based L1)', () => {
       expect(result).toEqual(testValue);
 
       const stats = l3OnlyCache.getStats();
-      expect(stats.l3.hits).toBeGreaterThan(0);
+      expect(stats.l3?.hits).toBeGreaterThan(0);
     });
   });
 
@@ -411,13 +411,14 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
   describe('PHASE1-TASK34: Statistics and monitoring', () => {
     it('should include PriceMatrix stats', () => {
       const stats = cache.getStats();
+      const pm = stats.l1.priceMatrix as { reads: number; writes: number; hits: number; misses: number };
 
       expect(stats.l1.implementation).toBe('PriceMatrix');
       expect(stats.l1.priceMatrix).toBeDefined();
-      expect(stats.l1.priceMatrix.reads).toBeDefined();
-      expect(stats.l1.priceMatrix.writes).toBeDefined();
-      expect(stats.l1.priceMatrix.hits).toBeDefined();
-      expect(stats.l1.priceMatrix.misses).toBeDefined();
+      expect(pm.reads).toBeDefined();
+      expect(pm.writes).toBeDefined();
+      expect(pm.hits).toBeDefined();
+      expect(pm.misses).toBeDefined();
     });
 
     it('should track cache operations', async () => {
@@ -426,11 +427,12 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
       await cache.get('price:test:nonexistent');
 
       const stats = cache.getStats();
+      const pm = stats.l1.priceMatrix as { reads: number; writes: number; hits: number; misses: number };
 
-      expect(stats.l1.priceMatrix.writes).toBeGreaterThan(0);
-      expect(stats.l1.priceMatrix.reads).toBeGreaterThan(0);
-      expect(stats.l1.priceMatrix.hits).toBeGreaterThan(0);
-      expect(stats.l1.priceMatrix.misses).toBeGreaterThan(0);
+      expect(pm.writes).toBeGreaterThan(0);
+      expect(pm.reads).toBeGreaterThan(0);
+      expect(pm.hits).toBeGreaterThan(0);
+      expect(pm.misses).toBeGreaterThan(0);
     });
   });
 

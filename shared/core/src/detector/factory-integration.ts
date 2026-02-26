@@ -21,6 +21,7 @@ import type {
   FactoryWebSocketManager,
   PairCreatedEvent,
 } from '../factory-subscription';
+import type { RawEventLog } from '../factory-subscription/parsers/types';
 import { createFactorySubscriptionService } from '../factory-subscription';
 import {
   getAllFactoryAddresses,
@@ -349,7 +350,7 @@ export class FactoryIntegrationService {
    */
   handleFactoryEvent(result: Record<string, unknown>): void {
     if (this.factorySubscriptionService) {
-      this.factorySubscriptionService.handleFactoryEvent(result);
+      this.factorySubscriptionService.handleFactoryEvent(result as unknown as RawEventLog);
     }
   }
 

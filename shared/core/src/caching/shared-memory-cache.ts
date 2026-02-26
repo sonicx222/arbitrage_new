@@ -15,7 +15,7 @@ export interface SharedCacheConfig {
 
 export interface SharedCacheEntry {
   key: string;
-  value: any;
+  value: unknown;
   timestamp: number;
   ttl?: number;
   compressed: boolean;
@@ -75,7 +75,7 @@ export class SharedMemoryCache {
     });
   }
 
-  get(key: string): any {
+  get(key: string): unknown {
     if (!this.validateKey(key)) return null;
 
     try {
@@ -95,7 +95,7 @@ export class SharedMemoryCache {
     }
   }
 
-  set(key: string, value: any, ttl?: number): boolean {
+  set(key: string, value: unknown, ttl?: number): boolean {
     if (!this.validateKey(key)) return false;
 
     try {
@@ -151,7 +151,14 @@ export class SharedMemoryCache {
     return Array.from(this.keyOffsetMap.keys());
   }
 
-  stats(): any {
+  stats(): {
+    size: number;
+    entries: number;
+    utilization: number;
+    compressionEnabled: boolean;
+    encryptionEnabled: boolean;
+    atomicOperationsEnabled: boolean;
+  } {
     return {
       size: this.config.size,
       entries: this.size(),
@@ -166,13 +173,13 @@ export class SharedMemoryCache {
   increment(key: string, delta: number = 1): number {
     // Values are JSON-serialized, so raw Atomics.add on the buffer is not
     // feasible. Use get/set for both atomic and non-atomic paths.
-    const current = this.get(key) ?? 0;
+    const current = (this.get(key) as number) ?? 0;
     const newValue = current + delta;
     this.set(key, newValue);
     return newValue;
   }
 
-  compareAndSet(key: string, expectedValue: any, newValue: any): boolean {
+  compareAndSet(key: string, expectedValue: unknown, newValue: unknown): boolean {
     if (!this.config.enableAtomicOperations) {
       const current = this.get(key);
       if (current === expectedValue) {
@@ -271,7 +278,7 @@ export class SharedMemoryCache {
     return offset;
   }
 
-  private createEntry(key: string, value: any, ttl?: number): boolean {
+  private createEntry(key: string, value: unknown, ttl?: number): boolean {
     const entryCount = Atomics.load(this.metadataView, SharedMemoryCache.ENTRY_COUNT_OFFSET);
     const maxEntries = Atomics.load(this.metadataView, SharedMemoryCache.MAX_ENTRIES_OFFSET);
 
@@ -323,7 +330,7 @@ export class SharedMemoryCache {
     return true;
   }
 
-  private updateEntry(key: string, value: any, ttl: number | undefined, existingEntry: any): boolean {
+  private updateEntry(key: string, value: unknown, ttl: number | undefined, existingEntry: SharedCacheEntry): boolean {
     // Tombstone old entry, then create new one at end of data
     const offset = this.findEntryOffset(key);
     if (offset !== -1) {
@@ -349,7 +356,7 @@ export class SharedMemoryCache {
   // Fix #26: Numeric type flag (bit 2) for typed array fast-path
   private static readonly FLAG_NUMERIC = 4;
 
-  private serializeValue(value: any): Uint8Array | null {
+  private serializeValue(value: unknown): Uint8Array | null {
     try {
       // Fix #26: Fast path for numbers — use Float64 directly instead of JSON
       if (typeof value === 'number') {
@@ -381,7 +388,7 @@ export class SharedMemoryCache {
     }
   }
 
-  private deserializeValue(entry: any): any {
+  private deserializeValue(entry: SharedCacheEntry): unknown {
     try {
       // Fix #26: Fast path for numeric entries — read Float64 directly
       if ((entry.compressed === false && entry.encrypted === false) && entry.valueLen === 8) {
@@ -393,7 +400,7 @@ export class SharedMemoryCache {
         }
       }
 
-      let data = this.readString(entry.valueOffset, entry.valueLen);
+      let data = this.readString(entry.valueOffset!, entry.valueLen!);
 
       if (entry.encrypted && this.config.enableEncryption) {
         data = this.simpleDecrypt(data);
@@ -418,7 +425,7 @@ export class SharedMemoryCache {
     return this.simpleEncrypt(data); // XOR is symmetric
   }
 
-  private getFlags(value: any): number {
+  private getFlags(value: unknown): number {
     let flags = 0;
     // Fix #26: Numeric values use typed array fast-path, skip compression/encryption
     if (typeof value === 'number') {
@@ -432,10 +439,10 @@ export class SharedMemoryCache {
 
   // Low-level memory access methods
   private readUint32(offset: number): number {
-    return (this.view[offset] << 24) |
+    return ((this.view[offset] << 24) |
       (this.view[offset + 1] << 16) |
       (this.view[offset + 2] << 8) |
-      this.view[offset + 3];
+      this.view[offset + 3]) >>> 0;
   }
 
   private writeUint32(offset: number, value: number): void {

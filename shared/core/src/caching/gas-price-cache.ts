@@ -15,7 +15,7 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Phase 2 recommendations
  */
 
-import { createLogger } from '../logger';
+import { createLogger, type Logger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { CHAINS, NATIVE_TOKEN_PRICES, FEATURE_FLAGS, isEvmChainSafe } from '@arbitrage/config';
 
@@ -328,6 +328,7 @@ export class GasPriceCache {
   private refreshTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
   private isRefreshing = false; // Mutex to prevent concurrent refresh
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ethers.JsonRpcProvider is dynamically imported, no static type available
   private providers: Map<string, any> = new Map(); // ethers providers
 
   // Fix 3: Dynamic L1 oracle cache (background-refreshed, sync reads)
@@ -337,7 +338,7 @@ export class GasPriceCache {
   constructor(config: Partial<GasPriceCacheConfig> = {}, deps?: GasPriceCacheDeps) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // DI: Use provided logger or create default
-    this.logger = deps?.logger ?? createLogger('gas-price-cache');
+    this.logger = (deps?.logger ?? createLogger('gas-price-cache')) as GasPriceCacheLogger;
 
     // Initialize with fallback values immediately so cache works without start()
     // This ensures getGasPrice() and getNativeTokenPrice() return valid data
@@ -861,7 +862,7 @@ export class GasPriceCache {
    *
    * Falls back to static L1_DATA_FEE_USD['zksync'] on failure.
    */
-  private async refreshZkSyncL1Fee(provider: any, ethPrice: number): Promise<void> {
+  private async refreshZkSyncL1Fee(provider: { send: (method: string, params: unknown[]) => Promise<unknown> }, ethPrice: number): Promise<void> {
     try {
       // Reference tx for fee estimation: ~500 bytes calldata to a contract
       const referenceTx = {
@@ -870,7 +871,7 @@ export class GasPriceCache {
         data: '0x' + '00'.repeat(L1_CALLDATA_BYTES),
       };
 
-      const feeEstimate = await provider.send('zks_estimateFee', [referenceTx]);
+      const feeEstimate = await provider.send('zks_estimateFee', [referenceTx]) as { gas_limit: string; max_fee_per_gas: string };
 
       // zks_estimateFee returns { gas_limit, max_fee_per_gas, max_priority_fee_per_gas, gas_per_pubdata_limit }
       // Total fee in wei = gas_limit * max_fee_per_gas

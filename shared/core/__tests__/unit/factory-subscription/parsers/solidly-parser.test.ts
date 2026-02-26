@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { parseSolidlyPairCreatedEvent } from '../../../../src/factory-subscription/parsers/solidly-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -135,15 +136,15 @@ describe('parseSolidlyPairCreatedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseSolidlyPairCreatedEvent(null)).toBeNull();
+      expect(parseSolidlyPairCreatedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseSolidlyPairCreatedEvent(undefined)).toBeNull();
+      expect(parseSolidlyPairCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseSolidlyPairCreatedEvent({})).toBeNull();
+      expect(parseSolidlyPairCreatedEvent({} as RawEventLog)).toBeNull();
     });
   });
 

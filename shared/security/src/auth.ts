@@ -4,6 +4,7 @@
 import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';  // BUG-FIX: Import at module level (was require per call)
+import { Request, Response, NextFunction } from 'express';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { createLogger } from '@arbitrage/core';
 import { getRedisClient } from '@arbitrage/core/redis';
@@ -95,7 +96,7 @@ export class AuthService {
     this.bcryptRounds = parseInt(process.env.BCRYPT_ROUNDS || '12');
 
     // DI: Use injected logger or create default
-    this.logger = deps?.logger ?? createLogger('auth-service');
+    this.logger = (deps?.logger ?? createLogger('auth-service')) as AuthServiceLogger;
 
     // DI: Use injected redis or initialize asynchronously
     if (deps?.redis) {
@@ -265,7 +266,7 @@ export class AuthService {
   async logout(token: string): Promise<void> {
     try {
       // Decode token without verification to get expiry
-      const decoded = jwt.decode(token) as any;
+      const decoded = jwt.decode(token) as { exp?: number; userId?: string } | null;
       if (decoded && decoded.exp) {
         // Add token to blacklist with remaining TTL
         const ttl = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
@@ -481,7 +482,7 @@ export function resetAuthService(): void {
 
 // Middleware for authentication
 export function authenticate(required: boolean = true) {
-  return async (req: any, res: any, next: any) => {
+  return async (req: Request & { user?: User }, res: Response, next: NextFunction) => {
     try {
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -520,7 +521,7 @@ export function authenticate(required: boolean = true) {
 
 // Middleware for authorization
 export function authorize(resource: string, action: string) {
-  return async (req: any, res: any, next: any) => {
+  return async (req: Request & { user?: User }, res: Response, next: NextFunction) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: 'Authentication required' });
@@ -702,7 +703,7 @@ export interface AuthOptions {
 export function apiAuth(options: AuthOptions = {}) {
   const { required = true, methods = ['jwt', 'apiKey'] } = options;
 
-  return async (req: any, res: any, next: any) => {
+  return async (req: Request & { user?: User | ApiKeyUser }, res: Response, next: NextFunction) => {
     try {
       // P1 FIX #8 + S-3 FIX: Only allow auth bypass in test/development environments.
       // Previously, missing JWT_SECRET + API_KEYS in production granted admin access.
@@ -714,11 +715,11 @@ export function apiAuth(options: AuthOptions = {}) {
           req.user = {
             id: 'dev-user',
             username: 'dev',
+            email: 'dev@localhost',
             roles: ['admin'],  // Array to match User interface
             permissions: ['*:*'], // Full access in dev/test mode
-            isApiKey: false,
             isActive: true
-          };
+          } as User;
           return next();
         }
         // In production or unknown NODE_ENV (including undefined), always reject
@@ -731,7 +732,8 @@ export function apiAuth(options: AuthOptions = {}) {
 
       // Try API key first (simpler, no expiry issues)
       if (methods.includes('apiKey') && isApiKeyAuthEnabled()) {
-        const apiKey = req.headers['x-api-key'];
+        const apiKeyHeader = req.headers['x-api-key'];
+        const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
         if (apiKey) {
           const user = validateApiKey(apiKey);
           if (user) {
@@ -788,7 +790,7 @@ export function apiAuth(options: AuthOptions = {}) {
  * Works with both JWT users and API key users
  */
 export function apiAuthorize(resource: string, action: string) {
-  return async (req: any, res: any, next: any) => {
+  return async (req: Request & { user?: User | ApiKeyUser }, res: Response, next: NextFunction) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: 'Authentication required' });
@@ -811,11 +813,11 @@ export function apiAuthorize(resource: string, action: string) {
       }
 
       // Check role-based permissions for JWT users
-      if (!req.user.isApiKey) {
+      if (!('isApiKey' in req.user) || !req.user.isApiKey) {
         try {
           const authService = getAuthService();
           if (authService) {
-            const allowed = await authService.authorize(req.user, resource, action);
+            const allowed = await authService.authorize(req.user as User, resource, action);
             if (allowed) {
               return next();
             }

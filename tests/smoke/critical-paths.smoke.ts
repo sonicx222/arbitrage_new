@@ -292,12 +292,12 @@ describe('Smoke Tests - Test Utilities', () => {
 
   it('should create price updates from factory', () => {
     const priceUpdate = createPriceUpdate({
-      price0: 3000,
+      price: 3000,
       token0: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
     });
 
     expect(priceUpdate).toBeDefined();
-    expect(priceUpdate.price0).toBe(3000);
+    expect(priceUpdate.price).toBe(3000);
   });
 
   it('should use builder pattern for swap events', () => {

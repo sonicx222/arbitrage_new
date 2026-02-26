@@ -244,16 +244,17 @@ describe('PHASE1-TASK35: HierarchicalCache L1 Performance Benchmark', () => {
       }
 
       const stats = cache.getStats();
-      const priceMatrixStats = stats.l1.priceMatrix;
+      const priceMatrixStats = stats.l1?.priceMatrix;
 
       console.log('\\n=== Memory Usage ===');
-      console.log(`L1 entries: ${stats.l1.entries.toLocaleString()}`);
-      console.log(`L1 utilization: ${(stats.l1.utilization * 100).toFixed(2)}%`);
+      console.log(`L1 entries: ${stats.l1?.entries?.toLocaleString() ?? 0}`);
+      console.log(`L1 utilization: ${((stats.l1?.utilization ?? 0) * 100).toFixed(2)}%`);
 
       if (priceMatrixStats) {
-        console.log(`PriceMatrix reads: ${priceMatrixStats.reads.toLocaleString()}`);
-        console.log(`PriceMatrix writes: ${priceMatrixStats.writes.toLocaleString()}`);
-        console.log(`PriceMatrix hits: ${priceMatrixStats.hits.toLocaleString()}`);
+        const pmStats = priceMatrixStats as { reads: number; writes: number; hits: number };
+        console.log(`PriceMatrix reads: ${pmStats.reads.toLocaleString()}`);
+        console.log(`PriceMatrix writes: ${pmStats.writes.toLocaleString()}`);
+        console.log(`PriceMatrix hits: ${pmStats.hits.toLocaleString()}`);
       }
 
       // Verify cache is functioning

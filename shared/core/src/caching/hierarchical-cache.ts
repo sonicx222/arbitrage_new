@@ -139,9 +139,49 @@ export interface CacheConfig {
   usePriceMatrix?: boolean;
 }
 
+/** Cache statistics for a single cache tier */
+export interface CacheTierStats {
+  hits: number;
+  misses: number;
+  evictions: number;
+  size: number;
+  entries?: number;
+  utilization?: number;
+  hitRate?: number;
+  priceMatrix?: unknown;
+  implementation?: string;
+  maxSize?: number;
+  [key: string]: unknown;
+}
+
+/** Complete cache statistics across all tiers */
+export interface HierarchicalCacheStats {
+  l1: CacheTierStats;
+  l2: CacheTierStats;
+  l3?: CacheTierStats;
+  promotions: number;
+  demotions: number;
+  predictiveWarming?: {
+    enabled: boolean;
+    maxPairsToWarm: number;
+    warmingTriggeredCount: number;
+    pairsWarmedCount: number;
+    warmingHitCount: number;
+    deduplicatedCount: number;
+    totalWarmingLatencyMs: number;
+    warmingLatencyCount: number;
+    lastWarmingLatencyMs: number;
+    noCorrelationsCount: number;
+    avgWarmingLatencyMs: number;
+    warmingHitRate: number;
+    correlationStats: unknown;
+    [key: string]: unknown;
+  };
+}
+
 export interface CacheEntry {
   key: string;
-  value: any;
+  value: unknown;
   timestamp: number;
   accessCount: number;
   lastAccess: number;
@@ -353,7 +393,7 @@ export class HierarchicalCache {
    * In production mode (enableTimingMetrics: false), performance.now() calls
    * are skipped to avoid the ~200ns overhead per cache access.
    */
-  async get(key: string): Promise<any> {
+  async get(key: string): Promise<unknown> {
     // P2-FIX 10.2: Only measure time if timing metrics are enabled
     const startTime = this.enableTimingMetrics ? performance.now() : 0;
 
@@ -457,7 +497,7 @@ export class HierarchicalCache {
     }
   }
 
-  async set(key: string, value: any, ttl?: number): Promise<void> {
+  async set(key: string, value: unknown, ttl?: number): Promise<void> {
     // P2-FIX 10.2: Only measure time if timing metrics are enabled
     const startTime = this.enableTimingMetrics ? performance.now() : 0;
 
@@ -579,11 +619,22 @@ export class HierarchicalCache {
    * PHASE1-TASK33: Get cache statistics.
    * Includes PriceMatrix stats when enabled.
    */
-  getStats(): any {
-    return {
+  getStats(): HierarchicalCacheStats {
+    // Calculate hit rates for each tier
+    const l1Total = this.stats.l1.hits + this.stats.l1.misses;
+    const l1HitRate = l1Total > 0 ? this.stats.l1.hits / l1Total : 0;
+
+    const l2Total = this.stats.l2.hits + this.stats.l2.misses;
+    const l2HitRate = l2Total > 0 ? this.stats.l2.hits / l2Total : 0;
+
+    const l3Total = this.stats.l3.hits + this.stats.l3.misses;
+    const l3HitRate = l3Total > 0 ? this.stats.l3.hits / l3Total : 0;
+
+    return ({
       ...this.stats,
       l1: {
         ...this.stats.l1,
+        hitRate: l1HitRate,
         entries: this.l1Metadata.size,
         utilization: this.l1Metadata.size / this.l1MaxEntries,
         // PHASE1-TASK33: Include PriceMatrix stats if enabled
@@ -597,10 +648,12 @@ export class HierarchicalCache {
       },
       l2: {
         ...this.stats.l2,
+        hitRate: l2HitRate,
         // Would need Redis INFO command for accurate stats
       },
       l3: {
         ...this.stats.l3,
+        hitRate: l3HitRate,
         entries: this.l3Storage.size,
         // T2.10: Include L3 max size and utilization
         maxSize: this.l3MaxSize,
@@ -626,7 +679,7 @@ export class HierarchicalCache {
         // Include correlation analyzer stats for monitoring memory usage
         correlationStats: this.correlationAnalyzer?.getStats() ?? null
       } : undefined
-    };
+    }) as HierarchicalCacheStats;
   }
 
   /**
@@ -659,7 +712,7 @@ export class HierarchicalCache {
    * PHASE1-TASK31: Get value from L1 cache.
    * Supports both Map-based and PriceMatrix-based implementations.
    */
-  private getFromL1(key: string): any {
+  private getFromL1(key: string): unknown {
     // PHASE1-TASK31: Use PriceMatrix if enabled
     if (this.usePriceMatrix && this.priceMatrix) {
       const priceEntry = this.priceMatrix.getPrice(key);
@@ -711,7 +764,7 @@ export class HierarchicalCache {
    * PHASE1-TASK32: Set value in L1 cache.
    * Supports both Map-based and PriceMatrix-based implementations.
    */
-  private setInL1(key: string, value: any, ttl?: number): void {
+  private setInL1(key: string, value: unknown, ttl?: number): void {
     const size = this.estimateSize(value);
     const timestamp = Date.now();
 
@@ -727,7 +780,8 @@ export class HierarchicalCache {
       let price = 0;
       if (typeof value === 'object' && value !== null) {
         // Check common price fields
-        price = value.price ?? value.value ?? value.amount ?? 0;
+        const obj = value as Record<string, unknown>;
+        price = (obj.price as number) ?? (obj.value as number) ?? (obj.amount as number) ?? 0;
       } else if (typeof value === 'number') {
         price = value;
       }
@@ -855,7 +909,7 @@ export class HierarchicalCache {
   // P0-FIX (Double Serialization): Use redis.getRaw()/setex() to avoid double JSON serialization.
   // RedisClient.get()/set() already do JSON.parse/stringify internally, so we use raw methods
   // and handle serialization explicitly here for clarity and correctness.
-  private async getFromL2(key: string): Promise<any> {
+  private async getFromL2(key: string): Promise<unknown> {
     if (!this.redisPromise) return null;
     try {
       const redis = await this.redisPromise;
@@ -869,7 +923,7 @@ export class HierarchicalCache {
     }
   }
 
-  private async setInL2(key: string, value: any, ttl?: number): Promise<void> {
+  private async setInL2(key: string, value: unknown, ttl?: number): Promise<void> {
     if (!this.redisPromise) return;
     try {
       const redis = await this.redisPromise;
@@ -944,28 +998,13 @@ export class HierarchicalCache {
    * Uses the underlying Redis client's scan capability.
    */
   private async scanKeys(
-    redis: any,
+    redis: import('../redis').RedisClient,
     cursor: string,
     pattern: string,
     count: number
   ): Promise<[string, string[]]> {
     try {
-      // Try to use the native scan method if available
-      if (typeof redis.scan === 'function') {
-        const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', count);
-        return result;
-      }
-
-      // Fallback: if scan is not available on the wrapper, try the underlying client
-      if (redis.client && typeof redis.client.scan === 'function') {
-        const result = await redis.client.scan(cursor, 'MATCH', pattern, 'COUNT', count);
-        return result;
-      }
-
-      // Last resort fallback: use keys but with warning (should not happen in production)
-      logger.warn('SCAN not available, falling back to KEYS command');
-      const keys = await redis.keys(pattern);
-      return ['0', keys];
+      return await redis.scan(cursor, 'MATCH', pattern, 'COUNT', count);
     } catch (error) {
       logger.error('SCAN operation failed', { error, cursor, pattern });
       return ['0', []];
@@ -973,7 +1012,7 @@ export class HierarchicalCache {
   }
 
   // L3 Cache Implementation (Persistent Storage)
-  private getFromL3(key: string): any {
+  private getFromL3(key: string): unknown {
     const l3Key = `${this.l3Prefix}${key}`;
     const entry = this.l3Storage.get(l3Key);
     if (!entry) return null;

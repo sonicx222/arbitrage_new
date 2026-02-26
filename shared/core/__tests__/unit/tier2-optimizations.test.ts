@@ -51,7 +51,7 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       });
 
       const stats = cache.getStats();
-      expect(stats.l3.maxSize).toBe(100);
+      expect(stats.l3!.maxSize).toBe(100);
     });
 
     it('should use default l3MaxSize when not specified', () => {
@@ -62,7 +62,7 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       });
 
       const stats = cache.getStats();
-      expect(stats.l3.maxSize).toBeGreaterThan(0);
+      expect(stats.l3!.maxSize).toBeGreaterThan(0);
     });
   });
 
@@ -86,13 +86,13 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
 
       // Verify all 5 are there
       const stats1 = cache.getStats();
-      expect(stats1.l3.entries).toBe(5);
+      expect(stats1.l3!.entries).toBe(5);
 
       // Add 6th entry - should trigger eviction
       await cache.set('key5', { value: 5 });
 
       const stats2 = cache.getStats();
-      expect(stats2.l3.entries).toBeLessThanOrEqual(5);
+      expect(stats2.l3!.entries).toBeLessThanOrEqual(5);
 
       // Oldest entry (key0) should be evicted
       const oldestValue = await cache.get('key0');
@@ -127,13 +127,13 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       }
 
       const statsBefore = cache.getStats();
-      const evictionsBefore = statsBefore.l3.evictions;
+      const evictionsBefore = statsBefore.l3!.evictions;
 
       // Trigger eviction
       await cache.set('key5', { value: 5 });
 
       const statsAfter = cache.getStats();
-      expect(statsAfter.l3.evictions).toBeGreaterThan(evictionsBefore);
+      expect(statsAfter.l3!.evictions).toBeGreaterThan(evictionsBefore);
     });
   });
 
@@ -152,7 +152,7 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       }
 
       const stats = cache.getStats();
-      expect(stats.l3.entries).toBeLessThanOrEqual(100);
+      expect(stats.l3!.entries).toBeLessThanOrEqual(100);
     });
 
     it('should report L3 utilization', async () => {
@@ -168,7 +168,7 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       }
 
       const stats = cache.getStats();
-      expect(stats.l3.utilization).toBeCloseTo(0.5, 1); // 50/100 = 0.5
+      expect(stats.l3!.utilization).toBeCloseTo(0.5, 1); // 50/100 = 0.5
     });
   });
 
@@ -214,7 +214,7 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       }
 
       const stats = cache.getStats();
-      expect(stats.l3.entries).toBe(10);
+      expect(stats.l3!.entries).toBe(10);
     });
 
     it('should handle setting same key multiple times', async () => {
@@ -232,11 +232,11 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
 
       // Should only have 1 entry
       const stats = cache.getStats();
-      expect(stats.l3.entries).toBe(1);
+      expect(stats.l3!.entries).toBe(1);
 
       // Value should be latest
       const value = await cache.get('sameKey');
-      expect(value.value).toBe(9);
+      expect((value as any).value).toBe(9);
     });
 
     it('should properly clear L3 eviction queue', async () => {
@@ -254,13 +254,13 @@ describe('T2.10: L3 Cache Eviction Policy', () => {
       await cache.clear();
 
       const stats = cache.getStats();
-      expect(stats.l3.entries).toBe(0);
+      expect(stats.l3!.entries).toBe(0);
 
       // Should be able to add new entries after clear
       await cache.set('newKey', { value: 'new' });
-      expect(stats.l3.entries).toBe(0); // Stats is snapshot
+      expect(stats.l3!.entries).toBe(0); // Stats is snapshot
       const newStats = cache.getStats();
-      expect(newStats.l3.entries).toBe(1);
+      expect(newStats.l3!.entries).toBe(1);
     });
   });
 });

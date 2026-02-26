@@ -8,6 +8,18 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+
+// Virtual mock for metrics-collector.interface — the require() in warming.container.ts
+// uses a path relative to shared/core/src, but the actual module is in shared/metrics/src
+jest.mock('../../../src/metrics/domain/metrics-collector.interface', () => ({
+  MetricType: {
+    COUNTER: 'counter',
+    GAUGE: 'gauge',
+    HISTOGRAM: 'histogram',
+    SUMMARY: 'summary',
+  },
+}), { virtual: true });
+
 import {
   WarmingContainer,
   WarmingContainerConfig,

@@ -15,7 +15,7 @@ export interface RecoveryContext {
   service: string;
   component: string;
   error: Error;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   correlationId?: string;
   attemptCount?: number;
   /** Optional callable to retry the failed operation. When provided, retry strategies will invoke it. */
@@ -32,9 +32,9 @@ export interface RecoveryResult {
 
 // P3-34 FIX: Typed return for getRecoveryStats()
 export interface RecoveryStats {
-  deadLetterQueue: any;
-  circuitBreakers: any;
-  gracefulDegradation: any;
+  deadLetterQueue: Record<string, unknown>;
+  circuitBreakers: Record<string, unknown>;
+  gracefulDegradation: Record<string, unknown>;
   timestamp: number;
 }
 
@@ -206,9 +206,10 @@ export class ErrorRecoveryOrchestrator {
       priority: 80,
       canHandle: (context) => {
         // Use for rate limiting or server overload
+        const status = (context.error as { status?: number }).status;
         return context.error.message.includes('rate limit') ||
           context.error.message.includes('too many requests') ||
-          (context.error as any).status === 429;
+          status === 429;
       },
       execute: async (context) => {
         if (!context.retryFn) {
@@ -290,10 +291,10 @@ export class ErrorRecoveryOrchestrator {
       execute: async (context) => {
         await enqueueFailedOperation({
           operation: context.operation,
-          payload: context.metadata || {},
+          payload: context.metadata ?? {},
           error: {
             message: context.error.message,
-            code: (context.error as any).code,
+            code: (context.error as { code?: string }).code,
             stack: context.error.stack
           },
           retryCount: context.attemptCount ?? 0,
@@ -363,7 +364,7 @@ export async function recoverFromError(
   service: string,
   component: string,
   error: Error,
-  metadata?: any
+  metadata?: Record<string, unknown>
 ): Promise<RecoveryResult> {
   const context: RecoveryContext = {
     operation,
@@ -383,20 +384,21 @@ export function withErrorRecovery(options: {
   component: string;
   operation?: string;
 }) {
-  return function (target: any, propertyName: string, descriptor: PropertyDescriptor) {
+  return function (target: unknown, propertyName: string, descriptor: PropertyDescriptor) {
     const method = descriptor.value;
-    const operationName = options.operation || `${target.constructor.name}.${propertyName}`;
+    const operationName = options.operation || `${(target as { constructor: { name: string } }).constructor.name}.${propertyName}`;
 
-    descriptor.value = async function (...args: any[]) {
+    descriptor.value = async function (...args: unknown[]) {
       try {
         return await method.apply(this, args);
-      } catch (error: any) {
+      } catch (error) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
         const result = await recoverFromError(
           operationName,
           options.service,
           options.component,
-          error,
-          { args, target: target.constructor.name }
+          errorObj,
+          { args, target: (target as { constructor: { name: string } }).constructor.name }
         );
 
         if (!result.success) {
@@ -406,7 +408,7 @@ export function withErrorRecovery(options: {
         // Return fallback value or throw depending on strategy
         if (result.nextAction === 'service_degraded') {
           // Return degraded response
-          return { degraded: true, error: (error as Error).message };
+          return { degraded: true, error: errorObj.message };
         }
 
         throw error;
@@ -434,8 +436,8 @@ export async function checkRecoverySystemHealth(): Promise<{
     const stats = await orchestrator.getRecoveryStats();
 
     const components = {
-      deadLetterQueue: stats.deadLetterQueue.totalOperations < 1000, // Not overwhelmed
-      circuitBreakers: Object.values(stats.circuitBreakers).every((cb: any) => cb.failures < 10),
+      deadLetterQueue: ((stats.deadLetterQueue as { totalOperations?: number }).totalOperations ?? 0) < 1000, // Not overwhelmed
+      circuitBreakers: Object.values(stats.circuitBreakers).every((cb) => ((cb as { failures?: number }).failures ?? 0) < 10),
       gracefulDegradation: Object.keys(stats.gracefulDegradation).length < 3 // Not too many services degraded
     };
 

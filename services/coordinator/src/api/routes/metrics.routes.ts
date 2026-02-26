@@ -7,7 +7,7 @@
  * @see coordinator.ts (parent service)
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, RequestHandler } from 'express';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import { findKLargest } from '@arbitrage/core/data-structures';
 import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
@@ -32,11 +32,11 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/metrics',
-    readAuth,
-    apiAuthorize('metrics', 'read'),
-    (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('metrics', 'read') as unknown as RequestHandler,
+    ((_req: Request, res: Response) => {
       res.json(state.getSystemMetrics());
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -45,11 +45,11 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/services',
-    readAuth,
-    apiAuthorize('services', 'read'),
-    (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('services', 'read') as unknown as RequestHandler,
+    ((_req: Request, res: Response) => {
       res.json(Object.fromEntries(state.getServiceHealthMap()));
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -60,9 +60,9 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/opportunities',
-    readAuth,
-    apiAuthorize('opportunities', 'read'),
-    (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('opportunities', 'read') as unknown as RequestHandler,
+    ((_req: Request, res: Response) => {
       const limit = 100;
       const opportunitiesMap = state.getOpportunities();
 
@@ -84,7 +84,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0)
       );
       res.json(result);
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -94,11 +94,11 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/alerts',
-    readAuth,
-    apiAuthorize('alerts', 'read'),
-    (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('alerts', 'read') as unknown as RequestHandler,
+    ((_req: Request, res: Response) => {
       res.json(state.getAlertHistory(100));
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -107,15 +107,15 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/leader',
-    readAuth,
-    apiAuthorize('leader', 'read'),
-    (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('leader', 'read') as unknown as RequestHandler,
+    ((_req: Request, res: Response) => {
       res.json({
         isLeader: state.getIsLeader(),
         instanceId: state.getInstanceId(),
         lockKey: state.getLockKey()
       });
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -129,9 +129,9 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/redis/stats',
-    readAuth,
-    apiAuthorize('metrics', 'read'),
-    async (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('metrics', 'read') as unknown as RequestHandler,
+    (async (_req: Request, res: Response) => {
       try {
         // P1 FIX #13: Add timeout guard to prevent hanging if Redis is unavailable
         const redis = await Promise.race([
@@ -148,7 +148,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           error: isTimeout ? 'Redis connection timeout' : 'Failed to get Redis stats',
         });
       }
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -161,17 +161,17 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/metrics/prometheus',
-    readAuth,
-    apiAuthorize('metrics', 'read'),
-    async (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('metrics', 'read') as unknown as RequestHandler,
+    (async (_req: Request, res: Response) => {
       try {
         const monitor = getStreamHealthMonitor();
         const metrics = await monitor.getPrometheusMetrics();
         res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics);
-      } catch (error) {
+      } catch (_error) {
         res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
       }
-    }
+    }) as RequestHandler
   );
 
   /**
@@ -182,9 +182,9 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
    */
   router.get(
     '/redis/dashboard',
-    readAuth,
-    apiAuthorize('metrics', 'read'),
-    async (_req: Request, res: Response) => {
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('metrics', 'read') as unknown as RequestHandler,
+    (async (_req: Request, res: Response) => {
       try {
         // P1 FIX #13: Add timeout guard to prevent hanging if Redis is unavailable
         const redis = await Promise.race([
@@ -203,7 +203,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           isTimeout ? 'Failed to get Redis dashboard: connection timeout' : 'Failed to get Redis dashboard'
         );
       }
-    }
+    }) as RequestHandler
   );
 
   return router;

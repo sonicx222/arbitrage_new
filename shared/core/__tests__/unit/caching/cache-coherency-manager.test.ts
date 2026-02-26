@@ -283,6 +283,8 @@ describe('CacheCoherencyManager', () => {
           key: 'price:ETH/USDC',
           value: 3500,
           version: 1,
+          timestamp: Date.now(),
+          nodeId: 'node-2',
         },
         vectorClock: new Map([['node-2', 1]]),
       };
@@ -302,6 +304,8 @@ describe('CacheCoherencyManager', () => {
           type: 'invalidate',
           key: 'price:ETH/USDC',
           version: 1,
+          timestamp: Date.now(),
+          nodeId: 'node-2',
         },
         vectorClock: new Map([['node-2', 1]]),
       };
@@ -321,6 +325,8 @@ describe('CacheCoherencyManager', () => {
           type: 'set',
           key: 'price:ETH/USDC',
           version: 1,
+          timestamp: Date.now(),
+          nodeId: 'node-2',
         },
         vectorClock: new Map([['node-2', 1]]),
       };
@@ -350,29 +356,35 @@ describe('CacheCoherencyManager', () => {
 
     it('should resolve conflicts when operations target same key from different nodes', async () => {
       // First: apply an operation from node-2
+      const timestamp1 = Date.now() - 100;
       await manager.handleIncomingMessage({
         type: 'update',
         nodeId: 'node-2',
-        timestamp: Date.now() - 100,
+        timestamp: timestamp1,
         payload: {
           type: 'set',
           key: 'price:ETH/USDC',
           value: 3400,
           version: 1,
+          timestamp: timestamp1,
+          nodeId: 'node-2',
         },
         vectorClock: new Map([['node-2', 1]]),
       });
 
       // Second: apply a conflicting operation from node-3 (same key, within 1s window)
+      const timestamp2 = Date.now();
       await manager.handleIncomingMessage({
         type: 'update',
         nodeId: 'node-3',
-        timestamp: Date.now(),
+        timestamp: timestamp2,
         payload: {
           type: 'set',
           key: 'price:ETH/USDC',
           value: 3500,
           version: 1,
+          timestamp: timestamp2,
+          nodeId: 'node-3',
         },
         vectorClock: new Map([['node-3', 1]]),
       });
@@ -452,7 +464,7 @@ describe('CacheCoherencyManager', () => {
         type: 'update',
         nodeId: 'node-2',
         timestamp: now,
-        payload: { type: 'set', key: 'conflict-key', value: 'A', version: 1 },
+        payload: { type: 'set', key: 'conflict-key', value: 'A', version: 1, timestamp: now, nodeId: 'node-2' },
         vectorClock: new Map([['node-2', 1]]),
       });
 
@@ -460,7 +472,7 @@ describe('CacheCoherencyManager', () => {
         type: 'update',
         nodeId: 'node-3',
         timestamp: now + 500, // within 1s window
-        payload: { type: 'set', key: 'conflict-key', value: 'B', version: 1 },
+        payload: { type: 'set', key: 'conflict-key', value: 'B', version: 1, timestamp: now + 500, nodeId: 'node-3' },
         vectorClock: new Map([['node-3', 1]]),
       });
 

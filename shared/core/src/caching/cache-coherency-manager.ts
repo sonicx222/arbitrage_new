@@ -4,6 +4,7 @@
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { getRedisClient } from '../redis/client';
+import type { RedisClient } from '../redis/client';
 
 const logger = createLogger('cache-coherency');
 
@@ -19,14 +20,20 @@ export interface GossipMessage {
   type: 'heartbeat' | 'invalidate' | 'update' | 'digest';
   nodeId: string;
   timestamp: number;
-  payload: any;
+  payload: GossipPayload;
   vectorClock: Map<string, number>;
 }
+
+export type GossipPayload =
+  | { address?: string } // heartbeat
+  | CacheOperation // invalidate/update
+  | { operations: Array<{ key: string; type: 'set' | 'delete' | 'invalidate'; version: number; timestamp: number }>; vectorClock: Record<string, number> } // digest
+  | { type: 'request'; operationKeys: string[] }; // request
 
 export interface CacheOperation {
   type: 'set' | 'delete' | 'invalidate';
   key: string;
-  value?: any;
+  value?: unknown;
   ttl?: number;
   timestamp: number;
   nodeId: string;
@@ -44,7 +51,7 @@ export interface CoherencyConfig {
 
 export class CacheCoherencyManager {
   private config: CoherencyConfig;
-  private redisPromise: Promise<any>;
+  private redisPromise: Promise<RedisClient>;
   private nodeId: string;
   private nodes: Map<string, NodeInfo> = new Map();
   private vectorClock: Map<string, number> = new Map();
@@ -96,7 +103,7 @@ export class CacheCoherencyManager {
   }
 
   // Lazy getter that awaits the Redis client promise
-  private async getRedis(): Promise<any> {
+  private async getRedis(): Promise<RedisClient> {
     return this.redisPromise;
   }
 
@@ -164,7 +171,13 @@ export class CacheCoherencyManager {
     }
   }
 
-  getNodeStatus(): any {
+  getNodeStatus(): {
+    nodeId: string;
+    knownNodes: string[];
+    vectorClock: Record<string, number>;
+    pendingOperations: number;
+    lastGossip: number;
+  } {
     return {
       nodeId: this.nodeId,
       knownNodes: Array.from(this.nodes.keys()),
@@ -238,7 +251,15 @@ export class CacheCoherencyManager {
     await this.sendMessageToNode(node, message);
   }
 
-  private createDigest(): any {
+  private createDigest(): {
+    operations: Array<{
+      key: string;
+      type: 'set' | 'delete' | 'invalidate';
+      version: number;
+      timestamp: number;
+    }>;
+    vectorClock: Record<string, number>;
+  } {
     // Create a summary of our recent operations
     const recentOperations = this.pendingOperations
       .filter(op => Date.now() - op.timestamp < 60000) // Last minute
@@ -258,12 +279,13 @@ export class CacheCoherencyManager {
   // Message handling
   private async handleHeartbeat(message: GossipMessage): Promise<void> {
     const nodeId = message.nodeId;
+    const payload = message.payload as { address?: string };
 
     if (!this.nodes.has(nodeId)) {
       // New node discovered
       this.nodes.set(nodeId, {
         id: nodeId,
-        address: message.payload.address || 'unknown',
+        address: payload.address ?? 'unknown',
         lastSeen: Date.now(),
         status: 'alive',
         vectorClock: new Map(message.vectorClock)
@@ -282,11 +304,7 @@ export class CacheCoherencyManager {
   }
 
   private async handleOperation(message: GossipMessage): Promise<void> {
-    const operation: CacheOperation = {
-      ...message.payload,
-      nodeId: message.nodeId,
-      timestamp: message.timestamp
-    };
+    const operation = message.payload as CacheOperation;
 
     // Check if we already have this operation
     if (this.hasOperation(operation)) {
@@ -314,7 +332,7 @@ export class CacheCoherencyManager {
   }
 
   private async handleDigest(message: GossipMessage): Promise<void> {
-    const remoteDigest = message.payload;
+    const remoteDigest = message.payload as { operations: Array<{ nodeId: string; version: number; key: string }>; vectorClock: Record<string, number> };
 
     // Compare digests and request missing operations
     const missingOps = this.findMissingOperations(remoteDigest.operations);
@@ -360,7 +378,7 @@ export class CacheCoherencyManager {
     return op1.timestamp > op2.timestamp ? op1 : op2;
   }
 
-  private findMissingOperations(remoteOps: any[]): string[] {
+  private findMissingOperations(remoteOps: Array<{ nodeId: string; version: number; key: string }>): string[] {
     const localOpKeys = new Set(
       this.pendingOperations.map(op => `${op.nodeId}:${op.version}:${op.key}`)
     );
@@ -393,7 +411,7 @@ export class CacheCoherencyManager {
       type: operation.type as 'invalidate' | 'update',
       nodeId: this.nodeId,
       timestamp: operation.timestamp,
-      payload: operation,
+      payload: operation as GossipPayload,
       vectorClock: new Map(this.vectorClock)
     };
 
@@ -410,7 +428,7 @@ export class CacheCoherencyManager {
       // For now, simulate with Redis pub/sub
       const channel = `gossip:${node.id}`;
       const redis = await this.getRedis();
-      await redis.publish(channel, JSON.stringify(message));
+      await redis.publish(channel, JSON.stringify(message) as unknown as import('@arbitrage/types').MessageEvent);
     } catch (error) {
       logger.error('Failed to send message to node', { error, nodeId: node.id });
     }

@@ -27,9 +27,9 @@ import {
 // Import validated types from message-validators (different from shared/types)
 // These are the types the validators actually check against
 import type {
-  ValidatedPriceUpdate as PriceUpdate,
-  ValidatedWhaleTransaction as WhaleTransaction,
-  ValidatedSwapEvent as SwapEvent,
+  PriceUpdate,
+  WhaleTransaction,
+  SwapEvent,
   ReserveUpdate,
   CoordinatorCommand,
   ServiceHealthStatus,

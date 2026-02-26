@@ -15,6 +15,7 @@ import {
   CURVE_PLAIN_POOL_SIGNATURE,
   CURVE_META_POOL_SIGNATURE,
 } from '../../../../src/factory-subscription/parsers/curve-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -180,15 +181,15 @@ describe('parseCurvePlainPoolDeployedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseCurvePlainPoolDeployedEvent(null)).toBeNull();
+      expect(parseCurvePlainPoolDeployedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseCurvePlainPoolDeployedEvent(undefined)).toBeNull();
+      expect(parseCurvePlainPoolDeployedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseCurvePlainPoolDeployedEvent({})).toBeNull();
+      expect(parseCurvePlainPoolDeployedEvent({} as RawEventLog)).toBeNull();
     });
   });
 });
@@ -261,11 +262,11 @@ describe('parseCurveMetaPoolDeployedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseCurveMetaPoolDeployedEvent(null)).toBeNull();
+      expect(parseCurveMetaPoolDeployedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseCurveMetaPoolDeployedEvent(undefined)).toBeNull();
+      expect(parseCurveMetaPoolDeployedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
   });
 });
@@ -328,23 +329,23 @@ describe('parseCurvePoolCreatedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseCurvePoolCreatedEvent(null)).toBeNull();
+      expect(parseCurvePoolCreatedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseCurvePoolCreatedEvent(undefined)).toBeNull();
+      expect(parseCurvePoolCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for log without topics', () => {
-      expect(parseCurvePoolCreatedEvent({ data: '0x' })).toBeNull();
+      expect(parseCurvePoolCreatedEvent({ data: '0x' } as RawEventLog)).toBeNull();
     });
 
     it('should return null for log without data', () => {
-      expect(parseCurvePoolCreatedEvent({ topics: ['0xsig'] })).toBeNull();
+      expect(parseCurvePoolCreatedEvent({ topics: ['0xsig'] } as RawEventLog)).toBeNull();
     });
 
     it('should return null for log with empty topics', () => {
-      expect(parseCurvePoolCreatedEvent({ topics: [], data: '0x' })).toBeNull();
+      expect(parseCurvePoolCreatedEvent({ topics: [], data: '0x' } as unknown as RawEventLog)).toBeNull();
     });
   });
 

@@ -87,17 +87,17 @@ describe('PriceOracle', () => {
 
   describe('default fallback prices', () => {
     it('should have ETH price', () => {
-      expect(getDefaultPrice('ETH')).toBe(3500);
-      expect(getDefaultPrice('WETH')).toBe(3500);
+      expect(getDefaultPrice('ETH')).toBe(3200);
+      expect(getDefaultPrice('WETH')).toBe(3200);
     });
 
     it('should have BNB price', () => {
-      expect(getDefaultPrice('BNB')).toBe(600);
-      expect(getDefaultPrice('WBNB')).toBe(600);
+      expect(getDefaultPrice('BNB')).toBe(650);
+      expect(getDefaultPrice('WBNB')).toBe(650);
     });
 
     it('should have MATIC price', () => {
-      expect(getDefaultPrice('MATIC')).toBe(1.00);
+      expect(getDefaultPrice('MATIC')).toBe(0.50);
     });
 
     it('should have stablecoin prices at $1', () => {
@@ -107,9 +107,9 @@ describe('PriceOracle', () => {
     });
 
     it('should handle case insensitivity', () => {
-      expect(getDefaultPrice('eth')).toBe(3500);
-      expect(getDefaultPrice('Eth')).toBe(3500);
-      expect(getDefaultPrice('ETH')).toBe(3500);
+      expect(getDefaultPrice('eth')).toBe(3200);
+      expect(getDefaultPrice('Eth')).toBe(3200);
+      expect(getDefaultPrice('ETH')).toBe(3200);
     });
 
     it('should return 0 for unknown tokens', () => {
@@ -154,7 +154,7 @@ describe('PriceOracle', () => {
 
       const result = await oracle.getPrice('ETH');
 
-      expect(result.price).toBe(3500);
+      expect(result.price).toBe(3200);
       expect(result.source).toBe('fallback');
       expect(result.isStale).toBe(true);
     });
@@ -175,7 +175,7 @@ describe('PriceOracle', () => {
       const result = await oracle.getPrice('ETH');
 
       // Should fall back to default price
-      expect(result.price).toBe(3500);
+      expect(result.price).toBe(3200);
       expect(result.source).toBe('fallback');
     });
 
@@ -210,8 +210,8 @@ describe('PriceOracle', () => {
       ]);
 
       expect(results.size).toBe(3);
-      expect(results.get('ETH')?.price).toBe(3500);
-      expect(results.get('BTC')?.price).toBe(100000);
+      expect(results.get('ETH')?.price).toBe(3200);
+      expect(results.get('BTC')?.price).toBe(95000);
       expect(results.get('USDT')?.price).toBe(1.00);
     });
 
@@ -258,7 +258,7 @@ describe('PriceOracle', () => {
     it('should return fallback when not in cache', () => {
       const price = oracle.getPriceSync('BTC');
 
-      expect(price).toBe(100000);
+      expect(price).toBe(95000);
     });
 
     it('should return 0 for unknown tokens', () => {
@@ -336,7 +336,7 @@ describe('PriceOracle', () => {
 
       const value = await oracle.estimateUsdValue('ETH', 2);
 
-      expect(value).toBe(7000); // 2 * 3500
+      expect(value).toBe(6400); // 2 * 3200
     });
 
     it('should use cached price when available', async () => {
@@ -372,7 +372,7 @@ describe('PriceOracle', () => {
     it('should use fallback when not cached', () => {
       const value = oracle.estimateUsdValueSync('BTC', 0.5);
 
-      expect(value).toBe(50000); // 0.5 * 100000
+      expect(value).toBe(47500); // 0.5 * 95000
     });
   });
 
@@ -382,7 +382,7 @@ describe('PriceOracle', () => {
 
   describe('fallback price management', () => {
     it('should get fallback price', () => {
-      expect(oracle.getFallbackPrice('ETH')).toBe(3500);
+      expect(oracle.getFallbackPrice('ETH')).toBe(3200);
     });
 
     it('should set custom fallback price', () => {
@@ -400,8 +400,8 @@ describe('PriceOracle', () => {
     it('should return all fallback prices', () => {
       const prices = oracle.getAllFallbackPrices();
 
-      expect(prices.ETH).toBe(3500);
-      expect(prices.BTC).toBe(100000);
+      expect(prices.ETH).toBe(3200);
+      expect(prices.BTC).toBe(95000);
       expect(Object.keys(prices).length).toBeGreaterThan(10);
     });
   });
@@ -480,7 +480,7 @@ describe('PriceOracle', () => {
       oracle.clearLocalCache();
 
       // Should now return fallback
-      expect(oracle.getPriceSync('ETH')).toBe(3500);
+      expect(oracle.getPriceSync('ETH')).toBe(3200);
     });
 
     it('should return cache statistics', async () => {
@@ -624,12 +624,12 @@ describe('PriceOracle', () => {
       it('should update multiple fallback prices at once', () => {
         oracle.updateFallbackPrices({
           ETH: 3000,
-          BTC: 95000,
+          BTC: 90000,
           BNB: 350
         });
 
         expect(oracle.getFallbackPrice('ETH')).toBe(3000);
-        expect(oracle.getFallbackPrice('BTC')).toBe(95000);
+        expect(oracle.getFallbackPrice('BTC')).toBe(90000);
         expect(oracle.getFallbackPrice('BNB')).toBe(350);
       });
 

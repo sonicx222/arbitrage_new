@@ -91,9 +91,10 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
       const actualSig = callArgs[sigIndex + 1];
 
       // Independently compute expected signature
+      // OP-18: HMAC input includes stream name for cross-stream replay protection
       const expectedSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(serialized)
+        .update(`${streamName}:${serialized}`)
         .digest('hex');
 
       expect(actualSig).toBe(expectedSig);
@@ -449,11 +450,12 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
       expect(sigIndex).toBeGreaterThan(-1);
 
       // Verify it is a valid HMAC for the serialized batch envelope
+      // OP-18: HMAC input includes stream name for cross-stream replay protection
       const dataIndex = callArgs.indexOf('data');
       const serialized = callArgs[dataIndex + 1];
       const expectedSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(serialized)
+        .update(`stream:price-updates:${serialized}`)
         .digest('hex');
       expect(callArgs[sigIndex + 1]).toBe(expectedSig);
     });

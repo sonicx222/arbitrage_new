@@ -30,10 +30,19 @@ const createMockSimulator = () => {
   return emitter;
 };
 
-jest.mock('@arbitrage/core', () => {
+// The source imports from sub-entry points:
+// - @arbitrage/core/simulation (getChainSimulator, stopChainSimulator)
+// - @arbitrage/core/async (clearIntervalSafe)
+// Mock each sub-entry point separately.
+jest.mock('@arbitrage/core/simulation', () => {
   return {
     getChainSimulator: jest.fn(),
     stopChainSimulator: jest.fn(),
+  };
+});
+
+jest.mock('@arbitrage/core/async', () => {
+  return {
     clearIntervalSafe: jest.fn().mockReturnValue(null),
   };
 });
@@ -107,19 +116,19 @@ describe('ChainSimulationHandler', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
+    jest.useFakeTimers({ legacyFakeTimers: false });
 
     // FIX: Create fresh mock simulator for each test and reset the mock implementation
     mockChainSimulatorEmitter = createMockSimulator();
-    const { getChainSimulator } = require('@arbitrage/core');
+    const { getChainSimulator } = require('@arbitrage/core/simulation');
     (getChainSimulator as jest.Mock).mockReturnValue(mockChainSimulatorEmitter);
 
     logger = createMockLogger();
     handler = new ChainSimulationHandler('ethereum', logger);
   });
 
-  afterEach(() => {
-    handler.stop();
+  afterEach(async () => {
+    await handler.stop();
     jest.useRealTimers();
   });
 
@@ -165,7 +174,7 @@ describe('ChainSimulationHandler', () => {
     });
 
     it('should start the chain simulator', async () => {
-      const { getChainSimulator } = require('@arbitrage/core');
+      const { getChainSimulator } = require('@arbitrage/core/simulation');
       const pairs = createSamplePairs();
       const callbacks = createMockCallbacks();
 
@@ -255,7 +264,7 @@ describe('ChainSimulationHandler', () => {
       const callbacks = createMockCallbacks();
 
       await handler.initializeEvmSimulation(pairs, callbacks);
-      handler.stop();
+      await handler.stop();
 
       getMockChainSimulator().emit('blockUpdate', { blockNumber: 12345678 });
 
@@ -459,14 +468,14 @@ describe('ChainSimulationHandler', () => {
 
   describe('stop', () => {
     it('should stop EVM simulation and cleanup', async () => {
-      const { stopChainSimulator } = require('@arbitrage/core');
+      const { stopChainSimulator } = require('@arbitrage/core/simulation');
       const pairs = createSamplePairs();
       const callbacks = createMockCallbacks();
 
       await handler.initializeEvmSimulation(pairs, callbacks);
       expect(handler.isActive()).toBe(true);
 
-      handler.stop();
+      await handler.stop();
 
       expect(handler.isActive()).toBe(false);
       expect(getMockChainSimulator().stop).toHaveBeenCalled();

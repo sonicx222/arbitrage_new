@@ -25,6 +25,14 @@ jest.mock('@arbitrage/core', () => ({
   validateFee: jest.fn((fee: number) => fee),
 }));
 
+jest.mock('@arbitrage/core/components', () => ({
+  bpsToDecimal: jest.fn((bps: number) => bps / 10000),
+}));
+
+jest.mock('@arbitrage/core/utils', () => ({
+  validateFee: jest.fn((fee: number) => fee),
+}));
+
 import { initializePairs, generatePairAddress } from '../../src/pair-initializer';
 import type { PairInitializerConfig } from '../../src/pair-initializer';
 import { bpsToDecimal } from '@arbitrage/core/components';

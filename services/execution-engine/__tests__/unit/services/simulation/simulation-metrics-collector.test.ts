@@ -120,6 +120,7 @@ const createMockSimulationService = (
     latencyMs: 100,
   })),
   shouldSimulate: jest.fn(() => true),
+  getSimulationTier: jest.fn().mockReturnValue('full' as const) as any,
   getAggregatedMetrics: jest.fn(() => metrics ?? createMockSimulationMetrics()),
   getProvidersHealth: jest.fn(() => providerHealth ?? new Map<SimulationProviderType, SimulationProviderHealth>([
     ['tenderly', createMockProviderHealth()],

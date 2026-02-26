@@ -39,7 +39,7 @@ import {
   type PairSnapshot,
 } from '../../../services/unified-detector/src/detection/simple-arbitrage-detector';
 import { PublishingService } from '../../../shared/core/src/publishing/publishing-service';
-import { RedisStreamsClient } from '../../../shared/core/src/redis-streams';
+import { RedisStreamsClient } from '../../../shared/core/src/redis/streams';
 import type { ServiceLogger } from '../../../shared/core/src/logging/types';
 
 // Test utilities

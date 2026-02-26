@@ -21,6 +21,34 @@ import {
 } from './types';
 import { MevMetricsManager } from './metrics-manager';
 import { getErrorMessage } from '../resilience/error-handling';
+
+// =============================================================================
+// Jito Response Types
+// =============================================================================
+
+/**
+ * Jito API JSON-RPC response structure
+ */
+interface JitoResponse {
+  result?: {
+    value?: Array<{
+      status?: string;
+      landed_slot?: number;
+      transactions?: string[];
+      [key: string]: unknown;
+    }> | {
+      err?: unknown;
+      unitsConsumed?: number;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  } | string; // Can be a bundle ID string
+  error?: {
+    message?: string;
+    code?: number;
+  };
+}
+
 // =============================================================================
 // Jito Configuration
 // =============================================================================
@@ -367,18 +395,28 @@ export class JitoProvider implements ISolanaMevProvider {
         };
       }
 
-      const result = response.result?.value;
+      // For simulation, result should be an object with value property
+      if (typeof response.result === 'object' && response.result !== null && 'value' in response.result) {
+        const result = response.result.value;
 
-      if (result?.err) {
-        return {
-          success: false,
-          error: JSON.stringify(result.err),
-        };
+        if (result && !Array.isArray(result)) {
+          if (result.err) {
+            return {
+              success: false,
+              error: JSON.stringify(result.err),
+            };
+          }
+
+          return {
+            success: true,
+            gasUsed: BigInt(result.unitsConsumed ?? 0),
+          };
+        }
       }
 
       return {
-        success: true,
-        gasUsed: BigInt(result?.unitsConsumed ?? 0),
+        success: false,
+        error: 'Invalid simulation response',
       };
     } catch (error) {
       return {
@@ -481,7 +519,7 @@ export class JitoProvider implements ISolanaMevProvider {
           };
         }
 
-        const bundleId = response.result;
+        const bundleId = typeof response.result === 'string' ? response.result : undefined;
         if (!bundleId) {
           if (attempt < maxRetries - 1) continue;
           return {
@@ -540,25 +578,30 @@ export class JitoProvider implements ISolanaMevProvider {
 
         const response = await this.sendJitoRequest(body);
 
-        if (response.result?.value?.[0]) {
-          const status = response.result.value[0];
+        // For bundle status, result should be an object with value property
+        if (typeof response.result === 'object' && response.result !== null && 'value' in response.result) {
+          const value = response.result.value;
 
-          if (status.status === 'Landed') {
-            return {
-              included: true,
-              slot: status.landed_slot,
-              signature: status.transactions?.[0],
-            };
+          if (value && Array.isArray(value)) {
+            const status = value[0];
+
+            if (status && status.status === 'Landed') {
+              return {
+                included: true,
+                slot: status.landed_slot,
+                signature: status.transactions?.[0],
+              };
+            }
+
+            if (status && status.status === 'Failed') {
+              await this.metricsManager.increment('bundlesReverted');
+              return {
+                included: false,
+              };
+            }
+
+            // Status is 'Pending' or 'Processing', continue polling
           }
-
-          if (status.status === 'Failed') {
-            await this.metricsManager.increment('bundlesReverted');
-            return {
-              included: false,
-            };
-          }
-
-          // Status is 'Pending' or 'Processing', continue polling
         }
 
         await this.sleep(currentInterval);
@@ -577,7 +620,7 @@ export class JitoProvider implements ISolanaMevProvider {
   /**
    * Send request to Jito API
    */
-  private async sendJitoRequest(body: object): Promise<any> {
+  private async sendJitoRequest(body: object): Promise<JitoResponse> {
     const timeout =
       this.config.submissionTimeoutMs ?? JITO_DEFAULTS.submissionTimeoutMs;
 
@@ -592,7 +635,7 @@ export class JitoProvider implements ISolanaMevProvider {
         signal: controller.signal,
       });
 
-      return await response.json();
+      return (await response.json()) as JitoResponse;
     } finally {
       clearTimeout(timeoutId);
     }

@@ -82,108 +82,161 @@ jest.mock('ioredis', () => {
 });
 
 // =============================================================================
-// Mock @arbitrage/core
+// Mock @arbitrage/core sub-entry points
 // =============================================================================
+
+// Helper factories (shared across mocks via closures)
+const makeStreamsClient = () => ({
+  createConsumerGroup: jest.fn<any>(() => {
+    consumerGroupCreated = true;
+    return Promise.resolve(undefined);
+  }),
+  xadd: jest.fn<any>(() => Promise.resolve('1-0')),
+  xack: jest.fn<any>(() => Promise.resolve(1)),
+  disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
+  STREAMS: { EXECUTION_REQUESTS: 'stream:execution-requests' },
+});
+
+const makeRedisClient = () => ({
+  get: jest.fn<any>(() => Promise.resolve(null)),
+  set: jest.fn<any>(() => Promise.resolve('OK')),
+  setNx: jest.fn<any>(() => Promise.resolve(true)),
+  expire: jest.fn<any>(() => Promise.resolve(1)),
+  disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
+  updateServiceHealth: jest.fn<any>(() => Promise.resolve(undefined)),
+  getAllServiceHealth: jest.fn<any>(() => Promise.resolve({})),
+});
+
+const makeLockManager = () => ({
+  withLock: jest.fn<any>(async (_key: string, fn: () => Promise<void>) => {
+    await fn();
+    return { success: true };
+  }),
+  shutdown: jest.fn<any>(() => Promise.resolve(undefined)),
+  disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
+});
+
+const makeNonceManager = () => ({
+  start: jest.fn(),
+  stop: jest.fn<any>(() => Promise.resolve(undefined)),
+  registerWallet: jest.fn(),
+  getNextNonce: jest.fn<any>(() => Promise.resolve(1)),
+  confirmTransaction: jest.fn(),
+  failTransaction: jest.fn(),
+  resetChain: jest.fn(),
+  disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
+});
+
+const makeStateManager = () => ({
+  getState: jest.fn(() => currentState),
+  executeStart: jest.fn(async (fn: () => Promise<void>) => {
+    currentState = 'starting';
+    try {
+      await fn();
+      currentState = 'running';
+      return { success: true };
+    } catch (error) {
+      currentState = 'idle';
+      return { success: false, error };
+    }
+  }),
+  executeStop: jest.fn(async (fn: () => Promise<void>) => {
+    currentState = 'stopping';
+    try {
+      await fn();
+      currentState = 'stopped';
+      return { success: true };
+    } catch (error) {
+      currentState = 'stopped';
+      return { success: true };
+    }
+  }),
+  isRunning: jest.fn(() => currentState === 'running'),
+  transition: jest.fn<any>(() => Promise.resolve({ success: true })),
+  isTransitioning: jest.fn(() => currentState === 'starting' || currentState === 'stopping'),
+  waitForIdle: jest.fn<any>(() => Promise.resolve(undefined)),
+  on: jest.fn(),
+  off: jest.fn(),
+  canTransition: jest.fn(() => true),
+});
+
+jest.mock('@arbitrage/core/async', () => ({
+  stopAndNullify: async (obj: any) => {
+    if (obj && typeof obj.stop === 'function') {
+      await obj.stop();
+    }
+    return null;
+  },
+  clearIntervalSafe: (timer: NodeJS.Timeout | null) => {
+    if (timer) clearInterval(timer);
+    return null;
+  },
+}));
+
+jest.mock('@arbitrage/core/redis', () => ({
+  getRedisClient: async () => {
+    redisClientCreated = true;
+    return makeRedisClient();
+  },
+  getRedisStreamsClient: async () => {
+    streamsClientCreated = true;
+    return makeStreamsClient();
+  },
+  getDistributedLockManager: async () => {
+    lockManagerCreated = true;
+    return makeLockManager();
+  },
+  RedisStreamsClient: {
+    STREAMS: {
+      EXECUTION_REQUESTS: 'stream:execution-requests',
+      OPPORTUNITIES: 'stream:opportunities',
+      EXECUTION_RESULTS: 'stream:execution-results',
+    },
+  },
+  StreamConsumer: class MockStreamConsumer {
+    start() {}
+    async stop() {}
+    pause() {}
+    resume() {}
+    getStats() { return { messagesProcessed: 0, messagesFailed: 0, lastProcessedAt: null, isRunning: false, isPaused: false }; }
+  },
+}));
+
+jest.mock('@arbitrage/core/resilience', () => ({
+  getErrorMessage: (err: unknown) => err instanceof Error ? err.message : String(err),
+}));
+
+jest.mock('@arbitrage/core/risk', () => ({
+  resetDrawdownCircuitBreaker: () => {},
+  resetEVCalculator: () => {},
+  resetKellyPositionSizer: () => {},
+  resetExecutionProbabilityTracker: () => {},
+}));
+
+jest.mock('@arbitrage/core/service-lifecycle', () => ({
+  createServiceState: () => makeStateManager(),
+  ServiceState: {},
+}));
+
+jest.mock('@arbitrage/core/utils', () => ({
+  disconnectWithTimeout: async () => {
+    disconnectCalled = true;
+  },
+  parseEnvIntSafe: (envVal: string | undefined, defaultVal: number) => {
+    if (!envVal) return defaultVal;
+    const parsed = parseInt(envVal, 10);
+    return isNaN(parsed) ? defaultVal : parsed;
+  },
+}));
+
 jest.mock('@arbitrage/core', () => {
   const actual = jest.requireActual('@arbitrage/core') as Record<string, unknown>;
-
-  // Use closures (not jest.fn() .mockImplementation) so resetMocks can't strip them.
-  // The outer closure captures the tracking flags by reference.
-
-  const makeStreamsClient = () => ({
-    createConsumerGroup: jest.fn<any>(() => {
-      consumerGroupCreated = true;
-      return Promise.resolve(undefined);
-    }),
-    xadd: jest.fn<any>(() => Promise.resolve('1-0')),
-    xack: jest.fn<any>(() => Promise.resolve(1)),
-    disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
-    STREAMS: { EXECUTION_REQUESTS: 'stream:execution-requests' },
-  });
-
-  const makeRedisClient = () => ({
-    get: jest.fn<any>(() => Promise.resolve(null)),
-    set: jest.fn<any>(() => Promise.resolve('OK')),
-    setNx: jest.fn<any>(() => Promise.resolve(true)),
-    expire: jest.fn<any>(() => Promise.resolve(1)),
-    disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
-    updateServiceHealth: jest.fn<any>(() => Promise.resolve(undefined)),
-    getAllServiceHealth: jest.fn<any>(() => Promise.resolve({})),
-  });
-
-  const makeLockManager = () => ({
-    withLock: jest.fn<any>(async (_key: string, fn: () => Promise<void>) => {
-      await fn();
-      return { success: true };
-    }),
-    shutdown: jest.fn<any>(() => Promise.resolve(undefined)),
-    disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
-  });
-
-  const makeNonceManager = () => ({
-    start: jest.fn(),
-    stop: jest.fn<any>(() => Promise.resolve(undefined)),
-    registerWallet: jest.fn(),
-    getNextNonce: jest.fn<any>(() => Promise.resolve(1)),
-    confirmTransaction: jest.fn(),
-    failTransaction: jest.fn(),
-    resetChain: jest.fn(),
-    disconnect: jest.fn<any>(() => Promise.resolve(undefined)),
-  });
-
-  const makeStateManager = () => ({
-    getState: jest.fn(() => currentState),
-    executeStart: jest.fn(async (fn: () => Promise<void>) => {
-      currentState = 'starting';
-      try {
-        await fn();
-        currentState = 'running';
-        return { success: true };
-      } catch (error) {
-        currentState = 'idle';
-        return { success: false, error };
-      }
-    }),
-    executeStop: jest.fn(async (fn: () => Promise<void>) => {
-      currentState = 'stopping';
-      try {
-        await fn();
-        currentState = 'stopped';
-        return { success: true };
-      } catch (error) {
-        currentState = 'stopped';
-        return { success: true };
-      }
-    }),
-    isRunning: jest.fn(() => currentState === 'running'),
-    transition: jest.fn<any>(() => Promise.resolve({ success: true })),
-    isTransitioning: jest.fn(() => currentState === 'starting' || currentState === 'stopping'),
-    waitForIdle: jest.fn<any>(() => Promise.resolve(undefined)),
-    on: jest.fn(),
-    off: jest.fn(),
-    canTransition: jest.fn(() => true),
-  });
-
   return {
     ...actual,
-    // Factory functions: create fresh instances each call
-    getRedisClient: async () => {
-      redisClientCreated = true;
-      return makeRedisClient();
-    },
-    getRedisStreamsClient: async () => {
-      streamsClientCreated = true;
-      return makeStreamsClient();
-    },
-    getDistributedLockManager: async () => {
-      lockManagerCreated = true;
-      return makeLockManager();
-    },
     getNonceManager: () => {
       nonceManagerCreated = true;
       return makeNonceManager();
     },
-    createServiceState: () => makeStateManager(),
     createLogger: (_name: string) => ({
       info: jest.fn(),
       error: jest.fn(),
@@ -195,19 +248,6 @@ jest.mock('@arbitrage/core', () => {
       logExecutionResult: jest.fn(),
       logHealthCheck: jest.fn(),
     }),
-    disconnectWithTimeout: async () => {
-      disconnectCalled = true;
-    },
-    stopAndNullify: async (obj: any) => {
-      if (obj && typeof obj.stop === 'function') {
-        await obj.stop();
-      }
-      return null;
-    },
-    clearIntervalSafe: (timer: NodeJS.Timeout | null) => {
-      if (timer) clearInterval(timer);
-      return null;
-    },
     TradeLogger: function() {
       return {
         log: jest.fn(),
@@ -215,18 +255,6 @@ jest.mock('@arbitrage/core', () => {
         validateLogDir: jest.fn<any>(() => Promise.resolve(undefined)),
       };
     },
-    resetDrawdownCircuitBreaker: () => {},
-    resetEVCalculator: () => {},
-    resetKellyPositionSizer: () => {},
-    resetExecutionProbabilityTracker: () => {},
-    RedisStreamsClient: {
-      STREAMS: {
-        EXECUTION_REQUESTS: 'stream:execution-requests',
-        OPPORTUNITIES: 'stream:opportunities',
-        EXECUTION_RESULTS: 'stream:execution-results',
-      },
-    },
-    getErrorMessage: (err: unknown) => err instanceof Error ? err.message : String(err),
   };
 });
 

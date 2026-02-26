@@ -33,6 +33,7 @@ import {
 } from '../utils/amm-math';
 import type { DynamicSlippageConfig } from '../utils/amm-math';
 import { getErrorMessage } from '../resilience/error-handling';
+import type { EventProcessingWorkerPool } from '../async/worker-pool';
 const logger = createLogger('multi-leg-path-finder');
 let hasLoggedWorkerFallback = false;
 
@@ -894,7 +895,7 @@ export class MultiLegPathFinder {
     pools: DexPool[],
     baseTokens: string[],
     targetPathLength: number,
-    workerPool?: any
+    workerPool?: EventProcessingWorkerPool
   ): Promise<MultiLegOpportunity[]> {
     // Lazy import worker pool to avoid circular dependencies
     const pool = workerPool || (await import('../async/worker-pool')).getWorkerPool();
@@ -943,14 +944,15 @@ export class MultiLegPathFinder {
 
       if (result.success && result.result) {
         // Update local stats from worker result
-        if (result.result.stats) {
+        const workerResult = result.result as { stats?: { pathsExplored?: number; processingTimeMs?: number }; opportunities?: unknown[] };
+        if (workerResult.stats) {
           this.stats.totalCalls++;
-          this.stats.totalPathsExplored += result.result.stats.pathsExplored ?? 0;
-          this.stats.totalOpportunitiesFound += result.result.opportunities?.length ?? 0;
-          this.stats.totalProcessingTimeMs += result.result.stats.processingTimeMs ?? 0;
+          this.stats.totalPathsExplored += workerResult.stats.pathsExplored ?? 0;
+          this.stats.totalOpportunitiesFound += workerResult.opportunities?.length ?? 0;
+          this.stats.totalProcessingTimeMs += workerResult.stats.processingTimeMs ?? 0;
         }
 
-        return result.result.opportunities || [];
+        return (workerResult.opportunities || []) as MultiLegOpportunity[];
       }
 
       logger.warn('Worker task failed, falling back to sync', { taskId, error: result.error });

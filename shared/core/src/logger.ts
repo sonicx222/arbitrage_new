@@ -17,15 +17,20 @@ import type { IPerformanceLogger, LogMeta } from './logging/types';
  * Backward-compatible Logger type with permissive parameter types.
  * 19+ files import this type and rely on `any`-permissive meta parameters.
  *
+ * Meta parameter accepts unknown for maximum compatibility with:
+ * - Custom logger interfaces using `meta?: object`
+ * - Error objects passed as context
+ * - Unknown types from catch blocks
+ *
  * For new code, prefer ILogger from ./logging/types for stricter type safety.
  */
 export interface Logger {
-  fatal(msg: string, meta?: any): void;
-  error(msg: string, meta?: any): void;
-  warn(msg: string, meta?: any): void;
-  info(msg: string, meta?: any): void;
-  debug(msg: string, meta?: any): void;
-  trace?(msg: string, meta?: any): void;
+  fatal(msg: string, meta?: unknown): void;
+  error(msg: string, meta?: unknown): void;
+  warn(msg: string, meta?: unknown): void;
+  info(msg: string, meta?: unknown): void;
+  debug(msg: string, meta?: unknown): void;
+  trace?(msg: string, meta?: unknown): void;
   child(bindings: Record<string, unknown>): Logger;
   isLevelEnabled?(level: string): boolean;
   /** @deprecated Access via isLevelEnabled() instead */
@@ -88,15 +93,15 @@ export class PerformanceLogger implements IPerformanceLogger {
     this.delegate.logEventLatency(operation, latency, meta);
   }
 
-  // Backward-compatible methods use `any` parameter types for legacy callers.
+  // Backward-compatible methods use `unknown` parameter types for legacy callers.
   // New code should use IPerformanceLogger for strict typed signatures.
 
-  logArbitrageOpportunity(opportunity: any): void {
-    this.delegate.logArbitrageOpportunity(opportunity);
+  logArbitrageOpportunity(opportunity: unknown): void {
+    this.delegate.logArbitrageOpportunity(opportunity as Parameters<IPerformanceLogger['logArbitrageOpportunity']>[0]);
   }
 
-  logExecutionResult(result: any): void {
-    this.delegate.logExecutionResult(result);
+  logExecutionResult(result: unknown): void {
+    this.delegate.logExecutionResult(result as Parameters<IPerformanceLogger['logExecutionResult']>[0]);
   }
 
   /**
@@ -112,12 +117,12 @@ export class PerformanceLogger implements IPerformanceLogger {
     });
   }
 
-  logHealthCheck(service: string, status: any): void {
-    this.delegate.logHealthCheck(service, status);
+  logHealthCheck(service: string, status: unknown): void {
+    this.delegate.logHealthCheck(service, status as Parameters<IPerformanceLogger['logHealthCheck']>[1]);
   }
 
-  logMetrics(metrics: any): void {
-    this.delegate.logMetrics(metrics);
+  logMetrics(metrics: unknown): void {
+    this.delegate.logMetrics(metrics as LogMeta);
   }
 }
 

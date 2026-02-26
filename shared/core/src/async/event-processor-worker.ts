@@ -78,11 +78,11 @@ interface TaskMessage {
   type: 'process_task';
   taskId: string;
   taskType: string;
-  taskData: any;
+  taskData: unknown;
 }
 
 // Reuse one path finder per worker process to avoid expensive per-task reinitialization.
-let workerMultiLegPathFinder: any = null;
+let workerMultiLegPathFinder: { findMultiLegOpportunities: (...args: unknown[]) => Promise<unknown[]>; updateConfig: (config: unknown) => void; getStats: () => { totalPathsExplored: number } } | null = null;
 let workerMultiLegPathFinderConfigHash: string | null = null;
 
 // Task processing functions
@@ -93,8 +93,8 @@ interface ArbitrageResult {
   sellPrice: number;
 }
 
-async function processArbitrageDetection(data: any): Promise<any> {
-  const { prices, minProfit } = data;
+async function processArbitrageDetection(data: unknown): Promise<{ opportunities: ArbitrageResult[]; processed: boolean }> {
+  const { prices, minProfit } = data as { prices?: number[]; minProfit?: number };
 
   // Use WebAssembly engine for arbitrage detection
   // For now, simulate with mock calculations
@@ -109,7 +109,7 @@ async function processArbitrageDetection(data: any): Promise<any> {
     if (sellPrice > buyPrice) {
       const profit = (sellPrice - buyPrice) / buyPrice;
 
-      if (profit > minProfit) {
+      if (profit > (minProfit ?? 0)) {
         opportunities.push({
           pairKey: 'MOCK/USDT',
           profit,
@@ -126,8 +126,8 @@ async function processArbitrageDetection(data: any): Promise<any> {
   };
 }
 
-async function processPriceCalculation(data: any): Promise<any> {
-  const { reserves, fee } = data;
+async function processPriceCalculation(data: unknown): Promise<{ price: number; adjustedPrice: number; fee: number }> {
+  const { reserves, fee } = data as { reserves?: { reserve0?: number; reserve1?: number }; fee?: number };
 
   if (!reserves || !reserves.reserve0 || !reserves.reserve1) {
     throw new Error('Invalid reserve data');
@@ -144,8 +144,8 @@ async function processPriceCalculation(data: any): Promise<any> {
   };
 }
 
-async function processCorrelationAnalysis(data: any): Promise<any> {
-  const { priceHistory1, priceHistory2 } = data;
+async function processCorrelationAnalysis(data: unknown): Promise<{ correlation: number; strength: string }> {
+  const { priceHistory1, priceHistory2 } = data as { priceHistory1?: number[]; priceHistory2?: number[] };
 
   if (!priceHistory1 || !priceHistory2 || priceHistory1.length !== priceHistory2.length) {
     throw new Error('Invalid price history data');
@@ -178,8 +178,8 @@ async function processCorrelationAnalysis(data: any): Promise<any> {
   };
 }
 
-async function processTriangularArbitrage(data: any): Promise<any> {
-  const { p0, p1, p2, fee } = data;
+async function processTriangularArbitrage(data: unknown): Promise<{ profit: number; profitable: boolean; path: number[] }> {
+  const { p0, p1, p2, fee } = data as { p0: number; p1: number; p2: number; fee: number };
 
   // Calculate triangular arbitrage profit
   const amount = 1000000000000000000; // 1 ETH in wei
@@ -193,10 +193,10 @@ async function processTriangularArbitrage(data: any): Promise<any> {
   };
 }
 
-async function processStatisticalAnalysis(data: any): Promise<any> {
-  const { prices, window } = data;
+async function processStatisticalAnalysis(data: unknown): Promise<{ movingAverage: number; volatility: number; trend: string }> {
+  const { prices, window } = data as { prices?: number[]; window?: number };
 
-  if (!prices || prices.length < window) {
+  if (!prices || !window || prices.length < window) {
     throw new Error('Insufficient price data for statistical analysis');
   }
 
@@ -317,16 +317,16 @@ function processBatchJsonParsing(data: { jsonStrings: string[] }): {
  * Process multi-leg path finding task.
  * Offloads CPU-intensive DFS from main event loop.
  */
-async function processMultiLegPathFinding(data: any): Promise<any> {
-  const { chain, pools, baseTokens, targetPathLength, config } = data;
+async function processMultiLegPathFinding(data: unknown): Promise<{ opportunities: unknown[]; stats: { pathsExplored: number; processingTimeMs: number } }> {
+  const { chain, pools, baseTokens, targetPathLength, config } = data as { chain: string; pools: unknown[]; baseTokens: unknown[]; targetPathLength: number; config?: Record<string, unknown> };
 
   // Dynamic import to avoid circular dependencies
   const { MultiLegPathFinder } = await import('../path-finding/multi-leg-path-finder');
-  const requestedConfig = config || {};
+  const requestedConfig = config ?? {};
   const requestedConfigHash = JSON.stringify(requestedConfig);
 
   if (!workerMultiLegPathFinder) {
-    workerMultiLegPathFinder = new MultiLegPathFinder(requestedConfig);
+    workerMultiLegPathFinder = new MultiLegPathFinder(requestedConfig) as unknown as typeof workerMultiLegPathFinder;
     workerMultiLegPathFinderConfigHash = requestedConfigHash;
   } else if (workerMultiLegPathFinderConfigHash !== requestedConfigHash) {
     workerMultiLegPathFinder.updateConfig(requestedConfig);
@@ -334,15 +334,15 @@ async function processMultiLegPathFinding(data: any): Promise<any> {
   }
 
   const startTime = Date.now();
-  const opportunities = await workerMultiLegPathFinder.findMultiLegOpportunities(
+  const opportunities = await workerMultiLegPathFinder!.findMultiLegOpportunities(
     chain,
     pools,
     baseTokens,
     targetPathLength
-  );
+  ) as unknown[];
   const processingTimeMs = Date.now() - startTime;
 
-  const stats = workerMultiLegPathFinder.getStats();
+  const stats = workerMultiLegPathFinder!.getStats();
 
   return {
     opportunities,
@@ -360,7 +360,7 @@ parentPort?.on('message', async (message: TaskMessage) => {
   try {
     const { taskId, taskType, taskData } = message;
 
-    let result: any;
+    let result: unknown;
 
     // Route to appropriate processing function
     switch (taskType) {
@@ -390,12 +390,12 @@ parentPort?.on('message', async (message: TaskMessage) => {
 
       case 'json_parsing':
         // Synchronous - no await needed
-        result = processJsonParsing(taskData);
+        result = processJsonParsing(taskData as { jsonString: string });
         break;
 
       case 'batch_json_parsing':
         // Synchronous - no await needed
-        result = processBatchJsonParsing(taskData);
+        result = processBatchJsonParsing(taskData as { jsonStrings: string[] });
         break;
 
       default:
@@ -412,14 +412,14 @@ parentPort?.on('message', async (message: TaskMessage) => {
       processingTime
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     const processingTime = Date.now() - startTime;
 
     // Send error back to main thread
     parentPort?.postMessage({
       taskId: message.taskId,
       success: false,
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
       processingTime
     });
   }

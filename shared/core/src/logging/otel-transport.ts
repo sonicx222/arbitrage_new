@@ -202,7 +202,7 @@ export class OtelTransportStream extends Writable {
 
   _write(
     chunk: Buffer | string,
-    _encoding: BufferEncoding,
+    _encoding: BufferEncoding, // eslint-disable-line no-undef
     callback: (error?: Error | null) => void,
   ): void {
     // Noop mode: discard immediately

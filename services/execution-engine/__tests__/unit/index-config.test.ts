@@ -22,26 +22,20 @@ jest.mock('@arbitrage/core', () => {
       error: jest.fn(),
       debug: jest.fn(),
     }),
-    getCrossRegionEnvConfig: jest.fn((serviceName: string) => ({
-      regionId: process.env.REGION_ID || 'us-east1',
-      serviceName,
-      healthCheckIntervalMs: 30000,
-      failoverThreshold: 3,
-      failoverTimeoutMs: 60000,
-      leaderHeartbeatIntervalMs: 10000,
-      leaderLockTtlMs: 30000,
-    })),
     getCrossRegionHealthManager: jest.fn(),
     resetCrossRegionHealthManager: jest.fn(),
-    parseEnvInt: jest.fn((envVar: string, defaultVal: number) => {
-      const raw = process.env[envVar];
-      if (raw === undefined) return defaultVal;
-      const parsed = parseInt(raw, 10);
-      return Number.isNaN(parsed) ? defaultVal : parsed;
-    }),
     setupServiceShutdown: jest.fn(),
     closeHealthServer: jest.fn(),
     runServiceMain: jest.fn(),
+  };
+});
+
+jest.mock('@arbitrage/core/utils', () => {
+  const actual = jest.requireActual('@arbitrage/core/utils') as Record<string, unknown>;
+  return {
+    ...actual,
+    getCrossRegionEnvConfig: jest.fn(),
+    parseEnvInt: jest.fn(),
   };
 });
 
@@ -51,10 +45,7 @@ import {
   getCircuitBreakerConfigFromEnv,
   getStandbyConfigFromEnv,
 } from '../../src/index';
-import { getCrossRegionEnvConfig } from '@arbitrage/core/utils';
-
-// Cast to jest.Mock for mock restoration in beforeEach
-const mockGetCrossRegionEnvConfig = getCrossRegionEnvConfig as jest.Mock;
+import { getCrossRegionEnvConfig, parseEnvInt } from '@arbitrage/core/utils';
 
 describe('Index Config Parsing', () => {
   const originalEnv = { ...process.env };
@@ -78,8 +69,8 @@ describe('Index Config Parsing', () => {
     delete process.env.REGION_ID;
 
     // Restore mock implementation after jest.resetAllMocks() in global afterEach (setupTests.ts)
-    (mockGetCrossRegionEnvConfig as jest.Mock<typeof getCrossRegionEnvConfig>).mockImplementation(
-      (serviceName) => ({
+    (getCrossRegionEnvConfig as jest.Mock).mockImplementation(
+      (serviceName: any) => ({
         regionId: process.env.REGION_ID || 'us-east1',
         serviceName,
         healthCheckIntervalMs: 30000,
@@ -89,6 +80,13 @@ describe('Index Config Parsing', () => {
         leaderLockTtlMs: 30000,
       })
     );
+
+    (parseEnvInt as jest.Mock).mockImplementation((envVar: any, defaultVal: any) => {
+      const raw = process.env[envVar as string];
+      if (raw === undefined) return defaultVal;
+      const parsed = parseInt(raw, 10);
+      return Number.isNaN(parsed) ? defaultVal : parsed;
+    });
   });
 
   afterEach(() => {

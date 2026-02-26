@@ -42,7 +42,7 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
       const status = systemHealth >= 50 ? 'healthy' : 'degraded';
 
       // Minimal response for unauthenticated requests (load balancer probes)
-      if (!(req as any).user) {
+      if (!(req as Request & { user?: unknown }).user) {
         res.json({
           status,
           systemHealth,

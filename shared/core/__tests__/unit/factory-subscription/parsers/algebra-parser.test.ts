@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { parseAlgebraPoolCreatedEvent } from '../../../../src/factory-subscription/parsers/algebra-parser';
+import type { RawEventLog } from '../../../../src/factory-subscription/parsers/types';
 
 // =============================================================================
 // Test Helpers
@@ -105,15 +106,15 @@ describe('parseAlgebraPoolCreatedEvent', () => {
 
   describe('Null/undefined log', () => {
     it('should return null for null log', () => {
-      expect(parseAlgebraPoolCreatedEvent(null)).toBeNull();
+      expect(parseAlgebraPoolCreatedEvent(null as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for undefined log', () => {
-      expect(parseAlgebraPoolCreatedEvent(undefined)).toBeNull();
+      expect(parseAlgebraPoolCreatedEvent(undefined as unknown as RawEventLog)).toBeNull();
     });
 
     it('should return null for empty object', () => {
-      expect(parseAlgebraPoolCreatedEvent({})).toBeNull();
+      expect(parseAlgebraPoolCreatedEvent({} as RawEventLog)).toBeNull();
     });
   });
 

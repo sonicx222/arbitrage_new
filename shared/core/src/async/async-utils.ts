@@ -351,6 +351,7 @@ export async function mapSequential<T, R>(
  * @param delayMs Debounce delay in milliseconds
  * @returns Debounced function
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- `any` required for ReturnType<T> inference
 export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
   fn: T,
   delayMs: number
@@ -400,6 +401,7 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
  * @param intervalMs Minimum interval between executions
  * @returns Throttled function
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- `any` required for ReturnType<T> inference
 export function throttleAsync<T extends (...args: any[]) => Promise<any>>(
   fn: T,
   intervalMs: number

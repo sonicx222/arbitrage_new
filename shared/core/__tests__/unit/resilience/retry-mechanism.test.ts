@@ -393,7 +393,7 @@ describe('RetryMechanism', () => {
       maxAttempts: 5,
       initialDelay: 50,
       jitter: false,
-      retryCondition: (error) => error.message === 'retry-me',
+      retryCondition: (error) => (error as Error).message === 'retry-me',
     });
 
     const retryableError = new Error('retry-me');

@@ -235,13 +235,13 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
                .replace(/on\w+\s*=/gi, '');
   };
 
-  const sanitizeObject = (obj: any): any => {
+  const sanitizeObject = (obj: unknown): unknown => {
     if (typeof obj === 'string') {
       return sanitizeString(obj);
     } else if (Array.isArray(obj)) {
       return obj.map(sanitizeObject);
     } else if (obj && typeof obj === 'object') {
-      const sanitized: any = {};
+      const sanitized: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj)) {
         sanitized[key] = sanitizeObject(value);
       }
@@ -251,11 +251,11 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
   };
 
   if (req.body && typeof req.body === 'object') {
-    req.body = sanitizeObject(req.body);
+    req.body = sanitizeObject(req.body) as typeof req.body;
   }
 
   if (req.query && typeof req.query === 'object') {
-    req.query = sanitizeObject(req.query);
+    req.query = sanitizeObject(req.query) as typeof req.query;
   }
 
   next();

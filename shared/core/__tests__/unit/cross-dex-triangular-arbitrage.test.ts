@@ -602,9 +602,10 @@ describe('CrossDexTriangularArbitrage', () => {
 
     it('should include slippage config in statistics', () => {
       const stats = arb.getStatistics();
-      expect(stats.slippageConfig.baseSlippage).toBe(0.003);
-      expect(stats.slippageConfig.priceImpactScale).toBe(5.0);
-      expect(stats.slippageConfig.liquidityPenaltyScale).toBe(2.0);
+      const slippageConfig = stats.slippageConfig as { baseSlippage: number; priceImpactScale: number; liquidityPenaltyScale: number };
+      expect(slippageConfig.baseSlippage).toBe(0.003);
+      expect(slippageConfig.priceImpactScale).toBe(5.0);
+      expect(slippageConfig.liquidityPenaltyScale).toBe(2.0);
     });
   });
 

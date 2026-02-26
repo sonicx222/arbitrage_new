@@ -134,7 +134,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: object): void {
  */
 interface ParseBodyResult {
   success: boolean;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   error?: string;
 }
 
@@ -305,7 +305,7 @@ async function handleForceOpen(
     return;
   }
 
-  const reason = parseResult.data.reason || 'API manual override';
+  const reason = (typeof parseResult.data.reason === 'string' ? parseResult.data.reason : undefined) || 'API manual override';
 
   // Force open
   engine.forceOpenCircuitBreaker(reason);

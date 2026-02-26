@@ -353,7 +353,7 @@ export class RedisClient {
         this.logger.warn(`Already subscribed to channel ${channel}, replacing callback`);
         // Remove old listener first, then delete from map
         const oldSubscription = this.subscriptions.get(channel)!;
-        this.subClient.removeListener('message', oldSubscription.listener as (...args: any[]) => void);
+        this.subClient.removeListener('message', oldSubscription.listener as (...args: unknown[]) => void);
         this.subscriptions.delete(channel);
         // Note: We don't call subClient.unsubscribe() here because we're immediately resubscribing
       }
@@ -379,7 +379,7 @@ export class RedisClient {
         this.logger.debug(`Subscribed to channel: ${channel}`);
       } catch (subscribeError) {
         // Rollback: remove listener if subscribe fails
-        this.subClient.removeListener('message', listener as (...args: any[]) => void);
+        this.subClient.removeListener('message', listener as (...args: unknown[]) => void);
         this.subscriptions.delete(channel);
         throw subscribeError;
       }
@@ -401,7 +401,7 @@ export class RedisClient {
 
     try {
       // Remove listener
-      this.subClient.removeListener('message', subscription.listener as (...args: any[]) => void);
+      this.subClient.removeListener('message', subscription.listener as (...args: unknown[]) => void);
       // Unsubscribe from channel
       await this.subClient.unsubscribe(channel);
       this.logger.debug(`Unsubscribed from channel: ${channel}`);
@@ -429,7 +429,7 @@ export class RedisClient {
     }
   }
 
-  async get<T = any>(key: string): Promise<T | null> {
+  async get<T = unknown>(key: string): Promise<T | null> {
     try {
       this.trackCommand('get');
       const value = await this.client.get(key);
@@ -452,7 +452,7 @@ export class RedisClient {
    * @param ttlSeconds - New TTL to set on the key (refreshes expiration)
    * @returns The cached value or null if not found
    */
-  async getex<T = any>(key: string, ttlSeconds: number): Promise<T | null> {
+  async getex<T = unknown>(key: string, ttlSeconds: number): Promise<T | null> {
     try {
       this.trackCommand('getex');
       // GETEX key EX seconds - gets value and sets new expiration
@@ -705,7 +705,7 @@ export class RedisClient {
     }
   }
 
-  async hget<T = any>(key: string, field: string): Promise<T | null> {
+  async hget<T = unknown>(key: string, field: string): Promise<T | null> {
     try {
       this.trackCommand('hget');
       const value = await this.client.hget(key, field);
@@ -716,7 +716,7 @@ export class RedisClient {
     }
   }
 
-  async hgetall<T = any>(key: string): Promise<Record<string, T> | null> {
+  async hgetall<T = unknown>(key: string): Promise<Record<string, T> | null> {
     try {
       this.trackCommand('hgetall');
       const result = await this.client.hgetall(key);
@@ -850,12 +850,12 @@ export class RedisClient {
    * Returns an object that can chain Redis commands and execute atomically.
    */
   multi(): {
-    zremrangebyscore: (key: string, min: number, max: number) => any;
-    zadd: (key: string, score: number, member: string) => any;
-    zcard: (key: string) => any;
-    expire: (key: string, seconds: number) => any;
-    zrange: (key: string, start: number, stop: number, withScores?: string) => any;
-    exec: () => Promise<any[]>;
+    zremrangebyscore: (key: string, min: number, max: number) => unknown;
+    zadd: (key: string, score: number, member: string) => unknown;
+    zcard: (key: string) => unknown;
+    expire: (key: string, seconds: number) => unknown;
+    zrange: (key: string, start: number, stop: number, withScores?: string) => unknown;
+    exec: () => Promise<unknown[]>;
   } {
     const multi = this.client.multi();
     return {
@@ -1118,7 +1118,7 @@ export class RedisClient {
       // Clean up subscriptions to prevent memory leaks
       for (const [channel, subscription] of this.subscriptions) {
         try {
-          this.subClient.removeListener('message', subscription.listener as (...args: any[]) => void);
+          this.subClient.removeListener('message', subscription.listener as (...args: unknown[]) => void);
           await this.subClient.unsubscribe(channel);
         } catch (error) {
           this.logger.warn(`Error cleaning up subscription for ${channel}`, { error });

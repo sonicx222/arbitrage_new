@@ -432,9 +432,10 @@ describe('EventProcessingWorkerPool (real workers)', () => {
     const result = await pool.submitTask(task);
 
     expect(result.success).toBe(true);
-    expect(result.result.parsed).toEqual(jsonData);
-    expect(result.result.byteLength).toBeGreaterThan(0);
-    expect(result.result.parseTimeUs).toBeGreaterThanOrEqual(0);
+    const resultData = result.result as { parsed: typeof jsonData; byteLength: number; parseTimeUs: number };
+    expect(resultData.parsed).toEqual(jsonData);
+    expect(resultData.byteLength).toBeGreaterThan(0);
+    expect(resultData.parseTimeUs).toBeGreaterThanOrEqual(0);
   });
 
   it('should handle batch JSON parsing with real workers', async () => {
@@ -457,9 +458,9 @@ describe('EventProcessingWorkerPool (real workers)', () => {
     const result = await pool.submitTask(task);
 
     expect(result.success).toBe(true);
-    expect(result.result.successCount).toBe(2);
-    expect(result.result.errorCount).toBe(1);
-    expect(result.result.results).toHaveLength(3);
+    expect((result.result as any).successCount).toBe(2);
+    expect((result.result as any).errorCount).toBe(1);
+    expect((result.result as any).results).toHaveLength(3);
   });
 
   it('should process multiple tasks across multiple workers', async () => {

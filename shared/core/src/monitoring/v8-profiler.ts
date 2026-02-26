@@ -18,11 +18,24 @@ import { createLogger } from '../logger';
 
 const logger = createLogger('v8-profiler');
 
+/**
+ * Internal type representing the V8 profiler data object returned by v8-profiler-next.
+ * v8-profiler-next has no published @types, so we define the minimal interface here.
+ */
+interface V8ProfileData {
+  title?: string;
+  startTime: number;
+  endTime: number;
+  samples?: unknown[];
+  export(callback: (error: Error | null, result: string) => void): void;
+  delete(): void;
+}
+
 export interface ProfileResult {
   title: string;
   samples: number;
   duration: number;
-  profile: any; // v8-profiler-next profile object
+  profile: unknown; // v8-profiler-next profile object
 }
 
 export interface ProfileOptions {
@@ -31,7 +44,7 @@ export interface ProfileOptions {
 }
 
 export class V8Profiler {
-  private profiler: any = null;
+  private profiler: unknown = null;
   private outputDir: string;
   private sampleInterval: number;
   private outputDirReady = false;
@@ -55,7 +68,7 @@ export class V8Profiler {
       const moduleName = 'v8-profiler-next';
       const mod = await import(/* webpackIgnore: true */ moduleName);
       this.profiler = mod.default ?? mod;
-      this.profiler.setSamplingInterval(this.sampleInterval);
+      (this.profiler as unknown as { setSamplingInterval: (interval: number) => void }).setSamplingInterval(this.sampleInterval);
       return true;
     } catch {
       logger.warn('v8-profiler-next not available. Install with: npm install --save-dev v8-profiler-next');
@@ -98,7 +111,7 @@ export class V8Profiler {
       throw new Error('V8 profiler not available. Install v8-profiler-next.');
     }
 
-    this.profiler.startProfiling(title, true);
+    (this.profiler as unknown as { startProfiling: (title: string, recsamples: boolean) => void }).startProfiling(title, true);
     logger.info(`Started profiling: ${title} (sampling interval: ${this.sampleInterval}us)`);
   }
 
@@ -110,7 +123,7 @@ export class V8Profiler {
       throw new Error('V8 profiler not available.');
     }
 
-    const profile = this.profiler.stopProfiling(title);
+    const profile = (this.profiler as unknown as { stopProfiling: (title?: string) => V8ProfileData }).stopProfiling(title);
 
     // Calculate duration and samples
     const startTime = profile.startTime;
@@ -140,7 +153,8 @@ export class V8Profiler {
     const filepath = join(this.outputDir, filename);
 
     return new Promise((resolve, reject) => {
-      profileResult.profile.export(async (error: Error | null, result: string) => {
+      const profileData = profileResult.profile as unknown as V8ProfileData;
+      profileData.export(async (error: Error | null, result: string) => {
         if (error) {
           reject(error);
           return;
@@ -148,7 +162,7 @@ export class V8Profiler {
 
         try {
           await writeFile(filepath, result, 'utf8');
-          profileResult.profile.delete();
+          profileData.delete();
           logger.info(`Exported profile: ${filepath}`);
           resolve(filepath);
         } catch (writeError) {
