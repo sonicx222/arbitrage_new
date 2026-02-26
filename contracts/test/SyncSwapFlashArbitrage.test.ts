@@ -14,6 +14,16 @@ import {
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,
   getDeadline,
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testSwapDeadlineConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
+  build2HopPath,
+  build2HopCrossRouterPath,
 } from './helpers';
 
 /**
@@ -51,6 +61,23 @@ describe('SyncSwapFlashArbitrage', () => {
 
     return { syncSwapArbitrage, vault, ...base };
   }
+
+  // Admin test fixture adapter for shared tests
+  const adminConfig = {
+    contractName: 'SyncSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.syncSwapArbitrage,
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 
   // ===========================================================================
   // 1. Deployment and Initialization Tests
@@ -127,189 +154,9 @@ describe('SyncSwapFlashArbitrage', () => {
   });
 
   // ===========================================================================
-  // 2. Router Management Tests
+  // 2. Router Management Tests (shared harness)
   // ===========================================================================
-  describe('2. Router Management', () => {
-    describe('addApprovedRouter()', () => {
-      it('should allow owner to add router', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        expect(
-          await syncSwapArbitrage.isApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.true;
-      });
-
-      it('should emit RouterAdded event', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await expect(
-          syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress())
-        )
-          .to.emit(syncSwapArbitrage, 'RouterAdded')
-          .withArgs(await dexRouter1.getAddress());
-      });
-
-      it('should increment router count', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(0);
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(1);
-      });
-
-      it('should allow multiple routers to be added', async () => {
-        const { syncSwapArbitrage, dexRouter1, dexRouter2, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter2.getAddress());
-
-        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(2);
-        expect(
-          await syncSwapArbitrage.isApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.true;
-        expect(
-          await syncSwapArbitrage.isApprovedRouter(await dexRouter2.getAddress())
-        ).to.be.true;
-      });
-
-      it('should revert on zero address router', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(owner).addApprovedRouter(ethers.ZeroAddress)
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidRouterAddress');
-      });
-
-      it('should revert on duplicate router', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'RouterAlreadyApproved');
-      });
-
-      it('should revert if non-owner tries to add', async () => {
-        const { syncSwapArbitrage, dexRouter1, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await expect(
-          syncSwapArbitrage.connect(user).addApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('removeApprovedRouter()', () => {
-      it('should allow owner to remove router', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        expect(
-          await syncSwapArbitrage.isApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.true;
-
-        await syncSwapArbitrage
-          .connect(owner)
-          .removeApprovedRouter(await dexRouter1.getAddress());
-
-        expect(
-          await syncSwapArbitrage.isApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.false;
-      });
-
-      it('should emit RouterRemoved event', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          syncSwapArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress())
-        )
-          .to.emit(syncSwapArbitrage, 'RouterRemoved')
-          .withArgs(await dexRouter1.getAddress());
-      });
-
-      it('should decrement router count', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(1);
-
-        await syncSwapArbitrage
-          .connect(owner)
-          .removeApprovedRouter(await dexRouter1.getAddress());
-
-        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(0);
-      });
-
-      it('should revert on non-existent router', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await expect(
-          syncSwapArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'RouterNotApproved');
-      });
-
-      it('should revert if non-owner tries to remove', async () => {
-        const { syncSwapArbitrage, dexRouter1, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          syncSwapArbitrage.connect(user).removeApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('getApprovedRouters()', () => {
-      it('should return empty array initially', async () => {
-        const { syncSwapArbitrage } = await loadFixture(deployContractsFixture);
-
-        const routers = await syncSwapArbitrage.getApprovedRouters();
-        expect(routers).to.have.lengthOf(0);
-      });
-
-      it('should return all approved routers', async () => {
-        const { syncSwapArbitrage, dexRouter1, dexRouter2, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter2.getAddress());
-
-        const routers = await syncSwapArbitrage.getApprovedRouters();
-        expect(routers).to.have.lengthOf(2);
-        expect(routers).to.include(await dexRouter1.getAddress());
-        expect(routers).to.include(await dexRouter2.getAddress());
-      });
-    });
-  });
+  testRouterManagement(adminConfig);
 
   // ===========================================================================
   // 3. Flash Loan Execution Tests
@@ -347,21 +194,7 @@ describe('SyncSwapFlashArbitrage', () => {
         );
 
         const amountIn = ethers.parseEther('10');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 1n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
         const deadline = await getDeadline();
 
         // Execute arbitrage
@@ -398,21 +231,7 @@ describe('SyncSwapFlashArbitrage', () => {
         );
 
         const amountIn = ethers.parseEther('10');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 1n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
         const deadline = await getDeadline();
 
         await expect(
@@ -771,21 +590,7 @@ describe('SyncSwapFlashArbitrage', () => {
       );
 
       const amountIn = ethers.parseEther('10');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       const tx = await syncSwapArbitrage
@@ -1110,21 +915,7 @@ describe('SyncSwapFlashArbitrage', () => {
       );
 
       const amountIn = ethers.parseEther('10');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
       const minProfit = ethers.parseEther('1'); // Require 1 WETH profit (too high)
 
@@ -1162,21 +953,7 @@ describe('SyncSwapFlashArbitrage', () => {
       );
 
       const amountIn = ethers.parseEther('10');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       await expect(
@@ -1212,21 +989,7 @@ describe('SyncSwapFlashArbitrage', () => {
       const initialTotalProfits = await syncSwapArbitrage.totalProfits();
 
       const amountIn = ethers.parseEther('10');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       await syncSwapArbitrage
@@ -1240,279 +1003,15 @@ describe('SyncSwapFlashArbitrage', () => {
   });
 
   // ===========================================================================
-  // 6. Admin Functions Tests
+  // 6. Admin Functions Tests (shared harness)
   // ===========================================================================
-  describe('6. Admin Functions', () => {
-    describe('setMinimumProfit()', () => {
-      it('should allow owner to update minimum profit', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newMinProfit = ethers.parseEther('0.05');
-        await syncSwapArbitrage.connect(owner).setMinimumProfit(newMinProfit);
-
-        expect(await syncSwapArbitrage.minimumProfit()).to.equal(newMinProfit);
-      });
-
-      it('should emit MinimumProfitUpdated event', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newMinProfit = ethers.parseEther('0.05');
-        await expect(syncSwapArbitrage.connect(owner).setMinimumProfit(newMinProfit))
-          .to.emit(syncSwapArbitrage, 'MinimumProfitUpdated')
-          .withArgs(BigInt(1e14), newMinProfit);
-      });
-
-      it('should revert if non-owner tries to update', async () => {
-        const { syncSwapArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(user).setMinimumProfit(ethers.parseEther('0.05'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert when setting minimum profit to zero', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(owner).setMinimumProfit(0)
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidMinimumProfit');
-      });
-    });
-
-    describe('setSwapDeadline()', () => {
-      it('should allow owner to update swap deadline', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newDeadline = 600;
-        await syncSwapArbitrage.connect(owner).setSwapDeadline(newDeadline);
-
-        expect(await syncSwapArbitrage.swapDeadline()).to.equal(newDeadline);
-      });
-
-      it('should emit SwapDeadlineUpdated event', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newDeadline = 600;
-        await expect(syncSwapArbitrage.connect(owner).setSwapDeadline(newDeadline))
-          .to.emit(syncSwapArbitrage, 'SwapDeadlineUpdated')
-          .withArgs(60, newDeadline);
-      });
-
-      it('should revert on zero deadline', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(owner).setSwapDeadline(0)
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should revert on deadline > MAX_SWAP_DEADLINE', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(owner).setSwapDeadline(601)
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should revert if non-owner tries to update', async () => {
-        const { syncSwapArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(user).setSwapDeadline(600)
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('pause() / unpause()', () => {
-      it('should allow owner to pause', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await syncSwapArbitrage.connect(owner).pause();
-        expect(await syncSwapArbitrage.paused()).to.be.true;
-      });
-
-      it('should allow owner to unpause', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await syncSwapArbitrage.connect(owner).pause();
-        await syncSwapArbitrage.connect(owner).unpause();
-
-        expect(await syncSwapArbitrage.paused()).to.be.false;
-      });
-
-      it('should revert if non-owner tries to pause', async () => {
-        const { syncSwapArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          syncSwapArbitrage.connect(user).pause()
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert if non-owner tries to unpause', async () => {
-        const { syncSwapArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        await syncSwapArbitrage.connect(owner).pause();
-
-        await expect(
-          syncSwapArbitrage.connect(user).unpause()
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('withdrawToken()', () => {
-      it('should allow owner to withdraw tokens', async () => {
-        const { syncSwapArbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        // Send some WETH to contract
-        await weth.mint(await syncSwapArbitrage.getAddress(), ethers.parseEther('1'));
-
-        const ownerBalanceBefore = await weth.balanceOf(owner.address);
-
-        await syncSwapArbitrage
-          .connect(owner)
-          .withdrawToken(await weth.getAddress(), owner.address, ethers.parseEther('1'));
-
-        const ownerBalanceAfter = await weth.balanceOf(owner.address);
-        expect(ownerBalanceAfter).to.equal(ownerBalanceBefore + ethers.parseEther('1'));
-      });
-
-      it('should emit TokenWithdrawn event', async () => {
-        const { syncSwapArbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await syncSwapArbitrage.getAddress(), ethers.parseEther('1'));
-
-        await expect(
-          syncSwapArbitrage
-            .connect(owner)
-            .withdrawToken(await weth.getAddress(), owner.address, ethers.parseEther('1'))
-        )
-          .to.emit(syncSwapArbitrage, 'TokenWithdrawn')
-          .withArgs(await weth.getAddress(), owner.address, ethers.parseEther('1'));
-      });
-
-      it('should revert on zero address recipient', async () => {
-        const { syncSwapArbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await syncSwapArbitrage.getAddress(), ethers.parseEther('1'));
-
-        await expect(
-          syncSwapArbitrage
-            .connect(owner)
-            .withdrawToken(await weth.getAddress(), ethers.ZeroAddress, ethers.parseEther('1'))
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidRecipient');
-      });
-
-      it('should revert if non-owner tries to withdraw', async () => {
-        const { syncSwapArbitrage, weth, user } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await syncSwapArbitrage.getAddress(), ethers.parseEther('1'));
-
-        await expect(
-          syncSwapArbitrage
-            .connect(user)
-            .withdrawToken(await weth.getAddress(), user.address, ethers.parseEther('1'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('withdrawETH()', () => {
-      it('should allow owner to withdraw ETH', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        // Send some ETH to contract
-        await owner.sendTransaction({
-          to: await syncSwapArbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
-
-        const tx = await syncSwapArbitrage
-          .connect(owner)
-          .withdrawETH(owner.address, ethers.parseEther('1'));
-        const receipt = await tx.wait();
-        const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
-
-        const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
-        expect(ownerBalanceAfter).to.be.closeTo(
-          ownerBalanceBefore + ethers.parseEther('1') - gasUsed,
-          ethers.parseEther('0.01')
-        );
-      });
-
-      it('should emit ETHWithdrawn event', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await syncSwapArbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          syncSwapArbitrage.connect(owner).withdrawETH(owner.address, ethers.parseEther('1'))
-        )
-          .to.emit(syncSwapArbitrage, 'ETHWithdrawn')
-          .withArgs(owner.address, ethers.parseEther('1'));
-      });
-
-      it('should revert on zero address recipient', async () => {
-        const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await syncSwapArbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          syncSwapArbitrage.connect(owner).withdrawETH(ethers.ZeroAddress, ethers.parseEther('1'))
-        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidRecipient');
-      });
-
-      it('should revert if non-owner tries to withdraw ETH', async () => {
-        const { syncSwapArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await syncSwapArbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          syncSwapArbitrage.connect(user).withdrawETH(user.address, ethers.parseEther('1'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('Ownable2Step', () => {
-      it('should support two-step ownership transfer', async () => {
-        const { syncSwapArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        // Step 1: Current owner initiates transfer
-        await syncSwapArbitrage.connect(owner).transferOwnership(user.address);
-
-        // Owner is still the original owner (pending transfer)
-        expect(await syncSwapArbitrage.owner()).to.equal(owner.address);
-        expect(await syncSwapArbitrage.pendingOwner()).to.equal(user.address);
-
-        // Step 2: New owner accepts
-        await syncSwapArbitrage.connect(user).acceptOwnership();
-
-        // Now ownership is transferred
-        expect(await syncSwapArbitrage.owner()).to.equal(user.address);
-      });
-
-      it('should not allow non-pending owner to accept', async () => {
-        const { syncSwapArbitrage, owner, user, attacker } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).transferOwnership(user.address);
-
-        await expect(
-          syncSwapArbitrage.connect(attacker).acceptOwnership()
-        ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
-      });
-    });
-  });
+  testMinimumProfitConfig(adminConfig);
+  testSwapDeadlineConfig(adminConfig);
+  testPauseUnpause(adminConfig);
+  testWithdrawToken(adminConfig);
+  testWithdrawETH(adminConfig);
+  testWithdrawGasLimitConfig(adminConfig);
+  testOwnable2Step(adminConfig);
 
   // ===========================================================================
   // 7. View Functions Tests
@@ -1537,20 +1036,7 @@ describe('SyncSwapFlashArbitrage', () => {
           BigInt('600000000000000000000000000') // 0.0006 WETH per USDC adjusted for decimals
         );
 
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 0n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0n,
-          },
-        ];
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress());
 
         const result = await syncSwapArbitrage.calculateExpectedProfit(
           await weth.getAddress(),
@@ -1616,20 +1102,7 @@ describe('SyncSwapFlashArbitrage', () => {
           BigInt('490000000000000000000000000') // Lose money
         );
 
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 0n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0n,
-          },
-        ];
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress());
 
         const result = await syncSwapArbitrage.calculateExpectedProfit(
           await weth.getAddress(),
@@ -1689,20 +1162,10 @@ describe('SyncSwapFlashArbitrage', () => {
       );
 
       // Path: WETH→USDC (malicious, 1:1 + reentrancy) → USDC→WETH (normal, 1% profit)
-      const swapPath = [
-        {
-          router: await maliciousRouter.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
+      const swapPath = build2HopCrossRouterPath(
+        await maliciousRouter.getAddress(), await dexRouter1.getAddress(),
+        await weth.getAddress(), await usdc.getAddress(), 1n, 1n
+      );
 
       const deadline = await getDeadline();
 
@@ -1841,21 +1304,7 @@ describe('SyncSwapFlashArbitrage', () => {
       );
 
       const amountIn = ethers.parseEther('5');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       // Execute first arbitrage
@@ -1900,21 +1349,7 @@ describe('SyncSwapFlashArbitrage', () => {
       );
 
       const amountIn = ethers.parseEther('10');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       const tx = await syncSwapArbitrage

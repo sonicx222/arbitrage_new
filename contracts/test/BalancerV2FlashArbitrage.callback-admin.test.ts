@@ -8,6 +8,14 @@ import {
   RATE_WETH_TO_USDC,
   getDeadline,
   deployBalancerV2Fixture,
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testSwapDeadlineConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
 } from './helpers';
 
 /**
@@ -30,6 +38,23 @@ import {
 describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   // Use shared fixture from helpers/balancer-v2.ts
   const deployContractsFixture = deployBalancerV2Fixture;
+
+  // Admin test config for shared harness
+  const adminConfig = {
+    contractName: 'BalancerV2FlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.arbitrage,
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 
   // ===========================================================================
   // 5. Flash Loan Callback Tests
@@ -386,285 +411,33 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   });
 
   // ===========================================================================
-  // 7. Configuration Management Tests
+  // 7-8. Configuration Management & Fund Recovery (shared harness)
   // ===========================================================================
-  describe('7. Configuration Management', () => {
-    describe('setMinimumProfit()', () => {
-      it('should allow owner to set minimum profit', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
+  testRouterManagement(adminConfig);
+  testMinimumProfitConfig(adminConfig);
+  testSwapDeadlineConfig(adminConfig);
+  testPauseUnpause(adminConfig);
+  testWithdrawToken(adminConfig);
+  testWithdrawETH(adminConfig);
+  testWithdrawGasLimitConfig(adminConfig);
+  testOwnable2Step(adminConfig);
 
-        const newMinProfit = ethers.parseEther('0.1');
-        await arbitrage.connect(owner).setMinimumProfit(newMinProfit);
+  describe('BalancerV2FlashArbitrage — ETH withdrawal edge case', () => {
+    it('should revert ETH withdrawal to rejecting contract (Fix 8f)', async () => {
+      const { arbitrage, owner } = await loadFixture(deployContractsFixture);
 
-        expect(await arbitrage.minimumProfit()).to.equal(newMinProfit);
+      await owner.sendTransaction({
+        to: await arbitrage.getAddress(),
+        value: ethers.parseEther('1'),
       });
 
-      it('should emit MinimumProfitUpdated event', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
+      // Deploy a contract that rejects ETH (MockERC20 has no receive/fallback)
+      const RejectEther = await ethers.getContractFactory('MockERC20');
+      const rejecter = await RejectEther.deploy('Rejector', 'REJ', 18);
 
-        const newMinProfit = ethers.parseEther('0.1');
-        await expect(arbitrage.connect(owner).setMinimumProfit(newMinProfit))
-          .to.emit(arbitrage, 'MinimumProfitUpdated')
-          .withArgs(BigInt(1e14), newMinProfit);
-      });
-
-      it('should revert when setting to zero', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          arbitrage.connect(owner).setMinimumProfit(0)
-        ).to.be.revertedWithCustomError(arbitrage, 'InvalidMinimumProfit');
-      });
-
-      it('should revert if non-owner tries to set', async () => {
-        const { arbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          arbitrage.connect(user).setMinimumProfit(ethers.parseEther('0.1'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('setSwapDeadline()', () => {
-      it('should allow owner to set swap deadline', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newDeadline = 300;
-        await arbitrage.connect(owner).setSwapDeadline(newDeadline);
-
-        expect(await arbitrage.swapDeadline()).to.equal(newDeadline);
-      });
-
-      it('should emit SwapDeadlineUpdated event', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newDeadline = 300;
-        await expect(arbitrage.connect(owner).setSwapDeadline(newDeadline))
-          .to.emit(arbitrage, 'SwapDeadlineUpdated')
-          .withArgs(60, newDeadline);
-      });
-
-      it('should revert on zero deadline', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          arbitrage.connect(owner).setSwapDeadline(0)
-        ).to.be.revertedWithCustomError(arbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should revert on deadline exceeding MAX_SWAP_DEADLINE', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          arbitrage.connect(owner).setSwapDeadline(601) // > 600
-        ).to.be.revertedWithCustomError(arbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should accept MAX_SWAP_DEADLINE exactly', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).setSwapDeadline(600);
-        expect(await arbitrage.swapDeadline()).to.equal(600);
-      });
-
-      it('should revert if non-owner tries to set', async () => {
-        const { arbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          arbitrage.connect(user).setSwapDeadline(600)
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('pause() / unpause()', () => {
-      it('should allow owner to pause', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).pause();
-        expect(await arbitrage.paused()).to.be.true;
-      });
-
-      it('should allow owner to unpause', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).pause();
-        await arbitrage.connect(owner).unpause();
-        expect(await arbitrage.paused()).to.be.false;
-      });
-
-      it('should revert if non-owner tries to pause', async () => {
-        const { arbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          arbitrage.connect(user).pause()
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert if non-owner tries to unpause', async () => {
-        const { arbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).pause();
-
-        await expect(
-          arbitrage.connect(user).unpause()
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-  });
-
-  // ===========================================================================
-  // 8. Fund Recovery Tests
-  // ===========================================================================
-  describe('8. Fund Recovery', () => {
-    describe('withdrawToken()', () => {
-      it('should allow owner to withdraw ERC20 tokens', async () => {
-        const { arbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        // Send tokens to contract
-        await weth.mint(await arbitrage.getAddress(), ethers.parseEther('10'));
-
-        const ownerBalanceBefore = await weth.balanceOf(owner.address);
-
-        await arbitrage.connect(owner).withdrawToken(
-          await weth.getAddress(),
-          owner.address,
-          ethers.parseEther('10')
-        );
-
-        const ownerBalanceAfter = await weth.balanceOf(owner.address);
-        expect(ownerBalanceAfter).to.equal(ownerBalanceBefore + ethers.parseEther('10'));
-      });
-
-      it('should emit TokenWithdrawn event', async () => {
-        const { arbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await arbitrage.getAddress(), ethers.parseEther('10'));
-
-        await expect(
-          arbitrage.connect(owner).withdrawToken(
-            await weth.getAddress(),
-            owner.address,
-            ethers.parseEther('10')
-          )
-        )
-          .to.emit(arbitrage, 'TokenWithdrawn')
-          .withArgs(await weth.getAddress(), owner.address, ethers.parseEther('10'));
-      });
-
-      it('should revert on zero recipient address', async () => {
-        const { arbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await arbitrage.getAddress(), ethers.parseEther('10'));
-
-        await expect(
-          arbitrage.connect(owner).withdrawToken(
-            await weth.getAddress(),
-            ethers.ZeroAddress,
-            ethers.parseEther('10')
-          )
-        ).to.be.revertedWithCustomError(arbitrage, 'InvalidRecipient');
-      });
-
-      it('should revert if non-owner tries to withdraw', async () => {
-        const { arbitrage, weth, user } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await arbitrage.getAddress(), ethers.parseEther('10'));
-
-        await expect(
-          arbitrage.connect(user).withdrawToken(
-            await weth.getAddress(),
-            user.address,
-            ethers.parseEther('10')
-          )
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('withdrawETH()', () => {
-      it('should allow owner to withdraw ETH', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        // Send ETH to contract
-        await owner.sendTransaction({
-          to: await arbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
-
-        const tx = await arbitrage.connect(owner).withdrawETH(
-          owner.address,
-          ethers.parseEther('1')
-        );
-        const receipt = await tx.wait();
-        const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
-
-        const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
-        expect(ownerBalanceAfter).to.be.closeTo(
-          ownerBalanceBefore + ethers.parseEther('1') - gasUsed,
-          ethers.parseEther('0.001')
-        );
-      });
-
-      it('should emit ETHWithdrawn event', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await arbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          arbitrage.connect(owner).withdrawETH(owner.address, ethers.parseEther('1'))
-        )
-          .to.emit(arbitrage, 'ETHWithdrawn')
-          .withArgs(owner.address, ethers.parseEther('1'));
-      });
-
-      it('should revert on zero recipient address', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await arbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          arbitrage.connect(owner).withdrawETH(ethers.ZeroAddress, ethers.parseEther('1'))
-        ).to.be.revertedWithCustomError(arbitrage, 'InvalidRecipient');
-      });
-
-      it('should revert if non-owner tries to withdraw ETH', async () => {
-        const { arbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await arbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          arbitrage.connect(user).withdrawETH(user.address, ethers.parseEther('1'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert ETH withdrawal to rejecting contract (Fix 8f)', async () => {
-        const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        // Fund the arbitrage contract with ETH
-        await owner.sendTransaction({
-          to: await arbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        // Deploy a contract that rejects ETH (MockERC20 has no receive/fallback)
-        // The gas-limited call (10000 gas) should fail if the recipient reverts
-        const RejectEther = await ethers.getContractFactory('MockERC20');
-        const rejecter = await RejectEther.deploy('Rejector', 'REJ', 18);
-
-        await expect(
-          arbitrage.connect(owner).withdrawETH(await rejecter.getAddress(), ethers.parseEther('0.5'))
-        ).to.be.revertedWithCustomError(arbitrage, 'ETHTransferFailed');
-      });
+      await expect(
+        arbitrage.connect(owner).withdrawETH(await rejecter.getAddress(), ethers.parseEther('0.5'))
+      ).to.be.revertedWithCustomError(arbitrage, 'ETHTransferFailed');
     });
   });
 
@@ -672,30 +445,7 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   // 9. Access Control Tests
   // ===========================================================================
   describe('9. Access Control', () => {
-    describe('Ownable2Step', () => {
-      it('should support two-step ownership transfer', async () => {
-        const { arbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        // Step 1: Initiate transfer
-        await arbitrage.connect(owner).transferOwnership(user.address);
-        expect(await arbitrage.owner()).to.equal(owner.address);
-        expect(await arbitrage.pendingOwner()).to.equal(user.address);
-
-        // Step 2: Accept ownership
-        await arbitrage.connect(user).acceptOwnership();
-        expect(await arbitrage.owner()).to.equal(user.address);
-      });
-
-      it('should not allow non-pending owner to accept', async () => {
-        const { arbitrage, owner, user, attacker } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).transferOwnership(user.address);
-
-        await expect(
-          arbitrage.connect(attacker).acceptOwnership()
-        ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
-      });
-    });
+    // Note: Ownable2Step tests now covered by shared admin harness (testOwnable2Step)
 
     describe('ReentrancyGuard', () => {
       it('should prevent reentrancy attacks via malicious router', async () => {

@@ -4,18 +4,22 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { MockAavePool, MockERC20 } from '../typechain-types';
 
 /**
- * Aave V3 Interface Compliance Tests
+ * Aave V3 Mock Protocol Fidelity Tests
  *
- * Verifies that IFlashLoanReceiver interface implementation matches documentation:
+ * These tests verify that MockAavePool faithfully reproduces real Aave V3
+ * protocol behavior (fee calculation, return value handling, repayment logic).
+ * Solidity's `override` keyword already enforces interface signature compliance
+ * at compile time — these tests validate mock BEHAVIOR, not interface shape.
+ *
  * 1. Fee calculation (0.09% = 9 basis points)
  * 2. executeOperation return value handling
  * 3. Callback validation
  * 4. Repayment verification
  *
+ * @see contracts/src/mocks/MockAavePool.sol
  * @see contracts/src/interfaces/IFlashLoanReceiver.sol
- * @see contracts/INTERFACE_FIXES_APPLIED.md
  */
-describe('Aave V3 Interface Compliance', () => {
+describe('Aave V3 Mock Protocol Fidelity', () => {
   // ===========================================================================
   // Test Fixtures
   // ===========================================================================
@@ -343,59 +347,10 @@ describe('Aave V3 Interface Compliance', () => {
   });
 
   // ===========================================================================
-  // 5. Documentation Consistency Tests
+  // 5. Edge Case Tests
   // ===========================================================================
 
-  describe('5. Documentation Consistency', () => {
-    it('should match documented fee (0.09%)', async () => {
-      const { pool } = await loadFixture(deployAavePoolFixture);
-
-      const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-
-      // Documentation states: 0.09% = 9 basis points
-      expect(premium).to.equal(9);
-    });
-
-    it('should match example: 1000 tokens → 0.9 tokens fee', async () => {
-      const { pool } = await loadFixture(deployAavePoolFixture);
-
-      const loanAmount = ethers.parseEther('1000');
-      const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-      const fee = (loanAmount * BigInt(premium)) / 10000n;
-
-      // Example from documentation: 1000 tokens loan → 0.9 tokens fee
-      expect(fee).to.equal(ethers.parseEther('0.9'));
-    });
-
-    it('should verify returning false causes revert (not silent fail)', async () => {
-      const { pool, token } = await loadFixture(deployAavePoolFixture);
-
-      const MockReceiverFactory = await ethers.getContractFactory(
-        'MockFlashLoanRecipient'
-      );
-      const receiver = await MockReceiverFactory.deploy();
-      await receiver.setShouldSucceed(false); // Return false
-
-      const loanAmount = ethers.parseEther('100');
-
-      // Verify that returning false causes revert (not silent failure)
-      await expect(
-        pool.flashLoanSimple(
-          await receiver.getAddress(),
-          await token.getAddress(),
-          loanAmount,
-          '0x',
-          0
-        )
-      ).to.be.revertedWith('Flash loan execution failed');
-    });
-  });
-
-  // ===========================================================================
-  // 6. Edge Case Tests
-  // ===========================================================================
-
-  describe('6. Edge Cases', () => {
+  describe('5. Edge Cases', () => {
     it('should handle zero amount loan', async () => {
       const { pool, token } = await loadFixture(deployAavePoolFixture);
 

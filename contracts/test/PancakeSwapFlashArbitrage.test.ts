@@ -14,6 +14,17 @@ import {
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,
   getDeadline,
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testSwapDeadlineConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
+  build2HopPath,
+  build2HopCrossRouterPath,
+  type AdminTestConfig,
 } from './helpers';
 
 /**
@@ -110,131 +121,35 @@ describe('PancakeSwapFlashArbitrage', () => {
   });
 
   // ===========================================================================
-  // Access Control Tests
+  // Admin Functions Tests (shared harness — eliminates ~200 LOC of duplication)
   // ===========================================================================
-  describe('Access Control', () => {
-    it('should only allow owner to add approved routers', async () => {
-      const { flashArbitrage, dexRouter1, user } = await loadFixture(deployContractsFixture);
+  const adminConfig: AdminTestConfig = {
+    contractName: 'PancakeSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.flashArbitrage,
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 
-      const userContract = flashArbitrage.connect(user) as PancakeSwapFlashArbitrage;
-      await expect(
-        userContract.addApprovedRouter(await dexRouter1.getAddress())
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should allow owner to add approved routers', async () => {
-      const { flashArbitrage, dexRouter1 } = await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      expect(await flashArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-    });
-
-    it('should only allow owner to whitelist pools', async () => {
-      const { flashArbitrage, wethUsdcPool, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashArbitrage.connect(user) as PancakeSwapFlashArbitrage;
-      await expect(
-        userContract.whitelistPool(await wethUsdcPool.getAddress())
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should only allow owner to withdraw profits', async () => {
-      const { flashArbitrage, weth, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashArbitrage.connect(user) as PancakeSwapFlashArbitrage;
-      await expect(
-        userContract.withdrawToken(await weth.getAddress(), user.address, 100)
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should only allow owner to set minimum profit', async () => {
-      const { flashArbitrage, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashArbitrage.connect(user) as PancakeSwapFlashArbitrage;
-      await expect(userContract.setMinimumProfit(1000)).to.be.revertedWith(
-        'Ownable: caller is not the owner'
-      );
-    });
-
-    it('should only allow owner to pause/unpause', async () => {
-      const { flashArbitrage, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashArbitrage.connect(user) as PancakeSwapFlashArbitrage;
-      await expect(userContract.pause()).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-  });
+  testRouterManagement(adminConfig);
+  testMinimumProfitConfig(adminConfig);
+  testSwapDeadlineConfig(adminConfig);
+  testPauseUnpause(adminConfig);
+  testWithdrawToken(adminConfig);
+  testWithdrawETH(adminConfig);
+  testWithdrawGasLimitConfig(adminConfig);
+  testOwnable2Step(adminConfig);
 
   // ===========================================================================
-  // Router Management Tests
-  // ===========================================================================
-  describe('Router Management', () => {
-    it('should correctly add and query router', async () => {
-      const { flashArbitrage, dexRouter1 } = await loadFixture(deployContractsFixture);
-
-      await expect(flashArbitrage.addApprovedRouter(await dexRouter1.getAddress()))
-        .to.emit(flashArbitrage, 'RouterAdded')
-        .withArgs(await dexRouter1.getAddress());
-
-      expect(await flashArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-    });
-
-    it('should correctly remove approved router', async () => {
-      const { flashArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
-
-      // Add two routers
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
-
-      // Verify both are approved
-      expect(await flashArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-      expect(await flashArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
-
-      // Remove router1
-      await expect(flashArbitrage.removeApprovedRouter(await dexRouter1.getAddress()))
-        .to.emit(flashArbitrage, 'RouterRemoved')
-        .withArgs(await dexRouter1.getAddress());
-
-      // Verify router1 is removed, router2 still approved
-      expect(await flashArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.false;
-      expect(await flashArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
-
-      // Verify getApprovedRouters returns correct list
-      const routers = await flashArbitrage.getApprovedRouters();
-      expect(routers.length).to.equal(1);
-      expect(routers[0]).to.equal(await dexRouter2.getAddress());
-    });
-
-    it('should revert when removing unapproved router', async () => {
-      const { flashArbitrage, dexRouter1 } = await loadFixture(deployContractsFixture);
-
-      await expect(
-        flashArbitrage.removeApprovedRouter(await dexRouter1.getAddress())
-      ).to.be.revertedWithCustomError(flashArbitrage, 'RouterNotApproved');
-    });
-
-    it('should revert when adding already approved router', async () => {
-      const { flashArbitrage, dexRouter1 } = await loadFixture(deployContractsFixture);
-
-      // Add router
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-
-      // Try to add again
-      await expect(
-        flashArbitrage.addApprovedRouter(await dexRouter1.getAddress())
-      ).to.be.revertedWithCustomError(flashArbitrage, 'RouterAlreadyApproved');
-    });
-
-    it('should revert when adding zero address as router', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-
-      await expect(
-        flashArbitrage.addApprovedRouter(ethers.ZeroAddress)
-      ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidRouterAddress');
-    });
-  });
-
-  // ===========================================================================
-  // Pool Management Tests
+  // Pool Management Tests (PancakeSwap-specific)
   // ===========================================================================
   describe('Pool Management', () => {
     it('should correctly whitelist pool', async () => {
@@ -304,55 +219,7 @@ describe('PancakeSwapFlashArbitrage', () => {
     });
   });
 
-  // ===========================================================================
-  // Minimum Profit Configuration Tests
-  // ===========================================================================
-  describe('Minimum Profit Configuration', () => {
-    it('should allow owner to set minimum profit', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-
-      const newMinProfit = ethers.parseEther('0.1');
-      await expect(flashArbitrage.setMinimumProfit(newMinProfit))
-        .to.emit(flashArbitrage, 'MinimumProfitUpdated')
-        .withArgs(BigInt(1e14), newMinProfit);
-
-      expect(await flashArbitrage.minimumProfit()).to.equal(newMinProfit);
-    });
-  });
-
-  // ===========================================================================
-  // Swap Deadline Configuration Tests
-  // ===========================================================================
-  describe('Swap Deadline Configuration', () => {
-    it('should allow owner to set swap deadline', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-
-      const newDeadline = 600; // 10 minutes
-      await expect(flashArbitrage.setSwapDeadline(newDeadline))
-        .to.emit(flashArbitrage, 'SwapDeadlineUpdated')
-        .withArgs(60, newDeadline);
-
-      expect(await flashArbitrage.swapDeadline()).to.equal(newDeadline);
-    });
-
-    it('should revert when setting deadline to 0', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-
-      await expect(flashArbitrage.setSwapDeadline(0)).to.be.revertedWithCustomError(
-        flashArbitrage,
-        'InvalidSwapDeadline'
-      );
-    });
-
-    it('should revert when setting deadline > MAX_SWAP_DEADLINE', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-
-      await expect(flashArbitrage.setSwapDeadline(601)).to.be.revertedWithCustomError(
-        flashArbitrage,
-        'InvalidSwapDeadline'
-      );
-    });
-  });
+  // Note: Minimum Profit and Swap Deadline tests now covered by shared admin harness
 
   // ===========================================================================
   // Flash Loan Execution Tests
@@ -382,21 +249,11 @@ describe('PancakeSwapFlashArbitrage', () => {
       );
 
       const flashAmount = ethers.parseEther('10');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter2.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: ethers.parseEther('9.5'),
-        },
-      ];
-
+      const swapPath = build2HopCrossRouterPath(
+        await dexRouter1.getAddress(), await dexRouter2.getAddress(),
+        await weth.getAddress(), await usdc.getAddress(),
+        ethers.parseUnits('19000', 6), ethers.parseEther('9.5')
+      );
       const deadline = await getDeadline();
 
       // Record pool balance before to verify flash loan repayment
@@ -446,21 +303,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         BigInt('500000000000000')  // 1 USDC -> 0.0005 WETH (exact 1:1, no profit to cover fee)
       );
 
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       // Should revert because profit doesn't cover the 0.25% flash loan fee
@@ -486,21 +329,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       // Set pool liquidity to zero
       await wethUsdcPool.setLiquidity(0);
 
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       await expect(
@@ -607,8 +436,9 @@ describe('PancakeSwapFlashArbitrage', () => {
   // ===========================================================================
   // Pause Functionality Tests
   // ===========================================================================
-  describe('Pause Functionality', () => {
-    it('should allow owner to pause contract', async () => {
+  // Note: Basic pause/unpause tests covered by shared admin harness (testPauseUnpause)
+  describe('Pause — PancakeSwap-Specific', () => {
+    it('should revert executeArbitrage when paused', async () => {
       const { flashArbitrage, wethUsdcPool, dexRouter1, weth } = await loadFixture(
         deployContractsFixture
       );
@@ -643,16 +473,6 @@ describe('PancakeSwapFlashArbitrage', () => {
         )
       ).to.be.revertedWith('Pausable: paused');
     });
-
-    it('should allow owner to unpause contract', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.pause();
-      await flashArbitrage.unpause();
-
-      // Contract should be usable again
-      // (Full execution test in next section)
-    });
   });
 
   // ===========================================================================
@@ -666,21 +486,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       // Setup routers but DON'T whitelist pool
       await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
 
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       // Should fail because pool is not whitelisted
@@ -844,20 +650,10 @@ describe('PancakeSwapFlashArbitrage', () => {
       );
 
       // Path: WETH→USDC (malicious, 1:1 + reentrancy) → USDC→WETH (normal, 1% profit)
-      const swapPath = [
-        {
-          router: await maliciousRouter.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
+      const swapPath = build2HopCrossRouterPath(
+        await maliciousRouter.getAddress(), await dexRouter1.getAddress(),
+        await weth.getAddress(), await usdc.getAddress(), 1n, 1n
+      );
 
       const deadline = await getDeadline();
       await flashArbitrage.executeArbitrage(
@@ -909,55 +705,7 @@ describe('PancakeSwapFlashArbitrage', () => {
   // ===========================================================================
   // Fund Recovery Tests
   // ===========================================================================
-  describe('Fund Recovery', () => {
-    it('should allow owner to withdraw ERC20 tokens', async () => {
-      const { flashArbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-      // Send some WETH to contract
-      const amount = ethers.parseEther('1');
-      await weth.mint(await flashArbitrage.getAddress(), amount);
-
-      // Withdraw
-      await expect(
-        flashArbitrage.withdrawToken(await weth.getAddress(), owner.address, amount)
-      )
-        .to.emit(flashArbitrage, 'TokenWithdrawn')
-        .withArgs(await weth.getAddress(), owner.address, amount);
-
-      expect(await weth.balanceOf(owner.address)).to.equal(amount);
-    });
-
-    it('should allow owner to withdraw ETH', async () => {
-      const { flashArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-      // Send some ETH to contract
-      const amount = ethers.parseEther('1');
-      await owner.sendTransaction({
-        to: await flashArbitrage.getAddress(),
-        value: amount,
-      });
-
-      const balanceBefore = await ethers.provider.getBalance(owner.address);
-
-      // Withdraw
-      const tx = await flashArbitrage.withdrawETH(owner.address, amount);
-      const receipt = await tx.wait();
-      const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
-
-      const balanceAfter = await ethers.provider.getBalance(owner.address);
-
-      // Balance should increase by amount minus gas
-      expect(balanceAfter).to.equal(balanceBefore + amount - gasUsed);
-    });
-
-    it('should revert when withdrawing to zero address', async () => {
-      const { flashArbitrage, weth } = await loadFixture(deployContractsFixture);
-
-      await expect(
-        flashArbitrage.withdrawToken(await weth.getAddress(), ethers.ZeroAddress, 100)
-      ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidRecipient');
-    });
-  });
+  // Note: Fund Recovery tests now covered by shared admin harness (testWithdrawToken, testWithdrawETH)
 
   // ===========================================================================
   // Batch Pool Whitelisting Tests (whitelistMultiplePools)
@@ -1218,33 +966,7 @@ describe('PancakeSwapFlashArbitrage', () => {
     });
   });
 
-  // ===========================================================================
-  // Ownable2Step Tests
-  // ===========================================================================
-  describe('Ownable2Step', () => {
-    it('should support two-step ownership transfer', async () => {
-      const { flashArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-      // Step 1: Initiate transfer
-      await flashArbitrage.connect(owner).transferOwnership(user.address);
-      expect(await flashArbitrage.owner()).to.equal(owner.address);
-      expect(await flashArbitrage.pendingOwner()).to.equal(user.address);
-
-      // Step 2: Accept ownership
-      await flashArbitrage.connect(user).acceptOwnership();
-      expect(await flashArbitrage.owner()).to.equal(user.address);
-    });
-
-    it('should not allow non-pending owner to accept', async () => {
-      const { flashArbitrage, owner, user, attacker } = await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.connect(owner).transferOwnership(user.address);
-
-      await expect(
-        flashArbitrage.connect(attacker).acceptOwnership()
-      ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
-    });
-  });
+  // Note: Ownable2Step tests now covered by shared admin harness (testOwnable2Step)
 
   // ===========================================================================
   // Gas Benchmark Tests
@@ -1269,21 +991,10 @@ describe('PancakeSwapFlashArbitrage', () => {
         RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter2.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
+      const swapPath = build2HopCrossRouterPath(
+        await dexRouter1.getAddress(), await dexRouter2.getAddress(),
+        await weth.getAddress(), await usdc.getAddress(), 1n, 1n
+      );
       const deadline = await getDeadline();
 
       const tx = await flashArbitrage.executeArbitrage(

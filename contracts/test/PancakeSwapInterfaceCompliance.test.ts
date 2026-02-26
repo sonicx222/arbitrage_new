@@ -4,19 +4,24 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { MockPancakeV3Pool, MockPancakeV3Factory, MockERC20 } from '../typechain-types';
 
 /**
- * PancakeSwap V3 Interface Compliance Tests
+ * PancakeSwap V3 Mock Protocol Fidelity Tests
  *
- * Verifies that IPancakeV3FlashCallback interface implementation matches documentation:
- * 1. Fee tier validation (100, 500, 2500, 10000 bps)
+ * These tests verify that MockPancakeV3Pool and MockPancakeV3Factory faithfully
+ * reproduce real PancakeSwap V3 protocol behavior (fee tiers, dual-token flash
+ * loans, callback parameters, repayment verification). Solidity's `override`
+ * keyword already enforces interface signature compliance at compile time —
+ * these tests validate mock BEHAVIOR, not interface shape.
+ *
+ * 1. Fee tier validation (100, 500, 2500, 10000 fee units)
  * 2. Dual-token flash loan support
  * 3. Callback parameter passing
  * 4. Repayment verification
- * 5. Input validation (at least one amount > 0)
+ * 5. Pool discovery via factory
  *
- * @see contracts/src/interfaces/IPancakeV3FlashCallback.sol
- * @see contracts/INTERFACE_FIXES_APPLIED.md
+ * @see contracts/src/mocks/MockPancakeV3Pool.sol
+ * @see contracts/src/mocks/MockPancakeV3Factory.sol
  */
-describe('PancakeSwap V3 Interface Compliance', () => {
+describe('PancakeSwap V3 Mock Protocol Fidelity', () => {
   // ===========================================================================
   // Test Fixtures
   // ===========================================================================
@@ -492,64 +497,10 @@ describe('PancakeSwap V3 Interface Compliance', () => {
   });
 
   // ===========================================================================
-  // 6. Documentation Consistency Tests
+  // 6. Edge Cases
   // ===========================================================================
 
-  describe('6. Documentation Consistency', () => {
-    it('should verify documented fee tiers are correct', async () => {
-      // Documentation states: 100, 500, 2500, 10000 (0.01%, 0.05%, 0.25%, 1%)
-      const documentedTiers = [100, 500, 2500, 10000];
-
-      for (const tier of documentedTiers) {
-        const { factory, token0, token1 } = await loadFixture(deployPancakeV3Fixture);
-
-        const MockPancakeV3PoolFactory = await ethers.getContractFactory(
-          'MockPancakeV3Pool'
-        );
-        const pool = await MockPancakeV3PoolFactory.deploy(
-          await token0.getAddress(),
-          await token1.getAddress(),
-          tier,
-          await factory.getAddress()
-        );
-
-        const fee = await pool.fee();
-        expect(fee).to.equal(tier);
-      }
-    });
-
-    it('should match example: 1000 tokens @ 0.25% = 2.5 tokens fee', async () => {
-      const { pool } = await loadFixture(deployPancakeV3Fixture);
-
-      const loanAmount = ethers.parseEther('1000');
-      const poolFee = await pool.fee(); // 2500 fee units = 0.25%
-
-      // Fee = (amount * fee) / 1000000
-      const calculatedFee = (loanAmount * BigInt(poolFee)) / 1000000n;
-
-      expect(calculatedFee).to.equal(ethers.parseEther('2.5'));
-    });
-
-    it('should verify at least one amount must be > 0', async () => {
-      const { pool } = await loadFixture(deployPancakeV3Fixture);
-
-      const MockFlashLoanRecipientFactory = await ethers.getContractFactory(
-        'MockFlashLoanRecipient'
-      );
-      const recipient = await MockFlashLoanRecipientFactory.deploy();
-
-      // Documentation states: at least one amount must be > 0
-      await expect(
-        pool.flash(await recipient.getAddress(), 0, 0, '0x')
-      ).to.be.revertedWith('Both amounts cannot be zero');
-    });
-  });
-
-  // ===========================================================================
-  // 7. Edge Cases
-  // ===========================================================================
-
-  describe('7. Edge Cases', () => {
+  describe('6. Edge Cases', () => {
     it('should handle very small amounts (dust)', async () => {
       const { pool, token0 } = await loadFixture(deployPancakeV3Fixture);
 

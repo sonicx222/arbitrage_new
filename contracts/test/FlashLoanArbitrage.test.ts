@@ -14,6 +14,15 @@ import {
   build2HopCrossRouterPath,
   build3HopPath,
   getDeadline,
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testSwapDeadlineConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
+  type AdminTestConfig,
 } from './helpers';
 
 /**
@@ -83,129 +92,37 @@ describe('FlashLoanArbitrage', () => {
   });
 
   // ===========================================================================
-  // Access Control Tests
+  // Admin Functions Tests (shared harness — eliminates ~200 LOC of duplication)
   // ===========================================================================
-  describe('Access Control', () => {
-    it('should only allow owner to add approved routers', async () => {
-      const { flashLoanArbitrage, dexRouter1, user } = await loadFixture(deployContractsFixture);
+  const adminConfig: AdminTestConfig = {
+    contractName: 'FlashLoanArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.flashLoanArbitrage,
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 
-      const userContract = flashLoanArbitrage.connect(user) as FlashLoanArbitrage;
-      await expect(
-        userContract.addApprovedRouter(await dexRouter1.getAddress())
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should allow owner to add approved routers', async () => {
-      const { flashLoanArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
-
-      const ownerContract = flashLoanArbitrage.connect(owner) as FlashLoanArbitrage;
-      await ownerContract.addApprovedRouter(await dexRouter1.getAddress());
-      expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-    });
-
-    it('should only allow owner to withdraw profits', async () => {
-      const { flashLoanArbitrage, weth, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashLoanArbitrage.connect(user) as FlashLoanArbitrage;
-      await expect(
-        userContract.withdrawToken(await weth.getAddress(), user.address, 100)
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should only allow owner to set minimum profit', async () => {
-      const { flashLoanArbitrage, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashLoanArbitrage.connect(user) as FlashLoanArbitrage;
-      await expect(
-        userContract.setMinimumProfit(1000)
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should only allow owner to pause/unpause', async () => {
-      const { flashLoanArbitrage, user } = await loadFixture(deployContractsFixture);
-
-      const userContract = flashLoanArbitrage.connect(user) as FlashLoanArbitrage;
-      await expect(userContract.pause()).to.be.revertedWith(
-        'Ownable: caller is not the owner'
-      );
-    });
-  });
+  testRouterManagement(adminConfig);
+  testMinimumProfitConfig(adminConfig);
+  testSwapDeadlineConfig(adminConfig);
+  testPauseUnpause(adminConfig);
+  testWithdrawToken(adminConfig);
+  testWithdrawETH(adminConfig);
+  testWithdrawGasLimitConfig(adminConfig);
+  testOwnable2Step(adminConfig);
 
   // ===========================================================================
-  // Router Management Tests
+  // Minimum Profit — Integration Tests (unique to FlashLoanArbitrage)
   // ===========================================================================
-  describe('Router Management', () => {
-    it('should correctly remove approved router', async () => {
-      const { flashLoanArbitrage, dexRouter1, dexRouter2, owner } =
-        await loadFixture(deployContractsFixture);
-
-      // Add two routers
-      await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
-
-      // Verify both are approved
-      expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-      expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
-
-      // Remove router1
-      await expect(flashLoanArbitrage.removeApprovedRouter(await dexRouter1.getAddress()))
-        .to.emit(flashLoanArbitrage, 'RouterRemoved')
-        .withArgs(await dexRouter1.getAddress());
-
-      // Verify router1 is removed, router2 still approved
-      expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.false;
-      expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
-
-      // Verify getApprovedRouters returns correct list
-      const routers = await flashLoanArbitrage.getApprovedRouters();
-      expect(routers.length).to.equal(1);
-      expect(routers[0]).to.equal(await dexRouter2.getAddress());
-    });
-
-    it('should revert when removing unapproved router', async () => {
-      const { flashLoanArbitrage, dexRouter1 } = await loadFixture(deployContractsFixture);
-
-      await expect(
-        flashLoanArbitrage.removeApprovedRouter(await dexRouter1.getAddress())
-      ).to.be.revertedWithCustomError(flashLoanArbitrage, 'RouterNotApproved');
-    });
-
-    it('should revert when adding already approved router', async () => {
-      const { flashLoanArbitrage, dexRouter1 } = await loadFixture(deployContractsFixture);
-
-      // Add router
-      await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-
-      // Try to add again
-      await expect(
-        flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress())
-      ).to.be.revertedWithCustomError(flashLoanArbitrage, 'RouterAlreadyApproved');
-    });
-
-    it('should revert when adding zero address as router', async () => {
-      const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-      await expect(
-        flashLoanArbitrage.addApprovedRouter(ethers.ZeroAddress)
-      ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidRouterAddress');
-    });
-  });
-
-  // ===========================================================================
-  // Minimum Profit Configuration Tests
-  // ===========================================================================
-  describe('Minimum Profit Configuration', () => {
-    it('should allow owner to set minimum profit', async () => {
-      const { flashLoanArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-      const newMinProfit = ethers.parseEther('0.1');
-      await expect(flashLoanArbitrage.setMinimumProfit(newMinProfit))
-        .to.emit(flashLoanArbitrage, 'MinimumProfitUpdated')
-        .withArgs(BigInt(1e14), newMinProfit);
-
-      expect(await flashLoanArbitrage.minimumProfit()).to.equal(newMinProfit);
-    });
-
+  describe('Minimum Profit Enforcement', () => {
     it('should enforce global minimum profit even when caller specifies lower', async () => {
       const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } =
         await loadFixture(deployContractsFixture);
@@ -956,45 +873,7 @@ describe('FlashLoanArbitrage', () => {
       expect(poolBalanceAfter).to.be.gte(poolBalanceBefore + premium);
     });
 
-    it('should allow owner to withdraw stuck tokens', async () => {
-      const { flashLoanArbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-      // Simulate some tokens stuck in contract
-      await weth.mint(await flashLoanArbitrage.getAddress(), ethers.parseEther('1'));
-
-      const ownerBalanceBefore = await weth.balanceOf(owner.address);
-
-      await flashLoanArbitrage.withdrawToken(
-        await weth.getAddress(),
-        owner.address,
-        ethers.parseEther('1')
-      );
-
-      const ownerBalanceAfter = await weth.balanceOf(owner.address);
-      expect(ownerBalanceAfter).to.equal(ownerBalanceBefore + ethers.parseEther('1'));
-    });
-
-    it('should allow owner to withdraw ETH', async () => {
-      const { flashLoanArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-      // Send some ETH to contract
-      await owner.sendTransaction({
-        to: await flashLoanArbitrage.getAddress(),
-        value: ethers.parseEther('1'),
-      });
-
-      const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
-
-      const tx = await flashLoanArbitrage.withdrawETH(owner.address, ethers.parseEther('1'));
-      const receipt = await tx.wait();
-      const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
-
-      const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
-      expect(ownerBalanceAfter).to.be.closeTo(
-        ownerBalanceBefore + ethers.parseEther('1') - gasUsed,
-        ethers.parseEther('0.01') // Allow for gas variance
-      );
-    });
+    // Note: withdrawToken and withdrawETH tests now covered by shared admin harness
   });
 
   // ===========================================================================
@@ -1209,146 +1088,9 @@ describe('FlashLoanArbitrage', () => {
   // Edge Case Tests (Added for regression prevention)
   // ===========================================================================
   describe('Edge Cases', () => {
-    describe('Swap Deadline Configuration', () => {
-      it('should initialize with default swap deadline', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        const deadline = await flashLoanArbitrage.swapDeadline();
-        expect(deadline).to.equal(60n); // DEFAULT_SWAP_DEADLINE
-      });
-
-      it('should allow owner to update swap deadline', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.setSwapDeadline(600); // 10 minutes
-        expect(await flashLoanArbitrage.swapDeadline()).to.equal(600n);
-      });
-
-      it('should reject zero deadline', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          flashLoanArbitrage.setSwapDeadline(0)
-        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should reject deadline exceeding maximum', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        // MAX_SWAP_DEADLINE is 600 (10 minutes)
-        await expect(
-          flashLoanArbitrage.setSwapDeadline(601)
-        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should emit SwapDeadlineUpdated event', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await expect(flashLoanArbitrage.setSwapDeadline(120))
-          .to.emit(flashLoanArbitrage, 'SwapDeadlineUpdated')
-          .withArgs(60, 120); // old value, new value
-      });
-    });
-
-    describe('setWithdrawGasLimit', () => {
-      it('should set gas limit within valid range', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.setWithdrawGasLimit(100000);
-        expect(await flashLoanArbitrage.withdrawGasLimit()).to.equal(100000);
-      });
-
-      it('should accept minimum value (2300)', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.setWithdrawGasLimit(2300);
-        expect(await flashLoanArbitrage.withdrawGasLimit()).to.equal(2300);
-      });
-
-      it('should accept maximum value (500000)', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.setWithdrawGasLimit(500000);
-        expect(await flashLoanArbitrage.withdrawGasLimit()).to.equal(500000);
-      });
-
-      it('should reject below minimum', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          flashLoanArbitrage.setWithdrawGasLimit(2299)
-        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidGasLimit');
-      });
-
-      it('should reject above maximum', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          flashLoanArbitrage.setWithdrawGasLimit(500001)
-        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidGasLimit');
-      });
-
-      it('should emit WithdrawGasLimitUpdated event', async () => {
-        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-
-        await expect(flashLoanArbitrage.setWithdrawGasLimit(100000))
-          .to.emit(flashLoanArbitrage, 'WithdrawGasLimitUpdated')
-          .withArgs(50000, 100000); // old default, new value
-      });
-
-      it('should reject when called by non-owner', async () => {
-        const { flashLoanArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          flashLoanArbitrage.connect(user).setWithdrawGasLimit(100000)
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('EnumerableSet Router Storage', () => {
-      it('should support O(1) router lookup via isApprovedRouter', async () => {
-        const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
-
-        // Add routers
-        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
-
-        // Check lookup works
-        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
-        expect(await flashLoanArbitrage.isApprovedRouter(ethers.ZeroAddress)).to.be.false;
-      });
-
-      it('should enumerate all routers via getApprovedRouters', async () => {
-        const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
-
-        const routers = await flashLoanArbitrage.getApprovedRouters();
-        expect(routers.length).to.equal(2);
-        expect(routers).to.include(await dexRouter1.getAddress());
-        expect(routers).to.include(await dexRouter2.getAddress());
-      });
-
-      it('should handle removal correctly with EnumerableSet', async () => {
-        const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
-
-        // Remove first router
-        await flashLoanArbitrage.removeApprovedRouter(await dexRouter1.getAddress());
-
-        // Verify removal
-        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.false;
-        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
-
-        const routers = await flashLoanArbitrage.getApprovedRouters();
-        expect(routers.length).to.equal(1);
-        expect(routers[0]).to.equal(await dexRouter2.getAddress());
-      });
-    });
+    // Note: setWithdrawGasLimit tests now covered by shared admin harness (testWithdrawGasLimitConfig)
+    // Note: Swap Deadline Configuration tests now covered by shared admin harness (testSwapDeadlineConfig)
+    // Note: EnumerableSet Router Storage tests now covered by shared admin harness (testRouterManagement)
 
     describe('Constants Verification', () => {
       it('should have correct DEFAULT_SWAP_DEADLINE constant', async () => {
@@ -1501,36 +1243,7 @@ describe('FlashLoanArbitrage', () => {
       });
     });
 
-    describe('Fix 7.2: Ownable2Step', () => {
-      it('should support two-step ownership transfer', async () => {
-        const { flashLoanArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        // Step 1: Current owner initiates transfer
-        await flashLoanArbitrage.connect(owner).transferOwnership(user.address);
-
-        // Owner is still the original owner (pending transfer)
-        expect(await flashLoanArbitrage.owner()).to.equal(owner.address);
-        expect(await flashLoanArbitrage.pendingOwner()).to.equal(user.address);
-
-        // Step 2: New owner accepts
-        await flashLoanArbitrage.connect(user).acceptOwnership();
-
-        // Now ownership is transferred
-        expect(await flashLoanArbitrage.owner()).to.equal(user.address);
-      });
-
-      it('should not allow non-pending owner to accept', async () => {
-        const { flashLoanArbitrage, owner, user, attacker } = await loadFixture(deployContractsFixture);
-
-        await flashLoanArbitrage.connect(owner).transferOwnership(user.address);
-
-        // Attacker tries to accept
-        // Note: OpenZeppelin 4.9.x uses require with string, not custom error
-        await expect(
-          flashLoanArbitrage.connect(attacker).acceptOwnership()
-        ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
-      });
-    });
+    // Note: Ownable2Step tests now covered by shared admin harness (testOwnable2Step)
 
     describe('Fix 10.3: Router Validation Optimization', () => {
       it('should only validate unique routers (optimization test)', async () => {

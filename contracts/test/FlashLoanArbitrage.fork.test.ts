@@ -244,6 +244,44 @@ describe('FlashLoanArbitrage - Mainnet Fork Integration', function () {
       // This test validates the contract can interact with real Aave.
     });
 
+    it('should execute flash loan through real Aave and revert with InsufficientProfit', async () => {
+      const { flashLoanArbitrage } = await loadFixture(deployWithRealAaveFixture);
+
+      const flashLoanAmount = ethers.parseEther('1'); // 1 WETH
+
+      // Build a real 2-hop swap path through Uniswap V2 and SushiSwap
+      const swapPath = [
+        {
+          router: MAINNET_ADDRESSES.UNISWAP_V2_ROUTER,
+          tokenIn: MAINNET_ADDRESSES.WETH,
+          tokenOut: MAINNET_ADDRESSES.USDC,
+          amountOutMin: 0n,
+        },
+        {
+          router: MAINNET_ADDRESSES.SUSHISWAP_ROUTER,
+          tokenIn: MAINNET_ADDRESSES.USDC,
+          tokenOut: MAINNET_ADDRESSES.WETH,
+          amountOutMin: 0n,
+        },
+      ];
+
+      const block = await ethers.provider.getBlock('latest');
+      const deadline = BigInt(block!.timestamp) + 300n;
+
+      // This calls real Aave V3 Pool.flashLoan → contract.executeOperation callback
+      // → real DEX swaps. The round-trip loses money to fees/slippage, so it
+      // reverts with InsufficientProfit after the callback completes swap execution.
+      await expect(
+        flashLoanArbitrage.executeArbitrage(
+          MAINNET_ADDRESSES.WETH,
+          flashLoanAmount,
+          swapPath,
+          0n, // minimumProfit
+          deadline
+        )
+      ).to.be.reverted; // Reverts in Aave callback (InsufficientProfit or DEX slippage)
+    });
+
     it('should calculate expected profit using real DEX quotes', async () => {
       const { flashLoanArbitrage } = await loadFixture(deployWithRealAaveFixture);
 

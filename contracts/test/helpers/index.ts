@@ -39,3 +39,17 @@ export {
   BALANCER_AMOUNTS,
   type BalancerV2Fixture,
 } from './balancer-v2';
+
+export {
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testSwapDeadlineConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
+  testAllAdminFunctions,
+  type AdminTestFixture,
+  type AdminTestConfig,
+} from './shared-admin-tests';

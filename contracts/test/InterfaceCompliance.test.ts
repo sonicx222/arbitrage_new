@@ -4,19 +4,21 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { MockSyncSwapVault, MockBalancerVault, MockERC20 } from '../typechain-types';
 
 /**
- * Interface Compliance Tests
+ * SyncSwap & Balancer Mock Protocol Fidelity Tests
  *
- * Verifies that interface implementations match their documentation:
- * 1. Fee calculations match documented formulas
- * 2. Array validation matches documented requirements
- * 3. Error messages match documented revert strings
+ * These tests verify that MockSyncSwapVault and MockBalancerVault faithfully
+ * reproduce real protocol behavior (fee calculations, array validation, error
+ * messages). Solidity's `override` keyword already enforces interface signature
+ * compliance at compile time — these tests validate mock BEHAVIOR, not interface shape.
  *
- * These tests ensure documentation stays in sync with implementation.
+ * 1. SyncSwap fee calculations (0.3%)
+ * 2. Balancer V2 array validation
+ * 3. EIP-3156 compliance (SyncSwap)
  *
- * @see contracts/INTERFACE_FIXES_APPLIED.md
- * @see contracts/src/interfaces/FLASH_LOAN_ERRORS.md
+ * @see contracts/src/mocks/MockSyncSwapVault.sol
+ * @see contracts/src/mocks/MockBalancerVault.sol
  */
-describe('Interface Compliance', () => {
+describe('SyncSwap & Balancer Mock Protocol Fidelity', () => {
   // ===========================================================================
   // Test Fixtures
   // ===========================================================================
@@ -229,88 +231,10 @@ describe('Interface Compliance', () => {
   });
 
   // ===========================================================================
-  // 3. Documentation Consistency Tests
+  // 3. EIP-3156 Compliance Tests
   // ===========================================================================
 
-  describe('3. Documentation Consistency', () => {
-    it('SyncSwap: Fee formula matches documentation', async () => {
-      const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-      // Documentation states: fee = (amount * 0.003) or (amount * flashLoanFeePercentage()) / 1e18
-      const amount = ethers.parseEther('1000');
-
-      // Method 1: (amount * 0.003)
-      const feeMethod1 = amount * 3n / 1000n;
-
-      // Method 2: (amount * flashLoanFeePercentage()) / 1e18
-      const feePercentage = await vault.flashLoanFeePercentage();
-      const feeMethod2 = (amount * feePercentage) / ethers.parseEther('1');
-
-      // Both methods should give same result
-      expect(feeMethod1).to.equal(feeMethod2);
-
-      // Actual implementation should match
-      const actualFee = await vault.flashFee(await weth.getAddress(), amount);
-      expect(actualFee).to.equal(feeMethod1);
-      expect(actualFee).to.equal(feeMethod2);
-    });
-
-    it('SyncSwap: Documented example (1000 ETH → 3 ETH fee) is accurate', async () => {
-      const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-      // Example from ISyncSwapVault.sol documentation:
-      // "1000 ETH loan → 3 ETH fee (0.3%)"
-      const loanAmount = ethers.parseEther('1000');
-      const expectedFee = ethers.parseEther('3');
-
-      const actualFee = await vault.flashFee(await weth.getAddress(), loanAmount);
-
-      expect(actualFee).to.equal(expectedFee);
-    });
-
-    it('Balancer: All documented error messages are accurate', async () => {
-      const { vault, token1, token2, recipient } = await loadFixture(deployBalancerVaultFixture);
-
-      // Test each documented error message
-      const errorTests = [
-        {
-          name: 'Array length mismatch',
-          tokens: [await token1.getAddress(), await token2.getAddress()],
-          amounts: [ethers.parseEther('100')],
-          expectedError: 'Array length mismatch',
-        },
-        {
-          name: 'Empty arrays',
-          tokens: [],
-          amounts: [],
-          expectedError: 'Empty arrays',
-        },
-        {
-          name: 'Zero amount',
-          tokens: [await token1.getAddress()],
-          amounts: [0n],
-          expectedError: 'Zero amount',
-        },
-      ];
-
-      for (const test of errorTests) {
-        await expect(
-          vault.flashLoan(
-            await recipient.getAddress(),
-            test.tokens,
-            test.amounts,
-            '0x'
-          )
-        ).to.be.revertedWith(test.expectedError);
-      }
-    });
-  });
-
-  // ===========================================================================
-  // 4. EIP-3156 Compliance Tests
-  // ===========================================================================
-
-  describe('4. EIP-3156 Compliance (SyncSwap)', () => {
+  describe('3. EIP-3156 Compliance (SyncSwap)', () => {
     it('should implement EIP-3156 flashFee interface', async () => {
       const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
 

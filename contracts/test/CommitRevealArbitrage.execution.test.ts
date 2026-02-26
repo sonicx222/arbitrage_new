@@ -11,6 +11,13 @@ import {
   deployCommitRevealFixture,
   createCommitmentHash,
   mineBlocks,
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
 } from './helpers';
 
 /**
@@ -30,6 +37,23 @@ import {
 describe('CommitRevealArbitrage Execution', () => {
   // Use shared fixture from helpers/commit-reveal.ts
   const deployContractsFixture = deployCommitRevealFixture;
+
+  // Admin test config for shared harness
+  const adminConfig = {
+    contractName: 'CommitRevealArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.commitRevealArbitrage,
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 
   // ===========================================================================
   // 5. Reveal Phase - Swap Execution Tests
@@ -825,243 +849,15 @@ describe('CommitRevealArbitrage Execution', () => {
   });
 
   // ===========================================================================
-  // 7. Admin Function Tests
+  // 7. Admin Function Tests (shared harness)
   // ===========================================================================
-  describe('7. Admin Functions', () => {
-    describe('addApprovedRouter()', () => {
-      it('should allow owner to approve router', async () => {
-        const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        expect(await commitRevealArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-      });
-
-      it('should emit RouterAdded event', async () => {
-        const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress()))
-          .to.emit(commitRevealArbitrage, 'RouterAdded')
-          .withArgs(await dexRouter1.getAddress());
-      });
-
-      it('should revert if non-owner tries to approve', async () => {
-        const { commitRevealArbitrage, dexRouter1, owner, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          commitRevealArbitrage.connect(user).addApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert on zero address router', async () => {
-        const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          commitRevealArbitrage.connect(owner).addApprovedRouter(ethers.ZeroAddress)
-        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InvalidRouterAddress');
-      });
-    });
-
-    describe('removeApprovedRouter()', () => {
-      it('should allow owner to remove router', async () => {
-        const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        expect(await commitRevealArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
-
-        await commitRevealArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress());
-        expect(await commitRevealArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.false;
-      });
-
-      it('should emit RouterRemoved event', async () => {
-        const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(commitRevealArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress()))
-          .to.emit(commitRevealArbitrage, 'RouterRemoved')
-          .withArgs(await dexRouter1.getAddress());
-      });
-
-      it('should revert if non-owner tries to remove', async () => {
-        const { commitRevealArbitrage, dexRouter1, owner, user } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          commitRevealArbitrage.connect(user).removeApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('setMinimumProfit()', () => {
-      it('should allow owner to update minimum profit', async () => {
-        const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newMinProfit = ethers.parseEther('0.05');
-        await commitRevealArbitrage.connect(owner).setMinimumProfit(newMinProfit);
-
-        expect(await commitRevealArbitrage.minimumProfit()).to.equal(newMinProfit);
-      });
-
-      it('should emit MinimumProfitUpdated event', async () => {
-        const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        const newMinProfit = ethers.parseEther('0.05');
-        await expect(commitRevealArbitrage.connect(owner).setMinimumProfit(newMinProfit))
-          .to.emit(commitRevealArbitrage, 'MinimumProfitUpdated')
-          .withArgs(BigInt(1e14), newMinProfit);
-      });
-
-      it('should revert if non-owner tries to update', async () => {
-        const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          commitRevealArbitrage.connect(user).setMinimumProfit(ethers.parseEther('0.05'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('pause() / unpause()', () => {
-      it('should allow owner to pause', async () => {
-        const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).pause();
-        expect(await commitRevealArbitrage.paused()).to.be.true;
-      });
-
-      it('should allow owner to unpause', async () => {
-        const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).pause();
-        expect(await commitRevealArbitrage.paused()).to.be.true;
-
-        await commitRevealArbitrage.connect(owner).unpause();
-        expect(await commitRevealArbitrage.paused()).to.be.false;
-      });
-
-      it('should revert if non-owner tries to pause', async () => {
-        const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          commitRevealArbitrage.connect(user).pause()
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert if non-owner tries to unpause', async () => {
-        const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).pause();
-
-        await expect(
-          commitRevealArbitrage.connect(user).unpause()
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('withdrawToken()', () => {
-      it('should allow owner to withdraw stuck tokens', async () => {
-        const { commitRevealArbitrage, weth, owner } = await loadFixture(deployContractsFixture);
-
-        // Send some WETH to contract
-        await weth.mint(await commitRevealArbitrage.getAddress(), ethers.parseEther('1'));
-
-        const ownerBalanceBefore = await weth.balanceOf(owner.address);
-
-        await commitRevealArbitrage.connect(owner).withdrawToken(
-          await weth.getAddress(),
-          owner.address,
-          ethers.parseEther('1')
-        );
-
-        const ownerBalanceAfter = await weth.balanceOf(owner.address);
-        expect(ownerBalanceAfter).to.equal(ownerBalanceBefore + ethers.parseEther('1'));
-      });
-
-      it('should revert if non-owner tries to withdraw', async () => {
-        const { commitRevealArbitrage, weth, user } = await loadFixture(deployContractsFixture);
-
-        await weth.mint(await commitRevealArbitrage.getAddress(), ethers.parseEther('1'));
-
-        await expect(
-          commitRevealArbitrage.connect(user).withdrawToken(
-            await weth.getAddress(),
-            user.address,
-            ethers.parseEther('1')
-          )
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('withdrawETH()', () => {
-      it('should allow owner to withdraw ETH', async () => {
-        const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        // Send some ETH to contract
-        await owner.sendTransaction({
-          to: await commitRevealArbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
-
-        const tx = await commitRevealArbitrage.connect(owner).withdrawETH(
-          owner.address,
-          ethers.parseEther('1')
-        );
-        const receipt = await tx.wait();
-        const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
-
-        const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
-        expect(ownerBalanceAfter).to.be.closeTo(
-          ownerBalanceBefore + ethers.parseEther('1') - gasUsed,
-          ethers.parseEther('0.01')
-        );
-      });
-
-      it('should revert if non-owner tries to withdraw ETH', async () => {
-        const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        await owner.sendTransaction({
-          to: await commitRevealArbitrage.getAddress(),
-          value: ethers.parseEther('1'),
-        });
-
-        await expect(
-          commitRevealArbitrage.connect(user).withdrawETH(user.address, ethers.parseEther('1'))
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('Ownable2Step', () => {
-      it('should support two-step ownership transfer', async () => {
-        const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-        // Step 1: Current owner initiates transfer
-        await commitRevealArbitrage.connect(owner).transferOwnership(user.address);
-
-        // Owner is still the original owner (pending transfer)
-        expect(await commitRevealArbitrage.owner()).to.equal(owner.address);
-        expect(await commitRevealArbitrage.pendingOwner()).to.equal(user.address);
-
-        // Step 2: New owner accepts
-        await commitRevealArbitrage.connect(user).acceptOwnership();
-
-        // Now ownership is transferred
-        expect(await commitRevealArbitrage.owner()).to.equal(user.address);
-      });
-
-      it('should not allow non-pending owner to accept', async () => {
-        const { commitRevealArbitrage, owner, user, attacker } = await loadFixture(deployContractsFixture);
-
-        await commitRevealArbitrage.connect(owner).transferOwnership(user.address);
-
-        await expect(
-          commitRevealArbitrage.connect(attacker).acceptOwnership()
-        ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
-      });
-    });
-  });
+  testRouterManagement(adminConfig);
+  testMinimumProfitConfig(adminConfig);
+  testPauseUnpause(adminConfig);
+  testWithdrawToken(adminConfig);
+  testWithdrawETH(adminConfig);
+  testWithdrawGasLimitConfig(adminConfig);
+  testOwnable2Step(adminConfig);
 
   // ===========================================================================
   // 8. View Function Tests

@@ -11,6 +11,16 @@ import {
   deployBaseFixture,
   fundProvider,
   getDeadline,
+  testRouterManagement,
+  testMinimumProfitConfig,
+  testSwapDeadlineConfig,
+  testPauseUnpause,
+  testWithdrawToken,
+  testWithdrawETH,
+  testWithdrawGasLimitConfig,
+  testOwnable2Step,
+  build2HopPath,
+  build2HopCrossRouterPath,
 } from './helpers';
 
 /**
@@ -53,6 +63,23 @@ describe('DaiFlashMintArbitrage', () => {
 
     return { daiArbitrage, dssFlash, ...base };
   }
+
+  // Admin test config for shared harness
+  const adminConfig = {
+    contractName: 'DaiFlashMintArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.daiArbitrage,
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 
   // ==========================================================================
   // 1. Deployment and Initialization Tests
@@ -188,116 +215,9 @@ describe('DaiFlashMintArbitrage', () => {
   });
 
   // ==========================================================================
-  // 2. Router Management Tests
+  // 2. Router Management Tests (shared harness)
   // ==========================================================================
-  describe('2. Router Management', () => {
-    describe('addApprovedRouter()', () => {
-      it('should allow owner to add router', async () => {
-        const { daiArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        expect(
-          await daiArbitrage.isApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.true;
-      });
-
-      it('should emit RouterAdded event', async () => {
-        const { daiArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await expect(
-          daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress())
-        )
-          .to.emit(daiArbitrage, 'RouterAdded')
-          .withArgs(await dexRouter1.getAddress());
-      });
-
-      it('should revert on zero address router', async () => {
-        const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(owner).addApprovedRouter(ethers.ZeroAddress)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InvalidRouterAddress');
-      });
-
-      it('should revert on duplicate router', async () => {
-        const { daiArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWithCustomError(daiArbitrage, 'RouterAlreadyApproved');
-      });
-
-      it('should revert if non-owner tries to add', async () => {
-        const { daiArbitrage, dexRouter1, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await expect(
-          daiArbitrage.connect(user).addApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('removeApprovedRouter()', () => {
-      it('should allow owner to remove router', async () => {
-        const { daiArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        await daiArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress());
-
-        expect(
-          await daiArbitrage.isApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.false;
-      });
-
-      it('should emit RouterRemoved event', async () => {
-        const { daiArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          daiArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress())
-        )
-          .to.emit(daiArbitrage, 'RouterRemoved')
-          .withArgs(await dexRouter1.getAddress());
-      });
-
-      it('should revert on non-existent router', async () => {
-        const { daiArbitrage, dexRouter1, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await expect(
-          daiArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWithCustomError(daiArbitrage, 'RouterNotApproved');
-      });
-
-      it('should revert if non-owner tries to remove', async () => {
-        const { daiArbitrage, dexRouter1, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await expect(
-          daiArbitrage.connect(user).removeApprovedRouter(await dexRouter1.getAddress())
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-  });
+  testRouterManagement(adminConfig);
 
   // ==========================================================================
   // 3. Flash Loan Execution Tests
@@ -333,21 +253,7 @@ describe('DaiFlashMintArbitrage', () => {
         );
 
         const amountIn = ethers.parseEther('10000'); // 10000 DAI
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
         const deadline = await getDeadline();
 
         // Execute arbitrage (note: no asset param, always DAI)
@@ -384,21 +290,7 @@ describe('DaiFlashMintArbitrage', () => {
         );
 
         const amountIn = ethers.parseEther('10000');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
         const deadline = await getDeadline();
 
         await expect(
@@ -430,21 +322,7 @@ describe('DaiFlashMintArbitrage', () => {
         );
 
         const amountIn = ethers.parseEther('10000');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
         const deadline = await getDeadline();
         await daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline);
 
@@ -480,21 +358,7 @@ describe('DaiFlashMintArbitrage', () => {
         );
 
         const amountIn = ethers.parseEther('100'); // 100 DAI
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
+        const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
         const deadline = await getDeadline();
 
         // Profit is ~0.01 DAI = 1e16 wei, but minProfit set very high
@@ -832,20 +696,10 @@ describe('DaiFlashMintArbitrage', () => {
       // Path: DAI→WETH (malicious, 1:1 + reentrancy) → WETH→DAI (normal, profit)
       // Use 100 DAI to stay within router funding limits (1:1 + 2100x = 210k DAI < 1M)
       const amountIn = ethers.parseEther('100');
-      const swapPath = [
-        {
-          router: await maliciousRouter.getAddress(),
-          tokenIn: await dai.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await dai.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
+      const swapPath = build2HopCrossRouterPath(
+        await maliciousRouter.getAddress(), await dexRouter1.getAddress(),
+        await dai.getAddress(), await weth.getAddress(), 1n, 1n
+      );
 
       const deadline = await getDeadline();
       await daiArbitrage
@@ -859,151 +713,19 @@ describe('DaiFlashMintArbitrage', () => {
   });
 
   // ==========================================================================
-  // 4. Pause Functionality Tests
+  // 4. Pause Functionality Tests (shared harness)
   // ==========================================================================
-  describe('4. Pause Functionality', () => {
-    it('should allow owner to pause', async () => {
-      const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-      await daiArbitrage.connect(owner).pause();
-
-      expect(await daiArbitrage.paused()).to.be.true;
-    });
-
-    it('should allow owner to unpause', async () => {
-      const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-      await daiArbitrage.connect(owner).pause();
-      await daiArbitrage.connect(owner).unpause();
-
-      expect(await daiArbitrage.paused()).to.be.false;
-    });
-
-    it('should revert if non-owner tries to pause', async () => {
-      const { daiArbitrage, user } = await loadFixture(deployContractsFixture);
-
-      await expect(
-        daiArbitrage.connect(user).pause()
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-
-    it('should revert if non-owner tries to unpause', async () => {
-      const { daiArbitrage, owner, user } = await loadFixture(deployContractsFixture);
-
-      await daiArbitrage.connect(owner).pause();
-
-      await expect(
-        daiArbitrage.connect(user).unpause()
-      ).to.be.revertedWith('Ownable: caller is not the owner');
-    });
-  });
+  testPauseUnpause(adminConfig);
 
   // ==========================================================================
-  // 5. Owner-Only Admin Functions Tests
+  // 5. Owner-Only Admin Functions Tests (shared harness)
   // ==========================================================================
-  describe('5. Owner-Only Admin Functions', () => {
-    describe('setMinimumProfit()', () => {
-      it('should allow owner to set minimum profit', async () => {
-        const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await daiArbitrage.connect(owner).setMinimumProfit(ethers.parseEther('0.01'));
-
-        expect(await daiArbitrage.minimumProfit()).to.equal(ethers.parseEther('0.01'));
-      });
-
-      it('should revert on zero minimum profit', async () => {
-        const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(owner).setMinimumProfit(0)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InvalidMinimumProfit');
-      });
-
-      it('should revert if non-owner tries to set', async () => {
-        const { daiArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(user).setMinimumProfit(1)
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-
-    describe('withdrawToken()', () => {
-      it('should allow owner to withdraw tokens', async () => {
-        const { daiArbitrage, dai, owner } = await loadFixture(deployContractsFixture);
-
-        // Mint some DAI to the contract
-        const amount = ethers.parseEther('100');
-        await dai.mint(await daiArbitrage.getAddress(), amount);
-
-        await daiArbitrage.connect(owner).withdrawToken(
-          await dai.getAddress(),
-          owner.address,
-          amount
-        );
-
-        expect(await dai.balanceOf(await daiArbitrage.getAddress())).to.equal(0);
-      });
-
-      it('should revert if non-owner tries to withdraw', async () => {
-        const { daiArbitrage, dai, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(user).withdrawToken(
-            await dai.getAddress(),
-            user.address,
-            ethers.parseEther('1')
-          )
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-
-      it('should revert on zero recipient address', async () => {
-        const { daiArbitrage, dai, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(owner).withdrawToken(
-            await dai.getAddress(),
-            ethers.ZeroAddress,
-            1
-          )
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InvalidRecipient');
-      });
-    });
-
-    describe('setSwapDeadline()', () => {
-      it('should allow owner to set swap deadline', async () => {
-        const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await daiArbitrage.connect(owner).setSwapDeadline(120);
-
-        expect(await daiArbitrage.swapDeadline()).to.equal(120);
-      });
-
-      it('should revert on zero deadline', async () => {
-        const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(owner).setSwapDeadline(0)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should revert on deadline exceeding max', async () => {
-        const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(owner).setSwapDeadline(601)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InvalidSwapDeadline');
-      });
-
-      it('should revert if non-owner tries to set', async () => {
-        const { daiArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        await expect(
-          daiArbitrage.connect(user).setSwapDeadline(120)
-        ).to.be.revertedWith('Ownable: caller is not the owner');
-      });
-    });
-  });
+  testMinimumProfitConfig(adminConfig);
+  testSwapDeadlineConfig(adminConfig);
+  testWithdrawToken(adminConfig);
+  testWithdrawETH(adminConfig);
+  testWithdrawGasLimitConfig(adminConfig);
+  testOwnable2Step(adminConfig);
 
   // ==========================================================================
   // 6. Calculate Expected Profit Tests
@@ -1034,20 +756,7 @@ describe('DaiFlashMintArbitrage', () => {
       );
 
       const amount = ethers.parseEther('10000');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await dai.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await dai.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
 
       const [expectedProfit, flashLoanFee] = await daiArbitrage.calculateExpectedProfit(
         amount,
@@ -1084,20 +793,7 @@ describe('DaiFlashMintArbitrage', () => {
       );
 
       const amount = ethers.parseEther('10000');
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await dai.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await dai.getAddress(),
-          amountOutMin: 1n,
-        },
-      ];
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
 
       const [expectedProfit] = await daiArbitrage.calculateExpectedProfit(amount, swapPath);
 
