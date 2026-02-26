@@ -35,6 +35,7 @@ describe('Factory Functions Tests', () => {
     cache = new HierarchicalCache({
       l1Size: 64,
       l2Enabled: false, // Disable L2 in unit tests to avoid Redis connection
+      usePriceMatrix: false, // Skip 64MB SharedArrayBuffer allocation in tests
     });
   });
 
@@ -232,8 +233,8 @@ describe('Factory Functions Tests', () => {
     });
 
     it('should be isolated from other test instances', () => {
-      const cache1 = new HierarchicalCache({ l1Size: 64 });
-      const cache2 = new HierarchicalCache({ l1Size: 64 });
+      const cache1 = new HierarchicalCache({ l1Size: 64, usePriceMatrix: false });
+      const cache2 = new HierarchicalCache({ l1Size: 64, usePriceMatrix: false });
 
       const components1 = createTestWarming(cache1);
       const components2 = createTestWarming(cache2);
@@ -273,8 +274,8 @@ describe('Factory Functions Tests', () => {
     });
 
     it('should have different analyzer sharing behavior', () => {
-      const cache1 = new HierarchicalCache({ l1Size: 64 });
-      const cache2 = new HierarchicalCache({ l1Size: 64 });
+      const cache1 = new HierarchicalCache({ l1Size: 64, usePriceMatrix: false });
+      const cache2 = new HierarchicalCache({ l1Size: 64, usePriceMatrix: false });
 
       const topN1 = createTopNWarming(cache1);
       const topN2 = createTopNWarming(cache2);

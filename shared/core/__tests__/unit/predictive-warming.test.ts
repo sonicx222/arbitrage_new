@@ -143,7 +143,8 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
       cache = createHierarchicalCache({
         l1Enabled: true,
         l2Enabled: true,
-        l3Enabled: false
+        l3Enabled: false,
+        usePriceMatrix: false,
       });
 
       const stats = cache.getStats();
@@ -155,6 +156,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -170,6 +172,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 5
@@ -185,6 +188,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true
         }
@@ -201,6 +205,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -250,6 +255,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3,
@@ -283,6 +289,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 2,
@@ -350,6 +357,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -442,6 +450,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -485,6 +494,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3,
@@ -547,6 +557,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -582,6 +593,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -637,6 +649,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3
@@ -655,6 +668,7 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
         l1Enabled: true,
         l2Enabled: true,
         l3Enabled: false,
+        usePriceMatrix: false,
         predictiveWarming: {
           enabled: true,
           maxPairsToWarm: 3

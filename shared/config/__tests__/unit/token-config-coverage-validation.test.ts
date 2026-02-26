@@ -58,9 +58,9 @@ describe('S2.2.4 Token Coverage Verification', () => {
       // S3.2.1: Avalanche expanded to 15, Fantom to 10
       // S3.3.3: Solana expanded to 15 → Total 112
       // Phase 0 Item 2: Expanded Ethereum LSTs (eETH, rsETH, pufETH added to existing wstETH, rETH, cbETH, sfrxETH) → Total 117
-      // Emerging L2s: Blast 2, Scroll 3, Mantle 3, Mode 2 → Total 127
-      // Arbitrum: Added rsETH → Total 128
-      expect(totalTokens).toBe(128);
+      // Emerging L2s (RPC-verified 2026-02-26): Blast 5, Scroll 7, Mantle 3, Mode 2 → Total 134
+      // Arbitrum: Added rsETH → Total 135
+      expect(totalTokens).toBe(135);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -95,11 +95,11 @@ describe('S2.2.4 Token Coverage Verification', () => {
       fantom: 10,
       zksync: 6,
       linea: 6,
-      // Emerging L2s
-      blast: 2,
-      scroll: 3,
-      mantle: 3,
-      mode: 2,
+      // Emerging L2s (RPC-verified 2026-02-26)
+      blast: 5,   // WETH, USDB, BLAST, WBTC, MIM
+      scroll: 7,  // WETH, USDC, USDT, DAI, WBTC, wstETH, SCR
+      mantle: 3,  // WMNT, USDC, USDT
+      mode: 2,    // WETH, USDC
       solana: 15
     };
 

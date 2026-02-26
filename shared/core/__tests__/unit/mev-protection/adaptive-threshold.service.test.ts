@@ -17,6 +17,7 @@ const mockRedis = {
   expire: jest.fn().mockResolvedValue(1),
   get: jest.fn().mockResolvedValue(null),
   set: jest.fn().mockResolvedValue('OK'),
+  setex: jest.fn().mockResolvedValue('OK'),
   del: jest.fn().mockResolvedValue(1),
   scanStream: jest.fn().mockReturnValue({
     [Symbol.asyncIterator]: async function* () {
@@ -187,12 +188,11 @@ describe('AdaptiveThresholdService', () => {
         mevExtractedUsd: 100,
       });
 
-      // Verify adjustment stored in Redis
-      expect(mockRedis.set).toHaveBeenCalledWith(
+      // Verify adjustment stored in Redis (setex: key, ttl, value)
+      expect(mockRedis.setex).toHaveBeenCalledWith(
         'adaptive:threshold_adjustments:ethereum:uniswap_v2',
-        expect.stringContaining('"profitMultiplier"'),
-        'EX',
-        expect.any(Number)
+        expect.any(Number), // TTL in seconds
+        expect.stringContaining('"profitMultiplier"')
       );
     });
 
@@ -455,12 +455,12 @@ describe('AdaptiveThresholdService', () => {
       });
 
       // Verify adjustment stored with 0.7 multiplier
-      const setCall = mockRedis.set.mock.calls.find((call: any) =>
+      const setCall = mockRedis.setex.mock.calls.find((call: any) =>
         call[0] === 'adaptive:threshold_adjustments:ethereum:uniswap_v2'
       );
 
       expect(setCall).toBeDefined();
-      const adjustmentData = JSON.parse(setCall![1]);
+      const adjustmentData = JSON.parse(setCall![2]); // setex: [key, ttl, value]
       expect(adjustmentData.profitMultiplier).toBe(0.7);
       expect(adjustmentData.slippageMultiplier).toBe(0.7);
     });
@@ -491,12 +491,12 @@ describe('AdaptiveThresholdService', () => {
         mevExtractedUsd: 100,
       });
 
-      const setCall = mockRedis.set.mock.calls.find((call: any) =>
+      const setCall = mockRedis.setex.mock.calls.find((call: any) =>
         call[0] === 'adaptive:threshold_adjustments:ethereum:uniswap_v2'
       );
 
       expect(setCall).toBeDefined();
-      const adjustmentData = JSON.parse(setCall![1]);
+      const adjustmentData = JSON.parse(setCall![2]); // setex: [key, ttl, value]
       expect(adjustmentData.profitMultiplier).toBe(1.0);
       expect(adjustmentData.slippageMultiplier).toBe(1.0);
     });
@@ -530,11 +530,12 @@ describe('AdaptiveThresholdService', () => {
         mevExtractedUsd: 100,
       });
 
-      const setCall = mockRedis.set.mock.calls.find((call: any) =>
+      const setCall = mockRedis.setex.mock.calls.find((call: any) =>
         call[0] === 'adaptive:threshold_adjustments:ethereum:uniswap_v2'
       );
 
-      const adjustmentData = JSON.parse(setCall![1]);
+      expect(setCall).toBeDefined();
+      const adjustmentData = JSON.parse(setCall![2]); // setex: [key, ttl, value]
       // Only 2 recent attacks, should not trigger reduction
       expect(adjustmentData.profitMultiplier).toBe(1.0);
     });
@@ -595,19 +596,17 @@ describe('AdaptiveThresholdService', () => {
         mevExtractedUsd: 100,
       });
 
-      // Verify separate adjustments
-      expect(mockRedis.set).toHaveBeenCalledWith(
+      // Verify separate adjustments (setex: key, ttl, value)
+      expect(mockRedis.setex).toHaveBeenCalledWith(
         'adaptive:threshold_adjustments:ethereum:uniswap_v2',
-        expect.any(String),
-        'EX',
-        expect.any(Number)
+        expect.any(Number),
+        expect.any(String)
       );
 
-      expect(mockRedis.set).toHaveBeenCalledWith(
+      expect(mockRedis.setex).toHaveBeenCalledWith(
         'adaptive:threshold_adjustments:ethereum:sushiswap',
-        expect.any(String),
-        'EX',
-        expect.any(Number)
+        expect.any(Number),
+        expect.any(String)
       );
     });
 

@@ -190,9 +190,10 @@ describe('PartitionRouter', () => {
   });
 
   describe('getRoutableChains', () => {
-    it('should return all 15 chains', () => {
+    it('should return all 15 chains from CHAINS config', () => {
       const chains = PartitionRouter.getRoutableChains();
-      // 15 chains total: 11 original (bsc, polygon, avalanche, fantom, arbitrum, optimism, base, ethereum, zksync, linea, solana) + 4 emerging L2s (blast, scroll, mantle, mode)
+      // 15 chains total in CHAINS config: 11 original (bsc, polygon, avalanche, fantom, arbitrum, optimism, base, ethereum, zksync, linea, solana) + 4 emerging L2s (blast, scroll, mantle, mode)
+      // Note: Mantle and Mode are stub chains (config present but not assigned to partitions yet)
       expect(chains).toHaveLength(15);
     });
 
@@ -239,7 +240,7 @@ describe('PartitionRouter', () => {
 
     it('should return correct chains for l2-turbo', () => {
       const chains = PartitionRouter.getChainsForPartition(PARTITION_IDS.L2_TURBO);
-      expect(chains).toEqual(['arbitrum', 'optimism', 'base']);
+      expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast']);
     });
 
     it('should return empty array for unknown partition', () => {

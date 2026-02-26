@@ -23,13 +23,14 @@ describe('flash-loan-availability', () => {
   // ===========================================================================
 
   describe('getSupportedProtocols', () => {
-    it('returns aave_v3, balancer_v2, pancakeswap_v3 for ethereum', () => {
+    it('returns aave_v3, balancer_v2, pancakeswap_v3, dai_flash_mint for ethereum', () => {
       const protocols = getSupportedProtocols('ethereum');
       expect(protocols).toContain('aave_v3');
       expect(protocols).toContain('balancer_v2');
       expect(protocols).toContain('pancakeswap_v3');
       expect(protocols).toContain('dai_flash_mint');
       expect(protocols).not.toContain('syncswap');
+      expect(protocols).not.toContain('morpho'); // Morpho present but disabled (no contract yet)
       expect(protocols).toHaveLength(4);
     });
 
@@ -183,7 +184,7 @@ describe('flash-loan-availability', () => {
   // ===========================================================================
 
   describe('FLASH_LOAN_AVAILABILITY', () => {
-    it('ethereum has aave_v3, balancer_v2, pancakeswap_v3 enabled', () => {
+    it('ethereum has aave_v3, balancer_v2, pancakeswap_v3, dai_flash_mint enabled', () => {
       expect(FLASH_LOAN_AVAILABILITY['ethereum']).toEqual({
         aave_v3: true,
         balancer_v2: true,
@@ -191,6 +192,7 @@ describe('flash-loan-availability', () => {
         spookyswap: false,
         syncswap: false,
         dai_flash_mint: true,
+        morpho: false, // Morpho Blue deployed but no MorphoFlashArbitrage contract yet
       });
     });
 

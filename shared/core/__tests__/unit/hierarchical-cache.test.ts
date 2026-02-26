@@ -79,7 +79,8 @@ describe('HierarchicalCache (Map-based L1)', () => {
       l2Ttl: 300,
       l3Enabled: true,
       enablePromotion: true,
-      enableDemotion: false
+      enableDemotion: false,
+      usePriceMatrix: false, // Map-based L1 — skip 64MB SharedArrayBuffer allocation
     });
   });
 
@@ -219,11 +220,13 @@ describe('HierarchicalCache (Map-based L1)', () => {
     // P2-FIX: Test un-skipped - L1 cache enforces TTL on reads (lines 494-498 in hierarchical-cache.ts)
     // Use L1-only cache to avoid L2 (Redis mock) re-promoting expired entries
     it('should respect TTL', async () => {
+      jest.useFakeTimers();
       const l1OnlyCache = createHierarchicalCache({
         l1Enabled: true,
         l1Size: 64,
         l2Enabled: false,
         l3Enabled: false,
+        usePriceMatrix: false,
       });
 
       const testKey = 'ttl:test';
@@ -231,10 +234,11 @@ describe('HierarchicalCache (Map-based L1)', () => {
 
       await l1OnlyCache.set(testKey, testValue, 0.1); // 0.1s = 100ms TTL
 
-      await new Promise(resolve => setTimeout(resolve, 150)); // Wait 150ms (50% margin)
+      jest.advanceTimersByTime(150); // Advance 150ms (50% margin)
 
       const result = await l1OnlyCache.get(testKey);
       expect(result).toBeNull();
+      jest.useRealTimers();
     });
 
     it('should handle clearing the cache', async () => {
@@ -243,7 +247,8 @@ describe('HierarchicalCache (Map-based L1)', () => {
         l1Enabled: true,
         l1Size: 64,
         l2Enabled: false,  // Disable L2 for this test to avoid mock timeout
-        l3Enabled: true
+        l3Enabled: true,
+        usePriceMatrix: false,
       });
 
       await l1l3Cache.set('k1', 'v1');
@@ -275,9 +280,10 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
     });
 
     // PHASE1-TASK34: Create cache with PriceMatrix enabled
+    // Use l1Size: 1 (1MB = ~65K pairs) instead of 64 (64MB) to avoid slow init in tests
     cache = createHierarchicalCache({
       l1Enabled: true,
-      l1Size: 64,
+      l1Size: 1,
       l2Enabled: true,
       l2Ttl: 300,
       l3Enabled: true,
@@ -387,7 +393,7 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
       // Use cache without L2 to avoid Redis mock re-promoting cleared entries
       const l1OnlyCache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 64,
+        l1Size: 1,
         l2Enabled: false,
         l3Enabled: true,
         usePriceMatrix: true,
@@ -462,17 +468,17 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
 
   describe('PHASE1-TASK34: Capacity limits', () => {
     it('should respect L1 capacity limits', async () => {
-      // Create small cache
+      // Create small cache — 0.001MB ≈ 1KB ≈ 65 PriceMatrix slots
       const smallCache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 1, // 1MB = ~85K pairs max in PriceMatrix
+        l1Size: 0.001,
         l2Enabled: false,
         l3Enabled: false,
         usePriceMatrix: true
       });
 
-      // Try to add many entries (some will be evicted)
-      const numEntries = 100000; // More than capacity
+      // Try to add more entries than capacity (~65) to trigger evictions
+      const numEntries = 200;
       for (let i = 0; i < numEntries; i++) {
         await smallCache.set(`price:test:${i}`, { price: i });
       }
@@ -485,10 +491,11 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
 
   describe('PHASE1-TASK34: TTL support', () => {
     it('should expire entries after TTL', async () => {
+      jest.useFakeTimers();
       // Use L1-only cache to avoid L2 (Redis mock) re-promoting expired entries
       const l1OnlyCache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 64,
+        l1Size: 1,
         l2Enabled: false,
         l3Enabled: false,
         usePriceMatrix: true,
@@ -503,11 +510,12 @@ describe('HierarchicalCache (PriceMatrix-based L1)', () => {
       // Should be available immediately
       expect(await l1OnlyCache.get(testKey)).toEqual(testValue);
 
-      // Wait for TTL to expire
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      // Advance past TTL expiry
+      jest.advanceTimersByTime(1100);
 
       // Should be expired now
       expect(await l1OnlyCache.get(testKey)).toBeNull();
+      jest.useRealTimers();
     });
   });
 });
@@ -516,7 +524,7 @@ describe('HierarchicalCache PriceMatrix vs Map comparison', () => {
   it('should produce identical results for both implementations', async () => {
     const priceMatrixCache = createHierarchicalCache({
       l1Enabled: true,
-      l1Size: 64,
+      l1Size: 1,
       l2Enabled: false,
       l3Enabled: false,
       usePriceMatrix: true
@@ -524,7 +532,7 @@ describe('HierarchicalCache PriceMatrix vs Map comparison', () => {
 
     const mapCache = createHierarchicalCache({
       l1Enabled: true,
-      l1Size: 64,
+      l1Size: 1,
       l2Enabled: false,
       l3Enabled: false,
       usePriceMatrix: false

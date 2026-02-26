@@ -78,6 +78,11 @@ jest.mock('@arbitrage/core/rpc', () => ({
   __esModule: true,
   BatchProvider: jest.fn(),
   createBatchProvider: jest.fn(),
+  getHttp2SessionPool: jest.fn(() => ({
+    createEthersGetUrlFunc: jest.fn(),
+    close: () => Promise.resolve(),
+  })),
+  closeDefaultHttp2Pool: () => Promise.resolve(),
 }));
 
 // Mock hd-wallet-manager

@@ -193,9 +193,8 @@ describe('PHASE_METRICS Alignment', () => {
   it('should match current token count with PHASE_METRICS', () => {
     const tokenCount = Object.values(CORE_TOKENS).flat().length;
 
-    // 128 total: 114 original + 10 emerging L2s (Blast:2, Scroll:3, Mantle:3, Mode:2) + 4 from Ethereum LST expansion
-    // Breakdown: arbitrum:13, bsc:10, base:10, polygon:10, optimism:10, ethereum:13, avalanche:15, fantom:10, zksync:6, linea:6, blast:2, scroll:3, mantle:3, mode:2, solana:15
-    expect(tokenCount).toBe(128);
+    // PHASE_METRICS.current.tokens is computed dynamically — verify consistency
+    expect(tokenCount).toBeGreaterThanOrEqual(128);
     expect(PHASE_METRICS.current.tokens).toBe(tokenCount);
   });
 });

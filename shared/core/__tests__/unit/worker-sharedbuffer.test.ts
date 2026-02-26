@@ -37,10 +37,10 @@ describe('Worker SharedArrayBuffer Integration', () => {
     });
 
     it('should initialize with HierarchicalCache SharedArrayBuffer', () => {
-      // Create cache with PriceMatrix
+      // Create cache with PriceMatrix (l1Size: 1 = 1MB, enough for testing)
       const cache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 64,
+        l1Size: 1,
         l2Enabled: false,
         l3Enabled: false,
         usePriceMatrix: true
@@ -81,7 +81,7 @@ describe('Worker SharedArrayBuffer Integration', () => {
     it('should return SharedArrayBuffer when PriceMatrix is enabled', () => {
       const cache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 64,
+        l1Size: 1,
         l2Enabled: false,
         l3Enabled: false,
         usePriceMatrix: true
@@ -166,7 +166,7 @@ describe('Worker SharedArrayBuffer Integration', () => {
     it('should preserve data written to SharedArrayBuffer', async () => {
       const cache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 64,
+        l1Size: 1,
         l2Enabled: false,
         l3Enabled: false,
         usePriceMatrix: true
@@ -199,10 +199,10 @@ describe('Worker SharedArrayBuffer Integration', () => {
 
   describe('Integration readiness', () => {
     it('should have all components ready for worker integration', () => {
-      // Create cache with PriceMatrix
+      // Create cache with PriceMatrix (l1Size: 1 = 1MB, enough for testing)
       const cache = createHierarchicalCache({
         l1Enabled: true,
-        l1Size: 64,
+        l1Size: 1,
         l2Enabled: false,
         l3Enabled: false,
         usePriceMatrix: true
