@@ -8,9 +8,13 @@
  * - Profit threshold validation
  * - Gas cost estimation per chain
  *
+ * Uses fake timers + collected events instead of done() callbacks to avoid
+ * stochastic 10-second timeouts.
+ *
  * @see shared/core/src/simulation-mode.ts (CrossChainSimulator)
  */
 
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import {
   CrossChainSimulator,
   type CrossChainSimulatorConfig,
@@ -18,7 +22,43 @@ import {
   type BridgeCostConfig,
 } from '../../src/simulation-mode';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/** Collect opportunities from a cross-chain simulator during a fake-timer advance. */
+async function collectCrossChainOpportunities(
+  config: Partial<CrossChainSimulatorConfig> & Pick<CrossChainSimulatorConfig, 'chains' | 'tokens'>,
+  advanceMs: number
+): Promise<SimulatedOpportunity[]> {
+  const simulator = new CrossChainSimulator({
+    updateIntervalMs: 50,
+    volatility: 0.10,
+    minProfitThreshold: 0.001,
+    ...config,
+  });
+
+  const opportunities: SimulatedOpportunity[] = [];
+  simulator.on('opportunity', (opp: SimulatedOpportunity) => opportunities.push(opp));
+  simulator.start();
+  await jest.advanceTimersByTimeAsync(advanceMs);
+  simulator.stop();
+  return opportunities;
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
 describe('CrossChainSimulator', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   describe('Initialization', () => {
     it('should initialize prices for all chains and tokens', () => {
       const simulator = new CrossChainSimulator({
@@ -48,15 +88,13 @@ describe('CrossChainSimulator', () => {
       const arbPrice = simulator.getPrice('arbitrum', 'WETH');
       const opPrice = simulator.getPrice('optimism', 'WETH');
 
-      // Prices should be similar but slightly different due to chain variation
       expect(ethPrice).toBeDefined();
       expect(arbPrice).toBeDefined();
       expect(opPrice).toBeDefined();
 
-      // Variation should be within ±0.5% (as per implementation)
       if (ethPrice && arbPrice) {
         const variation = Math.abs((arbPrice - ethPrice) / ethPrice);
-        expect(variation).toBeLessThan(0.01); // <1%
+        expect(variation).toBeLessThan(0.01);
       }
     });
 
@@ -75,82 +113,46 @@ describe('CrossChainSimulator', () => {
   });
 
   describe('Cross-Chain Opportunity Detection', () => {
-    it('should detect opportunity when price differential exceeds bridge costs', (done) => {
-      const customBridgeCosts: Record<string, BridgeCostConfig> = {
-        'ethereum-arbitrum': {
-          fixedCost: 5, // Low bridge cost
-          percentageFee: 0.0001, // 0.01%
-          estimatedTimeSeconds: 600,
-        },
-      };
-
-      const simulator = new CrossChainSimulator({
+    it('should detect opportunity when price differential exceeds bridge costs', async () => {
+      const opportunities = await collectCrossChainOpportunities({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH', 'WBTC'],
-        updateIntervalMs: 50,
-        volatility: 0.10, // 10% volatility to reliably create opportunities
-        minProfitThreshold: 0.001, // 0.1% min profit
-        bridgeCosts: customBridgeCosts,
-      });
+        bridgeCosts: {
+          'ethereum-arbitrum': {
+            fixedCost: 5,
+            percentageFee: 0.0001,
+            estimatedTimeSeconds: 600,
+          },
+        },
+      }, 5000);
 
-      let resolved = false;
-      const failTimeout = setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        simulator.stop();
-        done(new Error('No cross-chain opportunity detected within timeout'));
-      }, 10000);
+      expect(opportunities.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(failTimeout);
-        expect(opportunity.type).toBe('cross-chain');
-        expect(opportunity.buyChain).toBeDefined();
-        expect(opportunity.sellChain).toBeDefined();
-        expect(opportunity.buyChain).not.toBe(opportunity.sellChain);
-        expect(opportunity.bridgeProtocol).toBeDefined();
-        expect(opportunity.bridgeFee).toBeGreaterThan(0);
-        expect(opportunity.profitPercentage).toBeGreaterThan(0.1); // Above threshold
-
-        simulator.stop();
-        done();
-      });
-
-      simulator.start();
+      const opp = opportunities[0];
+      expect(opp.type).toBe('cross-chain');
+      expect(opp.buyChain).toBeDefined();
+      expect(opp.sellChain).toBeDefined();
+      expect(opp.buyChain).not.toBe(opp.sellChain);
+      expect(opp.bridgeProtocol).toBeDefined();
+      expect(opp.bridgeFee).toBeGreaterThan(0);
+      expect(opp.profitPercentage).toBeGreaterThan(0.1);
     });
 
-    it('should not emit opportunities when bridge costs exceed profit', (done) => {
-      const expensiveBridgeCosts: Record<string, BridgeCostConfig> = {
-        'ethereum-arbitrum': {
-          fixedCost: 1000, // Very expensive bridge
-          percentageFee: 0.05, // 5%
-          estimatedTimeSeconds: 600,
-        },
-      };
-
-      const simulator = new CrossChainSimulator({
+    it('should not emit opportunities when bridge costs exceed profit', async () => {
+      const opportunities = await collectCrossChainOpportunities({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH'],
-        updateIntervalMs: 100,
         volatility: 0.01, // Low volatility
-        minProfitThreshold: 0.002,
-        bridgeCosts: expensiveBridgeCosts,
-      });
-
-      let opportunityCount = 0;
-      simulator.on('opportunity', () => {
-        opportunityCount++;
-      });
-
-      simulator.start();
-
-      // Check after 2 seconds that no opportunities were emitted
-      setTimeout(() => {
-        simulator.stop();
-        expect(opportunityCount).toBe(0);
-        done();
+        bridgeCosts: {
+          'ethereum-arbitrum': {
+            fixedCost: 1000, // Very expensive bridge
+            percentageFee: 0.05,
+            estimatedTimeSeconds: 600,
+          },
+        },
       }, 2000);
+
+      expect(opportunities.length).toBe(0);
     });
 
     it('should only detect opportunities with dest price > source price', () => {
@@ -162,28 +164,21 @@ describe('CrossChainSimulator', () => {
         minProfitThreshold: 0.002,
       });
 
-      // Manually test the detection logic by checking prices
       const ethPrice = simulator.getPrice('ethereum', 'WETH');
       const arbPrice = simulator.getPrice('arbitrum', 'WETH');
 
       if (ethPrice && arbPrice) {
-        // Opportunity should only exist if arbPrice > ethPrice (buy cheap, sell high)
         const shouldHaveOpportunity = arbPrice > ethPrice;
-
-        // This is a conceptual test - in practice, the simulator checks this internally
         expect(typeof shouldHaveOpportunity).toBe('boolean');
       }
     });
   });
 
   describe('Bridge Protocol Selection', () => {
-    it('should use stargate for ethereum routes', (done) => {
-      const simulator = new CrossChainSimulator({
+    it('should use stargate for ethereum routes', async () => {
+      const opportunities = await collectCrossChainOpportunities({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH', 'WBTC'],
-        updateIntervalMs: 50,
-        volatility: 0.10,
-        minProfitThreshold: 0.001,
         bridgeCosts: {
           'ethereum-arbitrum': {
             fixedCost: 10,
@@ -191,40 +186,20 @@ describe('CrossChainSimulator', () => {
             estimatedTimeSeconds: 600,
           },
         },
-      });
+      }, 5000);
 
-      let resolved = false;
-      const failTimeout = setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        simulator.stop();
-        done(new Error('No opportunity detected'));
-      }, 10000);
+      expect(opportunities.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(failTimeout);
-        if (
-          opportunity.buyChain === 'ethereum' ||
-          opportunity.sellChain === 'ethereum'
-        ) {
-          expect(opportunity.bridgeProtocol).toBe('stargate');
-        }
-        simulator.stop();
-        done();
-      });
-
-      simulator.start();
+      const opp = opportunities[0];
+      if (opp.buyChain === 'ethereum' || opp.sellChain === 'ethereum') {
+        expect(opp.bridgeProtocol).toBe('stargate');
+      }
     });
 
-    it('should use across for L2-to-L2 routes', (done) => {
-      const simulator = new CrossChainSimulator({
+    it('should use across for L2-to-L2 routes', async () => {
+      const opportunities = await collectCrossChainOpportunities({
         chains: ['arbitrum', 'optimism'],
         tokens: ['WETH', 'WBTC'],
-        updateIntervalMs: 50,
-        volatility: 0.10,
-        minProfitThreshold: 0.001,
         bridgeCosts: {
           'arbitrum-optimism': {
             fixedCost: 5,
@@ -232,37 +207,18 @@ describe('CrossChainSimulator', () => {
             estimatedTimeSeconds: 120,
           },
         },
-      });
+      }, 5000);
 
-      let resolved = false;
-      const failTimeout = setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        simulator.stop();
-        done(new Error('No opportunity detected'));
-      }, 10000);
-
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(failTimeout);
-        expect(opportunity.bridgeProtocol).toBe('across');
-        simulator.stop();
-        done();
-      });
-
-      simulator.start();
+      expect(opportunities.length).toBeGreaterThan(0);
+      expect(opportunities[0].bridgeProtocol).toBe('across');
     });
   });
 
   describe('Gas Cost Estimation', () => {
-    it('should include realistic gas costs per chain', (done) => {
-      const simulator = new CrossChainSimulator({
+    it('should include realistic gas costs per chain', async () => {
+      const opportunities = await collectCrossChainOpportunities({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH', 'WBTC'],
-        updateIntervalMs: 50,
-        volatility: 0.10,
-        minProfitThreshold: 0.001,
         bridgeCosts: {
           'ethereum-arbitrum': {
             fixedCost: 10,
@@ -270,45 +226,27 @@ describe('CrossChainSimulator', () => {
             estimatedTimeSeconds: 600,
           },
         },
-      });
+      }, 5000);
 
-      let resolved = false;
-      const failTimeout = setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        simulator.stop();
-        done(new Error('No opportunity detected'));
-      }, 10000);
+      expect(opportunities.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(failTimeout);
-        expect(opportunity.expectedGasCost).toBeDefined();
-        expect(opportunity.expectedGasCost).toBeGreaterThan(0);
+      const opp = opportunities[0];
+      expect(opp.expectedGasCost).toBeDefined();
+      expect(opp.expectedGasCost).toBeGreaterThan(0);
 
-        // Ethereum gas should be higher than Arbitrum
-        if (opportunity.buyChain === 'ethereum') {
-          // Ethereum gas is typically $20-30
-          expect(opportunity.expectedGasCost).toBeGreaterThan(10);
-        }
-
-        simulator.stop();
-        done();
-      });
-
-      simulator.start();
+      if (opp.buyChain === 'ethereum') {
+        expect(opp.expectedGasCost).toBeGreaterThan(10);
+      }
     });
   });
 
   describe('Profit Calculation', () => {
-    it('should calculate net profit after bridge fees and gas', (done) => {
-      const simulator = new CrossChainSimulator({
+    it('should calculate net profit after bridge fees and gas', async () => {
+      const opportunities = await collectCrossChainOpportunities({
         chains: ['ethereum', 'arbitrum'],
         tokens: ['WETH', 'WBTC'],
         updateIntervalMs: 100,
-        volatility: 0.10,
-        minProfitThreshold: 0.005, // 0.5% min profit
+        minProfitThreshold: 0.005,
         bridgeCosts: {
           'ethereum-arbitrum': {
             fixedCost: 15,
@@ -316,42 +254,24 @@ describe('CrossChainSimulator', () => {
             estimatedTimeSeconds: 600,
           },
         },
-      });
+      }, 5000);
 
-      let resolved = false;
-      const failTimeout = setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        simulator.stop();
-        done(new Error('No opportunity detected'));
-      }, 10000);
+      expect(opportunities.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(failTimeout);
-        expect(opportunity.expectedProfit).toBeDefined();
+      const opp = opportunities[0];
+      expect(opp.expectedProfit).toBeDefined();
 
-        // Expected profit should account for bridge fees and gas
-        const grossProfit = opportunity.estimatedProfitUsd;
-        const bridgeFee = opportunity.bridgeFee || 0;
-        const gasCost = opportunity.expectedGasCost || 0;
-        const netProfit = grossProfit - bridgeFee - gasCost;
+      const grossProfit = opp.estimatedProfitUsd;
+      const bridgeFee = opp.bridgeFee || 0;
+      const gasCost = opp.expectedGasCost || 0;
+      const netProfit = grossProfit - bridgeFee - gasCost;
 
-        // expectedProfit should approximately equal netProfit
-        // Note: Due to position size variance and rounding, allow reasonable difference
-        expect(Math.abs((opportunity.expectedProfit || 0) - netProfit)).toBeLessThan(25);
-
-        simulator.stop();
-        done();
-      });
-
-      simulator.start();
+      expect(Math.abs((opp.expectedProfit || 0) - netProfit)).toBeLessThan(25);
     });
   });
 
   describe('Price Updates', () => {
-    it('should emit priceUpdate events when prices change', (done) => {
+    it('should emit priceUpdate events when prices change', async () => {
       const simulator = new CrossChainSimulator({
         chains: ['ethereum'],
         tokens: ['WETH'],
@@ -360,18 +280,19 @@ describe('CrossChainSimulator', () => {
         minProfitThreshold: 0.002,
       });
 
-      let resolved = false;
+      const updates: Array<{ chain: string; token: string; price: number }> = [];
       simulator.on('priceUpdate', (update: { chain: string; token: string; price: number }) => {
-        if (resolved) return;
-        resolved = true;
-        expect(update.chain).toBe('ethereum');
-        expect(update.token).toBe('WETH');
-        expect(update.price).toBeGreaterThan(0);
-        simulator.stop();
-        done();
+        updates.push(update);
       });
 
       simulator.start();
+      await jest.advanceTimersByTimeAsync(500);
+      simulator.stop();
+
+      expect(updates.length).toBeGreaterThan(0);
+      expect(updates[0].chain).toBe('ethereum');
+      expect(updates[0].token).toBe('WETH');
+      expect(updates[0].price).toBeGreaterThan(0);
     });
   });
 
@@ -406,7 +327,6 @@ describe('CrossChainSimulator', () => {
       simulator.start();
       expect(simulator.isRunning()).toBe(true);
 
-      // Second start should be ignored
       simulator.start();
       expect(simulator.isRunning()).toBe(true);
 
@@ -447,7 +367,7 @@ describe('CrossChainSimulator', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle missing bridge route gracefully', (done) => {
+    it('should handle missing bridge route gracefully', async () => {
       const simulator = new CrossChainSimulator({
         chains: ['ethereum', 'arbitrum', 'bsc'],
         tokens: ['WETH', 'WBTC'],
@@ -464,23 +384,22 @@ describe('CrossChainSimulator', () => {
         },
       });
 
-      let opportunityCount = 0;
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        opportunityCount++;
-        // Should only see ethereum<->arbitrum opportunities
-        expect(
-          (opportunity.buyChain === 'ethereum' && opportunity.sellChain === 'arbitrum') ||
-          (opportunity.buyChain === 'arbitrum' && opportunity.sellChain === 'ethereum')
-        ).toBe(true);
+      const opportunities: SimulatedOpportunity[] = [];
+      simulator.on('opportunity', (opp: SimulatedOpportunity) => {
+        opportunities.push(opp);
       });
 
       simulator.start();
+      await jest.advanceTimersByTimeAsync(3000);
+      simulator.stop();
 
-      setTimeout(() => {
-        simulator.stop();
-        // Should have some opportunities, but only for the defined route
-        done();
-      }, 3000);
+      // Should only see ethereum<->arbitrum opportunities
+      for (const opp of opportunities) {
+        expect(
+          (opp.buyChain === 'ethereum' && opp.sellChain === 'arbitrum') ||
+          (opp.buyChain === 'arbitrum' && opp.sellChain === 'ethereum')
+        ).toBe(true);
+      }
     });
 
     it('should handle zero tokens gracefully', () => {

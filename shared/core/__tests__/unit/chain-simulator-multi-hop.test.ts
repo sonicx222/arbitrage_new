@@ -7,9 +7,14 @@
  * - Profit calculation with multi-hop fees
  * - Flash loan fee application
  *
+ * Uses fake timers + collected events instead of done() callbacks to avoid
+ * stochastic 10-second timeouts. The simulator's setInterval is advanced
+ * deterministically via jest.advanceTimersByTimeAsync().
+ *
  * @see shared/core/src/simulation-mode.ts (ChainSimulator.generateMultiHopOpportunity)
  */
 
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import {
   ChainSimulator,
   type ChainSimulatorConfig,
@@ -17,383 +22,251 @@ import {
   type SimulatedOpportunity,
 } from '../../src/simulation-mode';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Create a simulator with enough token pairs to generate multi-hop opportunities.
+ */
+function createMultiHopSimulator(): ChainSimulator {
+  const pairs: SimulatedPairConfig[] = [
+    // Uniswap pairs for multi-hop
+    {
+      address: '0x1000000000000000000000000000000000000001',
+      token0Symbol: 'WETH',
+      token1Symbol: 'USDC',
+      token0Decimals: 18,
+      token1Decimals: 6,
+      dex: 'uniswap_v3',
+      fee: 0.003,
+    },
+    {
+      address: '0x1000000000000000000000000000000000000002',
+      token0Symbol: 'WBTC',
+      token1Symbol: 'WETH',
+      token0Decimals: 8,
+      token1Decimals: 18,
+      dex: 'uniswap_v3',
+      fee: 0.003,
+    },
+    {
+      address: '0x1000000000000000000000000000000000000003',
+      token0Symbol: 'LINK',
+      token1Symbol: 'USDC',
+      token0Decimals: 18,
+      token1Decimals: 6,
+      dex: 'uniswap_v3',
+      fee: 0.003,
+    },
+    {
+      address: '0x1000000000000000000000000000000000000004',
+      token0Symbol: 'LINK',
+      token1Symbol: 'WETH',
+      token0Decimals: 18,
+      token1Decimals: 18,
+      dex: 'uniswap_v3',
+      fee: 0.003,
+    },
+    // Sushiswap pairs for intra-chain arbitrage (same tokens, different DEX)
+    {
+      address: '0x2000000000000000000000000000000000000001',
+      token0Symbol: 'WETH',
+      token1Symbol: 'USDC',
+      token0Decimals: 18,
+      token1Decimals: 6,
+      dex: 'sushiswap',
+      fee: 0.003,
+    },
+    {
+      address: '0x2000000000000000000000000000000000000002',
+      token0Symbol: 'WBTC',
+      token1Symbol: 'WETH',
+      token0Decimals: 8,
+      token1Decimals: 18,
+      dex: 'sushiswap',
+      fee: 0.003,
+    },
+  ];
+
+  const config: ChainSimulatorConfig = {
+    chainId: 'ethereum',
+    updateIntervalMs: 50,
+    volatility: 0.01,
+    arbitrageChance: 0.5, // 50% chance per tick
+    minArbitrageSpread: 0.005,
+    maxArbitrageSpread: 0.02,
+    pairs,
+  };
+
+  return new ChainSimulator(config);
+}
+
+/** Collect opportunities from simulator during a fake-timer advance. */
+async function collectOpportunities(
+  simulator: ChainSimulator,
+  advanceMs: number
+): Promise<SimulatedOpportunity[]> {
+  const opportunities: SimulatedOpportunity[] = [];
+  simulator.on('opportunity', (opp: SimulatedOpportunity) => opportunities.push(opp));
+  simulator.start();
+  await jest.advanceTimersByTimeAsync(advanceMs);
+  simulator.stop();
+  return opportunities;
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
 describe('ChainSimulator - Multi-Hop Opportunities', () => {
-  /**
-   * Create a simulator with enough token pairs to generate multi-hop opportunities.
-   */
-  function createMultiHopSimulator(): ChainSimulator {
-    const pairs: SimulatedPairConfig[] = [
-      // Uniswap pairs for multi-hop
-      {
-        address: '0x1000000000000000000000000000000000000001',
-        token0Symbol: 'WETH',
-        token1Symbol: 'USDC',
-        token0Decimals: 18,
-        token1Decimals: 6,
-        dex: 'uniswap_v3',
-        fee: 0.003,
-      },
-      {
-        address: '0x1000000000000000000000000000000000000002',
-        token0Symbol: 'WBTC',
-        token1Symbol: 'WETH',
-        token0Decimals: 8,
-        token1Decimals: 18,
-        dex: 'uniswap_v3',
-        fee: 0.003,
-      },
-      {
-        address: '0x1000000000000000000000000000000000000003',
-        token0Symbol: 'LINK',
-        token1Symbol: 'USDC',
-        token0Decimals: 18,
-        token1Decimals: 6,
-        dex: 'uniswap_v3',
-        fee: 0.003,
-      },
-      {
-        address: '0x1000000000000000000000000000000000000004',
-        token0Symbol: 'LINK',
-        token1Symbol: 'WETH',
-        token0Decimals: 18,
-        token1Decimals: 18,
-        dex: 'uniswap_v3',
-        fee: 0.003,
-      },
-      // Sushiswap pairs for intra-chain arbitrage (same tokens, different DEX)
-      {
-        address: '0x2000000000000000000000000000000000000001',
-        token0Symbol: 'WETH',
-        token1Symbol: 'USDC',
-        token0Decimals: 18,
-        token1Decimals: 6,
-        dex: 'sushiswap',
-        fee: 0.003,
-      },
-      {
-        address: '0x2000000000000000000000000000000000000002',
-        token0Symbol: 'WBTC',
-        token1Symbol: 'WETH',
-        token0Decimals: 8,
-        token1Decimals: 18,
-        dex: 'sushiswap',
-        fee: 0.003,
-      },
-    ];
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
 
-    const config: ChainSimulatorConfig = {
-      chainId: 'ethereum',
-      updateIntervalMs: 50, // Faster ticks for test reliability
-      volatility: 0.01,
-      arbitrageChance: 0.5, // 50% chance to generate multi-hop (increased for test reliability)
-      minArbitrageSpread: 0.005,
-      maxArbitrageSpread: 0.02,
-      pairs,
-    };
-
-    return new ChainSimulator(config);
-  }
+  afterEach(() => {
+    jest.useRealTimers();
+  });
 
   describe('Triangular Opportunities (3-hop)', () => {
-    it('should generate triangular path with 3 unique tokens + circular return', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should generate triangular path with 3 unique tokens + circular return', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
+      const triangular = opportunities.filter(o => o.type === 'triangular');
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No triangular opportunity detected within timeout'));
-        }
-      }, 10000);
+      expect(triangular.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return; // Prevent multiple done() calls
+      const opp = triangular[0];
+      expect(opp.hops).toBe(3);
+      expect(opp.path).toBeDefined();
+      expect(opp.path!.length).toBe(4); // A -> B -> C -> A
 
-        if (opportunity.type === 'triangular') {
-          expect(opportunity.hops).toBe(3);
-          expect(opportunity.path).toBeDefined();
-          expect(opportunity.path!.length).toBe(4); // A -> B -> C -> A
+      // First and last tokens should be the same (circular)
+      expect(opp.path![0]).toBe(opp.path![3]);
 
-          // First and last tokens should be the same (circular)
-          expect(opportunity.path![0]).toBe(opportunity.path![3]);
+      // Intermediate tokens should be unique
+      const intermediateTokens = opp.path!.slice(1, 3);
+      const uniqueIntermediateTokens = new Set(intermediateTokens);
+      expect(uniqueIntermediateTokens.size).toBe(2);
 
-          // Intermediate tokens should be unique
-          const intermediateTokens = opportunity.path!.slice(1, 3);
-          const uniqueIntermediateTokens = new Set(intermediateTokens);
-          expect(uniqueIntermediateTokens.size).toBe(2);
+      // Should use flash loan
+      expect(opp.useFlashLoan).toBe(true);
 
-          // Should use flash loan
-          expect(opportunity.useFlashLoan).toBe(true);
-
-          // Should have intermediate tokens field
-          expect(opportunity.intermediateTokens).toBeDefined();
-          expect(opportunity.intermediateTokens!.length).toBe(2);
-
-          completed = true;
-          clearTimeout(failTimeout);
-          simulator.stop();
-          done();
-        }
-      });
-
-      simulator.start();
+      // Should have intermediate tokens field
+      expect(opp.intermediateTokens).toBeDefined();
+      expect(opp.intermediateTokens!.length).toBe(2);
     });
 
-    it('should calculate profit after fees per hop', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should calculate profit after fees per hop', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
+      const triangular = opportunities.filter(o => o.type === 'triangular');
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No triangular opportunity detected'));
-        }
-      }, 10000);
+      expect(triangular.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return;
-
-        if (opportunity.type === 'triangular') {
-          completed = true;
-          clearTimeout(failTimeout);
-
-          // Triangular: 3 hops * 0.3% fee per hop = 0.9% total fees
-          // Profit percentage should account for these fees
-          const minFeesCost = 0.9; // 0.9% in fees minimum
-
-          // Profit should be positive after fees
-          expect(opportunity.profitPercentage).toBeGreaterThan(0);
-
-          // Base profit before fees must have been > fee cost
-          // (otherwise it wouldn't be emitted)
-          expect(opportunity.profitPercentage).toBeLessThan(5); // Reasonable upper bound
-
-          simulator.stop();
-          done();
-        }
-      });
-
-      simulator.start();
+      const opp = triangular[0];
+      // Profit should be positive after fees
+      expect(opp.profitPercentage).toBeGreaterThan(0);
+      // Reasonable upper bound
+      expect(opp.profitPercentage).toBeLessThan(5);
     });
 
-    it('should include flash loan fee in expected profit', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should include flash loan fee in expected profit', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
+      const triangular = opportunities.filter(o => o.type === 'triangular');
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No triangular opportunity detected'));
-        }
-      }, 10000);
+      expect(triangular.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return;
-
-        if (opportunity.type === 'triangular') {
-          completed = true;
-          clearTimeout(failTimeout);
-
-          expect(opportunity.flashLoanFee).toBeDefined();
-          expect(opportunity.flashLoanFee).toBe(0.0009); // Aave V3: 0.09%
-
-          // Expected profit should account for flash loan fee
-          expect(opportunity.expectedProfit).toBeDefined();
-
-          simulator.stop();
-          done();
-        }
-      });
-
-      simulator.start();
+      const opp = triangular[0];
+      expect(opp.flashLoanFee).toBeDefined();
+      expect(opp.flashLoanFee).toBe(0.0009); // Aave V3: 0.09%
+      expect(opp.expectedProfit).toBeDefined();
     });
   });
 
   describe('Quadrilateral Opportunities (4-hop)', () => {
-    it('should generate quadrilateral path with 4 unique tokens + circular return', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should generate quadrilateral path with 4 unique tokens + circular return', async () => {
+      // Advance longer for 4-hop (less common: 30% of multi-hop events)
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 10000);
+      const quadrilateral = opportunities.filter(o => o.type === 'quadrilateral');
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No quadrilateral opportunity detected within timeout'));
-        }
-      }, 10000);
+      expect(quadrilateral.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return;
+      const opp = quadrilateral[0];
+      expect(opp.hops).toBe(4);
+      expect(opp.path).toBeDefined();
+      expect(opp.path!.length).toBe(5); // A -> B -> C -> D -> A
 
-        if (opportunity.type === 'quadrilateral') {
-          completed = true;
-          clearTimeout(failTimeout);
+      // First and last tokens should be the same (circular)
+      expect(opp.path![0]).toBe(opp.path![4]);
 
-          expect(opportunity.hops).toBe(4);
-          expect(opportunity.path).toBeDefined();
-          expect(opportunity.path!.length).toBe(5); // A -> B -> C -> D -> A
+      // Intermediate tokens should be unique (3 intermediate)
+      const intermediateTokens = opp.path!.slice(1, 4);
+      const uniqueIntermediateTokens = new Set(intermediateTokens);
+      expect(uniqueIntermediateTokens.size).toBe(3);
 
-          // First and last tokens should be the same (circular)
-          expect(opportunity.path![0]).toBe(opportunity.path![4]);
+      // Should use flash loan
+      expect(opp.useFlashLoan).toBe(true);
 
-          // Intermediate tokens should be unique (3 intermediate + 1 start = 4 total unique)
-          const intermediateTokens = opportunity.path!.slice(1, 4);
-          const uniqueIntermediateTokens = new Set(intermediateTokens);
-          expect(uniqueIntermediateTokens.size).toBe(3);
-
-          // Should use flash loan
-          expect(opportunity.useFlashLoan).toBe(true);
-
-          // Should have intermediate tokens field
-          expect(opportunity.intermediateTokens).toBeDefined();
-          expect(opportunity.intermediateTokens!.length).toBe(3);
-
-          simulator.stop();
-          done();
-        }
-      });
-
-      simulator.start();
+      // Should have intermediate tokens field
+      expect(opp.intermediateTokens).toBeDefined();
+      expect(opp.intermediateTokens!.length).toBe(3);
     });
 
-    it('should calculate profit after more fees (4 hops)', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should calculate profit after more fees (4 hops)', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 10000);
+      const quadrilateral = opportunities.filter(o => o.type === 'quadrilateral');
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No quadrilateral opportunity detected'));
-        }
-      }, 10000);
+      expect(quadrilateral.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return;
-
-        if (opportunity.type === 'quadrilateral') {
-          completed = true;
-          clearTimeout(failTimeout);
-
-          // Quadrilateral: 4 hops * 0.3% fee per hop = 1.2% total fees
-          const minFeesCost = 1.2;
-
-          // Profit should still be positive after all fees
-          expect(opportunity.profitPercentage).toBeGreaterThan(0);
-
-          // Gas cost should be higher for 4-hop
-          expect(opportunity.expectedGasCost).toBeGreaterThan(10); // At least $10 gas
-
-          simulator.stop();
-          done();
-        }
-      });
-
-      simulator.start();
+      const opp = quadrilateral[0];
+      // Profit should still be positive after all fees
+      expect(opp.profitPercentage).toBeGreaterThan(0);
+      // Gas cost should be higher for 4-hop
+      expect(opp.expectedGasCost).toBeGreaterThan(10);
     });
   });
 
   describe('Multi-Hop Confidence', () => {
-    it('should have slightly lower confidence than intra-chain', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should have slightly lower confidence than intra-chain', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
 
-      const confidences: { type: string; confidence: number }[] = [];
+      const multiHopConfidences = opportunities
+        .filter(c => c.type === 'triangular' || c.type === 'quadrilateral')
+        .map(c => c.confidence);
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          if (confidences.length === 0) {
-            done(new Error('No opportunities detected'));
-          } else {
-            done(); // Pass if we got some data
-          }
-        }
-      }, 10000);
+      const intraChainConfidences = opportunities
+        .filter(c => c.type === 'intra-chain')
+        .map(c => c.confidence);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return; // Prevent processing after done() is called
+      if (multiHopConfidences.length > 0 && intraChainConfidences.length > 0) {
+        const avgMultiHop =
+          multiHopConfidences.reduce((a, b) => a + b, 0) / multiHopConfidences.length;
+        const avgIntraChain =
+          intraChainConfidences.reduce((a, b) => a + b, 0) / intraChainConfidences.length;
 
-        confidences.push({
-          type: opportunity.type,
-          confidence: opportunity.confidence,
-        });
-
-        // Stop after collecting a few samples
-        if (confidences.length >= 5) {
-          completed = true;
-          clearTimeout(failTimeout);
-          simulator.stop();
-
-          // Multi-hop opportunities should have lower confidence
-          const multiHopConfidences = confidences
-            .filter(c => c.type === 'triangular' || c.type === 'quadrilateral')
-            .map(c => c.confidence);
-
-          const intraChainConfidences = confidences
-            .filter(c => c.type === 'intra-chain')
-            .map(c => c.confidence);
-
-          if (multiHopConfidences.length > 0 && intraChainConfidences.length > 0) {
-            const avgMultiHop =
-              multiHopConfidences.reduce((a, b) => a + b, 0) / multiHopConfidences.length;
-            const avgIntraChain =
-              intraChainConfidences.reduce((a, b) => a + b, 0) / intraChainConfidences.length;
-
-            // Multi-hop should generally have lower confidence
-            expect(avgMultiHop).toBeLessThanOrEqual(avgIntraChain + 0.1); // Allow small margin
-          }
-
-          done();
-        }
-      });
-
-      simulator.start();
+        // Multi-hop should generally have lower confidence
+        expect(avgMultiHop).toBeLessThanOrEqual(avgIntraChain + 0.1);
+      }
     });
   });
 
   describe('Multi-Hop Expiry', () => {
-    it('should have shorter expiry than intra-chain', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should have shorter expiry than intra-chain', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No opportunity detected'));
-        }
-      }, 10000);
+      for (const opp of opportunities) {
+        const expiryMs = opp.expiresAt - opp.timestamp;
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return; // Prevent multiple done() calls
-
-        const expiryMs = opportunity.expiresAt - opportunity.timestamp;
-
-        if (opportunity.type === 'triangular' || opportunity.type === 'quadrilateral') {
-          // Multi-hop: 3000ms expiry
+        if (opp.type === 'triangular' || opp.type === 'quadrilateral') {
           expect(expiryMs).toBeLessThanOrEqual(3000);
-        } else if (opportunity.type === 'intra-chain') {
-          // Intra-chain: 5000ms expiry
+        } else if (opp.type === 'intra-chain') {
           expect(expiryMs).toBeLessThanOrEqual(5000);
         }
-
-        completed = true;
-        clearTimeout(failTimeout);
-        simulator.stop();
-        done();
-      });
-
-      simulator.start();
+      }
     });
   });
 
   describe('Path Generation Edge Cases', () => {
-    it('should not generate multi-hop with insufficient tokens', (done) => {
+    it('should not generate multi-hop with insufficient tokens', async () => {
       // Only 2 unique tokens - cannot make triangular (needs 3)
       const pairs: SimulatedPairConfig[] = [
         {
@@ -425,97 +298,46 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       });
 
       simulator.start();
+      await jest.advanceTimersByTimeAsync(2000);
+      simulator.stop();
 
-      setTimeout(() => {
-        simulator.stop();
-        expect(multiHopCount).toBe(0);
-        done();
-      }, 2000);
+      expect(multiHopCount).toBe(0);
     });
 
-    it('should emit multi-hop opportunities randomly (not every tick)', (done) => {
-      const simulator = createMultiHopSimulator();
+    it('should emit multi-hop opportunities randomly (not every tick)', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
 
-      const opportunityTypes: string[] = [];
-      let completed = false;
+      const multiHopCount = opportunities.filter(
+        o => o.type === 'triangular' || o.type === 'quadrilateral'
+      ).length;
+      const intraChainCount = opportunities.filter(o => o.type === 'intra-chain').length;
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          if (opportunityTypes.length === 0) {
-            done(new Error('No opportunities detected'));
-          } else {
-            done(); // Pass if we got some data
-          }
-        }
-      }, 10000);
+      // Should have both types
+      expect(multiHopCount).toBeGreaterThan(0);
+      expect(intraChainCount).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return; // Prevent processing after done() is called
-
-        opportunityTypes.push(opportunity.type);
-
-        if (opportunityTypes.length >= 20) {
-          completed = true;
-          clearTimeout(failTimeout);
-          simulator.stop();
-
-          // Should have variety (not all multi-hop)
-          const multiHopCount = opportunityTypes.filter(
-            t => t === 'triangular' || t === 'quadrilateral'
-          ).length;
-          const intraChainCount = opportunityTypes.filter(t => t === 'intra-chain').length;
-
-          // Should have both types
-          expect(multiHopCount).toBeGreaterThan(0);
-          expect(intraChainCount).toBeGreaterThan(0);
-
-          // Intra-chain should be more common than multi-hop
-          expect(intraChainCount).toBeGreaterThan(multiHopCount);
-
-          done();
-        }
-      });
-
-      simulator.start();
+      // Intra-chain should be more common than multi-hop
+      expect(intraChainCount).toBeGreaterThan(multiHopCount);
     });
   });
 
   describe('Buy/Sell DEX Consistency', () => {
-    it('should use different DEXs for multi-hop buy and sell endpoints', (done) => {
-      const simulator = createMultiHopSimulator();
-      let completed = false;
+    it('should use different DEXs for multi-hop buy and sell endpoints', async () => {
+      const opportunities = await collectOpportunities(createMultiHopSimulator(), 5000);
+      const multiHop = opportunities.filter(
+        o => o.type === 'triangular' || o.type === 'quadrilateral'
+      );
 
-      const failTimeout = setTimeout(() => {
-        if (!completed) {
-          completed = true;
-          simulator.stop();
-          done(new Error('No multi-hop opportunity detected'));
-        }
-      }, 10000);
+      expect(multiHop.length).toBeGreaterThan(0);
 
-      simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
-        if (completed) return;
+      const opp = multiHop[0];
+      // Multi-hop arbitrage buys on one DEX and sells on another
+      expect(opp.buyDex).not.toBe(opp.sellDex);
 
-        if (opportunity.type === 'triangular' || opportunity.type === 'quadrilateral') {
-          completed = true;
-          clearTimeout(failTimeout);
-
-          // Multi-hop arbitrage buys on one DEX and sells on another
-          expect(opportunity.buyDex).not.toBe(opportunity.sellDex);
-
-          // Both should be valid DEX names from the configured pairs
-          const validDexes = ['uniswap_v3', 'sushiswap'];
-          expect(validDexes).toContain(opportunity.buyDex);
-          expect(validDexes).toContain(opportunity.sellDex);
-
-          simulator.stop();
-          done();
-        }
-      });
-
-      simulator.start();
+      // Both should be valid DEX names from the configured pairs
+      const validDexes = ['uniswap_v3', 'sushiswap'];
+      expect(validDexes).toContain(opp.buyDex);
+      expect(validDexes).toContain(opp.sellDex);
     });
   });
 });
