@@ -9,6 +9,7 @@
  * - getStats(): pool statistics
  * - Singleton: getHttp2SessionPool / closeDefaultHttp2Pool
  * - createEthersGetUrlFunc(): ethers.js integration
+ * - Ping keep-alive and force-destroy on close
  *
  * @see shared/core/src/rpc/http2-session-pool.ts
  */
@@ -18,7 +19,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import { EventEmitter } from 'events';
 
 // ---------------------------------------------------------------------------
-// Mocks — must be declared before importing the module under test
+// Mocks -- must be declared before importing the module under test
 // ---------------------------------------------------------------------------
 
 jest.mock('../../../src/logger', () => ({
@@ -46,7 +47,6 @@ jest.mock('http2', () => ({
   },
 }));
 
-import * as http2 from 'http2';
 import {
   Http2SessionPool,
   getHttp2SessionPool,
@@ -58,27 +58,39 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a mock HTTP/2 client stream that emits response headers, data, and end.
+ * Create a mock HTTP/2 client stream.
+ *
+ * Emits response events via setImmediate so the caller's promise handler
+ * is already attached when the events fire.
  */
 function createMockStream(
   responseData = '{"result":"0x1"}',
   statusCode = 200,
-  opts?: { errorOnEnd?: Error; delayMs?: number }
+  opts?: { errorOnEnd?: boolean; neverEnd?: boolean; sync?: boolean }
 ) {
   const stream = new EventEmitter();
   (stream as any).write = jest.fn();
   (stream as any).close = jest.fn();
 
-  // When end() is called, schedule response emission
+  const emit = (fn: () => void) => {
+    if (opts?.sync) {
+      fn();
+    } else {
+      setImmediate(fn);
+    }
+  };
+
   (stream as any).end = jest.fn((_body?: string | Buffer) => {
     if (opts?.errorOnEnd) {
-      process.nextTick(() => stream.emit('error', opts.errorOnEnd));
+      emit(() => stream.emit('error', new Error('stream error')));
       return;
     }
-    process.nextTick(() => {
+    if (opts?.neverEnd) {
+      emit(() => stream.emit('response', { ':status': statusCode }));
+      return;
+    }
+    emit(() => {
       stream.emit('response', { ':status': statusCode });
-    });
-    process.nextTick(() => {
       stream.emit('data', Buffer.from(responseData));
       stream.emit('end');
     });
@@ -90,16 +102,19 @@ function createMockStream(
 /**
  * Create a mock HTTP/2 client session.
  *
- * By default emits 'connect' on next tick so `getOrCreateSession` resolves.
- * Pass `autoConnect: false` to suppress the connect event.
+ * By default emits 'connect' via setImmediate so getOrCreateSession resolves.
+ * Pass `sync: true` to emit synchronously (needed for fake-timer tests).
+ * Pass `autoConnect: false` to suppress the connect event entirely.
+ * Pass `connectError` to emit an error instead.
  */
 function createMockSession(opts?: {
   autoConnect?: boolean;
   stream?: EventEmitter;
   connectError?: Error;
+  sync?: boolean;
 }) {
   const session = new EventEmitter();
-  const mockStream = opts?.stream ?? createMockStream();
+  const mockStream = opts?.stream ?? createMockStream('{"result":"0x1"}', 200, { sync: opts?.sync });
   (session as any).request = jest.fn().mockReturnValue(mockStream);
   (session as any).close = jest.fn((cb?: () => void) => {
     (session as any).closed = true;
@@ -119,12 +134,38 @@ function createMockSession(opts?: {
 
   const autoConnect = opts?.autoConnect ?? true;
   if (opts?.connectError) {
-    process.nextTick(() => session.emit('error', opts.connectError));
+    if (opts?.sync) {
+      // Defer by one microtask so the caller can attach handlers first
+      Promise.resolve().then(() => session.emit('error', opts.connectError));
+    } else {
+      setImmediate(() => session.emit('error', opts.connectError));
+    }
   } else if (autoConnect) {
-    process.nextTick(() => session.emit('connect'));
+    if (opts?.sync) {
+      // Do NOT emit immediately in the constructor -- the source code attaches
+      // handlers after http2.connect() returns. Use a microtask (Promise.resolve)
+      // so that handlers are registered first, but no real timers are needed.
+      Promise.resolve().then(() => session.emit('connect'));
+    } else {
+      setImmediate(() => session.emit('connect'));
+    }
   }
 
   return session;
+}
+
+/**
+ * Flush all pending setImmediate callbacks.
+ */
+function flushImmediate(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Flush microtask queue (Promise.resolve callbacks).
+ */
+function flushMicrotasks(): Promise<void> {
+  return Promise.resolve();
 }
 
 // ---------------------------------------------------------------------------
@@ -133,23 +174,56 @@ function createMockSession(opts?: {
 
 describe('Http2SessionPool', () => {
   let pool: Http2SessionPool;
-  let mockSession: EventEmitter;
 
   beforeEach(() => {
-    jest.useFakeTimers();
     jest.clearAllMocks();
-
-    mockSession = createMockSession();
-    mockHttp2Connect.mockImplementation(() => mockSession);
-
     pool = new Http2SessionPool();
   });
 
   afterEach(async () => {
-    // Ensure all timers are flushed so idle/ping timers do not leak
+    // Close pool to clear idle timers. The source code's close() creates a
+    // 5-second force-destroy timeout that isn't cleared when the close callback
+    // fires first. We enable fake timers temporarily to flush that pending timer.
+    const hadFakeTimers = jest.isMockFunction(setTimeout);
+    if (!hadFakeTimers) {
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    }
+    try {
+      const closePromise = pool.close();
+      jest.runAllTimers();
+      await closePromise;
+    } catch {
+      // Pool may already be closed; ignore
+    }
     jest.clearAllTimers();
     jest.useRealTimers();
   });
+
+  /**
+   * Helper: set up mockHttp2Connect to return a fresh auto-connecting session.
+   * Returns the mock session so tests can inspect it.
+   */
+  function setupDefaultSession() {
+    const session = createMockSession();
+    mockHttp2Connect.mockReturnValue(session);
+    return session;
+  }
+
+  /**
+   * Helper: set up mockHttp2Connect for multiple origins.
+   * Sessions are created lazily (on each connect call) so their
+   * setImmediate-based connect events fire at the right time.
+   * Returns an array that gets populated as sessions are created.
+   */
+  function setupMultipleSessions(count: number) {
+    const sessions: EventEmitter[] = [];
+    mockHttp2Connect.mockImplementation(() => {
+      const session = createMockSession();
+      sessions.push(session);
+      return session;
+    });
+    return sessions;
+  }
 
   // =========================================================================
   // Constructor
@@ -158,7 +232,6 @@ describe('Http2SessionPool', () => {
   describe('constructor', () => {
     it('should use default config values', () => {
       const p = new Http2SessionPool();
-      // Verify defaults indirectly — pool should be functional
       expect(p.getActiveSessionCount()).toBe(0);
       expect(p.getStats()).toEqual([]);
     });
@@ -180,157 +253,138 @@ describe('Http2SessionPool', () => {
 
   describe('request()', () => {
     it('should send an HTTP/2 request and return response body', async () => {
-      const responsePromise = pool.request('https://rpc.example.com', {
+      const session = setupDefaultSession();
+
+      const result = await pool.request('https://rpc.example.com', {
         method: 'POST',
         body: '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}',
       });
 
-      // Allow connect event to fire
-      await jest.advanceTimersByTimeAsync(1);
-
-      const result = await responsePromise;
       expect(result.status).toBe(200);
       expect(result.body).toBe('{"result":"0x1"}');
-      expect((mockSession as any).request).toHaveBeenCalled();
+      expect((session as any).request).toHaveBeenCalled();
     });
 
     it('should reuse existing session for same origin', async () => {
-      const req1 = pool.request('https://rpc.example.com/path1', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req1;
+      setupDefaultSession();
 
-      // Second request to same origin
-      const req2 = pool.request('https://rpc.example.com/path2', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req2;
+      await pool.request('https://rpc.example.com/path1', { body: '{}' });
+      await pool.request('https://rpc.example.com/path2', { body: '{}' });
 
-      // http2.connect should only be called once for the same origin
       expect(mockHttp2Connect).toHaveBeenCalledTimes(1);
     });
 
     it('should create separate sessions for different origins', async () => {
-      const session2 = createMockSession();
-      let callCount = 0;
-      mockHttp2Connect.mockImplementation(() => {
-        callCount++;
-        return callCount === 1 ? mockSession : session2;
-      });
+      const sessions = setupMultipleSessions(2);
 
-      const req1 = pool.request('https://rpc1.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req1;
-
-      const req2 = pool.request('https://rpc2.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req2;
+      await pool.request('https://rpc1.example.com', { body: '{}' });
+      await pool.request('https://rpc2.example.com', { body: '{}' });
 
       expect(mockHttp2Connect).toHaveBeenCalledTimes(2);
+      expect(pool.getActiveSessionCount()).toBe(2);
     });
 
     it('should handle POST requests with body', async () => {
+      const session = setupDefaultSession();
       const body = '{"jsonrpc":"2.0","method":"eth_call","params":[],"id":1}';
-      const reqPromise = pool.request('https://rpc.example.com', {
-        method: 'POST',
-        body,
-      });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
 
-      const stream = (mockSession as any).request.mock.results[0].value;
+      await pool.request('https://rpc.example.com', { method: 'POST', body });
+
+      const stream = (session as any).request.mock.results[0].value;
       expect(stream.end).toHaveBeenCalledWith(body);
     });
 
     it('should handle GET requests without body', async () => {
       const stream = createMockStream('{"result":"ok"}', 200);
-      (mockSession as any).request = jest.fn().mockReturnValue(stream);
+      const session = createMockSession({ stream });
+      mockHttp2Connect.mockReturnValue(session);
 
-      const reqPromise = pool.request('https://rpc.example.com/health', {
-        method: 'GET',
-      });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
+      await pool.request('https://rpc.example.com/health', { method: 'GET' });
 
       expect(stream.end).toHaveBeenCalledWith();
     });
 
     it('should default to POST method', async () => {
-      const reqPromise = pool.request('https://rpc.example.com', {
-        body: '{}',
-      });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
+      const session = setupDefaultSession();
 
-      const headers = (mockSession as any).request.mock.calls[0][0];
+      await pool.request('https://rpc.example.com', { body: '{}' });
+
+      const headers = (session as any).request.mock.calls[0][0];
       expect(headers[':method']).toBe('POST');
     });
 
     it('should merge custom headers', async () => {
-      const reqPromise = pool.request('https://rpc.example.com', {
+      const session = setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', {
         body: '{}',
         headers: {
-          'Authorization': 'Bearer token123',
+          Authorization: 'Bearer token123',
           'X-Custom': 'value',
         },
       });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
 
-      const headers = (mockSession as any).request.mock.calls[0][0];
+      const headers = (session as any).request.mock.calls[0][0];
       expect(headers['authorization']).toBe('Bearer token123');
       expect(headers['x-custom']).toBe('value');
     });
 
+    it('should set default content-type to application/json', async () => {
+      const session = setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', { body: '{}' });
+
+      const headers = (session as any).request.mock.calls[0][0];
+      expect(headers['content-type']).toBe('application/json');
+    });
+
     it('should allow overriding content-type header', async () => {
-      const reqPromise = pool.request('https://rpc.example.com', {
+      const session = setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', {
         body: '{}',
         headers: { 'Content-Type': 'text/plain' },
       });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
 
-      const headers = (mockSession as any).request.mock.calls[0][0];
+      const headers = (session as any).request.mock.calls[0][0];
       expect(headers['content-type']).toBe('text/plain');
     });
 
     it('should skip pseudo-headers from custom headers', async () => {
-      const reqPromise = pool.request('https://rpc.example.com', {
+      const session = setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', {
         body: '{}',
         headers: { ':authority': 'evil.com', 'x-ok': 'fine' },
       });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
 
-      const headers = (mockSession as any).request.mock.calls[0][0];
-      // Pseudo-header should NOT be overridden by custom headers
+      const headers = (session as any).request.mock.calls[0][0];
       expect(headers[':authority']).toBe('rpc.example.com');
       expect(headers['x-ok']).toBe('fine');
     });
 
     it('should handle stream errors and reject with wrapped error', async () => {
-      const errorStream = createMockStream('', 200, {
-        errorOnEnd: new Error('stream reset'),
-      });
-      (mockSession as any).request = jest.fn().mockReturnValue(errorStream);
+      const errorStream = createMockStream('', 200, { errorOnEnd: true });
+      const session = createMockSession({ stream: errorStream });
+      mockHttp2Connect.mockReturnValue(session);
 
-      const reqPromise = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-
-      await expect(reqPromise).rejects.toThrow('HTTP/2 stream error: stream reset');
+      await expect(
+        pool.request('https://rpc.example.com', { body: '{}' })
+      ).rejects.toThrow('HTTP/2 stream error: stream error');
     });
 
     it('should handle non-200 status codes', async () => {
       const stream = createMockStream('{"error":"rate limited"}', 429);
-      (mockSession as any).request = jest.fn().mockReturnValue(stream);
+      const session = createMockSession({ stream });
+      mockHttp2Connect.mockReturnValue(session);
 
-      const reqPromise = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-
-      const result = await reqPromise;
+      const result = await pool.request('https://rpc.example.com', { body: '{}' });
       expect(result.status).toBe(429);
       expect(result.body).toBe('{"error":"rate limited"}');
     });
 
     it('should throw when pool is closed', async () => {
+      setupDefaultSession();
       await pool.close();
 
       await expect(
@@ -346,57 +400,50 @@ describe('Http2SessionPool', () => {
       mockHttp2Connect.mockReturnValue(errorSession);
 
       const p = new Http2SessionPool();
-      const reqPromise = p.request('https://bad-host.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-
-      await expect(reqPromise).rejects.toThrow('HTTP/2 connection error: connection refused');
+      await expect(
+        p.request('https://bad-host.example.com', { body: '{}' })
+      ).rejects.toThrow('HTTP/2 connection error: connection refused');
     });
 
     it('should handle connection timeout', async () => {
-      // Session never emits 'connect'
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+
       const stalledSession = createMockSession({ autoConnect: false });
       mockHttp2Connect.mockReturnValue(stalledSession);
 
       const p = new Http2SessionPool({ connectTimeoutMs: 500 });
       const reqPromise = p.request('https://slow-host.example.com', { body: '{}' });
 
-      // Advance past the connect timeout
-      await jest.advanceTimersByTimeAsync(600);
+      jest.advanceTimersByTime(600);
 
       await expect(reqPromise).rejects.toThrow('HTTP/2 connection timeout');
     });
 
-    it('should set correct path from URL', async () => {
-      const reqPromise = pool.request('https://rpc.example.com/v1/mainnet?key=abc', {
-        body: '{}',
-      });
-      await jest.advanceTimersByTimeAsync(1);
-      await reqPromise;
+    it('should set correct path and authority from URL', async () => {
+      const session = setupDefaultSession();
 
-      const headers = (mockSession as any).request.mock.calls[0][0];
+      await pool.request('https://rpc.example.com/v1/mainnet?key=abc', { body: '{}' });
+
+      const headers = (session as any).request.mock.calls[0][0];
       expect(headers[':path']).toBe('/v1/mainnet?key=abc');
       expect(headers[':scheme']).toBe('https');
       expect(headers[':authority']).toBe('rpc.example.com');
     });
 
     it('should replace stale session on reconnect', async () => {
-      // First request succeeds
-      const req1 = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req1;
+      const session1 = setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', { body: '{}' });
 
       // Mark session as closed (simulating server-side close)
-      (mockSession as any).closed = true;
+      (session1 as any).closed = true;
 
-      // Create a new session for reconnect
-      const freshSession = createMockSession();
-      mockHttp2Connect.mockReturnValue(freshSession);
+      // New session for reconnect
+      const session2 = createMockSession();
+      mockHttp2Connect.mockReturnValue(session2);
 
-      const req2 = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req2;
+      await pool.request('https://rpc.example.com', { body: '{}' });
 
-      // Should have called connect twice (original + reconnect)
       expect(mockHttp2Connect).toHaveBeenCalledTimes(2);
     });
   });
@@ -407,93 +454,76 @@ describe('Http2SessionPool', () => {
 
   describe('session management', () => {
     it('should track active session count', async () => {
+      setupDefaultSession();
       expect(pool.getActiveSessionCount()).toBe(0);
 
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      await pool.request('https://rpc.example.com', { body: '{}' });
 
       expect(pool.getActiveSessionCount()).toBe(1);
     });
 
     it('should close idle sessions after timeout', async () => {
-      const p = new Http2SessionPool({
-        maxIdleTimeMs: 5000,
-        pingIntervalMs: 0,
-      });
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
 
-      const req = p.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const p = new Http2SessionPool({ maxIdleTimeMs: 5000, pingIntervalMs: 0 });
+      const session = setupDefaultSession();
+
+      const reqPromise = p.request('https://rpc.example.com', { body: '{}' });
+      // Let setImmediate callbacks fire (connect + stream events)
+      await flushImmediate();
+      await flushImmediate();
+      await reqPromise;
 
       expect(p.getActiveSessionCount()).toBe(1);
 
       // Advance past idle timeout
       jest.advanceTimersByTime(6000);
 
-      // Session should have been closed and removed
-      expect((mockSession as any).close).toHaveBeenCalled();
+      expect((session as any).close).toHaveBeenCalled();
     });
 
     it('should not close session with active streams during idle timeout', async () => {
-      const p = new Http2SessionPool({
-        maxIdleTimeMs: 1000,
-        pingIntervalMs: 0,
-      });
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
 
-      // Create a stream that never ends (simulating long-running request)
-      const neverEndStream = new EventEmitter();
-      (neverEndStream as any).write = jest.fn();
-      (neverEndStream as any).close = jest.fn();
-      (neverEndStream as any).end = jest.fn(() => {
-        // Emit response but never emit 'end' — stream stays active
-        process.nextTick(() => neverEndStream.emit('response', { ':status': 200 }));
-      });
-      (mockSession as any).request = jest.fn().mockReturnValue(neverEndStream);
+      const p = new Http2SessionPool({ maxIdleTimeMs: 1000, pingIntervalMs: 0 });
 
-      // Start request (increments activeStreams)
+      const neverEndStream = createMockStream('{}', 200, { neverEnd: true });
+      const session = createMockSession({ stream: neverEndStream });
+      mockHttp2Connect.mockReturnValue(session);
+
       const reqPromise = p.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
+      await flushImmediate();
+      await flushImmediate();
 
       // Advance past idle timeout while stream is still active
       jest.advanceTimersByTime(2000);
 
       // Session should NOT be closed because activeStreams > 0
-      // The close is only called if activeStreams === 0 in the idle callback
       expect(p.getActiveSessionCount()).toBe(1);
+      expect((session as any).close).not.toHaveBeenCalled();
 
-      // Clean up: emit end to resolve the promise
+      // Clean up
       neverEndStream.emit('data', Buffer.from('{}'));
       neverEndStream.emit('end');
       await reqPromise;
     });
 
     it('should close all sessions on close()', async () => {
-      // Set up two origins
-      const session2 = createMockSession();
-      let callCount = 0;
-      mockHttp2Connect.mockImplementation(() => {
-        callCount++;
-        return callCount === 1 ? mockSession : session2;
-      });
+      const sessions = setupMultipleSessions(2);
 
-      const req1 = pool.request('https://rpc1.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req1;
-
-      const req2 = pool.request('https://rpc2.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req2;
+      await pool.request('https://rpc1.example.com', { body: '{}' });
+      await pool.request('https://rpc2.example.com', { body: '{}' });
 
       expect(pool.getActiveSessionCount()).toBe(2);
 
       await pool.close();
 
-      expect((mockSession as any).close).toHaveBeenCalled();
-      expect((session2 as any).close).toHaveBeenCalled();
+      expect((sessions[0] as any).close).toHaveBeenCalled();
+      expect((sessions[1] as any).close).toHaveBeenCalled();
     });
 
     it('should mark pool as closed after close()', async () => {
+      setupDefaultSession();
       await pool.close();
 
       await expect(
@@ -502,27 +532,23 @@ describe('Http2SessionPool', () => {
     });
 
     it('should handle close() when sessions are already destroyed', async () => {
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const session = setupDefaultSession();
 
-      // Simulate session already destroyed before close
-      (mockSession as any).closed = true;
-      (mockSession as any).destroyed = true;
+      await pool.request('https://rpc.example.com', { body: '{}' });
 
-      // Should not throw
+      (session as any).closed = true;
+      (session as any).destroyed = true;
+
       await pool.close();
     });
 
     it('should remove session from pool when session emits close event', async () => {
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const session = setupDefaultSession();
 
+      await pool.request('https://rpc.example.com', { body: '{}' });
       expect(pool.getActiveSessionCount()).toBe(1);
 
-      // Simulate server-side close
-      mockSession.emit('close');
+      session.emit('close');
 
       expect(pool.getActiveSessionCount()).toBe(0);
     });
@@ -538,9 +564,9 @@ describe('Http2SessionPool', () => {
     });
 
     it('should return stats for active sessions', async () => {
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', { body: '{}' });
 
       const stats = pool.getStats();
       expect(stats).toHaveLength(1);
@@ -551,18 +577,13 @@ describe('Http2SessionPool', () => {
     });
 
     it('should show correct active stream count', async () => {
-      // Use a stream that never ends to keep activeStreams > 0
-      const hangingStream = new EventEmitter();
-      (hangingStream as any).write = jest.fn();
-      (hangingStream as any).close = jest.fn();
-      (hangingStream as any).end = jest.fn(() => {
-        process.nextTick(() => hangingStream.emit('response', { ':status': 200 }));
-        // Never emit 'end'
-      });
-      (mockSession as any).request = jest.fn().mockReturnValue(hangingStream);
+      const hangingStream = createMockStream('{}', 200, { neverEnd: true });
+      const session = createMockSession({ stream: hangingStream });
+      mockHttp2Connect.mockReturnValue(session);
 
       const reqPromise = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
+      await flushImmediate();
+      await flushImmediate();
 
       const stats = pool.getStats();
       expect(stats).toHaveLength(1);
@@ -575,36 +596,29 @@ describe('Http2SessionPool', () => {
     });
 
     it('should show closed status for destroyed sessions', async () => {
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const session = setupDefaultSession();
 
-      (mockSession as any).destroyed = true;
+      await pool.request('https://rpc.example.com', { body: '{}' });
+
+      (session as any).destroyed = true;
 
       const stats = pool.getStats();
       expect(stats[0].closed).toBe(true);
     });
 
     it('should report multiple origins', async () => {
-      const session2 = createMockSession();
-      let callCount = 0;
-      mockHttp2Connect.mockImplementation(() => {
-        callCount++;
-        return callCount === 1 ? mockSession : session2;
-      });
+      setupMultipleSessions(2);
 
-      const req1 = pool.request('https://rpc1.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req1;
-
-      const req2 = pool.request('https://rpc2.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req2;
+      await pool.request('https://rpc1.example.com', { body: '{}' });
+      await pool.request('https://rpc2.example.com', { body: '{}' });
 
       const stats = pool.getStats();
       expect(stats).toHaveLength(2);
       const origins = stats.map((s) => s.origin).sort();
-      expect(origins).toEqual(['https://rpc1.example.com', 'https://rpc2.example.com']);
+      expect(origins).toEqual([
+        'https://rpc1.example.com',
+        'https://rpc2.example.com',
+      ]);
     });
   });
 
@@ -618,19 +632,19 @@ describe('Http2SessionPool', () => {
     });
 
     it('should increment when sessions are created', async () => {
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      setupDefaultSession();
+
+      await pool.request('https://rpc.example.com', { body: '{}' });
 
       expect(pool.getActiveSessionCount()).toBe(1);
     });
 
     it('should return 0 after close()', async () => {
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      setupDefaultSession();
 
+      await pool.request('https://rpc.example.com', { body: '{}' });
       await pool.close();
+
       expect(pool.getActiveSessionCount()).toBe(0);
     });
   });
@@ -641,7 +655,6 @@ describe('Http2SessionPool', () => {
 
   describe('Singleton', () => {
     afterEach(async () => {
-      // Clean up singleton between tests
       await closeDefaultHttp2Pool();
     });
 
@@ -664,7 +677,6 @@ describe('Http2SessionPool', () => {
     });
 
     it('should handle closeDefaultHttp2Pool when no pool exists', async () => {
-      // Should not throw when called without creating a pool first
       await closeDefaultHttp2Pool();
     });
   });
@@ -681,19 +693,17 @@ describe('Http2SessionPool', () => {
     });
 
     it('should use HTTP/2 for HTTPS URLs', async () => {
+      setupDefaultSession();
       const getUrl = pool.createEthersGetUrlFunc(mockDefaultGetUrl);
 
       const req = {
         url: 'https://rpc.example.com',
         method: 'POST',
         headers: {},
-        body: new Uint8Array([123, 125]), // '{}'
+        body: new Uint8Array([123, 125]),
       };
 
-      const resultPromise = getUrl(req);
-      await jest.advanceTimersByTimeAsync(1);
-
-      const result = await resultPromise;
+      const result = await getUrl(req);
       expect(result.statusCode).toBe(200);
       expect(mockDefaultGetUrl).not.toHaveBeenCalled();
     });
@@ -722,10 +732,6 @@ describe('Http2SessionPool', () => {
     });
 
     it('should fall back on HTTP/2 session creation failure', async () => {
-      // Make the pool closed so getOrCreateSession will fail
-      const closedPool = new Http2SessionPool();
-
-      // Override connect to fail
       mockHttp2Connect.mockImplementation(() => {
         return createMockSession({
           autoConnect: false,
@@ -741,7 +747,8 @@ describe('Http2SessionPool', () => {
       };
       mockDefaultGetUrl.mockResolvedValue(mockResponse);
 
-      const getUrl = closedPool.createEthersGetUrlFunc(mockDefaultGetUrl);
+      const freshPool = new Http2SessionPool();
+      const getUrl = freshPool.createEthersGetUrlFunc(mockDefaultGetUrl);
 
       const req = {
         url: 'https://failing-rpc.example.com',
@@ -750,19 +757,15 @@ describe('Http2SessionPool', () => {
         body: new Uint8Array([123, 125]),
       };
 
-      const resultPromise = getUrl(req);
-      await jest.advanceTimersByTimeAsync(1);
-
-      const result = await resultPromise;
+      const result = await getUrl(req);
       expect(mockDefaultGetUrl).toHaveBeenCalled();
       expect(result).toBe(mockResponse);
     });
 
     it('should fall back on HTTP/2 stream error', async () => {
-      const errorStream = createMockStream('', 200, {
-        errorOnEnd: new Error('stream error'),
-      });
-      (mockSession as any).request = jest.fn().mockReturnValue(errorStream);
+      const errorStream = createMockStream('', 200, { errorOnEnd: true });
+      const session = createMockSession({ stream: errorStream });
+      mockHttp2Connect.mockReturnValue(session);
 
       const mockResponse = {
         statusCode: 200,
@@ -781,23 +784,22 @@ describe('Http2SessionPool', () => {
         body: new Uint8Array([123, 125]),
       };
 
-      const resultPromise = getUrl(req);
-      await jest.advanceTimersByTimeAsync(1);
-
-      const result = await resultPromise;
+      const result = await getUrl(req);
       expect(mockDefaultGetUrl).toHaveBeenCalled();
       expect(result).toBe(mockResponse);
     });
 
     it('should handle abort signal', async () => {
-      // Use a stream that never completes
+      // First establish a session so it is cached
+      const session = setupDefaultSession();
+      await pool.request('https://rpc.example.com', { body: '{}' });
+
+      // Now set up a slow stream that never completes
       const slowStream = new EventEmitter();
       (slowStream as any).write = jest.fn();
       (slowStream as any).close = jest.fn();
-      (slowStream as any).end = jest.fn(() => {
-        // Never emit response/end
-      });
-      (mockSession as any).request = jest.fn().mockReturnValue(slowStream);
+      (slowStream as any).end = jest.fn();
+      (session as any).request = jest.fn().mockReturnValue(slowStream);
 
       const getUrl = pool.createEthersGetUrlFunc(mockDefaultGetUrl);
 
@@ -816,9 +818,9 @@ describe('Http2SessionPool', () => {
       };
 
       const resultPromise = getUrl(req, signal);
-      await jest.advanceTimersByTimeAsync(1);
+      // Let microtasks settle so getOrCreateSession resolves from cache
+      await flushImmediate();
 
-      // Fire the abort signal
       expect(abortListener).toBeDefined();
       abortListener!();
 
@@ -827,27 +829,27 @@ describe('Http2SessionPool', () => {
     });
 
     it('should copy request headers to HTTP/2 stream', async () => {
+      const session = setupDefaultSession();
       const getUrl = pool.createEthersGetUrlFunc(mockDefaultGetUrl);
 
       const req = {
         url: 'https://rpc.example.com',
         method: 'POST',
-        headers: { 'X-Api-Key': 'secret', 'Authorization': 'Bearer tok' },
+        headers: { 'X-Api-Key': 'secret', Authorization: 'Bearer tok' },
         body: new Uint8Array([123, 125]),
       };
 
-      const resultPromise = getUrl(req);
-      await jest.advanceTimersByTimeAsync(1);
-      await resultPromise;
+      await getUrl(req);
 
-      const headers = (mockSession as any).request.mock.calls[0][0];
+      const headers = (session as any).request.mock.calls[0][0];
       expect(headers['x-api-key']).toBe('secret');
       expect(headers['authorization']).toBe('Bearer tok');
     });
 
     it('should write body as Buffer from Uint8Array', async () => {
       const stream = createMockStream();
-      (mockSession as any).request = jest.fn().mockReturnValue(stream);
+      const session = createMockSession({ stream });
+      mockHttp2Connect.mockReturnValue(session);
 
       const getUrl = pool.createEthersGetUrlFunc(mockDefaultGetUrl);
 
@@ -859,11 +861,8 @@ describe('Http2SessionPool', () => {
         body: bodyBytes,
       };
 
-      const resultPromise = getUrl(req);
-      await jest.advanceTimersByTimeAsync(1);
-      await resultPromise;
+      await getUrl(req);
 
-      // end() should have been called with a Buffer
       expect(stream.end).toHaveBeenCalled();
       const argToEnd = (stream.end as jest.Mock).mock.calls[0][0];
       expect(Buffer.isBuffer(argToEnd)).toBe(true);
@@ -871,7 +870,8 @@ describe('Http2SessionPool', () => {
 
     it('should call stream.end() without body when body is null', async () => {
       const stream = createMockStream();
-      (mockSession as any).request = jest.fn().mockReturnValue(stream);
+      const session = createMockSession({ stream });
+      mockHttp2Connect.mockReturnValue(session);
 
       const getUrl = pool.createEthersGetUrlFunc(mockDefaultGetUrl);
 
@@ -882,11 +882,8 @@ describe('Http2SessionPool', () => {
         body: null,
       };
 
-      const resultPromise = getUrl(req);
-      await jest.advanceTimersByTimeAsync(1);
-      await resultPromise;
+      await getUrl(req);
 
-      // end() should be called without arguments
       expect(stream.end).toHaveBeenCalledWith();
     });
   });
@@ -897,29 +894,36 @@ describe('Http2SessionPool', () => {
 
   describe('ping keep-alive', () => {
     it('should start ping interval when pingIntervalMs > 0', async () => {
-      const p = new Http2SessionPool({ pingIntervalMs: 5000 });
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
 
-      const req = p.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const p = new Http2SessionPool({ pingIntervalMs: 5000 });
+      const session = setupDefaultSession();
+
+      const reqPromise = p.request('https://rpc.example.com', { body: '{}' });
+      await flushImmediate();
+      await flushImmediate();
+      await reqPromise;
 
       // Advance past one ping interval
       jest.advanceTimersByTime(5500);
 
-      expect((mockSession as any).ping).toHaveBeenCalled();
+      expect((session as any).ping).toHaveBeenCalled();
     });
 
     it('should not start ping interval when pingIntervalMs is 0', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+
       const p = new Http2SessionPool({ pingIntervalMs: 0 });
+      const session = setupDefaultSession();
 
-      const req = p.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const reqPromise = p.request('https://rpc.example.com', { body: '{}' });
+      await flushImmediate();
+      await flushImmediate();
+      await reqPromise;
 
-      // Advance a long time — no pings should have been sent
       jest.advanceTimersByTime(60000);
 
-      expect((mockSession as any).ping).not.toHaveBeenCalled();
+      expect((session as any).ping).not.toHaveBeenCalled();
     });
   });
 
@@ -929,25 +933,58 @@ describe('Http2SessionPool', () => {
 
   describe('close() with force destroy', () => {
     it('should force destroy session if close callback does not fire within 5s', async () => {
-      // Override close to never call the callback
-      (mockSession as any).close = jest.fn((_cb?: () => void) => {
-        // Intentionally do NOT call cb, simulating a stuck session
-      });
-      (mockSession as any).closed = false;
-      (mockSession as any).destroyed = false;
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
 
-      const req = pool.request('https://rpc.example.com', { body: '{}' });
-      await jest.advanceTimersByTimeAsync(1);
-      await req;
+      const session = setupDefaultSession();
+      // Override close to never call the callback (stuck session)
+      (session as any).close = jest.fn(); // no-op
 
-      const closePromise = pool.close();
+      const p = new Http2SessionPool({ pingIntervalMs: 0 });
+
+      const reqPromise = p.request('https://rpc.example.com', { body: '{}' });
+      await flushImmediate();
+      await flushImmediate();
+      await reqPromise;
+
+      const closePromise = p.close();
 
       // Advance past the 5000ms force-destroy timeout
       jest.advanceTimersByTime(5100);
 
       await closePromise;
 
-      expect((mockSession as any).destroy).toHaveBeenCalled();
+      expect((session as any).destroy).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // Connection settings
+  // =========================================================================
+
+  describe('connection settings', () => {
+    it('should pass maxConcurrentStreams to http2.connect', async () => {
+      setupDefaultSession();
+      const p = new Http2SessionPool({ maxConcurrentStreams: 42 });
+
+      await p.request('https://rpc.example.com', { body: '{}' });
+
+      expect(mockHttp2Connect).toHaveBeenCalledWith(
+        'https://rpc.example.com',
+        expect.objectContaining({
+          settings: { maxConcurrentStreams: 42 },
+        })
+      );
+    });
+
+    it('should pass origin string to http2.connect', async () => {
+      setupDefaultSession();
+
+      await pool.request('https://rpc.example.com:8545/v1', { body: '{}' });
+
+      expect(mockHttp2Connect).toHaveBeenCalledWith(
+        'https://rpc.example.com:8545',
+        expect.any(Object)
+      );
     });
   });
 });
