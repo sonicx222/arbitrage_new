@@ -1217,6 +1217,250 @@ describe('HealthMonitor', () => {
   });
 
   // ===========================================================================
+  // Hysteresis (consecutive-failure gating before degradation)
+  // ===========================================================================
+
+  describe('hysteresis', () => {
+    it('should not downgrade on a single stale heartbeat detection', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        consecutiveFailuresThreshold: 3,
+        staleHeartbeatThresholdMs: 5000,
+      });
+      mon.start();
+
+      const now = Date.now();
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('execution-engine', createServiceHealth({
+        name: 'execution-engine',
+        status: 'healthy',
+        lastHeartbeat: now, // fresh
+      }));
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000, // stale: 10s > 5s threshold
+      }));
+
+      mon.evaluateDegradationLevel(serviceMap, 100);
+
+      // Single stale detection should NOT cause downgrade due to hysteresis
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+    });
+
+    it('should downgrade after N consecutive stale detections', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        consecutiveFailuresThreshold: 3,
+        staleHeartbeatThresholdMs: 5000,
+      });
+      mon.start();
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+
+      // Use a fixed "now" so the stale heartbeat stays stale across all calls
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('execution-engine', createServiceHealth({
+        name: 'execution-engine',
+        status: 'healthy',
+        lastHeartbeat: now, // fresh
+      }));
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000, // stale
+      }));
+
+      // Call 1: stale count = 1 (below threshold 3)
+      mon.evaluateDegradationLevel(serviceMap, 100);
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+
+      // Reset detector-1 to healthy (since detectStaleServices mutates it)
+      serviceMap.get('detector-1')!.status = 'healthy';
+
+      // Call 2: stale count = 2 (below threshold 3)
+      mon.evaluateDegradationLevel(serviceMap, 100);
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+
+      // Reset detector-1 to healthy again
+      serviceMap.get('detector-1')!.status = 'healthy';
+
+      // Call 3: stale count = 3 (meets threshold) — should now evaluate and downgrade
+      mon.evaluateDegradationLevel(serviceMap, 100);
+      expect(mon.getDegradationLevel()).not.toBe(DegradationLevel.FULL_OPERATION);
+
+      Date.now = originalDateNow;
+    });
+
+    it('should reset consecutive counter when services recover', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        consecutiveFailuresThreshold: 3,
+        staleHeartbeatThresholdMs: 5000,
+      });
+      mon.start();
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const staleMap = new Map<string, ServiceHealth>();
+      staleMap.set('execution-engine', createServiceHealth({
+        name: 'execution-engine',
+        status: 'healthy',
+        lastHeartbeat: now,
+      }));
+      staleMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000, // stale
+      }));
+
+      // 2 stale detections: count = 2
+      mon.evaluateDegradationLevel(staleMap, 100);
+      staleMap.get('detector-1')!.status = 'healthy'; // reset for re-detection
+      mon.evaluateDegradationLevel(staleMap, 100);
+
+      // Now all healthy (fresh heartbeats) — should reset counter
+      const freshMap = new Map<string, ServiceHealth>();
+      freshMap.set('execution-engine', createServiceHealth({
+        name: 'execution-engine',
+        status: 'healthy',
+        lastHeartbeat: now,
+      }));
+      freshMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now, // fresh now
+      }));
+
+      mon.evaluateDegradationLevel(freshMap, 100);
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+
+      // 2 more stale detections after reset: count = 1, 2 (still below 3)
+      staleMap.get('detector-1')!.status = 'healthy';
+      mon.evaluateDegradationLevel(staleMap, 100);
+      staleMap.get('detector-1')!.status = 'healthy';
+      mon.evaluateDegradationLevel(staleMap, 100);
+
+      // Still at FULL_OPERATION — counter was reset, so 2 < 3
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+
+      Date.now = originalDateNow;
+    });
+
+    it('should purge ancient heartbeat entries', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        consecutiveFailuresThreshold: 3,
+        staleHeartbeatThresholdMs: 5000,
+      });
+      mon.start();
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('execution-engine', createServiceHealth({
+        name: 'execution-engine',
+        status: 'healthy',
+        lastHeartbeat: now,
+      }));
+      serviceMap.set('ancient-detector', createServiceHealth({
+        name: 'ancient-detector',
+        status: 'healthy',
+        lastHeartbeat: now - 600_000, // 10 minutes ago — ancient
+      }));
+
+      mon.evaluateDegradationLevel(serviceMap, 100);
+
+      // The ancient entry should have been purged from the map
+      expect(serviceMap.has('ancient-detector')).toBe(false);
+      // Fresh entry should remain
+      expect(serviceMap.has('execution-engine')).toBe(true);
+
+      // Should have logged the purge
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Purged ancient heartbeat entry',
+        expect.objectContaining({
+          service: 'ancient-detector',
+        })
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should not purge entries with lastHeartbeat within 5 minutes', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        consecutiveFailuresThreshold: 3,
+        staleHeartbeatThresholdMs: 5000,
+      });
+      mon.start();
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 200_000, // 3.3 minutes — within 5 minute threshold
+      }));
+
+      mon.evaluateDegradationLevel(serviceMap, 100);
+
+      // Should NOT be purged (< 300,000ms)
+      expect(serviceMap.has('detector-1')).toBe(true);
+
+      Date.now = originalDateNow;
+    });
+
+    it('should reset consecutiveStaleCount on reset()', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        consecutiveFailuresThreshold: 3,
+        staleHeartbeatThresholdMs: 5000,
+      });
+      mon.start();
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const staleMap = new Map<string, ServiceHealth>();
+      staleMap.set('execution-engine', createServiceHealth({
+        name: 'execution-engine',
+        status: 'healthy',
+        lastHeartbeat: now,
+      }));
+      staleMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000,
+      }));
+
+      // Build up 2 consecutive stale counts
+      mon.evaluateDegradationLevel(staleMap, 100);
+      staleMap.get('detector-1')!.status = 'healthy';
+      mon.evaluateDegradationLevel(staleMap, 100);
+
+      // Reset should clear the counter
+      mon.reset();
+
+      // After reset, need 3 more consecutive stale detections
+      staleMap.get('detector-1')!.status = 'healthy';
+      mon.evaluateDegradationLevel(staleMap, 100);
+      staleMap.get('detector-1')!.status = 'healthy';
+      mon.evaluateDegradationLevel(staleMap, 100);
+
+      // Only 2 since reset — should still be at FULL_OPERATION
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
+
+      Date.now = originalDateNow;
+    });
+  });
+
+  // ===========================================================================
   // DegradationLevel enum
   // ===========================================================================
 

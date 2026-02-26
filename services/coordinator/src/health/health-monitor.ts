@@ -90,6 +90,8 @@ export interface HealthMonitorConfig {
   cooldownMaxAgeMs?: number;
   /** @see OP-13: Threshold in ms for detecting stale heartbeats (default: 30000) */
   staleHeartbeatThresholdMs?: number;
+  /** Consecutive stale checks required before downgrading (default: 3) */
+  consecutiveFailuresThreshold?: number;
 }
 
 /**
@@ -105,6 +107,7 @@ const DEFAULT_CONFIG: Required<Omit<HealthMonitorConfig, 'servicePatterns'>> & {
   cooldownMaxAgeMs: 3600000, // 1 hour
   // OP-13: Stale heartbeat detection threshold (heartbeats are every 5-10s)
   staleHeartbeatThresholdMs: 30000,
+  consecutiveFailuresThreshold: 3,
 };
 
 /**
@@ -120,6 +123,7 @@ export class HealthMonitor {
   private degradationLevel: DegradationLevel = DegradationLevel.FULL_OPERATION;
   private startTime: number = 0;
   private alertCooldowns: Map<string, number> = new Map();
+  private consecutiveStaleCount = 0;
 
   constructor(
     logger: HealthMonitorLogger,
@@ -170,8 +174,32 @@ export class HealthMonitor {
     serviceHealth: Map<string, ServiceHealth>,
     systemHealth: number
   ): void {
+    // Purge ancient heartbeat entries (>5 minutes) from previous runs
+    const now = Date.now();
+    for (const [name, health] of serviceHealth) {
+      if (health.lastHeartbeat && (now - health.lastHeartbeat) > 300_000) {
+        serviceHealth.delete(name);
+        this.logger.info('Purged ancient heartbeat entry', { service: name, ageMs: now - health.lastHeartbeat });
+      }
+    }
+
     // OP-13 FIX: Detect stale heartbeats before evaluating degradation
-    this.detectStaleServices(serviceHealth);
+    const staleCount = this.detectStaleServices(serviceHealth);
+
+    // Hysteresis: require consecutive stale detections before downgrading
+    if (staleCount > 0) {
+      this.consecutiveStaleCount++;
+      if (this.consecutiveStaleCount < this.config.consecutiveFailuresThreshold) {
+        this.logger.debug('Stale services detected but below hysteresis threshold', {
+          staleCount,
+          consecutiveStaleCount: this.consecutiveStaleCount,
+          threshold: this.config.consecutiveFailuresThreshold,
+        });
+        return;
+      }
+    } else {
+      this.consecutiveStaleCount = 0;
+    }
 
     const previousLevel = this.degradationLevel;
 
@@ -260,15 +288,17 @@ export class HealthMonitor {
    *
    * @param serviceHealth - Map of service name to health status (mutated in place)
    */
-  detectStaleServices(serviceHealth: Map<string, ServiceHealth>): void {
+  detectStaleServices(serviceHealth: Map<string, ServiceHealth>): number {
     const now = Date.now();
     const threshold = this.config.staleHeartbeatThresholdMs;
+    let staleCount = 0;
 
     for (const [name, health] of serviceHealth) {
       if (health.status === 'healthy' && health.lastHeartbeat) {
         const age = now - health.lastHeartbeat;
         if (age > threshold) {
           health.status = 'unhealthy';
+          staleCount++;
           this.logger.warn('Service heartbeat stale, marking unhealthy', {
             service: name,
             lastHeartbeat: health.lastHeartbeat,
@@ -278,6 +308,8 @@ export class HealthMonitor {
         }
       }
     }
+
+    return staleCount;
   }
 
   /**
@@ -475,5 +507,6 @@ export class HealthMonitor {
     this.degradationLevel = DegradationLevel.FULL_OPERATION;
     this.startTime = 0;
     this.alertCooldowns.clear();
+    this.consecutiveStaleCount = 0;
   }
 }
