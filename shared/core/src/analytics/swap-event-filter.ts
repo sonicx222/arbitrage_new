@@ -31,6 +31,7 @@ export interface SwapEventFilterConfig {
   aggregationWindowMs: number;   // Volume aggregation window in ms (default: 5000)
   maxDedupCacheSize: number;     // Maximum dedup cache entries (default: 10000)
   cleanupIntervalMs: number;     // Cleanup interval in ms (default: 30000)
+  knownRouterAddresses?: Set<string>; // Known DEX router addresses to filter from whale alerts
 }
 
 export interface FilterResult {
@@ -75,6 +76,7 @@ export interface FilterStats {
   totalPassed: number;
   totalFiltered: number;
   whaleAlerts: number;
+  routerSwapsFiltered: number;
   filterRate: number;
   filterReasons: Record<FilterReason, number>;
   avgProcessingTimeMs: number;
@@ -110,6 +112,7 @@ interface AggregationBucket {
 
 export class SwapEventFilter {
   private config: SwapEventFilterConfig;
+  private knownRouterAddresses: Set<string>;
   private dedupCache: Map<string, number> = new Map(); // key -> timestamp
   private aggregationBuckets: Map<string, AggregationBucket> = new Map(); // pairAddress -> bucket
   private aggregationTimer: NodeJS.Timeout | null = null;
@@ -122,6 +125,7 @@ export class SwapEventFilter {
     totalPassed: 0,
     totalFiltered: 0,
     whaleAlerts: 0,
+    routerSwapsFiltered: 0,
     filterRate: 0,
     filterReasons: {
       zero_amount: 0,
@@ -142,6 +146,8 @@ export class SwapEventFilter {
   constructor(config: Partial<SwapEventFilterConfig> = {}) {
     // Validate provided config values
     this.validateConfigValues(config);
+
+    this.knownRouterAddresses = config.knownRouterAddresses ?? new Set();
 
     this.config = {
       minUsdValue: config.minUsdValue ?? 10,
@@ -466,6 +472,12 @@ export class SwapEventFilter {
   // ===========================================================================
 
   private emitWhaleAlert(event: SwapEvent, usdValue: number): void {
+    // Filter out known DEX router addresses from whale alerts
+    if (event.sender && this.knownRouterAddresses.has(event.sender.toLowerCase())) {
+      this.stats.routerSwapsFiltered++;
+      return;
+    }
+
     this.stats.whaleAlerts++;
 
     const alert: WhaleAlert = {
@@ -720,6 +732,7 @@ export class SwapEventFilter {
       totalPassed: 0,
       totalFiltered: 0,
       whaleAlerts: 0,
+      routerSwapsFiltered: 0,
       filterRate: 0,
       filterReasons: {
         zero_amount: 0,

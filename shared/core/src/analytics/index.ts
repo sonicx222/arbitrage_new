@@ -197,3 +197,9 @@ export type {
   CexDexSpreadConfig,
   SpreadHistoryPoint
 } from './cex-dex-spread';
+
+// Known Router Addresses (whale alert false-positive filtering)
+export {
+  getKnownRouterAddresses,
+  _resetKnownRouterCache
+} from './known-router-addresses';

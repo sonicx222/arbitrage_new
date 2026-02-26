@@ -25,6 +25,7 @@ import {
   getMLOpportunityScorer,
   LiquidityDepthAnalyzer,
   getLiquidityDepthAnalyzer,
+  getKnownRouterAddresses,
 } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
 import {
@@ -694,7 +695,8 @@ export class ChainDetectorInstance extends EventEmitter {
       this.swapEventFilter = getSwapEventFilter({
         minUsdValue: 10,
         whaleThreshold: 50000,
-        dedupWindowMs: 5000
+        dedupWindowMs: 5000,
+        knownRouterAddresses: getKnownRouterAddresses()
       });
 
       // PHASE-3.3: Initialize whale alert publisher (extracted module)
