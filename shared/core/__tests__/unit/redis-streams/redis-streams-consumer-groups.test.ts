@@ -284,6 +284,33 @@ describe('RedisStreamsClient - Consumer Groups', () => {
     });
   });
 
+  describe('createBatcher key reuse', () => {
+    it('should return existing batcher when called with the same stream name', () => {
+      const batcher1 = client.createBatcher('stream:test-shared', {
+        maxBatchSize: 50,
+        maxWaitMs: 10,
+      });
+      const batcher2 = client.createBatcher('stream:test-shared', {
+        maxBatchSize: 50,
+        maxWaitMs: 10,
+      });
+      expect(batcher2).toBe(batcher1); // Same reference
+    });
+
+    it('should create new batcher if previous was destroyed', async () => {
+      const batcher1 = client.createBatcher('stream:test-destroyed', {
+        maxBatchSize: 50,
+        maxWaitMs: 10,
+      });
+      await batcher1.destroy();
+      const batcher2 = client.createBatcher('stream:test-destroyed', {
+        maxBatchSize: 50,
+        maxWaitMs: 10,
+      });
+      expect(batcher2).not.toBe(batcher1);
+    });
+  });
+
   describe('Deep Dive Regression: Consumer Group Race Condition', () => {
     it('should handle BUSYGROUP error gracefully', async () => {
       // Simulate group already exists

@@ -155,6 +155,10 @@ export class StreamBatcher<T = Record<string, unknown>> {
     private logger: Logger
   ) {}
 
+  get isDestroyed(): boolean {
+    return this.destroyed;
+  }
+
   add(message: T): void {
     if (this.destroyed) {
       this.logger.warn('Attempted to add message to destroyed batcher', { streamName: this.streamName });
@@ -987,12 +991,15 @@ export class RedisStreamsClient {
     streamName: string,
     config: BatcherConfig
   ): StreamBatcher<T> {
-    // Cleanup existing batcher if any (fire and forget - don't block creation)
+    // Return existing batcher if available and not destroyed
     const existing = this.batchers.get(streamName);
+    if (existing && !existing.isDestroyed) {
+      return existing as StreamBatcher<T>;
+    }
+
+    // Cleanup destroyed batcher entry if present
     if (existing) {
-      existing.destroy().catch(err => {
-        this.logger.warn('Failed to cleanup existing batcher', { streamName, error: err });
-      });
+      this.batchers.delete(streamName);
     }
 
     const batcher = new StreamBatcher<T>(this, streamName, config, this.logger);
