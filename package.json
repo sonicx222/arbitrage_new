@@ -60,6 +60,7 @@
     "dev:redis:ui": "node scripts/run-docker-compose.js -f docker-compose.local.yml --profile debug up -d",
     "dev:redis:down": "node scripts/stop-redis.js",
     "dev:redis:logs": "node scripts/run-docker-compose.js -f docker-compose.local.yml logs -f redis",
+    "dev:redis:clean": "node scripts/clean-redis.js",
     "dev:coordinator": "ts-node -r dotenv/config -r tsconfig-paths/register services/coordinator/src/index.ts",
     "dev:coordinator:fast": "tsx watch --env-file=.env services/coordinator/src/index.ts",
     "dev:detector": "ts-node -r dotenv/config -r tsconfig-paths/register services/unified-detector/src/index.ts",

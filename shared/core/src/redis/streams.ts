@@ -54,6 +54,11 @@ export interface ConsumerGroupConfig {
   groupName: string;
   consumerName: string;
   startId?: string; // Default '$' (only new messages), use '0' for all messages
+  /**
+   * When true, BUSYGROUP on create triggers XGROUP SETID to startId.
+   * This is useful for services that must skip stale backlog on restart.
+   */
+  resetToStartIdOnExistingGroup?: boolean;
 }
 
 export interface XReadOptions {
@@ -659,6 +664,22 @@ export class RedisStreamsClient {
     } catch (error: unknown) {
       // Ignore "group already exists" error
       if ((error as Error).message?.includes('BUSYGROUP')) {
+        if (config.resetToStartIdOnExistingGroup) {
+          const targetId = config.startId ?? '$';
+          await this.client.xgroup(
+            'SETID',
+            config.streamName,
+            config.groupName,
+            targetId
+          );
+          this.logger.info('Consumer group already existed, reset offset to configured startId', {
+            stream: config.streamName,
+            group: config.groupName,
+            startId: targetId
+          });
+          return;
+        }
+
         if (this.logger.isLevelEnabled?.('debug') ?? false) {
           this.logger.debug('Consumer group already exists', {
             stream: config.streamName,

@@ -78,6 +78,38 @@ describe('RedisStreamsClient - Consumer Groups', () => {
       await expect(client.createConsumerGroup(config)).resolves.not.toThrow();
     });
 
+    it('should reset existing group to configured startId when requested', async () => {
+      const config: ConsumerGroupConfig = {
+        streamName: 'stream:test',
+        groupName: 'existing-group',
+        consumerName: 'consumer-1',
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
+      };
+
+      mockRedis.xgroup
+        .mockRejectedValueOnce(new Error('BUSYGROUP Consumer Group name already exists'))
+        .mockResolvedValueOnce('OK');
+
+      await expect(client.createConsumerGroup(config)).resolves.not.toThrow();
+
+      expect(mockRedis.xgroup).toHaveBeenNthCalledWith(
+        1,
+        'CREATE',
+        config.streamName,
+        config.groupName,
+        '$',
+        'MKSTREAM'
+      );
+      expect(mockRedis.xgroup).toHaveBeenNthCalledWith(
+        2,
+        'SETID',
+        config.streamName,
+        config.groupName,
+        '$'
+      );
+    });
+
     it('should create group starting from specific ID', async () => {
       const config: ConsumerGroupConfig = {
         streamName: 'stream:test',

@@ -466,45 +466,52 @@ export class CoordinatorService implements CoordinatorStateProvider {
         streamName: RedisStreamsClient.STREAMS.HEALTH,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$' // Only new messages - stale health data not useful
+        startId: '$', // Only new messages - stale health data not useful
+        resetToStartIdOnExistingGroup: true
       },
       {
         streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$'
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       },
       {
         streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$'
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       },
       {
         streamName: RedisStreamsClient.STREAMS.SWAP_EVENTS,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$'
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       },
       {
         streamName: RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$'
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       },
       // S3.3.5 FIX: Add PRICE_UPDATES consumer for Solana price feed integration
       {
         streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$'
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       },
       // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
       {
         streamName: RedisStreamsClient.STREAMS.EXECUTION_RESULTS,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$'
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       }
     ];
 
