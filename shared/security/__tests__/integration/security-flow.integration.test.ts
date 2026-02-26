@@ -138,9 +138,20 @@ describe('[Integration] Security Flow — AuthService + RateLimiter with Real Re
   });
 
   beforeEach(async () => {
-    // Flush all keys for test isolation
+    // Clean only our own keys (not flushall) to avoid clobbering other workers' data
+    // when integration tests run in parallel with shared Redis.
     if (redis?.status === 'ready') {
-      await redis.flushall();
+      const prefixes = ['auth:', 'test-ratelimit:', 'test-failclosed:', 'test-failopen:', 'test-short:', 'test-login-rate:'];
+      for (const prefix of prefixes) {
+        let cursor = '0';
+        do {
+          const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 100);
+          cursor = nextCursor;
+          if (keys.length > 0) {
+            await redis.del(...keys);
+          }
+        } while (cursor !== '0');
+      }
     }
 
     // Reset the core RedisClient singleton so RateLimiter gets a fresh connection
@@ -430,21 +441,9 @@ describe('[Integration] Security Flow — AuthService + RateLimiter with Real Re
   // ===========================================================================
 
   describe('RateLimiter — failOpen vs failClosed behavior', () => {
-    let savedUrl: string | undefined;
-
-    beforeEach(async () => {
-      // Point REDIS_URL to a non-existent Redis BEFORE creating RateLimiter
-      // so that the internal getRedisClient() call will fail
-      savedUrl = process.env.REDIS_URL;
-      process.env.REDIS_URL = 'redis://localhost:1'; // Port 1 - won't connect
-      await resetRedisInstance();
-    });
-
-    afterEach(async () => {
-      // Restore Redis URL and reset singleton to clear failed connection state
-      process.env.REDIS_URL = savedUrl;
-      await resetRedisInstance();
-    });
+    // Strategy: Create limiter with real test Redis (fast init), then disconnect
+    // the underlying ioredis client to force errors on subsequent operations.
+    // This avoids the 25s hang from ioredis retry on dead ports.
 
     it('should fail CLOSED by default when Redis errors occur', async () => {
       const badLimiter = new RateLimiter({
@@ -453,6 +452,12 @@ describe('[Integration] Security Flow — AuthService + RateLimiter with Real Re
         keyPrefix: 'test-failclosed',
         failOpen: false,
       });
+
+      // Let RateLimiter's background initializeRedis() complete
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Disconnect the Redis singleton (RateLimiter still holds a ref to the now-dead client)
+      await resetRedisInstance();
 
       const result = await badLimiter.checkLimit('user:failclosed');
 
@@ -464,7 +469,7 @@ describe('[Integration] Security Flow — AuthService + RateLimiter with Real Re
       const metrics = badLimiter.getFailModeMetrics();
       expect(metrics.failClosedCount).toBeGreaterThanOrEqual(1);
       expect(metrics.failOpenCount).toBe(0);
-    }, 30000);
+    }, 10000);
 
     it('should fail OPEN when configured and Redis errors occur', async () => {
       const openLimiter = new RateLimiter({
@@ -473,6 +478,12 @@ describe('[Integration] Security Flow — AuthService + RateLimiter with Real Re
         keyPrefix: 'test-failopen',
         failOpen: true,
       });
+
+      // Let RateLimiter's background initializeRedis() complete
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Disconnect the Redis singleton (RateLimiter still holds a ref to the now-dead client)
+      await resetRedisInstance();
 
       const result = await openLimiter.checkLimit('user:failopen');
 
@@ -484,7 +495,7 @@ describe('[Integration] Security Flow — AuthService + RateLimiter with Real Re
       const metrics = openLimiter.getFailModeMetrics();
       expect(metrics.failOpenCount).toBeGreaterThanOrEqual(1);
       expect(metrics.failClosedCount).toBe(0);
-    }, 30000);
+    }, 10000);
   });
 
   // ===========================================================================

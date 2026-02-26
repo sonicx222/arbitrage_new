@@ -16,7 +16,7 @@ import {
   WarmingComponents,
 } from '../../src/warming/container/warming.container';
 import { HierarchicalCache } from '../../src/caching/hierarchical-cache';
-import { setupRedisTestLifecycle, getTestRedisUrl } from '@arbitrage/test-utils/integration/redis-helpers';
+import { getTestRedisUrl } from '@arbitrage/test-utils/integration/redis-helpers';
 import { resetRedisInstance } from '../../src/redis/client';
 
 describe('Warming Flow Integration Tests', () => {
@@ -525,19 +525,27 @@ describe('Warming Flow Integration Tests', () => {
 describe('L2 Redis-Backed Warming Flow', () => {
   jest.setTimeout(30000);
 
-  const getRedis = setupRedisTestLifecycle();
+  // Manual Redis lifecycle instead of setupRedisTestLifecycle() to avoid
+  // flushall() which clobbers other workers' data in parallel execution.
+  let testRedis: import('ioredis').default;
+  const getRedis = () => testRedis;
 
   /** L2 key prefix used by HierarchicalCache */
   const L2_PREFIX = 'cache:l2:';
 
   let savedRedisUrl: string | undefined;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Ensure REDIS_URL points to the test Redis server so that
     // getRedisClient() (called inside HierarchicalCache) connects
     // to the same instance as our test ioredis client.
     savedRedisUrl = process.env.REDIS_URL;
     process.env.REDIS_URL = getTestRedisUrl();
+
+    const { createTestRedisClient: createClient } = await import(
+      '@arbitrage/test-utils'
+    );
+    testRedis = await createClient();
   });
 
   afterAll(async () => {
@@ -546,6 +554,24 @@ describe('L2 Redis-Backed Warming Flow', () => {
       process.env.REDIS_URL = savedRedisUrl;
     } else {
       delete process.env.REDIS_URL;
+    }
+    if (testRedis) {
+      await testRedis.quit();
+    }
+  });
+
+  beforeEach(async () => {
+    // Clean only cache:l2:* keys (not flushall) to avoid clobbering
+    // other workers' data when integration tests run in parallel.
+    if (testRedis?.status === 'ready') {
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await testRedis.scan(cursor, 'MATCH', `${L2_PREFIX}*`, 'COUNT', 200);
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          await testRedis.del(...keys);
+        }
+      } while (cursor !== '0');
     }
   });
 

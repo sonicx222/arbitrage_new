@@ -73,8 +73,17 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
   });
 
   beforeEach(async () => {
+    // Clean only stream:hmac-* keys (not flushall) to avoid clobbering
+    // other workers' data when integration tests run in parallel.
     if (redis?.status === 'ready') {
-      await redis.flushall();
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'stream:hmac-*', 'COUNT', 200);
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          await redis.del(...keys);
+        }
+      } while (cursor !== '0');
     }
   });
 
