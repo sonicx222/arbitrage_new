@@ -308,6 +308,8 @@ describe('ServiceStateManager', () => {
     });
 
     it('should timeout if start takes too long', async () => {
+      jest.useFakeTimers();
+
       const manager = createServiceState({
         serviceName: 'slow-service',
         transitionTimeoutMs: 100
@@ -319,10 +321,17 @@ describe('ServiceStateManager', () => {
         await new Promise<void>(resolve => setTimeout(resolve, 500));
       };
 
-      const result = await manager.executeStart(slowStartFn);
+      const resultPromise = manager.executeStart(slowStartFn);
+
+      // Advance past the 100ms timeout (but before the 500ms delay completes)
+      await jest.advanceTimersByTimeAsync(150);
+
+      const result = await resultPromise;
 
       expect(result.success).toBe(false);
       expect(result.error?.message).toContain('timeout');
+
+      jest.useRealTimers();
     });
   });
 

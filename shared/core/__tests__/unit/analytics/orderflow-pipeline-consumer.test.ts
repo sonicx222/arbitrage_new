@@ -195,15 +195,18 @@ describe('OrderflowPipelineConsumer', () => {
       // Return message on first poll, empty on subsequent
       mockXreadgroup.mockResolvedValueOnce([message]).mockResolvedValue([]);
 
+      jest.useFakeTimers();
+
       const consumer = new OrderflowPipelineConsumer(
         { cacheTtlMs: 30000, pollIntervalMs: 50000 },
         { redisStreamsClient: mockRedisClient as any, predictor: mockPredictor as any },
       );
       await consumer.start();
 
-      // Manually trigger a poll cycle by calling pollMessages through the message processing
-      // Wait a tick for the setInterval callback (first poll)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Advance past the pollIntervalMs to trigger the first poll cycle
+      await jest.advanceTimersByTimeAsync(50000);
+
+      jest.useRealTimers();
 
       // The prediction should be cached under the pair key
       const prediction = consumer.getPrediction('0xTokenA-0xTokenB');

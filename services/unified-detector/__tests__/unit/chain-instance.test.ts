@@ -892,6 +892,8 @@ describe('Bug Fix Regression Tests', () => {
      * stays valid even if this.whaleAlertPublisher is nullified.
      */
     it('should handle publisher null during async operation (SPRINT 2 FIX)', async () => {
+      jest.useFakeTimers();
+
       let publishStarted = false;
       let publishCompleted = false;
       let publishError: Error | null = null;
@@ -938,8 +940,10 @@ describe('Bug Fix Regression Tests', () => {
       instance.isStopping = true;
       instance.whaleAlertPublisher = null as any;
 
-      // Wait for async operation to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Advance past the mock's 50ms setTimeout to complete the async operation
+      await jest.advanceTimersByTimeAsync(100);
+
+      jest.useRealTimers();
 
       // Verify the publish started and completed successfully
       // even though publisher was nullified mid-operation

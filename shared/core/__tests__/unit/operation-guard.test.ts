@@ -77,6 +77,8 @@ describe('OperationGuard', () => {
     });
 
     it('should apply cooldown between acquisitions', async () => {
+      jest.useFakeTimers();
+
       const release1 = guard.tryAcquire();
       expect(release1).not.toBeNull();
       release1!();
@@ -86,12 +88,14 @@ describe('OperationGuard', () => {
       expect(release2).toBeNull();
       expect(guard.isRateLimited()).toBe(true);
 
-      // Wait for cooldown
-      await new Promise(resolve => setTimeout(resolve, 110));
+      // Advance past cooldown (100ms)
+      await jest.advanceTimersByTimeAsync(110);
 
       // Now should work
       const release3 = guard.tryAcquire();
       expect(release3).not.toBeNull();
+
+      jest.useRealTimers();
     });
 
     it('should track rate limit rejections', async () => {

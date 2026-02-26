@@ -195,8 +195,6 @@ describe('BridgeRecoveryManager', () => {
     });
 
     it('should start periodic check interval', async () => {
-      jest.useRealTimers();
-
       createManager({ checkIntervalMs: 50 });
 
       await manager.start();
@@ -205,13 +203,10 @@ describe('BridgeRecoveryManager', () => {
       mockRedis.scan.mockClear();
       mockRedis.scan.mockResolvedValue(['0', []]);
 
-      // Wait for the interval to fire (50ms + margin)
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      // Advance past the 50ms check interval to trigger the periodic scan
+      await jest.advanceTimersByTimeAsync(120);
 
       expect(mockRedis.scan).toHaveBeenCalled();
-
-      // Re-enable fake timers for afterEach
-      jest.useFakeTimers();
     });
   });
 

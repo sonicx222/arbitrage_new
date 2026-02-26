@@ -418,6 +418,8 @@ describe('PairDiscoveryService', () => {
     });
 
     it('should close circuit after reset time', async () => {
+      jest.useFakeTimers();
+
       const serviceAny = service as any;
       const threshold = testConfig.circuitBreakerThreshold!;
 
@@ -428,10 +430,12 @@ describe('PairDiscoveryService', () => {
 
       expect(serviceAny.isCircuitOpen('ethereum', 'test_dex')).toBe(true);
 
-      // Wait for reset (100ms in test config)
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Advance past the circuit breaker reset time (100ms in test config)
+      await jest.advanceTimersByTimeAsync(150);
 
       expect(serviceAny.isCircuitOpen('ethereum', 'test_dex')).toBe(false);
+
+      jest.useRealTimers();
     });
   });
 

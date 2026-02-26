@@ -401,6 +401,8 @@ describe('CrossRegionHealthManager', () => {
 
   describe('event emission', () => {
     it('should emit leadershipLost event when lock extension fails', async () => {
+      jest.useFakeTimers();
+
       manager = new CrossRegionHealthManager(createTestConfig({
         leaderHeartbeatIntervalMs: 100
       }));
@@ -414,10 +416,12 @@ describe('CrossRegionHealthManager', () => {
       // not mockLockManager.extendLock (which is never called by the production code).
       (mockLockHandle.extend as Mock<() => Promise<boolean>>).mockResolvedValueOnce(false);
 
-      // Wait for heartbeat interval to fire
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Advance past the heartbeat interval to trigger the lock extension check
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(lostHandler).toHaveBeenCalled();
+
+      jest.useRealTimers();
     });
 
     it('should emit activateStandby on failover', async () => {

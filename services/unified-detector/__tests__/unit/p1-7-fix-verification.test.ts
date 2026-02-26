@@ -17,7 +17,7 @@
  * @package services/unified-detector
  */
 
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { WarmingIntegration, WarmingIntegrationConfig } from '../../src/warming-integration';
 import { HierarchicalCache } from '@arbitrage/core/caching';
 
@@ -29,7 +29,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     // Create cache
     cache = new HierarchicalCache({
       l1Size: 64,
-      l2Enabled: true,
+      l2Enabled: false,
       usePriceMatrix: false,
     });
 
@@ -48,6 +48,13 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     // Seed cache with test data
     await cache.set('WETH_USDT', { price: 1800, timestamp: Date.now() });
     await cache.set('WBTC_USDT', { price: 42000, timestamp: Date.now() });
+
+    // Enable fake timers AFTER setup completes so initialization timers work normally
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('should debounce concurrent warming operations for same pair', async () => {
@@ -81,7 +88,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     expect(pendingAfterThird).toBe(1);
 
     // Wait for warming to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await jest.advanceTimersByTimeAsync(100);
 
     // Pending count should be 0 after completion
     const pendingAfterComplete = integration.getPendingWarmingCount();
@@ -102,7 +109,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     expect(pendingCount).toBe(3);
 
     // Wait for warmings to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await jest.advanceTimersByTimeAsync(100);
 
     // All should complete
     const pendingAfterComplete = integration.getPendingWarmingCount();
@@ -124,7 +131,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     }
 
     // Wait for warming to complete
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await jest.advanceTimersByTimeAsync(150);
 
     // Get final stats
     const finalStats = integration.getStats();
@@ -174,7 +181,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     expect(integration.getPendingWarmingCount()).toBe(1);
 
     // Wait for completion
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await jest.advanceTimersByTimeAsync(100);
 
     // Now should be complete
     expect(integration.getPendingWarmingCount()).toBe(0);
@@ -221,6 +228,6 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
     expect(avgPerCall).toBeLessThan(0.1);
 
     // Cleanup
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await jest.advanceTimersByTimeAsync(100);
   });
 });

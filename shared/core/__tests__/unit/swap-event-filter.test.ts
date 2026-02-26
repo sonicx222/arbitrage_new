@@ -683,6 +683,8 @@ describe('FilterResult Interface', () => {
 
 describe('VolumeAggregate Interface', () => {
   it('should have correct shape when emitted', async () => {
+    jest.useFakeTimers();
+
     const filter = new SwapEventFilter({ aggregationWindowMs: 50 });
     let aggregate: VolumeAggregate | null = null;
 
@@ -695,7 +697,8 @@ describe('VolumeAggregate Interface', () => {
       transactionHash: '0xtx1'
     }));
 
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Advance past the 50ms aggregation window to trigger the volume aggregate callback
+    await jest.advanceTimersByTimeAsync(100);
 
     expect(aggregate).not.toBeNull();
     expect(aggregate).toHaveProperty('pairAddress');
@@ -710,6 +713,7 @@ describe('VolumeAggregate Interface', () => {
     expect(aggregate).toHaveProperty('windowEndMs');
 
     filter.destroy();
+    jest.useRealTimers();
   });
 });
 

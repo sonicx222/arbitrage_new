@@ -30,7 +30,6 @@ describe('OnChainLiquidityValidator', () => {
   const mockBalanceResult = '0x' + (BigInt(10e18)).toString(16).padStart(64, '0');
 
   beforeEach(() => {
-    // Reset fake timers if used
     jest.useRealTimers();
 
     mockCall = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockBalanceResult);
@@ -44,7 +43,7 @@ describe('OnChainLiquidityValidator', () => {
       rpcTimeoutMs: 5000,      // 5 seconds
       maxCacheSize: 100,
       circuitBreakerThreshold: 3,
-      circuitBreakerCooldownMs: 1000, // Short for tests
+      circuitBreakerCooldownMs: 200, // Short for tests
     });
   });
 
@@ -290,8 +289,8 @@ describe('OnChainLiquidityValidator', () => {
         await validator.checkLiquidity(provider, `0x${i}bbb`, BigInt(1e18), context);
       }
 
-      // Wait for cooldown (1000ms configured in beforeEach)
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      // Wait for cooldown (200ms configured in beforeEach)
+      await new Promise(resolve => setTimeout(resolve, 250));
 
       // Should allow retry (half-open)
       mockCall.mockClear();
@@ -315,8 +314,8 @@ describe('OnChainLiquidityValidator', () => {
         await validator.checkLiquidity(provider, `0x${i}ccc`, BigInt(1e18), context);
       }
 
-      // Wait for cooldown
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      // Wait for cooldown (200ms configured in beforeEach)
+      await new Promise(resolve => setTimeout(resolve, 250));
 
       // Successful retry should close circuit
       mockCall.mockResolvedValue(mockBalanceResult);
@@ -589,7 +588,7 @@ describe('OnChainLiquidityValidator', () => {
 
       const loggedValidator = new OnChainLiquidityValidator({
         circuitBreakerThreshold: 3,
-        circuitBreakerCooldownMs: 100, // Short cooldown for test
+        circuitBreakerCooldownMs: 10, // Minimal cooldown for test
         rpcTimeoutMs: 5000,
         logger: mockLogger as any,
       });
@@ -607,7 +606,7 @@ describe('OnChainLiquidityValidator', () => {
       }
 
       // Wait for cooldown
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 20));
 
       // Successful retry should close circuit and log CLOSED
       mockCall.mockResolvedValue(mockBalanceResult);
@@ -635,7 +634,7 @@ describe('OnChainLiquidityValidator', () => {
 
       const loggedValidator = new OnChainLiquidityValidator({
         circuitBreakerThreshold: 3,
-        circuitBreakerCooldownMs: 100,
+        circuitBreakerCooldownMs: 10,
         rpcTimeoutMs: 5000,
         logger: mockLogger as any,
       });
@@ -653,7 +652,7 @@ describe('OnChainLiquidityValidator', () => {
       }
 
       // Wait for cooldown
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 20));
 
       // Retry attempt should log HALF-OPEN
       (mockLogger.info as jest.Mock).mockClear();

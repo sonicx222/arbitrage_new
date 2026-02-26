@@ -206,7 +206,6 @@ describe('HotForkSynchronizer', () => {
 
   describe('sync behavior', () => {
     beforeEach(async () => {
-      jest.useRealTimers();
       synchronizer = new HotForkSynchronizer({
         anvilManager: mockAnvilManager as unknown as AnvilForkManager,
         sourceProvider: mockSourceProvider as unknown as ethers.JsonRpcProvider,
@@ -221,8 +220,8 @@ describe('HotForkSynchronizer', () => {
       // Simulate new block
       blockNumber = 18500001;
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance past sync interval to trigger sync
+      await jest.advanceTimersByTimeAsync(150);
 
       expect(mockAnvilManager.resetToBlock).toHaveBeenCalledWith(18500001);
       expect(synchronizer.getLastSyncedBlock()).toBe(18500001);
@@ -234,8 +233,8 @@ describe('HotForkSynchronizer', () => {
       // Keep same block number
       mockAnvilManager.resetToBlock.mockClear();
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance past sync interval
+      await jest.advanceTimersByTimeAsync(150);
 
       expect(mockAnvilManager.resetToBlock).not.toHaveBeenCalled();
     });
@@ -252,8 +251,8 @@ describe('HotForkSynchronizer', () => {
 
       await synchronizer.start();
 
-      // Wait for failed sync
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance past sync interval to trigger failed sync
+      await jest.advanceTimersByTimeAsync(150);
 
       const metrics = synchronizer.getMetrics();
       expect(metrics.failedSyncs).toBeGreaterThan(0);
@@ -334,7 +333,6 @@ describe('HotForkSynchronizer', () => {
 
   describe('metrics', () => {
     beforeEach(async () => {
-      jest.useRealTimers();
       synchronizer = new HotForkSynchronizer({
         anvilManager: mockAnvilManager as unknown as AnvilForkManager,
         sourceProvider: mockSourceProvider as unknown as ethers.JsonRpcProvider,
@@ -355,8 +353,8 @@ describe('HotForkSynchronizer', () => {
       blockNumber = 18500001;
       await synchronizer.start();
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Advance past sync interval to trigger sync
+      await jest.advanceTimersByTimeAsync(100);
 
       const metrics = synchronizer.getMetrics();
       expect(metrics.successfulSyncs).toBeGreaterThan(0);
@@ -373,8 +371,8 @@ describe('HotForkSynchronizer', () => {
 
       await synchronizer.start();
 
-      // Wait for failed sync
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Advance past sync interval to trigger failed sync
+      await jest.advanceTimersByTimeAsync(100);
 
       const metrics = synchronizer.getMetrics();
       expect(metrics.failedSyncs).toBeGreaterThan(0);
@@ -391,8 +389,8 @@ describe('HotForkSynchronizer', () => {
 
       await synchronizer.start();
 
-      // Wait for multiple failed syncs
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Advance for multiple failed syncs
+      await jest.advanceTimersByTimeAsync(200);
 
       const metrics = synchronizer.getMetrics();
       expect(metrics.consecutiveFailures).toBeGreaterThan(0);
@@ -402,8 +400,8 @@ describe('HotForkSynchronizer', () => {
       blockNumber = 18500001;
       await synchronizer.start();
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Advance past sync interval
+      await jest.advanceTimersByTimeAsync(100);
 
       synchronizer.resetMetrics();
 
@@ -416,8 +414,8 @@ describe('HotForkSynchronizer', () => {
       const beforeTime = Date.now();
       await synchronizer.start();
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Advance past sync interval
+      await jest.advanceTimersByTimeAsync(100);
       const afterTime = Date.now();
 
       const metrics = synchronizer.getMetrics();
@@ -432,7 +430,6 @@ describe('HotForkSynchronizer', () => {
 
   describe('forceSync', () => {
     beforeEach(async () => {
-      jest.useRealTimers();
       synchronizer = new HotForkSynchronizer({
         anvilManager: mockAnvilManager as unknown as AnvilForkManager,
         sourceProvider: mockSourceProvider as unknown as ethers.JsonRpcProvider,
@@ -464,10 +461,6 @@ describe('HotForkSynchronizer', () => {
   // ===========================================================================
 
   describe('auto-pause on failures', () => {
-    beforeEach(() => {
-      jest.useRealTimers();
-    });
-
     test('should auto-pause after max consecutive failures', async () => {
       // First call succeeds (for start()), then fails
       let callCount = 0;
@@ -487,8 +480,8 @@ describe('HotForkSynchronizer', () => {
 
       await synchronizer.start();
 
-      // Wait for enough failures
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Advance for enough failures (3+ intervals at 20ms each)
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(synchronizer.getState()).toBe('paused');
       expect(mockLogger.error).toHaveBeenCalled();
@@ -516,8 +509,8 @@ describe('HotForkSynchronizer', () => {
 
       await synchronizer.start();
 
-      // Wait for enough syncs to complete failures and recovery (increased for CI stability)
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Advance for enough syncs to complete failures and recovery
+      await jest.advanceTimersByTimeAsync(400);
 
       const metrics = synchronizer.getMetrics();
       expect(metrics.consecutiveFailures).toBe(0);
@@ -530,8 +523,6 @@ describe('HotForkSynchronizer', () => {
 
   describe('adaptive sync (Fix 10.5)', () => {
     test('should use adaptive sync when enabled', async () => {
-      jest.useRealTimers();
-
       // Ensure mock returns successful values
       mockSourceProvider.getBlockNumber.mockResolvedValue(blockNumber);
 
@@ -549,8 +540,8 @@ describe('HotForkSynchronizer', () => {
       // Simulate block progress to trigger syncs
       blockNumber = 18500001;
 
-      // Wait for some syncs
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Advance time for syncs
+      await jest.advanceTimersByTimeAsync(300);
 
       expect(synchronizer.getState()).toBe('running');
       // Adaptive mode should have synced at least once
@@ -558,8 +549,6 @@ describe('HotForkSynchronizer', () => {
     });
 
     test('should stop cleanly in adaptive mode', async () => {
-      jest.useRealTimers();
-
       // Ensure mock returns successful values
       mockSourceProvider.getBlockNumber.mockResolvedValue(blockNumber);
 
@@ -576,7 +565,7 @@ describe('HotForkSynchronizer', () => {
       expect(synchronizer.getState()).toBe('running');
 
       // Let adaptive sync start
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await jest.advanceTimersByTimeAsync(100);
 
       // Stop should work cleanly without hanging timers
       await synchronizer.stop();

@@ -243,6 +243,8 @@ describe('RedisStreamsClient - Consumer Groups', () => {
     });
 
     it('should flush batch on timeout', async () => {
+      jest.useFakeTimers();
+
       mockRedis.xadd.mockResolvedValue('1234-0');
 
       const batcher = client.createBatcher('stream:test', {
@@ -252,12 +254,13 @@ describe('RedisStreamsClient - Consumer Groups', () => {
 
       batcher.add({ type: 'price', value: 1 });
 
-      // Wait for timeout
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Advance past the 50ms maxWaitMs to trigger the batch flush
+      await jest.advanceTimersByTimeAsync(100);
 
       expect(mockRedis.xadd).toHaveBeenCalled();
 
       batcher.destroy();
+      jest.useRealTimers();
     });
 
     it('should provide batch statistics', async () => {

@@ -743,8 +743,8 @@ describe('S3.3.7 Solana Partition Deployment & Testing', () => {
     it('should track uptime', async () => {
       detector = await createStartedDetector('mainnet');
 
-      // Wait briefly
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Brief wait to accumulate some uptime (Date.now() based, no timer needed)
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       const stats = detector.getStats();
       expect(stats.uptimeSeconds).toBeGreaterThan(0);
