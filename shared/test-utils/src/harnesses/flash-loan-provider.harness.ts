@@ -95,6 +95,33 @@ export interface FlashLoanProviderTestConfig {
   createRequest?: (overrides?: Partial<FlashLoanRequest>) => FlashLoanRequest;
   /** Default chain for this provider (defaults to 'ethereum') */
   defaultChain?: string;
+
+  /**
+   * Where buildTransaction sends tx. Defaults to FLASH_LOAN_TEST_ADDRESSES.CONTRACT.
+   * DAI Flash Mint and Morpho send to poolAddress instead.
+   */
+  expectedTxTarget?: string;
+
+  /**
+   * Skip the calldata decode test that uses executeArbitrage ABI.
+   * Set for providers using different ABIs (EIP-3156 flashLoan, Morpho flashLoan).
+   * The basic calldata test (non-empty hex) still runs.
+   */
+  skipCalldataDecodeTest?: boolean;
+
+  /**
+   * Expected error code for wrong chain validation.
+   * Defaults to '[ERR_CHAIN_MISMATCH]'.
+   * Providers with custom chain validation (DAI, Morpho) use '[ERR_CHAIN_NOT_SUPPORTED]'.
+   */
+  wrongChainErrorCode?: string;
+
+  /**
+   * Expected error code for invalid asset address validation.
+   * Defaults to '[ERR_INVALID_ASSET]'.
+   * DAI Flash Mint returns '[ERR_ASSET_NOT_DAI]' for any non-DAI asset.
+   */
+  invalidAssetErrorCode?: string;
 }
 
 // =============================================================================
@@ -119,6 +146,18 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
   const baseCreateRequest = config.createRequest ?? createStandardRequest;
   const createRequest = (overrides?: Partial<FlashLoanRequest>) =>
     baseCreateRequest({ chain: defaultChain, ...overrides });
+
+  // Configurable overrides with backward-compatible defaults
+  const expectedTxTarget = config.expectedTxTarget ?? FLASH_LOAN_TEST_ADDRESSES.CONTRACT;
+  const skipCalldataDecodeTest = config.skipCalldataDecodeTest ?? false;
+  const wrongChainErrorCode = config.wrongChainErrorCode ?? '[ERR_CHAIN_MISMATCH]';
+  const invalidAssetErrorCode = config.invalidAssetErrorCode ?? '[ERR_INVALID_ASSET]';
+
+  // Determine the default asset for this provider (WETH for most, DAI for DaiFlashMint)
+  const defaultAsset = createRequest({}).asset;
+  // Two tokens different from the default asset, for constructing dynamic swap paths
+  const otherTokens = [FLASH_LOAN_TEST_ADDRESSES.WETH, FLASH_LOAN_TEST_ADDRESSES.USDC, FLASH_LOAN_TEST_ADDRESSES.DAI]
+    .filter(t => t.toLowerCase() !== defaultAsset.toLowerCase());
 
   // ---------------------------------------------------------------------------
   // Constructor and Initialization
@@ -299,9 +338,9 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
     it('should validate multi-hop swap path', () => {
       const request = createRequest({
         swapPath: [
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: ethers.parseUnits('24875', 6) },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_SUSHISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.DAI, amountOutMin: ethers.parseEther('24875') },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.DAI, tokenOut: FLASH_LOAN_TEST_ADDRESSES.WETH, amountOutMin: ethers.parseEther('9.95') },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: defaultAsset, tokenOut: otherTokens[0], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_SUSHISWAP, tokenIn: otherTokens[0], tokenOut: otherTokens[1], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: otherTokens[1], tokenOut: defaultAsset, amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       });
       expect(provider.validate(request).valid).toBe(true);
@@ -311,13 +350,13 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
       const mismatchChain = defaultChain === 'polygon' ? 'arbitrum' : 'polygon';
       const result = provider.validate(createRequest({ chain: mismatchChain }));
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('[ERR_CHAIN_MISMATCH]');
+      expect(result.error).toContain(wrongChainErrorCode);
     });
 
     it('should reject invalid asset address', () => {
       const result = provider.validate(createRequest({ asset: 'not-an-address' }));
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('[ERR_INVALID_ASSET]');
+      expect(result.error).toContain(invalidAssetErrorCode);
     });
 
     it('should reject zero loan amount', () => {
@@ -335,8 +374,8 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
     it('should reject swap path with invalid router address', () => {
       const result = provider.validate(createRequest({
         swapPath: [
-          { router: 'invalid-router', tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: 1n },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.WETH, amountOutMin: ethers.parseEther('9.95') },
+          { router: 'invalid-router', tokenIn: defaultAsset, tokenOut: otherTokens[0], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: otherTokens[0], tokenOut: defaultAsset, amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       }));
       expect(result.valid).toBe(false);
@@ -346,8 +385,8 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
     it('should reject unapproved router', () => {
       const result = provider.validate(createRequest({
         swapPath: [
-          { router: '0x9999999999999999999999999999999999999999', tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: 1n },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.WETH, amountOutMin: ethers.parseEther('9.95') },
+          { router: '0x9999999999999999999999999999999999999999', tokenIn: defaultAsset, tokenOut: otherTokens[0], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: otherTokens[0], tokenOut: defaultAsset, amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       }));
       expect(result.valid).toBe(false);
@@ -357,8 +396,8 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
     it('should accept approved routers case-insensitively', () => {
       const result = provider.validate(createRequest({
         swapPath: [
-          { router: '0x' + FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP.slice(2).toUpperCase(), tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: ethers.parseUnits('24875', 6) },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_SUSHISWAP.toLowerCase(), tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.WETH, amountOutMin: ethers.parseEther('9.95') },
+          { router: '0x' + FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP.slice(2).toUpperCase(), tokenIn: defaultAsset, tokenOut: otherTokens[0], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_SUSHISWAP.toLowerCase(), tokenIn: otherTokens[0], tokenOut: defaultAsset, amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       }));
       expect(result.valid).toBe(true);
@@ -367,8 +406,8 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
     it('should reject path that does not end with starting token', () => {
       const result = provider.validate(createRequest({
         swapPath: [
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: ethers.parseUnits('24875', 6) },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.DAI, amountOutMin: ethers.parseEther('24875') },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: defaultAsset, tokenOut: otherTokens[0], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: otherTokens[0], tokenOut: otherTokens[1], amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       }));
       expect(result.valid).toBe(false);
@@ -376,11 +415,12 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
     });
 
     it('should reject when first swap token does not match asset', () => {
+      // Use a token different from the asset for tokenIn to trigger asset mismatch
+      const wrongTokenIn = otherTokens[0];
       const result = provider.validate(createRequest({
-        asset: FLASH_LOAN_TEST_ADDRESSES.WETH,
         swapPath: [
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.DAI, amountOutMin: 1n },
-          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: FLASH_LOAN_TEST_ADDRESSES.DAI, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: wrongTokenIn, tokenOut: otherTokens[1], amountOutMin: 1n },
+          { router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP, tokenIn: otherTokens[1], tokenOut: wrongTokenIn, amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       }));
       expect(result.valid).toBe(false);
@@ -408,20 +448,22 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
         expect(calldata.length).toBeGreaterThan(10);
       });
 
-      it('should set deadline to approximately 5 minutes in future', () => {
-        const beforeTimestamp = Math.floor(Date.now() / 1000);
-        const calldata = provider.buildCalldata(createRequest());
+      if (!skipCalldataDecodeTest) {
+        it('should set deadline to approximately 5 minutes in future', () => {
+          const beforeTimestamp = Math.floor(Date.now() / 1000);
+          const calldata = provider.buildCalldata(createRequest());
 
-        const iface = new ethers.Interface([
-          'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
-        ]);
-        const decoded = iface.decodeFunctionData('executeArbitrage', calldata);
-        const deadline = Number(decoded[4]);
-        const afterTimestamp = Math.floor(Date.now() / 1000);
+          const iface = new ethers.Interface([
+            'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
+          ]);
+          const decoded = iface.decodeFunctionData('executeArbitrage', calldata);
+          const deadline = Number(decoded[4]);
+          const afterTimestamp = Math.floor(Date.now() / 1000);
 
-        expect(deadline).toBeGreaterThanOrEqual(beforeTimestamp + 299);
-        expect(deadline).toBeLessThanOrEqual(afterTimestamp + 301);
-      });
+          expect(deadline).toBeGreaterThanOrEqual(beforeTimestamp + 299);
+          expect(deadline).toBeLessThanOrEqual(afterTimestamp + 301);
+        });
+      }
     });
 
     describe('buildTransaction', () => {
@@ -429,7 +471,7 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
         const request = createRequest();
         const tx = provider.buildTransaction(request, FLASH_LOAN_TEST_ADDRESSES.INITIATOR);
 
-        expect(tx.to).toBe(FLASH_LOAN_TEST_ADDRESSES.CONTRACT);
+        expect(tx.to).toBe(expectedTxTarget);
         expect(tx.from).toBe(FLASH_LOAN_TEST_ADDRESSES.INITIATOR);
         expect(tx.data).toBeDefined();
       });
@@ -491,7 +533,7 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
       expect(feeInfo.feeAmount).toBe((request.amount * BigInt(defaultFeeBps)) / 10000n);
 
       const tx = provider.buildTransaction(request, request.initiator);
-      expect(tx.to).toBe(FLASH_LOAN_TEST_ADDRESSES.CONTRACT);
+      expect(tx.to).toBe(expectedTxTarget);
 
       const gasEstimate = await provider.estimateGas(request, mockProvider);
       expect(gasEstimate).toBe(550000n);
@@ -509,8 +551,8 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
       const request = createRequest({
         swapPath: [{
           router: FLASH_LOAN_TEST_ADDRESSES.ROUTER_UNISWAP,
-          tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH,
-          tokenOut: FLASH_LOAN_TEST_ADDRESSES.WETH,
+          tokenIn: defaultAsset,
+          tokenOut: defaultAsset,
           amountOutMin: ethers.parseEther('10.1'),
         }] as FlashLoanSwapStep[],
       });
@@ -548,8 +590,8 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
 
       const request = createRequest({
         swapPath: [
-          { router: mixedCaseRouters[0].toLowerCase(), tokenIn: FLASH_LOAN_TEST_ADDRESSES.WETH, tokenOut: FLASH_LOAN_TEST_ADDRESSES.USDC, amountOutMin: ethers.parseUnits('24875', 6) },
-          { router: mixedCaseRouters[1].toLowerCase(), tokenIn: FLASH_LOAN_TEST_ADDRESSES.USDC, tokenOut: FLASH_LOAN_TEST_ADDRESSES.WETH, amountOutMin: ethers.parseEther('9.95') },
+          { router: mixedCaseRouters[0].toLowerCase(), tokenIn: defaultAsset, tokenOut: otherTokens[0], amountOutMin: 1n },
+          { router: mixedCaseRouters[1].toLowerCase(), tokenIn: otherTokens[0], tokenOut: defaultAsset, amountOutMin: 1n },
         ] as FlashLoanSwapStep[],
       });
 
