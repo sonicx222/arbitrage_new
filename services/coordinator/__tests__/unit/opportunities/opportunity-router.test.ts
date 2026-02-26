@@ -396,6 +396,46 @@ describe('OpportunityRouter', () => {
       expect(streamsClient.xadd).not.toHaveBeenCalled();
     });
 
+    // =========================================================================
+    // Forwarding observability
+    // =========================================================================
+
+    describe('forwarding observability', () => {
+      it('should log reason when opportunity is not forwarded due to non-leader status', async () => {
+        const data = createOpportunityData({ id: 'opp-not-leader-obs', status: 'pending' });
+
+        await router.processOpportunity(data, false);
+
+        expect(logger.debug).toHaveBeenCalledWith(
+          'Opportunity stored but not forwarded',
+          expect.objectContaining({
+            id: 'opp-not-leader-obs',
+            reason: 'not_leader',
+            isLeader: false,
+            status: 'pending',
+          }),
+        );
+        expect(streamsClient.xadd).not.toHaveBeenCalled();
+      });
+
+      it('should log reason when opportunity is not forwarded due to non-pending status', async () => {
+        const data = createOpportunityData({ id: 'opp-status-obs', status: 'executed' });
+
+        await router.processOpportunity(data, true);
+
+        expect(logger.debug).toHaveBeenCalledWith(
+          'Opportunity stored but not forwarded',
+          expect.objectContaining({
+            id: 'opp-status-obs',
+            reason: 'status_not_pending',
+            isLeader: true,
+            status: 'executed',
+          }),
+        );
+        expect(streamsClient.xadd).not.toHaveBeenCalled();
+      });
+    });
+
     it('should log opportunity detection with metadata', async () => {
       const data = createOpportunityData({
         id: 'opp-log',

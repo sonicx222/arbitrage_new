@@ -299,6 +299,14 @@ export class OpportunityRouter {
     // Forward to execution engine if leader and pending
     if (isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
       await this.forwardToExecutionEngine(opportunity, traceContext);
+    } else {
+      const reason = !isLeader ? 'not_leader' : 'status_not_pending';
+      this.logger.debug('Opportunity stored but not forwarded', {
+        id,
+        reason,
+        isLeader,
+        status: opportunity.status,
+      });
     }
 
     return true;
