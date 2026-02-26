@@ -362,10 +362,12 @@ describe('SimpleArbitrageDetector', () => {
 
   // ===========================================================================
   // FIX #22c: Unrealistic Profit Filter Edge Cases
+  // Threshold lowered from 500% (5.0) to 20% (0.20) after terminal analysis
+  // showed simulation generating 100-500% profits. Real arb is 0.01-5%.
   // ===========================================================================
 
   describe('Unrealistic Profit Filter (FIX #22c)', () => {
-    it('should reject opportunities with >500% profit', () => {
+    it('should reject opportunities with >20% profit as unrealistic', () => {
       // pair1: price = reserve0/reserve1 = 1000/2000 = 0.5
       const pair1 = createMockPairSnapshot({
         address: '0xpair1',
@@ -379,7 +381,7 @@ describe('SimpleArbitrageDetector', () => {
 
       // pair2: price = reserve0/reserve1 = 1000/200 = 5.0
       // priceDiff = |0.5 - 5.0| / 0.5 = 9.0 (900%)
-      // netProfitPct = 9.0 - 0.006 = 8.994 >> 5.0 threshold
+      // netProfitPct = 9.0 - 0.006 = 8.994 >> 0.20 threshold
       const pair2 = createMockPairSnapshot({
         address: '0xpair2',
         dex: 'sushiswap',
@@ -394,7 +396,7 @@ describe('SimpleArbitrageDetector', () => {
       expect(result).toBeNull();
     });
 
-    it('should increment unrealisticProfit counter when >500% profit rejected', () => {
+    it('should increment unrealisticProfit counter when >20% profit rejected', () => {
       const pair1 = createMockPairSnapshot({
         address: '0xpair1',
         dex: 'uniswap',
@@ -422,12 +424,11 @@ describe('SimpleArbitrageDetector', () => {
       expect(stats.total).toBeGreaterThanOrEqual(1);
     });
 
-    it('should accept opportunities near but below 500% profit', () => {
-      // We need netProfitPct < 5.0 but > minProfitThreshold (0.005 for ethereum)
+    it('should reject 25% profit (0.25) as unrealistic', () => {
       // pair1: price = 1000/2000 = 0.5
-      // pair2: price = 1000/350 = ~2.857
-      // priceDiff = |0.5 - 2.857| / 0.5 = ~4.714 (471.4%)
-      // netProfitPct = 4.714 - 0.006 = 4.708 < 5.0 => accepted
+      // pair2: price = 1000/1600 = 0.625
+      // priceDiff = |0.5 - 0.625| / 0.5 = 0.25 (25%)
+      // netProfitPct = 0.25 - 0.006 = 0.244 > 0.20 => rejected
       const pair1 = createMockPairSnapshot({
         address: '0xpair1',
         dex: 'uniswap',
@@ -442,17 +443,81 @@ describe('SimpleArbitrageDetector', () => {
         address: '0xpair2',
         dex: 'sushiswap',
         reserve0: '1000000000000000000000',
-        reserve1: '350000000000000000000',
+        reserve1: '1600000000000000000000',
         reserve0BigInt: BigInt('1000000000000000000000'),
-        reserve1BigInt: BigInt('350000000000000000000'),
+        reserve1BigInt: BigInt('1600000000000000000000'),
+        fee: 0.003,
+      });
+
+      const result = detector.calculateArbitrage(pair1, pair2);
+      expect(result).toBeNull();
+
+      const stats = detector.getStats();
+      expect(stats.unrealisticProfit).toBe(1);
+    });
+
+    it('should accept 15% profit (0.15) as realistic', () => {
+      // pair1: price = 1000/2000 = 0.5
+      // pair2: price = 1000/1740 = ~0.5747
+      // priceDiff = |0.5 - 0.5747| / 0.5 = ~0.1494 (14.94%)
+      // netProfitPct = 0.1494 - 0.006 = 0.1434 < 0.20 => accepted
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '2000000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('2000000000000000000000'),
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '1740000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('1740000000000000000000'),
         fee: 0.003,
       });
 
       const result = detector.calculateArbitrage(pair1, pair2);
       expect(result).not.toBeNull();
-      // Verify the profit is high but below 500%
-      expect(result!.profitPercentage).toBeGreaterThan(100);
-      expect(result!.profitPercentage).toBeLessThan(500);
+      // profitPercentage is netProfitPct * 100, so ~14.34%
+      expect(result!.profitPercentage).toBeGreaterThan(10);
+      expect(result!.profitPercentage).toBeLessThan(20);
+    });
+
+    it('should accept opportunities near but below 20% profit', () => {
+      // pair1: price = 1000/2000 = 0.5
+      // pair2: price = 1000/1700 = ~0.5882
+      // priceDiff = |0.5 - 0.5882| / 0.5 = ~0.1765 (17.65%)
+      // netProfitPct = 0.1765 - 0.006 = 0.1705 < 0.20 => accepted
+      const pair1 = createMockPairSnapshot({
+        address: '0xpair1',
+        dex: 'uniswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '2000000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('2000000000000000000000'),
+        fee: 0.003,
+      });
+
+      const pair2 = createMockPairSnapshot({
+        address: '0xpair2',
+        dex: 'sushiswap',
+        reserve0: '1000000000000000000000',
+        reserve1: '1700000000000000000000',
+        reserve0BigInt: BigInt('1000000000000000000000'),
+        reserve1BigInt: BigInt('1700000000000000000000'),
+        fee: 0.003,
+      });
+
+      const result = detector.calculateArbitrage(pair1, pair2);
+      expect(result).not.toBeNull();
+      // Verify the profit is below 20%
+      expect(result!.profitPercentage).toBeGreaterThan(10);
+      expect(result!.profitPercentage).toBeLessThan(20);
     });
   });
 

@@ -222,10 +222,10 @@ export class SimpleArbitrageDetector {
     }
 
     // FIX #22c: Filter unrealistic profit percentages.
-    // In simulation mode, reserve drift across DEXes creates artificially large spreads.
-    // In production, >500% indicates stale/erroneous price data (real arb is 0.1-5%).
-    // Sending absurd opportunities to the execution engine wastes resources.
-    if (netProfitPct > 5.0) {
+    // Real-world arbitrage is typically 0.01-5%. Values above 20% indicate
+    // stale reserves or simulation drift. Lowered from 500% after terminal
+    // analysis showed simulation generating 100-500% profits.
+    if (netProfitPct > 0.20) {
       this.rejectionStats.unrealisticProfit++;
       this.trackRejection();
       return null;
