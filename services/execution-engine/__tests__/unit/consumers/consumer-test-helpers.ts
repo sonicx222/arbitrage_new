@@ -65,6 +65,7 @@ export const createMockStreamsClient = () => ({
   createConsumerGroup: jest.fn().mockResolvedValue(undefined),
   xack: jest.fn().mockResolvedValue(1),
   xadd: jest.fn().mockResolvedValue('stream-id'),
+  xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
 });
 
 export const createMockStreamConsumer = () => {

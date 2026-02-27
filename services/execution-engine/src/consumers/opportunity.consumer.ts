@@ -799,7 +799,7 @@ export class OpportunityConsumer {
         originalPayload,
       };
 
-      await this.streamsClient.xadd(DLQ_STREAM, dlqData);
+      await this.streamsClient.xaddWithLimit(DLQ_STREAM, dlqData);
     } catch (dlqError) {
       this.logger.error('Failed to move message to DLQ', {
         messageId: message.id,

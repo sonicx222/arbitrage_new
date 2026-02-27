@@ -39,6 +39,7 @@ function createMockStreamsClient(): jest.Mocked<StreamsClient> {
   return {
     xack: jest.fn().mockResolvedValue(1),
     xadd: jest.fn().mockResolvedValue('dlq-1-0'),
+    xaddWithLimit: jest.fn().mockResolvedValue('dlq-1-0'),
     xpending: jest.fn().mockResolvedValue(null),
     xclaim: jest.fn().mockResolvedValue([]),
     xpendingRange: jest.fn().mockResolvedValue([]),
@@ -154,8 +155,8 @@ describe('StreamConsumerManager', () => {
       );
 
       // Should move claimed messages to DLQ
-      expect(streamsClient.xadd).toHaveBeenCalledTimes(2);
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:dead-letter-queue',
         expect.objectContaining({
           originalStream: 'stream:opportunities',
@@ -314,7 +315,7 @@ describe('StreamConsumerManager', () => {
 
       expect(handler).toHaveBeenCalled();
       expect(streamsClient.xack).toHaveBeenCalledWith('stream:opportunities', 'coordinator-group', '1-0');
-      expect(streamsClient.xadd).not.toHaveBeenCalled(); // No DLQ
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled(); // No DLQ
     });
 
     it('should move to DLQ then ACK on handler failure', async () => {
@@ -325,7 +326,7 @@ describe('StreamConsumerManager', () => {
       await wrapped({ id: '1-0', data: { opportunity: 'data' } });
 
       // Should write to DLQ first
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:dead-letter-queue',
         expect.objectContaining({
           originalStream: 'stream:opportunities',
@@ -437,7 +438,7 @@ describe('StreamConsumerManager', () => {
       await wrapped({ id: '3-0', data: { corrupted: 'yes' } });
 
       // Should write to DLQ with error info
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:dead-letter-queue',
         expect.objectContaining({
           originalStream: 'stream:opportunities',
@@ -550,7 +551,7 @@ describe('StreamConsumerManager', () => {
       ]);
 
       // DLQ write fails
-      streamsClient.xadd.mockRejectedValue(new Error('DLQ write failed'));
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('DLQ write failed'));
 
       await manager.recoverPendingMessages([groupConfig]);
 

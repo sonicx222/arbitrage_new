@@ -386,7 +386,7 @@ describe('OpportunityConsumer - Message Handling', () => {
 
     // Invalid type should be moved to DLQ
     expect(mockStats.validationErrors).toBe(1);
-    expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
       DLQ_STREAM,
       expect.any(Object)
     );
@@ -770,7 +770,7 @@ describe('OpportunityConsumer - Stream-Init Handling (BUG #2 Fix)', () => {
     // Should NOT increment error counter
     expect(mockStats.validationErrors).toBe(0);
     // Should NOT move to DLQ
-    expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+    expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
     // Should log debug message
     expect(mockLogger.debug).toHaveBeenCalledWith(
       'Skipping system message',
@@ -827,7 +827,7 @@ describe('OpportunityConsumer - Chain Validation (BUG #3 Fix)', () => {
     await (consumer as any).handleStreamMessage(message);
 
     expect(mockStats.validationErrors).toBe(1);
-    expect(mockStreamsClient.xadd).toHaveBeenCalled(); // Moved to DLQ
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled(); // Moved to DLQ
   });
 
   it('should reject cross-chain with unsupported sellChain', async () => {
@@ -994,7 +994,7 @@ describe('OpportunityConsumer - Type Validation', () => {
     await (consumer as any).handleStreamMessage(message);
 
     expect(mockStats.validationErrors).toBe(1);
-    expect(mockStreamsClient.xadd).toHaveBeenCalled(); // Moved to DLQ
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled(); // Moved to DLQ
   });
 
   it('should accept all valid opportunity types', async () => {

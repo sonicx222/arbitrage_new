@@ -103,6 +103,10 @@ export const MIN_GAS_PRICE_GWEI: Record<string, number> = {
   base: 0.0001,
   zksync: 0.01,
   linea: 0.01,
+  blast: 0.0001,     // OP-stack L2
+  scroll: 0.01,      // zkRollup (like zkSync/Linea)
+  mantle: 0.0001,    // OP-stack L2 (MNT native token)
+  mode: 0.0001,      // OP-stack L2
 };
 
 /**
@@ -120,6 +124,10 @@ export const MAX_GAS_PRICE_GWEI: Record<string, number> = {
   base: 1,
   zksync: 10,
   linea: 10,
+  blast: 1,          // OP-stack L2
+  scroll: 10,        // zkRollup (like zkSync/Linea)
+  mantle: 1,         // OP-stack L2 (MNT native token)
+  mode: 1,           // OP-stack L2
 };
 
 /**
@@ -182,6 +190,10 @@ export const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
   fantom: validateGasPrice('fantom', parseFloat(process.env.GAS_PRICE_FANTOM_GWEI || '35')),
   zksync: validateGasPrice('zksync', parseFloat(process.env.GAS_PRICE_ZKSYNC_GWEI || '0.25')),
   linea: validateGasPrice('linea', parseFloat(process.env.GAS_PRICE_LINEA_GWEI || '0.5')),
+  blast: validateGasPrice('blast', parseFloat(process.env.GAS_PRICE_BLAST_GWEI || '0.001')),
+  scroll: validateGasPrice('scroll', parseFloat(process.env.GAS_PRICE_SCROLL_GWEI || '0.5')),
+  mantle: validateGasPrice('mantle', parseFloat(process.env.GAS_PRICE_MANTLE_GWEI || '0.02')),
+  mode: validateGasPrice('mode', parseFloat(process.env.GAS_PRICE_MODE_GWEI || '0.001')),
 };
 
 /**

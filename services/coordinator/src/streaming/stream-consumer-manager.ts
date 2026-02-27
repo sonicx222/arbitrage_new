@@ -49,6 +49,7 @@ export interface ConsumerGroupConfig {
 export interface StreamsClient {
   xack(streamName: string, groupName: string, messageId: string): Promise<number>;
   xadd(streamName: string, data: Record<string, unknown>): Promise<string>;
+  xaddWithLimit(streamName: string, data: Record<string, unknown>): Promise<string>;
   xpending(streamName: string, groupName: string): Promise<{
     total: number;
     smallestId?: string;
@@ -465,7 +466,7 @@ export class StreamConsumerManager {
     sourceStream: string
   ): Promise<void> {
     try {
-      await this.streamsClient.xadd(this.config.dlqStream, {
+      await this.streamsClient.xaddWithLimit(this.config.dlqStream, {
         originalMessageId: message.id,
         originalStream: sourceStream,
         originalData: JSON.stringify(message.data),

@@ -89,6 +89,10 @@ export const EVM_GAS_COSTS_USD: Readonly<Record<string, number>> = {
   bsc: 0.30,
   avalanche: 0.50,
   fantom: 0.10,
+  blast: 0.05,       // OP-stack L2
+  scroll: 0.25,      // zkRollup (similar to zkSync/Linea)
+  mantle: 0.05,      // OP-stack L2 (MNT native token, low fees)
+  mode: 0.05,        // OP-stack L2
 };
 
 /**
