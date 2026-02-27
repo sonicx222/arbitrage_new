@@ -675,4 +675,44 @@ describe('DaiFlashMintArbitrage', () => {
       expect(await daiArbitrage.totalProfits()).to.be.gt(0);
     });
   });
+
+  // ==========================================================================
+  // 8. Gas Benchmarks
+  // ==========================================================================
+  describe('8. Gas Benchmarks', () => {
+    it('should execute 2-hop arbitrage within gas budget', async () => {
+      const { daiArbitrage, dexRouter1, dai, weth, owner, user } =
+        await loadFixture(deployContractsFixture);
+
+      await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Configure profitable rates: DAI -> WETH -> DAI
+      await dexRouter1.setExchangeRate(
+        await dai.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('0.0005')
+      );
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await dai.getAddress(),
+        ethers.parseEther('2100') // Profitable return
+      );
+
+      const swapPath = build2HopPath(
+        await dexRouter1.getAddress(),
+        await dai.getAddress(),
+        await weth.getAddress(),
+        1n, 1n
+      );
+      const deadline = await getDeadline();
+
+      const tx = await daiArbitrage.connect(user).executeArbitrage(
+        ethers.parseEther('10000'), swapPath, 0n, deadline
+      );
+      const receipt = await tx.wait();
+
+      // DssFlash mint + 2 swaps, no pool fee overhead — budget < 400,000 gas
+      expect(receipt!.gasUsed).to.be.lt(400_000);
+    });
+  });
 });
