@@ -24,8 +24,9 @@ const logger = createLogger('worker-pool');
 async function resolveWorkerScriptPath(): Promise<string> {
   const candidates = [
     path.join(__dirname, 'event-processor-worker.js'),
+    path.join(__dirname, 'event-processor-worker.ts'), // Support direct ts-node dev execution
     path.join(__dirname, '..', 'event-processor-worker.js'),
-    path.join(__dirname, '..', '..', 'dist', 'event-processor-worker.js'),
+    path.join(__dirname, '..', 'event-processor-worker.ts'),
     path.join(process.cwd(), 'shared', 'core', 'dist', 'event-processor-worker.js')
   ];
 
@@ -239,7 +240,7 @@ export class PriorityQueue<T> {
 export class EventProcessingWorkerPool extends EventEmitter {
   private workers: Worker[] = [];
   private availableWorkers: Set<number> = new Set();
-  private activeTasks: Map<string, {resolve: Function, reject: Function, timeout: NodeJS.Timeout, startTime: number}> = new Map();
+  private activeTasks: Map<string, { resolve: Function, reject: Function, timeout: NodeJS.Timeout, startTime: number }> = new Map();
   private taskQueue: PriorityQueue<Task> = new PriorityQueue();
   private workerStats: Map<number, WorkerStats> = new Map();
   private isRunning = false;
@@ -485,13 +486,20 @@ export class EventProcessingWorkerPool extends EventEmitter {
     for (let i = 0; i < this.poolSize; i++) {
       // PHASE3-TASK41: Pass SharedArrayBuffer to workers for zero-copy price access
       // PHASE3-TASK43: Pass key registry buffer for key-to-index mapping
-      const worker = new Worker(this.workerPath, {
+      const workerOptions: any = {
         workerData: {
           workerId: i,
           priceBuffer: this.priceBuffer, // SharedArrayBuffer is transferable
           keyRegistryBuffer: this.keyRegistryBuffer // SharedArrayBuffer for key lookups
         }
-      });
+      };
+
+      // Support running .ts files directly using ts-node in development
+      if (this.workerPath.endsWith('.ts')) {
+        workerOptions.execArgv = ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register'];
+      }
+
+      const worker = new Worker(this.workerPath, workerOptions);
 
       worker.on('message', (message) => this.handleWorkerMessage(message, i));
       worker.on('error', (error) => this.handleWorkerError(error, i));
@@ -513,8 +521,8 @@ export class EventProcessingWorkerPool extends EventEmitter {
       const bufferInfo = this.priceBuffer && this.keyRegistryBuffer
         ? ' with SharedArrayBuffer + key registry'
         : this.priceBuffer
-        ? ' with SharedArrayBuffer'
-        : '';
+          ? ' with SharedArrayBuffer'
+          : '';
       logger.debug(`Worker ${i} initialized${bufferInfo}`);
     }
   }
@@ -727,13 +735,19 @@ export class EventProcessingWorkerPool extends EventEmitter {
     try {
       // P0-FIX: Pass SharedArrayBuffers to restarted workers (matching initializeWorkers)
       // Without these, restarted workers cannot access L1 price matrix or key registry
-      const worker = new Worker(this.workerPath, {
+      const workerOptions: any = {
         workerData: {
           workerId,
           priceBuffer: this.priceBuffer,
           keyRegistryBuffer: this.keyRegistryBuffer
         }
-      });
+      };
+
+      if (this.workerPath.endsWith('.ts')) {
+        workerOptions.execArgv = ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register'];
+      }
+
+      const worker = new Worker(this.workerPath, workerOptions);
 
       // Set up event handlers
       worker.on('message', (message) => this.handleWorkerMessage(message, workerId));

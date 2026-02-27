@@ -149,6 +149,9 @@ export function createSimulationMetricsCollector(
    */
   let stopped = false;
 
+  // Fix 3: Track last logged status to suppress repeated identical entries
+  let lastLoggedSimulationStatus: string | null = null;
+
   // ===========================================================================
   // Private Methods
   // ===========================================================================
@@ -175,7 +178,9 @@ export function createSimulationMetricsCollector(
         snapshot.simulationErrors > 0;
 
       if (!hasActivity) {
-        // Still log health check (lightweight, important for liveness) but skip verbose metrics
+        // Fix 2 & Fix 3: Skip redundant health check logging.
+        // HealthMonitoringManager already includes simulationStatus in its health report.
+        // Only log on status transitions (e.g., not_configured → healthy) to suppress spam.
         const healthyProviders = Object.values(snapshot.providerHealth).filter((p) => p.healthy).length;
         const totalProviders = Object.keys(snapshot.providerHealth).length;
 
@@ -188,15 +193,19 @@ export function createSimulationMetricsCollector(
           status = 'healthy';
         }
 
-        perfLogger.logHealthCheck('simulation-service', {
-          status,
-          simulationSuccessRate: 0,
-          averageLatencyMs: 0,
-          healthyProviders,
-          totalProviders,
-          simulationsPerformed: 0,
-          simulationPredictedReverts: 0,
-        });
+        // Only log when status changes (prevents 2880 useless entries/day)
+        if (status !== lastLoggedSimulationStatus) {
+          lastLoggedSimulationStatus = status;
+          perfLogger.logHealthCheck('simulation-service', {
+            status,
+            simulationSuccessRate: 0,
+            averageLatencyMs: 0,
+            healthyProviders,
+            totalProviders,
+            simulationsPerformed: 0,
+            simulationPredictedReverts: 0,
+          });
+        }
         return;
       }
 

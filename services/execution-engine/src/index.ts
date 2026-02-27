@@ -12,6 +12,12 @@
  *
  * @see ADR-007: Cross-Region Failover Strategy
  */
+
+// Fix 1: Increase max listeners to prevent MaxListenersExceededWarning.
+// The execution engine legitimately registers 11+ exit listeners across Redis clients,
+// service-bootstrap signal handlers, and graceful shutdown handlers.
+process.setMaxListeners(20);
+
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { ExecutionEngineService, SimulationConfig } from './engine';
 import { getOrderflowPipelineConsumer } from '@arbitrage/core/analytics';

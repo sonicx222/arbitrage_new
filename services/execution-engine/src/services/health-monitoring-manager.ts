@@ -129,6 +129,9 @@ export class HealthMonitoringManager {
   // H2 FIX: Delta-based CPU usage tracking (replaces hardcoded 0)
   private readonly cpuTracker = new CpuUsageTracker();
 
+  // Fix 6: Track heap usage between health checks to surface memory growth trends
+  private lastHeapUsed = 0;
+
   constructor(deps: HealthMonitoringDependencies) {
     this.deps = deps;
   }
@@ -195,11 +198,18 @@ export class HealthMonitoringManager {
    * Collect current health data and publish to Redis.
    */
   private async collectAndPublishHealth(): Promise<void> {
+    const currentHeapUsed = process.memoryUsage().heapUsed;
+    // Fix 6: Track heap delta between health checks for memory growth monitoring
+    const heapDeltaKB = this.lastHeapUsed > 0
+      ? Math.round((currentHeapUsed - this.lastHeapUsed) / 1024)
+      : 0;
+    this.lastHeapUsed = currentHeapUsed;
+
     const health: ServiceHealth = {
       name: 'execution-engine',
       status: this.deps.stateManager.isRunning() ? 'healthy' : 'unhealthy',
       uptime: process.uptime(),
-      memoryUsage: process.memoryUsage().heapUsed,
+      memoryUsage: currentHeapUsed,
       cpuUsage: this.cpuTracker.getUsagePercent(),
       lastHeartbeat: Date.now(),
       error: undefined,
@@ -251,8 +261,11 @@ export class HealthMonitoringManager {
       await redis.updateServiceHealth('execution-engine', health);
     }
 
-    // Log health check
-    this.deps.perfLogger.logHealthCheck('execution-engine', health);
+    // Log health check (Fix 6: include heap delta for memory growth visibility)
+    this.deps.perfLogger.logHealthCheck('execution-engine', {
+      ...health,
+      heapDeltaKB,
+    });
   }
 
   // ===========================================================================

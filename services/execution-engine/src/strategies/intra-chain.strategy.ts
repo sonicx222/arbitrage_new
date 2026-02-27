@@ -45,7 +45,9 @@ function getRouterAddress(chain: string, sellDex?: string): string | undefined {
 
 export class IntraChainStrategy extends BaseExecutionStrategy {
   private readonly mevRiskAnalyzer: MevRiskAnalyzer;
-  private readonly commitRevealService: CommitRevealService;
+  // Fix 5: Lazy-initialized only when FEATURE_COMMIT_REVEAL is enabled.
+  // Avoids the "no deployed contracts" warning when the feature is disabled.
+  private commitRevealService: CommitRevealService | null;
 
   constructor(
     logger: Logger,
@@ -54,7 +56,12 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
   ) {
     super(logger);
     this.mevRiskAnalyzer = mevRiskAnalyzer ?? new MevRiskAnalyzer();
-    this.commitRevealService = commitRevealService ?? new CommitRevealService(logger, COMMIT_REVEAL_CONTRACTS);
+    // Fix 5: Only create CommitRevealService when the feature flag is enabled
+    this.commitRevealService = commitRevealService ?? (
+      FEATURE_FLAGS.useCommitReveal
+        ? new CommitRevealService(logger, COMMIT_REVEAL_CONTRACTS)
+        : null
+    );
   }
 
   async execute(
@@ -509,6 +516,13 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       });
 
       // Phase 1: Commit
+      if (!this.commitRevealService) {
+        return BaseExecutionStrategy.createOpportunityError(
+          opportunity,
+          formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'CommitRevealService not initialized'),
+          chain
+        );
+      }
       const commitResult = await this.commitRevealService.commit(
         params,
         chain,
