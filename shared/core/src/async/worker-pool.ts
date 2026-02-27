@@ -263,9 +263,13 @@ export class EventProcessingWorkerPool extends EventEmitter {
 
   // P1-FIX: Track restart attempts per worker for bounded retry with exponential backoff
   private workerRestartCounts: Map<number, number> = new Map();
+  // P0 Fix: Slow periodic retry timers for permanently failed workers
+  private slowRetryTimers: Map<number, NodeJS.Timeout> = new Map();
   private static readonly MAX_RESTART_RETRIES = 5;
   private static readonly BASE_RESTART_DELAY_MS = 10000;
   private static readonly MAX_RESTART_DELAY_MS = 300000; // 5 minutes
+  // P0 Fix: Slow periodic retry interval for permanently failed workers
+  private static readonly SLOW_RETRY_INTERVAL_MS = 300000; // 5 minutes
 
   // JSON parsing statistics (Phase 2)
   private jsonParsingStats: JsonParsingStats = {
@@ -421,6 +425,12 @@ export class EventProcessingWorkerPool extends EventEmitter {
     // P1-FIX: Clear restart counters and cancelled task tracking on stop
     this.workerRestartCounts.clear();
     this.cancelledTaskIds.clear();
+
+    // P0 Fix: Clear all slow retry timers on stop
+    for (const [, timer] of this.slowRetryTimers) {
+      clearInterval(timer);
+    }
+    this.slowRetryTimers.clear();
 
     logger.info('Worker pool stopped successfully');
   }
@@ -729,6 +739,26 @@ export class EventProcessingWorkerPool extends EventEmitter {
         `Giving up — manual intervention required.`
       );
       this.emit('workerRestartFailed', { workerId, attempts: restartCount - 1 });
+
+      // P0 Fix: Slow periodic retry for permanently failed workers
+      // Pattern similar to WebSocket slow recovery (chain-instance.ts:273-276)
+      if (!this.slowRetryTimers.has(workerId)) {
+        const intervalMs = EventProcessingWorkerPool.SLOW_RETRY_INTERVAL_MS;
+        logger.info(`Scheduling slow periodic retry for worker ${workerId} every ${intervalMs / 1000}s`);
+        const timer = setInterval(() => {
+          if (!this.isRunning) {
+            clearInterval(timer);
+            this.slowRetryTimers.delete(workerId);
+            return;
+          }
+          logger.info(`Slow retry: attempting to restart worker ${workerId}`);
+          this.workerRestartCounts.set(workerId, 0); // Reset count for fresh attempt
+          this.restartWorker(workerId);
+        }, intervalMs);
+        timer.unref();
+        this.slowRetryTimers.set(workerId, timer);
+      }
+
       return;
     }
 
@@ -770,6 +800,14 @@ export class EventProcessingWorkerPool extends EventEmitter {
 
       // P1-FIX: Reset restart counter on successful restart
       this.workerRestartCounts.set(workerId, 0);
+
+      // P0 Fix: Clear slow retry timer on successful restart
+      const slowRetryTimer = this.slowRetryTimers.get(workerId);
+      if (slowRetryTimer) {
+        clearInterval(slowRetryTimer);
+        this.slowRetryTimers.delete(workerId);
+      }
+
       logger.info(`Worker ${workerId} restarted successfully`);
 
       // P1-FIX: Dispatch queued tasks to the restarted worker immediately

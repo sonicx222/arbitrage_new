@@ -261,6 +261,7 @@ export class ExecutionEngineService {
   private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
   // FIX 10.1: Pre-computed last gas prices for O(1) hot path access
   private lastGasPrices: Map<string, bigint> = new Map();
+  /** @deprecated Legacy field — only used by pre-pipeline fallback code path. Shutdown drain uses pipeline.getActiveExecutionCount() */
   private activeExecutionCount = 0;
   private readonly maxConcurrentExecutions: number;
   private isProcessingQueue = false; // Guard against concurrent processQueueItems calls (legacy, kept for pipeline fallback)
@@ -792,18 +793,24 @@ export class ExecutionEngineService {
 
       // Fix R2: Wait for in-flight executions to complete before tearing down.
       // Without this, active executions lose access to providers/Redis/nonces mid-flight.
-      if (this.activeExecutionCount > 0) {
+      // M1 FIX: Use pipeline's activeExecutionCount (engine's was always 0 after W1-42 extraction)
+      const activeCount = this.executionPipeline?.getActiveExecutionCount() ?? 0;
+      if (activeCount > 0) {
         this.logger.info('Waiting for in-flight executions to complete', {
-          activeCount: this.activeExecutionCount,
+          activeCount,
         });
         const drainStart = Date.now();
         const drainTimeoutMs = 10_000;
-        while (this.activeExecutionCount > 0 && Date.now() - drainStart < drainTimeoutMs) {
+        while (
+          (this.executionPipeline?.getActiveExecutionCount() ?? 0) > 0 &&
+          Date.now() - drainStart < drainTimeoutMs
+        ) {
           await new Promise<void>((resolve) => setTimeout(resolve, 100));
         }
-        if (this.activeExecutionCount > 0) {
+        const remaining = this.executionPipeline?.getActiveExecutionCount() ?? 0;
+        if (remaining > 0) {
           this.logger.warn('In-flight executions did not complete within drain timeout', {
-            remaining: this.activeExecutionCount,
+            remaining,
             drainTimeoutMs,
           });
         }
@@ -857,6 +864,7 @@ export class ExecutionEngineService {
       // Fix #51: Stop MEV-Share event listener
       if (this.mevShareListener) {
         await this.mevShareListener.stop();
+        this.mevShareListener.removeAllListeners();
         this.mevShareListener = null;
       }
 
@@ -1138,8 +1146,8 @@ export class ExecutionEngineService {
       cbManager: this.cbManager,
       riskOrchestrator: this.riskOrchestrator,
       abTestingFramework: this.abTestingFramework,
-      isSimulationMode: this.isSimulationMode,
-      riskManagementEnabled: this.riskManagementEnabled,
+      getIsSimulationMode: () => this.isSimulationMode,
+      getRiskManagementEnabled: () => this.riskManagementEnabled,
       buildStrategyContext: () => this.buildStrategyContext(),
       publishExecutionResult: (result, opp) => this.publishExecutionResult(result, opp),
       getLastGasPrice: (chain) => this.lastGasPrices.get(chain) ?? 0n,

@@ -41,6 +41,11 @@ import type {
   VariantAssignment,
 } from './ab-testing';
 import type { EVCalculation, PositionSize, TradingAllowedResult } from '@arbitrage/core/risk';
+import {
+  recordExecutionAttempt,
+  recordExecutionSuccess,
+  recordVolume,
+} from './services/prometheus-metrics';
 
 // =============================================================================
 // Pipeline Dependencies Interface
@@ -68,8 +73,8 @@ export interface PipelineDeps {
   cbManager: CircuitBreakerManager | null;
   riskOrchestrator: RiskManagementOrchestrator | null;
   abTestingFramework: ABTestingFramework | null;
-  isSimulationMode: boolean;
-  riskManagementEnabled: boolean;
+  getIsSimulationMode: () => boolean;
+  getRiskManagementEnabled: () => boolean;
 
   // Callbacks back to engine for state that changes
   buildStrategyContext: () => StrategyContext;
@@ -103,6 +108,8 @@ export class ExecutionPipeline {
   /** Track CB re-enqueue attempts per opportunity to prevent infinite loops */
   private readonly cbReenqueueCounts = new Map<string, number>();
   private static readonly MAX_CB_REENQUEUE_ATTEMPTS = 3;
+  /** Prevent unbounded growth of cbReenqueueCounts map */
+  private static readonly MAX_CB_REENQUEUE_MAP_SIZE = 10_000;
 
   constructor(deps: PipelineDeps) {
     this.deps = deps;
@@ -144,6 +151,15 @@ export class ExecutionPipeline {
             this.deps.stats.circuitBreakerBlocks++;
           } else {
             this.cbReenqueueCounts.set(opportunity.id, reenqueueCount);
+            // Evict oldest entries if map grows beyond limit (FIFO via insertion order)
+            if (this.cbReenqueueCounts.size > ExecutionPipeline.MAX_CB_REENQUEUE_MAP_SIZE) {
+              const iter = this.cbReenqueueCounts.keys();
+              const toRemove = Math.floor(ExecutionPipeline.MAX_CB_REENQUEUE_MAP_SIZE * 0.2);
+              for (let i = 0; i < toRemove; i++) {
+                const key = iter.next().value;
+                if (key !== undefined) this.cbReenqueueCounts.delete(key);
+              }
+            }
             this.deps.queueService.enqueue(opportunity);
             this.deps.stats.circuitBreakerBlocks++;
           }
@@ -342,6 +358,7 @@ export class ExecutionPipeline {
     try {
       this.deps.opportunityConsumer.markActive(opportunity.id);
       this.deps.stats.executionAttempts++;
+      recordExecutionAttempt(chain, opportunity.type ?? 'unknown');
 
       this.deps.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
@@ -351,11 +368,11 @@ export class ExecutionPipeline {
         buyDex: dex,
         sellDex: opportunity.sellDex,
         expectedProfit: opportunity.expectedProfit,
-        simulationMode: this.deps.isSimulationMode,
+        simulationMode: this.deps.getIsSimulationMode(),
       });
 
       // Risk management checks
-      if (this.deps.riskManagementEnabled && !this.deps.isSimulationMode && this.deps.riskOrchestrator) {
+      if (this.deps.getRiskManagementEnabled() && !this.deps.getIsSimulationMode() && this.deps.riskOrchestrator) {
         let safeGasEstimate: number | undefined;
         if (opportunity.gasEstimate) {
           const raw = Number(opportunity.gasEstimate);
@@ -445,7 +462,7 @@ export class ExecutionPipeline {
       this.deps.perfLogger.logExecutionResult(result);
 
       // Record outcome for risk management
-      if (this.deps.riskManagementEnabled && !this.deps.isSimulationMode && this.deps.riskOrchestrator) {
+      if (this.deps.getRiskManagementEnabled() && !this.deps.getIsSimulationMode() && this.deps.riskOrchestrator) {
         const currentGasPrice = this.deps.getLastGasPrice(chain);
 
         this.deps.riskOrchestrator.recordOutcome({
@@ -477,6 +494,10 @@ export class ExecutionPipeline {
       if (result.success) {
         this.deps.stats.successfulExecutions++;
         this.deps.cbManager?.recordSuccess(chain);
+        recordExecutionSuccess(chain, opportunity.type ?? 'unknown');
+        if (result.actualProfit) {
+          recordVolume(chain, result.actualProfit);
+        }
       } else {
         this.deps.stats.failedExecutions++;
         this.deps.cbManager?.recordFailure(chain);
@@ -491,7 +512,7 @@ export class ExecutionPipeline {
       this.deps.stats.failedExecutions++;
       this.deps.cbManager?.recordFailure(chain);
 
-      if (this.deps.riskManagementEnabled && !this.deps.isSimulationMode && this.deps.riskOrchestrator) {
+      if (this.deps.getRiskManagementEnabled() && !this.deps.getIsSimulationMode() && this.deps.riskOrchestrator) {
         this.deps.riskOrchestrator.recordOutcome({
           chain,
           dex,
