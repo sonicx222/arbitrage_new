@@ -1,5 +1,9 @@
 # Prometheus Alert Rules for Arbitrage System
 #
+# LOCATION NOTE: infrastructure/monitoring/ contains production alert rules and
+# the main Grafana dashboard. infrastructure/grafana/ contains setup automation
+# scripts and warming-specific dashboards/provisioning configs.
+#
 # Alert Severity Levels:
 # - critical: Page immediately (P1) - System down, data loss, revenue impact
 # - warning: Investigate during business hours (P2) - Degraded performance

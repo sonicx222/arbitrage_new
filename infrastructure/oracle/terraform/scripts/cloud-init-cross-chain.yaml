@@ -40,6 +40,8 @@ write_files:
       lazyfree-lazy-eviction yes
       lazyfree-lazy-expire yes
       lazyfree-lazy-server-del yes
+      # io-threads intentionally omitted: AMD E2.1.Micro has 1/8 OCPU (single-threaded).
+      # Partition cloud-init (ARM A1.Flex, 2+ OCPUs) uses io-threads 2.
       rename-command FLUSHDB ""
       rename-command FLUSHALL ""
       rename-command DEBUG ""

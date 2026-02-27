@@ -704,11 +704,14 @@ main() {
             [ "$SETUP_SECRETS" = true ] && setup_asia_fast_secrets
             [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
             [ "$SETUP_SECRETS" = true ] && setup_cross_chain_secrets
-            # Deploy in dependency order: partitions first, then cross-chain, then execution, then coordinator
-            deploy_l2_fast
-            deploy_high_value
-            deploy_asia_fast
-            deploy_solana
+            # Deploy partitions in parallel (independent services), then dependent services sequentially
+            log_info "Deploying partitions in parallel..."
+            deploy_l2_fast &
+            deploy_high_value &
+            deploy_asia_fast &
+            deploy_solana &
+            wait
+            log_info "All partitions deployed, continuing with dependent services..."
             deploy_cross_chain
             deploy_execution_engine
             deploy_coordinator

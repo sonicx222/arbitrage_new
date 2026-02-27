@@ -4,6 +4,10 @@
 #
 # Automated provisioning of Grafana dashboards and alerts for warming infrastructure
 #
+# LOCATION NOTE: infrastructure/grafana/ contains setup automation scripts and
+# warming-specific dashboards/provisioning configs. infrastructure/monitoring/
+# contains production alert rules and the main Grafana dashboard.
+#
 # Usage:
 #   ./setup-grafana.sh [options]
 #

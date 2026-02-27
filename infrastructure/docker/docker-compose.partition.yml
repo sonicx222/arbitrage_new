@@ -81,15 +81,23 @@ services:
   # Redis uses inline flags here (Docker deployment).
   # For Oracle Cloud ARM deployments, see oracle/redis/redis-production.conf
   # which adds io-threads, slowlog, dangerous command disabling, and 512mb memory.
+  #
+  # Redis maxmemory per deployment tier:
+  #   docker-compose.yml (dev/base):         256mb
+  #   docker-compose.partition.yml (prod):   256mb
+  #   docker-compose.testnet.yml:            128mb
+  #   oracle/redis-production.conf (ARM):    512mb (24GB host, headroom for AOF rewrite)
+  #   cloud-init-partition (Oracle ARM):     512mb
+  #   cloud-init-cross-chain (Oracle AMD):   256mb (1/8 OCPU micro instance)
   redis:
     image: redis:7-alpine
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-changeme}
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "--no-auth-warning", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "--no-auth-warning", "ping"]
       # FIX P3-1: Standardize to 15s interval per ADR-007 (was 10s)
       # Consistent with docker-compose.yml and health-check.sh default
       interval: 15s
@@ -115,7 +123,7 @@ services:
       - PARTITION_CHAINS=bsc,polygon,avalanche,fantom
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-asia-fast-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -170,7 +178,7 @@ services:
       - PARTITION_CHAINS=arbitrum,optimism,base,scroll,blast
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-l2-turbo-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -226,7 +234,7 @@ services:
       - PARTITION_CHAINS=ethereum,zksync,linea
       - REGION_ID=us-east1
       - INSTANCE_ID=partition-high-value-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -279,7 +287,7 @@ services:
       - PARTITION_CHAINS=solana
       - REGION_ID=us-west1
       - INSTANCE_ID=partition-solana-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -327,7 +335,7 @@ services:
       dockerfile: services/cross-chain-detector/Dockerfile
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INSTANCE_ID=cross-chain-detector-${HOSTNAME:-local}
       - HEALTH_CHECK_PORT=3001
@@ -367,7 +375,7 @@ services:
       dockerfile: services/execution-engine/Dockerfile
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INSTANCE_ID=execution-engine-${HOSTNAME:-local}
       - HEALTH_CHECK_PORT=3001
@@ -413,7 +421,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PORT=3000
       - INSTANCE_ID=coordinator-${HOSTNAME:-local}
