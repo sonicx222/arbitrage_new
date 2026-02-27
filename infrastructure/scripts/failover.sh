@@ -83,17 +83,17 @@ build_health_url() {
 #   - partition-asia-fast:   3011
 #   - partition-l2-fast:     3012
 #   - partition-high-value:  3013
-#   - cross-chain-detector:  3014
+#   - partition-solana:      3014
 #   - execution-engine:      3015
-#   - partition-solana:      3016
+#   - cross-chain-detector:  3016
 declare -A SERVICE_ENDPOINTS=(
     ["coordinator-primary"]="$(build_health_url "${COORDINATOR_PRIMARY_URL:-http://localhost:3000}")"
     ["coordinator-standby"]="$(build_health_url "${COORDINATOR_STANDBY_URL:-}")"
     ["partition-asia-fast"]="$(build_health_url "${PARTITION_ASIA_FAST_URL:-http://localhost:3011}")"
     ["partition-l2-fast"]="$(build_health_url "${PARTITION_L2_FAST_URL:-http://localhost:3012}")"
     ["partition-high-value"]="$(build_health_url "${PARTITION_HIGH_VALUE_URL:-http://localhost:3013}")"
-    ["partition-solana"]="$(build_health_url "${PARTITION_SOLANA_URL:-http://localhost:3016}")"
-    ["cross-chain-detector"]="$(build_health_url "${CROSS_CHAIN_URL:-http://localhost:3014}")"
+    ["partition-solana"]="$(build_health_url "${PARTITION_SOLANA_URL:-http://localhost:3014}")"
+    ["cross-chain-detector"]="$(build_health_url "${CROSS_CHAIN_URL:-http://localhost:3016}")"
     ["execution-engine"]="$(build_health_url "${EXECUTION_URL:-http://localhost:3015}")"
 )
 

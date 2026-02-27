@@ -13,7 +13,7 @@
 #   fly deploy -c infrastructure/fly/partition-l2-fast.toml
 #
 # Scaling:
-#   fly scale memory 384 -c infrastructure/fly/partition-l2-fast.toml
+#   fly scale memory 640 -c infrastructure/fly/partition-l2-fast.toml
 
 app = "arbitrage-l2-fast"
 primary_region = "sin"

@@ -115,15 +115,18 @@ release_lock() {
 }
 
 # Service definitions
-# Port mappings (per ADR-003 and docker-compose.partition.yml):
-#   - Coordinator:           3000
-#   - partition-asia-fast:   3011
-#   - partition-l2-fast:     3012
-#   - partition-high-value:  3013
-#   - cross-chain-detector:  3014
-#   - execution-engine:      3015
-#   - partition-solana:      3016
-#   - Redis:                 6379 (configurable via REDIS_PORT)
+# Port mappings (Docker partition compose external ports, base port + 10 offset):
+#   - Coordinator:           3000  (no offset, same as base)
+#   - partition-asia-fast:   3011  (base 3001 + 10)
+#   - partition-l2-fast:     3012  (base 3002 + 10)
+#   - partition-high-value:  3013  (base 3003 + 10)
+#   - partition-solana:      3014  (base 3004 + 10)
+#   - execution-engine:      3015  (base 3005 + 10; Fly.io uses 8080 override)
+#   - cross-chain-detector:  3016  (base 3006 + 10)
+#   - Redis:                 6379  (configurable via REDIS_PORT)
+#
+# NOTE: Fly.io TOMLs use different internal ports (e.g., execution-engine=8080).
+# These mappings are for Docker partition compose deployments only.
 REDIS_PORT=${REDIS_PORT:-6379}
 
 declare -A SERVICES=(
@@ -131,8 +134,8 @@ declare -A SERVICES=(
     ["partition-asia-fast"]="http://localhost:3011/health"
     ["partition-l2-fast"]="http://localhost:3012/health"
     ["partition-high-value"]="http://localhost:3013/health"
-    ["partition-solana"]="http://localhost:3016/health"
-    ["cross-chain-detector"]="http://localhost:3014/health"
+    ["partition-solana"]="http://localhost:3014/health"
+    ["cross-chain-detector"]="http://localhost:3016/health"
     ["execution-engine"]="http://localhost:3015/health"
     ["redis"]="redis://localhost:$REDIS_PORT"
 )

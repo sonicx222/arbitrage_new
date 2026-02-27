@@ -116,9 +116,9 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
       expect(config.env.NODE_ENV).toBe('production');
     });
 
-    it('should configure correct memory limit (384MB for l2-fast)', () => {
+    it('should configure correct memory limit (640MB for l2-fast 5-chain workload)', () => {
       expect(config.vm).toBeDefined();
-      expect(config.vm.memory_mb).toBe(384);
+      expect(config.vm.memory_mb).toBe(640);
       expect(config.vm.cpus).toBe(1);
       expect(config.vm.cpu_kind).toBe('shared');
     });
@@ -135,7 +135,7 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
 
     it('should configure HTTP service', () => {
       expect(config.http_service).toBeDefined();
-      expect(config.http_service.internal_port).toBe(3001);
+      expect(config.http_service.internal_port).toBe(3002);
     });
   });
 
@@ -704,9 +704,9 @@ describe('Phase 3: Configuration Consistency', () => {
       'partition-asia-fast': 3011,
       'partition-l2-fast': 3012,
       'partition-high-value': 3013,
-      'cross-chain-detector': 3014,
+      'partition-solana': 3014,
       'execution-engine': 3015,
-      'partition-solana': 3016
+      'cross-chain-detector': 3016
     };
 
     it('should have unique ports across all services', () => {
