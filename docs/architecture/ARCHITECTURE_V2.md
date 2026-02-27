@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **11 blockchains** active (10 EVM + Solana), **4 emerging L2s** configured (Blast, Scroll, Mantle, Mode), with **71 DEXs** (current) and **112+ tokens** (current)
+- Monitor **16 blockchains** configured (14 EVM + Solana + 1 additional), **2 stubs** (Mantle, Mode), with **72 DEXs** (current) and **112+ tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -630,6 +630,7 @@ The hard rejection runs **before** any confidence calculation, ensuring that wha
 | `stream:swap-events` | Detectors | Coordinator | ~30/min | 1 hour |
 | `stream:volume-aggregates` | Detectors | Coordinator, Analyzer | ~20/min | 1 hour |
 | `stream:health` | All | Coordinator | ~10/min | 1 hour |
+| `stream:fast-lane` | Partition Detectors | Execution Engine | ~5/min | 1 hour |
 | `stream:dead-letter-queue` | All | Ops/Monitoring | ~1/hour | 7 days |
 
 ### 5.5 Opportunity Execution Flow (Broker Pattern)
@@ -1112,6 +1113,11 @@ SimulationService now routes requests based on chain:
    - Chains: All EVM chains
    - Contract: `CommitRevealArbitrage.sol`
    - Two-phase commit-reveal pattern for MEV protection when private mempools unavailable
+
+7. **Morpho Blue** (0% fee, EIP-3156)
+   - Chains: Ethereum, Base
+   - EIP-3156 compliant flash loan interface with zero fees
+   - Ideal for high-frequency, low-margin arbitrage where flash loan fees would erode profit
 
 **Strategy Selection**: Automatically selects lowest-fee protocol with sufficient liquidity.
 

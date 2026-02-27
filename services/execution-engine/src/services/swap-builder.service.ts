@@ -55,6 +55,8 @@ export class SwapBuilder {
   private readonly swapStepsCache: Map<string, CachedSwapSteps>;
   private static readonly MAX_CACHE_SIZE = 100;
   private static readonly CACHE_TTL_MS = 60000; // 60 seconds
+  private static readonly CLEANUP_INTERVAL_MS = 1000; // Rate-limit cleanup to once/second
+  private lastCleanupAt = 0;
 
   constructor(
     private readonly dexLookup: DexLookupService,
@@ -153,8 +155,12 @@ export class SwapBuilder {
       timestamp: Date.now()
     });
 
-    // Opportunistic cleanup
-    this.cleanStaleCache();
+    // Rate-limited cleanup (once/second max)
+    const now = Date.now();
+    if (now - this.lastCleanupAt >= SwapBuilder.CLEANUP_INTERVAL_MS) {
+      this.cleanStaleCache();
+      this.lastCleanupAt = now;
+    }
     this.evictOldestIfNeeded();
 
     return steps;

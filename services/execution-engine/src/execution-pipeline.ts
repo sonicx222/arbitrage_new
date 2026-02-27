@@ -31,6 +31,7 @@ import {
   createSkippedResult,
   ExecutionErrorCode,
 } from './types';
+import { createCancellableTimeout } from './services/simulation/types';
 import type { ExecutionStrategyFactory } from './strategies/strategy-factory';
 import type { OpportunityConsumer } from './consumers/opportunity.consumer';
 import type { LockConflictTracker } from './services/lock-conflict-tracker';
@@ -298,13 +299,10 @@ export class ExecutionPipeline {
   // ===========================================================================
 
   private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error(`Execution timeout after ${EXECUTION_TIMEOUT_MS}ms`));
-      }, EXECUTION_TIMEOUT_MS);
-    });
+    const { promise: timeoutPromise, cancel } = createCancellableTimeout<never>(
+      EXECUTION_TIMEOUT_MS,
+      `Execution timeout after ${EXECUTION_TIMEOUT_MS}ms`,
+    );
 
     try {
       await Promise.race([
@@ -322,9 +320,7 @@ export class ExecutionPipeline {
       }
       throw error;
     } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      cancel();
     }
   }
 

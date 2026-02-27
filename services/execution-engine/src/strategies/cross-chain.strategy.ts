@@ -1997,20 +1997,44 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       this.logger.info('Found pending bridges for recovery', { count: keys.length });
 
+      // M4 gap: Get HMAC signing key before the loop — consistent with updateBridgeRecoveryStatus
+      const signingKey = getHmacSigningKey();
+
       for (const key of keys) {
         try {
           // FIX P0-1: redis.get() already returns parsed object — no JSON.parse needed
           // @see FIX P0-1 in docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md
-          const state = await redis.get(key) as BridgeRecoveryState | null;
-          if (!state) continue;
+          const raw = await redis.get(key);
+          if (!raw) continue;
 
-          if (typeof state !== 'object') {
+          if (typeof raw !== 'object') {
             // Corrupt data in Redis - clean up and continue
             this.logger.warn('Corrupt bridge recovery state during scan, deleting key', {
               key,
             });
             await redis.del(key);
             continue;
+          }
+
+          // HMAC verification — consistent with updateBridgeRecoveryStatus and BridgeRecoveryManager
+          let state: BridgeRecoveryState;
+          if (isSignedEnvelope(raw)) {
+            // P3-27: Include Redis key as HMAC context to prevent cross-key replay
+            let verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey, key);
+            if (!verified) {
+              // Migration: try without context for pre-P3-27 signed data
+              verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
+            }
+            if (!verified) {
+              this.logger.error('Bridge recovery state HMAC verification failed during recovery scan', { key });
+              continue;
+            }
+            state = verified;
+          } else if (signingKey) {
+            this.logger.warn('Unsigned bridge recovery state rejected during recovery scan — HMAC signing enabled', { key });
+            continue;
+          } else {
+            state = raw as BridgeRecoveryState;
           }
 
           // Skip already recovered/failed bridges

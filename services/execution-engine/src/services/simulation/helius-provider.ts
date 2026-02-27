@@ -696,7 +696,7 @@ interface HeliusSimulationResponse {
  * const provider = createHeliusProvider({
  *   type: 'helius',
  *   chain: 'solana',
- *   provider: null as any, // Not used for Solana
+ *   provider: null!, // Not used for Solana
  *   enabled: true,
  *   heliusApiKey: process.env.HELIUS_API_KEY,
  *   fallbackRpcUrl: process.env.SOLANA_RPC_URL,

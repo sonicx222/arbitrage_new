@@ -103,6 +103,7 @@ jest.mock('../../../src/services/simulation/types', () => ({
 
 import { ProviderServiceImpl, ProviderServiceConfig } from '../../../src/services/provider.service';
 import type { Logger, ExecutionStats } from '../../../src/types';
+import { createMockExecutionStats } from '../../helpers/mock-factories';
 
 // =============================================================================
 // Mock Factories
@@ -120,32 +121,7 @@ const createMockStateManager = () => ({
   getState: jest.fn().mockReturnValue('running'),
 });
 
-const createMockStats = (): ExecutionStats => ({
-  opportunitiesReceived: 0,
-  executionAttempts: 0,
-  opportunitiesRejected: 0,
-  successfulExecutions: 0,
-  failedExecutions: 0,
-  queueRejects: 0,
-  lockConflicts: 0,
-  executionTimeouts: 0,
-  validationErrors: 0,
-  providerReconnections: 0,
-  providerHealthCheckFailures: 0,
-  simulationsPerformed: 0,
-  simulationsSkipped: 0,
-  simulationPredictedReverts: 0,
-  simulationProfitabilityRejections: 0,
-  simulationErrors: 0,
-  circuitBreakerTrips: 0,
-  circuitBreakerBlocks: 0,
-  riskEVRejections: 0,
-  riskPositionSizeRejections: 0,
-  riskDrawdownBlocks: 0,
-  riskCautionCount: 0,
-  riskHaltCount: 0,
-  staleLockRecoveries: 0,
-});
+const createMockStats = (): ExecutionStats => createMockExecutionStats();
 
 const createMockConfig = (overrides: Partial<ProviderServiceConfig> = {}): ProviderServiceConfig => ({
   logger: createMockLogger(),

@@ -10,6 +10,7 @@
 
 import type { Logger, ExecutionStats, QueueService } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import { createMockExecutionStats } from '../../helpers/mock-factories';
 
 export const createMockLogger = (): Logger => ({
   debug: jest.fn(),
@@ -18,33 +19,7 @@ export const createMockLogger = (): Logger => ({
   error: jest.fn(),
 });
 
-export const createMockStats = (): ExecutionStats => ({
-  opportunitiesReceived: 0,
-  executionAttempts: 0,
-  opportunitiesRejected: 0,
-  successfulExecutions: 0,
-  failedExecutions: 0,
-  queueRejects: 0,
-  lockConflicts: 0,
-  executionTimeouts: 0,
-  validationErrors: 0,
-  providerReconnections: 0,
-  providerHealthCheckFailures: 0,
-  simulationsPerformed: 0,
-  simulationsSkipped: 0,
-  simulationPredictedReverts: 0,
-  simulationProfitabilityRejections: 0,
-  simulationErrors: 0,
-  circuitBreakerTrips: 0,
-  circuitBreakerBlocks: 0,
-  // Capital risk management metrics (Phase 3)
-  riskEVRejections: 0,
-  riskPositionSizeRejections: 0,
-  riskDrawdownBlocks: 0,
-  riskCautionCount: 0,
-  riskHaltCount: 0,
-  staleLockRecoveries: 0,
-});
+export const createMockStats = (): ExecutionStats => createMockExecutionStats();
 
 export const createMockQueueService = (overrides: Partial<QueueService> = {}): QueueService => ({
   enqueue: jest.fn().mockReturnValue(true),

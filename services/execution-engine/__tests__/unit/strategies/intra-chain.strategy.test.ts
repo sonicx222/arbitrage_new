@@ -15,10 +15,6 @@ import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   ISimulationService,
   SimulationResult,
-  SimulationRequest,
-  SimulationMetrics,
-  SimulationProviderHealth,
-  SimulationProviderType,
 } from '../../../src/services/simulation/types';
 import {
   createMockStrategyLogger,
@@ -26,6 +22,7 @@ import {
   createMockStrategyWallet,
   createMockStrategyOpportunity,
 } from '@arbitrage/test-utils';
+import { createMockSimulationService } from '../../helpers/mock-factories';
 
 // =============================================================================
 // Mock Implementations (shared factories with local aliases)
@@ -33,33 +30,7 @@ import {
 
 const createMockLogger = createMockStrategyLogger;
 
-const createMockSimulationService = (
-  overrides: Partial<ISimulationService> = {}
-): ISimulationService => ({
-  initialize: jest.fn().mockResolvedValue(undefined),
-  simulate: jest.fn().mockResolvedValue({
-    success: true,
-    wouldRevert: false,
-    provider: 'tenderly' as SimulationProviderType,
-    latencyMs: 100,
-    gasUsed: BigInt(200000),
-  } as SimulationResult),
-  shouldSimulate: jest.fn().mockReturnValue(true),
-  getSimulationTier: jest.fn().mockReturnValue('full' as const) as any,
-  getAggregatedMetrics: jest.fn().mockReturnValue({
-    totalSimulations: 0,
-    successfulSimulations: 0,
-    failedSimulations: 0,
-    predictedReverts: 0,
-    averageLatencyMs: 0,
-    fallbackUsed: 0,
-    cacheHits: 0,
-    lastUpdated: Date.now(),
-  } as SimulationMetrics),
-  getProvidersHealth: jest.fn().mockReturnValue(new Map()),
-  stop: jest.fn(),
-  ...overrides,
-});
+// createMockSimulationService imported from ../../helpers/mock-factories
 
 const createMockOpportunity = createMockStrategyOpportunity;
 
