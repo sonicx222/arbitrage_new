@@ -75,18 +75,29 @@ describe('calculateAmmAmountOut', () => {
     expect(result).toBeGreaterThan(resultWithFee!);
   });
 
-  it('should return 0n when fee is 100% (10000n basis points)', () => {
+  it('should return null when fee is 100% (10000n basis points) — invalid pool', () => {
     const amountIn = 10n ** 18n; // 1 ETH
     const result = calculateAmmAmountOut(amountIn, RESERVE_ETH, RESERVE_USDC, 10000n);
 
-    // Fee = 10000 bps => feeMultiplierNumerator = 0 => amountInWithFee = 0
-    // numerator = 0, denominator = reserveIn + 0 = reserveIn (> 0)
-    // result = 0 / reserveIn = 0
-    expect(result).toBe(0n);
+    // Fee >= 10000 bps (100%) is an invalid pool configuration — return null
+    expect(result).toBeNull();
+  });
+
+  it('should return null when fee exceeds 100% (>10000n basis points) — corrupted config', () => {
+    const amountIn = 10n ** 18n; // 1 ETH
+    // Fee > 10000 would make feeMultiplierNumerator negative, corrupting output
+    const result = calculateAmmAmountOut(amountIn, RESERVE_ETH, RESERVE_USDC, 15000n);
+    expect(result).toBeNull();
+  });
+
+  it('should return null for negative fee', () => {
+    const amountIn = 10n ** 18n; // 1 ETH
+    const result = calculateAmmAmountOut(amountIn, RESERVE_ETH, RESERVE_USDC, -1n);
+    expect(result).toBeNull();
   });
 
   it('should return null when denominator is zero (empty pool with 100% fee)', () => {
-    // reserveIn = 0 and amountInWithFee = 0 (100% fee) => denominator = 0
+    // Fee >= 10000 bps is caught by the fee validation guard
     const result = calculateAmmAmountOut(10n ** 18n, 0n, RESERVE_USDC, 10000n);
     expect(result).toBeNull();
   });

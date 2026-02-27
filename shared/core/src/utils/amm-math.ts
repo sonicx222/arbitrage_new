@@ -83,6 +83,10 @@ export function calculateAmmAmountOut(
   reserveOutBigInt: bigint,
   feeBigInt: bigint
 ): bigint | null {
+  // Guard: fee must be in valid basis points range [0, 10000)
+  // A fee >= 10000 (100%) would make feeMultiplierNumerator <= 0, producing zero/negative output
+  if (feeBigInt < 0n || feeBigInt >= BASIS_POINTS_DIVISOR) return null;
+
   const feeMultiplierNumerator = BASIS_POINTS_DIVISOR - feeBigInt;
   const amountInWithFee = (amountInBigInt * feeMultiplierNumerator) / BASIS_POINTS_DIVISOR;
 

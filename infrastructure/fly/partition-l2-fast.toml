@@ -1,9 +1,9 @@
 # Fly.io Deployment Configuration for L2-Fast Partition
 #
 # Partition: l2-turbo (file named l2-fast for historical reasons; PARTITION_ID=l2-turbo)
-# Chains: Arbitrum, Optimism, Base
+# Chains: Arbitrum, Optimism, Base, Scroll, Blast
 # Region: asia-southeast1 (Singapore)
-# Resource Profile: standard (384MB)
+# Resource Profile: standard (640MB — increased for 5-chain workload)
 #
 # @see ADR-003: Partitioned Chain Detectors
 # @see ADR-006: Free Hosting Provider Selection
@@ -26,7 +26,7 @@ primary_region = "sin"
 [env]
   NODE_ENV = "production"
   PARTITION_ID = "l2-turbo"
-  PARTITION_CHAINS = "arbitrum,optimism,base"
+  PARTITION_CHAINS = "arbitrum,optimism,base,scroll,blast"
   REGION_ID = "asia-southeast1"
   LOG_LEVEL = "info"
   HEALTH_CHECK_PORT = "3002"
@@ -52,7 +52,7 @@ primary_region = "sin"
 [vm]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 384
+  memory_mb = 640
 
 [metrics]
   port = 9091
@@ -95,3 +95,7 @@ primary_region = "sin"
 # OPTIMISM_RPC_URL - Optimism HTTP RPC (fallback)
 # BASE_WS_URL - Base WebSocket RPC
 # BASE_RPC_URL - Base HTTP RPC (fallback)
+# SCROLL_WS_URL - Scroll WebSocket RPC
+# SCROLL_RPC_URL - Scroll HTTP RPC (fallback)
+# BLAST_WS_URL - Blast WebSocket RPC
+# BLAST_RPC_URL - Blast HTTP RPC (fallback)

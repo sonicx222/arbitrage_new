@@ -156,13 +156,17 @@ export class CrossDexTriangularArbitrage {
     // Group pools by token pairs for efficient lookup
     const tokenPairs = this.groupPoolsByPairs(pools);
 
+    // Build adjacency map once for O(1) neighbor lookup in BFS
+    const adjacency = this.buildAdjacencyMap(tokenPairs);
+
     // Find all possible triangles starting from base tokens
     for (const baseToken of baseTokens) {
       const triangles = await this.findTrianglesFromBaseToken(
         baseToken,
         tokenPairs,
         pools,
-        chain
+        chain,
+        adjacency
       );
 
       opportunities.push(...triangles);
@@ -577,12 +581,13 @@ export class CrossDexTriangularArbitrage {
     baseToken: string,
     tokenPairs: Map<string, DexPool[]>,
     allPools: DexPool[],
-    chain: string
+    chain: string,
+    adjacency: Map<string, Set<string>>
   ): Promise<TriangularOpportunity[]> {
     const opportunities: TriangularOpportunity[] = [];
 
     // Get all tokens that can be reached from base token
-    const reachableTokens = this.findReachableTokens(baseToken, tokenPairs);
+    const reachableTokens = this.findReachableTokens(baseToken, tokenPairs, adjacency);
 
     // Try all possible triangles: baseToken -> tokenA -> tokenB -> baseToken
     for (const tokenA of reachableTokens) {
@@ -818,31 +823,31 @@ export class CrossDexTriangularArbitrage {
     return pairs;
   }
 
-  // Find tokens reachable from a base token
-  private findReachableTokens(baseToken: string, tokenPairs: Map<string, DexPool[]>): string[] {
+  // Find tokens reachable from a base token using BFS with adjacency map
+  // Uses index pointer (O(1)) instead of shift() (O(n)), and adjacency map
+  // for O(1) neighbor lookup instead of iterating all tokenPairs (O(P)) per node.
+  private findReachableTokens(baseToken: string, _tokenPairs: Map<string, DexPool[]>, adjacency: Map<string, Set<string>>): string[] {
     const visited = new Set<string>();
     const queue = [baseToken];
-    const reachable = new Set<string>();
+    let queueIdx = 0;
 
-    while (queue.length > 0) {
-      const currentToken = queue.shift()!;
+    while (queueIdx < queue.length) {
+      const currentToken = queue[queueIdx++];
       if (visited.has(currentToken)) continue;
 
       visited.add(currentToken);
-      reachable.add(currentToken);
 
-      // Find all tokens directly connected to current token
-      for (const [pairKey, pools] of tokenPairs) {
-        const [tokenA, tokenB] = pairKey.split('_');
-        if (tokenA === currentToken && !visited.has(tokenB)) {
-          queue.push(tokenB);
-        } else if (tokenB === currentToken && !visited.has(tokenA)) {
-          queue.push(tokenA);
+      const neighbors = adjacency.get(currentToken);
+      if (neighbors) {
+        for (const neighbor of neighbors) {
+          if (!visited.has(neighbor)) {
+            queue.push(neighbor);
+          }
         }
       }
     }
 
-    return Array.from(reachable);
+    return Array.from(visited);
   }
 
   // Find best pools for a token pair

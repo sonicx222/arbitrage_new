@@ -56,7 +56,12 @@ export const ARBITRAGE_CONFIG = {
     fantom: 0.002,     // 0.2% - very low gas
     zksync: 0.002,     // 0.2% - L2 gas pricing
     linea: 0.002,      // 0.2% - L2 gas pricing
-    solana: 0.001      // 0.1% - minimal transaction fees
+    solana: 0.001,     // 0.1% - minimal transaction fees
+    // Emerging L2s
+    blast: 0.002,      // 0.2% - OP-stack L2
+    scroll: 0.002,     // 0.2% - zkRollup L2
+    mantle: 0.002,     // 0.2% - modular L2
+    mode: 0.002        // 0.2% - OP-stack L2
   } as Record<string, number>
 };
 
@@ -85,6 +90,11 @@ export const chainOpportunityTimeoutMs: Record<string, number> = {
   base: 4000,        // 2s blocks
   zksync: 3000,      // ~1s blocks
   linea: 4000,       // ~2s blocks
+  // Emerging L2s
+  blast: 4000,       // 2s blocks
+  scroll: 6000,      // 3s blocks
+  mantle: 4000,      // 2s blocks
+  mode: 4000,        // 2s blocks
   // Alt-L1 chains
   avalanche: 4000,   // 2s blocks
   fantom: 2000,      // 1s blocks
@@ -132,6 +142,10 @@ export const chainGasSpikeMultiplier: Record<string, number> = {
   base: 2.0,
   zksync: 2.0,
   linea: 2.0,
+  blast: 2.0,
+  scroll: 2.0,
+  mantle: 2.0,
+  mode: 2.0,
 };
 
 /**
@@ -174,6 +188,10 @@ export const chainConfidenceMaxAgeMs: Record<string, number> = {
   base: 6000,        // 2s blocks — 6s is ~3 blocks
   zksync: 3000,      // ~1s blocks — 3s is ~3 blocks
   linea: 6000,       // ~2s blocks — 6s is ~3 blocks
+  blast: 6000,       // 2s blocks — 6s is ~3 blocks
+  scroll: 9000,      // 3s blocks — 9s is ~3 blocks
+  mantle: 6000,      // 2s blocks — 6s is ~3 blocks
+  mode: 6000,        // 2s blocks — 6s is ~3 blocks
   solana: 2000,      // ~400ms blocks — 2s is ~5 slots
 };
 

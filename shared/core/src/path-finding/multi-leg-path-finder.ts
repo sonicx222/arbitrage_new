@@ -104,6 +104,8 @@ interface ExecutionContext {
   tokenPairs: Map<string, DexPool[]>;
   // P2-FIX 3.1: O(1) lookup index for pool by pair+dex (replaces O(n) .find())
   poolByPairDex: Map<string, DexPool>;
+  /** O(1) neighbor lookup: token -> Set of connected tokens */
+  adjacencyMap: Map<string, Set<string>>;
   /** Effective timeout for this execution (chain-specific or global fallback) */
   effectiveTimeoutMs: number;
 }
@@ -230,6 +232,8 @@ export class MultiLegPathFinder {
       tokenPairs: new Map(),
       // P2-FIX 3.1: O(1) lookup index for pool by pair+dex
       poolByPairDex: new Map(),
+      // H2-FIX: O(1) neighbor lookup for DFS getNextCandidates
+      adjacencyMap: new Map(),
       // Task 1.2: Use chain-specific timeout, falling back to global timeoutMs
       effectiveTimeoutMs: this.config.chainTimeoutMs?.[chain] ?? this.config.timeoutMs,
     };
@@ -258,6 +262,14 @@ export class MultiLegPathFinder {
     // Group pools by token pairs for O(1) lookup
     // P2-FIX 3.1: Pass ctx to also build poolByPairDex index
     ctx.tokenPairs = this.groupPoolsByPairs(pools, ctx);
+
+    // H2-FIX: Build adjacency map for O(1) neighbor lookup in DFS
+    for (const pool of pools) {
+      if (!ctx.adjacencyMap.has(pool.token0)) ctx.adjacencyMap.set(pool.token0, new Set());
+      if (!ctx.adjacencyMap.has(pool.token1)) ctx.adjacencyMap.set(pool.token1, new Set());
+      ctx.adjacencyMap.get(pool.token0)!.add(pool.token1);
+      ctx.adjacencyMap.get(pool.token1)!.add(pool.token0);
+    }
 
     // Count unique tokens
     const uniqueTokens = this.getUniqueTokens(pools);
@@ -415,18 +427,18 @@ export class MultiLegPathFinder {
 
         if (!swapResult) continue;
 
-        // Create new state for recursion
-        const newState: PathState = {
-          tokens: [...state.tokens, nextToken],
-          dexes: [...state.dexes, pool.dex],
-          amountBigInt: swapResult.amountOutBigInt,
-          steps: [...state.steps, swapResult.step],
-          visitedTokens: new Set([...state.visitedTokens, nextToken])
-        };
+        // H1-FIX: Mutable push/pop backtracking instead of spread-operator allocations.
+        // Saves 4 array/set allocations per recursive call (up to 759K in deep DFS).
+        const savedAmount = state.amountBigInt;
+        state.tokens.push(nextToken);
+        state.dexes.push(pool.dex);
+        state.steps.push(swapResult.step);
+        state.visitedTokens.add(nextToken);
+        state.amountBigInt = swapResult.amountOutBigInt;
 
-        // Recurse
+        // Recurse with mutated state
         await this.dfs(
-          newState,
+          state,
           startToken,
           targetLength,
           chain,
@@ -434,6 +446,13 @@ export class MultiLegPathFinder {
           opportunities,
           ctx
         );
+
+        // Backtrack: restore state for next iteration
+        state.tokens.pop();
+        state.dexes.pop();
+        state.steps.pop();
+        state.visitedTokens.delete(nextToken);
+        state.amountBigInt = savedAmount;
       }
     }
   }
@@ -449,29 +468,21 @@ export class MultiLegPathFinder {
     targetLength: number,
     ctx: ExecutionContext
   ): string[] {
-    const candidates: Set<string> = new Set();
+    // H2-FIX: Use adjacency map for O(1) neighbor lookup instead of O(P) tokenPairs scan
+    const neighbors = ctx.adjacencyMap.get(currentToken);
+    if (!neighbors) return [];
 
-    // Find all tokens directly connected to current token
-    for (const [pairKey] of ctx.tokenPairs) {
-      const [tokenA, tokenB] = pairKey.split('_');
+    const candidates: string[] = [];
 
-      let nextToken: string | null = null;
-      if (tokenA === currentToken) {
-        nextToken = tokenB;
-      } else if (tokenB === currentToken) {
-        nextToken = tokenA;
-      }
-
-      if (nextToken) {
-        // Don't revisit tokens (except start token when closing)
-        if (nextToken === startToken) {
-          // Only allow returning to start if we're at target length - 1
-          if (currentDepth === targetLength - 1) {
-            candidates.add(nextToken);
-          }
-        } else if (!visitedTokens.has(nextToken)) {
-          candidates.add(nextToken);
+    for (const nextToken of neighbors) {
+      // Don't revisit tokens (except start token when closing)
+      if (nextToken === startToken) {
+        // Only allow returning to start if we're at target length - 1
+        if (currentDepth === targetLength - 1) {
+          candidates.push(nextToken);
         }
+      } else if (!visitedTokens.has(nextToken)) {
+        candidates.push(nextToken);
       }
     }
 
