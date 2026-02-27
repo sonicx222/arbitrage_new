@@ -1,0 +1,51 @@
+# Best Free WebSocket RPC Alternatives
+
+Based on the requirement for **free** providers that support **WebSockets** across **BSC, Polygon, Avalanche, and Fantom**, here are the best alternatives to Ankr. 
+
+These providers offer the best balance of generous free tiers, high WebSocket bandwidth (RPS), and multi-chain support.
+
+## 1. dRPC (Highly Recommended)
+dRPC is a decentralized RPC provider and is fundamentally one of the strongest overall free tiers available right now. Your logs actually show your system successfully falling back to dRPC when Ankr failed, meaning you already have this partially configured!
+* **WebSockets**: Fully supported on the free tier.
+* **Bandwidth / Rate Limits**: Dynamic between **40 to 100 RPS** depending on network utilization. 210 Million Compute Units (CU) per 30 days.
+* **Chain Support**: BSC, Polygon, Avalanche, Fantom, and 100+ others.
+* **Pros**: Incredible multichain support without needing separate configurations for each chain. Load-balanced across hundreds of disparate node providers. 
+
+## 2. GetBlock
+GetBlock caters heavily to developers who need instant API connections to over 50+ networks.
+* **WebSockets**: Fully supported on the free tier.
+* **Bandwidth / Rate Limits**: **60 RPS** limit. The free tier gives you **40,000 daily requests** (approx 1.2M reqs/month).
+* **Chain Support**: BSC, Polygon, Avalanche, and Fantom.
+* **Pros**: High RPS for a free tier. Very stable WebSocket connections.
+* **Cons**: The 40k daily request limit might be quickly exhausted if your bot subscribes to highly active DEX factory contracts (like UniswapV3) all day without efficient filtering.
+
+## 3. OnFinality
+OnFinality provides enterprise-grade infrastructure but has a very generous free developer plan.
+* **WebSockets**: Premium support on their free Developer tier. They also maintain highly used *public* WebSocket endpoints (e.g., Fantom and Avalanche).
+* **Bandwidth / Rate Limits**: The developer plan provides a staggering **500,000 daily regular requests** for free.
+* **Chain Support**: Avalanche, Fantom, Polygon, and BSC.
+* **Pros**: Extremely reliable. Historically one of the top providers for Avalanche and Fantom specifically.
+
+## 4. Chainstack
+Chainstack is widely used in DeFi for trading bots due to its low latency focus.
+* **WebSockets**: Supported on the Developer (Free) plan.
+* **Bandwidth / Rate Limits**: **3,000,000 requests per month**. Rate limits are usually soft-capped during spikes rather than hard 429 errors.
+* **Chain Support**: Fantom, BSC, Polygon, Avalanche.
+* **Pros**: Very fast global routing. Good latency for arbitrage and MEV searchers.
+
+## 5. PublicNode
+If you want to completely avoid API keys and sign-ups, PublicNode is currently the best public good RPC project.
+* **WebSockets**: Supported via public WSS endpoints.
+* **Bandwidth / Rate Limits**: Varies dynamically. Generally inferred to allow **~100-200 RPS per IP** before aggressive throttling kicks in. Completely unlimited in total requests.
+* **Chain Support**: BSC, Polygon, Avalanche (and 100+ others). *Note: Fantom support on PublicNode occasionally comes and goes, so you may need a dedicated Fantom provider.*
+* **Pros**: Zero setup, no account required. Unmetered raw bandwidth.
+* **Cons**: As a shared public resource, you get zero SLA, zero guarantees, and occasional degraded performance during high global network congestion.
+
+---
+
+### Recommendation for your Arbitrage Bot Strategy:
+Since your bot subscribes to multiple DEX factories (UniswapV2/V3, Solidly, Curve, TraderJoe) and requires low-latency event streams:
+
+1. **Use dRPC as your primary WebSocket provider** for all chains. It has the highest base rate limits (40-100 RPS) and robust fallback logic built-in.
+2. **Register a free OnFinality account** for a secondary fallback, specifically targeting Avalanche and Fantom where they excel.
+3. **Use PublicNode WSS endpoints** as your lowest priority fallback in your `websocket-manager` rotation list. It costs nothing but will keep your bot alive if all API-key providers run out of credits.
