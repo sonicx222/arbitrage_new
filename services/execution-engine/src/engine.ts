@@ -1715,8 +1715,12 @@ export class ExecutionEngineService {
   private async publishExecutionResult(result: ExecutionResult, opportunity?: ArbitrageOpportunity): Promise<void> {
     // O-6: Log trade to persistent JSONL file (non-blocking, never throws)
     if (this.tradeLogger) {
-      await this.tradeLogger.logTrade(result, opportunity).catch(() => {
-        // logTrade already handles errors internally; this catch is defense-in-depth
+      await this.tradeLogger.logTrade(result, opportunity).catch((error: unknown) => {
+        this.logger.error('Trade log write failed', {
+          error: error instanceof Error ? error.message : String(error),
+          opportunityId: opportunity?.id,
+          resultSuccess: result.success,
+        });
       });
     }
 

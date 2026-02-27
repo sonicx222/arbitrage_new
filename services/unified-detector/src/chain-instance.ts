@@ -44,6 +44,7 @@ import {
   MultiLegOpportunity,
 } from '@arbitrage/core/path-finding';
 import { RedisStreamsClient, StreamBatcher } from '@arbitrage/core/redis';
+import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { isSimulationMode } from '@arbitrage/core/simulation';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
@@ -1559,16 +1560,20 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private publishPriceUpdate(update: PriceUpdate): void {
+    // P1-6 FIX: Add trace context to price updates for cross-service correlation
+    const traceCtx = createTraceContext(`chain-detector:${this.chainId}`);
+    const enrichedUpdate = { ...update, ...propagateContext({}, traceCtx) } as PriceUpdate;
+
     // ADR-002: Use StreamBatcher to reduce Redis commands ~50x
     // batcher.add() is O(1) synchronous queue push — faster than async xaddWithLimit
     // Flush happens asynchronously in background (maxBatchSize: 50, maxWaitMs: 10ms)
     if (this.priceUpdateBatcher) {
-      this.priceUpdateBatcher.add(update);
+      this.priceUpdateBatcher.add(enrichedUpdate);
     } else {
       // Fallback: direct publish if batcher not yet initialized (startup race)
       this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        update
+        enrichedUpdate
       ).catch(error => {
         this.logger.error('Failed to publish price update', { error });
       });

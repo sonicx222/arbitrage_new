@@ -782,6 +782,26 @@ export class RedisStreamsClient {
         } catch (ackError) {
           this.logger.error('Failed to ACK rejected messages', { error: ackError });
         }
+
+        // P1-5 FIX: Route HMAC-rejected messages to DLQ for forensic analysis
+        try {
+          for (const rejectedId of rejectedIds) {
+            await this.client.xadd(
+              RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
+              '*',
+              'originalStream', config.streamName,
+              'originalId', rejectedId,
+              'reason', 'hmac_verification_failed',
+              'consumerGroup', config.groupName,
+              'timestamp', String(Date.now()),
+            );
+          }
+        } catch (dlqError) {
+          this.logger.error('Failed to route HMAC-rejected messages to DLQ', {
+            error: dlqError instanceof Error ? dlqError.message : String(dlqError),
+            count: rejectedIds.length,
+          });
+        }
       }
 
       return messages;
