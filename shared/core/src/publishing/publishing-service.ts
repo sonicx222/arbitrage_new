@@ -278,8 +278,18 @@ export class PublishingService {
           return;
         }
       } catch (error) {
-        // If Redis fails, log warning but still publish
-        this.logger.warn('Redis dedup check failed, publishing anyway', {
+        // P2-13 FIX: Configurable fail-open vs fail-closed dedup behavior.
+        // Fail-open (default): publish anyway when Redis is unavailable — prioritizes availability.
+        // Fail-closed: drop the opportunity — safer for high-value trades to prevent duplicates.
+        const failClosed = process.env.DEDUP_FAIL_CLOSED === 'true';
+        if (failClosed) {
+          this.logger.error('Redis dedup check failed, dropping opportunity (DEDUP_FAIL_CLOSED=true)', {
+            id: opportunity.id,
+            error: (error as Error).message,
+          });
+          return;
+        }
+        this.logger.warn('Redis dedup check failed, publishing anyway (fail-open)', {
           id: opportunity.id,
           error: (error as Error).message,
         });

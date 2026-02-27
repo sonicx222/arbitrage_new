@@ -217,6 +217,22 @@ export const MEV_CONFIG = {
  * }
  * ```
  */
+/**
+ * P2-20 FIX: Apply env var overrides for per-chain MEV priority fees.
+ * Pattern: MEV_PRIORITY_FEE_{CHAIN}_GWEI (e.g., MEV_PRIORITY_FEE_ETHEREUM_GWEI=3.0)
+ * This allows runtime tuning without code changes.
+ */
+for (const [chain, settings] of Object.entries(MEV_CONFIG.chainSettings)) {
+  const envKey = `MEV_PRIORITY_FEE_${chain.toUpperCase()}_GWEI`;
+  const envVal = process.env[envKey];
+  if (envVal !== undefined) {
+    const parsed = parseFloat(envVal);
+    if (!Number.isNaN(parsed) && parsed >= 0) {
+      settings.priorityFeeGwei = parsed;
+    }
+  }
+}
+
 export function getMevChainConfigForValidation(): Array<{ chain: string; priorityFeeGwei: number }> {
   return Object.entries(MEV_CONFIG.chainSettings).map(([chain, settings]) => ({
     chain,

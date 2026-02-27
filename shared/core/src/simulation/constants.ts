@@ -254,4 +254,20 @@ export const DEFAULT_BRIDGE_COSTS: Record<string, BridgeCostConfig> = {
   'polygon-bsc': { fixedCost: 8, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
   'avalanche-bsc': { fixedCost: 10, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
   'avalanche-polygon': { fixedCost: 10, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
+
+  // P2-22 FIX: Emerging L2s — L1 <-> L2 routes
+  'ethereum-zksync': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-linea': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-blast': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-scroll': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-mantle': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-mode': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-fantom': { fixedCost: 20, percentageFee: 0.0006, estimatedTimeSeconds: 900 },
+
+  // Emerging L2 <-> L2 routes (via shared bridge protocols)
+  'arbitrum-blast': { fixedCost: 3, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
+  'arbitrum-scroll': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
+  'optimism-blast': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
+  'base-blast': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
+  'base-scroll': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
 };

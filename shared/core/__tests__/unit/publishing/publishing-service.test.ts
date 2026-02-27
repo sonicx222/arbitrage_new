@@ -263,7 +263,7 @@ describe('PublishingService', () => {
       await service.publishArbitrageOpportunity({ id: 'opp-123' } as any);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Redis dedup check failed, publishing anyway',
+        'Redis dedup check failed, publishing anyway (fail-open)',
         expect.any(Object)
       );
       expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();

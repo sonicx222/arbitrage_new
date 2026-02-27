@@ -180,19 +180,17 @@ export class SharedMemoryCache {
     return newValue;
   }
 
+  /**
+   * Compare-and-set operation.
+   *
+   * **WARNING**: This is NOT truly atomic even when `enableAtomicOperations=true`.
+   * Both paths use non-atomic get/set on JSON-serialized values in SharedArrayBuffer.
+   * Safe ONLY in single-writer scenarios (one thread writes, others read).
+   * For multi-writer CAS, use Atomics on fixed-layout SharedArrayBuffer (see price-matrix.ts).
+   */
   compareAndSet(key: string, expectedValue: unknown, newValue: unknown): boolean {
-    if (!this.config.enableAtomicOperations) {
-      const current = this.get(key);
-      if (current === expectedValue) {
-        this.set(key, newValue);
-        return true;
-      }
-      return false;
-    }
-
-    // Atomic compare-and-set operation
-    // This is more complex and would require careful implementation
-    // For now, fall back to non-atomic operation
+    // P2-14 FIX: Both paths are identical — non-atomic get/set.
+    // Documented as single-writer-only to prevent misuse.
     const current = this.get(key);
     if (current === expectedValue) {
       this.set(key, newValue);

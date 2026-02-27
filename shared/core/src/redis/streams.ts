@@ -36,6 +36,13 @@ export interface RedisStreamsClientDeps {
   signingKey?: string;
   /** OP-17 FIX: Previous signing key accepted during rotation window. */
   previousSigningKey?: string;
+  /**
+   * P2-17 FIX: When false, skips legacy (pre-OP-18) signature checks that omit stream name.
+   * Reduces HMAC computations from up to 4 per message to 1-2. Set to false once all
+   * producers have been updated to include stream name in signatures.
+   * Default: true (backward compatible).
+   */
+  legacySignatureCompatEnabled?: boolean;
 }
 import { createLogger, Logger } from '../logger';
 import { clearTimeoutSafe } from '../async/lifecycle-utils';
@@ -352,6 +359,8 @@ export class RedisStreamsClient {
   /** OP-32 FIX: Cached KeyObject instances to avoid per-message crypto.createHmac() overhead */
   private cachedSigningKeyObj: crypto.KeyObject | null = null;
   private cachedPreviousKeyObj: crypto.KeyObject | null = null;
+  /** P2-17 FIX: Skip legacy (no-stream-name) HMAC checks when false. */
+  private legacySignatureCompatEnabled: boolean;
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -395,6 +404,8 @@ export class RedisStreamsClient {
     this.signingKey = deps?.signingKey ?? null;
     // OP-17 FIX: Accept previous key for dual-key verification during rotation
     this.previousSigningKey = deps?.previousSigningKey ?? null;
+    // P2-17 FIX: Legacy compat flag for pre-OP-18 messages without stream name in signature
+    this.legacySignatureCompatEnabled = deps?.legacySignatureCompatEnabled ?? true;
     // OP-32 FIX: Pre-cache KeyObject instances to avoid per-message crypto.createHmac() allocation
     if (this.signingKey) {
       this.cachedSigningKeyObj = crypto.createSecretKey(Buffer.from(this.signingKey, 'utf8'));
@@ -519,8 +530,8 @@ export class RedisStreamsClient {
           crypto.timingSafeEqual(Buffer.from(previousExpected), Buffer.from(signature))) {
         return true;
       }
-      // Also try previous key WITHOUT stream name (backward compat with pre-OP-18 messages)
-      if (streamName) {
+      // P2-17 FIX: Only try legacy (no-stream-name) checks when compat enabled
+      if (this.legacySignatureCompatEnabled && streamName) {
         const legacyExpected = this.signMessageWithKey(data, this.cachedPreviousKeyObj);
         if (legacyExpected.length === signature.length &&
             crypto.timingSafeEqual(Buffer.from(legacyExpected), Buffer.from(signature))) {
@@ -529,8 +540,8 @@ export class RedisStreamsClient {
       }
     }
 
-    // Also try current key WITHOUT stream name (backward compat with pre-OP-18 messages)
-    if (streamName) {
+    // P2-17 FIX: Only try legacy (no-stream-name) checks when compat enabled
+    if (this.legacySignatureCompatEnabled && streamName) {
       const legacyExpected = this.signMessageWithKey(data, this.cachedSigningKeyObj!);
       if (legacyExpected.length === signature.length &&
           crypto.timingSafeEqual(Buffer.from(legacyExpected), Buffer.from(signature))) {

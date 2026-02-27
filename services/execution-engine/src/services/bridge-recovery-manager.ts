@@ -443,7 +443,13 @@ export class BridgeRecoveryManager {
                 // Re-sign with context for future reads
                 this.logger.info('Migrating bridge recovery state to context-bound HMAC', { key });
                 const resigned = hmacSign(verified, signingKey, key);
-                await this.redis.set(key, resigned).catch(() => {});
+                // P2-23 FIX: Log error instead of silently swallowing state write failure
+                await this.redis.set(key, resigned).catch((error: unknown) => {
+                  this.logger.error('Failed to persist re-signed bridge recovery state', {
+                    error: error instanceof Error ? error.message : String(error),
+                    key,
+                  });
+                });
               }
             }
             if (!verified) {

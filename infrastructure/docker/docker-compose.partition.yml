@@ -109,6 +109,9 @@ services:
 
   # =============================================================================
   # Partitioned Chain Detectors (ADR-003)
+  # P2-25: All services use HEALTH_CHECK_PORT=3001 internally because each
+  # container has its own network namespace — no port conflicts. External
+  # access uses unique host-mapped ports (3011, 3012, 3013, 3014).
   # =============================================================================
 
   # Partition: asia-fast (BSC + Polygon + Avalanche + Fantom)
@@ -428,7 +431,8 @@ services:
       - PORT=3000
       - INSTANCE_ID=coordinator-${HOSTNAME:-local}
       # Cross-region health configuration
-      - REGION_ID=${COORDINATOR_REGION:-us-east1}
+      # P2-21 FIX: Default aligned with Fly coordinator (sjc = us-west1)
+      - REGION_ID=${COORDINATOR_REGION:-us-west1}
       - ENABLE_CROSS_REGION_HEALTH=true
     depends_on:
       redis:
