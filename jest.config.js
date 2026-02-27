@@ -126,7 +126,7 @@ module.exports = {
   reporters: [
     'default',
     [
-      '<rootDir>/shared/test-utils/src/reporters/slow-test-reporter.js',
+      '<rootDir>/shared/test-utils/dist/reporters/slow-test-reporter.js',
       {
         unitThreshold: 100, // Unit tests should be <100ms
         integrationThreshold: 5000, // Integration tests should be <5s

@@ -339,7 +339,6 @@ export class OpportunityConsumer {
     // FIX W2-5: Separate in-flight from completed pending messages.
     // Only ACK messages that are NOT actively executing.
     const safeToAck = new Map<string, PendingMessageInfo>();
-    const inFlightCount = 0;
 
     for (const [id, info] of this.pendingMessages) {
       if (this.activeExecutions.has(id)) {

@@ -10,7 +10,7 @@
  * @see R2 - Coordinator Subsystems extraction
  */
 
-import fs from 'fs';
+import fsPromises from 'fs/promises';
 import pathModule from 'path';
 import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core/data-structures';
@@ -512,21 +512,19 @@ export class OpportunityRouter {
   /** FIX 4.3: Maximum DLQ fallback file size per day (100MB) */
   private static readonly MAX_DLQ_FILE_BYTES = 100 * 1024 * 1024;
 
-  private writeLocalDlqFallback(
+  private async writeLocalDlqFallback(
     opportunity: ArbitrageOpportunity,
     error: Error | null
-  ): void {
+  ): Promise<void> {
     try {
       const date = new Date().toISOString().split('T')[0];
       const dir = pathModule.resolve('data');
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      await fsPromises.mkdir(dir, { recursive: true });
       const filePath = pathModule.join(dir, `dlq-forwarding-fallback-${date}.jsonl`);
 
       // FIX 4.3: Enforce 100MB daily file size limit to prevent disk exhaustion
-      if (fs.existsSync(filePath)) {
-        const stat = fs.statSync(filePath);
+      try {
+        const stat = await fsPromises.stat(filePath);
         if (stat.size >= OpportunityRouter.MAX_DLQ_FILE_BYTES) {
           this.logger.warn('DLQ fallback file size limit reached, dropping message', {
             filePath,
@@ -536,6 +534,8 @@ export class OpportunityRouter {
           });
           return;
         }
+      } catch {
+        // File doesn't exist yet — proceed to create it
       }
 
       const entry = JSON.stringify({
@@ -546,7 +546,7 @@ export class OpportunityRouter {
         service: 'opportunity-router',
         instanceId: this.config.instanceId,
       });
-      fs.appendFileSync(filePath, entry + '\n');
+      await fsPromises.appendFile(filePath, entry + '\n');
     } catch (fileError) {
       this.logger.error('Local DLQ fallback write also failed', {
         opportunityId: opportunity.id,

@@ -226,11 +226,18 @@ export class FlashLoanLiquidityValidator {
         return 0n;
       }
 
-      // Query on-chain liquidity with timeout
+      // Query on-chain liquidity with timeout (cleanup timer to prevent leak)
+      let timeoutTimer: NodeJS.Timeout;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutTimer = setTimeout(
+          () => reject(new Error(`Liquidity check timeout after ${this.config.rpcTimeoutMs}ms`)),
+          this.config.rpcTimeoutMs
+        );
+      });
       const liquidity = await Promise.race([
         this.queryOnChainLiquidity(provider, asset, rpcProvider),
-        this.timeoutPromise(this.config.rpcTimeoutMs),
-      ]);
+        timeoutPromise,
+      ]).finally(() => clearTimeout(timeoutTimer!));
 
       const latency = Date.now() - startTime;
 
@@ -335,34 +342,25 @@ export class FlashLoanLiquidityValidator {
   }
 
   /**
-   * Cleanup cache if size exceeds maximum
+   * Cleanup cache if size exceeds maximum.
+   * Uses Map insertion-order iteration (FIFO) instead of O(n log n) sort.
    */
   private cleanupCacheIfNeeded(): void {
     if (this.cache.size > this.config.maxCacheSize) {
-      // Remove oldest entries (simple LRU)
-      const entries = Array.from(this.cache.entries());
-      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-
-      const toRemove = entries.slice(0, Math.floor(this.config.maxCacheSize * 0.2));
-      for (const [key] of toRemove) {
-        this.cache.delete(key);
+      const toRemove = Math.floor(this.config.maxCacheSize * 0.2);
+      const iter = this.cache.keys();
+      for (let i = 0; i < toRemove; i++) {
+        const key = iter.next().value;
+        if (key !== undefined) this.cache.delete(key);
       }
 
       this.logger.debug('[LiquidityValidator] Cache cleanup', {
-        removed: toRemove.length,
+        removed: toRemove,
         remaining: this.cache.size,
       });
     }
   }
 
-  /**
-   * Timeout promise for RPC calls
-   */
-  private timeoutPromise(ms: number): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Liquidity check timeout after ${ms}ms`)), ms);
-    });
-  }
 
 }
 

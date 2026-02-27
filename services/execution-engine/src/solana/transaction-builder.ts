@@ -11,6 +11,7 @@
  * @see Phase 3 #29: Solana Execution with Jito Bundles
  */
 
+import { randomInt } from 'crypto';
 import {
   VersionedTransaction,
   Keypair,
@@ -148,7 +149,7 @@ export class SolanaTransactionBuilder {
    * @returns PublicKey of a randomly selected tip account
    */
   getRandomTipAccount(): PublicKey {
-    const index = Math.floor(Math.random() * this.tipAccounts.length);
+    const index = randomInt(this.tipAccounts.length);
     return this.tipAccounts[index];
   }
 

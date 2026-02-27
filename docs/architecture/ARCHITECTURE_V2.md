@@ -933,7 +933,7 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 - Low fees (<$0.001) enable micro-arbitrage
 - Unique ecosystem (memecoins, LSTs) not available on EVM
 
-### 9.2 DEX Distribution (57 DEXs: 50 EVM + 7 Solana)
+### 9.2 DEX Distribution (71 DEXs: 50 Core EVM + 7 Solana + 14 Emerging L2)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐

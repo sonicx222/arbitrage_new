@@ -193,8 +193,8 @@ ETHEREUM_WS_URL=wss://...
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Chains | 11 (10 EVM + Solana) | 15 |
-| DEXes | 64 (57 EVM + 7 Solana) | 75 |
+| Chains | 15 (14 EVM + Solana) | 15 |
+| DEXes | 71 (64 EVM + 7 Solana) | 75 |
 | Tokens | 128 | 150 |
 | Strategies | 6 (Intra-chain, Cross-chain, Flash Loan, Statistical Arb, CoW Backrun, Solana/Jito) | 7+ |
 | Data Sources | DEX feeds + Binance CEX feed + CoW Settlement watcher | Multi-CEX |

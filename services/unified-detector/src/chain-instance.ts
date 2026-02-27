@@ -1230,7 +1230,7 @@ export class ChainDetectorInstance extends EventEmitter {
           if (topic0 === EVENT_SIGNATURES.SYNC) {
             this.handleSyncEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
-            this.handleSwapEvent(result);
+            this.handleSwapEvent(result, messageReceivedAt);
           } else if (this.factorySubscriptionService && this.useFactoryMode) {
             // P0-FIX: Route potential factory events to factory subscription service
             // Check if this is a factory event (PairCreated, PoolCreated, etc.)
@@ -1359,7 +1359,7 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // P2 FIX: Use EthereumLog type instead of any
-  private handleSwapEvent(log: EthereumLog): void {
+  private handleSwapEvent(log: EthereumLog, now: number = Date.now()): void {
     // Guard against processing during shutdown (consistent with base-detector.ts)
     if (this.isStopping || !this.isRunning) return;
 
@@ -1410,7 +1410,7 @@ export class ChainDetectorInstance extends EventEmitter {
         pairAddress: pairAddress,
         blockNumber: parseInt(log.blockNumber, 16),
         transactionHash: log.transactionHash || '',
-        timestamp: Date.now(),
+        timestamp: now,
         sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '',
         recipient: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '',
         amount0In,
