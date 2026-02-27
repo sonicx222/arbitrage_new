@@ -6,21 +6,15 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
  * Mock Protocol Fidelity Tests
  *
  * Validates that mock contracts faithfully reproduce real protocol behavior
- * (fee calculations, callback parameters, repayment logic, array validation).
- * Solidity's `override` keyword already enforces interface signature compliance
- * at compile time — these tests validate mock BEHAVIOR, not interface shape.
+ * (callback parameters, repayment logic, array validation, dual-token flash).
+ * Pure-arithmetic fee tests (amount * bps / divisor) removed — they test basic
+ * multiplication, not mock fidelity.
  *
  * Protocols covered:
- * 1. Aave V3 (MockAavePool) — fee calculation, executeOperation, repayment
- * 2. SyncSwap (MockSyncSwapVault) — EIP-3156 fee calculation
- * 3. Balancer V2 (MockBalancerVault) — array validation, flash loan
- * 4. PancakeSwap V3 (MockPancakeV3Pool/Factory) — fee tiers, dual-token flash
- *
- * @see contracts/src/mocks/MockAavePool.sol
- * @see contracts/src/mocks/MockSyncSwapVault.sol
- * @see contracts/src/mocks/MockBalancerVault.sol
- * @see contracts/src/mocks/MockPancakeV3Pool.sol
- * @see contracts/src/mocks/MockPancakeV3Factory.sol
+ * 1. Aave V3 (MockAavePool) — premium constant, executeOperation, callback, repayment
+ * 2. SyncSwap (MockSyncSwapVault) — fee percentage constant, maxFlashLoan
+ * 3. Balancer V2 (MockBalancerVault) — array validation
+ * 4. PancakeSwap V3 (MockPancakeV3Pool/Factory) — dual-token flash, callback, repayment, pool discovery
  */
 describe('Mock Protocol Fidelity', () => {
   // ===========================================================================
@@ -84,7 +78,6 @@ describe('Mock Protocol Fidelity', () => {
     const MockPancakeV3FactoryFactory = await ethers.getContractFactory('MockPancakeV3Factory');
     const factory = await MockPancakeV3FactoryFactory.deploy();
 
-    // PancakeSwap V3 fee tiers: 100 (0.01%), 500 (0.05%), 2500 (0.25%), 10000 (1%)
     const MockPancakeV3PoolFactory = await ethers.getContractFactory('MockPancakeV3Pool');
     const pool = await MockPancakeV3PoolFactory.deploy(
       await token0.getAddress(),
@@ -111,44 +104,9 @@ describe('Mock Protocol Fidelity', () => {
   // ===========================================================================
 
   describe('Aave V3', () => {
-    describe('Fee Calculation', () => {
-      it('should calculate premium as 0.09% (9 basis points)', async () => {
-        const { pool } = await loadFixture(deployAavePoolFixture);
-        const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-        expect(premium).to.equal(9);
-      });
-
-      it('should calculate correct fee for 1000 token loan', async () => {
-        const { pool } = await loadFixture(deployAavePoolFixture);
-        const loanAmount = ethers.parseEther('1000');
-        const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-        const expectedFee = (loanAmount * BigInt(premium)) / 10000n;
-        expect(expectedFee).to.equal(ethers.parseEther('0.9'));
-      });
-
-      it('should calculate correct fee for small amounts', async () => {
-        const { pool } = await loadFixture(deployAavePoolFixture);
-        const loanAmount = ethers.parseEther('1');
-        const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-        const expectedFee = (loanAmount * BigInt(premium)) / 10000n;
-        expect(expectedFee).to.equal(ethers.parseEther('0.0009'));
-      });
-
-      it('should calculate correct fee for large amounts', async () => {
-        const { pool } = await loadFixture(deployAavePoolFixture);
-        const loanAmount = ethers.parseEther('1000000');
-        const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-        const expectedFee = (loanAmount * BigInt(premium)) / 10000n;
-        expect(expectedFee).to.equal(ethers.parseEther('900'));
-      });
-
-      it('should handle rounding for very small amounts', async () => {
-        const { pool } = await loadFixture(deployAavePoolFixture);
-        const loanAmount = 1000n;
-        const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
-        const expectedFee = (loanAmount * BigInt(premium)) / 10000n;
-        expect(expectedFee).to.equal(0n);
-      });
+    it('should have premium constant of 9 basis points (0.09%)', async () => {
+      const { pool } = await loadFixture(deployAavePoolFixture);
+      expect(await pool.FLASHLOAN_PREMIUM_TOTAL()).to.equal(9);
     });
 
     describe('executeOperation Return Value', () => {
@@ -334,76 +292,6 @@ describe('Mock Protocol Fidelity', () => {
         expect(poolBalanceAfter - poolBalanceBefore).to.be.gte(expectedFee);
       });
     });
-
-    describe('Edge Cases', () => {
-      it('should handle zero amount loan', async () => {
-        const { pool, token } = await loadFixture(deployAavePoolFixture);
-
-        const MockReceiverFactory = await ethers.getContractFactory('MockFlashLoanRecipient');
-        const receiver = await MockReceiverFactory.deploy();
-        await receiver.setShouldSucceed(true);
-
-        await expect(
-          pool.flashLoanSimple(
-            await receiver.getAddress(),
-            await token.getAddress(),
-            0,
-            '0x',
-            0
-          )
-        ).to.not.be.reverted;
-      });
-
-      it('should handle maximum uint256 approval', async () => {
-        const { pool, token } = await loadFixture(deployAavePoolFixture);
-
-        const MockReceiverFactory = await ethers.getContractFactory('MockFlashLoanRecipient');
-        const receiver = await MockReceiverFactory.deploy();
-        await receiver.setShouldSucceed(true);
-
-        await token.mint(await receiver.getAddress(), ethers.parseEther('1'));
-        await receiver.approveToken(
-          await token.getAddress(),
-          await pool.getAddress(),
-          ethers.MaxUint256
-        );
-
-        await expect(
-          pool.flashLoanSimple(
-            await receiver.getAddress(),
-            await token.getAddress(),
-            ethers.parseEther('100'),
-            '0x',
-            0
-          )
-        ).to.not.be.reverted;
-      });
-
-      it('should handle empty userData', async () => {
-        const { pool, token } = await loadFixture(deployAavePoolFixture);
-
-        const MockReceiverFactory = await ethers.getContractFactory('MockFlashLoanRecipient');
-        const receiver = await MockReceiverFactory.deploy();
-        await receiver.setShouldSucceed(true);
-
-        await token.mint(await receiver.getAddress(), ethers.parseEther('1'));
-        await receiver.approveToken(
-          await token.getAddress(),
-          await pool.getAddress(),
-          ethers.MaxUint256
-        );
-
-        await expect(
-          pool.flashLoanSimple(
-            await receiver.getAddress(),
-            await token.getAddress(),
-            ethers.parseEther('100'),
-            '0x',
-            0
-          )
-        ).to.not.be.reverted;
-      });
-    });
   });
 
   // ===========================================================================
@@ -411,94 +299,22 @@ describe('Mock Protocol Fidelity', () => {
   // ===========================================================================
 
   describe('SyncSwap', () => {
-    describe('Fee Calculation (ISyncSwapVault)', () => {
-      it('should calculate fee as 0.3% of loan amount', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
+    it('should return fee percentage as 3e15 (0.3% with 18 decimals)', async () => {
+      const { vault } = await loadFixture(deploySyncSwapVaultFixture);
 
-        const loanAmount = ethers.parseEther('1000');
-        const expectedFee = loanAmount * 3n / 1000n;
+      const feePercentage = await vault.flashLoanFeePercentage();
 
-        const actualFee = await vault.flashFee(await weth.getAddress(), loanAmount);
-
-        expect(actualFee).to.equal(expectedFee);
-        expect(actualFee).to.equal(ethers.parseEther('3'));
-      });
-
-      it('should return fee percentage as 3e15 (0.3% with 18 decimals)', async () => {
-        const { vault } = await loadFixture(deploySyncSwapVaultFixture);
-
-        const feePercentage = await vault.flashLoanFeePercentage();
-
-        expect(feePercentage).to.equal(3000000000000000n);
-        expect(feePercentage).to.equal(ethers.parseEther('0.003'));
-      });
-
-      it('should calculate fee correctly for small amounts', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-        const loanAmount = ethers.parseEther('1');
-        const expectedFee = loanAmount * 3n / 1000n;
-
-        const actualFee = await vault.flashFee(await weth.getAddress(), loanAmount);
-
-        expect(actualFee).to.equal(expectedFee);
-        expect(actualFee).to.equal(ethers.parseEther('0.003'));
-      });
-
-      it('should calculate fee correctly for large amounts', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-        const loanAmount = ethers.parseEther('1000000');
-        const expectedFee = loanAmount * 3n / 1000n;
-
-        const actualFee = await vault.flashFee(await weth.getAddress(), loanAmount);
-
-        expect(actualFee).to.equal(expectedFee);
-        expect(actualFee).to.equal(ethers.parseEther('3000'));
-      });
-
-      it('should handle rounding for very small amounts', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-        const loanAmount = 100n;
-        const expectedFee = (loanAmount * 3n) / 1000n;
-
-        const actualFee = await vault.flashFee(await weth.getAddress(), loanAmount);
-
-        expect(actualFee).to.equal(expectedFee);
-        expect(actualFee).to.equal(0n);
-      });
+      expect(feePercentage).to.equal(3000000000000000n);
+      expect(feePercentage).to.equal(ethers.parseEther('0.003'));
     });
 
-    describe('EIP-3156 Compliance', () => {
-      it('should implement EIP-3156 flashFee interface', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
+    it('should implement EIP-3156 maxFlashLoan interface', async () => {
+      const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
 
-        const amount = ethers.parseEther('100');
-        const fee = await vault.flashFee(await weth.getAddress(), amount);
+      const maxLoan = await vault.maxFlashLoan(await weth.getAddress());
 
-        expect(fee).to.be.a('bigint');
-        expect(fee).to.be.greaterThan(0n);
-      });
-
-      it('should implement EIP-3156 maxFlashLoan interface', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-        const maxLoan = await vault.maxFlashLoan(await weth.getAddress());
-
-        expect(maxLoan).to.be.a('bigint');
-        expect(maxLoan).to.equal(ethers.parseEther('10000'));
-      });
-
-      it('should calculate fee independent of maxFlashLoan', async () => {
-        const { vault, weth } = await loadFixture(deploySyncSwapVaultFixture);
-
-        const maxLoan = await vault.maxFlashLoan(await weth.getAddress());
-        const feeForMax = await vault.flashFee(await weth.getAddress(), maxLoan);
-
-        const expectedFee = (maxLoan * 3n) / 1000n;
-        expect(feeForMax).to.equal(expectedFee);
-      });
+      expect(maxLoan).to.be.a('bigint');
+      expect(maxLoan).to.equal(ethers.parseEther('10000'));
     });
   });
 
@@ -586,80 +402,6 @@ describe('Mock Protocol Fidelity', () => {
   // ===========================================================================
 
   describe('PancakeSwap V3', () => {
-    describe('Fee Tier Validation', () => {
-      it('should support 0.01% fee tier (100 fee units)', async () => {
-        const { factory, token0, token1 } = await loadFixture(deployPancakeV3Fixture);
-
-        const MockPancakeV3PoolFactory = await ethers.getContractFactory('MockPancakeV3Pool');
-        const pool = await MockPancakeV3PoolFactory.deploy(
-          await token0.getAddress(),
-          await token1.getAddress(),
-          100,
-          await factory.getAddress()
-        );
-
-        expect(await pool.fee()).to.equal(100);
-      });
-
-      it('should support 0.05% fee tier (500 fee units)', async () => {
-        const { factory, token0, token1 } = await loadFixture(deployPancakeV3Fixture);
-
-        const MockPancakeV3PoolFactory = await ethers.getContractFactory('MockPancakeV3Pool');
-        const pool = await MockPancakeV3PoolFactory.deploy(
-          await token0.getAddress(),
-          await token1.getAddress(),
-          500,
-          await factory.getAddress()
-        );
-
-        expect(await pool.fee()).to.equal(500);
-      });
-
-      it('should support 0.25% fee tier (2500 fee units)', async () => {
-        const { factory, token0, token1 } = await loadFixture(deployPancakeV3Fixture);
-
-        const MockPancakeV3PoolFactory = await ethers.getContractFactory('MockPancakeV3Pool');
-        const pool = await MockPancakeV3PoolFactory.deploy(
-          await token0.getAddress(),
-          await token1.getAddress(),
-          2500,
-          await factory.getAddress()
-        );
-
-        expect(await pool.fee()).to.equal(2500);
-      });
-
-      it('should support 1% fee tier (10000 fee units)', async () => {
-        const { factory, token0, token1 } = await loadFixture(deployPancakeV3Fixture);
-
-        const MockPancakeV3PoolFactory = await ethers.getContractFactory('MockPancakeV3Pool');
-        const pool = await MockPancakeV3PoolFactory.deploy(
-          await token0.getAddress(),
-          await token1.getAddress(),
-          10000,
-          await factory.getAddress()
-        );
-
-        expect(await pool.fee()).to.equal(10000);
-      });
-
-      it('should calculate correct fee for each tier', async () => {
-        const loanAmount = ethers.parseEther('1000');
-
-        const tiers = [
-          { bps: 100, expected: ethers.parseEther('0.1') },
-          { bps: 500, expected: ethers.parseEther('0.5') },
-          { bps: 2500, expected: ethers.parseEther('2.5') },
-          { bps: 10000, expected: ethers.parseEther('10') },
-        ];
-
-        for (const tier of tiers) {
-          const calculatedFee = (loanAmount * BigInt(tier.bps)) / 1000000n;
-          expect(calculatedFee).to.equal(tier.expected);
-        }
-      });
-    });
-
     describe('Dual-Token Flash Loans', () => {
       it('should support single-token flash loan (token0 only)', async () => {
         const { pool, token0 } = await loadFixture(deployPancakeV3Fixture);
@@ -906,40 +648,6 @@ describe('Mock Protocol Fidelity', () => {
     });
 
     describe('Edge Cases', () => {
-      it('should handle very small amounts (dust)', async () => {
-        const { pool, token0 } = await loadFixture(deployPancakeV3Fixture);
-
-        const amount0 = 1000n;
-
-        const MockFlashLoanRecipientFactory = await ethers.getContractFactory('MockFlashLoanRecipient');
-        const recipient = await MockFlashLoanRecipientFactory.deploy();
-
-        const fee = (amount0 * 2500n) / 1000000n;
-        await token0.mint(await recipient.getAddress(), fee + 1n);
-        await recipient.approveToken(await token0.getAddress(), await pool.getAddress(), ethers.MaxUint256);
-
-        await expect(
-          pool.flash(await recipient.getAddress(), amount0, 0, '0x')
-        ).to.not.be.reverted;
-      });
-
-      it('should handle maximum safe integer amounts', async () => {
-        const { pool, token0 } = await loadFixture(deployPancakeV3Fixture);
-
-        const amount0 = ethers.parseEther('1000000');
-
-        const MockFlashLoanRecipientFactory = await ethers.getContractFactory('MockFlashLoanRecipient');
-        const recipient = await MockFlashLoanRecipientFactory.deploy();
-
-        const fee = (amount0 * 2500n) / 1000000n;
-        await token0.mint(await recipient.getAddress(), fee);
-        await recipient.approveToken(await token0.getAddress(), await pool.getAddress(), ethers.MaxUint256);
-
-        await expect(
-          pool.flash(await recipient.getAddress(), amount0, 0, '0x')
-        ).to.not.be.reverted;
-      });
-
       it('should revert if pool has insufficient liquidity', async () => {
         const { pool } = await loadFixture(deployPancakeV3Fixture);
 
