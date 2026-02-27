@@ -82,7 +82,7 @@ export class MevShareProvider extends FlashbotsProvider {
       logs: false,            // Hide event data (profit amounts, swap details)
       calldata: false,        // Hide parameters (amounts, tokens, paths)
       hash: false,            // Hide tx hash (prevents front-running)
-      txValue: options?.revealValue || false, // Optionally reveal ETH value
+      txValue: options?.revealValue ?? false, // W2-L2 FIX: Use ?? for convention compliance
     };
   }
 

@@ -357,8 +357,9 @@ export class SwapEventFilter {
         amount0Out === 0n &&
         amount1Out === 0n
       );
-    } catch {
-      // Invalid BigInt input - treat as zero amount (will be filtered)
+    } catch (error) {
+      // W2-M8 FIX: Log instead of silently swallowing
+      logger.debug('BigInt parse failed in isZeroAmount, treating as filtered', { error: (error as Error).message });
       return true;
     }
   }
@@ -402,7 +403,9 @@ export class SwapEventFilter {
       // This is imprecise but provides a reasonable filter
       const maxAmount = Math.max(amount0In, amount1In, amount0Out, amount1Out);
       return maxAmount > 0 ? maxAmount : 0;
-    } catch {
+    } catch (error) {
+      // W2-M8 FIX: Log instead of silently swallowing
+      logger.debug('USD estimation failed', { error: (error as Error).message });
       return 0;
     }
   }
@@ -566,7 +569,9 @@ export class SwapEventFilter {
       }
 
       return 0;
-    } catch {
+    } catch (error) {
+      // W2-M8 FIX: Log instead of silently swallowing
+      logger.debug('Exchange rate estimation failed', { error: (error as Error).message });
       return 0;
     }
   }

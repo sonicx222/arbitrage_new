@@ -690,7 +690,7 @@ export class ChainDetectorInstance extends EventEmitter {
       // batcher.add() is O(1) synchronous — FASTER than previous async xaddWithLimit
       this.priceUpdateBatcher = this.streamsClient.createBatcher<PriceUpdate>(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        { maxBatchSize: 50, maxWaitMs: 10 }
+        { maxBatchSize: 50, maxWaitMs: 3 }
       );
 
       this.isRunning = true;
@@ -1211,8 +1211,13 @@ export class ChainDetectorInstance extends EventEmitter {
     // but before the WebSocket connection is fully disconnected
     if (this.isStopping || !this.isRunning) return;
 
+    // W2-M14 FIX: Cache Date.now() once per message to avoid 6+ syscalls/event.
+    // At 1000 events/sec, this saves ~6000 syscalls/sec and ensures consistent
+    // timestamps within a single event processing pipeline.
+    const messageReceivedAt = Date.now();
+
     // Phase 0 instrumentation: capture WebSocket receive timestamp
-    this.lastWsReceivedAt = Date.now();
+    this.lastWsReceivedAt = messageReceivedAt;
 
     try {
       // Route message based on type
@@ -1223,7 +1228,7 @@ export class ChainDetectorInstance extends EventEmitter {
           // Log event
           const topic0 = result.topics[0];
           if (topic0 === EVENT_SIGNATURES.SYNC) {
-            this.handleSyncEvent(result);
+            this.handleSyncEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
             this.handleSwapEvent(result);
           } else if (this.factorySubscriptionService && this.useFactoryMode) {
@@ -1265,7 +1270,7 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // P2 FIX: Use EthereumLog type instead of any
-  private handleSyncEvent(log: EthereumLog): void {
+  private handleSyncEvent(log: EthereumLog, now: number = Date.now()): void {
     // Guard against processing during shutdown (consistent with base-detector.ts)
     if (this.isStopping || !this.isRunning) return;
 
@@ -1303,7 +1308,7 @@ export class ChainDetectorInstance extends EventEmitter {
         if (this.momentumTracker && syncPrice !== null) {
           this.momentumTracker.addPriceUpdate(
             pair.chainPairKey ?? `${this.chainId}:${pairAddress}`,
-            syncPrice, 0, Date.now()
+            syncPrice, 0, now
           );
         }
 
@@ -1322,7 +1327,7 @@ export class ChainDetectorInstance extends EventEmitter {
             feeBps: Math.round((pair.fee ?? 0.003) * 10000),
             liquidityUsd: 0, // Estimated by analyzer from reserves
             price: syncPrice ?? 0,
-            timestamp: Date.now(),
+            timestamp: now,
           });
         }
 
@@ -1334,7 +1339,7 @@ export class ChainDetectorInstance extends EventEmitter {
         pair.reserve0BigInt = reserve0BigInt;
         pair.reserve1BigInt = reserve1BigInt;
         pair.blockNumber = blockNumber;
-        pair.lastUpdate = Date.now();
+        pair.lastUpdate = now;
 
         // R3 Refactor: Delegate cache invalidation to SnapshotManager
         // SnapshotManager handles version-based cache coherency and TTL internally
@@ -1342,8 +1347,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
         this.eventsProcessed++;
 
-        // Calculate and emit price update
-        this.emitPriceUpdate(pair);
+        // Calculate and emit price update (pass cached timestamp)
+        this.emitPriceUpdate(pair, now);
 
         // Check for arbitrage opportunities
         this.checkArbitrageOpportunity(pair);
@@ -1480,7 +1485,7 @@ export class ChainDetectorInstance extends EventEmitter {
   // @see Hot-Path Analysis in refactoring analysis report
   // ===========================================================================
 
-  private emitPriceUpdate(pair: ExtendedPair): void {
+  private emitPriceUpdate(pair: ExtendedPair, now: number = Date.now()): void {
     // FIX Perf 10.2: Use cached BigInt values to avoid re-parsing (~2000 parses/sec saved)
     // Falls back to parsing if BigInt cache is missing (e.g., pairs from older code paths)
     const reserve0 = pair.reserve0BigInt ?? BigInt(pair.reserve0);
@@ -1504,7 +1509,7 @@ export class ChainDetectorInstance extends EventEmitter {
       price,
       reserve0: pair.reserve0,
       reserve1: pair.reserve1,
-      timestamp: Date.now(),
+      timestamp: now,
       blockNumber: pair.blockNumber,
       latency: 0, // Calculated by downstream consumers if needed
       // Include DEX-specific fee for accurate arbitrage calculations (S2.2.2 fix)
@@ -1512,7 +1517,7 @@ export class ChainDetectorInstance extends EventEmitter {
       // Phase 0 instrumentation: pipeline latency tracking
       pipelineTimestamps: {
         wsReceivedAt: this.lastWsReceivedAt,
-        publishedAt: Date.now(),
+        publishedAt: now,
       },
       source: this.simulationMode ? 'simulation' as const : 'live' as const,
     };

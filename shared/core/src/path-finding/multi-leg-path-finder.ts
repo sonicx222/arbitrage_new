@@ -23,6 +23,8 @@ import {
   GAS_FALLBACK_SAFETY_FACTOR
 } from '../caching/gas-price-cache';
 import type { DexPool, TriangularStep } from './cross-dex-triangular-arbitrage';
+// L3+W2-M18 FIX: Import shared module-level constant instead of inline object literal
+import { BASE_EXECUTION_TIMES } from './cross-dex-triangular-arbitrage';
 import {
   PRECISION_MULTIPLIER,
   BASIS_POINTS_DIVISOR,
@@ -135,11 +137,12 @@ export interface PathFinderStats {
  * - MULTI_LEG_MAX_CANDIDATES: Max candidates per hop (default: 15)
  */
 const DEFAULT_CONFIG: MultiLegPathConfig = {
-  minProfitThreshold: parseFloat(process.env.MULTI_LEG_MIN_PROFIT || '0.001'),
+  // W2-L1 FIX: Use ?? for convention compliance
+  minProfitThreshold: parseFloat(process.env.MULTI_LEG_MIN_PROFIT ?? '0.001'),
   maxPathLength: 6,  // 6 tokens = 5 hops = matches contract MAX_SWAP_HOPS
   minPathLength: 5,
-  maxCandidatesPerHop: parseInt(process.env.MULTI_LEG_MAX_CANDIDATES || '15', 10),
-  timeoutMs: parseInt(process.env.MULTI_LEG_TIMEOUT_MS || '5000', 10),
+  maxCandidatesPerHop: parseInt(process.env.MULTI_LEG_MAX_CANDIDATES ?? '15', 10),
+  timeoutMs: parseInt(process.env.MULTI_LEG_TIMEOUT_MS ?? '5000', 10),
   minConfidence: 0.4,
   chainTimeoutMs: {
     ethereum: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ETHEREUM ?? '5000', 10),
@@ -773,15 +776,7 @@ export class MultiLegPathFinder {
    * Estimate execution time.
    */
   private estimateExecutionTime(chain: string, numSteps: number): number {
-    const baseExecutionTimes: { [chain: string]: number } = {
-      ethereum: 15000,
-      bsc: 3000,
-      arbitrum: 1000,
-      base: 2000,
-      polygon: 2000
-    };
-
-    const baseTime = baseExecutionTimes[chain] || 5000;
+    const baseTime = BASE_EXECUTION_TIMES[chain] ?? 5000;
     const stepTime = 500;
     return baseTime + (numSteps * stepTime);
   }

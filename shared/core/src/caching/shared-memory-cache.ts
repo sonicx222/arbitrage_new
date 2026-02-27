@@ -61,8 +61,9 @@ export class SharedMemoryCache {
   constructor(config: Partial<SharedCacheConfig> = {}) {
     this.config = {
       size: config.size ?? 64, // 64MB default (reduced from 256MB; no production callers)
-      enableCompression: config.enableCompression || false,
-      enableEncryption: config.enableEncryption || false,
+      // W2-L2 FIX: Use ?? for convention compliance
+      enableCompression: config.enableCompression ?? false,
+      enableEncryption: config.enableEncryption ?? false,
       maxKeyLength: config.maxKeyLength ?? SharedMemoryCache.MAX_KEY_LENGTH,
       enableAtomicOperations: config.enableAtomicOperations !== false
     };

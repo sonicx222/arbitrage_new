@@ -155,11 +155,18 @@ export class QueueServiceImpl implements QueueService {
 
   /**
    * Clear the queue.
+   * W2-L11 FIX: Notify pauseCallback when clearing resets pause state,
+   * so consumers waiting for drain don't stay permanently paused.
    */
   clear(): void {
+    const wasPaused = this.paused || this.manuallyPaused;
     this.queue.clear();
     this.paused = false;
     this.manuallyPaused = false;
+    // Notify consumer that pause state has been released
+    if (wasPaused && this.pauseCallback) {
+      this.pauseCallback(false);
+    }
   }
 
   /**

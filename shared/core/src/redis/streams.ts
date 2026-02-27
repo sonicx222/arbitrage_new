@@ -124,6 +124,7 @@ export interface BatcherStats {
   compressionRatio: number;     // totalMessagesQueued / batchesSent (higher = better batching)
   averageBatchSize: number;     // totalMessagesSent / batchesSent
   totalBatchFlushes: number;    // Total successful batch flush xadd calls
+  totalMessagesDropped: number; // W2-M5: Messages dropped due to queue full
 }
 
 // =============================================================================
@@ -149,7 +150,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
     totalMessagesSent: 0,
     compressionRatio: 1,
     averageBatchSize: 0,
-    totalBatchFlushes: 0
+    totalBatchFlushes: 0,
+    totalMessagesDropped: 0,
   };
 
   // P2-FIX: Use proper Logger type
@@ -173,10 +175,13 @@ export class StreamBatcher<T = Record<string, unknown>> {
     // Enforce maxQueueSize to prevent unbounded memory growth during sustained Redis outages
     const totalQueued = this.queue.length + this.pendingDuringFlush.length;
     if (this.config.maxQueueSize != null && totalQueued >= this.config.maxQueueSize) {
+      // W2-M5 FIX: Track dropped messages for monitoring
+      this.stats.totalMessagesDropped++;
       this.logger.warn('Batcher queue full, dropping message', {
         streamName: this.streamName,
         queueSize: totalQueued,
         maxQueueSize: this.config.maxQueueSize,
+        totalDropped: this.stats.totalMessagesDropped,
       });
       return;
     }
@@ -1066,9 +1071,13 @@ export class RedisStreamsClient {
     await Promise.all(destroyPromises);
     this.batchers.clear();
 
-    // Disconnect client
-    this.client.removeAllListeners();
-    await this.client.disconnect();
+    // W2-L7 FIX: Disconnect first, then remove listeners.
+    // If disconnect throws, error handlers remain to catch it.
+    try {
+      await this.client.disconnect();
+    } finally {
+      this.client.removeAllListeners();
+    }
     this.logger.info('Redis Streams client disconnected');
   }
 

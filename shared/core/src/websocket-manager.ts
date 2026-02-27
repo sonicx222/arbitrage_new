@@ -164,10 +164,11 @@ export class WebSocketManager {
 
   /**
    * Minimum payload size to use worker parsing.
-   * P1-PHASE1: Changed from 1KB to 2KB per research recommendations.
-   * Below 2KB, main thread parsing overhead is less than worker message-passing overhead.
+   * W2-L8 FIX: Changed from 2KB to 32KB. Worker postMessage overhead
+   * exceeds main-thread JSON.parse for payloads under ~10KB. 32KB
+   * provides safety margin above the breakeven point.
    */
-  private workerParsingThresholdBytes = 2048;
+  private workerParsingThresholdBytes = 32768;
 
   /** Maximum allowed message size in bytes. Messages exceeding this close the connection. */
   private maxMessageSize: number;
@@ -259,7 +260,7 @@ export class WebSocketManager {
       : isProduction;
 
     this.useWorkerParsing = config.useWorkerParsing ?? workerParsingDefault;
-    this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 2048;
+    this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 32768;
     this.maxMessageSize = config.maxMessageSize ?? 10 * 1024 * 1024; // 10MB
 
     if (this.useWorkerParsing) {
@@ -460,8 +461,14 @@ export class WebSocketManager {
           // Start heartbeat
           this.startHeartbeat();
 
-          // Re-subscribe to existing subscriptions
-          this.resubscribe();
+          // W2-M12 FIX: Use validated resubscription with per-subscription confirmation.
+          // Basic resubscribe() silently loses subscriptions on rate-limit/error.
+          this.resubscribeWithValidation().catch(error => {
+            this.logger.error('Subscription recovery failed after reconnection', {
+              chainId: this.chainId,
+              error: getErrorMessage(error),
+            });
+          });
 
           // C3 FIX: Proactively detect data gaps after reconnection
           // This triggers 'dataGap' events that DataGapBackfiller can consume

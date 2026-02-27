@@ -17,7 +17,7 @@ import type {
   SimulatedOpportunity,
   SimulatedOpportunityType,
 } from './types';
-import { DEXES, getTokenPrice } from './constants';
+import { DEFAULT_CONFIG, DEXES, getTokenPrice } from './constants';
 
 // =============================================================================
 // ChainSimulator
@@ -497,8 +497,9 @@ export function getChainSimulator(
     const simulatorConfig: ChainSimulatorConfig = {
       chainId: key,
       pairs,
-      updateIntervalMs: config?.updateIntervalMs ?? parseInt(process.env.SIMULATION_UPDATE_INTERVAL_MS || '1000', 10),
-      volatility: config?.volatility ?? parseFloat(process.env.SIMULATION_VOLATILITY || '0.01'),
+      // W2-M2 FIX: Use DEFAULT_CONFIG values instead of divergent inline defaults
+      updateIntervalMs: config?.updateIntervalMs ?? DEFAULT_CONFIG.updateIntervalMs,
+      volatility: config?.volatility ?? DEFAULT_CONFIG.volatility,
       arbitrageChance: config?.arbitrageChance ?? 0.08,
       minArbitrageSpread: config?.minArbitrageSpread ?? 0.003,
       maxArbitrageSpread: config?.maxArbitrageSpread ?? 0.015

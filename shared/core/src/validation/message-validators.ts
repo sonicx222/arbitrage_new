@@ -127,7 +127,8 @@ export function validatePriceUpdate(
   if (typeof u.pairKey !== 'string' || !u.pairKey) return false;
 
   // Required number fields
-  if (typeof u.price !== 'number' || isNaN(u.price) || u.price < 0) return false;
+  // L1 FIX: Reject price === 0 (defense-in-depth; zero price is never valid for trading)
+  if (typeof u.price !== 'number' || isNaN(u.price) || u.price <= 0) return false;
   if (typeof u.timestamp !== 'number' || u.timestamp <= 0) return false;
 
   // Optional fields validation

@@ -53,11 +53,12 @@ export interface DynamicSlippageConfig {
  * - SLIPPAGE_MAX: Maximum slippage cap (default: 0.10 = 10%)
  * - SLIPPAGE_MIN_LIQUIDITY_USD: Minimum liquidity for full confidence (default: 100000)
  */
+// W2-L1 FIX: Use ?? for convention compliance
 export const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
-  baseSlippage: parseFloat(process.env.SLIPPAGE_BASE || '0.003'),
+  baseSlippage: parseFloat(process.env.SLIPPAGE_BASE ?? '0.003'),
   priceImpactScale: 5.0,
-  maxSlippage: parseFloat(process.env.SLIPPAGE_MAX || '0.10'),
-  minLiquidityUsd: parseInt(process.env.SLIPPAGE_MIN_LIQUIDITY_USD || '100000', 10),
+  maxSlippage: parseFloat(process.env.SLIPPAGE_MAX ?? '0.10'),
+  minLiquidityUsd: parseInt(process.env.SLIPPAGE_MIN_LIQUIDITY_USD ?? '100000', 10),
   liquidityPenaltyScale: 2.0
 };
 

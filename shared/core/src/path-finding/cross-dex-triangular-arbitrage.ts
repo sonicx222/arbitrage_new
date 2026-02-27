@@ -24,6 +24,26 @@ import type { DynamicSlippageConfig } from '../utils/amm-math';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
 
+// L3+W2-M18 FIX: Extract to module-level constant — avoids re-creating object literal
+// on every call. Covers all 16 supported chains (was only 5).
+export const BASE_EXECUTION_TIMES: Record<string, number> = {
+  ethereum: 15000,  // ~12s block time + confirmation
+  bsc: 3000,        // ~3s block time
+  polygon: 2000,    // ~2s block time
+  avalanche: 2000,  // ~2s block time
+  fantom: 1000,     // ~1s block time
+  arbitrum: 1000,   // Fast L2 (~250ms)
+  optimism: 2000,   // OP-stack L2 (~2s)
+  base: 2000,       // OP-stack L2 (~2s)
+  zksync: 2000,     // zkSync Era (~2s)
+  linea: 3000,      // ~3s block time
+  blast: 2000,      // OP-stack L2 (~2s)
+  scroll: 3000,     // zkEVM (~3s)
+  mantle: 2000,     // OP-stack L2 (~2s)
+  mode: 2000,       // OP-stack L2 (~2s)
+  solana: 400,      // ~400ms slot time
+};
+
 export interface DexPool {
   dex: string;
   token0: string;
@@ -98,9 +118,10 @@ export type { DynamicSlippageConfig } from '../utils/amm-math';
  */
 export class CrossDexTriangularArbitrage {
   private cache = getHierarchicalCache();
-  private minProfitThreshold = parseFloat(process.env.TRIANGULAR_MIN_PROFIT || '0.005');
-  private maxSlippage = parseFloat(process.env.SLIPPAGE_MAX || '0.10');
-  private maxExecutionTime = parseInt(process.env.TRIANGULAR_MAX_EXECUTION_TIME_MS || '5000', 10);
+  // W2-L1 FIX: Use ?? for convention compliance (|| treats '' as falsy)
+  private minProfitThreshold = parseFloat(process.env.TRIANGULAR_MIN_PROFIT ?? '0.005');
+  private maxSlippage = parseFloat(process.env.SLIPPAGE_MAX ?? '0.10');
+  private maxExecutionTime = parseInt(process.env.TRIANGULAR_MAX_EXECUTION_TIME_MS ?? '5000', 10);
 
   /** T1.2: Dynamic slippage configuration */
   private slippageConfig: DynamicSlippageConfig;
@@ -915,15 +936,7 @@ export class CrossDexTriangularArbitrage {
   // Estimate execution time
   private estimateExecutionTime(chain: string, steps: TriangularStep[]): number {
     // Base execution times for different chains (in ms)
-    const baseExecutionTimes: { [chain: string]: number } = {
-      ethereum: 15000, // 15 seconds average
-      bsc: 3000,       // 3 seconds
-      arbitrum: 1000,  // 1 second (fast L2)
-      base: 2000,      // 2 seconds
-      polygon: 2000    // 2 seconds
-    };
-
-    const baseTime = baseExecutionTimes[chain] || 5000;
+    const baseTime = BASE_EXECUTION_TIMES[chain] ?? 5000;
 
     // Add time for each step and account for sequential execution
     const stepTime = 500; // 500ms per swap

@@ -16,7 +16,7 @@ import type {
   SimulatedOpportunity,
   SimulatedBridgeProtocol,
 } from './types';
-import { DEXES, BASE_PRICES, getTokenPrice, DEFAULT_BRIDGE_COSTS } from './constants';
+import { DEFAULT_CONFIG, DEXES, BASE_PRICES, getTokenPrice, DEFAULT_BRIDGE_COSTS } from './constants';
 
 // =============================================================================
 // CrossChainSimulator
@@ -295,8 +295,9 @@ export function getCrossChainSimulator(
   if (!crossChainSimulatorInstance) {
     const defaultConfig: CrossChainSimulatorConfig = {
       chains: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche'],
-      updateIntervalMs: parseInt(process.env.SIMULATION_UPDATE_INTERVAL_MS || '2000', 10),
-      volatility: parseFloat(process.env.SIMULATION_VOLATILITY || '0.015'),
+      // W2-M2 FIX: Use DEFAULT_CONFIG values instead of divergent inline defaults
+      updateIntervalMs: DEFAULT_CONFIG.updateIntervalMs,
+      volatility: DEFAULT_CONFIG.volatility,
       minProfitThreshold: 0.002,
       tokens: ['WETH', 'WBTC', 'USDC', 'USDT', 'LINK', 'UNI', 'AAVE'],
     };
