@@ -91,6 +91,7 @@ export const EVM_GAS_COSTS_USD: Readonly<Record<string, number>> = {
   fantom: 0.10,
   blast: 0.05,       // OP-stack L2
   scroll: 0.25,      // zkRollup (similar to zkSync/Linea)
+  // IMPORTANT: Mantle uses MNT (~$0.80) not ETH - this USD estimate accounts for MNT pricing
   mantle: 0.05,      // OP-stack L2 (MNT native token, low fees)
   mode: 0.05,        // OP-stack L2
 };

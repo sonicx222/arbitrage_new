@@ -12,7 +12,22 @@
  */
 
 import { ethers } from 'ethers';
+import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
 import type { FlashLoanRequest } from './types';
+
+// Lazy-initialized module logger for flash loan providers
+let _providerLogger: ILogger | null = null;
+
+/**
+ * Get shared logger for flash loan providers.
+ * Lazily initialized to avoid startup overhead.
+ */
+export function getProviderLogger(): ILogger {
+  if (!_providerLogger) {
+    _providerLogger = createPinoLogger('flash-loan-providers');
+  }
+  return _providerLogger;
+}
 
 /**
  * Validation result type

@@ -25,7 +25,7 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
-import { validateFlashLoanRequest } from './validation-utils';
+import { validateFlashLoanRequest, getProviderLogger } from './validation-utils';
 
 /**
  * DAI Flash Mint fee: 1 basis point (0.01%)
@@ -192,8 +192,11 @@ export class DaiFlashMintProvider implements IFlashLoanProvider {
 
     try {
       return await provider.estimateGas(tx);
-    } catch {
-      // Default gas estimate for DAI flash mint + multi-hop swaps
+    } catch (error) {
+      getProviderLogger().warn('estimateGas failed, using fallback (tx may revert)', {
+        provider: 'dai-flash-mint', chain: this.chain, fallbackGas: 450000,
+        error: (error as Error).message,
+      });
       return 450000n;
     }
   }

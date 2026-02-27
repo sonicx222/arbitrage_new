@@ -25,7 +25,7 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
-import { validateFlashLoanRequest } from './validation-utils';
+import { validateFlashLoanRequest, getProviderLogger } from './validation-utils';
 
 /**
  * Morpho Blue flash loan fee: 0 basis points (zero-fee)
@@ -191,8 +191,11 @@ export class MorphoFlashLoanProvider implements IFlashLoanProvider {
 
     try {
       return await provider.estimateGas(tx);
-    } catch {
-      // Default gas estimate for Morpho flash loan + multi-hop swaps
+    } catch (error) {
+      getProviderLogger().warn('estimateGas failed, using fallback (tx may revert)', {
+        provider: 'morpho', chain: this.chain, fallbackGas: 400000,
+        error: (error as Error).message,
+      });
       return 400000n;
     }
   }

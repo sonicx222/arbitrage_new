@@ -48,6 +48,7 @@ import { createMockLogger } from '@arbitrage/test-utils';
 function createMockStreamsClient(): OpportunityStreamsClient & StreamsClient {
   return {
     xadd: jest.fn().mockResolvedValue('1-0'),
+    xaddWithLimit: jest.fn().mockResolvedValue('1-0'),
     xack: jest.fn().mockResolvedValue(1),
     xpending: jest.fn().mockResolvedValue(null),
     // OP-1 FIX: New interface methods for orphaned PEL recovery
@@ -509,8 +510,8 @@ describe('StreamConsumerManager', () => {
       const wrapped = manager.withDeferredAck(groupConfig, handler);
       await wrapped({ id: 'msg-fail', data: { key: 'value' } });
 
-      // Should write to DLQ
-      expect(mockStreams.xadd).toHaveBeenCalledWith(
+      // Should write to DLQ (uses xaddWithLimit for MAXLEN enforcement)
+      expect(mockStreams.xaddWithLimit).toHaveBeenCalledWith(
         'stream:test-dlq',
         expect.objectContaining({ originalMessageId: 'msg-fail' }),
       );

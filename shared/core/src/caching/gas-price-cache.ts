@@ -156,7 +156,13 @@ const FALLBACK_GAS_PRICES: Record<string, number> = {
   avalanche: 25,   // ~25 nAVAX
   fantom: 35,      // ~35 gwei (aligned with gas-price-optimizer)
   zksync: 0.25,    // L2 fees
-  linea: 0.5       // L2 fees
+  linea: 0.5,      // L2 fees
+  blast: 0.001,    // OP-stack L2 (very low fees)
+  scroll: 0.5,     // zkRollup (similar to zkSync/Linea)
+  // IMPORTANT: Mantle uses MNT (~$0.80) not ETH (~$3200) as native token.
+  // Gas cost in USD must use MNT price, not ETH price, when Mantle exits stub status.
+  mantle: 0.02,    // OP-stack L2 (MNT native token, low fees)
+  mode: 0.001,     // OP-stack L2 (very low fees)
 };
 
 /**

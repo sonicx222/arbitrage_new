@@ -480,10 +480,19 @@ export function getNativeTokenPrice(
 // =============================================================================
 // TOKEN METADATA - Chain-specific token addresses and categories
 // Used for USD value estimation and price calculations
+//
+// P3-29 NOTE: The `weth` key is a legacy name meaning "primary wrapped native token".
+// On ETH-based chains (Ethereum, Arbitrum, Optimism, Base, etc.) this IS WETH.
+// On non-ETH chains, it points to the chain's wrapped native token:
+//   - BSC: WBNB, Polygon: WMATIC, Avalanche: WAVAX, Fantom: WFTM
+//   - Mantle: WMNT, Solana: Wrapped SOL
+// Prefer `nativeWrapper` for new code — it's semantically accurate for all chains.
 // =============================================================================
 export const TOKEN_METADATA: Record<string, {
+  /** @deprecated Use `nativeWrapper` for clarity. Legacy key — points to wrapped native, not always WETH. */
   weth: string;
   stablecoins: { address: string; symbol: string; decimals: number }[];
+  /** Wrapped native token address. Preferred over `weth` for non-ETH chains. */
   nativeWrapper: string;
 }> = {
   optimism: {

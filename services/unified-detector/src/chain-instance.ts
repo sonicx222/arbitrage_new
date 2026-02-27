@@ -689,9 +689,12 @@ export class ChainDetectorInstance extends EventEmitter {
 
       // ADR-002: Create StreamBatcher for price updates (~50x Redis command reduction)
       // batcher.add() is O(1) synchronous — FASTER than previous async xaddWithLimit
+      // P3-27 FIX: Increased maxWaitMs from 3 to 10. At 3ms, Redis XADD fires ~333x/sec
+      // even with single messages. 10ms gives better batching ratio while staying well
+      // within the <50ms hot-path budget. Tunable via PRICE_BATCHER_MAX_WAIT_MS env var.
       this.priceUpdateBatcher = this.streamsClient.createBatcher<PriceUpdate>(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        { maxBatchSize: 50, maxWaitMs: 3 }
+        { maxBatchSize: 50, maxWaitMs: 10 }
       );
 
       this.isRunning = true;

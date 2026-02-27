@@ -85,7 +85,7 @@ export const chainOpportunityTimeoutMs: Record<string, number> = {
   ethereum: 30000,   // 12s blocks — 30s is ~2.5 blocks
   bsc: 15000,        // 3s blocks — 15s is ~5 blocks
   // L2 fast chains (sub-second to 2s blocks)
-  arbitrum: 2000,    // Sub-second blocks — opportunities expire fast
+  arbitrum: 2000,    // 0.25s blocks — 2s is ~8 blocks (conservative for sequencer delays)
   optimism: 4000,    // 2s blocks
   base: 4000,        // 2s blocks
   zksync: 3000,      // ~1s blocks
@@ -128,6 +128,9 @@ export function getOpportunityTimeoutMs(chainId: string): number {
  * - Ethereum 5x: Mainnet experiences 5-10x spikes during NFT mints, MEV wars
  * - BSC/Polygon/Avalanche/Fantom 3x: Alt-L1s can spike during congestion
  * - Arbitrum/Optimism/Base/zkSync/Linea 2x: L2s have more stable gas pricing
+ * - Solana 1.5x: Uses priority fees (not EIP-1559 gas), less volatile than L1s
+ *
+ * NOTE: mantle/mode have thresholds defined but are currently stubs (no DEX factories).
  *
  * @see gas-price-optimizer.ts — consumer of these thresholds
  */
@@ -144,8 +147,11 @@ export const chainGasSpikeMultiplier: Record<string, number> = {
   linea: 2.0,
   blast: 2.0,
   scroll: 2.0,
-  mantle: 2.0,
-  mode: 2.0,
+  mantle: 2.0,  // stub chain — no DEX factories yet
+  mode: 2.0,    // stub chain — no DEX factories yet
+  // P3-28 FIX: Solana uses priority fees (lamports/CU), not EIP-1559 gas.
+  // Lower multiplier since fee spikes are less extreme than L1 gas wars.
+  solana: 1.5,
 };
 
 /**
@@ -183,7 +189,7 @@ export const chainConfidenceMaxAgeMs: Record<string, number> = {
   polygon: 6000,     // 2s blocks — 6s is ~3 blocks
   avalanche: 6000,   // 2s blocks — 6s is ~3 blocks
   fantom: 3000,      // 1s blocks — 3s is ~3 blocks
-  arbitrum: 4000,    // Sub-second blocks — 4s is conservative
+  arbitrum: 4000,    // 0.25s blocks — 4s is ~16 blocks (conservative for sequencer delays)
   optimism: 6000,    // 2s blocks — 6s is ~3 blocks
   base: 6000,        // 2s blocks — 6s is ~3 blocks
   zksync: 3000,      // ~1s blocks — 3s is ~3 blocks

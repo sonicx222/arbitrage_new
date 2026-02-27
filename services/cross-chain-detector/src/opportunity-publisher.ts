@@ -21,6 +21,7 @@
 
 import { RedisStreamsClient } from '@arbitrage/core/redis';
 import { PerformanceLogger } from '@arbitrage/core';
+import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import { ArbitrageOpportunity } from '@arbitrage/types';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating
@@ -257,19 +258,27 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     timestamps.detectedAt = Date.now();
     arbitrageOpp.pipelineTimestamps = timestamps;
 
+    // O-1 Fix: Inject trace context for end-to-end correlation.
+    // Without this, coordinator starts a new root trace, breaking cross-chain trace chain.
+    const traceCtx = createTraceContext('cross-chain-detector');
+    const enrichedOpp = propagateContext(
+      arbitrageOpp as unknown as Record<string, unknown>,
+      traceCtx,
+    ) as unknown as ArbitrageOpportunity;
+
     try {
       // FIX 2.2: Use xaddWithLimit to prevent unbounded stream growth
       // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts
       await streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        arbitrageOpp
+        enrichedOpp
       );
 
-      perfLogger.logArbitrageOpportunity(arbitrageOpp);
+      perfLogger.logArbitrageOpportunity(enrichedOpp);
 
       // Fast lane: publish high-confidence, high-profit opportunities
       // to stream:fast-lane for coordinator bypass (fire-and-forget)
-      tryPublishToFastLane(arbitrageOpp);
+      tryPublishToFastLane(enrichedOpp);
 
       // Cache with timestamp for deduplication
       opportunitiesCache.set(dedupeKey, {

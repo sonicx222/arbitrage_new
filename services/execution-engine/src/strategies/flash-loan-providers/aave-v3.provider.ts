@@ -25,7 +25,7 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
-import { validateFlashLoanRequest } from './validation-utils';
+import { validateFlashLoanRequest, getProviderLogger } from './validation-utils';
 
 // Fix 1.1: Use centralized constant, alias for local readability
 const BPS_DENOMINATOR = getBpsDenominatorBigInt();
@@ -187,8 +187,12 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
 
     try {
       return await provider.estimateGas(tx);
-    } catch {
-      // Default gas estimate for flash loan arbitrage
+    } catch (error) {
+      // estimateGas failure usually indicates the tx would revert on-chain
+      getProviderLogger().warn('estimateGas failed, using fallback (tx may revert)', {
+        provider: 'aave-v3', chain: this.chain, fallbackGas: 500000,
+        error: (error as Error).message,
+      });
       return 500000n;
     }
   }

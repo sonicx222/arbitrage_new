@@ -47,6 +47,7 @@ import {
   type PendingSwapIntent,
   type FeedHealthMetrics,
 } from './types';
+import { getMetricsText } from './prometheus-metrics';
 import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIntent } from '@arbitrage/types';
 
 // =============================================================================
@@ -548,6 +549,11 @@ export class MempoolDetectorService extends EventEmitter {
       },
       readyCheck: () => this.isRunning && this.feeds.size > 0,
       additionalRoutes: {
+        '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {
+          const text = await getMetricsText();
+          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end(text);
+        },
         '/stats': (_req: IncomingMessage, res: ServerResponse) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({

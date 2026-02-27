@@ -1,5 +1,5 @@
 // Cross-Chain Detector Service Entry Point
-import { Server } from 'http';
+import { IncomingMessage, Server, ServerResponse } from 'http';
 import { CrossChainDetectorService } from './detector';
 import {
   createSimpleHealthServer,
@@ -8,6 +8,7 @@ import {
   runServiceMain,
 } from '@arbitrage/core/service-lifecycle';
 import { createLogger } from '@arbitrage/core';
+import { getMetricsText } from './prometheus-metrics';
 
 const logger = createLogger('cross-chain-detector');
 
@@ -39,6 +40,13 @@ async function main() {
         };
       },
       readyCheck: () => detector.isRunning(),
+      additionalRoutes: {
+        '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {
+          const text = await getMetricsText();
+          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end(text);
+        },
+      },
     });
 
     await detector.start();

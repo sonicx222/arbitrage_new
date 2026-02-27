@@ -192,6 +192,9 @@ export const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
   linea: validateGasPrice('linea', parseFloat(process.env.GAS_PRICE_LINEA_GWEI || '0.5')),
   blast: validateGasPrice('blast', parseFloat(process.env.GAS_PRICE_BLAST_GWEI || '0.001')),
   scroll: validateGasPrice('scroll', parseFloat(process.env.GAS_PRICE_SCROLL_GWEI || '0.5')),
+  // IMPORTANT: Mantle uses MNT (~$0.80) as native token, NOT ETH (~$3200).
+  // Gas cost calculations that assume ETH pricing will overestimate by ~4000x.
+  // When Mantle exits stub status, add MNT-aware gas cost conversion.
   mantle: validateGasPrice('mantle', parseFloat(process.env.GAS_PRICE_MANTLE_GWEI || '0.02')),
   mode: validateGasPrice('mode', parseFloat(process.env.GAS_PRICE_MODE_GWEI || '0.001')),
 };

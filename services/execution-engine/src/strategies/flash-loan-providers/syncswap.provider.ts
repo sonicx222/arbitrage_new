@@ -30,7 +30,7 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
-import { validateFlashLoanRequest } from './validation-utils';
+import { validateFlashLoanRequest, getProviderLogger } from './validation-utils';
 
 /**
  * Cached ethers.Interface for hot-path optimization.
@@ -222,9 +222,11 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
 
     try {
       return await provider.estimateGas(tx);
-    } catch {
-      // Default gas estimate for flash loan arbitrage on zkSync Era
-      // SyncSwap Vault + EIP-3156 callback + multi-hop swaps
+    } catch (error) {
+      getProviderLogger().warn('estimateGas failed, using fallback (tx may revert)', {
+        provider: 'syncswap', chain: this.chain, fallbackGas: 520000,
+        error: (error as Error).message,
+      });
       return 520000n;
     }
   }

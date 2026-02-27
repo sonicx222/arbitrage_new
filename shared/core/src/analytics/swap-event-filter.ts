@@ -113,6 +113,10 @@ interface AggregationBucket {
 export class SwapEventFilter {
   private config: SwapEventFilterConfig;
   private knownRouterAddresses: Set<string>;
+  // P3-30: In-memory dedup cache is lost on restart, creating a brief duplicate window.
+  // This is acceptable because the Redis SETNX dedup layer in PublishingService provides
+  // cross-restart protection for arbitrage opportunities. Swap events are idempotent
+  // consumers, so occasional duplicates during restart are harmless.
   private dedupCache: Map<string, number> = new Map(); // key -> timestamp
   private aggregationBuckets: Map<string, AggregationBucket> = new Map(); // pairAddress -> bucket
   private aggregationTimer: NodeJS.Timeout | null = null;

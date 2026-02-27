@@ -194,7 +194,7 @@ describe('OpportunityConsumer - DLQ Data Optimization', () => {
     await (consumer as any).handleStreamMessage(message);
 
     // Verify DLQ was called
-    expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
       DLQ_STREAM,
       expect.objectContaining({
         opportunityId: 'test-id',
@@ -205,7 +205,7 @@ describe('OpportunityConsumer - DLQ Data Optimization', () => {
     );
 
     // Verify full payload is NOT stored
-    const dlqCall = mockStreamsClient.xadd.mock.calls[0];
+    const dlqCall = mockStreamsClient.xaddWithLimit.mock.calls[0];
     expect(dlqCall[1]).not.toHaveProperty('data');
     expect(dlqCall[1]).not.toHaveProperty('largeField');
   });

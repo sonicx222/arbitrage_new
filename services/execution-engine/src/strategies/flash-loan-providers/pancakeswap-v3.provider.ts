@@ -24,6 +24,7 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
+import { getProviderLogger } from './validation-utils';
 
 /**
  * PancakeSwap V3 supported fee tiers in hundredths of a bip (1e-6)
@@ -393,9 +394,11 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
 
     try {
       return await provider.estimateGas(tx);
-    } catch {
-      // Default gas estimate for PancakeSwap V3 flash loan arbitrage
-      // Slightly higher than Aave due to pool whitelist checks
+    } catch (error) {
+      getProviderLogger().warn('estimateGas failed, using fallback (tx may revert)', {
+        provider: 'pancakeswap-v3', chain: this.chain, fallbackGas: 550000,
+        error: (error as Error).message,
+      });
       return 550000n;
     }
   }

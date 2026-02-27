@@ -304,8 +304,13 @@ export class CrossDexTriangularArbitrage {
     }
 
     // Sort neighbors by liquidity (highest first) - check profitable paths first
+    // P3-34 FIX: Reusable scratch array avoids 3x Array.from() allocation per base token.
+    // Collect from Set directly, sort in place, then slice.
+    const scratch: string[] = [];
+
+    for (const t of baseNeighbors) scratch.push(t);
     const sortedNeighborsA = this.sortTokensByLiquidity(
-      Array.from(baseNeighbors),
+      scratch,
       baseToken,
       tokenPairs
     ).slice(0, 15); // Limit first hop
@@ -329,8 +334,10 @@ export class CrossDexTriangularArbitrage {
 
       // P4-FIX: Use Set for O(1) exclusion checks instead of !== comparisons
       const excludedB = new Set([baseToken, tokenA]);
+      scratch.length = 0;
+      for (const t of neighborsA) { if (!excludedB.has(t)) scratch.push(t); }
       const sortedNeighborsB = this.sortTokensByLiquidity(
-        Array.from(neighborsA).filter(t => !excludedB.has(t)),
+        scratch,
         tokenA,
         tokenPairs
       ).slice(0, 10); // Limit second hop
@@ -346,11 +353,12 @@ export class CrossDexTriangularArbitrage {
         // P4-FIX: Use Set for O(1) exclusion checks instead of !== comparisons
         // Filter: must connect to a token that connects back to base
         const excludedC = new Set([baseToken, tokenA, tokenB]);
+        scratch.length = 0;
+        for (const t of neighborsB) {
+          if (!excludedC.has(t) && adjacency.get(t)?.has(baseToken)) scratch.push(t);
+        }
         const sortedNeighborsC = this.sortTokensByLiquidity(
-          Array.from(neighborsB).filter(t =>
-            !excludedC.has(t) &&
-            adjacency.get(t)?.has(baseToken) // CRITICAL: Must connect back to base
-          ),
+          scratch,
           tokenB,
           tokenPairs
         ).slice(0, 8); // Limit third hop
