@@ -46,6 +46,14 @@ const CHAIN_DEFAULT_GAS_COSTS: Record<string, bigint> = {
   bsc: 500000000000000n, // 0.0005 BNB (~$0.30)
   avalanche: 1000000000000000n, // 0.001 AVAX (~$0.04)
 
+  // Additional L2s
+  fantom: 100000000000000n, // 0.0001 FTM (~$0.05)
+  linea: 300000000000000n, // 0.0003 ETH (~$0.75)
+  blast: 200000000000000n, // 0.0002 ETH (~$0.50)
+  scroll: 300000000000000n, // 0.0003 ETH (~$0.75)
+  mantle: 1000000000000000000n, // 1.0 MNT (~$0.80) — MNT native token, not ETH
+  mode: 100000000000000n, // 0.0001 ETH (~$0.25)
+
   // Fallback for unknown chains
   default: 1000000000000000n, // 0.001 ETH (~$2.50)
 };

@@ -157,14 +157,20 @@ None found. The security posture is strong (Grade A-).
 - [ ] **Fix M11:** Nonce pool lock ordering — acquire lock before `shift()` or invalidate pool on return
 - [ ] **Fix M13:** Add fee range validation to `calculateAmmAmountOut` in amm-math.ts
 
-### Phase 2: Next Sprint (P2 — coverage gaps + architecture)
-- [ ] **Fix H5:** Create `base-provider.test.ts` for MEV abstract base class
-- [ ] **Fix M5:** Create `redis-client.test.ts` for connection lifecycle
-- [ ] **Fix M2:** Extract flash-loan types to `@arbitrage/types`; relocate Solana test
-- [ ] **Fix M4:** Extract shared path-finding utilities (~200 LOC dedup)
-- [ ] **Fix M8:** Consolidate inline Redis mocks to use `@arbitrage/test-utils` RedisMock
-
-- [ ] **Fix M12:** Add per-chain lock to background `syncNonce()` path
+### Phase 2: Next Sprint (P2 — coverage gaps + architecture) ✅ COMPLETED 2026-02-27
+- [x] **Fix H5:** Create `base-provider.test.ts` for MEV abstract base class (20 tests)
+- [x] **Fix M5:** Create `redis-client.test.ts` for connection lifecycle (31 tests)
+- [x] **Fix M12:** Add per-chain lock to background `syncNonce()` path (`syncNonceWithLock`)
+- [x] **Fix W2-H4:** Add missing chains/DEXs to extractChainFromDex (blast, scroll, mantle, mode, solana DEXs)
+- [x] **Fix W2-H5:** Add chain-specific gas costs to EV calculator (fantom, linea, blast, scroll, mantle, mode)
+- [x] **Fix W2-H9:** Add Across SpokePool addresses for blast+scroll (verified from GitHub)
+- [x] **Fix W2-M3:** Shutdown exit code — exit(1) on timeout, exit(0) on clean shutdown
+- [x] **Fix W2-H3:** Inject trace context into publishPriceUpdate/publishSwapEvent
+- [x] **Fix W2-H6:** Wire LatencyTracker metrics into enhanced-health-monitor
+- [x] **Fix W2-H7:** Add /metrics Prometheus endpoint to partition health server
+- [ ] **Fix M2:** Extract flash-loan types to `@arbitrage/types` (deferred — cross-package refactoring)
+- [ ] **Fix M4:** Extract shared path-finding utilities (~200 LOC dedup) (deferred)
+- [ ] **Fix M8:** Consolidate inline Redis mocks to use `@arbitrage/test-utils` RedisMock (deferred)
 
 ### Phase 3: Backlog (P3 — documentation + minor improvements)
 - [ ] **Fix M6+M7+M10+L4+L6:** Documentation refresh pass (streams topology, chain counts, analytics inventory, feature flag, partition membership)
@@ -464,22 +470,22 @@ All 4 FEATURE_* flags use correct `=== 'true'` opt-in pattern. ENABLE_CROSS_REGI
 - [x] **M11 (Wave 1): Nonce pool lock ordering** — Moved acquireLock before shift() with try/finally for safe release on all paths
 - [x] **M13 (Wave 1): Add fee range validation** — Guard: return null if feeBigInt < 0n or >= 10000n (BASIS_POINTS_DIVISOR)
 
-### Phase 2: Next Sprint (P1 — observability + detection accuracy)
+### Phase 2: Next Sprint (P1 — observability + detection accuracy) ✅ COMPLETED 2026-02-27
 
-- [ ] **W2-H3: Add trace context to price/swap publishing** — inject createTraceContext in publishPriceUpdate/publishSwapEvent (Score: 3.8)
-- [ ] **W2-H4: Add missing chains to extractChainFromDex** — blast/scroll/mantle/mode + Solana DEXs (Score: 3.7)
-- [ ] **W2-H5: Add missing chains to EV calculator** — CHAIN_DEFAULT_GAS_COSTS for 6 chains (Score: 3.6)
-- [ ] **W2-H6: Wire LatencyTracker into PerformanceHealth** — replace hard-coded zeros (Score: 3.5)
-- [ ] **W2-H7: Add /metrics endpoint to health server** — serve Prometheus exposition format (Score: 3.5)
+- [x] **W2-H3: Add trace context to price/swap publishing** — inject createTraceContext in publishPriceUpdate/publishSwapEvent (Score: 3.8)
+- [x] **W2-H4: Add missing chains to extractChainFromDex** — blast/scroll/mantle/mode + Solana DEXs (Score: 3.7)
+- [x] **W2-H5: Add missing chains to EV calculator** — CHAIN_DEFAULT_GAS_COSTS for 6 chains (Score: 3.6)
+- [x] **W2-H6: Wire LatencyTracker into PerformanceHealth** — replace hard-coded zeros (Score: 3.5)
+- [x] **W2-H7: Add /metrics endpoint to health server** — serve Prometheus exposition format (Score: 3.5)
 - [x] **W2-H8: Add Blast to L1_ORACLE_ADDRESSES** — OP-stack oracle address (Score: 3.4) — Fixed as part of W2-C1 (Phase 1)
-- [ ] **W2-H9: Add Blast/Scroll SpokePool addresses to AcrossRouter** — bridge routes dead without them (Score: 3.4)
-- [ ] **W2-M3: Fix shutdown exit code on timeout** — use exit(1) not exit(0) (Score: 3.2)
-- [ ] **H5 (Wave 1): Create base-provider.test.ts** for MEV abstract base class
-- [ ] **M5 (Wave 1): Create redis-client.test.ts** for connection lifecycle
-- [ ] **M2 (Wave 1): Extract flash-loan types** to @arbitrage/types
-- [ ] **M4 (Wave 1): Extract shared path-finding utilities** (~200 LOC dedup)
-- [ ] **M8 (Wave 1): Consolidate inline Redis mocks**
-- [ ] **M12 (Wave 1): Add per-chain lock to syncNonce()** background path
+- [x] **W2-H9: Add Blast/Scroll SpokePool addresses to AcrossRouter** — bridge routes dead without them (Score: 3.4)
+- [x] **W2-M3: Fix shutdown exit code on timeout** — use exit(1) not exit(0) (Score: 3.2)
+- [x] **H5 (Wave 1): Create base-provider.test.ts** for MEV abstract base class (20 tests)
+- [x] **M5 (Wave 1): Create redis-client.test.ts** for connection lifecycle (31 tests)
+- [x] **M12 (Wave 1): Add per-chain lock to syncNonce()** background path (syncNonceWithLock)
+- [ ] **M2 (Wave 1): Extract flash-loan types** to @arbitrage/types (deferred — cross-package)
+- [ ] **M4 (Wave 1): Extract shared path-finding utilities** (~200 LOC dedup) (deferred)
+- [ ] **M8 (Wave 1): Consolidate inline Redis mocks** (deferred)
 
 ### Phase 3: Hardening (P2 — config, monitoring, resilience)
 

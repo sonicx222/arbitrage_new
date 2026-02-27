@@ -220,7 +220,13 @@ export class PublishingService {
   async publishPriceUpdate(update: PriceUpdate): Promise<void> {
     this.assertBatcherInitialized('priceUpdate', 'Price update');
     const message = this.createMessage('price-update', update);
-    this.batchers.priceUpdate!.add(message);
+    // W2-H3: Inject trace context for upstream pipeline correlation
+    const traceCtx = createTraceContext(this.source);
+    const tracedMessage = propagateContext(
+      message as unknown as Record<string, unknown>,
+      traceCtx,
+    );
+    this.batchers.priceUpdate!.add(tracedMessage as unknown as MessageEvent);
   }
 
   /**
@@ -242,7 +248,13 @@ export class PublishingService {
 
     this.assertBatcherInitialized('swapEvent', 'Swap event');
     const message = this.createMessage('swap-event', swapEvent);
-    this.batchers.swapEvent!.add(message);
+    // W2-H3: Inject trace context for upstream pipeline correlation
+    const traceCtx = createTraceContext(this.source);
+    const tracedMessage = propagateContext(
+      message as unknown as Record<string, unknown>,
+      traceCtx,
+    );
+    this.batchers.swapEvent!.add(tracedMessage as unknown as MessageEvent);
   }
 
   /**

@@ -72,6 +72,8 @@ export const ACROSS_SPOKEPOOL_ADDRESSES: Record<string, string> = {
   polygon: '0x9295ee1d8C5b022Be115A2AD3c30C72E34e7F096',
   zksync: '0xE0B015E54d54fc84a6cB9B666099c46adE3335C5',
   linea: '0x7E63A5f1a8F0B4d0934B2f2327DAED3F6bb2ee75',
+  blast: '0x013604ce1FB573Dac669Bb2dFd24020ef7c8929e',
+  scroll: '0x02D65fb01d3d88127dF19838902ba42c6239c0Fd',
 };
 
 /**
@@ -86,6 +88,8 @@ export const ACROSS_CHAIN_IDS: Record<string, number> = {
   polygon: 137,
   zksync: 324,
   linea: 59144,
+  blast: 81457,
+  scroll: 534352,
 };
 
 /**
