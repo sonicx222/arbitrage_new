@@ -35,7 +35,9 @@ import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
 } from './api';
-import { getMetricsText } from './services/prometheus-metrics';
+import { getMetricsText, updateHealthGauges } from './services/prometheus-metrics';
+// P2 Fix DI-6: Import for stream lag monitoring
+import { getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core/redis';
 
 const logger = createLogger('execution-engine');
 
@@ -150,6 +152,27 @@ function startRedisHealthMonitor(engine: ExecutionEngineService): void {
         action: 'Check consumer health, increase concurrency, or investigate stalled processing',
       });
     }
+    // P2 Fix DI-6: Monitor stream length vs MAXLEN to detect message loss risk
+    try {
+      const streamsClient = await getRedisStreamsClient();
+      const criticalStreams = [
+        RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        RedisStreamsClient.STREAMS.OPPORTUNITIES,
+      ];
+      for (const streamName of criticalStreams) {
+        const lag = await streamsClient.checkStreamLag(streamName);
+        if (lag.critical) {
+          logger.warn('Stream length approaching MAXLEN — unread messages at risk of trimming', {
+            streamName,
+            length: lag.length,
+            maxLen: lag.maxLen,
+            lagRatio: lag.lagRatio,
+          });
+        }
+      }
+    } catch {
+      // Stream lag check is non-critical — don't let it break the health monitor
+    }
   }, 10_000);
   // Initial check
   engine.isRedisHealthy().then(healthy => { cachedRedisHealthy = healthy; }).catch(() => { cachedRedisHealthy = false; });
@@ -172,6 +195,14 @@ function createHealthServer(engine: ExecutionEngineService): Server {
       const status = !isRunning ? 'unhealthy' :
                     (!cachedRedisHealthy) ? 'degraded' :
                     (healthyProviders === 0 && !isSimulation) ? 'degraded' : 'healthy';
+
+      // P2 Fix O-9: Update Prometheus gauges from health endpoint values
+      updateHealthGauges({
+        queueDepth: engine.getQueueSize(),
+        activeExecutions: engine.getActiveExecutionsCount(),
+        dlqLength: cachedDlqLength,
+        consumerLagPending: cachedConsumerLag.pendingCount,
+      });
 
       return {
         status,

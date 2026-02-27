@@ -1900,4 +1900,23 @@ export class CrossChainDetectorService {
   getOpportunitiesCount(): number {
     return this.opportunityPublisher?.getCacheSize() ?? 0;
   }
+
+  /**
+   * P2 Fix O-10: Detailed health info for health endpoint.
+   * Returns Redis connectivity, chain count, and cache size
+   * so the health endpoint can detect degraded states beyond `isRunning()`.
+   */
+  getHealthDetails(): {
+    redisConnected: boolean;
+    chainsMonitored: number;
+    opportunitiesCache: number;
+    mlPredictorActive: boolean;
+  } {
+    return {
+      redisConnected: this.redis !== null && this.streamsClient !== null,
+      chainsMonitored: this.priceDataManager?.getChains().length ?? 0,
+      opportunitiesCache: this.opportunityPublisher?.getCacheSize() ?? 0,
+      mlPredictorActive: this.mlPredictorInitialized,
+    };
+  }
 }

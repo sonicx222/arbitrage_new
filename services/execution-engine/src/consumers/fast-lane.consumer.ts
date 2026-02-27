@@ -207,7 +207,8 @@ export class FastLaneConsumer {
 
     // Try to enqueue
     if (!this.queueService.enqueue(opportunity)) {
-      this.logger.debug('Fast lane opportunity rejected by queue backpressure', {
+      // P2 Fix F-5: Warn on queue-full drops — fast lane is best-effort but data loss should be visible
+      this.logger.warn('Fast lane opportunity dropped: queue full (best-effort, no retry)', {
         id: opportunity.id,
         queueSize: this.queueService.size(),
       });

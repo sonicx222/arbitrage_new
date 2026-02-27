@@ -31,15 +31,26 @@ async function main() {
       serviceName: 'cross-chain-detector',
       logger,
       description: 'Cross-Chain Arbitrage Detector Service',
+      // P2 Fix O-10: Health check includes Redis connectivity, chain count, and data freshness
       healthCheck: () => {
         const isRunning = detector.isRunning();
+        const details = detector.getHealthDetails();
+
+        // Degraded if running but Redis disconnected or no chains monitored
+        const status = !isRunning ? 'unhealthy' :
+                      (!details.redisConnected || details.chainsMonitored === 0) ? 'degraded' : 'healthy';
+
         return {
-          status: isRunning ? 'healthy' : 'unhealthy',
+          status,
           uptime: process.uptime(),
           memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+          redisConnected: details.redisConnected,
+          chainsMonitored: details.chainsMonitored,
+          opportunitiesCache: details.opportunitiesCache,
+          mlPredictorActive: details.mlPredictorActive,
         };
       },
-      readyCheck: () => detector.isRunning(),
+      readyCheck: () => detector.isRunning() && detector.getHealthDetails().redisConnected,
       additionalRoutes: {
         '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {
           const text = await getMetricsText();

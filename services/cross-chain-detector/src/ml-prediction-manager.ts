@@ -310,12 +310,15 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
         return prediction;
       }
 
-      // Prediction timed out - expected behavior, no logging needed
-      // Monitor via metrics if tracking is required
+      // Prediction timed out - expected behavior under load
+      logger.debug('ML prediction timed out', { pair: cacheKey });
       return null;
-    } catch {
-      // Prediction failed - expected under load, no logging needed
-      // Errors here are operational (timeout, model busy), not bugs
+    } catch (error) {
+      // P2 Fix O-5: Log prediction failures for operational visibility (was silent)
+      logger.debug('ML prediction failed', {
+        pair: cacheKey,
+        error: (error as Error).message,
+      });
       return null;
     }
   }

@@ -118,7 +118,13 @@ export interface PendingInfo {
 
 export interface BatcherConfig {
   maxBatchSize: number;    // Maximum messages before flush
-  maxWaitMs: number;       // Maximum wait time before flush
+  /**
+   * Maximum wait time (ms) before flushing a partial batch.
+   * P2 Fix L-2: This is the primary controllable latency source for time-critical streams.
+   * Recommended: ≤5ms for price updates, ≤10ms for opportunity publishing, ≤50ms for mempool.
+   * Configurable via env vars: PRICE_BATCHER_MAX_WAIT_MS, SWAP_BATCHER_MAX_WAIT_MS, etc.
+   */
+  maxWaitMs: number;
   compress?: boolean;      // Whether to compress batched messages
   maxQueueSize?: number;   // Maximum queued messages before dropping (default: unbounded)
 }
@@ -482,6 +488,11 @@ export class RedisStreamsClient {
    *
    * OP-18 FIX: Includes stream name in HMAC input to prevent cross-stream replay.
    * A valid signed message from one stream cannot be replayed on another.
+   *
+   * P2 Fix DI-4: Known limitation — HMAC does NOT cover the Redis-assigned message ID.
+   * An attacker with Redis access could reorder messages within a stream without
+   * invalidating signatures. This is acceptable because Redis access already grants
+   * full read/write control over all data.
    *
    * @param data - Serialized message data
    * @param streamName - Stream name for replay protection (optional for backward compat)
@@ -1396,9 +1407,15 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
 
   initializingPromise = (async () => {
     try {
+      // P2 Fix L-1: Wire LEGACY_HMAC_COMPAT env var to disable legacy HMAC fallback paths.
+      // When false, reduces HMAC computations from up to 4 per message to 1-2.
+      // Set to 'false' once all producers have been updated to include stream name in signatures.
+      const legacyHmacCompat = process.env.LEGACY_HMAC_COMPAT !== 'false';
+
       const instance = new RedisStreamsClient(redisUrl, redisPassword, {
         signingKey,
         previousSigningKey,
+        legacySignatureCompatEnabled: legacyHmacCompat,
       });
 
       // Verify connection

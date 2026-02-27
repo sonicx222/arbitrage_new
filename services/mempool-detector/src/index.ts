@@ -48,6 +48,8 @@ import {
   type FeedHealthMetrics,
 } from './types';
 import { getMetricsText } from './prometheus-metrics';
+// P2 Fix O-2: Import trace context for cross-service correlation
+import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIntent } from '@arbitrage/types';
 
 // =============================================================================
@@ -744,7 +746,13 @@ export class MempoolDetectorService extends EventEmitter {
       if (this.streamBatcher) {
         try {
           const pendingOpp = createPendingOpportunity(swapIntent);
-          this.streamBatcher.add(pendingOpp);
+          // P2 Fix O-2: Inject trace context for cross-service correlation
+          const traceCtx = createTraceContext('mempool-detector');
+          const tracedOpp = propagateContext(
+            pendingOpp as unknown as Record<string, unknown>,
+            traceCtx,
+          ) as unknown as PendingOpportunity;
+          this.streamBatcher.add(tracedOpp);
           this.stats.opportunitiesPublished++;
         } catch (publishError) {
           this.logger.warn('Failed to add to stream batcher', {

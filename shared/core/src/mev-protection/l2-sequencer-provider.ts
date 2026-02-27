@@ -25,6 +25,14 @@ import {
 } from './types';
 import { BaseMevProvider } from './base-provider';
 import { getErrorMessage } from '../resilience/error-handling';
+import { createPinoLogger, type ILogger } from '../logging';
+
+// P2 Fix O-4: Lazy-initialized module logger for transaction wait errors
+let _l2Logger: ILogger | null = null;
+function getL2Logger(): ILogger {
+  if (!_l2Logger) _l2Logger = createPinoLogger('l2-sequencer-provider');
+  return _l2Logger;
+}
 // =============================================================================
 // L2 Chain Configuration
 // =============================================================================
@@ -393,8 +401,12 @@ export class L2SequencerProvider extends BaseMevProvider {
             resolve(receipt);
           }
         })
-        .catch(() => {
-          // Transaction failed (reverted, dropped, etc.)
+        .catch((error) => {
+          // P2 Fix O-4: Log transaction wait failure for diagnostics (was silent)
+          getL2Logger().warn('Transaction wait failed (reverted/dropped), resolving null', {
+            txHash: response.hash,
+            error: getErrorMessage(error),
+          });
           if (!settled) {
             settled = true;
             clearTimeout(timeoutId);

@@ -150,16 +150,20 @@ export class DlqConsumer {
 
   /**
    * Scan the DLQ stream and update statistics.
-   * Reads messages from the beginning of the stream (ID '0') to analyze all entries.
+   *
+   * P2 Fix F-4: Uses XLEN for accurate total count instead of messages.length,
+   * which was capped by maxMessagesPerScan. The scan still reads from '0' each
+   * time for full error classification, but totalCount reflects the true stream size.
    */
   async scanDlq(): Promise<void> {
     try {
-      // Read from beginning of stream (ID '0') to get all messages
       const messages = await this.streamsClient.xread(DLQ_STREAM, '0', {
         count: this.maxMessagesPerScan,
       });
 
-      // Reset stats for fresh count
+      // P2 Fix F-4: Use XLEN for accurate total count (not capped by maxMessagesPerScan)
+      const totalCount = await this.streamsClient.xlen(DLQ_STREAM);
+
       const errorCounts = new Map<string, number>();
       let oldestTimestamp: number | null = null;
 
@@ -179,18 +183,18 @@ export class DlqConsumer {
       // Calculate oldest entry age
       const oldestEntryAge = oldestTimestamp !== null ? Date.now() - oldestTimestamp : null;
 
-      // Update stats
+      // Update stats with XLEN-based total count
       this.stats = {
-        totalCount: messages.length,
+        totalCount,
         errorCounts,
         oldestEntryAge,
         lastScanAt: Date.now(),
       };
 
-      // Log summary
+      // Log summary when messages are found
       if (messages.length > 0) {
         this.logger.info('DLQ scan complete', {
-          totalCount: messages.length,
+          totalCount,
           errorTypes: Array.from(errorCounts.entries()).map(([type, count]) => ({
             type,
             count,

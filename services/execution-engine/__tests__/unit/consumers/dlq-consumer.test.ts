@@ -48,6 +48,7 @@ import {
 const createMockStreamsClient = () => ({
   xread: jest.fn().mockResolvedValue([]),
   xadd: jest.fn().mockResolvedValue('msg-id-1'),
+  xlen: jest.fn().mockResolvedValue(0),
 });
 
 const createMockLogger = () => ({
@@ -292,6 +293,7 @@ describe('DlqConsumer', () => {
     it('should update stats with message count', async () => {
       const messages = createDlqMessages(4);
       mockStreamsClient.xread.mockResolvedValueOnce(messages);
+      mockStreamsClient.xlen.mockResolvedValueOnce(4);
 
       await consumer.scanDlq();
 
@@ -351,6 +353,7 @@ describe('DlqConsumer', () => {
     it('should log summary when messages are found', async () => {
       const messages = createDlqMessages(2);
       mockStreamsClient.xread.mockResolvedValueOnce(messages);
+      mockStreamsClient.xlen.mockResolvedValueOnce(2);
 
       await consumer.scanDlq();
 
@@ -391,11 +394,13 @@ describe('DlqConsumer', () => {
     it('should reset stats on each scan (not accumulate)', async () => {
       // First scan: 4 messages
       mockStreamsClient.xread.mockResolvedValueOnce(createDlqMessages(4));
+      mockStreamsClient.xlen.mockResolvedValueOnce(4);
       await consumer.scanDlq();
       expect(consumer.getDlqStats().totalCount).toBe(4);
 
       // Second scan: 1 message
       mockStreamsClient.xread.mockResolvedValueOnce(createDlqMessages(1));
+      mockStreamsClient.xlen.mockResolvedValueOnce(1);
       await consumer.scanDlq();
       expect(consumer.getDlqStats().totalCount).toBe(1);
     });
@@ -442,6 +447,7 @@ describe('DlqConsumer', () => {
 
     it('should return updated stats after scan', async () => {
       mockStreamsClient.xread.mockResolvedValueOnce(createDlqMessages(6));
+      mockStreamsClient.xlen.mockResolvedValueOnce(6);
 
       await consumer.scanDlq();
 
@@ -734,6 +740,7 @@ describe('DlqConsumer', () => {
           },
         },
       ]);
+      mockStreamsClient.xlen.mockResolvedValueOnce(3);
 
       await consumer.scanDlq();
 
@@ -783,6 +790,7 @@ describe('DlqConsumer', () => {
     it('should create functional instance that can scan', async () => {
       const instance = createDlqConsumer(deps);
       mockStreamsClient.xread.mockResolvedValueOnce(createDlqMessages(2));
+      mockStreamsClient.xlen.mockResolvedValueOnce(2);
 
       await instance.scanDlq();
 

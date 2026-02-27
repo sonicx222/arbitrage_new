@@ -83,6 +83,10 @@ export interface TradeLogEntry {
   sellChain?: string;
   /** DEX where the sell side executed (for cross-chain) */
   sellDex?: string;
+  /** P2 Fix O-6: Gas price in gwei (derived from gasCost/gasUsed) for gas economics reconstruction */
+  gasPriceGwei?: number;
+  /** P2 Fix O-6: Detection timestamp from pipeline for detection-to-execution latency measurement */
+  detectionTimestamp?: number;
 }
 
 /**
@@ -259,6 +263,14 @@ export class TradeLogger {
     // Consumer layer sets _deliveryCount on redelivered messages from PEL.
     const retryCount = (opportunity as unknown as Record<string, unknown> | undefined)?._deliveryCount as number | undefined;
 
+    // P2 Fix O-6: Derive gas price in gwei from gasCost (native units) and gasUsed
+    const gasPriceGwei = (result.gasCost != null && result.gasUsed != null && result.gasUsed > 0)
+      ? (result.gasCost / result.gasUsed) * 1e9
+      : undefined;
+
+    // P2 Fix O-6: Extract detection timestamp for detection-to-execution latency
+    const detectionTimestamp = opportunity?.pipelineTimestamps?.detectedAt;
+
     return {
       timestamp: result.timestamp ?? Date.now(),
       opportunityId: result.opportunityId,
@@ -285,6 +297,8 @@ export class TradeLogger {
       blockNumber: opportunity?.blockNumber,
       sellChain: opportunity?.sellChain,
       sellDex: opportunity?.sellDex,
+      gasPriceGwei,
+      detectionTimestamp,
     };
   }
 }
