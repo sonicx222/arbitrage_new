@@ -24,6 +24,7 @@ import {
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
+  testCalculateExpectedProfit,
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
@@ -760,117 +761,44 @@ describe('SyncSwapFlashArbitrage', () => {
   // ===========================================================================
   // 7. View Functions Tests
   // ===========================================================================
-  describe('7. View Functions', () => {
-    describe('calculateExpectedProfit()', () => {
-      it('should calculate expected profit correctly', async () => {
-        const { syncSwapArbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(
-          deployContractsFixture
-        );
+  // ===========================================================================
+  // 7. View Functions (shared + SyncSwap-specific)
+  // ===========================================================================
+  testCalculateExpectedProfit({
+    contractName: 'SyncSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.syncSwapArbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.weth,
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      const result = await contract.calculateExpectedProfit(
+        params.asset, params.amount, params.swapPath
+      );
+      return { expectedProfit: result.expectedProfit, flashLoanFee: result.flashLoanFee };
+    },
+    profitableReverseRate: BigInt('600000000000000000000000000'),
+  });
 
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+  describe('7. View Functions — SyncSwap-Specific', () => {
+    it('should calculate flash loan fee correctly (0.3%)', async () => {
+      const { syncSwapArbitrage, weth } = await loadFixture(deployContractsFixture);
 
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          BigInt('600000000000000000000000000') // 0.0006 WETH per USDC adjusted for decimals
-        );
+      const amount = ethers.parseEther('100');
+      const expectedFee = (amount * 30n) / 10000n; // 0.3%
 
-        const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress());
+      const result = await syncSwapArbitrage.calculateExpectedProfit(
+        await weth.getAddress(),
+        amount,
+        []
+      );
 
-        const result = await syncSwapArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.be.gt(0);
-        expect(result.flashLoanFee).to.equal(ethers.parseEther('10') * 30n / 10000n); // 0.3% = 30 bps
-      });
-
-      it('should return 0 for empty path', async () => {
-        const { syncSwapArbitrage, weth } = await loadFixture(deployContractsFixture);
-
-        const result = await syncSwapArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          []
-        );
-
-        expect(result.expectedProfit).to.equal(0);
-      });
-
-      it('should return 0 for path starting with wrong asset', async () => {
-        const { syncSwapArbitrage, dexRouter1, weth, usdc } = await loadFixture(
-          deployContractsFixture
-        );
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(), // Wrong!
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0n,
-          },
-        ];
-
-        const result = await syncSwapArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.equal(0);
-      });
-
-      it('should return 0 for unprofitable path', async () => {
-        const { syncSwapArbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        // Configure unprofitable rates (lose money)
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          BigInt('490000000000000000000000000') // Lose money
-        );
-
-        const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress());
-
-        const result = await syncSwapArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.equal(0);
-      });
-
-      it('should calculate flash loan fee correctly (0.3%)', async () => {
-        const { syncSwapArbitrage, weth } = await loadFixture(deployContractsFixture);
-
-        const amount = ethers.parseEther('100');
-        const expectedFee = (amount * 30n) / 10000n; // 0.3%
-
-        const result = await syncSwapArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          amount,
-          []
-        );
-
-        expect(result.flashLoanFee).to.equal(expectedFee);
-      });
+      expect(result.flashLoanFee).to.equal(expectedFee);
     });
   });
 

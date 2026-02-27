@@ -620,6 +620,224 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
 }
 
 // =============================================================================
+// SB-3: calculateExpectedProfit (~5 tests)
+// =============================================================================
+
+export interface CalculateProfitTestFixture {
+  /** The contract under test */
+  contract: any;
+  /** Owner signer */
+  owner: any;
+  /** First mock DEX router */
+  dexRouter1: any;
+  /** WETH mock token */
+  weth: any;
+  /** USDC mock token */
+  usdc: any;
+}
+
+export interface CalculateProfitResult {
+  /** Expected profit (0 if unprofitable/invalid) */
+  expectedProfit: bigint;
+  /** Flash loan fee (undefined for CommitReveal which returns single value) */
+  flashLoanFee?: bigint;
+}
+
+export interface CalculateProfitTestConfig {
+  /** Contract name for describe blocks */
+  contractName: string;
+  /** Returns a fresh fixture with normalized field names */
+  getFixture: () => Promise<CalculateProfitTestFixture>;
+  /**
+   * Callback that triggers calculateExpectedProfit with the contract's specific signature.
+   * Must return a normalized result with expectedProfit (and optionally flashLoanFee).
+   *
+   * @param contract - The contract instance
+   * @param params - Normalized parameters: asset address, amount, swap path
+   * @returns Normalized result
+   */
+  triggerCalculateProfit: (
+    contract: any,
+    params: {
+      asset: string;
+      amount: bigint;
+      swapPath: Array<{
+        router: string;
+        tokenIn: string;
+        tokenOut: string;
+        amountOutMin: bigint;
+      }>;
+    }
+  ) => Promise<CalculateProfitResult>;
+  /**
+   * Rate constant for USDC -> WETH that produces a profitable round trip.
+   * Different contracts have different fee structures, so the profitable rate varies.
+   */
+  profitableReverseRate: bigint;
+}
+
+/**
+ * Tests calculateExpectedProfit view function common across all flash arbitrage contracts.
+ * Verifies: profitable path, empty path, unprofitable path, wrong start asset, wrong end asset.
+ *
+ * Protocol-specific tests (Balancer cycle detection, fee-specific calculations) should
+ * remain in individual test files.
+ */
+export function testCalculateExpectedProfit(config: CalculateProfitTestConfig): void {
+  const { contractName, getFixture, triggerCalculateProfit, profitableReverseRate } = config;
+
+  describe(`${contractName} — calculateExpectedProfit (shared)`, () => {
+    it('should return positive profit for profitable path', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1, weth, usdc } = fixture;
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        profitableReverseRate
+      );
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 0n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 0n,
+        },
+      ];
+
+      const result = await triggerCalculateProfit(contract, {
+        asset: await weth.getAddress(),
+        amount: ethers.parseEther('10'),
+        swapPath,
+      });
+
+      expect(result.expectedProfit).to.be.gt(0);
+    });
+
+    it('should return 0 profit for empty swap path', async () => {
+      const fixture = await getFixture();
+      const { contract, weth } = fixture;
+
+      const result = await triggerCalculateProfit(contract, {
+        asset: await weth.getAddress(),
+        amount: ethers.parseEther('1'),
+        swapPath: [],
+      });
+
+      expect(result.expectedProfit).to.equal(0);
+    });
+
+    it('should return 0 profit for unprofitable path', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1, weth, usdc } = fixture;
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('490000000000000000000000000') // Lose money
+      );
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 0n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 0n,
+        },
+      ];
+
+      const result = await triggerCalculateProfit(contract, {
+        asset: await weth.getAddress(),
+        amount: ethers.parseEther('10'),
+        swapPath,
+      });
+
+      expect(result.expectedProfit).to.equal(0);
+    });
+
+    it('should return 0 profit for path starting with wrong asset', async () => {
+      const fixture = await getFixture();
+      const { contract, dexRouter1, weth, usdc } = fixture;
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(), // Wrong — should be WETH
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 0n,
+        },
+      ];
+
+      const result = await triggerCalculateProfit(contract, {
+        asset: await weth.getAddress(),
+        amount: ethers.parseEther('1'),
+        swapPath,
+      });
+
+      expect(result.expectedProfit).to.equal(0);
+    });
+
+    it('should return 0 profit for non-circular path (wrong end asset)', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1, weth, usdc } = fixture;
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+
+      // Path ends with USDC, not WETH
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 0n,
+        },
+      ];
+
+      const result = await triggerCalculateProfit(contract, {
+        asset: await weth.getAddress(),
+        amount: ethers.parseEther('10'),
+        swapPath,
+      });
+
+      expect(result.expectedProfit).to.equal(0);
+    });
+  });
+}
+
+// =============================================================================
 // SB-5: Reentrancy Protection (~1 test)
 // =============================================================================
 

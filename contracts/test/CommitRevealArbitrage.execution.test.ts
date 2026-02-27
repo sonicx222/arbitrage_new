@@ -19,6 +19,7 @@ import {
   testWithdrawETH,
   testWithdrawGasLimitConfig,
   testOwnable2Step,
+  testCalculateExpectedProfit,
 } from './helpers';
 
 /**
@@ -862,101 +863,48 @@ describe('CommitRevealArbitrage Execution', () => {
   testOwnable2Step(adminConfig);
 
   // ===========================================================================
-  // 8. View Function Tests
+  // 8. View Functions (shared + CommitReveal-specific)
   // ===========================================================================
-  describe('8. View Functions', () => {
-    describe('calculateExpectedProfit()', () => {
-      it('should calculate expected profit correctly', async () => {
-        const { commitRevealArbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
+  testCalculateExpectedProfit({
+    contractName: 'CommitRevealArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.commitRevealArbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.weth,
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      // CommitReveal returns a single value (profit), no fee
+      const profit = await contract.calculateExpectedProfit(
+        params.asset, params.amount, params.swapPath
+      );
+      return { expectedProfit: profit };
+    },
+    profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
+  });
 
-        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          RATE_USDC_TO_WETH_1PCT_PROFIT
-        );
+  describe('8. View Functions — CommitReveal-Specific', () => {
+    it('should return 0 for path too long (> MAX_SWAP_HOPS)', async () => {
+      const { commitRevealArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
 
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 0n,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0n,
-          },
-        ];
-
-        const profit = await commitRevealArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath
-        );
-
-        expect(profit).to.be.gt(0);
-        expect(profit).to.be.lt(ethers.parseEther('0.2')); // Sanity check
+      const swapPath = Array(6).fill({
+        router: await dexRouter1.getAddress(),
+        tokenIn: await weth.getAddress(),
+        tokenOut: await usdc.getAddress(),
+        amountOutMin: 0n,
       });
 
-      it('should return 0 for empty path', async () => {
-        const { commitRevealArbitrage, weth } = await loadFixture(deployContractsFixture);
+      const profit = await commitRevealArbitrage.calculateExpectedProfit(
+        await weth.getAddress(),
+        ethers.parseEther('1'),
+        swapPath
+      );
 
-        const profit = await commitRevealArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          []
-        );
-
-        expect(profit).to.equal(0);
-      });
-
-      it('should return 0 for path too long', async () => {
-        const { commitRevealArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
-
-        const swapPath = Array(6).fill({
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 0n,
-        });
-
-        const profit = await commitRevealArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath
-        );
-
-        expect(profit).to.equal(0);
-      });
-
-      it('should return 0 for invalid path (wrong start token)', async () => {
-        const { commitRevealArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(), // Wrong!
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0n,
-          },
-        ];
-
-        const profit = await commitRevealArbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath
-        );
-
-        expect(profit).to.equal(0);
-      });
+      expect(profit).to.equal(0);
     });
   });
 
@@ -1076,5 +1024,72 @@ describe('CommitRevealArbitrage Execution', () => {
     });
 
     // Replay prevention is tested in CommitRevealArbitrage.security.test.ts
+  });
+
+  // ===========================================================================
+  // 10. Gas Benchmarks
+  // ===========================================================================
+  describe('10. Gas Benchmarks', () => {
+    it('should execute commit + reveal 2-hop within gas budget', async () => {
+      const { commitRevealArbitrage, dexRouter1, dexRouter2, weth, usdc, owner, user } =
+        await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter2.getAddress());
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter2.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        RATE_USDC_TO_WETH_2PCT_PROFIT
+      );
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        { router: await dexRouter1.getAddress(), tokenIn: await weth.getAddress(), tokenOut: await usdc.getAddress(), amountOutMin: 1n },
+        { router: await dexRouter2.getAddress(), tokenIn: await usdc.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
+      ];
+      const deadline = await getDeadline();
+      const salt = ethers.id('gas-benchmark-salt');
+
+      // Commit phase
+      const commitHash = createCommitmentHash(
+        user.address,
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        salt
+      );
+      const commitTx = await commitRevealArbitrage.connect(user).commit(commitHash);
+      const commitReceipt = await commitTx.wait();
+
+      // Mine blocks to pass minimum delay
+      await mineBlocks(2);
+
+      // Fund the contract with tokens for the swap
+      await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
+
+      // Reveal phase
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn,
+        swapPath,
+        minProfit: 0n,
+        deadline,
+        salt,
+      };
+      const revealTx = await commitRevealArbitrage.connect(user).reveal(revealParams);
+      const revealReceipt = await revealTx.wait();
+
+      // Commit + reveal 2-tx pattern — budget < 600,000 total gas
+      const totalGas = commitReceipt!.gasUsed + revealReceipt!.gasUsed;
+      expect(totalGas).to.be.lt(600_000);
+    });
   });
 });

@@ -24,6 +24,7 @@ import {
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
+  testCalculateExpectedProfit,
   testReentrancyProtection,
   type AdminTestConfig,
 } from './helpers';
@@ -202,17 +203,37 @@ describe('FlashLoanArbitrage', () => {
   });
 
   // ===========================================================================
-  // Calculate Expected Profit Tests
+  // Calculate Expected Profit (shared + Aave-specific)
   // ===========================================================================
-  describe('Calculate Expected Profit', () => {
-    it('should calculate expected profit correctly', async () => {
+  testCalculateExpectedProfit({
+    contractName: 'FlashLoanArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.flashLoanArbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.weth,
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      const [expectedProfit, flashLoanFee] = await contract.calculateExpectedProfit(
+        params.asset, params.amount, params.swapPath
+      );
+      return { expectedProfit, flashLoanFee };
+    },
+    profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
+  });
+
+  describe('Calculate Expected Profit — Aave-Specific', () => {
+    it('should calculate flash loan fee as 0.09% (Aave premium)', async () => {
       const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } =
         await loadFixture(deployContractsFixture);
 
       await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
       await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
 
-      // Configure rates for ~1% profit
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -224,106 +245,61 @@ describe('FlashLoanArbitrage', () => {
         RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
-      const flashLoanAmount = ethers.parseEther('10');
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 0,
-        },
-        {
-          router: await dexRouter2.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 0,
-        },
-      ];
-
-      const [expectedProfit, flashLoanFee] = await flashLoanArbitrage.calculateExpectedProfit(
+      const [, flashLoanFee] = await flashLoanArbitrage.calculateExpectedProfit(
         await weth.getAddress(),
-        flashLoanAmount,
-        swapPath
+        ethers.parseEther('10'),
+        [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 0,
+          },
+          {
+            router: await dexRouter2.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 0,
+          },
+        ]
       );
 
       // Flash loan fee should be 0.09% of 10 WETH = 0.009 WETH
       expect(flashLoanFee).to.equal(ethers.parseEther('0.009'));
-
-      // Expected profit should be positive (10.1 WETH - 10.009 WETH = ~0.091 WETH)
-      expect(expectedProfit).to.be.gt(0);
-      expect(expectedProfit).to.be.gt(ethers.parseEther('0.08'));
     });
 
-    it('should return zero profit for invalid path', async () => {
+    it('should still calculate fee for invalid path', async () => {
       const { flashLoanArbitrage, dexRouter1, weth, usdc, dai } =
         await loadFixture(deployContractsFixture);
 
       await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
         ethers.parseUnits('2000', 6)
       );
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 0,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await dai.getAddress(), // Invalid: should be USDC
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 0,
-        },
-      ];
 
       const [expectedProfit, flashLoanFee] = await flashLoanArbitrage.calculateExpectedProfit(
         await weth.getAddress(),
         ethers.parseEther('10'),
-        swapPath
+        [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 0,
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await dai.getAddress(), // Invalid: should be USDC
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 0,
+          },
+        ]
       );
 
-      // Should return 0 profit for invalid path
       expect(expectedProfit).to.equal(0);
-      // Flash loan fee should still be calculated
       expect(flashLoanFee).to.equal(ethers.parseEther('0.009'));
-    });
-
-    it('should return zero profit when ending with wrong asset', async () => {
-      const { flashLoanArbitrage, dexRouter1, weth, usdc } =
-        await loadFixture(deployContractsFixture);
-
-      await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
-      );
-
-      // Path doesn't return to WETH
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 0,
-        },
-      ];
-
-      const [expectedProfit, ] = await flashLoanArbitrage.calculateExpectedProfit(
-        await weth.getAddress(),
-        ethers.parseEther('10'),
-        swapPath
-      );
-
-      // Should return 0 profit when not ending with flash loan asset
-      expect(expectedProfit).to.equal(0);
     });
   });
 

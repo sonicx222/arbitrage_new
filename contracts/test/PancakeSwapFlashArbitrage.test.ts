@@ -24,6 +24,7 @@ import {
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
+  testCalculateExpectedProfit,
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
@@ -370,90 +371,54 @@ describe('PancakeSwapFlashArbitrage', () => {
   });
 
   // ===========================================================================
-  // Calculate Expected Profit Tests
+  // Calculate Expected Profit (shared + PancakeSwap-specific)
   // ===========================================================================
-  describe('Calculate Expected Profit', () => {
-    it('should calculate expected profit correctly with 0.25% fee', async () => {
+
+  // PancakeSwap requires pool address — reuse cachedPoolAddress from fixture closure
+  testCalculateExpectedProfit({
+    contractName: 'PancakeSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      cachedPoolAddress = await f.wethUsdcPool.getAddress();
+      return {
+        contract: f.flashArbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.weth,
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      const [expectedProfit, flashLoanFee] = await contract.calculateExpectedProfit(
+        cachedPoolAddress, params.asset, params.amount, params.swapPath
+      );
+      return { expectedProfit, flashLoanFee };
+    },
+    profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
+  });
+
+  describe('Calculate Expected Profit — PancakeSwap-Specific', () => {
+    it('should calculate PancakeSwap V3 fee as 0.25%', async () => {
       const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc } =
         await loadFixture(deployContractsFixture);
 
       await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
       await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+      await dexRouter2.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_1PCT_PROFIT);
 
-      // Configure rates for ~1% profit
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
-      );
-      await dexRouter2.setExchangeRate(
-        await usdc.getAddress(),
-        await weth.getAddress(),
-        RATE_USDC_TO_WETH_1PCT_PROFIT // ~1% profit
-      );
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter2.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: ethers.parseEther('9.9'),
-        },
-      ];
-
-      const [profit, fee] = await flashArbitrage.calculateExpectedProfit(
+      const [, fee] = await flashArbitrage.calculateExpectedProfit(
         await wethUsdcPool.getAddress(),
         await weth.getAddress(),
         ethers.parseEther('10'),
-        swapPath
+        [
+          { router: await dexRouter1.getAddress(), tokenIn: await weth.getAddress(), tokenOut: await usdc.getAddress(), amountOutMin: 1n },
+          { router: await dexRouter2.getAddress(), tokenIn: await usdc.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
+        ]
       );
 
       // Fee should be 0.25% of 10 WETH = 0.025 WETH
-      // 10 WETH * 2500 / 1e6 = 0.025 WETH
-      const expectedFee = ethers.parseEther('0.025');
-      expect(fee).to.equal(expectedFee);
-
-      // Profit should be > 0 (exact amount depends on mock router logic)
-      expect(profit).to.be.gt(0);
-    });
-
-    it('should return 0 profit for invalid swap path', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc, dai } =
-        await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-
-      // Invalid path: doesn't end with starting token
-      const invalidPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await dai.getAddress(),
-          amountOutMin: ethers.parseEther('19000'),
-        },
-      ];
-
-      const [profit, fee] = await flashArbitrage.calculateExpectedProfit(
-        await wethUsdcPool.getAddress(),
-        await weth.getAddress(),
-        ethers.parseEther('10'),
-        invalidPath
-      );
-
-      expect(profit).to.equal(0);
-      expect(fee).to.be.gt(0); // Fee should still be calculated
+      expect(fee).to.equal(ethers.parseEther('0.025'));
     });
   });
 
