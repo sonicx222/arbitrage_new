@@ -10,7 +10,7 @@
  * @see ADR-002 - Redis Streams over Pub/Sub
  */
 
-import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import { StreamRateLimiter, RateLimiterConfig } from './rate-limiter';
 import { RedisStreams } from '@arbitrage/types';
@@ -500,27 +500,25 @@ export class StreamConsumerManager {
    * since it's ACKed to prevent infinite retry loops.
    *
    * Writes JSONL (one JSON object per line) to data/dlq-fallback-{date}.jsonl.
-   * Append-only, async-safe via synchronous fs.appendFileSync.
+   * Append-only, async via fs/promises.
    */
   /** FIX 4.3: Maximum DLQ fallback file size per day (100MB) */
   private static readonly MAX_DLQ_FILE_BYTES = 100 * 1024 * 1024;
 
-  private writeLocalDlqFallback(
+  private async writeLocalDlqFallback(
     message: StreamMessage,
     error: Error,
     sourceStream: string
-  ): void {
+  ): Promise<void> {
     try {
       const date = new Date().toISOString().split('T')[0];
       const dir = path.resolve('data');
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      await fsPromises.mkdir(dir, { recursive: true });
       const filePath = path.join(dir, `dlq-fallback-${date}.jsonl`);
 
       // FIX 4.3: Enforce 100MB daily file size limit to prevent disk exhaustion
-      if (fs.existsSync(filePath)) {
-        const stat = fs.statSync(filePath);
+      try {
+        const stat = await fsPromises.stat(filePath);
         if (stat.size >= StreamConsumerManager.MAX_DLQ_FILE_BYTES) {
           this.logger.warn('DLQ fallback file size limit reached, dropping message', {
             filePath,
@@ -531,6 +529,8 @@ export class StreamConsumerManager {
           });
           return;
         }
+      } catch {
+        // File doesn't exist yet — proceed to create it
       }
 
       const entry = JSON.stringify({
@@ -542,7 +542,7 @@ export class StreamConsumerManager {
         service: 'coordinator',
         instanceId: this.config.instanceId,
       });
-      fs.appendFileSync(filePath, entry + '\n');
+      await fsPromises.appendFile(filePath, entry + '\n');
     } catch (fileError) {
       // Absolute last resort: message only exists in application logs
       this.logger.error('Local DLQ fallback write also failed', {

@@ -252,11 +252,15 @@ export class CrossChainSimulator extends EventEmitter {
       fantom: 0.2,
       zksync: 1.0,
       linea: 0.8,
+      blast: 0.5,
+      scroll: 0.5,
+      mantle: 0.2,
+      mode: 0.5,
       solana: 0.01,
     };
 
-    const sourceGas = chainGasCosts[sourceChain] || 5;
-    const destGas = chainGasCosts[destChain] || 5;
+    const sourceGas = chainGasCosts[sourceChain] ?? 5;
+    const destGas = chainGasCosts[destChain] ?? 5;
     return sourceGas + destGas + 2;
   }
 
@@ -294,7 +298,7 @@ export function getCrossChainSimulator(
 ): CrossChainSimulator {
   if (!crossChainSimulatorInstance) {
     const defaultConfig: CrossChainSimulatorConfig = {
-      chains: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche'],
+      chains: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche', 'fantom', 'zksync', 'linea', 'blast', 'scroll', 'mantle', 'mode', 'solana'],
       // W2-M2 FIX: Use DEFAULT_CONFIG values instead of divergent inline defaults
       updateIntervalMs: DEFAULT_CONFIG.updateIntervalMs,
       volatility: DEFAULT_CONFIG.volatility,

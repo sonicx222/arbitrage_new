@@ -135,6 +135,11 @@ export class ProviderServiceImpl implements IProviderService {
    * Fix #9: Cached private keys for wallet reconnection.
    * Populated during initializeWallets() so reconnection logic does not
    * depend on process.env (keys may be rotated or cleaned from env).
+   *
+   * SECURITY NOTE: JS strings are immutable and cannot be reliably zeroed from
+   * memory. The Map is cleared on shutdown (clear()) but GC timing is non-deterministic.
+   * For production deployments with real funds, use KMS signers (FEATURE_KMS_SIGNING=true)
+   * which keep private keys in hardware security modules and never expose them to the process.
    */
   private chainPrivateKeys: Map<string, string> = new Map();
 

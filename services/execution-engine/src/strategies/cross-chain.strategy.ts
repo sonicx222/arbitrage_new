@@ -399,6 +399,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       tokenOut: opportunity.tokenOut,
     });
 
+    // Declare outside try so outer catch can release on unexpected failure
+    let bridgeNonce: number | undefined;
+
     try {
       // D3: Check for gas spike on source chain BEFORE getting bridge quote
       const gasSpikeError = await this.checkSourceChainGasSpike(opportunity, sourceChain!, ctx);
@@ -435,7 +438,6 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Fix 4.3: Get nonce for bridge transaction with proper error handling
       // If NonceManager is available but fails, we should abort rather than continue without a nonce
       // (which could cause transaction conflicts or unpredictable behavior)
-      let bridgeNonce: number | undefined;
       if (ctx.nonceManager) {
         try {
           bridgeNonce = await ctx.nonceManager.getNextNonce(sourceChain!);
@@ -654,6 +656,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       );
 
     } catch (error) {
+      // Release bridge nonce on unexpected failure to prevent nonce leaks
+      if (ctx.nonceManager && bridgeNonce !== undefined) {
+        ctx.nonceManager.failTransaction(sourceChain!, bridgeNonce, `Unexpected error: ${getErrorMessage(error)}`);
+      }
+
       this.logger.error('Cross-chain arbitrage execution failed', {
         opportunityId: opportunity.id,
         sourceChain,
@@ -1960,6 +1967,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     try {
       // Scan for pending bridge recovery keys using iterative scan
+      // Cap at 10,000 keys to prevent unbounded memory growth in degraded states
+      const MAX_RECOVERY_KEYS = 10_000;
       const keys: string[] = [];
       let cursor = '0';
       do {
@@ -1972,6 +1981,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         );
         cursor = nextCursor;
         keys.push(...foundKeys);
+        if (keys.length >= MAX_RECOVERY_KEYS) {
+          this.logger.warn('Bridge recovery key scan hit limit, processing partial set', {
+            limit: MAX_RECOVERY_KEYS,
+            keysFound: keys.length,
+          });
+          break;
+        }
       } while (cursor !== '0');
 
       if (keys.length === 0) {

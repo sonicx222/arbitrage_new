@@ -19,6 +19,7 @@
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 3.1
  */
 
+import { randomBytes } from 'crypto';
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { getErrorMessage } from '@arbitrage/core/resilience';
@@ -64,6 +65,18 @@ const REDIS_TTL_SECONDS = 600;
  * Gas bump percentage for retry (10%)
  */
 const RETRY_GAS_BUMP_PERCENT = 10;
+
+/**
+ * Generate a cryptographically secure random salt for commit-reveal.
+ * Returns a 32-byte hex string prefixed with 0x.
+ *
+ * SECURITY: Uses Node.js crypto.randomBytes which reads from the OS CSPRNG
+ * (e.g., /dev/urandom on Linux). Never use Math.random() for salt generation
+ * as it is predictable and would allow MEV actors to precompute commitment hashes.
+ */
+export function generateSalt(): string {
+  return '0x' + randomBytes(32).toString('hex');
+}
 
 // =============================================================================
 // Types

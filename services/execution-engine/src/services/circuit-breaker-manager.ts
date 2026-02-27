@@ -283,7 +283,14 @@ export class CircuitBreakerManager {
       const now = Date.now();
       for (const [chain, state] of latestByChain) {
         if (state.newState === 'OPEN') {
-          const eventTimestamp = parseInt(state.timestamp, 10) || 0;
+          const eventTimestamp = parseInt(state.timestamp, 10);
+          if (Number.isNaN(eventTimestamp)) {
+            this.logger.warn('Invalid circuit breaker state timestamp, skipping restoration', {
+              chain,
+              timestamp: state.timestamp,
+            });
+            continue;
+          }
           const ageMs = now - eventTimestamp;
 
           // Only restore if the OPEN event is within the cooldown period

@@ -81,9 +81,35 @@ export class JupiterSwapClient {
   private readonly config: JupiterClientConfig;
   private readonly logger: Logger;
 
+  /** Trusted Jupiter API hostnames (prevent SSRF via config injection) */
+  private static readonly ALLOWED_HOSTNAMES = new Set([
+    'quote-api.jup.ag',
+    'api.jup.ag',
+    'station.jup.ag',
+    'lite-api.jup.ag',
+  ]);
+
   constructor(config?: Partial<JupiterClientConfig>, logger?: Logger) {
+    const apiUrl = config?.apiUrl ?? DEFAULT_CONFIG.apiUrl;
+
+    // Validate hostname to prevent SSRF via config-injected internal URLs
+    try {
+      const hostname = new URL(apiUrl).hostname;
+      if (!JupiterSwapClient.ALLOWED_HOSTNAMES.has(hostname)) {
+        throw new Error(
+          `Untrusted Jupiter API hostname: ${hostname}. ` +
+          `Allowed: ${[...JupiterSwapClient.ALLOWED_HOSTNAMES].join(', ')}`
+        );
+      }
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error(`Invalid Jupiter API URL: ${apiUrl}`);
+      }
+      throw error;
+    }
+
     this.config = {
-      apiUrl: config?.apiUrl ?? DEFAULT_CONFIG.apiUrl,
+      apiUrl,
       timeoutMs: config?.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
       maxRetries: config?.maxRetries ?? DEFAULT_CONFIG.maxRetries,
       defaultSlippageBps: config?.defaultSlippageBps ?? DEFAULT_CONFIG.defaultSlippageBps,

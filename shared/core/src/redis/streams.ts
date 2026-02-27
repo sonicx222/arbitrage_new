@@ -166,10 +166,11 @@ export class StreamBatcher<T = Record<string, unknown>> {
     return this.destroyed;
   }
 
-  add(message: T): void {
+  // P0 Fix: Return boolean for backpressure signaling — false when message is dropped
+  add(message: T): boolean {
     if (this.destroyed) {
       this.logger.warn('Attempted to add message to destroyed batcher', { streamName: this.streamName });
-      return;
+      return false;
     }
 
     // Enforce maxQueueSize to prevent unbounded memory growth during sustained Redis outages
@@ -183,7 +184,7 @@ export class StreamBatcher<T = Record<string, unknown>> {
         maxQueueSize: this.config.maxQueueSize,
         totalDropped: this.stats.totalMessagesDropped,
       });
-      return;
+      return false;
     }
 
     // P0-2 FIX: If currently flushing, add to pending queue to prevent race condition
@@ -191,7 +192,7 @@ export class StreamBatcher<T = Record<string, unknown>> {
     if (this.flushing) {
       this.pendingDuringFlush.push(message);
       this.stats.totalMessagesQueued++;
-      return;
+      return true;
     }
 
     this.queue.push(message);
@@ -210,6 +211,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
         });
       }, this.config.maxWaitMs);
     }
+
+    return true;
   }
 
   async flush(): Promise<void> {
@@ -356,6 +359,12 @@ export class RedisStreamsClient {
   /**
    * P1-3 fix: Recommended MAXLEN values to prevent unbounded stream growth.
    * These are approximate (~) limits for performance.
+   *
+   * P0 Fix: WARNING — approximate MAXLEN trimming can silently discard unread messages
+   * when a consumer lags behind the configured limit. If a consumer group falls behind
+   * by more than MAXLEN entries, older unprocessed messages will be permanently lost.
+   * Use checkStreamLag() to monitor consumer lag against these limits and alert
+   * when lag exceeds 80% of MAXLEN for a given stream.
    */
   static readonly STREAM_MAX_LENGTHS: Record<string, number> = {
     [RedisStreamsClient.STREAMS.PRICE_UPDATES]: 100000,    // High volume, keep more history
@@ -599,6 +608,9 @@ export class RedisStreamsClient {
   /**
    * P1-3 fix: Add message with automatic MAXLEN based on stream type.
    * Uses recommended limits from STREAM_MAX_LENGTHS.
+   *
+   * P0 Fix: Approximate MAXLEN can discard unread messages when consumers lag.
+   * Use checkStreamLag() in health checks to monitor lag and alert before message loss.
    */
   async xaddWithLimit<T = Record<string, unknown>>(
     streamName: string,
@@ -770,6 +782,26 @@ export class RedisStreamsClient {
         } catch (ackError) {
           this.logger.error('Failed to ACK rejected messages', { error: ackError });
         }
+
+        // P1-5 FIX: Route HMAC-rejected messages to DLQ for forensic analysis
+        try {
+          for (const rejectedId of rejectedIds) {
+            await this.client.xadd(
+              RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
+              '*',
+              'originalStream', config.streamName,
+              'originalId', rejectedId,
+              'reason', 'hmac_verification_failed',
+              'consumerGroup', config.groupName,
+              'timestamp', String(Date.now()),
+            );
+          }
+        } catch (dlqError) {
+          this.logger.error('Failed to route HMAC-rejected messages to DLQ', {
+            error: dlqError instanceof Error ? dlqError.message : String(dlqError),
+            count: rejectedIds.length,
+          });
+        }
       }
 
       return messages;
@@ -803,6 +835,36 @@ export class RedisStreamsClient {
       this.logger.error('XLEN error', { error, streamName });
       return 0;
     }
+  }
+
+  /**
+   * P0 Fix: Check stream length against MAXLEN and warn when lag exceeds 80%.
+   * Use this to detect when consumers are falling behind and at risk of losing
+   * messages to MAXLEN trimming.
+   *
+   * @param streamName - The stream to check
+   * @returns Object with stream length, maxLen, and whether lag is critical (>80%)
+   */
+  async checkStreamLag(streamName: string): Promise<{ length: number; maxLen: number; lagRatio: number; critical: boolean }> {
+    const maxLen = RedisStreamsClient.STREAM_MAX_LENGTHS[streamName] ?? 0;
+    if (maxLen === 0) {
+      return { length: 0, maxLen: 0, lagRatio: 0, critical: false };
+    }
+
+    const length = await this.xlen(streamName);
+    const lagRatio = length / maxLen;
+    const critical = lagRatio > 0.8;
+
+    if (critical) {
+      this.logger.warn('Stream length approaching MAXLEN — unread messages may be trimmed', {
+        streamName,
+        length,
+        maxLen,
+        lagRatio: Math.round(lagRatio * 100) / 100,
+      });
+    }
+
+    return { length, maxLen, lagRatio, critical };
   }
 
   /**

@@ -11,6 +11,13 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { ExecutionPipeline, type PipelineDeps } from '../../src/execution-pipeline';
 
+// H1 FIX: Mock prometheus metrics (now called from pipeline after W1-42 extraction)
+jest.mock('../../src/services/prometheus-metrics', () => ({
+  recordExecutionAttempt: jest.fn(),
+  recordExecutionSuccess: jest.fn(),
+  recordVolume: jest.fn(),
+}));
+
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};
 
@@ -95,8 +102,8 @@ const createMockDeps = (overrides = {}): PipelineDeps => ({
   cbManager: null,
   riskOrchestrator: null,
   abTestingFramework: null,
-  isSimulationMode: false,
-  riskManagementEnabled: false,
+  getIsSimulationMode: jest.fn().mockReturnValue(false),
+  getRiskManagementEnabled: jest.fn().mockReturnValue(false),
   buildStrategyContext: jest.fn().mockReturnValue({}),
   publishExecutionResult: jest.fn().mockResolvedValue(undefined),
   getLastGasPrice: jest.fn().mockReturnValue(20000000000n),
@@ -749,8 +756,8 @@ describe('ExecutionPipeline', () => {
         recordOutcome: jest.fn(),
       };
       deps.riskOrchestrator = mockRiskOrchestrator;
-      deps.riskManagementEnabled = true;
-      deps.isSimulationMode = true; // <-- simulation mode ON
+      (deps.getRiskManagementEnabled as jest.Mock).mockReturnValue(true);
+      (deps.getIsSimulationMode as jest.Mock).mockReturnValue(true); // <-- simulation mode ON
 
       const opp = createMockOpportunity();
       deps.queueService.size
@@ -775,8 +782,8 @@ describe('ExecutionPipeline', () => {
         recordOutcome: jest.fn(),
       };
       deps.riskOrchestrator = mockRiskOrchestrator;
-      deps.riskManagementEnabled = false;
-      deps.isSimulationMode = false;
+      (deps.getRiskManagementEnabled as jest.Mock).mockReturnValue(false);
+      (deps.getIsSimulationMode as jest.Mock).mockReturnValue(false);
 
       const opp = createMockOpportunity();
       deps.queueService.size
@@ -804,8 +811,8 @@ describe('ExecutionPipeline', () => {
         recordOutcome: jest.fn(),
       };
       deps.riskOrchestrator = mockRiskOrchestrator;
-      deps.riskManagementEnabled = true;
-      deps.isSimulationMode = false;
+      (deps.getRiskManagementEnabled as jest.Mock).mockReturnValue(true);
+      (deps.getIsSimulationMode as jest.Mock).mockReturnValue(false);
 
       const opp = createMockOpportunity();
       deps.queueService.size
@@ -844,8 +851,8 @@ describe('ExecutionPipeline', () => {
         recordOutcome: jest.fn(),
       };
       deps.riskOrchestrator = mockRiskOrchestrator;
-      deps.riskManagementEnabled = true;
-      deps.isSimulationMode = false;
+      (deps.getRiskManagementEnabled as jest.Mock).mockReturnValue(true);
+      (deps.getIsSimulationMode as jest.Mock).mockReturnValue(false);
 
       const opp = createMockOpportunity();
       deps.queueService.size
@@ -879,8 +886,8 @@ describe('ExecutionPipeline', () => {
         recordOutcome: jest.fn(),
       };
       deps.riskOrchestrator = mockRiskOrchestrator;
-      deps.riskManagementEnabled = true;
-      deps.isSimulationMode = false;
+      (deps.getRiskManagementEnabled as jest.Mock).mockReturnValue(true);
+      (deps.getIsSimulationMode as jest.Mock).mockReturnValue(false);
 
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,

@@ -595,11 +595,16 @@ export function initializeApiKeys(): void {
     return;
   }
 
+  // Format: name:key:perm1;perm2,name2:key2:perm1;perm2
+  // IMPORTANT: Keys must NOT contain ':' characters (used as delimiter).
+  // Base64-encoded keys with ':' will be silently truncated. Use hex encoding instead.
   const keyEntries = envKeys.split(',');
   for (const entry of keyEntries) {
     const [name, key, ...permParts] = entry.split(':');
     if (!name || !key) {
-      moduleLogger.warn('Invalid API key entry format', { entry: entry.substring(0, 10) + '...' });
+      moduleLogger.warn('Invalid API key entry format — expected name:key[:permissions]', {
+        entry: entry.substring(0, 10) + '...',
+      });
       continue;
     }
 

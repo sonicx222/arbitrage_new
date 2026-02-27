@@ -596,7 +596,7 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
         params: { result: swapLog },
       });
 
-      expect(mockHandleSwap).toHaveBeenCalledWith(swapLog);
+      expect(mockHandleSwap).toHaveBeenCalledWith(swapLog, expect.any(Number));
     });
 
     it('should route block headers to handleNewBlock', () => {

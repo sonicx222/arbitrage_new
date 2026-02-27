@@ -75,7 +75,7 @@ describe('JupiterSwapClient', () => {
 
     client = new JupiterSwapClient(
       {
-        apiUrl: 'https://test-jupiter.api',
+        apiUrl: 'https://quote-api.jup.ag',
         timeoutMs: 5000,
         maxRetries: 2,
         defaultSlippageBps: 50,
@@ -155,7 +155,7 @@ describe('JupiterSwapClient', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe('https://test-jupiter.api/swap');
+      expect(url).toBe('https://quote-api.jup.ag/swap');
       expect(init.method).toBe('POST');
 
       const body = JSON.parse(init.body);
@@ -246,7 +246,7 @@ describe('JupiterSwapClient', () => {
       // Create client with very short timeout for test
       const fastClient = new JupiterSwapClient(
         {
-          apiUrl: 'https://test-jupiter.api',
+          apiUrl: 'https://quote-api.jup.ag',
           timeoutMs: 50,
           maxRetries: 0,
           defaultSlippageBps: 50,
@@ -273,6 +273,30 @@ describe('JupiterSwapClient', () => {
       const defaultClient = new JupiterSwapClient();
       // Client should be created without errors
       expect(defaultClient).toBeInstanceOf(JupiterSwapClient);
+    });
+  });
+
+  // ===========================================================================
+  // SSRF hostname validation
+  // ===========================================================================
+
+  describe('hostname validation', () => {
+    it('should reject untrusted API hostnames', () => {
+      expect(
+        () => new JupiterSwapClient({ apiUrl: 'https://evil.internal.corp/v6' }, createMockLogger()),
+      ).toThrow('Untrusted Jupiter API hostname: evil.internal.corp');
+    });
+
+    it('should reject invalid URLs', () => {
+      expect(
+        () => new JupiterSwapClient({ apiUrl: 'not-a-url' }, createMockLogger()),
+      ).toThrow('Invalid URL');
+    });
+
+    it('should accept allowed Jupiter hostnames', () => {
+      expect(
+        () => new JupiterSwapClient({ apiUrl: 'https://quote-api.jup.ag/v6' }, createMockLogger()),
+      ).not.toThrow();
     });
   });
 });

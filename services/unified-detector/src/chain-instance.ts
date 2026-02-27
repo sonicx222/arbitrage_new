@@ -44,6 +44,7 @@ import {
   MultiLegOpportunity,
 } from '@arbitrage/core/path-finding';
 import { RedisStreamsClient, StreamBatcher } from '@arbitrage/core/redis';
+import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { isSimulationMode } from '@arbitrage/core/simulation';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
@@ -1230,7 +1231,7 @@ export class ChainDetectorInstance extends EventEmitter {
           if (topic0 === EVENT_SIGNATURES.SYNC) {
             this.handleSyncEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
-            this.handleSwapEvent(result);
+            this.handleSwapEvent(result, messageReceivedAt);
           } else if (this.factorySubscriptionService && this.useFactoryMode) {
             // P0-FIX: Route potential factory events to factory subscription service
             // Check if this is a factory event (PairCreated, PoolCreated, etc.)
@@ -1359,7 +1360,7 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // P2 FIX: Use EthereumLog type instead of any
-  private handleSwapEvent(log: EthereumLog): void {
+  private handleSwapEvent(log: EthereumLog, now: number = Date.now()): void {
     // Guard against processing during shutdown (consistent with base-detector.ts)
     if (this.isStopping || !this.isRunning) return;
 
@@ -1410,7 +1411,7 @@ export class ChainDetectorInstance extends EventEmitter {
         pairAddress: pairAddress,
         blockNumber: parseInt(log.blockNumber, 16),
         transactionHash: log.transactionHash || '',
-        timestamp: Date.now(),
+        timestamp: now,
         sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '',
         recipient: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '',
         amount0In,
@@ -1559,16 +1560,20 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private publishPriceUpdate(update: PriceUpdate): void {
+    // P1-6 FIX: Add trace context to price updates for cross-service correlation
+    const traceCtx = createTraceContext(`chain-detector:${this.chainId}`);
+    const enrichedUpdate = { ...update, ...propagateContext({}, traceCtx) } as PriceUpdate;
+
     // ADR-002: Use StreamBatcher to reduce Redis commands ~50x
     // batcher.add() is O(1) synchronous queue push — faster than async xaddWithLimit
     // Flush happens asynchronously in background (maxBatchSize: 50, maxWaitMs: 10ms)
     if (this.priceUpdateBatcher) {
-      this.priceUpdateBatcher.add(update);
+      this.priceUpdateBatcher.add(enrichedUpdate);
     } else {
       // Fallback: direct publish if batcher not yet initialized (startup race)
       this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        update
+        enrichedUpdate
       ).catch(error => {
         this.logger.error('Failed to publish price update', { error });
       });

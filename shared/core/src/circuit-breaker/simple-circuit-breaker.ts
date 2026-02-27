@@ -60,6 +60,11 @@ export interface SimpleCircuitBreakerStatus {
  *
  * Unlike the full CircuitBreaker, this doesn't have a HALF_OPEN state.
  * After cooldown, it automatically allows one attempt and resets if successful.
+ *
+ * **Note**: State is in-memory only and resets on process restart. For services
+ * requiring persistence across restarts (e.g., to prevent rapid crash-restart
+ * cycles from bypassing circuit protection), persist state externally via Redis
+ * using the `getStatus()` / constructor pattern.
  */
 export class SimpleCircuitBreaker {
   private failures = 0;

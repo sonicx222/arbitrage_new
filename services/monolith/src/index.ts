@@ -141,7 +141,7 @@ function buildServiceConfigs(): ServiceWorkerConfig[] {
       name: 'partition-solana',
       scriptPath: resolveServicePath('partition-solana'),
       env: {
-        PARTITION_ID: 'solana',
+        PARTITION_ID: 'solana-native',
         HEALTH_CHECK_PORT: '3004',
         REDIS_URL,
       },
@@ -303,18 +303,35 @@ async function main(): Promise<void> {
 
     logger.info(`Received ${signal}, shutting down monolith...`);
 
-    if (workerManager) {
-      await workerManager.stop();
-    }
+    // P0 Fix: Force-exit timer to prevent hanging shutdown
+    // Pattern from service-bootstrap.ts:142-147
+    const forceExitTimer = setTimeout(() => {
+      logger.error(`Monolith shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms, forcing exit`);
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    forceExitTimer.unref();
 
-    if (healthServer) {
-      await new Promise<void>((resolve) => {
-        healthServer!.close(() => resolve());
+    try {
+      if (workerManager) {
+        await workerManager.stop();
+      }
+
+      if (healthServer) {
+        await new Promise<void>((resolve) => {
+          healthServer!.close(() => resolve());
+        });
+      }
+
+      clearTimeout(forceExitTimer);
+      logger.info('Monolith shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      clearTimeout(forceExitTimer);
+      logger.error('Error during monolith shutdown', {
+        error: error instanceof Error ? error.message : String(error),
       });
+      process.exit(1);
     }
-
-    logger.info('Monolith shutdown complete');
-    process.exit(0);
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));

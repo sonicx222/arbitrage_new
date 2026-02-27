@@ -316,7 +316,7 @@ Instead of one service per chain, chains are grouped into partitions based on:
 | Partition | Chains | Location | Provider | Resources |
 |-----------|--------|----------|----------|-----------|
 | P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | Singapore | Oracle ARM | 2 OCPU, 12GB |
-| P2: L2-Turbo | Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode | Singapore | Fly.io x2 | 768MB total |
+| P2: L2-Turbo | Arbitrum, Optimism, Base, Scroll, Blast | Singapore | Fly.io x2 | 640MB total |
 | P3: High-Value | Ethereum, zkSync, Linea | US-East | Oracle ARM | 2 OCPU, 12GB |
 | P4: Solana | Solana (non-EVM) | US-West | Fly.io | 256MB |
 
@@ -933,7 +933,7 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 - Low fees (<$0.001) enable micro-arbitrage
 - Unique ecosystem (memecoins, LSTs) not available on EVM
 
-### 9.2 DEX Distribution (57 DEXs: 50 EVM + 7 Solana)
+### 9.2 DEX Distribution (71 DEXs: 50 Core EVM + 7 Solana + 14 Emerging L2)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
