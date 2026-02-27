@@ -10,6 +10,8 @@
 
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { createLogger } from '../logger';
+import { getStreamHealthMonitor } from '../monitoring/stream-health-monitor';
+import { getLatencyTracker } from '../monitoring/latency-tracker';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
 
 // =============================================================================
@@ -182,6 +184,35 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         ready,
         chains: detector.getChains()
       }));
+    } else if (req.url === '/metrics') {
+      // W2-H7: Prometheus metrics endpoint for scraping
+      try {
+        const streamMonitor = getStreamHealthMonitor();
+        const streamMetrics = await streamMonitor.getPrometheusMetrics();
+
+        const latencyMetrics = getLatencyTracker().getMetrics();
+        const latencyLines: string[] = [];
+        latencyLines.push('# HELP pipeline_latency_p50_ms Pipeline latency 50th percentile in ms');
+        latencyLines.push('# TYPE pipeline_latency_p50_ms gauge');
+        latencyLines.push(`pipeline_latency_p50_ms ${latencyMetrics.e2e.p50}`);
+        latencyLines.push('# HELP pipeline_latency_p95_ms Pipeline latency 95th percentile in ms');
+        latencyLines.push('# TYPE pipeline_latency_p95_ms gauge');
+        latencyLines.push(`pipeline_latency_p95_ms ${latencyMetrics.e2e.p95}`);
+        latencyLines.push('# HELP pipeline_latency_p99_ms Pipeline latency 99th percentile in ms');
+        latencyLines.push('# TYPE pipeline_latency_p99_ms gauge');
+        latencyLines.push(`pipeline_latency_p99_ms ${latencyMetrics.e2e.p99}`);
+        latencyLines.push('# HELP pipeline_events_total Total pipeline events tracked');
+        latencyLines.push('# TYPE pipeline_events_total counter');
+        latencyLines.push(`pipeline_events_total ${latencyMetrics.e2e.count}`);
+
+        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n';
+        res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+        res.end(body);
+      } catch (error) {
+        logger.error('Metrics endpoint failed', { error: (error as Error).message });
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('# Error generating metrics\n');
+      }
     } else if (req.url === '/') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -190,7 +221,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         partitionId: config.partitionId,
         chains: config.defaultChains,
         region: config.region,
-        endpoints: ['/health', '/ready', '/stats']
+        endpoints: ['/health', '/ready', '/stats', '/metrics']
       }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -349,15 +380,22 @@ export async function shutdownPartitionService(
     await closeServerWithTimeout(healthServer, SHUTDOWN_TIMEOUT_MS, logger);
 
     // H6: Wrap detector.stop() with timeout to prevent hanging on stuck WebSocket/RPC calls
+    // W2-M3: Track whether shutdown timed out — exit(1) signals unclean shutdown to orchestrator
+    let timedOut = false;
     await Promise.race([
       detector.stop(),
       new Promise<void>((resolve) => {
         setTimeout(() => {
-          logger.warn(`${serviceName} detector.stop() timed out after ${SHUTDOWN_TIMEOUT_MS}ms, proceeding with shutdown`);
+          timedOut = true;
+          logger.warn(`${serviceName} detector.stop() timed out after ${SHUTDOWN_TIMEOUT_MS}ms — async operations may still be running`);
           resolve();
         }, SHUTDOWN_TIMEOUT_MS);
       }),
     ]);
+    if (timedOut) {
+      logger.error(`${serviceName} shutdown incomplete (timed out) — exiting with code 1`);
+      process.exit(1);
+    }
     logger.info(`${serviceName} shutdown complete`);
     process.exit(0);
   } catch (error) {

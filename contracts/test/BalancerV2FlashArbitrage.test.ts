@@ -8,6 +8,8 @@ import {
   RATE_WETH_TO_USDC,
   getDeadline,
   deployBalancerV2Fixture,
+  testDeploymentDefaults,
+  testInputValidation,
 } from './helpers';
 
 /**
@@ -30,40 +32,20 @@ describe('BalancerV2FlashArbitrage', () => {
   const deployContractsFixture = deployBalancerV2Fixture;
 
   // ===========================================================================
-  // 1. Deployment and Initialization Tests
+  // 1. Deployment Defaults (shared) + Balancer-Specific Deployment
   // ===========================================================================
-  describe('1. Deployment and Initialization', () => {
-    it('should deploy with correct owner', async () => {
-      const { arbitrage, owner } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.owner()).to.equal(owner.address);
-    });
+  testDeploymentDefaults({
+    contractName: 'BalancerV2FlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return { contract: f.arbitrage, owner: f.owner };
+    },
+  });
 
+  describe('Deployment — Balancer-Specific', () => {
     it('should deploy with correct vault address', async () => {
       const { arbitrage, vault } = await loadFixture(deployContractsFixture);
       expect(await arbitrage.VAULT()).to.equal(await vault.getAddress());
-    });
-
-    it('should set initial minimumProfit to default (1e14)', async () => {
-      const { arbitrage } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.minimumProfit()).to.equal(BigInt(1e14));
-    });
-
-    it('should set initial totalProfits to 0', async () => {
-      const { arbitrage } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.totalProfits()).to.equal(0);
-    });
-
-    it('should set default swap deadline', async () => {
-      const { arbitrage } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.swapDeadline()).to.equal(60);
-    });
-
-    it('should initialize with correct constants', async () => {
-      const { arbitrage } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(60);
-      expect(await arbitrage.MAX_SWAP_DEADLINE()).to.equal(600);
-      expect(await arbitrage.MIN_SLIPPAGE_BPS()).to.equal(10);
-      expect(await arbitrage.MAX_SWAP_HOPS()).to.equal(5);
     });
 
     it('should revert on zero vault address', async () => {
@@ -82,7 +64,6 @@ describe('BalancerV2FlashArbitrage', () => {
       const { owner, user } = await loadFixture(deployContractsFixture);
       const BalancerV2FlashArbitrageFactory = await ethers.getContractFactory('BalancerV2FlashArbitrage');
 
-      // User address is an EOA, not a contract
       await expect(
         BalancerV2FlashArbitrageFactory.deploy(user.address, owner.address)
       ).to.be.revertedWithCustomError(
@@ -90,17 +71,30 @@ describe('BalancerV2FlashArbitrage', () => {
         'InvalidProtocolAddress'
       );
     });
+  });
 
-    it('should not be paused on deployment', async () => {
-      const { arbitrage } = await loadFixture(deployContractsFixture);
-      expect(await arbitrage.paused()).to.be.false;
-    });
-
-    it('should start with no approved routers', async () => {
-      const { arbitrage } = await loadFixture(deployContractsFixture);
-      const routers = await arbitrage.getApprovedRouters();
-      expect(routers.length).to.equal(0);
-    });
+  // ===========================================================================
+  // Input Validation (shared — _validateArbitrageParams)
+  // ===========================================================================
+  testInputValidation({
+    contractName: 'BalancerV2FlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.arbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerArbitrage: (contract, signer, params) =>
+      contract.connect(signer).executeArbitrage(
+        params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
+      ),
   });
 
   // ===========================================================================
@@ -350,206 +344,6 @@ describe('BalancerV2FlashArbitrage', () => {
         )
       ).to.be.revertedWithCustomError(arbitrage, 'InsufficientProfit');
     });
-
-    it('should revert on zero amount', async () => {
-      const { arbitrage, dexRouter1, weth, user } = await loadFixture(deployContractsFixture);
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 0,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          0,
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'InvalidAmount');
-    });
-
-    it('should revert on expired deadline', async () => {
-      const { arbitrage, dexRouter1, weth, user } = await loadFixture(deployContractsFixture);
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 0,
-        },
-      ];
-
-      const deadline = await getDeadline(-100); // Past deadline
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'TransactionTooOld');
-    });
-
-    it('should revert on empty swap path', async () => {
-      const { arbitrage, weth, user } = await loadFixture(deployContractsFixture);
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          [],
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'EmptySwapPath');
-    });
-
-    it('should revert on path too long (> 5 hops)', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      // Create 6-hop path
-      const swapPath = Array(6).fill({
-        router: await dexRouter1.getAddress(),
-        tokenIn: await weth.getAddress(),
-        tokenOut: await usdc.getAddress(),
-        amountOutMin: 1,
-      });
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'PathTooLong');
-    });
-
-    it('should revert on asset mismatch (first hop)', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(), // Wrong! Should be WETH
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'SwapPathAssetMismatch');
-    });
-
-    it('should revert on unapproved router', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, user } = await loadFixture(deployContractsFixture);
-
-      // Don't approve the router
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'RouterNotApproved');
-    });
-
-    it('should revert on zero amountOutMin without slippage protection', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 0, // Zero slippage protection!
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'InsufficientSlippageProtection');
-    });
-
-    it('should revert when paused', async () => {
-      const { arbitrage, dexRouter1, weth, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).pause();
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWith('Pausable: paused');
-    });
   });
 
   // ===========================================================================
@@ -700,78 +494,6 @@ describe('BalancerV2FlashArbitrage', () => {
       );
 
       expect(await weth.balanceOf(await arbitrage.getAddress())).to.be.gt(0);
-    });
-
-    it('should revert on token continuity error', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, dai, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
-      );
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await dai.getAddress(), // Wrong! Should be USDC
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'InvalidSwapPath');
-    });
-
-    it('should revert if path does not end with start asset', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
-      );
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(), // Ends with USDC, not WETH
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'InvalidSwapPath');
     });
 
     it('should revert on insufficient output amount', async () => {

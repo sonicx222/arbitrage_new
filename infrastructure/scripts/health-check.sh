@@ -115,24 +115,27 @@ release_lock() {
 }
 
 # Service definitions
-# Port mappings (per ADR-003 and docker-compose.partition.yml):
-#   - Coordinator:           3000
-#   - partition-asia-fast:   3011
-#   - partition-l2-fast:     3012
-#   - partition-high-value:  3013
-#   - cross-chain-detector:  3014
-#   - execution-engine:      3015
-#   - partition-solana:      3016
-#   - Redis:                 6379 (configurable via REDIS_PORT)
+# Port mappings (Docker partition compose external ports, base port + 10 offset):
+#   - Coordinator:           3000  (no offset, same as base)
+#   - partition-asia-fast:   3011  (base 3001 + 10)
+#   - partition-l2-turbo:     3012  (base 3002 + 10)
+#   - partition-high-value:  3013  (base 3003 + 10)
+#   - partition-solana:      3014  (base 3004 + 10)
+#   - execution-engine:      3015  (base 3005 + 10; Fly.io uses 8080 override)
+#   - cross-chain-detector:  3016  (base 3006 + 10)
+#   - Redis:                 6379  (configurable via REDIS_PORT)
+#
+# NOTE: Fly.io TOMLs use different internal ports (e.g., execution-engine=8080).
+# These mappings are for Docker partition compose deployments only.
 REDIS_PORT=${REDIS_PORT:-6379}
 
 declare -A SERVICES=(
     ["coordinator"]="http://localhost:3000/health"
     ["partition-asia-fast"]="http://localhost:3011/health"
-    ["partition-l2-fast"]="http://localhost:3012/health"
+    ["partition-l2-turbo"]="http://localhost:3012/health"
     ["partition-high-value"]="http://localhost:3013/health"
-    ["partition-solana"]="http://localhost:3016/health"
-    ["cross-chain-detector"]="http://localhost:3014/health"
+    ["partition-solana"]="http://localhost:3014/health"
+    ["cross-chain-detector"]="http://localhost:3016/health"
     ["execution-engine"]="http://localhost:3015/health"
     ["redis"]="redis://localhost:$REDIS_PORT"
 )
@@ -140,7 +143,7 @@ declare -A SERVICES=(
 # Override with environment variables
 [ -n "$COORDINATOR_URL" ] && SERVICES["coordinator"]="$COORDINATOR_URL/health"
 [ -n "$PARTITION_ASIA_FAST_URL" ] && SERVICES["partition-asia-fast"]="$PARTITION_ASIA_FAST_URL/health"
-[ -n "$PARTITION_L2_FAST_URL" ] && SERVICES["partition-l2-fast"]="$PARTITION_L2_FAST_URL/health"
+[ -n "$PARTITION_L2_TURBO_URL" ] && SERVICES["partition-l2-turbo"]="$PARTITION_L2_TURBO_URL/health"
 [ -n "$PARTITION_HIGH_VALUE_URL" ] && SERVICES["partition-high-value"]="$PARTITION_HIGH_VALUE_URL/health"
 [ -n "$PARTITION_SOLANA_URL" ] && SERVICES["partition-solana"]="$PARTITION_SOLANA_URL/health"
 [ -n "$CROSS_CHAIN_URL" ] && SERVICES["cross-chain-detector"]="$CROSS_CHAIN_URL/health"

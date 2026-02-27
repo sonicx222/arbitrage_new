@@ -11,6 +11,7 @@ import { getDeadLetterQueue } from '../resilience/dead-letter-queue';
 import { getGracefulDegradationManager } from '../resilience/graceful-degradation';
 import { checkRecoverySystemHealth } from '../resilience/error-recovery';
 import { getStreamHealthMonitor, StreamHealthSummary } from './stream-health-monitor';
+import { getLatencyTracker } from './latency-tracker';
 
 const logger = createLogger('enhanced-health-monitor');
 
@@ -626,11 +627,14 @@ export class EnhancedHealthMonitor {
     this.lastCpuUsage = currentCpu;
     this.lastCpuCheckTime = now;
 
+    // W2-H6: Wire LatencyTracker to replace hard-coded zeros
+    const latencyMetrics = getLatencyTracker().getMetrics();
+
     return {
       memoryUsage: memUsage.heapUsed / memUsage.heapTotal,
       cpuUsage: cpuPercent,
-      throughput: 0, // Would need request tracking
-      latency: 0 // Would need response time tracking
+      throughput: latencyMetrics.e2e.count,
+      latency: latencyMetrics.e2e.p95,
     };
   }
 

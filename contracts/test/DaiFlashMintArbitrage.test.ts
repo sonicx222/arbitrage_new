@@ -19,6 +19,9 @@ import {
   testWithdrawETH,
   testWithdrawGasLimitConfig,
   testOwnable2Step,
+  testDeploymentDefaults,
+  testInputValidation,
+  testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
 } from './helpers';
@@ -84,12 +87,15 @@ describe('DaiFlashMintArbitrage', () => {
   // ==========================================================================
   // 1. Deployment and Initialization Tests
   // ==========================================================================
-  describe('1. Deployment and Initialization', () => {
-    it('should deploy with correct owner', async () => {
-      const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
-      expect(await daiArbitrage.owner()).to.equal(owner.address);
-    });
+  testDeploymentDefaults({
+    contractName: 'DaiFlashMintArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return { contract: f.daiArbitrage, owner: f.owner };
+    },
+  });
 
+  describe('1. DaiFlashMint-Specific Deployment', () => {
     it('should set DSS_FLASH address correctly', async () => {
       const { daiArbitrage, dssFlash } = await loadFixture(deployContractsFixture);
       expect(await daiArbitrage.DSS_FLASH()).to.equal(await dssFlash.getAddress());
@@ -98,29 +104,6 @@ describe('DaiFlashMintArbitrage', () => {
     it('should set DAI address correctly', async () => {
       const { daiArbitrage, dai } = await loadFixture(deployContractsFixture);
       expect(await daiArbitrage.DAI()).to.equal(await dai.getAddress());
-    });
-
-    it('should initialize with default minimum profit (1e14)', async () => {
-      const { daiArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await daiArbitrage.minimumProfit()).to.equal(BigInt(1e14));
-    });
-
-    it('should initialize with zero total profits', async () => {
-      const { daiArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await daiArbitrage.totalProfits()).to.equal(0);
-    });
-
-    it('should initialize with default swap deadline (60 seconds)', async () => {
-      const { daiArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await daiArbitrage.swapDeadline()).to.equal(60);
-    });
-
-    it('should verify constants are set correctly', async () => {
-      const { daiArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await daiArbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(60);
-      expect(await daiArbitrage.MAX_SWAP_DEADLINE()).to.equal(600);
-      expect(await daiArbitrage.MIN_SLIPPAGE_BPS()).to.equal(10);
-      expect(await daiArbitrage.MAX_SWAP_HOPS()).to.equal(5);
     });
 
     it('should revert on zero address dssFlash', async () => {
@@ -202,16 +185,6 @@ describe('DaiFlashMintArbitrage', () => {
         'InvalidDaiAddress'
       );
     });
-
-    it('should initialize with empty approved router list', async () => {
-      const { daiArbitrage } = await loadFixture(deployContractsFixture);
-      expect((await daiArbitrage.getApprovedRouters()).length).to.equal(0);
-    });
-
-    it('should start in unpaused state', async () => {
-      const { daiArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await daiArbitrage.paused()).to.be.false;
-    });
   });
 
   // ==========================================================================
@@ -220,9 +193,34 @@ describe('DaiFlashMintArbitrage', () => {
   testRouterManagement(adminConfig);
 
   // ==========================================================================
-  // 3. Flash Loan Execution Tests
+  // 3. Input Validation Tests (shared harness)
   // ==========================================================================
-  describe('3. Flash Loan Execution', () => {
+  testInputValidation({
+    contractName: 'DaiFlashMintArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.daiArbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerArbitrage: (contract, signer, params) =>
+      contract.connect(signer).executeArbitrage(
+        params.amount, params.swapPath, params.minProfit, params.deadline
+      ),
+    getAssetAddress: async (f) => f.dai.getAddress(),
+  });
+
+  // ==========================================================================
+  // 3b. Flash Loan Execution Tests
+  // ==========================================================================
+  describe('3b. Flash Loan Execution', () => {
     describe('executeArbitrage()', () => {
       it('should execute successful arbitrage with profit', async () => {
         const {
@@ -367,178 +365,6 @@ describe('DaiFlashMintArbitrage', () => {
         ).to.be.revertedWithCustomError(daiArbitrage, 'InsufficientProfit');
       });
 
-      it('should revert on zero amount', async () => {
-        const { daiArbitrage, dai, dexRouter1, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(0, swapPath, 0n, deadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InvalidAmount');
-      });
-
-      it('should revert on expired deadline', async () => {
-        const { daiArbitrage, dai, dexRouter1, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        const amountIn = ethers.parseEther('1');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-
-        const pastDeadline = (await ethers.provider.getBlock('latest'))!.timestamp - 100;
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, pastDeadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'TransactionTooOld');
-      });
-
-      it('should revert on empty swap path', async () => {
-        const { daiArbitrage, user } = await loadFixture(deployContractsFixture);
-
-        const amountIn = ethers.parseEther('1');
-        const swapPath: any[] = [];
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'EmptySwapPath');
-      });
-
-      it('should revert on path too long (> 5 hops)', async () => {
-        const { daiArbitrage, dexRouter1, dai, weth, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        const amountIn = ethers.parseEther('1');
-        const swapPath = Array(6).fill({
-          router: await dexRouter1.getAddress(),
-          tokenIn: await dai.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        });
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'PathTooLong');
-      });
-
-      it('should revert on asset mismatch (first swap not starting with DAI)', async () => {
-        const { daiArbitrage, dexRouter1, dai, weth, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        const amountIn = ethers.parseEther('1');
-        // First swap starts with WETH, not DAI
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(), // Wrong! Should be DAI
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'SwapPathAssetMismatch');
-      });
-
-      it('should revert on unapproved router in path', async () => {
-        const { daiArbitrage, dexRouter1, dai, weth, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        // Don't approve router
-
-        const amountIn = ethers.parseEther('1');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'RouterNotApproved');
-      });
-
-      it('should revert on zero amountOutMin (no slippage protection)', async () => {
-        const { daiArbitrage, dexRouter1, dai, weth, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        const amountIn = ethers.parseEther('1');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0n, // No slippage protection!
-          },
-        ];
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.be.revertedWithCustomError(daiArbitrage, 'InsufficientSlippageProtection');
-      });
-
-      it('should revert when paused', async () => {
-        const { daiArbitrage, dai, dexRouter1, owner, user } = await loadFixture(
-          deployContractsFixture
-        );
-
-        await daiArbitrage.connect(owner).pause();
-        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        const amountIn = ethers.parseEther('1');
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await dai.getAddress(),
-            tokenOut: await dai.getAddress(),
-            amountOutMin: 1n,
-          },
-        ];
-        const deadline = await getDeadline();
-
-        await expect(
-          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.be.revertedWith('Pausable: paused');
-      });
-
       it('should revert if flash loan fails', async () => {
         const {
           daiArbitrage,
@@ -657,59 +483,36 @@ describe('DaiFlashMintArbitrage', () => {
     });
   });
 
-  // ==========================================================================
-  // Security Tests - Reentrancy
-  // ==========================================================================
-  describe('Security - Reentrancy', () => {
-    it('should prevent reentrancy attacks via malicious router', async () => {
-      const {
-        daiArbitrage,
-        dexRouter1,
-        dai,
-        weth,
-        owner,
-        user,
-      } = await loadFixture(deployContractsFixture);
-
-      // Deploy malicious router that tries reentrancy during swap execution
-      const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
-      const maliciousRouter = await MaliciousRouterFactory.deploy(
-        await daiArbitrage.getAddress()
-      );
-
-      await daiArbitrage.connect(owner).addApprovedRouter(await maliciousRouter.getAddress());
-      await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      // Fund the malicious router with enough tokens (1:1 passthrough — needs matching amounts)
-      await dai.mint(await maliciousRouter.getAddress(), ethers.parseEther('100000'));
-      await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100000'));
-
-      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
-      // The malicious router does 1:1 passthrough, so we need the 2nd hop to be profitable
-      // to cover DssFlash's 0.01% fee (1 bps).
+  // Reentrancy Protection (shared — MockMaliciousRouter)
+  testReentrancyProtection({
+    contractName: 'DaiFlashMintArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.daiArbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerWithMaliciousRouter: async (fixture, maliciousRouterAddress) => {
+      const { contract, owner, dexRouter1, weth, dai } = fixture;
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      // DAI→WETH (malicious, 1:1) → WETH→DAI (normal, profit)
       await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await dai.getAddress(),
-        ethers.parseEther('2100')
+        await weth.getAddress(), await dai.getAddress(), ethers.parseEther('2100')
       );
-
-      // Path: DAI→WETH (malicious, 1:1 + reentrancy) → WETH→DAI (normal, profit)
-      // Use 100 DAI to stay within router funding limits (1:1 + 2100x = 210k DAI < 1M)
-      const amountIn = ethers.parseEther('100');
-      const swapPath = build2HopCrossRouterPath(
-        await maliciousRouter.getAddress(), await dexRouter1.getAddress(),
-        await dai.getAddress(), await weth.getAddress(), 1n, 1n
-      );
-
+      const swapPath = [
+        { router: maliciousRouterAddress, tokenIn: await dai.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
+        { router: await dexRouter1.getAddress(), tokenIn: await weth.getAddress(), tokenOut: await dai.getAddress(), amountOutMin: 1n },
+      ];
       const deadline = await getDeadline();
-      await daiArbitrage
-        .connect(user)
-        .executeArbitrage(amountIn, swapPath, 0n, deadline);
-
-      // Verify the attack was actually attempted and blocked
-      expect(await maliciousRouter.attackAttempted()).to.be.true;
-      expect(await maliciousRouter.attackSucceeded()).to.be.false;
-    });
+      await contract.connect(fixture.user).executeArbitrage(ethers.parseEther('100'), swapPath, 0n, deadline);
+    },
   });
 
   // ==========================================================================
@@ -870,6 +673,46 @@ describe('DaiFlashMintArbitrage', () => {
 
       // Verify profit was recorded
       expect(await daiArbitrage.totalProfits()).to.be.gt(0);
+    });
+  });
+
+  // ==========================================================================
+  // 8. Gas Benchmarks
+  // ==========================================================================
+  describe('8. Gas Benchmarks', () => {
+    it('should execute 2-hop arbitrage within gas budget', async () => {
+      const { daiArbitrage, dexRouter1, dai, weth, owner, user } =
+        await loadFixture(deployContractsFixture);
+
+      await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Configure profitable rates: DAI -> WETH -> DAI
+      await dexRouter1.setExchangeRate(
+        await dai.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('0.0005')
+      );
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await dai.getAddress(),
+        ethers.parseEther('2100') // Profitable return
+      );
+
+      const swapPath = build2HopPath(
+        await dexRouter1.getAddress(),
+        await dai.getAddress(),
+        await weth.getAddress(),
+        1n, 1n
+      );
+      const deadline = await getDeadline();
+
+      const tx = await daiArbitrage.connect(user).executeArbitrage(
+        ethers.parseEther('10000'), swapPath, 0n, deadline
+      );
+      const receipt = await tx.wait();
+
+      // DssFlash mint + 2 swaps, no pool fee overhead — budget < 400,000 gas
+      expect(receipt!.gasUsed).to.be.lt(400_000);
     });
   });
 });

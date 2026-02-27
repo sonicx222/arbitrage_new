@@ -97,7 +97,7 @@ output "cross_chain_private_ip" {
 
 output "cross_chain_health_url" {
   description = "Health check URL for Cross-Chain Detector"
-  value       = "http://${oci_core_instance.cross_chain_detector.public_ip}:3014/health"
+  value       = "http://${oci_core_instance.cross_chain_detector.public_ip}:3016/health"
 }
 
 # =============================================================================
@@ -124,7 +124,7 @@ output "deployment_summary" {
     cross_chain_detector = {
       region          = "us-ashburn-1"
       public_ip       = oci_core_instance.cross_chain_detector.public_ip
-      health_url      = "http://${oci_core_instance.cross_chain_detector.public_ip}:3014/health"
+      health_url      = "http://${oci_core_instance.cross_chain_detector.public_ip}:3016/health"
       redis           = var.redis_self_hosted ? "self-hosted (localhost:6379)" : "external"
     }
   }

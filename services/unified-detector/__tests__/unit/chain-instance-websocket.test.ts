@@ -573,7 +573,7 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
         params: { result: syncLog },
       });
 
-      expect(mockHandleSync).toHaveBeenCalledWith(syncLog);
+      expect(mockHandleSync).toHaveBeenCalledWith(syncLog, expect.any(Number));
     });
 
     it('should route Swap events to handleSwapEvent', () => {

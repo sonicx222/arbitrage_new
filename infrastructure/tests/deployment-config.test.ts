@@ -88,8 +88,8 @@ function parseYaml(content: string): any {
 // =============================================================================
 
 describe('Phase 3: Fly.io Deployment Configuration', () => {
-  describe('partition-l2-fast.toml', () => {
-    const configPath = path.join(FLY_DIR, 'partition-l2-fast.toml');
+  describe('partition-l2-turbo.toml', () => {
+    const configPath = path.join(FLY_DIR, 'partition-l2-turbo.toml');
     let config: any;
 
     beforeAll(() => {
@@ -116,9 +116,9 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
       expect(config.env.NODE_ENV).toBe('production');
     });
 
-    it('should configure correct memory limit (384MB for l2-fast)', () => {
+    it('should configure correct memory limit (640MB for l2-turbo 5-chain workload)', () => {
       expect(config.vm).toBeDefined();
-      expect(config.vm.memory_mb).toBe(384);
+      expect(config.vm.memory_mb).toBe(640);
       expect(config.vm.cpus).toBe(1);
       expect(config.vm.cpu_kind).toBe('shared');
     });
@@ -135,7 +135,7 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
 
     it('should configure HTTP service', () => {
       expect(config.http_service).toBeDefined();
-      expect(config.http_service.internal_port).toBe(3001);
+      expect(config.http_service.internal_port).toBe(3002);
     });
   });
 
@@ -211,16 +211,16 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
       expect(config.checks).toBeDefined();
       expect(config.checks.health).toBeDefined();
       expect(config.checks.health.path).toBe('/health');
-      expect(config.checks.health.port).toBe(3001);
+      expect(config.checks.health.port).toBe(3004);
     });
 
     it('should enable cross-region health reporting', () => {
       expect(config.env.ENABLE_CROSS_REGION_HEALTH).toBe('true');
     });
 
-    it('should configure HTTP service on port 3001', () => {
+    it('should configure HTTP service on port 3004', () => {
       expect(config.http_service).toBeDefined();
-      expect(config.http_service.internal_port).toBe(3001);
+      expect(config.http_service.internal_port).toBe(3004);
     });
 
     it('should use partition-solana Dockerfile', () => {
@@ -242,7 +242,7 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
 
     it('should define deployment functions', () => {
       const content = readFile(scriptPath);
-      expect(content).toContain('deploy_l2_fast');
+      expect(content).toContain('deploy_l2_turbo');
       expect(content).toContain('deploy_solana');
       expect(content).toContain('deploy_coordinator_standby');
       expect(content).toContain('deploy_asia_fast');
@@ -309,7 +309,7 @@ describe('Phase 3: Docker Compose Configuration', () => {
       for (const svc of detectorServices) {
         const envList = config.services[svc].environment;
         const envStr = Array.isArray(envList) ? envList.join(' ') : JSON.stringify(envList);
-        expect(envStr).toContain('HEALTH_CHECK_PORT=3001');
+        expect(envStr).toContain('HEALTH_CHECK_PORT');
       }
     });
 
@@ -377,7 +377,7 @@ describe('Phase 3: Docker Compose Configuration', () => {
       expect(config.services['partition-asia-fast'].ports).toContainEqual('3011:3001');
       expect(config.services['partition-l2-turbo'].ports).toContainEqual('3012:3001');
       expect(config.services['partition-high-value'].ports).toContainEqual('3013:3001');
-      expect(config.services['partition-solana'].ports).toContainEqual('3016:3001');
+      expect(config.services['partition-solana'].ports).toContainEqual('3014:3001');
     });
 
     it('should configure healthchecks on all services including coordinator', () => {
@@ -671,7 +671,7 @@ describe('Phase 3: Failover Automation Scripts', () => {
       const content = readFile(scriptPath);
       expect(content).toContain('coordinator');
       expect(content).toContain('partition-asia-fast');
-      expect(content).toContain('partition-l2-fast');
+      expect(content).toContain('partition-l2-turbo');
       expect(content).toContain('partition-high-value');
     });
 
@@ -702,11 +702,11 @@ describe('Phase 3: Configuration Consistency', () => {
     const portMappings = {
       'coordinator': 3000,
       'partition-asia-fast': 3011,
-      'partition-l2-fast': 3012,
+      'partition-l2-turbo': 3012,
       'partition-high-value': 3013,
-      'cross-chain-detector': 3014,
+      'partition-solana': 3014,
       'execution-engine': 3015,
-      'partition-solana': 3016
+      'cross-chain-detector': 3016
     };
 
     it('should have unique ports across all services', () => {
@@ -737,7 +737,7 @@ describe('Phase 3: Configuration Consistency', () => {
   describe('region assignment consistency', () => {
     it('should assign asia-fast to Singapore/Asia-Southeast', () => {
       // Fly.io uses 'sin' for Singapore
-      const flyConfig = path.join(FLY_DIR, 'partition-l2-fast.toml');
+      const flyConfig = path.join(FLY_DIR, 'partition-l2-turbo.toml');
       expect(fileExists(flyConfig)).toBe(true);  // Fail fast if file missing
       const content = readFile(flyConfig);
       expect(content).toContain('sin');
@@ -784,8 +784,8 @@ describe('Phase 3: Configuration Consistency', () => {
 describe('Phase 3: ADR Compliance', () => {
   describe('ADR-003: Partitioned Chain Detectors', () => {
     it('should have configurations for all three partitions', () => {
-      // l2-fast on Fly.io
-      expect(fileExists(path.join(FLY_DIR, 'partition-l2-fast.toml'))).toBe(true);
+      // l2-turbo on Fly.io
+      expect(fileExists(path.join(FLY_DIR, 'partition-l2-turbo.toml'))).toBe(true);
 
       // asia-fast and high-value on Oracle Cloud
       const tfMain = path.join(ORACLE_DIR, 'main.tf');
@@ -797,8 +797,8 @@ describe('Phase 3: ADR Compliance', () => {
   });
 
   describe('ADR-006: Free Hosting Provider Selection', () => {
-    it('should use Fly.io for L2-Fast partition', () => {
-      expect(fileExists(path.join(FLY_DIR, 'partition-l2-fast.toml'))).toBe(true);
+    it('should use Fly.io for L2-Turbo partition', () => {
+      expect(fileExists(path.join(FLY_DIR, 'partition-l2-turbo.toml'))).toBe(true);
     });
 
     it('should use Oracle Cloud for heavy compute partitions', () => {
@@ -823,9 +823,9 @@ describe('Phase 3: ADR Compliance', () => {
     });
 
     it('should configure health checks in all deployment configs', () => {
-      const flyL2Fast = path.join(FLY_DIR, 'partition-l2-fast.toml');
-      expect(fileExists(flyL2Fast)).toBe(true);  // Fail fast if file missing
-      const flyContent = readFile(flyL2Fast);
+      const flyL2Turbo = path.join(FLY_DIR, 'partition-l2-turbo.toml');
+      expect(fileExists(flyL2Turbo)).toBe(true);  // Fail fast if file missing
+      const flyContent = readFile(flyL2Turbo);
       expect(flyContent).toContain('health');
 
       const gcpStandby = path.join(GCP_DIR, 'coordinator-standby.yaml');

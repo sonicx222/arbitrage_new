@@ -11,6 +11,7 @@ import {
   deployCommitRevealFixture,
   createCommitmentHash,
   mineBlocks,
+  testDeploymentDefaults,
 } from './helpers';
 
 /**
@@ -30,19 +31,17 @@ describe('CommitRevealArbitrage', () => {
   const deployContractsFixture = deployCommitRevealFixture;
 
   // ===========================================================================
-  // 1. Deployment Tests
+  // 1. Deployment Defaults (shared) + CommitReveal-Specific Deployment
   // ===========================================================================
-  describe('1. Deployment', () => {
-    it('should deploy with correct owner', async () => {
-      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
-      expect(await commitRevealArbitrage.owner()).to.equal(owner.address);
-    });
+  testDeploymentDefaults({
+    contractName: 'CommitRevealArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return { contract: f.commitRevealArbitrage, owner: f.owner };
+    },
+  });
 
-    it('should set initial minimumProfit to default (1e14)', async () => {
-      const { commitRevealArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await commitRevealArbitrage.minimumProfit()).to.equal(BigInt(1e14));
-    });
-
+  describe('1. Deployment — CommitReveal-Specific', () => {
     it('should revert on zero address owner', async () => {
       const CommitRevealArbitrageFactory = await ethers.getContractFactory('CommitRevealArbitrage');
       await expect(
@@ -53,13 +52,11 @@ describe('CommitRevealArbitrage', () => {
       );
     });
 
-    it('should initialize with correct constants', async () => {
+    it('should initialize with correct CommitReveal constants', async () => {
       const { commitRevealArbitrage } = await loadFixture(deployContractsFixture);
       expect(await commitRevealArbitrage.MIN_DELAY_BLOCKS()).to.equal(1);
       expect(await commitRevealArbitrage.maxCommitAgeBlocks()).to.equal(10);
       expect(await commitRevealArbitrage.DEFAULT_MAX_COMMIT_AGE()).to.equal(10);
-      expect(await commitRevealArbitrage.MAX_SWAP_DEADLINE()).to.equal(600);
-      expect(await commitRevealArbitrage.MAX_SWAP_HOPS()).to.equal(5);
     });
   });
 

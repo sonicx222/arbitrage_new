@@ -626,7 +626,8 @@ export function adjustPriceForTokenOrder(
 function extractChainFromDex(dex: string): string | null {
   // Common DEX prefixes
   const chainPrefixes = [
-    'ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bsc', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
+    'ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bsc', 'avalanche', 'fantom',
+    'zksync', 'linea', 'blast', 'scroll', 'mantle', 'mode', 'solana'
   ];
 
   const dexLower = dex.toLowerCase();
@@ -656,6 +657,18 @@ function extractChainFromDex(dex: string): string | null {
     mute: 'zksync',
     velocore: 'linea',
     horizondex: 'linea',
+    // Blast DEXs
+    thruster: 'blast',
+    thruster_v2: 'blast',
+    thruster_v3: 'blast',
+    bladeswap: 'blast',
+    // Scroll DEXs
+    ambient: 'scroll',
+    // Solana DEXs (not in original list)
+    meteora: 'solana',
+    phoenix: 'solana',
+    lifinity: 'solana',
+    'raydium-clmm': 'solana',
   };
 
   return dexToChain[dexLower] || null;

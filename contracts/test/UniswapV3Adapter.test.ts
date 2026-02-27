@@ -988,4 +988,29 @@ describe('UniswapV3Adapter', () => {
       expect(contractBalance).to.be.gt(0);
     });
   });
+
+  // ==========================================================================
+  // Gas Benchmarks
+  // ==========================================================================
+  describe('Gas Benchmarks', () => {
+    it('should execute adapter swap within gas budget', async () => {
+      const { adapter, weth, dai, wethAddr, daiAddr, owner } =
+        await loadFixture(deployAdapterFixture);
+
+      const amountIn = ethers.parseEther('10');
+      const deadline = await getDeadline();
+
+      const tx = await adapter.swapExactTokensForTokens(
+        amountIn,
+        1n,
+        [wethAddr, daiAddr],
+        owner.address,
+        deadline
+      );
+      const receipt = await tx.wait();
+
+      // Adapter swap (approve + exactInputSingle) — budget < 300,000 gas
+      expect(receipt!.gasUsed).to.be.lt(300_000);
+    });
+  });
 });

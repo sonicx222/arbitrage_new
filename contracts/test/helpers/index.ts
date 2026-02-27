@@ -53,3 +53,21 @@ export {
   type AdminTestFixture,
   type AdminTestConfig,
 } from './shared-admin-tests';
+
+export {
+  testDeploymentDefaults,
+  testInputValidation,
+  testProfitValidation,
+  testCalculateExpectedProfit,
+  testReentrancyProtection,
+  type DeploymentTestConfig,
+  type DeploymentTestFixture,
+  type ValidationTestConfig,
+  type ValidationTestFixture,
+  type ProfitValidationTestConfig,
+  type CalculateProfitTestConfig,
+  type CalculateProfitTestFixture,
+  type CalculateProfitResult,
+  type ReentrancyTestConfig,
+  type ReentrancyTestFixture,
+} from './shared-base-tests';

@@ -16,6 +16,9 @@ import {
   testWithdrawETH,
   testWithdrawGasLimitConfig,
   testOwnable2Step,
+  testProfitValidation,
+  testCalculateExpectedProfit,
+  testReentrancyProtection,
 } from './helpers';
 
 /**
@@ -226,98 +229,38 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   // ===========================================================================
   // 6. Profit Validation Tests
   // ===========================================================================
-  describe('6. Profit Validation', () => {
-    it('should revert on insufficient profit (below minProfit param)', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      // Set rates that give minimal profit
+  // Profit Validation (shared — _verifyAndTrackProfit)
+  testProfitValidation({
+    contractName: 'BalancerV2FlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.arbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerArbitrage: (contract, signer, params) =>
+      contract.connect(signer).executeArbitrage(
+        params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
+      ),
+    setupSmallProfitRates: async (fixture) => {
+      const { dexRouter1, weth, usdc } = fixture;
       await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
+        await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6)
       );
       await dexRouter1.setExchangeRate(
-        await usdc.getAddress(),
-        await weth.getAddress(),
-        BigInt('500500000000000000000000000') // Barely profitable
+        await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_1PCT_PROFIT
       );
+    },
+  });
 
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: ethers.parseEther('9.5'),
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      // Require huge profit
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath,
-          ethers.parseEther('5'), // Require 5 WETH profit (impossible)
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'InsufficientProfit');
-    });
-
-    it('should revert on insufficient profit (below minimumProfit setting)', async () => {
-      const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
-
-      await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-      await arbitrage.connect(owner).setMinimumProfit(ethers.parseEther('5'));
-
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
-      );
-      await dexRouter1.setExchangeRate(
-        await usdc.getAddress(),
-        await weth.getAddress(),
-        RATE_USDC_TO_WETH_2PCT_PROFIT
-      );
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: ethers.parseEther('9.5'),
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        arbitrage.connect(user).executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(arbitrage, 'InsufficientProfit');
-    });
-
+  describe('6. Profit Validation — Protocol-Specific', () => {
     it('should use max of minProfit and minimumProfit', async () => {
       const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
@@ -441,262 +384,83 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
     });
   });
 
-  // ===========================================================================
-  // 9. Access Control Tests
-  // ===========================================================================
-  describe('9. Access Control', () => {
-    describe('ReentrancyGuard', () => {
-      it('should prevent reentrancy attacks via malicious router', async () => {
-        const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
-
-        // Deploy malicious router targeting this contract
-        const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
-        const maliciousRouter = await MaliciousRouterFactory.deploy(
-          await arbitrage.getAddress()
-        );
-
-        await arbitrage.connect(owner).addApprovedRouter(await maliciousRouter.getAddress());
-        await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        // Fund the malicious router with enough of each token (it does 1:1 passthrough in raw units)
-        await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('1000'));
-        await usdc.mint(await maliciousRouter.getAddress(), ethers.parseEther('1000'));
-
-        // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
-        // The malicious router does 1:1 passthrough (amountOut = amountIn), which yields
-        // zero profit. Using a normal router for the 2nd hop with a 1% premium ensures
-        // the trade is profitable, so the tx succeeds and attackAttempted state persists.
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          ethers.parseEther('1.01')
-        );
-
-        // Swap path: hop 1 through malicious router (triggers reentrancy),
-        // hop 2 through normal router (generates profit)
-        const swapPath = [
-          {
-            router: await maliciousRouter.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 1,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 1,
-          },
-        ];
-
-        const deadline = await getDeadline();
-
-        // The malicious router attempts reentrancy during the first swap.
-        // ReentrancyGuard blocks it (attackSucceeded=false), but the swap itself
-        // continues. The tx succeeds because the trade is profitable.
-        await arbitrage.executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        );
-
-        // Verify the attack was actually attempted and blocked
-        expect(await maliciousRouter.attackAttempted()).to.be.true;
-        expect(await maliciousRouter.attackSucceeded()).to.be.false;
-      });
-    });
+  // Reentrancy Protection (shared — MockMaliciousRouter)
+  testReentrancyProtection({
+    contractName: 'BalancerV2FlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.arbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerWithMaliciousRouter: async (fixture, maliciousRouterAddress) => {
+      const { contract, owner, dexRouter1, weth, usdc } = fixture;
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(), await weth.getAddress(), ethers.parseEther('1.01')
+      );
+      const swapPath = [
+        { router: maliciousRouterAddress, tokenIn: await weth.getAddress(), tokenOut: await usdc.getAddress(), amountOutMin: 1n },
+        { router: await dexRouter1.getAddress(), tokenIn: await usdc.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
+      ];
+      const deadline = await getDeadline();
+      await contract.executeArbitrage(await weth.getAddress(), ethers.parseEther('1'), swapPath, 0, deadline);
+    },
   });
 
   // ===========================================================================
   // 10. View Function Tests
   // ===========================================================================
-  describe('10. View Functions', () => {
+  // ===========================================================================
+  // 10. View Functions (shared + Balancer-specific)
+  // ===========================================================================
+  testCalculateExpectedProfit({
+    contractName: 'BalancerV2FlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.arbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.weth,
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      const result = await contract.calculateExpectedProfit(
+        params.asset, params.amount, params.swapPath
+      );
+      return { expectedProfit: result.expectedProfit, flashLoanFee: result.flashLoanFee };
+    },
+    profitableReverseRate: RATE_USDC_TO_WETH_2PCT_PROFIT,
+  });
+
+  describe('10. View Functions — Balancer-Specific', () => {
     describe('calculateExpectedProfit()', () => {
-      it('should calculate expected profit correctly', async () => {
+      it('should return zero flash loan fee (Balancer V2 has 0% fees)', async () => {
         const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
 
         await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          RATE_USDC_TO_WETH_2PCT_PROFIT
-        );
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 0,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0,
-          },
-        ];
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+        await dexRouter1.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_2PCT_PROFIT);
 
         const result = await arbitrage.calculateExpectedProfit(
           await weth.getAddress(),
           ethers.parseEther('10'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.be.gt(0);
-        expect(result.flashLoanFee).to.equal(0); // Balancer V2 has 0% fees
-      });
-
-      it('should return zero flash loan fee', async () => {
-        const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          RATE_USDC_TO_WETH_2PCT_PROFIT
-        );
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 0,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0,
-          },
-        ];
-
-        const result = await arbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath
+          [
+            { router: await dexRouter1.getAddress(), tokenIn: await weth.getAddress(), tokenOut: await usdc.getAddress(), amountOutMin: 0 },
+            { router: await dexRouter1.getAddress(), tokenIn: await usdc.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 0 },
+          ]
         );
 
         expect(result.flashLoanFee).to.equal(0);
-      });
-
-      it('should return 0 profit for empty path', async () => {
-        const { arbitrage, weth } = await loadFixture(deployContractsFixture);
-
-        const result = await arbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          []
-        );
-
-        expect(result.expectedProfit).to.equal(0);
-        expect(result.flashLoanFee).to.equal(0);
-      });
-
-      it('should return 0 profit for invalid path (wrong start asset)', async () => {
-        const { arbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(), // Wrong!
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0,
-          },
-        ];
-
-        const result = await arbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.equal(0);
-      });
-
-      it('should return 0 profit for invalid path (wrong end asset)', async () => {
-        const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(), // Ends with USDC, not WETH
-            amountOutMin: 0,
-          },
-        ];
-
-        const result = await arbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.equal(0);
-      });
-
-      it('should return 0 profit for unprofitable trade', async () => {
-        const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
-
-        await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-        // Set rates that cause loss
-        await dexRouter1.setExchangeRate(
-          await weth.getAddress(),
-          await usdc.getAddress(),
-          ethers.parseUnits('2000', 6)
-        );
-        await dexRouter1.setExchangeRate(
-          await usdc.getAddress(),
-          await weth.getAddress(),
-          BigInt('490000000000000000000000000') // Loss
-        );
-
-        const swapPath = [
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await weth.getAddress(),
-            tokenOut: await usdc.getAddress(),
-            amountOutMin: 0,
-          },
-          {
-            router: await dexRouter1.getAddress(),
-            tokenIn: await usdc.getAddress(),
-            tokenOut: await weth.getAddress(),
-            amountOutMin: 0,
-          },
-        ];
-
-        const result = await arbitrage.calculateExpectedProfit(
-          await weth.getAddress(),
-          ethers.parseEther('10'),
-          swapPath
-        );
-
-        expect(result.expectedProfit).to.equal(0);
       });
 
       it('should handle router call failures gracefully', async () => {

@@ -5,7 +5,7 @@
 #
 # Partitions:
 # - partition-asia-fast: BSC + Polygon + Avalanche + Fantom (asia-southeast1, heavy resources)
-# - partition-l2-turbo: Arbitrum + Optimism + Base (asia-southeast1, standard resources)
+# - partition-l2-turbo: Arbitrum + Optimism + Base + Scroll + Blast (asia-southeast1, standard resources)
 # - partition-high-value: Ethereum + zkSync + Linea (us-east1, heavy resources)
 # - partition-solana: Solana (us-west1, heavy resources)
 #
@@ -22,13 +22,17 @@
 #   FANTOM_WS_URL     - WebSocket URL for Fantom
 #   FANTOM_RPC_URL    - RPC URL for Fantom
 #
-# Partition l2-turbo (Arbitrum + Optimism + Base):
+# Partition l2-turbo (Arbitrum + Optimism + Base + Scroll + Blast):
 #   ARBITRUM_WS_URL  - WebSocket URL for Arbitrum
 #   ARBITRUM_RPC_URL - RPC URL for Arbitrum
 #   OPTIMISM_WS_URL  - WebSocket URL for Optimism
 #   OPTIMISM_RPC_URL - RPC URL for Optimism
 #   BASE_WS_URL      - WebSocket URL for Base
 #   BASE_RPC_URL     - RPC URL for Base
+#   SCROLL_WS_URL    - WebSocket URL for Scroll
+#   SCROLL_RPC_URL   - RPC URL for Scroll
+#   BLAST_WS_URL     - WebSocket URL for Blast
+#   BLAST_RPC_URL    - RPC URL for Blast
 #
 # Partition high-value (Ethereum + zkSync + Linea):
 #   ETHEREUM_WS_URL  - WebSocket URL for Ethereum
@@ -74,15 +78,26 @@ services:
   # Infrastructure Services
   # =============================================================================
 
+  # Redis uses inline flags here (Docker deployment).
+  # For Oracle Cloud ARM deployments, see oracle/redis/redis-production.conf
+  # which adds io-threads, slowlog, dangerous command disabling, and 512mb memory.
+  #
+  # Redis maxmemory per deployment tier:
+  #   docker-compose.yml (dev/base):         256mb
+  #   docker-compose.partition.yml (prod):   256mb
+  #   docker-compose.testnet.yml:            128mb
+  #   oracle/redis-production.conf (ARM):    512mb (24GB host, headroom for AOF rewrite)
+  #   cloud-init-partition (Oracle ARM):     512mb
+  #   cloud-init-cross-chain (Oracle AMD):   256mb (1/8 OCPU micro instance)
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-changeme}
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "--no-auth-warning", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "--no-auth-warning", "ping"]
       # FIX P3-1: Standardize to 15s interval per ADR-007 (was 10s)
       # Consistent with docker-compose.yml and health-check.sh default
       interval: 15s
@@ -108,7 +123,7 @@ services:
       - PARTITION_CHAINS=bsc,polygon,avalanche,fantom
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-asia-fast-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -149,10 +164,10 @@ services:
       - "com.arbitrage.region=asia-southeast1"
       - "com.arbitrage.profile=heavy"
 
-  # Partition: l2-turbo (Arbitrum + Optimism + Base)
+  # Partition: l2-turbo (Arbitrum + Optimism + Base + Scroll + Blast)
   # Region: asia-southeast1, Provider: fly, Profile: standard
-  # NOTE: CURRENT_STATE.md lists Blast, Scroll, Mantle, Mode as future L2-Turbo chains.
-  # They have placeholder DEX addresses and are NOT included here until addresses are verified.
+  # Scroll and Blast are fully operational with real DEX addresses (per CLAUDE.md).
+  # Mantle and Mode remain stubs — config present but missing verified DEX factories.
   partition-l2-turbo:
     build:
       context: ../..
@@ -160,10 +175,10 @@ services:
     environment:
       - NODE_ENV=production
       - PARTITION_ID=l2-turbo
-      - PARTITION_CHAINS=arbitrum,optimism,base
+      - PARTITION_CHAINS=arbitrum,optimism,base,scroll,blast
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-l2-turbo-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -174,6 +189,10 @@ services:
       - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:?OPTIMISM_RPC_URL is required}
       - BASE_WS_URL=${BASE_WS_URL:?BASE_WS_URL is required}
       - BASE_RPC_URL=${BASE_RPC_URL:?BASE_RPC_URL is required}
+      - SCROLL_WS_URL=${SCROLL_WS_URL:?SCROLL_WS_URL is required}
+      - SCROLL_RPC_URL=${SCROLL_RPC_URL:?SCROLL_RPC_URL is required}
+      - BLAST_WS_URL=${BLAST_WS_URL:?BLAST_WS_URL is required}
+      - BLAST_RPC_URL=${BLAST_RPC_URL:?BLAST_RPC_URL is required}
     ports:
       - "3012:3001"
     depends_on:
@@ -182,10 +201,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 640M
           cpus: '0.75'
         reservations:
-          memory: 256M
+          memory: 320M
           cpus: '0.25'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
@@ -199,7 +218,7 @@ services:
     restart: unless-stopped
     labels:
       - "com.arbitrage.partition=l2-turbo"
-      - "com.arbitrage.chains=arbitrum,optimism,base"
+      - "com.arbitrage.chains=arbitrum,optimism,base,scroll,blast"
       - "com.arbitrage.region=asia-southeast1"
       - "com.arbitrage.profile=standard"
 
@@ -215,7 +234,7 @@ services:
       - PARTITION_CHAINS=ethereum,zksync,linea
       - REGION_ID=us-east1
       - INSTANCE_ID=partition-high-value-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -268,7 +287,7 @@ services:
       - PARTITION_CHAINS=solana
       - REGION_ID=us-west1
       - INSTANCE_ID=partition-solana-${HOSTNAME:-local}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -316,7 +335,7 @@ services:
       dockerfile: services/cross-chain-detector/Dockerfile
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INSTANCE_ID=cross-chain-detector-${HOSTNAME:-local}
       - HEALTH_CHECK_PORT=3001
@@ -356,7 +375,7 @@ services:
       dockerfile: services/execution-engine/Dockerfile
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INSTANCE_ID=execution-engine-${HOSTNAME:-local}
       - HEALTH_CHECK_PORT=3001
@@ -402,7 +421,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PORT=3000
       - INSTANCE_ID=coordinator-${HOSTNAME:-local}
@@ -430,7 +449,8 @@ services:
           memory: 256M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      # Coordinator uses Express with '/api' prefix — health endpoint is /api/health
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       start_period: 30s

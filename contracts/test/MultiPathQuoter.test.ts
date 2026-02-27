@@ -3,6 +3,7 @@ import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { MultiPathQuoter, MockDexRouter, MockERC20 } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import { deployBaseFixture } from './helpers';
 
 /**
  * MultiPathQuoter Contract Tests
@@ -23,96 +24,46 @@ import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
  * @see contracts/src/MultiPathQuoter.sol
  */
 describe('MultiPathQuoter', () => {
-  // Test fixtures for consistent state
+  // Fixture uses deployBaseFixture() for shared tokens/routers,
+  // then adds USDT, a 3rd router, and quoter-specific exchange rates.
   async function deployContractsFixture() {
-    const [owner, user1, user2] = await ethers.getSigners();
+    const base = await deployBaseFixture();
+    const { weth, usdc, dai, dexRouter1: uniswapRouter, dexRouter2: sushiswapRouter, owner, user } = base;
 
-    // Deploy mock tokens
+    // MultiPathQuoter-specific: USDT token + 3rd router
     const MockERC20Factory = await ethers.getContractFactory('MockERC20');
-    const weth = await MockERC20Factory.deploy('Wrapped Ether', 'WETH', 18);
-    const usdc = await MockERC20Factory.deploy('USD Coin', 'USDC', 6);
-    const dai = await MockERC20Factory.deploy('Dai Stablecoin', 'DAI', 18);
     const usdt = await MockERC20Factory.deploy('Tether', 'USDT', 6);
 
-    // Deploy mock DEX routers (simulate different DEXes)
     const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
-    const uniswapRouter = await MockDexRouterFactory.deploy('Uniswap');
-    const sushiswapRouter = await MockDexRouterFactory.deploy('Sushiswap');
     const pancakeswapRouter = await MockDexRouterFactory.deploy('Pancakeswap');
 
     // Deploy MultiPathQuoter contract
     const MultiPathQuoterFactory = await ethers.getContractFactory('MultiPathQuoter');
     const quoter = await MultiPathQuoterFactory.deploy();
 
-    // Fund DEX routers for potential swaps (not needed for quotes but good practice)
-    await weth.mint(await uniswapRouter.getAddress(), ethers.parseEther('1000'));
-    await usdc.mint(await uniswapRouter.getAddress(), ethers.parseUnits('1000000', 6));
-    await dai.mint(await uniswapRouter.getAddress(), ethers.parseEther('1000000'));
+    // Fund routers with USDT (base already funds WETH/USDC/DAI to router1/router2)
     await usdt.mint(await uniswapRouter.getAddress(), ethers.parseUnits('1000000', 6));
 
-    await weth.mint(await sushiswapRouter.getAddress(), ethers.parseEther('1000'));
-    await usdc.mint(await sushiswapRouter.getAddress(), ethers.parseUnits('1000000', 6));
-    await dai.mint(await sushiswapRouter.getAddress(), ethers.parseEther('1000000'));
-
+    // Fund 3rd router
     await weth.mint(await pancakeswapRouter.getAddress(), ethers.parseEther('1000'));
     await usdc.mint(await pancakeswapRouter.getAddress(), ethers.parseUnits('1000000', 6));
 
     // Set exchange rates on routers
-    // Uniswap: WETH/USDC = 2000, USDC/WETH = 0.0005, USDC/DAI = 1.01, DAI/USDT = 1.0
-    await uniswapRouter.setExchangeRate(
-      await weth.getAddress(),
-      await usdc.getAddress(),
-      ethers.parseUnits('2000', 6) // 1 WETH = 2000 USDC
-    );
-    await uniswapRouter.setExchangeRate(
-      await usdc.getAddress(),
-      await weth.getAddress(),
-      ethers.parseEther('0.0005') // 1 USDC = 0.0005 WETH
-    );
-    await uniswapRouter.setExchangeRate(
-      await usdc.getAddress(),
-      await dai.getAddress(),
-      ethers.parseEther('1.01') // 1 USDC = 1.01 DAI
-    );
-    await uniswapRouter.setExchangeRate(
-      await dai.getAddress(),
-      await usdt.getAddress(),
-      ethers.parseUnits('1.0', 6) // 1 DAI = 1.0 USDT
-    );
-    await uniswapRouter.setExchangeRate(
-      await usdt.getAddress(),
-      await weth.getAddress(),
-      ethers.parseEther('0.0005') // 1 USDT = 0.0005 WETH
-    );
+    // Uniswap (dexRouter1): WETH/USDC = 2000, USDC/WETH = 0.0005, USDC/DAI = 1.01, DAI/USDT = 1.0
+    await uniswapRouter.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+    await uniswapRouter.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), ethers.parseEther('0.0005'));
+    await uniswapRouter.setExchangeRate(await usdc.getAddress(), await dai.getAddress(), ethers.parseEther('1.01'));
+    await uniswapRouter.setExchangeRate(await dai.getAddress(), await usdt.getAddress(), ethers.parseUnits('1.0', 6));
+    await uniswapRouter.setExchangeRate(await usdt.getAddress(), await weth.getAddress(), ethers.parseEther('0.0005'));
 
-    // Sushiswap: Slightly better rates (arbitrage opportunity)
-    await sushiswapRouter.setExchangeRate(
-      await weth.getAddress(),
-      await usdc.getAddress(),
-      ethers.parseUnits('2010', 6) // 1 WETH = 2010 USDC (better)
-    );
-    await sushiswapRouter.setExchangeRate(
-      await usdc.getAddress(),
-      await dai.getAddress(),
-      ethers.parseEther('1.02') // 1 USDC = 1.02 DAI
-    );
-    await sushiswapRouter.setExchangeRate(
-      await dai.getAddress(),
-      await weth.getAddress(),
-      ethers.parseEther('0.000498') // 1 DAI = 0.000498 WETH
-    );
+    // Sushiswap (dexRouter2): Slightly better rates (arbitrage opportunity)
+    await sushiswapRouter.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2010', 6));
+    await sushiswapRouter.setExchangeRate(await usdc.getAddress(), await dai.getAddress(), ethers.parseEther('1.02'));
+    await sushiswapRouter.setExchangeRate(await dai.getAddress(), await weth.getAddress(), ethers.parseEther('0.000498'));
 
-    // Pancakeswap: Different rates
-    await pancakeswapRouter.setExchangeRate(
-      await weth.getAddress(),
-      await usdc.getAddress(),
-      ethers.parseUnits('1995', 6) // 1 WETH = 1995 USDC (worse)
-    );
-    await pancakeswapRouter.setExchangeRate(
-      await usdc.getAddress(),
-      await weth.getAddress(),
-      ethers.parseEther('0.000502') // 1 USDC = 0.000502 WETH (better)
-    );
+    // Pancakeswap (3rd router): Different rates
+    await pancakeswapRouter.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('1995', 6));
+    await pancakeswapRouter.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), ethers.parseEther('0.000502'));
 
     return {
       quoter,
@@ -124,8 +75,8 @@ describe('MultiPathQuoter', () => {
       dai,
       usdt,
       owner,
-      user1,
-      user2,
+      user1: user,
+      user2: base.attacker,
     };
   }
 

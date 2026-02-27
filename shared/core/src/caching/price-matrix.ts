@@ -28,6 +28,10 @@ import { SharedKeyRegistry } from './shared-key-registry';
 
 const logger = createLogger('price-matrix');
 
+// L9 FIX: Extract to module-level constant — avoids re-parsing Date string on every
+// constructor call and fromSharedBuffer call. Cold-path only but cleaner.
+const TIMESTAMP_EPOCH = new Date('2024-01-01T00:00:00Z').getTime();
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -274,7 +278,7 @@ export class PriceMatrix implements Resettable {
     this.mapper = new PriceIndexMapper(totalSlots);
 
     // Use epoch from 2024-01-01 to keep timestamps small
-    this.timestampEpoch = new Date('2024-01-01T00:00:00Z').getTime();
+    this.timestampEpoch = TIMESTAMP_EPOCH;
 
     this.initializeArrays(totalSlots);
 
@@ -346,7 +350,7 @@ export class PriceMatrix implements Resettable {
     instance.mapper = new PriceIndexMapper(totalSlots);
     // Use Object.defineProperty to set readonly field
     Object.defineProperty(instance, 'timestampEpoch', {
-      value: new Date('2024-01-01T00:00:00Z').getTime(),
+      value: TIMESTAMP_EPOCH,
       writable: false,
       enumerable: true,
       configurable: false
@@ -596,18 +600,15 @@ export class PriceMatrix implements Resettable {
   /**
    * Get price for a key.
    *
-   * ⚠️ TORN READ WARNING (P0-2):
-   * Price and timestamp are NOT atomically read together. A concurrent writer
-   * may update the price between reading the two values, resulting in:
-   * - New price + old timestamp (most common)
-   * - Old price + new timestamp (rare but possible)
+   * Thread Safety (Fix #7 — seqlock protocol):
+   * When enableAtomics is true, reads use a sequence counter to detect concurrent
+   * writes. The reader retries if the sequence number is odd (write in progress)
+   * or changes between reading price and timestamp. This prevents torn reads
+   * where price and timestamp come from different write epochs.
    *
-   * For most price feed use cases, this slight inconsistency is acceptable
-   * because we're looking at approximate price freshness.
-   *
-   * If you need guaranteed consistency for critical decisions (e.g., trade execution),
-   * use `getPriceWithFreshnessCheck()` which validates the timestamp is recent
-   * regardless of potential torn reads.
+   * When enableAtomics is false (single-threaded use), reads are direct without
+   * retry overhead. In this mode, concurrent writes from other threads can cause
+   * torn reads, but this is acceptable for single-threaded callers.
    */
   getPrice(key: string): PriceEntry | null {
     if (this.destroyed) {

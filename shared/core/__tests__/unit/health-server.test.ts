@@ -312,7 +312,7 @@ describe('createPartitionHealthServer', () => {
       expect(body.partitionId).toBe('test-partition');
       expect(body.chains).toEqual(['bsc', 'polygon']);
       expect(body.region).toBe('us-east1');
-      expect(body.endpoints).toEqual(['/health', '/ready', '/stats']);
+      expect(body.endpoints).toEqual(['/health', '/ready', '/stats', '/metrics']);
     });
   });
 

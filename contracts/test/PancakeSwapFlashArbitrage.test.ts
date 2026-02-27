@@ -22,6 +22,10 @@ import {
   testWithdrawETH,
   testWithdrawGasLimitConfig,
   testOwnable2Step,
+  testDeploymentDefaults,
+  testInputValidation,
+  testCalculateExpectedProfit,
+  testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
   type AdminTestConfig,
@@ -82,28 +86,24 @@ describe('PancakeSwapFlashArbitrage', () => {
     return { flashArbitrage, pancakeFactory, wethUsdcPool, usdcDaiPool, ...base };
   }
 
-  // ===========================================================================
-  // Deployment Tests
-  // ===========================================================================
-  describe('Deployment', () => {
-    it('should deploy with correct owner', async () => {
-      const { flashArbitrage, owner } = await loadFixture(deployContractsFixture);
-      expect(await flashArbitrage.owner()).to.equal(owner.address);
-    });
+  // Module-level variable to share pool address with triggerArbitrage callback
+  let cachedPoolAddress: string;
 
+  // ===========================================================================
+  // Deployment Defaults (shared) + PancakeSwap-Specific Deployment
+  // ===========================================================================
+  testDeploymentDefaults({
+    contractName: 'PancakeSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return { contract: f.flashArbitrage, owner: f.owner };
+    },
+  });
+
+  describe('Deployment — PancakeSwap-Specific', () => {
     it('should set correct factory address', async () => {
       const { flashArbitrage, pancakeFactory } = await loadFixture(deployContractsFixture);
       expect(await flashArbitrage.FACTORY()).to.equal(await pancakeFactory.getAddress());
-    });
-
-    it('should initialize with zero profits', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await flashArbitrage.totalProfits()).to.equal(0);
-    });
-
-    it('should initialize with default swap deadline', async () => {
-      const { flashArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await flashArbitrage.swapDeadline()).to.equal(60); // DEFAULT_SWAP_DEADLINE
     });
 
     it('should revert on zero factory address', async () => {
@@ -147,6 +147,33 @@ describe('PancakeSwapFlashArbitrage', () => {
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
+
+  // ===========================================================================
+  // Input Validation (shared — _validateArbitrageParams)
+  // ===========================================================================
+  testInputValidation({
+    contractName: 'PancakeSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      cachedPoolAddress = await f.wethUsdcPool.getAddress();
+      // Pre-whitelist the pool so base validation tests can reach _validateArbitrageParams
+      await f.flashArbitrage.connect(f.owner).whitelistPool(cachedPoolAddress);
+      return {
+        contract: f.flashArbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerArbitrage: (contract, signer, params) =>
+      contract.connect(signer).executeArbitrage(
+        cachedPoolAddress, params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
+      ),
+  });
 
   // ===========================================================================
   // Pool Management Tests (PancakeSwap-specific)
@@ -344,138 +371,62 @@ describe('PancakeSwapFlashArbitrage', () => {
   });
 
   // ===========================================================================
-  // Calculate Expected Profit Tests
+  // Calculate Expected Profit (shared + PancakeSwap-specific)
   // ===========================================================================
-  describe('Calculate Expected Profit', () => {
-    it('should calculate expected profit correctly with 0.25% fee', async () => {
+
+  // PancakeSwap requires pool address — reuse cachedPoolAddress from fixture closure
+  testCalculateExpectedProfit({
+    contractName: 'PancakeSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      cachedPoolAddress = await f.wethUsdcPool.getAddress();
+      return {
+        contract: f.flashArbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.weth,
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      const [expectedProfit, flashLoanFee] = await contract.calculateExpectedProfit(
+        cachedPoolAddress, params.asset, params.amount, params.swapPath
+      );
+      return { expectedProfit, flashLoanFee };
+    },
+    profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
+  });
+
+  describe('Calculate Expected Profit — PancakeSwap-Specific', () => {
+    it('should calculate PancakeSwap V3 fee as 0.25%', async () => {
       const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc } =
         await loadFixture(deployContractsFixture);
 
       await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
       await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+      await dexRouter2.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_1PCT_PROFIT);
 
-      // Configure rates for ~1% profit
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await usdc.getAddress(),
-        ethers.parseUnits('2000', 6)
-      );
-      await dexRouter2.setExchangeRate(
-        await usdc.getAddress(),
-        await weth.getAddress(),
-        RATE_USDC_TO_WETH_1PCT_PROFIT // ~1% profit
-      );
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter2.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: ethers.parseEther('9.9'),
-        },
-      ];
-
-      const [profit, fee] = await flashArbitrage.calculateExpectedProfit(
+      const [, fee] = await flashArbitrage.calculateExpectedProfit(
         await wethUsdcPool.getAddress(),
         await weth.getAddress(),
         ethers.parseEther('10'),
-        swapPath
+        [
+          { router: await dexRouter1.getAddress(), tokenIn: await weth.getAddress(), tokenOut: await usdc.getAddress(), amountOutMin: 1n },
+          { router: await dexRouter2.getAddress(), tokenIn: await usdc.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
+        ]
       );
 
       // Fee should be 0.25% of 10 WETH = 0.025 WETH
-      // 10 WETH * 2500 / 1e6 = 0.025 WETH
-      const expectedFee = ethers.parseEther('0.025');
-      expect(fee).to.equal(expectedFee);
-
-      // Profit should be > 0 (exact amount depends on mock router logic)
-      expect(profit).to.be.gt(0);
-    });
-
-    it('should return 0 profit for invalid swap path', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc, dai } =
-        await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-
-      // Invalid path: doesn't end with starting token
-      const invalidPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('19000', 6),
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await dai.getAddress(),
-          amountOutMin: ethers.parseEther('19000'),
-        },
-      ];
-
-      const [profit, fee] = await flashArbitrage.calculateExpectedProfit(
-        await wethUsdcPool.getAddress(),
-        await weth.getAddress(),
-        ethers.parseEther('10'),
-        invalidPath
-      );
-
-      expect(profit).to.equal(0);
-      expect(fee).to.be.gt(0); // Fee should still be calculated
+      expect(fee).to.equal(ethers.parseEther('0.025'));
     });
   });
 
   // ===========================================================================
-  // Pause Functionality Tests
+  // Security Tests (PancakeSwap-specific)
   // ===========================================================================
-  // Note: Basic pause/unpause tests covered by shared admin harness (testPauseUnpause)
-  describe('Pause — PancakeSwap-Specific', () => {
-    it('should revert executeArbitrage when paused', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth } = await loadFixture(
-        deployContractsFixture
-      );
-
-      // Setup first (before pausing)
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
-
-      // Now pause
-      await flashArbitrage.pause();
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      // Should fail because contract is paused
-      await expect(
-        flashArbitrage.executeArbitrage(
-          await wethUsdcPool.getAddress(),
-          await weth.getAddress(),
-          1,
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWith('Pausable: paused');
-    });
-  });
-
-  // ===========================================================================
-  // Security Tests
-  // ===========================================================================
+  // Note: Base validation tests (stale deadline, zero amount, unapproved router,
+  // slippage protection, paused state) are covered by testInputValidation above.
   describe('Security', () => {
     it('should reject flash loan from non-whitelisted pool', async () => {
       const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc } =
@@ -522,182 +473,69 @@ describe('PancakeSwapFlashArbitrage', () => {
       ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidFlashLoanCaller');
     });
 
-    it('should reject transaction with stale deadline', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth } =
-        await loadFixture(deployContractsFixture);
+  });
 
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+  // ===========================================================================
+  // Reentrancy Protection (shared — MockMaliciousRouter)
+  // ===========================================================================
+  testReentrancyProtection({
+    contractName: 'PancakeSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.flashArbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+        wethUsdcPool: f.wethUsdcPool,
+      };
+    },
+    triggerWithMaliciousRouter: async (fixture, maliciousRouterAddress) => {
+      const { contract, owner, dexRouter1, weth, usdc, wethUsdcPool } = fixture as any;
 
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
+      // PancakeSwap requires pool whitelisting
+      const poolAddress = await wethUsdcPool.getAddress();
+      await contract.connect(owner).whitelistPool(poolAddress);
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
-      // Use a deadline in the past
-      const staleDeadline = (await ethers.provider.getBlock('latest'))!.timestamp - 1;
-
-      await expect(
-        flashArbitrage.executeArbitrage(
-          await wethUsdcPool.getAddress(),
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          staleDeadline
-        )
-      ).to.be.revertedWithCustomError(flashArbitrage, 'TransactionTooOld');
-    });
-
-    it('should reject zero amount flash loan', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth } =
-        await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 0,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        flashArbitrage.executeArbitrage(
-          await wethUsdcPool.getAddress(),
-          await weth.getAddress(),
-          0, // Zero amount
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidAmount');
-    });
-
-    it('should reject swap path with unapproved router', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc } =
-        await loadFixture(deployContractsFixture);
-
-      // Only approve router1, not router2
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
-
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 1,
-        },
-        {
-          router: await dexRouter2.getAddress(), // Unapproved!
-          tokenIn: await usdc.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1,
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        flashArbitrage.executeArbitrage(
-          await wethUsdcPool.getAddress(),
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(flashArbitrage, 'RouterNotApproved');
-    });
-
-    it('should prevent reentrancy attacks via malicious router', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc, owner } =
-        await loadFixture(deployContractsFixture);
-
-      // Deploy malicious router that tries reentrancy during swap execution
-      const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
-      const maliciousRouter = await MaliciousRouterFactory.deploy(
-        await flashArbitrage.getAddress()
-      );
-
-      await flashArbitrage.addApprovedRouter(await maliciousRouter.getAddress());
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
-
-      // Fund the malicious router with enough tokens (1:1 passthrough)
-      await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
-      await usdc.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
-
-      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
-      // The malicious router does 1:1 passthrough, so we need the 2nd hop to be profitable
-      // to cover PancakeSwap's 0.25% flash loan fee (2500 bps).
+      // Set profitable rate on 2nd hop so the tx doesn't revert for lack of profit
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        ethers.parseEther('1.01')
+        ethers.parseEther('1.01'),
       );
 
-      // Path: WETH→USDC (malicious, 1:1 + reentrancy) → USDC→WETH (normal, 1% profit)
-      const swapPath = build2HopCrossRouterPath(
-        await maliciousRouter.getAddress(), await dexRouter1.getAddress(),
-        await weth.getAddress(), await usdc.getAddress(), 1n, 1n
-      );
+      const swapPath = [
+        {
+          router: maliciousRouterAddress,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
 
       const deadline = await getDeadline();
-      await flashArbitrage.executeArbitrage(
-        await wethUsdcPool.getAddress(),
+
+      // PancakeSwap uses 6-param executeArbitrage (pool, asset, amount, path, minProfit, deadline)
+      await contract.executeArbitrage(
+        poolAddress,
         await weth.getAddress(),
         ethers.parseEther('1'),
         swapPath,
         0,
-        deadline
+        deadline,
       );
-
-      // Verify the attack was actually attempted and blocked
-      expect(await maliciousRouter.attackAttempted()).to.be.true;
-      expect(await maliciousRouter.attackSucceeded()).to.be.false;
-    });
-
-    it('should enforce minimum slippage protection', async () => {
-      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc } =
-        await loadFixture(deployContractsFixture);
-
-      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
-      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
-
-      // Swap path with amountOutMin = 0 (no slippage protection)
-      const swapPath = [
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await usdc.getAddress(),
-          amountOutMin: 0, // No slippage protection!
-        },
-      ];
-
-      const deadline = await getDeadline();
-
-      await expect(
-        flashArbitrage.executeArbitrage(
-          await wethUsdcPool.getAddress(),
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.revertedWithCustomError(flashArbitrage, 'InsufficientSlippageProtection');
-    });
+    },
   });
 
   // ===========================================================================

@@ -591,6 +591,11 @@ export class NonceManager {
   // Private Methods
   // ===========================================================================
 
+  /**
+   * Sync nonce state from network. This method does NOT acquire the lock —
+   * callers must either already hold the lock (getNextNonce) or use
+   * syncNonceWithLock() for background sync.
+   */
   private async syncNonce(chain: string): Promise<void> {
     const state = this.chainStates.get(chain);
     const provider = this.providers.get(chain);
@@ -611,9 +616,44 @@ export class NonceManager {
     }
   }
 
+  /**
+   * M12 FIX: Sync nonce with per-chain lock for background sync.
+   * Prevents TOCTOU race where background sync overwrites pendingNonce
+   * between getNextNonce's read and its increment, causing duplicate nonces.
+   * The I/O (getTransactionCount) runs BEFORE acquiring the lock to minimize
+   * lock hold time.
+   */
+  private async syncNonceWithLock(chain: string): Promise<void> {
+    const state = this.chainStates.get(chain);
+    const provider = this.providers.get(chain);
+    const address = this.walletAddresses.get(chain);
+
+    if (!state || !provider || !address) return;
+
+    try {
+      // Fetch network nonce outside lock (I/O)
+      const networkNonce = await provider.getTransactionCount(address, 'pending');
+
+      // Acquire lock for state mutation to prevent race with getNextNonce
+      await this.acquireLock(state);
+      try {
+        state.confirmedNonce = networkNonce;
+        state.pendingNonce = Math.max(state.pendingNonce, networkNonce);
+        state.lastSync = Date.now();
+      } finally {
+        this.releaseLock(state);
+      }
+
+      logger.debug('Nonce synced', { chain, nonce: networkNonce });
+    } catch (error) {
+      logger.error('Failed to sync nonce', { chain, error });
+    }
+  }
+
   private async syncAllChains(): Promise<void> {
     const chains = Array.from(this.chainStates.keys());
-    await Promise.all(chains.map(chain => this.syncNonce(chain)));
+    // M12 FIX: Use locked version for background sync to prevent TOCTOU race
+    await Promise.all(chains.map(chain => this.syncNonceWithLock(chain)));
   }
 
   private cleanupTimedOutTransactions(chain: string): void {

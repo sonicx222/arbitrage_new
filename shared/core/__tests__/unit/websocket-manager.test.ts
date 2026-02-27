@@ -724,7 +724,7 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
   describe('Configuration', () => {
     it.each([
       { desc: 'disabled by default', config: {}, expectedEnabled: false, expectedThreshold: undefined },
-      { desc: 'enabled when configured', config: { useWorkerParsing: true }, expectedEnabled: true, expectedThreshold: 2048 },
+      { desc: 'enabled when configured', config: { useWorkerParsing: true }, expectedEnabled: true, expectedThreshold: 32768 },
       { desc: 'custom threshold', config: { useWorkerParsing: true, workerParsingThresholdBytes: 4096 }, expectedEnabled: true, expectedThreshold: 4096 },
     ])('should initialize with $desc', ({ config, expectedEnabled, expectedThreshold }) => {
       manager = new WebSocketManager({

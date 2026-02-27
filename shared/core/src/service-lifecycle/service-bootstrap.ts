@@ -171,8 +171,31 @@ export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShut
       process.exit(1);
     });
   };
+  // W2-M6 FIX: Track unhandled rejections and trigger shutdown after threshold,
+  // consistent with partition services (handlers.ts FIX #4). Prevents zombie state
+  // where coordinator/execution-engine silently fails after repeated rejections.
+  const REJECTION_THRESHOLD = 5;
+  const REJECTION_WINDOW_MS = 60_000;
+  const rejectionTimestamps: number[] = [];
+
   const rejectionHandler = (reason: unknown, _promise: Promise<unknown>) => {
     logger.error(`Unhandled rejection in ${serviceName}`, { reason });
+
+    const now = Date.now();
+    rejectionTimestamps.push(now);
+    // Evict timestamps outside the window
+    while (rejectionTimestamps.length > 0 && rejectionTimestamps[0] <= now - REJECTION_WINDOW_MS) {
+      rejectionTimestamps.shift();
+    }
+    if (rejectionTimestamps.length >= REJECTION_THRESHOLD) {
+      logger.error(`${REJECTION_THRESHOLD} unhandled rejections within ${REJECTION_WINDOW_MS / 1000}s window - triggering shutdown`, {
+        service: serviceName,
+        rejectionCount: rejectionTimestamps.length,
+      });
+      shutdown('unhandledRejection').catch(() => {
+        process.exit(1);
+      });
+    }
   };
 
   // Prevent MaxListenersExceededWarning — services register 4 process handlers

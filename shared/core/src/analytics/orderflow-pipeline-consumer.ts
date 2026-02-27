@@ -438,7 +438,9 @@ export class OrderflowPipelineConsumer {
     try {
       this.reserveCache = getReserveCache();
       return this.reserveCache;
-    } catch {
+    } catch (error) {
+      // W2-M8 FIX: Log instead of silently swallowing
+      this.logger.debug('ReserveCache not yet initialized', { error: (error as Error).message });
       return null;
     }
   }
