@@ -10,10 +10,11 @@
 #   coordinator        Deploy Coordinator (primary)
 #   coordinator-standby Deploy Coordinator standby instance
 #   execution-engine   Deploy Execution Engine
-#   l2-fast            Deploy L2-Fast partition (Arbitrum, Optimism, Base)
+#   l2-fast            Deploy L2-Fast partition (Arbitrum, Optimism, Base, Scroll, Blast)
 #   high-value         Deploy High-Value partition (Ethereum, zkSync, Linea)
 #   asia-fast           Deploy Asia-Fast partition (BSC, Polygon, Avalanche, Fantom)
 #   solana             Deploy Solana partition
+#   cross-chain        Deploy Cross-Chain Detector
 #   all                Deploy all Fly.io services
 #
 # Options:
@@ -101,6 +102,22 @@ setup_l2_fast_secrets() {
     read -rs BASE_RPC_URL
     echo ""
 
+    echo -n "Enter SCROLL_WS_URL: "
+    read -rs SCROLL_WS_URL
+    echo ""
+
+    echo -n "Enter SCROLL_RPC_URL: "
+    read -rs SCROLL_RPC_URL
+    echo ""
+
+    echo -n "Enter BLAST_WS_URL: "
+    read -rs BLAST_WS_URL
+    echo ""
+
+    echo -n "Enter BLAST_RPC_URL: "
+    read -rs BLAST_RPC_URL
+    echo ""
+
     fly secrets set \
         REDIS_URL="$REDIS_URL" \
         STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
@@ -110,9 +127,13 @@ setup_l2_fast_secrets() {
         OPTIMISM_RPC_URL="$OPTIMISM_RPC_URL" \
         BASE_WS_URL="$BASE_WS_URL" \
         BASE_RPC_URL="$BASE_RPC_URL" \
+        SCROLL_WS_URL="$SCROLL_WS_URL" \
+        SCROLL_RPC_URL="$SCROLL_RPC_URL" \
+        BLAST_WS_URL="$BLAST_WS_URL" \
+        BLAST_RPC_URL="$BLAST_RPC_URL" \
         -c "$SCRIPT_DIR/partition-l2-fast.toml"
 
-    unset REDIS_URL STREAM_SIGNING_KEY ARBITRUM_WS_URL ARBITRUM_RPC_URL OPTIMISM_WS_URL OPTIMISM_RPC_URL BASE_WS_URL BASE_RPC_URL
+    unset REDIS_URL STREAM_SIGNING_KEY ARBITRUM_WS_URL ARBITRUM_RPC_URL OPTIMISM_WS_URL OPTIMISM_RPC_URL BASE_WS_URL BASE_RPC_URL SCROLL_WS_URL SCROLL_RPC_URL BLAST_WS_URL BLAST_RPC_URL
     log_info "Secrets set for L2-Fast partition"
 }
 
@@ -471,6 +492,62 @@ deploy_solana() {
     deploy_service "Solana partition" "arbitrage-solana" "$SCRIPT_DIR/partition-solana.toml"
 }
 
+# Set up secrets for Cross-Chain Detector
+setup_cross_chain_secrets() {
+    log_info "Setting up secrets for Cross-Chain Detector..."
+    log_warn "Secrets will be hidden from terminal output for security"
+
+    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
+    read -rs REDIS_URL
+    echo ""
+
+    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
+    read -rs STREAM_SIGNING_KEY
+    echo ""
+
+    echo -n "Enter ETHEREUM_RPC_URL: "
+    read -rs ETHEREUM_RPC_URL
+    echo ""
+
+    echo -n "Enter ARBITRUM_RPC_URL: "
+    read -rs ARBITRUM_RPC_URL
+    echo ""
+
+    echo -n "Enter BASE_RPC_URL: "
+    read -rs BASE_RPC_URL
+    echo ""
+
+    echo -n "Enter OPTIMISM_RPC_URL: "
+    read -rs OPTIMISM_RPC_URL
+    echo ""
+
+    echo -n "Enter BSC_RPC_URL: "
+    read -rs BSC_RPC_URL
+    echo ""
+
+    echo -n "Enter POLYGON_RPC_URL: "
+    read -rs POLYGON_RPC_URL
+    echo ""
+
+    fly secrets set \
+        REDIS_URL="$REDIS_URL" \
+        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
+        ETHEREUM_RPC_URL="$ETHEREUM_RPC_URL" \
+        ARBITRUM_RPC_URL="$ARBITRUM_RPC_URL" \
+        BASE_RPC_URL="$BASE_RPC_URL" \
+        OPTIMISM_RPC_URL="$OPTIMISM_RPC_URL" \
+        BSC_RPC_URL="$BSC_RPC_URL" \
+        POLYGON_RPC_URL="$POLYGON_RPC_URL" \
+        -c "$SCRIPT_DIR/cross-chain-detector.toml"
+
+    unset REDIS_URL STREAM_SIGNING_KEY ETHEREUM_RPC_URL ARBITRUM_RPC_URL BASE_RPC_URL OPTIMISM_RPC_URL BSC_RPC_URL POLYGON_RPC_URL
+    log_info "Secrets set for Cross-Chain Detector"
+}
+
+deploy_cross_chain() {
+    deploy_service "Cross-Chain Detector" "arbitrage-cross-chain" "$SCRIPT_DIR/cross-chain-detector.toml"
+}
+
 # Show status of all Fly.io services
 show_status() {
     log_info "Fly.io Services Status:"
@@ -520,6 +597,12 @@ show_status() {
         fly status -c "$SCRIPT_DIR/partition-solana.toml" 2>/dev/null || echo "Not deployed"
         echo ""
     fi
+
+    if echo "$apps_list" | grep -q "arbitrage-cross-chain"; then
+        echo "=== Cross-Chain Detector ==="
+        fly status -c "$SCRIPT_DIR/cross-chain-detector.toml" 2>/dev/null || echo "Not deployed"
+        echo ""
+    fi
 }
 
 # Main
@@ -531,7 +614,7 @@ main() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
-            coordinator|coordinator-standby|execution-engine|l2-fast|high-value|asia-fast|solana|all|status)
+            coordinator|coordinator-standby|execution-engine|l2-fast|high-value|asia-fast|solana|cross-chain|all|status)
                 SERVICE="$1"
                 shift
                 ;;
@@ -554,6 +637,7 @@ main() {
                 echo "  high-value           Deploy High-Value partition"
                 echo "  asia-fast            Deploy Asia-Fast partition"
                 echo "  solana               Deploy Solana partition"
+                echo "  cross-chain          Deploy Cross-Chain Detector"
                 echo "  all                  Deploy all services"
                 echo "  status               Show status of all services"
                 echo ""
@@ -606,6 +690,10 @@ main() {
             [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
             deploy_solana
             ;;
+        cross-chain)
+            [ "$SETUP_SECRETS" = true ] && setup_cross_chain_secrets
+            deploy_cross_chain
+            ;;
         all)
             # Set up secrets for all services if requested
             [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
@@ -615,11 +703,13 @@ main() {
             [ "$SETUP_SECRETS" = true ] && setup_high_value_secrets
             [ "$SETUP_SECRETS" = true ] && setup_asia_fast_secrets
             [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
-            # Deploy in dependency order: partitions first, then execution, then coordinator
+            [ "$SETUP_SECRETS" = true ] && setup_cross_chain_secrets
+            # Deploy in dependency order: partitions first, then cross-chain, then execution, then coordinator
             deploy_l2_fast
             deploy_high_value
             deploy_asia_fast
             deploy_solana
+            deploy_cross_chain
             deploy_execution_engine
             deploy_coordinator
             deploy_coordinator_standby
