@@ -231,8 +231,11 @@ export class DlqConsumer {
   async replayMessage(messageId: string): Promise<boolean> {
     try {
       // Paginate through DLQ to find the target message (stream may have >100 entries)
+      // Limit to 100 pages to prevent unbounded scanning of large DLQ streams
+      const MAX_REPLAY_PAGES = 100;
       let cursor = '0';
       let targetMessage: { id: string; data: unknown } | undefined;
+      let pagesScanned = 0;
 
       do {
         const messages = await this.streamsClient.xread(DLQ_STREAM, cursor, {
@@ -240,13 +243,22 @@ export class DlqConsumer {
         });
 
         if (messages.length === 0) break;
+        pagesScanned++;
 
         targetMessage = messages.find(m => m.id === messageId);
         if (targetMessage) break;
 
         // Advance cursor to last message ID for next page
         cursor = messages[messages.length - 1].id;
-      } while (!targetMessage);
+      } while (!targetMessage && pagesScanned < MAX_REPLAY_PAGES);
+
+      if (pagesScanned >= MAX_REPLAY_PAGES && !targetMessage) {
+        this.logger.warn('DLQ replay scan hit page limit', {
+          messageId,
+          pagesScanned,
+          maxPages: MAX_REPLAY_PAGES,
+        });
+      }
 
       if (!targetMessage) {
         this.logger.warn('DLQ message not found for replay', { messageId });

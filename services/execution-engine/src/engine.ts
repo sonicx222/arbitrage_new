@@ -37,7 +37,6 @@ import {
   ExecutionProbabilityTracker,
   resetExecutionProbabilityTracker,
   type TradingAllowedResult,
-  type EVCalculation,
   type PositionSize,
 } from '@arbitrage/core/risk';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
@@ -72,14 +71,10 @@ import {
   ConsumerConfig,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_CONSUMER_CONFIG,
-  EXECUTION_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_MS,
   createInitialStats,
   resolveSimulationConfig,
   DEFAULT_QUEUE_CONFIG,
-  createErrorResult,
-  createSkippedResult,
-  ExecutionErrorCode,
 } from './types';
 import { ProviderServiceImpl } from './services/provider.service';
 import { QueueServiceImpl } from './services/queue.service';
@@ -98,13 +93,6 @@ import type { Logger as CoreLogger } from '@arbitrage/core';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import { FastLaneConsumer } from './consumers/fast-lane.consumer';
 import type { ISimulationService } from './services/simulation/types';
-import {
-  recordExecutionAttempt,
-  recordExecutionSuccess,
-  recordOpportunityDetected,
-  updateGasPrice,
-  recordVolume,
-} from './services/prometheus-metrics';
 import {
   createSimulationMetricsCollector,
   SimulationMetricsCollector,
@@ -147,7 +135,6 @@ import {
   ABTestingFramework,
   createABTestingFramework,
   type ABTestingConfig,
-  type VariantAssignment,
   type ExperimentSummary,
 } from './ab-testing';
 // Task 4.1: Per-Chain Balance Monitor
@@ -261,20 +248,10 @@ export class ExecutionEngineService {
   private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
   // FIX 10.1: Pre-computed last gas prices for O(1) hot path access
   private lastGasPrices: Map<string, bigint> = new Map();
-  /** @deprecated Legacy field — only used by pre-pipeline fallback code path. Shutdown drain uses pipeline.getActiveExecutionCount() */
-  private activeExecutionCount = 0;
   private readonly maxConcurrentExecutions: number;
-  private isProcessingQueue = false; // Guard against concurrent processQueueItems calls (legacy, kept for pipeline fallback)
 
   // W1-42 FIX: Extracted execution pipeline
   private executionPipeline: ExecutionPipeline | null = null;
-
-  // FIX 5: Track circuit breaker re-enqueue attempts per opportunity to prevent
-  // infinite dequeue/re-enqueue loops when CB is in HALF_OPEN state
-  private readonly cbReenqueueCounts = new Map<string, number>();
-  private static readonly MAX_CB_REENQUEUE_ATTEMPTS = 3;
-  /** Max size for cbReenqueueCounts before forced cleanup (prevents unbounded growth) */
-  private static readonly MAX_CB_REENQUEUE_MAP_SIZE = 10_000;
 
   // P1 FIX: Lock conflict tracking extracted to dedicated class
   // Tracks repeated lock conflicts to detect crashed lock holders
@@ -903,8 +880,6 @@ export class ExecutionEngineService {
       this.gasBaselines.clear();
       // FIX 10.1: Clear pre-computed last gas prices
       this.lastGasPrices.clear();
-      // FIX 5: Clear CB re-enqueue tracking
-      this.cbReenqueueCounts.clear();
       // FIX P1-13: Invalidate cached strategy context
       this.invalidateStrategyContext();
       this.mevProviderFactory = null;
@@ -1105,19 +1080,6 @@ export class ExecutionEngineService {
     // FIX Race 1.1: Check stateManager.isRunning() to prevent processing during shutdown
     this.executionProcessingInterval = setInterval(() => {
       if (!this.stateManager.isRunning()) return;
-
-      // Prevent unbounded growth of cbReenqueueCounts. Entries accumulate for
-      // opportunities that expire without ever passing the CB check. Clearing
-      // is safe — it only resets retry counts, potentially allowing a few
-      // extra re-enqueue attempts for in-flight opportunities.
-      if (this.cbReenqueueCounts.size > ExecutionEngineService.MAX_CB_REENQUEUE_MAP_SIZE) {
-        this.logger.warn('cbReenqueueCounts exceeded size limit, clearing', {
-          size: this.cbReenqueueCounts.size,
-          limit: ExecutionEngineService.MAX_CB_REENQUEUE_MAP_SIZE,
-        });
-        this.cbReenqueueCounts.clear();
-      }
-
       this.processQueueItems();
     }, 1000);
   }
@@ -1158,511 +1120,10 @@ export class ExecutionEngineService {
 
   /**
    * Process available queue items up to concurrency limit.
-   * Called both by event callback and fallback interval.
-   *
-   * Uses a processing guard to prevent race conditions from concurrent calls.
-   * This ensures activeExecutionCount is accurately tracked.
-   *
-   * Circuit breaker integration (Phase 1.3.1):
-   * - Checks `canExecute()` before processing
-   * - Blocks processing when circuit is OPEN
-   * - Tracks blocked executions in stats
+   * Delegates to the extracted ExecutionPipeline (W1-42).
    */
   private processQueueItems(): void {
-    // W1-42 FIX: Delegate to extracted pipeline when available
-    if (this.executionPipeline) {
-      this.executionPipeline.processQueueItems();
-      return;
-    }
-
-    // Legacy fallback (during initialization before pipeline is created)
-    // Check preconditions: running, queue exists
-    if (!this.stateManager.isRunning()) return;
-    if (!this.queueService) return;
-
-    // Guard against concurrent entry - prevents race condition where multiple
-    // callers could each increment activeExecutionCount past the limit
-    if (this.isProcessingQueue) return;
-    this.isProcessingQueue = true;
-
-    try {
-      // Process multiple items if under concurrency limit
-      while (
-        this.queueService.size() > 0 &&
-        this.activeExecutionCount < this.maxConcurrentExecutions
-      ) {
-        // Dequeue first, then check per-chain circuit breaker
-        const opportunity = this.queueService.dequeue();
-        if (!opportunity) break;
-
-        // Task 1.1: Per-chain circuit breaker check — only blocks the affected chain
-        const oppChain = opportunity.buyChain || 'unknown';
-        if (this.cbManager && !this.cbManager.canExecute(oppChain)) {
-          // FIX 5: Track re-enqueue count to prevent infinite dequeue/re-enqueue loop
-          // when circuit breaker is in HALF_OPEN state. Without this limit, the
-          // setImmediate in .finally() triggers processQueueItems() again, creating
-          // a tight cycle until CB transitions.
-          const reenqueueCount = (this.cbReenqueueCounts.get(opportunity.id) ?? 0) + 1;
-          if (reenqueueCount >= ExecutionEngineService.MAX_CB_REENQUEUE_ATTEMPTS) {
-            // Drop opportunity after max re-enqueue attempts — stream will redeliver
-            this.cbReenqueueCounts.delete(opportunity.id);
-            this.logger.warn('Dropping opportunity after max CB re-enqueue attempts', {
-              opportunityId: opportunity.id,
-              attempts: reenqueueCount,
-            });
-            this.stats.circuitBreakerBlocks++;
-          } else {
-            // Re-enqueue with tracked count
-            this.cbReenqueueCounts.set(opportunity.id, reenqueueCount);
-            this.queueService.enqueue(opportunity);
-            this.stats.circuitBreakerBlocks++;
-          }
-          continue;
-        }
-
-        // FIX 5: Clear re-enqueue tracking when opportunity proceeds to execution
-        this.cbReenqueueCounts.delete(opportunity.id);
-
-        // Fix 5.2: Increment counter before async operation with bounds check
-        this.activeExecutionCount++;
-
-        // Execute and decrement counter when done (success or failure)
-        // Also trigger another processing cycle to handle queued items
-        this.executeOpportunityWithLock(opportunity)
-          .catch((error) => {
-            // Prevent unhandled promise rejection. The execution result
-            // (success/failure) is already tracked inside executeOpportunityWithLock
-            // and executeWithTimeout. This catch handles unexpected errors like
-            // lock acquisition failures or uncaught throws.
-            this.logger.error('Execution failed for opportunity', {
-              opportunityId: opportunity.id,
-              traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
-              error: getErrorMessage(error),
-            });
-          })
-          .finally(() => {
-            // Fix 5.2: Ensure counter doesn't go negative (defensive check)
-            if (this.activeExecutionCount > 0) {
-              this.activeExecutionCount--;
-            } else {
-              this.logger.warn('activeExecutionCount was already 0, not decrementing');
-            }
-            // Process more items if available (avoids waiting for next event/interval)
-            // Check isProcessingQueue INSIDE setImmediate to prevent race condition
-            // where multiple .finally() callbacks could each check the flag before any
-            // of them had a chance to set it, resulting in multiple processQueueItems calls
-            if (
-              this.stateManager.isRunning() &&
-              this.queueService &&
-              this.queueService.size() > 0
-            ) {
-              setImmediate(() => {
-                // Double-check guard inside callback to prevent concurrent processing
-                if (!this.isProcessingQueue) {
-                  this.processQueueItems();
-                }
-              });
-            }
-          });
-      }
-    } finally {
-      this.isProcessingQueue = false;
-    }
-  }
-
-  private async executeOpportunityWithLock(opportunity: ArbitrageOpportunity): Promise<void> {
-    if (!this.lockManager) {
-      this.logger.error('Lock manager not initialized');
-      return;
-    }
-
-    // Extract trace context injected by opportunity consumer for cross-service correlation
-    const traceId = (opportunity as unknown as Record<string, unknown>)._traceId as string | undefined;
-
-    const lockResourceId = `opportunity:${opportunity.id}`;
-
-    const lockResult = await this.lockManager.withLock(
-      lockResourceId,
-      async () => {
-        await this.executeWithTimeout(opportunity);
-      },
-      {
-        ttlMs: EXECUTION_TIMEOUT_MS * 2, // 2x execution timeout for safety
-        retries: 0
-      }
-    );
-
-    if (!lockResult.success) {
-      if (lockResult.reason === 'lock_not_acquired') {
-        // SPRINT 1 FIX: Crash recovery for stuck locks
-        // P1 FIX: Use extracted LockConflictTracker for crash detection
-        const shouldForceRelease = this.lockConflictTracker.recordConflict(opportunity.id);
-
-        if (shouldForceRelease) {
-          // Lock holder appears to have crashed - force release and retry
-          this.logger.warn('Detected potential crashed lock holder - force releasing lock', {
-            id: opportunity.id,
-            traceId,
-            conflictCount: this.lockConflictTracker.getConflictInfo(opportunity.id)?.count
-          });
-
-          const released = await this.lockManager.forceRelease(lockResourceId);
-          if (released) {
-            this.stats.staleLockRecoveries++;
-            // Clear tracker and retry execution
-            this.lockConflictTracker.clear(opportunity.id);
-
-            // Retry with fresh lock acquisition
-            const retryResult = await this.lockManager.withLock(
-              lockResourceId,
-              async () => {
-                await this.executeWithTimeout(opportunity);
-              },
-              {
-                ttlMs: EXECUTION_TIMEOUT_MS * 2,
-                retries: 0
-              }
-            );
-
-            if (retryResult.success) {
-              // Success after recovery - ACK the message
-              await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
-              return;
-            } else if (retryResult.reason === 'execution_error') {
-              // Had lock, execution failed - ACK to prevent infinite redelivery
-              this.logger.error('Opportunity execution failed after crash recovery', {
-                id: opportunity.id,
-                traceId,
-                error: retryResult.error
-              });
-              await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
-              return;
-            }
-            // If retry still can't get lock, another instance recovered faster - fall through
-          }
-        }
-
-        // Another instance is executing this opportunity - DO NOT ACK
-        // Let Redis redeliver to the instance that holds the lock
-        this.stats.lockConflicts++;
-        this.logger.debug('Opportunity skipped - already being executed by another instance', {
-          id: opportunity.id,
-          traceId,
-        });
-        return; // Don't ACK - another instance will handle it
-      } else if (lockResult.reason === 'redis_error') {
-        // Redis unavailable - can't reliably ACK anyway
-        this.logger.error('Opportunity skipped - Redis unavailable', {
-          id: opportunity.id,
-          traceId,
-          error: lockResult.error?.message
-        });
-        return; // Don't ACK - Redis is down
-      } else if (lockResult.reason === 'execution_error') {
-        // We had the lock, execution failed - ACK to prevent infinite redelivery
-        this.logger.error('Opportunity execution failed', {
-          id: opportunity.id,
-          traceId,
-          error: lockResult.error
-        });
-        // Fall through to ACK below
-      }
-    } else {
-      // Success - clear any conflict tracking for this opportunity
-      this.lockConflictTracker.clear(opportunity.id);
-    }
-
-    // ACK the message only after we've processed it (success or execution_error)
-    // This ensures messages aren't lost when lock conflicts occur
-    await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
-  }
-
-  // P1 FIX: Lock conflict tracking methods moved to LockConflictTracker class
-  // See: services/lock-conflict-tracker.ts
-
-  private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error(`Execution timeout after ${EXECUTION_TIMEOUT_MS}ms`));
-      }, EXECUTION_TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([
-        this.executeOpportunity(opportunity),
-        timeoutPromise
-      ]);
-    } catch (error) {
-      if (getErrorMessage(error).includes('timeout')) {
-        this.stats.executionTimeouts++;
-        this.logger.error('Execution timed out', {
-          opportunityId: opportunity.id,
-          traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
-          timeoutMs: EXECUTION_TIMEOUT_MS
-        });
-      }
-      throw error;
-    } finally {
-      // Always clear the timeout to prevent timer leaks
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    }
-  }
-
-  private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
-    const startTime = performance.now();
-
-    // FIX P0-3: Fail fast on missing buyChain instead of proceeding with 'unknown'
-    if (!opportunity.buyChain) {
-      const errorResult = createErrorResult(
-        opportunity.id,
-        'Missing required buyChain field',
-        'unknown',
-        opportunity.buyDex || 'unknown'
-      );
-      await this.publishExecutionResult(errorResult, opportunity);
-      this.opportunityConsumer?.markComplete(opportunity.id);
-      return;
-    }
-
-    const chain = opportunity.buyChain || 'unknown';
-    const dex = opportunity.buyDex || 'unknown';
-
-    // Variables for risk management
-    let evCalc: EVCalculation | null = null;
-    let positionSize: PositionSize | null = null;
-    let drawdownCheck: TradingAllowedResult | null = null;
-
-    // Task 3: A/B testing variant assignment
-    let abVariants: Map<string, VariantAssignment> | null = null;
-
-    try {
-      this.opportunityConsumer?.markActive(opportunity.id);
-      this.stats.executionAttempts++;
-      recordExecutionAttempt(chain, opportunity.type ?? 'unknown');
-
-      this.logger.info('Executing arbitrage opportunity', {
-        id: opportunity.id,
-        traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
-        type: opportunity.type,
-        buyChain: chain,
-        buyDex: dex,
-        sellDex: opportunity.sellDex,
-        expectedProfit: opportunity.expectedProfit,
-        simulationMode: this.isSimulationMode
-      });
-
-      // =======================================================================
-      // Phase 3: Capital Risk Management Checks (Task 3.4.5)
-      // R2: Refactored to use RiskManagementOrchestrator
-      // =======================================================================
-
-      if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
-        // BUG-005 FIX: Guard against precision loss for gas estimates > Number.MAX_SAFE_INTEGER
-        let safeGasEstimate: number | undefined;
-        if (opportunity.gasEstimate) {
-          const raw = Number(opportunity.gasEstimate);
-          safeGasEstimate = Number.isFinite(raw) && raw <= Number.MAX_SAFE_INTEGER ? raw : undefined;
-        }
-
-        const riskDecision = this.riskOrchestrator.assess({
-          chain,
-          dex,
-          pathLength: opportunity.path?.length ?? 2,
-          expectedProfit: opportunity.expectedProfit,
-          gasEstimate: safeGasEstimate,
-        });
-
-        // Store results for later use (outcome recording)
-        drawdownCheck = riskDecision.drawdownCheck ?? null;
-        evCalc = riskDecision.evCalculation ?? null;
-        positionSize = riskDecision.positionSize ?? null;
-
-        if (!riskDecision.allowed) {
-          // Map rejection code to execution error code
-          const errorCode = riskDecision.rejectionCode === 'DRAWDOWN_HALT'
-            ? ExecutionErrorCode.DRAWDOWN_HALT
-            : riskDecision.rejectionCode === 'LOW_EV'
-              ? ExecutionErrorCode.LOW_EV
-              : ExecutionErrorCode.POSITION_SIZE;
-
-          // Log with opportunity context
-          if (riskDecision.rejectionCode === 'DRAWDOWN_HALT') {
-            this.logger.warn('Trade blocked by drawdown circuit breaker', {
-              id: opportunity.id,
-              state: drawdownCheck?.state,
-              reason: riskDecision.rejectionReason,
-            });
-          } else {
-            this.logger.debug(`Trade rejected: ${riskDecision.rejectionReason}`, {
-              id: opportunity.id,
-              code: riskDecision.rejectionCode,
-            });
-          }
-
-          const skippedResult = createSkippedResult(
-            opportunity.id,
-            `${errorCode}: ${riskDecision.rejectionReason}`,
-            chain,
-            dex
-          );
-          await this.publishExecutionResult(skippedResult, opportunity);
-          return;
-        }
-
-        // Log position sizing info for allowed trades
-        if (positionSize && riskDecision.recommendedSize) {
-          this.logger.debug('Position sized for trade', {
-            id: opportunity.id,
-            recommendedSize: riskDecision.recommendedSize.toString(),
-            fractionOfCapital: positionSize.fractionOfCapital,
-            sizeMultiplier: drawdownCheck?.sizeMultiplier ?? 1.0,
-          });
-        }
-
-        // Log reduced position states
-        if (drawdownCheck?.state === 'CAUTION' || drawdownCheck?.state === 'RECOVERY') {
-          this.logger.debug(`Trading with reduced position size (${drawdownCheck.state})`, {
-            id: opportunity.id,
-            sizeMultiplier: drawdownCheck.sizeMultiplier,
-          });
-        }
-      }
-
-      // =======================================================================
-      // Task 3: A/B Testing Variant Assignment
-      // =======================================================================
-
-      if (this.abTestingFramework) {
-        // Use opportunity ID as the hash for deterministic variant assignment
-        abVariants = this.abTestingFramework.assignAllVariants(
-          opportunity.id,
-          chain,
-          dex
-        );
-
-        if (abVariants.size > 0) {
-          this.logger.debug('A/B variant assignments', {
-            id: opportunity.id,
-            variants: Object.fromEntries(abVariants),
-          });
-        }
-      }
-
-      // =======================================================================
-      // Execute Trade
-      // =======================================================================
-
-      // Build strategy context
-      const ctx = this.buildStrategyContext();
-
-      // Use strategy factory for clean dispatch (replaces if/else chain)
-      if (!this.strategyFactory) {
-        throw new Error('Strategy factory not initialized');
-      }
-
-      const result = await this.strategyFactory.execute(opportunity, ctx);
-
-      // Publish result
-      await this.publishExecutionResult(result, opportunity);
-      this.perfLogger.logExecutionResult(result);
-
-      // =======================================================================
-      // Record Outcome for Risk Management (Task 3.4.5)
-      // R2: Refactored to use RiskManagementOrchestrator
-      // =======================================================================
-
-      if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
-        // FIX 10.1: Use pre-computed last gas price for O(1) hot path access
-        const currentGasPrice = this.lastGasPrices.get(chain) ?? 0n;
-
-        this.riskOrchestrator.recordOutcome({
-          chain,
-          dex,
-          pathLength: opportunity.path?.length ?? 2,
-          success: result.success,
-          actualProfit: result.actualProfit,
-          gasCost: result.gasCost,
-          gasPrice: currentGasPrice,
-        });
-      }
-
-      // =======================================================================
-      // Task 3: Record A/B Testing Results
-      // =======================================================================
-
-      const latencyMs = performance.now() - startTime;
-
-      if (this.abTestingFramework && abVariants && abVariants.size > 0) {
-        // Record result for each active experiment
-        for (const [experimentId, variant] of abVariants) {
-          await this.abTestingFramework.recordResult(
-            experimentId,
-            variant,
-            result,
-            latencyMs,
-            false // MEV frontrun detection - can be enhanced later
-          );
-        }
-      }
-
-      if (result.success) {
-        this.stats.successfulExecutions++;
-        recordExecutionSuccess(chain, opportunity.type ?? 'unknown');
-        // Record volume for successful trades
-        if (result.actualProfit !== undefined && result.actualProfit > 0) {
-          recordVolume(chain, result.actualProfit);
-        }
-        // Task 1.1: Record success on chain-specific circuit breaker
-        this.cbManager?.recordSuccess(chain);
-      } else {
-        this.stats.failedExecutions++;
-        // Task 1.1: Record failure on chain-specific circuit breaker
-        this.cbManager?.recordFailure(chain);
-      }
-
-      this.perfLogger.logEventLatency('opportunity_execution', latencyMs, {
-        success: result.success,
-        profit: result.actualProfit ?? 0
-      });
-
-    } catch (error) {
-      this.stats.failedExecutions++;
-      // Task 1.1: Record failure on chain-specific circuit breaker
-      this.cbManager?.recordFailure(chain);
-
-      // Record failure to risk management
-      // R2: Use orchestrator when available for consistency
-      if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
-        this.riskOrchestrator.recordOutcome({
-          chain,
-          dex,
-          pathLength: opportunity.path?.length ?? 2,
-          success: false,
-          actualProfit: undefined,
-          gasCost: undefined,
-        });
-      }
-
-      this.logger.error('Failed to execute opportunity', {
-        error,
-        opportunityId: opportunity.id
-      });
-
-      const errorResult = createErrorResult(
-        opportunity.id,
-        getErrorMessage(error),
-        chain,
-        dex
-      );
-
-      await this.publishExecutionResult(errorResult, opportunity);
-    } finally {
-      this.opportunityConsumer?.markComplete(opportunity.id);
-    }
+    this.executionPipeline?.processQueueItems();
   }
 
   // FIX P1-13: Cached strategy context to avoid allocating a new 15-field object

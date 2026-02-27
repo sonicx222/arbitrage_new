@@ -85,14 +85,18 @@ export function validateFlashLoanRequest(
       };
     }
 
-    // Only validate against approved routers if the list is non-empty
-    if (approvedRoutersSet.size > 0) {
-      if (!approvedRoutersSet.has(step.router.toLowerCase())) {
-        return {
-          valid: false,
-          error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,
-        };
-      }
+    // Fail-closed: reject if approved set is empty (misconfiguration) or router not in set
+    if (approvedRoutersSet.size === 0) {
+      return {
+        valid: false,
+        error: '[ERR_NO_APPROVED_ROUTERS] No approved routers configured — cannot validate',
+      };
+    }
+    if (!approvedRoutersSet.has(step.router.toLowerCase())) {
+      return {
+        valid: false,
+        error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,
+      };
     }
   }
 

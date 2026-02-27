@@ -66,6 +66,9 @@ export class NonceAllocationManager {
   private readonly chainNonceLocks = new Map<string, Promise<void>>();
   private readonly chainNonceLockResolvers = new Map<string, () => void>();
 
+  /** Track when each chain lock was acquired (for stale lock detection) */
+  private readonly lockAcquiredAt = new Map<string, number>();
+
   /**
    * Track in-progress nonce allocations per chain.
    * Used to detect potential race conditions when multiple strategies
@@ -167,6 +170,7 @@ export class NonceAllocationManager {
 
       this.chainNonceLocks.set(chain, lockPromise);
       this.chainNonceLockResolvers.set(chain, resolver!);
+      this.lockAcquiredAt.set(chain, Date.now());
 
       this.logger.debug('[NONCE_LOCK] Lock acquired', {
         chain,
@@ -190,6 +194,7 @@ export class NonceAllocationManager {
       resolver();
       this.chainNonceLocks.delete(chain);
       this.chainNonceLockResolvers.delete(chain);
+      this.lockAcquiredAt.delete(chain);
 
       this.logger.debug('[NONCE_LOCK] Lock released', {
         chain,
@@ -268,6 +273,44 @@ export class NonceAllocationManager {
   }
 
   /**
+   * Detect and force-release locks held longer than the given threshold.
+   *
+   * Dropped transactions or crashed holders can leave nonce locks stuck,
+   * halting chain execution until manual intervention. This method auto-recovers
+   * by releasing any lock held longer than `staleThresholdMs`.
+   *
+   * @param staleThresholdMs - Max lock hold time before forced release (default: 2x defaultLockTimeoutMs)
+   * @returns Array of chain names that had stale locks released
+   */
+  reconcileStaleAllocations(staleThresholdMs?: number): string[] {
+    const threshold = staleThresholdMs ?? this.defaultLockTimeoutMs * 2;
+    const now = Date.now();
+    const released: string[] = [];
+
+    for (const [chain, acquiredAt] of this.lockAcquiredAt) {
+      const heldMs = now - acquiredAt;
+      if (heldMs >= threshold) {
+        this.logger.warn('[NONCE_LOCK] Force-releasing stale lock', {
+          chain,
+          heldMs,
+          threshold,
+        });
+        this.releaseLock(chain, 'stale-reconciliation');
+        released.push(chain);
+      }
+    }
+
+    if (released.length > 0) {
+      this.logger.info('[NONCE_LOCK] Stale lock reconciliation complete', {
+        releasedChains: released,
+        count: released.length,
+      });
+    }
+
+    return released;
+  }
+
+  /**
    * Reset all locks and tracking (for testing).
    */
   reset(): void {
@@ -277,6 +320,7 @@ export class NonceAllocationManager {
     }
     this.chainNonceLocks.clear();
     this.chainNonceLockResolvers.clear();
+    this.lockAcquiredAt.clear();
     this.inProgressNonceAllocations.clear();
   }
 }

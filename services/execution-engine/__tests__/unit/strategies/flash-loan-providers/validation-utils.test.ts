@@ -115,7 +115,7 @@ describe('validateFlashLoanRequest', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('should pass validation when approved routers set is empty (allows all)', () => {
+    it('should fail-closed when approved routers set is empty (misconfiguration)', () => {
       const request = createValidRequest({
         swapPath: [
           {
@@ -135,7 +135,8 @@ describe('validateFlashLoanRequest', () => {
 
       const result = validateFlashLoanRequest(request, PROVIDER_CHAIN, EMPTY_ROUTERS);
 
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('[ERR_NO_APPROVED_ROUTERS]');
     });
 
     it('should pass validation with case-insensitive router matching', () => {
@@ -346,7 +347,7 @@ describe('validateFlashLoanRequest', () => {
       expect(result.error).toContain(TEST_ADDRESSES.UNAPPROVED);
     });
 
-    it('should allow unapproved router when approval list is empty', () => {
+    it('should fail-closed when approval list is empty', () => {
       const request = createValidRequest({
         swapPath: [
           {
@@ -366,7 +367,8 @@ describe('validateFlashLoanRequest', () => {
 
       const result = validateFlashLoanRequest(request, PROVIDER_CHAIN, EMPTY_ROUTERS);
 
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('[ERR_NO_APPROVED_ROUTERS]');
     });
   });
 

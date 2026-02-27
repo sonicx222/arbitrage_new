@@ -87,17 +87,18 @@ describe('SyncSwapFlashLoanProvider — vault address', () => {
 describe('SyncSwapFlashLoanProvider — case-insensitive validation', () => {
   const WETH_ZKSYNC = '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91';
   const USDC_ZKSYNC = '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4';
+  const SYNCSWAP_ROUTER = '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295';
 
   it('should accept valid cycle with case-insensitive token matching', () => {
-    const provider = new SyncSwapFlashLoanProvider(createConfig({ approvedRouters: [] }));
+    const provider = new SyncSwapFlashLoanProvider(createConfig({ approvedRouters: [SYNCSWAP_ROUTER] }));
 
     const result = provider.validate({
       asset: WETH_ZKSYNC.toLowerCase(),
       amount: ethers.parseEther('10'),
       chain: 'zksync',
       swapPath: [
-        { router: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', tokenIn: '0x' + WETH_ZKSYNC.slice(2).toUpperCase(), tokenOut: USDC_ZKSYNC, amountOutMin: ethers.parseUnits('24875', 6) },
-        { router: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', tokenIn: USDC_ZKSYNC, tokenOut: WETH_ZKSYNC.toLowerCase(), amountOutMin: ethers.parseEther('9.95') },
+        { router: SYNCSWAP_ROUTER, tokenIn: '0x' + WETH_ZKSYNC.slice(2).toUpperCase(), tokenOut: USDC_ZKSYNC, amountOutMin: ethers.parseUnits('24875', 6) },
+        { router: SYNCSWAP_ROUTER, tokenIn: USDC_ZKSYNC, tokenOut: WETH_ZKSYNC.toLowerCase(), amountOutMin: ethers.parseEther('9.95') },
       ] as FlashLoanSwapStep[],
       minProfit: ethers.parseEther('0.1'),
       initiator: FLASH_LOAN_TEST_ADDRESSES.INITIATOR,
@@ -107,15 +108,15 @@ describe('SyncSwapFlashLoanProvider — case-insensitive validation', () => {
   });
 
   it('should accept case-insensitive asset match', () => {
-    const provider = new SyncSwapFlashLoanProvider(createConfig({ approvedRouters: [] }));
+    const provider = new SyncSwapFlashLoanProvider(createConfig({ approvedRouters: [SYNCSWAP_ROUTER] }));
 
     const result = provider.validate({
       asset: WETH_ZKSYNC.toLowerCase(),
       amount: ethers.parseEther('10'),
       chain: 'zksync',
       swapPath: [
-        { router: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', tokenIn: WETH_ZKSYNC.toUpperCase(), tokenOut: USDC_ZKSYNC, amountOutMin: ethers.parseUnits('24875', 6) },
-        { router: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', tokenIn: USDC_ZKSYNC, tokenOut: WETH_ZKSYNC, amountOutMin: ethers.parseEther('9.95') },
+        { router: SYNCSWAP_ROUTER, tokenIn: WETH_ZKSYNC.toUpperCase(), tokenOut: USDC_ZKSYNC, amountOutMin: ethers.parseUnits('24875', 6) },
+        { router: SYNCSWAP_ROUTER, tokenIn: USDC_ZKSYNC, tokenOut: WETH_ZKSYNC, amountOutMin: ethers.parseEther('9.95') },
       ] as FlashLoanSwapStep[],
       minProfit: ethers.parseEther('0.1'),
       initiator: FLASH_LOAN_TEST_ADDRESSES.INITIATOR,
