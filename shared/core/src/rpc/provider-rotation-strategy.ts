@@ -152,6 +152,7 @@ export class ProviderRotationStrategy {
 
     // Check for API-key providers (more specific patterns first)
     if (lowerUrl.includes('drpc.org') || lowerUrl.includes('lb.drpc.org')) return 'drpc';
+    if (lowerUrl.includes('onfinality.io')) return 'onfinality';
     if (lowerUrl.includes('ankr.com') || lowerUrl.includes('rpc.ankr.com')) return 'ankr';
     if (lowerUrl.includes('publicnode.com')) return 'publicnode';
     if (lowerUrl.includes('infura.io')) return 'infura';

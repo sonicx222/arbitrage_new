@@ -489,7 +489,7 @@ describe('ProviderHealthScorer Budget Tracking', () => {
 
       // Throttled providers should be at the end
       // Since no providers are throttled initially, all should maintain base order
-      expect(priority.length).toBe(7); // 7 providers total including blastapi
+      expect(priority.length).toBe(8); // 8 providers total including onfinality and blastapi
     });
   });
 

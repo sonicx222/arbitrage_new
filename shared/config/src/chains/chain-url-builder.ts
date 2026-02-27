@@ -4,8 +4,8 @@
  * Provides a centralized utility for building chain RPC and WebSocket URLs
  * with consistent environment variable resolution and fallback patterns.
  *
- * Updated to implement the 6-Provider Shield Architecture:
- * Priority: dRPC → Ankr → PublicNode → Infura → Alchemy → QuickNode
+ * Updated to implement the 8-Provider Shield Architecture:
+ * Priority: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → QuickNode → BlastAPI
  *
  * @see P2-CONFIG from refactoring-roadmap.md
  * @see docs/reports/RPC_DEEP_DIVE_ANALYSIS.md
@@ -19,6 +19,7 @@ export {
   buildDrpcUrl,
   buildAnkrUrl,
   buildPublicNodeUrl,
+  buildOnFinalityUrl,
   buildInfuraUrl,
   buildAlchemyUrl,
   buildBlastApiUrl,
@@ -235,7 +236,7 @@ export function buildSolanaUrls(network: 'mainnet' | 'devnet' = 'mainnet'): Chai
 
 /**
  * Standard EVM chain fallback URL providers
- * Priority order: dRPC → Ankr → PublicNode → Infura → Alchemy → BlastAPI
+ * Priority order: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → BlastAPI
  */
 export const STANDARD_FALLBACK_PROVIDERS = {
   /**
@@ -258,8 +259,27 @@ export const STANDARD_FALLBACK_PROVIDERS = {
   },
 
   /**
+   * OnFinality - SECONDARY (500K daily reqs, enterprise-grade)
+   * Excellent for BSC, Polygon, Avalanche, Fantom
+   */
+  onFinality: (chain: string, apiKey?: string) => {
+    const key = apiKey || process.env.ONFINALITY_API_KEY;
+    if (key) {
+      return {
+        rpc: `https://${chain}.api.onfinality.io/rpc?apikey=${key}`,
+        ws: `wss://${chain}.api.onfinality.io/ws?apikey=${key}`,
+      };
+    }
+    // Fallback to public (limited)
+    return {
+      rpc: `https://${chain}.api.onfinality.io/public`,
+      ws: `wss://${chain}.api.onfinality.io/public-ws`,
+    };
+  },
+
+  /**
    * Ankr - SECONDARY (200M credits/month, 30 RPS)
-   * Second highest capacity, excellent chain coverage
+   * Third highest capacity, excellent chain coverage
    */
   ankr: (chain: string, apiKey?: string) => {
     const key = apiKey || process.env.ANKR_API_KEY;
@@ -339,6 +359,18 @@ export function createDrpcConfig(network: string): ApiKeyUrlConfig {
 }
 
 /**
+ * OnFinality API key configuration generator (SECONDARY - 500K daily reqs)
+ * Supports BSC, Polygon, Avalanche, Fantom
+ */
+export function createOnFinalityConfig(network: string): ApiKeyUrlConfig {
+  return {
+    apiKeyEnvVar: 'ONFINALITY_API_KEY',
+    rpcUrlTemplate: (key) => `https://${network}.api.onfinality.io/rpc?apikey=${key}`,
+    wsUrlTemplate: (key) => `wss://${network}.api.onfinality.io/ws?apikey=${key}`,
+  };
+}
+
+/**
  * Ankr API key configuration generator (SECONDARY - 200M credits/month)
  */
 export function createAnkrConfig(network: string): ApiKeyUrlConfig {
@@ -383,11 +415,24 @@ export function buildChainUrlsOptimized(
     };
   }
 
-  // Priority order: dRPC → Ankr → Infura → Alchemy → default
+  // Priority order: dRPC → OnFinality → Ankr → Infura → Alchemy → default
   const apiKeyConfigs: ApiKeyUrlConfig[] = [
     createDrpcConfig(chainName),
-    createAnkrConfig(chainName),
   ];
+
+  // OnFinality supports BSC, Polygon, Avalanche, Fantom
+  const chainToOnFinality: Record<string, string> = {
+    bsc: 'bsc',
+    polygon: 'polygon',
+    avalanche: 'avalanche',
+    fantom: 'fantom',
+  };
+  const onFinalityNetwork = chainToOnFinality[chainName.toLowerCase()];
+  if (onFinalityNetwork) {
+    apiKeyConfigs.push(createOnFinalityConfig(onFinalityNetwork));
+  }
+
+  apiKeyConfigs.push(createAnkrConfig(chainName));
 
   // Map chain names to provider network names for Infura/Alchemy
   const chainToInfura: Record<string, string> = {

@@ -161,6 +161,7 @@ describe('ProviderRotationStrategy', () => {
       // API-key providers
       { url: 'wss://lb.drpc.org/ogws/abc123', expected: 'drpc', description: 'drpc via lb.drpc.org' },
       { url: 'wss://some.drpc.org/ws', expected: 'drpc', description: 'drpc via drpc.org' },
+      { url: 'wss://bsc.api.onfinality.io/ws?apikey=abc', expected: 'onfinality', description: 'onfinality' },
       { url: 'wss://rpc.ankr.com/eth/abc', expected: 'ankr', description: 'ankr via rpc.ankr.com' },
       { url: 'wss://some.ankr.com/eth', expected: 'ankr', description: 'ankr via ankr.com' },
       { url: 'wss://eth.publicnode.com', expected: 'publicnode', description: 'publicnode' },

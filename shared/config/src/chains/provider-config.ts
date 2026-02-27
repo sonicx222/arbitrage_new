@@ -8,12 +8,13 @@
  *
  * Provider Priority Order (based on free tier capacity):
  * 1. dRPC       - 210M CU/30 days, 40-100 RPS (PRIMARY)
- * 2. Ankr       - 200M credits/month, 30 RPS (SECONDARY)
- * 3. PublicNode - Unlimited, ~100-200 RPS (OVERFLOW/BURST - NO KEY NEEDED)
- * 4. Infura     - 3M/day (~90M/month), 500 CU/s (DAILY RESET)
- * 5. Alchemy    - 30M CU/month, 25 RPS (QUALITY RESERVE)
- * 6. QuickNode  - 10M credits/month, 15 RPS (LAST RESORT)
- * 7. BlastAPI   - ~40M/month, 25 RPS (PUBLIC FALLBACK - NO KEY NEEDED)
+ * 2. OnFinality - 500K daily reqs (~15M/month), enterprise-grade (SECONDARY - BSC/Polygon/Avalanche/Fantom)
+ * 3. Ankr       - 200M credits/month, 30 RPS (SECONDARY)
+ * 4. PublicNode - Unlimited, ~100-200 RPS (OVERFLOW/BURST - NO KEY NEEDED)
+ * 5. Infura     - 3M/day (~90M/month), 500 CU/s (DAILY RESET)
+ * 6. Alchemy    - 30M CU/month, 25 RPS (QUALITY RESERVE)
+ * 7. QuickNode  - 10M credits/month, 15 RPS (LAST RESORT)
+ * 8. BlastAPI   - ~40M/month, 25 RPS (PUBLIC FALLBACK - NO KEY NEEDED)
  *
  * Thread Safety: This module is designed for single-threaded Node.js execution.
  * Budget tracking state is not thread-safe for worker thread access.
@@ -66,6 +67,15 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     rpsLimit: 100, // Dynamic 40-100 RPS
     requiresApiKey: true,
     apiKeyEnvVar: 'DRPC_API_KEY',
+    supportsWebSocket: true
+  },
+  onfinality: {
+    name: 'OnFinality',
+    tier: ProviderTier.SECONDARY,
+    monthlyCapacityCU: 15_000_000, // 500K daily reqs * 30 days
+    rpsLimit: 50, // Enterprise-grade developer plan
+    requiresApiKey: true,
+    apiKeyEnvVar: 'ONFINALITY_API_KEY',
     supportsWebSocket: true
   },
   ankr: {
@@ -130,6 +140,7 @@ export const CHAIN_NETWORK_NAMES: Record<string, {
   drpc: string;
   ankr: string;
   publicnode: string;
+  onfinality?: string;
   infura?: string;
   alchemy?: string;
   blastapi: string;
@@ -154,6 +165,7 @@ export const CHAIN_NETWORK_NAMES: Record<string, {
     drpc: 'bsc',
     ankr: 'bsc',
     publicnode: 'bsc-rpc',
+    onfinality: 'bsc',
     // Infura doesn't support BSC
     // Alchemy doesn't support BSC
     blastapi: 'bsc'
@@ -170,6 +182,7 @@ export const CHAIN_NETWORK_NAMES: Record<string, {
     drpc: 'polygon',
     ankr: 'polygon',
     publicnode: 'polygon-bor-rpc',
+    onfinality: 'polygon',
     infura: 'polygon-mainnet',
     alchemy: 'polygon',
     blastapi: 'polygon'
@@ -186,6 +199,7 @@ export const CHAIN_NETWORK_NAMES: Record<string, {
     drpc: 'avalanche-c',
     ankr: 'avalanche',
     publicnode: 'avalanche-c-chain-rpc',
+    onfinality: 'avalanche',
     infura: 'avalanche-mainnet',
     alchemy: 'avax',
     blastapi: 'avax'
@@ -194,6 +208,7 @@ export const CHAIN_NETWORK_NAMES: Record<string, {
     drpc: 'fantom',
     ankr: 'fantom',
     publicnode: 'fantom-rpc',
+    onfinality: 'fantom',
     // Infura limited support
     alchemy: 'fantom',
     blastapi: 'fantom'
@@ -267,6 +282,16 @@ export function buildAlchemyUrl(network: string, apiKey: string, isWebSocket = f
 }
 
 /**
+ * Build OnFinality URL with API key (SECONDARY - 500K daily reqs, enterprise-grade)
+ * Supports BSC, Polygon, Avalanche, Fantom
+ */
+export function buildOnFinalityUrl(network: string, apiKey: string, isWebSocket = false): string {
+  const protocol = isWebSocket ? 'wss' : 'https';
+  const path = isWebSocket ? 'ws' : 'rpc';
+  return `${protocol}://${network}.api.onfinality.io/${path}?apikey=${apiKey}`;
+}
+
+/**
  * Build BlastAPI URL (public, no key needed)
  */
 export function buildBlastApiUrl(network: string, isWebSocket = false): string {
@@ -295,28 +320,34 @@ export function getProviderUrlsForChain(
     urls.push(buildDrpcUrl(networkNames.drpc, drpcKey, isWebSocket));
   }
 
-  // 2. Ankr (SECONDARY) - 200M CU/month
+  // 2. OnFinality (SECONDARY) - 500K daily reqs, enterprise-grade (BSC/Polygon/Avalanche/Fantom)
+  const onFinalityKey = process.env.ONFINALITY_API_KEY;
+  if (onFinalityKey && networkNames.onfinality) {
+    urls.push(buildOnFinalityUrl(networkNames.onfinality, onFinalityKey, isWebSocket));
+  }
+
+  // 3. Ankr (SECONDARY) - 200M CU/month
   const ankrKey = process.env.ANKR_API_KEY;
   if (ankrKey) {
     urls.push(buildAnkrUrl(networkNames.ankr, ankrKey, isWebSocket));
   }
 
-  // 3. PublicNode (OVERFLOW) - Unlimited, no key needed
+  // 4. PublicNode (OVERFLOW) - Unlimited, no key needed
   urls.push(buildPublicNodeUrl(networkNames.publicnode, isWebSocket));
 
-  // 4. Infura (TERTIARY) - 3M/day
+  // 5. Infura (TERTIARY) - 3M/day
   const infuraKey = process.env.INFURA_API_KEY;
   if (infuraKey && networkNames.infura) {
     urls.push(buildInfuraUrl(networkNames.infura, infuraKey, isWebSocket));
   }
 
-  // 5. Alchemy (TERTIARY) - 30M CU/month
+  // 6. Alchemy (TERTIARY) - 30M CU/month
   const alchemyKey = process.env.ALCHEMY_API_KEY;
   if (alchemyKey && networkNames.alchemy) {
     urls.push(buildAlchemyUrl(networkNames.alchemy, alchemyKey, isWebSocket));
   }
 
-  // 6. BlastAPI (LAST RESORT) - public fallback
+  // 7. BlastAPI (LAST RESORT) - public fallback
   urls.push(buildBlastApiUrl(networkNames.blastapi, isWebSocket));
 
   // Return primary (first) and fallbacks (rest)
@@ -342,13 +373,13 @@ export function getTimeBasedProviderOrder(): string[] {
 
   if (hour < 8) {
     // Early UTC: Use Infura first (fresh daily allocation)
-    return ['infura', 'drpc', 'ankr', 'publicnode', 'alchemy', 'quicknode', 'blastapi'];
+    return ['infura', 'drpc', 'onfinality', 'ankr', 'publicnode', 'alchemy', 'quicknode', 'blastapi'];
   } else if (hour < 20) {
     // Mid-day: Use dRPC primary (highest capacity)
-    return ['drpc', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
+    return ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
   } else {
-    // Late UTC: Spread across Ankr/PublicNode to preserve Infura for next day
-    return ['ankr', 'publicnode', 'drpc', 'alchemy', 'infura', 'quicknode', 'blastapi'];
+    // Late UTC: Spread across Ankr/PublicNode, OnFinality preserves daily budget
+    return ['ankr', 'publicnode', 'drpc', 'onfinality', 'alchemy', 'infura', 'quicknode', 'blastapi'];
   }
 }
 

@@ -20,6 +20,7 @@ import {
   buildDrpcUrl,
   buildAnkrUrl,
   buildPublicNodeUrl,
+  buildOnFinalityUrl,
   buildInfuraUrl,
   buildAlchemyUrl,
   buildBlastApiUrl,
@@ -35,10 +36,10 @@ import {
 describe('PROVIDER_CONFIGS', () => {
   const providerNames = Object.keys(PROVIDER_CONFIGS);
 
-  it('should have 7 providers defined', () => {
-    expect(providerNames).toHaveLength(7);
+  it('should have 8 providers defined', () => {
+    expect(providerNames).toHaveLength(8);
     expect(providerNames).toEqual(
-      expect.arrayContaining(['drpc', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'])
+      expect.arrayContaining(['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'])
     );
   });
 
@@ -53,7 +54,8 @@ describe('PROVIDER_CONFIGS', () => {
     expect(PROVIDER_CONFIGS.drpc.tier).toBe(ProviderTier.PRIMARY);
   });
 
-  it('should have ankr and publicnode as SECONDARY tier', () => {
+  it('should have onfinality, ankr, and publicnode as SECONDARY tier', () => {
+    expect(PROVIDER_CONFIGS.onfinality.tier).toBe(ProviderTier.SECONDARY);
     expect(PROVIDER_CONFIGS.ankr.tier).toBe(ProviderTier.SECONDARY);
     expect(PROVIDER_CONFIGS.publicnode.tier).toBe(ProviderTier.SECONDARY);
   });
@@ -194,6 +196,20 @@ describe('URL builder functions', () => {
     it('should build WSS URL when isWebSocket is true', () => {
       expect(buildAnkrUrl('eth', 'key123', true)).toBe(
         'wss://rpc.ankr.com/eth/key123'
+      );
+    });
+  });
+
+  describe('buildOnFinalityUrl', () => {
+    it('should build HTTPS URL by default', () => {
+      expect(buildOnFinalityUrl('bsc', 'key123')).toBe(
+        'https://bsc.api.onfinality.io/rpc?apikey=key123'
+      );
+    });
+
+    it('should build WSS URL when isWebSocket is true', () => {
+      expect(buildOnFinalityUrl('bsc', 'key123', true)).toBe(
+        'wss://bsc.api.onfinality.io/ws?apikey=key123'
       );
     });
   });
@@ -386,16 +402,16 @@ describe('getTimeBasedProviderOrder', () => {
     expect(order[0]).toBe('ankr');
   });
 
-  it('should always return 7 providers in the order', () => {
+  it('should always return 8 providers in the order', () => {
     for (const hour of [0, 8, 20]) {
       mockUTCHour(hour);
       const order = getTimeBasedProviderOrder();
-      expect(order).toHaveLength(7);
+      expect(order).toHaveLength(8);
     }
   });
 
   it('should include all provider names in every time window', () => {
-    const allProviders = ['drpc', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
+    const allProviders = ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
     for (const hour of [0, 8, 20]) {
       mockUTCHour(hour);
       const order = getTimeBasedProviderOrder();
