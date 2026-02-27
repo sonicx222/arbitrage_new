@@ -279,7 +279,7 @@ describe('FlashLoanArbitrage - Mainnet Fork Integration', function () {
           0n, // minimumProfit
           deadline
         )
-      ).to.be.reverted; // Reverts in Aave callback (InsufficientProfit or DEX slippage)
+      ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientProfit');
     });
 
     it('should calculate expected profit using real DEX quotes', async () => {

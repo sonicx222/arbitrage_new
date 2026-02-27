@@ -103,9 +103,6 @@ describe('BalancerV2FlashArbitrage', () => {
     });
   });
 
-  // Note: Router Management tests now covered by shared admin harness
-  // in BalancerV2FlashArbitrage.callback-admin.test.ts (testRouterManagement)
-
   // ===========================================================================
   // 3. Flash Loan Execution Tests
   // ===========================================================================

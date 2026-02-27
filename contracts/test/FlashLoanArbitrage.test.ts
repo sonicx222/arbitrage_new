@@ -873,7 +873,6 @@ describe('FlashLoanArbitrage', () => {
       expect(poolBalanceAfter).to.be.gte(poolBalanceBefore + premium);
     });
 
-    // Note: withdrawToken and withdrawETH tests now covered by shared admin harness
   });
 
   // ===========================================================================
@@ -1088,10 +1087,6 @@ describe('FlashLoanArbitrage', () => {
   // Edge Case Tests (Added for regression prevention)
   // ===========================================================================
   describe('Edge Cases', () => {
-    // Note: setWithdrawGasLimit tests now covered by shared admin harness (testWithdrawGasLimitConfig)
-    // Note: Swap Deadline Configuration tests now covered by shared admin harness (testSwapDeadlineConfig)
-    // Note: EnumerableSet Router Storage tests now covered by shared admin harness (testRouterManagement)
-
     describe('Constants Verification', () => {
       it('should have correct DEFAULT_SWAP_DEADLINE constant', async () => {
         const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
@@ -1242,8 +1237,6 @@ describe('FlashLoanArbitrage', () => {
         ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientSlippageProtection');
       });
     });
-
-    // Note: Ownable2Step tests now covered by shared admin harness (testOwnable2Step)
 
     describe('Fix 10.3: Router Validation Optimization', () => {
       it('should only validate unique routers (optimization test)', async () => {

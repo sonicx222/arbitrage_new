@@ -1202,9 +1202,9 @@ describe('SyncSwapFlashArbitrage', () => {
   });
 
   // ===========================================================================
-  // 9. Integration Tests
+  // 9. End-to-End Flow Tests
   // ===========================================================================
-  describe('9. Integration Tests', () => {
+  describe('9. End-to-End Flow Tests', () => {
     it('should execute complete arbitrage flow end-to-end', async () => {
       const {
         syncSwapArbitrage,

@@ -219,8 +219,6 @@ describe('PancakeSwapFlashArbitrage', () => {
     });
   });
 
-  // Note: Minimum Profit and Swap Deadline tests now covered by shared admin harness
-
   // ===========================================================================
   // Flash Loan Execution Tests
   // ===========================================================================
@@ -705,8 +703,6 @@ describe('PancakeSwapFlashArbitrage', () => {
   // ===========================================================================
   // Fund Recovery Tests
   // ===========================================================================
-  // Note: Fund Recovery tests now covered by shared admin harness (testWithdrawToken, testWithdrawETH)
-
   // ===========================================================================
   // Batch Pool Whitelisting Tests (whitelistMultiplePools)
   // ===========================================================================
@@ -965,8 +961,6 @@ describe('PancakeSwapFlashArbitrage', () => {
       expect(contractBalance).to.be.gt(0);
     });
   });
-
-  // Note: Ownable2Step tests now covered by shared admin harness (testOwnable2Step)
 
   // ===========================================================================
   // Gas Benchmark Tests

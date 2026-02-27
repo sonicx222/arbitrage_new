@@ -445,8 +445,6 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   // 9. Access Control Tests
   // ===========================================================================
   describe('9. Access Control', () => {
-    // Note: Ownable2Step tests now covered by shared admin harness (testOwnable2Step)
-
     describe('ReentrancyGuard', () => {
       it('should prevent reentrancy attacks via malicious router', async () => {
         const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);

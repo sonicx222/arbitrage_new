@@ -13,6 +13,7 @@ import {
   mineBlocks,
   testRouterManagement,
   testMinimumProfitConfig,
+  testSwapDeadlineConfig,
   testPauseUnpause,
   testWithdrawToken,
   testWithdrawETH,
@@ -853,6 +854,7 @@ describe('CommitRevealArbitrage Execution', () => {
   // ===========================================================================
   testRouterManagement(adminConfig);
   testMinimumProfitConfig(adminConfig);
+  testSwapDeadlineConfig(adminConfig);
   testPauseUnpause(adminConfig);
   testWithdrawToken(adminConfig);
   testWithdrawETH(adminConfig);
