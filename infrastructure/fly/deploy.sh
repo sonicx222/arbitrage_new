@@ -10,7 +10,7 @@
 #   coordinator        Deploy Coordinator (primary)
 #   coordinator-standby Deploy Coordinator standby instance
 #   execution-engine   Deploy Execution Engine
-#   l2-fast            Deploy L2-Fast partition (Arbitrum, Optimism, Base, Scroll, Blast)
+#   l2-turbo           Deploy L2-Turbo partition (Arbitrum, Optimism, Base, Scroll, Blast)
 #   high-value         Deploy High-Value partition (Ethereum, zkSync, Linea)
 #   asia-fast           Deploy Asia-Fast partition (BSC, Polygon, Avalanche, Fantom)
 #   solana             Deploy Solana partition
@@ -65,229 +65,69 @@ check_fly_auth() {
     log_info "Logged in to Fly.io as: $(fly auth whoami)"
 }
 
-# Set up secrets for L2-Fast partition
-setup_l2_fast_secrets() {
-    log_info "Setting up secrets for L2-Fast partition..."
+# =============================================================================
+# Generic secrets setup — all setup_*_secrets() functions delegate to this
+# =============================================================================
+# Args: $1=display_name, $2=config_file, $3...=additional secret names
+# Common secrets (REDIS_URL, STREAM_SIGNING_KEY) are always prompted first.
+# Additional secrets are prompted in the order specified.
+setup_service_secrets() {
+    local display_name="$1"
+    local config_file="$2"
+    shift 2
+    local extra_secrets=("$@")
+
+    log_info "Setting up secrets for ${display_name}..."
     log_warn "Secrets will be hidden from terminal output for security"
 
+    local args=()
+    local value
+
+    # Common secrets (all services need these)
     echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
+    read -rs value; echo ""
+    args+=("REDIS_URL=${value}")
 
     echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
+    read -rs value; echo ""
+    args+=("STREAM_SIGNING_KEY=${value}")
 
-    echo -n "Enter ARBITRUM_WS_URL: "
-    read -rs ARBITRUM_WS_URL
-    echo ""
+    # Service-specific secrets
+    for secret_name in "${extra_secrets[@]}"; do
+        echo -n "Enter ${secret_name}: "
+        read -rs value; echo ""
+        args+=("${secret_name}=${value}")
+    done
 
-    echo -n "Enter ARBITRUM_RPC_URL: "
-    read -rs ARBITRUM_RPC_URL
-    echo ""
+    fly secrets set "${args[@]}" -c "${config_file}"
 
-    echo -n "Enter OPTIMISM_WS_URL: "
-    read -rs OPTIMISM_WS_URL
-    echo ""
-
-    echo -n "Enter OPTIMISM_RPC_URL: "
-    read -rs OPTIMISM_RPC_URL
-    echo ""
-
-    echo -n "Enter BASE_WS_URL: "
-    read -rs BASE_WS_URL
-    echo ""
-
-    echo -n "Enter BASE_RPC_URL: "
-    read -rs BASE_RPC_URL
-    echo ""
-
-    echo -n "Enter SCROLL_WS_URL: "
-    read -rs SCROLL_WS_URL
-    echo ""
-
-    echo -n "Enter SCROLL_RPC_URL: "
-    read -rs SCROLL_RPC_URL
-    echo ""
-
-    echo -n "Enter BLAST_WS_URL: "
-    read -rs BLAST_WS_URL
-    echo ""
-
-    echo -n "Enter BLAST_RPC_URL: "
-    read -rs BLAST_RPC_URL
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        ARBITRUM_WS_URL="$ARBITRUM_WS_URL" \
-        ARBITRUM_RPC_URL="$ARBITRUM_RPC_URL" \
-        OPTIMISM_WS_URL="$OPTIMISM_WS_URL" \
-        OPTIMISM_RPC_URL="$OPTIMISM_RPC_URL" \
-        BASE_WS_URL="$BASE_WS_URL" \
-        BASE_RPC_URL="$BASE_RPC_URL" \
-        SCROLL_WS_URL="$SCROLL_WS_URL" \
-        SCROLL_RPC_URL="$SCROLL_RPC_URL" \
-        BLAST_WS_URL="$BLAST_WS_URL" \
-        BLAST_RPC_URL="$BLAST_RPC_URL" \
-        -c "$SCRIPT_DIR/partition-l2-fast.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY ARBITRUM_WS_URL ARBITRUM_RPC_URL OPTIMISM_WS_URL OPTIMISM_RPC_URL BASE_WS_URL BASE_RPC_URL SCROLL_WS_URL SCROLL_RPC_URL BLAST_WS_URL BLAST_RPC_URL
-    log_info "Secrets set for L2-Fast partition"
+    log_info "Secrets set for ${display_name}"
 }
 
-# Set up secrets for Coordinator standby
+# Service-specific secret setup wrappers — all delegate to setup_service_secrets()
+setup_l2_turbo_secrets() {
+    setup_service_secrets "L2-Turbo partition" "$SCRIPT_DIR/partition-l2-turbo.toml" \
+        ARBITRUM_WS_URL ARBITRUM_RPC_URL OPTIMISM_WS_URL OPTIMISM_RPC_URL \
+        BASE_WS_URL BASE_RPC_URL SCROLL_WS_URL SCROLL_RPC_URL BLAST_WS_URL BLAST_RPC_URL
+}
+
 setup_coordinator_standby_secrets() {
-    log_info "Setting up secrets for Coordinator standby..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        -c "$SCRIPT_DIR/coordinator-standby.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY
-    log_info "Secrets set for Coordinator standby"
+    setup_service_secrets "Coordinator standby" "$SCRIPT_DIR/coordinator-standby.toml"
 }
 
-# Set up secrets for Coordinator (primary)
 setup_coordinator_secrets() {
-    log_info "Setting up secrets for Coordinator (primary)..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        -c "$SCRIPT_DIR/coordinator.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY
-    log_info "Secrets set for Coordinator (primary)"
+    setup_service_secrets "Coordinator (primary)" "$SCRIPT_DIR/coordinator.toml"
 }
 
-# Set up secrets for Execution Engine
 setup_execution_engine_secrets() {
-    log_info "Setting up secrets for Execution Engine..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    echo -n "Enter WALLET_PRIVATE_KEY (primary wallet): "
-    read -rs WALLET_PRIVATE_KEY
-    echo ""
-
-    echo -n "Enter ETHEREUM_RPC_URL: "
-    read -rs ETHEREUM_RPC_URL
-    echo ""
-
-    echo -n "Enter BSC_RPC_URL: "
-    read -rs BSC_RPC_URL
-    echo ""
-
-    echo -n "Enter ARBITRUM_RPC_URL: "
-    read -rs ARBITRUM_RPC_URL
-    echo ""
-
-    echo -n "Enter BASE_RPC_URL: "
-    read -rs BASE_RPC_URL
-    echo ""
-
-    echo -n "Enter POLYGON_RPC_URL: "
-    read -rs POLYGON_RPC_URL
-    echo ""
-
-    echo -n "Enter OPTIMISM_RPC_URL: "
-    read -rs OPTIMISM_RPC_URL
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        WALLET_PRIVATE_KEY="$WALLET_PRIVATE_KEY" \
-        ETHEREUM_RPC_URL="$ETHEREUM_RPC_URL" \
-        BSC_RPC_URL="$BSC_RPC_URL" \
-        ARBITRUM_RPC_URL="$ARBITRUM_RPC_URL" \
-        BASE_RPC_URL="$BASE_RPC_URL" \
-        POLYGON_RPC_URL="$POLYGON_RPC_URL" \
-        OPTIMISM_RPC_URL="$OPTIMISM_RPC_URL" \
-        -c "$SCRIPT_DIR/execution-engine.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY WALLET_PRIVATE_KEY ETHEREUM_RPC_URL BSC_RPC_URL ARBITRUM_RPC_URL BASE_RPC_URL POLYGON_RPC_URL OPTIMISM_RPC_URL
-    log_info "Secrets set for Execution Engine"
+    setup_service_secrets "Execution Engine" "$SCRIPT_DIR/execution-engine.toml" \
+        WALLET_PRIVATE_KEY ETHEREUM_RPC_URL BSC_RPC_URL ARBITRUM_RPC_URL \
+        BASE_RPC_URL POLYGON_RPC_URL OPTIMISM_RPC_URL
 }
 
-# Set up secrets for High-Value partition
 setup_high_value_secrets() {
-    log_info "Setting up secrets for High-Value partition..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    echo -n "Enter ETHEREUM_WS_URL: "
-    read -rs ETHEREUM_WS_URL
-    echo ""
-
-    echo -n "Enter ETHEREUM_RPC_URL: "
-    read -rs ETHEREUM_RPC_URL
-    echo ""
-
-    echo -n "Enter ZKSYNC_WS_URL: "
-    read -rs ZKSYNC_WS_URL
-    echo ""
-
-    echo -n "Enter ZKSYNC_RPC_URL: "
-    read -rs ZKSYNC_RPC_URL
-    echo ""
-
-    echo -n "Enter LINEA_WS_URL: "
-    read -rs LINEA_WS_URL
-    echo ""
-
-    echo -n "Enter LINEA_RPC_URL: "
-    read -rs LINEA_RPC_URL
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        ETHEREUM_WS_URL="$ETHEREUM_WS_URL" \
-        ETHEREUM_RPC_URL="$ETHEREUM_RPC_URL" \
-        ZKSYNC_WS_URL="$ZKSYNC_WS_URL" \
-        ZKSYNC_RPC_URL="$ZKSYNC_RPC_URL" \
-        LINEA_WS_URL="$LINEA_WS_URL" \
-        LINEA_RPC_URL="$LINEA_RPC_URL" \
-        -c "$SCRIPT_DIR/partition-high-value.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY ETHEREUM_WS_URL ETHEREUM_RPC_URL ZKSYNC_WS_URL ZKSYNC_RPC_URL LINEA_WS_URL LINEA_RPC_URL
-    log_info "Secrets set for High-Value partition"
+    setup_service_secrets "High-Value partition" "$SCRIPT_DIR/partition-high-value.toml" \
+        ETHEREUM_WS_URL ETHEREUM_RPC_URL ZKSYNC_WS_URL ZKSYNC_RPC_URL LINEA_WS_URL LINEA_RPC_URL
 }
 
 # Generic deploy function — all deploy_* functions delegate to this
@@ -369,8 +209,8 @@ verify_deployment_health() {
 }
 
 # Service-specific deploy wrappers — all delegate to deploy_service()
-deploy_l2_fast() {
-    deploy_service "L2-Fast partition" "arbitrage-l2-fast" "$SCRIPT_DIR/partition-l2-fast.toml"
+deploy_l2_turbo() {
+    deploy_service "L2-Turbo partition" "arbitrage-l2-fast" "$SCRIPT_DIR/partition-l2-turbo.toml"
 }
 
 deploy_coordinator_standby() {
@@ -394,154 +234,24 @@ deploy_asia_fast() {
     deploy_service "Asia-Fast partition" "arbitrage-asia-fast" "$SCRIPT_DIR/partition-asia-fast.toml"
 }
 
-# Set up secrets for Asia-Fast partition
 setup_asia_fast_secrets() {
-    log_info "Setting up secrets for Asia-Fast partition..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    echo -n "Enter BSC_WS_URL: "
-    read -rs BSC_WS_URL
-    echo ""
-
-    echo -n "Enter BSC_RPC_URL: "
-    read -rs BSC_RPC_URL
-    echo ""
-
-    echo -n "Enter POLYGON_WS_URL: "
-    read -rs POLYGON_WS_URL
-    echo ""
-
-    echo -n "Enter POLYGON_RPC_URL: "
-    read -rs POLYGON_RPC_URL
-    echo ""
-
-    echo -n "Enter AVALANCHE_WS_URL: "
-    read -rs AVALANCHE_WS_URL
-    echo ""
-
-    echo -n "Enter AVALANCHE_RPC_URL: "
-    read -rs AVALANCHE_RPC_URL
-    echo ""
-
-    echo -n "Enter FANTOM_WS_URL: "
-    read -rs FANTOM_WS_URL
-    echo ""
-
-    echo -n "Enter FANTOM_RPC_URL: "
-    read -rs FANTOM_RPC_URL
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        BSC_WS_URL="$BSC_WS_URL" \
-        BSC_RPC_URL="$BSC_RPC_URL" \
-        POLYGON_WS_URL="$POLYGON_WS_URL" \
-        POLYGON_RPC_URL="$POLYGON_RPC_URL" \
-        AVALANCHE_WS_URL="$AVALANCHE_WS_URL" \
-        AVALANCHE_RPC_URL="$AVALANCHE_RPC_URL" \
-        FANTOM_WS_URL="$FANTOM_WS_URL" \
-        FANTOM_RPC_URL="$FANTOM_RPC_URL" \
-        -c "$SCRIPT_DIR/partition-asia-fast.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY BSC_WS_URL BSC_RPC_URL POLYGON_WS_URL POLYGON_RPC_URL AVALANCHE_WS_URL AVALANCHE_RPC_URL FANTOM_WS_URL FANTOM_RPC_URL
-    log_info "Secrets set for Asia-Fast partition"
+    setup_service_secrets "Asia-Fast partition" "$SCRIPT_DIR/partition-asia-fast.toml" \
+        BSC_WS_URL BSC_RPC_URL POLYGON_WS_URL POLYGON_RPC_URL \
+        AVALANCHE_WS_URL AVALANCHE_RPC_URL FANTOM_WS_URL FANTOM_RPC_URL
 }
 
-# Set up secrets for Solana partition
 setup_solana_secrets() {
-    log_info "Setting up secrets for Solana partition..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    echo -n "Enter SOLANA_RPC_URL: "
-    read -rs SOLANA_RPC_URL
-    echo ""
-
-    echo -n "Enter SOLANA_WS_URL: "
-    read -rs SOLANA_WS_URL
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        SOLANA_RPC_URL="$SOLANA_RPC_URL" \
-        SOLANA_WS_URL="$SOLANA_WS_URL" \
-        -c "$SCRIPT_DIR/partition-solana.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY SOLANA_RPC_URL SOLANA_WS_URL
-    log_info "Secrets set for Solana partition"
+    setup_service_secrets "Solana partition" "$SCRIPT_DIR/partition-solana.toml" \
+        SOLANA_RPC_URL SOLANA_WS_URL
 }
 
 deploy_solana() {
     deploy_service "Solana partition" "arbitrage-solana" "$SCRIPT_DIR/partition-solana.toml"
 }
 
-# Set up secrets for Cross-Chain Detector
 setup_cross_chain_secrets() {
-    log_info "Setting up secrets for Cross-Chain Detector..."
-    log_warn "Secrets will be hidden from terminal output for security"
-
-    echo -n "Enter REDIS_URL (Redis connection URL — self-hosted recommended): "
-    read -rs REDIS_URL
-    echo ""
-
-    echo -n "Enter STREAM_SIGNING_KEY (HMAC key for Redis Streams — must match all services): "
-    read -rs STREAM_SIGNING_KEY
-    echo ""
-
-    echo -n "Enter ETHEREUM_RPC_URL: "
-    read -rs ETHEREUM_RPC_URL
-    echo ""
-
-    echo -n "Enter ARBITRUM_RPC_URL: "
-    read -rs ARBITRUM_RPC_URL
-    echo ""
-
-    echo -n "Enter BASE_RPC_URL: "
-    read -rs BASE_RPC_URL
-    echo ""
-
-    echo -n "Enter OPTIMISM_RPC_URL: "
-    read -rs OPTIMISM_RPC_URL
-    echo ""
-
-    echo -n "Enter BSC_RPC_URL: "
-    read -rs BSC_RPC_URL
-    echo ""
-
-    echo -n "Enter POLYGON_RPC_URL: "
-    read -rs POLYGON_RPC_URL
-    echo ""
-
-    fly secrets set \
-        REDIS_URL="$REDIS_URL" \
-        STREAM_SIGNING_KEY="$STREAM_SIGNING_KEY" \
-        ETHEREUM_RPC_URL="$ETHEREUM_RPC_URL" \
-        ARBITRUM_RPC_URL="$ARBITRUM_RPC_URL" \
-        BASE_RPC_URL="$BASE_RPC_URL" \
-        OPTIMISM_RPC_URL="$OPTIMISM_RPC_URL" \
-        BSC_RPC_URL="$BSC_RPC_URL" \
-        POLYGON_RPC_URL="$POLYGON_RPC_URL" \
-        -c "$SCRIPT_DIR/cross-chain-detector.toml"
-
-    unset REDIS_URL STREAM_SIGNING_KEY ETHEREUM_RPC_URL ARBITRUM_RPC_URL BASE_RPC_URL OPTIMISM_RPC_URL BSC_RPC_URL POLYGON_RPC_URL
-    log_info "Secrets set for Cross-Chain Detector"
+    setup_service_secrets "Cross-Chain Detector" "$SCRIPT_DIR/cross-chain-detector.toml" \
+        ETHEREUM_RPC_URL ARBITRUM_RPC_URL BASE_RPC_URL OPTIMISM_RPC_URL BSC_RPC_URL POLYGON_RPC_URL
 }
 
 deploy_cross_chain() {
@@ -575,8 +285,8 @@ show_status() {
     fi
 
     if echo "$apps_list" | grep -q "arbitrage-l2-fast"; then
-        echo "=== L2-Fast Partition ==="
-        fly status -c "$SCRIPT_DIR/partition-l2-fast.toml" 2>/dev/null || echo "Not deployed"
+        echo "=== L2-Turbo Partition ==="
+        fly status -c "$SCRIPT_DIR/partition-l2-turbo.toml" 2>/dev/null || echo "Not deployed"
         echo ""
     fi
 
@@ -614,7 +324,7 @@ main() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
-            coordinator|coordinator-standby|execution-engine|l2-fast|high-value|asia-fast|solana|cross-chain|all|status)
+            coordinator|coordinator-standby|execution-engine|l2-turbo|high-value|asia-fast|solana|cross-chain|all|status)
                 SERVICE="$1"
                 shift
                 ;;
@@ -633,7 +343,7 @@ main() {
                 echo "  coordinator          Deploy Coordinator (primary)"
                 echo "  coordinator-standby  Deploy Coordinator standby"
                 echo "  execution-engine     Deploy Execution Engine"
-                echo "  l2-fast              Deploy L2-Fast partition"
+                echo "  l2-turbo             Deploy L2-Turbo partition"
                 echo "  high-value           Deploy High-Value partition"
                 echo "  asia-fast            Deploy Asia-Fast partition"
                 echo "  solana               Deploy Solana partition"
@@ -674,9 +384,9 @@ main() {
             [ "$SETUP_SECRETS" = true ] && setup_execution_engine_secrets
             deploy_execution_engine
             ;;
-        l2-fast)
-            [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
-            deploy_l2_fast
+        l2-turbo)
+            [ "$SETUP_SECRETS" = true ] && setup_l2_turbo_secrets
+            deploy_l2_turbo
             ;;
         high-value)
             [ "$SETUP_SECRETS" = true ] && setup_high_value_secrets
@@ -699,14 +409,14 @@ main() {
             [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
             [ "$SETUP_SECRETS" = true ] && setup_coordinator_standby_secrets
             [ "$SETUP_SECRETS" = true ] && setup_execution_engine_secrets
-            [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_l2_turbo_secrets
             [ "$SETUP_SECRETS" = true ] && setup_high_value_secrets
             [ "$SETUP_SECRETS" = true ] && setup_asia_fast_secrets
             [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
             [ "$SETUP_SECRETS" = true ] && setup_cross_chain_secrets
             # Deploy partitions in parallel (independent services), then dependent services sequentially
             log_info "Deploying partitions in parallel..."
-            deploy_l2_fast &
+            deploy_l2_turbo &
             deploy_high_value &
             deploy_asia_fast &
             deploy_solana &

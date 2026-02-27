@@ -292,7 +292,7 @@ describe('REGRESSION: Cloud-Init Docker Ready Wait and Health Check', () => {
     // Must validate critical variables
     expect(content).toContain('validate_var');
     expect(content).toContain('docker_image');
-    expect(content).toContain('redis_url');
+    expect(content).toContain('redis_password');
   });
 
   it('should have proper systemd service dependencies in cross-chain', () => {
@@ -396,16 +396,16 @@ describe('REGRESSION: Failover Script Endpoint URLs', () => {
 // =============================================================================
 
 describe('REGRESSION: Fly.io TOML Syntax', () => {
-  const l2FastPath = path.join(FLY_DIR, 'partition-l2-fast.toml');
+  const l2TurboPath = path.join(FLY_DIR, 'partition-l2-turbo.toml');
   const coordinatorPath = path.join(FLY_DIR, 'coordinator-standby.toml');
 
   beforeAll(() => {
-    expect(fileExists(l2FastPath)).toBe(true);
+    expect(fileExists(l2TurboPath)).toBe(true);
     expect(fileExists(coordinatorPath)).toBe(true);
   });
 
   it('should NOT mix V1 [[services]] and V2 [http_service] syntax (CRITICAL)', () => {
-    const l2Content = readFile(l2FastPath);
+    const l2Content = readFile(l2TurboPath);
     const coordContent = readFile(coordinatorPath);
 
     // If using [http_service] (V2), should NOT have [[services]] (V1)
@@ -419,7 +419,7 @@ describe('REGRESSION: Fly.io TOML Syntax', () => {
   });
 
   it('should use [vm] (single) not [[vm]] (array) for single VM config', () => {
-    const l2Content = readFile(l2FastPath);
+    const l2Content = readFile(l2TurboPath);
     const coordContent = readFile(coordinatorPath);
 
     // Single VM should use [vm], not [[vm]]
@@ -431,7 +431,7 @@ describe('REGRESSION: Fly.io TOML Syntax', () => {
   });
 
   it('should have [checks] section for health checks (V2 style)', () => {
-    const l2Content = readFile(l2FastPath);
+    const l2Content = readFile(l2TurboPath);
     const coordContent = readFile(coordinatorPath);
 
     // V2 uses [checks] section
@@ -443,7 +443,7 @@ describe('REGRESSION: Fly.io TOML Syntax', () => {
   });
 
   it('should have [metrics] section for observability', () => {
-    const l2Content = readFile(l2FastPath);
+    const l2Content = readFile(l2TurboPath);
     const coordContent = readFile(coordinatorPath);
 
     // Both should have metrics configuration
@@ -519,7 +519,7 @@ describe('Summary: Critical Files Were Modified', () => {
     { path: path.join(ORACLE_DIR, 'scripts', 'cloud-init-cross-chain.yaml'), description: 'Cross-chain cloud-init' },
     { path: path.join(SCRIPTS_DIR, 'health-check.sh'), description: 'Health check script' },
     { path: path.join(SCRIPTS_DIR, 'failover.sh'), description: 'Failover script' },
-    { path: path.join(FLY_DIR, 'partition-l2-fast.toml'), description: 'Fly.io L2 config' },
+    { path: path.join(FLY_DIR, 'partition-l2-turbo.toml'), description: 'Fly.io L2 config' },
     { path: path.join(FLY_DIR, 'coordinator-standby.toml'), description: 'Fly.io coordinator config' },
     { path: path.join(SCRIPTS_DIR, 'lib', 'health-utils.sh'), description: 'Shared health utilities' },
   ];

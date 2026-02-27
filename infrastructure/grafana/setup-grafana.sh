@@ -253,31 +253,85 @@ import_alert_rules() {
     log_info "  /etc/grafana/provisioning/alerting/warming-infrastructure.yml"
 }
 
-# Function to create notification channels
+# Function to create notification contact points via Grafana Alerting API
+# Uses the unified alerting contact points API (Grafana 9+)
 create_notification_channels() {
-    log_info "Setting up notification channels..."
+    log_info "Setting up notification contact points..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "  [DRY RUN] Would create notification channels"
+        log_info "  [DRY RUN] Would create notification contact points"
         return 0
     fi
 
-    # Check if PagerDuty channel exists
+    # PagerDuty contact point
     local pagerduty_key="${PAGERDUTY_SERVICE_KEY:-}"
     if [[ -n "$pagerduty_key" ]]; then
-        log_info "Creating PagerDuty notification channel..."
-        # Implementation would go here
-        log_info "✓ PagerDuty channel configured"
+        log_info "Creating PagerDuty contact point..."
+
+        local pd_payload
+        pd_payload=$(jq -n \
+            --arg key "$pagerduty_key" \
+            '{
+                name: "PagerDuty - Arbitrage Critical",
+                type: "pagerduty",
+                settings: {
+                    integrationKey: $key,
+                    severity: "critical",
+                    class: "arbitrage-infrastructure"
+                }
+            }')
+
+        local response
+        response=$(curl -s -X POST \
+            -H "Authorization: Bearer ${GRAFANA_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$pd_payload" \
+            "${GRAFANA_URL}/api/v1/provisioning/contact-points" 2>&1)
+
+        if echo "$response" | grep -q '"uid"'; then
+            log_info "✓ PagerDuty contact point created"
+        elif echo "$response" | grep -q 'already exists'; then
+            log_info "✓ PagerDuty contact point already exists"
+        else
+            log_warn "PagerDuty setup response: $response"
+        fi
     else
         log_warn "PAGERDUTY_SERVICE_KEY not set, skipping PagerDuty setup"
     fi
 
-    # Check if Slack webhook exists
+    # Slack contact point
     local slack_webhook="${SLACK_WEBHOOK_URL:-}"
     if [[ -n "$slack_webhook" ]]; then
-        log_info "Creating Slack notification channels..."
-        # Implementation would go here
-        log_info "✓ Slack channels configured"
+        log_info "Creating Slack contact point..."
+
+        local slack_payload
+        slack_payload=$(jq -n \
+            --arg url "$slack_webhook" \
+            '{
+                name: "Slack - Arbitrage Alerts",
+                type: "slack",
+                settings: {
+                    url: $url,
+                    recipient: "#arbitrage-alerts",
+                    title: "{{ template \"default.title\" . }}",
+                    text: "{{ template \"default.message\" . }}"
+                }
+            }')
+
+        local response
+        response=$(curl -s -X POST \
+            -H "Authorization: Bearer ${GRAFANA_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$slack_payload" \
+            "${GRAFANA_URL}/api/v1/provisioning/contact-points" 2>&1)
+
+        if echo "$response" | grep -q '"uid"'; then
+            log_info "✓ Slack contact point created"
+        elif echo "$response" | grep -q 'already exists'; then
+            log_info "✓ Slack contact point already exists"
+        else
+            log_warn "Slack setup response: $response"
+        fi
     else
         log_warn "SLACK_WEBHOOK_URL not set, skipping Slack setup"
     fi

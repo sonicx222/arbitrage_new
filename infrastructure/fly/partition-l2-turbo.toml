@@ -1,6 +1,6 @@
-# Fly.io Deployment Configuration for L2-Fast Partition
+# Fly.io Deployment Configuration for L2-Turbo Partition
 #
-# Partition: l2-turbo (file named l2-fast for historical reasons; PARTITION_ID=l2-turbo)
+# Partition: l2-turbo
 # Chains: Arbitrum, Optimism, Base, Scroll, Blast
 # Region: asia-southeast1 (Singapore)
 # Resource Profile: standard (640MB — increased for 5-chain workload)
@@ -10,10 +10,12 @@
 # @see ADR-007: Cross-Region Failover Strategy
 #
 # Deployment:
-#   fly deploy -c infrastructure/fly/partition-l2-fast.toml
+#   fly deploy -c infrastructure/fly/partition-l2-turbo.toml
 #
 # Scaling:
-#   fly scale memory 640 -c infrastructure/fly/partition-l2-fast.toml
+#   fly scale memory 640 -c infrastructure/fly/partition-l2-turbo.toml
+#
+# NOTE: Fly app name remains "arbitrage-l2-fast" (historical — renaming requires app migration)
 
 app = "arbitrage-l2-fast"
 primary_region = "sin"
@@ -84,7 +86,7 @@ primary_region = "sin"
 
 # Deploy strategy
 [deploy]
-  release_command = "echo 'L2-Fast partition deploying...'"
+  release_command = "echo 'L2-Turbo partition deploying...'"
   strategy = "rolling"
 
 # Secrets to configure (via fly secrets set):

@@ -81,7 +81,7 @@ build_health_url() {
 # Port mappings (per ADR-003 and docker-compose.partition.yml):
 #   - Coordinator:           3000
 #   - partition-asia-fast:   3011
-#   - partition-l2-fast:     3012
+#   - partition-l2-turbo:     3012
 #   - partition-high-value:  3013
 #   - partition-solana:      3014
 #   - execution-engine:      3015
@@ -90,7 +90,7 @@ declare -A SERVICE_ENDPOINTS=(
     ["coordinator-primary"]="$(build_health_url "${COORDINATOR_PRIMARY_URL:-http://localhost:3000}")"
     ["coordinator-standby"]="$(build_health_url "${COORDINATOR_STANDBY_URL:-}")"
     ["partition-asia-fast"]="$(build_health_url "${PARTITION_ASIA_FAST_URL:-http://localhost:3011}")"
-    ["partition-l2-fast"]="$(build_health_url "${PARTITION_L2_FAST_URL:-http://localhost:3012}")"
+    ["partition-l2-turbo"]="$(build_health_url "${PARTITION_L2_TURBO_URL:-http://localhost:3012}")"
     ["partition-high-value"]="$(build_health_url "${PARTITION_HIGH_VALUE_URL:-http://localhost:3013}")"
     ["partition-solana"]="$(build_health_url "${PARTITION_SOLANA_URL:-http://localhost:3014}")"
     ["cross-chain-detector"]="$(build_health_url "${CROSS_CHAIN_URL:-http://localhost:3016}")"
@@ -103,7 +103,7 @@ declare -A SERVICE_ENDPOINTS=(
 declare -A STANDBY_SERVICES=(
     ["coordinator-primary"]="coordinator-standby"
     ["partition-asia-fast"]=""
-    ["partition-l2-fast"]=""
+    ["partition-l2-turbo"]=""
     ["partition-high-value"]=""
     ["partition-solana"]=""
 )
@@ -375,7 +375,7 @@ usage() {
     echo "  COORDINATOR_PRIMARY_URL"
     echo "  COORDINATOR_STANDBY_URL"
     echo "  PARTITION_ASIA_FAST_URL"
-    echo "  PARTITION_L2_FAST_URL"
+    echo "  PARTITION_L2_TURBO_URL"
     echo "  PARTITION_HIGH_VALUE_URL"
     echo "  PARTITION_SOLANA_URL"
     echo "  CROSS_CHAIN_URL"
