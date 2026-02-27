@@ -36,10 +36,10 @@ import {
 describe('PROVIDER_CONFIGS', () => {
   const providerNames = Object.keys(PROVIDER_CONFIGS);
 
-  it('should have 8 providers defined', () => {
-    expect(providerNames).toHaveLength(8);
+  it('should have 7 providers defined', () => {
+    expect(providerNames).toHaveLength(7);
     expect(providerNames).toEqual(
-      expect.arrayContaining(['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'])
+      expect.arrayContaining(['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'blastapi'])
     );
   });
 
@@ -65,8 +65,7 @@ describe('PROVIDER_CONFIGS', () => {
     expect(PROVIDER_CONFIGS.alchemy.tier).toBe(ProviderTier.TERTIARY);
   });
 
-  it('should have quicknode and blastapi as LAST_RESORT tier', () => {
-    expect(PROVIDER_CONFIGS.quicknode.tier).toBe(ProviderTier.LAST_RESORT);
+  it('should have blastapi as LAST_RESORT tier', () => {
     expect(PROVIDER_CONFIGS.blastapi.tier).toBe(ProviderTier.LAST_RESORT);
   });
 
@@ -402,16 +401,16 @@ describe('getTimeBasedProviderOrder', () => {
     expect(order[0]).toBe('ankr');
   });
 
-  it('should always return 8 providers in the order', () => {
+  it('should always return 7 providers in the order', () => {
     for (const hour of [0, 8, 20]) {
       mockUTCHour(hour);
       const order = getTimeBasedProviderOrder();
-      expect(order).toHaveLength(8);
+      expect(order).toHaveLength(7);
     }
   });
 
   it('should include all provider names in every time window', () => {
-    const allProviders = ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
+    const allProviders = ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'blastapi'];
     for (const hour of [0, 8, 20]) {
       mockUTCHour(hour);
       const order = getTimeBasedProviderOrder();

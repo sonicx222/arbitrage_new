@@ -1,8 +1,8 @@
 /**
- * RPC Provider Configuration - 6-Provider Shield Architecture
+ * RPC Provider Configuration - 7-Provider Shield Architecture
  *
  * Implements the optimized provider strategy from RPC_DEEP_DIVE_ANALYSIS.md:
- * - Combined Free Tier: ~540M CU/month + unlimited PublicNode
+ * - Combined Free Tier: ~555M CU/month + unlimited PublicNode
  * - Combined RPS: 210-375 requests/second
  * - Target: 24/7 uptime with $0/month cost
  *
@@ -13,8 +13,7 @@
  * 4. PublicNode - Unlimited, ~100-200 RPS (OVERFLOW/BURST - NO KEY NEEDED)
  * 5. Infura     - 3M/day (~90M/month), 500 CU/s (DAILY RESET)
  * 6. Alchemy    - 30M CU/month, 25 RPS (QUALITY RESERVE)
- * 7. QuickNode  - 10M credits/month, 15 RPS (LAST RESORT)
- * 8. BlastAPI   - ~40M/month, 25 RPS (PUBLIC FALLBACK - NO KEY NEEDED)
+ * 7. BlastAPI   - ~40M/month, 25 RPS (PUBLIC FALLBACK - NO KEY NEEDED)
  *
  * Thread Safety: This module is designed for single-threaded Node.js execution.
  * Budget tracking state is not thread-safe for worker thread access.
@@ -112,15 +111,6 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     rpsLimit: 25,
     requiresApiKey: true,
     apiKeyEnvVar: 'ALCHEMY_API_KEY',
-    supportsWebSocket: true
-  },
-  quicknode: {
-    name: 'QuickNode',
-    tier: ProviderTier.LAST_RESORT,
-    monthlyCapacityCU: 10_000_000,
-    rpsLimit: 15,
-    requiresApiKey: true,
-    apiKeyEnvVar: 'QUICKNODE_API_KEY',
     supportsWebSocket: true
   },
   blastapi: {
@@ -373,13 +363,13 @@ export function getTimeBasedProviderOrder(): string[] {
 
   if (hour < 8) {
     // Early UTC: Use Infura first (fresh daily allocation)
-    return ['infura', 'drpc', 'onfinality', 'ankr', 'publicnode', 'alchemy', 'quicknode', 'blastapi'];
+    return ['infura', 'drpc', 'onfinality', 'ankr', 'publicnode', 'alchemy', 'blastapi'];
   } else if (hour < 20) {
     // Mid-day: Use dRPC primary (highest capacity)
-    return ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
+    return ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'blastapi'];
   } else {
     // Late UTC: Spread across Ankr/PublicNode, OnFinality preserves daily budget
-    return ['ankr', 'publicnode', 'drpc', 'onfinality', 'alchemy', 'infura', 'quicknode', 'blastapi'];
+    return ['ankr', 'publicnode', 'drpc', 'onfinality', 'alchemy', 'infura', 'blastapi'];
   }
 }
 

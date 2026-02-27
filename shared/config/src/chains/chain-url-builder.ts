@@ -4,8 +4,8 @@
  * Provides a centralized utility for building chain RPC and WebSocket URLs
  * with consistent environment variable resolution and fallback patterns.
  *
- * Updated to implement the 8-Provider Shield Architecture:
- * Priority: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → QuickNode → BlastAPI
+ * Updated to implement the 7-Provider Shield Architecture:
+ * Priority: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → BlastAPI
  *
  * @see P2-CONFIG from refactoring-roadmap.md
  * @see docs/reports/RPC_DEEP_DIVE_ANALYSIS.md
@@ -231,7 +231,7 @@ export function buildSolanaUrls(network: 'mainnet' | 'devnet' = 'mainnet'): Chai
 
 // =============================================================================
 // PRE-CONFIGURED URL BUILDERS FOR COMMON PATTERNS
-// Updated for 6-Provider Shield Architecture
+// Updated for 7-Provider Shield Architecture
 // =============================================================================
 
 /**
@@ -382,7 +382,7 @@ export function createAnkrConfig(network: string): ApiKeyUrlConfig {
 }
 
 /**
- * Build chain URLs with the optimized 6-Provider Shield priority order.
+ * Build chain URLs with the optimized 7-Provider Shield priority order.
  *
  * Resolution order:
  * 1. Explicit environment variable (e.g., ETHEREUM_RPC_URL)

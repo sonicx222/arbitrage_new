@@ -7,8 +7,8 @@
  * - T3: Selective opportunities (Ethereum)
  * - S3.1.2: New chains (Avalanche, Fantom, zkSync, Linea, Solana)
  *
- * Updated with 8-Provider Shield Architecture:
- * Priority: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → QuickNode → BlastAPI
+ * Updated with 7-Provider Shield Architecture:
+ * Priority: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → BlastAPI
  * Combined Free Tier: ~555M CU/month + unlimited PublicNode
  *
  * @see ADR-003: Partitioned Chain Detectors
@@ -75,7 +75,7 @@ const fallbacks = (...urls: (string | null)[]): string[] =>
 // Priority: T1 (Arbitrum, BSC, Base), T2 (Polygon, Optimism), T3 (Ethereum)
 // S3.1.2: New chains (Avalanche, Fantom, zkSync, Linea, Solana)
 // Emerging L2s: Blast, Scroll, Mantle, Mode
-// Updated with 8-Provider Shield: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy
+// Updated with 7-Provider Shield: dRPC → OnFinality → Ankr → PublicNode → Infura → Alchemy → BlastAPI
 // =============================================================================
 export const CHAINS: Record<string, Chain> = {
   // T1: Highest arbitrage potential
@@ -85,7 +85,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC (210M CU/month) > Ankr > PublicNode > Official
     rpcUrl: process.env.ARBITRUM_RPC_URL || drpc('arbitrum') || 'https://arb1.arbitrum.io/rpc',
     wsUrl: process.env.ARBITRUM_WS_URL || drpc('arbitrum', true) || 'wss://arb1.arbitrum.io/feed',
-    // 6-Provider Shield fallbacks in priority order
+    // 7-Provider Shield fallbacks in priority order
     wsFallbackUrls: fallbacks(
       ankr('arbitrum', true),
       publicNode('arbitrum-one-rpc', true),
@@ -112,7 +112,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > OnFinality > Ankr > PublicNode (Infura/Alchemy don't support BSC)
     rpcUrl: process.env.BSC_RPC_URL || drpc('bsc') || 'https://bsc-dataseed1.binance.org',
     wsUrl: process.env.BSC_WS_URL || drpc('bsc', true) || publicNode('bsc-rpc', true),
-    // 8-Provider Shield fallbacks (BSC: OnFinality, Ankr, PublicNode, BlastAPI)
+    // 7-Provider Shield fallbacks (BSC: OnFinality, Ankr, PublicNode, BlastAPI)
     wsFallbackUrls: fallbacks(
       onfinality('bsc', true),
       ankr('bsc', true),
@@ -138,7 +138,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > Ankr > PublicNode > Alchemy (Infura doesn't support Base)
     rpcUrl: process.env.BASE_RPC_URL || drpc('base') || 'https://mainnet.base.org',
     wsUrl: process.env.BASE_WS_URL || drpc('base', true) || publicNode('base-rpc', true),
-    // 6-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       ankr('base', true),
       publicNode('base-rpc', true),
@@ -164,7 +164,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > OnFinality > Ankr > PublicNode > Infura > Alchemy
     rpcUrl: process.env.POLYGON_RPC_URL || drpc('polygon') || 'https://polygon-rpc.com',
     wsUrl: process.env.POLYGON_WS_URL || drpc('polygon', true) || publicNode('polygon-bor-rpc', true),
-    // 8-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       onfinality('polygon', true),
       ankr('polygon', true),
@@ -193,7 +193,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > Ankr > PublicNode > Infura > Alchemy
     rpcUrl: process.env.OPTIMISM_RPC_URL || drpc('optimism') || 'https://mainnet.optimism.io',
     wsUrl: process.env.OPTIMISM_WS_URL || drpc('optimism', true) || publicNode('optimism-rpc', true),
-    // 6-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       ankr('optimism', true),
       publicNode('optimism-rpc', true),
@@ -221,7 +221,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > Ankr > PublicNode > Infura > Alchemy (full provider support)
     rpcUrl: process.env.ETHEREUM_RPC_URL || drpc('ethereum') || 'https://eth.llamarpc.com',
     wsUrl: process.env.ETHEREUM_WS_URL || drpc('ethereum', true) || publicNode('ethereum-rpc', true),
-    // 6-Provider Shield fallbacks - Ethereum has best provider coverage
+    // 7-Provider Shield fallbacks - Ethereum has best provider coverage
     wsFallbackUrls: fallbacks(
       ankr('eth', true),
       publicNode('ethereum-rpc', true),
@@ -244,7 +244,7 @@ export const CHAINS: Record<string, Chain> = {
   },
   // =============================================================================
   // S3.1.2: New Chains for 4-Partition Architecture
-  // Updated with 6-Provider Shield fallback strategy
+  // Updated with 7-Provider Shield fallback strategy
   // =============================================================================
   // Asia-Fast expansion (P1)
   avalanche: {
@@ -253,7 +253,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > OnFinality > Ankr > PublicNode > Infura > Alchemy
     rpcUrl: process.env.AVALANCHE_RPC_URL || drpc('avalanche-c') || 'https://api.avax.network/ext/bc/C/rpc',
     wsUrl: process.env.AVALANCHE_WS_URL || drpc('avalanche-c', true) || publicNode('avalanche-c-chain-rpc', true),
-    // 8-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       onfinality('avalanche', true),
       ankr('avalanche', true),
@@ -282,7 +282,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > OnFinality > Ankr > PublicNode > Alchemy (limited Infura support)
     rpcUrl: process.env.FANTOM_RPC_URL || drpc('fantom') || 'https://rpc.ftm.tools',
     wsUrl: process.env.FANTOM_WS_URL || drpc('fantom', true) || publicNode('fantom-rpc', true),
-    // 8-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       onfinality('fantom', true),
       ankr('fantom', true),
@@ -310,7 +310,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > Ankr > PublicNode > Infura > Alchemy
     rpcUrl: process.env.ZKSYNC_RPC_URL || drpc('zksync') || 'https://mainnet.era.zksync.io',
     wsUrl: process.env.ZKSYNC_WS_URL || drpc('zksync', true) || publicNode('zksync-era-rpc', true),
-    // 6-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       ankr('zksync_era', true),
       publicNode('zksync-era-rpc', true),
@@ -337,7 +337,7 @@ export const CHAINS: Record<string, Chain> = {
     // Primary: dRPC > Ankr > PublicNode > Infura (Alchemy limited support)
     rpcUrl: process.env.LINEA_RPC_URL || drpc('linea') || 'https://rpc.linea.build',
     wsUrl: process.env.LINEA_WS_URL || drpc('linea', true) || publicNode('linea-rpc', true),
-    // 6-Provider Shield fallbacks
+    // 7-Provider Shield fallbacks
     wsFallbackUrls: fallbacks(
       ankr('linea', true),
       publicNode('linea-rpc', true),
@@ -463,7 +463,7 @@ export const CHAINS: Record<string, Chain> = {
         : process.env.TRITON_API_KEY
           ? `wss://solana-mainnet.triton.one/v1/${process.env.TRITON_API_KEY}`
           : drpc('solana', true) || publicNode('solana-rpc', true)),
-    // 6-Provider Shield + Solana-specific fallbacks
+    // 7-Provider Shield + Solana-specific fallbacks
     wsFallbackUrls: fallbacks(
       // Triton as fallback if Helius is primary
       process.env.TRITON_API_KEY && process.env.HELIUS_API_KEY

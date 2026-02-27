@@ -981,13 +981,13 @@ export class ProviderHealthScorer {
 
     if (hour < 8) {
       // Early UTC: Use Infura first (fresh daily allocation)
-      basePriority = ['infura', 'drpc', 'onfinality', 'ankr', 'publicnode', 'alchemy', 'quicknode', 'blastapi'];
+      basePriority = ['infura', 'drpc', 'onfinality', 'ankr', 'publicnode', 'alchemy', 'blastapi'];
     } else if (hour < 20) {
       // Mid-day: Use dRPC primary (highest capacity)
-      basePriority = ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
+      basePriority = ['drpc', 'onfinality', 'ankr', 'publicnode', 'infura', 'alchemy', 'blastapi'];
     } else {
       // Late UTC: Spread across Ankr/PublicNode, OnFinality preserves daily budget
-      basePriority = ['ankr', 'publicnode', 'drpc', 'onfinality', 'alchemy', 'infura', 'quicknode', 'blastapi'];
+      basePriority = ['ankr', 'publicnode', 'drpc', 'onfinality', 'alchemy', 'infura', 'blastapi'];
     }
 
     // Re-order based on throttle status (move throttled providers to end)
