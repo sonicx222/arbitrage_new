@@ -40,6 +40,8 @@ export interface DlqMessage {
   timestamp: number;
   service: string;
   instanceId: string;
+  /** Full original message payload preserved for replay capability */
+  originalPayload?: string;
 }
 
 /**
@@ -216,38 +218,68 @@ export class DlqConsumer {
   /**
    * Replay a specific DLQ message back to the main execution stream.
    *
+   * Requires that the original message payload was preserved in the DLQ entry
+   * (via `originalPayload` field). Messages without a stored payload cannot be
+   * replayed — the original opportunity data is needed for validation.
+   *
    * WARNING: This does NOT validate the message. Use with caution.
    * The replayed message will go through normal validation in the opportunity consumer.
    *
    * @param messageId - DLQ message ID to replay
-   * @returns True if replay succeeded, false if message not found
+   * @returns True if replay succeeded, false if message not found or payload missing
    */
   async replayMessage(messageId: string): Promise<boolean> {
     try {
-      // Read the specific message from DLQ
-      const messages = await this.streamsClient.xread(DLQ_STREAM, '0', {
-        count: this.maxMessagesPerScan,
-      });
+      // Paginate through DLQ to find the target message (stream may have >100 entries)
+      let cursor = '0';
+      let targetMessage: { id: string; data: unknown } | undefined;
 
-      const message = messages.find(m => m.id === messageId);
-      if (!message) {
+      do {
+        const messages = await this.streamsClient.xread(DLQ_STREAM, cursor, {
+          count: this.maxMessagesPerScan,
+        });
+
+        if (messages.length === 0) break;
+
+        targetMessage = messages.find(m => m.id === messageId);
+        if (targetMessage) break;
+
+        // Advance cursor to last message ID for next page
+        cursor = messages[messages.length - 1].id;
+      } while (!targetMessage);
+
+      if (!targetMessage) {
         this.logger.warn('DLQ message not found for replay', { messageId });
         return false;
       }
 
-      const dlqMessage = message.data as unknown as DlqMessage;
+      const dlqMessage = targetMessage.data as unknown as DlqMessage;
 
-      // Reconstruct original opportunity data (simplified - real implementation
-      // would need to store the full opportunity payload in DLQ)
-      const replayData = {
-        id: dlqMessage.opportunityId,
-        type: dlqMessage.opportunityType,
-        // Note: This is a minimal replay. Real implementation would need
-        // to preserve the full opportunity data in DLQ for accurate replay.
-        replayed: true,
-        originalError: dlqMessage.error,
-        replayedAt: Date.now(),
-      };
+      // Verify original payload is available for replay
+      if (!dlqMessage.originalPayload) {
+        this.logger.error('DLQ message has no stored payload — cannot replay', {
+          messageId,
+          opportunityId: dlqMessage.opportunityId,
+        });
+        return false;
+      }
+
+      // Parse the preserved original payload
+      let replayData: Record<string, unknown>;
+      try {
+        replayData = JSON.parse(dlqMessage.originalPayload) as Record<string, unknown>;
+      } catch {
+        this.logger.error('DLQ message has corrupt payload — cannot replay', {
+          messageId,
+          opportunityId: dlqMessage.opportunityId,
+        });
+        return false;
+      }
+
+      // Mark as replayed for tracking/dedup
+      replayData.replayed = true;
+      replayData.originalError = dlqMessage.error;
+      replayData.replayedAt = Date.now();
 
       // Send back to execution requests stream
       await this.streamsClient.xadd(

@@ -141,7 +141,7 @@ function buildServiceConfigs(): ServiceWorkerConfig[] {
       name: 'partition-solana',
       scriptPath: resolveServicePath('partition-solana'),
       env: {
-        PARTITION_ID: 'solana',
+        PARTITION_ID: 'solana-native',
         HEALTH_CHECK_PORT: '3004',
         REDIS_URL,
       },

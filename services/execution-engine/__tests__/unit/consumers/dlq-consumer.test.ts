@@ -68,25 +68,39 @@ const createDeps = (overrides: Partial<DlqConsumerDeps> = {}): DlqConsumerDeps =
 /**
  * Create mock DLQ messages with alternating error types.
  * Even-indexed messages get VAL_MISSING_ID, odd-indexed get ERR_NO_CHAIN.
+ * Each message includes originalPayload for replay capability.
  */
 const createDlqMessages = (count: number, baseTimestamp?: number) => {
   const now = baseTimestamp ?? Date.now();
-  return Array.from({ length: count }, (_, i) => ({
-    id: `msg-${i}`,
-    data: {
-      originalMessageId: `orig-${i}`,
-      originalStream: 'execution-requests',
-      opportunityId: `opp-${i}`,
-      opportunityType: 'intra-chain',
-      error:
-        i % 2 === 0
-          ? '[VAL_MISSING_ID] Missing ID field'
-          : '[ERR_NO_CHAIN] Chain not configured',
-      timestamp: now - i * 60000, // Progressively older
-      service: 'execution-engine',
-      instanceId: 'inst-1',
-    },
-  }));
+  return Array.from({ length: count }, (_, i) => {
+    const originalPayload = {
+      id: `opp-${i}`,
+      type: 'intra-chain',
+      buyChain: 'ethereum',
+      sellChain: 'ethereum',
+      tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+      tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+      expectedProfit: '0.05',
+      confidence: 0.85,
+    };
+    return {
+      id: `msg-${i}`,
+      data: {
+        originalMessageId: `orig-${i}`,
+        originalStream: 'execution-requests',
+        opportunityId: `opp-${i}`,
+        opportunityType: 'intra-chain',
+        error:
+          i % 2 === 0
+            ? '[VAL_MISSING_ID] Missing ID field'
+            : '[ERR_NO_CHAIN] Chain not configured',
+        timestamp: now - i * 60000, // Progressively older
+        service: 'execution-engine',
+        instanceId: 'inst-1',
+        originalPayload: JSON.stringify(originalPayload),
+      },
+    };
+  });
 };
 
 // =============================================================================
@@ -469,6 +483,7 @@ describe('DlqConsumer', () => {
         expect.objectContaining({
           id: 'opp-1',
           type: 'intra-chain',
+          buyChain: 'ethereum',
           replayed: true,
           originalError: '[ERR_NO_CHAIN] Chain not configured',
           replayedAt: expect.any(Number),
@@ -505,6 +520,77 @@ describe('DlqConsumer', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith('DLQ message not found for replay', {
         messageId: 'missing-id',
       });
+    });
+
+    it('should return false when message has no originalPayload', async () => {
+      const messages = [{
+        id: 'msg-no-payload',
+        data: {
+          originalMessageId: 'orig-0',
+          originalStream: 'execution-requests',
+          opportunityId: 'opp-0',
+          opportunityType: 'intra-chain',
+          error: '[VAL_MISSING_ID] Missing ID',
+          timestamp: Date.now(),
+          service: 'execution-engine',
+          instanceId: 'inst-1',
+          // No originalPayload
+        },
+      }];
+      mockStreamsClient.xread.mockResolvedValueOnce(messages);
+
+      const result = await consumer.replayMessage('msg-no-payload');
+
+      expect(result).toBe(false);
+      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'DLQ message has no stored payload — cannot replay',
+        expect.objectContaining({ messageId: 'msg-no-payload' }),
+      );
+    });
+
+    it('should return false when originalPayload is corrupt JSON', async () => {
+      const messages = [{
+        id: 'msg-corrupt',
+        data: {
+          originalMessageId: 'orig-0',
+          originalStream: 'execution-requests',
+          opportunityId: 'opp-0',
+          opportunityType: 'intra-chain',
+          error: '[VAL_MISSING_ID] Missing ID',
+          timestamp: Date.now(),
+          service: 'execution-engine',
+          instanceId: 'inst-1',
+          originalPayload: '{corrupt json',
+        },
+      }];
+      mockStreamsClient.xread.mockResolvedValueOnce(messages);
+
+      const result = await consumer.replayMessage('msg-corrupt');
+
+      expect(result).toBe(false);
+      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+    });
+
+    it('should paginate through DLQ to find message beyond first batch', async () => {
+      // First page: messages 0-2 (target not here)
+      const page1 = createDlqMessages(3);
+      // Second page: messages 3-5 (target is msg-4)
+      const page2 = createDlqMessages(3).map((m, i) => ({
+        ...m,
+        id: `msg-${i + 3}`,
+        data: { ...m.data, opportunityId: `opp-${i + 3}` },
+      }));
+      // Third page: empty (end of stream)
+      mockStreamsClient.xread
+        .mockResolvedValueOnce(page1)    // First read from '0'
+        .mockResolvedValueOnce(page2)    // Second read from 'msg-2'
+        .mockResolvedValueOnce([]);      // Third read (empty, stops)
+
+      const result = await consumer.replayMessage('msg-4');
+
+      expect(result).toBe(true);
+      expect(mockStreamsClient.xread).toHaveBeenCalledTimes(2);
     });
 
     it('should throw when xadd fails', async () => {

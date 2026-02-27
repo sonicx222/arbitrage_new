@@ -767,15 +767,27 @@ export class OpportunityConsumer {
 
   /**
    * Move failed messages to Dead Letter Queue.
-   * Stores essential information for debugging without the full message payload.
+   * Stores essential debugging info AND the full original payload for replay capability.
    */
   private async moveToDeadLetterQueue(
     message: { id: string; data: unknown },
     error: Error
   ): Promise<void> {
     try {
-      // Extract essential fields for DLQ analysis (avoid storing full payload)
       const data = message.data as Record<string, unknown> | null;
+
+      // Serialize the full original payload for replay capability.
+      // Without this, replayed messages lack required fields and fail validation.
+      let originalPayload: string | undefined;
+      try {
+        originalPayload = data ? JSON.stringify(data) : undefined;
+      } catch {
+        // If serialization fails, proceed without payload (replay won't be available)
+        this.logger.warn('Failed to serialize DLQ payload for replay', {
+          messageId: message.id,
+        });
+      }
+
       const dlqData = {
         originalMessageId: message.id,
         originalStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
@@ -785,6 +797,7 @@ export class OpportunityConsumer {
         timestamp: Date.now(),
         service: 'execution-engine',
         instanceId: this.instanceId,
+        originalPayload,
       };
 
       await this.streamsClient.xadd(DLQ_STREAM, dlqData);
