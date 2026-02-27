@@ -827,4 +827,94 @@ describe('SimulationMetricsCollector', () => {
       expect(stopCalls.length).toBe(1);
     });
   });
+
+  // =========================================================================
+  // M3 FIX: Zero-activity metrics suppression
+  // =========================================================================
+
+  describe('zero-activity suppression (M3)', () => {
+    test('should skip logMetrics when all simulation counters are 0', () => {
+      const zeroStats = createMockStats({
+        simulationsPerformed: 0,
+        simulationsSkipped: 0,
+        simulationPredictedReverts: 0,
+        simulationProfitabilityRejections: 0,
+        simulationErrors: 0,
+      });
+
+      const config: SimulationMetricsCollectorConfig = {
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        getStats: () => zeroStats,
+        simulationService: mockSimulationService,
+        stateManager: mockStateManager as any,
+        collectionIntervalMs: 1000,
+      };
+
+      collector = createSimulationMetricsCollector(config);
+      collector.start();
+
+      jest.advanceTimersByTime(1000);
+
+      // logMetrics should NOT be called (zero activity)
+      expect(mockPerfLogger.logMetrics).not.toHaveBeenCalled();
+    });
+
+    test('should still log health check when all counters are 0', () => {
+      const zeroStats = createMockStats({
+        simulationsPerformed: 0,
+        simulationsSkipped: 0,
+        simulationPredictedReverts: 0,
+        simulationProfitabilityRejections: 0,
+        simulationErrors: 0,
+      });
+
+      const config: SimulationMetricsCollectorConfig = {
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        getStats: () => zeroStats,
+        simulationService: mockSimulationService,
+        stateManager: mockStateManager as any,
+        collectionIntervalMs: 1000,
+      };
+
+      collector = createSimulationMetricsCollector(config);
+      collector.start();
+
+      jest.advanceTimersByTime(1000);
+
+      // logHealthCheck SHOULD still be called (liveness signal)
+      expect(mockPerfLogger.logHealthCheck).toHaveBeenCalledWith(
+        'simulation-service',
+        expect.objectContaining({ status: expect.any(String) }),
+      );
+    });
+
+    test('should log full metrics when any counter is non-zero', () => {
+      const activeStats = createMockStats({
+        simulationsPerformed: 5,
+        simulationsSkipped: 0,
+        simulationPredictedReverts: 0,
+        simulationProfitabilityRejections: 0,
+        simulationErrors: 0,
+      });
+
+      const config: SimulationMetricsCollectorConfig = {
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        getStats: () => activeStats,
+        simulationService: mockSimulationService,
+        stateManager: mockStateManager as any,
+        collectionIntervalMs: 1000,
+      };
+
+      collector = createSimulationMetricsCollector(config);
+      collector.start();
+
+      jest.advanceTimersByTime(1000);
+
+      // logMetrics SHOULD be called (non-zero activity)
+      expect(mockPerfLogger.logMetrics).toHaveBeenCalled();
+    });
+  });
 });

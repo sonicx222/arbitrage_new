@@ -180,6 +180,10 @@ const L1_DATA_FEE_USD: Record<string, number> = {
   base: 0.40,       // OP-stack (same model as Optimism)
   zksync: 0.30,     // zkSync Era uses validity proofs; data cost amortized across batch
   linea: 0.35,      // Consensys zkEVM; similar to zkSync cost model
+  blast: 0.40,      // OP-stack L2; same fee model as Optimism
+  scroll: 0.35,     // zkRollup; similar cost model to zkSync/Linea
+  mantle: 0.10,     // Uses EigenDA for modular data availability; very low L1 fees
+  mode: 0.40,       // OP-stack L2; same fee model as Optimism
 };
 
 // =============================================================================
@@ -206,13 +210,15 @@ const L1_ORACLE_ADDRESSES: Record<string, string> = {
   arbitrum: '0x000000000000000000000000000000000000006C', // ArbGasInfo
   optimism: '0x420000000000000000000000000000000000000F', // GasPriceOracle
   base: '0x420000000000000000000000000000000000000F',     // GasPriceOracle (OP Stack)
+  blast: '0x420000000000000000000000000000000000000F',    // GasPriceOracle (OP Stack)
+  mode: '0x420000000000000000000000000000000000000F',     // GasPriceOracle (OP Stack)
 };
 
 /**
  * Chains that use RPC-based L1 fee estimation instead of oracle contracts.
  * These chains have custom fee models that require specific RPC methods.
  */
-const L1_RPC_FEE_CHAINS = ['zksync', 'linea'] as const;
+const L1_RPC_FEE_CHAINS = ['zksync', 'linea', 'scroll', 'mantle'] as const;
 
 /** Cached L1 oracle fee data per chain. */
 interface L1OracleCacheEntry {
@@ -291,7 +297,11 @@ export const FALLBACK_GAS_COSTS_ETH: Record<string, number> = {
   avalanche: 0.001,    // 450K gas @ 25 nAVAX
   fantom: 0.0001,      // Low gas prices
   zksync: 0.00005,     // zkRollup efficiency
-  linea: 0.0001        // Consensys L2
+  linea: 0.0001,       // Consensys L2
+  blast: 0.00005,      // OP-stack L2 with calldata compression
+  scroll: 0.00008,     // zkRollup, slightly higher than zkSync
+  mantle: 0.001,       // MNT-native; ~0.001 MNT ≈ $0.001 at $0.80/MNT
+  mode: 0.00001,       // OP-stack L2, very low fees (similar to Base)
 };
 
 /**

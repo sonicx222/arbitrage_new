@@ -1107,7 +1107,8 @@ describe('HealthMonitor', () => {
 
       // Each evaluation should produce a consistent result based on its input
       expect(levelAfterHealthy).toBe(DegradationLevel.FULL_OPERATION);
-      expect(levelAfterDegraded).toBe(DegradationLevel.COMPLETE_OUTAGE);
+      // C4 FIX: During grace period, COMPLETE_OUTAGE is suppressed to READ_ONLY
+      expect(levelAfterDegraded).toBe(DegradationLevel.READ_ONLY);
       expect(levelAfterRecovery).toBe(DegradationLevel.FULL_OPERATION);
     });
 
@@ -1208,10 +1209,10 @@ describe('HealthMonitor', () => {
       }
 
       // Should have logged 3 transitions:
-      // default FULL -> DETECTION_ONLY -> COMPLETE_OUTAGE -> FULL_OPERATION
+      // default FULL -> DETECTION_ONLY -> READ_ONLY (C4: suppressed from COMPLETE_OUTAGE) -> FULL_OPERATION
       expect(transitions.length).toBe(3);
       expect(transitions[0]).toBe('DETECTION_ONLY');
-      expect(transitions[1]).toBe('COMPLETE_OUTAGE');
+      expect(transitions[1]).toBe('READ_ONLY'); // C4 FIX: COMPLETE_OUTAGE suppressed during grace period
       expect(transitions[2]).toBe('FULL_OPERATION');
     });
   });
@@ -1227,6 +1228,8 @@ describe('HealthMonitor', () => {
         staleHeartbeatThresholdMs: 5000,
       });
       mon.start();
+      // C4 FIX: Record heartbeat so stale detection isn't skipped during grace period
+      mon.recordHeartbeat('detector-1');
 
       const now = Date.now();
       const serviceMap = new Map<string, ServiceHealth>();
@@ -1253,6 +1256,8 @@ describe('HealthMonitor', () => {
         staleHeartbeatThresholdMs: 5000,
       });
       mon.start();
+      // C4 FIX: Record heartbeat so stale detection isn't skipped during grace period
+      mon.recordHeartbeat('detector-1');
 
       const now = Date.now();
       const originalDateNow = Date.now;
@@ -1299,6 +1304,8 @@ describe('HealthMonitor', () => {
         staleHeartbeatThresholdMs: 5000,
       });
       mon.start();
+      // C4 FIX: Record heartbeat so stale detection isn't skipped during grace period
+      mon.recordHeartbeat('detector-1');
 
       const now = Date.now();
       const originalDateNow = Date.now;
@@ -1422,6 +1429,8 @@ describe('HealthMonitor', () => {
         staleHeartbeatThresholdMs: 5000,
       });
       mon.start();
+      // C4 FIX: Record heartbeat so stale detection isn't skipped during grace period
+      mon.recordHeartbeat('detector-1');
 
       const now = Date.now();
       const originalDateNow = Date.now;
@@ -1457,6 +1466,445 @@ describe('HealthMonitor', () => {
       expect(mon.getDegradationLevel()).toBe(DegradationLevel.FULL_OPERATION);
 
       Date.now = originalDateNow;
+    });
+  });
+
+  // ===========================================================================
+  // H1: Stale heartbeat log aggregation (escalation-based)
+  // ===========================================================================
+
+  describe('H1: stale heartbeat log escalation', () => {
+    it('should log WARN on first stale detection', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        consecutiveFailuresThreshold: 1, // immediate effect for this test
+      });
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000, // stale
+      }));
+
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Service heartbeat stale, marking unhealthy',
+        expect.objectContaining({ service: 'detector-1' })
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should log DEBUG on subsequent detections before escalation threshold', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        consecutiveFailuresThreshold: 1,
+      });
+
+      const firstDetectionTime = Date.now();
+      const originalDateNow = Date.now;
+
+      // First detection: WARN
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime);
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: firstDetectionTime - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+      mockLogger.warn.mockClear();
+      mockLogger.debug.mockClear();
+
+      // Second detection 30s later (below 60s escalation): DEBUG
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime + 30_000);
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: firstDetectionTime - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Service heartbeat still stale',
+        expect.objectContaining({ service: 'detector-1' })
+      );
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        'Service heartbeat still stale (escalation)',
+        expect.any(Object)
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should log WARN at 60s escalation threshold', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        consecutiveFailuresThreshold: 1,
+      });
+
+      const firstDetectionTime = Date.now();
+      const originalDateNow = Date.now;
+
+      // First detection
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime);
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: firstDetectionTime - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+      mockLogger.warn.mockClear();
+
+      // Detection at 60s: should escalate to WARN
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime + 60_000);
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: firstDetectionTime - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Service heartbeat still stale (escalation)',
+        expect.objectContaining({
+          service: 'detector-1',
+          staleDurationMs: 60_000,
+        })
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should escalate at 120s and 300s thresholds', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        consecutiveFailuresThreshold: 1,
+      });
+
+      const firstDetectionTime = Date.now();
+      const originalDateNow = Date.now;
+
+      // First detection
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime);
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: firstDetectionTime - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+
+      // 60s escalation
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime + 60_000);
+      serviceMap.set('detector-1', createServiceHealth({ name: 'detector-1', status: 'healthy', lastHeartbeat: firstDetectionTime - 10000 }));
+      mon.detectStaleServices(serviceMap);
+
+      // 120s escalation
+      mockLogger.warn.mockClear();
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime + 120_000);
+      serviceMap.set('detector-1', createServiceHealth({ name: 'detector-1', status: 'healthy', lastHeartbeat: firstDetectionTime - 10000 }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Service heartbeat still stale (escalation)',
+        expect.objectContaining({ staleDurationMs: 120_000 })
+      );
+
+      // 300s escalation
+      mockLogger.warn.mockClear();
+      Date.now = jest.fn().mockReturnValue(firstDetectionTime + 300_000);
+      serviceMap.set('detector-1', createServiceHealth({ name: 'detector-1', status: 'healthy', lastHeartbeat: firstDetectionTime - 10000 }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Service heartbeat still stale (escalation)',
+        expect.objectContaining({ staleDurationMs: 300_000 })
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should clean up stale log state when service recovers', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        consecutiveFailuresThreshold: 1,
+      });
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      // First: stale detection
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+      mockLogger.debug.mockClear();
+
+      // Now service recovers (fresh heartbeat)
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now, // fresh
+      }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Service recovered from stale heartbeat',
+        expect.objectContaining({ service: 'detector-1' })
+      );
+
+      // If stale again, should start as first detection (WARN) again
+      mockLogger.warn.mockClear();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Service heartbeat stale, marking unhealthy',
+        expect.objectContaining({ service: 'detector-1' })
+      );
+
+      Date.now = originalDateNow;
+    });
+  });
+
+  // ===========================================================================
+  // C4: Grace period awareness for stale heartbeat detection
+  // ===========================================================================
+
+  describe('C4: grace period stale heartbeat suppression', () => {
+    it('should skip stale check for never-heartbeated services during grace period', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        startupGracePeriodMs: 60000,
+      });
+      mon.start(); // Enter grace period
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000, // stale but never heartbeated
+      }));
+
+      const staleCount = mon.detectStaleServices(serviceMap);
+
+      // Should skip — service never heartbeated during grace period
+      expect(staleCount).toBe(0);
+      expect(serviceMap.get('detector-1')!.status).toBe('healthy'); // not mutated
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Skipping stale check for never-heartbeated service during grace period',
+        expect.objectContaining({ service: 'detector-1' })
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should mark stale services that HAVE heartbeated during grace period', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        startupGracePeriodMs: 60000,
+      });
+      mon.start();
+      mon.recordHeartbeat('detector-1'); // Has heartbeated
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000, // stale AND has heartbeated
+      }));
+
+      const staleCount = mon.detectStaleServices(serviceMap);
+
+      // Should mark unhealthy — service HAS heartbeated before
+      expect(staleCount).toBe(1);
+      expect(serviceMap.get('detector-1')!.status).toBe('unhealthy');
+
+      Date.now = originalDateNow;
+    });
+
+    it('should mark stale services normally after grace period expires', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        startupGracePeriodMs: 100, // very short
+      });
+
+      const startTime = Date.now();
+      const originalDateNow = Date.now;
+
+      // Start the monitor
+      Date.now = jest.fn().mockReturnValue(startTime);
+      mon.start();
+
+      // Jump past grace period
+      Date.now = jest.fn().mockReturnValue(startTime + 200);
+
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: startTime - 10000, // stale, never heartbeated
+      }));
+
+      const staleCount = mon.detectStaleServices(serviceMap);
+
+      // After grace period, should mark unhealthy regardless
+      expect(staleCount).toBe(1);
+      expect(serviceMap.get('detector-1')!.status).toBe('unhealthy');
+
+      Date.now = originalDateNow;
+    });
+
+    it('should suppress COMPLETE_OUTAGE during grace period', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        startupGracePeriodMs: 60000,
+      });
+      mon.start();
+
+      // No services registered yet — would normally be COMPLETE_OUTAGE
+      mon.evaluateDegradationLevel(new Map(), 0);
+
+      // During grace period, should cap at READ_ONLY instead
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.READ_ONLY);
+    });
+
+    it('should allow COMPLETE_OUTAGE after grace period expires', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        startupGracePeriodMs: 100,
+      });
+
+      const startTime = Date.now();
+      const originalDateNow = Date.now;
+
+      Date.now = jest.fn().mockReturnValue(startTime);
+      mon.start();
+
+      // Past grace period
+      Date.now = jest.fn().mockReturnValue(startTime + 200);
+
+      mon.evaluateDegradationLevel(new Map(), 0);
+      expect(mon.getDegradationLevel()).toBe(DegradationLevel.COMPLETE_OUTAGE);
+
+      Date.now = originalDateNow;
+    });
+  });
+
+  // ===========================================================================
+  // recordHeartbeat() / hasReceivedHeartbeat()
+  // ===========================================================================
+
+  describe('recordHeartbeat()', () => {
+    it('should track first heartbeat for a service', () => {
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(false);
+
+      monitor.recordHeartbeat('detector-1');
+
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(true);
+    });
+
+    it('should be idempotent for repeated heartbeats', () => {
+      monitor.recordHeartbeat('detector-1');
+      monitor.recordHeartbeat('detector-1');
+      monitor.recordHeartbeat('detector-1');
+
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(true);
+    });
+
+    it('should track multiple services independently', () => {
+      monitor.recordHeartbeat('detector-1');
+      monitor.recordHeartbeat('execution-engine');
+
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(true);
+      expect(monitor.hasReceivedHeartbeat('execution-engine')).toBe(true);
+      expect(monitor.hasReceivedHeartbeat('detector-2')).toBe(false);
+    });
+
+    it('should be cleared by reset()', () => {
+      monitor.recordHeartbeat('detector-1');
+      monitor.recordHeartbeat('execution-engine');
+
+      monitor.reset();
+
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(false);
+      expect(monitor.hasReceivedHeartbeat('execution-engine')).toBe(false);
+    });
+  });
+
+  // ===========================================================================
+  // reset() clears new Batch 3 state
+  // ===========================================================================
+
+  describe('reset() clears Batch 3 state', () => {
+    it('should clear staleLogState on reset', () => {
+      const mon = new HealthMonitor(mockLogger, mockOnAlert, {
+        staleHeartbeatThresholdMs: 5000,
+        consecutiveFailuresThreshold: 1,
+      });
+
+      const now = Date.now();
+      const originalDateNow = Date.now;
+      Date.now = jest.fn().mockReturnValue(now);
+
+      // Build up stale log state
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+      mockLogger.warn.mockClear();
+
+      // Reset
+      mon.reset();
+
+      // After reset, next stale detection should log WARN (first detection) again
+      serviceMap.set('detector-1', createServiceHealth({
+        name: 'detector-1',
+        status: 'healthy',
+        lastHeartbeat: now - 10000,
+      }));
+      mon.detectStaleServices(serviceMap);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Service heartbeat stale, marking unhealthy',
+        expect.objectContaining({ service: 'detector-1' })
+      );
+
+      Date.now = originalDateNow;
+    });
+
+    it('should clear firstHeartbeatReceived on reset', () => {
+      monitor.recordHeartbeat('detector-1');
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(true);
+
+      monitor.reset();
+
+      expect(monitor.hasReceivedHeartbeat('detector-1')).toBe(false);
     });
   });
 

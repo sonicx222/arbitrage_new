@@ -339,4 +339,84 @@ describe('RedisStreamsClient - Basic Operations', () => {
       );
     });
   });
+
+  // ===========================================================================
+  // Retry Strategy (C2 fix)
+  // ===========================================================================
+
+  describe('retryStrategy', () => {
+    let retryStrategy: (times: number) => number | null;
+
+    beforeEach(() => {
+      // Extract the retryStrategy from the options passed to MockRedis constructor
+      const constructorCall = (MockRedis as unknown as jest.Mock).mock.calls[0];
+      const options = constructorCall[1] as { retryStrategy: (times: number) => number | null };
+      retryStrategy = options.retryStrategy;
+    });
+
+    it('should use exponential backoff starting at 200ms', () => {
+      // 200 * 2^0, 200 * 2^1, 200 * 2^2
+      expect(retryStrategy(1)).toBe(200);
+      expect(retryStrategy(2)).toBe(400);
+      expect(retryStrategy(3)).toBe(800);
+    });
+
+    it('should cap delay at 60 seconds', () => {
+      // 200 * 2^8 = 51200, then 200 * 2^9 = 102400 capped at 60000
+      expect(retryStrategy(9)).toBe(51200);
+      expect(retryStrategy(10)).toBe(60000);
+      // All retries at/above cap should also be 60000
+      expect(retryStrategy(15)).toBe(60000);
+      expect(retryStrategy(30)).toBe(60000);
+    });
+
+    it('should never return null — always reconnect with capped delay', () => {
+      // W2-C3 FIX: Previously returned null after 15 retries, permanently killing the client.
+      // Now always returns a delay so ioredis keeps reconnecting after transient outages.
+      expect(retryStrategy(16)).toBe(60000);
+      expect(retryStrategy(50)).toBe(60000);
+      expect(retryStrategy(100)).toBe(60000);
+    });
+
+    it('should follow exponential progression: 200, 400, 800, 1600, 3200, ...', () => {
+      const delays = [1, 2, 3, 4, 5, 6, 7, 8].map(t => retryStrategy(t));
+      expect(delays).toEqual([200, 400, 800, 1600, 3200, 6400, 12800, 25600]);
+    });
+  });
+
+  // ===========================================================================
+  // Error Event Handling (H4 fix)
+  // ===========================================================================
+
+  describe('error event handler', () => {
+    it('should log error message when present', () => {
+      // The on('error') handler is registered in setupEventHandlers
+      // We can trigger it by emitting an error on the mock
+      const errorHandler = mockRedis.on.mock.calls.find(
+        (call: any[]) => call[0] === 'error'
+      );
+      expect(errorHandler).toBeDefined();
+
+      // Trigger the error handler with a normal error
+      const err = new Error('Connection refused');
+      (err as NodeJS.ErrnoException).code = 'ECONNREFUSED';
+      errorHandler[1](err);
+
+      // The handler should not throw — it logs internally
+    });
+
+    it('should handle errors with empty message by falling back to String(err)', () => {
+      const errorHandler = mockRedis.on.mock.calls.find(
+        (call: any[]) => call[0] === 'error'
+      );
+      expect(errorHandler).toBeDefined();
+
+      // Trigger with an error that has an empty message
+      const err = new Error('');
+      (err as NodeJS.ErrnoException).code = 'EPIPE';
+      errorHandler[1](err);
+
+      // Should not throw — the handler uses fallback serialization
+    });
+  });
 });

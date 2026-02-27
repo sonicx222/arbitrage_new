@@ -463,6 +463,15 @@ export class WebSocketManager {
           // Re-subscribe to existing subscriptions
           this.resubscribe();
 
+          // C3 FIX: Proactively detect data gaps after reconnection
+          // This triggers 'dataGap' events that DataGapBackfiller can consume
+          this.detectDataGaps().catch(error => {
+            this.logger.debug('Post-reconnection gap detection failed (best-effort)', {
+              chainId: this.chainId,
+              error: getErrorMessage(error),
+            });
+          });
+
           // Notify connection handlers
           this.connectionHandlers.forEach(handler => handler(true));
 
@@ -478,8 +487,12 @@ export class WebSocketManager {
           this.logger.error('WebSocket error', { error });
           this.isConnecting = false;
 
-          // CQ8-ALT: Rate limit and health scoring via rotation strategy
-          if (this.rotationStrategy.isRateLimitError(error)) {
+          // CQ8-ALT: Classify error and apply appropriate handling
+          if (this.rotationStrategy.isAuthError(error)) {
+            // Auth failures (401/403) are deterministic — quarantine and skip immediately
+            this.rotationStrategy.handleAuthFailure(currentUrl);
+            this.rotationStrategy.getHealthScorer().recordFailure(currentUrl, this.chainId, 'auth_failure');
+          } else if (this.rotationStrategy.isRateLimitError(error)) {
             this.rotationStrategy.handleRateLimit(currentUrl);
             this.rotationStrategy.getHealthScorer().recordRateLimit(currentUrl, this.chainId);
           } else {
@@ -507,8 +520,12 @@ export class WebSocketManager {
           // Stop heartbeat
           this.stopHeartbeat();
 
-          // CQ8-ALT: Rate limit and health scoring via rotation strategy
-          if (code === 1008 || code === 1013 ||
+          // CQ8-ALT: Classify close event — auth failure, rate limit, or generic drop
+          if (this.rotationStrategy.isAuthError({ code, message: reasonStr })) {
+            // Auth failures (401/403) from WebSocket handshake rejection
+            this.rotationStrategy.handleAuthFailure(currentUrl);
+            this.rotationStrategy.getHealthScorer().recordFailure(currentUrl, this.chainId, 'auth_failure');
+          } else if (code === 1008 || code === 1013 ||
               reasonStr.toLowerCase().includes('rate') ||
               reasonStr.toLowerCase().includes('limit')) {
             this.rotationStrategy.handleRateLimit(currentUrl);

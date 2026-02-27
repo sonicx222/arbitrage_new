@@ -403,11 +403,21 @@ export class RedisStreamsClient {
     const options: Record<string, unknown> = {
       password,
       retryStrategy: (times: number) => {
-        if (times > 3) {
-          this.logger.error('Redis connection failed after 3 retries');
-          return null;
+        // Capped exponential backoff: 200ms, 400ms, ..., capped at 60s.
+        // NEVER return null — ioredis interprets null as "stop reconnecting",
+        // permanently killing the client. A transient Redis outage would require
+        // a full service restart to recover.
+        const delay = Math.min(Math.round(200 * Math.pow(2, Math.min(times - 1, 18))), 60000);
+        if (times === 1 || times % 5 === 0) {
+          this.logger.warn('Redis Streams reconnecting', { attempt: times, delayMs: delay });
         }
-        return Math.min(times * 100, 3000);
+        if (times > 30 && times % 10 === 0) {
+          this.logger.error('Redis Streams connection failing persistently', {
+            totalRetries: times,
+            delayMs: delay,
+          });
+        }
+        return delay;
       },
       maxRetriesPerRequest: 3,
       lazyConnect: true
@@ -424,7 +434,12 @@ export class RedisStreamsClient {
     this.client.removeAllListeners('connect');
 
     this.client.on('error', (err: Error) => {
-      this.logger.error('Redis Streams client error', { error: err.message });
+      // Fix H4: empty error strings — ioredis can emit errors with empty messages
+      const errorDetail = err.message || err.name || (err as NodeJS.ErrnoException).code || String(err);
+      this.logger.error('Redis Streams client error', {
+        error: errorDetail,
+        code: (err as NodeJS.ErrnoException).code,
+      });
     });
 
     this.client.on('connect', () => {

@@ -102,3 +102,6 @@ export * from './provider-health-tracker';
 
 // V8 Profiler (Task #46)
 export * from './v8-profiler';
+
+// CPU Usage Tracker (H2)
+export { CpuUsageTracker } from './cpu-usage-tracker';

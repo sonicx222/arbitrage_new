@@ -26,7 +26,7 @@ import http from 'http';
 import express from 'express';
 import { SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
 import { findKSmallest } from '@arbitrage/core/data-structures';
-import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, CpuUsageTracker } from '@arbitrage/core/monitoring';
 import {
   RedisClient,
   getRedisClient,
@@ -272,7 +272,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // Startup grace period: Don't report critical alerts during initial startup
   // This prevents false alerts when services haven't reported health yet
-  private static readonly STARTUP_GRACE_PERIOD_MS = 60000; // 60 seconds
+  private static readonly STARTUP_GRACE_PERIOD_MS = 120000; // 120 seconds — partitions take 59-80s to register
   private startTime: number = 0;
 
   // P2-11: Centralized interval management (replaces individual interval fields)
@@ -280,6 +280,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // Stream consumers (blocking read pattern - replaces setInterval polling)
   private streamConsumers: StreamConsumer[] = [];
+
+  // H2 FIX: Delta-based CPU usage tracking (replaces hardcoded 0)
+  private readonly cpuTracker = new CpuUsageTracker();
+
+  // M4 FIX: Pipeline starvation detection — track last time execution requests were seen
+  private lastExecutionRequestTime = 0;
+  private pipelineStarvationAlerted = false;
+  private static readonly PIPELINE_STARVATION_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
   // Configuration
   private readonly config: CoordinatorConfig;
@@ -1713,6 +1721,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // All services now use Redis Streams exclusively (ADR-002)
     // See REFACTORING_IMPLEMENTATION_PLAN.md P0-3 for details
 
+    // M4 FIX: Pipeline starvation detection — check stream depths every 60s.
+    // Alerts when detectors are healthy but execution pipeline has been idle for 5+ minutes.
+    this.intervalManager.set(
+      'pipeline-starvation-check',
+      async () => {
+        if (!this.stateManager.isRunning()) return;
+        if (!this.streamsClient) return;
+
+        try {
+          await this.checkPipelineStarvation();
+        } catch (error) {
+          this.logger.debug('Pipeline starvation check failed (best-effort)', { error });
+        }
+      },
+      60_000
+    );
+
     // FIX P1: Use dedicated interval for cleanup operations
     // This runs regardless of legacy polling mode to ensure cleanup always happens
     // Previous bug: cleanup only ran if legacy polling was disabled due to ?? operator
@@ -1733,6 +1758,61 @@ export class CoordinatorService implements CoordinatorStateProvider {
       },
       10000
     );
+  }
+
+  /**
+   * M4 FIX: Check for pipeline starvation — detectors healthy but no execution requests.
+   * Uses XLEN to check stream depths without blocking.
+   */
+  private async checkPipelineStarvation(): Promise<void> {
+    if (!this.streamsClient) return;
+
+    // Skip during startup grace period
+    if (Date.now() - this.startTime < CoordinatorService.STARTUP_GRACE_PERIOD_MS) return;
+
+    const executionRequestsLen = await this.streamsClient.xlen(
+      RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
+    );
+
+    // If execution requests exist, pipeline is active
+    if (executionRequestsLen > 0) {
+      this.lastExecutionRequestTime = Date.now();
+      this.pipelineStarvationAlerted = false;
+      return;
+    }
+
+    // Check if any detectors are healthy
+    const healthyDetectors = Array.from(this.serviceHealth.values()).filter(
+      s => s.status === 'healthy' && s.name !== 'coordinator' && s.name !== 'execution-engine'
+    );
+
+    if (healthyDetectors.length === 0) {
+      // No healthy detectors — starvation is expected, not an alert condition
+      return;
+    }
+
+    // Initialize tracking on first check
+    if (this.lastExecutionRequestTime === 0) {
+      this.lastExecutionRequestTime = Date.now();
+      return;
+    }
+
+    const starvationDuration = Date.now() - this.lastExecutionRequestTime;
+    if (starvationDuration >= CoordinatorService.PIPELINE_STARVATION_THRESHOLD_MS && !this.pipelineStarvationAlerted) {
+      this.pipelineStarvationAlerted = true;
+      this.sendAlert({
+        type: 'PIPELINE_STARVATION',
+        service: 'coordinator',
+        severity: 'warning',
+        message: `Pipeline starved: ${healthyDetectors.length} healthy detector(s) but 0 execution requests for ${Math.round(starvationDuration / 1000)}s`,
+        data: {
+          healthyDetectors: healthyDetectors.map(s => s.name),
+          starvationDurationMs: starvationDuration,
+          executionRequestStreamLen: executionRequestsLen,
+        },
+        timestamp: Date.now(),
+      });
+    }
   }
 
   private async reportHealth(): Promise<void> {
@@ -1756,7 +1836,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         isLeader: this.getIsLeader(),
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage().heapUsed,
-        cpuUsage: 0,
+        cpuUsage: this.cpuTracker.getUsagePercent(),
         timestamp: Date.now(),
         metrics: {
           activeServices: this.systemMetrics.activeServices,

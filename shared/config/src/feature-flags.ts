@@ -557,13 +557,20 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       }
     }
   } else {
-    const message =
-      'Commit-Reveal MEV Protection DISABLED - high-risk transactions will use only private mempools. ' +
-      'Set FEATURE_COMMIT_REVEAL=true to enable commit-reveal protection as fallback.';
-    if (logger) {
-      logger.warn(message);
-    } else {
-      console.warn(`⚠️  WARNING: ${message}`);
+    // H3 FIX: Only warn about disabled commit-reveal on execution-engine.
+    // Other services (coordinator, partitions, cross-chain) don't use commit-reveal
+    // and were generating 7 identical noisy warnings at every startup.
+    const isExecutionEngine = process.env.SERVICE_ROLE === 'execution-engine'
+      || process.env.SERVICE_NAME === 'execution-engine';
+    if (isExecutionEngine) {
+      const message =
+        'Commit-Reveal MEV Protection DISABLED - high-risk transactions will use only private mempools. ' +
+        'Set FEATURE_COMMIT_REVEAL=true to enable commit-reveal protection as fallback.';
+      if (logger) {
+        logger.warn(message);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`);
+      }
     }
   }
 

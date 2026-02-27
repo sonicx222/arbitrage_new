@@ -26,6 +26,7 @@ import {
   getPerformanceLogger,
   PerformanceLogger
 } from '../logger';
+import { CpuUsageTracker } from '../monitoring/cpu-usage-tracker';
 import { NumericRollingWindow } from '../data-structures/numeric-rolling-window';
 import { AsyncMutex } from '../async/async-mutex';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
@@ -339,6 +340,9 @@ export class SolanaDetector extends EventEmitter {
   // RACE CONDITION FIX: Mutex for atomic pool updates across multiple maps
   // Ensures pools, poolsByDex, and poolsByTokenPair stay consistent
   private poolUpdateMutex = new AsyncMutex();
+
+  // H2 FIX: Delta-based CPU usage tracking (replaces hardcoded 0)
+  private readonly cpuTracker = new CpuUsageTracker();
 
   constructor(config: SolanaDetectorConfig, deps?: SolanaDetectorDeps) {
     super();
@@ -1422,7 +1426,7 @@ export class SolanaDetector extends EventEmitter {
             status: health.status,
             uptime: health.uptime,
             memoryUsage: health.memoryUsage,
-            cpuUsage: 0,
+            cpuUsage: this.cpuTracker.getUsagePercent(),
             lastHeartbeat: health.lastHeartbeat,
             latency: health.connections.avgLatencyMs
           });

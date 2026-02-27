@@ -190,19 +190,20 @@ export class NonceManager {
     }
 
     // Tier 2: Try to get nonce from pre-allocated pool first (fast path)
-    // NOTE: The length check and shift() are NOT atomic across async boundaries.
-    // Two concurrent callers could both see length > 0, both call shift(), and one gets undefined.
-    // This is INTENTIONAL - undefined result safely falls through to standard lock path below.
-    // The trade-off is: occasional fallback vs. always acquiring lock on pool access.
+    // Lock is acquired BEFORE shift() to prevent nonce ordering issues:
+    // Without lock, concurrent callers could shift() nonces out of order, and
+    // unshift() on max-pending rejection would insert a nonce before already-allocated
+    // later nonces, causing "nonce too low" errors on submission.
     if (this.config.preAllocationPoolSize > 0 && state.noncePool.length > 0) {
-      const pooledNonce = state.noncePool.shift();
-      if (pooledNonce !== undefined) {
-        // Track pending transaction (still need lock for pendingTxs)
-        await this.acquireLock(state);
-        try {
+      await this.acquireLock(state);
+      try {
+        // Re-check under lock (pool may have been drained by another caller)
+        if (state.noncePool.length > 0) {
+          const pooledNonce = state.noncePool.shift()!;
+
           // Check max pending limit
           if (state.pendingTxs.size >= this.config.maxPendingPerChain) {
-            // Put nonce back in pool and throw
+            // Put nonce back in pool and throw — safe because we hold the lock
             state.noncePool.unshift(pooledNonce);
             throw new Error(`Max pending transactions (${this.config.maxPendingPerChain}) reached for ${chain}`);
           }
@@ -229,9 +230,10 @@ export class NonceManager {
           }
 
           return pooledNonce;
-        } finally {
-          this.releaseLock(state);
         }
+        // Pool drained by another caller — fall through to standard path
+      } finally {
+        this.releaseLock(state);
       }
     }
 

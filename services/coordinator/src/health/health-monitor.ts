@@ -125,6 +125,19 @@ export class HealthMonitor {
   private alertCooldowns: Map<string, number> = new Map();
   private consecutiveStaleCount = 0;
 
+  /**
+   * H1 FIX: Track last stale-heartbeat log time per service to reduce log noise.
+   * Only log WARN on first detection and at escalation thresholds (60s, 120s, 300s).
+   * Intermediate checks are logged at DEBUG level.
+   */
+  private staleLogState: Map<string, { firstLoggedAt: number; lastEscalationAge: number }> = new Map();
+
+  /**
+   * C4 FIX: Track which services have ever sent a heartbeat.
+   * During grace period, "never heartbeated" (STARTING) is distinct from "heartbeat went stale" (FAILED).
+   */
+  private firstHeartbeatReceived: Set<string> = new Set();
+
   constructor(
     logger: HealthMonitorLogger,
     onAlert: (alert: Alert) => void,
@@ -208,7 +221,10 @@ export class HealthMonitor {
 
     // Determine degradation level based on analysis
     if (!analysis.hasAnyServices || systemHealth === 0) {
-      this.degradationLevel = DegradationLevel.COMPLETE_OUTAGE;
+      // C4 FIX: During grace period, suppress COMPLETE_OUTAGE — services may still be starting
+      this.degradationLevel = this.isInGracePeriod()
+        ? DegradationLevel.READ_ONLY
+        : DegradationLevel.COMPLETE_OUTAGE;
     } else if (!analysis.executorHealthy && !analysis.hasHealthyDetectors) {
       this.degradationLevel = DegradationLevel.READ_ONLY;
     } else if (!analysis.executorHealthy) {
@@ -292,20 +308,68 @@ export class HealthMonitor {
     const now = Date.now();
     const threshold = this.config.staleHeartbeatThresholdMs;
     let staleCount = 0;
+    const currentlyStale = new Set<string>();
 
     for (const [name, health] of serviceHealth) {
       if (health.status === 'healthy' && health.lastHeartbeat) {
         const age = now - health.lastHeartbeat;
         if (age > threshold) {
+          // C4 FIX: During grace period, skip services that never sent a real heartbeat
+          if (this.isInGracePeriod() && !this.firstHeartbeatReceived.has(name)) {
+            this.logger.debug('Skipping stale check for never-heartbeated service during grace period', {
+              service: name,
+            });
+            continue;
+          }
+
           health.status = 'unhealthy';
           staleCount++;
-          this.logger.warn('Service heartbeat stale, marking unhealthy', {
-            service: name,
-            lastHeartbeat: health.lastHeartbeat,
-            ageMs: age,
-            thresholdMs: threshold,
-          });
+          currentlyStale.add(name);
+
+          // H1 FIX: Escalation-based logging to reduce noise
+          const state = this.staleLogState.get(name);
+          if (!state) {
+            // First detection: log WARN with full details
+            this.staleLogState.set(name, { firstLoggedAt: now, lastEscalationAge: 0 });
+            this.logger.warn('Service heartbeat stale, marking unhealthy', {
+              service: name,
+              lastHeartbeat: health.lastHeartbeat,
+              ageMs: age,
+              thresholdMs: threshold,
+            });
+          } else {
+            // Subsequent detections: only WARN at escalation thresholds (60s, 120s, 300s)
+            const staleDuration = now - state.firstLoggedAt;
+            const escalationThresholds = [60_000, 120_000, 300_000];
+            const nextThreshold = escalationThresholds.find(
+              t => t > state.lastEscalationAge && staleDuration >= t
+            );
+
+            if (nextThreshold) {
+              state.lastEscalationAge = nextThreshold;
+              this.logger.warn('Service heartbeat still stale (escalation)', {
+                service: name,
+                staleDurationMs: staleDuration,
+                ageMs: age,
+                thresholdMs: threshold,
+              });
+            } else {
+              this.logger.debug('Service heartbeat still stale', {
+                service: name,
+                staleDurationMs: staleDuration,
+                ageMs: age,
+              });
+            }
+          }
         }
+      }
+    }
+
+    // H1 FIX: Clean up stale log state for recovered services
+    for (const name of this.staleLogState.keys()) {
+      if (!currentlyStale.has(name)) {
+        this.staleLogState.delete(name);
+        this.logger.debug('Service recovered from stale heartbeat', { service: name });
       }
     }
 
@@ -464,6 +528,23 @@ export class HealthMonitor {
   }
 
   /**
+   * C4 FIX: Record that a service has sent a real heartbeat.
+   * Used to distinguish "never heartbeated" (STARTING) from "heartbeat went stale" (FAILED).
+   *
+   * @param serviceName - Name of the service that sent a heartbeat
+   */
+  recordHeartbeat(serviceName: string): void {
+    this.firstHeartbeatReceived.add(serviceName);
+  }
+
+  /**
+   * Check if a service has ever sent a heartbeat
+   */
+  hasReceivedHeartbeat(serviceName: string): boolean {
+    return this.firstHeartbeatReceived.has(serviceName);
+  }
+
+  /**
    * Get alert cooldowns map (for testing/monitoring)
    */
   getAlertCooldowns(): Map<string, number> {
@@ -508,5 +589,7 @@ export class HealthMonitor {
     this.startTime = 0;
     this.alertCooldowns.clear();
     this.consecutiveStaleCount = 0;
+    this.staleLogState.clear();
+    this.firstHeartbeatReceived.clear();
   }
 }

@@ -279,12 +279,48 @@ describe('validateFeatureFlags', () => {
       warnSpy.mockRestore();
     });
 
-    it('should warn when commit-reveal is disabled (default)', async () => {
+    // H3 FIX: commit-reveal disabled warning is now gated to execution-engine only
+    it('should NOT warn when commit-reveal is disabled on non-execution services', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
       const { validateFeatureFlags } = await importWithFlags({
         // FEATURE_COMMIT_REVEAL defaults to disabled (=== 'true' pattern)
+        // No SERVICE_ROLE or SERVICE_NAME set — not execution-engine
+      });
+
+      validateFeatureFlags();
+
+      const warnCalls = warnSpy.mock.calls.flat().join(' ');
+      expect(warnCalls).not.toContain('Commit-Reveal MEV Protection DISABLED');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should warn when commit-reveal is disabled on execution-engine', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        SERVICE_ROLE: 'execution-engine',
+      });
+
+      validateFeatureFlags();
+
+      const warnCalls = warnSpy.mock.calls.flat().join(' ');
+      expect(warnCalls).toContain('Commit-Reveal MEV Protection DISABLED');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should warn when commit-reveal is disabled with SERVICE_NAME=execution-engine', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        SERVICE_NAME: 'execution-engine',
       });
 
       validateFeatureFlags();

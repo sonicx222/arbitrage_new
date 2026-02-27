@@ -42,6 +42,7 @@ import {
   getRedisStreamsClient,
   ConsumerGroupConfig,
 } from '@arbitrage/core/redis';
+import { CpuUsageTracker } from '@arbitrage/core/monitoring';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
@@ -260,6 +261,9 @@ export class CrossChainDetectorService {
   // P0-7: Pre-validation delegated to PreValidationOrchestrator
   // Extracted for SRP - see REFACTORING_IMPLEMENTATION_PLAN.md P0-7
   private preValidationOrchestrator: PreValidationOrchestrator | null = null;
+
+  // H2 FIX: Delta-based CPU usage tracking (replaces hardcoded 0)
+  private readonly cpuTracker = new CpuUsageTracker();
 
   // P2-2: Confidence calculation delegated to ConfidenceCalculator
   // Extracted for SRP - see REFACTORING_IMPLEMENTATION_PLAN.md P2-2
@@ -1844,7 +1848,7 @@ export class CrossChainDetectorService {
           status: (this.stateManager.isRunning() ? 'healthy' : 'unhealthy') as 'healthy' | 'degraded' | 'unhealthy',
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage().heapUsed,
-          cpuUsage: 0,
+          cpuUsage: this.cpuTracker.getUsagePercent(),
           lastHeartbeat: now,    // FIX 6.3: Primary field per ServiceHealth interface
           // ADR-014: Use module getters for health metrics
           chainsMonitored: this.priceDataManager?.getChains().length ?? 0,

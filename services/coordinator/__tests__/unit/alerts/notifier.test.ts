@@ -313,7 +313,7 @@ describe('AlertNotifier', () => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('should log when no channels are configured', async () => {
+    it('should log at DEBUG level when no channels are configured (H5 dual-log fix)', async () => {
       delete process.env.DISCORD_WEBHOOK_URL;
       delete process.env.SLACK_WEBHOOK_URL;
 
@@ -327,8 +327,14 @@ describe('AlertNotifier', () => {
 
       await notifier.notify(alert);
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Alert triggered (no notification channels)'),
+      // H5 FIX: Downgraded from warn to debug to prevent dual-logging with coordinator
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Alert stored (no notification channels configured)'),
+        expect.objectContaining({ alertType: 'TEST' })
+      );
+      // Should NOT log at warn level anymore
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('Alert triggered'),
         expect.any(Object)
       );
     });

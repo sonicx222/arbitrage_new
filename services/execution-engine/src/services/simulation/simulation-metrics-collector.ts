@@ -165,6 +165,41 @@ export function createSimulationMetricsCollector(
     try {
       const snapshot = getSnapshot();
 
+      // M3 FIX: Skip metrics logging when all counters are 0 (zero-activity suppression).
+      // In simulation mode with no activity, this prevents 2880 useless log entries/day.
+      const hasActivity =
+        snapshot.simulationsPerformed > 0 ||
+        snapshot.simulationsSkipped > 0 ||
+        snapshot.simulationPredictedReverts > 0 ||
+        snapshot.simulationProfitabilityRejections > 0 ||
+        snapshot.simulationErrors > 0;
+
+      if (!hasActivity) {
+        // Still log health check (lightweight, important for liveness) but skip verbose metrics
+        const healthyProviders = Object.values(snapshot.providerHealth).filter((p) => p.healthy).length;
+        const totalProviders = Object.keys(snapshot.providerHealth).length;
+
+        let status: 'healthy' | 'degraded' | 'not_configured';
+        if (!simulationService) {
+          status = 'not_configured';
+        } else if (totalProviders === 0 || healthyProviders === 0) {
+          status = 'degraded';
+        } else {
+          status = 'healthy';
+        }
+
+        perfLogger.logHealthCheck('simulation-service', {
+          status,
+          simulationSuccessRate: 0,
+          averageLatencyMs: 0,
+          healthyProviders,
+          totalProviders,
+          simulationsPerformed: 0,
+          simulationPredictedReverts: 0,
+        });
+        return;
+      }
+
       // Build provider health maps with single iteration (performance optimization)
       const providerHealthy: Record<string, boolean> = {};
       const providerSuccessRates: Record<string, number> = {};

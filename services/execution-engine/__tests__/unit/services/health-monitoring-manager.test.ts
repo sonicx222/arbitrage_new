@@ -467,6 +467,83 @@ describe('HealthMonitoringManager', () => {
   });
 
   // =========================================================================
+  // M2 FIX: Simulation sub-status in health report
+  // =========================================================================
+
+  describe('simulation status consolidation (M2)', () => {
+    it('should include simulationStatus=not_configured when no metrics snapshot', async () => {
+      const mockStreamsClient = createMockStreamsClient();
+      deps = createMockDeps({
+        getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
+        getSimulationMetricsSnapshot: jest.fn().mockReturnValue(null),
+      });
+      manager = new HealthMonitoringManager(deps);
+      manager.start();
+
+      jest.advanceTimersByTime(30001);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+        'stream:health',
+        expect.objectContaining({ simulationStatus: 'not_configured' }),
+      );
+    });
+
+    it('should include simulationStatus=healthy when providers are healthy', async () => {
+      const mockStreamsClient = createMockStreamsClient();
+      deps = createMockDeps({
+        getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
+        getSimulationMetricsSnapshot: jest.fn().mockReturnValue({
+          simulationsPerformed: 10,
+          simulationSuccessRate: 0.9,
+          providerHealth: {
+            tenderly: { healthy: true, successRate: 0.9, averageLatencyMs: 200 },
+          },
+          timestamp: Date.now(),
+        }),
+      });
+      manager = new HealthMonitoringManager(deps);
+      manager.start();
+
+      jest.advanceTimersByTime(30001);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+        'stream:health',
+        expect.objectContaining({ simulationStatus: 'healthy' }),
+      );
+    });
+
+    it('should include simulationStatus=degraded when all providers unhealthy', async () => {
+      const mockStreamsClient = createMockStreamsClient();
+      deps = createMockDeps({
+        getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
+        getSimulationMetricsSnapshot: jest.fn().mockReturnValue({
+          simulationsPerformed: 5,
+          simulationSuccessRate: 0,
+          providerHealth: {
+            tenderly: { healthy: false, successRate: 0, averageLatencyMs: 0 },
+          },
+          timestamp: Date.now(),
+        }),
+      });
+      manager = new HealthMonitoringManager(deps);
+      manager.start();
+
+      jest.advanceTimersByTime(30001);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+        'stream:health',
+        expect.objectContaining({ simulationStatus: 'degraded' }),
+      );
+    });
+  });
+
+  // =========================================================================
   // createHealthMonitoringManager factory
   // =========================================================================
 

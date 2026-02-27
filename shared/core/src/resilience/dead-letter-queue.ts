@@ -50,6 +50,8 @@ export interface DLQConfig {
   retryDelay: number;          // Delay between retry attempts
   alertThreshold: number;       // Alert when queue size exceeds this
   batchSize: number;           // How many operations to process at once
+  /** M5 FIX: Key prefix for Redis keys (default: 'dlq'). Use 'test:dlq' for test isolation. */
+  keyPrefix: string;
 }
 
 export interface ProcessingResult {
@@ -126,10 +128,18 @@ export class DeadLetterQueue {
       retryEnabled: config.retryEnabled !== false,
       retryDelay: config.retryDelay ?? 60000, // 1 minute
       alertThreshold: config.alertThreshold ?? 1000,
-      batchSize: config.batchSize ?? 10
+      batchSize: config.batchSize ?? 10,
+      keyPrefix: config.keyPrefix ?? 'dlq',
     };
     // P1-10 FIX: Store init promise so dualPublish can await readiness
     this.initPromise = this.initializeStreamsClient();
+  }
+
+  /**
+   * M5 FIX: Build a key with the configured prefix for namespace isolation.
+   */
+  private key(suffix: string): string {
+    return `${this.config.keyPrefix}:${suffix}`;
   }
 
   /**
@@ -192,21 +202,21 @@ export class DeadLetterQueue {
 
       const redis = await this.redis;
       // Store in Redis with TTL
-      const key = `dlq:${failedOp.id}`;
+      const key = this.key(failedOp.id);
       await redis.set(key, failedOp, Math.floor(this.config.retentionPeriod / 1000));
 
       // Add to priority queue
-      const priorityKey = `dlq:priority:${failedOp.priority}`;
+      const priorityKey = this.key(`priority:${failedOp.priority}`);
       await redis.zadd(priorityKey, failedOp.timestamp, failedOp.id);
 
       // Add to service-specific queue
-      const serviceKey = `dlq:service:${failedOp.service}`;
+      const serviceKey = this.key(`service:${failedOp.service}`);
       await redis.zadd(serviceKey, failedOp.timestamp, failedOp.id);
 
       // Add tags for filtering
       if (failedOp.tags) {
         for (const tag of failedOp.tags) {
-          const tagKey = `dlq:tag:${tag}`;
+          const tagKey = this.key(`tag:${tag}`);
           await redis.zadd(tagKey, failedOp.timestamp, failedOp.id);
         }
       }
@@ -250,7 +260,7 @@ export class DeadLetterQueue {
       for (const priority of priorities) {
         if (processed >= batchSize) break;
 
-        const priorityKey = `dlq:priority:${priority}`;
+        const priorityKey = this.key(`priority:${priority}`);
         const operationIds = await redis.zrange(priorityKey, 0, batchSize - processed - 1);
 
         for (const operationId of operationIds) {
@@ -306,18 +316,18 @@ export class DeadLetterQueue {
 
     const redis = await this.redis;
     if (priority) {
-      const key = `dlq:priority:${priority}`;
+      const key = this.key(`priority:${priority}`);
       operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else if (service) {
-      const key = `dlq:service:${service}`;
+      const key = this.key(`service:${service}`);
       operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else if (tag) {
-      const key = `dlq:tag:${tag}`;
+      const key = this.key(`tag:${tag}`);
       operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else {
       // Get all operations (by timestamp)
       // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
-      const keys = await this.scanKeys('dlq:priority:*');
+      const keys = await this.scanKeys(`${this.config.keyPrefix}:priority:*`);
       for (const key of keys) {
         const ids = await redis.zrange(key, offset, offset + limit - 1);
         operationIds.push(...ids);
@@ -359,24 +369,24 @@ export class DeadLetterQueue {
     // Count by priority
     const priorities = ['critical', 'high', 'medium', 'low'];
     for (const priority of priorities) {
-      const count = await redis.zcard(`dlq:priority:${priority}`);
+      const count = await redis.zcard(this.key(`priority:${priority}`));
       stats.byPriority[priority] = count;
     }
 
     // Count by service
     // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
-    const serviceKeys = await this.scanKeys('dlq:service:*');
+    const serviceKeys = await this.scanKeys(`${this.config.keyPrefix}:service:*`);
     for (const key of serviceKeys) {
-      const service = key.replace('dlq:service:', '');
+      const service = key.replace(`${this.config.keyPrefix}:service:`, '');
       const count = await redis.zcard(key);
       stats.byService[service] = count;
     }
 
     // Count by tag
     // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
-    const tagKeys = await this.scanKeys('dlq:tag:*');
+    const tagKeys = await this.scanKeys(`${this.config.keyPrefix}:tag:*`);
     for (const key of tagKeys) {
-      const tag = key.replace('dlq:tag:', '');
+      const tag = key.replace(`${this.config.keyPrefix}:tag:`, '');
       const count = await redis.zcard(key);
       stats.byTag[tag] = count;
     }
@@ -386,7 +396,7 @@ export class DeadLetterQueue {
       let oldest = Infinity;
       let newest = 0;
       for (const priority of priorities) {
-        const ops = await redis.zrange(`dlq:priority:${priority}`, 0, -1, 'WITHSCORES');
+        const ops = await redis.zrange(this.key(`priority:${priority}`), 0, -1, 'WITHSCORES');
         if (ops.length >= 2) {
           const firstScore = parseInt(ops[1]);
           const lastScore = parseInt(ops[ops.length - 1]);
@@ -429,7 +439,7 @@ export class DeadLetterQueue {
         return true;
       } else {
         operation.retryCount++;
-        await redis.set(`dlq:${operationId}`, operation);
+        await redis.set(this.key(operationId), operation, Math.floor(this.config.retentionPeriod / 1000));
         logger.warn('Manual retry failed', { operationId, retryCount: operation.retryCount });
         return false;
       }
@@ -449,14 +459,14 @@ export class DeadLetterQueue {
     try {
       const redis = await this.redis;
       // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
-      const keys = await this.scanKeys('dlq:*');
+      const keys = await this.scanKeys(`${this.config.keyPrefix}:*`);
 
       for (const key of keys) {
-        if (key.startsWith('dlq:') && !key.includes(':priority:') && !key.includes(':service:') && !key.includes(':tag:')) {
+        if (key.startsWith(`${this.config.keyPrefix}:`) && !key.includes(':priority:') && !key.includes(':service:') && !key.includes(':tag:')) {
           // This is an operation key
           const operation = await redis.get<FailedOperation>(key);
           if (operation && operation.timestamp < cutoffTime) {
-            await this.removeOperation(key.replace('dlq:', ''));
+            await this.removeOperation(key.replace(`${this.config.keyPrefix}:`, ''));
             cleaned++;
           }
         }
@@ -524,7 +534,7 @@ export class DeadLetterQueue {
     const priorities = ['critical', 'high', 'medium', 'low'];
     let total = 0;
     for (const priority of priorities) {
-      total += await redis.zcard(`dlq:priority:${priority}`);
+      total += await redis.zcard(this.key(`priority:${priority}`));
     }
     return total;
   }
@@ -537,7 +547,7 @@ export class DeadLetterQueue {
       if (count <= 0) break;
 
       const redis = await this.redis;
-      const key = `dlq:priority:${priority}`;
+      const key = this.key(`priority:${priority}`);
       const oldestIds = await redis.zrange(key, 0, Math.min(count - 1, 100));
 
       for (const id of oldestIds) {
@@ -550,7 +560,7 @@ export class DeadLetterQueue {
 
   private async getOperation(id: string): Promise<FailedOperation | null> {
     const redis = await this.redis;
-    return await redis.get(`dlq:${id}`);
+    return await redis.get(this.key(id));
   }
 
   // P0-4 FIX: Replaced simulateOperationProcessing with handler registry lookup.
@@ -577,6 +587,10 @@ export class DeadLetterQueue {
       return { success: true, retry: false };
     } catch (error) {
       operation.retryCount++;
+
+      // Persist updated retryCount to Redis — prevents infinite retry loops on restart
+      const redis = await this.redis;
+      await redis.set(this.key(operationId), operation, Math.floor(this.config.retentionPeriod / 1000));
 
       const shouldRetry = operation.retryCount < operation.maxRetries && await this.shouldRetry(operation, error);
       return { success: false, retry: shouldRetry };
@@ -607,7 +621,7 @@ export class DeadLetterQueue {
     const indexKeys = await this.findOperationInIndexes(operationId);
 
     // Remove from main storage
-    await redis.del(`dlq:${operationId}`);
+    await redis.del(this.key(operationId));
 
     // Remove from all indexes
     for (const key of indexKeys) {
@@ -618,7 +632,8 @@ export class DeadLetterQueue {
   private async findOperationInIndexes(operationId: string): Promise<string[]> {
     const redis = await this.redis;
     const indexKeys: string[] = [];
-    const patterns = ['dlq:priority:*', 'dlq:service:*', 'dlq:tag:*'];
+    const pfx = this.config.keyPrefix;
+    const patterns = [`${pfx}:priority:*`, `${pfx}:service:*`, `${pfx}:tag:*`];
 
     // P0-1 FIX: Use SCAN instead of KEYS to avoid blocking Redis
     for (const pattern of patterns) {

@@ -5,6 +5,7 @@
  * - BinanceWebSocketClient: Real-time trade stream from Binance
  * - CexPriceNormalizer: Maps Binance symbols to internal token IDs
  * - CowSettlementWatcher: Monitors CoW Protocol batch settlements on Ethereum
+ * - DataGapBackfiller: Fills missed blockchain events via eth_getLogs after reconnection
  *
  * @module feeds
  */
@@ -38,3 +39,16 @@ export type {
   TokenMapping,
   CexNormalizerConfig,
 } from './cex-price-normalizer';
+
+// Data Gap Backfiller (C3 fix)
+export {
+  DataGapBackfiller,
+} from './data-gap-backfiller';
+export type {
+  DataGapEvent,
+  EthLog,
+  DataGapSource,
+  DataGapBackfillerConfig,
+  BackfillStats,
+  DataGapBackfillerLogger,
+} from './data-gap-backfiller';

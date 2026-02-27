@@ -67,6 +67,13 @@ export class ProviderRotationStrategy {
    */
   private excludedProviders: Map<string, { until: number; count: number }> = new Map();
 
+  /**
+   * Auth failure quarantine tracking.
+   * URLs that returned 401/403 are quarantined for 1 hour (auth errors don't self-heal).
+   * Maps URL to quarantine expiry timestamp.
+   */
+  private authQuarantinedProviders: Map<string, number> = new Map();
+
   /** S3.3: Provider health scorer for intelligent fallback selection */
   private readonly healthScorer: ProviderHealthScorer;
 
@@ -276,9 +283,12 @@ export class ProviderRotationStrategy {
   // ===========================================================================
 
   /**
-   * S3.3: Check if a provider URL is currently excluded due to rate limiting.
+   * S3.3: Check if a provider URL is currently excluded due to rate limiting or auth failure.
    */
   isProviderExcluded(url: string): boolean {
+    // Check auth quarantine first (longer exclusion)
+    if (this.isAuthQuarantined(url)) return true;
+
     const exclusion = this.excludedProviders.get(url);
     if (!exclusion) return false;
 
@@ -341,11 +351,112 @@ export class ProviderRotationStrategy {
   }
 
   /**
-   * Clear all provider exclusions (useful for recovery/reset).
+   * Clear all provider exclusions — rate limits only (auth quarantines are separate).
+   * Use clearAuthQuarantines() after API key rotation.
    */
   clearProviderExclusions(): void {
     this.excludedProviders.clear();
     logger.info('Cleared all provider exclusions', { chainId: this.chainId });
+  }
+
+  // ===========================================================================
+  // Auth Failure Handling
+  // ===========================================================================
+
+  /** Default quarantine duration for auth failures: 1 hour */
+  private static readonly AUTH_QUARANTINE_MS = 3_600_000;
+
+  /**
+   * Check if a provider URL is quarantined due to authentication failure (401/403).
+   * Auth errors are deterministic — they won't self-heal without key rotation,
+   * so quarantine is much longer than rate-limit exclusion.
+   */
+  isAuthQuarantined(url: string): boolean {
+    const until = this.authQuarantinedProviders.get(url);
+    if (until === undefined) return false;
+
+    if (Date.now() > until) {
+      this.authQuarantinedProviders.delete(url);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Handle an authentication failure (HTTP 401/403) by quarantining the URL.
+   * Quarantined providers are skipped immediately during fallback selection —
+   * no exponential backoff since auth errors are deterministic.
+   */
+  handleAuthFailure(url: string): void {
+    const until = Date.now() + ProviderRotationStrategy.AUTH_QUARANTINE_MS;
+    this.authQuarantinedProviders.set(url, until);
+
+    const provider = this.extractProviderFromUrl(url);
+    recordRpcError(provider, this.chainId, 'auth_failure');
+
+    // Mask API key in URL for safe logging
+    const maskedUrl = url.replace(/\/([a-f0-9]{8})[a-f0-9]+/gi, '/$1***');
+    logger.error('Authentication failure (401/403), quarantining provider for 1 hour', {
+      maskedUrl,
+      provider,
+      chainId: this.chainId,
+      quarantineUntil: new Date(until).toISOString(),
+    });
+  }
+
+  /**
+   * Check if an error indicates an authentication/authorization failure.
+   * Detects HTTP 401/403 and common auth-related error patterns.
+   */
+  isAuthError(error: unknown): boolean {
+    if (!error) return false;
+
+    const errorObj = error as { message?: string; code?: number | string; status?: number; statusCode?: number };
+    const message = (errorObj.message ?? '').toLowerCase();
+    const code = errorObj.code;
+    const status = errorObj.status ?? errorObj.statusCode;
+
+    // HTTP status codes
+    if (code === 401 || code === 403) return true;
+    if (status === 401 || status === 403) return true;
+
+    // Message patterns
+    const authPatterns = [
+      'unauthorized',
+      'forbidden',
+      'invalid api key',
+      'invalid key',
+      'api key expired',
+      'authentication failed',
+      'authentication required',
+      'unexpected server response: 401',
+      'unexpected server response: 403',
+    ];
+
+    return authPatterns.some(pattern => message.includes(pattern));
+  }
+
+  /**
+   * Get all auth-quarantined providers for diagnostics.
+   */
+  getAuthQuarantinedProviders(): Map<string, number> {
+    // Clean up expired quarantines
+    const now = Date.now();
+    for (const [url, until] of this.authQuarantinedProviders) {
+      if (now > until) {
+        this.authQuarantinedProviders.delete(url);
+      }
+    }
+    return new Map(this.authQuarantinedProviders);
+  }
+
+  /**
+   * Clear all auth quarantines (useful after API key rotation).
+   */
+  clearAuthQuarantines(): void {
+    this.authQuarantinedProviders.clear();
+    logger.info('Cleared all auth quarantines', { chainId: this.chainId });
   }
 
   // ===========================================================================

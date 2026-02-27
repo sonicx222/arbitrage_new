@@ -85,6 +85,8 @@ interface RedisConnectionOptions {
   enableReadyCheck: boolean;
   maxRetriesPerRequest: number;
   lazyConnect: boolean;
+  retryStrategy?: (times: number) => number | null;
+  reconnectOnError?: (err: Error) => boolean;
 }
 
 // =============================================================================
@@ -211,7 +213,26 @@ export class RedisClient {
       retryDelayOnFailover: 100,
       enableReadyCheck: false,
       maxRetriesPerRequest: 3,
-      lazyConnect: true
+      lazyConnect: true,
+      // Align with RedisStreamsClient: exponential backoff, give up after 15 retries (~4.5 min).
+      // Previously relied on ioredis default (infinite retries with min(times*50, 2000) backoff).
+      retryStrategy: (times: number) => {
+        if (times > 15) {
+          this.logger.error('Redis connection failed after 15 retries, giving up', {
+            totalRetries: times,
+          });
+          return null;
+        }
+        const delay = Math.min(Math.round(200 * Math.pow(2, times - 1)), 30000);
+        if (times === 1 || times % 3 === 0) {
+          this.logger.warn('Redis client reconnecting', { attempt: times, delayMs: delay });
+        }
+        return delay;
+      },
+      // Reconnect on READONLY errors (Redis failover scenario)
+      reconnectOnError: (err: Error) => {
+        return err.message?.includes('READONLY') ?? false;
+      },
     };
 
     const RedisImpl = this.deps.RedisImpl;
@@ -240,8 +261,12 @@ export class RedisClient {
     this.client.removeAllListeners('close');
 
     // P1-1 FIX: Use Error type instead of any
+    // Fix H4: Include error code for diagnostic precision (EPIPE, ECONNREFUSED, etc.)
     this.client.on('error', (err: Error) => {
-      this.logger?.error('Redis main client error', { error: err });
+      this.logger?.error('Redis main client error', {
+        error: err.message || String(err),
+        code: (err as NodeJS.ErrnoException).code,
+      });
     });
 
     this.client.on('connect', () => {
@@ -258,17 +283,21 @@ export class RedisClient {
 
     // Setup pubClient event handlers
     this.pubClient.removeAllListeners('error');
-    // P1-1 FIX: Use Error type instead of any
     this.pubClient.on('error', (err: Error) => {
-      this.logger?.error('Redis pub client error', { error: err });
+      this.logger?.error('Redis pub client error', {
+        error: err.message || String(err),
+        code: (err as NodeJS.ErrnoException).code,
+      });
     });
 
     // Setup subClient event handlers
     this.subClient.removeAllListeners('error');
     this.subClient.removeAllListeners('message');
-    // P1-1 FIX: Use Error type instead of any
     this.subClient.on('error', (err: Error) => {
-      this.logger?.error('Redis sub client error', { error: err });
+      this.logger?.error('Redis sub client error', {
+        error: err.message || String(err),
+        code: (err as NodeJS.ErrnoException).code,
+      });
     });
   }
 

@@ -359,8 +359,9 @@ export class AlertNotifier {
     const configuredChannels = this.channels.filter(c => c.isConfigured());
 
     if (configuredChannels.length === 0) {
-      // No channels configured - just log
-      this.logger.warn('Alert triggered (no notification channels)', { ...alert });
+      // H5 FIX: Downgraded to DEBUG to prevent dual-logging with coordinator.sendAlert()
+      // The coordinator already logs 'Alert triggered' at WARN level for every alert
+      this.logger.debug?.('Alert stored (no notification channels configured)', { alertType: alert.type });
       return;
     }
 

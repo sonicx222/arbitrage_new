@@ -564,6 +564,214 @@ describe('ProviderRotationStrategy', () => {
   });
 
   // ===========================================================================
+  // Auth Failure Handling
+  // ===========================================================================
+
+  describe('isAuthError()', () => {
+    describe('error codes', () => {
+      it('should detect HTTP 401 (Unauthorized) via code', () => {
+        expect(strategy.isAuthError({ code: 401, message: '' })).toBe(true);
+      });
+
+      it('should detect HTTP 403 (Forbidden) via code', () => {
+        expect(strategy.isAuthError({ code: 403, message: '' })).toBe(true);
+      });
+
+      it('should detect HTTP 401 via status field', () => {
+        expect(strategy.isAuthError({ status: 401 })).toBe(true);
+      });
+
+      it('should detect HTTP 403 via statusCode field', () => {
+        expect(strategy.isAuthError({ statusCode: 403 })).toBe(true);
+      });
+
+      it('should not detect non-auth error codes', () => {
+        expect(strategy.isAuthError({ code: 429, message: '' })).toBe(false);
+        expect(strategy.isAuthError({ code: 500, message: '' })).toBe(false);
+        expect(strategy.isAuthError({ code: 1006, message: '' })).toBe(false);
+      });
+    });
+
+    describe('message patterns', () => {
+      const authMessages = [
+        'Unauthorized',
+        'Forbidden',
+        'invalid api key',
+        'invalid key',
+        'api key expired',
+        'authentication failed',
+        'authentication required',
+        'Unexpected server response: 401',
+        'Unexpected server response: 403',
+      ];
+
+      for (const msg of authMessages) {
+        it(`should detect "${msg}" pattern`, () => {
+          expect(strategy.isAuthError({ message: msg })).toBe(true);
+        });
+      }
+
+      it('should be case-insensitive', () => {
+        expect(strategy.isAuthError({ message: 'UNAUTHORIZED' })).toBe(true);
+        expect(strategy.isAuthError({ message: 'Invalid API Key' })).toBe(true);
+      });
+
+      it('should detect partial matches within longer messages', () => {
+        expect(strategy.isAuthError({
+          message: 'Error: Unexpected server response: 401 from wss://rpc.ankr.com/polygon/fd86c2'
+        })).toBe(true);
+      });
+
+      it('should not detect unrelated error messages', () => {
+        expect(strategy.isAuthError({ message: 'connection refused' })).toBe(false);
+        expect(strategy.isAuthError({ message: 'rate limit exceeded' })).toBe(false);
+        expect(strategy.isAuthError({ message: 'timeout' })).toBe(false);
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should return false for null', () => {
+        expect(strategy.isAuthError(null)).toBe(false);
+      });
+
+      it('should return false for undefined', () => {
+        expect(strategy.isAuthError(undefined)).toBe(false);
+      });
+
+      it('should return false for empty object', () => {
+        expect(strategy.isAuthError({})).toBe(false);
+      });
+    });
+  });
+
+  describe('handleAuthFailure()', () => {
+    it('should quarantine a provider for 1 hour', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+
+      const quarantined = strategy.getAuthQuarantinedProviders();
+      const until = quarantined.get('wss://fallback1.ankr.com/ws');
+
+      expect(until).toBeDefined();
+      // 1 hour = 3,600,000ms
+      expect(until).toBe(1000000 + 3600000);
+    });
+
+    it('should cause isProviderExcluded to return true', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      expect(strategy.isProviderExcluded('wss://fallback1.ankr.com/ws')).toBe(true);
+    });
+
+    it('should expire after 1 hour', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      // Advance past quarantine: 1000000 + 3600000 + 1
+      dateNowSpy.mockReturnValue(4600001);
+
+      expect(strategy.isProviderExcluded('wss://fallback1.ankr.com/ws')).toBe(false);
+      expect(strategy.isAuthQuarantined('wss://fallback1.ankr.com/ws')).toBe(false);
+    });
+
+    it('should exclude auth-quarantined providers from fallback selection', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      mockSelectBestProviderWithBudget.mockReturnValueOnce('wss://fallback2.publicnode.com/ws');
+
+      const result = strategy.selectBestFallbackUrl();
+      expect(result).toBe('wss://fallback2.publicnode.com/ws');
+    });
+
+    it('should return null when all fallbacks are auth-quarantined', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      strategy.handleAuthFailure('wss://fallback2.publicnode.com/ws');
+
+      const result = strategy.selectBestFallbackUrl();
+      expect(result).toBeNull();
+    });
+
+    it('should reduce available provider count', () => {
+      expect(strategy.getAvailableProviderCount()).toBe(3);
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      expect(strategy.getAvailableProviderCount()).toBe(2);
+    });
+  });
+
+  describe('isAuthQuarantined()', () => {
+    it('should return false for URLs never quarantined', () => {
+      expect(strategy.isAuthQuarantined('wss://fallback1.ankr.com/ws')).toBe(false);
+    });
+
+    it('should return true for quarantined URL before expiry', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      expect(strategy.isAuthQuarantined('wss://fallback1.ankr.com/ws')).toBe(true);
+    });
+
+    it('should clean up expired quarantine entry', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      dateNowSpy.mockReturnValue(4600001);
+
+      strategy.isAuthQuarantined('wss://fallback1.ankr.com/ws');
+      expect(strategy.getAuthQuarantinedProviders().size).toBe(0);
+    });
+  });
+
+  describe('getAuthQuarantinedProviders()', () => {
+    it('should return empty map when none quarantined', () => {
+      expect(strategy.getAuthQuarantinedProviders().size).toBe(0);
+    });
+
+    it('should return a copy (modifying returned map does not affect internal state)', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      const copy = strategy.getAuthQuarantinedProviders();
+      copy.delete('wss://fallback1.ankr.com/ws');
+
+      expect(strategy.getAuthQuarantinedProviders().size).toBe(1);
+    });
+
+    it('should clean up expired quarantines before returning', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      dateNowSpy.mockReturnValue(4600001);
+
+      expect(strategy.getAuthQuarantinedProviders().size).toBe(0);
+    });
+  });
+
+  describe('clearAuthQuarantines()', () => {
+    it('should clear all quarantines', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      strategy.handleAuthFailure('wss://fallback2.publicnode.com/ws');
+      expect(strategy.getAuthQuarantinedProviders().size).toBe(2);
+
+      strategy.clearAuthQuarantines();
+      expect(strategy.getAuthQuarantinedProviders().size).toBe(0);
+    });
+
+    it('should allow previously quarantined providers to be used again', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      expect(strategy.isProviderExcluded('wss://fallback1.ankr.com/ws')).toBe(true);
+
+      strategy.clearAuthQuarantines();
+      expect(strategy.isProviderExcluded('wss://fallback1.ankr.com/ws')).toBe(false);
+    });
+  });
+
+  describe('auth quarantine vs rate limit exclusion interaction', () => {
+    it('should exclude by auth quarantine even if rate limit exclusion expired', () => {
+      // Rate limit exclusion: 30s
+      strategy.handleRateLimit('wss://fallback1.ankr.com/ws');
+      // Auth quarantine: 1 hour
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+
+      // Advance past rate limit but not auth quarantine
+      dateNowSpy.mockReturnValue(1030001);
+      expect(strategy.isProviderExcluded('wss://fallback1.ankr.com/ws')).toBe(true);
+    });
+
+    it('should prioritize auth quarantine check (checked first in isProviderExcluded)', () => {
+      strategy.handleAuthFailure('wss://fallback1.ankr.com/ws');
+      // isProviderExcluded should return true via auth quarantine path
+      expect(strategy.isProviderExcluded('wss://fallback1.ankr.com/ws')).toBe(true);
+    });
+  });
+
+  // ===========================================================================
   // Rate Limit Detection
   // ===========================================================================
 

@@ -1444,9 +1444,12 @@ let defaultCacheConfig: Partial<CacheConfig> | undefined = undefined;
  */
 export function getHierarchicalCache(config?: Partial<CacheConfig>): HierarchicalCache {
   if (!defaultCache) {
+    // Use CACHE_DEFAULTS.defaultL1SizeMb which respects CACHE_L1_SIZE_MB env var
+    // and platform detection (Fly.io=16MB, constrained=32MB, local=64MB).
+    // Previously hardcoded 128MB, causing 563MB SharedArrayBuffer per partition.
     const defaultConfig: Partial<CacheConfig> = config ?? {
       l1Enabled: true,
-      l1Size: 128, // 128MB L1 cache
+      l1Size: CACHE_DEFAULTS.defaultL1SizeMb,
       l2Enabled: true,
       l2Ttl: 600, // 10 minutes
       l3Enabled: true,

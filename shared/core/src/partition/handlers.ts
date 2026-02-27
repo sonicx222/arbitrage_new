@@ -241,8 +241,8 @@ export function setupProcessHandlers(
   };
 
   // Prevent MaxListenersExceededWarning — services register 4 process handlers
-  // plus Pino transport exit handlers (ADR-015)
-  process.setMaxListeners(Math.max(process.getMaxListeners(), 15));
+  // plus Pino transport exit handlers, dotenv, tsconfig-paths, redis, ws (ADR-015)
+  process.setMaxListeners(Math.max(process.getMaxListeners(), 25));
 
   process.on('SIGTERM', sigtermHandler);
   process.on('SIGINT', sigintHandler);

@@ -19,6 +19,7 @@
  */
 
 import { clearIntervalSafe } from '@arbitrage/core/async';
+import { CpuUsageTracker } from '@arbitrage/core/monitoring';
 import { RedisStreamsClient, type RedisClient } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
@@ -125,6 +126,9 @@ export class HealthMonitoringManager {
   // Concurrency guards to prevent overlapping async callbacks
   private isReporting = false;
 
+  // H2 FIX: Delta-based CPU usage tracking (replaces hardcoded 0)
+  private readonly cpuTracker = new CpuUsageTracker();
+
   constructor(deps: HealthMonitoringDependencies) {
     this.deps = deps;
   }
@@ -196,7 +200,7 @@ export class HealthMonitoringManager {
       status: this.deps.stateManager.isRunning() ? 'healthy' : 'unhealthy',
       uptime: process.uptime(),
       memoryUsage: process.memoryUsage().heapUsed,
-      cpuUsage: 0,
+      cpuUsage: this.cpuTracker.getUsagePercent(),
       lastHeartbeat: Date.now(),
       error: undefined,
     };
@@ -207,6 +211,22 @@ export class HealthMonitoringManager {
     const opportunityConsumer = this.deps.getOpportunityConsumer();
     const streamsClient = this.deps.getStreamsClient();
     const redis = this.deps.getRedis();
+
+    // M2 FIX: Include simulation sub-status in the main health report.
+    // Previously, simulation-service logged a separate health check with
+    // 'not_configured'/'degraded'/'healthy', confusing operators who saw
+    // two different statuses from the same service.
+    let simulationStatus: 'healthy' | 'degraded' | 'not_configured' = 'not_configured';
+    if (simulationMetrics) {
+      const healthyProviders = Object.values(simulationMetrics.providerHealth)
+        .filter(p => p.healthy).length;
+      const totalProviders = Object.keys(simulationMetrics.providerHealth).length;
+      if (totalProviders > 0 && healthyProviders > 0) {
+        simulationStatus = 'healthy';
+      } else if (totalProviders > 0) {
+        simulationStatus = 'degraded';
+      }
+    }
 
     // Publish to Redis Streams
     if (streamsClient) {
@@ -220,6 +240,7 @@ export class HealthMonitoringManager {
           pendingMessages: opportunityConsumer?.getPendingCount() ?? 0,
           stats: this.deps.stats,
           simulationMetrics: simulationMetrics ?? null,
+          simulationStatus,
           strategyMetrics: this.deps.getStrategyMetrics?.() ?? null,
         }
       );
