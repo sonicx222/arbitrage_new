@@ -1345,6 +1345,13 @@ function isBatchEnvelope<T>(data: unknown): data is BatchEnvelope<T> {
  */
 export function unwrapBatchMessages<T>(data: unknown): T[] {
   if (isBatchEnvelope<T>(data)) {
+    // FIX L8: Validate count matches actual messages length to detect truncation/corruption
+    if (data.count !== data.messages.length) {
+      process.emitWarning(
+        `Batch envelope count mismatch: declared ${data.count}, actual ${data.messages.length}`,
+        'BatchIntegrityWarning'
+      );
+    }
     return data.messages;
   }
   return [data as T];

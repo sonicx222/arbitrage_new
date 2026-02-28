@@ -73,6 +73,8 @@ export interface RejectionStats {
 /** Minimal logger interface for optional structured logging */
 interface DetectorLogger {
   debug(msg: string, obj?: Record<string, unknown>): void;
+  // FIX M9: info-level for periodic production visibility (5-min summary)
+  info?(msg: string, obj?: Record<string, unknown>): void;
 }
 
 /**
@@ -311,8 +313,19 @@ export class SimpleArbitrageDetector {
     // Only consider logging every 1000 rejections to amortize Date.now() cost
     if (this.rejectionStats.total % 1000 === 0 && this.logger) {
       const now = Date.now();
-      // Throttle to at most once every 60 seconds
-      if (now - this.lastStatsLogTime >= 60_000) {
+      // FIX M9: Emit periodic info-level summary (every 5 min) for production visibility.
+      // Debug-level stats fire every 60s for detailed monitoring.
+      // At production LOG_LEVEL=info, operators need some visibility into why
+      // the detector stopped finding opportunities (rejection patterns).
+      if (now - this.lastStatsLogTime >= 300_000) {
+        this.lastStatsLogTime = now;
+        // FIX M9: Use info if available, fallback to debug for backwards compatibility
+        const logFn = this.logger.info?.bind(this.logger) ?? this.logger.debug.bind(this.logger);
+        logFn('Arbitrage rejection stats (5m summary)', {
+          chainId: this.config.chainId,
+          ...this.rejectionStats,
+        });
+      } else if (now - this.lastStatsLogTime >= 60_000) {
         this.lastStatsLogTime = now;
         this.logger.debug('Arbitrage rejection stats', {
           chainId: this.config.chainId,

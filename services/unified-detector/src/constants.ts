@@ -171,8 +171,9 @@ export const WS_DISCONNECT_TIMEOUT_MS = 5_000;
 // =============================================================================
 
 /** List of recognized stablecoin symbols */
+// FIX M13: Added USDB (Blast native stablecoin, 18 decimals unlike typical 6-decimal stables)
 export const STABLECOIN_SYMBOLS = [
-  'USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM'
+  'USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM', 'USDB'
 ] as const;
 
 /** FIX #31: O(1) Set for stablecoin lookups (vs O(9) Array.includes) */

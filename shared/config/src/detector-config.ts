@@ -178,7 +178,7 @@ export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
     healthCheckInterval: 10000, // Frequent health checks
     confidence: 0.85,           // High confidence for fast chain
     expiryMs: 5000,             // 5s (very fast blocks)
-    gasEstimate: 5000,          // Very low transaction fees
+    gasEstimate: 5000,          // Compute units (not gas) — Solana uses ~5K CU per swap, ~200K CU budget
     whaleThreshold: 50000,      // $50K (high activity chain)
     nativeTokenKey: 'nativeWrapper'  // Wrapped SOL for USD calc
   }

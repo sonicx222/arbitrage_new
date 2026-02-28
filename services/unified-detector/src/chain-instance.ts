@@ -63,6 +63,7 @@ import {
   isEvmChain,
   FEATURE_FLAGS,
   getOpportunityTimeoutMs,
+  getConfidenceMaxAgeMs,
 } from '@arbitrage/config';
 
 import {
@@ -272,10 +273,11 @@ export class ChainDetectorInstance extends EventEmitter {
   /** Phase 0 instrumentation: timestamp of last WebSocket message received */
   private lastWsReceivedAt: number = 0;
   private reconnectAttempts: number = 0;
-  private readonly MAX_RECONNECT_ATTEMPTS = 5;
-  // Slow recovery: After max reconnect attempts, retry every 5 minutes
+  // FIX L2: Configurable reconnect parameters via env vars
+  private readonly MAX_RECONNECT_ATTEMPTS = parseInt(process.env.WS_MAX_RECONNECT_ATTEMPTS ?? '5', 10);
+  // Slow recovery: After max reconnect attempts, retry periodically
   private slowRecoveryTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly SLOW_RECOVERY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly SLOW_RECOVERY_INTERVAL_MS = parseInt(process.env.WS_SLOW_RECOVERY_INTERVAL_MS ?? '300000', 10);
 
   // P0-NEW-3/P0-NEW-4 FIX: Lifecycle promises to prevent race conditions
   // These ensure concurrent start/stop calls are handled correctly
@@ -301,8 +303,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
   // P1-FIX: Maximum staleness for pair data in arbitrage detection.
   // Pairs not updated within this window are skipped to prevent false opportunities
-  // from stale reserves. 30s aligns with typical block times across supported chains.
-  private readonly MAX_STALENESS_MS = 30_000;
+  // from stale reserves.
+  // FIX M8: Use per-chain staleness from thresholds.ts instead of hardcoded 30s.
+  // Ethereum: 30s, BSC: 9s, Arbitrum: 4s, Solana: 3s — matches block time ratios.
+  private readonly MAX_STALENESS_MS: number;
 
   // Swap event filtering and whale detection
   private swapEventFilter: SwapEventFilter | null = null;
@@ -368,6 +372,8 @@ export class ChainDetectorInstance extends EventEmitter {
   // ADR-002: StreamBatcher for price updates — reduces Redis commands ~50x
   // batcher.add() is O(1) synchronous, flush happens asynchronously
   private priceUpdateBatcher: StreamBatcher<PriceUpdate> | null = null;
+  // FIX M2+M12: Track batcher drops for backpressure visibility
+  private batcherDropCount: number = 0;
 
   constructor(config: ChainInstanceConfig) {
     super();
@@ -388,6 +394,8 @@ export class ChainDetectorInstance extends EventEmitter {
     this.detectorConfig = DETECTOR_CONFIG[this.chainId as keyof typeof DETECTOR_CONFIG] ?? DETECTOR_CONFIG.ethereum;
     // FIX C1: Pre-compute tracing service name to avoid template string per price update
     this.tracingServiceName = `chain-detector:${this.chainId}`;
+    // FIX M8: Per-chain staleness from thresholds.ts (Ethereum: 30s, Arbitrum: 4s, Solana: 3s)
+    this.MAX_STALENESS_MS = getConfidenceMaxAgeMs(this.chainId);
     this.dexes = getEnabledDexes(this.chainId);
     this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] || [];
     this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] || {};
@@ -1596,7 +1604,19 @@ export class ChainDetectorInstance extends EventEmitter {
     // batcher.add() is O(1) synchronous queue push — faster than async xaddWithLimit
     // Flush happens asynchronously in background (maxBatchSize: 50, maxWaitMs: 10ms)
     if (this.priceUpdateBatcher) {
-      this.priceUpdateBatcher.add(enrichedUpdate);
+      // FIX M2+M12: Check batcher.add() return value for backpressure visibility.
+      // Returns false when queue is full (Redis outage, maxQueueSize reached).
+      const accepted = this.priceUpdateBatcher.add(enrichedUpdate);
+      if (!accepted) {
+        this.batcherDropCount++;
+        // Throttle warning to avoid log spam during sustained outages
+        if (this.batcherDropCount === 1 || this.batcherDropCount % 1000 === 0) {
+          this.logger.warn('Price update dropped by batcher (queue full)', {
+            chain: this.chainId,
+            totalDropped: this.batcherDropCount,
+          });
+        }
+      }
     } else {
       // Fallback: direct publish if batcher not yet initialized (startup race)
       this.streamsClient.xaddWithLimit(
@@ -1728,8 +1748,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // VOLATILITY-OPT: Hot pairs (high activity) bypass time-based throttling
     // This ensures we catch arbitrage opportunities on rapidly-updating pairs
-    // Use chain:address format to match recordUpdate format
-    const isHotPair = this.activityTracker.isHotPair(`${this.chainId}:${updatedPair.address}`);
+    // FIX L4: Use pre-computed chainPairKey to avoid template string allocation (1000/sec)
+    const isHotPair = this.activityTracker.isHotPair(updatedPair.chainPairKey ?? `${this.chainId}:${updatedPair.address}`);
 
     // Time-based throttle OR hot pair override
     const shouldCheckTriangular = isHotPair || (now - this.lastTriangularCheck >= TRIANGULAR_CHECK_INTERVAL_MS);

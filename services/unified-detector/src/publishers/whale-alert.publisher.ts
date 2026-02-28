@@ -104,7 +104,8 @@ export class WhaleAlertPublisher {
         direction: whaleTransaction.direction
       });
     } catch (error) {
-      this.logger.error('Whale alert publish failed', { error });
+      // FIX L7: Log error.message consistently (30+ other sites use .message)
+      this.logger.error('Whale alert publish failed', { error: (error as Error).message });
     }
   }
 
@@ -120,7 +121,8 @@ export class WhaleAlertPublisher {
         event
       );
     } catch (error) {
-      this.logger.error('Failed to publish swap event', { error });
+      // FIX L7: Log error.message consistently
+      this.logger.error('Failed to publish swap event', { error: (error as Error).message });
     }
   }
 

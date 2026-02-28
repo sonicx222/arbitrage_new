@@ -49,6 +49,9 @@ export interface OpportunityPublisherStats {
 
   /** Total opportunities published to fast lane */
   fastLanePublished: number;
+
+  /** FIX M10: Total fast lane publish failures (fire-and-forget, non-fatal) */
+  fastLaneFailed: number;
 }
 
 // =============================================================================
@@ -65,6 +68,7 @@ export class OpportunityPublisher {
     failed: 0,
     lastPublishedAt: null,
     fastLanePublished: 0,
+    fastLaneFailed: 0,
   };
 
   constructor(config: OpportunityPublisherConfig) {
@@ -201,6 +205,7 @@ export class OpportunityPublisher {
       failed: 0,
       lastPublishedAt: null,
       fastLanePublished: 0,
+      fastLaneFailed: 0,
     };
   }
 
@@ -270,6 +275,8 @@ export class OpportunityPublisher {
         });
       })
       .catch((error) => {
+        // FIX M10: Track fast lane failures for monitoring
+        this.stats.fastLaneFailed++;
         this.logger.warn('Failed to publish to fast lane (non-fatal)', {
           opportunityId: opportunity.id,
           error: (error as Error).message,

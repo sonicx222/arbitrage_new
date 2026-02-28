@@ -187,6 +187,7 @@ jest.mock('@arbitrage/config', () => ({
       feeBps: 30,
     },
   ]),
+  getConfidenceMaxAgeMs: jest.fn().mockReturnValue(30000),
   isEvmChain: jest.fn().mockReturnValue(true),
   getAllFactoryAddresses: jest.fn().mockReturnValue([
     '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',

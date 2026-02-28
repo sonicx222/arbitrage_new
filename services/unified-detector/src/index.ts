@@ -43,12 +43,20 @@ let healthServer: Server | null = null;
 let opportunityPublisher: OpportunityPublisher | null = null;
 let streamsClient: RedisStreamsClient | null = null;
 
+// FIX M6: Track concurrent in-flight publishes to prevent burst overload
+let inFlightPublishes = 0;
+const MAX_CONCURRENT_PUBLISHES = 50;
+
+// FIX M11: Price update ingestion counter for monitoring
+let priceUpdatesIngested = 0;
+
 // FIX Inconsistency 6.2: Use parsePort for consistent port validation
 const healthCheckPort = parsePort(process.env.HEALTH_CHECK_PORT, DEFAULT_HEALTH_CHECK_PORT, logger);
 
 // Get region from partition config for consistent health response
 const partitionConfig = process.env.PARTITION_ID ? getPartition(process.env.PARTITION_ID) : null;
-const regionId = process.env.REGION_ID || partitionConfig?.region || 'asia-southeast1';
+// FIX L1: Use ?? for consistent nullish coalescing convention
+const regionId = process.env.REGION_ID ?? partitionConfig?.region ?? 'asia-southeast1';
 
 const config: UnifiedDetectorConfig = {
   partitionId: process.env.PARTITION_ID,
@@ -204,7 +212,24 @@ function createHealthServer(port: number): Server {
             lines.push('# HELP detector_publish_failed_total Publish failures');
             lines.push('# TYPE detector_publish_failed_total counter');
             lines.push(`detector_publish_failed_total ${publisherStats.failed}`);
+            // FIX M10: Fast lane publish metrics
+            lines.push('# HELP detector_fast_lane_published_total Fast lane publishes');
+            lines.push('# TYPE detector_fast_lane_published_total counter');
+            lines.push(`detector_fast_lane_published_total ${publisherStats.fastLanePublished}`);
+            lines.push('# HELP detector_fast_lane_failed_total Fast lane failures');
+            lines.push('# TYPE detector_fast_lane_failed_total counter');
+            lines.push(`detector_fast_lane_failed_total ${publisherStats.fastLaneFailed}`);
           }
+
+          // FIX M11: Price update ingestion rate
+          lines.push('# HELP detector_price_updates_total Price updates ingested');
+          lines.push('# TYPE detector_price_updates_total counter');
+          lines.push(`detector_price_updates_total ${priceUpdatesIngested}`);
+
+          // FIX M6: Concurrent publish tracking
+          lines.push('# HELP detector_publish_in_flight Current in-flight publishes');
+          lines.push('# TYPE detector_publish_in_flight gauge');
+          lines.push(`detector_publish_in_flight ${inFlightPublishes}`);
 
           // Uptime
           lines.push('# HELP detector_uptime_seconds Service uptime');
@@ -266,9 +291,11 @@ function createHealthServer(port: number): Server {
 // Event Handlers
 // =============================================================================
 
-// NOTE: Price update event logging removed - fires 100s-1000s times/sec
-// Use metrics/monitoring for price update visibility if needed
-// detector.on('priceUpdate', ...) intentionally not logged
+// FIX M11: Track price update ingestion rate for monitoring
+// Counter exposed via /metrics endpoint — no per-event logging (1000s/sec)
+detector.on('priceUpdate', () => {
+  priceUpdatesIngested++;
+});
 
 detector.on('opportunity', (opp) => {
   logger.info('Arbitrage opportunity detected', {
@@ -282,16 +309,27 @@ detector.on('opportunity', (opp) => {
 
   // Publish opportunity to Redis Streams for Coordinator/Execution Engine
   // FIX P0: Fire-and-forget pattern with explicit error handling
-  // - EventEmitter doesn't await async handlers, causing unhandled rejections
-  // - Using .catch() ensures errors are logged, not thrown as unhandled rejections
-  // - This is intentional: we don't want to block the detector's event loop
+  // FIX M6: Gate concurrent publishes to prevent burst overload on Redis
   if (opportunityPublisher) {
-    opportunityPublisher.publish(opp).catch((error) => {
-      logger.error('Failed to publish opportunity (fire-and-forget)', {
+    if (inFlightPublishes >= MAX_CONCURRENT_PUBLISHES) {
+      logger.warn('Concurrent publish limit reached, skipping', {
         opportunityId: opp.id,
-        error: (error as Error).message,
+        inFlight: inFlightPublishes,
+        limit: MAX_CONCURRENT_PUBLISHES,
       });
-    });
+      return;
+    }
+    inFlightPublishes++;
+    opportunityPublisher.publish(opp)
+      .catch((error) => {
+        logger.error('Failed to publish opportunity (fire-and-forget)', {
+          opportunityId: opp.id,
+          error: (error as Error).message,
+        });
+      })
+      .finally(() => {
+        inFlightPublishes--;
+      });
   }
 });
 

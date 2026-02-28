@@ -30,7 +30,7 @@ export const ARBITRAGE_CONFIG = {
   predictiveEnabled: false, // Enable in Phase 3
   // Additional config properties for opportunity calculation
   defaultAmount: 10000, // Default trade amount in USD (flash loans need $10k+ to cover gas)
-  estimatedGasCost: parseFloat(process.env.ESTIMATED_GAS_COST_USD ?? '15'), // Env: ESTIMATED_GAS_COST_USD. Default 15 USD (conservative for mainnet; L2s are $0.01-$0.50)
+  estimatedGasCost: parseFloat(process.env.ESTIMATED_GAS_COST_USD ?? '15'), // Env: ESTIMATED_GAS_COST_USD. Global fallback (mainnet-oriented). Use getEstimatedGasCostUsd() for per-chain values.
   opportunityTimeoutMs: 30000, // 30 seconds
   minProfitThreshold: 2, // Minimum $2 net profit (per-chain % thresholds in chainMinProfits are primary filter)
   minConfidenceThreshold: 0.7, // Minimum 70% confidence
@@ -112,6 +112,58 @@ export const chainOpportunityTimeoutMs: Record<string, number> = {
  */
 export function getOpportunityTimeoutMs(chainId: string): number {
   return chainOpportunityTimeoutMs[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.opportunityTimeoutMs;
+}
+
+// =============================================================================
+// CHAIN-SPECIFIC ESTIMATED GAS COST (USD)
+// FIX M14: Global $15 default is 30-1500x overestimate for L2 chains.
+// Fallback paths using the global filter out all L2 opportunities under $15 profit.
+// Per-chain values reflect actual typical gas costs.
+// =============================================================================
+
+/**
+ * Per-chain estimated gas cost in USD for opportunity profit calculations.
+ *
+ * Values are approximate median costs for a swap transaction on each chain.
+ * These are used as deductions in absolute profit calculations:
+ *   net_profit = gross_profit - estimatedGasCostUsd
+ *
+ * Override globally via ESTIMATED_GAS_COST_USD env var if needed.
+ *
+ * @see ARBITRAGE_CONFIG.estimatedGasCost — global fallback ($15 mainnet)
+ */
+export const chainEstimatedGasCostUsd: Record<string, number> = {
+  // L1 chains — expensive
+  ethereum: 15.0,    // Highly variable ($5-$50+), $15 is conservative median
+  // Alt-L1 chains — moderate
+  bsc: 0.30,         // ~$0.10-$0.50
+  polygon: 0.05,     // ~$0.01-$0.10
+  avalanche: 0.10,   // ~$0.05-$0.20
+  fantom: 0.02,      // ~$0.01-$0.05
+  // L2 chains — cheap
+  arbitrum: 0.10,    // ~$0.05-$0.20
+  optimism: 0.05,    // ~$0.02-$0.10
+  base: 0.05,        // ~$0.02-$0.10
+  zksync: 0.10,      // ~$0.05-$0.20
+  linea: 0.10,       // ~$0.05-$0.20
+  // Emerging L2s — cheap
+  blast: 0.05,       // OP-stack L2
+  scroll: 0.10,      // zkRollup L2
+  mantle: 0.03,      // Modular L2 (EigenDA)
+  mode: 0.05,        // OP-stack L2
+  // Non-EVM
+  solana: 0.005,     // ~$0.001-$0.01 (priority fees)
+};
+
+/**
+ * Get estimated gas cost in USD for a specific chain.
+ * Uses chainEstimatedGasCostUsd with fallback to global ARBITRAGE_CONFIG.estimatedGasCost.
+ *
+ * @param chainId - Chain identifier (case-insensitive)
+ * @returns Estimated gas cost in USD
+ */
+export function getEstimatedGasCostUsd(chainId: string): number {
+  return chainEstimatedGasCostUsd[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.estimatedGasCost;
 }
 
 // =============================================================================
@@ -198,7 +250,9 @@ export const chainConfidenceMaxAgeMs: Record<string, number> = {
   scroll: 9000,      // 3s blocks — 9s is ~3 blocks
   mantle: 6000,      // 2s blocks — 6s is ~3 blocks
   mode: 6000,        // 2s blocks — 6s is ~3 blocks
-  solana: 2000,      // ~400ms blocks — 2s is ~5 slots
+  // FIX L10: Increased from 2000ms. WebSocket delivery latency is 500-1500ms,
+  // leaving only 500-1000ms of "fresh" window at 2s. 3s gives a safer margin.
+  solana: 3000,      // ~400ms blocks — 3s is ~7.5 slots (accounts for WS delivery latency)
 };
 
 /**

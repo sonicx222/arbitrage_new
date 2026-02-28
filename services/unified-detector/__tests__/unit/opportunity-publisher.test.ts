@@ -252,6 +252,7 @@ describe('OpportunityPublisher', () => {
         failed: 0,
         lastPublishedAt: null,
         fastLanePublished: 0,
+        fastLaneFailed: 0,
       });
     });
 
@@ -307,6 +308,7 @@ describe('OpportunityPublisher', () => {
         failed: 0,
         lastPublishedAt: null,
         fastLanePublished: 0,
+        fastLaneFailed: 0,
       });
     });
 
