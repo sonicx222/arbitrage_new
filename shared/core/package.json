@@ -97,6 +97,10 @@
       "types": "./dist/service-lifecycle/index.d.ts",
       "default": "./dist/service-lifecycle/index.js"
     },
+    "./publishers": {
+      "types": "./dist/publishers/index.d.ts",
+      "default": "./dist/publishers/index.js"
+    },
     "./publishing": {
       "types": "./dist/publishing/index.d.ts",
       "default": "./dist/publishing/index.js"

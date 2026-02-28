@@ -28,6 +28,9 @@ import { createPartitionHealthServer, closeServerWithTimeout } from './health-se
 import { setupDetectorEventHandlers, setupProcessHandlers } from './handlers';
 import type { ProcessHandlerCleanup } from './handlers';
 import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './router';
+// F4 FIX: Import Redis + OpportunityPublisher for auto-wiring in dev mode
+import { getRedisStreamsClient } from '../redis';
+import { OpportunityPublisher } from '../publishers';
 
 // =============================================================================
 // R9: Partition Service Runner Factory
@@ -479,13 +482,74 @@ export function createPartitionEntry(
     healthCheckPort: parsePort(envConfig?.healthCheckPort, defaultPort, logger)
   };
 
-  // Service Runner (with optional lifecycle hooks)
+  // F4 FIX: Compose onStarted hook to auto-wire OpportunityPublisher.
+  // In dev mode (`npm run dev:all`), partition services previously only logged
+  // opportunities without publishing to Redis. This creates a pipeline gap
+  // because the Coordinator never receives opportunities.
+  // Now, each partition auto-initializes Redis + OpportunityPublisher on startup
+  // and registers an 'opportunity' event listener that publishes to stream:opportunities.
+  const MAX_CONCURRENT_PUBLISHES = 10;
+  let inFlightPublishes = 0;
+
+  const composedOnStarted = async (detector: PartitionDetectorInterface, startupDurationMs: number): Promise<void> => {
+    // Auto-wire OpportunityPublisher if Redis is available
+    try {
+      const streamsClient = await getRedisStreamsClient();
+      const publisher = new OpportunityPublisher({
+        logger,
+        streamsClient,
+        partitionId,
+        sourcePrefix: 'partition',
+      });
+
+      // Register opportunity listener for publishing.
+      // The detector emits ArbitrageOpportunity objects via EventEmitter.
+      // The handler type is loosely typed to avoid coupling to the full ArbitrageOpportunity import,
+      // but the actual runtime values are always ArbitrageOpportunity instances.
+      detector.on('opportunity', (opp: Record<string, unknown> & { id: string }) => {
+        if (inFlightPublishes >= MAX_CONCURRENT_PUBLISHES) {
+          logger.warn('Concurrent publish limit reached, skipping', {
+            opportunityId: opp.id,
+            inFlight: inFlightPublishes,
+            limit: MAX_CONCURRENT_PUBLISHES,
+          });
+          return;
+        }
+        inFlightPublishes++;
+        publisher.publish(opp as unknown as import('@arbitrage/types').ArbitrageOpportunity)
+          .catch((error) => {
+            logger.error('Failed to publish opportunity', {
+              opportunityId: opp.id,
+              error: (error as Error).message,
+            });
+          })
+          .finally(() => {
+            inFlightPublishes--;
+          });
+      });
+
+      logger.info('OpportunityPublisher auto-wired for partition', { partitionId });
+    } catch (error) {
+      // Non-fatal: continue without Redis publishing (matches P4 Solana pattern)
+      logger.warn('Redis unavailable, opportunity publishing disabled', {
+        partitionId,
+        error: (error as Error).message,
+      });
+    }
+
+    // Call user-provided onStarted hook if present
+    if (hooks?.onStarted) {
+      await hooks.onStarted(detector, startupDurationMs);
+    }
+  };
+
+  // Service Runner (with composed lifecycle hooks)
   const runner = runPartitionService({
     config: serviceConfig,
     detectorConfig,
     createDetector,
     logger,
-    onStarted: hooks?.onStarted,
+    onStarted: composedOnStarted,
     onStartupError: hooks?.onStartupError
   });
 

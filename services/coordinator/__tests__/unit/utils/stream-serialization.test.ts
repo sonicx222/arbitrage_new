@@ -12,13 +12,17 @@ import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { TraceContext } from '@arbitrage/core/tracing';
 
 describe('serializeOpportunityForStream', () => {
+  // F1 FIX: Updated to include expectedProfit, estimatedProfit, gasEstimate
+  // which are now serialized for execution engine validation (business rules + cost calc).
   const EXPECTED_FIELDS = [
     'id', 'type', 'chain', 'buyDex', 'sellDex',
     'profitPercentage', 'confidence', 'timestamp', 'expiresAt',
-    'tokenIn', 'tokenOut', 'amountIn', 'forwardedBy', 'forwardedAt',
+    'tokenIn', 'tokenOut', 'amountIn',
+    'expectedProfit', 'estimatedProfit', 'gasEstimate',
+    'forwardedBy', 'forwardedAt',
   ];
 
-  it('should produce all 14 required fields', () => {
+  it('should produce all 17 required fields', () => {
     const opp = {
       id: 'test-1',
       type: 'simple',

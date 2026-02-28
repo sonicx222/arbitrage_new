@@ -1735,6 +1735,20 @@ export class CoordinatorService implements CoordinatorStateProvider {
           // Report own health to stream
           await this.reportHealth();
 
+          // F3 FIX: Update serviceHealth map directly after reporting health.
+          // Previously the coordinator relied on its own health message round-tripping
+          // through Redis (publish → consume via handleHealthMessage → serviceHealth.set).
+          // If updateSystemMetrics/detectStaleServices ran before the round-trip completed,
+          // the coordinator's lastHeartbeat was stale, causing it to mark itself unhealthy.
+          this.serviceHealth.set('coordinator', {
+            name: 'coordinator',
+            status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
+            uptime: process.uptime(),
+            memoryUsage: process.memoryUsage().heapUsed,
+            cpuUsage: this.cpuTracker.getUsagePercent(),
+            lastHeartbeat: Date.now(),
+          });
+
           // P1 Fix: Monitor execution stream depth for backpressure detection.
           // Cached value is checked in forwardToExecution() to prevent message loss.
           if (this.streamsClient) {
