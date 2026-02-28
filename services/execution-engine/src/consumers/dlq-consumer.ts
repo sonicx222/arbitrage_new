@@ -70,6 +70,10 @@ export interface DlqConsumerConfig {
   scanIntervalMs?: number;
   /** Maximum messages to read per scan (default: 100) */
   maxMessagesPerScan?: number;
+  /** F7-FIX: Max age for DLQ messages in ms before auto-trimming (default: 24h, 0 to disable) */
+  maxMessageAgeMs?: number;
+  /** F7-FIX: Maximum DLQ stream length before trimming (default: 1000, 0 to disable) */
+  maxStreamLength?: number;
 }
 
 /**
@@ -80,6 +84,8 @@ export interface DlqConsumerDeps {
   logger: Logger;
   scanIntervalMs?: number;
   maxMessagesPerScan?: number;
+  maxMessageAgeMs?: number;
+  maxStreamLength?: number;
 }
 
 // =============================================================================
@@ -91,6 +97,10 @@ export class DlqConsumer {
   private readonly logger: Logger;
   private readonly scanIntervalMs: number;
   private readonly maxMessagesPerScan: number;
+  /** F7-FIX: Max age for DLQ messages before auto-trimming (default: 24h) */
+  private readonly maxMessageAgeMs: number;
+  /** F7-FIX: Max DLQ stream length before trimming (default: 1000) */
+  private readonly maxStreamLength: number;
 
   private scanTimer: NodeJS.Timeout | null = null;
   private stats: DlqStats = {
@@ -105,6 +115,8 @@ export class DlqConsumer {
     this.logger = deps.logger;
     this.scanIntervalMs = deps.scanIntervalMs ?? 60000; // Default: 1 minute
     this.maxMessagesPerScan = deps.maxMessagesPerScan ?? 100;
+    this.maxMessageAgeMs = deps.maxMessageAgeMs ?? 86_400_000; // Default: 24 hours
+    this.maxStreamLength = deps.maxStreamLength ?? 1000; // Default: 1000 messages
   }
 
   /**
@@ -202,9 +214,52 @@ export class DlqConsumer {
           oldestEntryAgeMs: oldestEntryAge,
         });
       }
+
+      // F7-FIX: Auto-trim old messages from DLQ
+      await this.autoTrimDlq(totalCount);
     } catch (error) {
       this.logger.error('DLQ scan failed', { error: getErrorMessage(error) });
       throw error;
+    }
+  }
+
+  /**
+   * F7-FIX: Automatically trim stale DLQ messages.
+   * Uses MINID-based trimming (by age) and MAXLEN-based trimming (by count).
+   * Both thresholds use approximate trimming (~) for Redis efficiency.
+   */
+  private async autoTrimDlq(currentLength: number): Promise<void> {
+    let trimmed = 0;
+
+    // Age-based trimming: remove messages older than maxMessageAgeMs
+    if (this.maxMessageAgeMs > 0) {
+      // Redis stream IDs encode timestamps: <ms_timestamp>-<seq>
+      const cutoffMs = Date.now() - this.maxMessageAgeMs;
+      const minId = `${cutoffMs}-0`;
+      try {
+        const ageResult = await this.streamsClient.xtrim(DLQ_STREAM, { minId });
+        trimmed += ageResult;
+      } catch (error) {
+        this.logger.warn('DLQ age-based trim failed', { error: getErrorMessage(error) });
+      }
+    }
+
+    // Length-based trimming: cap the stream at maxStreamLength
+    if (this.maxStreamLength > 0 && currentLength > this.maxStreamLength) {
+      try {
+        const lenResult = await this.streamsClient.xtrim(DLQ_STREAM, { maxLen: this.maxStreamLength });
+        trimmed += lenResult;
+      } catch (error) {
+        this.logger.warn('DLQ length-based trim failed', { error: getErrorMessage(error) });
+      }
+    }
+
+    if (trimmed > 0) {
+      this.logger.info('DLQ auto-trimmed stale messages', {
+        trimmedCount: trimmed,
+        maxMessageAgeMs: this.maxMessageAgeMs,
+        maxStreamLength: this.maxStreamLength,
+      });
     }
   }
 

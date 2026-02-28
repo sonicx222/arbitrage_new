@@ -278,6 +278,9 @@ export class ChainDetectorInstance extends EventEmitter {
   // Slow recovery: After max reconnect attempts, retry periodically
   private slowRecoveryTimer: ReturnType<typeof setInterval> | null = null;
   private readonly SLOW_RECOVERY_INTERVAL_MS = parseInt(process.env.WS_SLOW_RECOVERY_INTERVAL_MS ?? '300000', 10);
+  /** F2-FIX: Track slow recovery cycles to prevent infinite reconnection loops */
+  private slowRecoveryCycles: number = 0;
+  private readonly MAX_SLOW_RECOVERY_CYCLES = parseInt(process.env.WS_MAX_SLOW_RECOVERY_CYCLES ?? '10', 10);
 
   // P0-NEW-3/P0-NEW-4 FIX: Lifecycle promises to prevent race conditions
   // These ensure concurrent start/stop calls are handled correctly
@@ -959,6 +962,7 @@ export class ChainDetectorInstance extends EventEmitter {
         if (!this.isRunning) return;
         this.status = 'connected';
         this.reconnectAttempts = 0;
+        this.slowRecoveryCycles = 0; // F2-FIX: Reset recovery cycles on successful connection
         // Clear slow recovery timer on successful reconnection
         if (this.slowRecoveryTimer) {
           clearInterval(this.slowRecoveryTimer);
@@ -1025,6 +1029,16 @@ export class ChainDetectorInstance extends EventEmitter {
       this.slowRecoveryTimer = null;
     }
 
+    // F2-FIX: Don't start recovery if we've exhausted all recovery cycles
+    if (this.slowRecoveryCycles >= this.MAX_SLOW_RECOVERY_CYCLES) {
+      this.logger.warn('Max slow recovery cycles reached — stopping reconnection permanently', {
+        chainId: this.chainId,
+        slowRecoveryCycles: this.slowRecoveryCycles,
+        maxSlowRecoveryCycles: this.MAX_SLOW_RECOVERY_CYCLES,
+      });
+      return;
+    }
+
     this.slowRecoveryTimer = setInterval(() => {
       // Self-clear if instance is stopping
       if (this.isStopping) {
@@ -1035,9 +1049,27 @@ export class ChainDetectorInstance extends EventEmitter {
         return;
       }
 
+      this.slowRecoveryCycles++;
+
+      // F2-FIX: Stop if we've exceeded the max recovery cycles
+      if (this.slowRecoveryCycles >= this.MAX_SLOW_RECOVERY_CYCLES) {
+        this.logger.warn('Max slow recovery cycles reached — stopping reconnection permanently', {
+          chainId: this.chainId,
+          slowRecoveryCycles: this.slowRecoveryCycles,
+          maxSlowRecoveryCycles: this.MAX_SLOW_RECOVERY_CYCLES,
+        });
+        if (this.slowRecoveryTimer) {
+          clearInterval(this.slowRecoveryTimer);
+          this.slowRecoveryTimer = null;
+        }
+        return;
+      }
+
       this.logger.info('Slow recovery: attempting reconnection', {
         chainId: this.chainId,
         intervalMs: this.SLOW_RECOVERY_INTERVAL_MS,
+        cycle: this.slowRecoveryCycles,
+        maxCycles: this.MAX_SLOW_RECOVERY_CYCLES,
       });
 
       // Reset state for a fresh reconnect cycle
@@ -1118,6 +1150,9 @@ export class ChainDetectorInstance extends EventEmitter {
    * Non-fatal: if adapter init fails for one DEX, others still proceed.
    */
   private async initializeVaultAdapters(): Promise<void> {
+    // Vault-model adapters (Balancer V2, GMX, Platypus) are EVM-only — skip for Solana
+    if (this.chainId === 'solana') return;
+
     const { isVaultModelDex } = await import('@arbitrage/config');
     const { getAdapterRegistry, BalancerV2Adapter, GmxAdapter, PlatypusAdapter } = await import('@arbitrage/core/dex-adapters');
 

@@ -358,7 +358,7 @@ export class GracefulDegradationManager {
       'unified-detector-asia-fast',
       'unified-detector-l2-turbo',
       'unified-detector-high-value',
-      'unified-detector-solana'
+      'unified-detector-solana-native'
     ];
 
     for (const service of services) {

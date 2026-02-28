@@ -443,11 +443,11 @@ describe('singleton and convenience functions', () => {
     it('should delegate to manager', async () => {
       const manager = getGracefulDegradationManager();
       // Use service with default levels registered
-      manager.registerCapabilities('unified-detector-solana', [
+      manager.registerCapabilities('unified-detector-solana-native', [
         { name: 'test-cap', required: false, degradationLevel: DegradationLevel.REDUCED_CHAINS }
       ]);
 
-      const result = await triggerDegradation('unified-detector-solana', 'test-cap');
+      const result = await triggerDegradation('unified-detector-solana-native', 'test-cap');
       expect(result).toBe(true);
     });
   });
