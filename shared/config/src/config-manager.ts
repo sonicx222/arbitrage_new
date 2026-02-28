@@ -141,12 +141,12 @@ export class ConfigManager {
       errorMessage: `PARTITION_ID must be one of: ${VALID_PARTITION_IDS.join(', ')}`
     });
 
-    // SOLANA_RPC_URL - Required for solana-native partition
-    // FIX: Use imported constant instead of hardcoded string
+    // SOLANA_RPC_URL - Required for solana-native partition in production
+    // FIX #9: Only require in production — dev mode falls back to PublicNode via selectSolanaRpcUrl()
     this.rules.set('SOLANA_RPC_URL', {
-      required: (env) => env.PARTITION_ID === PARTITION_IDS.SOLANA_NATIVE,
+      required: (env) => env.PARTITION_ID === PARTITION_IDS.SOLANA_NATIVE && env.NODE_ENV === 'production',
       validate: (v) => v.startsWith('https://') || v.startsWith('wss://'),
-      errorMessage: 'SOLANA_RPC_URL required for solana-native partition (must start with https:// or wss://)'
+      errorMessage: 'SOLANA_RPC_URL required for solana-native partition in production (must start with https:// or wss://)'
     });
 
     // NODE_ENV - Optional but recommended

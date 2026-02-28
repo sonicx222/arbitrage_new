@@ -176,14 +176,25 @@ describe('ConfigManager', () => {
       process.env.SERVICE_TYPE = 'detector';
     });
 
-    it('should require SOLANA_RPC_URL for solana-native partition', () => {
+    it('should require SOLANA_RPC_URL for solana-native partition in production', () => {
       process.env.PARTITION_ID = 'solana-native';
+      process.env.NODE_ENV = 'production';
       delete process.env.SOLANA_RPC_URL;
 
       const result = ConfigManager.getInstance().validate();
 
       expect(result.valid).toBe(false);
       expect(result.errors.some((e: string) => e.includes('SOLANA_RPC_URL'))).toBe(true);
+    });
+
+    it('should not require SOLANA_RPC_URL for solana-native in development', () => {
+      process.env.PARTITION_ID = 'solana-native';
+      process.env.NODE_ENV = 'development';
+      delete process.env.SOLANA_RPC_URL;
+
+      const result = ConfigManager.getInstance().validate();
+
+      expect(result.valid).toBe(true);
     });
 
     it('should pass with valid https SOLANA_RPC_URL', () => {

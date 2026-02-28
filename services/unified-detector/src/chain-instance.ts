@@ -699,8 +699,10 @@ export class ChainDetectorInstance extends EventEmitter {
         await this.simulationInitializer.initializeEvmSimulation();
       } else {
         // PRODUCTION MODE: Use real WebSocket and RPC connections
-        // Initialize RPC provider
-        this.provider = new ethers.JsonRpcProvider(this.chainConfig.rpcUrl);
+        // FIX #10: Configure RPC provider with request timeout to prevent hanging connections
+        const fetchReq = new ethers.FetchRequest(this.chainConfig.rpcUrl);
+        fetchReq.timeout = 10_000; // 10s per-request timeout
+        this.provider = new ethers.JsonRpcProvider(fetchReq);
 
         // R8 Refactor: Initialize WebSocket and subscribe in a single call
         await this.initializeWebSocketAndSubscribe();
@@ -1123,7 +1125,10 @@ export class ChainDetectorInstance extends EventEmitter {
     if (vaultDexes.length === 0) return;
 
     const registry = getAdapterRegistry();
-    const provider = new ethers.JsonRpcProvider(this.chainConfig.rpcUrl);
+    // FIX #10: Configure vault adapter provider with request timeout
+    const vaultFetchReq = new ethers.FetchRequest(this.chainConfig.rpcUrl);
+    vaultFetchReq.timeout = 10_000;
+    const provider = new ethers.JsonRpcProvider(vaultFetchReq);
     let registeredCount = 0;
 
     for (const dex of vaultDexes) {

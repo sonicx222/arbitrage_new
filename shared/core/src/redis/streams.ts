@@ -432,8 +432,9 @@ export class RedisStreamsClient {
       );
     }
 
+    // FIX #8: Only include password when defined to avoid ioredis warning on password-free servers
     const options: Record<string, unknown> = {
-      password,
+      ...(password ? { password } : {}),
       retryStrategy: (times: number) => {
         // Capped exponential backoff: 200ms, 400ms, ..., capped at 60s.
         // NEVER return null — ioredis interprets null as "stop reconnecting",

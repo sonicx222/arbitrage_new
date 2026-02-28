@@ -255,6 +255,7 @@ jest.mock('../../src/types', () => ({
 jest.mock('ethers', () => ({
   ethers: {
     JsonRpcProvider: jest.fn().mockImplementation(() => ({})),
+    FetchRequest: jest.fn().mockImplementation(() => ({ timeout: 0 })),
     keccak256: jest.fn().mockReturnValue('0x' + 'ab'.repeat(32)),
     solidityPacked: jest.fn().mockReturnValue('0x1234'),
   },

@@ -168,6 +168,7 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
   async function publishHealth(health: PartitionHealth): Promise<void> {
     // Check state at publish time
     if (!stateManager.isRunning()) {
+      logger.debug('Skipping health publish - service not running');
       return;
     }
 
@@ -184,6 +185,16 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
         ...health,
         // Convert Map to object for serialization
         chainHealth: Object.fromEntries(health.chainHealth),
+      });
+
+      // FIX #6: Log successful health publishes at INFO level for visibility.
+      // Previously, successful publishes were silent, making it impossible to
+      // distinguish "publishing but not logged" from "not publishing at all".
+      logger.info('Health check completed', {
+        status: health.status,
+        memoryUsage: health.memoryUsage,
+        cpuUsage: health.cpuUsage,
+        uptime: health.uptimeSeconds,
       });
     } catch (error) {
       logger.error('Failed to publish health', { error: (error as Error).message });

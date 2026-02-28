@@ -1062,6 +1062,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     this.serviceHealth.set(serviceName, health);
 
+    // FIX #2: Record heartbeat so HealthMonitor's grace period logic works.
+    // Without this, firstHeartbeatReceived is never populated, and the C4 FIX
+    // grace period check in detectStaleServices() is dead code — causing
+    // continuous degradation oscillation despite healthy services.
+    this.healthMonitor?.recordHeartbeat(serviceName);
+
     this.logger.debug('Health update received', {
       name: serviceName,
       status: health.status

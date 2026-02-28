@@ -81,6 +81,16 @@ export const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 30_000;
 /** Timeout for stopping individual chain instances (30 seconds) */
 export const CHAIN_STOP_TIMEOUT_MS = 30_000;
 
+/**
+ * FIX #4: Per-chain start timeout (45 seconds).
+ * Individual chains that fail to connect within this window are skipped
+ * rather than blocking the entire partition. This prevents vault-model
+ * adapters (GMX, Beethoven X) with slow RPC from killing the whole service.
+ * Must be less than STATE_TRANSITION_TIMEOUT_MS (60s) to allow the service
+ * to complete startup with partial chains.
+ */
+export const CHAIN_START_TIMEOUT_MS = 45_000;
+
 /** Default timeout for service state transitions (60 seconds) */
 export const STATE_TRANSITION_TIMEOUT_MS = 60_000;
 

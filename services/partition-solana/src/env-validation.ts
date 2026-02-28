@@ -33,6 +33,14 @@ export function validateEnvironment(partitionId: string, logger: ReturnType<type
   const nodeEnv = process.env.NODE_ENV;
   const redisUrl = process.env.REDIS_URL;
 
+  // FIX #9: Warn when SOLANA_RPC_URL is missing in dev mode (falls back to PublicNode)
+  if (!process.env.SOLANA_RPC_URL && nodeEnv !== 'test' && nodeEnv !== 'production') {
+    logger.warn('SOLANA_RPC_URL not set — using PublicNode fallback (rate-limited, not for production)', {
+      partitionId,
+      hint: 'Set SOLANA_RPC_URL for better reliability, or use HELIUS_API_KEY/TRITON_API_KEY',
+    });
+  }
+
   // Validate REDIS_URL - required for all partition services
   // P3-FIX: Also validate URL format to catch configuration errors early
   if (!redisUrl && nodeEnv !== 'test') {

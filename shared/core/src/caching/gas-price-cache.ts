@@ -351,6 +351,12 @@ export class GasPriceCache {
   private l1OracleCache: Map<string, L1OracleCacheEntry> = new Map();
   private l1OracleRefreshTimer: NodeJS.Timeout | null = null;
 
+  // FIX #1: Rate-limit stale gas price warnings (per chain).
+  // Without this, the warn() in getGasPrice() fires on every hot-path call (~63K/sec),
+  // producing 37.6M log lines in 10 minutes and saturating disk I/O.
+  private staleWarnLastLogged: Map<string, number> = new Map();
+  private static readonly STALE_WARN_INTERVAL_MS = 30_000; // Log at most once per 30s per chain
+
   constructor(config: Partial<GasPriceCacheConfig> = {}, deps?: GasPriceCacheDeps) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // DI: Use provided logger or create default
@@ -427,7 +433,14 @@ export class GasPriceCache {
       // Check if data is stale
       const age = Date.now() - cached.lastUpdated;
       if (age > this.config.staleThresholdMs) {
-        this.logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
+        // FIX #1: Rate-limit stale warnings — this runs in the hot path (~1000s/sec)
+        // and must not emit a log line on every call. Log at most once per 30s per chain.
+        const now = Date.now();
+        const lastLogged = this.staleWarnLastLogged.get(chain) ?? 0;
+        if (now - lastLogged >= GasPriceCache.STALE_WARN_INTERVAL_MS) {
+          this.staleWarnLastLogged.set(chain, now);
+          this.logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
+        }
         // Return stale data but mark as potentially unreliable
         return { ...cached, isFallback: true };
       }

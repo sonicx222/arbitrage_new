@@ -207,10 +207,11 @@ export class RedisClient {
     };
 
     // P1-1 FIX: Use typed options instead of any
+    // FIX #8: Only include password when defined to avoid ioredis warning on password-free servers
     const options: RedisConnectionOptions = {
       host: this.parseHost(url),
       port: this.parsePort(url),
-      password,
+      ...(password ? { password } : {}),
       retryDelayOnFailover: 100,
       enableReadyCheck: false,
       maxRetriesPerRequest: 3,

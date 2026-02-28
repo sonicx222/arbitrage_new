@@ -184,7 +184,7 @@ describe('HealthMonitor', () => {
       expect(mockLogger.info).toHaveBeenCalledWith(
         'Health monitor started',
         expect.objectContaining({
-          gracePeriodMs: 60000, // default
+          gracePeriodMs: 180000, // default (FIX #5: increased from 60000)
         })
       );
     });
@@ -1494,7 +1494,7 @@ describe('HealthMonitor', () => {
       mon.detectStaleServices(serviceMap);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Service heartbeat stale, marking unhealthy',
+        expect.stringContaining('heartbeat stale, marking unhealthy'),
         expect.objectContaining({ service: 'detector-1' })
       );
 
@@ -1675,7 +1675,7 @@ describe('HealthMonitor', () => {
       mon.detectStaleServices(serviceMap);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Service heartbeat stale, marking unhealthy',
+        expect.stringContaining('heartbeat stale, marking unhealthy'),
         expect.objectContaining({ service: 'detector-1' })
       );
 
@@ -1891,7 +1891,7 @@ describe('HealthMonitor', () => {
       mon.detectStaleServices(serviceMap);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Service heartbeat stale, marking unhealthy',
+        expect.stringContaining('heartbeat stale, marking unhealthy'),
         expect.objectContaining({ service: 'detector-1' })
       );
 
