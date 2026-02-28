@@ -1023,11 +1023,11 @@ describe('OpportunityRouter', () => {
       );
 
       const snapshot = router.getOpportunities();
-      snapshot.delete('opp-copy');
 
-      // Original should be unaffected
+      // ReadonlyMap — callers cannot mutate the internal map
+      expect(snapshot.has('opp-copy')).toBe(true);
+      expect(snapshot.size).toBe(1);
       expect(router.getPendingCount()).toBe(1);
-      expect(router.getOpportunities().has('opp-copy')).toBe(true);
     });
   });
 

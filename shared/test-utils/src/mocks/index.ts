@@ -48,6 +48,9 @@ export {
 
 export type { MockRedisClient } from './mock-factories';
 
+// Comprehensive @arbitrage/core mock factory (E16)
+export { createCoreMockModule } from './core.mock';
+
 // Provider mocks (ethers.js)
 export {
   createMockProvider,

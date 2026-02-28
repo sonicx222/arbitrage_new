@@ -397,7 +397,7 @@ export class ChainDetectorInstance extends EventEmitter {
     // FIX M8: Per-chain staleness from thresholds.ts (Ethereum: 30s, Arbitrum: 4s, Solana: 3s)
     this.MAX_STALENESS_MS = getConfidenceMaxAgeMs(this.chainId);
     this.dexes = getEnabledDexes(this.chainId);
-    this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] || [];
+    this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] ?? [];
     this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] || {};
 
     // PERF-OPT: Build O(1) token lookup map at construction time

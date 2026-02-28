@@ -476,11 +476,17 @@ export class BridgeRecoveryManager {
             key,
             error: getErrorMessage(error),
           });
-          // Clean up corrupt entry
+          // Move corrupt entry to dead-letter key for audit trail instead of deleting
           try {
+            const corruptKey = `bridge:recovery:corrupt:${key}`;
+            await this.redis.set(corruptKey, JSON.stringify({
+              originalKey: key,
+              error: getErrorMessage(error),
+              movedAt: Date.now(),
+            }));
             await this.redis.del(key);
           } catch {
-            // Best effort cleanup
+            // Best effort — if dead-letter write fails, leave original intact
           }
         }
       }

@@ -97,8 +97,8 @@ export interface CoordinatorStateProvider {
   /** Map of service name to health status */
   getServiceHealthMap(): Map<string, ServiceHealth>;
 
-  /** Map of opportunity ID to opportunity */
-  getOpportunities(): Map<string, ArbitrageOpportunity>;
+  /** Map of opportunity ID to opportunity (ReadonlyMap — no copy on each call) */
+  getOpportunities(): ReadonlyMap<string, ArbitrageOpportunity>;
 
   /** Map of alert key to last alert timestamp (for cooldowns) */
   getAlertCooldowns(): Map<string, number>;

@@ -2083,9 +2083,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * @returns Map of opportunity ID to opportunity data
    * @see OpportunityRouter for opportunity management logic
    */
-  getOpportunities(): Map<string, ArbitrageOpportunity> {
+  getOpportunities(): ReadonlyMap<string, ArbitrageOpportunity> {
     // R2: Delegate to opportunity router if available
-    return this.opportunityRouter?.getOpportunities() ?? new Map(this.opportunities);
+    return this.opportunityRouter?.getOpportunities() ?? this.opportunities;
   }
 
   /**

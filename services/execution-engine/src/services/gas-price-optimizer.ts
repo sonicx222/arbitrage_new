@@ -796,9 +796,13 @@ export class GasPriceOptimizer {
 
   /**
    * Ring buffer of recent (timestamp, gasPrice) samples per chain.
-   * Used for linear regression prediction.
+   * Uses index wrapping (O(1) insertion) instead of splice (O(n) shift).
    */
-  private predictionSamples: Map<string, { timestamp: number; price: bigint }[]> = new Map();
+  private predictionSamples: Map<string, {
+    data: Array<{ timestamp: number; price: bigint }>;
+    writeIdx: number;
+    count: number;
+  }> = new Map();
 
   /** Maximum samples kept for regression (ring buffer size) */
   private readonly PREDICTION_BUFFER_SIZE = 30;
@@ -810,17 +814,16 @@ export class GasPriceOptimizer {
    * Called automatically from updateGasBaseline.
    */
   private recordPredictionSample(chain: string, price: bigint): void {
-    let samples = this.predictionSamples.get(chain);
-    if (!samples) {
-      samples = [];
-      this.predictionSamples.set(chain, samples);
+    let buffer = this.predictionSamples.get(chain);
+    if (!buffer) {
+      buffer = { data: new Array(this.PREDICTION_BUFFER_SIZE), writeIdx: 0, count: 0 };
+      this.predictionSamples.set(chain, buffer);
     }
 
-    samples.push({ timestamp: Date.now(), price });
-
-    // Ring buffer: remove oldest when over capacity
-    if (samples.length > this.PREDICTION_BUFFER_SIZE) {
-      samples.splice(0, samples.length - this.PREDICTION_BUFFER_SIZE);
+    buffer.data[buffer.writeIdx] = { timestamp: Date.now(), price };
+    buffer.writeIdx = (buffer.writeIdx + 1) % this.PREDICTION_BUFFER_SIZE;
+    if (buffer.count < this.PREDICTION_BUFFER_SIZE) {
+      buffer.count++;
     }
   }
 
@@ -837,19 +840,22 @@ export class GasPriceOptimizer {
    * @returns Predicted gas price in wei, or EMA baseline as fallback
    */
   predictGasPrice(chain: string, estimatedDelayMs: number = 2000): bigint | undefined {
-    const samples = this.predictionSamples.get(chain);
+    const buffer = this.predictionSamples.get(chain);
 
     // Insufficient data: fall back to EMA
-    if (!samples || samples.length < this.MIN_REGRESSION_SAMPLES) {
+    if (!buffer || buffer.count < this.MIN_REGRESSION_SAMPLES) {
       return this.emaBaselines.get(chain);
     }
 
     // Simple linear regression: y = slope * x + intercept
     // x = timestamp (ms), y = gas price (Number, in gwei for precision)
-    const n = samples.length;
+    const n = buffer.count;
+
+    // Ring buffer oldest entry: if not full, starts at 0; if full, starts at writeIdx
+    const oldestIdx = buffer.count < this.PREDICTION_BUFFER_SIZE ? 0 : buffer.writeIdx;
 
     // Use relative timestamps to avoid precision loss with large epoch values
-    const t0 = samples[0].timestamp;
+    const t0 = buffer.data[oldestIdx].timestamp;
 
     let sumX = 0;
     let sumY = 0;
@@ -857,9 +863,10 @@ export class GasPriceOptimizer {
     let sumX2 = 0;
 
     for (let i = 0; i < n; i++) {
-      const x = samples[i].timestamp - t0;
+      const idx = (oldestIdx + i) % this.PREDICTION_BUFFER_SIZE;
+      const x = buffer.data[idx].timestamp - t0;
       // Convert to gwei for regression to avoid BigInt precision issues
-      const y = Number(samples[i].price / WEI_PER_GWEI);
+      const y = Number(buffer.data[idx].price / WEI_PER_GWEI);
 
       sumX += x;
       sumY += y;

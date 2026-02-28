@@ -41,6 +41,10 @@ export const CHAIN_DERIVATION_INDEX: Record<string, number> = {
   base: 7,
   zksync: 8,
   linea: 9,
+  blast: 10,
+  scroll: 11,
+  mantle: 12,
+  mode: 13,
   // Solana uses Ed25519, not secp256k1 — HD derivation path is different.
   // Solana wallets must be provided via SOLANA_PRIVATE_KEY env var.
   // solana: excluded (non-EVM)
@@ -84,7 +88,6 @@ export function derivePerChainWallets(
     mnemonic = ethers.Mnemonic.fromPhrase(config.mnemonic, config.passphrase);
   } catch (error) {
     logger.error('Invalid HD wallet mnemonic', {
-      wordCount: config.mnemonic.trim().split(/\s+/).length,
       error: getErrorMessage(error),
     });
     throw new Error('Invalid WALLET_MNEMONIC: mnemonic phrase is not valid BIP-39');

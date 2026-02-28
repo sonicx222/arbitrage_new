@@ -174,10 +174,11 @@ export class OpportunityRouter {
   }
 
   /**
-   * Get the opportunities map (for API endpoints)
+   * Get the opportunities map (for API endpoints).
+   * Returns a ReadonlyMap backed by the internal map (O(1), no copy).
    */
-  getOpportunities(): Map<string, ArbitrageOpportunity> {
-    return new Map(this.opportunities);
+  getOpportunities(): ReadonlyMap<string, ArbitrageOpportunity> {
+    return this.opportunities;
   }
 
   /**

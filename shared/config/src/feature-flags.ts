@@ -201,6 +201,9 @@ export const FEATURE_FLAGS = {
    * @default true (safety-on-by-default — L1 data fees are 50-90% of total gas
    *   cost on L2 rollups; without dynamic fees, gas is underestimated 2-10x,
    *   causing unprofitable trade execution on Arbitrum/Optimism/Base/zkSync/Linea)
+   * @note INTENTIONAL OPT-OUT (`!== 'false'`): This is a safety-critical flag.
+   *   Disabling it causes 2-10x gas underestimation on L2s. Unlike experimental
+   *   features that use `=== 'true'` (opt-in), this must be on by default.
    * @see shared/core/src/caching/gas-price-cache.ts - L1 oracle integration
    * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-1
    */
@@ -352,9 +355,9 @@ export const FLASH_LOAN_AGGREGATOR_CONFIG = {
   /**
    * Enable on-chain liquidity validation
    * When true, validates pool liquidity before execution
-   * @default true (if aggregator enabled)
+   * @default false (opt-in sub-feature of already opt-in aggregator)
    */
-  enableLiquidityValidation: process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_VALIDATION !== 'false',
+  enableLiquidityValidation: process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_VALIDATION === 'true',
 
   /**
    * Liquidity check threshold in USD

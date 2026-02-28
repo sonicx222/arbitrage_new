@@ -22,14 +22,17 @@ This document provides a snapshot of the current arbitrage trading system archit
 |---------|---------------|---------------|------|-------------|
 | **Coordinator** | 3000 | 3000 | Core | Orchestrates all services, manages leader election |
 | **Partition Asia-Fast** | 3001 | 3011 | Detector | P1: BSC, Polygon, Avalanche, Fantom (Unified Detector) |
-| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base (Unified Detector) |
+| **Partition L2-Turbo** | 3002 | 3012 | Detector | P2: Arbitrum, Optimism, Base, Scroll, Blast (Unified Detector) |
 | **Partition High-Value** | 3003 | 3013 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
 | **Partition Solana** | 3004 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3005 | 3015 | Core | Trade execution and MEV protection |
 | **Cross-Chain Detector** | 3006 | 3016 | Detector | Cross-chain arbitrage opportunities |
 | **Mempool Detector** | 3008 | — | Optional | Pre-block pending tx detection via bloXroute BDN |
+| **Monolith** | 3100 | — | Deployment | All-in-one single-process mode for Oracle ARM (4 OCPU, 24GB) |
 
 > **Note:** The Mempool Detector is an optional service — run with `npm run dev:mempool` or `npm run dev:mempool:fast`. Requires bloXroute BDN API key (`BLOXROUTE_AUTH_HEADER`). Currently supports Ethereum and BSC mempool feeds.
+
+> **Note:** The Monolith service consolidates all services into a single Node.js process using worker threads. Designed for Oracle Cloud ARM deployment to eliminate inter-service network latency and enable SharedArrayBuffer-based PriceMatrix. Port 3100 serves a unified health endpoint. See `services/monolith/`.
 
 **Note**: Each partition service uses a unique internal port (P1:3001, P2:3002, P3:3003, P4:3004, configurable via `HEALTH_CHECK_PORT`). Port assignments are the single source of truth in `shared/constants/service-ports.json`.
 
@@ -46,11 +49,11 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ### P2: L2-Turbo
 - **Partition ID:** `l2-turbo`
-- **Chains:** Arbitrum, Optimism, Base
+- **Chains:** Arbitrum, Optimism, Base, Scroll, Blast
 - **Region:** Singapore (Fly.io)
-- **Resource Profile:** Standard (512MB)
+- **Resource Profile:** Standard (640MB)
 - **Rationale:** Ethereum L2 rollups with sub-second confirmations
-- **Note:** Blast, Scroll, Mantle, Mode were planned but removed — all have placeholder DEX addresses. Will be re-added when real factory addresses are configured in `dexes/index.ts`.
+- **Note:** Scroll and Blast re-added with verified factory addresses (2026-02-26). Mantle and Mode remain stubs — re-add when factory addresses verified.
 
 ### P3: High-Value
 - **Partition ID:** `high-value`
@@ -253,6 +256,7 @@ ETHEREUM_WS_URL=wss://...
 | 2026-02-04 | Nonce pre-allocation pool (5-10ms savings) | ADR-027 |
 | 2026-02-24 | 4 emerging L2 chains planned (Blast, Scroll, Mantle, Mode) — reverted, placeholder addresses | ADR-003 |
 | 2026-02-24 | P2 partition remains at 3 chains (emerging L2s removed pending real DEX addresses) | ADR-003 |
+| 2026-02-26 | Scroll + Blast re-added to P2 with verified factory addresses (5 chains total) | ADR-003 |
 | 2026-02-24 | Solana execution via Jupiter V6 + Jito bundles | ADR-034 |
 | 2026-02-24 | Statistical arbitrage strategy (triple-gate signals) | ADR-035 |
 | 2026-02-24 | Binance CEX price signal integration | ADR-036 |
