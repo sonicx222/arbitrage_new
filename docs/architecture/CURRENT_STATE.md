@@ -91,11 +91,13 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ### Consumer Groups
 
-| Group | Members | Purpose |
-|-------|---------|---------|
-| `execution-engine-group` | Execution Engine | Processes opportunities |
-| `cross-chain-detector-group` | Cross-Chain Detector | Processes price updates |
-| `analytics-group` | Quality Monitor | Processes events for analytics |
+| Group | Members | Streams | Purpose |
+|-------|---------|---------|---------|
+| `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results | Orchestration, health monitoring, opportunity routing |
+| `execution-engine-group` | Execution Engine | execution-requests | Processes forwarded opportunities |
+| `execution-engine` | Fast Lane Consumer | fast-lane | Processes fast-lane high-priority opportunities |
+| `cross-chain-detector-group` | Cross-Chain Detector | price-updates, swap-events, whale-alerts | Cross-chain opportunity detection |
+| `analytics-group` | Quality Monitor | swap-events | Processes events for analytics |
 
 ---
 
@@ -197,7 +199,7 @@ ETHEREUM_WS_URL=wss://...
 | Metric | Current | Target |
 |--------|---------|--------|
 | Chains | 15 (14 EVM + Solana) | 15 |
-| DEXes | 71 (64 EVM + 7 Solana) | 75 |
+| DEXes | 78 (71 EVM + 7 Solana) | 80 |
 | Tokens | 128 | 150 |
 | Strategies | 6 (Intra-chain, Cross-chain, Flash Loan, Statistical Arb, CoW Backrun, Solana/Jito) | 7+ |
 | Data Sources | DEX feeds + Binance CEX feed + CoW Settlement watcher | Multi-CEX |

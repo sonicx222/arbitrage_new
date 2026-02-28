@@ -378,8 +378,9 @@ describe('MLPredictionManager', () => {
 
       Date.now = originalDateNow;
 
-      // This is an internal implementation detail - the test verifies cleanup runs without error
-      expect(true).toBe(true);
+      // Cleanup ran without error; verify manager is still functional after cleanup
+      const volatility = manager.calculateVolatility('ethereum', 'uniswap_WETH_USDC');
+      expect(volatility).toBeGreaterThanOrEqual(0);
     });
   });
 

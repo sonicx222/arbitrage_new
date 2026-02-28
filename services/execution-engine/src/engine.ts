@@ -1003,37 +1003,8 @@ export class ExecutionEngineService {
       logger: this.logger as unknown as CoreLogger,
     });
 
-    // Subscribe to backrun opportunities and convert to ArbitrageOpportunity
-    this.mevShareListener.on('backrunOpportunity', (backrun: BackrunOpportunity) => {
-      if (!this.queueService || !this.stateManager.isRunning()) {
-        return;
-      }
-
-      const opportunity: ArbitrageOpportunity = {
-        id: `backrun-${backrun.txHash}-${backrun.detectedAt}`,
-        type: 'backrun',
-        chain: 'ethereum',
-        confidence: 0.5, // MEV-Share hints are partial; confidence is moderate
-        timestamp: backrun.detectedAt,
-        backrunTarget: {
-          txHash: backrun.txHash,
-          routerAddress: backrun.routerAddress,
-          swapDirection: 'buy', // Default; BackrunStrategy will refine from calldata
-          source: 'mev-share',
-          poolAddress: backrun.pairAddress,
-          traceId: backrun.traceId,
-        },
-      };
-
-      const enqueued = this.queueService.enqueue(opportunity);
-      if (enqueued) {
-        this.logger.debug('MEV-Share backrun opportunity enqueued', {
-          txHash: backrun.txHash,
-          router: backrun.routerAddress,
-          traceId: backrun.traceId,
-        });
-      }
-    });
+    // Subscribe to backrun opportunities — named handler for safe removal
+    this.mevShareListener.on('backrunOpportunity', this.handleBackrunOpportunity);
 
     await this.mevShareListener.start();
     this.logger.info('MEV-Share event listener started', {
@@ -1041,6 +1012,41 @@ export class ExecutionEngineService {
       endpoint: process.env.MEV_SHARE_SSE_ENDPOINT ?? 'https://mev-share.flashbots.net',
     });
   }
+
+  /**
+   * Handles MEV-Share backrun opportunities from the SSE listener.
+   * Bound as an arrow property so it can be safely used as an event handler.
+   */
+  private handleBackrunOpportunity = (backrun: BackrunOpportunity): void => {
+    if (!this.queueService || !this.stateManager.isRunning()) {
+      return;
+    }
+
+    const opportunity: ArbitrageOpportunity = {
+      id: `backrun-${backrun.txHash}-${backrun.detectedAt}`,
+      type: 'backrun',
+      chain: 'ethereum',
+      confidence: 0.5, // MEV-Share hints are partial; confidence is moderate
+      timestamp: backrun.detectedAt,
+      backrunTarget: {
+        txHash: backrun.txHash,
+        routerAddress: backrun.routerAddress,
+        swapDirection: 'buy', // Default; BackrunStrategy will refine from calldata
+        source: 'mev-share',
+        poolAddress: backrun.pairAddress,
+        traceId: backrun.traceId,
+      },
+    };
+
+    const enqueued = this.queueService.enqueue(opportunity);
+    if (enqueued) {
+      this.logger.debug('MEV-Share backrun opportunity enqueued', {
+        txHash: backrun.txHash,
+        router: backrun.routerAddress,
+        traceId: backrun.traceId,
+      });
+    }
+  };
 
   // Finding #7: initializeCircuitBreaker, handleCircuitBreakerStateChange,
   // publishCircuitBreakerEvent extracted to CircuitBreakerManager

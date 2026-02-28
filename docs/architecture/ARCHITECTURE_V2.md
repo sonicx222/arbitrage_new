@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.10
-> **Last Updated:** 2026-02-24
+> **Document Version:** 2.11
+> **Last Updated:** 2026-02-28
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **16 blockchains** configured (14 EVM + Solana + 1 additional), **2 stubs** (Mantle, Mode), with **72 DEXs** (current) and **112+ tokens** (current)
+- Monitor **16 blockchains** configured (14 EVM + Solana + 1 additional), **2 stubs** (Mantle, Mode), with **78 DEXs** (71 EVM + 7 Solana) and **112+ tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -63,7 +63,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 | Metric | Current (Feb 2026) | Target (Q2 2026) | Status |
 |--------|-------------------|------------------|--------|
 | **Chains Supported** | **15** (14 EVM + Solana) | 15 | ✅ Complete (+4 L2s: Blast, Scroll, Mantle, Mode) |
-| **DEXs Monitored** | **71** (64 EVM + 7 Solana) | 75 | 🔄 +4 DEXs planned |
+| **DEXs Monitored** | **78** (71 EVM + 7 Solana) | 80 | 🔄 Mantle/Mode stubs pending |
 | **Tokens Tracked** | **112** | 143 | 🔄 +31 tokens planned |
 | **Detection Latency (EVM)** | <50ms | <50ms | ✅ Achieved |
 | **Detection Latency (Solana)** | <100ms | <100ms | ✅ Achieved |
@@ -945,38 +945,56 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 - Low fees (<$0.001) enable micro-arbitrage
 - Unique ecosystem (memecoins, LSTs) not available on EVM
 
-### 9.2 DEX Distribution (71 DEXs: 50 Core EVM + 7 Solana + 14 Emerging L2)
+### 9.2 DEX Distribution (78 DEXs: 57 Core EVM + 7 Solana + 14 Emerging L2)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                         DEX COVERAGE BY CHAIN                                    │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  ARBITRUM (9 DEXs)          BSC (8 DEXs)              BASE (7 DEXs)             │
+│  ARBITRUM (10 DEXs)         BSC (8 DEXs)              BASE (8 DEXs)             │
 │  ├── Uniswap V3 [C]         ├── PancakeSwap V3 [C]    ├── Uniswap V3 [C]        │
 │  ├── Camelot V3 [C]         ├── PancakeSwap V2 [C]    ├── Aerodrome [C]         │
 │  ├── SushiSwap [C]          ├── Biswap [C]            ├── BaseSwap [C]          │
-│  ├── GMX [H]                ├── THENA [H]             ├── SushiSwap [H]         │
-│  ├── Trader Joe [H]         ├── ApeSwap [H]           ├── Maverick [H]          │
-│  ├── Balancer [H]           ├── BabyDogeSwap [H]      ├── SwapBased [M]         │
-│  ├── Zyberswap [M]          ├── Nomiswap [M]          └── Synthswap [M]         │
-│  ├── WooFi [M]              └── KnightSwap [M]                                  │
-│  └── Ramses [M]                                                                 │
+│  ├── Uniswap V2 [C]         ├── Thena [H]             ├── PancakeSwap V3 [C]    │
+│  ├── Trader Joe [H]         ├── ApeSwap [H]           ├── SushiSwap [H]         │
+│  ├── Balancer V2 [H]        ├── MDEX [H]              ├── Maverick [H]          │
+│  ├── Curve [H]              ├── Ellipsis [M]          ├── SwapBased [M]         │
+│  ├── Zyberswap [M]          └── Nomiswap [M]          └── AlienBase [M]         │
+│  ├── Ramses [M]                                                                 │
+│  └── Chronos [M]                                                                │
 │                                                                                  │
-│  POLYGON (4 DEXs)           OPTIMISM (3 DEXs)         ETHEREUM (5 DEXs)         │
+│  POLYGON (4 DEXs)           OPTIMISM (5 DEXs)         ETHEREUM (5 DEXs)         │
 │  ├── Uniswap V3 [C]         ├── Uniswap V3 [C]        ├── Uniswap V3 [C]        │
 │  ├── QuickSwap V3 [C]       ├── Velodrome [C]         ├── Uniswap V2 [C]        │
-│  ├── SushiSwap [H]          └── SushiSwap [H]         ├── SushiSwap [C]         │
-│  └── Balancer [H]                                      ├── Curve [H]             │
-│                                                         └── Balancer [H]          │
+│  ├── SushiSwap [H]          ├── SushiSwap [H]         ├── SushiSwap [C]         │
+│  └── ApeSwap [H]            ├── Balancer V2 [H]       ├── Curve [H]             │
+│                              └── Curve [H]             └── Balancer V2 [H]       │
 │                                                                                  │
-│  AVALANCHE (6 DEXs)         FANTOM (4 DEXs)           zkSYNC (2 DEXs)           │
+│  AVALANCHE (6 DEXs)         FANTOM (4 DEXs)           zkSYNC (4 DEXs)           │
 │  ├── Trader Joe V2 [C]      ├── SpookySwap [C]        ├── SyncSwap [C]          │
-│  ├── Pangolin [C]           ├── Equalizer [C]         └── Mute.io [C]           │
-│  ├── SushiSwap [H]          ├── SpiritSwap [H]                                  │
-│  ├── GMX [H]                └── Beethoven X [M]       LINEA (2 DEXs)            │
-│  ├── Platypus [M]                                      ├── Velocore [C]          │
-│  └── KyberSwap [M]                                     └── HorizonDEX [C]       │
+│  ├── Pangolin [C]           ├── Equalizer [C]         ├── Mute [C]              │
+│  ├── SushiSwap [H]          ├── SpiritSwap [H]        ├── PancakeSwap V3 [H]    │
+│  ├── GMX [H]                └── Beethoven X [M]       └── SpaceFi [M]           │
+│  ├── Platypus [M]                                                                │
+│  └── KyberSwap [M]          LINEA (3 DEXs)                                      │
+│                              ├── SyncSwap [C]                                    │
+│                              ├── Velocore [C]                                    │
+│                              └── PancakeSwap V3 [H]                              │
+│                                                                                  │
+│  ═══════════════════════════════════════════════════════════════════════════    │
+│  EMERGING L2 — VERIFIED (8 DEXs, RPC-verified 2026-02-26)                       │
+│  BLAST (4 DEXs)             SCROLL (4 DEXs)                                     │
+│  ├── Thruster V3 [C]        ├── SyncSwap [C]                                    │
+│  ├── Thruster V2 [C]        ├── Uniswap V3 [C]                                  │
+│  ├── BladeSwap [H]          ├── SushiSwap V3 [H]                                │
+│  └── Fenix Finance [M]      └── Ambient [M]                                     │
+│                                                                                  │
+│  EMERGING L2 — STUBS (6 DEXs, placeholder addresses only)                       │
+│  MANTLE (3 DEXs)            MODE (3 DEXs)                                        │
+│  ├── Merchant MOE           ├── Kim Exchange                                     │
+│  ├── Agni Finance           ├── SupSwap                                          │
+│  └── FusionX                └── SwapMode                                         │
 │                                                                                  │
 │  ═══════════════════════════════════════════════════════════════════════════    │
 │  SOLANA (7 DEXs) - NON-EVM                                                      │
@@ -1374,7 +1392,8 @@ The following Architecture Decision Records document key decisions:
 | 2.7 | 2026-02-04 | Simulation Enhancements | Added Solana simulation (HeliusProvider), detector pre-validation (ADR-023), strategy simulation enhancements |
 | 2.8 | 2026-02-04 | Documentation Update | Added Mempool Detector service (port 3008), completed ADR references (all 27 ADRs), updated service count to 9 |
 | 2.9 | 2026-02-14 | Analytics Module | Added §4.8 Analytics Module documenting 9 analytics components, updated Layer 2/3 component hierarchy with PriceMomentum, PriceOracle, PairActivityTracker, SwapEventFilter, MLOpportunityScorer, PerformanceAnalyticsEngine |
-| 2.10 | 2026-02-24 | Phase 6 Expansion | Added 4 emerging L2 chains (Blast, Scroll, Mantle, Mode) to P2 partition (3→7 chains, 11→15 total), Solana execution via Jupiter + Jito (ADR-034), statistical arbitrage strategy (ADR-035), CEX price signal integration (ADR-036), updated chain/DEX counts (57→71 DEXs) |
+| 2.10 | 2026-02-24 | Phase 6 Expansion | Added 4 emerging L2 chain configs (Blast, Scroll, Mantle, Mode) to P2 partition — 2 operational (Blast, Scroll with verified DEX addresses), 2 stubs (Mantle, Mode pending factory verification). Solana execution via Jupiter + Jito (ADR-034), statistical arbitrage strategy (ADR-035), CEX price signal integration (ADR-036), updated chain/DEX counts (57→71 DEXs) |
+| 2.11 | 2026-02-28 | DEX Count Correction | Corrected DEX counts to match source config (71→78 DEXs: 57 core EVM + 8 verified emerging L2 + 6 stubs + 7 Solana). Updated §9.2 DEX distribution diagram with verified DEX names per chain. Blast/Scroll (8 DEXs) confirmed operational with RPC-verified factory addresses (2026-02-26). |
 
 ---
 

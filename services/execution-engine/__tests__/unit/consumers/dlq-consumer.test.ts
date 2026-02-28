@@ -21,7 +21,9 @@ jest.mock('@arbitrage/core/async', () => ({
 }));
 
 jest.mock('@arbitrage/core/resilience', () => ({
-  getErrorMessage: jest.fn(),
+  getErrorMessage: jest.fn((err: unknown) =>
+    err instanceof Error ? err.message : String(err ?? 'Unknown error'),
+  ),
 }));
 
 jest.mock('@arbitrage/core/redis', () => ({

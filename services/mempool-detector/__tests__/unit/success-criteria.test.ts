@@ -560,6 +560,9 @@ describe('Success Criteria: Summary Validation', () => {
     console.log(`  - ${REAL_NON_SWAPS.length} real non-swap transactions`);
     console.log('='.repeat(60) + '\n');
 
-    expect(true).toBe(true);
+    // Verify test fixture data is available for criteria validation
+    expect(REAL_V2_SWAPS.length).toBeGreaterThan(0);
+    expect(REAL_V3_SWAPS.length).toBeGreaterThan(0);
+    expect(REAL_NON_SWAPS.length).toBeGreaterThan(0);
   });
 });
