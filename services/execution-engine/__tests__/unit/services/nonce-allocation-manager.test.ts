@@ -33,7 +33,6 @@ describe('NonceAllocationManager', () => {
   afterEach(() => {
     manager.reset();
     resetDefaultNonceAllocationManager();
-    jest.clearAllMocks();
   });
 
   // ===========================================================================

@@ -58,10 +58,6 @@ describe('Fastlane Integration (Polygon)', () => {
     });
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   describe('Configuration', () => {
     it('should configure Fastlane strategy for Polygon', () => {
       expect(provider.chain).toBe('polygon');

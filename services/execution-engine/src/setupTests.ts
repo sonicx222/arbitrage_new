@@ -20,13 +20,8 @@ process.env.ARBITRUM_PRIVATE_KEY = HARDHAT_DEFAULT_KEY;
 process.env.BASE_PRIVATE_KEY = HARDHAT_DEFAULT_KEY;
 process.env.POLYGON_PRIVATE_KEY = HARDHAT_DEFAULT_KEY;
 
-global.beforeEach(() => {
-  jest.clearAllMocks();
-});
-
-global.afterEach(() => {
-  jest.resetAllMocks();
-});
+// Note: jest.clearAllMocks/resetAllMocks removed — handled by jest.config.base.js
+// (clearMocks: true, resetMocks: true, restoreMocks: true)
 
 // FIX #23: Use shared performance mock (single source of truth)
 import '@arbitrage/test-utils/setup/performance-mock';

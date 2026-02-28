@@ -46,7 +46,6 @@ describe('FlashbotsProtectL2Provider (Base)', () => {
 
   afterEach(() => {
     process.env = originalEnv;
-    jest.restoreAllMocks();
   });
 
   function createProvider(overrides?: Partial<{ enabled: boolean; flashbotsProtectL2Url: string }>): FlashbotsProtectL2Provider {

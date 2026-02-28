@@ -76,10 +76,6 @@ describe('AlchemySimulationProvider', () => {
     global.fetch = mockFetch as unknown as typeof fetch;
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   // ===========================================================================
   // Constructor Tests
   // ===========================================================================

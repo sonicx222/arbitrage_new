@@ -108,7 +108,6 @@ describe('SimulationStrategy', () => {
   afterEach(() => {
     Math.random = originalMathRandom;
     jest.useRealTimers();
-    jest.clearAllMocks();
   });
 
   describe('constructor', () => {

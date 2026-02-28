@@ -229,7 +229,6 @@ describe('FlashbotsProvider', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     provider.dispose();
-    jest.restoreAllMocks();
   });
 
   // ===========================================================================

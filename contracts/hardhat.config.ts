@@ -68,7 +68,8 @@ const config: HardhatUserConfig = {
           // viaIR provides advanced optimizations for standard EVM chains
           // Disabled for zkSync Era which uses custom zksolc compiler
           // Set DISABLE_VIA_IR=true for zkSync deployments
-          viaIR: process.env.DISABLE_VIA_IR !== 'true',
+          // Also disabled during tests (HARDHAT_TEST=true) for 2-5x faster compilation
+          viaIR: process.env.DISABLE_VIA_IR !== 'true' && process.env.HARDHAT_TEST !== 'true',
         },
       },
     ],

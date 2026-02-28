@@ -37,10 +37,6 @@ describe('HotPathMonitor', () => {
     module.resetHotPathMonitor();
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   describe('singleton pattern', () => {
     it('should return the same instance', () => {
       const instance1 = HotPathMonitor.getInstance();

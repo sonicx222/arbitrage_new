@@ -65,10 +65,6 @@ describe('TenderlyProvider', () => {
     global.fetch = mockFetch;
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   // ===========================================================================
   // Constructor Tests
   // ===========================================================================

@@ -59,10 +59,6 @@ describe('BloXroute Integration (BSC)', () => {
     });
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   describe('Configuration', () => {
     it('should configure BloXroute strategy for BSC', () => {
       expect(provider.chain).toBe('bsc');

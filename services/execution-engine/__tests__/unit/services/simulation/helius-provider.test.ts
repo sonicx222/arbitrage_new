@@ -38,10 +38,6 @@ describe('HeliusSimulationProvider', () => {
     provider = new HeliusSimulationProvider(defaultConfig);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
   describe('constructor', () => {
     it('should initialize with Helius API key', () => {
       const config: HeliusProviderConfig = {

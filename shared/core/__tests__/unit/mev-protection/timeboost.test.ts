@@ -46,7 +46,6 @@ describe('TimeboostProvider (Arbitrum)', () => {
 
   afterEach(() => {
     process.env = originalEnv;
-    jest.restoreAllMocks();
   });
 
   function createProvider(overrides?: Partial<{ enabled: boolean; timeboostExpressLaneUrl: string }>): TimeboostProvider {

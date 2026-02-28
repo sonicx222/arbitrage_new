@@ -67,10 +67,6 @@ describe('LocalSimulationProvider', () => {
     mockRpcProvider = createMockProvider();
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   // ===========================================================================
   // Constructor Tests
   // ===========================================================================

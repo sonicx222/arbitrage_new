@@ -121,7 +121,6 @@ describe('BaseSimulationProvider', () => {
 
   afterEach(() => {
     jest.useRealTimers();
-    jest.restoreAllMocks();
   });
 
   // ===========================================================================

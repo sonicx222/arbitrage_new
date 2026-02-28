@@ -105,7 +105,6 @@ describe('CircuitBreaker', () => {
   afterEach(() => {
     circuitBreaker?.stop();
     jest.useRealTimers();
-    jest.clearAllMocks();
   });
 
   // ===========================================================================

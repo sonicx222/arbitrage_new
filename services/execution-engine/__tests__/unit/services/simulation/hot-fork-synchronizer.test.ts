@@ -67,7 +67,6 @@ describe('HotForkSynchronizer', () => {
       await synchronizer.stop();
     }
     jest.useRealTimers();
-    jest.restoreAllMocks();
   });
 
   // ===========================================================================

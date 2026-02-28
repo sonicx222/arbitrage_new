@@ -33,10 +33,6 @@ describe('AlertNotifier', () => {
     notifier = new AlertNotifier(mockLogger, 5);
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   describe('Initialization', () => {
     it('should initialize with configured channels', () => {
       // Configure a webhook for this test

@@ -58,8 +58,8 @@ afterEach(async () => {
   // Reset all singletons to prevent test interference
   await resetAllSingletons();
 
-  // Clear all mocks
-  jest.clearAllMocks();
+  // Note: jest.clearAllMocks() removed — handled by jest.config.base.js
+  // (clearMocks: true, resetMocks: true, restoreMocks: true)
 });
 
 // =============================================================================

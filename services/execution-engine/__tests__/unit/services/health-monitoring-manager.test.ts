@@ -213,7 +213,6 @@ describe('HealthMonitoringManager', () => {
   afterEach(() => {
     manager?.stop();
     jest.useRealTimers();
-    jest.clearAllMocks();
   });
 
   // =========================================================================

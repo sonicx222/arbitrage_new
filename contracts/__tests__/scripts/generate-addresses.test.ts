@@ -23,10 +23,6 @@ beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation();
 });
 
-afterEach(() => {
-  jest.restoreAllMocks();
-});
-
 // Import after mocking fs
 import { extractManualSections } from '../../scripts/generate-addresses';
 
