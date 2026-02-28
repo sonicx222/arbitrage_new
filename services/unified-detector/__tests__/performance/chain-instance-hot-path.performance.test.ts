@@ -110,12 +110,12 @@ function benchmark(
   };
 
   return {
-    min: times[0] || 0,
-    max: times[times.length - 1] || 0,
+    min: times[0] ?? 0,
+    max: times[times.length - 1] ?? 0,
     avg: times.reduce((a, b) => a + b, 0) / times.length,
-    p50: times[safeIndex(0.5)] || 0,
-    p95: times[safeIndex(0.95)] || 0,
-    p99: times[safeIndex(0.99)] || 0
+    p50: times[safeIndex(0.5)] ?? 0,
+    p95: times[safeIndex(0.95)] ?? 0,
+    p99: times[safeIndex(0.99)] ?? 0
   };
 }
 
@@ -406,13 +406,13 @@ describe('Chain Instance Hot-Path Performance Guards', () => {
       }
 
       times.sort((a, b) => a - b);
-      const p95 = times[Math.floor(times.length * 0.95)] || 0;
+      const p95 = times[Math.floor(times.length * 0.95)] ?? 0;
       const avg = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : 0;
 
       console.log('Burst Processing (100 events) Performance (ms):', {
         avg: avg.toFixed(3),
         p95: p95.toFixed(3),
-        max: (times[times.length - 1] || 0).toFixed(3)
+        max: (times[times.length - 1] ?? 0).toFixed(3)
       });
 
       // In CI, timing is very noisy - use generous threshold

@@ -18,6 +18,7 @@ import { ethers } from 'ethers';
 import { createLogger } from './logger';
 import { clearIntervalSafe } from './async/lifecycle-utils';
 import { getErrorMessage } from './resilience/error-handling';
+import { notifySingletonAccess } from './singleton-tracking';
 const logger = createLogger('nonce-manager');
 
 // =============================================================================
@@ -747,6 +748,7 @@ function shallowConfigEquals(
  * @returns The singleton NonceManager instance
  */
 export function getNonceManager(config?: Partial<NonceManagerConfig>): NonceManager {
+  notifySingletonAccess();
   if (!nonceManagerInstance) {
     nonceManagerInstance = new NonceManager(config);
     nonceManagerInitialConfig = config;

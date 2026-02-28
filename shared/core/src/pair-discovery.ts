@@ -17,6 +17,7 @@ import { EventEmitter } from 'events';
 import { createLogger } from './logger';
 import { Dex, Token } from '../../types';
 import type { Resettable } from '@arbitrage/types';
+import { notifySingletonAccess } from './singleton-tracking';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -831,6 +832,7 @@ const logger = createLogger('pair-discovery');
  * config will log a warning and return the existing instance.
  */
 export function getPairDiscoveryService(config?: Partial<PairDiscoveryConfig>): PairDiscoveryService {
+  notifySingletonAccess();
   if (!pairDiscoveryInstance) {
     pairDiscoveryInstance = new PairDiscoveryService(config);
   } else if (config) {

@@ -22,6 +22,7 @@ import type { PerformanceLogger } from '@arbitrage/core';
 import type { ExecutionStats, Logger } from '../../types';
 import type { ISimulationService, SimulationProviderType } from './types';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { clearIntervalSafe } from '@arbitrage/core/async/lifecycle-utils';
 
 // =============================================================================
 // Constants
@@ -370,8 +371,7 @@ export function createSimulationMetricsCollector(
     stopped = true;
 
     if (collectionInterval) {
-      clearInterval(collectionInterval);
-      collectionInterval = null;
+      collectionInterval = clearIntervalSafe(collectionInterval);
     }
 
     logger.info('SimulationMetricsCollector stopped');

@@ -17,6 +17,7 @@ import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
 import { getRedisClient, RedisClient } from '../redis/client';
 import type { Resettable } from '@arbitrage/types';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 // =============================================================================
 // Types
@@ -643,6 +644,7 @@ const logger = createLogger('pair-cache-singleton');
 export async function getPairCacheService(
   config?: Partial<PairCacheConfig>
 ): Promise<PairCacheService> {
+  notifySingletonAccess();
   // Return existing initialized instance
   if (pairCacheInstance?.isInitialized()) {
     if (config) {

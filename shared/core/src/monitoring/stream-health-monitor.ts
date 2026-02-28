@@ -10,6 +10,7 @@
 import { createLogger, LoggerLike } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 /** Configuration options for StreamHealthMonitor */
 export interface StreamHealthMonitorConfig {
@@ -680,6 +681,7 @@ let globalStreamHealthMonitor: StreamHealthMonitor | null = null;
  * Get the global stream health monitor instance
  */
 export function getStreamHealthMonitor(): StreamHealthMonitor {
+  notifySingletonAccess();
   if (!globalStreamHealthMonitor) {
     globalStreamHealthMonitor = new StreamHealthMonitor();
   }

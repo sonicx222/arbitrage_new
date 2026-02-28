@@ -61,7 +61,7 @@ const regionId = process.env.REGION_ID ?? partitionConfig?.region ?? 'asia-south
 const config: UnifiedDetectorConfig = {
   partitionId: process.env.PARTITION_ID,
   chains: process.env.PARTITION_CHAINS?.split(',').map(c => c.trim()),
-  instanceId: process.env.INSTANCE_ID || `unified-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
+  instanceId: process.env.INSTANCE_ID ?? `unified-${process.env.HOSTNAME ?? 'local'}-${Date.now()}`,
   regionId,
   enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
   healthCheckPort

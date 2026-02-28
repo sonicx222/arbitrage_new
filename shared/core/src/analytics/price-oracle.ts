@@ -22,6 +22,7 @@
 import { RedisClient, getRedisClient } from '../redis/client';
 import { createLogger, Logger } from '../logger';
 import { FALLBACK_TOKEN_PRICES } from '@arbitrage/config';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -744,6 +745,7 @@ let oracleInitError: Error | null = null;
  * Thread-safe: concurrent calls will wait for the same initialization.
  */
 export async function getPriceOracle(config?: PriceOracleConfig): Promise<PriceOracle> {
+  notifySingletonAccess();
   // If already initialized successfully, return immediately
   if (oracleInstance) {
     return oracleInstance;

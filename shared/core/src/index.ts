@@ -190,6 +190,9 @@ export type { SignedEnvelope } from './utils/hmac-utils';
 // 1.3 Async Primitives
 // =============================================================================
 
+// Singleton access tracking (dirty-flag for test reset optimization)
+export { notifySingletonAccess, isSingletonDirty, clearSingletonDirty } from './singleton-tracking';
+
 // P1-3-FIX: Standardized singleton pattern utilities
 // P1-FIX: Added createConfigurableSingleton for singletons needing config on first init
 export { createAsyncSingleton, createSingleton, createConfigurableSingleton, singleton } from './async/async-singleton';

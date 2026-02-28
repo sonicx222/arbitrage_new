@@ -398,7 +398,7 @@ export class ChainDetectorInstance extends EventEmitter {
     this.MAX_STALENESS_MS = getConfidenceMaxAgeMs(this.chainId);
     this.dexes = getEnabledDexes(this.chainId);
     this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] ?? [];
-    this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] || {};
+    this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] ?? undefined;
 
     // PERF-OPT: Build O(1) token lookup map at construction time
     // This avoids O(N) array.find() on every getTokenSymbol() call in hot path

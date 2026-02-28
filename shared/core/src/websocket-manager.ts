@@ -450,7 +450,7 @@ export class WebSocketManager {
         this.ws.on('open', () => {
           this.clearConnectionTimeout();
           const connectionTime = Date.now() - connectionStartTime;
-          this.logger.info('WebSocket connected', { url: currentUrl, chainId: this.chainId, connectionTime });
+          this.logger.info('WebSocket connected', { url: maskedUrl, chainId: this.chainId, connectionTime });
           this.isConnecting = false;
           this.isConnected = true;
           this.reconnectAttempts = 0;
@@ -524,7 +524,7 @@ export class WebSocketManager {
         this.ws.on('close', (code: number, reason: Buffer) => {
           this.clearConnectionTimeout();
           const reasonStr = reason.toString();
-          this.logger.warn('WebSocket closed', { code, reason: reasonStr, url: currentUrl });
+          this.logger.warn('WebSocket closed', { code, reason: reasonStr, url: maskedUrl });
           this.isConnecting = false;
           this.isConnected = false;
 

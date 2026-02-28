@@ -42,6 +42,7 @@ import {
   type GasBaselineEntry,
 } from '../services/gas-price-optimizer';
 import { PROVIDER_HEALTH_CHECK_TIMEOUT_MS } from '../types';
+import { createCancellableTimeout } from '../services/simulation/types';
 import {
   NonceAllocationManager,
 } from '../services/nonce-allocation-manager';
@@ -510,13 +511,12 @@ export abstract class BaseExecutionStrategy {
     chain: string,
     ctx: StrategyContext
   ): Promise<boolean> {
+    const { promise: timeoutPromise, cancel } = createCancellableTimeout<ethers.Network>(
+      PROVIDER_HEALTH_CHECK_TIMEOUT_MS,
+      'Provider health check timeout',
+    );
     try {
-      await Promise.race([
-        provider.getNetwork(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Provider health check timeout')), PROVIDER_HEALTH_CHECK_TIMEOUT_MS)
-        ),
-      ]);
+      await Promise.race([provider.getNetwork(), timeoutPromise]);
       return true;
     } catch (error) {
       const providerHealth = ctx.providerHealth.get(chain);
@@ -533,6 +533,8 @@ export abstract class BaseExecutionStrategy {
         error: getErrorMessage(error),
       });
       return false;
+    } finally {
+      cancel();
     }
   }
 

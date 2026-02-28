@@ -267,7 +267,7 @@ describe('Memory Stability Performance (Task #45)', () => {
 
       // Track ArrayBuffer memory before load
       const initialMem = process.memoryUsage();
-      const initialArrayBuffers = (initialMem as any).arrayBuffers || 0;
+      const initialArrayBuffers = (initialMem as any).arrayBuffers ?? 0;
 
       // Event handler
       let eventIndex = 0;
@@ -288,7 +288,7 @@ describe('Memory Stability Performance (Task #45)', () => {
 
       // Track ArrayBuffer memory after load
       const finalMem = process.memoryUsage();
-      const finalArrayBuffers = (finalMem as any).arrayBuffers || 0;
+      const finalArrayBuffers = (finalMem as any).arrayBuffers ?? 0;
 
       const arrayBufferGrowthMB = (finalArrayBuffers - initialArrayBuffers) / 1024 / 1024;
 

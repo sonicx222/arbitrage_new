@@ -17,6 +17,7 @@
 import { RedisClient, getRedisClient } from './client';
 import { createLogger } from '../logger';
 import type { ILogger } from '@arbitrage/types';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 // =============================================================================
 // Types
@@ -722,6 +723,7 @@ let lockManagerInitError: Error | null = null;
  * Thread-safe: concurrent calls will wait for the same initialization.
  */
 export async function getDistributedLockManager(config?: LockConfig): Promise<DistributedLockManager> {
+  notifySingletonAccess();
   // If already initialized successfully, return immediately
   if (lockManagerInstance) {
     return lockManagerInstance;

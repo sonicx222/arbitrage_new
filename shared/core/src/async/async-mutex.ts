@@ -31,6 +31,8 @@
  * ```
  */
 
+import { notifySingletonAccess } from '../singleton-tracking';
+
 export interface MutexStats {
   /** Number of times the mutex was acquired */
   acquireCount: number;
@@ -295,6 +297,7 @@ function ensureCleanupRunning(): void {
 }
 
 export function namedMutex(name: string): AsyncMutex {
+  notifySingletonAccess();
   let entry = namedMutexes.get(name);
   if (!entry) {
     entry = {

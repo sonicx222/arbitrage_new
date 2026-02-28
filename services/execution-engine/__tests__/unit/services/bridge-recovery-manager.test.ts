@@ -586,7 +586,7 @@ describe('BridgeRecoveryManager', () => {
       expect(count).toBe(0);
     });
 
-    it('should clean up entries that throw on get', async () => {
+    it('should move corrupt entries to dead-letter key on get failure', async () => {
       mockRedis.scan.mockResolvedValueOnce(['0', [`${BRIDGE_RECOVERY_KEY_PREFIX}bad-key`]]);
       mockRedis.get.mockRejectedValueOnce(new Error('Redis parse error'));
 
@@ -595,6 +595,13 @@ describe('BridgeRecoveryManager', () => {
       const count = await manager.recoverPendingBridges();
 
       expect(count).toBe(0);
+      // Corrupt entry moved to dead-letter key with 30-day TTL for audit trail
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        `bridge:recovery:corrupt:${BRIDGE_RECOVERY_KEY_PREFIX}bad-key`,
+        expect.stringContaining('"originalKey"'),
+        30 * 24 * 60 * 60,
+      );
+      // Original key still deleted after dead-letter copy
       expect(mockRedis.del).toHaveBeenCalledWith(`${BRIDGE_RECOVERY_KEY_PREFIX}bad-key`);
     });
   });

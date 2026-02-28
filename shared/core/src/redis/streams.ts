@@ -17,6 +17,7 @@
 import crypto from 'crypto';
 import Redis from 'ioredis';
 import { RedisStreams } from '@arbitrage/types';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 // =============================================================================
 // DI Types (P16 pattern - enables testability without Jest mock hoisting)
@@ -1369,7 +1370,6 @@ let initializingPromise: Promise<RedisStreamsClient> | null = null; // Race cond
 
 import { resolveRedisPassword } from './utils';
 import { getErrorMessage } from '../resilience/error-handling';
-import { notifySingletonAccess } from '../singleton-tracking';
 
 export async function getRedisStreamsClient(url?: string, password?: string): Promise<RedisStreamsClient> {
   notifySingletonAccess();

@@ -123,7 +123,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
 
     // Get initial stats
     const initialStats = integration.getStats();
-    const initialWarmed = initialStats.warming?.totalPairsWarmed || 0;
+    const initialWarmed = initialStats.warming?.totalPairsWarmed ?? 0;
 
     // Trigger 10 concurrent price updates for same pair
     for (let i = 0; i < 10; i++) {
@@ -135,7 +135,7 @@ describe('P1-7 Fix Verification - Concurrent Warming Race Condition', () => {
 
     // Get final stats
     const finalStats = integration.getStats();
-    const finalWarmed = finalStats.warming?.totalPairsWarmed || 0;
+    const finalWarmed = finalStats.warming?.totalPairsWarmed ?? 0;
 
     // Should have warmed pairs only ONCE (not 10 times)
     // The exact count depends on correlations, but should be small

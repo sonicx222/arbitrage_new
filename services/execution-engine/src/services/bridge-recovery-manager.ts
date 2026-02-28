@@ -477,13 +477,15 @@ export class BridgeRecoveryManager {
             error: getErrorMessage(error),
           });
           // Move corrupt entry to dead-letter key for audit trail instead of deleting
+          // TTL 30 days — prevents unbounded accumulation of corrupt entries in Redis
           try {
+            const CORRUPT_KEY_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
             const corruptKey = `bridge:recovery:corrupt:${key}`;
             await this.redis.set(corruptKey, JSON.stringify({
               originalKey: key,
               error: getErrorMessage(error),
               movedAt: Date.now(),
-            }));
+            }), CORRUPT_KEY_TTL_SECONDS);
             await this.redis.del(key);
           } catch {
             // Best effort — if dead-letter write fails, leave original intact

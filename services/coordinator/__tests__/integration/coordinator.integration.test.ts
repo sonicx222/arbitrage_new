@@ -15,74 +15,11 @@ import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach 
 import type { Mock } from 'jest-mock';
 import { CoordinatorService, CoordinatorDependencies } from '../../src/coordinator';
 import { RedisStreamsClient, RedisClient } from '@arbitrage/core/redis';
-import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
+import { ServiceStateManager, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { createTestRedisClient, createMockLogger, createMockPerfLogger } from '@arbitrage/test-utils';
 import Redis from 'ioredis';
 import * as fs from 'fs';
 import * as path from 'path';
-
-/**
- * Creates a mock state manager with configurable running state.
- *
- * Fix 12c: This mock mirrors the real ServiceStateManager state machine:
- * - STOPPED -> RUNNING via executeStart (matches ServiceState.STOPPED -> STARTING -> RUNNING)
- * - RUNNING -> STOPPED via executeStop (matches ServiceState.RUNNING -> STOPPING -> STOPPED)
- * - executeStart returns { success, currentState } matching StateTransitionResult shape
- * - executeStop returns { success, currentState } matching StateTransitionResult shape
- *
- * Limitation: The mock skips intermediate STARTING/STOPPING states and does not
- * enforce the transition lock (transitionLock) that prevents concurrent transitions.
- * TODO: Consider swapping to real ServiceStateManager when test setup allows it.
- *
- * @see shared/core/src/service-state.ts — Real ServiceStateManager
- */
-function createMockStateManager() {
-  const state = { running: false };
-
-  // Use explicit function implementations to avoid Jest type issues
-  const executeStartImpl = async (callback: () => Promise<void>) => {
-    // Match real behavior: reject start if already running
-    if (state.running) {
-      return { success: false as const, previousState: 'RUNNING' as const, currentState: 'RUNNING' as const };
-    }
-    try {
-      await callback();
-      state.running = true;
-      return { success: true as const, previousState: 'STOPPED' as const, currentState: 'RUNNING' as const };
-    } catch (error) {
-      state.running = false;
-      return { success: false as const, previousState: 'STOPPED' as const, currentState: 'STOPPED' as const, error };
-    }
-  };
-
-  const executeStopImpl = async (callback: () => Promise<void>) => {
-    // Match real behavior: reject stop if not running
-    if (!state.running) {
-      return { success: false as const, previousState: 'STOPPED' as const, currentState: 'STOPPED' as const };
-    }
-    try {
-      await callback();
-      state.running = false;
-      return { success: true as const, previousState: 'RUNNING' as const, currentState: 'STOPPED' as const };
-    } catch (error) {
-      return { success: false as const, previousState: 'RUNNING' as const, currentState: 'RUNNING' as const, error };
-    }
-  };
-
-  return {
-    getState: jest.fn().mockImplementation(() => state.running ? 'RUNNING' : 'STOPPED'),
-    isRunning: jest.fn().mockImplementation(() => state.running),
-    isStopped: jest.fn().mockImplementation(() => !state.running),
-
-    executeStart: jest.fn().mockImplementation(executeStartImpl as any),
-
-    executeStop: jest.fn().mockImplementation(executeStopImpl as any),
-    on: jest.fn(),
-    removeAllListeners: jest.fn(),
-    // Expose state for test manipulation
-    _state: state
-  };
-}
 
 /**
  * Creates a mock stream health monitor.
@@ -157,7 +94,7 @@ describe('CoordinatorService Integration', () => {
   let coordinator: CoordinatorService;
   let redisClient: RedisClient;
   let streamsClient: RedisStreamsClient;
-  let mockStateManager: ReturnType<typeof createMockStateManager>;
+  let stateManager: ServiceStateManager;
   let mockDeps: CoordinatorDependencies;
   // Raw Redis client for direct verification and cleanup
   let rawRedis: Redis;
@@ -181,7 +118,6 @@ describe('CoordinatorService Integration', () => {
     // Create fresh real Redis clients for each test
     redisClient = createRealRedisClient();
     streamsClient = createRealStreamsClient();
-    mockStateManager = createMockStateManager();
 
     // Create factory functions that return the real clients
     const getRedisClientMock = jest.fn<() => Promise<RedisClient>>();
@@ -190,8 +126,12 @@ describe('CoordinatorService Integration', () => {
     const getRedisStreamsClientMock = jest.fn<() => Promise<RedisStreamsClient>>();
     getRedisStreamsClientMock.mockResolvedValue(streamsClient);
 
-    const createServiceStateMock = jest.fn<() => typeof mockStateManager>();
-    createServiceStateMock.mockReturnValue(mockStateManager);
+    // Use real ServiceStateManager (swapped from mock per Fix #7)
+    const mockLogger = createMockLogger();
+    const createServiceStateFn = jest.fn((config: { serviceName: string; transitionTimeoutMs: number }) => {
+      stateManager = createServiceState(config, { logger: mockLogger });
+      return stateManager;
+    });
 
     const getStreamHealthMonitorMock = jest.fn();
     getStreamHealthMonitorMock.mockReturnValue(createMockStreamHealthMonitor());
@@ -202,7 +142,7 @@ describe('CoordinatorService Integration', () => {
       perfLogger: createMockPerfLogger() as any,
       getRedisClient: getRedisClientMock as any,
       getRedisStreamsClient: getRedisStreamsClientMock as any,
-      createServiceState: createServiceStateMock as any,
+      createServiceState: createServiceStateFn as any,
       getStreamHealthMonitor: getStreamHealthMonitorMock as any,
       StreamConsumer: createMockStreamConsumerClass() as any
     };

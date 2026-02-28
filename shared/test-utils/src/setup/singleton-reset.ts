@@ -18,6 +18,11 @@ interface RegisteredSingleton {
 
 const registeredSingletons: RegisteredSingleton[] = [];
 
+// Dirty-tracking: skip resets when no singleton was accessed during the test.
+// Loaded dynamically from @arbitrage/core in initializeSingletonResets().
+let _isSingletonDirty: (() => boolean) | null = null;
+let _clearSingletonDirty: (() => void) | null = null;
+
 // Simple mutex to prevent concurrent reset operations
 let resetInProgress = false;
 let resetQueue: Array<() => void> = [];
@@ -69,6 +74,12 @@ export async function resetAllSingletons(): Promise<void> {
     });
   }
 
+  // Fast path: skip all resets when no singleton getter was called since last reset.
+  // ~82% of test files never access registered singletons, saving 14 async calls per test.
+  if (_isSingletonDirty && !_isSingletonDirty()) {
+    return;
+  }
+
   resetInProgress = true;
   const errors: Array<{ name: string; error: Error }> = [];
 
@@ -91,6 +102,8 @@ export async function resetAllSingletons(): Promise<void> {
     }
   } finally {
     resetInProgress = false;
+    // Clear dirty flag after successful reset
+    _clearSingletonDirty?.();
 
     // Process queued reset calls
     const pendingResolvers = resetQueue;
@@ -136,6 +149,14 @@ export async function initializeSingletonResets(): Promise<void> {
   try {
     // Dynamic import to avoid circular dependencies during module load
     const core = await import('@arbitrage/core');
+
+    // Wire up dirty-tracking from @arbitrage/core singleton-tracking module
+    if (typeof core.isSingletonDirty === 'function') {
+      _isSingletonDirty = core.isSingletonDirty;
+    }
+    if (typeof core.clearSingletonDirty === 'function') {
+      _clearSingletonDirty = core.clearSingletonDirty;
+    }
 
     // Redis (priority 10 - reset early, others may depend on it)
     if (typeof core.resetRedisInstance === 'function') {

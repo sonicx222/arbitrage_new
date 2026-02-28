@@ -5,6 +5,7 @@ import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { getRedisClient } from '../redis/client';
 import type { RedisClient } from '../redis/client';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 const logger = createLogger('cache-coherency');
 
@@ -732,6 +733,7 @@ export function createCacheCoherencyManager(
 let defaultCoherencyManager: CacheCoherencyManager | null = null;
 
 export function getCacheCoherencyManager(): CacheCoherencyManager {
+  notifySingletonAccess();
   if (!defaultCoherencyManager) {
     defaultCoherencyManager = createCacheCoherencyManager(
       `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

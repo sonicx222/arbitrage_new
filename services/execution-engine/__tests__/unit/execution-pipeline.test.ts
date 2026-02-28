@@ -166,7 +166,7 @@ describe('ExecutionPipeline', () => {
 
     it('should respect maxConcurrentExecutions limit', async () => {
       // Create a slow-resolving strategy so executions stay "active"
-      let resolvers: Array<() => void> = [];
+      const resolvers: Array<() => void> = [];
       deps.lockManager.withLock.mockImplementation(async (_resource, fn) => {
         const p = new Promise<void>((resolve) => {
           resolvers.push(resolve);
@@ -177,7 +177,6 @@ describe('ExecutionPipeline', () => {
       deps.maxConcurrentExecutions = 2;
 
       // Queue has 5 items, but only 2 should be dequeued
-      let sizeCallCount = 0;
       deps.queueService.size.mockImplementation(() => {
         return 5; // always has items
       });

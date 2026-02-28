@@ -99,7 +99,7 @@ function reapplyRedisMockImplementations(): void {
       'radix-tree-keys', 1,
       'radix-tree-nodes', 2,
       'last-generated-id', streamData.length > 0 ? streamData[streamData.length - 1].id : '0-0',
-      'groups', mockConsumerGroups.get(stream)?.size || 0
+      'groups', mockConsumerGroups.get(stream)?.size ?? 0
     ];
   });
 
@@ -177,7 +177,7 @@ jest.mock('ioredis', () => {
         'radix-tree-keys', 1,
         'radix-tree-nodes', 2,
         'last-generated-id', streamData.length > 0 ? streamData[streamData.length - 1].id : '0-0',
-        'groups', _mockConsumerGroups.get(stream)?.size || 0
+        'groups', _mockConsumerGroups.get(stream)?.size ?? 0
       ];
     }),
     xlen: jest.fn().mockImplementation(async (stream: any) => (_mockStreams.get(stream) || []).length),

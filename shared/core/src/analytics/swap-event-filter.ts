@@ -17,6 +17,7 @@
 import type { SwapEvent } from '@arbitrage/types';
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 const logger = createLogger('swap-event-filter');
 
@@ -834,6 +835,7 @@ let filterInstance: SwapEventFilter | null = null;
 let initializingFilter = false; // Race condition guard
 
 export function getSwapEventFilter(config?: Partial<SwapEventFilterConfig>): SwapEventFilter {
+  notifySingletonAccess();
   // Return existing instance if available
   if (filterInstance) {
     return filterInstance;

@@ -24,6 +24,7 @@ import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { getRedisClient, RedisClient } from '../redis/client';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 import { getDistributedLockManager, DistributedLockManager } from '../redis/distributed-lock';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 // P0-11 FIX: Stream name for failover events (ADR-002 compliant)
 const FAILOVER_STREAM = 'stream:system-failover';
@@ -1023,6 +1024,7 @@ export class CrossRegionHealthManager extends EventEmitter {
 let globalCrossRegionHealthManager: CrossRegionHealthManager | null = null;
 
 export function getCrossRegionHealthManager(config?: CrossRegionHealthConfig): CrossRegionHealthManager {
+  notifySingletonAccess();
   if (!globalCrossRegionHealthManager && config) {
     globalCrossRegionHealthManager = new CrossRegionHealthManager(config);
   }

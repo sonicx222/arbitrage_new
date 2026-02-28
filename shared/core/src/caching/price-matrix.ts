@@ -25,6 +25,7 @@
 import { createLogger } from '../logger';
 import type { Resettable } from '@arbitrage/types';
 import { SharedKeyRegistry } from './shared-key-registry';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 const logger = createLogger('price-matrix');
 
@@ -1202,6 +1203,7 @@ let initializingMatrix = false; // Race condition guard
  * @param config - Configuration (only used on first call, ignored afterward)
  */
 export function getPriceMatrix(config?: Partial<PriceMatrixConfig>): PriceMatrix {
+  notifySingletonAccess();
   // Return existing instance if available
   if (matrixInstance) {
     if (config) {

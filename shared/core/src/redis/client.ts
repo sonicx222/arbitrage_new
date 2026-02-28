@@ -2,6 +2,7 @@
 import { Redis } from 'ioredis';
 import { MessageEvent, ServiceHealth, PerformanceMetrics } from '../../../types';
 import { createLogger, Logger } from '../logger';
+import { notifySingletonAccess } from '../singleton-tracking';
 
 // =============================================================================
 // P2-FIX-1: Standardized Redis Error Handling
@@ -1355,6 +1356,7 @@ let initializationError: Error | null = null;
 import { resolveRedisPassword } from './utils';
 
 export async function getRedisClient(url?: string, password?: string): Promise<RedisClient> {
+  notifySingletonAccess();
   // If already initialized successfully, return immediately
   if (redisInstance) {
     return redisInstance;
