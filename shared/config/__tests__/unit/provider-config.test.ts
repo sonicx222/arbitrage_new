@@ -128,12 +128,13 @@ describe('PROVIDER_CONFIGS', () => {
 describe('CHAIN_NETWORK_NAMES', () => {
   const expectedChains = [
     'ethereum', 'arbitrum', 'bsc', 'base', 'polygon',
-    'optimism', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
+    'optimism', 'avalanche', 'fantom', 'zksync', 'linea',
+    'blast', 'scroll', 'mantle', 'mode', 'solana'
   ];
 
-  it('should have entries for all 11 chains', () => {
+  it('should have entries for all 15 chains', () => {
     const chainNames = Object.keys(CHAIN_NETWORK_NAMES);
-    expect(chainNames).toHaveLength(11);
+    expect(chainNames).toHaveLength(15);
     for (const chain of expectedChains) {
       expect(CHAIN_NETWORK_NAMES[chain]).toBeDefined();
     }
@@ -283,6 +284,7 @@ describe('getProviderUrlsForChain', () => {
     delete process.env.ANKR_API_KEY;
     delete process.env.INFURA_API_KEY;
     delete process.env.ALCHEMY_API_KEY;
+    delete process.env.ONFINALITY_API_KEY;
   });
 
   afterEach(() => {

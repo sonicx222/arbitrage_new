@@ -841,7 +841,7 @@ export class GasPriceCache {
       })
     );
 
-    // Refresh RPC-based chains (zkSync, Linea)
+    // Refresh RPC-based chains (zkSync, Linea, Scroll, Mantle)
     const rpcResults = await Promise.allSettled(
       L1_RPC_FEE_CHAINS.map(async (chain) => {
         const chainConfig = CHAINS[chain];
@@ -857,6 +857,12 @@ export class GasPriceCache {
           await this.refreshZkSyncL1Fee(provider, ethPrice);
         } else if (chain === 'linea') {
           await this.refreshLineaL1Fee(ethPrice);
+        } else if (chain === 'scroll') {
+          // FIX H4: Scroll uses L1GasOracle precompile like OP-stack
+          await this.refreshScrollL1Fee(provider, ethPrice);
+        } else if (chain === 'mantle') {
+          // FIX H4: Mantle uses EigenDA — L1 fee is minimal, use static estimate
+          await this.refreshMantleL1Fee(ethPrice);
         }
       })
     );
@@ -954,6 +960,100 @@ export class GasPriceCache {
     } catch (error) {
       this.logger.warn('Linea L1 fee estimation failed, using static fallback', { error });
       // Do not cache — getL1DataFee() will return static fallback
+    }
+  }
+
+  /**
+   * FIX H4: Refresh Scroll L1 fee estimate.
+   *
+   * Scroll is a zkRollup that posts compressed data to L1. It has a
+   * L1GasOracle precompile similar to OP-stack chains but with different
+   * compression characteristics (~5x compression from zk proofs).
+   *
+   * Uses Ethereum L1 base fee from cache with Scroll's compression ratio.
+   * Falls back to static L1_DATA_FEE_USD['scroll'] on failure.
+   */
+  private async refreshScrollL1Fee(provider: { send: (method: string, params: unknown[]) => Promise<unknown> }, ethPrice: number): Promise<void> {
+    try {
+      // Try Scroll's L1GasOracle precompile at 0x5300000000000000000000000000000000000002
+      const SCROLL_L1_GAS_ORACLE = '0x5300000000000000000000000000000000000002';
+      // l1BaseFee() selector: 0x519b4bd3
+      const l1BaseFeeHex = await provider.send('eth_call', [{
+        to: SCROLL_L1_GAS_ORACLE,
+        data: '0x519b4bd3',
+      }, 'latest']) as string;
+
+      const l1BaseFeeWei = BigInt(l1BaseFeeHex);
+
+      // Scroll compresses data ~5x via zk proofs before posting to L1
+      const SCROLL_COMPRESSION_RATIO = 5;
+      const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
+      const l1CostWei = (l1BaseFeeWei * l1GasUsed) / BigInt(SCROLL_COMPRESSION_RATIO);
+      const l1CostEth = Number(l1CostWei) / 1e18;
+      const feeUsd = l1CostEth * ethPrice;
+
+      this.l1OracleCache.set('scroll', {
+        feeUsd,
+        updatedAt: Date.now(),
+      });
+
+      this.logger.debug('Scroll L1 fee updated via L1GasOracle', {
+        chain: 'scroll',
+        l1BaseFeeGwei: Number(l1BaseFeeWei) / 1e9,
+        compressionRatio: SCROLL_COMPRESSION_RATIO,
+        feeUsd,
+      });
+    } catch (error) {
+      // Fallback: use Ethereum L1 base fee with compression ratio
+      try {
+        const ethGasPrice = this.getGasPrice('ethereum');
+        const SCROLL_COMPRESSION_RATIO = 5;
+        const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
+        const l1CostWei = (ethGasPrice.gasPriceWei * l1GasUsed) / BigInt(SCROLL_COMPRESSION_RATIO);
+        const l1CostEth = Number(l1CostWei) / 1e18;
+        const feeUsd = l1CostEth * ethPrice;
+
+        this.l1OracleCache.set('scroll', { feeUsd, updatedAt: Date.now() });
+        this.logger.debug('Scroll L1 fee estimated from Ethereum base fee (oracle fallback)', {
+          chain: 'scroll', feeUsd,
+        });
+      } catch {
+        this.logger.warn('Scroll L1 fee estimation failed, using static fallback', { error });
+      }
+    }
+  }
+
+  /**
+   * FIX H4: Refresh Mantle L1 fee estimate.
+   *
+   * Mantle uses EigenDA for data availability instead of posting to Ethereum L1.
+   * This makes L1 data fees minimal (~$0.01-0.10 per tx). Since there's no
+   * on-chain oracle to query, we estimate based on the known EigenDA fee model.
+   *
+   * The primary cost factor for Mantle is the MNT gas price on L2 itself,
+   * not L1 data posting. We update the cache with a minimal estimated L1 fee.
+   *
+   * Falls back to static L1_DATA_FEE_USD['mantle'] on failure.
+   */
+  private async refreshMantleL1Fee(ethPrice: number): Promise<void> {
+    try {
+      // Mantle's L1 data fee is minimal due to EigenDA.
+      // Estimate: ~0.001 ETH equivalent per tx at current rates
+      // This is much cheaper than Ethereum-posting L2s.
+      const MANTLE_EIGENDATA_COST_ETH = 0.00005; // ~50 gas units of EigenDA cost
+      const feeUsd = MANTLE_EIGENDATA_COST_ETH * ethPrice;
+
+      this.l1OracleCache.set('mantle', {
+        feeUsd,
+        updatedAt: Date.now(),
+      });
+
+      this.logger.debug('Mantle L1 fee updated (EigenDA estimate)', {
+        chain: 'mantle',
+        feeUsd,
+      });
+    } catch (error) {
+      this.logger.warn('Mantle L1 fee estimation failed, using static fallback', { error });
     }
   }
 

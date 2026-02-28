@@ -25,7 +25,6 @@ export {
   buildBlastApiUrl,
   getProviderUrlsForChain,
   getTimeBasedProviderOrder,
-  getTrafficAllocation,
   calculateProviderBudget,
   type ProviderConfig,
   type ProviderBudget
@@ -329,7 +328,7 @@ export const STANDARD_FALLBACK_PROVIDERS = {
  */
 export function createAlchemyConfig(network: string): ApiKeyUrlConfig {
   return {
-    apiKeyEnvVar: `ALCHEMY_${network.toUpperCase()}_KEY`,
+    apiKeyEnvVar: 'ALCHEMY_API_KEY',
     rpcUrlTemplate: (key) => `https://${network}-mainnet.g.alchemy.com/v2/${key}`,
     wsUrlTemplate: (key) => `wss://${network}-mainnet.g.alchemy.com/v2/${key}`,
   };
@@ -381,90 +380,3 @@ export function createAnkrConfig(network: string): ApiKeyUrlConfig {
   };
 }
 
-/**
- * Build chain URLs with the optimized 7-Provider Shield priority order.
- *
- * Resolution order:
- * 1. Explicit environment variable (e.g., ETHEREUM_RPC_URL)
- * 2. dRPC (highest capacity - 210M CU/month)
- * 3. Ankr (second highest - 200M credits/month)
- * 4. Infura (if supported for chain)
- * 5. Alchemy (if supported for chain)
- * 6. Default public URL
- *
- * @param config - Base URL configuration
- * @param chainName - Chain name for provider lookup
- * @returns Resolved URLs with optimized provider priority
- */
-export function buildChainUrlsOptimized(
-  config: ChainUrlConfig,
-  chainName: string
-): ChainUrls {
-  const envPrefix = config.chainEnvPrefix.toUpperCase();
-
-  // Check explicit env vars first
-  const explicitRpcUrl = process.env[`${envPrefix}_RPC_URL`];
-  const explicitWsUrl = process.env[`${envPrefix}_WS_URL`];
-
-  if (explicitRpcUrl && explicitWsUrl) {
-    return {
-      rpcUrl: explicitRpcUrl,
-      wsUrl: explicitWsUrl,
-      wsFallbackUrls: config.wsFallbackUrls || [],
-      rpcFallbackUrls: config.rpcFallbackUrls || [],
-    };
-  }
-
-  // Priority order: dRPC → OnFinality → Ankr → Infura → Alchemy → default
-  const apiKeyConfigs: ApiKeyUrlConfig[] = [
-    createDrpcConfig(chainName),
-  ];
-
-  // OnFinality supports BSC, Polygon, Avalanche, Fantom
-  const chainToOnFinality: Record<string, string> = {
-    bsc: 'bsc',
-    polygon: 'polygon',
-    avalanche: 'avalanche',
-    fantom: 'fantom',
-  };
-  const onFinalityNetwork = chainToOnFinality[chainName.toLowerCase()];
-  if (onFinalityNetwork) {
-    apiKeyConfigs.push(createOnFinalityConfig(onFinalityNetwork));
-  }
-
-  apiKeyConfigs.push(createAnkrConfig(chainName));
-
-  // Map chain names to provider network names for Infura/Alchemy
-  const chainToInfura: Record<string, string> = {
-    ethereum: 'mainnet',
-    arbitrum: 'arbitrum-mainnet',
-    polygon: 'polygon-mainnet',
-    optimism: 'optimism-mainnet',
-    avalanche: 'avalanche-mainnet',
-    linea: 'linea-mainnet',
-    zksync: 'zksync-mainnet',
-  };
-
-  const chainToAlchemy: Record<string, string> = {
-    ethereum: 'eth',
-    arbitrum: 'arb',
-    polygon: 'polygon',
-    optimism: 'opt',
-    base: 'base',
-    avalanche: 'avax',
-    fantom: 'fantom',
-    zksync: 'zksync',
-  };
-
-  const infuraNetwork = chainToInfura[chainName.toLowerCase()];
-  if (infuraNetwork) {
-    apiKeyConfigs.push(createInfuraConfig(infuraNetwork));
-  }
-
-  const alchemyNetwork = chainToAlchemy[chainName.toLowerCase()];
-  if (alchemyNetwork) {
-    apiKeyConfigs.push(createAlchemyConfig(alchemyNetwork));
-  }
-
-  return buildChainUrlsWithApiKeys(config, apiKeyConfigs);
-}

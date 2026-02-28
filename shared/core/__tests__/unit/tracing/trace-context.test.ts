@@ -16,6 +16,8 @@ import {
   generateTraceId,
   generateSpanId,
   createTraceContext,
+  createFastTraceContext,
+  resetFastTraceCounter,
   createChildContext,
   propagateContext,
   extractContext,
@@ -406,6 +408,94 @@ describe('stripTraceFields', () => {
 // =============================================================================
 // TRACE_FIELDS constants
 // =============================================================================
+
+// =============================================================================
+// Fast Trace Context (Regression tests for FIX C1)
+// =============================================================================
+
+describe('createFastTraceContext', () => {
+  beforeEach(() => {
+    resetFastTraceCounter();
+  });
+
+  it('should return a valid TraceContext with 32-char traceId and 16-char spanId', () => {
+    const ctx = createFastTraceContext('test-service');
+
+    expect(ctx.traceId).toHaveLength(32);
+    expect(ctx.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(ctx.spanId).toHaveLength(16);
+    expect(ctx.spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(ctx.serviceName).toBe('test-service');
+    expect(ctx.timestamp).toBeGreaterThan(0);
+  });
+
+  it('should generate unique IDs on successive calls', () => {
+    const ids = new Set<string>();
+    for (let i = 0; i < 1000; i++) {
+      ids.add(createFastTraceContext('svc').traceId);
+    }
+    // All 1000 should be unique (counter-based guarantees this)
+    expect(ids.size).toBe(1000);
+  });
+
+  it('should generate unique spanIds on successive calls', () => {
+    const spanIds = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      spanIds.add(createFastTraceContext('svc').spanId);
+    }
+    expect(spanIds.size).toBe(100);
+  });
+
+  it('should not use crypto.randomBytes (no 16-byte entropy)', () => {
+    // Fast context uses deterministic counter-based IDs.
+    // Verify by checking the traceId contains the service name hash component
+    // (same service always produces same hash portion)
+    const ctx1 = createFastTraceContext('detector');
+    const ctx2 = createFastTraceContext('detector');
+
+    // Last 12 chars are the service name hash — should be identical for same service
+    const hash1 = ctx1.traceId.slice(20);
+    const hash2 = ctx2.traceId.slice(20);
+    expect(hash1).toBe(hash2);
+  });
+
+  it('should produce different hash components for different service names', () => {
+    const ctx1 = createFastTraceContext('service-a');
+    const ctx2 = createFastTraceContext('service-b');
+
+    // Last 12 chars are the service name hash
+    const hash1 = ctx1.traceId.slice(20);
+    const hash2 = ctx2.traceId.slice(20);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it('should set timestamp close to current time', () => {
+    const before = Date.now();
+    const ctx = createFastTraceContext('svc');
+    const after = Date.now();
+
+    expect(ctx.timestamp).toBeGreaterThanOrEqual(before);
+    expect(ctx.timestamp).toBeLessThanOrEqual(after);
+  });
+
+  it('should produce extractable context when used with TRACE_FIELDS', () => {
+    // Regression: ensure fast contexts are compatible with the extraction pipeline
+    const ctx = createFastTraceContext('chain-detector:ethereum');
+    const message: Record<string, unknown> = { type: 'price_update' };
+
+    // Manually inject (mirrors the hot-path code in chain-instance.ts)
+    message[TRACE_FIELDS.traceId] = ctx.traceId;
+    message[TRACE_FIELDS.spanId] = ctx.spanId;
+    message[TRACE_FIELDS.serviceName] = ctx.serviceName;
+    message[TRACE_FIELDS.timestamp] = String(ctx.timestamp);
+
+    const extracted = extractContext(message);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.traceId).toBe(ctx.traceId);
+    expect(extracted!.spanId).toBe(ctx.spanId);
+    expect(extracted!.serviceName).toBe('chain-detector:ethereum');
+  });
+});
 
 describe('TRACE_FIELDS', () => {
   it('should have the expected field names with _trace_ prefix', () => {

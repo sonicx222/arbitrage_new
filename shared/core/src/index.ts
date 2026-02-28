@@ -162,6 +162,8 @@ export type { ProfileResult, ProfileOptions } from './monitoring/v8-profiler';
 
 export {
   createTraceContext,
+  createFastTraceContext,
+  resetFastTraceCounter,
   createChildContext,
   propagateContext,
   extractContext,

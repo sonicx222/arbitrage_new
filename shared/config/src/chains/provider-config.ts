@@ -219,6 +219,34 @@ export const CHAIN_NETWORK_NAMES: Record<string, {
     // Alchemy limited support
     blastapi: 'linea'
   },
+  blast: {
+    drpc: 'blast',
+    ankr: 'blast',
+    publicnode: 'blast-rpc',
+    // No Infura/Alchemy/OnFinality support
+    blastapi: 'blast'
+  },
+  scroll: {
+    drpc: 'scroll',
+    ankr: 'scroll',
+    publicnode: 'scroll-rpc',
+    // No Infura/Alchemy/OnFinality support
+    blastapi: 'scroll'
+  },
+  mantle: {
+    drpc: 'mantle',
+    ankr: 'mantle',
+    publicnode: 'mantle-rpc',
+    // No Infura/Alchemy/OnFinality support
+    blastapi: 'mantle'
+  },
+  mode: {
+    drpc: 'mode',
+    ankr: 'mode',
+    publicnode: 'mode-rpc',
+    // No Infura/Alchemy/OnFinality support
+    blastapi: 'mode'
+  },
   solana: {
     drpc: 'solana',
     ankr: 'solana',
@@ -371,18 +399,6 @@ export function getTimeBasedProviderOrder(): string[] {
     // Late UTC: Spread across Ankr/PublicNode, OnFinality preserves daily budget
     return ['ankr', 'publicnode', 'drpc', 'onfinality', 'alchemy', 'infura', 'blastapi'];
   }
-}
-
-/**
- * Calculate recommended traffic allocation percentage per provider tier
- */
-export function getTrafficAllocation(): Record<ProviderTier, number> {
-  return {
-    [ProviderTier.PRIMARY]: 50,
-    [ProviderTier.SECONDARY]: 30,
-    [ProviderTier.TERTIARY]: 15,
-    [ProviderTier.LAST_RESORT]: 5
-  };
 }
 
 /**

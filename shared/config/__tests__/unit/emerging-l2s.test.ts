@@ -32,6 +32,7 @@ import {
   PARTITION_IDS,
   getBridgeCost,
   getAllBridgeOptions,
+  DETECTOR_CONFIG,
 } from '@arbitrage/config';
 
 // =============================================================================
@@ -383,6 +384,51 @@ describe('Emerging L2s Configuration', () => {
 
       const allBlastFromEth = getAllBridgeOptions('ethereum', 'blast');
       expect(allBlastFromEth.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  // ===========================================================================
+  // FIX C2 Regression: DETECTOR_CONFIG entries for emerging L2s
+  // Previously, blast/scroll/mantle/mode fell back to Ethereum defaults
+  // (250000 gas, 15s expiry, $100K whale threshold) — inappropriate for L2s.
+  // ===========================================================================
+  describe('DETECTOR_CONFIG coverage (FIX C2 regression)', () => {
+    it.each(['blast', 'scroll', 'mantle', 'mode'])(
+      '%s has its own DETECTOR_CONFIG entry (not falling back to ethereum)',
+      (chainKey) => {
+        const config = DETECTOR_CONFIG[chainKey];
+        expect(config).toBeDefined();
+
+        // Must NOT match Ethereum's high-gas defaults
+        expect(config.gasEstimate).toBeLessThan(250000); // Ethereum is 250000
+        expect(config.whaleThreshold).toBeLessThan(100000); // Ethereum is $100K
+        expect(config.expiryMs).toBeLessThanOrEqual(10000); // Ethereum is 15000
+      }
+    );
+
+    it.each(['blast', 'scroll', 'mantle', 'mode'])(
+      '%s has valid L2 config values',
+      (chainKey) => {
+        const config = DETECTOR_CONFIG[chainKey];
+        expect(config.batchSize).toBeGreaterThanOrEqual(10);
+        expect(config.batchSize).toBeLessThanOrEqual(50);
+        expect(config.confidence).toBeGreaterThanOrEqual(0.7);
+        expect(config.confidence).toBeLessThanOrEqual(1.0);
+        expect(config.expiryMs).toBeGreaterThan(0);
+        expect(config.gasEstimate).toBeGreaterThan(0);
+        expect(config.whaleThreshold).toBeGreaterThan(0);
+        expect(config.nativeTokenKey).toBeDefined();
+      }
+    );
+
+    it('mantle uses nativeWrapper (MNT is native token, not ETH)', () => {
+      expect(DETECTOR_CONFIG['mantle'].nativeTokenKey).toBe('nativeWrapper');
+    });
+
+    it('blast, scroll, mode use weth (ETH-based L2s)', () => {
+      for (const chain of ['blast', 'scroll', 'mode']) {
+        expect(DETECTOR_CONFIG[chain].nativeTokenKey).toBe('weth');
+      }
     });
   });
 });

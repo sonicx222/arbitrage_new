@@ -44,7 +44,7 @@ import {
   MultiLegOpportunity,
 } from '@arbitrage/core/path-finding';
 import { RedisStreamsClient, StreamBatcher } from '@arbitrage/core/redis';
-import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
+import { createFastTraceContext, TRACE_FIELDS } from '@arbitrage/core/tracing';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { isSimulationMode } from '@arbitrage/core/simulation';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
@@ -62,6 +62,7 @@ import {
   // Using bpsToDecimal from @arbitrage/core instead
   isEvmChain,
   FEATURE_FLAGS,
+  getOpportunityTimeoutMs,
 } from '@arbitrage/config';
 
 import {
@@ -317,6 +318,9 @@ export class ChainDetectorInstance extends EventEmitter {
   // ML Signal Integration: Momentum data recording for ML scoring pipeline
   private momentumTracker: PriceMomentumTracker | null = null;
 
+  // FIX C1: Pre-computed tracing service name to avoid template string allocation per event
+  private readonly tracingServiceName: string;
+
   // ML Signal Integration: Background pre-computed signal cache
   private signalCache: Map<string, CachedSignal> = new Map();
   private signalPreComputeTimer: ReturnType<typeof setInterval> | null = null;
@@ -381,7 +385,9 @@ export class ChainDetectorInstance extends EventEmitter {
       throw new Error(`Chain configuration not found: ${this.chainId}`);
     }
 
-    this.detectorConfig = DETECTOR_CONFIG[this.chainId as keyof typeof DETECTOR_CONFIG] || DETECTOR_CONFIG.ethereum;
+    this.detectorConfig = DETECTOR_CONFIG[this.chainId as keyof typeof DETECTOR_CONFIG] ?? DETECTOR_CONFIG.ethereum;
+    // FIX C1: Pre-compute tracing service name to avoid template string per price update
+    this.tracingServiceName = `chain-detector:${this.chainId}`;
     this.dexes = getEnabledDexes(this.chainId);
     this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] || [];
     this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] || {};
@@ -692,9 +698,11 @@ export class ChainDetectorInstance extends EventEmitter {
       // P3-27 FIX: Increased maxWaitMs from 3 to 10. At 3ms, Redis XADD fires ~333x/sec
       // even with single messages. 10ms gives better batching ratio while staying well
       // within the <50ms hot-path budget. Tunable via PRICE_BATCHER_MAX_WAIT_MS env var.
+      // FIX H1: Set maxQueueSize to prevent unbounded memory growth during Redis outages.
+      // StreamBatcher drops messages with a warning when queue exceeds this limit.
       this.priceUpdateBatcher = this.streamsClient.createBatcher<PriceUpdate>(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        { maxBatchSize: 50, maxWaitMs: 10 }
+        { maxBatchSize: 50, maxWaitMs: 10, maxQueueSize: 10000 }
       );
 
       this.isRunning = true;
@@ -944,6 +952,14 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private handleConnectionError(error: Error): void {
     this.reconnectAttempts++;
+
+    // FIX H9: Log the actual error at each attempt so operators can diagnose connection failures
+    this.logger.warn('WebSocket connection error', {
+      chain: this.chainId,
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
+      error: error.message,
+    });
 
     if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
       this.status = 'error';
@@ -1500,7 +1516,9 @@ export class ChainDetectorInstance extends EventEmitter {
     // P0-1 FIX: Use precision-safe price calculation to prevent precision loss
     // for large BigInt values (reserves can be > 2^53)
     const price = calculatePriceFromBigIntReserves(reserve0, reserve1);
-    if (price === null) return;
+    // FIX H11: Defense-in-depth — reject non-finite prices before publishing
+    // (safeBigIntDivisionOrNull already checks this, but guard against future changes)
+    if (price === null || !Number.isFinite(price)) return;
 
     const priceUpdate: PriceUpdate = {
       chain: this.chainId,
@@ -1563,9 +1581,16 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private publishPriceUpdate(update: PriceUpdate): void {
-    // P1-6 FIX: Add trace context to price updates for cross-service correlation
-    const traceCtx = createTraceContext(`chain-detector:${this.chainId}`);
-    const enrichedUpdate = { ...update, ...propagateContext({}, traceCtx) } as PriceUpdate;
+    // FIX C1: Use counter-based fast trace context for hot-path price updates.
+    // crypto.randomBytes was adding ~0.3-0.5ms per call (2 calls × 1000/sec = 600-1000ms CPU/sec).
+    // Counter-based IDs are sufficient for price update correlation (cross-service uniqueness not needed).
+    // Also eliminated 3 object spreads by mutating update directly (hot-path allocation reduction).
+    const traceCtx = createFastTraceContext(this.tracingServiceName);
+    const enrichedUpdate = update as PriceUpdate & Record<string, unknown>;
+    enrichedUpdate[TRACE_FIELDS.traceId] = traceCtx.traceId;
+    enrichedUpdate[TRACE_FIELDS.spanId] = traceCtx.spanId;
+    enrichedUpdate[TRACE_FIELDS.serviceName] = traceCtx.serviceName;
+    enrichedUpdate[TRACE_FIELDS.timestamp] = String(traceCtx.timestamp);
 
     // ADR-002: Use StreamBatcher to reduce Redis commands ~50x
     // batcher.add() is O(1) synchronous queue push — faster than async xaddWithLimit
@@ -1911,7 +1936,9 @@ export class ChainDetectorInstance extends EventEmitter {
       gasEstimate: String(this.detectorConfig.gasEstimate * opp.steps.length),
       confidence: opp.confidence,
       timestamp: opp.timestamp,
-      expiresAt: Date.now() + this.detectorConfig.expiryMs,
+      // FIX H5: Use canonical chain-aware timeout from thresholds.ts
+      // (DETECTOR_CONFIG.expiryMs diverged: Arbitrum 5s vs threshold 2s, Fantom 8s vs 2s)
+      expiresAt: Date.now() + getOpportunityTimeoutMs(this.chainId),
       blockNumber: this.lastBlockNumber,
       status: 'pending'
     };

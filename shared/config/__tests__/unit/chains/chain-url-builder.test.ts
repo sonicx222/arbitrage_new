@@ -250,7 +250,7 @@ describe('ChainUrlBuilder', () => {
     it('should create correct Alchemy URL templates', () => {
       const config = createAlchemyConfig('eth');
 
-      expect(config.apiKeyEnvVar).toBe('ALCHEMY_ETH_KEY');
+      expect(config.apiKeyEnvVar).toBe('ALCHEMY_API_KEY');
       expect(config.rpcUrlTemplate('test-key')).toBe('https://eth-mainnet.g.alchemy.com/v2/test-key');
       expect(config.wsUrlTemplate('test-key')).toBe('wss://eth-mainnet.g.alchemy.com/v2/test-key');
     });

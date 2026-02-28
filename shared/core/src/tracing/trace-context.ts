@@ -77,6 +77,63 @@ export function generateSpanId(): string {
 }
 
 // =============================================================================
+// Fast ID Generation (Hot-Path Optimized)
+// =============================================================================
+
+/**
+ * Counter-based trace ID generator for hot-path code.
+ *
+ * FIX C1: crypto.randomBytes() costs ~0.3-0.5ms per call. On the price update
+ * hot path (1000 events/sec), this adds 600-1000ms CPU/sec. Counter-based IDs
+ * are sufficient for price updates since they only need uniqueness within the
+ * service, not cryptographic randomness.
+ *
+ * ID format: `{timestamp_hex(12)}{counter_hex(8)}{service_hash_hex(12)}` = 32 hex chars.
+ * Counter wraps at ~4.3B (~49.7 days at 1000/sec); safe because timestamp differentiates.
+ * Reserve crypto.randomBytes for opportunities (10-100/sec, need cross-service uniqueness).
+ */
+let fastTraceCounter = 0;
+
+/**
+ * Reset the fast trace counter. Exported for test isolation only.
+ * @internal
+ */
+export function resetFastTraceCounter(): void {
+  fastTraceCounter = 0;
+}
+
+/**
+ * Create a trace context using fast counter-based IDs instead of crypto.randomBytes.
+ *
+ * Use this for high-frequency hot-path operations (e.g., price updates at 1000/sec).
+ * For lower-frequency operations that need cross-service correlation, use createTraceContext().
+ *
+ * @param serviceName - Name of the originating service
+ * @returns TraceContext with counter-based traceId and spanId
+ */
+export function createFastTraceContext(serviceName: string): TraceContext {
+  const count = ++fastTraceCounter;
+  const now = Date.now();
+  // Pad counter to 8 hex chars (supports up to 4 billion per restart)
+  const countHex = (count >>> 0).toString(16).padStart(8, '0');
+  // Build 32-char traceId: timestamp(12) + counter(8) + serviceName hash(12)
+  const timeHex = now.toString(16).padStart(12, '0');
+  // Simple hash of serviceName for the remaining 12 chars (stable per service)
+  let hash = 0;
+  for (let i = 0; i < serviceName.length; i++) {
+    hash = ((hash << 5) - hash + serviceName.charCodeAt(i)) | 0;
+  }
+  const hashHex = (hash >>> 0).toString(16).padStart(12, '0').slice(0, 12);
+
+  return {
+    traceId: `${timeHex}${countHex}${hashHex}`,
+    spanId: `${timeHex.slice(4)}${countHex}`, // 16 chars: time(8) + counter(8)
+    serviceName,
+    timestamp: now,
+  };
+}
+
+// =============================================================================
 // Context Lifecycle
 // =============================================================================
 

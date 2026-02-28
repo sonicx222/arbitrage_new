@@ -555,6 +555,42 @@ describe('UnifiedChainDetector', () => {
       expect(stats.totalOpportunitiesFound).toBe(10); // 5 per chain * 2 chains
       expect(stats.chainStats.size).toBe(2);
     });
+
+    // FIX C3 Regression: getStats() must include opportunityOutcomes
+    it('should include opportunityOutcomes in stats (FIX C3 regression)', async () => {
+      const mockFactory = jest.fn().mockImplementation((cfg) => {
+        return createMockChainInstance(cfg.chainId);
+      });
+
+      const detector = new UnifiedChainDetector({
+        partitionId: 'test-partition',
+        chains: ['ethereum'],
+        chainInstanceFactory: mockFactory,
+        streamsClient: mockStreamsClient as any,
+        redisClient: mockRedisClient as any,
+        stateManager: mockStateManager as any,
+        logger: mockLogger as any,
+        perfLogger: mockPerfLogger as any,
+        enableCrossRegionHealth: false,
+      });
+
+      await detector.start();
+
+      const stats = detector.getStats();
+
+      // Verify opportunityOutcomes exists with all required fields
+      expect(stats.opportunityOutcomes).toBeDefined();
+      expect(stats.opportunityOutcomes).toHaveProperty('published');
+      expect(stats.opportunityOutcomes).toHaveProperty('publishFailed');
+      expect(stats.opportunityOutcomes).toHaveProperty('expired');
+      expect(stats.opportunityOutcomes).toHaveProperty('active');
+
+      // Initial values should be 0
+      expect(stats.opportunityOutcomes.published).toBe(0);
+      expect(stats.opportunityOutcomes.publishFailed).toBe(0);
+      expect(stats.opportunityOutcomes.expired).toBe(0);
+      expect(stats.opportunityOutcomes.active).toBe(0);
+    });
   });
 
   describe('getHealthyChains', () => {

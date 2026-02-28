@@ -568,7 +568,6 @@ export function getAllChains(): Record<string, Chain> {
 export {
   buildChainUrls,
   buildChainUrlsWithApiKeys,
-  buildChainUrlsOptimized,
   buildSolanaUrls,
   createAlchemyConfig,
   createInfuraConfig,
@@ -582,7 +581,7 @@ export {
 } from './chain-url-builder';
 
 // =============================================================================
-// 8-PROVIDER SHIELD CONFIGURATION
+// 7-PROVIDER SHIELD CONFIGURATION
 // Provider configs and utilities for RPC management
 // =============================================================================
 export {
@@ -598,7 +597,6 @@ export {
   buildBlastApiUrl,
   getProviderUrlsForChain,
   getTimeBasedProviderOrder,
-  getTrafficAllocation,
   calculateProviderBudget,
   type ProviderConfig,
   type ProviderBudget,

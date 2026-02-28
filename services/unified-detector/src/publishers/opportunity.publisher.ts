@@ -167,6 +167,11 @@ export class OpportunityPublisher {
             attempts: maxAttempts,
             error: (error as Error).message,
           });
+
+          // FIX H2: Write to DLQ so failed opportunities can be replayed/audited.
+          // Fire-and-forget since Redis may be degraded — best-effort DLQ write.
+          this.writeToDlq(opportunity, (error as Error).message);
+
           return false;
         }
       }
@@ -197,6 +202,40 @@ export class OpportunityPublisher {
       lastPublishedAt: null,
       fastLanePublished: 0,
     };
+  }
+
+  // ===========================================================================
+  // Dead Letter Queue (FIX H2)
+  // ===========================================================================
+
+  /**
+   * Write a permanently failed opportunity to the DLQ stream for replay/audit.
+   * Fire-and-forget — if DLQ write fails, we log but don't retry (Redis is likely degraded).
+   */
+  private writeToDlq(opportunity: ArbitrageOpportunity, lastError: string): void {
+    this.streamsClient
+      .xaddWithLimit(RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE, {
+        originalStream: RedisStreamsClient.STREAMS.OPPORTUNITIES,
+        reason: 'publish_exhausted_retries',
+        opportunityId: opportunity.id,
+        type: opportunity.type,
+        chain: opportunity.chain ?? '',
+        profitPercentage: String(opportunity.profitPercentage ?? 0),
+        lastError,
+        partition: this.partitionId,
+        timestamp: String(Date.now()),
+      })
+      .then(() => {
+        this.logger.info('Failed opportunity written to DLQ', {
+          opportunityId: opportunity.id,
+        });
+      })
+      .catch((dlqError) => {
+        this.logger.warn('DLQ write also failed (Redis degraded)', {
+          opportunityId: opportunity.id,
+          error: (dlqError as Error).message,
+        });
+      });
   }
 
   // ===========================================================================

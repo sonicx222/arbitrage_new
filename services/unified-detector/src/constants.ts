@@ -222,6 +222,9 @@ export const FACTORY_SUBSCRIPTION_ENABLED_CHAINS: readonly string[] = [
   'arbitrum',
   'optimism',
   'base',
+  // FIX H3: Emerging L2s with verified DEX factories
+  'blast',
+  'scroll',
   // Main chains
   'ethereum',
   'polygon',
@@ -285,6 +288,9 @@ export const RESERVE_CACHE_ENABLED_CHAINS: readonly string[] = [
   'arbitrum',
   'optimism',
   'base',
+  // FIX H3: Emerging L2s with verified DEX factories
+  'blast',
+  'scroll',
   // Phase 2: Main chains (fast blocks, high benefit)
   'polygon',
   'avalanche',
@@ -305,7 +311,7 @@ export const RESERVE_CACHE_ENABLED_CHAINS: readonly string[] = [
  * Environment override: RESERVE_CACHE_ROLLOUT_PERCENT=50 for 50% rollout
  */
 export const DEFAULT_RESERVE_CACHE_ROLLOUT_PERCENT =
-  parseInt(process.env.RESERVE_CACHE_ROLLOUT_PERCENT || '100', 10);
+  parseInt(process.env.RESERVE_CACHE_ROLLOUT_PERCENT ?? '100', 10);
 
 /**
  * TTL for reserve cache entries in milliseconds.

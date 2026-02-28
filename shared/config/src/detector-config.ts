@@ -129,6 +129,49 @@ export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
     whaleThreshold: 25000,      // $25K
     nativeTokenKey: 'weth'
   },
+  // =============================================================================
+  // New L2 Chains (FIX C2: Previously missing — fell back to Ethereum defaults)
+  // =============================================================================
+  blast: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 8000,             // 8s (2s block time)
+    gasEstimate: 100000,        // Low gas on L2
+    whaleThreshold: 25000,      // $25K (L2 threshold)
+    nativeTokenKey: 'weth'
+  },
+  scroll: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s (3s block time)
+    gasEstimate: 100000,        // Low gas on L2
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'
+  },
+  mantle: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 8000,             // 8s (2s block time)
+    gasEstimate: 100000,        // Low gas on L2
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'nativeWrapper'  // MNT native token
+  },
+  mode: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 8000,             // 8s (2s block time)
+    gasEstimate: 100000,        // Low gas on L2
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'
+  },
   solana: {
     batchSize: 50,              // Very high batch for 400ms blocks
     batchTimeout: 10,           // Very fast timeout

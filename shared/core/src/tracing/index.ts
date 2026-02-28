@@ -10,6 +10,8 @@
 
 export {
   createTraceContext,
+  createFastTraceContext,
+  resetFastTraceCounter,
   createChildContext,
   propagateContext,
   extractContext,

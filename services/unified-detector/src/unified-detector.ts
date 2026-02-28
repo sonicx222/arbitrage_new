@@ -122,6 +122,19 @@ export interface UnifiedDetectorStats {
 
   /** Per-chain statistics */
   chainStats: Map<string, ChainStats>;
+
+  // FIX C3: Opportunity outcome tracking
+  /** Opportunity lifecycle counters */
+  opportunityOutcomes: {
+    /** Total opportunities published to Redis Streams */
+    published: number;
+    /** Total opportunities that failed to publish after all retries */
+    publishFailed: number;
+    /** Total opportunities expired without being consumed (cleaned up locally) */
+    expired: number;
+    /** Currently active (not yet expired or consumed) */
+    active: number;
+  };
 }
 
 // ChainStats moved to types.ts to fix circular dependency:
@@ -165,6 +178,9 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
   private activeOpportunities: Map<string, number> = new Map(); // opportunityId -> expiresAt
   private opportunityCleanupInterval: NodeJS.Timeout | null = null;
   private static readonly OPPORTUNITY_CLEANUP_INTERVAL_MS = 5000;
+
+  // FIX C3: Opportunity outcome counters for detection quality monitoring
+  private opportunityExpiredCount: number = 0;
 
   constructor(config: UnifiedDetectorConfig = {}) {
     super();
@@ -332,11 +348,17 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
         }
       }
 
+      // FIX C3: Track expired opportunity count for outcome monitoring
+      if (expiredCount > 0) {
+        this.opportunityExpiredCount += expiredCount;
+      }
+
       // Only log if we cleaned up a significant number (reduce log noise)
       if (expiredCount > 10) {
         this.logger.debug('Cleaned up expired opportunities', {
           expired: expiredCount,
-          remaining: this.activeOpportunities.size
+          remaining: this.activeOpportunities.size,
+          totalExpired: this.opportunityExpiredCount,
         });
       }
     }, UnifiedChainDetector.OPPORTUNITY_CLEANUP_INTERVAL_MS);
@@ -349,6 +371,8 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
       // BUG-FIX: Stop opportunity cleanup interval and clear tracking
       this.opportunityCleanupInterval = clearIntervalSafe(this.opportunityCleanupInterval);
       this.activeOpportunities.clear();
+      // FIX C3: Reset outcome counters on stop (prevents stale data on restart)
+      this.opportunityExpiredCount = 0;
 
       // REFACTOR 9.1: Stop extracted modules
 
@@ -428,7 +452,7 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
     return this.chainInstanceManager?.getChainInstance(chainId);
   }
 
-  getStats(): UnifiedDetectorStats {
+  getStats(publisherStats?: { published: number; failed: number }): UnifiedDetectorStats {
     const chainStats = this.chainInstanceManager?.getStats() ?? new Map<string, ChainStats>();
     const chains = this.chainInstanceManager?.getChains() ?? [];
 
@@ -449,7 +473,15 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
       totalOpportunitiesFound: totalOpportunities,
       uptimeSeconds: (Date.now() - this.startTime) / 1000,
       memoryUsageMB: Math.round(memUsage.heapUsed / 1024 / 1024),
-      chainStats
+      chainStats,
+      // FIX C3: Opportunity outcome tracking
+      // published/publishFailed come from OpportunityPublisher if provided
+      opportunityOutcomes: {
+        published: publisherStats?.published ?? 0,
+        publishFailed: publisherStats?.failed ?? 0,
+        expired: this.opportunityExpiredCount,
+        active: this.activeOpportunities.size,
+      },
     };
   }
 
