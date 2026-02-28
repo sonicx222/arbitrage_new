@@ -1,7 +1,7 @@
 // Worker Thread Pool for Parallel Event Processing
 // High-performance parallel processing of arbitrage detection events
 
-import { Worker } from 'worker_threads';
+import { Worker, type WorkerOptions } from 'worker_threads';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -496,7 +496,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     for (let i = 0; i < this.poolSize; i++) {
       // PHASE3-TASK41: Pass SharedArrayBuffer to workers for zero-copy price access
       // PHASE3-TASK43: Pass key registry buffer for key-to-index mapping
-      const workerOptions: any = {
+      const workerOptions: WorkerOptions = {
         workerData: {
           workerId: i,
           priceBuffer: this.priceBuffer, // SharedArrayBuffer is transferable
@@ -765,7 +765,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     try {
       // P0-FIX: Pass SharedArrayBuffers to restarted workers (matching initializeWorkers)
       // Without these, restarted workers cannot access L1 price matrix or key registry
-      const workerOptions: any = {
+      const workerOptions: WorkerOptions = {
         workerData: {
           workerId,
           priceBuffer: this.priceBuffer,
