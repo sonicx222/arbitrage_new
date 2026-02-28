@@ -99,9 +99,12 @@ const CHAIN_NAME_POOL = createStringPool(100);
 const KNOWN_CHAINS = [
   'ethereum', 'polygon', 'arbitrum', 'base', 'optimism',
   'bsc', 'avalanche', 'fantom', 'zksync', 'linea', 'solana',
+  // Emerging L2s
+  'blast', 'scroll', 'mantle', 'mode',
   // Uppercase variants commonly seen
   'ETHEREUM', 'POLYGON', 'ARBITRUM', 'BASE', 'OPTIMISM',
   'BSC', 'AVALANCHE', 'FANTOM', 'ZKSYNC', 'LINEA', 'SOLANA',
+  'BLAST', 'SCROLL', 'MANTLE', 'MODE',
   // Testnets
   'sepolia', 'goerli', 'mumbai', 'arbitrum-sepolia', 'base-sepolia',
 ];

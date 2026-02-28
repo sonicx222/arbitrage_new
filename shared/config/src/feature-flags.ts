@@ -23,6 +23,18 @@ import { safeParseFloat, safeParseInt } from './utils/env-parsing';
  * - Gradually roll out to 100% if metrics show improvement
  * - Instant rollback by setting flag to false
  *
+ * P2-16 NOTE: Two env var patterns are used in this codebase:
+ *
+ * 1. **Opt-in** (`=== 'true'`): For experimental features. Flag is OFF unless
+ *    explicitly set to 'true'. Unset env var = feature disabled.
+ *    Used for: all FEATURE_* flags in this object (except useDynamicL1Fees).
+ *
+ * 2. **Opt-out** (`!== 'false'`): For safety-critical features. Flag is ON unless
+ *    explicitly set to 'false'. Unset env var = feature enabled.
+ *    Used for: useDynamicL1Fees (here), RISK_* flags (risk-config.ts).
+ *    Rationale: disabling these causes silent degradation (e.g., 2-10x gas
+ *    underestimation on L2s), so they must be on by default.
+ *
  * @see ADR-029: Batched Quote Fetching
  */
 export const FEATURE_FLAGS = {
@@ -687,7 +699,7 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
   // Fix #53: Validate KMS signing configuration
   if (FEATURE_FLAGS.useKmsSigning) {
     if (!process.env.KMS_KEY_ID) {
-      const isProduction = process.env.NODE_ENV === 'production';
+      // P2-15 FIX: Use imported isProduction from service-config (was shadowed local)
       const msg = 'FEATURE_KMS_SIGNING is enabled but KMS_KEY_ID is not set. ' +
         'createKmsSigner() will return null for chains without per-chain KMS_KEY_ID_{CHAIN} env vars.';
       if (isProduction) {
@@ -742,7 +754,10 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
  *
  * @see validateFeatureFlags() for manual validation with custom logger
  */
-if (process.env.DISABLE_CONFIG_VALIDATION !== 'true' && !process.env.JEST_WORKER_ID) {
+// P2-9 FIX: Never allow disabling config validation in production
+const configValidationDisabled = process.env.DISABLE_CONFIG_VALIDATION === 'true'
+  && process.env.NODE_ENV !== 'production';
+if (!configValidationDisabled && !process.env.JEST_WORKER_ID) {
   // Defer validation to allow services to call validateFeatureFlags() first
   setTimeout(() => {
     // If validation hasn't run yet, run it now with console fallback

@@ -264,7 +264,10 @@ for (const config of BRIDGE_COSTS) {
   // Build route+bridge -> config map
   BRIDGE_COST_BY_ROUTE_AND_BRIDGE.set(fullKey, config);
 
-  // Track best (lowest fee) bridge per route
+  // Track best (lowest fee bps) bridge per route.
+  // P2-8 NOTE: This selects by lowest feeBps only, which is cost-optimal for
+  // typical (large) trade sizes. For small trades where minFeeUsd dominates,
+  // callers should use selectOptimalBridge() which factors in trade size.
   const currentBest = BEST_BRIDGE_BY_ROUTE.get(routeKey);
   if (!currentBest || config.feeBps < currentBest.feeBps) {
     BEST_BRIDGE_BY_ROUTE.set(routeKey, config);

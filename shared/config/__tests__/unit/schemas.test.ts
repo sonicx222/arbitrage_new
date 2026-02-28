@@ -339,10 +339,19 @@ describe('FlashLoanProviderSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should accept Jupiter provider with empty address', () => {
+  it('should accept dai_flash_mint protocol', () => {
     const result = FlashLoanProviderSchema.safeParse({
-      address: '',
-      protocol: 'jupiter',
+      address: '0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853',
+      protocol: 'dai_flash_mint',
+      fee: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept morpho protocol', () => {
+    const result = FlashLoanProviderSchema.safeParse({
+      address: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
+      protocol: 'morpho',
       fee: 0,
     });
     expect(result.success).toBe(true);
@@ -353,6 +362,15 @@ describe('FlashLoanProviderSchema', () => {
       address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
       protocol: 'unknown_protocol',
       fee: 9,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject jupiter (not a flash loan protocol)', () => {
+    const result = FlashLoanProviderSchema.safeParse({
+      address: '',
+      protocol: 'jupiter',
+      fee: 0,
     });
     expect(result.success).toBe(false);
   });

@@ -16,6 +16,7 @@
 
 // FIX: Import from partition-ids.ts to avoid duplicate definitions
 import { PARTITION_IDS, PartitionId } from './partition-ids';
+import { isProduction } from './service-config';
 
 // =============================================================================
 // Types
@@ -226,11 +227,7 @@ export class ConfigManager {
     const strictEnv = process.env.STRICT_CONFIG_VALIDATION;
     const forceStrict = strictEnv === 'true' || strictEnv === '1';
     const forceRelaxed = strictEnv === 'false' || strictEnv === '0';
-    const isProduction = process.env.NODE_ENV === 'production'
-      || !!process.env.FLY_APP_NAME
-      || !!process.env.RAILWAY_ENVIRONMENT
-      || !!process.env.RENDER_SERVICE_NAME
-      || !!process.env.KOYEB_SERVICE_NAME;
+    // P2-15 FIX: Use canonical isProduction from service-config.ts (was triplicated)
 
     // Logic: If errors exist and relaxed mode is ON, move errors to warnings —
     // BUT only in non-production environments. Production always enforces strict.

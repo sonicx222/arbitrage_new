@@ -480,7 +480,7 @@ describe('CURVE_POOL_TOKENS', () => {
     expect(threePool).toBeDefined();
     expect(threePool).toHaveLength(3);
     // DAI
-    expect(threePool[0]).toBe('0x6B175474E89094C44Da98b954EeadCDeBc5C5e818');
+    expect(threePool[0]).toBe('0x6B175474E89094C44Da98b954EedeAC495271d0F');
     // USDC
     expect(threePool[1]).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
     // USDT

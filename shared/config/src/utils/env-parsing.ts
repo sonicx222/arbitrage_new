@@ -53,3 +53,90 @@ export function safeParseFloat(value: string | undefined, defaultValue: number):
   const parsed = parseFloat(value);
   return Number.isNaN(parsed) ? defaultValue : parsed;
 }
+
+/**
+ * Parse a string value as a float with bounds validation.
+ * Returns `defaultValue` if the value is missing, invalid, or out of range.
+ *
+ * @param value - Raw string to parse (typically from process.env)
+ * @param defaultValue - Fallback when value is missing, invalid, or out of range
+ * @param min - Minimum allowed value (inclusive)
+ * @param max - Maximum allowed value (inclusive)
+ * @param label - Optional label for warning messages (e.g., env var name)
+ * @returns Validated float or defaultValue
+ */
+export function safeParseFloatBounded(
+  value: string | undefined,
+  defaultValue: number,
+  min: number,
+  max: number,
+  label?: string
+): number {
+  if (!value) return defaultValue;
+  const parsed = parseFloat(value);
+  if (Number.isNaN(parsed)) {
+    if (label) console.warn(`[CONFIG] Invalid float value for ${label}: "${value}" - using default`);
+    return defaultValue;
+  }
+  if (parsed < min || parsed > max) {
+    if (label) console.warn(`[CONFIG] Value for ${label} (${parsed}) out of range [${min}, ${max}] - using default`);
+    return defaultValue;
+  }
+  return parsed;
+}
+
+/**
+ * Parse a string value as an integer with minimum bound validation.
+ * Returns `defaultValue` if missing or invalid, `min` if below minimum.
+ *
+ * @param value - Raw string to parse (typically from process.env)
+ * @param defaultValue - Fallback when value is missing or invalid
+ * @param min - Minimum allowed value (inclusive, defaults to 1)
+ * @param label - Optional label for warning messages
+ * @returns Validated integer or defaultValue
+ */
+export function safeParseIntBounded(
+  value: string | undefined,
+  defaultValue: number,
+  min = 1,
+  label?: string
+): number {
+  if (!value) return defaultValue;
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed)) {
+    if (label) console.warn(`[CONFIG] Invalid integer value for ${label}: "${value}" - using default`);
+    return defaultValue;
+  }
+  if (parsed < min) {
+    if (label) console.warn(`[CONFIG] Value for ${label} (${parsed}) below minimum ${min} - using minimum`);
+    return min;
+  }
+  return parsed;
+}
+
+/**
+ * Parse a string value as a BigInt with validation.
+ * Returns `BigInt(defaultValue)` if missing or invalid.
+ *
+ * @param value - Raw string to parse (typically from process.env)
+ * @param defaultValue - Default value as string
+ * @param label - Optional label for warning messages
+ * @returns Parsed BigInt
+ */
+export function safeParseBigInt(
+  value: string | undefined,
+  defaultValue: string,
+  label?: string
+): bigint {
+  if (!value) return BigInt(defaultValue);
+  try {
+    if (!/^-?\d+$/.test(value.trim())) {
+      if (label) console.warn(`[CONFIG] Invalid BigInt value for ${label}: "${value}" - using default`);
+      return BigInt(defaultValue);
+    }
+    return BigInt(value.trim());
+  } catch {
+    if (label) console.warn(`[CONFIG] Failed to parse BigInt for ${label}: "${value}" - using default`);
+    return BigInt(defaultValue);
+  }
+}

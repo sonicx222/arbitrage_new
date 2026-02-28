@@ -241,8 +241,11 @@ export function getMevChainConfigForValidation(): Array<{ chain: string; priorit
 }
 
 /**
- * Expected priority fee values for each chain.
- * Use this for documentation and quick reference.
+ * Priority fee summary computed dynamically from chainSettings AFTER env var overrides.
+ *
+ * P2-14 FIX: Previously a static const that drifted from runtime overrides.
+ * Now computed from the live chainSettings values so MEV_PRIORITY_FEE_ETHEREUM_GWEI=5.0
+ * is correctly reflected here.
  *
  * IMPORTANT: These values MUST stay synchronized with:
  * - MEV_RISK_DEFAULTS.chainBasePriorityFees in shared/core/src/mev-protection/mev-risk-analyzer.ts
@@ -254,20 +257,6 @@ export function getMevChainConfigForValidation(): Array<{ chain: string; priorit
  * const result = validateConfigSync(getMevChainConfigForValidation());
  * ```
  */
-export const MEV_PRIORITY_FEE_SUMMARY = {
-  ethereum: 2.0,
-  bsc: 3.0,
-  polygon: 30.0,
-  arbitrum: 0.01,
-  optimism: 0.01,
-  base: 0.01,
-  zksync: 0.01,
-  linea: 0.01,
-  blast: 0.01,
-  scroll: 0.01,
-  mantle: 0.01,
-  mode: 0.01,
-  avalanche: 25.0,
-  fantom: 100.0,
-  solana: 0,
-} as const;
+export const MEV_PRIORITY_FEE_SUMMARY = Object.fromEntries(
+  Object.entries(MEV_CONFIG.chainSettings).map(([chain, settings]) => [chain, settings.priorityFeeGwei])
+) as Record<string, number>;

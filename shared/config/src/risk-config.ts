@@ -17,94 +17,24 @@
 
 // =============================================================================
 // HELPER: Env Parsing with Validation (FIX 3.2)
+// Consolidated into utils/env-parsing.ts (P2-5 FIX)
 // =============================================================================
 
-// S-6: Use shared parseEnvIntSafe for integer parsing
-// NOTE: Cannot import from @arbitrage/core here because config builds before core.
-// The shared parseEnvIntSafe in core has identical semantics. If the build order
-// changes in the future, this local copy can be replaced with an import.
+import { safeParseFloatBounded, safeParseIntBounded, safeParseBigInt } from './utils/env-parsing';
 
-/**
- * FIX 3.2: Parse environment variable to BigInt with validation.
- * Prevents SyntaxError from invalid BigInt strings like "abc".
- *
- * @param envVar - Environment variable name
- * @param defaultValue - Default value as string (for logging)
- * @returns Parsed BigInt value
- */
-function parseEnvBigInt(envVar: string, defaultValue: string): bigint {
-  const raw = process.env[envVar];
-  if (!raw) {
-    return BigInt(defaultValue);
-  }
-  try {
-    // Validate the string only contains valid BigInt characters
-    if (!/^-?\d+$/.test(raw.trim())) {
-      console.warn(`[RISK_CONFIG] Invalid BigInt value for ${envVar}: "${raw}" - using default`);
-      return BigInt(defaultValue);
-    }
-    return BigInt(raw.trim());
-  } catch (error) {
-    console.warn(`[RISK_CONFIG] Failed to parse BigInt for ${envVar}: "${raw}" - using default`);
-    return BigInt(defaultValue);
-  }
-}
-
-/**
- * FIX 3.2: Parse environment variable to float with validation.
- * Prevents NaN from invalid float strings.
- *
- * @param envVar - Environment variable name
- * @param defaultValue - Default value
- * @param min - Minimum allowed value
- * @param max - Maximum allowed value
- * @returns Validated float value
- */
+/** Parse env var as float with bounds. Thin wrapper for env-var-name-based API. */
 function parseEnvFloat(envVar: string, defaultValue: number, min = 0, max = 1): number {
-  const raw = process.env[envVar];
-  if (!raw) {
-    return defaultValue;
-  }
-  const parsed = parseFloat(raw);
-  if (Number.isNaN(parsed)) {
-    console.warn(`[RISK_CONFIG] Invalid float value for ${envVar}: "${raw}" - using default`);
-    return defaultValue;
-  }
-  if (parsed < min || parsed > max) {
-    console.warn(`[RISK_CONFIG] Value for ${envVar} (${parsed}) out of range [${min}, ${max}] - using default`);
-    return defaultValue;
-  }
-  return parsed;
+  return safeParseFloatBounded(process.env[envVar], defaultValue, min, max, envVar);
 }
 
-/**
- * FIX 3.2: Parse environment variable to integer with validation (safe mode).
- * Prevents NaN from invalid integer strings. Returns default/min on invalid input.
- *
- * NOTE: This is functionally identical to parseEnvIntSafe in @arbitrage/core/env-utils.
- * It remains local because shared/config builds before shared/core in the dependency chain.
- * See S-6 consolidation notes.
- *
- * @param envVar - Environment variable name
- * @param defaultValue - Default value
- * @param min - Minimum allowed value
- * @returns Validated integer value
- */
+/** Parse env var as integer with minimum bound. Thin wrapper for env-var-name-based API. */
 function parseEnvInt(envVar: string, defaultValue: number, min = 1): number {
-  const raw = process.env[envVar];
-  if (!raw) {
-    return defaultValue;
-  }
-  const parsed = parseInt(raw, 10);
-  if (Number.isNaN(parsed)) {
-    console.warn(`[RISK_CONFIG] Invalid integer value for ${envVar}: "${raw}" - using default`);
-    return defaultValue;
-  }
-  if (parsed < min) {
-    console.warn(`[RISK_CONFIG] Value for ${envVar} (${parsed}) below minimum ${min} - using minimum`);
-    return min;
-  }
-  return parsed;
+  return safeParseIntBounded(process.env[envVar], defaultValue, min, envVar);
+}
+
+/** Parse env var as BigInt. Thin wrapper for env-var-name-based API. */
+function parseEnvBigInt(envVar: string, defaultValue: string): bigint {
+  return safeParseBigInt(process.env[envVar], defaultValue, envVar);
 }
 
 // =============================================================================

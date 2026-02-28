@@ -215,6 +215,9 @@ export const FactoryRegistrySchema = z.record(
 export const TokenSchema = z.object({
   address: EthereumAddressSchema.describe('Token contract address'),
   symbol: z.string().min(1, 'Token symbol is required').max(20, 'Symbol too long'),
+  // P2-13 NOTE: max(18) is intentional — all CORE_TOKENS in this system use ≤18 decimals.
+  // Some exotic ERC20s (e.g., YAM) have up to 24 decimals, but those are not in our token registry.
+  // If adding tokens with >18 decimals in the future, update this constraint.
   decimals: z.number().int().min(0).max(18, 'Decimals must be 0-18'),
   chainId: PositiveIntSchema.describe('Chain ID where token exists'),
 });
@@ -278,7 +281,8 @@ export const FlashLoanProtocolSchema = z.enum([
   'pancakeswap_v3',
   'spookyswap',
   'syncswap',
-  'jupiter',
+  'dai_flash_mint',
+  'morpho',
 ]);
 
 /**

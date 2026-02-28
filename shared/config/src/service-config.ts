@@ -468,13 +468,9 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   //   protocol: 'syncswap',
   //   fee: 30  // 0.3% flash loan fee (30 bps)
   // },
-  // FIX: Explicit Solana entry to prevent silent failures when iterating all chains
-  // Solana uses Jupiter swap routes instead of traditional flash loans
-  solana: {
-    address: '',  // Not applicable - Solana uses different mechanism
-    protocol: 'jupiter',  // Jupiter aggregator for Solana swaps
-    fee: 0  // Jupiter has no flash loan fee (uses atomic swaps)
-  }
+  // NOTE: Solana is intentionally omitted — it uses Jupiter atomic swaps,
+  // not traditional flash loans. supportsFlashLoan('solana') returns false.
+  // All consumers access via optional chaining (FLASH_LOAN_PROVIDERS[chain]?.protocol).
 };
 
 /**
@@ -639,12 +635,37 @@ export const FAST_LANE_CONFIG = {
   minProfitUsd: safeParseFloat(process.env.FAST_LANE_MIN_PROFIT_USD, 100),
 };
 
+/**
+ * R2 trade log upload configuration.
+ *
+ * P2-11 FIX: secretAccessKey uses a getter that returns the real value at runtime
+ * but toJSON() redacts it to '[REDACTED]', preventing accidental exposure via
+ * JSON.stringify(), structured logging, or error serialization.
+ *
+ * Access the secret via `R2_CONFIG.secretAccessKey` (the getter returns the real value).
+ *
+ * @warning NEVER log or serialize R2_CONFIG directly in production.
+ */
+const _r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY ?? '';
+
 export const R2_CONFIG = {
   enabled: process.env.R2_ENABLED === 'true',
   bucket: process.env.R2_BUCKET ?? 'arbitrage-trades',
   accountId: process.env.R2_ACCOUNT_ID ?? '',
   accessKeyId: process.env.R2_ACCESS_KEY_ID ?? '',
-  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? '',
+  /** Redacted in toJSON(). The getter returns the real value for runtime use. */
+  get secretAccessKey(): string { return _r2SecretAccessKey; },
   endpoint: process.env.R2_ENDPOINT,
   prefix: process.env.R2_PREFIX ?? 'trades/',
+  toJSON() {
+    return {
+      enabled: this.enabled,
+      bucket: this.bucket,
+      accountId: this.accountId,
+      accessKeyId: this.accessKeyId,
+      secretAccessKey: _r2SecretAccessKey ? '[REDACTED]' : '',
+      endpoint: this.endpoint,
+      prefix: this.prefix,
+    };
+  },
 };

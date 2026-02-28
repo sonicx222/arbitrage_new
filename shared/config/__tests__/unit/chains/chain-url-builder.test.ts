@@ -9,6 +9,10 @@ import {
   buildChainUrlsWithApiKeys,
   buildSolanaUrls,
   createAlchemyConfig,
+  createInfuraConfig,
+  createDrpcConfig,
+  createOnFinalityConfig,
+  createAnkrConfig,
   ChainUrlConfig,
 } from '../../../src/chains/chain-url-builder';
 
@@ -253,6 +257,75 @@ describe('ChainUrlBuilder', () => {
       expect(config.apiKeyEnvVar).toBe('ALCHEMY_API_KEY');
       expect(config.rpcUrlTemplate('test-key')).toBe('https://eth-mainnet.g.alchemy.com/v2/test-key');
       expect(config.wsUrlTemplate('test-key')).toBe('wss://eth-mainnet.g.alchemy.com/v2/test-key');
+    });
+  });
+
+  // P2-21 FIX: Tests for remaining 4 API key config builders
+  describe('createInfuraConfig', () => {
+    it('should create correct Infura URL templates', () => {
+      const config = createInfuraConfig('mainnet');
+
+      expect(config.apiKeyEnvVar).toBe('INFURA_API_KEY');
+      expect(config.rpcUrlTemplate('my-key')).toBe('https://mainnet.infura.io/v3/my-key');
+      expect(config.wsUrlTemplate('my-key')).toBe('wss://mainnet.infura.io/ws/v3/my-key');
+    });
+
+    it('should handle different network names', () => {
+      const config = createInfuraConfig('polygon-mainnet');
+
+      expect(config.rpcUrlTemplate('key')).toBe('https://polygon-mainnet.infura.io/v3/key');
+      expect(config.wsUrlTemplate('key')).toBe('wss://polygon-mainnet.infura.io/ws/v3/key');
+    });
+  });
+
+  describe('createDrpcConfig', () => {
+    it('should create correct dRPC URL templates', () => {
+      const config = createDrpcConfig('ethereum');
+
+      expect(config.apiKeyEnvVar).toBe('DRPC_API_KEY');
+      expect(config.rpcUrlTemplate('my-dkey')).toBe('https://lb.drpc.org/ogrpc?network=ethereum&dkey=my-dkey');
+      expect(config.wsUrlTemplate('my-dkey')).toBe('wss://lb.drpc.org/ogws?network=ethereum&dkey=my-dkey');
+    });
+
+    it('should handle different network names', () => {
+      const config = createDrpcConfig('arbitrum');
+
+      expect(config.rpcUrlTemplate('key')).toBe('https://lb.drpc.org/ogrpc?network=arbitrum&dkey=key');
+      expect(config.wsUrlTemplate('key')).toBe('wss://lb.drpc.org/ogws?network=arbitrum&dkey=key');
+    });
+  });
+
+  describe('createOnFinalityConfig', () => {
+    it('should create correct OnFinality URL templates', () => {
+      const config = createOnFinalityConfig('bsc');
+
+      expect(config.apiKeyEnvVar).toBe('ONFINALITY_API_KEY');
+      expect(config.rpcUrlTemplate('my-apikey')).toBe('https://bsc.api.onfinality.io/rpc?apikey=my-apikey');
+      expect(config.wsUrlTemplate('my-apikey')).toBe('wss://bsc.api.onfinality.io/ws?apikey=my-apikey');
+    });
+
+    it('should handle different network names', () => {
+      const config = createOnFinalityConfig('polygon');
+
+      expect(config.rpcUrlTemplate('key')).toBe('https://polygon.api.onfinality.io/rpc?apikey=key');
+      expect(config.wsUrlTemplate('key')).toBe('wss://polygon.api.onfinality.io/ws?apikey=key');
+    });
+  });
+
+  describe('createAnkrConfig', () => {
+    it('should create correct Ankr URL templates', () => {
+      const config = createAnkrConfig('eth');
+
+      expect(config.apiKeyEnvVar).toBe('ANKR_API_KEY');
+      expect(config.rpcUrlTemplate('my-token')).toBe('https://rpc.ankr.com/eth/my-token');
+      expect(config.wsUrlTemplate('my-token')).toBe('wss://rpc.ankr.com/eth/my-token');
+    });
+
+    it('should handle different network names', () => {
+      const config = createAnkrConfig('avalanche');
+
+      expect(config.rpcUrlTemplate('token')).toBe('https://rpc.ankr.com/avalanche/token');
+      expect(config.wsUrlTemplate('token')).toBe('wss://rpc.ankr.com/avalanche/token');
     });
   });
 });

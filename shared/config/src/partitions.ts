@@ -219,6 +219,11 @@ export function getNonEvmChains(): string[] {
  */
 // Note: Using string literals for partitionId to avoid circular dependency issues
 // during module initialization. Values match those in partition-ids.ts.
+//
+// P2-17 NOTE: All 4 partitions currently use provider: 'fly' for the primary deployment.
+// ARCHITECTURE_V2.md mentions P1/P3 should use Oracle ARM instances — this reflects
+// the initial all-Fly deployment. When migrating P1/P3 to Oracle ARM, update the
+// provider field and standby configs accordingly.
 export const PARTITIONS: PartitionConfig[] = [
   // P1: Asia-Fast - High-throughput Asian chains
   {

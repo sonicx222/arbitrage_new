@@ -22,6 +22,12 @@ import { Chain } from '../../../types';
 // Priority: dRPC (210M CU) → OnFinality (500K/day) → Ankr (200M) → PublicNode (unlimited) → Infura → Alchemy
 // =============================================================================
 
+/**
+ * P2-10 SECURITY NOTE: API keys are interpolated into URL strings at module load time.
+ * The CHAINS config object contains these keys in plain text within URL strings.
+ * NEVER log, serialize (JSON.stringify), or include CHAINS in error messages.
+ * If you need to log chain info, use chain name/ID only, not the full config.
+ */
 const DRPC_KEY = process.env.DRPC_API_KEY;
 const ONFINALITY_KEY = process.env.ONFINALITY_API_KEY;
 const ANKR_KEY = process.env.ANKR_API_KEY;

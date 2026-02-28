@@ -241,12 +241,10 @@ describe('Service Config Module', () => {
       // Note: Linea flash loan provider is TODO in source
     });
 
-    it('should have explicit Solana entry with Jupiter protocol (different model)', () => {
-      // Solana uses Jupiter atomic swaps instead of traditional flash loans
-      expect(FLASH_LOAN_PROVIDERS['solana']).toBeDefined();
-      expect(FLASH_LOAN_PROVIDERS['solana'].protocol).toBe('jupiter');
-      expect(FLASH_LOAN_PROVIDERS['solana'].address).toBe(''); // Empty - uses different mechanism
-      expect(FLASH_LOAN_PROVIDERS['solana'].fee).toBe(0); // Jupiter has no flash loan fee
+    it('should not include Solana (uses Jupiter atomic swaps, not flash loans)', () => {
+      // Solana uses Jupiter atomic swaps instead of traditional flash loans.
+      // It is intentionally omitted from FLASH_LOAN_PROVIDERS.
+      expect(FLASH_LOAN_PROVIDERS['solana']).toBeUndefined();
     });
 
     describe('supportsFlashLoan helper', () => {

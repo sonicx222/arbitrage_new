@@ -339,9 +339,9 @@ export const KNOWN_ROUTERS = {
       type: '1inch' as const,
       name: '1inch AggregatorV5',
     },
-    // GMX
-    '0xabc0000000000000000000000000000000000000': {
-      type: 'uniswapV2' as const, // Placeholder
+    // GMX V2 Router
+    '0xabbc5f99639c9b6bcb58544ddf04efa6802f4064': {
+      type: 'uniswapV2' as const,
       name: 'GMX Router',
     },
   },
@@ -423,6 +423,61 @@ export const KNOWN_ROUTERS = {
       name: '1inch AggregatorV5',
     },
   },
+  // P2-6 FIX: Fantom (chainId: 250)
+  fantom: {
+    // SpookySwap (V2 compatible)
+    '0xf491e7b69e4244ad4002bc14e878a34207e38c29': {
+      type: 'uniswapV2' as const,
+      name: 'SpookySwap Router',
+    },
+    // SpiritSwap (V2 compatible)
+    '0x16327e3fbdaca3bcf7e38f5af2599d2ddc33ae52': {
+      type: 'uniswapV2' as const,
+      name: 'SpiritSwap Router',
+    },
+    // SushiSwap
+    '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506': {
+      type: 'sushiswap' as const,
+      name: 'SushiSwap Router',
+    },
+  },
+  // P2-6 FIX: zkSync Era (chainId: 324)
+  zksync: {
+    // SyncSwap (V2 compatible)
+    '0x2da10a1e27bf85cedd8ffb1abbe97e53391c0295': {
+      type: 'uniswapV2' as const,
+      name: 'SyncSwap Router',
+    },
+    // Mute.io (V2 compatible)
+    '0x8b791913eb07c32779a16750e3868aa8495f5964': {
+      type: 'uniswapV2' as const,
+      name: 'Mute Router',
+    },
+    // PancakeSwap V3
+    '0xf8b59f3c3ab33200ec80a8a58b2aa5f5d2a7944c': {
+      type: 'uniswapV3' as const,
+      name: 'PancakeSwap V3 SmartRouter',
+    },
+  },
+  // P2-6 FIX: Linea (chainId: 59144)
+  linea: {
+    // SyncSwap (V2 compatible)
+    '0x80e38291e06339d10aab483c65695d004dbd5c69': {
+      type: 'uniswapV2' as const,
+      name: 'SyncSwap Router',
+    },
+    // PancakeSwap V3
+    '0x678aa4e4fda39ee5964309ae37abec4ebb54e2e1': {
+      type: 'uniswapV3' as const,
+      name: 'PancakeSwap V3 SmartRouter',
+    },
+  },
+  // P2-6 FIX: Stubs for chains without verified router addresses
+  // Blast, Scroll, Mantle, Mode — add entries when addresses are RPC-verified
+  blast: {},
+  scroll: {},
+  mantle: {},
+  mode: {},
 } as const;
 
 // =============================================================================
@@ -589,13 +644,13 @@ export const CURVE_POOL_TOKENS: Record<number, Record<string, string[]>> = {
   1: {
     // 3pool (DAI, USDC, USDT)
     '0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7': [
-      '0x6B175474E89094C44Da98b954EeadCDeBc5C5e818', // DAI
+      '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
       '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
       '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
     ],
     // sUSD pool (DAI, USDC, USDT, sUSD)
     '0xa5407eae9ba41422680e2e00537571bcc53efbfd': [
-      '0x6B175474E89094C44Da98b954EeadCDeBc5C5e818', // DAI
+      '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
       '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
       '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
       '0x57Ab1ec28D129707052df4dF418D58a2D46d5f51', // sUSD
