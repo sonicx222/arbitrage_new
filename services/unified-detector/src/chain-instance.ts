@@ -47,7 +47,7 @@ import { RedisStreamsClient, StreamBatcher } from '@arbitrage/core/redis';
 import { createFastTraceContext, TRACE_FIELDS } from '@arbitrage/core/tracing';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { isSimulationMode } from '@arbitrage/core/simulation';
-import { disconnectWithTimeout } from '@arbitrage/core/utils';
+import { disconnectWithTimeout, calculateVirtualReservesFromSqrtPriceX96 } from '@arbitrage/core/utils';
 import { createLogger, PerformanceLogger, WebSocketManager, FactorySubscriptionService, FactoryEventSignatures, AdditionalEventSignatures } from '@arbitrage/core';
 
 import {
@@ -90,7 +90,7 @@ import { SimulationInitializer } from './simulation-initializer';
 // R8 Refactor: Use extracted subscription and pair initialization modules
 import { createSubscriptionManager } from './subscription';
 import type { SubscriptionCallbacks, SubscriptionStats } from './subscription';
-import { initializePairs as initializePairsFromModule } from './pair-initializer';
+import { initializePairs as initializePairsFromModule, initializeAdapterPairs } from './pair-initializer';
 // FIX Config 3.1/3.2: Import utility functions and constants
 import { parseIntEnvVar } from './types';
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
@@ -637,6 +637,11 @@ export class ChainDetectorInstance extends EventEmitter {
     this.emit('statusChange', this.status);
 
     try {
+      // P0-1: Initialize DEX adapters for vault-model DEXes before pair discovery
+      // Adapters must be registered in the global registry before initializePairs()
+      // calls initializeAdapterPairs() to discover real pool addresses.
+      await this.initializeVaultAdapters();
+
       // Initialize pairs first (needed for both real and simulated modes)
       await this.initializePairs();
 
@@ -832,6 +837,18 @@ export class ChainDetectorInstance extends EventEmitter {
     // Clean up liquidity depth analyzer
     this.liquidityAnalyzer = null;
 
+    // P0-1: Clean up vault-model DEX adapters registered for this chain
+    try {
+      const { getAdapterRegistry } = await import('@arbitrage/core/dex-adapters');
+      const registry = getAdapterRegistry();
+      const chainAdapters = registry.listAdaptersByChain(this.chainId);
+      for (const adapter of chainAdapters) {
+        await registry.unregister(adapter.name, adapter.chain);
+      }
+    } catch {
+      // Adapter cleanup failure is non-fatal during shutdown
+    }
+
     // Clear pairs and caches
     this.pairs.clear();
     this.pairsByAddress.clear();
@@ -949,6 +966,9 @@ export class ChainDetectorInstance extends EventEmitter {
       },
       onSyncEvent: (log) => this.handleSyncEvent(log as EthereumLog),
       onSwapEvent: (log) => this.handleSwapEvent(log as EthereumLog),
+      onSwapV3Event: (log) => this.handleSwapV3Event(log as EthereumLog),
+      onCurveTokenExchangeEvent: (log) => this.handleCurveTokenExchangeEvent(log as EthereumLog),
+      onBalancerSwapEvent: (log) => this.handleBalancerSwapEvent(log as EthereumLog),
       onNewBlock: (block) => this.handleNewBlock(block as EthereumBlockHeader),
       onPairCreated: (event) => this.handlePairCreatedEvent(event),
     };
@@ -1065,9 +1085,87 @@ export class ChainDetectorInstance extends EventEmitter {
     this.pairsByTokens = result.pairsByTokens;
     this.pairAddressesCache = result.pairAddressesCache;
 
+    // P0-1: Discover real pool addresses for vault-model DEXes via adapters.
+    // This runs after standard pair init so adapter-discovered pools merge into
+    // the same data structures used by event routing and arbitrage detection.
+    try {
+      await initializeAdapterPairs(
+        { chainId: this.chainId, dexes: this.dexes, tokens: this.tokens },
+        result,
+        (t0, t1) => this.getTokenPairKey(t0, t1),
+        this.logger,
+      );
+    } catch (adapterError) {
+      // Non-fatal: vault-model DEX discovery failure shouldn't prevent startup
+      this.logger.warn('Adapter-based pair discovery failed, vault-model DEXes may be inactive', {
+        chainId: this.chainId,
+        error: (adapterError as Error).message,
+      });
+    }
+
     this.logger.debug(`Initialized ${this.pairs.size} pairs for monitoring`, {
       tokenPairGroups: this.pairsByTokens.size
     });
+  }
+
+  /**
+   * P0-1: Initialize DEX adapters for vault-model DEXes (Balancer V2, GMX, Platypus).
+   *
+   * Creates and registers adapters in the global AdapterRegistry so that
+   * initializeAdapterPairs() can discover real pool addresses.
+   * Non-fatal: if adapter init fails for one DEX, others still proceed.
+   */
+  private async initializeVaultAdapters(): Promise<void> {
+    const { isVaultModelDex } = await import('@arbitrage/config');
+    const { getAdapterRegistry, BalancerV2Adapter, GmxAdapter, PlatypusAdapter } = await import('@arbitrage/core/dex-adapters');
+
+    const vaultDexes = this.dexes.filter(dex => isVaultModelDex(dex.name));
+    if (vaultDexes.length === 0) return;
+
+    const registry = getAdapterRegistry();
+    const provider = new ethers.JsonRpcProvider(this.chainConfig.rpcUrl);
+    let registeredCount = 0;
+
+    for (const dex of vaultDexes) {
+      try {
+        let adapter;
+        const dexName = dex.name.toLowerCase();
+        const baseConfig = {
+          name: dex.name,
+          chain: this.chainId,
+          primaryAddress: dex.factoryAddress, // Vault address for vault-model DEXes
+          provider,
+        };
+
+        if (dexName === 'gmx') {
+          adapter = new GmxAdapter({ ...baseConfig, secondaryAddress: dex.routerAddress });
+        } else if (dexName === 'platypus') {
+          adapter = new PlatypusAdapter({ ...baseConfig, secondaryAddress: dex.routerAddress });
+        } else if (dexName === 'balancer_v2' || dexName === 'beethoven_x') {
+          adapter = new BalancerV2Adapter(baseConfig);
+        }
+
+        if (adapter) {
+          await adapter.initialize();
+          await registry.register(adapter);
+          registeredCount++;
+        }
+      } catch (error) {
+        this.logger.warn('Failed to initialize adapter for vault-model DEX', {
+          dex: dex.name,
+          chainId: this.chainId,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    if (registeredCount > 0) {
+      this.logger.info('Initialized vault-model DEX adapters', {
+        chainId: this.chainId,
+        registered: registeredCount,
+        total: vaultDexes.length,
+      });
+    }
   }
 
   // ===========================================================================
@@ -1262,6 +1360,15 @@ export class ChainDetectorInstance extends EventEmitter {
             this.handleSyncEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
             this.handleSwapEvent(result, messageReceivedAt);
+          } else if (topic0 === EVENT_SIGNATURES.SWAP_V3) {
+            // P0-4: V3 Swap events carry sqrtPriceX96 + liquidity for price/reserve updates
+            this.handleSwapV3Event(result, messageReceivedAt);
+          } else if (topic0 === EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE) {
+            // P0-5: Curve TokenExchange events for StableSwap pools
+            this.handleCurveTokenExchangeEvent(result, messageReceivedAt);
+          } else if (topic0 === EVENT_SIGNATURES.BALANCER_SWAP) {
+            // P0-5: Balancer V2 Swap events from the Vault
+            this.handleBalancerSwapEvent(result, messageReceivedAt);
           } else if (this.factorySubscriptionService && this.useFactoryMode) {
             // P0-FIX: Route potential factory events to factory subscription service
             // Check if this is a factory event (PairCreated, PoolCreated, etc.)
@@ -1468,6 +1575,215 @@ export class ChainDetectorInstance extends EventEmitter {
       this.emit('swapEvent', swapEvent);
     } catch (error) {
       this.logger.error('Error handling Swap event', { error });
+    }
+  }
+
+  /**
+   * P0-4: Handle V3 Swap events from Uniswap V3, PancakeSwap V3, Algebra, etc.
+   *
+   * V3 Swap event signature:
+   *   Swap(address indexed sender, address indexed recipient,
+   *        int256 amount0, int256 amount1,
+   *        uint160 sqrtPriceX96, uint128 liquidity, int24 tick)
+   *
+   * Data layout (5 values): amount0(32) + amount1(32) + sqrtPriceX96(32) + liquidity(32) + tick(32) = 322 hex chars
+   *
+   * We compute virtual reserves from sqrtPriceX96 + liquidity to feed into
+   * the existing reserve-based detection pipeline.
+   */
+  private handleSwapV3Event(log: EthereumLog, now: number = Date.now()): void {
+    if (this.isStopping || !this.isRunning) return;
+
+    try {
+      const pairAddress = log.address?.toLowerCase();
+      const pair = this.pairsByAddress.get(pairAddress);
+      if (!pair) return;
+
+      // V3 Swap data: 5 ABI-encoded values = 0x prefix (2) + 5 * 64 hex chars = 322
+      const data = log.data;
+      if (!data || data.length < 322) return;
+
+      // Parse sqrtPriceX96 (uint160) and liquidity (uint128) from data
+      // Layout: amount0[2..66], amount1[66..130], sqrtPriceX96[130..194], liquidity[194..258], tick[258..322]
+      const sqrtPriceX96 = BigInt('0x' + data.slice(130, 194));
+      const liquidity = BigInt('0x' + data.slice(194, 258));
+
+      // Compute virtual reserves from concentrated liquidity parameters
+      const reserves = calculateVirtualReservesFromSqrtPriceX96(sqrtPriceX96, liquidity);
+      if (!reserves) return;
+
+      const { reserve0: reserve0BigInt, reserve1: reserve1BigInt } = reserves;
+      const reserve0 = reserve0BigInt.toString();
+      const reserve1 = reserve1BigInt.toString();
+      const blockNumber = parseInt(log.blockNumber, 16);
+
+      // Record activity after successful parsing
+      this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
+
+      // ML momentum tracking with price from reserves
+      const syncPrice = (this.momentumTracker || (FEATURE_FLAGS.useLiquidityDepthSizing && this.liquidityAnalyzer))
+        ? calculatePriceFromBigIntReserves(reserve0BigInt, reserve1BigInt)
+        : null;
+
+      if (this.momentumTracker && syncPrice !== null) {
+        this.momentumTracker.addPriceUpdate(
+          pair.chainPairKey ?? `${this.chainId}:${pairAddress}`,
+          syncPrice, 0, now
+        );
+      }
+
+      // Liquidity depth: feed pool data with V3 sqrtPriceX96 for concentrated liquidity sizing
+      if (FEATURE_FLAGS.useLiquidityDepthSizing && this.liquidityAnalyzer) {
+        this.liquidityAnalyzer.updatePoolLiquidity({
+          poolAddress: pairAddress,
+          chain: this.chainId,
+          dex: pair.dex,
+          token0: pair.token0,
+          token1: pair.token1,
+          reserve0: reserve0BigInt,
+          reserve1: reserve1BigInt,
+          feeBps: Math.round((pair.fee ?? 0.003) * 10000),
+          liquidityUsd: 0,
+          price: syncPrice ?? 0,
+          timestamp: now,
+          sqrtPriceX96,
+          liquidity,
+        });
+      }
+
+      // HOT-PATH OPT: Direct property assignment
+      pair.reserve0 = reserve0;
+      pair.reserve1 = reserve1;
+      pair.reserve0BigInt = reserve0BigInt;
+      pair.reserve1BigInt = reserve1BigInt;
+      pair.blockNumber = blockNumber;
+      pair.lastUpdate = now;
+
+      // Invalidate snapshot cache
+      this.snapshotManager.invalidateCache();
+
+      this.eventsProcessed++;
+
+      // Calculate and emit price update
+      this.emitPriceUpdate(pair, now);
+
+      // Check for arbitrage opportunities
+      this.checkArbitrageOpportunity(pair);
+    } catch (error) {
+      this.logger.error('Error handling V3 Swap event', { error });
+    }
+  }
+
+  /**
+   * P0-5: Handle Curve TokenExchange events from StableSwap pools.
+   *
+   * TokenExchange event signature:
+   *   TokenExchange(address indexed buyer, int128 sold_id, uint256 tokens_sold,
+   *                 int128 bought_id, uint256 tokens_bought)
+   *
+   * Data layout: sold_id(32) + tokens_sold(32) + bought_id(32) + tokens_bought(32) = 258 hex chars
+   *
+   * We derive a synthetic price from tokens_sold/tokens_bought and update
+   * the pair reserves proportionally.
+   */
+  private handleCurveTokenExchangeEvent(log: EthereumLog, now: number = Date.now()): void {
+    if (this.isStopping || !this.isRunning) return;
+
+    try {
+      const pairAddress = log.address?.toLowerCase();
+      const pair = this.pairsByAddress.get(pairAddress);
+      if (!pair) return;
+
+      // Curve data: 4 ABI-encoded values = 0x prefix (2) + 4 * 64 hex chars = 258
+      const data = log.data;
+      if (!data || data.length < 258) return;
+
+      // Parse: sold_id[2..66], tokens_sold[66..130], bought_id[130..194], tokens_bought[194..258]
+      const tokensSold = BigInt('0x' + data.slice(66, 130));
+      const tokensBought = BigInt('0x' + data.slice(194, 258));
+
+      if (tokensSold === 0n || tokensBought === 0n) return;
+
+      // Use swap amounts as synthetic reserves for price derivation
+      // This gives us the marginal exchange rate from this trade
+      const blockNumber = parseInt(log.blockNumber, 16);
+
+      this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
+
+      // Update reserves with swap amounts as synthetic reserves
+      pair.reserve0 = tokensSold.toString();
+      pair.reserve1 = tokensBought.toString();
+      pair.reserve0BigInt = tokensSold;
+      pair.reserve1BigInt = tokensBought;
+      pair.blockNumber = blockNumber;
+      pair.lastUpdate = now;
+
+      this.snapshotManager.invalidateCache();
+      this.eventsProcessed++;
+
+      this.emitPriceUpdate(pair, now);
+      this.checkArbitrageOpportunity(pair);
+    } catch (error) {
+      this.logger.error('Error handling Curve TokenExchange event', { error });
+    }
+  }
+
+  /**
+   * P0-5: Handle Balancer V2 Swap events from the Vault.
+   *
+   * Balancer Swap event signature:
+   *   Swap(bytes32 indexed poolId, address indexed tokenIn, address indexed tokenOut,
+   *        uint256 amountIn, uint256 amountOut)
+   *
+   * topics: [signature, poolId, tokenIn, tokenOut]
+   * data: amountIn(32) + amountOut(32) = 130 hex chars
+   *
+   * We derive price from the swap amounts, similar to Curve.
+   */
+  private handleBalancerSwapEvent(log: EthereumLog, now: number = Date.now()): void {
+    if (this.isStopping || !this.isRunning) return;
+
+    try {
+      // Balancer Vault emits events from the Vault address, not the pool address.
+      // The poolId is in topics[1]. We look up pair by the log address first,
+      // then fall back to checking if any pair matches.
+      const vaultAddress = log.address?.toLowerCase();
+      const poolId = log.topics?.[1];
+
+      // Try to find the pair by pool ID (lower 20 bytes of poolId = pool address)
+      // poolId format: first 20 bytes = pool address, last 12 bytes = pool specialization + nonce
+      const poolAddress = poolId ? ('0x' + poolId.slice(26)).toLowerCase() : '';
+      const pair = this.pairsByAddress.get(poolAddress) ?? this.pairsByAddress.get(vaultAddress);
+      if (!pair) return;
+
+      // Balancer data: 2 ABI-encoded values = 0x prefix (2) + 2 * 64 hex chars = 130
+      const data = log.data;
+      if (!data || data.length < 130) return;
+
+      const amountIn = BigInt('0x' + data.slice(2, 66));
+      const amountOut = BigInt('0x' + data.slice(66, 130));
+
+      if (amountIn === 0n || amountOut === 0n) return;
+
+      const blockNumber = parseInt(log.blockNumber, 16);
+
+      this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${poolAddress}`);
+
+      // Use swap amounts as synthetic reserves (marginal exchange rate)
+      pair.reserve0 = amountIn.toString();
+      pair.reserve1 = amountOut.toString();
+      pair.reserve0BigInt = amountIn;
+      pair.reserve1BigInt = amountOut;
+      pair.blockNumber = blockNumber;
+      pair.lastUpdate = now;
+
+      this.snapshotManager.invalidateCache();
+      this.eventsProcessed++;
+
+      this.emitPriceUpdate(pair, now);
+      this.checkArbitrageOpportunity(pair);
+    } catch (error) {
+      this.logger.error('Error handling Balancer Swap event', { error });
     }
   }
 

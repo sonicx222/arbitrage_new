@@ -20,6 +20,51 @@
 import { DEXES } from '@arbitrage/config';
 import { Dex } from '@arbitrage/types';
 
+/**
+ * V3 DEX router addresses by chain.
+ *
+ * These routers use ISwapRouter.exactInputSingle (Uniswap V3 interface) and
+ * are separate from the V2-style routers in APPROVED_ROUTERS.
+ *
+ * This constant mirrors V3_APPROVED_ROUTERS in contracts/deployments/addresses.ts.
+ * It is duplicated here to avoid cross-boundary imports (rootDir constraint).
+ *
+ * @see contracts/deployments/addresses.ts V3_APPROVED_ROUTERS
+ */
+const V3_ROUTER_ADDRESSES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  bsc: {
+    pancakeswap_v3: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',
+  },
+  polygon: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  },
+  avalanche: {
+    trader_joe_v2: '0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30',
+  },
+  arbitrum: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  },
+  base: {
+    uniswap_v3: '0x2626664c2603336E57B271c5C0b26F421741e481',
+  },
+  ethereum: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  },
+};
+
+/**
+ * Pre-built Map for O(1) V3 router lookups.
+ * Map<chain, Map<dexName (lowercase), routerAddress>>
+ */
+const V3_ROUTER_MAP: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map(
+  Object.entries(V3_ROUTER_ADDRESSES).map(([chain, dexRouters]) => [
+    chain,
+    new Map(
+      Object.entries(dexRouters).map(([dex, addr]) => [dex.toLowerCase(), addr])
+    ),
+  ])
+);
+
 export class DexLookupService {
   /**
    * O(1) router address lookup by chain + DEX name.
@@ -186,5 +231,32 @@ export class DexLookupService {
    */
   public isValidRouter(chain: string, routerAddress: string): boolean {
     return this.findDexByRouter(chain, routerAddress) !== undefined;
+  }
+
+  /**
+   * Get V3 router address for a DEX on a chain.
+   * O(1) Map-based lookup. Case-insensitive DEX name matching.
+   *
+   * V3 routers use ISwapRouter.exactInputSingle and require separate
+   * encoding via V3SwapAdapter.
+   *
+   * @param chain - Chain identifier (e.g., 'ethereum', 'arbitrum')
+   * @param dexName - DEX name (case-insensitive, e.g., 'uniswap_v3')
+   * @returns V3 router address or undefined if not configured
+   *
+   * @example
+   * ```typescript
+   * const router = service.getV3RouterAddress('ethereum', 'uniswap_v3');
+   * // '0xE592427A0AEce92De3Edee1F18E0157C05861564'
+   * ```
+   *
+   * @see contracts/deployments/addresses.ts V3_APPROVED_ROUTERS
+   */
+  public getV3RouterAddress(chain: string, dexName: string): string | undefined {
+    const chainMap = V3_ROUTER_MAP.get(chain);
+    if (!chainMap) {
+      return undefined;
+    }
+    return chainMap.get(dexName.toLowerCase().trim());
   }
 }

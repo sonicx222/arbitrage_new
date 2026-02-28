@@ -153,3 +153,12 @@ export * from './amm-math';
 // =============================================================================
 
 export { maskUrlApiKeys } from './url-utils';
+
+// =============================================================================
+// V3 Price Utilities - sqrtPriceX96 Conversions
+// =============================================================================
+
+export {
+  calculatePriceFromSqrtPriceX96,
+  calculateVirtualReservesFromSqrtPriceX96,
+} from './v3-price-utils';

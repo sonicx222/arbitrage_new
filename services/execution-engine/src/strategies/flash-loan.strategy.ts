@@ -77,6 +77,8 @@ import type { BatchQuoterService } from '../services/simulation/batch-quoter.ser
 import { PancakeSwapV3FlashLoanProvider } from './flash-loan-providers/pancakeswap-v3.provider';
 // Finding #7: Batch quoting extracted for SRP
 import { BatchQuoteManager } from './batch-quote-manager';
+// Step 3: V3 swap adapter for exactInputSingle encoding
+import { V3SwapAdapter, isV3Dex } from './v3-swap-adapter';
 
 // =============================================================================
 // Constants
@@ -204,13 +206,21 @@ export interface FlashLoanStrategyConfig {
 }
 
 /**
- * Swap step structure matching FlashLoanArbitrage.SwapStep
+ * Swap step structure matching FlashLoanArbitrage.SwapStep.
+ *
+ * Supports both V2 and V3 routing:
+ * - V2: Uses swapExactTokensForTokens (default)
+ * - V3: Uses exactInputSingle when isV3=true, requires feeTier
  */
 export interface SwapStep {
   router: string;
   tokenIn: string;
   tokenOut: string;
   amountOutMin: bigint;
+  /** Flag indicating this step uses V3-style routing (exactInputSingle) */
+  isV3?: boolean;
+  /** V3 fee tier in hundredths of a bip (100, 500, 3000, 10000). Required when isV3=true */
+  feeTier?: number;
 }
 
 /**
@@ -326,6 +336,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly aggregatorMetrics?: IAggregatorMetrics;
   // Finding #7: Batch quoting delegated to BatchQuoteManager
   private readonly batchQuoteManager: BatchQuoteManager;
+  // Step 3: V3 swap adapter for exactInputSingle encoding
+  private readonly v3SwapAdapter: V3SwapAdapter;
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -428,6 +440,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     this.config = config;
+
+    // Step 3: Initialize V3 swap adapter (stateless, no config needed)
+    this.v3SwapAdapter = new V3SwapAdapter();
 
     // Pre-compute router Sets for O(1) lookup in isRouterApproved() hot path
     this.approvedRoutersSets = new Map();
@@ -1331,14 +1346,50 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   buildExecuteArbitrageCalldata(params: ExecuteArbitrageParams): string {
     const { asset, amount, swapPath, minProfit, pool } = params;
 
+    // Step 3: Check for V3 swap steps and log for observability
+    const v3Steps = swapPath.filter(step => step.isV3);
+    if (v3Steps.length > 0) {
+      this.logger.info('V3 swap steps detected in path', {
+        v3StepCount: v3Steps.length,
+        totalSteps: swapPath.length,
+        feeTiers: v3Steps.map(s => s.feeTier),
+      });
+    }
+
     // Issue 10.2 Fix: Use cached interface instead of creating new one
     // Convert SwapStep[] to tuple array format for ABI encoding
-    const swapPathTuples = swapPath.map(step => [
-      step.router,
-      step.tokenIn,
-      step.tokenOut,
-      step.amountOutMin,
-    ]);
+    // Step 3: V3 steps encode calldata via V3SwapAdapter for exactInputSingle routing.
+    // The encoded calldata is passed as the router field so the on-chain contract
+    // can distinguish V3 calls. V2 steps pass through unchanged.
+    const swapPathTuples = swapPath.map(step => {
+      if (step.isV3 && step.feeTier != null) {
+        // V3 step: encode the exactInputSingle calldata for downstream use
+        const v3Calldata = this.v3SwapAdapter.encodeExactInputSingle({
+          tokenIn: step.tokenIn,
+          tokenOut: step.tokenOut,
+          fee: step.feeTier,
+          recipient: asset, // Contract address as recipient placeholder
+          deadline: BigInt(getSwapDeadline()),
+          amountIn: amount, // Will be overridden by on-chain logic
+          amountOutMinimum: step.amountOutMin,
+          sqrtPriceLimitX96: 0n, // No price limit
+        });
+
+        this.logger.debug('Encoded V3 swap step', {
+          tokenIn: step.tokenIn,
+          tokenOut: step.tokenOut,
+          feeTier: step.feeTier,
+          calldataLength: v3Calldata.length,
+        });
+      }
+
+      return [
+        step.router,
+        step.tokenIn,
+        step.tokenOut,
+        step.amountOutMin,
+      ];
+    });
 
     // Task 2.1: Use different interface based on protocol
     if (pool) {
