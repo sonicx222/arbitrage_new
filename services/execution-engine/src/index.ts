@@ -374,9 +374,17 @@ async function main() {
     await orderflowConsumer.start();
 
     // Graceful shutdown with shared bootstrap utility
+    // P0 FIX: Bootstrap shutdownTimeoutMs must exceed engine drain timeout.
+    // engine.stop() waits up to SHUTDOWN_DRAIN_TIMEOUT_MS (default 30s) for in-flight
+    // executions, then runs post-drain cleanup (R2 upload, trade logger, consumers, Redis).
+    // Without this, the 10s default force-kills the process before drain completes,
+    // abandoning in-flight cross-chain trades.
+    const drainTimeoutMs = parseInt(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS ?? '30000', 10);
+    const POST_DRAIN_CLEANUP_BUFFER_MS = 15_000; // R2 upload, trade logger, consumers, Redis
     setupServiceShutdown({
       logger,
       serviceName: 'Execution Engine',
+      shutdownTimeoutMs: drainTimeoutMs + POST_DRAIN_CLEANUP_BUFFER_MS,
       onShutdown: async () => {
         // Stop cross-region health manager if running
         // P1-2 FIX: Remove event listeners before destroying manager to prevent memory leak
