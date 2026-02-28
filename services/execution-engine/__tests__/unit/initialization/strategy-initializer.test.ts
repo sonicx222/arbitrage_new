@@ -211,21 +211,7 @@ import { initializeTxSimulationService } from '../../../src/services/tx-simulati
 // Test Helpers
 // =============================================================================
 
-type MockLogger = {
-  info: jest.Mock;
-  warn: jest.Mock;
-  error: jest.Mock;
-  debug: jest.Mock;
-};
-
-function createMockLogger(): MockLogger {
-  return {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  };
-}
+import { createMockLogger } from '@arbitrage/test-utils';
 
 function createDefaultDeps(overrides?: Partial<StrategyInitDeps>): StrategyInitDeps {
   return {

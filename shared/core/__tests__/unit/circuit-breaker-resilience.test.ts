@@ -1,5 +1,5 @@
 /**
- * Circuit Breaker State Machine Integration Test
+ * Circuit Breaker State Machine Unit Test
  *
  * Tests the circuit breaker pattern for resilience in the arbitrage system.
  *
@@ -52,7 +52,7 @@ function succeedingOperation<T>(result: T): () => Promise<T> {
   return async () => result;
 }
 
-describe('[Integration] Circuit Breaker State Machine', () => {
+describe('Circuit Breaker State Machine', () => {
   let registry: CircuitBreakerRegistry;
 
   beforeEach(() => {

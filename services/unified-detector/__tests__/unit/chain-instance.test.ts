@@ -53,6 +53,15 @@ jest.mock('@arbitrage/core', () => ({
 // Import AFTER mocks are set up
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 
+// Import real utility functions from @arbitrage/core/components (NOT mocked —
+// only @arbitrage/core barrel is mocked above). This ensures tests verify the
+// actual production implementations rather than local copies.
+import {
+  isSameTokenPair,
+  isReverseOrder,
+  getMinProfitThreshold,
+} from '@arbitrage/core/components';
+
 // =============================================================================
 // Test Types (matching chain-instance.ts internal types)
 // =============================================================================
@@ -70,36 +79,14 @@ interface PairSnapshot {
 
 // =============================================================================
 // Helper Functions for Testing
-// These replicate the private methods for unit testing
 // =============================================================================
 
-function isSameTokenPair(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-  const token1_0 = pair1.token0.toLowerCase();
-  const token1_1 = pair1.token1.toLowerCase();
-  const token2_0 = pair2.token0.toLowerCase();
-  const token2_1 = pair2.token1.toLowerCase();
-
-  return (
-    (token1_0 === token2_0 && token1_1 === token2_1) ||
-    (token1_0 === token2_1 && token1_1 === token2_0)
-  );
-}
-
-function isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-  const token1_0 = pair1.token0.toLowerCase();
-  const token1_1 = pair1.token1.toLowerCase();
-  const token2_0 = pair2.token0.toLowerCase();
-  const token2_1 = pair2.token1.toLowerCase();
-
-  return token1_0 === token2_1 && token1_1 === token2_0;
-}
-
-function getMinProfitThreshold(chainId: string): number {
-  const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
-  // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit
-  return chainMinProfits[chainId] ?? 0.003;
-}
-
+/**
+ * Simplified arbitrage calculation for testing.
+ * Uses real `isReverseOrder` and `getMinProfitThreshold` from @arbitrage/core.
+ * Price calculation is inline (the production hot-path uses BigInt-cached
+ * PairSnapshot fields — see simple-arbitrage-detector.ts).
+ */
 function calculateArbitrage(
   pair1: PairSnapshot,
   pair2: PairSnapshot,
@@ -118,8 +105,8 @@ function calculateArbitrage(
   const price1 = Number(reserve1_1) / Number(reserve1_0);
   let price2 = Number(reserve2_1) / Number(reserve2_0);
 
-  // Adjust price for reverse order pairs
-  if (isReverseOrder(pair1, pair2) && price2 !== 0) {
+  // Adjust price for reverse order pairs — uses real isReverseOrder
+  if (isReverseOrder(pair1.token0, pair2.token0) && price2 !== 0) {
     price2 = 1 / price2;
   }
 
@@ -127,11 +114,10 @@ function calculateArbitrage(
   const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
 
   // Calculate fee-adjusted profit
-  // S2.2.3 FIX: Use ?? instead of || to correctly handle fee: 0
   const totalFees = (pair1.fee ?? 0.003) + (pair2.fee ?? 0.003);
   const netProfitPct = priceDiff - totalFees;
 
-  // Check against threshold
+  // Check against threshold — uses real getMinProfitThreshold
   const minProfitThreshold = getMinProfitThreshold(chainId);
   const isProfitable = netProfitPct >= minProfitThreshold;
 
@@ -164,7 +150,7 @@ describe('ChainDetectorInstance Bug Fixes', () => {
       const pair1 = createPairSnapshot({ dex: 'uniswap_v3' });
       const pair2 = createPairSnapshot({ dex: 'sushiswap', address: '0xdifferent' });
 
-      expect(isSameTokenPair(pair1, pair2)).toBe(true);
+      expect(isSameTokenPair(pair1.token0, pair1.token1, pair2.token0, pair2.token1)).toBe(true);
       expect(pair1.dex).not.toBe(pair2.dex);
     });
 
@@ -204,8 +190,8 @@ describe('ChainDetectorInstance Bug Fixes', () => {
         dex: 'sushiswap'
       });
 
-      expect(isSameTokenPair(pair1, pair2)).toBe(true);
-      expect(isReverseOrder(pair1, pair2)).toBe(false);
+      expect(isSameTokenPair(pair1.token0, pair1.token1, pair2.token0, pair2.token1)).toBe(true);
+      expect(isReverseOrder(pair1.token0, pair2.token0)).toBe(false);
     });
 
     it('should detect same token pair in reverse order', () => {
@@ -219,8 +205,8 @@ describe('ChainDetectorInstance Bug Fixes', () => {
         dex: 'sushiswap'
       });
 
-      expect(isSameTokenPair(pair1, pair2)).toBe(true);
-      expect(isReverseOrder(pair1, pair2)).toBe(true);
+      expect(isSameTokenPair(pair1.token0, pair1.token1, pair2.token0, pair2.token1)).toBe(true);
+      expect(isReverseOrder(pair1.token0, pair2.token0)).toBe(true);
     });
 
     it('should invert price for reverse order pairs', () => {
@@ -428,7 +414,7 @@ describe('ChainDetectorInstance Bug Fixes', () => {
         dex: 'sushiswap'
       });
 
-      expect(isSameTokenPair(pair1, pair2)).toBe(true);
+      expect(isSameTokenPair(pair1.token0, pair1.token1, pair2.token0, pair2.token1)).toBe(true);
     });
 
     it('should detect different token pairs', () => {
@@ -442,7 +428,7 @@ describe('ChainDetectorInstance Bug Fixes', () => {
         dex: 'sushiswap'
       });
 
-      expect(isSameTokenPair(pair1, pair2)).toBe(false);
+      expect(isSameTokenPair(pair1.token0, pair1.token1, pair2.token0, pair2.token1)).toBe(false);
     });
 
     it('should use default fee when fee is undefined', () => {

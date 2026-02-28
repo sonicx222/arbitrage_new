@@ -229,32 +229,6 @@ describe('UnifiedChainDetector', () => {
   let mockLogger: ReturnType<typeof createMockLogger>;
   let mockPerfLogger: ReturnType<typeof createMockPerfLogger>;
 
-  // FIX: Helper to create mock state manager for injection
-  function createMockStateManager() {
-    return {
-      executeStart: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
-        try {
-          await fn();
-          return { success: true };
-        } catch (error) {
-          return { success: false, error };
-        }
-      }),
-      executeStop: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
-        try {
-          await fn();
-          return { success: true };
-        } catch (error) {
-          return { success: false, error };
-        }
-      }),
-      isRunning: jest.fn().mockReturnValue(true),
-      getState: jest.fn().mockReturnValue('running'),
-    };
-  }
-
-  // Mock logger and perf logger imported from @arbitrage/test-utils
-
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers({ legacyFakeTimers: true });
@@ -700,29 +674,4 @@ describe('UnifiedChainDetector', () => {
     });
   });
 
-  // ===========================================================================
-  // State Management
-  // ===========================================================================
-
-  describe('isRunning', () => {
-    it('should return running state', async () => {
-      const mockFactory = jest.fn().mockImplementation((cfg) => {
-        return createMockChainInstance(cfg.chainId);
-      });
-
-      const detector = new UnifiedChainDetector({
-        partitionId: 'test-partition',
-        chains: ['ethereum'],
-        chainInstanceFactory: mockFactory,
-        streamsClient: mockStreamsClient as any,
-        redisClient: mockRedisClient as any,
-        stateManager: mockStateManager as any,
-        logger: mockLogger as any,
-        perfLogger: mockPerfLogger as any,
-        enableCrossRegionHealth: false,
-      });
-
-      expect(detector.isRunning()).toBe(true); // Mocked to return true
-    });
-  });
 });

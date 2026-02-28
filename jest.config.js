@@ -143,7 +143,7 @@ module.exports = {
   projects: [
     {
       displayName: 'unit',
-      testMatch: ['**/__tests__/unit/**/*.test.ts', '**/__tests__/unit/**/*.spec.ts'],
+      testMatch: ['**/__tests__/unit/**/*.test.ts', '**/__tests__/unit/**/*.spec.ts', '**/tests/unit/**/*.test.ts'],
       setupFilesAfterEnv: [
         '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
         '<rootDir>/shared/test-utils/src/setup/jest.unit.setup.ts'
