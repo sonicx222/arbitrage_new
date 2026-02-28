@@ -289,6 +289,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private pipelineStarvationAlerted = false;
   private static readonly PIPELINE_STARVATION_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
+  // P1 Fix: Cached execution stream depth for backpressure detection.
+  // Updated every 5s in health monitoring. When ratio > 0.8, forwardToExecution()
+  // logs a warning. When ratio > 0.95, forwarding is skipped to prevent MAXLEN trimming.
+  private cachedExecutionStreamDepthRatio = 0;
+
   // Configuration
   private readonly config: CoordinatorConfig;
 
@@ -1611,6 +1616,20 @@ export class CoordinatorService implements CoordinatorStateProvider {
       return;
     }
 
+    // P1 Fix: End-to-end backpressure — skip forwarding when execution stream is
+    // near MAXLEN capacity. Dropping newest opportunities is safer than having MAXLEN
+    // trim oldest (potentially in-progress) messages from the stream.
+    if (this.cachedExecutionStreamDepthRatio > 0.95) {
+      this.systemMetrics.opportunitiesDropped++;
+      this.logger.warn('Execution stream backpressure — skipping forwarding', {
+        id: opportunity.id,
+        depthRatio: this.cachedExecutionStreamDepthRatio,
+        totalDropped: this.systemMetrics.opportunitiesDropped,
+        action: 'Execution engine may be overloaded — check consumer health',
+      });
+      return;
+    }
+
     try {
       // Phase 0 instrumentation: stamp coordinator timestamp before serialization
       const timestamps = opportunity.pipelineTimestamps ?? {};
@@ -1709,6 +1728,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
           // Report own health to stream
           await this.reportHealth();
+
+          // P1 Fix: Monitor execution stream depth for backpressure detection.
+          // Cached value is checked in forwardToExecution() to prevent message loss.
+          if (this.streamsClient) {
+            const lag = await this.streamsClient.checkStreamLag(
+              RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
+            );
+            this.cachedExecutionStreamDepthRatio = lag.lagRatio;
+          }
 
         } catch (error) {
           this.logger.error('Metrics update failed', { error });

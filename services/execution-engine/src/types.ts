@@ -1173,10 +1173,17 @@ export const BRIDGE_RECOVERY_MAX_AGE_MS = 72 * 60 * 60 * 1000;
  * The 8-day TTL provides a 1-day buffer beyond the challenge window.
  * Fast bridges (Stargate, Across, etc.) use the default 72h TTL.
  *
+ * P1 Fix: Added protocol-specific entries for bridges with non-standard completion times.
+ * Missing entries fall back to BRIDGE_RECOVERY_MAX_AGE_MS (72h).
+ *
  * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-3
+ * @see docs/reports/EXTENDED_SERVICES_DEEP_ANALYSIS_2026-02-28.md P1-2
  */
 export const BRIDGE_RECOVERY_MAX_AGE_BY_PROTOCOL: Record<string, number> = {
-  native: 8 * 24 * 60 * 60 * 1000, // 8 days for native rollup bridges (7-day challenge + buffer)
+  native: 8 * 24 * 60 * 60 * 1000,          // 8 days — Arbitrum/Optimism 7-day challenge + buffer
+  'scroll-native': 15 * 24 * 60 * 60 * 1000, // 15 days — Scroll 14-day challenge + buffer
+  wormhole: 4 * 24 * 60 * 60 * 1000,         // 4 days — Wormhole guardian quorum can delay
+  'zksync-native': 4 * 24 * 60 * 60 * 1000,  // 4 days — zkSync Era proof generation ~24h + buffer
 };
 
 /**

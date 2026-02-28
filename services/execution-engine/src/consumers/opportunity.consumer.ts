@@ -133,6 +133,18 @@ export class OpportunityConsumer {
   private pendingMessages: Map<string, PendingMessageInfo> = new Map();
   private activeExecutions: Set<string> = new Set();
 
+  // P1 Fix: Content-based dedup to catch same economic opportunity from different detectors
+  // (e.g., cross-chain detector and Solana partition both detecting the same arb).
+  // Maps content hash -> { id, timestamp } of last seen occurrence.
+  // Only rejects when a DIFFERENT ID has the same content hash (different detectors).
+  // Same-ID duplicates are handled by the existing activeExecutions/pendingMessages checks.
+  private readonly recentContentHashes: Map<string, { id: string; timestamp: number }> = new Map();
+  private static readonly CONTENT_DEDUP_WINDOW_MS = 5_000; // 5s dedup window
+  // Types where multiple detectors may independently detect the same economic opportunity
+  private static readonly CONTENT_DEDUP_TYPES = new Set(['cross-chain', 'solana', 'multi-leg']);
+  private static readonly CONTENT_DEDUP_CLEANUP_INTERVAL_MS = 30_000; // 30s cleanup
+  private contentDedupCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(config: OpportunityConsumerConfig) {
     this.logger = config.logger;
     this.streamsClient = config.streamsClient;
@@ -316,6 +328,7 @@ export class OpportunityConsumer {
     });
 
     this.streamConsumer.start();
+    this.startContentDedupCleanup();
     this.logger.info('Stream consumer started with blocking reads', {
       stream: this.consumerGroup.streamName,
       batchSize: this.config.batchSize,
@@ -335,6 +348,9 @@ export class OpportunityConsumer {
    * @see recoverOrphanedMessages() — XCLAIM recovery for orphaned PEL entries
    */
   async stop(): Promise<void> {
+    // Stop content dedup cleanup timer
+    this.stopContentDedupCleanup();
+
     // Stop stream consumer first (no new messages)
     this.streamConsumer = await stopAndNullify(this.streamConsumer);
 
@@ -655,6 +671,23 @@ export class OpportunityConsumer {
         this.stats.opportunitiesRejected++;
         this.logger.debug('Opportunity rejected: already queued or executing', {
           id: opportunity.id,
+        });
+        return 'rejected';
+      }
+
+      // P1 Fix: Content-based dedup catches same economic opportunity from different
+      // detectors (e.g., cross-chain detector and Solana partition both detecting the
+      // same arb with different opportunity IDs). Only applies to multi-detector types
+      // where dual detection is a known risk.
+      if (OpportunityConsumer.CONTENT_DEDUP_TYPES.has(opportunity.type ?? '') &&
+          this.isContentDuplicate(opportunity)) {
+        this.stats.opportunitiesRejected++;
+        this.logger.debug('Opportunity rejected: content-based duplicate', {
+          id: opportunity.id,
+          token0: opportunity.token0,
+          token1: opportunity.token1,
+          buyChain: opportunity.buyChain,
+          sellChain: opportunity.sellChain,
         });
         return 'rejected';
       }
@@ -986,6 +1019,66 @@ export class OpportunityConsumer {
       });
       return { pendingCount: -1, minId: null, maxId: null };
     }
+  }
+
+  // ===========================================================================
+  // Content-Based Dedup (P1 Fix)
+  // ===========================================================================
+
+  /**
+   * Generate a content hash for an opportunity based on its economic properties.
+   * Two opportunities with different IDs but the same economic content (same pair,
+   * same chains, same direction) will produce the same hash.
+   */
+  private getContentHash(opp: ArbitrageOpportunity): string {
+    return `${opp.token0 ?? ''}:${opp.token1 ?? ''}:${opp.buyChain ?? ''}:${opp.sellChain ?? ''}:${opp.buyDex ?? ''}:${opp.sellDex ?? ''}:${opp.type ?? ''}`;
+  }
+
+  /**
+   * Check if this opportunity is a content-based duplicate from a DIFFERENT detector.
+   * Returns true only if the same economic content was seen with a DIFFERENT opportunity ID
+   * within the dedup window. Same-ID duplicates are handled by activeExecutions/pendingMessages.
+   */
+  private isContentDuplicate(opportunity: ArbitrageOpportunity): boolean {
+    const hash = this.getContentHash(opportunity);
+    const existing = this.recentContentHashes.get(hash);
+    const now = Date.now();
+
+    if (existing &&
+        existing.id !== opportunity.id &&
+        (now - existing.timestamp) < OpportunityConsumer.CONTENT_DEDUP_WINDOW_MS) {
+      return true;
+    }
+
+    this.recentContentHashes.set(hash, { id: opportunity.id, timestamp: now });
+    return false;
+  }
+
+  /**
+   * Start periodic cleanup of expired content hashes.
+   * Called from start() to prevent unbounded Map growth.
+   */
+  startContentDedupCleanup(): void {
+    this.contentDedupCleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [hash, entry] of this.recentContentHashes) {
+        if (now - entry.timestamp > OpportunityConsumer.CONTENT_DEDUP_WINDOW_MS) {
+          this.recentContentHashes.delete(hash);
+        }
+      }
+    }, OpportunityConsumer.CONTENT_DEDUP_CLEANUP_INTERVAL_MS);
+  }
+
+  /**
+   * Stop content dedup cleanup timer.
+   * Called from stop() during graceful shutdown.
+   */
+  stopContentDedupCleanup(): void {
+    if (this.contentDedupCleanupTimer) {
+      clearInterval(this.contentDedupCleanupTimer);
+      this.contentDedupCleanupTimer = null;
+    }
+    this.recentContentHashes.clear();
   }
 
   // ===========================================================================

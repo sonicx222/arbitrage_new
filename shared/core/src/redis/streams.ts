@@ -810,16 +810,19 @@ export class RedisStreamsClient {
         }
 
         // P1-5 FIX: Route HMAC-rejected messages to DLQ for forensic analysis
+        // P1 Fix: Use signed xadd() instead of raw client.xadd() so DLQ messages
+        // are HMAC-authenticated and can be verified when read/replayed.
         try {
           for (const rejectedId of rejectedIds) {
-            await this.client.xadd(
+            await this.xadd(
               RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
-              '*',
-              'originalStream', config.streamName,
-              'originalId', rejectedId,
-              'reason', 'hmac_verification_failed',
-              'consumerGroup', config.groupName,
-              'timestamp', String(Date.now()),
+              {
+                originalStream: config.streamName,
+                originalId: rejectedId,
+                reason: 'hmac_verification_failed',
+                consumerGroup: config.groupName,
+                timestamp: Date.now(),
+              },
             );
           }
         } catch (dlqError) {
@@ -1366,7 +1369,10 @@ let initializingPromise: Promise<RedisStreamsClient> | null = null; // Race cond
 
 import { resolveRedisPassword } from './utils';
 import { getErrorMessage } from '../resilience/error-handling';
+import { notifySingletonAccess } from '../singleton-tracking';
+
 export async function getRedisStreamsClient(url?: string, password?: string): Promise<RedisStreamsClient> {
+  notifySingletonAccess();
   // Return existing instance if available
   if (streamsInstance) {
     return streamsInstance;
@@ -1420,8 +1426,10 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     try {
       // P2 Fix L-1: Wire LEGACY_HMAC_COMPAT env var to disable legacy HMAC fallback paths.
       // When false, reduces HMAC computations from up to 4 per message to 1-2.
-      // Set to 'false' once all producers have been updated to include stream name in signatures.
-      const legacyHmacCompat = process.env.LEGACY_HMAC_COMPAT !== 'false';
+      // P1 Fix: Flip default to OFF (explicit opt-in). All producers now include stream name
+      // in signatures (OP-18), so legacy compat is no longer needed by default.
+      // Set to 'true' only during migration from pre-OP-18 producers.
+      const legacyHmacCompat = process.env.LEGACY_HMAC_COMPAT === 'true';
 
       const instance = new RedisStreamsClient(redisUrl, redisPassword, {
         signingKey,
