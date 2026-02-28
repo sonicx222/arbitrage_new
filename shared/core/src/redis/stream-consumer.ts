@@ -98,6 +98,9 @@ export class StreamConsumer {
   private consecutiveErrors = 0;
   private static readonly MAX_ERROR_BACKOFF_MS = 30_000;
   private static readonly BASE_ERROR_DELAY_MS = 100;
+  // P3 Fix DI-7: Track warned schema versions to avoid log spam (once per unknown version)
+  private static readonly warnedSchemaVersions = new Set<string>();
+  private static readonly KNOWN_SCHEMA_VERSION = '1';
   private stats: StreamConsumerStats = {
     messagesProcessed: 0,
     messagesFailed: 0,
@@ -215,6 +218,18 @@ export class StreamConsumer {
 
       for (const message of messages) {
         if (!this.running) break;
+
+        // P3 Fix DI-7: Warn once per unrecognized schema version
+        const sv = (message.data as Record<string, unknown>)?.schemaVersion;
+        if (typeof sv === 'string' && sv !== StreamConsumer.KNOWN_SCHEMA_VERSION
+            && !StreamConsumer.warnedSchemaVersions.has(sv)) {
+          StreamConsumer.warnedSchemaVersions.add(sv);
+          this.config.logger?.warn?.('Unrecognized message schema version — processing anyway', {
+            schemaVersion: sv,
+            knownVersion: StreamConsumer.KNOWN_SCHEMA_VERSION,
+            stream: this.config.config.streamName,
+          });
+        }
 
         try {
           await this.config.handler(message);

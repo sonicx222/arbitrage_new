@@ -284,6 +284,8 @@ export class OpportunityConsumer {
       batchSize: this.config.batchSize,
       blockMs: this.config.blockMs,
       autoAck: false, // Deferred ACK after execution
+      // P3 Fix L-4: Zero inter-poll delay for execution engine (hot-path, <50ms target)
+      interPollDelayMs: 0,
       logger: {
         error: (msg: string, ctx?: Record<string, unknown>) => this.logger.error(msg, ctx),
         debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx),

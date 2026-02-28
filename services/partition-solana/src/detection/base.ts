@@ -128,6 +128,8 @@ export const DEFAULT_DETECTION_CONFIG = {
   crossChainEnabled: true,
   triangularEnabled: true,
   maxTriangularDepth: 3,
+  // P3 Fix CC-8: This 1s expiry is the Solana-specific detection window (fast 400ms blocks).
+  // detector-config.ts:expiryMs (5s) is the data freshness/staleness tolerance, not the same concept.
   opportunityExpiryMs: 1000, // 1 second (Solana is fast)
   priceStalenessMs: 5000, // 5 seconds
   defaultTradeValueUsd: 1000,

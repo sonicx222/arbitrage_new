@@ -122,6 +122,9 @@ export class WebSocketManager {
   /** Slow recovery timer after max reconnect attempts exhausted */
   private recoveryTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
+  // P3 Fix F-6: Track recovery cycles to reduce log spam from dead providers
+  private recoveryCycles = 0;
+  private static readonly RECOVERY_QUIET_THRESHOLD = 5;
   private isConnecting = false;
   private isConnected = false;
   // P2-FIX: Track if reconnection is actively in progress to prevent overlapping attempts
@@ -451,6 +454,7 @@ export class WebSocketManager {
           this.isConnecting = false;
           this.isConnected = true;
           this.reconnectAttempts = 0;
+          this.recoveryCycles = 0; // P3 Fix F-6: Reset recovery cycles on successful connection
 
           // CQ8-ALT: Track connection metrics via health tracker
           this.healthTracker.onConnected();
@@ -1503,7 +1507,15 @@ export class WebSocketManager {
     this.healthTracker.onReconnecting();
 
     if (this.reconnectAttempts >= (this.config.maxReconnectAttempts ?? 10)) {
-      this.logger.error('Max reconnection attempts reached across all URLs — scheduling slow recovery');
+      // P3 Fix F-6: After RECOVERY_QUIET_THRESHOLD cycles, reduce to debug to avoid log spam
+      const isQuiet = this.recoveryCycles >= WebSocketManager.RECOVERY_QUIET_THRESHOLD;
+      if (isQuiet) {
+        this.logger.debug('Max reconnection attempts reached — scheduling slow recovery (quiet mode)', {
+          recoveryCycles: this.recoveryCycles,
+        });
+      } else {
+        this.logger.error('Max reconnection attempts reached across all URLs — scheduling slow recovery');
+      }
       // Emit error for handlers
       this.errorHandlers.forEach(handler => {
         try {
@@ -1517,11 +1529,16 @@ export class WebSocketManager {
       // without causing reconnect storms. Resets attempts and tries again.
       if (!this.recoveryTimer && !this.isDisconnected) {
         const recoveryDelayMs = 60_000;
-        this.logger.info(`Scheduling slow recovery attempt in ${recoveryDelayMs}ms`);
+        if (!isQuiet) {
+          this.logger.info(`Scheduling slow recovery attempt in ${recoveryDelayMs}ms`);
+        }
         this.recoveryTimer = setTimeout(() => {
           this.recoveryTimer = null;
           if (this.isDisconnected) return;
-          this.logger.info('Slow recovery: resetting reconnect attempts and retrying');
+          this.recoveryCycles++;
+          if (!isQuiet) {
+            this.logger.info('Slow recovery: resetting reconnect attempts and retrying');
+          }
           this.reconnectAttempts = 0;
           this.rotationStrategy.switchToNextUrl(); // Try a different URL
           this.scheduleReconnection();

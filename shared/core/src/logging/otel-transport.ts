@@ -370,7 +370,10 @@ export class OtelTransportStream extends Writable {
       attributes,
     };
 
-    // Inject trace context if present in log metadata
+    // Inject trace context if present in log metadata.
+    // P3 Note O-12: Currently requires manual traceId/spanId injection in every log call.
+    // Future improvement: use AsyncLocalStorage for automatic context propagation
+    // so trace context is inherited without explicit passing. @see ADR-002
     const traceId = pinoLog.traceId;
     const spanId = pinoLog.spanId;
 

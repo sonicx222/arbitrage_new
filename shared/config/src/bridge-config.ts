@@ -151,7 +151,7 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'zksync', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 86400, reliability: 0.99 },      // ~24 hours
     { src: 'ethereum', dst: 'linea', feeBps: 0, minFeeUsd: 3, latency: 1200, reliability: 0.99 },        // ~20 min
     { src: 'linea', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 28800, reliability: 0.99 },       // ~8 hours
-    // Scroll native bridge (optimistic rollup, ~7 day withdrawal)
+    // Scroll native bridge (zkRollup, ~7 day withdrawal — conservative estimate)
     { src: 'ethereum', dst: 'scroll', feeBps: 0, minFeeUsd: 3, latency: 1200, reliability: 0.99 },       // ~20 min deposit
     { src: 'scroll', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 604800, reliability: 0.99 },     // ~7 days withdrawal
     // Blast native bridge (optimistic rollup, ~14 day withdrawal)

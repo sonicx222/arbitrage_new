@@ -138,6 +138,8 @@ export class FastLaneConsumer {
       batchSize: this.config.batchSize,
       blockMs: this.config.blockMs,
       autoAck: true, // Immediate ACK — fast lane is best-effort
+      // P3 Fix L-4: Zero inter-poll delay for fast lane (latency-sensitive)
+      interPollDelayMs: 0,
       logger: {
         error: (msg: string, ctx?: Record<string, unknown>) => this.logger.error(msg, ctx),
         debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx),
