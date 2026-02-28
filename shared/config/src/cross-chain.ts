@@ -350,7 +350,8 @@ export const DEFAULT_QUOTE_TOKENS: Readonly<Record<string, string>> = {
  * @returns The default quote token symbol for that chain
  */
 export function getDefaultQuoteToken(chain: string): string {
-  return DEFAULT_QUOTE_TOKENS[chain.toLowerCase()] || 'USDC';
+  // P3-23 FIX: Use ?? for consistency with project convention (|| treats '' as falsy)
+  return DEFAULT_QUOTE_TOKENS[chain.toLowerCase()] ?? 'USDC';
 }
 
 // =============================================================================

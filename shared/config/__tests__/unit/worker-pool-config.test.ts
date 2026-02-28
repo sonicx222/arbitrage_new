@@ -45,6 +45,7 @@ describe('Worker Pool Configuration', () => {
     delete process.env.FLY_APP_NAME;
     delete process.env.RAILWAY_ENVIRONMENT;
     delete process.env.RENDER_SERVICE_NAME;
+    delete process.env.KOYEB_SERVICE_NAME;
     delete process.env.CONSTRAINED_MEMORY;
     delete process.env.WORKER_POOL_SIZE;
     delete process.env.WORKER_POOL_MAX_QUEUE_SIZE;
@@ -85,6 +86,14 @@ describe('Worker Pool Configuration', () => {
       expect(config.IS_RENDER).toBe(true);
       expect(config.IS_CONSTRAINED_HOST).toBe(true);
       expect(config.PLATFORM_NAME).toBe('render');
+    });
+
+    // P3-25: Added Koyeb platform detection
+    it('should detect Koyeb via KOYEB_SERVICE_NAME', () => {
+      const config = importWithEnv({ KOYEB_SERVICE_NAME: 'my-service' });
+      expect(config.IS_KOYEB).toBe(true);
+      expect(config.IS_CONSTRAINED_HOST).toBe(true);
+      expect(config.PLATFORM_NAME).toBe('koyeb');
     });
 
     it('should detect constrained memory via CONSTRAINED_MEMORY=true', () => {

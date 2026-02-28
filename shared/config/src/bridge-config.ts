@@ -546,3 +546,39 @@ export function selectOptimalBridgeFast(
   const options = getAllBridgeOptionsFast(sourceChain, targetChain);
   return scoreBridgeOptions(options, tradeSizeUsd, urgency);
 }
+
+// =============================================================================
+// P3-26: BRIDGE ROUTE SYMMETRY VALIDATION
+// Detects one-directional routes (A→B without B→A) at startup
+// =============================================================================
+
+/**
+ * Validate that bridge routes are symmetric (A→B implies B→A exists).
+ * One-directional routes may indicate missing data — the return leg of
+ * a cross-chain arbitrage would have no cost estimate.
+ *
+ * @returns Array of asymmetric route warnings (empty = all routes symmetric)
+ */
+export function validateRouteSymmetry(): string[] {
+  const warnings: string[] = [];
+  const routeSet = new Set<string>();
+
+  // Build set of all routes (excluding native bridges which are intentionally asymmetric in latency)
+  for (const config of BRIDGE_COSTS) {
+    if (config.bridge === 'native') continue; // Native bridges have different L1→L2 vs L2→L1 characteristics
+    routeSet.add(`${config.sourceChain}:${config.targetChain}:${config.bridge}`);
+  }
+
+  // Check for missing reverse routes
+  for (const config of BRIDGE_COSTS) {
+    if (config.bridge === 'native') continue;
+    const reverseKey = `${config.targetChain}:${config.sourceChain}:${config.bridge}`;
+    if (!routeSet.has(reverseKey)) {
+      warnings.push(
+        `${config.bridge}: ${config.sourceChain}→${config.targetChain} exists but reverse route missing`
+      );
+    }
+  }
+
+  return warnings;
+}

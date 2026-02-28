@@ -29,7 +29,9 @@ import { safeParseInt } from './utils/env-parsing';
 export const IS_FLY_IO = process.env.FLY_APP_NAME !== undefined;
 export const IS_RAILWAY = process.env.RAILWAY_ENVIRONMENT !== undefined;
 export const IS_RENDER = process.env.RENDER_SERVICE_NAME !== undefined;
-export const IS_CONSTRAINED_HOST = IS_FLY_IO || IS_RAILWAY || IS_RENDER ||
+// P3-25 FIX: Added Koyeb detection (aligned with isProduction in service-config.ts)
+export const IS_KOYEB = process.env.KOYEB_SERVICE_NAME !== undefined;
+export const IS_CONSTRAINED_HOST = IS_FLY_IO || IS_RAILWAY || IS_RENDER || IS_KOYEB ||
   process.env.CONSTRAINED_MEMORY === 'true';
 
 /**
@@ -38,6 +40,7 @@ export const IS_CONSTRAINED_HOST = IS_FLY_IO || IS_RAILWAY || IS_RENDER ||
 export const PLATFORM_NAME = IS_FLY_IO ? 'fly.io'
   : IS_RAILWAY ? 'railway'
   : IS_RENDER ? 'render'
+  : IS_KOYEB ? 'koyeb'
   : IS_CONSTRAINED_HOST ? 'constrained'
   : 'standard';
 

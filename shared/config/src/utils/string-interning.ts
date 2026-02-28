@@ -197,11 +197,17 @@ export function internTokenSymbolUpper(symbol: string): string {
 const DEX_NAME_POOL = createStringPool(100);
 
 // Pre-intern common DEX names
+// P3-24 FIX: Expanded to cover all DEXs from dex-factories/index.ts
 const COMMON_DEXES = [
-  'uniswap_v2', 'uniswap_v3', 'sushiswap', 'pancakeswap_v2', 'pancakeswap_v3',
+  'uniswap_v2', 'uniswap_v3', 'sushiswap', 'sushiswap_v3', 'pancakeswap_v2', 'pancakeswap_v3',
   'quickswap', 'quickswap_v3', 'camelot', 'camelot_v3', 'velodrome', 'aerodrome',
   'trader_joe', 'trader_joe_v2', 'balancer_v2', 'curve', 'gmx',
-  'raydium', 'orca', 'jupiter',
+  'spookyswap', 'spiritswap', 'syncswap', 'mute', 'baseswap', 'thena',
+  'zyberswap', 'ramses', 'chronos', 'biswap', 'apeswap', 'pangolin',
+  'equalizer', 'beethoven_x', 'velocore', 'spacefi', 'maverick',
+  'thruster_v2', 'thruster_v3', 'bladeswap', 'fenix_finance', 'ambient',
+  'merchant_moe', 'agni_finance', 'fusionx', 'kim_exchange', 'supswap', 'swapmode',
+  'raydium', 'raydium-clmm', 'orca', 'jupiter', 'meteora', 'phoenix', 'lifinity',
 ];
 
 for (const dex of COMMON_DEXES) {

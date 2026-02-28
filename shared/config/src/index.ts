@@ -301,6 +301,7 @@ export {
   // Phase 3: Dynamic bridge selection (multi-factor scoring)
   selectOptimalBridge,
   selectOptimalBridgeFast,
+  validateRouteSymmetry,
   BridgeUrgency,
   OptimalBridgeResult,
 } from './bridge-config';

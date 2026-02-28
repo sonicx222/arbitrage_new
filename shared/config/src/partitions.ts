@@ -662,6 +662,12 @@ export function getChainsFromEnv(): string[] {
  *
  * @see ADR-008: Phase metrics and targets
  */
+/**
+ * P3-29 NOTE: `current` values are computed dynamically from CHAINS/DEXES/CORE_TOKENS
+ * and always reflect the live config. `targets` are planning estimates — review when
+ * adding chains or DEXs to ensure they still represent meaningful milestones.
+ * Last calibrated: 2026-02-28 (15 chains, 72 DEXs operational).
+ */
 export const PHASE_METRICS = {
   current: {
     phase: 1,
