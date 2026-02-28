@@ -1846,6 +1846,12 @@ export type { StandbyBaseConfig } from './cross-region/bootstrap';
 export { disconnectWithTimeout } from './utils/disconnect-utils';
 
 // =============================================================================
+// 14.2 URL Utilities - API Key Masking
+// =============================================================================
+
+export { maskUrlApiKeys } from './utils/url-utils';
+
+// =============================================================================
 // 14.1 Common Validators (Lightweight validation utilities)
 // =============================================================================
 

@@ -26,7 +26,7 @@
  */
 
 import { PairCreatedEvent } from '@arbitrage/core/factory-subscription';
-import { WebSocketManager, WebSocketConfig, FactorySubscriptionService, FactoryWebSocketManager } from '@arbitrage/core';
+import { WebSocketManager, WebSocketConfig, FactorySubscriptionService, FactoryWebSocketManager, maskUrlApiKeys } from '@arbitrage/core';
 
 import {
   EVENT_SIGNATURES,
@@ -209,13 +209,15 @@ export class SubscriptionManager {
         const result = toWebSocketUrl(chainConfig.rpcUrl);
         primaryWsUrl = result.url;
         if (result.converted) {
+          // FIX P1-6: Mask API keys in log output
           logger.warn('Converting RPC URL to WebSocket URL', {
-            original: result.originalUrl,
-            converted: result.url
+            original: maskUrlApiKeys(result.originalUrl ?? ''),
+            converted: maskUrlApiKeys(result.url)
           });
         }
       } catch (error) {
-        throw new Error(`No valid WebSocket URL available for chain ${chainId}. wsUrl: ${chainConfig.wsUrl}, rpcUrl: ${chainConfig.rpcUrl}`);
+        // FIX P1-6: Mask API keys in error messages to prevent credential leakage
+        throw new Error(`No valid WebSocket URL available for chain ${chainId}. wsUrl: ${maskUrlApiKeys(chainConfig.wsUrl ?? '')}, rpcUrl: ${maskUrlApiKeys(chainConfig.rpcUrl)}`);
       }
     }
 

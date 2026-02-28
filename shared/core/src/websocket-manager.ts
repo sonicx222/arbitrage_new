@@ -17,6 +17,7 @@ import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
 import { ProviderRotationStrategy } from './rpc/provider-rotation-strategy';
 import { ProviderHealthTracker } from './monitoring/provider-health-tracker';
 import { getErrorMessage } from './resilience/error-handling';
+import { maskUrlApiKeys } from './utils/url-utils';
 export interface WebSocketConfig {
   url: string;
   /** Fallback URLs to try if primary URL fails */
@@ -432,10 +433,8 @@ export class WebSocketManager {
       try {
         const currentUrl = this.getCurrentUrl();
         const connectionStartTime = Date.now(); // S3.3: Track connection time for health scoring
-        // FIX 2.1: Mask API keys in log string interpolation.
-        // Pino redaction only handles structured fields ({ url: ... }), not template literals.
-        // Use same regex pattern as ProviderHealthScorer.maskUrl() for consistency.
-        const maskedUrl = currentUrl.replace(/\/([a-zA-Z0-9_-]{12,})/g, (_, key) => '/' + key.slice(0, 5) + '...');
+        // FIX 2.1 + P1-6: Mask API keys using shared utility
+        const maskedUrl = maskUrlApiKeys(currentUrl);
         this.logger.info(`Connecting to WebSocket: ${maskedUrl}${this.rotationStrategy.getCurrentUrlIndex() > 0 ? ' (fallback)' : ''}`);
 
         this.ws = new WebSocket(currentUrl);
@@ -800,7 +799,8 @@ export class WebSocketManager {
       reconnectAttempts: this.reconnectAttempts,
       subscriptions: this.subscriptions.size,
       readyState: this.ws?.readyState,
-      currentUrl: this.getCurrentUrl(),
+      // FIX P1-6: Mask API keys to prevent credential leakage in health endpoints/logs
+      currentUrl: maskUrlApiKeys(this.getCurrentUrl()),
       currentUrlIndex: this.rotationStrategy.getCurrentUrlIndex(),
       totalUrls: this.rotationStrategy.getTotalUrls()
     };
@@ -1022,7 +1022,8 @@ export class WebSocketManager {
             this.emit('dataGap', {
               chainId: this.chainId,
               ...gap,
-              url: this.getCurrentUrl()
+              // FIX P1-6: Mask API keys in emitted events
+              url: maskUrlApiKeys(this.getCurrentUrl())
             });
           }
           this.healthTracker.qualityMetrics.lastBlockNumber = blockNumber;
@@ -1333,7 +1334,8 @@ export class WebSocketManager {
         this.emit('dataGap', {
           chainId: this.chainId,
           ...gapInfo,
-          url: this.getCurrentUrl()
+          // FIX P1-6: Mask API keys in emitted events
+          url: maskUrlApiKeys(this.getCurrentUrl())
         });
 
         return gapInfo;
@@ -1462,7 +1464,8 @@ export class WebSocketManager {
         // Stale connection callback
         this.emit('staleConnection', {
           chainId: this.chainId,
-          url: this.getCurrentUrl(),
+          // FIX P1-6: Mask API keys in emitted events
+          url: maskUrlApiKeys(this.getCurrentUrl()),
           messageGapMs: this.healthTracker.qualityMetrics.messageGapMs
         });
 
@@ -1557,7 +1560,7 @@ export class WebSocketManager {
     // Use exponential backoff with jitter for reconnection delay
     const delay = this.rotationStrategy.calculateReconnectDelay(this.reconnectAttempts);
 
-    this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts} to ${this.getCurrentUrl()} in ${delay}ms (exponential backoff)`);
+    this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts} to ${maskUrlApiKeys(this.getCurrentUrl())} in ${delay}ms (exponential backoff)`);
 
     this.reconnectTimer = setTimeout(async () => {
       // P2-FIX: Clear timer reference immediately and set reconnecting flag
@@ -1576,7 +1579,7 @@ export class WebSocketManager {
         this.isReconnecting = false;
       } catch (error) {
         this.isReconnecting = false;
-        this.logger.error(`Reconnection to ${this.getCurrentUrl()} failed`, { error });
+        this.logger.error(`Reconnection to ${maskUrlApiKeys(this.getCurrentUrl())} failed`, { error });
 
         // P2-FIX: Only schedule next attempt if not disconnected
         if (!this.isDisconnected) {
