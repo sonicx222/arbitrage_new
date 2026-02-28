@@ -162,7 +162,11 @@ jest.mock('@arbitrage/config', () => ({
   EVENT_SIGNATURES: {
     SYNC: '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1',
     SWAP_V2: '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822',
+    SWAP_V3: '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67',
+    CURVE_TOKEN_EXCHANGE: '0x8b3e96f2b889fa771c53c981b40daf005f63f637f1869f707052d15a3dd97140',
+    BALANCER_SWAP: '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b',
   },
+  isVaultModelDex: jest.fn().mockReturnValue(false),
   DETECTOR_CONFIG: {
     ethereum: { minProfitPercentage: 0.003 },
     bsc: { minProfitPercentage: 0.005 },

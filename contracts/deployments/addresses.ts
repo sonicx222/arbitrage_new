@@ -176,6 +176,14 @@ export const AAVE_V3_POOL_ADDRESSES = AAVE_V3_POOLS;
  *
  * **Future Enhancement**: Auto-generate this file from registry.json
  */
+// P0-2 DEPLOYMENT REQUIRED:
+// Ethereum: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.ethereum
+// Polygon: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.polygon
+// Arbitrum: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.arbitrum
+// Base: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.base
+// Optimism: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.optimism
+// Avalanche: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.avalanche
+// Scroll: Deploy FlashLoanArbitrage.sol (Aave V3) → set FLASH_LOAN_CONTRACT_ADDRESSES.scroll
 export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
   arbitrumSepolia: '0xE5b26749430ed50917b75689B654a4C5808b23FB',
@@ -210,6 +218,8 @@ export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
  * Deploy: `npx hardhat run scripts/deploy-pancakeswap.ts --network bsc`
  * @see contracts/src/PancakeSwapFlashArbitrage.sol
  */
+// P0-2 DEPLOYMENT REQUIRED:
+// BSC: Deploy PancakeSwapFlashArbitrage.sol → set PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES.bsc
 export const PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
 };
@@ -227,6 +237,8 @@ export const PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
  * Deploy: `npx hardhat run scripts/deploy-balancer.ts --network ethereum`
  * @see contracts/src/BalancerV2FlashArbitrage.sol
  */
+// P0-2 DEPLOYMENT REQUIRED:
+// Fantom: Deploy BalancerV2FlashArbitrage.sol → set BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES.fantom
 export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
 };
@@ -243,6 +255,8 @@ export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
  * Deploy: `npx hardhat run scripts/deploy-syncswap.ts --network zksync`
  * @see contracts/src/SyncSwapFlashArbitrage.sol
  */
+// P0-2 DEPLOYMENT REQUIRED:
+// zkSync: Deploy SyncSwapFlashArbitrage.sol → set SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES.zksync
 export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
 };
@@ -350,6 +364,50 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   linea: [
     '0x80e38291e06339d10AAB483C65695D004dBD5C69', // SyncSwap Router (V2-compatible)
   ],
+};
+
+// =============================================================================
+// V3 Approved DEX Routers
+// =============================================================================
+
+/**
+ * V3-style DEX router addresses by chain.
+ *
+ * These routers use `exactInputSingle` (Uniswap V3 ISwapRouter interface) instead of
+ * the V2-style `swapExactTokensForTokens`. They require separate encoding via V3SwapAdapter.
+ *
+ * Structure: Record<chain, Record<dexName, routerAddress>>
+ *
+ * **Usage**:
+ * ```typescript
+ * import { V3_APPROVED_ROUTERS, getV3RouterAddress } from '../deployments/addresses';
+ *
+ * const router = getV3RouterAddress('ethereum', 'uniswap_v3');
+ * // '0xE592427A0AEce92De3Edee1F18E0157C05861564'
+ * ```
+ *
+ * @see https://docs.uniswap.org/contracts/v3/reference/periphery/interfaces/ISwapRouter
+ * @see services/execution-engine/src/strategies/v3-swap-adapter.ts
+ */
+export const V3_APPROVED_ROUTERS: Record<string, Record<string, string>> = {
+  bsc: {
+    pancakeswap_v3: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4', // PancakeSwap V3 SwapRouter
+  },
+  polygon: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter
+  },
+  avalanche: {
+    trader_joe_v2: '0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30', // Trader Joe LB Router
+  },
+  arbitrum: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter
+  },
+  base: {
+    uniswap_v3: '0x2626664c2603336E57B271c5C0b26F421741e481', // Uniswap V3 SwapRouter (Base)
+  },
+  ethereum: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter
+  },
 };
 
 // =============================================================================
@@ -607,6 +665,21 @@ const AAVE_POOL_MAP = buildNormalizedMap(
   (addr): addr is string => !!addr
 );
 
+/**
+ * V3 Approved Routers Map for O(1) lookups by chain + dex name.
+ * Map<normalizedChain, Map<dexName, routerAddress>>
+ * Keys are normalized to canonical chain names.
+ */
+const V3_APPROVED_ROUTERS_MAP = new Map(
+  Object.entries(V3_APPROVED_ROUTERS)
+    .map(([chain, dexRouters]) => {
+      const dexMap = new Map(
+        Object.entries(dexRouters).map(([dex, addr]) => [dex.toLowerCase(), addr])
+      );
+      return [normalizeChainName(chain), dexMap] as const;
+    })
+);
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -755,6 +828,30 @@ export function tryGetQuoterAddress(chain: string): string | undefined {
   return DEPLOYED_QUOTERS_MAP.get(normalized);
 }
 
+/**
+ * Get the V3 router address for a DEX on a chain.
+ * Uses pre-built Map for O(1) lookup performance.
+ * Handles chain name aliases (e.g., 'zksync-mainnet' -> 'zksync').
+ *
+ * @param chain - Chain name (accepts aliases)
+ * @param dexName - DEX name (case-insensitive, e.g., 'uniswap_v3')
+ * @returns Router address or undefined if not configured
+ *
+ * @example
+ * ```typescript
+ * const router = getV3RouterAddress('ethereum', 'uniswap_v3');
+ * // '0xE592427A0AEce92De3Edee1F18E0157C05861564'
+ * ```
+ */
+export function getV3RouterAddress(chain: string, dexName: string): string | undefined {
+  const normalized = normalizeChainName(chain);
+  const chainMap = V3_APPROVED_ROUTERS_MAP.get(normalized);
+  if (!chainMap) {
+    return undefined;
+  }
+  return chainMap.get(dexName.toLowerCase().trim());
+}
+
 // =============================================================================
 // Module-Load Validation (Fail Fast)
 // =============================================================================
@@ -779,6 +876,13 @@ if (process.env.NODE_ENV !== 'test') {
 
     // Validate router addresses
     validateRouterAddresses(APPROVED_ROUTERS, 'APPROVED_ROUTERS');
+
+    // Validate V3 router addresses
+    for (const [chain, dexRouters] of Object.entries(V3_APPROVED_ROUTERS)) {
+      for (const [dex, address] of Object.entries(dexRouters)) {
+        validateAddressFormat(address, `V3_APPROVED_ROUTERS.${chain}.${dex}`);
+      }
+    }
 
     // Validate token addresses
     for (const [chain, tokens] of Object.entries(TOKEN_ADDRESSES)) {

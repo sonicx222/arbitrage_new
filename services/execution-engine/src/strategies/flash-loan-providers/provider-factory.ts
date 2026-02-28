@@ -108,6 +108,55 @@ export class FlashLoanProviderFactory {
     if (Object.keys(config.contractAddresses).length === 0) {
       this.logger.warn('[WARN_CONFIG] No FlashLoanArbitrage contract addresses configured');
     }
+
+    // P0-2: Validate deployment readiness at startup
+    this.validateDeploymentReadiness();
+  }
+
+  /**
+   * Validate that all configured flash loan providers have corresponding
+   * deployed contract addresses. Logs warnings for chains with providers
+   * configured but no contract deployed, since opportunities on those
+   * chains will not be executable.
+   *
+   * Called once at startup to surface deployment gaps early.
+   *
+   * @see contracts/deployments/addresses.ts - Deployment requirement comments
+   */
+  private validateDeploymentReadiness(): void {
+    const configuredChains = Object.keys(FLASH_LOAN_PROVIDERS);
+    const chainsWithMissingContracts: string[] = [];
+
+    for (const chain of configuredChains) {
+      const contractAddress = this.config.contractAddresses[chain];
+      if (!isValidContractAddress(contractAddress)) {
+        const protocol = FLASH_LOAN_PROVIDERS[chain].protocol;
+        this.logger.warn(
+          `Flash loan contracts not deployed for ${chain} — opportunities on this chain will not execute`,
+          {
+            chain,
+            protocol,
+            action: 'Deploy the appropriate flash loan contract and add the address to contractAddresses config',
+          },
+        );
+        chainsWithMissingContracts.push(chain);
+      }
+    }
+
+    if (chainsWithMissingContracts.length > 0) {
+      this.logger.warn(
+        `[WARN_DEPLOYMENT] ${chainsWithMissingContracts.length}/${configuredChains.length} chains have flash loan providers configured but no contract deployed`,
+        {
+          chainsWithMissingContracts: chainsWithMissingContracts.join(', '),
+          totalConfigured: String(configuredChains.length),
+          totalMissing: String(chainsWithMissingContracts.length),
+        },
+      );
+    } else if (configuredChains.length > 0) {
+      this.logger.info(
+        `All ${configuredChains.length} configured flash loan chains have deployed contracts`,
+      );
+    }
   }
 
   /**
