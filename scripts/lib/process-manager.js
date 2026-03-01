@@ -55,7 +55,9 @@ function execCommand(cmd) {
 /**
  * Kill a process and its entire process tree (cross-platform).
  *
- * On Windows: taskkill /F /T already kills the full tree.
+ * On Windows (F8-FIX): Two-phase graceful shutdown.
+ *   Phase 1: process.kill(pid, 'SIGTERM') triggers Node.js signal handlers.
+ *   Phase 2: taskkill /F /T force-kills the process tree if still running.
  * On Unix: Services are spawned with detached:true, creating new process groups.
  *   Phase 1: SIGTERM to the process group (graceful shutdown).
  *   Phase 2: SIGKILL to the process group if SIGTERM didn't work within timeout.
@@ -84,7 +86,29 @@ async function killProcess(pid, options = {}) {
   const { graceful = true, gracefulTimeoutMs = 3000 } = options;
 
   if (isWindows()) {
-    // taskkill /F /T already kills the process tree
+    // F8-FIX: Two-phase kill on Windows (graceful then force).
+    // Phase 1: process.kill(pid, 'SIGTERM') triggers Node.js SIGTERM handlers
+    // (setupServiceShutdown / setupProcessHandlers) for graceful cleanup.
+    // Phase 2: taskkill /F /T force-kills if graceful shutdown didn't complete.
+    if (graceful) {
+      try {
+        process.kill(safePid, 'SIGTERM');
+      } catch {
+        // Process may already be gone — fall through to force kill
+      }
+
+      // Wait for graceful shutdown with polling
+      const pollInterval = 200;
+      const maxPolls = Math.ceil(gracefulTimeoutMs / pollInterval);
+      for (let i = 0; i < maxPolls; i++) {
+        await new Promise((r) => setTimeout(r, pollInterval));
+        if (!(await processExists(safePid))) {
+          return true;
+        }
+      }
+    }
+
+    // Phase 2: Force kill the process tree
     return new Promise((resolve) => {
       exec(`taskkill /PID ${safePid} /F /T 2>nul`, (error) => resolve(!error));
     });

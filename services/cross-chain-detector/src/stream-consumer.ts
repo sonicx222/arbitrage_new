@@ -430,9 +430,14 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
         for (const data of items) {
           if (!validator(data)) {
             const reason = diagnosticFn ? diagnosticFn(data) : undefined;
+            // P2 Fix LW-024: Include data sample in rejection log for diagnostics
+            const dataSample = data && typeof data === 'object'
+              ? { chain: (data as Record<string, unknown>).chain, dex: (data as Record<string, unknown>).dex, price: (data as Record<string, unknown>).price }
+              : undefined;
             logger.warn(`Skipping invalid ${errorLabel} message`, {
               messageId: message.id,
               ...(reason ? { reason } : {}),
+              ...(dataSample ? { dataSample } : {}),
             });
             continue;
           }

@@ -63,7 +63,9 @@ const mockStreamsClient = {
 
 jest.mock('../../../src/redis/streams', () => ({
   getRedisStreamsClient: jest.fn(),
-  RedisStreamsClient: { STREAMS: {} },
+  RedisStreamsClient: { STREAMS: {
+    SERVICE_DEGRADATION: 'stream:service-degradation',
+  } },
 }));
 
 // Mock dual-publish utility

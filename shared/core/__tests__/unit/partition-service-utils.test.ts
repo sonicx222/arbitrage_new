@@ -374,7 +374,8 @@ describe('Partition Service Utilities', () => {
       });
     });
 
-    it('should log info on opportunity', () => {
+    it('should log debug on opportunity', () => {
+      // P2-1 FIX: Opportunity detection logs reduced from INFO to DEBUG
       setupDetectorEventHandlers(
         mockDetector,
         logger as unknown as PartitionLogger,
@@ -390,9 +391,9 @@ describe('Partition Service Utilities', () => {
         profitPercentage: 5.00
       });
 
-      expect(logger.hasLogMatching('info', 'Arbitrage opportunity detected')).toBe(true);
-      const infoLogs = logger.getLogs('info');
-      const oppLog = infoLogs.find(log => log.msg.includes('Arbitrage opportunity'));
+      expect(logger.hasLogMatching('debug', 'Arbitrage opportunity detected')).toBe(true);
+      const debugLogs = logger.getLogs('debug');
+      const oppLog = debugLogs.find(log => log.msg.includes('Arbitrage opportunity'));
       expect(oppLog?.meta).toMatchObject({
         partition: 'test-partition',
         id: 'opp-1',

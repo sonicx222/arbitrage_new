@@ -553,8 +553,10 @@ export class MultiLegPathFinder {
     // Complete path including return to start
     const completePath = [...state.tokens, startToken];
 
-    // profitPercentage uses netProfit (consistent with cross-dex-triangular-arbitrage)
-    const profitPercentage = netProfit;
+    // F2 FIX: profitPercentage must be a percentage value (netProfit * 100),
+    // consistent with simple-arbitrage-detector and solana-arbitrage-detector.
+    // Previously used raw decimal ratio which was 100x too small.
+    const profitPercentage = netProfit * 100;
 
     return {
       id: `multi_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,

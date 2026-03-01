@@ -27,7 +27,7 @@ import { CHAINS } from '@arbitrage/config';
 import { ChainDetectorInstance } from './chain-instance';
 import type { ChainStats } from './types';
 import { Logger } from './types';
-import { CHAIN_STOP_TIMEOUT_MS } from './constants';
+import { CHAIN_STOP_TIMEOUT_MS, CHAIN_START_TIMEOUT_MS } from './constants';
 
 // =============================================================================
 // Types
@@ -246,10 +246,18 @@ export function createChainInstanceManager(
 
       chainInstances.set(chainId, instance);
 
-      // Start instance in parallel
-      const startPromise = instance
-        .start()
+      // FIX #4: Per-chain start timeout — prevents a single slow chain
+      // (e.g., GMX on Avalanche, Beethoven X on Fantom) from blocking
+      // the entire partition. Chains that timeout are skipped gracefully.
+      let startTimeoutId: NodeJS.Timeout;
+      const startPromise = Promise.race([
+        instance.start(),
+        new Promise<never>((_, reject) => {
+          startTimeoutId = setTimeout(() => reject(new Error(`Chain ${chainId} start timed out after ${CHAIN_START_TIMEOUT_MS}ms`)), CHAIN_START_TIMEOUT_MS);
+        }),
+      ])
         .then(() => {
+          clearTimeout(startTimeoutId);
           if (instance.isConnected()) {
             startedChains.push(chainId);
           } else {
@@ -259,6 +267,7 @@ export function createChainInstanceManager(
           }
         })
         .catch((error) => {
+          clearTimeout(startTimeoutId);
           // FIX B1: Remove failed instance from map to prevent stale entries
           chainInstances.delete(chainId);
           logger.error(`Failed to start chain instance: ${chainId}`, {

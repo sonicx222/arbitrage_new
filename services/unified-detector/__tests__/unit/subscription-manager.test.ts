@@ -34,12 +34,16 @@ const MockFactorySubscriptionService = jest.fn().mockImplementation(() => mockFa
 jest.mock('@arbitrage/core', () => ({
   WebSocketManager: MockWebSocketManager,
   FactorySubscriptionService: MockFactorySubscriptionService,
+  maskUrlApiKeys: jest.fn((url: string) => url), // Pass-through for tests
 }));
 
 jest.mock('@arbitrage/config', () => ({
   EVENT_SIGNATURES: {
     SYNC: '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1',
     SWAP_V2: '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822',
+    SWAP_V3: '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67',
+    CURVE_TOKEN_EXCHANGE: '0x8b3e96f2b889fa771c53c981b40daf005f63f637f1869f707052d15a3dd97140',
+    BALANCER_SWAP: '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b',
   },
   getAllFactoryAddresses: jest.fn().mockReturnValue(['0xFactory1', '0xFactory2']),
 }));
@@ -111,6 +115,9 @@ function createMockCallbacks(): SubscriptionCallbacks {
     onConnected: jest.fn(),
     onSyncEvent: jest.fn(),
     onSwapEvent: jest.fn(),
+    onSwapV3Event: jest.fn(),
+    onCurveTokenExchangeEvent: jest.fn(),
+    onBalancerSwapEvent: jest.fn(),
     onNewBlock: jest.fn(),
     onPairCreated: jest.fn(),
   };
@@ -442,15 +449,15 @@ describe('SubscriptionManager', () => {
       expect(mockFactoryServiceInstance.subscribeToFactories).toHaveBeenCalled();
     });
 
-    it('should subscribe to Sync/Swap/newHeads for existing pairs', async () => {
+    it('should subscribe to Sync/SwapV2/SwapV3/Curve/Balancer/newHeads for existing pairs', async () => {
       const config = createDefaultConfig();
       const manager = new SubscriptionManager(config);
       const callbacks = createMockCallbacks();
 
       await manager.initialize(callbacks, ['0xpair1', '0xpair2']);
 
-      // 3 subscriptions: Sync, Swap, newHeads
-      expect(mockWsManagerInstance.subscribe).toHaveBeenCalledTimes(3);
+      // 6 subscriptions: Sync, SwapV2, SwapV3, Curve, Balancer, newHeads
+      expect(mockWsManagerInstance.subscribe).toHaveBeenCalledTimes(6);
     });
 
     it('should only subscribe to newHeads when no pair addresses', async () => {
@@ -512,7 +519,7 @@ describe('SubscriptionManager', () => {
       expect(result.useFactoryMode).toBe(false);
     });
 
-    it('should subscribe to Sync/Swap/newHeads in legacy mode', async () => {
+    it('should subscribe to Sync/SwapV2/SwapV3/Curve/Balancer/newHeads in legacy mode', async () => {
       const config = createDefaultConfig({
         subscriptionConfig: {
           useFactorySubscriptions: false,
@@ -525,7 +532,8 @@ describe('SubscriptionManager', () => {
 
       await manager.initialize(callbacks, ['0xpair1']);
 
-      expect(mockWsManagerInstance.subscribe).toHaveBeenCalledTimes(3);
+      // 6 subscriptions: Sync, SwapV2, SwapV3, Curve, Balancer, newHeads
+      expect(mockWsManagerInstance.subscribe).toHaveBeenCalledTimes(6);
     });
 
     it('should set subscription stats for legacy mode', async () => {
@@ -542,7 +550,7 @@ describe('SubscriptionManager', () => {
       const result = await manager.initialize(callbacks, ['0xpair1', '0xpair2']);
 
       expect(result.subscriptionStats.mode).toBe('legacy');
-      expect(result.subscriptionStats.legacySubscriptionCount).toBe(3);
+      expect(result.subscriptionStats.legacySubscriptionCount).toBe(6); // Sync, SwapV2, SwapV3, Curve, Balancer, newHeads
       expect(result.subscriptionStats.factorySubscriptionCount).toBe(0);
       expect(result.subscriptionStats.monitoredPairs).toBe(2);
       expect(result.subscriptionStats.rpcReductionRatio).toBe(1);

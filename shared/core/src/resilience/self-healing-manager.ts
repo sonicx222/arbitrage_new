@@ -747,7 +747,7 @@ export class SelfHealingManager {
     };
 
     await this.dualPublish(
-      'stream:service-degradation',  // Primary: Redis Streams
+      RedisStreamsClient.STREAMS.SERVICE_DEGRADATION,  // Primary: Redis Streams
       'service-degradation',  // Secondary: Pub/Sub
       degradationMessage
     );

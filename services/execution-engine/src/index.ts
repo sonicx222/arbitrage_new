@@ -13,10 +13,11 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
-// Fix 1: Increase max listeners to prevent MaxListenersExceededWarning.
-// The execution engine legitimately registers 11+ exit listeners across Redis clients,
+// P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
+// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+// The execution engine registers 11+ exit listeners across Redis clients,
 // service-bootstrap signal handlers, and graceful shutdown handlers.
-process.setMaxListeners(20);
+process.setMaxListeners(25);
 
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { ExecutionEngineService, SimulationConfig } from './engine';
@@ -124,6 +125,9 @@ let redisHealthCheckInterval: NodeJS.Timeout | null = null;
 // P1-6: Cached DLQ length for health monitoring
 let cachedDlqLength = 0;
 const DLQ_WARNING_THRESHOLD = 100;
+// P1-5 FIX: Track consecutive DLQ threshold breaches for escalation
+let dlqEscalationCount = 0;
+const DLQ_ESCALATION_AFTER = 6; // Escalate to error after 6 consecutive breaches (~60s)
 // P2-14: Consumer lag alerting thresholds
 let cachedConsumerLag = { pendingCount: 0, minId: null as string | null, maxId: null as string | null };
 const CONSUMER_LAG_WARNING_THRESHOLD = 50;
@@ -135,11 +139,27 @@ function startRedisHealthMonitor(engine: ExecutionEngineService): void {
     // P1-6: Monitor DLQ length — alert when failed messages accumulate
     cachedDlqLength = await engine.getDlqLength();
     if (cachedDlqLength > DLQ_WARNING_THRESHOLD) {
-      logger.warn('DLQ stream has accumulated failed messages', {
-        dlqLength: cachedDlqLength,
-        threshold: DLQ_WARNING_THRESHOLD,
-        action: 'Investigate failed execution requests in stream:dead-letter-queue',
-      });
+      dlqEscalationCount++;
+      // P1-5 FIX: Escalate to error level after persistent threshold breach (~60s).
+      // Warn-level logs are easily missed in high-volume output. Error-level
+      // ensures operators notice persistent DLQ accumulation.
+      if (dlqEscalationCount >= DLQ_ESCALATION_AFTER) {
+        logger.error('DLQ persistently above threshold — auto-recovery may be insufficient', {
+          dlqLength: cachedDlqLength,
+          threshold: DLQ_WARNING_THRESHOLD,
+          consecutiveBreaches: dlqEscalationCount,
+          action: 'Manual investigation required: check stream:dead-letter-queue error types',
+        });
+      } else {
+        logger.warn('DLQ stream has accumulated failed messages', {
+          dlqLength: cachedDlqLength,
+          threshold: DLQ_WARNING_THRESHOLD,
+          consecutiveBreaches: dlqEscalationCount,
+          action: 'Auto-recovery enabled; investigate if DLQ continues to grow',
+        });
+      }
+    } else {
+      dlqEscalationCount = 0;
     }
     // P2-14: Monitor consumer lag — alert when pending messages accumulate
     cachedConsumerLag = await engine.getConsumerLag();

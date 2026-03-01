@@ -92,7 +92,8 @@ services:
       - PARTITION_CHAINS=arbitrum,optimism,base
       - INSTANCE_ID=p2-local
       - REGION_ID=local-p2
-      - HEALTH_CHECK_PORT=3001
+      # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
+      - HEALTH_CHECK_PORT=3002
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
       - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL}
@@ -102,7 +103,7 @@ services:
       - BASE_RPC_URL=${BASE_RPC_URL}
       - BASE_WS_URL=${BASE_WS_URL}
     ports:
-      - "3002:3001"
+      - "3002:3002"
     depends_on:
       redis:
         condition: service_healthy
@@ -125,7 +126,8 @@ services:
       - PARTITION_CHAINS=ethereum,zksync,linea
       - INSTANCE_ID=p3-local
       - REGION_ID=local-p3
-      - HEALTH_CHECK_PORT=3001
+      # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
+      - HEALTH_CHECK_PORT=3003
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
       - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
@@ -135,7 +137,7 @@ services:
       - LINEA_RPC_URL=${LINEA_RPC_URL}
       - LINEA_WS_URL=${LINEA_WS_URL}
     ports:
-      - "3003:3001"
+      - "3003:3003"
     depends_on:
       redis:
         condition: service_healthy
@@ -158,14 +160,15 @@ services:
       - PARTITION_CHAINS=solana
       - INSTANCE_ID=p4-local
       - REGION_ID=local-p4
-      - HEALTH_CHECK_PORT=3001
+      # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
+      - HEALTH_CHECK_PORT=3004
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
       # RPC URLs from .env file
       - SOLANA_RPC_URL=${SOLANA_RPC_URL}
       - SOLANA_WS_URL=${SOLANA_WS_URL}
     ports:
-      - "3004:3001"
+      - "3004:3004"
     depends_on:
       redis:
         condition: service_healthy
@@ -185,11 +188,12 @@ services:
     environment:
       - NODE_ENV=development
       - INSTANCE_ID=cross-chain-local
-      - HEALTH_CHECK_PORT=3001
+      # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
+      - HEALTH_CHECK_PORT=3006
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
     ports:
-      - "3006:3001"
+      - "3006:3006"
     depends_on:
       redis:
         condition: service_healthy
@@ -217,7 +221,8 @@ services:
     environment:
       - NODE_ENV=development
       - INSTANCE_ID=execution-local
-      - HEALTH_CHECK_PORT=3001
+      # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
+      - HEALTH_CHECK_PORT=3005
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
       # Private keys (from .env - leave empty for dry-run mode)
@@ -235,7 +240,7 @@ services:
       - BASE_RPC_URL=${BASE_RPC_URL}
       - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL}
     ports:
-      - "3005:3001"
+      - "3005:3005"
     depends_on:
       redis:
         condition: service_healthy
@@ -257,13 +262,13 @@ services:
       - PORT=3000
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
-      # Partition endpoints for health monitoring (internal Docker network uses port 3001)
+      # P1 Fix CA-013: Partition endpoints now use per-service ports matching HEALTH_CHECK_PORT
       - PARTITION_P1_URL=http://partition-asia-fast:3001
-      - PARTITION_P2_URL=http://partition-l2-turbo:3001
-      - PARTITION_P3_URL=http://partition-high-value:3001
-      - PARTITION_P4_URL=http://partition-solana:3001
-      - CROSS_CHAIN_URL=http://cross-chain-detector:3001
-      - EXECUTION_URL=http://execution-engine:3001
+      - PARTITION_P2_URL=http://partition-l2-turbo:3002
+      - PARTITION_P3_URL=http://partition-high-value:3003
+      - PARTITION_P4_URL=http://partition-solana:3004
+      - CROSS_CHAIN_URL=http://cross-chain-detector:3006
+      - EXECUTION_URL=http://execution-engine:3005
       # External ports for dashboard display
       - P1_EXTERNAL_PORT=3001
       - P2_EXTERNAL_PORT=3002

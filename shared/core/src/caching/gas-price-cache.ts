@@ -116,7 +116,12 @@ export interface GasPriceCacheConfig {
 
 const DEFAULT_CONFIG: GasPriceCacheConfig = {
   refreshIntervalMs: 60000, // 60 seconds
-  staleThresholdMs: 120000, // 2 minutes
+  // P1-3 FIX: Increased from 120s (2min) to 180s (3min).
+  // With 13+ chains, a single refresh cycle can take >60s due to RPC timeouts.
+  // A stale threshold of only 2x the refresh interval caused spurious stale
+  // warnings for L2 chains (optimism, base were 2.3min stale). 3x provides
+  // a safe margin: refresh at 60s + worst-case RPC timeout ~30s = 90s << 180s.
+  staleThresholdMs: 180000, // 3 minutes
   autoRefresh: true
 };
 
@@ -351,6 +356,12 @@ export class GasPriceCache {
   private l1OracleCache: Map<string, L1OracleCacheEntry> = new Map();
   private l1OracleRefreshTimer: NodeJS.Timeout | null = null;
 
+  // FIX #1: Rate-limit stale gas price warnings (per chain).
+  // Without this, the warn() in getGasPrice() fires on every hot-path call (~63K/sec),
+  // producing 37.6M log lines in 10 minutes and saturating disk I/O.
+  private staleWarnLastLogged: Map<string, number> = new Map();
+  private static readonly STALE_WARN_INTERVAL_MS = 30_000; // Log at most once per 30s per chain
+
   constructor(config: Partial<GasPriceCacheConfig> = {}, deps?: GasPriceCacheDeps) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // DI: Use provided logger or create default
@@ -427,7 +438,14 @@ export class GasPriceCache {
       // Check if data is stale
       const age = Date.now() - cached.lastUpdated;
       if (age > this.config.staleThresholdMs) {
-        this.logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
+        // FIX #1: Rate-limit stale warnings — this runs in the hot path (~1000s/sec)
+        // and must not emit a log line on every call. Log at most once per 30s per chain.
+        const now = Date.now();
+        const lastLogged = this.staleWarnLastLogged.get(chain) ?? 0;
+        if (now - lastLogged >= GasPriceCache.STALE_WARN_INTERVAL_MS) {
+          this.staleWarnLastLogged.set(chain, now);
+          this.logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
+        }
         // Return stale data but mark as potentially unreliable
         return { ...cached, isFallback: true };
       }
@@ -655,9 +673,11 @@ export class GasPriceCache {
       const { ethers } = await import('ethers');
 
       // Get or create provider
+      // P1 Fix LW-012: Use staticNetwork to prevent ethers' infinite retry loop on network detection
       let provider = this.providers.get(chainLower);
       if (!provider) {
-        provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+        const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+        provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
         this.providers.set(chainLower, provider);
       }
 
@@ -802,7 +822,8 @@ export class GasPriceCache {
 
         let provider = this.providers.get(chain);
         if (!provider) {
-          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
           this.providers.set(chain, provider);
         }
 
@@ -849,7 +870,8 @@ export class GasPriceCache {
 
         let provider = this.providers.get(chain);
         if (!provider) {
-          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
           this.providers.set(chain, provider);
         }
 

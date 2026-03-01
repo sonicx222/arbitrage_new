@@ -189,15 +189,16 @@ describe('Worker Pool Configuration', () => {
       expect(config.WORKER_POOL_CONFIG.taskTimeout).toBe(60000);
     });
 
-    it('should default to 30000ms', () => {
+    it('should default to 60000ms', () => {
+      // P1-1 FIX: Default increased from 30s to 60s for complex multi-leg path finding
       const config = importWithEnv({});
-      expect(config.WORKER_POOL_CONFIG.taskTimeout).toBe(30000);
+      expect(config.WORKER_POOL_CONFIG.taskTimeout).toBe(60000);
     });
 
     it('should ignore env override of 0', () => {
       const config = importWithEnv({ WORKER_POOL_TASK_TIMEOUT_MS: '0' });
-      // 0 is not > 0, so falls through to default
-      expect(config.WORKER_POOL_CONFIG.taskTimeout).toBe(30000);
+      // 0 is not > 0, so falls through to default (60000 after P1-1 FIX)
+      expect(config.WORKER_POOL_CONFIG.taskTimeout).toBe(60000);
     });
   });
 

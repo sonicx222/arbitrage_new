@@ -44,6 +44,10 @@
  * @see ADR-003: Partitioned Chain Detectors (Factory Pattern)
  */
 
+// P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
+// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+process.setMaxListeners(25);
+
 import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';
 import { createPartitionEntry } from '@arbitrage/core/partition';
 import { getRedisStreamsClient } from '@arbitrage/core/redis';

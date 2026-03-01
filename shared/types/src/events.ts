@@ -9,40 +9,55 @@
 // ============================================================================
 // Redis Stream Names (ADR-002)
 // ============================================================================
+/**
+ * P3 Fix CA-004/CA-019: Lifecycle legend for stream constants.
+ *
+ * [ACTIVE]    — Receives traffic in normal operation (pre-created by coordinator)
+ * [ON-DEMAND] — Created when first published to (by resilience/self-healing subsystems)
+ * [IDLE]      — Consumer groups registered but no producer wired yet in dev mode
+ */
 export const RedisStreams = {
   // Core event streams
-  PRICE_UPDATES: 'stream:price-updates',
-  SWAP_EVENTS: 'stream:swap-events',
-  OPPORTUNITIES: 'stream:opportunities',
-  WHALE_ALERTS: 'stream:whale-alerts',
+  PRICE_UPDATES: 'stream:price-updates',              // [ACTIVE] Producers: partition services
+  SWAP_EVENTS: 'stream:swap-events',                   // [IDLE] Future: DEX swap event ingestion
+  OPPORTUNITIES: 'stream:opportunities',               // [ACTIVE] Producers: partition detectors
+  WHALE_ALERTS: 'stream:whale-alerts',                 // [IDLE] Future: whale transaction alerts
 
   // Service coordination streams
-  SERVICE_HEALTH: 'stream:service-health',
-  SERVICE_EVENTS: 'stream:service-events',
-  COORDINATOR_EVENTS: 'stream:coordinator-events',
-  HEALTH: 'stream:health',
-  HEALTH_ALERTS: 'stream:health-alerts',
+  SERVICE_HEALTH: 'stream:service-health',             // [IDLE] Reserved for per-service health
+  SERVICE_EVENTS: 'stream:service-events',             // [IDLE] Reserved for service lifecycle events
+  COORDINATOR_EVENTS: 'stream:coordinator-events',     // [IDLE] Reserved for coordinator broadcasts
+  HEALTH: 'stream:health',                             // [ACTIVE] Producers: all services (heartbeat)
+  HEALTH_ALERTS: 'stream:health-alerts',               // [ON-DEMAND] Producer: enhanced-health-monitor
 
   // Execution streams
-  EXECUTION_REQUESTS: 'stream:execution-requests',
-  EXECUTION_RESULTS: 'stream:execution-results',
+  EXECUTION_REQUESTS: 'stream:execution-requests',     // [ACTIVE] Producer: coordinator
+  EXECUTION_RESULTS: 'stream:execution-results',       // [ACTIVE] Producer: execution-engine
 
   // Mempool & detection streams
-  PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
-  VOLUME_AGGREGATES: 'stream:volume-aggregates',
+  PENDING_OPPORTUNITIES: 'stream:pending-opportunities', // [IDLE] Future: mempool-detector
+  VOLUME_AGGREGATES: 'stream:volume-aggregates',       // [IDLE] Future: volume aggregation
 
   // System coordination streams
-  CIRCUIT_BREAKER: 'stream:circuit-breaker',
-  SYSTEM_FAILOVER: 'stream:system-failover',
-  SYSTEM_COMMANDS: 'stream:system-commands',
+  CIRCUIT_BREAKER: 'stream:circuit-breaker',           // [IDLE] Reserved for circuit breaker events
+  SYSTEM_FAILOVER: 'stream:system-failover',           // [ON-DEMAND] Producer: cross-region-health
+  SYSTEM_COMMANDS: 'stream:system-commands',           // [ON-DEMAND] Producer: enhanced-health-monitor
+
+  // Self-healing system streams
+  SYSTEM_FAILURES: 'stream:system-failures',           // [ON-DEMAND] Producer: expert-self-healing-manager
+  SYSTEM_CONTROL: 'stream:system-control',             // [ON-DEMAND] Producer: expert-self-healing-manager
+  SYSTEM_SCALING: 'stream:system-scaling',             // [ON-DEMAND] Producer: expert-self-healing-manager
+
+  // Degradation events
+  SERVICE_DEGRADATION: 'stream:service-degradation',   // [ON-DEMAND] Producers: graceful-degradation, self-healing-manager
 
   // Fast lane (coordinator bypass for high-confidence opportunities)
-  FAST_LANE: 'stream:fast-lane',
+  FAST_LANE: 'stream:fast-lane',                       // [ACTIVE] Producer: partition detectors (high-confidence)
 
   // Dead letter queue
-  DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
-  DLQ_ALERTS: 'stream:dlq-alerts',
-  FORWARDING_DLQ: 'stream:forwarding-dlq',
+  DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',       // [ACTIVE] Producer: stream-consumer (failed messages)
+  DLQ_ALERTS: 'stream:dlq-alerts',                     // [ON-DEMAND] Producer: dead-letter-queue manager
+  FORWARDING_DLQ: 'stream:forwarding-dlq',             // [ON-DEMAND] Producer: DLQ forwarding failures
 } as const;
 
 export type RedisStreamName = typeof RedisStreams[keyof typeof RedisStreams];

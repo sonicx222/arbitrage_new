@@ -15,6 +15,10 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
+// P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
+// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+process.setMaxListeners(25);
+
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { UnifiedChainDetector, UnifiedDetectorConfig } from './unified-detector';
 import { parsePort } from '@arbitrage/core/partition';
@@ -45,7 +49,10 @@ let streamsClient: RedisStreamsClient | null = null;
 
 // FIX M6: Track concurrent in-flight publishes to prevent burst overload
 let inFlightPublishes = 0;
-const MAX_CONCURRENT_PUBLISHES = 50;
+// P2-2 FIX: Made configurable via env var, aligned with partition runner (default: 100)
+const MAX_CONCURRENT_PUBLISHES = parseInt(
+  process.env.MAX_CONCURRENT_PUBLISHES ?? '100', 10
+);
 
 // FIX M11: Price update ingestion counter for monitoring
 let priceUpdatesIngested = 0;
@@ -298,7 +305,8 @@ detector.on('priceUpdate', () => {
 });
 
 detector.on('opportunity', (opp) => {
-  logger.info('Arbitrage opportunity detected', {
+  // P2-1 FIX: Reduced from INFO to DEBUG to cut log volume (~4k lines/sec)
+  logger.debug('Arbitrage opportunity detected', {
     id: opp.id,
     type: opp.type,
     buyDex: opp.buyDex,

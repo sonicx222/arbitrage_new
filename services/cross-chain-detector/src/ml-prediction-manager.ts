@@ -273,7 +273,12 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
 
     // Get price history for this pair using circular buffer
     const entry = priceHistoryCache.get(cacheKey);
-    if (!entry || entry.size < 10) {
+    // P1-4 FIX: Reduced minimum history from 10 to 5 for faster initial predictions.
+    // With 10 points at ~5s per update, the cross-chain detector stays blind for ~50s
+    // per pair after startup. 5 points (25s) provides faster but slightly lower-confidence
+    // predictions. The LSTM predictor pads insufficient sequences with zeros, so 5 points
+    // is safe (just less accurate than a full 60-point sequence).
+    if (!entry || entry.size < 5) {
       // Not enough history for meaningful prediction
       return null;
     }

@@ -75,7 +75,7 @@ export interface ServiceHealthAnalysis {
  * Configuration for the health monitor
  */
 export interface HealthMonitorConfig {
-  /** Startup grace period in milliseconds (default: 60000) */
+  /** Startup grace period in milliseconds (default: 180000) */
   startupGracePeriodMs?: number;
   /** Alert cooldown in milliseconds (default: 300000) */
   alertCooldownMs?: number;
@@ -88,7 +88,7 @@ export interface HealthMonitorConfig {
   cooldownCleanupThreshold?: number;
   /** Maximum age for cooldown entries before cleanup (default: 3600000 ms = 1 hour) */
   cooldownMaxAgeMs?: number;
-  /** @see OP-13: Threshold in ms for detecting stale heartbeats (default: 30000) */
+  /** @see OP-13: Threshold in ms for detecting stale heartbeats (default: 90000) */
   staleHeartbeatThresholdMs?: number;
   /** Consecutive stale checks required before downgrading (default: 3) */
   consecutiveFailuresThreshold?: number;
@@ -98,15 +98,20 @@ export interface HealthMonitorConfig {
  * Default configuration
  */
 const DEFAULT_CONFIG: Required<Omit<HealthMonitorConfig, 'servicePatterns'>> & { servicePatterns: ServiceNamePatterns } = {
-  startupGracePeriodMs: 60000,
+  // FIX #5: Increased from 60s to 180s. Services with vault-model adapters
+  // (GMX, Beethoven X) can take 60-90s to initialize via slow RPC calls.
+  startupGracePeriodMs: 180000,
   alertCooldownMs: 300000,
   minServicesForGracePeriodAlert: 3,
   servicePatterns: DEFAULT_SERVICE_PATTERNS,
   // P2-005 FIX: Default values for cooldown cleanup
   cooldownCleanupThreshold: 1000,
   cooldownMaxAgeMs: 3600000, // 1 hour
-  // OP-13: Stale heartbeat detection threshold (heartbeats are every 5-10s)
-  staleHeartbeatThresholdMs: 30000,
+  // OP-13: Stale heartbeat detection threshold.
+  // FIX #5: Increased from 30s to 90s. The previous 30s threshold raced with
+  // P3's 30s healthCheckIntervalMs, causing oscillation at boundary edges.
+  // 90s gives 3x headroom over the longest health check interval (30s).
+  staleHeartbeatThresholdMs: 90000,
   consecutiveFailuresThreshold: 3,
 };
 
@@ -331,7 +336,8 @@ export class HealthMonitor {
           if (!state) {
             // First detection: log WARN with full details
             this.staleLogState.set(name, { firstLoggedAt: now, lastEscalationAge: 0 });
-            this.logger.warn('Service heartbeat stale, marking unhealthy', {
+            // FIX #3: Include service name in message text for discoverability
+            this.logger.warn(`Service ${name} heartbeat stale, marking unhealthy`, {
               service: name,
               lastHeartbeat: health.lastHeartbeat,
               ageMs: age,

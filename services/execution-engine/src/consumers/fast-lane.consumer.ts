@@ -98,7 +98,8 @@ export class FastLaneConsumer {
 
     this.consumerGroup = {
       streamName: RedisStreamsClient.STREAMS.FAST_LANE,
-      groupName: 'execution-engine',
+      // P1 Fix CA-005: Standardize on 'execution-engine-group' to match opportunity consumer
+      groupName: 'execution-engine-group',
       consumerName: this.instanceId,
       startId: '$',
     };

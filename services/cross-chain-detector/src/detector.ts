@@ -1333,6 +1333,25 @@ export class CrossChainDetectorService {
           for (const [key, value] of fetchedPredictions) {
             this.mlPredictionsCache.set(key, value);
           }
+
+          // P1-4 FIX: Log ML warmup progress every 10 cycles while predictions are sparse.
+          // During startup, most pairs return null because they lack 5+ price history points.
+          // This gives operators visibility into ML readiness without spamming logs.
+          if (this.detectionCycleCounter % 10 === 0) {
+            let nullCount = 0;
+            for (const v of fetchedPredictions.values()) {
+              if (v === null) nullCount++;
+            }
+            if (nullCount > fetchedPredictions.size * 0.3) {
+              this.logger.info('ML warmup progress', {
+                cycle: this.detectionCycleCounter,
+                pairsRequested: fetchedPredictions.size,
+                predictionsReady: fetchedPredictions.size - nullCount,
+                predictionsNull: nullCount,
+                readyPct: Math.round(((fetchedPredictions.size - nullCount) / fetchedPredictions.size) * 100),
+              });
+            }
+          }
         }
       }
 

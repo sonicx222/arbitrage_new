@@ -126,6 +126,8 @@ export class WebSocketManager {
   // P3 Fix F-6: Track recovery cycles to reduce log spam from dead providers
   private recoveryCycles = 0;
   private static readonly RECOVERY_QUIET_THRESHOLD = 5;
+  /** Absolute cap on recovery cycles to prevent infinite reconnection loops */
+  private static readonly MAX_RECOVERY_CYCLES = 20;
   private isConnecting = false;
   private isConnected = false;
   // P2-FIX: Track if reconnection is actively in progress to prevent overlapping attempts
@@ -1530,7 +1532,9 @@ export class WebSocketManager {
 
       // Schedule a slow recovery attempt (60s) to avoid permanent WS death
       // without causing reconnect storms. Resets attempts and tries again.
-      if (!this.recoveryTimer && !this.isDisconnected) {
+      // F2-FIX: Cap recovery cycles to prevent infinite reconnection loops.
+      if (!this.recoveryTimer && !this.isDisconnected &&
+          this.recoveryCycles < WebSocketManager.MAX_RECOVERY_CYCLES) {
         const recoveryDelayMs = 60_000;
         if (!isQuiet) {
           this.logger.info(`Scheduling slow recovery attempt in ${recoveryDelayMs}ms`);
@@ -1546,6 +1550,11 @@ export class WebSocketManager {
           this.rotationStrategy.switchToNextUrl(); // Try a different URL
           this.scheduleReconnection();
         }, recoveryDelayMs);
+      } else if (this.recoveryCycles >= WebSocketManager.MAX_RECOVERY_CYCLES) {
+        this.logger.warn('Max recovery cycles reached — stopping reconnection permanently', {
+          recoveryCycles: this.recoveryCycles,
+          maxRecoveryCycles: WebSocketManager.MAX_RECOVERY_CYCLES,
+        });
       }
       return;
     }

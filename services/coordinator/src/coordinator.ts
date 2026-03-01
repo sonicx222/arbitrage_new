@@ -525,6 +525,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
         consumerName: this.config.consumerId,
         startId: '$',
         resetToStartIdOnExistingGroup: true
+      },
+      // P0 Fix ES-003: DLQ consumer group — enables monitoring/draining of dead-letter messages.
+      // Uses startId '0' to process ALL messages (DLQ messages should never be skipped).
+      {
+        streamName: RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '0',
+        resetToStartIdOnExistingGroup: false
       }
     ];
 
@@ -611,6 +620,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
           timestamp: alert.timestamp,
         })
       );
+
+      // P0-4 FIX: Seed the coordinator's own serviceHealth entry at startup
+      // before the health monitor starts. This prevents detectStaleServices()
+      // from seeing an absent/ancient coordinator entry during the startup phase.
+      this.serviceHealth.set('coordinator', {
+        name: 'coordinator',
+        status: 'healthy',
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage().heapUsed,
+        cpuUsage: 0,
+        lastHeartbeat: Date.now(),
+      });
 
       // R2: Start health monitor (records start time for grace period)
       this.healthMonitor?.start();
@@ -1060,7 +1081,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
       restartCount: getOptionalNumber(typedData, 'restartCount')
     };
 
-    this.serviceHealth.set(serviceName, health);
+    // P0-4 FIX: Skip overwriting the coordinator's own serviceHealth entry from Redis.
+    // The coordinator's entry is maintained directly in startHealthMonitoring() (F3 FIX).
+    // Consuming its own round-tripped health message would overwrite the fresh local
+    // lastHeartbeat with a potentially older Redis timestamp, causing detectStaleServices()
+    // to see a stale coordinator heartbeat between the Redis round-trip and the next
+    // local update — triggering false health oscillation.
+    if (serviceName !== 'coordinator') {
+      this.serviceHealth.set(serviceName, health);
+    }
+
+    // FIX #2: Record heartbeat so HealthMonitor's grace period logic works.
+    // Without this, firstHeartbeatReceived is never populated, and the C4 FIX
+    // grace period check in detectStaleServices() is dead code — causing
+    // continuous degradation oscillation despite healthy services.
+    this.healthMonitor?.recordHeartbeat(serviceName);
 
     this.logger.debug('Health update received', {
       name: serviceName,
@@ -1723,10 +1758,25 @@ export class CoordinatorService implements CoordinatorStateProvider {
         if (!this.stateManager.isRunning()) return;
 
         try {
+          // P0-4 FIX: Update the coordinator's own serviceHealth entry BEFORE
+          // updateSystemMetrics(), which calls detectStaleServices().
+          // Previously, the F3 FIX was placed AFTER updateSystemMetrics(), meaning
+          // detectStaleServices() would see the coordinator's old lastHeartbeat and
+          // mark it as stale — causing health oscillation (50-100%) and false
+          // degradation level changes.
+          this.serviceHealth.set('coordinator', {
+            name: 'coordinator',
+            status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
+            uptime: process.uptime(),
+            memoryUsage: process.memoryUsage().heapUsed,
+            cpuUsage: this.cpuTracker.getUsagePercent(),
+            lastHeartbeat: Date.now(),
+          });
+
           this.updateSystemMetrics();
           this.checkForAlerts();
 
-          // Report own health to stream
+          // Report own health to stream (for other services to consume)
           await this.reportHealth();
 
           // P1 Fix: Monitor execution stream depth for backpressure detection.

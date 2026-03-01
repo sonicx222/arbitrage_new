@@ -217,7 +217,8 @@ export class StatisticalArbitrageDetector extends EventEmitter {
       // as lamports/wei by Jupiter/flash-loan paths, causing orders-of-magnitude errors.
     };
 
-    logger.info('Statistical arbitrage opportunity detected', {
+    // P2-1 FIX: Reduced from INFO to DEBUG to cut log volume
+    logger.debug('Statistical arbitrage opportunity detected', {
       pairId,
       signal,
       correlation,

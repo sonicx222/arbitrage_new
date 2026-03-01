@@ -49,10 +49,27 @@ export function serializeOpportunityForStream(
     profitPercentage: opportunity.profitPercentage?.toString() ?? '0',
     confidence: opportunity.confidence?.toString() ?? '0',
     timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
-    expiresAt: opportunity.expiresAt?.toString() ?? '',
     tokenIn: opportunity.tokenIn ?? '',
     tokenOut: opportunity.tokenOut ?? '',
     amountIn: opportunity.amountIn ?? '',
+    // F1 FIX: Serialize fields required by execution engine validation.
+    // expectedProfit/estimatedProfit are needed for business rule checks (LOW_PROFIT gate).
+    // buyChain/sellChain are required for cross-chain opportunity validation.
+    // gasEstimate is needed for execution cost calculations.
+    expectedProfit: opportunity.expectedProfit?.toString() ?? '0',
+    estimatedProfit: opportunity.estimatedProfit?.toString() ?? '0',
+    gasEstimate: opportunity.gasEstimate ?? '0',
+    // F1 FIX: Only serialize expiresAt when it has a numeric value.
+    // Previously used `?? ''` which produced an empty string that passes the
+    // `!== undefined && !== null` gate in validation.ts but fails NUMERIC_PATTERN,
+    // causing every opportunity with undefined expiresAt to be rejected as INVALID_EXPIRES_AT.
+    ...(opportunity.expiresAt != null
+      ? { expiresAt: opportunity.expiresAt.toString() }
+      : {}),
+    // F1 FIX: Serialize cross-chain fields when present.
+    // validateCrossChainFields() requires truthy buyChain/sellChain strings.
+    ...(opportunity.buyChain ? { buyChain: opportunity.buyChain } : {}),
+    ...(opportunity.sellChain ? { sellChain: opportunity.sellChain } : {}),
     forwardedBy: instanceId,
     forwardedAt: Date.now().toString(),
     // Phase 0 instrumentation: serialize pipeline timestamps as JSON string

@@ -50,6 +50,15 @@ interface SessionEntry {
   idleTimer: NodeJS.Timeout | null;
 }
 
+/** F3-FIX: Per-origin circuit breaker state to prevent infinite connection retries */
+interface CircuitBreakerEntry {
+  consecutiveFailures: number;
+  /** Timestamp when the circuit breaker opens (rejects immediately until this time) */
+  openUntil: number;
+  /** Last time we logged an error for this origin (for log suppression) */
+  lastLoggedAt: number;
+}
+
 /**
  * HTTP/2 Session Pool
  *
@@ -60,6 +69,13 @@ export class Http2SessionPool {
   private readonly sessions: Map<string, SessionEntry> = new Map();
   private readonly config: Required<Http2SessionPoolConfig>;
   private closed = false;
+  /** F3-FIX: Per-origin circuit breaker to prevent connection retry floods */
+  private readonly circuitBreakers: Map<string, CircuitBreakerEntry> = new Map();
+  private static readonly CB_FAILURE_THRESHOLD = 5;
+  private static readonly CB_INITIAL_COOLDOWN_MS = 30_000;
+  private static readonly CB_MAX_COOLDOWN_MS = 300_000;
+  /** Suppress repeated error logs — only log once per 30s per origin */
+  private static readonly ERROR_LOG_INTERVAL_MS = 30_000;
 
   constructor(config?: Http2SessionPoolConfig) {
     this.config = {
@@ -160,8 +176,16 @@ export class Http2SessionPool {
    * Get or create an HTTP/2 session for the given origin.
    */
   private async getOrCreateSession(origin: string): Promise<http2.ClientHttp2Session> {
+    // F3-FIX: Check circuit breaker before attempting connection
+    const cb = this.circuitBreakers.get(origin);
+    if (cb && cb.openUntil > Date.now()) {
+      throw new Error(`HTTP/2 circuit breaker open for ${origin} (${cb.consecutiveFailures} consecutive failures)`);
+    }
+
     const existing = this.sessions.get(origin);
     if (existing && !existing.session.closed && !existing.session.destroyed) {
+      // F3-FIX: Reset circuit breaker on successful session reuse
+      if (cb) this.circuitBreakers.delete(origin);
       return existing.session;
     }
 
@@ -172,6 +196,7 @@ export class Http2SessionPool {
 
     return new Promise<http2.ClientHttp2Session>((resolve, reject) => {
       const connectTimeout = setTimeout(() => {
+        this.recordConnectionFailure(origin, 'connection timeout');
         reject(new Error(`HTTP/2 connection timeout to ${origin}`));
       }, this.config.connectTimeoutMs);
 
@@ -183,6 +208,9 @@ export class Http2SessionPool {
 
       session.on('connect', () => {
         clearTimeout(connectTimeout);
+
+        // F3-FIX: Reset circuit breaker on successful connection
+        this.circuitBreakers.delete(origin);
 
         const entry: SessionEntry = {
           session,
@@ -199,7 +227,7 @@ export class Http2SessionPool {
 
       session.on('error', (err) => {
         clearTimeout(connectTimeout);
-        logger.warn('HTTP/2 session error', { origin, error: err.message });
+        this.recordConnectionFailure(origin, err.message);
 
         // Clean up the session
         const entry = this.sessions.get(origin);
@@ -259,6 +287,57 @@ export class Http2SessionPool {
 
     // Don't prevent process exit
     if (entry.idleTimer.unref) entry.idleTimer.unref();
+  }
+
+  /**
+   * F3-FIX: Record a connection failure and open circuit breaker if threshold exceeded.
+   * Uses exponential backoff for cooldown: 30s, 60s, 120s, 240s, max 5min.
+   * Suppresses repeated error logs to once per 30s per origin.
+   */
+  private recordConnectionFailure(origin: string, errorMessage: string): void {
+    const now = Date.now();
+    const existing = this.circuitBreakers.get(origin);
+    const failures = (existing?.consecutiveFailures ?? 0) + 1;
+
+    // Log suppression: only log once per ERROR_LOG_INTERVAL_MS per origin
+    const shouldLog = !existing || (now - existing.lastLoggedAt) >= Http2SessionPool.ERROR_LOG_INTERVAL_MS;
+    if (shouldLog) {
+      logger.warn('HTTP/2 session error', {
+        origin,
+        error: errorMessage,
+        consecutiveFailures: failures,
+        circuitBreakerOpen: failures >= Http2SessionPool.CB_FAILURE_THRESHOLD,
+      });
+    }
+
+    if (failures >= Http2SessionPool.CB_FAILURE_THRESHOLD) {
+      // Exponential backoff: 30s * 2^(cycles-1), max 5min
+      const cycles = Math.floor(failures / Http2SessionPool.CB_FAILURE_THRESHOLD);
+      const cooldownMs = Math.min(
+        Http2SessionPool.CB_INITIAL_COOLDOWN_MS * Math.pow(2, cycles - 1),
+        Http2SessionPool.CB_MAX_COOLDOWN_MS
+      );
+
+      this.circuitBreakers.set(origin, {
+        consecutiveFailures: failures,
+        openUntil: now + cooldownMs,
+        lastLoggedAt: shouldLog ? now : (existing?.lastLoggedAt ?? now),
+      });
+
+      if (shouldLog) {
+        logger.warn('HTTP/2 circuit breaker opened', {
+          origin,
+          cooldownMs,
+          consecutiveFailures: failures,
+        });
+      }
+    } else {
+      this.circuitBreakers.set(origin, {
+        consecutiveFailures: failures,
+        openUntil: 0,
+        lastLoggedAt: shouldLog ? now : (existing?.lastLoggedAt ?? now),
+      });
+    }
   }
 
   /**
@@ -342,6 +421,7 @@ export class Http2SessionPool {
     }
 
     await Promise.all(closePromises);
+    this.circuitBreakers.clear();
     logger.debug('HTTP/2 session pool closed');
   }
 

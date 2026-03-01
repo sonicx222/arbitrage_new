@@ -26,8 +26,7 @@ import { getRedisStreamsClient, RedisStreamsClient } from '../redis/streams';
 import { getDistributedLockManager, DistributedLockManager } from '../redis/distributed-lock';
 import { notifySingletonAccess } from '../singleton-tracking';
 
-// P0-11 FIX: Stream name for failover events (ADR-002 compliant)
-const FAILOVER_STREAM = 'stream:system-failover';
+// P3 Fix CA-007: Removed local RedisStreamsClient.STREAMS.SYSTEM_FAILOVER constant — use RedisStreamsClient.STREAMS.SYSTEM_FAILOVER
 
 // =============================================================================
 // Types
@@ -751,7 +750,7 @@ export class CrossRegionHealthManager extends EventEmitter {
         const groupName = `failover-${this.config.serviceName}`;
         const consumerName = this.config.instanceId;
         await this.streamsClient.createConsumerGroup({
-          streamName: FAILOVER_STREAM,
+          streamName: RedisStreamsClient.STREAMS.SYSTEM_FAILOVER,
           groupName,
           consumerName,
         }).catch(() => {
@@ -784,7 +783,7 @@ export class CrossRegionHealthManager extends EventEmitter {
    */
   private startStreamConsumer(groupName: string, consumerName: string): void {
     const consumerConfig = {
-      streamName: FAILOVER_STREAM,
+      streamName: RedisStreamsClient.STREAMS.SYSTEM_FAILOVER,
       groupName,
       consumerName,
       startId: '>'
@@ -806,7 +805,7 @@ export class CrossRegionHealthManager extends EventEmitter {
             if (event) {
               this.handleFailoverEvent(event);
             }
-            await this.streamsClient!.xack(FAILOVER_STREAM, groupName, msg.id);
+            await this.streamsClient!.xack(RedisStreamsClient.STREAMS.SYSTEM_FAILOVER, groupName, msg.id);
           }
         }
       } catch (error) {
@@ -868,7 +867,7 @@ export class CrossRegionHealthManager extends EventEmitter {
     // P0-11 FIX: Primary - Publish to Redis Streams for guaranteed delivery
     if (this.streamsClient) {
       try {
-        await this.streamsClient.xadd(FAILOVER_STREAM, message, '*', { maxLen: 10000 });
+        await this.streamsClient.xadd(RedisStreamsClient.STREAMS.SYSTEM_FAILOVER, message, '*', { maxLen: 10000 });
         this.logger.debug('Published failover event to stream', { eventType: event.type });
       } catch (error) {
         this.logger.error('Failed to publish failover event to stream', { error });

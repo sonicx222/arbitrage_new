@@ -29,7 +29,12 @@ jest.mock('../../src/redis/streams', () => ({
   getRedisStreamsClient: () => Promise.resolve({
     xadd: () => Promise.resolve('1234-0'),
     xread: () => Promise.resolve([])
-  })
+  }),
+  RedisStreamsClient: {
+    STREAMS: {
+      SERVICE_DEGRADATION: 'stream:service-degradation',
+    },
+  },
 }));
 
 // Mock logger (auto-resolves to src/__mocks__/logger.ts)
@@ -443,11 +448,11 @@ describe('singleton and convenience functions', () => {
     it('should delegate to manager', async () => {
       const manager = getGracefulDegradationManager();
       // Use service with default levels registered
-      manager.registerCapabilities('unified-detector-solana', [
+      manager.registerCapabilities('unified-detector-solana-native', [
         { name: 'test-cap', required: false, degradationLevel: DegradationLevel.REDUCED_CHAINS }
       ]);
 
-      const result = await triggerDegradation('unified-detector-solana', 'test-cap');
+      const result = await triggerDegradation('unified-detector-solana-native', 'test-cap');
       expect(result).toBe(true);
     });
   });

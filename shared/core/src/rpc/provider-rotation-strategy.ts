@@ -19,6 +19,7 @@
 import { createLogger } from '../logger';
 import { type ProviderHealthScorer, getProviderHealthScorer } from '../monitoring/provider-health-scorer';
 import { recordRpcCall, recordRpcError } from './rpc-metrics';
+import { maskUrlApiKeys } from '../utils/url-utils';
 
 const logger = createLogger('provider-rotation');
 
@@ -215,7 +216,7 @@ export class ProviderRotationStrategy {
 
       logger.info('Selected best fallback URL via budget-aware scoring', {
         chainId: this.chainId,
-        selectedUrl,
+        selectedUrl: maskUrlApiKeys(selectedUrl),
         provider: this.extractProviderFromUrl(selectedUrl),
         candidateCount: candidates.length,
         score: this.healthScorer.getHealthScore(selectedUrl, this.chainId)
@@ -229,7 +230,7 @@ export class ProviderRotationStrategy {
 
     logger.info('Selected best fallback URL via health scoring', {
       chainId: this.chainId,
-      selectedUrl,
+      selectedUrl: maskUrlApiKeys(selectedUrl),
       candidateCount: candidates.length,
       score: this.healthScorer.getHealthScore(selectedUrl, this.chainId)
     });
@@ -250,7 +251,7 @@ export class ProviderRotationStrategy {
       const newIndex = this.allUrls.indexOf(bestUrl);
       if (newIndex !== -1 && newIndex !== startIndex) {
         this.currentUrlIndex = newIndex;
-        logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${this.getCurrentUrl()}`);
+        logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${maskUrlApiKeys(this.getCurrentUrl())}`);
         return true;
       }
     }
@@ -268,7 +269,7 @@ export class ProviderRotationStrategy {
       // Found a valid URL
       if (nextIndex !== startIndex) {
         this.currentUrlIndex = nextIndex;
-        logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${this.getCurrentUrl()}`);
+        logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${maskUrlApiKeys(this.getCurrentUrl())}`);
         return true;
       }
     }
@@ -324,7 +325,7 @@ export class ProviderRotationStrategy {
     recordRpcError(provider, this.chainId, 'rate_limit');
 
     logger.warn('Rate limit detected, excluding provider', {
-      url,
+      url: maskUrlApiKeys(url),
       chainId: this.chainId,
       excludeMs,
       consecutiveRateLimits: count

@@ -15,6 +15,7 @@
 import { ethers } from 'ethers';
 import { bpsToDecimal } from '@arbitrage/core/components';
 import { validateFee } from '@arbitrage/core/utils';
+import { isVaultModelDex } from '@arbitrage/config';
 import type { Dex, Token } from '@arbitrage/types';
 import type { ExtendedPair } from './types';
 
@@ -92,6 +93,14 @@ export function initializePairs(
   const pairsByTokens = new Map<string, ExtendedPair[]>();
 
   for (const dex of config.dexes) {
+    // P0-1: Skip vault-model DEXes (Balancer V2, GMX, Platypus, Beethoven X).
+    // These DEXes don't use factory-based pair addresses — generatePairAddress()
+    // produces fake addresses that never match on-chain events.
+    // Vault-model pairs are discovered via adapter in initializeAdapterPairs().
+    if (isVaultModelDex(dex.name)) {
+      continue;
+    }
+
     for (let i = 0; i < config.tokens.length; i++) {
       for (let j = i + 1; j < config.tokens.length; j++) {
         const token0 = config.tokens[i];
@@ -152,4 +161,114 @@ export function initializePairs(
   const pairAddressesCache = Array.from(pairsByAddress.keys());
 
   return { pairs, pairsByAddress, pairsByTokens, pairAddressesCache };
+}
+
+/**
+ * P0-1: Initialize pairs for vault-model DEXes using adapter-based pool discovery.
+ *
+ * Vault-model DEXes (Balancer V2, GMX, Platypus, Beethoven X) don't follow
+ * the factory pattern, so generatePairAddress() produces fake addresses.
+ * This function uses the adapter registry to discover real pool addresses.
+ *
+ * @param config - Chain, DEXes, and tokens configuration
+ * @param initializedPairs - Existing InitializedPairs to merge into
+ * @param getTokenPairKey - Token key generation function
+ * @param logger - Logger instance (optional, for diagnostic output)
+ */
+export async function initializeAdapterPairs(
+  config: PairInitializerConfig,
+  initializedPairs: InitializedPairs,
+  getTokenPairKey: (token0: string, token1: string) => string,
+  logger?: { info: (msg: string, meta?: Record<string, unknown>) => void; warn: (msg: string, meta?: Record<string, unknown>) => void; error: (msg: string, meta?: Record<string, unknown>) => void },
+): Promise<void> {
+  // Lazy import to avoid circular dependency at module load time
+  const { getAdapterRegistry } = await import('@arbitrage/core/dex-adapters');
+  const registry = getAdapterRegistry();
+
+  const vaultDexes = config.dexes.filter(dex => isVaultModelDex(dex.name));
+  if (vaultDexes.length === 0) return;
+
+  let discoveredCount = 0;
+
+  for (const dex of vaultDexes) {
+    const adapter = registry.getAdapter(dex.name, config.chainId);
+    if (!adapter) {
+      logger?.warn('No adapter registered for vault-model DEX, skipping pool discovery', {
+        dex: dex.name,
+        chainId: config.chainId,
+      });
+      continue;
+    }
+
+    const feePercentage = validateFee(bpsToDecimal(dex.feeBps ?? 30));
+
+    // Discover pools for all token pair combinations
+    for (let i = 0; i < config.tokens.length; i++) {
+      for (let j = i + 1; j < config.tokens.length; j++) {
+        const token0 = config.tokens[i];
+        const token1 = config.tokens[j];
+
+        try {
+          const pools = await adapter.discoverPools(token0.address, token1.address);
+
+          for (const pool of pools) {
+            const normalizedPoolAddress = pool.address.toLowerCase();
+
+            // Skip if this address is already registered (e.g., from factory events)
+            if (initializedPairs.pairsByAddress.has(normalizedPoolAddress)) continue;
+
+            const pairKey = `${dex.name}_${token0.symbol}_${token1.symbol}_${normalizedPoolAddress.slice(0, 10)}`;
+            const chainPairKey = `${config.chainId}:${normalizedPoolAddress}`;
+            const normalizedToken0 = token0.address.toLowerCase();
+            const normalizedToken1 = token1.address.toLowerCase();
+
+            const pair: ExtendedPair = {
+              address: normalizedPoolAddress,
+              dex: dex.name,
+              token0: normalizedToken0,
+              token1: normalizedToken1,
+              fee: feePercentage,
+              reserve0: '0',
+              reserve1: '0',
+              blockNumber: 0,
+              lastUpdate: 0,
+              pairKey,
+              chainPairKey,
+            };
+
+            initializedPairs.pairs.set(pairKey, pair);
+            initializedPairs.pairsByAddress.set(normalizedPoolAddress, pair);
+
+            const tokenKey = getTokenPairKey(normalizedToken0, normalizedToken1);
+            let pairsForTokens = initializedPairs.pairsByTokens.get(tokenKey);
+            if (!pairsForTokens) {
+              pairsForTokens = [];
+              initializedPairs.pairsByTokens.set(tokenKey, pairsForTokens);
+            }
+            pairsForTokens.push(pair);
+
+            // Add to address cache for subscriptions
+            initializedPairs.pairAddressesCache.push(normalizedPoolAddress);
+
+            discoveredCount++;
+          }
+        } catch (error) {
+          logger?.warn('Failed to discover pools via adapter', {
+            dex: dex.name,
+            token0: token0.symbol,
+            token1: token1.symbol,
+            error: (error as Error).message,
+          });
+        }
+      }
+    }
+  }
+
+  if (discoveredCount > 0) {
+    logger?.info('Discovered vault-model DEX pools via adapters', {
+      chainId: config.chainId,
+      discoveredPools: discoveredCount,
+      vaultDexes: vaultDexes.map(d => d.name),
+    });
+  }
 }

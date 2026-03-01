@@ -782,7 +782,8 @@ export class EnhancedHealthMonitor {
       source: 'enhanced-health-monitor'
     };
 
-    await this.publishToStream('stream:health-alerts', alertMessage);
+    // P3 Fix CA-006: Use canonical stream constant instead of hardcoded string
+    await this.publishToStream(RedisStreamsClient.STREAMS.HEALTH_ALERTS, alertMessage);
   }
 
   private async executeAlertAction(action: string, rule: AlertRule, health: SystemHealth): Promise<void> {
@@ -845,7 +846,8 @@ export class EnhancedHealthMonitor {
           timestamp: Date.now(),
           source: 'enhanced-health-monitor'
         };
-        await this.publishToStream('stream:system-commands', cacheMessage);
+        // P3 Fix CA-006: Use canonical stream constant
+        await this.publishToStream(RedisStreamsClient.STREAMS.SYSTEM_COMMANDS, cacheMessage);
         break;
       }
 

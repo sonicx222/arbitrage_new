@@ -22,6 +22,7 @@ import { EventEmitter } from 'events';
 import { normalizeTokenForCrossChain, normalizeTokenForPricing } from '@arbitrage/config';
 import { createSimpleCircuitBreaker, type SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
 import { LRUCache, NumericRollingWindow } from '@arbitrage/core/data-structures';
+import { createLogger } from '@arbitrage/core/logger';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 
@@ -253,12 +254,8 @@ export class SolanaArbitrageDetector extends EventEmitter {
       resetTimeoutMs: CIRCUIT_BREAKER_CONFIG.RESET_TIMEOUT_MS,
     });
 
-    this.logger = deps?.logger ?? {
-      info: console.log,
-      warn: console.warn,
-      error: console.error,
-      debug: () => {},
-    };
+    // P2 Fix ES-001: Use structured logger instead of console fallback
+    this.logger = deps?.logger ?? createLogger('solana-arbitrage-detector');
 
     this.streamsClient = deps?.streamsClient;
 

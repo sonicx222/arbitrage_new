@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import Redis from 'ioredis';
 import { RedisStreams } from '@arbitrage/types';
 import { notifySingletonAccess } from '../singleton-tracking';
+import { SimpleCircuitBreaker } from '../circuit-breaker/simple-circuit-breaker';
 
 // =============================================================================
 // DI Types (P16 pattern - enables testability without Jest mock hoisting)
@@ -44,6 +45,17 @@ export interface RedisStreamsClientDeps {
    * Default: true (backward compatible).
    */
   legacySignatureCompatEnabled?: boolean;
+  /**
+   * P0 Fix ES-002: Circuit breaker threshold for xadd operations.
+   * After this many consecutive failures, xadd will fail fast instead of retrying.
+   * Default: 5.
+   */
+  xaddCircuitBreakerThreshold?: number;
+  /**
+   * P0 Fix ES-002: Circuit breaker cooldown in ms before retrying after open.
+   * Default: 30000 (30 seconds).
+   */
+  xaddCircuitBreakerResetMs?: number;
 }
 import { createLogger, Logger } from '../logger';
 import { clearTimeoutSafe } from '../async/lifecycle-utils';
@@ -368,6 +380,8 @@ export class RedisStreamsClient {
   private cachedPreviousKeyObj: crypto.KeyObject | null = null;
   /** P2-17 FIX: Skip legacy (no-stream-name) HMAC checks when false. */
   private legacySignatureCompatEnabled: boolean;
+  /** P0 Fix ES-002: Circuit breaker to prevent thundering herd on Redis failures during xadd. */
+  private xaddCircuitBreaker: SimpleCircuitBreaker;
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -404,6 +418,12 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.DLQ_ALERTS]: 5000,               // Alert data
     [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: 5000,           // Forwarded failures
     [RedisStreamsClient.STREAMS.FAST_LANE]: 5000,                // Fast lane: high-confidence, coordinator bypass
+    // P1 Fix CA-001: Self-healing system streams (created on-demand)
+    [RedisStreamsClient.STREAMS.SYSTEM_FAILURES]: 5000,          // System failure events
+    [RedisStreamsClient.STREAMS.SYSTEM_CONTROL]: 1000,           // Control commands, low volume
+    [RedisStreamsClient.STREAMS.SYSTEM_SCALING]: 1000,           // Scaling commands, low volume
+    // P2 Fix CA-002: Service degradation/recovery events
+    [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: 5000,      // Degradation + recovery events
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
@@ -421,6 +441,13 @@ export class RedisStreamsClient {
       this.cachedPreviousKeyObj = crypto.createSecretKey(Buffer.from(this.previousSigningKey, 'utf8'));
     }
 
+    // P0 Fix ES-002: Initialize circuit breaker for xadd operations.
+    // Prevents thundering herd when Redis is overloaded or unavailable.
+    this.xaddCircuitBreaker = new SimpleCircuitBreaker(
+      deps?.xaddCircuitBreakerThreshold ?? 5,
+      deps?.xaddCircuitBreakerResetMs ?? 30000
+    );
+
     // Enforce HMAC signing in production. Without a signing key, verifySignature()
     // returns true for ALL messages, allowing unsigned/tampered data through.
     // Fail-closed: refuse to start rather than silently accepting unverified messages.
@@ -432,8 +459,9 @@ export class RedisStreamsClient {
       );
     }
 
+    // FIX #8: Only include password when defined to avoid ioredis warning on password-free servers
     const options: Record<string, unknown> = {
-      password,
+      ...(password ? { password } : {}),
       retryStrategy: (times: number) => {
         // Capped exponential backoff: 200ms, 400ms, ..., capped at 60s.
         // NEVER return null — ioredis interprets null as "stop reconnecting",
@@ -576,6 +604,18 @@ export class RedisStreamsClient {
   ): Promise<string> {
     this.validateStreamName(streamName);
 
+    // P0 Fix ES-002: Fail fast when circuit breaker is open to prevent thundering herd.
+    // During Redis outages, all partition services would otherwise hammer Redis with
+    // exponential backoff retries, causing cascading failures on recovery.
+    if (this.xaddCircuitBreaker.isCurrentlyOpen()) {
+      const status = this.xaddCircuitBreaker.getStatus();
+      throw new Error(
+        `xadd circuit breaker open for ${streamName} ` +
+        `(${status.failures} consecutive failures, ` +
+        `cooldown: ${this.xaddCircuitBreaker.getCooldownRemaining()}ms remaining)`
+      );
+    }
+
     // P3 Fix DI-8: BigInt safety net — convention is .toString() before publishing,
     // but this guard prevents silent [object Object] or TypeError if one slips through
     const serialized = JSON.stringify(message, (_key, value) =>
@@ -618,9 +658,20 @@ export class RedisStreamsClient {
           messageId = await this.client.xadd(streamName, id, 'data', serialized, ...sigFields) as string;
         }
 
+        // P0 Fix ES-002: Record success to close circuit breaker after recovery
+        this.xaddCircuitBreaker.recordSuccess();
         return messageId;
       } catch (error) {
         lastError = error as Error;
+        // P0 Fix ES-002: Record failure — may open circuit breaker
+        const justOpened = this.xaddCircuitBreaker.recordFailure();
+        if (justOpened) {
+          this.logger.warn('xadd circuit breaker opened — failing fast to prevent thundering herd', {
+            streamName,
+            failures: this.xaddCircuitBreaker.getFailures(),
+            cooldownMs: this.xaddCircuitBreaker.getCooldownRemaining(),
+          });
+        }
         if (!options.retry || attempt === maxRetries) {
           throw error;
         }
@@ -858,6 +909,13 @@ export class RedisStreamsClient {
   // Stream Information
   // ===========================================================================
 
+  /**
+   * P0 Fix ES-002: Get xadd circuit breaker status for observability/health checks.
+   */
+  getXaddCircuitBreakerStatus() {
+    return this.xaddCircuitBreaker.getStatus();
+  }
+
   async xlen(streamName: string): Promise<number> {
     try {
       return await this.client.xlen(streamName);
@@ -868,33 +926,62 @@ export class RedisStreamsClient {
   }
 
   /**
-   * P0 Fix: Check stream length against MAXLEN and warn when lag exceeds 80%.
+   * P0 Fix ES-006: Check stream length against MAXLEN and warn when lag exceeds 80%.
    * Use this to detect when consumers are falling behind and at risk of losing
    * messages to MAXLEN trimming.
    *
+   * When groupName is provided, also checks XPENDING for the consumer group's
+   * actual pending message count, giving a more accurate picture of consumer lag.
+   *
    * @param streamName - The stream to check
-   * @returns Object with stream length, maxLen, and whether lag is critical (>80%)
+   * @param groupName - Optional consumer group to check pending messages for
+   * @returns Object with stream length, maxLen, lag metrics, and whether lag is critical (>80%)
    */
-  async checkStreamLag(streamName: string): Promise<{ length: number; maxLen: number; lagRatio: number; critical: boolean }> {
+  async checkStreamLag(
+    streamName: string,
+    groupName?: string
+  ): Promise<{
+    length: number;
+    maxLen: number;
+    lagRatio: number;
+    critical: boolean;
+    pendingCount: number;
+    pendingRatio: number;
+  }> {
     const maxLen = RedisStreamsClient.STREAM_MAX_LENGTHS[streamName] ?? 0;
     if (maxLen === 0) {
-      return { length: 0, maxLen: 0, lagRatio: 0, critical: false };
+      return { length: 0, maxLen: 0, lagRatio: 0, critical: false, pendingCount: 0, pendingRatio: 0 };
     }
 
     const length = await this.xlen(streamName);
     const lagRatio = length / maxLen;
-    const critical = lagRatio > 0.8;
+
+    // P0 Fix ES-006: Check consumer group pending count for accurate lag measurement
+    let pendingCount = 0;
+    let pendingRatio = 0;
+    if (groupName) {
+      try {
+        const pendingInfo = await this.xpending(streamName, groupName);
+        pendingCount = pendingInfo.total;
+        pendingRatio = maxLen > 0 ? pendingCount / maxLen : 0;
+      } catch {
+        // Non-fatal: group may not exist yet during startup
+      }
+    }
+
+    const critical = lagRatio > 0.8 || pendingRatio > 0.8;
 
     if (critical) {
-      this.logger.warn('Stream length approaching MAXLEN — unread messages may be trimmed', {
+      this.logger.warn('Stream lag critical — unread messages at risk of MAXLEN trimming', {
         streamName,
         length,
         maxLen,
         lagRatio: Math.round(lagRatio * 100) / 100,
+        ...(groupName ? { groupName, pendingCount, pendingRatio: Math.round(pendingRatio * 100) / 100 } : {}),
       });
     }
 
-    return { length, maxLen, lagRatio, critical };
+    return { length, maxLen, lagRatio, critical, pendingCount, pendingRatio };
   }
 
   /**

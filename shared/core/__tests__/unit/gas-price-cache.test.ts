@@ -79,7 +79,10 @@ jest.mock('ethers', () => {
         getEvent: jest.fn(),
         encodeFunctionData: jest.fn(),
         decodeFunctionResult: jest.fn(),
-      }))
+      })),
+      // P1 Fix LW-012: Mock Network.from() used by staticNetwork provider creation
+      Network: { from: jest.fn().mockImplementation((chainId: number) => ({ chainId, name: `chain-${chainId}` })) },
+      FetchRequest: jest.fn().mockImplementation(() => ({ timeout: 0 })),
     },
     // Expose internal mocks for test assertions
     __mocks__: {

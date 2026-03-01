@@ -17,13 +17,21 @@ const BPS_DENOMINATOR = 10000n;
 const DEFAULT_SLIPPAGE_BPS = 50n; // 0.5%
 
 /**
- * Swap step in a multi-hop swap path
+ * Swap step in a multi-hop swap path.
+ *
+ * Supports both V2 and V3 routing:
+ * - V2: Uses swapExactTokensForTokens (default)
+ * - V3: Uses exactInputSingle when isV3=true, requires feeTier
  */
 export interface SwapStep {
   router: string;
   tokenIn: string;
   tokenOut: string;
   amountOutMin: bigint;
+  /** Flag indicating this step uses V3-style routing (exactInputSingle) */
+  isV3?: boolean;
+  /** V3 fee tier in hundredths of a bip (100, 500, 3000, 10000). Required when isV3=true */
+  feeTier?: number;
 }
 
 /**

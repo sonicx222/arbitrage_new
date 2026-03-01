@@ -13,6 +13,7 @@
 
 import { clearTimeoutSafe } from '../async/lifecycle-utils';
 import type { RedisStreamsClient, StreamMessage, ConsumerGroupConfig } from './streams';
+import { RedisStreams } from '@arbitrage/types';
 
 // =============================================================================
 // Types
@@ -52,6 +53,18 @@ export interface StreamConsumerConfig {
   onPauseStateChange?: (isPaused: boolean) => void;
   /** OP-27 FIX: Inter-poll delay in ms between batch reads (default: 10, 0 = no delay) */
   interPollDelayMs?: number;
+  /**
+   * P0 Fix ES-003: Maximum delivery attempts before routing message to DLQ.
+   * When set, periodically checks pending messages via XPENDING RANGE.
+   * Messages exceeding this count are XACKed and routed to the dead-letter queue.
+   * Default: undefined (no limit — existing behavior).
+   */
+  maxDeliveryCount?: number;
+  /**
+   * P0 Fix ES-003: How often (in poll cycles) to check for stuck pending messages.
+   * Only used when maxDeliveryCount is set. Default: 10 (every 10th poll).
+   */
+  pendingCheckInterval?: number;
 }
 
 export interface StreamConsumerStats {
@@ -101,6 +114,8 @@ export class StreamConsumer {
   // P3 Fix DI-7: Track warned schema versions to avoid log spam (once per unknown version)
   private static readonly warnedSchemaVersions = new Set<string>();
   private static readonly KNOWN_SCHEMA_VERSION = '1';
+  /** P0 Fix ES-003: Counter for periodic pending message cleanup */
+  private pollCycleCount = 0;
   private stats: StreamConsumerStats = {
     messagesProcessed: 0,
     messagesFailed: 0,
@@ -200,8 +215,84 @@ export class StreamConsumer {
     this.pollPromise = this.poll();
   }
 
+  /**
+   * P0 Fix ES-003: Check pending messages for excessive delivery attempts.
+   * Messages exceeding maxDeliveryCount are ACKed and routed to the DLQ
+   * to prevent infinite retry loops and unbounded PEL growth.
+   */
+  private async cleanupStuckPendingMessages(): Promise<void> {
+    const maxDelivery = this.config.maxDeliveryCount;
+    if (!maxDelivery) return;
+
+    try {
+      const pending = await this.client.xpendingRange(
+        this.config.config.streamName,
+        this.config.config.groupName,
+        '-', '+', 50 // Check up to 50 pending messages at a time
+      );
+
+      const stuckMessages = pending.filter(entry => entry.deliveryCount > maxDelivery);
+      if (stuckMessages.length === 0) return;
+
+      const dlqStream = RedisStreams.DEAD_LETTER_QUEUE;
+
+      for (const entry of stuckMessages) {
+        try {
+          // Route to DLQ with metadata about why the message was moved
+          await this.client.xadd(dlqStream, {
+            originalStream: this.config.config.streamName,
+            originalId: entry.id,
+            consumerGroup: this.config.config.groupName,
+            consumer: entry.consumer,
+            reason: 'max_delivery_exceeded',
+            deliveryCount: entry.deliveryCount,
+            idleMs: entry.idleMs,
+            timestamp: Date.now(),
+          });
+
+          // ACK the original message to remove from PEL
+          await this.client.xack(
+            this.config.config.streamName,
+            this.config.config.groupName,
+            entry.id
+          );
+        } catch (dlqError) {
+          this.config.logger?.error('Failed to move stuck message to DLQ', {
+            error: dlqError,
+            messageId: entry.id,
+            deliveryCount: entry.deliveryCount,
+            stream: this.config.config.streamName,
+          });
+        }
+      }
+
+      this.config.logger?.warn?.('Moved stuck messages to DLQ', {
+        stream: this.config.config.streamName,
+        group: this.config.config.groupName,
+        count: stuckMessages.length,
+        maxDeliveryCount: maxDelivery,
+        messageIds: stuckMessages.map(m => m.id),
+      });
+    } catch (error) {
+      // Non-fatal: pending check failure should not block normal consumption
+      this.config.logger?.error('Failed to check pending messages for cleanup', {
+        error,
+        stream: this.config.config.streamName,
+      });
+    }
+  }
+
   private async poll(): Promise<void> {
     if (!this.running || this.paused) return;
+
+    // P0 Fix ES-003: Periodically check for stuck pending messages
+    if (this.config.maxDeliveryCount) {
+      this.pollCycleCount++;
+      const checkInterval = this.config.pendingCheckInterval ?? 10;
+      if (this.pollCycleCount % checkInterval === 0) {
+        await this.cleanupStuckPendingMessages();
+      }
+    }
 
     let pollSucceeded = false;
 

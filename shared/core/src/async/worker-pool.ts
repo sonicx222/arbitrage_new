@@ -1274,7 +1274,9 @@ let workerPool: EventProcessingWorkerPool | null = null;
 export function getWorkerPool(
   poolSize?: number,
   maxQueueSize?: number,
-  taskTimeout?: number
+  taskTimeout?: number,
+  priceBuffer?: SharedArrayBuffer | null,
+  keyRegistryBuffer?: SharedArrayBuffer | null
 ): EventProcessingWorkerPool {
   if (!workerPool) {
     // P2-FIX: Use platform-aware defaults from @arbitrage/config when not explicitly specified
@@ -1282,17 +1284,42 @@ export function getWorkerPool(
     const effectiveQueueSize = maxQueueSize ?? WORKER_POOL_CONFIG.maxQueueSize;
     const effectiveTimeout = taskTimeout ?? WORKER_POOL_CONFIG.taskTimeout;
 
+    // P1-2 FIX: Auto-detect SharedArrayBuffers from PriceMatrix singleton.
+    // Workers log "No SharedArrayBuffer provided, price lookups disabled" when these
+    // aren't passed, degrading detection quality. By pulling from the PriceMatrix
+    // singleton here, we ensure workers get price access regardless of which
+    // call site first triggers pool creation.
+    let effectivePriceBuffer = priceBuffer ?? null;
+    let effectiveKeyRegistryBuffer = keyRegistryBuffer ?? null;
+    if (!effectivePriceBuffer) {
+      try {
+        // Lazy import to avoid circular dependency (worker-pool -> price-matrix)
+        const { getPriceMatrix } = require('../caching/price-matrix');
+        const matrix = getPriceMatrix();
+        effectivePriceBuffer = matrix.getSharedBuffer?.() ?? null;
+        effectiveKeyRegistryBuffer = effectiveKeyRegistryBuffer ?? matrix.getKeyRegistryBuffer?.() ?? null;
+      } catch {
+        // PriceMatrix not yet initialized — workers will run without price lookups
+      }
+    }
+
     logger.info('Creating worker pool with platform-aware configuration', {
       platform: PLATFORM_NAME,
       poolSize: effectivePoolSize,
       maxQueueSize: effectiveQueueSize,
       taskTimeout: effectiveTimeout,
+      // P1-2 FIX: Log whether SharedArrayBuffers are provided for price lookups
+      hasPriceBuffer: !!effectivePriceBuffer,
+      hasKeyRegistryBuffer: !!effectiveKeyRegistryBuffer,
     });
 
     workerPool = new EventProcessingWorkerPool(
       effectivePoolSize,
       effectiveQueueSize,
-      effectiveTimeout
+      effectiveTimeout,
+      // P1-2 FIX: Forward SharedArrayBuffers so workers can perform price lookups
+      effectivePriceBuffer,
+      effectiveKeyRegistryBuffer
     );
   }
   return workerPool;

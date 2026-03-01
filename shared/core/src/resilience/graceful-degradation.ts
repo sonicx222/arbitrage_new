@@ -358,7 +358,7 @@ export class GracefulDegradationManager {
       'unified-detector-asia-fast',
       'unified-detector-l2-turbo',
       'unified-detector-high-value',
-      'unified-detector-solana'
+      'unified-detector-solana-native'
     ];
 
     for (const service of services) {
@@ -391,7 +391,7 @@ export class GracefulDegradationManager {
     };
 
     await this.dualPublish(
-      'stream:service-degradation',  // Primary: Redis Streams
+      RedisStreamsClient.STREAMS.SERVICE_DEGRADATION,  // Primary: Redis Streams
       `service-degradation:${serviceName}`,  // Secondary: Pub/Sub
       degradationMessage
     );
@@ -481,8 +481,10 @@ export class GracefulDegradationManager {
         source: 'graceful-degradation-manager'
       };
 
+      // P2 Fix CA-002: Use canonical degradation stream for recovery events too
+      // (message.type='service_recovered' distinguishes from degradation events)
       await this.dualPublish(
-        'stream:service-recovery',  // Primary: Redis Streams
+        RedisStreamsClient.STREAMS.SERVICE_DEGRADATION,  // Primary: Redis Streams
         `service-recovery:${serviceName}`,  // Secondary: Pub/Sub
         recoveryMessage
       );
@@ -534,7 +536,7 @@ export class GracefulDegradationManager {
     };
 
     await this.dualPublish(
-      'stream:service-degradation',  // Primary: Redis Streams
+      RedisStreamsClient.STREAMS.SERVICE_DEGRADATION,  // Primary: Redis Streams
       'service-degradation',  // Secondary: Pub/Sub (broadcast channel)
       notifyMessage
     );

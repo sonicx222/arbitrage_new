@@ -108,6 +108,10 @@ export interface SolanaArbitrageOpportunity {
   token0: string;
   /** Normalized quote token symbol */
   token1: string;
+  /** P0-1 FIX: Token input identifier (mirrors token0 for downstream compatibility) */
+  tokenIn?: string;
+  /** P0-1 FIX: Token output identifier (mirrors token1 for downstream compatibility) */
+  tokenOut?: string;
   /** Price on buy side */
   buyPrice: number;
   /** Price on sell side */
