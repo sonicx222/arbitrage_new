@@ -297,6 +297,7 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
 
     (OpportunityConsumer as unknown as jest.Mock).mockImplementation((() => ({
       createConsumerGroup: jest.fn(async () => {}),
+      recoverOrphanedMessages: jest.fn(async () => 0),
       start: jest.fn(async () => {}),
       stop: jest.fn(async () => {}),
     })) as any);

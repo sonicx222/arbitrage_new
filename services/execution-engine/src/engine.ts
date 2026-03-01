@@ -40,6 +40,7 @@ import {
   type PositionSize,
 } from '@arbitrage/core/risk';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
+import { extractContext, createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import { disconnectWithTimeout, parseEnvIntSafe } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger, NonceManager, getNonceManager, TradeLogger, R2Uploader, type TradeLoggerConfig, type R2UploaderConfig } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
@@ -1206,7 +1207,15 @@ export class ExecutionEngineService {
     if (!this.streamsClient) return;
 
     try {
-      await this.streamsClient.xadd(RedisStreams.EXECUTION_RESULTS, result);
+      // SM-006: Propagate trace context from the opportunity into the result
+      // so end-to-end traces are complete across the pipeline.
+      const parentCtx = opportunity ? extractContext(opportunity as unknown as Record<string, unknown>) : null;
+      const traceCtx = parentCtx
+        ? parentCtx
+        : createTraceContext('execution-engine');
+      const enrichedResult = propagateContext(result as unknown as Record<string, unknown>, traceCtx);
+
+      await this.streamsClient.xadd(RedisStreams.EXECUTION_RESULTS, enrichedResult);
     } catch (error) {
       this.logger.error('Failed to publish execution result', { error });
     }
