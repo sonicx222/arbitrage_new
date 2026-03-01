@@ -352,8 +352,24 @@ sets `CONSTRAINED_MEMORY=true` (smaller worker pools), `WORKER_POOL_SIZE=1`
 (1 worker thread per service instead of 4), and `CACHE_L1_SIZE_MB=8` (8MB L1
 cache instead of 64MB). These reduce peak RAM from ~1.5GB to ~600MB.
 
+Both scripts default to `SIMULATION_REALISM_LEVEL=high` (block-driven multi-swap
+engine with Markov regime model). Override with a `cross-env` prefix to use a
+different level:
+
+| Level | Behavior | Use Case |
+|-------|----------|----------|
+| `low` | Legacy `setInterval`, flat rate | Fast deterministic tests |
+| `medium` | Block-driven, Poisson swaps, gas model, no regime | Steady-state validation |
+| `high` | Medium + Markov regime (quiet/normal/burst) | Production-realistic load |
+
 ```bash
 npm run dev:monitor &
+```
+
+To override the realism level (e.g., medium for steady-state validation):
+
+```bash
+cross-env SIMULATION_REALISM_LEVEL=medium npm run dev:monitor &
 ```
 
 If only the critical pipeline path needs validation (Coordinator + P1 + Execution),
@@ -942,7 +958,9 @@ done
 ### Step 4B — Wait for pipeline flow (60s timeout, poll every 10s)
 
 In simulation mode, the partitions automatically generate simulated price data
-which feeds into the detection → execution pipeline.
+which feeds into the detection → execution pipeline. At `high` realism, the
+Markov regime model produces bursty activity — expect uneven stream growth
+(quiet periods with few events, then bursts). At `medium`, growth is steadier.
 
 Poll the 4 critical streams every 10 seconds for up to 60 seconds:
 
