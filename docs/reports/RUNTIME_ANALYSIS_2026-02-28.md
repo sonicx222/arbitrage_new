@@ -1,421 +1,293 @@
-# Runtime Analysis Report — 2026-02-28 (Rev 2)
+# Runtime Deep-Dive Analysis Report
 
-**Method:** Started all 7 services via `npm run dev:all` with in-memory Redis, monitored for 10 minutes, analyzed 8.14 million log lines.
-
-**Services:** Coordinator (coord), P1 asia-fast, P2 l2-turbo, P3 high-value, P4 solana-native, Cross-Chain Detector, Execution Engine
-
-**Mode:** `SIMULATION_MODE=true`, `EXECUTION_SIMULATION_MODE=true` — synthetic prices from ChainSimulator, SimulationStrategy for fake trade results. No real blockchain or RPC connections.
-
----
-
-## Simulation Mode Architecture (Context for All Findings)
-
-Two independent flags control simulation behavior:
-
-| Flag | Scope | Effect |
-|------|-------|--------|
-| `SIMULATION_MODE=true` | Detectors (P1-P4) | `ChainSimulator` generates synthetic Sync events and reserve updates on 1-5s intervals instead of real WebSocket/RPC connections. The **same** detection code (SimpleArbitrageDetector, CrossDexTriangularArbitrage, MultiLegPathFinder) runs on this synthetic data. |
-| `EXECUTION_SIMULATION_MODE=true` | Execution Engine | `SimulationStrategy` replaces real blockchain transactions. It **still processes** opportunities from `stream:execution-requests`: validates, enqueues, simulates latency (~500ms), returns mock tx hashes with 85% success rate. Risk management (drawdown, EV, Kelly sizing) is skipped. |
-
-**Key architectural fact:** In Docker/production, P1-P3 partitions use `services/unified-detector/Dockerfile` which runs `services/unified-detector/src/index.ts` — the entry point that includes `OpportunityPublisher` with Redis Streams wiring. In local dev (`dev:all`), P1-P3 use `services/partition-*/src/index.ts` which calls `createPartitionEntry()` — a different code path that lacks the publisher.
+**Date:** 2026-02-28
+**Duration:** ~10 minutes of live service monitoring
+**Environment:** Windows 11, Node.js 22, Redis 7.4.7, SIMULATION_MODE=true
+**Services:** 7 (coordinator, P1-P4 partitions, execution engine, cross-chain detector)
+**Log Volume:** 2.4M lines in ~10 minutes (~4,000 lines/sec)
 
 ---
 
 ## Executive Summary
 
-| Metric | Value | Context |
-|--------|-------|---------|
-| Total log lines | 8,144,755 | ~13,500/sec, mostly opportunity detection logs |
-| Opportunities detected (partitions) | 1,169,239 | Synthetic data from ChainSimulator |
-| Opportunities seen by coordinator | 23 (0.002%) | Only cross-chain detector publishes to streams |
-| Opportunities forwarded to execution | 21 | Coordinator forwards cross-chain opps |
-| **Trades executed** | **0** | Serialization bug causes silent validation rejection |
+| Severity | Count | Description |
+|----------|-------|-------------|
+| **P0 - Critical** | 4 | Pipeline-breaking bugs preventing trade execution |
+| **P1 - High** | 5 | Service health failures, data quality, and operational issues |
+| **P2 - Medium** | 6 | Configuration drift, performance bottlenecks, observability gaps |
+| **P3 - Low** | 4 | Cosmetic, deprecation warnings, minor improvements |
 
-**Two P0 bugs** affect ALL modes (simulation and production). One additional bug is **dev-mode-only**. Several findings are reclassified as simulation artifacts.
+**Overall System Health Grade: D+**
 
----
-
-## P0 — Critical Findings (Affect Production)
-
-### F1. Coordinator Stream Serialization Drops Critical Fields — Silent Execution Rejection
-
-**Severity:** P0 — All forwarded opportunities silently rejected by execution engine
-**Affects:** All modes (simulation AND production)
-**Simulation-independent:** YES — Coordinator has zero simulation-mode awareness
-
-`services/coordinator/src/utils/stream-serialization.ts` (lines 41-62) serializes opportunities for `stream:execution-requests` but omits critical fields:
-
-| Missing Field | Required By | Consequence |
-|---------------|-------------|-------------|
-| `expectedProfit` | `validateBusinessRules()` line 385 | Always `undefined` → resolves to `0` → fails `LOW_PROFIT` check |
-| `buyChain` / `sellChain` | `validateCrossChainFields()` line 262 | `MISSING_BUY_CHAIN` / `MISSING_SELL_CHAIN` for cross-chain opps |
-| `estimatedProfit` | Profitability checks | Lost in transit |
-| `gasEstimate` | Cost analysis | Lost in transit |
-
-The execution engine's `SimulationStrategy` DOES process valid opportunities (confirmed: it reads from stream, validates, simulates latency, returns mock results at 85% success rate). But **no opportunity ever reaches the strategy** because `expectedProfit` is always `undefined` → `0` → fails the `minProfitPercentage` business rule.
-
-**The rejection is logged at DEBUG level** (`opportunity.consumer.ts` line 664: `this.logger.debug('Opportunity rejected by business rules', ...)`), making it completely invisible at default log levels.
-
-Additionally, `tokenIn`, `tokenOut`, and `amountIn` use `?? ''` (empty string) fallback, which fails truthy validation checks.
-
-**Files:**
-- `services/coordinator/src/utils/stream-serialization.ts:41-62` — Incomplete field list
-- `services/execution-engine/src/consumers/validation.ts:262-266,385` — Validates missing fields
-- `services/execution-engine/src/consumers/opportunity.consumer.ts:664` — Debug-level rejection log
-
-**Fix:** Add all fields required by execution validation to `serializeOpportunityForStream()`. At minimum: `expectedProfit`, `buyChain`, `sellChain`. Change empty-string fallbacks to omit fields instead.
+The pipeline is fundamentally broken in simulation mode: zero opportunities reach execution successfully. All forwarded messages fail validation (100% DLQ rate). Two of four partition health servers fail to bind ports. The coordinator marks its own heartbeat stale. Simulated profit values are astronomically unrealistic (up to 159 billion percent).
 
 ---
 
-### F2. Profit Unit Inconsistency Across Detectors
+## P0 - Critical Findings
 
-**Severity:** P0 — Cross-detector profit comparison is meaningless
-**Affects:** All modes (simulation AND production)
-**Simulation-independent:** YES for the core inconsistency; the extreme values (870K, 999K) are simulation-specific
+### P0-1: Execution Pipeline Completely Broken — 100% DLQ Rate
 
-The `expectedProfit` and `profitPercentage` fields have incompatible units across detectors:
+**Impact:** Zero trades executed. All forwarded opportunities fail with `VAL_MISSING_TOKEN_IN`.
+**Evidence:** DLQ grew from 205 to 261 during the 10-minute run. `executionAttempts: 0`, `successRate: "N/A"`.
 
-| Detector | `expectedProfit` Unit | `profitPercentage` Unit | Production? |
-|---|---|---|---|
-| **Simple** (SimpleArbitrageDetector) | `Number(wei) * ratio` (raw wei-scale) | `ratio * 100` (correct %) | YES |
-| **Triangular/Quad** (CrossDexTriangularArbitrage) | Decimal ratio (0-1) | Decimal ratio (**NOT** * 100) | YES |
-| **Multi-Leg** (MultiLegPathFinder) | Decimal ratio (0-1) | Decimal ratio (**NOT** * 100) | YES |
-| **Solana** (SolanaArbitrageDetector) | Decimal ratio (0-1) | `ratio * 100` (correct %) | YES |
-| **Chain Simulator** (simulation only) | USD absolute value | `ratio * 100` (correct %) | NO |
+**Root Cause — Triple Schema Mismatch:**
 
-**Two production sub-bugs:**
+1. **Coordinator drops critical fields during forwarding**
+   `services/coordinator/src/opportunities/opportunity-router.ts:276-286`
+   The `processOpportunity()` method constructs a new object with a hardcoded whitelist of 9 fields, dropping `tokenIn`, `tokenOut`, `amountIn`, `type`, and 10+ other fields.
 
-1. **Simple detector `expectedProfit` is raw wei** (`simple-arbitrage-detector.ts:262`): `Number(amountIn_in_wei) * netProfitPct` produces values like `5.3e+20`. This is `Number(BigInt)` of a raw token amount multiplied by a ratio — not ETH, not USD, not any normalized unit. In production with real reserves, this would produce similarly meaningless large numbers.
+2. **Serializer produces empty strings from missing fields**
+   `services/coordinator/src/utils/stream-serialization.ts:52-54`
+   Uses `opportunity.tokenIn ?? ''` which produces empty string `''` when field is `undefined`.
 
-2. **Triangular/Multi-leg `profitPercentage` missing `* 100`** (`cross-dex-triangular-arbitrage.ts:747`, `multi-leg-path-finder.ts:557`): Set to `netProfit` (a ratio like 0.003) without the `* 100` multiplication that Simple and Solana detectors correctly apply. A 0.3% profit shows as `0.003` instead of `0.3`.
+3. **Solana partition uses different field names**
+   `services/partition-solana/src/opportunity-factory.ts:118-146`
+   Publishes `token0`/`token1` (symbol names) instead of `tokenIn`/`tokenOut` (addresses). No `amountIn` field at all.
 
-**Simulation-specific artifact:** The Chain Simulator's `expectedProfit = estimatedProfitUsd - estimatedGasCost` (with `positionSize` up to $50K and profit up to 50% after clamping) produces the extreme values like `870676` and `999998` seen in P3 logs. This code path only runs when `SIMULATION_MODE=true`.
+4. **Execution engine rejects empty tokenIn**
+   `services/execution-engine/src/consumers/validation.ts:232-234`
+   `!data.tokenIn` evaluates `''` as falsy → `VAL_MISSING_TOKEN_IN`.
 
-**Downstream impact (all modes):** The coordinator's opportunity routing, the execution engine's profitability validation, and any cross-detector ranking are broken. A Simple opportunity with `expectedProfit = 5.3e+20` would always "outrank" a Triangular with `expectedProfit = 0.003`, regardless of actual profitability.
+**Additional:** `intra-solana` type not in `VALID_OPPORTUNITY_TYPES` set (validation.ts:149-162), but this is masked because the coordinator also drops `type` and it defaults to `'simple'`.
 
-**Files:**
-- `services/unified-detector/src/detection/simple-arbitrage-detector.ts:262`
-- `shared/core/src/path-finding/cross-dex-triangular-arbitrage.ts:747`
-- `shared/core/src/path-finding/multi-leg-path-finder.ts:557`
-- `shared/core/src/simulation/chain-simulator.ts:305` (simulation only)
-
-**Fix:** Normalize `expectedProfit` to a single unit (suggested: decimal ratio, matching Triangular/MultiLeg/Solana). Multiply Triangular/MultiLeg `profitPercentage` by 100.
+**Fix:** The coordinator's `processOpportunity()` must pass through ALL fields from the raw data object. The Solana partition must emit standard field names (`tokenIn`/`tokenOut`/`amountIn`). Add `intra-solana` to the execution engine's valid types.
 
 ---
 
-## P1 — Significant Bugs
+### P0-2: P1 (asia-fast) and P2 (l2-turbo) Health Servers Not Listening
 
-### F3. Coordinator Marks Its Own Heartbeat as Stale
+**Impact:** Ports 3001/3002 are not bound. These partitions are invisible to any health monitoring system, yet appear to be "running" from their log output.
+**Evidence:** `curl -v localhost:3001/health` → "Connection refused". Confirmed via PowerShell port scan — only 3000, 3003, 3004, 3005, 3006 are listening.
 
-**Severity:** P1 — Causes degradation oscillations and false SERVICE_UNHEALTHY alerts
-**Affects:** All modes
-**Simulation-independent:** YES
+**Root Cause — Fire-and-Forget `server.listen()` + Misleading Log:**
 
-The coordinator publishes health to the HEALTH Redis stream every 5s but does NOT directly update its own `serviceHealth['coordinator']` entry. It depends on a round-trip: `xadd(HEALTH)` → Redis → `xreadgroup(HEALTH)` → `handleHealthMessage()` → `serviceHealth.set()`.
+- `shared/core/src/partition/health-server.ts:248-253`: Logs "Health server bound to all interfaces" **BEFORE** `server.listen()` is called (line 255). This message is not confirmation of binding — it's premature.
+- `shared/core/src/partition/health-server.ts:255-257`: `server.listen()` is fire-and-forget. The actual bind confirmation is a `debug`-level log inside the callback, invisible at default `info` level.
+- `shared/core/src/partition/runner.ts:182`: `await detector.start()` begins heavy async work. If chain startup exceeds the 60-second state transition timeout (`shared/core/src/service-lifecycle/service-state.ts:335-341`), the catch block at `runner.ts:207-251` calls `closeServerWithTimeout()` and `process.exit(1)`.
+- P1 (4 chains, 2 classified as UNSTABLE_WEBSOCKET_CHAINS) and P2 (5 chains including newer Blast/Scroll) take longer to start than P3 (3 chains) and P4 (1 chain).
+- `shared/core/src/partition/health-server.ts:281-287`: Non-EADDRINUSE/EACCES errors are logged but NOT fatal — the service continues with a dead health server.
 
-The 5s health check interval runs:
-1. `updateSystemMetrics()` → `detectStaleServices()` — marks entries with `age > 90s` as unhealthy
-2. `checkForAlerts()` — fires alerts
-3. `reportHealth()` — publishes heartbeat
-
-Step 1 checks staleness BEFORE step 3 publishes. If the stream consumer's round-trip takes >90s (e.g., exponential backoff on errors), the coordinator marks itself unhealthy.
-
-**Observed:** Coordinator heartbeat consistently stale from 19:57:34 onwards, `ageMs` reaching 201-373 seconds.
-
-**Degradation oscillation timeline:**
-```
-19:55:35  FULL_OPERATION (startup)
-19:55:40  READ_ONLY (systemHealth: 0, no services registered yet)
-19:56:21  DETECTION_ONLY (executorHealthy: false)
-19:57:29  FULL_OPERATION (all services registered)
-~19:58+   Oscillation: REDUCED_CHAINS ↔ FULL_OPERATION (every ~10-30s)
-```
-
-**Additional sub-issues:**
-- `detectStaleServices()` mutates entries to `status: 'unhealthy'` BEFORE hysteresis check — even if `consecutiveStaleCount < threshold`, entries are already marked unhealthy
-- Entries older than 5 minutes are purged from `serviceHealth`, causing the coordinator to disappear from its own registry
-- Field name inconsistency: coordinator publishes `timestamp`, cross-chain detector publishes `lastHeartbeat`, unified-detector publishes neither. `handleHealthMessage()` reads `timestamp` with `Date.now()` fallback
-
-**Fix:** After `reportHealth()`, directly update `serviceHealth.set('coordinator', { ..., lastHeartbeat: Date.now() })`.
+**Fix:** Make `server.listen()` awaitable (wrap in Promise). Move the "bound" log to the listen callback. Make all listen errors fatal. Consider making the state transition timeout proportional to chain count.
 
 ---
 
-### F4. Dev-Mode Pipeline Gap: Partitions Never Publish Opportunities
+### P0-3: Simulated Profit Values Are Astronomically Unrealistic
 
-**Severity:** P1 — Breaks `dev:all` / `dev:start` / `dev:minimal` workflows
-**Affects:** Local development only (`npm run dev:*`)
-**Does NOT affect Docker/production** — Docker uses `services/unified-detector/Dockerfile` which includes `OpportunityPublisher`
-**Simulation-independent:** YES — Publishing gap is in entry point wiring, not simulation mode
+**Impact:** Data quality is completely broken for EVM simulation. Downstream consumers (ML models, strategy selectors, risk management) are trained/calibrated on nonsensical values.
+**Evidence:**
+- P1 max: 8,230,298% (8.2M%)
+- P2 max: 159,371,939,452% (159B%)
+- P3 max: 99,999,898% (100M%)
+- P4 (Solana): 0.99-1.00% (realistic)
 
-`npm run dev:all` runs `services/partition-*/src/index.ts` which calls `createPartitionEntry()` from `shared/core/src/partition/runner.ts`. This factory:
-- Creates detector ✓
-- Starts health server ✓
-- Registers event handlers (logging only) ✓
-- **Creates OpportunityPublisher: ✗ MISSING**
+**Root Cause — Three Compounding Bugs:**
 
-The `setupDetectorEventHandlers()` in `handlers.ts:65-82` only calls `logger.info('Arbitrage opportunity detected', ...)`. No Redis Streams client, no publisher, no forwarding.
+1. **Reserve ratio clamp distorts cross-decimal pairs**
+   `shared/core/src/simulation/chain-simulator.ts:149-151`
+   When the 2:1 ratio clamp triggers, it sets `reserve1 = reserve0`. For a WETH(18)/USDC(6) pair, this sets USDC reserve to 10^18 magnitude instead of 10^6 — a 10^12 distortion.
 
-**Entry point comparison:**
+2. **Price calculation ignores token decimals**
+   `shared/core/src/simulation/chain-simulator.ts:213`
+   `price = Number(reserves.reserve1) / Number(reserves.reserve0)` — raw division without decimal normalization.
 
-| Entry Point | Used By | Has OpportunityPublisher? |
-|---|---|---|
-| `services/unified-detector/src/index.ts` | Docker P1-P3, `dev:detector:fast` | YES (lines 300-334, with retry, DLQ, fast-lane) |
-| `services/partition-*/src/index.ts` via `createPartitionEntry()` | `dev:all`, `dev:start`, `dev:minimal` | NO |
-| `services/partition-solana/src/index.ts` | Both Docker and dev | YES (custom wiring in `onStarted` hook, lines 93-104) |
+3. **ChainSimulator's direct `opportunity` events bypass profit filters**
+   `services/unified-detector/src/simulation/chain.simulator.ts:144-146`
+   These opportunities are emitted directly to the pipeline without going through `SimpleArbitrageDetector`'s 20% cap (`simple-arbitrage-detector.ts:230`). The only cap is 50% gross profit (`chain-simulator.ts:246`), but after the reserve distortion bug, raw values can be billions of percent.
 
-**Result:** In `dev:all`, 1,169,239 opportunities are detected, logged to console, and discarded. Only P4 (Solana) and the cross-chain detector publish to Redis Streams.
+4. **Coordinator's profit sanity check is far too permissive**
+   `services/coordinator/src/opportunities/opportunity-router.ts:129` — `maxProfitPercentage` default is 10,000%
+   `services/coordinator/src/coordinator.ts:1144` — also allows up to 10,000%
 
-**Fix:** Either:
-- (A) Add `OpportunityPublisher` wiring to `createPartitionEntry()` in `runner.ts`
-- (B) Change `dev:all` to use `services/unified-detector/src/index.ts` with `PARTITION_ID` env var, matching Docker behavior
+**Why Solana is fine:** `services/unified-detector/src/simulation/chain.simulator.ts:228-263` uses direct price generation with hardcoded 0.3-1.0% profit range, no reserve-based math.
 
----
-
-## P2 — Moderate Issues
-
-### F5. TLS Certificate Errors for Vault-Model DEX Adapters
-
-**Severity:** P2
-**Affects:** All modes (adapters attempt initialization even in simulation mode)
-**Simulation impact:** Low in simulation (ChainSimulator provides synthetic data regardless), but prevents production adapter initialization
-
-All vault-model DEX adapters fail with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`:
-- P2: Balancer V2 on arbitrum, optimism (2 errors)
-- P1: Beethoven X, GMX, Platypus on avalanche/fantom (3 errors)
-- P3: Balancer V2 on ethereum (1 error)
-
-In simulation mode, these errors are cosmetic — the ChainSimulator generates data independently. **In production, these adapters would fail to start**, reducing DEX coverage for vault-model protocols.
-
-**Fix:** Set `NODE_EXTRA_CA_CERTS` env var or skip adapter initialization when `SIMULATION_MODE=true`.
+**Fix:** Normalize reserve ratio clamp for token decimals. Add decimal normalization to price calculation. Route all ChainSimulator opportunities through the profit filter. Lower coordinator's `maxProfitPercentage` to 50%.
 
 ---
 
-### F6. TensorFlow.js Running Without Native Backend
+### P0-4: Coordinator Marks Its Own Heartbeat as Stale
 
-**Severity:** P2
-**Affects:** All modes
-**Simulation-independent:** YES
+**Impact:** System health oscillates between 50-100%, triggering false degradation level changes (FULL_OPERATION ↔ DETECTION_ONLY ↔ REDUCED_CHAINS). This affects execution routing decisions.
+**Evidence:** 11 occurrences of "Service coordinator heartbeat stale, marking unhealthy". System health trajectory: 100 → 80 → 50 → 66 → 83 → 66 → 66 → 83.
 
-Cross-chain detector logs:
-```
-Hi, looks like you are running TensorFlow.js in Node.js.
-Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
-```
+**Root Cause — Wrong Operation Ordering + Startup Contamination:**
 
-The LSTM model initializes with a 65536-element orthogonal matrix using pure JavaScript. The `@tensorflow/tfjs-node` native backend would provide 10-100x speedup.
+- `services/coordinator/src/coordinator.ts:1732`: `updateSystemMetrics()` (which runs stale detection) is called BEFORE the local heartbeat update (F3 FIX at line 1743-1750).
+- `services/coordinator/src/coordinator.ts:621-629`: `recoverPendingMessages()` at startup loads OLD health entries from previous runs into `serviceHealth` map with ancient timestamps.
+- `services/coordinator/src/coordinator.ts:1063`: `handleHealthMessage()` can overwrite the F3 FIX value with older Redis data.
+- `services/coordinator/src/health/health-monitor.ts:312-383`: `detectStaleServices()` checks age > 90s threshold and marks entries unhealthy.
 
-**Fix:** Add `@tensorflow/tfjs-node` to dependencies.
+**Fix:** Seed the coordinator's own `serviceHealth` entry at startup before starting the health monitor. Move the F3 FIX to BEFORE `updateSystemMetrics()`. Skip the coordinator's own name in `handleHealthMessage()` from Redis.
 
 ---
 
-### F7. MaxListenersExceeded Warning on All 7 Processes
+## P1 - High Findings
 
-**Severity:** P2
-**Affects:** All modes
-**Simulation-independent:** YES
+### P1-1: Multi-Leg Path Finder Worker Tasks Timeout and Fall Back to Sync
 
-Every process emits: `MaxListenersExceededWarning: 11 exit listeners added to [process]. MaxListeners is 10.`
+**Impact:** All multi-leg path finding tasks on P2 timeout after 30s and fall back to synchronous execution, blocking the event loop.
+**Evidence:** 16+ timeout errors, all on P2 (l2-turbo): base, arbitrum, optimism, blast, scroll chains. Sync fallback processing times: 1,740-3,595ms.
+**Location:** `shared/core/src/async/worker-pool.ts:452`
+**Root Cause:** Worker pools with 4 workers are overwhelmed when 5 chains each submit multi-leg tasks simultaneously. The 30s timeout is insufficient for complex path finding on chains with 700+ pairs (Arbitrum).
 
-**Fix:** Consolidate exit handlers or increase `process.setMaxListeners()`.
+### P1-2: Event Processor Workers Lose Price Context
 
----
+**Impact:** Workers cannot perform price lookups, degrading detection quality.
+**Evidence:** Multiple occurrences of "Worker N: No SharedArrayBuffer provided, price lookups disabled" across P1 and P2.
+**Root Cause:** SharedArrayBuffer is not transferred to worker threads during event processor initialization. Workers fall back to detection without price data.
 
-### F8. SharedArrayBuffer Over-Allocation (1.18 GB Total)
+### P1-3: Gas Price Cache Goes Stale
 
-**Severity:** P2
-**Affects:** All modes
-**Simulation-independent:** YES
+**Impact:** Profit calculations use outdated gas prices, leading to incorrect P&L estimates.
+**Evidence:** `Gas price for optimism is stale (143665ms old)`, `Gas price for base is stale (142763ms old)` — over 2.3 minutes stale.
+**Root Cause:** Gas price refresh mechanism fails or is outpaced by the number of chains. With 5 chains on P2, the refresh cycle may not complete before prices expire.
 
-Each partition allocates 295MB `SharedKeyRegistry` buffer (`maxKeys: 4613734`, `slotSize: 64`). With 4 partitions: **1.18 GB** total, regardless of actual pair count.
+### P1-4: Cross-Chain Detector Slow to Produce Opportunities
 
-P4 (Solana, 1 chain, ~7 DEXs) allocates the same 295MB as P2 (5 chains, ~30 DEXs).
+**Impact:** Cross-chain opportunities only appear ~5 minutes after startup. During the first 5 minutes, only intra-chain simple arbitrage is detected.
+**Evidence:** First cross-chain opportunity detected at 22:22:47, services started at 22:16:51.
+**Root Cause:** The ML predictor initialization (TensorFlow.js) and price accumulation require warmup. The 64k-element orthogonal initializer warning suggests the model is larger than necessary.
 
-**Fix:** Scale allocation based on actual chain/pair count per partition.
+### P1-5: DLQ Accumulating Without Alerting or Recovery
 
----
-
-## P3 — Minor Issues & Config Drift
-
-### F9. Redis Password Mismatch (Dev-Only)
-
-All services warn: `This Redis server's 'default' user does not require a password, but a password was supplied`. The `.env` file has a Redis password but in-memory Redis doesn't require one. Cosmetic in dev.
-
-### F10. Health Servers Bound to 0.0.0.0 Without Auth (Expected in Dev)
-
-All 4 partitions bind to `0.0.0.0` without `HEALTH_AUTH_TOKEN`. Expected for local dev. Production validation (`validate:deployment`) should catch this.
-
-### F11. Deprecated `punycode` Module Warning
-
-All 7 processes emit `[DEP0040]`. Transitive dependency (ethers, ioredis, or similar). No functional impact.
-
-### F12. Orphaned Pending Messages from Previous Sessions
-
-Coordinator recovers 3+6 stale pending messages from previous consumer instances. Recovery works correctly, but indicates previous sessions didn't cleanly shut down.
-
-### F13. Coordinator Sees 3 Detectors, Not 4
-
-`detectorCount: 3` despite 4 partitions running. P4 (Solana) likely registers under a naming convention not matched by the health monitor pattern.
+**Impact:** DLQ grew from 205 (legacy from previous runs) to 261 during this session. No automated recovery or alarm escalation observed.
+**Evidence:** DLQ fallback files show entries from multiple previous sessions (Feb 20-28). `dlqAlert: true` in health endpoint but no actual notification sent (no alert channels configured).
+**DLQ files growing daily:** dlq-fallback files from 2.4KB (Feb 20) to 12.2KB (Feb 26) to 5.3KB (Feb 28). dlq-forwarding-fallback from 22.5KB to 98.9KB to 48.6KB.
 
 ---
 
-## Simulation-Specific Observations (NOT Bugs)
+## P2 - Medium Findings
 
-These behaviors are **expected artifacts** of `SIMULATION_MODE=true` and should not be treated as bugs:
+### P2-1: Log Volume Is Excessive — 4,000 Lines/Second
 
-### S1. Unrealistic Profit Values from Chain Simulator
+**Impact:** Disk I/O pressure, log storage costs, makes manual analysis impractical.
+**Evidence:** 2.4M lines in ~10 minutes. Each opportunity detection generates 6-8 lines of structured output.
+**Root Cause:** Every single arbitrage opportunity (18,811 in ~10 min) is logged at INFO level with full details (id, type, profit, confidence, buyDex, sellDex). Partition-level summaries also log each detection.
+**Fix:** Log opportunity detections at DEBUG level. Keep partition-level summaries (aggregated counts per interval) at INFO.
 
-Profit ranges like `"64627.639%"`, `"912250.009%"`, `"3360.054%"` and raw profit values like `870676`, `999998` come from the ChainSimulator's `positionSize * netProfit` calculation with:
-- Position sizes: $1K-$50K (log-normal distribution)
-- Net profit: up to 50% (clamped by reserve ratio bounds)
-- Result: `expectedProfit` in USD, range $0-$25K per opportunity
+### P2-2: Concurrent Publish Limit Drops 26% of Opportunities
 
-In production, the SimpleArbitrageDetector works with real reserve ratios and the raw-wei bug (F2) would produce different (but still incorrectly scaled) values.
+**Impact:** 14,640 of ~55,000 detected opportunities (26.4%) are silently dropped.
+**Evidence:** P1: 4,608 dropped, P2: 7,705 dropped, P3: 4,697 dropped, P4: 0.
+**Location:** `shared/core/src/partition/runner.ts:491` — `MAX_CONCURRENT_PUBLISHES = 10`
+**Root Cause:** Hardcoded limit of 10 concurrent publishes is far too low for the detection rate. The unified-detector uses 50 (`services/unified-detector/src/index.ts:48`), creating an inconsistency.
+**Fix:** Increase to 100 and make configurable via environment variable.
 
-### S2. 1.17M Opportunities in 10 Minutes (High Detection Volume)
+### P2-3: Redis Password Mismatch Warning
 
-The ChainSimulator updates reserves every 1-5s for all pairs. With hundreds of configured pairs across 13 chains, the combinatorial cross-DEX detection produces massive volumes. In production with real WebSocket feeds, opportunity volume would be order(s) of magnitude lower and driven by actual market movements.
+**Impact:** Cosmetic but indicates configuration drift between .env and Redis server.
+**Evidence:** Every service logs `[WARN] This Redis server's default user does not require a password, but a password was supplied` (14 occurrences across all services, some with 2 Redis connections).
+**Root Cause:** `.env` has `REDIS_PASSWORD=localdev` but the local Redis instance has no password configured.
+**Fix:** Remove or comment out `REDIS_PASSWORD` in `.env` for local development, or configure the Redis server with a password.
 
-### S3. Log Flood (~13,500 lines/sec)
+### P2-4: TLS Certificate Errors Block Vault-Model DEX Adapters
 
-Directly caused by S2. The `handlers.ts` logs every detected opportunity at INFO level. In production this would be lower volume, but **log sampling should still be added** to prevent I/O saturation during volatile markets.
+**Impact:** Balancer V2, GMX, Beethoven X, and Platypus adapters cannot initialize on 5 chains (Ethereum, Arbitrum, Optimism, Avalanche, Fantom). This reduces the available DEX coverage for arbitrage detection.
+**Evidence:** 11 ERROR logs with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` across P1 and P2.
+**Location:** `shared/core/src/dex-adapters/balancer-v2-adapter.ts:181`, `gmx-adapter.ts:88`
+**Root Cause:** Node.js `fetch()` does not have corporate proxy CA certificates. No `NODE_EXTRA_CA_CERTS` or custom agent configured.
+**Fix:** Set `NODE_EXTRA_CA_CERTS` environment variable for corporate environments, or add fallback to direct RPC pool queries.
 
-### S4. Confidence Value Clustering
+### P2-5: FEATURE_ORDERFLOW_PIPELINE Enabled Without BLOXROUTE_AUTH_HEADER
 
-75% of opportunities cluster at 0.80, 0.85, 0.75. The confidence calculation uses reserve-ratio-derived heuristics that produce narrow ranges when ChainSimulator generates tightly bounded random walk prices. In production with real volatility, confidence values would have wider distribution.
+**Impact:** Every service warns about this on startup. Feature is active but non-functional without the auth header.
+**Evidence:** 7 identical warnings (one per service).
+**Location:** `.env` — `FEATURE_ORDERFLOW_PIPELINE=true`, `BLOXROUTE_AUTH_HEADER=` (empty).
+**Fix:** Either disable `FEATURE_ORDERFLOW_PIPELINE=false` or set `BLOXROUTE_AUTH_HEADER`.
 
-### S5. Execution Engine "Idle" (No Trade Results)
+### P2-6: P4 Solana RPC Provider Mismatch — Claims "helius" but Uses PublicNode
 
-Expected consequence of F1 (serialization bug) — not a simulation issue. The `SimulationStrategy` IS ready and functional (confirmed: reads stream, validates, simulates latency, returns mock results). Zero trades = zero valid opportunities reaching the strategy, not the strategy being inactive.
-
-### S6. Cross-Chain Detector Limited Activity
-
-The cross-chain detector consumes from `stream:price-updates` and `stream:pending-opportunities`. In simulation mode, price updates ARE published (by partitions that have stream clients), but the cross-chain detector's internal opportunity generation produces only ~23 opportunities in 10 minutes. This is expected — cross-chain arbitrage requires specific cross-chain price divergence patterns that synthetic data rarely triggers.
-
----
-
-## Findings Classification Matrix
-
-| # | Finding | Severity | Simulation Artifact? | Affects Production? |
-|---|---------|----------|---------------------|---------------------|
-| F1 | Stream serialization drops fields | **P0** | No | **YES** — all modes |
-| F2 | Profit unit inconsistency | **P0** | Partially (extreme values sim-only, core inconsistency is real) | **YES** — all modes |
-| F3 | Coordinator self-heartbeat stale | **P1** | No | **YES** — all modes |
-| F4 | Dev-mode partition publishing gap | **P1** | No | **No** — Docker uses different entry point |
-| F5 | TLS certificate errors | **P2** | No (adapters init in both modes) | **YES** — adapter failure in production |
-| F6 | TF.js no native backend | **P2** | No | **YES** — all modes |
-| F7 | MaxListenersExceeded | **P2** | No | **YES** — all modes |
-| F8 | SharedArrayBuffer over-allocation | **P2** | No | **YES** — all modes |
-| S1 | Unrealistic profit ranges | Info | **YES** | No |
-| S2 | 1.17M detections in 10 min | Info | **YES** | No (lower volume) |
-| S3 | Log flood 13.5K lines/sec | Info | **YES** (but sampling still needed) | Partially |
-| S4 | Confidence clustering | Info | **YES** | No |
-| S5 | Execution engine idle | Info | Consequence of F1 | N/A |
-| S6 | Cross-chain low activity | Info | **YES** | No |
+**Impact:** Misleading operational metadata. Dashboards/alerts would show "helius" but actual performance is PublicNode (rate-limited).
+**Evidence:** `solanaRpcProvider: "helius"` in P4 startup log, but earlier: `SOLANA_RPC_URL not set — using PublicNode fallback`.
+**Root Cause:** The `solanaRpcProvider` field is likely hardcoded or derived from config defaults rather than actual provider resolution.
+**Fix:** Derive `solanaRpcProvider` from the actual resolved RPC URL, not from config defaults.
 
 ---
 
-## Recommended Fix Priority
+## P3 - Low Findings
 
-| Priority | Finding | Effort | Impact |
-|----------|---------|--------|--------|
-| **P0-1** | F1: Fix stream serialization field coverage | Small | Unblocks execution pipeline in ALL modes |
-| **P0-2** | F2: Normalize profit units across detectors | Large | Correct opportunity comparison and routing |
-| **P1-1** | F3: Coordinator self-heartbeat direct update | Small | Eliminates degradation oscillations |
-| **P1-2** | F4: Add OpportunityPublisher to `createPartitionEntry()` | Medium | Enables local dev pipeline |
-| **P2** | F5: TLS CA certificate or skip in sim mode | Small | Enables vault-model DEX adapters |
-| **P2** | F6: Install tfjs-node backend | Small | 10-100x ML performance improvement |
-| **P2** | F7: Consolidate process exit handlers | Small | Eliminates memory leak warning |
-| **P2** | F8: Scale SharedArrayBuffer per partition | Medium | Saves ~800MB RAM |
+### P3-1: MaxListenersExceededWarning on All 7 Services
 
----
+**Evidence:** All services log "Possible EventEmitter memory leak detected. 11 exit listeners added to [process]."
+**Root Cause:** Pino transports add `process.on('exit')` listeners per unique logger name. `process.setMaxListeners(25)` is called in `setupServiceShutdown()` but AFTER imports trigger logger creation.
+**Fix:** Add `process.setMaxListeners(25)` as the first line in every service entry point, before imports.
 
-## Appendix: Runtime Environment
+### P3-2: punycode Deprecation Warning on All 7 Services
 
-- **Platform:** Windows 11 Enterprise (Cygwin/MSYS2)
-- **Node.js:** v22.x
-- **Redis:** In-memory (scripts/start-redis-memory.js), PID 346248
-- **Duration:** ~10 minutes (19:55:35 — 20:06:23)
-- **Mode:** `SIMULATION_MODE=true`, `EXECUTION_SIMULATION_MODE=true`
-- **Launch:** `npm run dev:all` (concurrently, 7 services)
+**Evidence:** `[DEP0040] DeprecationWarning: The punycode module is deprecated.`
+**Root Cause:** Some dependency uses Node.js built-in `punycode` module (deprecated since Node 22+). Likely from `ethers` or `ws` library.
+**Fix:** Low priority. Suppress with `--no-deprecation` flag or wait for upstream fix.
 
-## Appendix: Simulation Mode Architecture
+### P3-3: Stale TypeScript Build Cache Warning
 
-```
-SIMULATION_MODE=true
-├── Effect: ChainSimulator generates synthetic reserve updates (1-5s interval)
-│   └── Same detection code runs (Simple, Triangular, MultiLeg)
-├── Does NOT affect: publishing, routing, serialization, validation
-└── Consumers: chain-instance.ts (SimulationInitializer), chain-simulator.ts
+**Evidence:** Build reports 9 `.tsbuildinfo` cache files and 1 stale `.d.ts` file.
+**Fix:** Run `npm run clean:cache` and delete `services/execution-engine/src/strategies/flash-loan-providers/types.d.ts`.
 
-EXECUTION_SIMULATION_MODE=true
-├── Effect: SimulationStrategy replaces real blockchain transactions
-│   └── Still processes stream:execution-requests normally
-│   └── Simulates 500ms latency, 85% success, mock tx hashes
-├── Skips: blockchain providers, nonce manager, risk management, bridge recovery
-└── Consumers: execution-engine index.ts, strategy-factory.ts
+### P3-4: TensorFlow.js Backend Warning
 
-Pipeline in dev:all (both flags true):
-  P1-P3: detect(synthetic) → log(opportunity) → DEAD END (no publisher)
-  P4:    detect(synthetic) → publish(stream:opportunities) → coordinator
-  Cross: detect(internal)  → publish(stream:opportunities) → coordinator
-  Coord: read(stream:opportunities) → serialize(DROPS fields) → write(stream:execution-requests)
-  Exec:  read(stream:execution-requests) → validate(expectedProfit=0) → REJECT (debug log)
-
-Pipeline in Docker (both flags true):
-  P1-P3: detect(synthetic) → OpportunityPublisher → write(stream:opportunities)
-  P4:    detect(synthetic) → publish(stream:opportunities)
-  Cross: detect(internal)  → publish(stream:opportunities)
-  Coord: read(stream:opportunities) → serialize(DROPS fields) → write(stream:execution-requests)
-  Exec:  read(stream:execution-requests) → validate(expectedProfit=0) → REJECT (debug log)
-  ↑ F1 serialization bug still blocks execution even in Docker
-```
+**Evidence:** "Hi, looks like you are running TensorFlow.js in Node.js. To speed things up dramatically, install our node backend" — appears on cross-chain and execution services.
+**Fix:** Install `@tensorflow/tfjs-node` for better performance, or suppress the warning.
 
 ---
 
-## Remediation (2026-02-28)
+## Configuration & Documentation Drift
 
-All P0 and P1 findings have been fixed. Fixes verified via typecheck and 1,161 passing tests.
+| Item | Config/Doc Says | Runtime Shows | Impact |
+|------|----------------|---------------|--------|
+| REDIS_PASSWORD | `localdev` in .env | Redis has no password | Warning spam (14x) |
+| FEATURE_ORDERFLOW_PIPELINE | `true` | BLOXROUTE_AUTH_HEADER empty | Feature non-functional, 7 warnings |
+| FEATURE_SOLANA_EXECUTION | `true` | SOLANA_RPC_URL not set | Execution engine ERROR, skips Solana |
+| P4 solanaRpcProvider | Reports "helius" | Actually uses PublicNode | Misleading operational data |
+| Health server logging | Says "bound to all interfaces" | P1/P2 never actually bound | Misleading — suggests success when failed |
+| MAX_CONCURRENT_PUBLISHES | 10 (partition) vs 50 (unified-detector) | 26.4% drop rate | Inconsistent limits across codepaths |
+| Coordinator maxProfitPercentage | 10,000% | Profits up to 159B% pass through | No effective sanity filtering |
+| CLAUDE.md chain count | "15 chains" | P1: 4, P2: 5, P3: 3, P4: 1 = 13 chains running | 2 chains (Mantle, Mode) are stubs |
 
-### F1 (P0) — FIXED: Stream Serialization
+---
 
-**File:** `services/coordinator/src/utils/stream-serialization.ts`
+## Runtime Statistics Summary
 
-- Added `expectedProfit`, `estimatedProfit`, `gasEstimate` to serialized field set
-- Changed `expiresAt` from always-present `?? ''` (empty string fails NUMERIC_PATTERN) to conditional inclusion: only serialized when the value is non-null
-- Added conditional `buyChain`/`sellChain` serialization for cross-chain opportunities
-- Total serialized fields: 14 → 17 (plus conditional buyChain, sellChain, expiresAt)
+| Metric | Value |
+|--------|-------|
+| **Total log lines** | 2,377,757 |
+| **Opportunities detected** | P1: 3,352 / P2: 8,919 / P3: 6,490 / P4: 50 / Cross: ~30 |
+| **Opportunities dropped (publish limit)** | 17,010 (P1: 4,608 / P2: 7,705 / P3: 4,697) |
+| **Opportunities forwarded to execution** | ~30 (coordinator only forwards Solana sim opportunities) |
+| **Execution success rate** | 0% (all fail validation) |
+| **DLQ growth** | 205 → 261 (+56 new failures) |
+| **System health range** | 50% - 100% (oscillating) |
+| **Degradation events** | 7 level changes in 10 minutes |
+| **Worker task timeouts** | 16+ (all on P2, multi-leg path finding) |
+| **TLS adapter failures** | 5 chains × 2-3 adapters = ~11 failures |
+| **Memory (final)** | Exec: 84MB, Cross: 98MB, P3: 52MB, P4: 47MB |
 
-**Pipeline impact:** Execution engine validation now receives `expectedProfit` as a string number, passing the `LOW_PROFIT` business rule check. Cross-chain opportunities include the required chain fields.
+---
 
-### F2 (P0) — FIXED: Profit Unit Inconsistency
+## Recommended Action Plan
 
-**Files:**
-- `shared/core/src/path-finding/cross-dex-triangular-arbitrage.ts:747` — triangular: `netProfit` → `netProfit * 100`
-- `shared/core/src/path-finding/cross-dex-triangular-arbitrage.ts:548` — quadrilateral: `netProfit` → `netProfit * 100`
-- `shared/core/src/path-finding/multi-leg-path-finder.ts:557` — multi-leg: `netProfit` → `netProfit * 100`
+### Phase 1: Immediate (P0 — Fix before any deployment)
 
-All detectors now use consistent `ratio * 100` for `profitPercentage`, matching Simple and Solana detectors.
+- [ ] **P0-1:** Fix coordinator `opportunity-router.ts:276-286` to pass through all fields. Add `tokenIn`/`tokenOut`/`amountIn` mapping for Solana partition. Add `intra-solana` to valid types.
+- [ ] **P0-2:** Make health server `listen()` awaitable. Fix misleading log. Make listen errors fatal.
+- [ ] **P0-3:** Fix reserve ratio clamp decimal normalization. Add decimal-aware price calculation. Lower `maxProfitPercentage` to 50%.
+- [ ] **P0-4:** Seed coordinator's own health entry at startup. Reorder F3 FIX before `updateSystemMetrics()`.
 
-### F3 (P1) — FIXED: Coordinator Self-Heartbeat Stale
+### Phase 2: Next Sprint (P1 — Reliability and data quality)
 
-**File:** `services/coordinator/src/coordinator.ts:1738`
+- [ ] **P1-1:** Increase worker pool size or task timeout for P2. Consider proportional allocation based on chain count.
+- [ ] **P1-2:** Pass SharedArrayBuffer to event processor workers during initialization.
+- [ ] **P1-3:** Fix gas price refresh mechanism to handle multi-chain parallel updates.
+- [ ] **P1-4:** Investigate TF.js model warmup time. Consider pre-warming with cached model weights.
+- [ ] **P1-5:** Add DLQ recovery cron job. Configure Discord/Slack webhook for alerts.
 
-After `reportHealth()` publishes to the HEALTH stream, the coordinator now directly updates its own `serviceHealth` map entry with `lastHeartbeat: Date.now()`. This eliminates the race condition where `detectStaleServices()` could mark the coordinator unhealthy before its own heartbeat round-tripped through Redis.
+### Phase 3: Backlog (P2/P3 — Performance, observability, cleanup)
 
-### F4 (P1) — FIXED: Dev-Mode Partition Publishing Gap
-
-**Files:**
-- Created `shared/core/src/publishers/opportunity-publisher.ts` — OpportunityPublisher moved from unified-detector to shared/core for reuse by all partition services
-- Created `shared/core/src/publishers/index.ts` — barrel export
-- Updated `shared/core/package.json` — added `./publishers` export path
-- Updated `shared/core/src/partition/runner.ts` — `createPartitionEntry()` now auto-wires Redis + OpportunityPublisher via a composed `onStarted` hook
-- Updated `services/unified-detector/src/publishers/opportunity.publisher.ts` — re-exports from shared/core for backward compatibility
-
-**Pipeline after fix (dev:all):**
-```
-P1-P3: detect → OpportunityPublisher (auto-wired) → write(stream:opportunities) → coordinator
-P4:    detect → publish(stream:opportunities) → coordinator
-Cross: detect → publish(stream:opportunities) → coordinator
-Coord: read(stream:opportunities) → serialize(ALL fields) → write(stream:execution-requests)
-Exec:  read(stream:execution-requests) → validate(expectedProfit=OK) → execute
-```
+- [ ] **P2-1:** Change opportunity detection logs to DEBUG level.
+- [ ] **P2-2:** Increase `MAX_CONCURRENT_PUBLISHES` to 100, make configurable.
+- [ ] **P2-3:** Fix Redis password mismatch in `.env`.
+- [ ] **P2-4:** Configure `NODE_EXTRA_CA_CERTS` or add TLS fallback logic.
+- [ ] **P2-5:** Disable FEATURE_ORDERFLOW_PIPELINE or set BLOXROUTE_AUTH_HEADER.
+- [ ] **P2-6:** Derive solanaRpcProvider from actual resolved URL.
+- [ ] **P3-1:** Add early `process.setMaxListeners(25)` to all service entry points.
+- [ ] **P3-2:** Suppress punycode deprecation or update dependency.
+- [ ] **P3-3:** Clean stale build cache and types.d.ts.
+- [ ] **P3-4:** Install `@tensorflow/tfjs-node`.
