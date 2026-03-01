@@ -159,6 +159,10 @@ export const VALID_OPPORTUNITY_TYPES = new Set([
   'multi-leg',        // Falls back to IntraChainStrategy
   'predictive',       // Falls back to IntraChainStrategy
   'intra-dex',        // Falls back to IntraChainStrategy
+
+  // P0-1 FIX: Solana and EVM intra-chain types
+  'intra-solana',     // Solana partition intra-chain opportunities
+  'intra-chain',      // EVM chain simulator intra-chain opportunities
 ]);
 
 /**

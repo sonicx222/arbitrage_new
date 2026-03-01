@@ -1124,9 +1124,10 @@ describe('OpportunityRouter', () => {
         id: 'opp-min-boundary',
         profitPercentage: -100,
       });
+      // P0-3 FIX: maxProfitPercentage lowered from 10000 to 100
       const dataMax = createOpportunityData({
         id: 'opp-max-boundary',
-        profitPercentage: 10000,
+        profitPercentage: 100,
       });
 
       expect(await router.processOpportunity(dataMin, false)).toBe(true);

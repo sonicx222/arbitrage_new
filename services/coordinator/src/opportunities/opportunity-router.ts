@@ -126,7 +126,10 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   instanceId: 'coordinator',
   executionRequestsStream: RedisStreams.EXECUTION_REQUESTS,
   minProfitPercentage: -100,
-  maxProfitPercentage: 10000,
+  // P0-3 FIX: Lowered from 10,000% to 100%. Even 100% (doubling money) is
+  // extremely generous for a single arbitrage trade. The previous 10,000% cap
+  // allowed astronomically unrealistic profits through to execution.
+  maxProfitPercentage: 100,
   // OP-14: Default chain-specific TTL overrides
   chainTtlOverrides: DEFAULT_CHAIN_TTL_OVERRIDES,
   // P1-7 FIX: Retry and DLQ defaults
@@ -272,17 +275,45 @@ export class OpportunityRouter {
       }
     }
 
-    // Build opportunity object
+    // Build opportunity object — pass through ALL fields required by downstream
+    // consumers (serializer, execution engine validation).
+    // P0-1 FIX: Previously only 9 fields were whitelisted, dropping tokenIn, tokenOut,
+    // amountIn, type, and 10+ other fields. The serializer then produced empty strings
+    // for missing fields, and the execution engine rejected them (100% DLQ rate).
+    const tokenIn = typeof data.tokenIn === 'string' ? data.tokenIn : undefined;
+    const tokenOut = typeof data.tokenOut === 'string' ? data.tokenOut : undefined;
+    const token0 = typeof data.token0 === 'string' ? data.token0 : undefined;
+    const token1 = typeof data.token1 === 'string' ? data.token1 : undefined;
+
     const opportunity: ArbitrageOpportunity = {
       id,
+      type: typeof data.type === 'string' ? data.type as ArbitrageOpportunity['type'] : undefined,
       confidence: typeof data.confidence === 'number' ? data.confidence : 0,
       timestamp,
       chain: typeof data.chain === 'string' ? data.chain : undefined,
       buyDex: typeof data.buyDex === 'string' ? data.buyDex : undefined,
       sellDex: typeof data.sellDex === 'string' ? data.sellDex : undefined,
+      buyChain: typeof data.buyChain === 'string' ? data.buyChain : undefined,
+      sellChain: typeof data.sellChain === 'string' ? data.sellChain : undefined,
       profitPercentage,
+      // P0-1 FIX: Pass through token fields. Fall back to token0/token1 (Solana partition
+      // uses these instead of tokenIn/tokenOut).
+      tokenIn: tokenIn ?? token0,
+      tokenOut: tokenOut ?? token1,
+      token0,
+      token1,
+      amountIn: typeof data.amountIn === 'string' ? data.amountIn : undefined,
+      buyPrice: typeof data.buyPrice === 'number' ? data.buyPrice : undefined,
+      sellPrice: typeof data.sellPrice === 'number' ? data.sellPrice : undefined,
+      expectedProfit: typeof data.expectedProfit === 'number' ? data.expectedProfit : undefined,
+      estimatedProfit: typeof data.estimatedProfit === 'number' ? data.estimatedProfit : undefined,
+      gasEstimate: typeof data.gasEstimate === 'string' ? data.gasEstimate : undefined,
       expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : undefined,
       status: typeof data.status === 'string' ? data.status as ArbitrageOpportunity['status'] : undefined,
+      blockNumber: typeof data.blockNumber === 'number' ? data.blockNumber : undefined,
+      useFlashLoan: typeof data.useFlashLoan === 'boolean' ? data.useFlashLoan : undefined,
+      buyPair: typeof data.buyPair === 'string' ? data.buyPair : undefined,
+      sellPair: typeof data.sellPair === 'string' ? data.sellPair : undefined,
     };
 
     // Store opportunity

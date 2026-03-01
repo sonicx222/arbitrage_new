@@ -132,6 +132,10 @@ export class OpportunityFactory {
       sellPair: sellPool.address,
       token0: buyPool.normalizedToken0,
       token1: buyPool.normalizedToken1,
+      // P0-1 FIX: Set tokenIn/tokenOut so downstream consumers (coordinator serializer,
+      // execution engine validation) receive non-empty token identifiers.
+      tokenIn: buyPool.normalizedToken0,
+      tokenOut: buyPool.normalizedToken1,
       buyPrice: buyPool.price!,
       sellPrice: sellPool.price!,
       profitPercentage: netProfit * 100,
@@ -163,6 +167,9 @@ export class OpportunityFactory {
       sellPair: path.steps[path.steps.length - 1]?.pool ?? '',
       token0: path.inputToken,
       token1: path.outputToken,
+      // P0-1 FIX: Set tokenIn/tokenOut for downstream compatibility
+      tokenIn: path.inputToken,
+      tokenOut: path.outputToken,
       buyPrice: path.steps[0]?.price ?? 0,
       sellPrice: path.steps[path.steps.length - 1]?.price ?? 0,
       profitPercentage: path.profitPercentage,
@@ -212,6 +219,9 @@ export class OpportunityFactory {
       sellPair,
       token0: comparison.token,
       token1: comparison.quoteToken,
+      // P0-1 FIX: Set tokenIn/tokenOut for downstream compatibility
+      tokenIn: comparison.token,
+      tokenOut: comparison.quoteToken,
       token: comparison.token,
       quoteToken: comparison.quoteToken,
       buyPrice: direction === 'buy-solana-sell-evm' ? comparison.solanaPrice : comparison.evmPrice,

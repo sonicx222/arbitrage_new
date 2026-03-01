@@ -144,10 +144,19 @@ export class ChainSimulator extends EventEmitter {
 
       // FIX #22: Clamp reserve ratio to prevent unbounded drift.
       // FIX #22b: Tightened from 100:1 to 2:1.
-      const ratio = Number(reserves.reserve0) / Number(reserves.reserve1);
+      // P0-3 FIX: Normalize for token decimals before comparing ratios.
+      // Previously, for cross-decimal pairs (e.g., WETH 18 / USDC 6), the raw
+      // ratio was always ~10^12, triggering the clamp every tick and setting
+      // reserve1 = reserve0 — a 10^12 distortion that produced billions of
+      // percent profit in downstream detectors.
+      const decimalDiff = pair.token0Decimals - pair.token1Decimals;
+      const decimalFactor = 10 ** decimalDiff;
+      const rawRatio = Number(reserves.reserve0) / Number(reserves.reserve1);
+      const normalizedRatio = rawRatio / decimalFactor;
       const MAX_RATIO = 2;
-      if (ratio > MAX_RATIO || ratio < 1 / MAX_RATIO) {
-        reserves.reserve1 = reserves.reserve0;
+      if (normalizedRatio > MAX_RATIO || normalizedRatio < 1 / MAX_RATIO) {
+        // Reset to balanced state preserving correct decimal scaling
+        reserves.reserve1 = BigInt(Math.floor(Number(reserves.reserve0) / decimalFactor));
       }
 
       this.emitSyncEvent(pair, reserves.reserve0, reserves.reserve1);
@@ -210,7 +219,11 @@ export class ChainSimulator extends EventEmitter {
       const reserves = this.reserves.get(pair.address.toLowerCase());
       if (!reserves) continue;
 
-      const price = Number(reserves.reserve1) / Number(reserves.reserve0);
+      // P0-3 FIX: Normalize price for token decimals.
+      // Raw reserve ratio differs by 10^(decimals0-decimals1) from the actual price.
+      // For WETH(18)/USDC(6): raw = 3e-9, adjusted = 3000.
+      const decimalFactor = 10 ** (pair.token0Decimals - pair.token1Decimals);
+      const price = (Number(reserves.reserve1) / Number(reserves.reserve0)) * decimalFactor;
 
       if (!pairsByTokens.has(tokenKey)) {
         pairsByTokens.set(tokenKey, []);

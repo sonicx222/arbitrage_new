@@ -322,12 +322,19 @@ describe('CoordinatorService Integration', () => {
       expect(metrics.whaleAlerts).toBe(0);
     });
 
-    it('should initialize service health map empty', async () => {
+    // P0-4 FIX: The coordinator now seeds its own serviceHealth entry at startup
+    // to prevent detectStaleServices() from marking itself as stale.
+    it('should initialize service health map with coordinator entry', async () => {
       await coordinator.start(0);
 
       const healthMap = coordinator.getServiceHealthMap();
       expect(healthMap).toBeInstanceOf(Map);
-      expect(healthMap.size).toBe(0);
+      // Coordinator seeds its own entry at startup (P0-4 FIX)
+      expect(healthMap.size).toBe(1);
+      expect(healthMap.has('coordinator')).toBe(true);
+      const coordHealth = healthMap.get('coordinator');
+      expect(coordHealth?.status).toBe('healthy');
+      expect(coordHealth?.name).toBe('coordinator');
     });
   });
 

@@ -246,14 +246,17 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
     throw new Error(msg);
   }
   if (!isProductionEnv && isPublicBind && !authToken) {
-    logger.warn('Health server bound to all interfaces without auth token (non-production)', {
+    // P0-2 FIX: Clarified log text — "will bind" not "bound" (binding hasn't happened yet)
+    logger.warn('Health server will bind to all interfaces without auth token (non-production)', {
       bindAddress,
       hint: 'Set HEALTH_AUTH_TOKEN or HEALTH_BIND_ADDRESS=127.0.0.1 for production',
     });
   }
 
   server.listen(port, bindAddress, () => {
-    logger.debug(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
+    // P0-2 FIX: Promote bind confirmation from debug to info level so operators
+    // can verify the server actually bound (previously invisible at default log level)
+    logger.info(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
   });
 
   // CRITICAL-FIX: Handle fatal server errors appropriately
@@ -277,9 +280,21 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         hint: `Port ${port} requires root/admin privileges. Use a port > 1024 or run with elevated permissions.`
       });
       process.exit(1);
+    } else if (!server.listening) {
+      // P0-2 FIX: If the server hasn't bound yet, any error is a startup failure.
+      // Previously non-EADDRINUSE/EACCES errors were swallowed, leaving the service
+      // running with a dead health server (invisible to monitoring).
+      logger.error('Health server failed to bind — startup failure', {
+        port,
+        service: config.serviceName,
+        code: errorCode,
+        error: error.message,
+        hint: `Health server could not bind to ${bindAddress}:${port}. Service cannot operate without health endpoint.`
+      });
+      process.exit(1);
     } else {
-      // Non-fatal errors - log but continue (e.g., connection resets)
-      logger.error('Health server error', {
+      // Runtime errors on established server (e.g., connection resets) — non-fatal
+      logger.error('Health server runtime error', {
         service: config.serviceName,
         code: errorCode,
         error: error.message
