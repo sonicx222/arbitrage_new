@@ -418,6 +418,10 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.DLQ_ALERTS]: 5000,               // Alert data
     [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: 5000,           // Forwarded failures
     [RedisStreamsClient.STREAMS.FAST_LANE]: 5000,                // Fast lane: high-confidence, coordinator bypass
+    // P1 Fix CA-001: Self-healing system streams (created on-demand)
+    [RedisStreamsClient.STREAMS.SYSTEM_FAILURES]: 5000,          // System failure events
+    [RedisStreamsClient.STREAMS.SYSTEM_CONTROL]: 1000,           // Control commands, low volume
+    [RedisStreamsClient.STREAMS.SYSTEM_SCALING]: 1000,           // Scaling commands, low volume
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {

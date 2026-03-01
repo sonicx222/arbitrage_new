@@ -673,9 +673,11 @@ export class GasPriceCache {
       const { ethers } = await import('ethers');
 
       // Get or create provider
+      // P1 Fix LW-012: Use staticNetwork to prevent ethers' infinite retry loop on network detection
       let provider = this.providers.get(chainLower);
       if (!provider) {
-        provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+        const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+        provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
         this.providers.set(chainLower, provider);
       }
 
@@ -820,7 +822,8 @@ export class GasPriceCache {
 
         let provider = this.providers.get(chain);
         if (!provider) {
-          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
           this.providers.set(chain, provider);
         }
 
@@ -867,7 +870,8 @@ export class GasPriceCache {
 
         let provider = this.providers.get(chain);
         if (!provider) {
-          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
           this.providers.set(chain, provider);
         }
 

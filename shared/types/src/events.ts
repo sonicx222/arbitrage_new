@@ -36,6 +36,11 @@ export const RedisStreams = {
   SYSTEM_FAILOVER: 'stream:system-failover',
   SYSTEM_COMMANDS: 'stream:system-commands',
 
+  // P1 Fix CA-001: Self-healing system streams (created on-demand by expert-self-healing-manager)
+  SYSTEM_FAILURES: 'stream:system-failures',
+  SYSTEM_CONTROL: 'stream:system-control',
+  SYSTEM_SCALING: 'stream:system-scaling',
+
   // Fast lane (coordinator bypass for high-confidence opportunities)
   FAST_LANE: 'stream:fast-lane',
 

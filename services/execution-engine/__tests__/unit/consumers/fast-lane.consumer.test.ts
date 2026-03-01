@@ -142,7 +142,7 @@ describe('FastLaneConsumer', () => {
       expect(config.streamsClient.createConsumerGroup).toHaveBeenCalledWith(
         expect.objectContaining({
           streamName: 'stream:fast-lane',
-          groupName: 'execution-engine',
+          groupName: 'execution-engine-group',
           consumerName: 'test-instance-1',
         })
       );

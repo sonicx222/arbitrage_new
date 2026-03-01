@@ -705,7 +705,18 @@ export class ChainDetectorInstance extends EventEmitter {
         // FIX #10: Configure RPC provider with request timeout to prevent hanging connections
         const fetchReq = new ethers.FetchRequest(this.chainConfig.rpcUrl);
         fetchReq.timeout = 10_000; // 10s per-request timeout
-        this.provider = new ethers.JsonRpcProvider(fetchReq);
+        // P1 Fix LW-012: Use staticNetwork to skip ethers' internal network auto-detection
+        // which retries indefinitely on failure ("JsonRpcProvider failed to detect network").
+        // We already know the chainId from config, so auto-detection is unnecessary.
+        const numericChainId = this.chainConfig.id;
+        const staticNetwork = numericChainId
+          ? ethers.Network.from(numericChainId)
+          : undefined;
+        this.provider = new ethers.JsonRpcProvider(
+          fetchReq,
+          staticNetwork,
+          { staticNetwork: !!staticNetwork }
+        );
 
         // R8 Refactor: Initialize WebSocket and subscribe in a single call
         await this.initializeWebSocketAndSubscribe();
@@ -1163,7 +1174,16 @@ export class ChainDetectorInstance extends EventEmitter {
     // FIX #10: Configure vault adapter provider with request timeout
     const vaultFetchReq = new ethers.FetchRequest(this.chainConfig.rpcUrl);
     vaultFetchReq.timeout = 10_000;
-    const provider = new ethers.JsonRpcProvider(vaultFetchReq);
+    // P1 Fix LW-012: Use staticNetwork to prevent infinite retry loop (see main provider fix)
+    const vaultNumericChainId = this.chainConfig.id;
+    const vaultStaticNetwork = vaultNumericChainId
+      ? ethers.Network.from(vaultNumericChainId)
+      : undefined;
+    const provider = new ethers.JsonRpcProvider(
+      vaultFetchReq,
+      vaultStaticNetwork,
+      { staticNetwork: !!vaultStaticNetwork }
+    );
     let registeredCount = 0;
 
     for (const dex of vaultDexes) {

@@ -54,7 +54,8 @@ import { createKmsSigner, type KmsSigner } from './kms-signer';
  */
 function createHttp2Provider(
   rpcUrl: string,
-  useHttp2 = true
+  useHttp2 = true,
+  numericChainId?: number
 ): ethers.JsonRpcProvider {
   const fetchRequest = new ethers.FetchRequest(rpcUrl);
 
@@ -64,7 +65,9 @@ function createHttp2Provider(
     fetchRequest.getUrlFunc = pool.createEthersGetUrlFunc(defaultGetUrl) as ethers.FetchGetUrlFunc;
   }
 
-  return new ethers.JsonRpcProvider(fetchRequest);
+  // P1 Fix LW-012: Use staticNetwork to prevent ethers' infinite network detection retry loop
+  const network = numericChainId ? ethers.Network.from(numericChainId) : undefined;
+  return new ethers.JsonRpcProvider(fetchRequest, network, { staticNetwork: !!network });
 }
 
 export interface ProviderServiceConfig {
@@ -201,9 +204,10 @@ export class ProviderServiceImpl implements IProviderService {
   async initialize(): Promise<void> {
     for (const [chainName, chainConfig] of Object.entries(CHAINS)) {
       try {
+        const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
         const provider = this.enableHttp2
-          ? createHttp2Provider(chainConfig.rpcUrl, true)
-          : new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+          ? createHttp2Provider(chainConfig.rpcUrl, true, chainConfig.id)
+          : new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
         this.providers.set(chainName, provider);
 
         // Phase 3: Create BatchProvider if batching is enabled
@@ -432,9 +436,10 @@ export class ProviderServiceImpl implements IProviderService {
       this.logger.info(`Attempting provider reconnection for ${chainName}`);
 
       // Create new provider instance (with HTTP/2 if enabled)
+      const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
       const newProvider = this.enableHttp2
-        ? createHttp2Provider(chainConfig.rpcUrl, true)
-        : new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+        ? createHttp2Provider(chainConfig.rpcUrl, true, chainConfig.id)
+        : new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
 
       // Verify connectivity
       // P1 FIX: Use cancellable timeout to prevent timer leak on success

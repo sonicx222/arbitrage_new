@@ -21,15 +21,17 @@ import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getEnhancedHealthMonitor } from '../monitoring/enhanced-health-monitor';
 import { getErrorRecoveryOrchestrator } from './error-recovery';
+import { RedisStreams } from '@arbitrage/types';
 
 const logger = createLogger('expert-self-healing-manager');
 
-// P0-10 FIX: Stream names for system control messages (ADR-002 compliant)
+// P1 Fix CA-001: Use canonical RedisStreams constants instead of local declarations.
+// These streams are created on-demand by the self-healing manager.
 const SYSTEM_STREAMS = {
-  FAILURES: 'stream:system-failures',
-  CONTROL: 'stream:system-control',
-  FAILOVER: 'stream:system-failover',
-  SCALING: 'stream:system-scaling'
+  FAILURES: RedisStreams.SYSTEM_FAILURES,
+  CONTROL: RedisStreams.SYSTEM_CONTROL,
+  FAILOVER: RedisStreams.SYSTEM_FAILOVER,
+  SCALING: RedisStreams.SYSTEM_SCALING,
 } as const;
 
 // P0-10 FIX: Consumer group configuration for self-healing manager
