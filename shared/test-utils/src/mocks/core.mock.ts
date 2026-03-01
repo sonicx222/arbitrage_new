@@ -47,6 +47,7 @@ const MOCK_REDIS_STREAMS = {
   SYSTEM_FAILURES: 'stream:system-failures',
   SYSTEM_CONTROL: 'stream:system-control',
   SYSTEM_SCALING: 'stream:system-scaling',
+  SERVICE_DEGRADATION: 'stream:service-degradation',
   FAST_LANE: 'stream:fast-lane',
   DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
   DLQ_ALERTS: 'stream:dlq-alerts',

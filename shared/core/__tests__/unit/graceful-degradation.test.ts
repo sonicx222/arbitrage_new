@@ -29,7 +29,12 @@ jest.mock('../../src/redis/streams', () => ({
   getRedisStreamsClient: () => Promise.resolve({
     xadd: () => Promise.resolve('1234-0'),
     xread: () => Promise.resolve([])
-  })
+  }),
+  RedisStreamsClient: {
+    STREAMS: {
+      SERVICE_DEGRADATION: 'stream:service-degradation',
+    },
+  },
 }));
 
 // Mock logger (auto-resolves to src/__mocks__/logger.ts)

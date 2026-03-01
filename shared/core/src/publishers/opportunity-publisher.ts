@@ -14,6 +14,7 @@
 
 import { RedisStreamsClient } from '../redis';
 import { createTraceContext, propagateContext } from '../tracing';
+import type { TraceContext } from '../tracing';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity, ILogger } from '@arbitrage/types';
 
@@ -85,11 +86,14 @@ export class OpportunityPublisher {
    * Publish an arbitrage opportunity to Redis Streams.
    *
    * @param opportunity - The arbitrage opportunity to publish
+   * @param parentTraceContext - Optional parent trace context for end-to-end correlation
+   *   (P2 Fix ES-007: propagates detector's trace context instead of creating a new one)
    * @returns true if published successfully, false otherwise
    */
-  async publish(opportunity: ArbitrageOpportunity): Promise<boolean> {
+  async publish(opportunity: ArbitrageOpportunity, parentTraceContext?: TraceContext): Promise<boolean> {
     const sourceName = `${this.sourcePrefix}-${this.partitionId}`;
-    const traceCtx = createTraceContext(sourceName);
+    // P2 Fix ES-007: Use parent context if provided for end-to-end tracing
+    const traceCtx = parentTraceContext ?? createTraceContext(sourceName);
     const enrichedOpportunity = propagateContext({
       ...opportunity,
       _source: sourceName,

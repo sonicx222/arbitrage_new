@@ -18,7 +18,7 @@ const logger = createLogger('dual-publish');
  *
  * @param streamsClient - Redis Streams client (may be null if not initialized)
  * @param redis - Resolved Redis client for Pub/Sub
- * @param streamName - Redis Stream name (e.g., 'stream:failure-events')
+ * @param streamName - Redis Stream name (e.g., RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE)
  * @param pubsubChannel - Pub/Sub channel name (e.g., 'system:failures')
  * @param message - Message payload to publish
  */

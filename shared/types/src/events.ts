@@ -41,6 +41,9 @@ export const RedisStreams = {
   SYSTEM_CONTROL: 'stream:system-control',
   SYSTEM_SCALING: 'stream:system-scaling',
 
+  // P2 Fix CA-002: Degradation events (used by graceful-degradation + self-healing-manager)
+  SERVICE_DEGRADATION: 'stream:service-degradation',
+
   // Fast lane (coordinator bypass for high-confidence opportunities)
   FAST_LANE: 'stream:fast-lane',
 

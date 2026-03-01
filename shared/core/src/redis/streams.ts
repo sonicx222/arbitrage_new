@@ -422,6 +422,8 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.SYSTEM_FAILURES]: 5000,          // System failure events
     [RedisStreamsClient.STREAMS.SYSTEM_CONTROL]: 1000,           // Control commands, low volume
     [RedisStreamsClient.STREAMS.SYSTEM_SCALING]: 1000,           // Scaling commands, low volume
+    // P2 Fix CA-002: Service degradation/recovery events
+    [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: 5000,      // Degradation + recovery events
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
