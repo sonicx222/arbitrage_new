@@ -26,6 +26,8 @@ import type {
   SimulatedOpportunity,
   SimulatedOpportunityType,
   MarketRegime,
+  ChainThroughputProfile,
+  SampledGasPrice,
 } from './types';
 import {
   DEFAULT_CONFIG,
@@ -38,6 +40,8 @@ import {
   selectWeightedStrategyType,
 } from './constants';
 import { getSimulationRealismLevel } from './mode-utils';
+import { gaussianRandom, poissonRandom, weightedRandomSelect } from './math-utils';
+import { CHAIN_THROUGHPUT_PROFILES, getNativeTokenPrice, selectWeightedDex } from './throughput-profiles';
 
 // =============================================================================
 // Simulation TTL
@@ -79,6 +83,8 @@ export class ChainSimulator extends EventEmitter {
   private config: ChainSimulatorConfig;
   private running = false;
   private interval: NodeJS.Timeout | null = null;
+  private blockTimeout: NodeJS.Timeout | null = null;
+  private currentGasPrice: SampledGasPrice = { baseFee: 0, priorityFee: 0, gasCostUsd: 5 };
   private blockNumber: number;
   private reserves: Map<string, { reserve0: bigint; reserve1: bigint }> = new Map();
   private logger = createLogger('chain-simulator');
@@ -143,18 +149,30 @@ export class ChainSimulator extends EventEmitter {
     this.running = true;
 
     const realismLevel = getSimulationRealismLevel();
-    const effectiveInterval = this.getEffectiveInterval(realismLevel);
+    const hasExplicitInterval = !!process.env.SIMULATION_UPDATE_INTERVAL_MS;
 
-    this.logger.info('Starting chain simulator', {
-      chainId: this.config.chainId,
-      updateInterval: effectiveInterval,
-      realismLevel,
-      pairs: this.config.pairs.length
-    });
-
-    this.interval = setInterval(() => {
-      this.simulateTick();
-    }, effectiveInterval);
+    // Low realism or explicit interval: keep legacy setInterval behavior
+    if (realismLevel === 'low' || hasExplicitInterval) {
+      const effectiveInterval = this.getEffectiveInterval(realismLevel);
+      this.logger.info('Starting chain simulator (legacy interval)', {
+        chainId: this.config.chainId,
+        updateInterval: effectiveInterval,
+        realismLevel,
+        pairs: this.config.pairs.length,
+      });
+      this.interval = setInterval(() => {
+        this.simulateTick();
+      }, effectiveInterval);
+    } else {
+      // Medium/high: block-driven multi-swap model
+      this.logger.info('Starting chain simulator (block-driven)', {
+        chainId: this.config.chainId,
+        realismLevel,
+        pairs: this.config.pairs.length,
+        profile: CHAIN_THROUGHPUT_PROFILES[this.config.chainId] ? 'found' : 'fallback',
+      });
+      this.scheduleNextBlock();
+    }
 
     this.emitAllSyncEvents();
   }
@@ -186,6 +204,10 @@ export class ChainSimulator extends EventEmitter {
     if (!this.running) return;
     this.running = false;
     this.interval = clearIntervalSafe(this.interval);
+    if (this.blockTimeout) {
+      clearTimeout(this.blockTimeout);
+      this.blockTimeout = null;
+    }
     this.logger.info('Chain simulator stopped', { chainId: this.config.chainId });
   }
 
@@ -263,6 +285,162 @@ export class ChainSimulator extends EventEmitter {
     if (shouldCreateArbitrage) {
       this.detectAndEmitOpportunities();
     }
+  }
+
+  // =============================================================================
+  // Block-Driven Multi-Swap Model (medium/high realism)
+  // =============================================================================
+
+  /**
+   * Schedule the next block using setTimeout with Gaussian jitter.
+   * Replaces setInterval for medium/high realism to simulate
+   * real block time variance and occasional missed slots.
+   */
+  private scheduleNextBlock(): void {
+    if (!this.running) return;
+
+    const profile = CHAIN_THROUGHPUT_PROFILES[this.config.chainId];
+    if (!profile) {
+      // Fallback for unknown chains: fixed interval
+      this.blockTimeout = setTimeout(() => {
+        this.simulateTick();
+        this.scheduleNextBlock();
+      }, this.config.updateIntervalMs);
+      return;
+    }
+
+    // Missed slot check (e.g. Ethereum ~1%)
+    const isMissedSlot = Math.random() < profile.slotMissRate;
+    const baseDelay = isMissedSlot ? profile.blockTimeMs * 2 : profile.blockTimeMs;
+
+    // Gaussian jitter
+    const jitter = gaussianRandom() * profile.blockTimeJitterMs;
+    const delay = Math.max(50, Math.round(baseDelay + jitter));
+
+    this.blockTimeout = setTimeout(() => {
+      this.simulateBlock(profile);
+      this.scheduleNextBlock();
+    }, delay);
+  }
+
+  /**
+   * Simulate one block with Poisson-distributed swap events.
+   * Each swap independently selects a DEX and pair, matching
+   * real chain throughput patterns.
+   */
+  private simulateBlock(profile: ChainThroughputProfile): void {
+    this.blockNumber++;
+    this.emit('blockUpdate', { blockNumber: this.blockNumber });
+
+    const realismLevel = getSimulationRealismLevel();
+
+    // Regime transition (high realism only)
+    if (realismLevel === 'high') {
+      this.currentRegime = transitionRegime(this.currentRegime);
+    }
+
+    const regimeConfig = realismLevel === 'high'
+      ? REGIME_CONFIGS[this.currentRegime]
+      : REGIME_CONFIGS['normal'];
+
+    // Sample gas price for this block
+    this.currentGasPrice = this.sampleGasPrice(profile);
+
+    // Poisson-distributed swap count
+    const avgSwaps = profile.dexSwapsPerBlock * regimeConfig.pairActivityMultiplier;
+    const swapCount = poissonRandom(avgSwaps);
+
+    // Generate individual swap events
+    for (let i = 0; i < swapCount; i++) {
+      const dex = selectWeightedDex(profile.dexMarketShare);
+      const pair = this.selectSwapPair(dex);
+      if (pair) {
+        this.executeSwap(pair);
+      }
+    }
+
+    // Opportunity detection
+    const effectiveArbChance = this.config.arbitrageChance * regimeConfig.arbChanceMultiplier;
+    if (Math.random() < effectiveArbChance) {
+      this.detectAndEmitOpportunities();
+    }
+
+    // Multi-hop opportunities (same as existing)
+    if (Math.random() < this.config.arbitrageChance) {
+      this.generateMultiHopOpportunity();
+    }
+  }
+
+  /**
+   * Sample gas price for a block using the chain's gas model.
+   * Base fee spikes during burst regime via burstMultiplier.
+   */
+  private sampleGasPrice(profile: ChainThroughputProfile): SampledGasPrice {
+    const gas = profile.gasModel;
+    const burstMult = this.currentRegime === 'burst' ? gas.burstMultiplier : 1.0;
+
+    const baseFee = Math.max(0, gaussianRandom(gas.baseFeeAvg * burstMult, gas.baseFeeStdDev));
+    const priorityFee = Math.max(0, gaussianRandom(gas.priorityFeeAvg, gas.priorityFeeStdDev));
+
+    const nativePrice = getNativeTokenPrice(this.config.chainId);
+    const isSolana = this.config.chainId === 'solana';
+    // Solana: lamports/CU * CU * SOL_price / 1e12 (lamports to SOL)
+    // EVM: gwei * gas * ETH_price / 1e9 (gwei to ETH)
+    const gasCostUsd = isSolana
+      ? ((baseFee + priorityFee) * gas.swapGasUnits * nativePrice) / 1e12
+      : ((baseFee + priorityFee) * gas.swapGasUnits * nativePrice) / 1e9;
+
+    return { baseFee, priorityFee, gasCostUsd };
+  }
+
+  /**
+   * Select a pair for a swap event, weighted by activity tier.
+   * If no pairs match the selected DEX, falls back to any pair.
+   */
+  private selectSwapPair(dex: string): SimulatedPairConfig | null {
+    if (this.config.pairs.length === 0) return null;
+
+    const dexPairs = this.config.pairs.filter(p => p.dex === dex);
+    const candidates = dexPairs.length > 0 ? dexPairs : this.config.pairs;
+
+    const weights = candidates.map(p => {
+      const key = `${p.token0Symbol}/${p.token1Symbol}`;
+      return PAIR_ACTIVITY_TIERS[key] ?? DEFAULT_PAIR_ACTIVITY;
+    });
+
+    return weightedRandomSelect(candidates, weights);
+  }
+
+  /**
+   * Execute a single simulated swap: apply random-walk price change
+   * to pair reserves and emit a syncEvent.
+   */
+  private executeSwap(pair: SimulatedPairConfig): void {
+    const reserves = this.reserves.get(pair.address.toLowerCase());
+    if (!reserves) return;
+
+    const realismLevel = getSimulationRealismLevel();
+    const regimeConfig = realismLevel === 'high'
+      ? REGIME_CONFIGS[this.currentRegime]
+      : REGIME_CONFIGS['normal'];
+
+    const effectiveVolatility = this.config.volatility * regimeConfig.volatilityMultiplier;
+    const priceChange = (Math.random() - 0.5) * 2 * effectiveVolatility;
+
+    const newReserve1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - priceChange)));
+    reserves.reserve1 = newReserve1 > 0n ? newReserve1 : 1n;
+
+    // Clamp reserve ratio (from existing code)
+    const decimalDiff = pair.token0Decimals - pair.token1Decimals;
+    const decimalFactor = 10 ** decimalDiff;
+    const rawRatio = Number(reserves.reserve0) / Number(reserves.reserve1);
+    const normalizedRatio = rawRatio / decimalFactor;
+    const MAX_RATIO = 2;
+    if (normalizedRatio > MAX_RATIO || normalizedRatio < 1 / MAX_RATIO) {
+      reserves.reserve1 = BigInt(Math.floor(Number(reserves.reserve0) / decimalFactor));
+    }
+
+    this.emitSyncEvent(pair, reserves.reserve0, reserves.reserve1);
   }
 
   private emitAllSyncEvents(): void {
@@ -398,7 +576,9 @@ export class ChainSimulator extends EventEmitter {
   ): SimulatedOpportunity {
     const positionSize = this.calculatePositionSize();
     const estimatedProfitUsd = netProfit * positionSize;
-    const estimatedGasCost = 5 + Math.random() * 15;
+    const estimatedGasCost = this.currentGasPrice.gasCostUsd > 0
+      ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4) // +-20% variance
+      : 5 + Math.random() * 15; // fallback for low realism
 
     const baseOpportunity = {
       id: `sim-${this.config.chainId}-${++this.opportunityId}`,
