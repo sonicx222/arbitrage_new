@@ -27,6 +27,9 @@ export type {
   SimulatedPairConfig,
   BridgeCostConfig,
   CrossChainSimulatorConfig,
+  MarketRegime,
+  RegimeConfig,
+  SimulationRealismLevel,
 } from './types';
 
 // Constants
@@ -37,6 +40,13 @@ export {
   CHAIN_SPECIFIC_PAIRS,
   DEXES,
   DEFAULT_BRIDGE_COSTS,
+  PAIR_ACTIVITY_TIERS,
+  DEFAULT_PAIR_ACTIVITY,
+  STRATEGY_WEIGHTS,
+  selectWeightedStrategyType,
+  REGIME_CONFIGS,
+  REGIME_TRANSITIONS,
+  transitionRegime,
 } from './constants';
 
 // Mode utilities
@@ -45,6 +55,7 @@ export {
   isExecutionSimulationMode,
   isHybridExecutionMode,
   getSimulationModeSummary,
+  getSimulationRealismLevel,
 } from './mode-utils';
 
 // Price simulator

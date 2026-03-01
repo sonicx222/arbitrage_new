@@ -17,6 +17,7 @@ import type {
   SimulatedBridgeProtocol,
 } from './types';
 import { DEFAULT_CONFIG, DEXES, BASE_PRICES, getTokenPrice, DEFAULT_BRIDGE_COSTS } from './constants';
+import { getSimulationRealismLevel } from './mode-utils';
 
 // =============================================================================
 // CrossChainSimulator
@@ -91,15 +92,29 @@ export class CrossChainSimulator extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
+    const realismLevel = getSimulationRealismLevel();
+    const hasExplicitInterval = !!process.env.SIMULATION_UPDATE_INTERVAL_MS;
+
+    // Cross-chain checks happen less frequently than single-chain.
+    // medium/high: use 5s interval (realistic bridge delay window)
+    // low: use configured interval (1000ms default)
+    let effectiveInterval: number;
+    if (hasExplicitInterval || realismLevel === 'low') {
+      effectiveInterval = this.config.updateIntervalMs;
+    } else {
+      effectiveInterval = 5000;
+    }
+
     this.logger.info('Starting cross-chain simulator', {
       chains: this.config.chains,
-      updateInterval: this.config.updateIntervalMs,
+      updateInterval: effectiveInterval,
+      realismLevel,
       minProfitThreshold: `${this.config.minProfitThreshold * 100}%`,
     });
 
     this.interval = setInterval(() => {
       this.simulateTick();
-    }, this.config.updateIntervalMs);
+    }, effectiveInterval);
 
     this.detectAllCrossChainOpportunities();
   }

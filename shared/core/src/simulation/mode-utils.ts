@@ -6,8 +6,25 @@
  * @module simulation
  */
 
+import type { SimulationRealismLevel } from './types';
+
 export function isSimulationMode(): boolean {
   return process.env.SIMULATION_MODE === 'true';
+}
+
+/**
+ * Get the simulation realism level from env var.
+ *
+ * - 'low': Legacy behavior (flat 1000ms, all pairs every tick, 5 types)
+ * - 'medium': Block-time aligned + activity tiers + all 13 types (default)
+ * - 'high': Full regime model on top of medium
+ *
+ * Set via: SIMULATION_REALISM_LEVEL=low|medium|high
+ */
+export function getSimulationRealismLevel(): SimulationRealismLevel {
+  const level = process.env.SIMULATION_REALISM_LEVEL?.toLowerCase();
+  if (level === 'low' || level === 'medium' || level === 'high') return level;
+  return 'medium';
 }
 
 /**

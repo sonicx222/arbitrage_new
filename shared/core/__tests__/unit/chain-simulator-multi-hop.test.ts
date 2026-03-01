@@ -122,10 +122,13 @@ async function collectOpportunities(
 describe('ChainSimulator - Multi-Hop Opportunities', () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    // Use low realism for predictable test behavior (flat interval, legacy type split)
+    process.env.SIMULATION_REALISM_LEVEL = 'low';
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    delete process.env.SIMULATION_REALISM_LEVEL;
   });
 
   describe('Triangular Opportunities (3-hop)', () => {
@@ -233,18 +236,18 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
         .filter(c => c.type === 'triangular' || c.type === 'quadrilateral')
         .map(c => c.confidence);
 
-      const intraChainConfidences = opportunities
-        .filter(c => c.type === 'intra-chain')
+      const basicConfidences = opportunities
+        .filter(c => c.type !== 'triangular' && c.type !== 'quadrilateral')
         .map(c => c.confidence);
 
-      if (multiHopConfidences.length > 0 && intraChainConfidences.length > 0) {
+      if (multiHopConfidences.length > 0 && basicConfidences.length > 0) {
         const avgMultiHop =
           multiHopConfidences.reduce((a, b) => a + b, 0) / multiHopConfidences.length;
-        const avgIntraChain =
-          intraChainConfidences.reduce((a, b) => a + b, 0) / intraChainConfidences.length;
+        const avgBasic =
+          basicConfidences.reduce((a, b) => a + b, 0) / basicConfidences.length;
 
         // Multi-hop should generally have lower confidence
-        expect(avgMultiHop).toBeLessThanOrEqual(avgIntraChain + 0.1);
+        expect(avgMultiHop).toBeLessThanOrEqual(avgBasic + 0.1);
       }
     });
   });
@@ -258,8 +261,8 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
 
         if (opp.type === 'triangular' || opp.type === 'quadrilateral') {
           expect(expiryMs).toBeLessThanOrEqual(3000);
-        } else if (opp.type === 'intra-chain') {
-          expect(expiryMs).toBeLessThanOrEqual(5000);
+        } else if (opp.type !== 'triangular' && opp.type !== 'quadrilateral') {
+          expect(expiryMs).toBeLessThanOrEqual(15000);
         }
       }
     });
@@ -310,14 +313,16 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       const multiHopCount = opportunities.filter(
         o => o.type === 'triangular' || o.type === 'quadrilateral'
       ).length;
-      const intraChainCount = opportunities.filter(o => o.type === 'intra-chain').length;
+      const basicCount = opportunities.filter(
+        o => o.type !== 'triangular' && o.type !== 'quadrilateral'
+      ).length;
 
       // Should have both types
       expect(multiHopCount).toBeGreaterThan(0);
-      expect(intraChainCount).toBeGreaterThan(0);
+      expect(basicCount).toBeGreaterThan(0);
 
-      // Intra-chain should be more common than multi-hop
-      expect(intraChainCount).toBeGreaterThan(multiHopCount);
+      // Basic types should be more common than multi-hop
+      expect(basicCount).toBeGreaterThan(multiHopCount);
     });
   });
 

@@ -6,7 +6,13 @@
  * @module simulation
  */
 
-import type { SimulationConfig, BridgeCostConfig } from './types';
+import type {
+  SimulationConfig,
+  BridgeCostConfig,
+  SimulatedOpportunityType,
+  MarketRegime,
+  RegimeConfig,
+} from './types';
 
 // =============================================================================
 // Default Configuration
@@ -271,3 +277,138 @@ export const DEFAULT_BRIDGE_COSTS: Record<string, BridgeCostConfig> = {
   'base-blast': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
   'base-scroll': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
 };
+
+// =============================================================================
+// Pair Activity Tiers
+// =============================================================================
+
+/**
+ * Pair activity probability — chance a pair has a trade in any given block.
+ * Based on typical DEX trading patterns:
+ * - Tier 1 (blue-chip): active in 60-80% of blocks
+ * - Tier 2 (medium): active in 20-40% of blocks
+ * - Tier 3 (low-cap/chain-specific): active in 3-15% of blocks
+ *
+ * Key format: 'TOKEN0/TOKEN1' (uppercase, canonical order from DEFAULT_CONFIG.pairs)
+ *
+ * @see docs/reports/SIMULATION_REWORK_RESEARCH_2026-03-01.md — Section 8.2
+ */
+export const PAIR_ACTIVITY_TIERS: Record<string, number> = {
+  // Tier 1: Blue-chip stablecoin pairs
+  'WETH/USDC': 0.75, 'WETH/USDT': 0.70, 'WBTC/WETH': 0.65, 'WBTC/USDC': 0.60,
+  'WBNB/BUSD': 0.70, 'WBNB/USDT': 0.65, 'SOL/USDC': 0.75,
+
+  // Tier 2: Medium-cap pairs
+  'ARB/WETH': 0.35, 'ARB/USDC': 0.30, 'OP/WETH': 0.30, 'OP/USDC': 0.25,
+  'LINK/WETH': 0.30, 'MATIC/USDC': 0.35, 'AVAX/USDC': 0.30, 'FTM/USDC': 0.25,
+  'JUP/SOL': 0.30, 'RAY/SOL': 0.25, 'ORCA/SOL': 0.20,
+
+  // Tier 2b: LST pairs (high correlation, steady flow)
+  'stETH/WETH': 0.20, 'rETH/WETH': 0.18, 'wstETH/WETH': 0.22, 'cbETH/WETH': 0.15,
+  'mSOL/SOL': 0.25, 'jitoSOL/SOL': 0.20, 'stMATIC/WMATIC': 0.15,
+
+  // Tier 3: Low-cap/chain-specific pairs
+  'CAKE/WBNB': 0.15, 'CAKE/BUSD': 0.12, 'XVS/WBNB': 0.08,
+  'BTCB/WBNB': 0.18, 'QUICK/WMATIC': 0.08, 'QUICK/USDC': 0.06,
+  'JOE/WAVAX': 0.12, 'JOE/USDC': 0.10,
+  'WFTM/USDC': 0.15, 'WFTM/DAI': 0.10,
+  'AERO/WETH': 0.15, 'AERO/USDC': 0.12, 'VELO/WETH': 0.10,
+  'sUSD/USDC': 0.08, 'GMX/WETH': 0.12, 'MAGIC/WETH': 0.08, 'PENDLE/WETH': 0.10,
+  'CRV/WETH': 0.12, 'AAVE/WETH': 0.15,
+
+  // Tier 3b: Meme/micro-cap
+  'PEPE/WETH': 0.08, 'SHIB/WETH': 0.06, 'DOGE/WETH': 0.05,
+  'BONK/SOL': 0.10, 'WIF/SOL': 0.12, 'JTO/SOL': 0.15,
+  'PYTH/SOL': 0.10, 'MNDE/SOL': 0.06, 'W/SOL': 0.08, 'BSOL/SOL': 0.12,
+};
+
+/** Default activity probability for pairs not listed in PAIR_ACTIVITY_TIERS */
+export const DEFAULT_PAIR_ACTIVITY = 0.15;
+
+// =============================================================================
+// Strategy Distribution Weights
+// =============================================================================
+
+/**
+ * Strategy type distribution weights for realistic simulation.
+ * Weights sum to 1.0 and reflect typical mainnet opportunity distribution.
+ *
+ * cross-dex dominates because most real arbitrage is between DEXes on the same chain.
+ * Cross-chain is handled separately by CrossChainSimulator (weight here is for
+ * occasional same-chain-simulator cross-chain hints).
+ * Solana-specific type is handled by the non-EVM simulator (weight here is minimal).
+ *
+ * @see docs/reports/SIMULATION_REWORK_RESEARCH_2026-03-01.md — Section 8.4
+ */
+export const STRATEGY_WEIGHTS: Record<SimulatedOpportunityType, number> = {
+  'cross-dex': 0.30,
+  'simple': 0.20,
+  'flash-loan': 0.12,
+  'triangular': 0.08,
+  'backrun': 0.06,
+  'intra-dex': 0.05,
+  'statistical': 0.05,
+  'cross-chain': 0.04,
+  'uniswapx': 0.03,
+  'predictive': 0.02,
+  'quadrilateral': 0.02,
+  'multi-leg': 0.02,
+  'solana': 0.01,
+};
+
+/**
+ * Select a strategy type using weighted random selection.
+ * Falls back to 'cross-dex' if weights somehow don't sum to 1.0.
+ */
+export function selectWeightedStrategyType(): SimulatedOpportunityType {
+  const rand = Math.random();
+  let cumulative = 0;
+  for (const [type, weight] of Object.entries(STRATEGY_WEIGHTS)) {
+    cumulative += weight;
+    if (rand < cumulative) return type as SimulatedOpportunityType;
+  }
+  return 'cross-dex';
+}
+
+// =============================================================================
+// Market Regime Model
+// =============================================================================
+
+/**
+ * Behavior multipliers per market regime.
+ *
+ * Quiet (~60% steady-state): Few pair updates, low volatility, rare opportunities.
+ * Normal (~30% steady-state): Moderate activity.
+ * Burst (~10% steady-state): Many pairs affected, correlated moves, higher arb chance.
+ *
+ * @see docs/reports/SIMULATION_REWORK_RESEARCH_2026-03-01.md — Section 8.5
+ */
+export const REGIME_CONFIGS: Record<MarketRegime, RegimeConfig> = {
+  quiet:  { pairActivityMultiplier: 0.3, volatilityMultiplier: 0.5, arbChanceMultiplier: 0.3 },
+  normal: { pairActivityMultiplier: 1.0, volatilityMultiplier: 1.0, arbChanceMultiplier: 1.0 },
+  burst:  { pairActivityMultiplier: 2.0, volatilityMultiplier: 3.0, arbChanceMultiplier: 2.5 },
+};
+
+/**
+ * Markov chain transition probabilities per tick.
+ * Each row sums to 1.0.
+ */
+export const REGIME_TRANSITIONS: Record<MarketRegime, Record<MarketRegime, number>> = {
+  quiet:  { quiet: 0.94, normal: 0.05, burst: 0.01 },
+  normal: { quiet: 0.10, normal: 0.87, burst: 0.03 },
+  burst:  { quiet: 0.05, normal: 0.15, burst: 0.80 },
+};
+
+/**
+ * Transition to the next regime using Markov chain probabilities.
+ */
+export function transitionRegime(current: MarketRegime): MarketRegime {
+  const transitions = REGIME_TRANSITIONS[current];
+  const rand = Math.random();
+  let cumulative = 0;
+  for (const [regime, prob] of Object.entries(transitions)) {
+    cumulative += prob;
+    if (rand < cumulative) return regime as MarketRegime;
+  }
+  return current;
+}

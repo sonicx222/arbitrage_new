@@ -8,8 +8,10 @@
 
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
+import { getBlockTimeMs } from '@arbitrage/config';
 import type { SimulationConfig, SimulatedPriceUpdate } from './types';
 import { DEFAULT_CONFIG, DEXES, getTokenPrice } from './constants';
+import { getSimulationRealismLevel } from './mode-utils';
 
 const logger = createLogger('simulation-mode');
 
@@ -61,16 +63,28 @@ export class PriceSimulator extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
+    const realismLevel = getSimulationRealismLevel();
+    const hasExplicitInterval = !!process.env.SIMULATION_UPDATE_INTERVAL_MS;
+
     logger.info('Starting price simulation', {
-      updateInterval: this.config.updateIntervalMs,
+      realismLevel,
       volatility: this.config.volatility
     });
 
     // Create update interval for each chain
+    // medium/high realism: use real block time per chain
+    // low realism or explicit env override: use flat configured interval
     for (const chain of this.config.chains) {
+      let intervalMs: number;
+      if (hasExplicitInterval || realismLevel === 'low') {
+        intervalMs = this.config.updateIntervalMs;
+      } else {
+        intervalMs = Math.max(100, Math.min(getBlockTimeMs(chain), 15000));
+      }
+
       const interval = setInterval(() => {
         this.updateChainPrices(chain);
-      }, this.config.updateIntervalMs);
+      }, intervalMs);
       this.intervals.push(interval);
     }
 

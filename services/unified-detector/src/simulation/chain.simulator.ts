@@ -239,7 +239,7 @@ export class ChainSimulationHandler {
 
             const opportunity: ArbitrageOpportunity = {
               id: `${this.chainId}-sim-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-              type: 'simple',
+              type: this.chainId === 'solana' ? 'solana' : 'simple',
               chain: this.chainId,
               buyDex: dex1,
               sellDex: dex2,
