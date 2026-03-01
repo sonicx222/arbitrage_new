@@ -525,6 +525,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
         consumerName: this.config.consumerId,
         startId: '$',
         resetToStartIdOnExistingGroup: true
+      },
+      // P0 Fix ES-003: DLQ consumer group — enables monitoring/draining of dead-letter messages.
+      // Uses startId '0' to process ALL messages (DLQ messages should never be skipped).
+      {
+        streamName: RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '0',
+        resetToStartIdOnExistingGroup: false
       }
     ];
 
