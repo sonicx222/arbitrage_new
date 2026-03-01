@@ -15,6 +15,10 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
+// P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
+// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+process.setMaxListeners(25);
+
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { UnifiedChainDetector, UnifiedDetectorConfig } from './unified-detector';
 import { parsePort } from '@arbitrage/core/partition';

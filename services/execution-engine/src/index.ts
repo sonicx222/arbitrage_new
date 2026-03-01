@@ -13,10 +13,11 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
-// Fix 1: Increase max listeners to prevent MaxListenersExceededWarning.
-// The execution engine legitimately registers 11+ exit listeners across Redis clients,
+// P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
+// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+// The execution engine registers 11+ exit listeners across Redis clients,
 // service-bootstrap signal handlers, and graceful shutdown handlers.
-process.setMaxListeners(20);
+process.setMaxListeners(25);
 
 import { IncomingMessage, ServerResponse, Server } from 'http';
 import { ExecutionEngineService, SimulationConfig } from './engine';

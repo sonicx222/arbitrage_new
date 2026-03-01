@@ -42,6 +42,10 @@
  * @see ADR-005: L1 Price Matrix with SharedArrayBuffer
  */
 
+// P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
+// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+process.setMaxListeners(25);
+
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import * as os from 'os';
 import * as path from 'path';
