@@ -18,7 +18,7 @@
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
-import { getBlockTimeMs } from '@arbitrage/config';
+import { getBlockTimeMs, getOpportunityTimeoutMs } from '@arbitrage/config';
 import type {
   ChainSimulatorConfig,
   SimulatedPairConfig,
@@ -38,6 +38,29 @@ import {
   selectWeightedStrategyType,
 } from './constants';
 import { getSimulationRealismLevel } from './mode-utils';
+
+// =============================================================================
+// Simulation TTL
+// =============================================================================
+
+/**
+ * Simulated opportunities get chain-specific TTLs multiplied by this factor.
+ * Production timeouts are tuned for real pipeline latency; simulation adds
+ * headroom so opportunities survive the coordinator's XREADGROUP cycle.
+ */
+const SIMULATION_TTL_MULTIPLIER = 3;
+
+/**
+ * Compute expiresAt for a simulated opportunity.
+ *
+ * @param chainId - Chain identifier (e.g. 'bsc', 'arbitrum')
+ * @param strategyTtlMs - Optional strategy-specific TTL override (e.g. 2000 for backrun)
+ * @returns Absolute timestamp (Date.now() + ttl)
+ */
+function getSimulationExpiresAt(chainId: string, strategyTtlMs?: number): number {
+  const baseTtl = strategyTtlMs ?? getOpportunityTimeoutMs(chainId);
+  return Date.now() + baseTtl * SIMULATION_TTL_MULTIPLIER;
+}
 
 // =============================================================================
 // ChainSimulator
@@ -391,7 +414,7 @@ export class ChainSimulator extends EventEmitter {
       estimatedProfitUsd,
       confidence: 0.8 + Math.random() * 0.15,
       timestamp: Date.now(),
-      expiresAt: Date.now() + 5000,
+      expiresAt: getSimulationExpiresAt(this.config.chainId),
       isSimulated: true as const,
       expectedGasCost: estimatedGasCost,
       expectedProfit: estimatedProfitUsd - estimatedGasCost,
@@ -476,7 +499,7 @@ export class ChainSimulator extends EventEmitter {
           type: 'backrun',
           useFlashLoan: false,
           confidence: 0.65 + Math.random() * 0.2, // Lower confidence for MEV
-          expiresAt: Date.now() + 2000, // Fast expiry
+          expiresAt: getSimulationExpiresAt(base.chain, 2000), // Fast expiry
         };
 
       // --- UniswapX Dutch auction fill ---
@@ -487,7 +510,7 @@ export class ChainSimulator extends EventEmitter {
           type: 'uniswapx',
           useFlashLoan: false,
           confidence: 0.70 + Math.random() * 0.15,
-          expiresAt: Date.now() + 10000, // Dutch auctions have longer windows
+          expiresAt: getSimulationExpiresAt(base.chain, 10000), // Dutch auctions have longer windows
         };
 
       // --- Statistical (mean-reversion) ---
@@ -510,7 +533,7 @@ export class ChainSimulator extends EventEmitter {
           type: 'predictive',
           useFlashLoan: false,
           confidence: 0.55 + Math.random() * 0.15, // ML predictions are lower confidence
-          expiresAt: Date.now() + 15000, // Predictions have longer time horizon
+          expiresAt: getSimulationExpiresAt(base.chain, 15000), // Predictions have longer time horizon
         };
 
       // --- Solana-specific ---
@@ -519,7 +542,7 @@ export class ChainSimulator extends EventEmitter {
           ...base,
           type: 'solana',
           useFlashLoan: false,
-          expiresAt: Date.now() + 1000, // Fast Solana block times
+          expiresAt: getSimulationExpiresAt(base.chain, 1000), // Fast Solana block times
         };
 
       // --- Cross-chain (shouldn't hit here often, mostly from CrossChainSimulator) ---
@@ -642,7 +665,7 @@ export class ChainSimulator extends EventEmitter {
       estimatedProfitUsd,
       confidence: 0.75 + Math.random() * 0.15,
       timestamp: Date.now(),
-      expiresAt: Date.now() + 3000,
+      expiresAt: getSimulationExpiresAt(this.config.chainId, 3000),
       isSimulated: true,
       useFlashLoan: true,
       hops,

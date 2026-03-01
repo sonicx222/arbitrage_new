@@ -260,9 +260,11 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
         const expiryMs = opp.expiresAt - opp.timestamp;
 
         if (opp.type === 'triangular' || opp.type === 'quadrilateral') {
-          expect(expiryMs).toBeLessThanOrEqual(3000);
+          // Multi-hop strategy TTL (3000ms) × SIMULATION_TTL_MULTIPLIER (3) = 9000ms
+          expect(expiryMs).toBeLessThanOrEqual(9000);
         } else if (opp.type !== 'triangular' && opp.type !== 'quadrilateral') {
-          expect(expiryMs).toBeLessThanOrEqual(15000);
+          // Chain-specific TTL (ethereum: 30000ms) × SIMULATION_TTL_MULTIPLIER (3) = 90000ms
+          expect(expiryMs).toBeLessThanOrEqual(90000);
         }
       }
     });
