@@ -166,7 +166,7 @@
     "tar": "^7.5.7",
     "diff": "8.0.3",
     "cookie": "^1.1.1",
-    "undici": "^7.19.1",
+    "undici": "^5.28.4",
     "@mapbox/node-pre-gyp": {
       "tar": "^7.5.7"
     },
@@ -183,10 +183,10 @@
       "@sentry/node": {
         "cookie": "^1.1.1"
       },
-      "undici": "^7.19.1"
+      "undici": "^5.28.4"
     },
     "@nomicfoundation/hardhat-verify": {
-      "undici": "^7.19.1"
+      "undici": "^5.28.4"
     }
   },
   "engines": {

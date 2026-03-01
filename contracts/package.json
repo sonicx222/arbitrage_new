@@ -5,7 +5,7 @@
   "main": "index.js",
   "overrides": {
     "cookie": "^1.1.1",
-    "undici": "^7.19.1",
+    "undici": "^5.28.4",
     "tar": "^7.5.7"
   },
   "scripts": {
