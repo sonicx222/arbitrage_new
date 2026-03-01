@@ -286,8 +286,12 @@ export class PriceMatrix implements Resettable {
     // PHASE3-TASK43: Initialize SharedKeyRegistry for worker access
     if (this.useSharedMemory) {
       try {
+        // SM-009 FIX: Cap registry at 10,000 keys instead of full PriceMatrix capacity.
+        // PriceMatrix may have 500K+ slots (for 8MB L1), but actual pair count is typically
+        // 1,000-5,000. The old sizing wasted ~34MB on unused SharedArrayBuffer space.
+        const registryMaxKeys = Math.min(this.config.maxPairs + this.config.reserveSlots, 10_000);
         this.keyRegistry = new SharedKeyRegistry({
-          maxKeys: this.config.maxPairs + this.config.reserveSlots
+          maxKeys: registryMaxKeys
         });
         if (logger.isLevelEnabled?.('debug') ?? false) {
           logger.debug('SharedKeyRegistry initialized for worker access');

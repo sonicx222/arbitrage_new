@@ -145,8 +145,11 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   dlqStream: RedisStreams.FORWARDING_DLQ,
   // FIX W2-8: Prevent unbounded stream growth (matches RedisStreamsClient.STREAM_MAX_LENGTHS)
   executionStreamMaxLen: 5000,
-  // RT-003 FIX: 5s grace period for execution engine consumer initialization
-  startupGracePeriodMs: 5000,
+  // RT-003 FIX: Grace period for execution engine consumer initialization.
+  // RT-004 FIX: Increased from 5s to 15s — execution engine initialization
+  // (Redis, nonce manager, providers, KMS, MEV, strategies, risk management,
+  // bridge recovery, consumer group creation) typically takes 7-12s.
+  startupGracePeriodMs: 15000,
 };
 
 /**
