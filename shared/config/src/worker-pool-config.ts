@@ -84,7 +84,11 @@ function resolveMaxQueueSize(): number {
 function resolveTaskTimeout(): number {
   const envValue = safeParseInt(process.env.WORKER_POOL_TASK_TIMEOUT_MS, 0);
   if (envValue > 0) return envValue;
-  return 30000;
+  // P1-1 FIX: Increased from 30s to 60s. Complex multi-leg path finding on
+  // chains with 700+ pairs (e.g., Arbitrum on P2) routinely exceeds 30s when
+  // 5 chains submit simultaneously to 4 workers. 30s timeouts cause sync
+  // fallback which blocks the event loop for 1.7-3.6s.
+  return 60000;
 }
 
 export const WORKER_POOL_CONFIG: WorkerPoolConfig = {

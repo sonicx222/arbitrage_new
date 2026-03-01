@@ -116,7 +116,12 @@ export interface GasPriceCacheConfig {
 
 const DEFAULT_CONFIG: GasPriceCacheConfig = {
   refreshIntervalMs: 60000, // 60 seconds
-  staleThresholdMs: 120000, // 2 minutes
+  // P1-3 FIX: Increased from 120s (2min) to 180s (3min).
+  // With 13+ chains, a single refresh cycle can take >60s due to RPC timeouts.
+  // A stale threshold of only 2x the refresh interval caused spurious stale
+  // warnings for L2 chains (optimism, base were 2.3min stale). 3x provides
+  // a safe margin: refresh at 60s + worst-case RPC timeout ~30s = 90s << 180s.
+  staleThresholdMs: 180000, // 3 minutes
   autoRefresh: true
 };
 

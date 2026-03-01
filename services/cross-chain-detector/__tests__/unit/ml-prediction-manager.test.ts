@@ -429,7 +429,7 @@ describe('MLPredictionManager', () => {
     });
 
     it('should return null when not enough history', async () => {
-      // Only add 5 entries (less than required 10)
+      // P1-4 FIX: Minimum history reduced from 10 to 5 — use 4 entries (below threshold)
       const baseUpdate: PriceUpdate = {
         chain: 'ethereum',
         dex: 'uniswap',
@@ -444,7 +444,7 @@ describe('MLPredictionManager', () => {
         latency: 50,
       };
 
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 4; i++) {
         manager.trackPriceUpdate({
           ...baseUpdate,
           price: 3000 + i,
@@ -452,7 +452,7 @@ describe('MLPredictionManager', () => {
         });
       }
 
-      const prediction = await manager.getCachedPrediction('ethereum', 'uniswap_WETH_USDC', 3004);
+      const prediction = await manager.getCachedPrediction('ethereum', 'uniswap_WETH_USDC', 3003);
       expect(prediction).toBeNull();
     });
 
