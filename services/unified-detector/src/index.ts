@@ -45,7 +45,10 @@ let streamsClient: RedisStreamsClient | null = null;
 
 // FIX M6: Track concurrent in-flight publishes to prevent burst overload
 let inFlightPublishes = 0;
-const MAX_CONCURRENT_PUBLISHES = 50;
+// P2-2 FIX: Made configurable via env var, aligned with partition runner (default: 100)
+const MAX_CONCURRENT_PUBLISHES = parseInt(
+  process.env.MAX_CONCURRENT_PUBLISHES ?? '100', 10
+);
 
 // FIX M11: Price update ingestion counter for monitoring
 let priceUpdatesIngested = 0;
@@ -298,7 +301,8 @@ detector.on('priceUpdate', () => {
 });
 
 detector.on('opportunity', (opp) => {
-  logger.info('Arbitrage opportunity detected', {
+  // P2-1 FIX: Reduced from INFO to DEBUG to cut log volume (~4k lines/sec)
+  logger.debug('Arbitrage opportunity detected', {
     id: opp.id,
     type: opp.type,
     buyDex: opp.buyDex,

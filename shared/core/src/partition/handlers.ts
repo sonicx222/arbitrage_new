@@ -70,7 +70,10 @@ export function setupDetectorEventHandlers(
     expectedProfit: number;
     profitPercentage: number;
   }) => {
-    logger.info('Arbitrage opportunity detected', {
+    // P2-1 FIX: Reduced from INFO to DEBUG. At ~18k opportunities per 10min,
+    // INFO-level logging generates ~4,000 lines/sec. Partition-level summaries
+    // (aggregated counts) remain at INFO for operational visibility.
+    logger.debug('Arbitrage opportunity detected', {
       partition: partitionId,
       id: opp.id,
       type: opp.type,

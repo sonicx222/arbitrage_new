@@ -239,7 +239,8 @@ export class CowBackrunDetector extends EventEmitter {
 
       opportunities.push(opportunity);
 
-      logger.info('CoW backrun opportunity detected', {
+      // P2-1 FIX: Reduced from INFO to DEBUG to cut log volume
+      logger.debug('CoW backrun opportunity detected', {
         id: opportunity.id,
         txHash: settlement.txHash,
         impactPct: impactPct.toFixed(4),

@@ -34,7 +34,11 @@ export function validateEnvironment(partitionId: string, logger: ReturnType<type
   const redisUrl = process.env.REDIS_URL;
 
   // FIX #9: Warn when SOLANA_RPC_URL is missing in dev mode (falls back to PublicNode)
-  if (!process.env.SOLANA_RPC_URL && nodeEnv !== 'test' && nodeEnv !== 'production') {
+  // P2-6 FIX: Only warn when no API key alternatives are set either.
+  // Previously this warned even when HELIUS_API_KEY was set (which provides
+  // a non-public endpoint), creating a misleading "PublicNode fallback" message.
+  if (!process.env.SOLANA_RPC_URL && !process.env.HELIUS_API_KEY && !process.env.TRITON_API_KEY
+      && nodeEnv !== 'test' && nodeEnv !== 'production') {
     logger.warn('SOLANA_RPC_URL not set — using PublicNode fallback (rate-limited, not for production)', {
       partitionId,
       hint: 'Set SOLANA_RPC_URL for better reliability, or use HELIUS_API_KEY/TRITON_API_KEY',

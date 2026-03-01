@@ -488,7 +488,12 @@ export function createPartitionEntry(
   // because the Coordinator never receives opportunities.
   // Now, each partition auto-initializes Redis + OpportunityPublisher on startup
   // and registers an 'opportunity' event listener that publishes to stream:opportunities.
-  const MAX_CONCURRENT_PUBLISHES = 10;
+  // P2-2 FIX: Increased from 10 to 100 and made configurable. The old limit of 10
+  // was far too low for the detection rate (~18k opportunities per 10min), causing
+  // 26.4% of opportunities to be silently dropped. Now consistent with unified-detector.
+  const MAX_CONCURRENT_PUBLISHES = parseInt(
+    process.env.MAX_CONCURRENT_PUBLISHES ?? '100', 10
+  );
   let inFlightPublishes = 0;
 
   const composedOnStarted = async (detector: PartitionDetectorInterface, startupDurationMs: number): Promise<void> => {
