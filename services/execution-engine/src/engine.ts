@@ -698,6 +698,17 @@ export class ExecutionEngineService {
 
       // Create consumer groups and start consuming
       await this.opportunityConsumer.createConsumerGroup();
+
+      // RT-008 FIX: Recover orphaned PEL messages from dead consumers before starting.
+      // recoverOrphanedMessages() already exists (W2-4 fix) but was never wired into
+      // startup. Without this, messages from crashed consumers stay pending forever.
+      const recovered = await this.opportunityConsumer.recoverOrphanedMessages();
+      if (recovered > 0) {
+        this.logger.info('Recovered orphaned execution-requests messages at startup', {
+          recovered,
+        });
+      }
+
       this.opportunityConsumer.start();
 
       // Item 12: Initialize fast lane consumer (coordinator bypass for high-confidence opps)

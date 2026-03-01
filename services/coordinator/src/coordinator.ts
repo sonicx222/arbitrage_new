@@ -639,6 +639,29 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Create consumer groups for all streams
       await this.createConsumerGroups();
 
+      // ST-010 FIX: Trim stale DLQ entries from previous sessions at startup.
+      // Without this, the DLQ accumulates entries across restarts (348+ entries observed),
+      // creating noise in monitoring and consuming Redis memory. Trims entries older than
+      // 1 hour — stale expired-opportunity DLQ entries have no recovery value.
+      try {
+        const dlqTrimCutoffMs = Date.now() - 3_600_000; // 1 hour
+        const trimmed = await this.streamsClient.xtrim(
+          CoordinatorService.DLQ_STREAM,
+          { minId: `${dlqTrimCutoffMs}-0` }
+        );
+        if (trimmed > 0) {
+          this.logger.info('Trimmed stale DLQ entries from previous sessions', {
+            trimmed,
+            cutoffAgeMs: 3_600_000,
+          });
+        }
+      } catch (error) {
+        // Non-fatal — DLQ trim failure shouldn't block startup
+        this.logger.warn('Failed to trim stale DLQ entries at startup', {
+          error: (error as Error).message,
+        });
+      }
+
       // P0-FIX 1.3: Recover pending messages from previous coordinator instance
       // R2 REFACTOR: Use StreamConsumerManager for pending message recovery
       await this.streamConsumerManager.recoverPendingMessages(

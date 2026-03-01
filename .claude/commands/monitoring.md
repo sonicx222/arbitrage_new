@@ -32,9 +32,9 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 | Service | Port | Ready Endpoint | Role |
 |---------|------|----------------|------|
 | Coordinator | 3000 | `/api/health/ready` | Orchestration, leader election, opportunity routing |
-| P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon |
+| P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon, Avalanche, Fantom |
 | P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll, Mantle, Mode |
-| P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, Avalanche, Fantom |
+| P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, zkSync, Linea |
 | P4 Solana | 3004 | `/ready` | Chain detector: Solana |
 | Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
 | Cross-Chain | 3006 | `/ready` | Cross-chain arbitrage detection |
@@ -647,9 +647,9 @@ with chain-specific staleness thresholds:
 **Method:**
 1. Hit each partition's `/stats` endpoint and parse the per-chain stats:
 ```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon
+curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon, AVAX, FTM
 curl -sf http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, zkSync, Linea, Blast, Scroll
-curl -sf http://localhost:3003/stats | jq .  # P3: ETH, AVAX, FTM
+curl -sf http://localhost:3003/stats | jq .  # P3: ETH, zkSync, Linea
 curl -sf http://localhost:3004/stats | jq .  # P4: Solana
 ```
 
@@ -1049,9 +1049,9 @@ Re-check partition `/stats` endpoints (from Check 3H) and compare per-chain
 message counts against the beginning of the smoke test.
 
 ```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon active
+curl -sf http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon + AVAX + FTM active
 curl -sf http://localhost:3002/stats | jq .  # P2: expect Arb + OP + Base + ... active
-curl -sf http://localhost:3003/stats | jq .  # P3: expect ETH + AVAX + FTM active
+curl -sf http://localhost:3003/stats | jq .  # P3: expect ETH + zkSync + Linea active
 curl -sf http://localhost:3004/stats | jq .  # P4: expect Solana active
 ```
 
@@ -1060,10 +1060,10 @@ For each partition, verify every assigned chain shows:
 - Price update rate >0 (chain is actively producing data)
 
 **Expected chain coverage:**
-- P1: BSC, Polygon (2 chains)
+- P1: BSC, Polygon, Avalanche, Fantom (4 chains)
 - P2: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll (7 active chains;
   Mantle and Mode are stubs — acceptable if missing)
-- P3: Ethereum, Avalanche, Fantom (3 chains)
+- P3: Ethereum, zkSync, Linea (3 chains)
 - P4: Solana (1 chain)
 
 **Flag:** Any non-stub chain with 0 messages during smoke test → **HIGH**,
@@ -1332,6 +1332,8 @@ Redis memory: <used> / <max>
 |-----------|-------|-----------------------|--------|
 | P1 | BSC | <n> | ACTIVE / SILENT |
 | P1 | Polygon | <n> | ACTIVE / SILENT |
+| P1 | Avalanche | <n> | ACTIVE / SILENT |
+| P1 | Fantom | <n> | ACTIVE / SILENT |
 | P2 | Arbitrum | <n> | ACTIVE / SILENT |
 | P2 | Optimism | <n> | ACTIVE / SILENT |
 | P2 | Base | <n> | ACTIVE / SILENT |
@@ -1340,8 +1342,8 @@ Redis memory: <used> / <max>
 | P2 | Blast | <n> | ACTIVE / SILENT |
 | P2 | Scroll | <n> | ACTIVE / SILENT |
 | P3 | Ethereum | <n> | ACTIVE / SILENT |
-| P3 | Avalanche | <n> | ACTIVE / SILENT |
-| P3 | Fantom | <n> | ACTIVE / SILENT |
+| P3 | zkSync | <n> | ACTIVE / SILENT |
+| P3 | Linea | <n> | ACTIVE / SILENT |
 | P4 | Solana | <n> | ACTIVE / SILENT |
 
 ### Risk State Post-Smoke

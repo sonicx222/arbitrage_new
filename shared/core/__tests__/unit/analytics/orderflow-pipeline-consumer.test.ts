@@ -53,6 +53,11 @@ const mockRedisClient = {
 };
 
 jest.mock('../../../src/redis/streams', () => ({
+  RedisStreamsClient: {
+    STREAMS: {
+      PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
+    },
+  },
   getRedisStreamsClient: jest.fn<() => Promise<unknown>>().mockResolvedValue(mockRedisClient),
 }));
 

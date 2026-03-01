@@ -78,8 +78,8 @@ const ORDERFLOW_BATCH_SIZE = parseInt(
   process.env.ORDERFLOW_BATCH_SIZE ?? '50', 10
 );
 
-/** Stream name for pending opportunities. */
-const PENDING_OPPORTUNITIES_STREAM = 'stream:pending-opportunities';
+/** Stream name for pending opportunities — uses canonical constant. */
+const PENDING_OPPORTUNITIES_STREAM = RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES;
 
 /** Consumer group name. */
 const CONSUMER_GROUP = 'orderflow-pipeline';
