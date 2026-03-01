@@ -100,6 +100,13 @@ export interface OpportunityRouterConfig {
   dlqStream?: string;
   /** FIX W2-8: MAXLEN for execution requests stream to prevent unbounded growth (default: 5000) */
   executionStreamMaxLen?: number;
+  /**
+   * RT-003 FIX: Grace period in ms after router creation before forwarding begins (default: 5000).
+   * Prevents the startup race where the coordinator forwards opportunities before
+   * the execution engine consumer is ready, causing the first message to expire in
+   * transit and land in the DLQ.
+   */
+  startupGracePeriodMs?: number;
 }
 
 /**
@@ -138,6 +145,8 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   dlqStream: RedisStreams.FORWARDING_DLQ,
   // FIX W2-8: Prevent unbounded stream growth (matches RedisStreamsClient.STREAM_MAX_LENGTHS)
   executionStreamMaxLen: 5000,
+  // RT-003 FIX: 5s grace period for execution engine consumer initialization
+  startupGracePeriodMs: 5000,
 };
 
 /**
@@ -161,6 +170,14 @@ export class OpportunityRouter {
   private _opportunitiesDropped = 0;
   // P1-8 FIX: Shutdown flag to cancel in-flight retry delays
   private _shuttingDown = false;
+  // RT-003 FIX: Startup grace period — defer forwarding until execution engine consumer is ready
+  private readonly _createdAt = Date.now();
+  // Consumer lag detection: tracks consecutive expired opportunities.
+  // When this exceeds the threshold, the coordinator should skip its consumer
+  // backlog to avoid the death spiral where processing stale messages causes
+  // even more messages to expire.
+  private _consecutiveExpired = 0;
+  private static readonly CONSECUTIVE_EXPIRED_WARN_THRESHOLD = 20;
 
   constructor(
     logger: OpportunityRouterLogger,
@@ -210,6 +227,24 @@ export class OpportunityRouter {
    */
   getOpportunitiesDropped(): number {
     return this._opportunitiesDropped;
+  }
+
+  /**
+   * Get the count of consecutive expired opportunities.
+   * When this exceeds the threshold, the consumer is lagging and should skip its backlog.
+   */
+  getConsecutiveExpired(): number {
+    return this._consecutiveExpired;
+  }
+
+  /**
+   * Reset the consecutive expired counter after a backlog skip (SETID to '$').
+   * Without this reset, every subsequent message triggers a redundant SETID call,
+   * adding latency that causes even more messages to expire — a death spiral
+   * within the fix itself.
+   */
+  resetConsecutiveExpired(): void {
+    this._consecutiveExpired = 0;
   }
 
   /**
@@ -333,13 +368,32 @@ export class OpportunityRouter {
     // consumer backlog. The execution engine then rejects them all with VAL_EXPIRED
     // (200-265s lag), producing 0 execution results and growing the DLQ continuously.
     if (opportunity.expiresAt !== undefined && opportunity.expiresAt < Date.now()) {
-      this.logger.debug('Opportunity already expired, skipping forwarding', {
-        id,
-        expiresAt: opportunity.expiresAt,
-        expiredAgoMs: Date.now() - opportunity.expiresAt,
-        chain: opportunity.chain,
-      });
+      this._consecutiveExpired++;
+
+      // Log at WARN level periodically when consumer is lagging — debug-only logging
+      // made this failure mode invisible during monitoring sessions.
+      if (this._consecutiveExpired === OpportunityRouter.CONSECUTIVE_EXPIRED_WARN_THRESHOLD) {
+        this.logger.warn('Consumer lag detected: many consecutive opportunities expired before processing', {
+          consecutiveExpired: this._consecutiveExpired,
+          latestExpiredAgoMs: Date.now() - opportunity.expiresAt,
+          chain: opportunity.chain,
+        });
+      } else if (this._consecutiveExpired > 0 && this._consecutiveExpired % 100 === 0) {
+        this.logger.warn('Consumer lag persisting: opportunities continue to expire', {
+          consecutiveExpired: this._consecutiveExpired,
+          latestExpiredAgoMs: Date.now() - opportunity.expiresAt,
+        });
+      }
+
       return true; // Still counts as processed (stored), just not forwarded
+    }
+
+    // Reset consecutive expired counter when a fresh opportunity is found
+    if (this._consecutiveExpired > 0) {
+      this.logger.info('Consumer lag recovered: processing fresh opportunities again', {
+        previousConsecutiveExpired: this._consecutiveExpired,
+      });
+      this._consecutiveExpired = 0;
     }
 
     // Forward to execution engine if leader and pending
@@ -373,6 +427,20 @@ export class OpportunityRouter {
     if (!this.streamsClient) {
       this.logger.warn('Cannot forward opportunity - streams client not initialized', {
         id: opportunity.id,
+      });
+      return;
+    }
+
+    // RT-003 FIX: Defer forwarding during startup grace period.
+    // The execution engine consumer takes ~2s to initialize after the coordinator
+    // starts forwarding. Without this, the first opportunity expires in transit
+    // (~1.6s) and lands in the DLQ every startup cycle.
+    const elapsedSinceStart = Date.now() - this._createdAt;
+    if (elapsedSinceStart < this.config.startupGracePeriodMs) {
+      this.logger.debug('Startup grace period active — deferring opportunity forwarding', {
+        id: opportunity.id,
+        elapsedMs: elapsedSinceStart,
+        gracePeriodMs: this.config.startupGracePeriodMs,
       });
       return;
     }

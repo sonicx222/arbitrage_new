@@ -224,6 +224,12 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         consumerLagPending: cachedConsumerLag.pendingCount,
       });
 
+      // RT-015 FIX: Expose risk/drawdown state for monitoring observability.
+      // Without this, operators cannot see HALT/CAUTION states, current drawdown,
+      // or position sizing adjustments from the health endpoint.
+      const drawdownStats = engine.getDrawdownStats();
+      const tradingAllowed = engine.isTradingAllowed();
+
       return {
         status,
         simulationMode: isSimulation,
@@ -241,6 +247,13 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         // P2-14: Consumer lag monitoring
         consumerLagPending: cachedConsumerLag.pendingCount,
         consumerLagAlert: cachedConsumerLag.pendingCount > CONSUMER_LAG_WARNING_THRESHOLD,
+        // RT-015 FIX: Risk/drawdown state — the #1 profitability observability blind spot
+        riskState: drawdownStats?.currentState ?? null,
+        tradingAllowed: tradingAllowed?.allowed ?? null,
+        positionSizeMultiplier: tradingAllowed?.sizeMultiplier ?? null,
+        currentDrawdown: drawdownStats?.currentDrawdown ?? null,
+        dailyPnLFraction: drawdownStats?.dailyPnLFraction ?? null,
+        haltCooldownRemainingMs: tradingAllowed?.haltCooldownRemaining ?? null,
         uptime: process.uptime(),
         memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       };

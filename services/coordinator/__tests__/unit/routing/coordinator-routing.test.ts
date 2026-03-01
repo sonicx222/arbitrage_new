@@ -97,7 +97,7 @@ describe('OpportunityRouter', () => {
       mockLogger,
       mockCircuitBreaker,
       mockStreams,
-      { maxOpportunities: 100, opportunityTtlMs: 5000, duplicateWindowMs: 1000 },
+      { maxOpportunities: 100, opportunityTtlMs: 5000, duplicateWindowMs: 1000, startupGracePeriodMs: 0 },
       (alert) => alerts.push(alert),
     );
   });

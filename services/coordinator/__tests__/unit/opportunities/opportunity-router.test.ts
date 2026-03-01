@@ -131,6 +131,7 @@ describe('OpportunityRouter', () => {
       instanceId: 'test-coordinator',
       maxRetries: 3,
       retryBaseDelayMs: 1, // Use 1ms for fast tests
+      startupGracePeriodMs: 0, // Disable grace period in tests
     });
   });
 
@@ -644,7 +645,7 @@ describe('OpportunityRouter', () => {
       const alertCallback = jest.fn();
       const routerWithAlert = new OpportunityRouter(
         logger, circuitBreaker, streamsClient,
-        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test-coordinator' },
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test-coordinator', startupGracePeriodMs: 0 },
         alertCallback,
       );
 
@@ -773,7 +774,7 @@ describe('OpportunityRouter', () => {
       const alertCallback = jest.fn();
       const routerWithAlert = new OpportunityRouter(
         logger, circuitBreaker, streamsClient,
-        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test-coordinator' },
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test-coordinator', startupGracePeriodMs: 0 },
         alertCallback,
       );
 
@@ -803,7 +804,7 @@ describe('OpportunityRouter', () => {
       const alertCallback = jest.fn();
       const routerWithAlert = new OpportunityRouter(
         logger, circuitBreaker, streamsClient,
-        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test-coordinator' },
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test-coordinator', startupGracePeriodMs: 0 },
         alertCallback,
       );
 
@@ -951,6 +952,7 @@ describe('OpportunityRouter', () => {
         maxRetries: 5,
         retryBaseDelayMs: 100,
         instanceId: 'test-coordinator',
+        startupGracePeriodMs: 0,
       });
 
       // Start forwarding in background
@@ -1151,7 +1153,7 @@ describe('OpportunityRouter', () => {
     it('should use custom executionRequestsStream when configured', async () => {
       const customRouter = new OpportunityRouter(
         logger, circuitBreaker, streamsClient,
-        { executionRequestsStream: 'stream:custom-exec', retryBaseDelayMs: 1 },
+        { executionRequestsStream: 'stream:custom-exec', retryBaseDelayMs: 1, startupGracePeriodMs: 0 },
       );
 
       const opp = createOpportunity({ id: 'opp-custom-stream' });
@@ -1176,7 +1178,7 @@ describe('OpportunityRouter', () => {
 
       const customRouter = new OpportunityRouter(
         logger, circuitBreaker, streamsClient,
-        { dlqStream: 'stream:custom-dlq', maxRetries: 1, retryBaseDelayMs: 1 },
+        { dlqStream: 'stream:custom-dlq', maxRetries: 1, retryBaseDelayMs: 1, startupGracePeriodMs: 0 },
       );
 
       const opp = createOpportunity({ id: 'opp-custom-dlq' });
