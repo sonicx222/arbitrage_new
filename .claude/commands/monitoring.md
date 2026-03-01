@@ -1,6 +1,6 @@
 # Pre-Deploy Validation
 # Single-Orchestrator Pipeline — Redis Streams + 7 Services
-# Version: 2.1
+# Version: 2.2
 
 ---
 
@@ -347,11 +347,22 @@ If any stream command is unsupported → **CRITICAL**. Report Redis version mism
 
 ### Step 2B — Start all services with simulation
 
+Use the memory-optimized monitoring script. This uses `tsx` (no file watchers),
+sets `CONSTRAINED_MEMORY=true` (smaller worker pools), `WORKER_POOL_SIZE=1`
+(1 worker thread per service instead of 4), and `CACHE_L1_SIZE_MB=8` (8MB L1
+cache instead of 64MB). These reduce peak RAM from ~1.5GB to ~600MB.
+
 ```bash
-SIMULATION_MODE=true EXECUTION_SIMULATION_MODE=true npm run dev:all &
+npm run dev:monitor &
 ```
 
-This starts the monolith process manager which spawns all 7 services.
+If only the critical pipeline path needs validation (Coordinator + P1 + Execution),
+use the minimal variant to save further (~350MB total):
+
+```bash
+npm run dev:monitor:minimal &
+```
+
 Capture PID for later cleanup.
 
 ---
@@ -1004,11 +1015,12 @@ trace context propagation system in `shared/core/src/tracing/`).
 
 If a traceId is found:
 ```bash
-# Search for the same traceId in upstream streams
-redis-cli XRANGE stream:opportunities - + COUNT 100
+# Search for the same traceId in upstream streams (COUNT 5 is sufficient —
+# we only need one matching message per stream for trace verification)
+redis-cli XREVRANGE stream:opportunities + - COUNT 5
 # (Search the output for matching _trace_traceId)
 
-redis-cli XRANGE stream:execution-requests - + COUNT 100
+redis-cli XREVRANGE stream:execution-requests + - COUNT 5
 # (Search the output for matching _trace_traceId)
 ```
 
