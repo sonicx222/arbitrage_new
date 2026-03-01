@@ -226,6 +226,12 @@ export const DEXES: Record<string, string[]> = {
   zksync: ['syncswap', 'mute'],
   linea: ['syncswap', 'velocore'],
 
+  // Emerging L2s (config present, limited DEX coverage)
+  blast: ['aerodrome', 'uniswap_v3', 'baseswap'],
+  scroll: ['aerodrome', 'uniswap_v3', 'baseswap'],
+  mantle: ['aerodrome', 'uniswap_v3', 'baseswap'],
+  mode: ['aerodrome', 'uniswap_v3', 'baseswap'],
+
   // P4 Solana-Native
   solana: ['raydium', 'orca', 'meteora']
 };
