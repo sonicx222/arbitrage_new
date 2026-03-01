@@ -328,6 +328,20 @@ export class OpportunityRouter {
       sellDex: opportunity.sellDex,
     });
 
+    // P3-FIX: Check expiry BEFORE forwarding to execution engine.
+    // Without this, the coordinator forwards already-expired opportunities from its
+    // consumer backlog. The execution engine then rejects them all with VAL_EXPIRED
+    // (200-265s lag), producing 0 execution results and growing the DLQ continuously.
+    if (opportunity.expiresAt !== undefined && opportunity.expiresAt < Date.now()) {
+      this.logger.debug('Opportunity already expired, skipping forwarding', {
+        id,
+        expiresAt: opportunity.expiresAt,
+        expiredAgoMs: Date.now() - opportunity.expiresAt,
+        chain: opportunity.chain,
+      });
+      return true; // Still counts as processed (stored), just not forwarded
+    }
+
     // Forward to execution engine if leader and pending
     if (isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
       await this.forwardToExecutionEngine(opportunity, traceContext);

@@ -65,6 +65,94 @@ function createHealthCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
 }
 
 // =============================================================================
+// Stats Cache (P3-FIX: Prevent /stats event loop starvation on P1/P2)
+// =============================================================================
+
+interface StatsCacheEntry {
+  data: string; // Pre-serialized JSON to avoid re-serialization on each request
+  timestamp: number;
+}
+
+/**
+ * Simple cache for /stats responses. Pre-serializes JSON to minimize
+ * time spent in the request handler on high-volume partitions.
+ */
+function createStatsCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
+  let cache: StatsCacheEntry | null = null;
+
+  return {
+    get(): string | null {
+      if (!cache) return null;
+      if (Date.now() - cache.timestamp > ttlMs) {
+        cache = null;
+        return null;
+      }
+      return cache.data;
+    },
+    set(data: string): void {
+      cache = { data, timestamp: Date.now() };
+    },
+    clear(): void {
+      cache = null;
+    }
+  };
+}
+
+// =============================================================================
+// Response timeout helper (P3-FIX)
+// =============================================================================
+
+/** Maximum time for /health and /stats handlers before sending 504 */
+const HANDLER_TIMEOUT_MS = 3000;
+
+/**
+ * Wraps an async handler with a response timeout. If the handler doesn't
+ * complete within the deadline, sends a 504 Gateway Timeout. This prevents
+ * event loop starvation from causing indefinite HTTP request hangs on
+ * high-volume partitions (P1/P2).
+ */
+function withResponseTimeout(
+  res: ServerResponse,
+  serviceName: string,
+  handler: () => Promise<void>,
+  logger: ReturnType<typeof createLogger>,
+): void {
+  let responded = false;
+  const timer = setTimeout(() => {
+    if (!responded) {
+      responded = true;
+      logger.warn('Health handler timed out — event loop may be saturated', {
+        service: serviceName,
+        timeoutMs: HANDLER_TIMEOUT_MS,
+      });
+      res.writeHead(504, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        service: serviceName,
+        status: 'timeout',
+        error: `Handler did not respond within ${HANDLER_TIMEOUT_MS}ms`,
+      }));
+    }
+  }, HANDLER_TIMEOUT_MS);
+
+  handler().then(() => {
+    clearTimeout(timer);
+    responded = true;
+  }).catch((error) => {
+    clearTimeout(timer);
+    if (!responded) {
+      responded = true;
+      logger.error('Health handler error', { error: (error as Error).message });
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        service: serviceName,
+        status: 'error',
+        error: 'Internal health check failed',
+      }));
+    }
+  });
+}
+
+// =============================================================================
 // Health Server (P12-P14 Refactor)
 // =============================================================================
 
@@ -95,6 +183,11 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   // FIX #8: Allow per-partition TTL configuration via healthCacheTtlMs option
   const healthCache = createHealthCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
 
+  // P3-FIX: Separate stats cache — /stats had no caching, causing event loop starvation
+  // on P1/P2 (high-volume partitions with 1000+ pairs). getStats() iterates all chain
+  // instances and pairs synchronously, blocking the event loop when WebSocket events flood it.
+  const statsCache = createStatsCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // SEC-02: Reject non-GET methods (all legitimate consumers use GET)
     if (req.method !== 'GET') {
@@ -104,7 +197,9 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
     }
 
     if (req.url === '/health') {
-      try {
+      // P3-FIX: Wrap with response timeout to prevent indefinite hang when
+      // event loop is saturated by WebSocket events on high-volume partitions (P1/P2).
+      withResponseTimeout(res, config.serviceName, async () => {
         // PERF-FIX: Use cached health data if available and fresh
         // FIX #3: Cache healthyChains alongside health data to prevent contradictory responses
         // where status could be "healthy" (cached) while healthyChains is [] (live, post-disconnect)
@@ -135,15 +230,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           region: config.region,
           timestamp: Date.now()
         }));
-      } catch (error) {
-        logger.error('Health check failed', { error: (error as Error).message });
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          service: config.serviceName,
-          status: 'error',
-          error: 'Internal health check failed'
-        }));
-      }
+      }, logger);
     } else if (req.url === '/stats') {
       // SEC-01: Require auth token for /stats when HEALTH_AUTH_TOKEN is configured
       if (authToken) {
@@ -154,10 +241,19 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           return;
         }
       }
-      try {
+      // P3-FIX: Wrap with response timeout + caching to prevent event loop starvation.
+      // getStats() iterates all chain instances and pairs synchronously (1000+ on P1/P2),
+      // which blocks the event loop when WebSocket events are flooding in.
+      withResponseTimeout(res, config.serviceName, async () => {
+        const cachedStats = statsCache.get();
+        if (cachedStats) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(cachedStats);
+          return;
+        }
+
         const stats = detector.getStats();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
+        const body = JSON.stringify({
           service: config.serviceName,
           partitionId: stats.partitionId,
           chains: stats.chains,
@@ -166,16 +262,11 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           uptimeSeconds: stats.uptimeSeconds,
           memoryMB: stats.memoryUsageMB,
           chainStats: Object.fromEntries(stats.chainStats)
-        }));
-      } catch (error) {
-        logger.error('Stats endpoint failed', { error: (error as Error).message });
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          service: config.serviceName,
-          status: 'error',
-          error: 'Internal stats check failed'
-        }));
-      }
+        });
+        statsCache.set(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(body);
+      }, logger);
     } else if (req.url === '/ready') {
       const ready = detector.isRunning();
       res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
