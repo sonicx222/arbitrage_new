@@ -275,3 +275,64 @@ export interface CrossChainSimulatorConfig {
   /** Custom bridge costs (optional) */
   bridgeCosts?: Record<string, BridgeCostConfig>;
 }
+
+// =============================================================================
+// Chain Throughput Profile Types
+// =============================================================================
+
+/**
+ * Gas dynamics model for realistic simulation.
+ * EVM chains use gwei; Solana uses lamports/compute-unit.
+ *
+ * @see docs/plans/2026-03-01-realistic-throughput-simulation-design.md
+ */
+export interface GasModel {
+  /** Average base fee in gwei (or lamports/CU for Solana) */
+  baseFeeAvg: number;
+  /** Base fee standard deviation */
+  baseFeeStdDev: number;
+  /** Average priority fee (tip) in gwei */
+  priorityFeeAvg: number;
+  /** Priority fee standard deviation */
+  priorityFeeStdDev: number;
+  /** Gas units consumed by a typical DEX swap on this chain */
+  swapGasUnits: number;
+  /** Base fee multiplier during burst regime */
+  burstMultiplier: number;
+}
+
+/**
+ * Per-chain throughput profile calibrated to real on-chain data.
+ * Used by ChainSimulator to generate realistic block timing,
+ * swap counts, DEX distribution, and gas costs.
+ *
+ * @see docs/plans/2026-03-01-realistic-throughput-simulation-design.md
+ */
+export interface ChainThroughputProfile {
+  /** Average block time in ms (reference — actual from BLOCK_TIMES_MS) */
+  blockTimeMs: number;
+  /** Standard deviation of block time jitter in ms (Gaussian) */
+  blockTimeJitterMs: number;
+  /** Probability of a missed slot per block (e.g. Ethereum ~0.01) */
+  slotMissRate: number;
+  /** Average number of DEX swap events per block (Poisson λ) */
+  dexSwapsPerBlock: number;
+  /** DEX name → market share weight (must approximately sum to 1.0) */
+  dexMarketShare: Record<string, number>;
+  /** Trade size range in USD [min, max] for log-normal sampling */
+  tradeSizeRange: [number, number];
+  /** Gas economics model */
+  gasModel: GasModel;
+}
+
+/**
+ * Sampled gas price for a simulated block.
+ */
+export interface SampledGasPrice {
+  /** Base fee in gwei (or lamports/CU) */
+  baseFee: number;
+  /** Priority fee in gwei */
+  priorityFee: number;
+  /** Total gas cost for one swap in USD */
+  gasCostUsd: number;
+}
