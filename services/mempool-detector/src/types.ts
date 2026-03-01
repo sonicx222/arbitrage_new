@@ -8,6 +8,8 @@
  * @see Phase 1: Mempool Detection Service (Implementation Plan v3.0)
  */
 
+import { RedisStreams } from '@arbitrage/types';
+
 // =============================================================================
 // PENDING TRANSACTION TYPES
 // =============================================================================
@@ -447,13 +449,12 @@ export const DEFAULT_MEMPOOL_DETECTOR_PORT = 3008;
 /**
  * Default Redis stream name for pending opportunities.
  *
- * FIX 9.2: This constant should match RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES
- * from @arbitrage/core. We keep a local constant here to avoid circular dependencies
- * in type definition files. The canonical source is redis-streams.ts.
+ * Uses canonical constant from @arbitrage/types (safe — types is a leaf package
+ * with no circular dependency risk).
  *
- * @see RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES - Canonical source
+ * @see RedisStreams.PENDING_OPPORTUNITIES - Canonical source in shared/types/src/events.ts
  */
-export const DEFAULT_PENDING_OPPORTUNITIES_STREAM = 'stream:pending-opportunities';
+export const DEFAULT_PENDING_OPPORTUNITIES_STREAM = RedisStreams.PENDING_OPPORTUNITIES;
 
 /**
  * Maximum pending transaction buffer size.

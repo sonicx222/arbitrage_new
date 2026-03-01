@@ -639,6 +639,29 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Create consumer groups for all streams
       await this.createConsumerGroups();
 
+      // ST-010 FIX: Trim stale DLQ entries from previous sessions at startup.
+      // Without this, the DLQ accumulates entries across restarts (348+ entries observed),
+      // creating noise in monitoring and consuming Redis memory. Trims entries older than
+      // 1 hour — stale expired-opportunity DLQ entries have no recovery value.
+      try {
+        const dlqTrimCutoffMs = Date.now() - 3_600_000; // 1 hour
+        const trimmed = await this.streamsClient.xtrim(
+          CoordinatorService.DLQ_STREAM,
+          { minId: `${dlqTrimCutoffMs}-0` }
+        );
+        if (trimmed > 0) {
+          this.logger.info('Trimmed stale DLQ entries from previous sessions', {
+            trimmed,
+            cutoffAgeMs: 3_600_000,
+          });
+        }
+      } catch (error) {
+        // Non-fatal — DLQ trim failure shouldn't block startup
+        this.logger.warn('Failed to trim stale DLQ entries at startup', {
+          error: (error as Error).message,
+        });
+      }
+
       // P0-FIX 1.3: Recover pending messages from previous coordinator instance
       // R2 REFACTOR: Use StreamConsumerManager for pending message recovery
       await this.streamConsumerManager.recoverPendingMessages(
@@ -985,11 +1008,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
         rawHandler
       );
 
+      // Use larger batch size for high-throughput streams to prevent consumer lag.
+      // Opportunities and price-updates arrive at high rates; small batches cause the
+      // consumer to fall behind, leading to expired opportunities being silently dropped.
+      const isHighThroughput = groupConfig.streamName === RedisStreams.OPPORTUNITIES
+        || groupConfig.streamName === RedisStreams.PRICE_UPDATES;
+      const batchSize = isHighThroughput ? 50 : 10;
+      const blockMs = isHighThroughput ? 200 : 100;
       const consumer = new StreamConsumerClass(this.streamsClient, {
         config: groupConfig,
         handler: wrappedHandler,
-        batchSize: 10,
-        blockMs: 1000, // Block for 1s - immediate delivery when messages arrive
+        batchSize,
+        blockMs,
         autoAck: false, // Deferred ACK - handled by streamConsumerManager.wrapHandler
         logger: {
           error: (msg, ctx) => {
@@ -1009,7 +1039,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
         this.logger.info('Stream consumer started', {
           stream: groupConfig.streamName,
-          blockMs: 1000
+          blockMs
         });
       } catch (error) {
         this.logger.error('Failed to start stream consumer', {
@@ -1143,6 +1173,36 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
       // P1-7 FIX: Always sync dropped opportunities (not just when processed)
       this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
+
+      // Consumer lag detection: if too many consecutive opportunities expired,
+      // skip the consumer backlog by resetting the group position to '$' (latest).
+      // This breaks the death spiral where stale messages waste processing time,
+      // causing even more messages to expire and the backlog to grow indefinitely.
+      const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
+      if (consecutiveExpired >= 50 && this.streamsClient) {
+        this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
+          consecutiveExpired,
+          stream: RedisStreams.OPPORTUNITIES,
+        });
+        try {
+          await this.streamsClient.createConsumerGroup({
+            streamName: RedisStreams.OPPORTUNITIES,
+            groupName: this.config.consumerGroup,
+            consumerName: this.config.consumerId,
+            startId: '$',
+            resetToStartIdOnExistingGroup: true,
+          });
+          // Reset counter after successful skip to prevent infinite SETID loop.
+          // Without this, the counter stays at 800+ and every subsequent message
+          // triggers another redundant SETID call.
+          this.opportunityRouter.resetConsecutiveExpired();
+        } catch (error) {
+          this.logger.error('Failed to reset opportunity consumer group position', {
+            error: getErrorMessage(error),
+          });
+        }
+      }
+
       return;
     }
 

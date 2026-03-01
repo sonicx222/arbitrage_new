@@ -480,7 +480,11 @@ export class RedisStreamsClient {
         return delay;
       },
       maxRetriesPerRequest: 3,
-      lazyConnect: true
+      lazyConnect: true,
+      // P3-FIX: Add connectTimeout to prevent indefinite hang during initial connection.
+      // Without this, getRedisStreamsClient() can block forever if Redis is unreachable,
+      // causing cross-chain detector (and other services) to never reach RUNNING state.
+      connectTimeout: 5000,
     };
 
     // DI: Use injected Redis constructor or default
@@ -1233,7 +1237,18 @@ export class RedisStreamsClient {
 
   async ping(): Promise<boolean> {
     try {
-      const result = await this.client.ping();
+      // P3-FIX: Add timeout to prevent hanging when Redis is slow/unresponsive.
+      // Previously had no timeout unlike RedisClient.ping() which uses withRedisTimeout(2000ms).
+      // This caused cross-chain detector startup to hang indefinitely on getRedisStreamsClient().
+      const result = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error('Redis Streams ping timed out after 2000ms'));
+        }, 2000);
+        this.client.ping().then(
+          (value) => { clearTimeout(timer); resolve(value); },
+          (error) => { clearTimeout(timer); reject(error); },
+        );
+      });
       return result === 'PONG';
     } catch (error) {
       return false;

@@ -62,14 +62,26 @@ export interface SimulatedSyncEvent {
 
 /**
  * Opportunity type for strategy routing.
- * Matches StrategyType in execution-engine for proper routing tests.
+ * Aligned with ArbitrageOpportunity.type in shared/types/src/index.ts:181
+ * and StrategyType in execution-engine for proper routing.
+ *
+ * @see shared/types/src/index.ts:181 — ArbitrageOpportunity.type
+ * @see services/execution-engine/src/strategies/strategy-factory.ts:79 — StrategyType
  */
 export type SimulatedOpportunityType =
-  | 'intra-chain'
+  | 'simple'
+  | 'cross-dex'
+  | 'intra-dex'
   | 'cross-chain'
   | 'flash-loan'
   | 'triangular'
-  | 'quadrilateral';
+  | 'quadrilateral'
+  | 'multi-leg'
+  | 'backrun'
+  | 'uniswapx'
+  | 'statistical'
+  | 'predictive'
+  | 'solana';
 
 /**
  * Bridge protocol for cross-chain opportunities.
@@ -79,14 +91,22 @@ export type SimulatedBridgeProtocol = 'stargate' | 'across' | 'native';
 /**
  * Simulated arbitrage opportunity.
  *
- * Enhanced to support all execution strategy types:
- * - intra-chain: Same chain, different DEXes
+ * Supports all 13 execution strategy types:
+ * - simple: Two-pool on same DEX (price lag between V2/V3 pools)
+ * - cross-dex: Same tokens, different DEXes on same chain
+ * - intra-dex: Same DEX, different pool types
  * - cross-chain: Different chains, bridge required
  * - flash-loan: Uses flash loan for capital-free execution
  * - triangular: 3-hop arbitrage (A -> B -> C -> A)
  * - quadrilateral: 4-hop arbitrage (A -> B -> C -> D -> A)
+ * - multi-leg: N-hop swap paths
+ * - backrun: MEV-Share backrun opportunities
+ * - uniswapx: Dutch auction filler opportunities
+ * - statistical: Mean-reversion / cointegration-based
+ * - predictive: ML-based price prediction
+ * - solana: Solana-native DEX arbitrage
  *
- * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md
+ * @see docs/reports/SIMULATION_REWORK_RESEARCH_2026-03-01.md
  */
 export interface SimulatedOpportunity {
   id: string;
@@ -98,10 +118,10 @@ export interface SimulatedOpportunity {
   /** Opportunity type for strategy routing */
   type: SimulatedOpportunityType;
 
-  /** Source chain (buyChain) - for cross-chain, same as chain for intra-chain */
+  /** Source chain — for cross-chain differs from sellChain, same for single-chain types */
   buyChain: string;
 
-  /** Destination chain (sellChain) - for cross-chain, same as chain for intra-chain */
+  /** Destination chain — for cross-chain differs from buyChain, same for single-chain types */
   sellChain: string;
 
   /** Whether to use flash loan for execution */
@@ -127,7 +147,7 @@ export interface SimulatedOpportunity {
   // Original Fields (preserved for backward compatibility)
   // =========================================================================
 
-  /** Primary chain (for intra-chain, same as buyChain/sellChain) */
+  /** Primary chain (same as buyChain/sellChain for single-chain types) */
   chain: string;
 
   buyDex: string;
@@ -193,6 +213,35 @@ export interface SimulatedPairConfig {
 }
 
 // =============================================================================
+// Market Regime Types
+// =============================================================================
+
+/**
+ * Market regime for realistic simulation tick behavior.
+ * Regimes transition via Markov chain each tick.
+ *
+ * @see docs/reports/SIMULATION_REWORK_RESEARCH_2026-03-01.md — Section 8.5
+ */
+export type MarketRegime = 'quiet' | 'normal' | 'burst';
+
+export interface RegimeConfig {
+  /** Multiplier for pair activity probability (0.3 = 30% of base) */
+  pairActivityMultiplier: number;
+  /** Multiplier for price volatility */
+  volatilityMultiplier: number;
+  /** Multiplier for arbitrage chance */
+  arbChanceMultiplier: number;
+}
+
+/**
+ * Simulation realism levels:
+ * - 'low': Legacy behavior (flat 1000ms, all pairs every tick, 5 types)
+ * - 'medium': Block-time aligned + activity tiers + all 13 types (default)
+ * - 'high': Full regime model on top of medium
+ */
+export type SimulationRealismLevel = 'low' | 'medium' | 'high';
+
+// =============================================================================
 // Cross-Chain Simulator Types
 // =============================================================================
 
@@ -225,4 +274,65 @@ export interface CrossChainSimulatorConfig {
   tokens: string[];
   /** Custom bridge costs (optional) */
   bridgeCosts?: Record<string, BridgeCostConfig>;
+}
+
+// =============================================================================
+// Chain Throughput Profile Types
+// =============================================================================
+
+/**
+ * Gas dynamics model for realistic simulation.
+ * EVM chains use gwei; Solana uses lamports/compute-unit.
+ *
+ * @see docs/plans/2026-03-01-realistic-throughput-simulation-design.md
+ */
+export interface GasModel {
+  /** Average base fee in gwei (or lamports/CU for Solana) */
+  baseFeeAvg: number;
+  /** Base fee standard deviation */
+  baseFeeStdDev: number;
+  /** Average priority fee (tip) in gwei */
+  priorityFeeAvg: number;
+  /** Priority fee standard deviation */
+  priorityFeeStdDev: number;
+  /** Gas units consumed by a typical DEX swap on this chain */
+  swapGasUnits: number;
+  /** Base fee multiplier during burst regime */
+  burstMultiplier: number;
+}
+
+/**
+ * Per-chain throughput profile calibrated to real on-chain data.
+ * Used by ChainSimulator to generate realistic block timing,
+ * swap counts, DEX distribution, and gas costs.
+ *
+ * @see docs/plans/2026-03-01-realistic-throughput-simulation-design.md
+ */
+export interface ChainThroughputProfile {
+  /** Average block time in ms (reference — actual from BLOCK_TIMES_MS) */
+  blockTimeMs: number;
+  /** Standard deviation of block time jitter in ms (Gaussian) */
+  blockTimeJitterMs: number;
+  /** Probability of a missed slot per block (e.g. Ethereum ~0.01) */
+  slotMissRate: number;
+  /** Average number of DEX swap events per block (Poisson λ) */
+  dexSwapsPerBlock: number;
+  /** DEX name → market share weight (must approximately sum to 1.0) */
+  dexMarketShare: Record<string, number>;
+  /** Trade size range in USD [min, max] for log-normal sampling */
+  tradeSizeRange: [number, number];
+  /** Gas economics model */
+  gasModel: GasModel;
+}
+
+/**
+ * Sampled gas price for a simulated block.
+ */
+export interface SampledGasPrice {
+  /** Base fee in gwei (or lamports/CU) */
+  baseFee: number;
+  /** Priority fee in gwei */
+  priorityFee: number;
+  /** Total gas cost for one swap in USD */
+  gasCostUsd: number;
 }

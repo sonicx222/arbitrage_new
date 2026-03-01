@@ -20,6 +20,7 @@
 
 import { EventEmitter } from 'events';
 import { normalizeTokenForCrossChain, normalizeTokenForPricing } from '@arbitrage/config';
+import { RedisStreams } from '@arbitrage/types';
 import { createSimpleCircuitBreaker, type SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
 import { LRUCache, NumericRollingWindow } from '@arbitrage/core/data-structures';
 import { createLogger } from '@arbitrage/core/logger';
@@ -84,8 +85,8 @@ const POOL_UPDATE_COOLDOWN_MS = 100;
 /** Maximum latency samples for rolling average */
 const MAX_LATENCY_SAMPLES = 100;
 
-/** Redis stream for opportunity publishing */
-const OPPORTUNITY_STREAM = 'stream:opportunities';
+/** Redis stream for opportunity publishing — uses canonical constant from @arbitrage/types */
+const OPPORTUNITY_STREAM = RedisStreams.OPPORTUNITIES;
 
 /** Redis retry configuration */
 const REDIS_RETRY = {

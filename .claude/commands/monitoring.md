@@ -1,6 +1,6 @@
 # Pre-Deploy Validation
 # Single-Orchestrator Pipeline — Redis Streams + 7 Services
-# Version: 2.1
+# Version: 2.2
 
 ---
 
@@ -32,9 +32,9 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 | Service | Port | Ready Endpoint | Role |
 |---------|------|----------------|------|
 | Coordinator | 3000 | `/api/health/ready` | Orchestration, leader election, opportunity routing |
-| P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon |
+| P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon, Avalanche, Fantom |
 | P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll, Mantle, Mode |
-| P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, Avalanche, Fantom |
+| P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, zkSync, Linea |
 | P4 Solana | 3004 | `/ready` | Chain detector: Solana |
 | Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
 | Cross-Chain | 3006 | `/ready` | Cross-chain arbitrage detection |
@@ -347,11 +347,38 @@ If any stream command is unsupported → **CRITICAL**. Report Redis version mism
 
 ### Step 2B — Start all services with simulation
 
+Use the memory-optimized monitoring script. This uses `tsx` (no file watchers),
+sets `CONSTRAINED_MEMORY=true` (smaller worker pools), `WORKER_POOL_SIZE=1`
+(1 worker thread per service instead of 4), and `CACHE_L1_SIZE_MB=8` (8MB L1
+cache instead of 64MB). These reduce peak RAM from ~1.5GB to ~600MB.
+
+Both scripts default to `SIMULATION_REALISM_LEVEL=high` (block-driven multi-swap
+engine with Markov regime model). Override with a `cross-env` prefix to use a
+different level:
+
+| Level | Behavior | Use Case |
+|-------|----------|----------|
+| `low` | Legacy `setInterval`, flat rate | Fast deterministic tests |
+| `medium` | Block-driven, Poisson swaps, gas model, no regime | Steady-state validation |
+| `high` | Medium + Markov regime (quiet/normal/burst) | Production-realistic load |
+
 ```bash
-SIMULATION_MODE=true EXECUTION_SIMULATION_MODE=true npm run dev:all &
+npm run dev:monitor &
 ```
 
-This starts the monolith process manager which spawns all 7 services.
+To override the realism level (e.g., medium for steady-state validation):
+
+```bash
+cross-env SIMULATION_REALISM_LEVEL=medium npm run dev:monitor &
+```
+
+If only the critical pipeline path needs validation (Coordinator + P1 + Execution),
+use the minimal variant to save further (~350MB total):
+
+```bash
+npm run dev:monitor:minimal &
+```
+
 Capture PID for later cleanup.
 
 ---
@@ -647,9 +674,9 @@ with chain-specific staleness thresholds:
 **Method:**
 1. Hit each partition's `/stats` endpoint and parse the per-chain stats:
 ```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon
+curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon, AVAX, FTM
 curl -sf http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, zkSync, Linea, Blast, Scroll
-curl -sf http://localhost:3003/stats | jq .  # P3: ETH, AVAX, FTM
+curl -sf http://localhost:3003/stats | jq .  # P3: ETH, zkSync, Linea
 curl -sf http://localhost:3004/stats | jq .  # P4: Solana
 ```
 
@@ -931,7 +958,9 @@ done
 ### Step 4B — Wait for pipeline flow (60s timeout, poll every 10s)
 
 In simulation mode, the partitions automatically generate simulated price data
-which feeds into the detection → execution pipeline.
+which feeds into the detection → execution pipeline. At `high` realism, the
+Markov regime model produces bursty activity — expect uneven stream growth
+(quiet periods with few events, then bursts). At `medium`, growth is steadier.
 
 Poll the 4 critical streams every 10 seconds for up to 60 seconds:
 
@@ -1004,11 +1033,12 @@ trace context propagation system in `shared/core/src/tracing/`).
 
 If a traceId is found:
 ```bash
-# Search for the same traceId in upstream streams
-redis-cli XRANGE stream:opportunities - + COUNT 100
+# Search for the same traceId in upstream streams (COUNT 5 is sufficient —
+# we only need one matching message per stream for trace verification)
+redis-cli XREVRANGE stream:opportunities + - COUNT 5
 # (Search the output for matching _trace_traceId)
 
-redis-cli XRANGE stream:execution-requests - + COUNT 100
+redis-cli XREVRANGE stream:execution-requests + - COUNT 5
 # (Search the output for matching _trace_traceId)
 ```
 
@@ -1049,9 +1079,9 @@ Re-check partition `/stats` endpoints (from Check 3H) and compare per-chain
 message counts against the beginning of the smoke test.
 
 ```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon active
+curl -sf http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon + AVAX + FTM active
 curl -sf http://localhost:3002/stats | jq .  # P2: expect Arb + OP + Base + ... active
-curl -sf http://localhost:3003/stats | jq .  # P3: expect ETH + AVAX + FTM active
+curl -sf http://localhost:3003/stats | jq .  # P3: expect ETH + zkSync + Linea active
 curl -sf http://localhost:3004/stats | jq .  # P4: expect Solana active
 ```
 
@@ -1060,10 +1090,10 @@ For each partition, verify every assigned chain shows:
 - Price update rate >0 (chain is actively producing data)
 
 **Expected chain coverage:**
-- P1: BSC, Polygon (2 chains)
+- P1: BSC, Polygon, Avalanche, Fantom (4 chains)
 - P2: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll (7 active chains;
   Mantle and Mode are stubs — acceptable if missing)
-- P3: Ethereum, Avalanche, Fantom (3 chains)
+- P3: Ethereum, zkSync, Linea (3 chains)
 - P4: Solana (1 chain)
 
 **Flag:** Any non-stub chain with 0 messages during smoke test → **HIGH**,
@@ -1332,6 +1362,8 @@ Redis memory: <used> / <max>
 |-----------|-------|-----------------------|--------|
 | P1 | BSC | <n> | ACTIVE / SILENT |
 | P1 | Polygon | <n> | ACTIVE / SILENT |
+| P1 | Avalanche | <n> | ACTIVE / SILENT |
+| P1 | Fantom | <n> | ACTIVE / SILENT |
 | P2 | Arbitrum | <n> | ACTIVE / SILENT |
 | P2 | Optimism | <n> | ACTIVE / SILENT |
 | P2 | Base | <n> | ACTIVE / SILENT |
@@ -1340,8 +1372,8 @@ Redis memory: <used> / <max>
 | P2 | Blast | <n> | ACTIVE / SILENT |
 | P2 | Scroll | <n> | ACTIVE / SILENT |
 | P3 | Ethereum | <n> | ACTIVE / SILENT |
-| P3 | Avalanche | <n> | ACTIVE / SILENT |
-| P3 | Fantom | <n> | ACTIVE / SILENT |
+| P3 | zkSync | <n> | ACTIVE / SILENT |
+| P3 | Linea | <n> | ACTIVE / SILENT |
 | P4 | Solana | <n> | ACTIVE / SILENT |
 
 ### Risk State Post-Smoke

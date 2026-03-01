@@ -155,14 +155,20 @@ export const VALID_OPPORTUNITY_TYPES = new Set([
   'flash-loan',       // FlashLoanStrategy
   'cross-chain',      // CrossChainStrategy
 
+  // Types with dedicated strategies (registered in strategy-factory)
+  'backrun',          // BackrunStrategy (MEV-Share)
+  'uniswapx',         // UniswapXFillerStrategy (Dutch auction)
+  'solana',           // SolanaExecutionStrategy (Solana-native)
+  'statistical',      // StatisticalArbitrageStrategy (mean-reversion)
+
   // Secondary types that route to IntraChainStrategy fallback
   'multi-leg',        // Falls back to IntraChainStrategy
   'predictive',       // Falls back to IntraChainStrategy
   'intra-dex',        // Falls back to IntraChainStrategy
 
-  // P0-1 FIX: Solana and EVM intra-chain types
+  // Legacy types (kept for backward compatibility during transition)
   'intra-solana',     // Solana partition intra-chain opportunities
-  'intra-chain',      // EVM chain simulator intra-chain opportunities
+  'intra-chain',      // Legacy EVM chain simulator type (replaced by cross-dex/simple)
 ]);
 
 /**

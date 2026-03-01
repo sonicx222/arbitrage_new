@@ -53,10 +53,13 @@ async function collectCrossChainOpportunities(
 describe('CrossChainSimulator', () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    // Use low realism for predictable test behavior (flat configured interval)
+    process.env.SIMULATION_REALISM_LEVEL = 'low';
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    delete process.env.SIMULATION_REALISM_LEVEL;
   });
 
   describe('Initialization', () => {

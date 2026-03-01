@@ -8,8 +8,12 @@
 
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
+import { getBlockTimeMs } from '@arbitrage/config';
 import type { SimulationConfig, SimulatedPriceUpdate } from './types';
 import { DEFAULT_CONFIG, DEXES, getTokenPrice } from './constants';
+import { getSimulationRealismLevel } from './mode-utils';
+import { gaussianRandom } from './math-utils';
+import { CHAIN_THROUGHPUT_PROFILES } from './throughput-profiles';
 
 const logger = createLogger('simulation-mode');
 
@@ -21,6 +25,7 @@ export class PriceSimulator extends EventEmitter {
   private config: SimulationConfig;
   private prices: Map<string, number> = new Map();
   private intervals: NodeJS.Timeout[] = [];
+  private timeouts: Map<string, NodeJS.Timeout> = new Map();
   private running = false;
   private blockNumbers: Map<string, number> = new Map();
 
@@ -61,17 +66,29 @@ export class PriceSimulator extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
+    const realismLevel = getSimulationRealismLevel();
+    const hasExplicitInterval = !!process.env.SIMULATION_UPDATE_INTERVAL_MS;
+
     logger.info('Starting price simulation', {
-      updateInterval: this.config.updateIntervalMs,
-      volatility: this.config.volatility
+      realismLevel,
+      volatility: this.config.volatility,
     });
 
-    // Create update interval for each chain
     for (const chain of this.config.chains) {
-      const interval = setInterval(() => {
-        this.updateChainPrices(chain);
-      }, this.config.updateIntervalMs);
-      this.intervals.push(interval);
+      if (hasExplicitInterval || realismLevel === 'low') {
+        let intervalMs: number;
+        if (hasExplicitInterval) {
+          intervalMs = this.config.updateIntervalMs;
+        } else {
+          intervalMs = this.config.updateIntervalMs;
+        }
+        const interval = setInterval(() => {
+          this.updateChainPrices(chain);
+        }, intervalMs);
+        this.intervals.push(interval);
+      } else {
+        this.scheduleNextChainUpdate(chain);
+      }
     }
 
     // Emit initial prices
@@ -84,7 +101,27 @@ export class PriceSimulator extends EventEmitter {
       clearInterval(interval);
     }
     this.intervals = [];
+    for (const timeout of this.timeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.timeouts.clear();
     logger.info('Price simulation stopped');
+  }
+
+  private scheduleNextChainUpdate(chain: string): void {
+    if (!this.running) return;
+
+    const profile = CHAIN_THROUGHPUT_PROFILES[chain];
+    const baseDelay = profile?.blockTimeMs ?? 1000;
+    const jitterMs = profile?.blockTimeJitterMs ?? 0;
+    const jitter = gaussianRandom() * jitterMs;
+    const delay = Math.max(50, Math.round(baseDelay + jitter));
+
+    const timeout = setTimeout(() => {
+      this.updateChainPrices(chain);
+      this.scheduleNextChainUpdate(chain);
+    }, delay);
+    this.timeouts.set(chain, timeout);
   }
 
   private updateChainPrices(chain: string): void {

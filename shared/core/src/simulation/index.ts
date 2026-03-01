@@ -11,6 +11,8 @@
  * - price-simulator: Global price feed simulator
  * - chain-simulator: Per-chain detector integration simulator
  * - cross-chain-simulator: Cross-chain opportunity simulator
+ * - math-utils: Statistical utilities (Gaussian, Poisson, weighted selection)
+ * - throughput-profiles: Per-chain throughput profiles calibrated to real data
  *
  * @module simulation
  */
@@ -27,6 +29,12 @@ export type {
   SimulatedPairConfig,
   BridgeCostConfig,
   CrossChainSimulatorConfig,
+  MarketRegime,
+  RegimeConfig,
+  SimulationRealismLevel,
+  ChainThroughputProfile,
+  GasModel,
+  SampledGasPrice,
 } from './types';
 
 // Constants
@@ -37,6 +45,13 @@ export {
   CHAIN_SPECIFIC_PAIRS,
   DEXES,
   DEFAULT_BRIDGE_COSTS,
+  PAIR_ACTIVITY_TIERS,
+  DEFAULT_PAIR_ACTIVITY,
+  STRATEGY_WEIGHTS,
+  selectWeightedStrategyType,
+  REGIME_CONFIGS,
+  REGIME_TRANSITIONS,
+  transitionRegime,
 } from './constants';
 
 // Mode utilities
@@ -45,6 +60,7 @@ export {
   isExecutionSimulationMode,
   isHybridExecutionMode,
   getSimulationModeSummary,
+  getSimulationRealismLevel,
 } from './mode-utils';
 
 // Price simulator
@@ -68,3 +84,13 @@ export {
   getCrossChainSimulator,
   stopCrossChainSimulator,
 } from './cross-chain-simulator';
+
+// Math utilities
+export { gaussianRandom, poissonRandom, weightedRandomSelect } from './math-utils';
+
+// Throughput profiles
+export {
+  CHAIN_THROUGHPUT_PROFILES,
+  getNativeTokenPrice,
+  selectWeightedDex,
+} from './throughput-profiles';

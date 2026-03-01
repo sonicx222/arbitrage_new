@@ -117,6 +117,8 @@ describe('ChainSimulationHandler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers({ legacyFakeTimers: false });
+    // Use low realism for predictable test behavior
+    process.env.SIMULATION_REALISM_LEVEL = 'low';
 
     // FIX: Create fresh mock simulator for each test and reset the mock implementation
     mockChainSimulatorEmitter = createMockSimulator();
@@ -130,6 +132,7 @@ describe('ChainSimulationHandler', () => {
   afterEach(async () => {
     await handler.stop();
     jest.useRealTimers();
+    delete process.env.SIMULATION_REALISM_LEVEL;
   });
 
   // ===========================================================================
@@ -399,7 +402,7 @@ describe('ChainSimulationHandler', () => {
 
       const opportunity = callbacks.mocks.onOpportunity.mock.calls[0][0] as ArbitrageOpportunity;
       expect(opportunity.chain).toBe('solana');
-      expect(opportunity.type).toBe('simple');
+      expect(opportunity.type).toBe('solana');
       expect(opportunity.tokenIn).toBe('SOL');
       expect(opportunity.tokenOut).toBe('USDC');
       expect(opportunity.amountIn).toBe('1000000000');

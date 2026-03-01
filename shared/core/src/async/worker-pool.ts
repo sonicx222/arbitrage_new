@@ -501,6 +501,13 @@ export class EventProcessingWorkerPool extends EventEmitter {
           workerId: i,
           priceBuffer: this.priceBuffer, // SharedArrayBuffer is transferable
           keyRegistryBuffer: this.keyRegistryBuffer // SharedArrayBuffer for key lookups
+        },
+        // Cap worker V8 heap to prevent unbounded memory growth per thread.
+        // Default Node.js heap is ~1.5GB per isolate; 64MB old-gen + 16MB young-gen
+        // is sufficient for JSON parsing and event processing workloads.
+        resourceLimits: {
+          maxOldGenerationSizeMb: 64,
+          maxYoungGenerationSizeMb: 16,
         }
       };
 
@@ -770,6 +777,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
           workerId,
           priceBuffer: this.priceBuffer,
           keyRegistryBuffer: this.keyRegistryBuffer
+        },
+        resourceLimits: {
+          maxOldGenerationSizeMb: 64,
+          maxYoungGenerationSizeMb: 16,
         }
       };
 
@@ -1148,6 +1159,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
           workerId: newWorkerId,
           priceBuffer: this.priceBuffer,
           keyRegistryBuffer: this.keyRegistryBuffer
+        },
+        resourceLimits: {
+          maxOldGenerationSizeMb: 64,
+          maxYoungGenerationSizeMb: 16,
         }
       });
 

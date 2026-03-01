@@ -15,6 +15,7 @@
 import { RedisStreamsClient } from '../redis';
 import { createTraceContext, propagateContext } from '../tracing';
 import type { TraceContext } from '../tracing';
+import { getLatencyTracker } from '../monitoring/latency-tracker';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity, ILogger } from '@arbitrage/types';
 
@@ -99,6 +100,11 @@ export class OpportunityPublisher {
       _source: sourceName,
       _publishedAt: Date.now(),
     }, traceCtx);
+
+    // Record pipeline latency (O(1), zero-allocation — same as PublishingService)
+    if (opportunity.pipelineTimestamps) {
+      getLatencyTracker().recordFromTimestamps(opportunity.pipelineTimestamps);
+    }
 
     // Bounded retry: 3 attempts with exponential backoff (50, 100, 200ms)
     const maxAttempts = 3;

@@ -146,7 +146,7 @@ export class Http2SessionPool {
       let status = 0;
 
       stream.on('response', (headers) => {
-        status = Number(headers[http2.constants.HTTP2_HEADER_STATUS]) || 0;
+        status = Number(headers[http2.constants.HTTP2_HEADER_STATUS]) ?? 0;
       });
 
       stream.on('data', (chunk: Buffer) => {
