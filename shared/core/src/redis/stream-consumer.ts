@@ -90,7 +90,7 @@ export interface StreamConsumerStats {
  * Usage:
  * ```ts
  * const consumer = new StreamConsumer(streamsClient, {
- *   config: { streamName: 'stream:opportunities', groupName: 'coordinator', consumerName: 'worker-1' },
+ *   config: { streamName: RedisStreams.OPPORTUNITIES, groupName: 'coordinator', consumerName: 'worker-1' },
  *   handler: async (msg) => { console.log(msg.data); },
  *   batchSize: 10,
  *   blockMs: 1000

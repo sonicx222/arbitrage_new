@@ -622,8 +622,8 @@ export function getMultiPathQuoterAddress(chainId: string): string | undefined {
  * Fast Lane configuration (Item 12: Coordinator Bypass).
  *
  * When FEATURE_FAST_LANE=true, opportunities exceeding both confidence
- * and profit thresholds are published to stream:fast-lane in parallel
- * with the normal stream:opportunities path.
+ * and profit thresholds are published to {@link RedisStreams.FAST_LANE} in parallel
+ * with the normal {@link RedisStreams.OPPORTUNITIES} path.
  *
  * @see shared/config/src/feature-flags.ts FEATURE_FLAGS.useFastLane
  * @see services/execution-engine/src/consumers/fast-lane.consumer.ts

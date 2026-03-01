@@ -1512,7 +1512,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
-   * Handle price update messages from stream:price-updates.
+   * Handle price update messages from the price-updates stream (RedisStreams.PRICE_UPDATES).
    * S3.3.5 FIX: Coordinator now consumes price updates for monitoring.
    *
    * Price updates contain:

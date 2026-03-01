@@ -286,8 +286,8 @@ export const FEATURE_FLAGS = {
    * Enable fast lane for high-confidence opportunities (Item 12).
    *
    * When enabled:
-   * - High-confidence, high-profit opportunities are published to stream:fast-lane
-   *   in parallel with the normal stream:opportunities path
+   * - High-confidence, high-profit opportunities are published to {@link RedisStreams.FAST_LANE}
+   *   in parallel with the normal {@link RedisStreams.OPPORTUNITIES} path
    * - Execution engine consumes fast lane directly, bypassing coordinator routing
    * - Normal coordinator path still processes the opportunity for metrics/dedup
    *
@@ -360,6 +360,9 @@ export const FEATURE_FLAGS = {
 
   /** Enable Flashbots Protect L2 provider. @default false @see shared/core/src/mev-protection/flashbots-protect-l2.provider.ts */
   useFlashbotsProtectL2: process.env.FEATURE_FLASHBOTS_PROTECT_L2 === 'true',
+
+  /** Enable CoW Protocol backrun strategy. @default false */
+  useCowBackrun: process.env.FEATURE_COW_BACKRUN === 'true',
 };
 
 /**
@@ -734,6 +737,23 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       } else {
         console.warn(`WARNING: ${msg}`);
       }
+    }
+  }
+
+  // RT-012: Validate Solana execution requires RPC URL
+  if (FEATURE_FLAGS.useSolanaExecution) {
+    if (!process.env.SOLANA_RPC_URL) {
+      const message =
+        'FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set. ' +
+        'Solana execution strategy will be unavailable at runtime.';
+      if (logger) {
+        logger.warn(message);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`);
+      }
+    } else {
+      const message = 'Solana Execution enabled - Solana arbitrage opportunities will be executed';
+      if (logger) { logger.info(message); } else { console.info(`✅ ${message}`); }
     }
   }
 
