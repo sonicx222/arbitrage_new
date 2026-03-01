@@ -1,0 +1,167 @@
+{
+  "discovered": [
+    "stream:dead-letter-queue",
+    "stream:execution-requests",
+    "stream:execution-results",
+    "stream:health",
+    "stream:opportunities",
+    "stream:pending-opportunities",
+    "stream:price-updates",
+    "stream:swap-events",
+    "stream:system-failover",
+    "stream:volume-aggregates",
+    "stream:whale-alerts"
+  ],
+  "missing": [
+    "stream:service-health",
+    "stream:service-events",
+    "stream:coordinator-events",
+    "stream:health-alerts",
+    "stream:circuit-breaker",
+    "stream:system-commands",
+    "stream:fast-lane",
+    "stream:forwarding-dlq"
+  ],
+  "unexpected": [],
+  "details": {
+    "stream:dead-letter-queue": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 0,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    },
+    "stream:execution-requests": {
+      "length": 1,
+      "groups": [
+        {
+          "name": "execution-engine-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "1772399597328-0"
+        }
+      ]
+    },
+    "stream:execution-results": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    },
+    "stream:health": {
+      "length": 33,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "1772399663542-0"
+        }
+      ]
+    },
+    "stream:opportunities": {
+      "length": 5618,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 15,
+          "lastDeliveredId": "1772399663550-5"
+        }
+      ]
+    },
+    "stream:pending-opportunities": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "cross-chain-detector-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        },
+        {
+          "name": "orderflow-pipeline",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    },
+    "stream:price-updates": {
+      "length": 2983,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 13,
+          "lastDeliveredId": "1772399656876-0"
+        },
+        {
+          "name": "cross-chain-detector-group",
+          "consumers": 1,
+          "pending": 1,
+          "lastDeliveredId": "1772399590966-0"
+        }
+      ]
+    },
+    "stream:swap-events": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    },
+    "stream:system-failover": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "failover-coordinator",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    },
+    "stream:volume-aggregates": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    },
+    "stream:whale-alerts": {
+      "length": 0,
+      "groups": [
+        {
+          "name": "coordinator-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        },
+        {
+          "name": "cross-chain-detector-group",
+          "consumers": 1,
+          "pending": 0,
+          "lastDeliveredId": "0-0"
+        }
+      ]
+    }
+  }
+}

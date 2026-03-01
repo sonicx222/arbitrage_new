@@ -1,82 +1,25 @@
-#!/usr/bin/env node
-// Redis CLI helper - sends raw Redis commands via Node.js
-// Usage: node redis-helper.js COMMAND [args...]
 const net = require('net');
-
-const args = process.argv.slice(2);
-if (args.length === 0) {
-  console.error('Usage: node redis-helper.js COMMAND [args...]');
-  process.exit(1);
-}
-
-// Build RESP protocol
-function buildResp(parts) {
-  let resp = `*${parts.length}\r\n`;
-  for (const part of parts) {
-    resp += `$${Buffer.byteLength(part)}\r\n${part}\r\n`;
-  }
-  return resp;
-}
-
-const client = net.connect(6379, '127.0.0.1');
-let data = '';
-
-client.on('connect', () => {
-  client.write(buildResp(args));
+const commands = process.argv.slice(2);
+if (commands.length === 0) { process.exit(1); }
+const c = net.createConnection({ host: '127.0.0.1', port: 6379 });
+let buf = '';
+c.on('connect', () => {
+  for (const cmd of commands) c.write(cmd + '\r\n');
+  c.write('QUIT\r\n');
 });
-
-client.on('data', (chunk) => {
-  data += chunk.toString();
-  // Simple heuristic: wait for complete response
-  setTimeout(() => {
-    process.stdout.write(parseResp(data));
-    client.end();
-  }, 100);
+c.on('data', d => buf += d.toString());
+c.on('end', () => {
+  const lines = buf.split('\r\n');
+  for (const line of lines) {
+    if (line === '' || line === '+OK') continue;
+    if (line.startsWith('$-1')) { console.log('(nil)'); continue; }
+    if (line.startsWith('$')) continue;
+    if (line.startsWith('*')) continue;
+    if (line.startsWith('+')) { console.log(line.substring(1)); continue; }
+    if (line.startsWith('-')) { console.log('ERROR:', line.substring(1)); continue; }
+    if (line.startsWith(':')) { console.log(line.substring(1)); continue; }
+    console.log(line);
+  }
 });
-
-client.on('error', (e) => {
-  console.error('Redis error:', e.message);
-  process.exit(1);
-});
-
-client.on('end', () => {
-  process.exit(0);
-});
-
-function parseResp(raw) {
-  const lines = raw.split('\r\n');
-  return parseLines(lines, 0).value + '\n';
-}
-
-function parseLines(lines, idx) {
-  if (idx >= lines.length) return { value: '', next: idx };
-  const line = lines[idx];
-
-  if (line.startsWith('+')) {
-    return { value: line.slice(1), next: idx + 1 };
-  }
-  if (line.startsWith('-')) {
-    return { value: 'ERROR: ' + line.slice(1), next: idx + 1 };
-  }
-  if (line.startsWith(':')) {
-    return { value: line.slice(1), next: idx + 1 };
-  }
-  if (line.startsWith('$')) {
-    const len = parseInt(line.slice(1));
-    if (len === -1) return { value: '(nil)', next: idx + 1 };
-    return { value: lines[idx + 1] || '', next: idx + 2 };
-  }
-  if (line.startsWith('*')) {
-    const count = parseInt(line.slice(1));
-    if (count === -1) return { value: '(empty array)', next: idx + 1 };
-    let result = [];
-    let cur = idx + 1;
-    for (let i = 0; i < count; i++) {
-      const parsed = parseLines(lines, cur);
-      result.push(parsed.value);
-      cur = parsed.next;
-    }
-    return { value: result.join('\n'), next: cur };
-  }
-  return { value: line, next: idx + 1 };
-}
+c.on('error', e => { console.error('Connection error:', e.message); process.exit(1); });
+setTimeout(() => { c.destroy(); }, 10000);
