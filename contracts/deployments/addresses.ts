@@ -187,6 +187,7 @@ export const AAVE_V3_POOL_ADDRESSES = AAVE_V3_POOLS;
 export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
   arbitrumSepolia: '0xE5b26749430ed50917b75689B654a4C5808b23FB',
+  sepolia: '0x2f091cc77601C5aE2439A763C4916d9d32e035B6',
 };
 
 // =============================================================================
@@ -203,6 +204,8 @@ export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
  */
 export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
+  sepolia: '0xE5b26749430ed50917b75689B654a4C5808b23FB',
+  arbitrumSepolia: '0xA99863BAe641bA1Fc375c7AaF921680bb943d588',
 };
 
 // =============================================================================
@@ -275,6 +278,7 @@ export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
  */
 export const COMMIT_REVEAL_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
+  arbitrumSepolia: '0x9EA7A39B94E06BaFd034285ae665297427A84337',
 };
 
 // === MANUAL SECTIONS (preserved by generate-addresses.ts) ===
@@ -312,9 +316,10 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   sepolia: [
     '0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008', // Uniswap V2 Router
   ],
-  arbitrumSepolia: [
-    '0x101F443B4d1b059569D643917553c771E1b9663E', // Uniswap V2 Router
-  ],
+   arbitrumSepolia: [
+     '0x101F443B4d1b059569D643917553c771E1b9663E', // Uniswap V2 Router
+     '0x1A9838ce19Ae905B4e5941a17891ba180F30F630', // Uniswap V3 Adapter
+   ],
   // NOTE: baseSepolia, polygonAmoy, bscTestnet, zksync-testnet routers not yet configured.
   // After deploying to these testnets, manually approve routers via addApprovedRouter() or
   // add addresses here and re-deploy. Check testnet DEX documentation for router addresses.

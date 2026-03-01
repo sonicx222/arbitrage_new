@@ -62,8 +62,8 @@
 | Network | FlashLoan | Balancer | PancakeSwap | SyncSwap | CommitReveal | MultiPathQuoter |
 |---------|:---------:|:--------:|:-----------:|:--------:|:------------:|:---------------:|
 | localhost | — | — | — | — | — | — |
-| sepolia | — | — | — | — | — | — |
-| **arbitrumSepolia** | **0xE5b2...23FB** | — | — | — | — | — |
+| **sepolia** | **0x2f09...35B6** | — | — | — | — | **0xE5b2...23FB** |
+| **arbitrumSepolia** | **0xE5b2...23FB** | — | — | — | **0x9EA7...337** | **0xA998...588** |
 | baseSepolia | — | — | — | — | — | — |
 | zksync-testnet | — | — | — | — | — | — |
 | *All mainnets* | — | — | — | — | — | — |
@@ -519,16 +519,16 @@ These are explicit TODO/DEFERRED/TBD markers found in source code:
 
 ### Phase C: Complete Testnet Deployments
 
-- [ ] **C.1** Deploy FlashLoanArbitrage to sepolia
+- [x] **C.1** Deploy FlashLoanArbitrage to sepolia
 - [ ] **C.2** Deploy FlashLoanArbitrage to baseSepolia
-- [ ] **C.3** Deploy MultiPathQuoter to arbitrumSepolia
-- [ ] **C.4** Deploy CommitRevealArbitrage to arbitrumSepolia
-- [ ] **C.5** Deploy UniswapV3Adapter to arbitrumSepolia
+- [x] **C.3** Deploy MultiPathQuoter to arbitrumSepolia
+- [x] **C.4** Deploy CommitRevealArbitrage to arbitrumSepolia
+- [x] **C.5** Deploy UniswapV3Adapter to arbitrumSepolia
 - [ ] **C.6** Deploy PancakeSwapFlashArbitrage to arbitrumSepolia
 - [ ] **C.7** Attempt BalancerV2FlashArbitrage on arbitrumSepolia (may fail if Vault not on testnet)
 - [ ] **C.8** Deploy SyncSwapFlashArbitrage to zksync-testnet (with DISABLE_VIA_IR=true)
-- [ ] **C.9** Verify ALL deployed contracts on block explorers
-- [ ] **C.10** Update `registry.json` and `addresses.ts` after each deployment
+- [x] **C.9** Verify ALL deployed contracts on block explorers
+- [x] **C.10** Update `registry.json` and `addresses.ts` after each deployment
 - [ ] **C.11** Run end-to-end test on testnet with SIMULATION_MODE=false
 
 ### Phase D: Mainnet Deployment (Phase 7 of Profitability Plan)

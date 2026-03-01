@@ -1,0 +1,30 @@
+{
+  "sepolia": {
+    "network": "sepolia",
+    "chainId": 11155111,
+    "contractAddress": "0xE5b26749430ed50917b75689B654a4C5808b23FB",
+    "ownerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "deployerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "transactionHash": "0xe7fcdc44358b73f36cebc9af10e8fa4ff749f1413f27fe96ef6014f0a3136e0c",
+    "blockNumber": 10364263,
+    "timestamp": 1772401884,
+    "minimumProfit": "0",
+    "approvedRouters": [],
+    "gasUsed": "892806",
+    "verified": true
+  },
+  "arbitrumSepolia": {
+    "network": "arbitrumSepolia",
+    "chainId": 421614,
+    "contractAddress": "0xA99863BAe641bA1Fc375c7AaF921680bb943d588",
+    "ownerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "deployerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "transactionHash": "0x668b75725969ac3f1cec334abf74c37eaad91fa12e47f2179598b8aa8b6c3970",
+    "blockNumber": 246240151,
+    "timestamp": 1772402216,
+    "minimumProfit": "0",
+    "approvedRouters": [],
+    "gasUsed": "892806",
+    "verified": true
+  }
+}

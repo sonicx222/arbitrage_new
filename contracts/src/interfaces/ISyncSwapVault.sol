@@ -105,7 +105,7 @@ interface ISyncSwapVault {
      * **EIP-3156 Compliance**: This follows the EIP-3156 standard where fee
      * is a function of the loan amount, known upfront before execution.
      */
-    function flashFee(address token, uint256 amount) external view returns (uint256);
+    function flashFee(address token, uint256 amount) external pure returns (uint256);
 
     /**
      * @notice Initiate a flash loan (EIP-3156 standard)

@@ -57,7 +57,7 @@ contract MockSyncSwapVault is ISyncSwapVault {
      */
     function flashFee(address token, uint256 amount)
         external
-        view
+        pure
         override
         returns (uint256)
     {

@@ -565,10 +565,10 @@ export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
   // Note: zkSync and Linea require separate contract deployment due to
   // different EVM compatibility. See docs/deployment/l2-contracts.md
 
-  // Testnet deployments (for development/testing)
-  // sepolia: '',
-  // arbitrum_sepolia: '',
-  // base_sepolia: '',
+   // Testnet deployments (for development/testing)
+   sepolia: '0xE5b26749430ed50917b75689B654a4C5808b23FB',
+   arbitrumSepolia: '0xA99863BAe641bA1Fc375c7AaF921680bb943d588',
+   // base_sepolia: '',
 };
 
 /**

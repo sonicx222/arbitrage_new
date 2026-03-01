@@ -143,7 +143,7 @@ function checkTsBuildInfoFiles() {
   log('\nChecking for TypeScript build cache files...', 'cyan');
 
   const issues = [];
-  const exclude = ['node_modules'];
+  const exclude = ['node_modules', '.git'];
   const tsbuildFiles = findFiles(ROOT_DIR, /tsconfig\.tsbuildinfo$/, exclude);
 
   if (tsbuildFiles.length > 0) {

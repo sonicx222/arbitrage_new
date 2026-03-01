@@ -110,8 +110,7 @@
     "preinstall": "node scripts/preinstall-check.js",
     "check:circular": "madge --circular --extensions ts shared/types/src shared/config/src shared/core/src shared/security/src shared/ml/src",
     "security:audit": "node scripts/security-audit.js",
-    "security:check": "npm run preinstall && npm audit",
-    "postinstall": "npm audit || node -e \"process.exit(0)\""
+    "security:check": "npm run preinstall && npm audit"
   },
   "workspaces": [
     "shared/*",
