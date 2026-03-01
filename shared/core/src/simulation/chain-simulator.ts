@@ -580,6 +580,7 @@ export class ChainSimulator extends EventEmitter {
       ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4) // +-20% variance
       : 5 + Math.random() * 15; // fallback for low realism
 
+    const now = Date.now();
     const baseOpportunity = {
       id: `sim-${this.config.chainId}-${++this.opportunityId}`,
       chain: this.config.chainId,
@@ -593,11 +594,18 @@ export class ChainSimulator extends EventEmitter {
       profitPercentage: netProfit * 100,
       estimatedProfitUsd,
       confidence: 0.8 + Math.random() * 0.15,
-      timestamp: Date.now(),
+      timestamp: now,
       expiresAt: getSimulationExpiresAt(this.config.chainId),
       isSimulated: true as const,
       expectedGasCost: estimatedGasCost,
       expectedProfit: estimatedProfitUsd - estimatedGasCost,
+      // RT-007 FIX: Synthetic pipeline timestamps so LatencyTracker records
+      // samples during simulation mode (exercises the same code path as live).
+      pipelineTimestamps: {
+        wsReceivedAt: now - 8,
+        publishedAt: now - 5,
+        consumedAt: now - 2,
+      },
     };
 
     const realismLevel = getSimulationRealismLevel();
