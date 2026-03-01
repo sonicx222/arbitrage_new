@@ -331,10 +331,13 @@ export class ExecutionPipeline {
   private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     const startTime = performance.now();
 
-    if (!opportunity.buyChain) {
+    // Same-chain arbitrage opportunities set 'chain' but not 'buyChain'.
+    // Fall back to 'chain' for same-chain arbs; only cross-chain arbs need buyChain explicitly.
+    const resolvedBuyChain = opportunity.buyChain ?? opportunity.chain;
+    if (!resolvedBuyChain) {
       const errorResult = createErrorResult(
         opportunity.id,
-        'Missing required buyChain field',
+        'Missing required chain field (neither buyChain nor chain set)',
         'unknown',
         opportunity.buyDex || 'unknown'
       );
@@ -343,7 +346,7 @@ export class ExecutionPipeline {
       return;
     }
 
-    const chain = opportunity.buyChain || 'unknown';
+    const chain = resolvedBuyChain;
     const dex = opportunity.buyDex || 'unknown';
 
     let evCalc: EVCalculation | null = null;

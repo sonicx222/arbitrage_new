@@ -298,7 +298,7 @@ export class EnhancedHealthMonitor {
     await this.ensureStreamsInitialized();
     if (this.streamsClient) {
       try {
-        await this.streamsClient.xadd(streamName, message);
+        await this.streamsClient.xaddWithLimit(streamName, message);
       } catch (error) {
         logger.error('Failed to publish to Redis Stream', { error, streamName });
       }

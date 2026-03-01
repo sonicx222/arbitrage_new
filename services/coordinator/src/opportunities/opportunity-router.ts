@@ -34,6 +34,7 @@ export interface OpportunityRouterLogger {
  */
 export interface OpportunityStreamsClient {
   xadd(streamName: string, data: Record<string, unknown>, id?: string, options?: { maxLen?: number; approximate?: boolean }): Promise<string>;
+  xaddWithLimit(streamName: string, data: Record<string, unknown>, options?: { approximate?: boolean }): Promise<string>;
 }
 
 /**
@@ -145,8 +146,11 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   dlqStream: RedisStreams.FORWARDING_DLQ,
   // FIX W2-8: Prevent unbounded stream growth (matches RedisStreamsClient.STREAM_MAX_LENGTHS)
   executionStreamMaxLen: 5000,
-  // RT-003 FIX: 5s grace period for execution engine consumer initialization
-  startupGracePeriodMs: 5000,
+  // RT-003 FIX: Grace period for execution engine consumer initialization.
+  // RT-004 FIX: Increased from 5s to 15s — execution engine initialization
+  // (Redis, nonce manager, providers, KMS, MEV, strategies, risk management,
+  // bridge recovery, consumer group creation) typically takes 7-12s.
+  startupGracePeriodMs: 15000,
 };
 
 /**
@@ -479,11 +483,8 @@ export class OpportunityRouter {
         return;
       }
       try {
-        // FIX W2-8: Use MAXLEN to prevent unbounded stream growth
-        await this.streamsClient.xadd(this.config.executionRequestsStream, messageData, '*', {
-          maxLen: this.config.executionStreamMaxLen,
-          approximate: true,
-        });
+        // SA-005 FIX: Use xaddWithLimit for automatic MAXLEN from STREAM_MAX_LENGTHS
+        await this.streamsClient.xaddWithLimit(this.config.executionRequestsStream, messageData);
 
         // Success - record and return
         const justRecovered = this.circuitBreaker.recordSuccess();
@@ -593,7 +594,7 @@ export class OpportunityRouter {
     }
 
     try {
-      await this.streamsClient.xadd(this.config.dlqStream, {
+      await this.streamsClient.xaddWithLimit(this.config.dlqStream, {
         opportunityId: opportunity.id,
         originalData: JSON.stringify(opportunity),
         error: error?.message || 'Unknown error',

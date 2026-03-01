@@ -240,7 +240,7 @@ export class HealthMonitoringManager {
 
     // Publish to Redis Streams
     if (streamsClient) {
-      await streamsClient.xadd(
+      await streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.HEALTH,
         {
           ...health,

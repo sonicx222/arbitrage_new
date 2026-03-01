@@ -176,9 +176,9 @@ describe('isMainnet', () => {
 });
 
 describe('get*Chains functions', () => {
-  it('getMainnetChains returns 11 mainnets', () => {
+  it('getMainnetChains returns 15 mainnets', () => {
     const chains = getMainnetChains();
-    expect(chains).toHaveLength(11);
+    expect(chains).toHaveLength(15);
     expect(chains).toContain('ethereum');
     expect(chains).toContain('solana');
     expect(chains).not.toContain('sepolia');
@@ -192,18 +192,18 @@ describe('get*Chains functions', () => {
     expect(chains).not.toContain('ethereum');
   });
 
-  it('getEVMChains returns all EVM chains (14)', () => {
+  it('getEVMChains returns all EVM chains (18)', () => {
     const chains = getEVMChains();
-    expect(chains).toHaveLength(14);
+    expect(chains).toHaveLength(18);
     expect(chains).toContain('ethereum');
     expect(chains).toContain('sepolia');
     expect(chains).not.toContain('solana');
     expect(chains).not.toContain('solana-devnet');
   });
 
-  it('getAllChains returns 16 total chains', () => {
+  it('getAllChains returns 20 total chains', () => {
     const chains = getAllChains();
-    expect(chains).toHaveLength(16);
+    expect(chains).toHaveLength(20);
     expect(chains).toContain('ethereum');
     expect(chains).toContain('solana');
     expect(chains).toContain('sepolia');

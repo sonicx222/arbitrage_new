@@ -50,6 +50,7 @@ import {
 const createMockStreamsClient = () => ({
   xread: jest.fn().mockResolvedValue([]),
   xadd: jest.fn().mockResolvedValue('msg-id-1'),
+  xaddWithLimit: jest.fn().mockResolvedValue('msg-id-1'),
   xlen: jest.fn().mockResolvedValue(0),
 });
 
@@ -486,7 +487,7 @@ describe('DlqConsumer', () => {
       const result = await consumer.replayMessage('msg-1');
 
       expect(result).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:execution-requests',
         expect.objectContaining({
           id: 'opp-1',
@@ -517,7 +518,7 @@ describe('DlqConsumer', () => {
       const result = await consumer.replayMessage('nonexistent-msg');
 
       expect(result).toBe(false);
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
     });
 
     it('should log warning when message not found', async () => {
@@ -550,7 +551,7 @@ describe('DlqConsumer', () => {
       const result = await consumer.replayMessage('msg-no-payload');
 
       expect(result).toBe(false);
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
       expect(mockLogger.error).toHaveBeenCalledWith(
         'DLQ message has no stored payload — cannot replay',
         expect.objectContaining({ messageId: 'msg-no-payload' }),
@@ -577,7 +578,7 @@ describe('DlqConsumer', () => {
       const result = await consumer.replayMessage('msg-corrupt');
 
       expect(result).toBe(false);
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
     });
 
     it('should paginate through DLQ to find message beyond first batch', async () => {
@@ -604,7 +605,7 @@ describe('DlqConsumer', () => {
     it('should throw when xadd fails', async () => {
       const messages = createDlqMessages(1);
       mockStreamsClient.xread.mockResolvedValueOnce(messages);
-      mockStreamsClient.xadd.mockRejectedValueOnce(new Error('Stream write failed'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValueOnce(new Error('Stream write failed'));
 
       await expect(consumer.replayMessage('msg-0')).rejects.toThrow('Stream write failed');
 

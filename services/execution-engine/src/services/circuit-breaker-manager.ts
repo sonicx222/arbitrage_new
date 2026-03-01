@@ -362,7 +362,7 @@ export class CircuitBreakerManager {
     if (!streamsClient) return;
 
     try {
-      await streamsClient.xadd(RedisStreamsClient.STREAMS.CIRCUIT_BREAKER, {
+      await streamsClient.xaddWithLimit(RedisStreamsClient.STREAMS.CIRCUIT_BREAKER, {
         service: 'execution-engine',
         instanceId: this.instanceId,
         chain,

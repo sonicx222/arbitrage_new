@@ -867,7 +867,7 @@ export class CrossRegionHealthManager extends EventEmitter {
     // P0-11 FIX: Primary - Publish to Redis Streams for guaranteed delivery
     if (this.streamsClient) {
       try {
-        await this.streamsClient.xadd(RedisStreamsClient.STREAMS.SYSTEM_FAILOVER, message, '*', { maxLen: 10000 });
+        await this.streamsClient.xaddWithLimit(RedisStreamsClient.STREAMS.SYSTEM_FAILOVER, message);
         this.logger.debug('Published failover event to stream', { eventType: event.type });
       } catch (error) {
         this.logger.error('Failed to publish failover event to stream', { error });

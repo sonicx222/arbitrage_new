@@ -869,18 +869,21 @@ describe('S3.3.6 Integration with SolanaDetector', () => {
 /**
  * Helper to create a mock streams client with proper typing.
  */
-function createMockStreamsClient(): SolanaArbitrageStreamsClient & { xadd: jest.Mock } {
+function createMockStreamsClient(): SolanaArbitrageStreamsClient & { xadd: jest.Mock; xaddWithLimit: jest.Mock } {
   const xaddMock = jest.fn();
   xaddMock.mockImplementation(() => Promise.resolve('stream-id-1234'));
+  const xaddWithLimitMock = jest.fn();
+  xaddWithLimitMock.mockImplementation(() => Promise.resolve('stream-id-1234'));
   return {
     xadd: xaddMock,
-  } as unknown as SolanaArbitrageStreamsClient & { xadd: jest.Mock };
+    xaddWithLimit: xaddWithLimitMock,
+  } as unknown as SolanaArbitrageStreamsClient & { xadd: jest.Mock; xaddWithLimit: jest.Mock };
 }
 
 describe('S3.3.6 Redis Streams Integration', () => {
   let detector: SolanaArbitrageDetector;
   let mockLogger: any;
-  let mockStreamsClient: SolanaArbitrageStreamsClient & { xadd: jest.Mock };
+  let mockStreamsClient: SolanaArbitrageStreamsClient & { xadd: jest.Mock; xaddWithLimit: jest.Mock };
 
   beforeEach(() => {
     mockLogger = {
@@ -974,7 +977,7 @@ describe('S3.3.6 Redis Streams Integration', () => {
 
       await detector.publishOpportunity(opportunity);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:opportunities',
         expect.objectContaining({
           id: opportunity.id,
@@ -1017,18 +1020,19 @@ describe('S3.3.6 Redis Streams Integration', () => {
       // Should not throw
       await detector.publishOpportunity(opportunity);
 
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
       expect(mockLogger.debug).toHaveBeenCalledWith(
         'No streams client, skipping opportunity publish',
         expect.objectContaining({ opportunityId: opportunity.id })
       );
     });
 
-    it('should handle xadd errors gracefully', async () => {
-      const errorXaddMock = jest.fn();
-      errorXaddMock.mockImplementation(() => Promise.reject(new Error('Redis connection failed')));
+    it('should handle xaddWithLimit errors gracefully', async () => {
+      const errorXaddWithLimitMock = jest.fn();
+      errorXaddWithLimitMock.mockImplementation(() => Promise.reject(new Error('Redis connection failed')));
       const errorClient = {
-        xadd: errorXaddMock,
+        xadd: jest.fn(),
+        xaddWithLimit: errorXaddWithLimitMock,
       } as unknown as SolanaArbitrageStreamsClient;
 
       detector = new SolanaArbitrageDetector({

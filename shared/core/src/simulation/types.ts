@@ -177,6 +177,14 @@ export interface SimulatedOpportunity {
 
   /** Bridge fee in USD (for cross-chain type) */
   bridgeFee?: number;
+
+  /** Pipeline timestamps for latency tracking (RT-007 FIX) */
+  pipelineTimestamps?: {
+    wsReceivedAt?: number;
+    publishedAt?: number;
+    consumedAt?: number;
+    detectedAt?: number;
+  };
 }
 
 /**

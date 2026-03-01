@@ -1,0 +1,9 @@
+{"phase":"STARTUP","findingId":"ST-001","category":"SERVICE_READY","severity":"INFO","service":"P1 Asia-Fast","port":3001,"startupTimeMs":35000,"evidence":"Healthy with 4 chains: BSC, Polygon, Avalanche, Fantom"}
+{"phase":"STARTUP","findingId":"ST-002","category":"SERVICE_READY","severity":"INFO","service":"P2 L2-Turbo","port":3002,"startupTimeMs":38000,"evidence":"Healthy with 5 chains: Arbitrum, Optimism, Base, Scroll, Blast"}
+{"phase":"STARTUP","findingId":"ST-003","category":"SERVICE_READY","severity":"INFO","service":"P3 High-Value","port":3003,"startupTimeMs":34000,"evidence":"Healthy with 3 chains: Ethereum, zkSync, Linea"}
+{"phase":"STARTUP","findingId":"ST-004","category":"SERVICE_READY","severity":"INFO","service":"P4 Solana","port":3004,"startupTimeMs":30000,"evidence":"Healthy with 1 chain: Solana"}
+{"phase":"STARTUP","findingId":"ST-005","category":"SERVICE_READY","severity":"INFO","service":"Execution Engine","port":3005,"startupTimeMs":40000,"evidence":"Healthy, simulation mode, risk state NORMAL"}
+{"phase":"STARTUP","findingId":"ST-006","category":"SERVICE_READY","severity":"INFO","service":"Cross-Chain Detector","port":3006,"startupTimeMs":50000,"evidence":"Healthy with 12 chains monitored, ML predictor active"}
+{"phase":"STARTUP","findingId":"ST-007","category":"SERVICE_HEALTH","severity":"HIGH","service":"Coordinator","port":3000,"evidence":"Leader election active, /api/health OK, but /health returns empty"}
+{"phase":"STARTUP","findingId":"ST-008","category":"STREAM_TOPOLOGY","severity":"MEDIUM","service":"cross-service","evidence":"11/19 expected streams created. Missing 8 IDLE/on-demand streams."}
+{"phase":"STARTUP","findingId":"ST-009","category":"CONSUMER_GROUP","severity":"MEDIUM","service":"cross-service","evidence":"Unexpected groups: orderflow-pipeline, failover-coordinator"}

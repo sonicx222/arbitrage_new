@@ -252,7 +252,7 @@ export class ChainDetectorInstance extends EventEmitter {
   // Key: "token0|token1", Value: normalized key "token0_token1" (alphabetically ordered)
   // At 1000 events/sec, this eliminates ~3000 string allocations/sec
   private tokenPairKeyCache: Map<string, string> = new Map();
-  private readonly TOKEN_PAIR_KEY_CACHE_MAX = 10000;
+  private readonly TOKEN_PAIR_KEY_CACHE_MAX = 5000;
 
   private status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   private eventsProcessed: number = 0;

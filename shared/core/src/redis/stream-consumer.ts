@@ -90,7 +90,7 @@ export interface StreamConsumerStats {
  * Usage:
  * ```ts
  * const consumer = new StreamConsumer(streamsClient, {
- *   config: { streamName: 'stream:opportunities', groupName: 'coordinator', consumerName: 'worker-1' },
+ *   config: { streamName: RedisStreams.OPPORTUNITIES, groupName: 'coordinator', consumerName: 'worker-1' },
  *   handler: async (msg) => { console.log(msg.data); },
  *   batchSize: 10,
  *   blockMs: 1000
@@ -239,7 +239,7 @@ export class StreamConsumer {
       for (const entry of stuckMessages) {
         try {
           // Route to DLQ with metadata about why the message was moved
-          await this.client.xadd(dlqStream, {
+          await this.client.xaddWithLimit(dlqStream, {
             originalStream: this.config.config.streamName,
             originalId: entry.id,
             consumerGroup: this.config.config.groupName,

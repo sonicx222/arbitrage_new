@@ -805,7 +805,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
 
     for (let attempt = 1; attempt <= REDIS_RETRY.MAX_ATTEMPTS; attempt++) {
       try {
-        await this.streamsClient.xadd(OPPORTUNITY_STREAM, data);
+        await this.streamsClient.xaddWithLimit(OPPORTUNITY_STREAM, data);
         if (this.redisPublishState.consecutiveFailures > 0) {
           this.redisPublishState.consecutiveFailures = 0;
         }

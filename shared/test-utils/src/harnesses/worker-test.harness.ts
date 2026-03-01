@@ -385,7 +385,13 @@ export class WorkerTestHarness {
 
       worker.once('message', (message) => {
         clearTimeout(timeout);
-        resolve(message);
+        // Unwrap worker response: { taskId, success, result, processingTime }
+        // Callers expect the inner result directly (e.g., { price, timestamp })
+        if (message.success && message.result !== undefined) {
+          resolve(message.result);
+        } else {
+          resolve(message);
+        }
       });
 
       worker.once('error', (error) => {

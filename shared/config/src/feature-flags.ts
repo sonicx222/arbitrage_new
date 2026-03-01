@@ -286,8 +286,8 @@ export const FEATURE_FLAGS = {
    * Enable fast lane for high-confidence opportunities (Item 12).
    *
    * When enabled:
-   * - High-confidence, high-profit opportunities are published to stream:fast-lane
-   *   in parallel with the normal stream:opportunities path
+   * - High-confidence, high-profit opportunities are published to {@link RedisStreams.FAST_LANE}
+   *   in parallel with the normal {@link RedisStreams.OPPORTUNITIES} path
    * - Execution engine consumes fast lane directly, bypassing coordinator routing
    * - Normal coordinator path still processes the opportunity for metrics/dedup
    *
@@ -337,6 +337,32 @@ export const FEATURE_FLAGS = {
    * @see shared/core/src/mev-protection/mev-share-event-listener.ts
    */
   useMevShareBackrun: process.env.FEATURE_MEV_SHARE_BACKRUN === 'true',
+
+  // =========================================================================
+  // Feature flags previously scattered across individual service/core files.
+  // Centralized here for single-source-of-truth (SA-011).
+  // =========================================================================
+
+  /** Enable Solana execution strategy (requires SOLANA_RPC_URL). @default false */
+  useSolanaExecution: process.env.FEATURE_SOLANA_EXECUTION === 'true',
+
+  /** Enable statistical arbitrage strategy. @default false */
+  useStatisticalArb: process.env.FEATURE_STATISTICAL_ARB === 'true',
+
+  /** Enable MEV-Share rebate mode. @default false @see shared/config/src/mev-config.ts */
+  useMevShare: process.env.FEATURE_MEV_SHARE === 'true',
+
+  /** Enable adaptive risk scoring thresholds. @default false @see shared/config/src/mev-config.ts */
+  useAdaptiveRiskScoring: process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true',
+
+  /** Enable Timeboost MEV protection (Arbitrum). @default false @see shared/core/src/mev-protection/timeboost-provider.ts */
+  useTimeboost: process.env.FEATURE_TIMEBOOST === 'true',
+
+  /** Enable Flashbots Protect L2 provider. @default false @see shared/core/src/mev-protection/flashbots-protect-l2.provider.ts */
+  useFlashbotsProtectL2: process.env.FEATURE_FLASHBOTS_PROTECT_L2 === 'true',
+
+  /** Enable CoW Protocol backrun strategy. @default false */
+  useCowBackrun: process.env.FEATURE_COW_BACKRUN === 'true',
 };
 
 /**
@@ -711,6 +737,23 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       } else {
         console.warn(`WARNING: ${msg}`);
       }
+    }
+  }
+
+  // RT-012: Validate Solana execution requires RPC URL
+  if (FEATURE_FLAGS.useSolanaExecution) {
+    if (!process.env.SOLANA_RPC_URL) {
+      const message =
+        'FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set. ' +
+        'Solana execution strategy will be unavailable at runtime.';
+      if (logger) {
+        logger.warn(message);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`);
+      }
+    } else {
+      const message = 'Solana Execution enabled - Solana arbitrage opportunities will be executed';
+      if (logger) { logger.info(message); } else { console.info(`✅ ${message}`); }
     }
   }
 

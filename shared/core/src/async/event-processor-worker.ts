@@ -398,6 +398,14 @@ parentPort?.on('message', async (message: TaskMessage) => {
         result = processBatchJsonParsing(taskData as { jsonStrings: string[] });
         break;
 
+      case 'get_price': {
+        // PHASE3-TASK42: Read price from SharedArrayBuffer (zero-copy)
+        const { key } = taskData as { type: string; key: string };
+        const priceEntry = getPriceFromSharedMemory(key);
+        result = priceEntry ?? { price: null, timestamp: null };
+        break;
+      }
+
       default:
         throw new Error(`Unknown task type: ${taskType}`);
     }

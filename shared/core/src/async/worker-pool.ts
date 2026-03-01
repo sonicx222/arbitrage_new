@@ -503,10 +503,11 @@ export class EventProcessingWorkerPool extends EventEmitter {
           keyRegistryBuffer: this.keyRegistryBuffer // SharedArrayBuffer for key lookups
         },
         // Cap worker V8 heap to prevent unbounded memory growth per thread.
-        // Default Node.js heap is ~1.5GB per isolate; 64MB old-gen + 16MB young-gen
-        // is sufficient for JSON parsing and event processing workloads.
+        // Default Node.js heap is ~1.5GB per isolate. 256MB old-gen is needed for
+        // the SharedArrayBuffer price matrix (524K+ pair slots) plus JSON parsing.
+        // Override via WORKER_MAX_OLD_GEN_MB env var for constrained environments.
         resourceLimits: {
-          maxOldGenerationSizeMb: 64,
+          maxOldGenerationSizeMb: parseInt(process.env.WORKER_MAX_OLD_GEN_MB || '256', 10),
           maxYoungGenerationSizeMb: 16,
         }
       };
@@ -779,7 +780,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
           keyRegistryBuffer: this.keyRegistryBuffer
         },
         resourceLimits: {
-          maxOldGenerationSizeMb: 64,
+          maxOldGenerationSizeMb: parseInt(process.env.WORKER_MAX_OLD_GEN_MB || '256', 10),
           maxYoungGenerationSizeMb: 16,
         }
       };
@@ -1161,7 +1162,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
           keyRegistryBuffer: this.keyRegistryBuffer
         },
         resourceLimits: {
-          maxOldGenerationSizeMb: 64,
+          maxOldGenerationSizeMb: parseInt(process.env.WORKER_MAX_OLD_GEN_MB || '256', 10),
           maxYoungGenerationSizeMb: 16,
         }
       });

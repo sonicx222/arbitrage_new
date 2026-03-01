@@ -38,6 +38,10 @@ export type ChainId =
   | 'fantom' // Fantom Opera (chain ID: 250)
   | 'zksync' // zkSync Era (chain ID: 324)
   | 'linea' // Linea (chain ID: 59144)
+  | 'blast' // Blast (chain ID: 81457)
+  | 'scroll' // Scroll (chain ID: 534352)
+  | 'mantle' // Mantle (chain ID: 5000)
+  | 'mode' // Mode (chain ID: 34443)
   // =========================================================================
   // Non-EVM
   // =========================================================================
@@ -86,6 +90,9 @@ export const CHAIN_ALIASES: Readonly<Record<string, ChainId>> = {
   avax: 'avalanche',
   ftm: 'fantom',
   sol: 'solana',
+
+  // New L2s
+  mnt: 'mantle',
 
   // Legacy names
   binance: 'bsc',
@@ -142,7 +149,8 @@ const TESTNET_IDS: ReadonlySet<string> = new Set([
 /** Module-level static arrays to avoid per-call allocation */
 const MAINNET_CHAINS: readonly MainnetChainId[] = [
   'ethereum', 'polygon', 'arbitrum', 'base', 'optimism',
-  'bsc', 'avalanche', 'fantom', 'zksync', 'linea', 'solana',
+  'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+  'blast', 'scroll', 'mantle', 'mode', 'solana',
 ];
 const TESTNET_CHAINS: readonly TestnetChainId[] = [
   'sepolia', 'arbitrum-sepolia', 'base-sepolia', 'zksync-sepolia', 'solana-devnet',
@@ -150,6 +158,7 @@ const TESTNET_CHAINS: readonly TestnetChainId[] = [
 const EVM_CHAINS: readonly EVMChainId[] = [
   'ethereum', 'polygon', 'arbitrum', 'base', 'optimism',
   'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+  'blast', 'scroll', 'mantle', 'mode',
   'sepolia', 'arbitrum-sepolia', 'base-sepolia', 'zksync-sepolia',
 ];
 const ALL_CHAINS: readonly ChainId[] = [...MAINNET_CHAINS, ...TESTNET_CHAINS];
@@ -167,6 +176,10 @@ const CANONICAL_IDS: ReadonlySet<string> = new Set([
   'fantom',
   'zksync',
   'linea',
+  'blast',
+  'scroll',
+  'mantle',
+  'mode',
   // Non-EVM
   'solana',
   // Testnets
@@ -200,7 +213,11 @@ export type EVMMainnetChainId =
   | 'avalanche'
   | 'fantom'
   | 'zksync'
-  | 'linea';
+  | 'linea'
+  | 'blast'
+  | 'scroll'
+  | 'mantle'
+  | 'mode';
 
 /**
  * Testnet chain IDs only
@@ -391,6 +408,38 @@ export const CHAIN_METADATA: Readonly<Record<ChainId, ChainMetadata>> = {
     id: 'linea',
     name: 'Linea',
     chainId: 59144,
+    testnet: false,
+    evm: true,
+    aliases: [],
+  },
+  blast: {
+    id: 'blast',
+    name: 'Blast',
+    chainId: 81457,
+    testnet: false,
+    evm: true,
+    aliases: [],
+  },
+  scroll: {
+    id: 'scroll',
+    name: 'Scroll',
+    chainId: 534352,
+    testnet: false,
+    evm: true,
+    aliases: [],
+  },
+  mantle: {
+    id: 'mantle',
+    name: 'Mantle',
+    chainId: 5000,
+    testnet: false,
+    evm: true,
+    aliases: ['mnt'],
+  },
+  mode: {
+    id: 'mode',
+    name: 'Mode',
+    chainId: 34443,
     testnet: false,
     evm: true,
     aliases: [],

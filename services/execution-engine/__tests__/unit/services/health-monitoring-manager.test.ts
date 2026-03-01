@@ -125,6 +125,7 @@ function createMockLockConflictTracker() {
 function createMockStreamsClient() {
   return {
     xadd: jest.fn().mockResolvedValue('1-0'),
+    xaddWithLimit: jest.fn().mockResolvedValue('1-0'),
   };
 }
 
@@ -255,7 +256,7 @@ describe('HealthMonitoringManager', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
     });
 
     it('should clean up gas baselines on interval tick', () => {
@@ -328,12 +329,12 @@ describe('HealthMonitoringManager', () => {
       manager.stop();
 
       // Clear previous calls
-      mockStreamsClient.xadd.mockClear();
+      mockStreamsClient.xaddWithLimit.mockClear();
 
       // Advance well past several intervals
       jest.advanceTimersByTime(120000);
 
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
     });
   });
 
@@ -401,7 +402,7 @@ describe('HealthMonitoringManager', () => {
   describe('error handling during health check', () => {
     it('should log error if health monitoring fails', async () => {
       const mockStreamsClient = createMockStreamsClient();
-      mockStreamsClient.xadd.mockRejectedValue(new Error('Redis connection lost'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis connection lost'));
       deps = createMockDeps({
         getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
       });
@@ -483,7 +484,7 @@ describe('HealthMonitoringManager', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:health',
         expect.objectContaining({ simulationStatus: 'not_configured' }),
       );
@@ -509,7 +510,7 @@ describe('HealthMonitoringManager', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:health',
         expect.objectContaining({ simulationStatus: 'healthy' }),
       );
@@ -535,7 +536,7 @@ describe('HealthMonitoringManager', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:health',
         expect.objectContaining({ simulationStatus: 'degraded' }),
       );

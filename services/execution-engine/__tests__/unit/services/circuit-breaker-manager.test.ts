@@ -95,6 +95,7 @@ describe('CircuitBreakerManager', () => {
 
     mockStreamsClient = {
       xadd: jest.fn().mockResolvedValue('stream-id'),
+      xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
     };
 
     defaultConfig = {
@@ -315,7 +316,7 @@ describe('CircuitBreakerManager', () => {
 
       await new Promise(resolve => setImmediate(resolve));
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           service: 'execution-engine',
@@ -329,7 +330,7 @@ describe('CircuitBreakerManager', () => {
     });
 
     it('should handle publish error gracefully', async () => {
-      mockStreamsClient.xadd.mockRejectedValue(new Error('Redis down'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis down'));
 
       const manager = createManager();
       manager.initialize();
@@ -377,7 +378,7 @@ describe('CircuitBreakerManager', () => {
 
       await new Promise(resolve => setImmediate(resolve));
 
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
     });
   });
 

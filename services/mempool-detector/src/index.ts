@@ -54,7 +54,7 @@ import {
 import { getMetricsText } from './prometheus-metrics';
 // P2 Fix O-2: Import trace context for cross-service correlation
 import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
-import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIntent } from '@arbitrage/types';
+import { RedisStreams, type PendingOpportunity, type PendingSwapIntent as SerializablePendingSwapIntent } from '@arbitrage/types';
 
 // =============================================================================
 // CONSTANTS
@@ -114,7 +114,7 @@ export const DEFAULT_CONFIG: Partial<MempoolDetectorConfig> = {
   ),
 
   // Stream name: string, safe to use ??
-  opportunityStream: MEMPOOL_CONFIG.streams.pendingOpportunities ?? 'stream:pending-opportunities',
+  opportunityStream: MEMPOOL_CONFIG.streams.pendingOpportunities ?? RedisStreams.PENDING_OPPORTUNITIES,
 
   // Min swap size: 0 is valid (capture all), but NaN is not
   minSwapSizeUsd: isNaN(MEMPOOL_CONFIG.filters.minSwapSizeUsd)

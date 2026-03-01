@@ -33,4 +33,9 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
   app.use('/api', createHealthRoutes(state));
   app.use('/api', createMetricsRoutes(state));
   app.use('/api', createAdminRoutes(state));
+
+  // RT-009 FIX: Mount health routes at root for uniform monitoring.
+  // Partitions expose /health, /health/live, /health/ready directly.
+  // Without this, monitoring scripts need special-case logic for coordinator.
+  app.use('/', createHealthRoutes(state));
 }

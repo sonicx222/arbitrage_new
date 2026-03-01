@@ -555,8 +555,8 @@ describe('ExecutionPipeline', () => {
   // ===========================================================================
 
   describe('executeOpportunity (via processQueueItems)', () => {
-    it('should reject opportunity missing buyChain', async () => {
-      const opp = createMockOpportunity({ buyChain: undefined });
+    it('should reject opportunity missing both buyChain and chain', async () => {
+      const opp = createMockOpportunity({ buyChain: undefined, chain: undefined });
       deps.queueService.size
         .mockReturnValueOnce(1)
         .mockReturnValueOnce(0)
@@ -570,13 +570,31 @@ describe('ExecutionPipeline', () => {
         expect.objectContaining({
           opportunityId: 'opp-1',
           success: false,
-          error: 'Missing required buyChain field',
+          error: 'Missing required chain field (neither buyChain nor chain set)',
         }),
         opp
       );
       expect(deps.opportunityConsumer.markComplete).toHaveBeenCalledWith('opp-1');
-      // Should NOT call strategyFactory when buyChain is missing
+      // Should NOT call strategyFactory when no chain is available
       expect(deps.strategyFactory.execute).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to chain when buyChain is undefined (same-chain arb)', async () => {
+      const opp = createMockOpportunity({ buyChain: undefined, chain: 'bsc' });
+      const mockResult = { success: true, actualProfit: 75, gasCost: 5 };
+      deps.strategyFactory.execute.mockResolvedValue(mockResult);
+
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      // Should proceed with chain='bsc' as the resolved buyChain
+      expect(deps.strategyFactory.execute).toHaveBeenCalled();
     });
 
     it('should execute via strategyFactory and publish result', async () => {
@@ -1057,11 +1075,11 @@ describe('ExecutionPipeline', () => {
       pipeline.processQueueItems();
       await flushMultiple();
 
-      // Empty string is falsy, so should trigger the missing buyChain path
+      // Empty string is falsy, so should trigger the missing chain path
       expect(deps.publishExecutionResult).toHaveBeenCalledWith(
         expect.objectContaining({
           success: false,
-          error: 'Missing required buyChain field',
+          error: 'Missing required chain field (neither buyChain nor chain set)',
         }),
         opp
       );

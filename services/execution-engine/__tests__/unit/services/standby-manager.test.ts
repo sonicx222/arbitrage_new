@@ -111,6 +111,7 @@ const createMockStrategyFactory = (): ExecutionStrategyFactory => ({
 const createMockStreamsClient = (): RedisStreamsClient => {
   const mock: any = {
     xadd: jest.fn(async () => '1234567890-0'),
+    xaddWithLimit: jest.fn(async () => '1234567890-0'),
     // Add other required methods as stubs
     xread: jest.fn(async () => []),
     xack: jest.fn(async () => 1),
@@ -361,7 +362,7 @@ describe('StandbyManager - Activation Happy Path', () => {
     const manager = new StandbyManager(deps);
     await manager.activate();
 
-    expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
       'stream:health',
       expect.objectContaining({
         name: 'execution-engine',

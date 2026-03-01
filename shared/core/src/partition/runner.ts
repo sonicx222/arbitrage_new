@@ -487,7 +487,7 @@ export function createPartitionEntry(
   // opportunities without publishing to Redis. This creates a pipeline gap
   // because the Coordinator never receives opportunities.
   // Now, each partition auto-initializes Redis + OpportunityPublisher on startup
-  // and registers an 'opportunity' event listener that publishes to stream:opportunities.
+  // and registers an 'opportunity' event listener that publishes to RedisStreams.OPPORTUNITIES.
   // P2-2 FIX: Increased from 10 to 100 and made configurable. The old limit of 10
   // was far too low for the detection rate (~18k opportunities per 10min), causing
   // 26.4% of opportunities to be silently dropped. Now consistent with unified-detector.
