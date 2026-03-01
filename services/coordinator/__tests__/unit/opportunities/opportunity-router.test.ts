@@ -56,6 +56,7 @@ const MOCK_SERIALIZED_DATA: Record<string, string> = {
 function createMockStreamsClient(): jest.Mocked<OpportunityStreamsClient> {
   return {
     xadd: jest.fn().mockResolvedValue('stream-id-1'),
+    xaddWithLimit: jest.fn().mockResolvedValue('stream-id-1'),
   };
 }
 
@@ -366,7 +367,7 @@ describe('OpportunityRouter', () => {
 
       await router.processOpportunity(data, true);
 
-      expect(streamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
       expect(router.getTotalExecutions()).toBe(1);
     });
 
@@ -376,7 +377,7 @@ describe('OpportunityRouter', () => {
 
       await router.processOpportunity(data, true);
 
-      expect(streamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
       expect(router.getTotalExecutions()).toBe(1);
     });
 
@@ -385,7 +386,7 @@ describe('OpportunityRouter', () => {
 
       await router.processOpportunity(data, false);
 
-      expect(streamsClient.xadd).not.toHaveBeenCalled();
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
       expect(router.getTotalExecutions()).toBe(0);
     });
 
@@ -394,7 +395,7 @@ describe('OpportunityRouter', () => {
 
       await router.processOpportunity(data, true);
 
-      expect(streamsClient.xadd).not.toHaveBeenCalled();
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
     });
 
     // =========================================================================
@@ -416,7 +417,7 @@ describe('OpportunityRouter', () => {
             status: 'pending',
           }),
         );
-        expect(streamsClient.xadd).not.toHaveBeenCalled();
+        expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
       });
 
       it('should log reason when opportunity is not forwarded due to non-pending status', async () => {
@@ -433,7 +434,7 @@ describe('OpportunityRouter', () => {
             status: 'executed',
           }),
         );
-        expect(streamsClient.xadd).not.toHaveBeenCalled();
+        expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
       });
     });
 
@@ -473,12 +474,10 @@ describe('OpportunityRouter', () => {
 
       // OP-3: Third argument is optional trace context (undefined when not provided)
       expect(mockSerialize).toHaveBeenCalledWith(opp, 'test-coordinator', undefined);
-      // FIX W2-8: xadd now includes MAXLEN options
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      // SA-005 FIX: xaddWithLimit auto-applies MAXLEN from STREAM_MAX_LENGTHS
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:execution-requests',
         expect.objectContaining({ id: 'mock-serialized' }),
-        '*',
-        expect.objectContaining({ maxLen: 5000, approximate: true }),
       );
       expect(circuitBreaker.recordSuccess).toHaveBeenCalled();
       expect(router.getTotalExecutions()).toBe(1);
@@ -505,7 +504,7 @@ describe('OpportunityRouter', () => {
         expect.stringContaining('streams client not initialized'),
         expect.objectContaining({ id: 'opp-no-client' }),
       );
-      expect(streamsClient.xadd).not.toHaveBeenCalled();
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
       expect(routerNoClient.getTotalExecutions()).toBe(0);
     });
 
@@ -517,8 +516,8 @@ describe('OpportunityRouter', () => {
       await router.forwardToExecutionEngine(opp);
 
       // OP-2 FIX: xadd is NOT called for the execution stream, but IS called for DLQ
-      expect(streamsClient.xadd).toHaveBeenCalledTimes(1);
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:forwarding-dlq',
         expect.objectContaining({
           opportunityId: 'opp-circuit-open',
@@ -557,7 +556,7 @@ describe('OpportunityRouter', () => {
       await router.forwardToExecutionEngine(opp);
 
       // Verify the request went through
-      expect(streamsClient.xadd).toHaveBeenCalled();
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalled();
       expect(circuitBreaker.recordSuccess).toHaveBeenCalled();
       // Verify recovery was logged
       expect(logger.info).toHaveBeenCalledWith(
@@ -588,7 +587,7 @@ describe('OpportunityRouter', () => {
 
   describe('retry logic', () => {
     it('should retry on first failure and succeed on second attempt', async () => {
-      streamsClient.xadd
+      streamsClient.xaddWithLimit
         .mockRejectedValueOnce(new Error('Connection refused'))
         .mockResolvedValueOnce('stream-id-2');
 
@@ -596,7 +595,7 @@ describe('OpportunityRouter', () => {
 
       await router.forwardToExecutionEngine(opp);
 
-      expect(streamsClient.xadd).toHaveBeenCalledTimes(2);
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
       expect(circuitBreaker.recordFailure).toHaveBeenCalledTimes(1);
       expect(circuitBreaker.recordSuccess).toHaveBeenCalledTimes(1);
       expect(router.getTotalExecutions()).toBe(1);
@@ -604,14 +603,14 @@ describe('OpportunityRouter', () => {
     });
 
     it('should exhaust all retries and drop the opportunity when all fail', async () => {
-      streamsClient.xadd.mockRejectedValue(new Error('Persistent failure'));
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('Persistent failure'));
 
       const opp = createOpportunity({ id: 'opp-retry-exhaust' });
 
       await router.forwardToExecutionEngine(opp);
 
       // 3 execution attempts + 1 DLQ attempt (also rejected) = 4 total xadd calls
-      const executionCalls = streamsClient.xadd.mock.calls.filter(
+      const executionCalls = streamsClient.xaddWithLimit.mock.calls.filter(
         c => c[0] === 'stream:execution-requests',
       );
       expect(executionCalls).toHaveLength(3); // maxRetries = 3
@@ -628,7 +627,7 @@ describe('OpportunityRouter', () => {
 
     it('should stop retrying when circuit breaker opens during retry loop', async () => {
       // Execution xadd fails, but DLQ xadd succeeds
-      streamsClient.xadd.mockImplementation(async (stream: string) => {
+      streamsClient.xaddWithLimit.mockImplementation(async (stream: string) => {
         if (stream === 'stream:execution-requests') {
           throw new Error('Timeout');
         }
@@ -653,7 +652,7 @@ describe('OpportunityRouter', () => {
       await routerWithAlert.forwardToExecutionEngine(opp);
 
       // 1 execution attempt (broke out of loop) + 1 DLQ write = 2 total
-      const executionCalls = streamsClient.xadd.mock.calls.filter(
+      const executionCalls = streamsClient.xaddWithLimit.mock.calls.filter(
         c => c[0] === 'stream:execution-requests',
       );
       expect(executionCalls).toHaveLength(1);
@@ -667,7 +666,7 @@ describe('OpportunityRouter', () => {
 
     it('should stop retrying when circuit breaker is already open after a failure', async () => {
       // Execution xadd fails, but DLQ xadd succeeds
-      streamsClient.xadd.mockImplementation(async (stream: string) => {
+      streamsClient.xaddWithLimit.mockImplementation(async (stream: string) => {
         if (stream === 'stream:execution-requests') {
           throw new Error('Timeout');
         }
@@ -684,7 +683,7 @@ describe('OpportunityRouter', () => {
       await router.forwardToExecutionEngine(opp);
 
       // 1 execution attempt (circuit found open after failure) + 1 DLQ write
-      const executionCalls = streamsClient.xadd.mock.calls.filter(
+      const executionCalls = streamsClient.xaddWithLimit.mock.calls.filter(
         c => c[0] === 'stream:execution-requests',
       );
       expect(executionCalls).toHaveLength(1);
@@ -698,13 +697,13 @@ describe('OpportunityRouter', () => {
 
   describe('dead letter queue', () => {
     it('should move to DLQ after all retries are exhausted', async () => {
-      streamsClient.xadd.mockRejectedValue(new Error('Network error'));
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('Network error'));
 
       const opp = createOpportunity({ id: 'opp-dlq-1' });
       await router.forwardToExecutionEngine(opp);
 
       // The last xadd call should be to the DLQ stream
-      const dlqCall = streamsClient.xadd.mock.calls.find(
+      const dlqCall = streamsClient.xaddWithLimit.mock.calls.find(
         call => call[0] === 'stream:forwarding-dlq',
       );
       expect(dlqCall).not.toBeUndefined();
@@ -721,7 +720,7 @@ describe('OpportunityRouter', () => {
 
     it('should include serialized opportunity data in DLQ entry', async () => {
       // Make execution xadd fail, but DLQ xadd succeed
-      streamsClient.xadd.mockImplementation(async (stream: string) => {
+      streamsClient.xaddWithLimit.mockImplementation(async (stream: string) => {
         if (stream === 'stream:execution-requests') {
           throw new Error('Write failed');
         }
@@ -731,7 +730,7 @@ describe('OpportunityRouter', () => {
       const opp = createOpportunity({ id: 'opp-dlq-data', chain: 'polygon' });
       await router.forwardToExecutionEngine(opp);
 
-      const dlqCall = streamsClient.xadd.mock.calls.find(
+      const dlqCall = streamsClient.xaddWithLimit.mock.calls.find(
         call => call[0] === 'stream:forwarding-dlq',
       );
       expect(dlqCall).not.toBeUndefined();
@@ -743,7 +742,7 @@ describe('OpportunityRouter', () => {
 
     it('should log error but not throw when DLQ write fails', async () => {
       // Both execution and DLQ writes fail
-      streamsClient.xadd.mockRejectedValue(new Error('Total failure'));
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('Total failure'));
 
       const opp = createOpportunity({ id: 'opp-dlq-fail' });
 
@@ -759,7 +758,7 @@ describe('OpportunityRouter', () => {
     });
 
     it('should send EXECUTION_FORWARD_FAILED alert when retries exhausted and circuit is not open', async () => {
-      streamsClient.xadd.mockImplementation(async (stream: string) => {
+      streamsClient.xaddWithLimit.mockImplementation(async (stream: string) => {
         if (stream === 'stream:execution-requests') {
           throw new Error('Transient error');
         }
@@ -794,7 +793,7 @@ describe('OpportunityRouter', () => {
     });
 
     it('should NOT send EXECUTION_FORWARD_FAILED alert when circuit is already open', async () => {
-      streamsClient.xadd.mockRejectedValue(new Error('fail'));
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('fail'));
       circuitBreaker.getStatus.mockReturnValue({
         isOpen: true,
         failures: 5,
@@ -946,7 +945,7 @@ describe('OpportunityRouter', () => {
   describe('shutdown', () => {
     it('should abort retry loop when shutdown is called', async () => {
       // Make xadd fail and use longer delays to ensure shutdown interrupts
-      streamsClient.xadd.mockRejectedValue(new Error('Fail'));
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('Fail'));
 
       const slowRouter = new OpportunityRouter(logger, circuitBreaker, streamsClient, {
         maxRetries: 5,
@@ -967,7 +966,7 @@ describe('OpportunityRouter', () => {
       await forwardPromise;
 
       // Should have been stopped early (fewer than maxRetries attempts)
-      expect(streamsClient.xadd.mock.calls.filter(
+      expect(streamsClient.xaddWithLimit.mock.calls.filter(
         c => c[0] === 'stream:execution-requests',
       ).length).toBeLessThan(5);
     });
@@ -1159,17 +1158,15 @@ describe('OpportunityRouter', () => {
       const opp = createOpportunity({ id: 'opp-custom-stream' });
       await customRouter.forwardToExecutionEngine(opp);
 
-      // FIX W2-8: xadd now includes id and MAXLEN options
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      // SA-005 FIX: xaddWithLimit auto-applies MAXLEN from STREAM_MAX_LENGTHS
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:custom-exec',
         expect.any(Object),
-        '*',
-        expect.objectContaining({ maxLen: 5000 }),
       );
     });
 
     it('should use custom dlqStream when configured', async () => {
-      streamsClient.xadd.mockImplementation(async (stream: string) => {
+      streamsClient.xaddWithLimit.mockImplementation(async (stream: string) => {
         if (stream !== 'stream:custom-dlq') {
           throw new Error('fail');
         }
@@ -1184,7 +1181,7 @@ describe('OpportunityRouter', () => {
       const opp = createOpportunity({ id: 'opp-custom-dlq' });
       await customRouter.forwardToExecutionEngine(opp);
 
-      expect(streamsClient.xadd).toHaveBeenCalledWith(
+      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:custom-dlq',
         expect.objectContaining({ opportunityId: 'opp-custom-dlq' }),
       );

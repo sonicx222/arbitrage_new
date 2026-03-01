@@ -1215,7 +1215,7 @@ export class ExecutionEngineService {
         : createTraceContext('execution-engine');
       const enrichedResult = propagateContext(result as unknown as Record<string, unknown>, traceCtx);
 
-      await this.streamsClient.xadd(RedisStreams.EXECUTION_RESULTS, enrichedResult);
+      await this.streamsClient.xaddWithLimit(RedisStreams.EXECUTION_RESULTS, enrichedResult);
     } catch (error) {
       this.logger.error('Failed to publish execution result', { error });
     }

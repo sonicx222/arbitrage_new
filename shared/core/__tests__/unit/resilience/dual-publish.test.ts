@@ -29,7 +29,7 @@ describe('dualPublish', () => {
   let mockRedis: ReturnType<typeof createInlineRedisMock>;
 
   // Mock Redis Streams client
-  let mockStreamsClient: { xadd: jest.Mock<(...args: any[]) => Promise<any>> };
+  let mockStreamsClient: { xaddWithLimit: jest.Mock<(...args: any[]) => Promise<any>> };
 
   const testStreamName = 'stream:test-events';
   const testPubsubChannel = 'test:events';
@@ -39,7 +39,7 @@ describe('dualPublish', () => {
     mockRedis = createInlineRedisMock();
 
     mockStreamsClient = {
-      xadd: jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue('1234567890-0'),
+      xaddWithLimit: jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue('1234567890-0'),
     };
   });
 
@@ -83,8 +83,8 @@ describe('dualPublish', () => {
         testMessage
       );
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(testStreamName, testMessage);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(testStreamName, testMessage);
     });
 
     it('should publish to Pub/Sub channel', async () => {
@@ -109,7 +109,7 @@ describe('dualPublish', () => {
         testMessage
       );
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
       expect(mockRedis.publish).toHaveBeenCalledTimes(1);
     });
 
@@ -125,14 +125,14 @@ describe('dualPublish', () => {
         testMessage
       );
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(customStream, testMessage);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(customStream, testMessage);
       expect(mockRedis.publish).toHaveBeenCalledWith(customChannel, testMessage);
     });
   });
 
   describe('partial failure (one target fails, other succeeds)', () => {
     it('should still publish to Pub/Sub when Streams fails', async () => {
-      mockStreamsClient.xadd.mockRejectedValueOnce(new Error('Stream unavailable'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValueOnce(new Error('Stream unavailable'));
 
       await dualPublish(
         mockStreamsClient as unknown as RedisStreamsClient,
@@ -143,12 +143,12 @@ describe('dualPublish', () => {
       );
 
       // Streams failed but Pub/Sub should still succeed
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
       expect(mockRedis.publish).toHaveBeenCalledTimes(1);
     });
 
     it('should not throw when Streams fails but Pub/Sub succeeds', async () => {
-      mockStreamsClient.xadd.mockRejectedValueOnce(new Error('Stream write error'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValueOnce(new Error('Stream write error'));
 
       await expect(
         dualPublish(
@@ -173,7 +173,7 @@ describe('dualPublish', () => {
       );
 
       // Streams should still have been called and succeeded
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
       expect(mockRedis.publish).toHaveBeenCalledTimes(1);
     });
 
@@ -194,7 +194,7 @@ describe('dualPublish', () => {
 
   describe('complete failure (both targets fail)', () => {
     it('should not throw when both Streams and Pub/Sub fail', async () => {
-      mockStreamsClient.xadd.mockRejectedValueOnce(new Error('Stream down'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValueOnce(new Error('Stream down'));
       mockRedis.publish.mockRejectedValueOnce(new Error('Pub/Sub down'));
 
       await expect(
@@ -209,7 +209,7 @@ describe('dualPublish', () => {
     });
 
     it('should attempt both publishes even when both will fail', async () => {
-      mockStreamsClient.xadd.mockRejectedValueOnce(new Error('Stream error'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValueOnce(new Error('Stream error'));
       mockRedis.publish.mockRejectedValueOnce(new Error('Pub/Sub error'));
 
       await dualPublish(
@@ -220,7 +220,7 @@ describe('dualPublish', () => {
         testMessage
       );
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
       expect(mockRedis.publish).toHaveBeenCalledTimes(1);
     });
   });
@@ -275,7 +275,7 @@ describe('dualPublish', () => {
         complexMessage
       );
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(testStreamName, complexMessage);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(testStreamName, complexMessage);
       expect(mockRedis.publish).toHaveBeenCalledWith(testPubsubChannel, complexMessage);
     });
 
@@ -290,7 +290,7 @@ describe('dualPublish', () => {
         emptyMessage
       );
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(testStreamName, emptyMessage);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(testStreamName, emptyMessage);
       expect(mockRedis.publish).toHaveBeenCalledWith(testPubsubChannel, emptyMessage);
     });
   });

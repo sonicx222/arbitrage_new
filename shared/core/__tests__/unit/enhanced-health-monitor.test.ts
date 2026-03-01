@@ -41,6 +41,7 @@ const createMockRedis = () => ({
 
 const createMockStreamsClient = () => ({
   xadd: jest.fn<() => Promise<string>>().mockResolvedValue('1234-0'),
+  xaddWithLimit: jest.fn<() => Promise<string>>().mockResolvedValue('1234-0'),
   ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
   disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
 });
@@ -329,8 +330,8 @@ describe('EnhancedHealthMonitor', () => {
 
       // Streams client should have been called with health alert
       // (xadd is called when an alert rule triggers)
-      if (mocks.streams.xadd.mock.calls.length > 0) {
-        const streamArg = (mocks.streams.xadd.mock.calls[0] as any[])[0];
+      if (mocks.streams.xaddWithLimit.mock.calls.length > 0) {
+        const streamArg = (mocks.streams.xaddWithLimit.mock.calls[0] as any[])[0];
         expect(streamArg).toBe('stream:health-alerts');
       }
 

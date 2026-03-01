@@ -15,6 +15,7 @@ import { getRedisClient, resetRedisInstance } from '@arbitrage/core/redis';
 // P2-FIX: Mock Redis Streams client for ADR-002 compliant messaging
 const mockStreamsClient = {
   xadd: jest.fn(() => Promise.resolve('1234567890-0')),
+  xaddWithLimit: jest.fn(() => Promise.resolve('1234567890-0')),
   xread: jest.fn(() => Promise.resolve(null)),
   xreadgroup: jest.fn(() => Promise.resolve(null)),
   xack: jest.fn(() => Promise.resolve(1)),
@@ -98,7 +99,7 @@ describe('ExpertSelfHealingManager', () => {
 
     // Re-establish mock implementations after clearMocks: true wipes jest.fn() impls.
     // Streams client methods
-    mockStreamsClient.xadd.mockImplementation(() => Promise.resolve('1234567890-0'));
+    mockStreamsClient.xaddWithLimit.mockImplementation(() => Promise.resolve('1234567890-0'));
     mockStreamsClient.xread.mockImplementation(() => Promise.resolve(null));
     mockStreamsClient.xreadgroup.mockImplementation(() => Promise.resolve(null));
     mockStreamsClient.xack.mockImplementation(() => Promise.resolve(1));
@@ -217,7 +218,8 @@ describe('ExpertSelfHealingManager', () => {
 
       // P0-10: publishControlMessage uses dual-publish: streams (xadd) + pub/sub (publish)
       // Streams: should publish to stream:system-failures via xadd
-      expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
+      // SA-006 FIX: xaddWithLimit auto-applies MAXLEN (2-arg signature)
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:system-failures',
         expect.objectContaining({
           type: 'failure_reported',
@@ -226,8 +228,6 @@ describe('ExpertSelfHealingManager', () => {
             component: 'component',
           }),
         }),
-        '*',
-        expect.any(Object)
       );
 
       // Pub/Sub: should publish to system:failures channel

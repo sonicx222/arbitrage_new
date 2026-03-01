@@ -337,6 +337,29 @@ export const FEATURE_FLAGS = {
    * @see shared/core/src/mev-protection/mev-share-event-listener.ts
    */
   useMevShareBackrun: process.env.FEATURE_MEV_SHARE_BACKRUN === 'true',
+
+  // =========================================================================
+  // Feature flags previously scattered across individual service/core files.
+  // Centralized here for single-source-of-truth (SA-011).
+  // =========================================================================
+
+  /** Enable Solana execution strategy (requires SOLANA_RPC_URL). @default false */
+  useSolanaExecution: process.env.FEATURE_SOLANA_EXECUTION === 'true',
+
+  /** Enable statistical arbitrage strategy. @default false */
+  useStatisticalArb: process.env.FEATURE_STATISTICAL_ARB === 'true',
+
+  /** Enable MEV-Share rebate mode. @default false @see shared/config/src/mev-config.ts */
+  useMevShare: process.env.FEATURE_MEV_SHARE === 'true',
+
+  /** Enable adaptive risk scoring thresholds. @default false @see shared/config/src/mev-config.ts */
+  useAdaptiveRiskScoring: process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true',
+
+  /** Enable Timeboost MEV protection (Arbitrum). @default false @see shared/core/src/mev-protection/timeboost-provider.ts */
+  useTimeboost: process.env.FEATURE_TIMEBOOST === 'true',
+
+  /** Enable Flashbots Protect L2 provider. @default false @see shared/core/src/mev-protection/flashbots-protect-l2.provider.ts */
+  useFlashbotsProtectL2: process.env.FEATURE_FLASHBOTS_PROTECT_L2 === 'true',
 };
 
 /**

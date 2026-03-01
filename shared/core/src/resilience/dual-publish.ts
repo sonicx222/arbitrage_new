@@ -32,7 +32,7 @@ export async function dualPublish(
   // Primary: Redis Streams (ADR-002 compliant)
   if (streamsClient) {
     try {
-      await streamsClient.xadd(streamName, message);
+      await streamsClient.xaddWithLimit(streamName, message);
     } catch (error) {
       logger.error('Failed to publish to Redis Stream', { error, streamName });
     }

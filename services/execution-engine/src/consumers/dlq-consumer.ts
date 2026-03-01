@@ -350,7 +350,7 @@ export class DlqConsumer {
         replayData.originalError = candidate.data.error;
         replayData.replayedAt = now;
 
-        await this.streamsClient.xadd(
+        await this.streamsClient.xaddWithLimit(
           RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
           replayData
         );
@@ -463,7 +463,7 @@ export class DlqConsumer {
       replayData.replayedAt = Date.now();
 
       // Send back to execution requests stream
-      await this.streamsClient.xadd(
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
         replayData
       );

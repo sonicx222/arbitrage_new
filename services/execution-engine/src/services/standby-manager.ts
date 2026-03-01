@@ -242,7 +242,7 @@ export class StandbyManager {
       // Publish activation event to stream
       const streamsClient = this.getStreamsClient();
       if (streamsClient) {
-        await streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, {
+        await streamsClient.xaddWithLimit(RedisStreamsClient.STREAMS.HEALTH, {
           name: 'execution-engine',
           service: 'execution-engine',
           status: 'healthy',

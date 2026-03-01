@@ -539,6 +539,12 @@ export class MultiLegPathFinder {
       return null;
     }
 
+    // RT-004 FIX: Filter unrealistic profit percentages from simulation drift.
+    // Consistent with simple-arbitrage-detector's 20% threshold.
+    if (netProfit > 0.20) {
+      return null;
+    }
+
     // Calculate confidence
     const pools = this.getPoolsForPath(state.tokens, state.dexes, closingPool, ctx);
     const confidence = this.calculateConfidence(allSteps, pools);

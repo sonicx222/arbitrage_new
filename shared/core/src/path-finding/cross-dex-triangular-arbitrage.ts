@@ -534,6 +534,12 @@ export class CrossDexTriangularArbitrage {
         return null;
       }
 
+      // RT-004 FIX: Filter unrealistic profit percentages from simulation drift.
+      // Consistent with simple-arbitrage-detector's 20% threshold.
+      if (netProfit > 0.20) {
+        return null;
+      }
+
       // Estimate execution time
       const executionTime = this.estimateExecutionTime(chain, steps);
 
@@ -730,6 +736,12 @@ export class CrossDexTriangularArbitrage {
       const netProfit = grossProfit - gasCost;
 
       if (netProfit < this.minProfitThreshold) {
+        return null;
+      }
+
+      // RT-004 FIX: Filter unrealistic profit percentages from simulation drift.
+      // Consistent with simple-arbitrage-detector's 20% threshold.
+      if (netProfit > 0.20) {
         return null;
       }
 

@@ -34,6 +34,7 @@ export interface OpportunityRouterLogger {
  */
 export interface OpportunityStreamsClient {
   xadd(streamName: string, data: Record<string, unknown>, id?: string, options?: { maxLen?: number; approximate?: boolean }): Promise<string>;
+  xaddWithLimit(streamName: string, data: Record<string, unknown>, options?: { approximate?: boolean }): Promise<string>;
 }
 
 /**
@@ -482,11 +483,8 @@ export class OpportunityRouter {
         return;
       }
       try {
-        // FIX W2-8: Use MAXLEN to prevent unbounded stream growth
-        await this.streamsClient.xadd(this.config.executionRequestsStream, messageData, '*', {
-          maxLen: this.config.executionStreamMaxLen,
-          approximate: true,
-        });
+        // SA-005 FIX: Use xaddWithLimit for automatic MAXLEN from STREAM_MAX_LENGTHS
+        await this.streamsClient.xaddWithLimit(this.config.executionRequestsStream, messageData);
 
         // Success - record and return
         const justRecovered = this.circuitBreaker.recordSuccess();
@@ -596,7 +594,7 @@ export class OpportunityRouter {
     }
 
     try {
-      await this.streamsClient.xadd(this.config.dlqStream, {
+      await this.streamsClient.xaddWithLimit(this.config.dlqStream, {
         opportunityId: opportunity.id,
         originalData: JSON.stringify(opportunity),
         error: error?.message || 'Unknown error',

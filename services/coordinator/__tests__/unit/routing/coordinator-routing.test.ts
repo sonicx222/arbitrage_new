@@ -188,7 +188,7 @@ describe('OpportunityRouter', () => {
         true,
       );
 
-      expect(mockStreams.xadd).toHaveBeenCalled();
+      expect(mockStreams.xaddWithLimit).toHaveBeenCalled();
       expect(router.getTotalExecutions()).toBe(1);
     });
 
@@ -198,7 +198,7 @@ describe('OpportunityRouter', () => {
         false,
       );
 
-      expect(mockStreams.xadd).not.toHaveBeenCalled();
+      expect(mockStreams.xaddWithLimit).not.toHaveBeenCalled();
     });
   });
 
@@ -216,8 +216,8 @@ describe('OpportunityRouter', () => {
       );
 
       // OP-2 FIX: xadd is called once for the DLQ write, not for execution stream
-      expect(mockStreams.xadd).toHaveBeenCalledTimes(1);
-      expect(mockStreams.xadd).toHaveBeenCalledWith(
+      expect(mockStreams.xaddWithLimit).toHaveBeenCalledTimes(1);
+      expect(mockStreams.xaddWithLimit).toHaveBeenCalledWith(
         'stream:forwarding-dlq',
         expect.objectContaining({
           opportunityId: 'cb-skip',
@@ -255,7 +255,7 @@ describe('OpportunityRouter', () => {
     });
 
     it('should retry on forwarding failure and eventually move to DLQ', async () => {
-      (mockStreams.xadd as jest.Mock).mockRejectedValue(new Error('Redis down'));
+      (mockStreams.xaddWithLimit as jest.Mock).mockRejectedValue(new Error('Redis down'));
       // After all retries fail, circuit breaker still closed
       (mockCircuitBreaker.isCurrentlyOpen as jest.Mock).mockReturnValue(false);
       (mockCircuitBreaker.recordFailure as jest.Mock).mockReturnValue(false);

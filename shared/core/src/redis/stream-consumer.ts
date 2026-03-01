@@ -239,7 +239,7 @@ export class StreamConsumer {
       for (const entry of stuckMessages) {
         try {
           // Route to DLQ with metadata about why the message was moved
-          await this.client.xadd(dlqStream, {
+          await this.client.xaddWithLimit(dlqStream, {
             originalStream: this.config.config.streamName,
             originalId: entry.id,
             consumerGroup: this.config.config.groupName,

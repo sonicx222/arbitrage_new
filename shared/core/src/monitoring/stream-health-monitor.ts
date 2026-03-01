@@ -18,6 +18,8 @@ export interface StreamHealthMonitorConfig {
   logger?: LoggerLike;
   /** Optional streams client for testing (defaults to getRedisStreamsClient) */
   streamsClient?: RedisStreamsClient;
+  /** Consumer group name used for XPENDING lag queries (defaults to 'coordinator-group') */
+  consumerGroup?: string;
 }
 
 const defaultLogger = createLogger('stream-health-monitor');
@@ -119,7 +121,7 @@ export class StreamHealthMonitor {
   private initializingPromise: Promise<void> | null = null; // Race condition fix
   private lastAlerts: Map<string, number> = new Map(); // Alert deduplication
   private alertCooldownMs = 60000; // 1 minute cooldown between same alerts
-  private defaultConsumerGroup = 'arbitrage-group'; // Configurable group name
+  private defaultConsumerGroup = 'coordinator-group'; // SA-003 FIX: Match real consumer group name
   private maxAlertAge = 3600000; // Remove alerts older than 1 hour
   private maxMetricsAge = 600000; // Remove metrics older than 10 minutes
 
@@ -127,6 +129,9 @@ export class StreamHealthMonitor {
     // Use injected dependencies or defaults
     this.logger = config.logger ?? defaultLogger;
     this.injectedStreamsClient = config.streamsClient ?? null;
+    if (config.consumerGroup) {
+      this.defaultConsumerGroup = config.consumerGroup;
+    }
     // Default thresholds
     this.thresholds = {
       lagWarning: 100,

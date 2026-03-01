@@ -365,8 +365,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
         instanceId,
         ...config?.leaderElection
       },
-      consumerGroup: config?.consumerGroup || 'coordinator-group',
-      consumerId: config?.consumerId || instanceId,
+      consumerGroup: config?.consumerGroup ?? 'coordinator-group',
+      consumerId: config?.consumerId ?? instanceId,
       // Standby configuration (ADR-007)
       isStandby: config?.isStandby ?? false,
       canBecomeLeader: config?.canBecomeLeader ?? true,
@@ -943,7 +943,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // The dummy message approach is standard practice for publish-only streams.
     // The execution-engine will skip 'stream-init' type messages.
     try {
-      await this.streamsClient.xadd(
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
         {
           type: 'stream-init',
@@ -1985,7 +1985,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         ...(notificationHealth && { notificationHealth })
       };
 
-      await this.streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, health);
+      await this.streamsClient.xaddWithLimit(RedisStreamsClient.STREAMS.HEALTH, health);
 
     } catch (error) {
       this.logger.error('Failed to report health', { error });

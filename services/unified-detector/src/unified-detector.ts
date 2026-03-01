@@ -177,7 +177,7 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
   // Now stores expiresAt timestamps for proper cleanup
   private activeOpportunities: Map<string, number> = new Map(); // opportunityId -> expiresAt
   private opportunityCleanupInterval: NodeJS.Timeout | null = null;
-  private static readonly OPPORTUNITY_CLEANUP_INTERVAL_MS = 5000;
+  private static readonly OPPORTUNITY_CLEANUP_INTERVAL_MS = 2000;
 
   // FIX C3: Opportunity outcome counters for detection quality monitoring
   private opportunityExpiredCount: number = 0;

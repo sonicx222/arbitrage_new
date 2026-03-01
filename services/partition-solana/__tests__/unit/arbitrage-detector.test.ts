@@ -46,8 +46,9 @@ const flushPromises = (): Promise<void> =>
 /**
  * Create a properly typed mock Redis Streams client.
  */
-const createMockStreamsClient = (): SolanaArbitrageStreamsClient & { xadd: jest.Mock<() => Promise<string | null>> } => ({
+const createMockStreamsClient = (): SolanaArbitrageStreamsClient & { xadd: jest.Mock<() => Promise<string | null>>; xaddWithLimit: jest.Mock<() => Promise<string | null>> } => ({
   xadd: jest.fn<() => Promise<string | null>>().mockResolvedValue('message-id'),
+  xaddWithLimit: jest.fn<() => Promise<string | null>>().mockResolvedValue('message-id'),
 });
 
 const createMockPool = createMockSolanaPool;
@@ -589,7 +590,7 @@ describe('SolanaArbitrageDetector', () => {
 
       const opportunity = createSyntheticOpportunity();
       await detector.publishOpportunity(opportunity);
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
     });
   });
 
@@ -1147,7 +1148,8 @@ describe('SolanaArbitrageDetector', () => {
     it('should retry on transient Redis failures', async () => {
       let callCount = 0;
       const flakeyStreamsClient: SolanaArbitrageStreamsClient = {
-        xadd: jest.fn<() => Promise<string | null>>().mockImplementation(async () => {
+        xadd: jest.fn<() => Promise<string | null>>().mockResolvedValue('message-id'),
+        xaddWithLimit: jest.fn<() => Promise<string | null>>().mockImplementation(async () => {
           callCount++;
           if (callCount < 3) {
             throw new Error('Transient Redis error');
@@ -1161,12 +1163,13 @@ describe('SolanaArbitrageDetector', () => {
       const opportunity = createSyntheticOpportunity();
       await detector.publishOpportunity(opportunity);
       // Should have been called 3 times (2 failures + 1 success)
-      expect(flakeyStreamsClient.xadd).toHaveBeenCalledTimes(3);
+      expect(flakeyStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(3);
     });
 
     it('should give up after max retries', async () => {
       const failingStreamsClient: SolanaArbitrageStreamsClient = {
-        xadd: jest.fn<() => Promise<string | null>>().mockRejectedValue(new Error('Permanent failure')),
+        xadd: jest.fn<() => Promise<string | null>>().mockResolvedValue('message-id'),
+        xaddWithLimit: jest.fn<() => Promise<string | null>>().mockRejectedValue(new Error('Permanent failure')),
       };
 
       detector.setStreamsClient(failingStreamsClient);
@@ -1174,7 +1177,7 @@ describe('SolanaArbitrageDetector', () => {
       const opportunity = createSyntheticOpportunity();
       await detector.publishOpportunity(opportunity);
       // Should have been called MAX_ATTEMPTS times (3)
-      expect(failingStreamsClient.xadd).toHaveBeenCalledTimes(3);
+      expect(failingStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(3);
     });
   });
 
