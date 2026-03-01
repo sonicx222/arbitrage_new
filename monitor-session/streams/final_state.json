@@ -1,0 +1,622 @@
+{
+  "timestamp": "2026-03-01T10:34:19.903Z",
+  "streams": {
+    "stream:pending-opportunities": {
+      "info": [
+        "length",
+        0,
+        "radix-tree-keys",
+        0,
+        "radix-tree-nodes",
+        1,
+        "last-generated-id",
+        "0-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        0,
+        "recorded-first-entry-id",
+        "0-0",
+        "groups",
+        2,
+        "first-entry",
+        null,
+        "last-entry",
+        null
+      ],
+      "groups": [
+        [
+          "name",
+          "cross-chain-detector-group",
+          "consumers",
+          6,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ],
+        [
+          "name",
+          "orderflow-pipeline",
+          "consumers",
+          4,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ]
+      ],
+      "length": 0
+    },
+    "stream:system-failover": {
+      "info": [
+        "length",
+        0,
+        "radix-tree-keys",
+        0,
+        "radix-tree-nodes",
+        1,
+        "last-generated-id",
+        "0-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        0,
+        "recorded-first-entry-id",
+        "0-0",
+        "groups",
+        1,
+        "first-entry",
+        null,
+        "last-entry",
+        null
+      ],
+      "groups": [
+        [
+          "name",
+          "failover-coordinator",
+          "consumers",
+          8,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ]
+      ],
+      "length": 0
+    },
+    "stream:opportunities": {
+      "info": [
+        "length",
+        10002,
+        "radix-tree-keys",
+        2481,
+        "radix-tree-nodes",
+        4953,
+        "last-generated-id",
+        "1772361273156-1",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        65786,
+        "recorded-first-entry-id",
+        "1772361103585-0",
+        "groups",
+        1,
+        "first-entry",
+        [
+          "1772361103585-0",
+          [
+            "data",
+            "{\"id\":\"ethereum-1772361103584-86759\",\"type\":\"simple\",\"chain\":\"ethereum\",\"buyDex\":\"uniswap_v3\",\"sellDex\":\"sushiswap\",\"buyPair\":\"0xf144c1d26efaa5152b8a8fcf5fc290cba9534473\",\"sellPair\":\"0x9bcce38b43a2623937be732b7a5433d2e9bb86be\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0\",\"tokenIn\":\"0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0\",\"tokenOut\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"amountIn\":\"8815936188265278944051\",\"buyPrice\":1.0783561421200953,\"sellPrice\":1.1343094807458798,\"profitPercentage\":4.588762454283215,\"expectedProfit\":404542369800683850000,\"estimatedProfit\":0,\"gasEstimate\":\"250000\",\"confidence\":0.75,\"timestamp\":1772361103584,\"expiresAt\":1772361118584,\"blockNumber\":1772360542,\"status\":\"pending\",\"_source\":\"partition-high-value\",\"_publishedAt\":1772361103584,\"_trace_traceId\":\"aa5a194d670e459f42ba8d5600cb89ec\",\"_trace_spanId\":\"ecccedd0b8d5975b\",\"_trace_serviceName\":\"partition-high-value\",\"_trace_timestamp\":\"1772361103584\"}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772361273156-1",
+          [
+            "data",
+            "{\"id\":\"cross-chain-1772361273155-r4a9ug72q\",\"type\":\"cross-chain\",\"buyDex\":\"mute\",\"sellDex\":\"spacefi\",\"buyChain\":\"zksync\",\"sellChain\":\"zksync\",\"tokenIn\":\"USDT\",\"tokenOut\":\"WBTC\",\"amountIn\":\"134213179946760012824576\",\"expectedProfit\":82114.78225176108,\"profitPercentage\":0.6118235353959616,\"gasEstimate\":\"0\",\"confidence\":0.95,\"timestamp\":1772361273155,\"blockNumber\":0,\"bridgeRequired\":true,\"bridgeCost\":0.000014901666146300719,\"pipelineTimestamps\":{\"detectedAt\":1772361273155},\"_trace_traceId\":\"12cc632caba28dfe7dcbd360abae2b5c\",\"_trace_spanId\":\"68611476c7045fe4\",\"_trace_serviceName\":\"cross-chain-detector\",\"_trace_timestamp\":\"1772361273155\"}"
+          ]
+        ]
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          0,
+          "last-delivered-id",
+          "1772360946678-5",
+          "entries-read",
+          46192,
+          "lag",
+          10002
+        ]
+      ],
+      "length": 10003
+    },
+    "stream:swap-events": {
+      "info": [
+        "length",
+        0,
+        "radix-tree-keys",
+        0,
+        "radix-tree-nodes",
+        1,
+        "last-generated-id",
+        "0-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        0,
+        "recorded-first-entry-id",
+        "0-0",
+        "groups",
+        1,
+        "first-entry",
+        null,
+        "last-entry",
+        null
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ]
+      ],
+      "length": 0
+    },
+    "stream:service-degradation": {
+      "info": [
+        "length",
+        8,
+        "radix-tree-keys",
+        1,
+        "radix-tree-nodes",
+        2,
+        "last-generated-id",
+        "1772316096681-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        8,
+        "recorded-first-entry-id",
+        "1772313238522-0",
+        "groups",
+        0,
+        "first-entry",
+        [
+          "1772313238522-0",
+          [
+            "data",
+            "{\"type\":\"service_degradation\",\"data\":{\"serviceName\":\"unified-detector-asia-fast\",\"degradationLevel\":\"partial\",\"triggeredBy\":\"chain_bsc_failure\",\"performanceImpact\":0.15},\"timestamp\":1772313238520,\"source\":\"graceful-degradation-manager\"}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772316096681-0",
+          [
+            "data",
+            "{\"type\":\"degradation_applied\",\"data\":{\"serviceName\":\"unified-detector-asia-fast\",\"degradationLevel\":1,\"degradationLevelName\":\"partial\",\"enabledFeatures\":[\"arbitrage_detection\",\"price_prediction\",\"real_time_updates\"],\"disabledFeatures\":[],\"performanceImpact\":0.15},\"timestamp\":1772316096681,\"source\":\"graceful-degradation-manager\"}"
+          ]
+        ]
+      ],
+      "groups": [],
+      "length": 8
+    },
+    "stream:dead-letter-queue": {
+      "info": [
+        "length",
+        321,
+        "radix-tree-keys",
+        119,
+        "radix-tree-nodes",
+        271,
+        "last-generated-id",
+        "1772361267255-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        321,
+        "recorded-first-entry-id",
+        "1772307171497-0",
+        "groups",
+        0,
+        "first-entry",
+        [
+          "1772307171497-0",
+          [
+            "data",
+            "{\"originalMessageId\":\"1772307171480-0\",\"originalStream\":\"stream:execution-requests\",\"opportunityId\":\"cross-chain-1772307159928-9momf5u60\",\"opportunityType\":\"simple\",\"error\":\"[VAL_MISSING_TOKEN_IN] Missing or invalid tokenIn\",\"timestamp\":1772307171497,\"service\":\"execution-engine\",\"instanceId\":\"execution-engine-local-1772306966008\",\"originalPayload\":\"{\\\"id\\\":\\\"cross-chain-1772307159928-9momf5u60\\\",\\\"type\\\":\\\"simple\\\",\\\"chain\\\":\\\"unknown\\\",\\\"buyDex\\\":\\\"sushiswap\\\",\\\"sellDex\\\":\\\"uniswap_v2\\\",\\\"profitPercentage\\\":\\\"0.39572303422470123\\\",\\\"confidence\\\":\\\"0.784788687936962\\\",\\\"timestamp\\\":\\\"1772307159928\\\",\\\"expiresAt\\\":\\\"\\\",\\\"tokenIn\\\":\\\"\\\",\\\"tokenOut\\\":\\\"\\\",\\\"amountIn\\\":\\\"\\\",\\\"forwardedBy\\\":\\\"coordinator-local-local-1772306972162\\\",\\\"forwardedAt\\\":\\\"1772307161979\\\",\\\"pipelineTimestamps\\\":\\\"{\\\\\\\"coordinatorAt\\\\\\\":1772307161978}\\\",\\\"_trace_traceId\\\":\\\"6dff1cd1d0d993083973e08e01bab549\\\",\\\"_trace_spanId\\\":\\\"6ac72723e15a1824\\\",\\\"_trace_serviceName\\\":\\\"coordinator\\\",\\\"_trace_timestamp\\\":\\\"1772307161978\\\",\\\"_trace_parentSpanId\\\":\\\"2b487d168f0b7855\\\"}\"}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772361267255-0",
+          [
+            "data",
+            "{\"originalMessageId\":\"1772361246280-0\",\"originalStream\":\"stream:execution-requests\",\"opportunityId\":\"linea-1772360946677-6020\",\"opportunityType\":\"simple\",\"error\":\"[VAL_EXPIRED] Opportunity has expired: Expired 304661ms ago\",\"timestamp\":1772361261338,\"service\":\"execution-engine\",\"instanceId\":\"execution-engine-local-1772360422900\",\"originalPayload\":\"{\\\"id\\\":\\\"linea-1772360946677-6020\\\",\\\"type\\\":\\\"simple\\\",\\\"chain\\\":\\\"linea\\\",\\\"buyDex\\\":\\\"pancakeswap_v3\\\",\\\"sellDex\\\":\\\"syncswap\\\",\\\"profitPercentage\\\":\\\"1.0463075840778302\\\",\\\"confidence\\\":\\\"0.8\\\",\\\"timestamp\\\":\\\"1772360946677\\\",\\\"tokenIn\\\":\\\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\\\",\\\"tokenOut\\\":\\\"0xa219439258ca9da29e9cc4ce5596924745e12b93\\\",\\\"amountIn\\\":\\\"1011210703351\\\",\\\"expectedProfit\\\":\\\"10580374280.168282\\\",\\\"estimatedProfit\\\":\\\"0\\\",\\\"gasEstimate\\\":\\\"100000\\\",\\\"expiresAt\\\":\\\"1772360956677\\\",\\\"forwardedBy\\\":\\\"coordinator-local-local-1772360423092\\\",\\\"forwardedAt\\\":\\\"1772361237931\\\",\\\"pipelineTimestamps\\\":\\\"{\\\\\\\"coordinatorAt\\\\\\\":1772361237931}\\\",\\\"_trace_traceId\\\":\\\"99295c6e79a613630fcdfa4e9581b1ae\\\",\\\"_trace_spanId\\\":\\\"8bea8a1e05430f6a\\\",\\\"_trace_serviceName\\\":\\\"coordinator\\\",\\\"_trace_timestamp\\\":\\\"1772361237931\\\",\\\"_trace_parentSpanId\\\":\\\"67321c444c317c04\\\"}\"}"
+          ]
+        ]
+      ],
+      "groups": [],
+      "length": 321
+    },
+    "stream:whale-alerts": {
+      "info": [
+        "length",
+        0,
+        "radix-tree-keys",
+        0,
+        "radix-tree-nodes",
+        1,
+        "last-generated-id",
+        "0-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        0,
+        "recorded-first-entry-id",
+        "0-0",
+        "groups",
+        2,
+        "first-entry",
+        null,
+        "last-entry",
+        null
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ],
+        [
+          "name",
+          "cross-chain-detector-group",
+          "consumers",
+          6,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ]
+      ],
+      "length": 0
+    },
+    "stream:price-updates": {
+      "info": [
+        "length",
+        19465,
+        "radix-tree-keys",
+        6850,
+        "radix-tree-nodes",
+        14370,
+        "last-generated-id",
+        "1772361278883-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        19465,
+        "recorded-first-entry-id",
+        "1772306971761-0",
+        "groups",
+        2,
+        "first-entry",
+        [
+          "1772306971761-0",
+          [
+            "data",
+            "{\"chain\":\"zksync\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_WETH_USDT\",\"pairAddress\":\"0x9be5955e9ed6f8c0f58eefd11b2dbdfd117c1f0b\",\"token0\":\"0x5aea5775959fbc2557cc8789bc1bf90a239d9a91\",\"token1\":\"0x493257fd37edb34451f62edf8d2a0c418852ba4c\",\"price\":312500000,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"3200000000000000\",\"timestamp\":1772306971759,\"blockNumber\":1772306971,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772306971759},\"source\":\"simulation\",\"_trace_traceId\":\"019ca5ba3c6f000000010000ccb48874\",\"_trace_spanId\":\"a5ba3c6f00000001\",\"_trace_serviceName\":\"chain-detector:zksync\",\"_trace_timestamp\":\"1772306971759\"}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772361278883-0",
+          [
+            "data",
+            "{\"type\":\"batch\",\"count\":50,\"messages\":[{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_WETH_USDC\",\"pairAddress\":\"0x56605f0e7fc2c2edd7bf02824fe500a00b2d5487\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"price\":1404746199112.7834,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"711872365721\",\"timestamp\":1772361277231,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277231},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df2f0000fcb90000a2bb6ac5\",\"_trace_spanId\":\"a8f6df2f0000fcb9\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277231\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_WETH_DAI\",\"pairAddress\":\"0x22fc21898a25052c6a2a0b769eb797bd48b8caaf\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":0.9558685896784168,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1046168909406710850912256\",\"timestamp\":1772361277231,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277231},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df2f0000fcba0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df2f0000fcba\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277231\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_WETH_WBTC\",\"pairAddress\":\"0x11fd3cbf17deb6274dc2d29f0df615a86bf6d899\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":9149015753.520702,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"109301374808015\",\"timestamp\":1772361277231,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277231},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df2f0000fcbb0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df2f0000fcbb\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277231\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_WETH_BUSD\",\"pairAddress\":\"0x43f987ca4af3ab82b2cede1c22377b27d0b70699\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":0.977098423345157,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1023438351866783277776896\",\"timestamp\":1772361277231,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277231},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df2f0000fcbc0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df2f0000fcbc\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277231\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDT_USDC\",\"pairAddress\":\"0xd1cdbdc849e09c63e544655490bb16a11e621c67\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"price\":1.288073924648834,\"reserve0\":\"1000000000000\",\"reserve1\":\"776352956817\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcbd0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcbd\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDT_DAI\",\"pairAddress\":\"0x094493b9eb057663d57a96004b82b08afa2cbd35\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":1.033316e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"967757741072269071876096\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcbe0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcbe\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDT_WBTC\",\"pairAddress\":\"0x58cc27a14ed46d172685870fddc6f4a3fb5204c2\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":0.01079554480700559,\"reserve0\":\"1000000000000\",\"reserve1\":\"92630804454729\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcbf0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcbf\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDT_BUSD\",\"pairAddress\":\"0xb5af34d0b68084fcde0371e46fc75fcb1f94b07b\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.063063e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"940677313536322269347840\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcc00000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcc0\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDC_DAI\",\"pairAddress\":\"0x271f4aa1b21bd421f7fe11c90105cd0857797409\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":1.070786e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"933892886658363649163264\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcc10000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcc1\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDC_WBTC\",\"pairAddress\":\"0x5eb084f5f94caebd4a404fe3a2548d517d181a6b\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":0.009651600524879443,\"reserve0\":\"1000000000000\",\"reserve1\":\"103609758549605\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcc20000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcc2\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_USDC_BUSD\",\"pairAddress\":\"0x8a733482b93f2397e17e62402bda9b78a6abcefd\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.241275e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"805623174081485589184512\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcc30000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcc3\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_DAI_WBTC\",\"pairAddress\":\"0xd262afa62f3ca59b2b47af9ebdc0f9cebaaf0a82\",\"token0\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":8050817324.319428,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"124210991221880\",\"timestamp\":1772361277232,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277232},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df300000fcc40000a2bb6ac5\",\"_trace_spanId\":\"a8f6df300000fcc4\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277232\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_DAI_BUSD\",\"pairAddress\":\"0x496b520bd96f477430639c668e620cf70f316102\",\"token0\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":0.9649055643477975,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1036370850111040320962560\",\"timestamp\":1772361277233,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277233},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df310000fcc50000a2bb6ac5\",\"_trace_spanId\":\"a8f6df310000fcc5\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277233\"},{\"chain\":\"linea\",\"dex\":\"syncswap\",\"pairKey\":\"syncswap_WBTC_BUSD\",\"pairAddress\":\"0xc6ed9432c736afd0298bb9cc9277413b513c58c7\",\"token0\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":7.6957096e-11,\"reserve0\":\"100000000000000\",\"reserve1\":\"1299425326782096907173888\",\"timestamp\":1772361277233,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277233},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df310000fcc60000a2bb6ac5\",\"_trace_spanId\":\"a8f6df310000fcc6\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277233\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_WETH_USDT\",\"pairAddress\":\"0x3150d0e1988b8da338a9e2bd0e40a88b33192806\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"price\":963892129792.7948,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1037460488670\",\"timestamp\":1772361277233,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277233},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df310000fcc70000a2bb6ac5\",\"_trace_spanId\":\"a8f6df310000fcc7\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277233\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_WETH_USDC\",\"pairAddress\":\"0xc4d94d35769aa31fa255166533b997af377934e9\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"price\":979972617031.9882,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1020436676107\",\"timestamp\":1772361277233,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277233},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df310000fcc80000a2bb6ac5\",\"_trace_spanId\":\"a8f6df310000fcc8\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277233\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_WETH_DAI\",\"pairAddress\":\"0xa683909968f6d9b9887a42ec7b2110e724c74fe9\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":1.0748214701741965,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"930387071480745345155072\",\"timestamp\":1772361277233,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277233},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df310000fcc90000a2bb6ac5\",\"_trace_spanId\":\"a8f6df310000fcc9\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277233\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_WETH_WBTC\",\"pairAddress\":\"0x7c08d92d920b3bb4db19e0b94c98a7082f8dc4d0\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":9566473638.149025,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"104531725881961\",\"timestamp\":1772361277233,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277233},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df310000fcca0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df310000fcca\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277233\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_WETH_BUSD\",\"pairAddress\":\"0x93431a892234b329ca258546a871da4472679148\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":0.8627890891035311,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1159031810472981267742720\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fccb0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fccb\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDT_USDC\",\"pairAddress\":\"0x8f047503b90781e950399d61e28ffa2c85d53401\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"price\":0.9421391218859383,\"reserve0\":\"1000000000000\",\"reserve1\":\"1061414367337\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fccc0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fccc\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDT_DAI\",\"pairAddress\":\"0x00f3fb23a708ec2e1ef14480949aff80adbd6f65\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":1.438667e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"695087743619093573402624\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fccd0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fccd\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDT_WBTC\",\"pairAddress\":\"0xb54b9be1653e6e332b31fb6ba9acfb177f181019\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":0.008252144862351854,\"reserve0\":\"1000000000000\",\"reserve1\":\"121180616273743\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fcce0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fcce\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDT_BUSD\",\"pairAddress\":\"0x9a07dc28094282018adb79fbe51c800907caf6f3\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.249446e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"800354365088318967775232\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fccf0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fccf\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDC_DAI\",\"pairAddress\":\"0x3431a89c6df45f04130975520794c3138c7f0a86\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":1.133584e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"882157447086085469372416\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fcd00000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fcd0\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDC_WBTC\",\"pairAddress\":\"0xdd5f9d306160637bdc581b27e0d5809fbb27dad8\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":0.01029278840492949,\"reserve0\":\"1000000000000\",\"reserve1\":\"97155402468108\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fcd10000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fcd1\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_USDC_BUSD\",\"pairAddress\":\"0xc1e5e65fdd44027884c27e8adbe86d5c2a9b9ebf\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.21199e-12,\"reserve0\":\"1000000000000\",\"reserve1\":\"825089295022285039599616\",\"timestamp\":1772361277234,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277234},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df320000fcd20000a2bb6ac5\",\"_trace_spanId\":\"a8f6df320000fcd2\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277234\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_DAI_WBTC\",\"pairAddress\":\"0xa4f52f8a6084ff8d4dcd415080762a0a1d4a6403\",\"token0\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":8700118223.009094,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"114940966819889\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd30000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd3\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_DAI_BUSD\",\"pairAddress\":\"0x09e7408ccc9f36007cf0d5cf2e20943f5fb3a6f9\",\"token0\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.0230782860290164,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"977442306865301012086784\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd40000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd4\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"velocore\",\"pairKey\":\"velocore_WBTC_BUSD\",\"pairAddress\":\"0x0733fdddd741d7e2466c5da301676fe768fdec56\",\"token0\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.03227921e-10,\"reserve0\":\"100000000000000\",\"reserve1\":\"968730154464304091365376\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd50000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd5\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_WETH_USDT\",\"pairAddress\":\"0x7efa45683700da308fd3914425d83ac815c3f7da\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"price\":909566388090.5358,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1099424971166\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd60000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd6\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_WETH_USDC\",\"pairAddress\":\"0x5998352dcd690458094340ff5f4c2f8fe39b8d10\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"price\":705154092928.6952,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1418129753522\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd70000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd7\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_WETH_DAI\",\"pairAddress\":\"0x7de97aa7f7c8583566de34ed74c4844fcd827c08\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":1.017566700324459,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"982736561329239840784384\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd80000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd8\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_WETH_WBTC\",\"pairAddress\":\"0xd0f7e880bde44fa024a2c95311f62aa3873960d3\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":16444358511.268303,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"60811128589465\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcd90000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcd9\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_WETH_BUSD\",\"pairAddress\":\"0x455c98ba967cd71602d0d1d5c2a1296892d2138a\",\"token0\":\"0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.0544954375123994,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"948320840874421773139968\",\"timestamp\":1772361277235,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277235},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df330000fcda0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df330000fcda\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277235\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDT_USDC\",\"pairAddress\":\"0x71b99086f1d6b69cc5e10c15a7bfa167cc15a90e\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"price\":1.0317999556681905,\"reserve0\":\"1000000000000\",\"reserve1\":\"969180115299\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fcdb0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fcdb\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDT_DAI\",\"pairAddress\":\"0xdc927c31dad9de08924eb268c0b8ca990a2af765\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":9.34472e-13,\"reserve0\":\"1000000000000\",\"reserve1\":\"1070122192679206341574656\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fcdc0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fcdc\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDT_WBTC\",\"pairAddress\":\"0x43ba857c204625e7dbe07a774b29c0eeca28494b\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":0.010808886698400483,\"reserve0\":\"1000000000000\",\"reserve1\":\"92516466117457\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fcdd0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fcdd\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDT_BUSD\",\"pairAddress\":\"0x06e1f05d1ddd49e1e257e2743a4cff4d89ad735c\",\"token0\":\"0xa219439258ca9da29e9cc4ce5596924745e12b93\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":8.94405e-13,\"reserve0\":\"1000000000000\",\"reserve1\":\"1118060671027094021472256\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fcde0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fcde\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDC_DAI\",\"pairAddress\":\"0x9d79d904afc5fa19f233e5ce64ca6999c370821d\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"price\":8.36048e-13,\"reserve0\":\"1000000000000\",\"reserve1\":\"1196102482552555007115264\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fcdf0000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fcdf\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDC_WBTC\",\"pairAddress\":\"0x7b3fe83a233cb6ca9c2ae4c28da1088e4c9c0cfe\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":0.00985877615387877,\"reserve0\":\"1000000000000\",\"reserve1\":\"101432468329912\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fce00000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fce0\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_USDC_BUSD\",\"pairAddress\":\"0x4853e1f4c3bba45da7617f0358a81344db201483\",\"token0\":\"0x176211869ca2b568f2a7d4ee941e073a821ee1ff\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":9.94877e-13,\"reserve0\":\"1000000000000\",\"reserve1\":\"1005148830937947247214592\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fce10000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fce1\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_DAI_WBTC\",\"pairAddress\":\"0xf5d977916cf869e57e5b7d78bf5a611c74831fbe\",\"token0\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"token1\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"price\":9437111147.82218,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"105964630948611\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fce20000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fce2\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_DAI_BUSD\",\"pairAddress\":\"0x78bed6e0d9aa8ed5d4576fdb9d6d28ae964068ae\",\"token0\":\"0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":1.0760024528058307,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"929365911195050259251200\",\"timestamp\":1772361277236,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277236},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df340000fce30000a2bb6ac5\",\"_trace_spanId\":\"a8f6df340000fce3\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277236\"},{\"chain\":\"linea\",\"dex\":\"pancakeswap_v3\",\"pairKey\":\"pancakeswap_v3_WBTC_BUSD\",\"pairAddress\":\"0x5213a78e2f42c407ca4e71cc549b8bca938f2776\",\"token0\":\"0x3aab2285ddcddad8edf438c1bab47e1a9d05a9b4\",\"token1\":\"0x7d43aabc515c356145049227cee54b608342c0ad\",\"price\":8.0674816e-11,\"reserve0\":\"100000000000000\",\"reserve1\":\"1239544184574910169874432\",\"timestamp\":1772361277237,\"blockNumber\":1772360576,\"latency\":0,\"fee\":0.0025,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361277237},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6df350000fce40000a2bb6ac5\",\"_trace_spanId\":\"a8f6df350000fce4\",\"_trace_serviceName\":\"chain-detector:linea\",\"_trace_timestamp\":\"1772361277237\"},{\"chain\":\"ethereum\",\"dex\":\"uniswap_v3\",\"pairKey\":\"uniswap_v3_WETH_USDT\",\"pairAddress\":\"0xd9c3e9776c1bd6bfce62431b70576907c3814a20\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0xdac17f958d2ee523a2206206994597c13d831ec7\",\"price\":917990818774.2861,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1089335513546\",\"timestamp\":1772361278877,\"blockNumber\":1772360577,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361278877},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6e59d0000fce50000b476651f\",\"_trace_spanId\":\"a8f6e59d0000fce5\",\"_trace_serviceName\":\"chain-detector:ethereum\",\"_trace_timestamp\":\"1772361278877\"},{\"chain\":\"ethereum\",\"dex\":\"uniswap_v3\",\"pairKey\":\"uniswap_v3_WETH_USDC\",\"pairAddress\":\"0xb930dc7150cb43a8fa9ee0841c9f8863eca716aa\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\",\"price\":929124047300.8425,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1076282551189\",\"timestamp\":1772361278880,\"blockNumber\":1772360577,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361278880},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6e5a00000fce60000b476651f\",\"_trace_spanId\":\"a8f6e5a00000fce6\",\"_trace_serviceName\":\"chain-detector:ethereum\",\"_trace_timestamp\":\"1772361278880\"},{\"chain\":\"ethereum\",\"dex\":\"uniswap_v3\",\"pairKey\":\"uniswap_v3_WETH_WBTC\",\"pairAddress\":\"0xd25893fdd8b7c898619401aed325e485641f6d0c\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0x2260fac5e5542a773aa44fbcfedf7c193bc2c599\",\"price\":11947390215.104849,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"83700287844932\",\"timestamp\":1772361278880,\"blockNumber\":1772360577,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361278880},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6e5a00000fce70000b476651f\",\"_trace_spanId\":\"a8f6e5a00000fce7\",\"_trace_serviceName\":\"chain-detector:ethereum\",\"_trace_timestamp\":\"1772361278880\"},{\"chain\":\"ethereum\",\"dex\":\"uniswap_v3\",\"pairKey\":\"uniswap_v3_WETH_wstETH\",\"pairAddress\":\"0xf144c1d26efaa5152b8a8fcf5fc290cba9534473\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0\",\"price\":1.0876420767017152,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"919420112021143330750464\",\"timestamp\":1772361278880,\"blockNumber\":1772360577,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361278880},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6e5a00000fce80000b476651f\",\"_trace_spanId\":\"a8f6e5a00000fce8\",\"_trace_serviceName\":\"chain-detector:ethereum\",\"_trace_timestamp\":\"1772361278880\"},{\"chain\":\"ethereum\",\"dex\":\"uniswap_v3\",\"pairKey\":\"uniswap_v3_WETH_rETH\",\"pairAddress\":\"0xd65573743727e08c0e9c00a2ca6cbb5c7a4afe26\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0xae78736cd615f374d3085123a210448e74fc6393\",\"price\":0.816085309494204,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"1225362089436192985579520\",\"timestamp\":1772361278881,\"blockNumber\":1772360577,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361278881},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6e5a10000fce90000b476651f\",\"_trace_spanId\":\"a8f6e5a10000fce9\",\"_trace_serviceName\":\"chain-detector:ethereum\",\"_trace_timestamp\":\"1772361278881\"},{\"chain\":\"ethereum\",\"dex\":\"uniswap_v3\",\"pairKey\":\"uniswap_v3_WETH_cbETH\",\"pairAddress\":\"0xada8f70c6683099508546abfd3eb4faf90687e83\",\"token0\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"token1\":\"0xbe9895146f7af43049ca1c1ae358b0541ea49704\",\"price\":1.1329773616819272,\"reserve0\":\"1000000000000000000000000\",\"reserve1\":\"882630168810681425461248\",\"timestamp\":1772361278881,\"blockNumber\":1772360577,\"latency\":0,\"fee\":0.003,\"pipelineTimestamps\":{\"wsReceivedAt\":0,\"publishedAt\":1772361278881},\"source\":\"simulation\",\"_trace_traceId\":\"019ca8f6e5a10000fcea0000b476651f\",\"_trace_spanId\":\"a8f6e5a10000fcea\",\"_trace_serviceName\":\"chain-detector:ethereum\",\"_trace_timestamp\":\"1772361278881\"}],\"timestamp\":1772361278881}"
+          ]
+        ]
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          2,
+          "last-delivered-id",
+          "1772360425514-3",
+          "entries-read",
+          null,
+          "lag",
+          null
+        ],
+        [
+          "name",
+          "cross-chain-detector-group",
+          "consumers",
+          6,
+          "pending",
+          1,
+          "last-delivered-id",
+          "1772361278883-0",
+          "entries-read",
+          19465,
+          "lag",
+          0
+        ]
+      ],
+      "length": 19466
+    },
+    "stream:execution-results": {
+      "info": [
+        "length",
+        1,
+        "radix-tree-keys",
+        1,
+        "radix-tree-nodes",
+        2,
+        "last-generated-id",
+        "1772360431604-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        1,
+        "recorded-first-entry-id",
+        "1772360431604-0",
+        "groups",
+        1,
+        "first-entry",
+        [
+          "1772360431604-0",
+          [
+            "data",
+            "{\"opportunityId\":\"zksync-1772360426211-1\",\"success\":false,\"error\":\"Missing required buyChain field\",\"timestamp\":1772360430545,\"chain\":\"unknown\",\"dex\":\"syncswap\"}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772360431604-0",
+          [
+            "data",
+            "{\"opportunityId\":\"zksync-1772360426211-1\",\"success\":false,\"error\":\"Missing required buyChain field\",\"timestamp\":1772360430545,\"chain\":\"unknown\",\"dex\":\"syncswap\"}"
+          ]
+        ]
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          0,
+          "last-delivered-id",
+          "1772360431604-0",
+          "entries-read",
+          1,
+          "lag",
+          0
+        ]
+      ],
+      "length": 1
+    },
+    "stream:health": {
+      "info": [
+        "length",
+        1002,
+        "radix-tree-keys",
+        136,
+        "radix-tree-nodes",
+        309,
+        "last-generated-id",
+        "1772361283512-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        2562,
+        "recorded-first-entry-id",
+        "1772316274185-0",
+        "groups",
+        1,
+        "first-entry",
+        [
+          "1772316274185-0",
+          [
+            "data",
+            "{\"name\":\"unified-detector-solana-native\",\"partitionId\":\"solana-native\",\"status\":\"healthy\",\"chainHealth\":{\"solana\":{\"chainId\":\"solana\",\"status\":\"healthy\",\"blocksBehind\":0,\"lastBlockTime\":1772316274184,\"wsConnected\":true,\"eventsPerSecond\":102.17950506194025,\"errorCount\":0}},\"totalEventsProcessed\":31500,\"avgEventLatencyMs\":0,\"memoryUsage\":44421544,\"cpuUsage\":0.94,\"uptimeSeconds\":308.281,\"lastHealthCheck\":1772316274184,\"activeOpportunities\":2}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772361283512-0",
+          [
+            "data",
+            "{\"name\":\"coordinator\",\"service\":\"coordinator\",\"status\":\"healthy\",\"isLeader\":true,\"uptime\":897.3612603,\"memoryUsage\":52192568,\"cpuUsage\":0,\"timestamp\":1772361275766,\"metrics\":{\"activeServices\":5,\"totalOpportunities\":51,\"pendingOpportunities\":0},\"notificationHealth\":{\"hasConfiguredChannels\":false,\"circuitStatus\":{\"discord\":{\"isOpen\":false,\"failures\":0},\"slack\":{\"isOpen\":false,\"failures\":0}},\"droppedAlerts\":0}}"
+          ]
+        ]
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          6,
+          "last-delivered-id",
+          "1772360697014-0",
+          "entries-read",
+          2327,
+          "lag",
+          235
+        ]
+      ],
+      "length": 1002
+    },
+    "stream:volume-aggregates": {
+      "info": [
+        "length",
+        0,
+        "radix-tree-keys",
+        0,
+        "radix-tree-nodes",
+        1,
+        "last-generated-id",
+        "0-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        0,
+        "recorded-first-entry-id",
+        "0-0",
+        "groups",
+        1,
+        "first-entry",
+        null,
+        "last-entry",
+        null
+      ],
+      "groups": [
+        [
+          "name",
+          "coordinator-group",
+          "consumers",
+          8,
+          "pending",
+          0,
+          "last-delivered-id",
+          "0-0",
+          "entries-read",
+          null,
+          "lag",
+          0
+        ]
+      ],
+      "length": 0
+    },
+    "stream:execution-requests": {
+      "info": [
+        "length",
+        279,
+        "radix-tree-keys",
+        49,
+        "radix-tree-nodes",
+        103,
+        "last-generated-id",
+        "1772361285568-0",
+        "max-deleted-entry-id",
+        "0-0",
+        "entries-added",
+        279,
+        "recorded-first-entry-id",
+        "1772306973323-0",
+        "groups",
+        1,
+        "first-entry",
+        [
+          "1772306973323-0",
+          [
+            "data",
+            "{\"type\":\"stream-init\",\"message\":\"Coordinator stream initialization - safe to ignore\",\"timestamp\":\"1772306973321\"}"
+          ]
+        ],
+        "last-entry",
+        [
+          "1772361285568-0",
+          [
+            "data",
+            "{\"id\":\"ethereum-1772361108592-87395\",\"type\":\"simple\",\"chain\":\"ethereum\",\"buyDex\":\"uniswap_v3\",\"sellDex\":\"sushiswap\",\"profitPercentage\":\"4.570889880711031\",\"confidence\":\"0.75\",\"timestamp\":\"1772361108592\",\"tokenIn\":\"0x2260fac5e5542a773aa44fbcfedf7c193bc2c599\",\"tokenOut\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"amountIn\":\"838772320796\",\"expectedProfit\":\"38339359133.46944\",\"estimatedProfit\":\"0\",\"gasEstimate\":\"250000\",\"expiresAt\":\"1772361123592\",\"forwardedBy\":\"coordinator-local-local-1772360423092\",\"forwardedAt\":\"1772361278382\",\"pipelineTimestamps\":\"{\\\"coordinatorAt\\\":1772361278382}\",\"_trace_traceId\":\"9844f626880e6892b7ddff69b86218d0\",\"_trace_spanId\":\"076aa0f6c4c895b2\",\"_trace_serviceName\":\"coordinator\",\"_trace_timestamp\":\"1772361278382\",\"_trace_parentSpanId\":\"6a06e6e4724e11e1\"}"
+          ]
+        ]
+      ],
+      "groups": [
+        [
+          "name",
+          "execution-engine-group",
+          "consumers",
+          7,
+          "pending",
+          3,
+          "last-delivered-id",
+          "1772361261957-0",
+          "entries-read",
+          278,
+          "lag",
+          1
+        ]
+      ],
+      "length": 279
+    }
+  },
+  "keyCount": 20,
+  "allKeys": {
+    "stream": [
+      "stream:pending-opportunities",
+      "stream:system-failover",
+      "stream:opportunities",
+      "stream:swap-events",
+      "stream:service-degradation",
+      "stream:dead-letter-queue",
+      "stream:whale-alerts",
+      "stream:price-updates",
+      "stream:execution-results",
+      "stream:health",
+      "stream:volume-aggregates",
+      "stream:execution-requests"
+    ],
+    "string": [
+      "lock:coordinator:leader:lock",
+      "coordinator:leader:lock",
+      "health:cross-chain-detector",
+      "service-config:unified-detector-high-value:degradation",
+      "service-config:unified-detector-l2-turbo:degradation",
+      "health:execution-engine",
+      "service-config:unified-detector-asia-fast:degradation",
+      "region:health:local"
+    ]
+  },
+  "memory": "# Memory",
+  "stats": "# Stats"
+}

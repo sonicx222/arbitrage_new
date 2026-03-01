@@ -1,1013 +1,1366 @@
-# MONITORING.md
-# Multi-Agent System Monitoring — Redis Streams + 7 Parallel Services
-# Designed for: Claude Code with Opus 4.6 subagents
-# Version: 1.0
+# Pre-Deploy Validation
+# Single-Orchestrator Pipeline — Redis Streams + 7 Services
+# Version: 2.1
 
 ---
 
-> **HOW TO USE IN CLAUDE CODE**
-> Place this file in your project root, then run:
-> ```bash
-> claude "Run the full multi-agent monitoring session as defined in MONITORING.md"
-> ```
-> Claude Code will read this file and spawn all subagents automatically.
+You are the **ORCHESTRATOR**. Your job is to validate the entire arbitrage system
+is deployment-ready by running 5 sequential phases: static analysis, startup,
+runtime validation, pipeline smoke test, and shutdown with a go/no-go report.
 
----
+You have full bash tool access plus Glob, Grep, and Read for file analysis.
+All findings are written to `./monitor-session/findings/` as JSONL.
+The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 
-You are the **ORCHESTRATOR agent** (Opus 4.6).
-
-Your job is to coordinate 4 specialist subagents, manage the full monitoring
-lifecycle, resolve cross-agent findings, and produce the final report.
-
-You have full bash tool access. All subagents are spawned via the Task tool.
-All subagents write findings to structured JSONL files in `./monitor-session/`
-which you will merge and synthesize at the end.
+**CRITICAL RULES:**
+- Run all 5 phases sequentially. Do NOT skip phases.
+- Do NOT spawn sub-agents. You handle everything directly.
+- Use `curl` for HTTP requests (Windows-compatible).
+- Use `redis-cli` for Redis commands.
+- Use Glob/Grep/Read for file analysis (NOT grep/find bash commands).
+- If a phase fails catastrophically (Redis won't start, no services come up),
+  record the failure as a CRITICAL finding and skip to Phase 5 (report).
 
 ---
 
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## ORCHESTRATOR — PRE-FLIGHT CHECKLIST
+## SYSTEM INVENTORY — Reference for all phases
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Execute every step in order. Do not proceed past a step if it fails.
+### Services (7 via `npm run dev:all`)
 
-**Step 1 — Create the shared session workspace:**
+| Service | Port | Ready Endpoint | Role |
+|---------|------|----------------|------|
+| Coordinator | 3000 | `/api/health/ready` | Orchestration, leader election, opportunity routing |
+| P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon |
+| P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll, Mantle, Mode |
+| P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, Avalanche, Fantom |
+| P4 Solana | 3004 | `/ready` | Chain detector: Solana |
+| Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
+| Cross-Chain | 3006 | `/ready` | Cross-chain arbitrage detection |
+
+### Redis Streams (19 declared in `shared/types/src/events.ts`)
+
+| Stream | MAXLEN | Producer(s) | Consumer Group(s) |
+|--------|--------|-------------|-------------------|
+| `stream:price-updates` | 100,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
+| `stream:swap-events` | 50,000 | P1-P4 partitions | coordinator-group |
+| `stream:opportunities` | 10,000 | P1-P4, cross-chain detector | coordinator-group |
+| `stream:whale-alerts` | 5,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
+| `stream:service-health` | 1,000 | All services | — |
+| `stream:service-events` | 5,000 | All services | — |
+| `stream:coordinator-events` | 5,000 | Coordinator | — |
+| `stream:health` | 1,000 | All services | coordinator-group |
+| `stream:health-alerts` | 5,000 | Health monitor | — |
+| `stream:execution-requests` | 5,000 | Coordinator | execution-engine-group |
+| `stream:execution-results` | 5,000 | Execution engine | coordinator-group |
+| `stream:pending-opportunities` | 10,000 | Mempool detector | cross-chain-detector-group |
+| `stream:volume-aggregates` | 10,000 | Volume aggregator | coordinator-group |
+| `stream:circuit-breaker` | 5,000 | Execution engine | — |
+| `stream:system-failover` | 1,000 | Coordinator | — |
+| `stream:system-commands` | 1,000 | Coordinator | — |
+| `stream:fast-lane` | — | Fast lane (feature-gated) | execution-engine |
+| `stream:dead-letter-queue` | 10,000 | Any service | coordinator-group |
+| `stream:forwarding-dlq` | — | Coordinator | — |
+
+### Consumer Groups (5 active)
+
+| Group | Service | Streams |
+|-------|---------|---------|
+| `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue |
+| `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities |
+| `execution-engine-group` | Execution Engine | execution-requests |
+| `execution-engine` | Execution Engine (fast lane) | fast-lane |
+| `mempool-detector-group` | Mempool Detector | pending-opportunities |
+
+### Pipeline Data Flow (Critical Path)
+
+```
+P1-P4 Partitions → stream:price-updates → Detectors → stream:opportunities
+    → Coordinator (validates, deduplicates) → stream:execution-requests
+    → Execution Engine (executes) → stream:execution-results
+    → Coordinator (records outcome)
+```
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PRE-FLIGHT — Create session workspace
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ```bash
 mkdir -p ./monitor-session/{logs,findings,streams,config}
 SESSION_ID=$(date +%Y%m%d_%H%M%S)
 echo $SESSION_ID > ./monitor-session/SESSION_ID
-echo "Session workspace initialized: ./monitor-session/ [$SESSION_ID]"
+echo "Session $SESSION_ID initialized"
 ```
 
-**Step 2 — Start Redis with stream support:**
-```bash
-npm run dev:redis:memory
+---
 
-# Verify Redis is up and streams-capable
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PHASE 1 — STATIC ANALYSIS (~60 seconds)
+## No services need to be running. Uses Glob, Grep, Read only.
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run ALL of these checks. Record each finding as a JSON object appended to
+`./monitor-session/findings/static-analysis.jsonl`.
+
+### Finding format:
+```json
+{
+  "phase": "STATIC",
+  "findingId": "SA-001",
+  "category": "STREAM_DECLARATION|CONSUMER_GROUP|MAXLEN|MISSING_ACK|ENV_VAR|ANTI_PATTERN|CONFIG_DRIFT|HMAC_SIGNING|FEATURE_FLAG|RISK_CONFIG",
+  "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
+  "title": "<short description>",
+  "service": "<service name or 'cross-service'>",
+  "evidence": "<file path, line number, and code snippet>",
+  "expected": "<what should be>",
+  "actual": "<what is>",
+  "recommendation": "<specific fix>"
+}
+```
+
+---
+
+### Check 1A — Stream Name Declaration Audit
+
+**Goal:** Every stream name used in code must reference the canonical `RedisStreams`
+constant from `shared/types/src/events.ts`, not hardcoded strings.
+
+**Method:**
+1. Read `shared/types/src/events.ts` to get the canonical stream name list.
+2. Use Grep to find all files containing `xadd`, `XADD`, `xReadGroup`, `XREADGROUP`,
+   `createConsumerGroup` patterns in `.ts` and `.js` files (exclude `node_modules`).
+3. In each matching file, check whether stream name arguments use the `RedisStreams`
+   constant or a variable derived from it, vs. hardcoded string literals like
+   `'stream:opportunities'`.
+
+**Flag:** Any hardcoded stream name string → severity: **HIGH**, category: `STREAM_DECLARATION`.
+**Exceptions:** Test files (`__tests__`, `.test.ts`, `.spec.ts`) may use hardcoded strings.
+
+---
+
+### Check 1B — Consumer Group Consistency
+
+**Goal:** Consumer group names in code must match the 5 expected groups listed in
+the System Inventory above.
+
+**Method:**
+1. Use Grep to find all occurrences of consumer group name strings in service code.
+   Search for patterns like `group:`, `Group:`, `consumerGroup`, `GROUP` in `.ts` files
+   under `services/` and `shared/`.
+2. Extract group name string literals.
+3. Compare against expected: `coordinator-group`, `cross-chain-detector-group`,
+   `execution-engine-group`, `execution-engine`, `mempool-detector-group`.
+
+**Flag:** Any group name NOT in the expected list → severity: **CRITICAL**,
+category: `CONSUMER_GROUP`.
+**Flag:** Any expected group NOT found in code → severity: **HIGH**,
+category: `CONSUMER_GROUP`.
+
+---
+
+### Check 1C — MAXLEN Enforcement
+
+**Goal:** Every XADD call must include MAXLEN trimming to prevent unbounded
+stream growth (memory time bomb).
+
+**Method:**
+1. Use Grep to find all `xadd` / `XADD` calls in `.ts` files (exclude `node_modules`,
+   exclude test files).
+2. For each call site, check if MAXLEN is specified (either directly or via
+   `STREAM_MAX_LENGTHS` constant or `StreamBatcher` config).
+
+**Flag:** Any XADD without MAXLEN → severity: **HIGH**, category: `MAXLEN`.
+**Note:** The `StreamBatcher` and `RedisStreamsClient.xadd()` may apply MAXLEN
+internally via config. Read those implementations to understand if MAXLEN is
+applied automatically before flagging individual call sites.
+
+---
+
+### Check 1D — XACK After Consume
+
+**Goal:** Every file that reads from a consumer group must also acknowledge
+messages. Missing ACK = messages stay pending forever.
+
+**Method:**
+1. Use Grep to find all files with `xReadGroup` / `XREADGROUP` patterns.
+2. For each file, check if it also contains `xack` / `XACK` (directly or via
+   a handler that calls ACK).
+
+**Flag:** File with consume but no acknowledge → severity: **HIGH**,
+category: `MISSING_ACK`.
+**Note:** The `StreamConsumer` class in `shared/core/src/redis/` may handle ACK
+internally. If all consumers use this abstraction, this check may pass cleanly.
+Read the abstraction to verify.
+
+---
+
+### Check 1E — Environment Variable Audit
+
+**Goal:** Every `process.env.*` reference in service code should be documented
+in `.env.example`.
+
+**Method:**
+1. Use Grep to find all `process\.env\.[A-Z_]+` patterns in `.ts` files under
+   `services/` and `shared/` (exclude `node_modules`, exclude test files).
+2. Read `.env.example` to get the documented variable list.
+3. Compare: env vars used in code but missing from `.env.example`.
+
+**Flag:** Missing from `.env.example` → severity: **MEDIUM**, category: `ENV_VAR`.
+**Note:** Some env vars like `NODE_ENV`, `PORT` are standard and don't need
+documentation. Only flag non-obvious custom env vars.
+
+---
+
+### Check 1F — Nullish Coalescing Anti-Pattern
+
+**Goal:** Numeric defaults must use `?? 0` / `?? 0n`, not `|| 0` / `|| 0n`.
+The `||` operator treats `0` as falsy, silently replacing legitimate zero values.
+
+**Method:**
+1. Use Grep to find `\|\| 0\b` and `\|\| 0n\b` patterns in `.ts` files
+   (exclude `node_modules`).
+
+**Flag:** Each occurrence → severity: **LOW**, category: `ANTI_PATTERN`.
+
+---
+
+### Check 1G — HMAC Signing Configuration
+
+**Goal:** Redis Streams message signing must be configured for production.
+Without `STREAM_SIGNING_KEY`, all Redis messages are accepted without
+verification — an attacker with Redis access could inject fake opportunities.
+
+**Method:**
+1. Read `.env.example` and check if `STREAM_SIGNING_KEY` is documented.
+2. Use Grep to find `STREAM_SIGNING_KEY` references in code. Verify the
+   signing implementation exists in `shared/core/src/redis/streams.ts`.
+3. Check if `STREAM_PREVIOUS_SIGNING_KEY` (key rotation support) is documented.
+4. Verify the fail-closed behavior: in production, missing HMAC should reject
+   messages (check for the enforcement code).
+
+**Flag:** `STREAM_SIGNING_KEY` not in `.env.example` → severity: **HIGH**,
+category: `HMAC_SIGNING`.
+**Flag:** No HMAC enforcement code in production path → severity: **CRITICAL**,
+category: `HMAC_SIGNING`.
+**Info:** Key rotation support (`STREAM_PREVIOUS_SIGNING_KEY`) not documented →
+severity: **LOW**, category: `HMAC_SIGNING`.
+
+---
+
+### Check 1H — Feature Flag Validation
+
+**Goal:** Feature flags must be consistent — no cross-dependency violations,
+and profit-impacting features should be explicitly documented.
+
+**Method:**
+1. Read `shared/config/src/feature-flags.ts` to get all 16 `FEATURE_*` flags.
+2. List each flag with its pattern (opt-in `=== 'true'` or opt-out `!== 'false'`).
+3. Verify cross-dependencies:
+   - `FEATURE_SIGNAL_CACHE_READ` requires `FEATURE_ML_SIGNAL_SCORING`
+   - `FEATURE_COMMIT_REVEAL_REDIS` requires `REDIS_URL`
+4. Check `.env.example` documents all feature flags with descriptions.
+
+**Expected flags (16 total):**
+`FEATURE_BATCHED_QUOTER`, `FEATURE_FLASH_LOAN_AGGREGATOR`, `FEATURE_COMMIT_REVEAL`,
+`FEATURE_COMMIT_REVEAL_REDIS`, `FEATURE_DEST_CHAIN_FLASH_LOAN`,
+`FEATURE_MOMENTUM_TRACKING`, `FEATURE_ML_SIGNAL_SCORING`,
+`FEATURE_SIGNAL_CACHE_READ`, `FEATURE_LIQUIDITY_DEPTH_SIZING`,
+`FEATURE_DYNAMIC_L1_FEES` (opt-out — ON by default),
+`FEATURE_ORDERFLOW_PIPELINE`, `FEATURE_KMS_SIGNING`, `FEATURE_FAST_LANE`,
+`FEATURE_BACKRUN_STRATEGY`, `FEATURE_UNISWAPX_FILLER`, `FEATURE_MEV_SHARE_BACKRUN`
+
+**Flag:** Cross-dependency violation in code → severity: **HIGH**,
+category: `FEATURE_FLAG`.
+**Flag:** Feature flag not documented in `.env.example` → severity: **MEDIUM**,
+category: `FEATURE_FLAG`.
+**Flag:** `FEATURE_DYNAMIC_L1_FEES` explicitly disabled in config → severity: **HIGH**,
+category: `FEATURE_FLAG` (required for accurate L2 cost estimation).
+
+---
+
+### Check 1I — Risk Configuration Audit
+
+**Goal:** Risk management parameters must be documented and consistent.
+Misconfigured risk params can silently halt trading (drawdown breaker) or
+allow oversized positions (Kelly criterion).
+
+**Method:**
+1. Read `shared/config/src/risk-config.ts` to get all risk env vars.
+2. Verify these are documented in `.env.example`:
+   - `RISK_TOTAL_CAPITAL` (REQUIRED in production)
+   - `RISK_KELLY_MULTIPLIER` (default 0.5)
+   - `RISK_MAX_SINGLE_TRADE` (default 0.02 = 2%)
+   - `RISK_MIN_EV_THRESHOLD` (default 0.005 ETH)
+   - `RISK_MIN_WIN_PROBABILITY` (default 0.3)
+   - `RISK_MAX_LOSS_PER_TRADE` (default 0.1 ETH)
+3. Verify cross-validation: `defaultWinProbability` >= `minWinProbability`
+   (prevents all trades being rejected after restart).
+
+**Flag:** `RISK_TOTAL_CAPITAL` not documented → severity: **HIGH**,
+category: `RISK_CONFIG` (system won't function in production without it).
+**Flag:** Cross-validation missing → severity: **MEDIUM**,
+category: `RISK_CONFIG`.
+
+---
+
+### Phase 1 Summary
+
+After all checks, read `./monitor-session/findings/static-analysis.jsonl` and
+output a summary:
+```
+PHASE 1 COMPLETE — Static Analysis
+  CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>  LOW: <n>  INFO: <n>
+  Total findings: <n>
+```
+
+If any CRITICAL findings exist, note them but **continue to Phase 2** (we want
+the full picture).
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PHASE 2 — STARTUP & READINESS (~60 seconds)
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### Step 2A — Start Redis
+
+```bash
+npm run dev:redis:memory &
+sleep 3
 redis-cli PING
+```
+
+If PING fails → **CRITICAL** finding. Skip to Phase 5 (report) — nothing works
+without Redis.
+
+Verify stream command support:
+```bash
 redis-cli COMMAND INFO XADD XREAD XREADGROUP XPENDING XINFO XACK XLEN XCLAIM
 ```
-If any stream command returns null or errors → **STOP**. Report Redis version
-mismatch as [CRITICAL] before proceeding.
 
-**Step 3 — Start all 7 services and capture startup output:**
+If any stream command is unsupported → **CRITICAL**. Report Redis version mismatch.
+
+---
+
+### Step 2B — Start all services with simulation
+
 ```bash
-npm run dev:all 2>&1 | tee ./monitor-session/logs/startup.log
+SIMULATION_MODE=true EXECUTION_SIMULATION_MODE=true npm run dev:all &
 ```
-- Wait for all 7 services to emit their ready/listening signal.
-- If any service fails to start within 30 seconds → flag as **[CRITICAL]**
-  and record which services are missing.
-- Identify and record the name of each service from its startup log output.
 
-**Step 4 — Capture baseline Redis stream state BEFORE any load:**
+This starts the monolith process manager which spawns all 7 services.
+Capture PID for later cleanup.
+
+---
+
+### Step 2C — Poll readiness
+
+Poll each service's `/ready` endpoint every 5 seconds, up to 30 seconds per service.
+Run these checks in sequence (services may have startup dependencies).
+
 ```bash
-# Discover all streams
-redis-cli --scan --pattern '*' | while read key; do
-  type=$(redis-cli TYPE $key)
-  if [ "$type" = "stream" ]; then echo $key; fi
-done > ./monitor-session/streams/discovered_streams.txt
+# Coordinator
+curl -sf http://localhost:3000/api/health/ready || echo "NOT READY"
 
-cat ./monitor-session/streams/discovered_streams.txt
-echo "Found $(wc -l < ./monitor-session/streams/discovered_streams.txt) streams"
+# Partitions
+curl -sf http://localhost:3001/ready || echo "NOT READY"
+curl -sf http://localhost:3002/ready || echo "NOT READY"
+curl -sf http://localhost:3003/ready || echo "NOT READY"
+curl -sf http://localhost:3004/ready || echo "NOT READY"
 
-# Capture full baseline for each stream
-for stream in $(cat ./monitor-session/streams/discovered_streams.txt); do
-  echo "=== BASELINE: $stream ===" >> ./monitor-session/streams/baseline.json
-  redis-cli XINFO STREAM $stream >> ./monitor-session/streams/baseline.json
-  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/baseline.json
-  redis-cli XLEN $stream >> ./monitor-session/streams/baseline.json
+# Execution Engine
+curl -sf http://localhost:3005/ready || echo "NOT READY"
+
+# Cross-Chain Detector
+curl -sf http://localhost:3006/ready || echo "NOT READY"
+```
+
+**For each service:**
+- Poll every 5 seconds for up to 30 seconds.
+- If ready within 30s → record startup time.
+- If NOT ready after 30s → **CRITICAL** finding. Record which service failed.
+  Continue with remaining services.
+
+Record findings to `./monitor-session/findings/startup.jsonl`:
+```json
+{
+  "phase": "STARTUP",
+  "findingId": "ST-001",
+  "category": "SERVICE_READY|SERVICE_FAILED|REDIS_FAILED",
+  "severity": "CRITICAL|HIGH|INFO",
+  "service": "<service name>",
+  "port": 3000,
+  "startupTimeMs": 0,
+  "evidence": "<curl output or error>"
+}
+```
+
+---
+
+### Step 2D — Capture baseline Redis stream state
+
+After all services are ready (or timed out), capture the baseline state of
+every stream that exists in Redis:
+
+```bash
+# Discover what streams actually exist
+redis-cli --scan --pattern 'stream:*' > ./monitor-session/streams/discovered.txt
+
+# For each discovered stream:
+for stream in $(cat ./monitor-session/streams/discovered.txt); do
+  echo "=== $stream ===" >> ./monitor-session/streams/baseline.txt
+  redis-cli XINFO STREAM $stream >> ./monitor-session/streams/baseline.txt
+  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/baseline.txt
+  redis-cli XLEN $stream >> ./monitor-session/streams/baseline.txt
 done
 
-# Capture Redis memory baseline
-redis-cli INFO memory >> ./monitor-session/streams/baseline.json
-redis-cli INFO stats >> ./monitor-session/streams/baseline.json
+# Memory baseline
+redis-cli INFO memory > ./monitor-session/streams/redis-memory-baseline.txt
 ```
 
-**Step 5 — Record session timing:**
-```bash
-echo "START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ./monitor-session/session.env
-echo "DEADLINE=$(date -u -d '+10 minutes' +%Y-%m-%dT%H:%M:%SZ)" \
-  >> ./monitor-session/session.env
-cat ./monitor-session/session.env
-echo "Monitoring window: 10 minutes from now. Agents launching..."
+Compare discovered streams against the 19 expected streams from the System
+Inventory. Any expected stream that does NOT exist → **MEDIUM** finding.
+Any unexpected stream that DOES exist → **INFO** finding (may be legitimate).
+
+Output:
 ```
-
-**Step 6 — Spawn all 4 specialist agents simultaneously via the Task tool.**
-
-> ⚠️ **CRITICAL**: Launch ALL 4 agents in parallel. Do not wait for one
-> to finish before spawning the next. Use Task() for each agent concurrently.
+PHASE 2 COMPLETE — Startup
+  Services ready: <n>/7 (list names)
+  Services failed: <n> (list names)
+  Streams discovered: <n>/19
+  Missing streams: <list>
+  Unexpected streams: <list>
+```
 
 ---
 
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## AGENT 1 — LOG WATCHER
-## Spawn as: Task("LOG_WATCHER_AGENT", <this section>)
+## PHASE 3 — RUNTIME VALIDATION (~90 seconds)
+## All services should be running. Uses curl + redis-cli.
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-You are the **LOG WATCHER** agent. Your sole focus is raw process output
-from all 7 services. You watch for errors, anomalies, crashes, security
-issues, and behavioral inconsistencies. You run for 10 minutes.
-
-**SETUP — attach to all service logs:**
-```bash
-# Merge all service logs with timestamps and service prefix
-tail -f ./monitor-session/logs/*.log 2>/dev/null | \
-  awk '{ print strftime("%Y-%m-%dT%H:%M:%S"), $0 }' \
-  > ./monitor-session/logs/merged.log &
-
-# Also forward stderr per service if available
-# Adapt to your process manager (pm2 logs, nodemon output, etc.)
-```
-
-**CLASSIFY every finding as a JSON object:**
+Record all findings to `./monitor-session/findings/runtime.jsonl`:
 ```json
 {
-  "agentId": "LOG_WATCHER",
-  "findingId": "LW-001",
-  "category": "BUG|ANOMALY|SECURITY|CRASH|RETRY_STORM|MEMORY_LEAK|TIMEOUT|DOC_DRIFT",
+  "phase": "RUNTIME",
+  "findingId": "RT-001",
+  "category": "SERVICE_HEALTH|LEADER_ELECTION|CIRCUIT_BREAKER|DLQ|STREAM_TOPOLOGY|CONSUMER_LAG|STUCK_MESSAGE|DEAD_CONSUMER|METRICS|WEBSOCKET_HEALTH|PROVIDER_HEALTH|RISK_STATE|LATENCY|GAS_SPIKE|SIMULATION|EXECUTION_PROBABILITY|BRIDGE_RECOVERY|MEMORY",
   "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
   "service": "<service name>",
-  "timestamp": "<ISO8601>",
-  "correlationId": "<if present in log line>",
-  "streamId": "<Redis message ID if log references one>",
-  "evidence": "<exact log line(s) — preserve verbatim>",
-  "pattern": "<one-off or repeating? include frequency if repeating>",
-  "hypothesis": "<root cause theory>",
-  "recommendation": "<specific fix>"
-}
-```
-
-**PATTERNS TO WATCH FOR — flag immediately:**
-
-Runtime errors and crashes:
-- Any line containing: `ERROR`, `FATAL`, `EXCEPTION`, `UNHANDLED`, `UNCAUGHT`,
-  `SIGTERM`, `SIGKILL`, `heap`, `OOM`, `ECONNREFUSED`, `ETIMEDOUT`, `ECONNRESET`
-- Full stack traces — capture the **complete trace**, not just the first line
-- A service going **silent for >30 seconds** (crash without log output)
-
-Behavioral anomalies:
-- Identical log lines repeating within 5 seconds → retry storm / infinite loop
-- A service logging startup steps multiple times → crash-restart loop
-- Timestamps in logs that are out of order or drift significantly between services
-- Message IDs appearing in error context → cross-reference with Stream Analyst
-
-Security signals:
-- Any log line containing what appears to be a token, secret, password, API key,
-  JWT, or private credential emitted in plaintext
-- Overly broad error messages that expose internal paths or stack details to output
-
-Quality signals:
-- Inconsistent log formats between services (some structured JSON, some printf)
-  → flag as `DOC_DRIFT`
-- Services logging expected errors at the wrong severity level
-  (e.g., a known validation error logged as `FATAL`)
-- Services with no log output at all during active periods → flag as `ANOMALY`
-
-**HEARTBEAT — emit every 2 minutes:**
-```json
-{
-  "type": "heartbeat",
-  "agent": "LOG_WATCHER",
-  "at": "<ISO8601>",
-  "linesProcessed": 0,
-  "findingCount": 0,
-  "servicesActive": ["<list of services still emitting logs>"],
-  "servicesSilent": ["<list of services with no output in last 2min>"]
-}
-```
-
-**OUTPUT:** Append all findings (one JSON object per line) to:
-`./monitor-session/findings/log-watcher.jsonl`
-
-**STOP** when `./monitor-session/STOP` file exists.
-
----
-
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## AGENT 2 — REDIS STREAM ANALYST
-## Spawn as: Task("REDIS_STREAM_ANALYST", <this section>)
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-You are the **REDIS STREAM ANALYST**. You have the most specialized role.
-You monitor the health, topology, and integrity of all Redis Streams across
-all 7 services. You are the only agent that sees cross-service event flows.
-
-**SETUP — load discovered streams:**
-```bash
-STREAMS=$(cat ./monitor-session/streams/discovered_streams.txt)
-echo "Monitoring streams: $STREAMS"
-
-# For each stream, discover all consumer groups
-for stream in $STREAMS; do
-  echo "=== GROUPS for $stream ===" >> ./monitor-session/streams/initial_topology.json
-  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/initial_topology.json
-done
-```
-
-**POLLING LOOP — run every 15 seconds for 10 minutes:**
-```bash
-while [ ! -f ./monitor-session/STOP ]; do
-  TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-  for stream in $(cat ./monitor-session/streams/discovered_streams.txt); do
-
-    # Total messages in stream (growing = producer faster than consumer)
-    XLEN_VAL=$(redis-cli XLEN $stream)
-
-    # Consumer group info including lag
-    redis-cli XINFO GROUPS $stream | \
-      awk -v stream="$stream" -v ts="$TIMESTAMP" \
-      'BEGIN{print "stream="stream" ts="ts} {print}' \
-      >> ./monitor-session/streams/poll_$(date +%H%M%S).txt
-
-    # Pending messages (delivered but not ACKed — potential stuck messages)
-    # Get all consumer groups for this stream and check pending per group
-    redis-cli XINFO GROUPS $stream | grep "^name" | awk '{print $2}' | \
-    while read group; do
-      redis-cli XPENDING $stream $group - + 50 \
-        >> ./monitor-session/streams/pending_$(date +%H%M%S).txt
-    done
-
-  done
-
-  sleep 15
-done
-```
-
-**CLASSIFY STREAM FINDINGS:**
-```json
-{
-  "agentId": "REDIS_STREAM_ANALYST",
-  "findingId": "RSA-001",
-  "category": "CONSUMER_LAG|STUCK_MESSAGE|MISSING_ACK|DEAD_CONSUMER|STREAM_GROWING|
-               NO_CONSUMER_GROUP|ORPHANED_STREAM|COMPETING_CONSUMERS|DELIVERY_FAILURE|
-               SCHEMA_INCONSISTENCY|UNBOUNDED_STREAM|MISSING_MAXLEN",
-  "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
-  "stream": "<stream name>",
+  "stream": "<stream name if applicable>",
   "consumerGroup": "<group name if applicable>",
-  "consumer": "<consumer name if applicable>",
-  "timestamp": "<ISO8601>",
-  "messageIds": ["<relevant Redis stream IDs>"],
-  "metrics": {
-    "streamLen": 0,
-    "pendingCount": 0,
-    "consumerLagMessages": 0,
-    "oldestPendingAgeMs": 0,
-    "deliveryCount": 0,
-    "messagesPerMinute": 0
-  },
-  "evidence": "<redis-cli output verbatim>",
-  "hypothesis": "<root cause>",
+  "evidence": "<endpoint response or redis-cli output>",
+  "expected": "<what should be>",
+  "actual": "<what is>",
   "recommendation": "<specific fix>"
 }
 ```
 
-**AUTO-FLAG AT THESE THRESHOLDS — do not wait for human review:**
+---
 
-| Condition | Category | Severity |
-|---|---|---|
-| `streamLen` growing for >2 consecutive polls | `STREAM_GROWING` | HIGH |
-| Any message pending for >30 seconds | `STUCK_MESSAGE` | HIGH |
-| Any message with `delivery-count` > 3 | `DELIVERY_FAILURE` | HIGH |
-| Consumer lag > 100 messages | `CONSUMER_LAG` | CRITICAL |
-| Consumer group with 0 active consumers | `DEAD_CONSUMER` | CRITICAL |
-| Stream with no consumer groups at all | `NO_CONSUMER_GROUP` | MEDIUM |
-| `pendingCount` rising but `streamLen` stable | `MISSING_ACK` | HIGH |
-| Stream with no `MAXLEN` in any XADD call | `UNBOUNDED_STREAM` | MEDIUM |
-| Multiple consumers in same group on same stream | `COMPETING_CONSUMERS` | INFO (verify intent) |
+### Check 3A — Service Health Matrix
 
-**STREAM TOPOLOGY MAP — update every minute to:**
-`./monitor-session/streams/topology_current.txt`
+Hit every service's `/health` endpoint and collect status:
 
-```
-Stream: <name>
-  Message Rate: ~<n> msgs/min
-  Total Length: <n>
-  Has MAXLEN cap: YES/NO
-  Producers: [inferred from code scan or flag as UNKNOWN]
-  Consumer Groups:
-    Group <name>:
-      Active Consumers: [list with last-active timestamp]
-      Lag: <n messages behind>
-      Pending (unacked): <n>
-      Oldest Pending Message: <age in seconds>
-  Schema Sample: <field names from most recent message>
-  Status: HEALTHY / DEGRADED / CRITICAL
+```bash
+# Coordinator (returns JSON with status field)
+curl -sf http://localhost:3000/api/health | jq .
+
+# Partitions (return JSON with status field)
+curl -sf http://localhost:3001/health | jq .
+curl -sf http://localhost:3002/health | jq .
+curl -sf http://localhost:3003/health | jq .
+curl -sf http://localhost:3004/health | jq .
+
+# Execution Engine
+curl -sf http://localhost:3005/health | jq .
+
+# Cross-Chain Detector
+curl -sf http://localhost:3006/health | jq .
 ```
 
-**NOTE ON STREAM IDs:** Redis Stream message IDs have the format
-`<milliseconds>-<sequence>`. The first 13 digits are a Unix ms timestamp.
-Use this to calculate message age: `age_ms = now_ms - parseInt(id.split('-')[0])`
+**Flag:** Any service with status `unhealthy` → **CRITICAL**.
+**Flag:** Any service with status `degraded` → **HIGH**.
+**Flag:** Any service unreachable → **CRITICAL**.
 
-**OUTPUT:** Append all findings to:
-`./monitor-session/findings/stream-analyst.jsonl`
+Also hit `/stats` on services that expose it:
+```bash
+curl -sf http://localhost:3001/stats  # P1 detailed stats
+curl -sf http://localhost:3002/stats  # P2 detailed stats
+curl -sf http://localhost:3003/stats  # P3 detailed stats
+curl -sf http://localhost:3004/stats  # P4 detailed stats
+curl -sf http://localhost:3005/stats  # Execution engine stats
+```
 
-**STOP** when `./monitor-session/STOP` exists.
+Record the stats output for the report — no findings needed unless values are
+anomalous (e.g., 0 chains active on a partition that should have chains).
 
 ---
 
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## AGENT 3 — CONFIG & DOC AUDITOR
-## Spawn as: Task("CONFIG_AUDITOR", <this section>)
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+### Check 3B — Leader Election
 
-You are the **CONFIG & DOC AUDITOR**. You run primarily at startup and
-shutdown, with one runtime check at the 5-minute mark.
+```bash
+curl -sf http://localhost:3000/api/leader | jq .
+```
+
+**Flag:** `isLeader` is `false` → **CRITICAL** (no leader = no opportunity routing).
+**Flag:** Endpoint unreachable → **CRITICAL**.
+
+Also verify the Redis leader lock:
+```bash
+redis-cli GET coordinator:leader:lock
+redis-cli TTL coordinator:leader:lock
+```
+
+**Flag:** Lock doesn't exist → **CRITICAL** (leader election not working).
+**Flag:** TTL < 5 seconds → **HIGH** (lock about to expire, heartbeat may be failing).
 
 ---
 
-### PHASE A — Static Analysis (run immediately, ~first 3 minutes)
+### Check 3C — Circuit Breaker States
 
-**Step 1 — Enumerate all config sources:**
 ```bash
-find . \( -name "*.env*" -o -name "*.config.*" -o -name "*.yaml" \
-          -o -name "*.yml" -o -name "docker-compose*" \
-          -o -name "*.json" -path "*/config/*" \) \
-  | grep -v node_modules | grep -v .git \
-  | tee ./monitor-session/config/config_files.txt
+curl -sf http://localhost:3005/circuit-breaker | jq .
 ```
 
-**Step 2 — For each of the 7 services, extract declarations:**
-- Which Redis streams it **declares** it publishes to (config / docs / comments)
-- Which Redis streams it **declares** it consumes from
-- Which consumer group name it uses
-- Its declared log level and format
-- Port and host bindings
-- Expected environment variables
+**Flag:** Any chain in `OPEN` state → **HIGH** (chain is blocked from execution).
+**Flag:** Any chain in `HALF_OPEN` state → **MEDIUM** (chain recovering).
+**Flag:** Endpoint unreachable → **HIGH**.
 
-**Step 3 — Cross-reference declarations against actual code:**
+---
+
+### Check 3D — Dead Letter Queue Status
+
 ```bash
-# Find all files that interact with Redis streams
-grep -r "XADD\|xadd\|xReadGroup\|XREADGROUP\|xread\|XREAD\|createConsumerGroup" \
-  --include="*.ts" --include="*.js" -l \
-  | grep -v node_modules \
-  | tee ./monitor-session/config/stream_files.txt
-
-# Extract all stream name strings used in code
-grep -r "XADD\|xadd\|xReadGroup\|XREADGROUP" \
-  --include="*.ts" --include="*.js" -h \
-  | grep -v node_modules \
-  | grep -oE '"[a-z:_\-]+"' | sort | uniq \
-  | tee ./monitor-session/config/code_stream_names.txt
-
-# Extract stream names from docs/README
-grep -ri "stream\|queue\|channel\|topic" docs/ README* 2>/dev/null \
-  | grep -v node_modules \
-  | tee ./monitor-session/config/doc_stream_names.txt
-
-# Compare: what's in docs vs what's in code
-echo "=== Streams in code but NOT in docs ===" \
-  >> ./monitor-session/config/drift_analysis.txt
-diff ./monitor-session/config/doc_stream_names.txt \
-     ./monitor-session/config/code_stream_names.txt \
-  >> ./monitor-session/config/drift_analysis.txt
+redis-cli XLEN stream:dead-letter-queue
+redis-cli XLEN stream:forwarding-dlq
+redis-cli XLEN stream:dlq-alerts
 ```
 
-**Step 4 — Consumer group name consistency check:**
+**Flag:** `stream:dead-letter-queue` length > 0 → **HIGH** (messages failing on startup).
+**Flag:** `stream:forwarding-dlq` length > 0 → **CRITICAL** (coordinator can't reach
+execution engine — the critical pipeline path is broken).
+
+If DLQ has entries, read the most recent messages to understand what's failing:
 ```bash
-# Extract consumer group names from code
-grep -r "createConsumerGroup\|XREADGROUP\|xReadGroup" \
-  --include="*.ts" --include="*.js" -h \
-  | grep -oE '"[a-z:_\-]+"' | sort | uniq \
-  | tee ./monitor-session/config/code_group_names.txt
-
-# Compare against what Redis actually has
-redis-cli --scan --pattern '*' | while read key; do
-  if [ "$(redis-cli TYPE $key)" = "stream" ]; then
-    redis-cli XINFO GROUPS $key | grep "^name" | awk '{print $2}'
-  fi
-done | sort | uniq > ./monitor-session/config/redis_group_names.txt
-
-diff ./monitor-session/config/code_group_names.txt \
-     ./monitor-session/config/redis_group_names.txt
-```
-→ Any mismatch in group names = **CONFIG_DRIFT CRITICAL**
-
-**Step 5 — Schema documentation check:**
-- Does each stream have a documented message schema somewhere?
-- Does the actual message payload structure in code match that schema?
-- Are schema versions tracked anywhere?
-
-**Step 6 — Environment variable audit:**
-```bash
-# Find all env var references across services
-grep -r "process\.env\." --include="*.ts" --include="*.js" -h \
-  | grep -v node_modules \
-  | grep -oE 'process\.env\.[A-Z_]+' | sort | uniq \
-  > ./monitor-session/config/required_env_vars.txt
-
-# Check which ones are actually set
-while read envvar; do
-  varname=$(echo $envvar | sed 's/process\.env\.//')
-  if [ -z "${!varname}" ]; then
-    echo "MISSING: $varname" >> ./monitor-session/config/env_audit.txt
-  else
-    echo "SET: $varname" >> ./monitor-session/config/env_audit.txt
-  fi
-done < ./monitor-session/config/required_env_vars.txt
+redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 5
+redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 5
 ```
 
 ---
 
-### PHASE B — Runtime Check (at the 5-minute mark)
+### Check 3E — Redis Stream Topology Validation
+
+For each of the 19 expected streams, verify the stream exists and has the
+correct consumer groups attached:
 
 ```bash
-# Wait ~5 minutes, then run
-sleep 300
+for stream in stream:price-updates stream:swap-events stream:opportunities \
+  stream:whale-alerts stream:service-health stream:service-events \
+  stream:coordinator-events stream:health stream:health-alerts \
+  stream:execution-requests stream:execution-results \
+  stream:pending-opportunities stream:volume-aggregates \
+  stream:circuit-breaker stream:system-failover stream:system-commands \
+  stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq; do
 
-# Check if any new streams appeared since baseline
-redis-cli --scan --pattern '*' | while read key; do
-  if [ "$(redis-cli TYPE $key)" = "stream" ]; then echo $key; fi
-done | sort > ./monitor-session/streams/streams_5min.txt
-
-diff ./monitor-session/streams/discovered_streams.txt \
-     ./monitor-session/streams/streams_5min.txt \
-  > ./monitor-session/streams/new_streams.diff
-
-if [ -s ./monitor-session/streams/new_streams.diff ]; then
-  echo "WARNING: New streams appeared after startup!" \
-    >> ./monitor-session/findings/config-auditor.jsonl
-fi
-
-# Re-check consumer group names match config
-for stream in $(cat ./monitor-session/streams/discovered_streams.txt); do
-  redis-cli XINFO GROUPS $stream
-done > ./monitor-session/config/runtime_groups.txt
-```
-
-**CLASSIFY FINDINGS:**
-```json
-{
-  "agentId": "CONFIG_AUDITOR",
-  "findingId": "CA-001",
-  "category": "CONFIG_DRIFT|DOC_DRIFT|SCHEMA_DRIFT|NAMING_INCONSISTENCY|
-               MISSING_SCHEMA|ENV_MISMATCH|PORT_CONFLICT|VERSION_MISMATCH|
-               ROGUE_STREAM|MISSING_ENV_VAR|GROUP_NAME_MISMATCH",
-  "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
-  "service": "<service name or 'cross-service'>",
-  "affectedFiles": ["<file paths>"],
-  "expected": "<what config/docs/env declares>",
-  "actual": "<what code/runtime does>",
-  "evidence": "<file paths, line numbers, CLI output>",
-  "recommendation": "<specific fix with file path>"
-}
-```
-
-**OUTPUT:** Append all findings to:
-`./monitor-session/findings/config-auditor.jsonl`
-
-**STOP** when `./monitor-session/STOP` exists.
-
----
-
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## AGENT 4 — ENHANCEMENT SCOUT
-## Spawn as: Task("ENHANCEMENT_SCOUT", <this section>)
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-You are the **ENHANCEMENT SCOUT**. You do NOT produce bug reports — that is
-the Log Watcher's job. You identify architectural anti-patterns, missing
-resilience, observability gaps, and performance improvements. High signal
-only — no noise.
-
-You run two passes:
-
----
-
-### PASS 1 — Static Code Analysis (minutes 0–5)
-
-**Redis Streams anti-patterns:**
-```bash
-# 1. Missing MAXLEN — unbounded streams are a memory time bomb
-echo "=== XADD without MAXLEN ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "XADD\|xadd" --include="*.ts" --include="*.js" \
-  | grep -v node_modules | grep -iv "MAXLEN\|maxlen" \
-  >> ./monitor-session/findings/es-static.txt
-
-# 2. Using XREAD instead of XREADGROUP — no consumer groups = no ACK, no replay
-echo "=== XREAD without consumer group ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "xread[^G]\|XREAD[^G]" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  >> ./monitor-session/findings/es-static.txt
-
-# 3. Missing XACK after processing — messages stay pending forever
-echo "=== XREADGROUP without XACK ===" >> ./monitor-session/findings/es-static.txt
-grep -rln "xReadGroup\|XREADGROUP" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  | xargs grep -L "xack\|XACK" \
-  >> ./monitor-session/findings/es-static.txt
-
-# 4. Hardcoded stream names — should come from config/env
-echo "=== Hardcoded stream names ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "XADD\|XREADGROUP\|xadd\|xReadGroup" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  | grep -v "process\.env\|config\.\|CONFIG\." \
-  >> ./monitor-session/findings/es-static.txt
-
-# 5. No dead-letter / max-delivery handling — failed messages loop forever
-echo "=== Missing DLQ/max delivery handling ===" >> ./monitor-session/findings/es-static.txt
-grep -rln "xReadGroup\|XREADGROUP" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  | xargs grep -L "delivery\|maxDelivery\|dlq\|dead.letter\|deadLetter" \
-  >> ./monitor-session/findings/es-static.txt
-
-# 6. Polling instead of blocking reads — unnecessary CPU burn
-echo "=== Polling instead of blocking reads ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "XREAD\|xread" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  | grep -iv "BLOCK\|block" \
-  >> ./monitor-session/findings/es-static.txt
-
-# 7. Single-message processing instead of batching
-echo "=== Processing COUNT 1 (not batching) ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "COUNT 1\b\|count.*:\s*1\b" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  >> ./monitor-session/findings/es-static.txt
-```
-
-**Observability gaps:**
-```bash
-# 8. Using console.log instead of structured logger
-echo "=== console.log usage ===" >> ./monitor-session/findings/es-static.txt
-grep -rln "console\.log\|console\.error\|console\.warn" \
-  --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  >> ./monitor-session/findings/es-static.txt
-
-# 9. Missing correlation ID in event payloads
-echo "=== XADD without correlationId ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "XADD\|xadd" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  | grep -iv "correlationId\|traceId\|requestId\|correlation_id" \
-  >> ./monitor-session/findings/es-static.txt
-
-# 10. Silent catch blocks — errors swallowed with no logging
-echo "=== Silent catch blocks ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "} catch" --include="*.ts" --include="*.js" -A 3 \
-  | grep -v node_modules \
-  | grep -B1 "^\s*}" \
-  >> ./monitor-session/findings/es-static.txt
-
-# 11. KEYS * usage — O(N) scan, blocks Redis in production
-echo "=== KEYS * usage (dangerous) ===" >> ./monitor-session/findings/es-static.txt
-grep -rn "KEYS \*\|\.keys(\s*['\"]\\*['\"])" \
-  --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  >> ./monitor-session/findings/es-static.txt
-
-# 12. No circuit breaker on producers
-echo "=== Producers without circuit breaker ===" >> ./monitor-session/findings/es-static.txt
-grep -rln "XADD\|xadd" --include="*.ts" --include="*.js" \
-  | grep -v node_modules \
-  | xargs grep -L "circuit\|breaker\|backoff\|retry.*delay\|exponential" \
-  >> ./monitor-session/findings/es-static.txt
-```
-
----
-
-### PASS 2 — Cross-Agent Pattern Analysis (minutes 5–10)
-
-Watch `./monitor-session/findings/` for findings from other agents.
-Every 60 seconds, scan for patterns across all finding files:
-
-```bash
-while [ ! -f ./monitor-session/STOP ]; do
-  sleep 60
-
-  # Look for findings on the same stream from multiple agents
-  # A timeout in Log Watcher + consumer lag in Stream Analyst on the same stream
-  # = backpressure problem, not a timeout problem
-  # Document the root cause synthesis, not just the symptoms
-  
-  cat ./monitor-session/findings/*.jsonl 2>/dev/null | \
-    jq -s 'group_by(.stream // .service) | 
-           map(select(length > 1)) | 
-           map({entity: .[0].stream // .[0].service, finding_count: length, 
-                agents: [.[].agentId] | unique})' \
-    > ./monitor-session/findings/cross-agent-clusters.json
+  echo "=== $stream ==="
+  redis-cli XINFO STREAM $stream 2>&1
+  redis-cli XINFO GROUPS $stream 2>&1
 done
 ```
 
-For each cluster of related findings from different agents, write a synthesis
-finding that identifies the **underlying architectural pattern**, not just the
-individual symptoms.
+For each stream, verify:
+1. **Exists** — `XINFO STREAM` succeeds. Missing → **MEDIUM**.
+2. **Has expected consumer groups** — compare `XINFO GROUPS` output against the
+   System Inventory table. Missing group → **HIGH**.
+3. **Consumer groups have active consumers** — `consumers` field > 0 for each
+   group. Zero consumers → **CRITICAL** (dead consumer group).
+4. **Stream length is reasonable** — not 0 (for active streams like `price-updates`)
+   and not at MAXLEN cap (indicates producer outpacing consumer trim).
 
-**Example of good synthesis:**
-> Log Watcher found 3 timeout errors on service-payments at T+2:14.
-> Stream Analyst found CONSUMER_LAG of 340 messages on `payments-stream` at T+2:00.
-> Root cause: the consumer is overloaded — timeouts are a symptom, not the cause.
-> The fix is producer-side backpressure or horizontal scaling of the consumer,
-> not increasing the timeout value.
+---
 
-**CLASSIFY FINDINGS:**
-```json
-{
-  "agentId": "ENHANCEMENT_SCOUT",
-  "findingId": "ES-001",
-  "category": "STREAM_ANTI_PATTERN|OBSERVABILITY_GAP|PERFORMANCE|RESILIENCE|
-               ARCHITECTURE|DX_IMPROVEMENT|CROSS_AGENT_SYNTHESIS",
-  "priority": "P0_CRITICAL|P1_HIGH|P2_MEDIUM|P3_LOW",
-  "effort": "HOURS_2_4|HOURS_4_8|DAYS_1_2|SPRINT",
-  "impact": "HIGH|MEDIUM|LOW",
-  "affectedServices": ["<service names>"],
-  "affectedStreams": ["<stream names>"],
-  "relatedFindings": ["<LW-001>", "<RSA-002>"],
-  "pattern": "<name of the anti-pattern or enhancement>",
-  "evidence": "<code location(s) or runtime observation>",
-  "recommendation": "<specific, actionable change>",
-  "codeSnippetBefore": "<problematic pattern if applicable>",
-  "codeSnippetAfter": "<corrected pattern if applicable>"
-}
+### Check 3F — Consumer Lag & Pending Messages
+
+For each active consumer group, check pending messages:
+
+```bash
+redis-cli XPENDING stream:price-updates coordinator-group
+redis-cli XPENDING stream:price-updates cross-chain-detector-group
+redis-cli XPENDING stream:opportunities coordinator-group
+redis-cli XPENDING stream:whale-alerts coordinator-group
+redis-cli XPENDING stream:whale-alerts cross-chain-detector-group
+redis-cli XPENDING stream:execution-requests execution-engine-group
+redis-cli XPENDING stream:execution-results coordinator-group
+redis-cli XPENDING stream:health coordinator-group
+redis-cli XPENDING stream:dead-letter-queue coordinator-group
 ```
 
-**OUTPUT:** Append all findings to:
-`./monitor-session/findings/enhancement-scout.jsonl`
+**Thresholds:**
+- Pending count > 50 → **HIGH** (consumer falling behind).
+- Pending count > 100 → **CRITICAL** (consumer overwhelmed).
+- Any message pending for > 30 seconds (check oldest pending entry) → **HIGH**
+  (stuck message — consumer may have crashed without ACKing).
+- Any message with delivery count > 3 → **HIGH** (message being retried
+  repeatedly — likely a poison message).
 
-**STOP** when `./monitor-session/STOP` exists.
+---
+
+### Check 3G — Prometheus Metrics Validation
+
+Scrape metrics from all services twice, 15 seconds apart:
+
+```bash
+# First scrape
+curl -sf http://localhost:3001/metrics > ./monitor-session/metrics_t0.txt
+curl -sf http://localhost:3005/metrics >> ./monitor-session/metrics_t0.txt
+curl -sf http://localhost:3006/metrics >> ./monitor-session/metrics_t0.txt
+
+sleep 15
+
+# Second scrape
+curl -sf http://localhost:3001/metrics > ./monitor-session/metrics_t1.txt
+curl -sf http://localhost:3005/metrics >> ./monitor-session/metrics_t1.txt
+curl -sf http://localhost:3006/metrics >> ./monitor-session/metrics_t1.txt
+```
+
+**Flag:** Counters NOT incrementing between scrapes → **MEDIUM** (metrics may be
+stale or service is idle — in simulation mode, counters should be incrementing).
+**Flag:** Metrics endpoint returns empty/error → **MEDIUM**.
+
+---
+
+### Check 3H — WebSocket & Provider Health Per Chain
+
+**Goal:** Verify RPC WebSocket connections are alive and receiving data for
+every active chain. A dead WebSocket means zero detection on that chain.
+
+The system uses a "6-Provider Shield" per chain (`shared/core/src/websocket-manager.ts`)
+with chain-specific staleness thresholds:
+- **Fast chains** (Arbitrum, Solana): 5s
+- **Medium chains** (Polygon, BSC, Optimism, Base, Avalanche, Fantom): 10s
+- **Slow chains** (Ethereum, zkSync, Linea): 15s
+
+**Method:**
+1. Hit each partition's `/stats` endpoint and parse the per-chain stats:
+```bash
+curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon
+curl -sf http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, zkSync, Linea, Blast, Scroll
+curl -sf http://localhost:3003/stats | jq .  # P3: ETH, AVAX, FTM
+curl -sf http://localhost:3004/stats | jq .  # P4: Solana
+```
+
+2. For each chain, check:
+   - `lastMessageTimestamp` (or equivalent) — is it recent?
+   - `reconnectCount` — high count indicates unstable provider
+   - `activeSubscriptions` — should be >0 for each chain
+   - `messagesReceived` — should be >0 (chains producing data)
+
+**Flag:** Any chain with no messages received → **CRITICAL**, category: `WEBSOCKET_HEALTH`
+(dead WebSocket = zero detection on that chain).
+**Flag:** Any chain with `lastMessage` older than its staleness threshold →
+**HIGH**, category: `WEBSOCKET_HEALTH`.
+**Flag:** Any chain with reconnectCount > 5 → **HIGH**, category: `PROVIDER_HEALTH`
+(unstable provider — frequent reconnections cause data gaps).
+**Flag:** Any chain with 0 active subscriptions → **CRITICAL**,
+category: `WEBSOCKET_HEALTH`.
+
+---
+
+### Check 3I — Risk Management State (Drawdown Circuit Breaker)
+
+**Goal:** Verify the drawdown circuit breaker is in NORMAL state. The system
+can pass all health checks while producing zero profit because the drawdown
+breaker is in HALT state — the #1 profitability blind spot.
+
+States: NORMAL (100% sizing) → CAUTION (75%) → HALT (0% — trading stopped)
+→ RECOVERY (50%)
+
+**Method:**
+```bash
+# Execution engine health includes risk state information
+curl -sf http://localhost:3005/health | jq .
+curl -sf http://localhost:3005/stats | jq .
+```
+
+Parse the response for drawdown/risk state fields. Look for:
+- `drawdownState` or `riskState` or similar field
+- `consecutiveLosses` — 5 consecutive losses triggers HALT
+- `dailyPnl` — daily loss >5% triggers HALT
+
+**Flag:** Drawdown state is `HALT` → **CRITICAL**, category: `RISK_STATE`
+(system is alive but not trading — invisible failure).
+**Flag:** Drawdown state is `CAUTION` → **HIGH**, category: `RISK_STATE`
+(trading at reduced capacity — 75% sizing).
+**Flag:** Drawdown state is `RECOVERY` → **MEDIUM**, category: `RISK_STATE`
+(recovering — 50% sizing).
+**Flag:** Risk state information not available in endpoint → **MEDIUM**,
+category: `RISK_STATE` (blind spot — can't verify trading status).
+
+---
+
+### Check 3J — Pipeline Latency vs <50ms Target
+
+**Goal:** Verify hot-path latency is within the <50ms target (ADR-022).
+Exceeding this target means opportunities expire before execution,
+especially on fast chains (Arbitrum 2s TTL, Solana 1s TTL).
+
+The `LatencyTracker` tracks 4 pipeline stages with Float64Array ring buffers:
+`ws_receive`, `batcher_flush`, `detector_process`, `opportunity_publish`.
+
+**Method:**
+```bash
+# Partition metrics expose pipeline latency percentiles
+curl -sf http://localhost:3001/metrics  # Parse pipeline_latency_p50, p95, p99
+curl -sf http://localhost:3002/metrics
+curl -sf http://localhost:3003/metrics
+curl -sf http://localhost:3004/metrics
+```
+
+Parse Prometheus metrics for:
+- `pipeline_latency_p95` — should be <50ms
+- `pipeline_latency_p99` — should be <100ms (some headroom)
+- `pipeline_latency_p50` — should be <20ms (median)
+
+**Flag:** Any partition with `pipeline_latency_p95` > 50ms → **HIGH**,
+category: `LATENCY` (exceeding hot-path target).
+**Flag:** Any partition with `pipeline_latency_p99` > 100ms → **HIGH**,
+category: `LATENCY` (tail latency too high).
+**Flag:** Latency metrics not present → **MEDIUM**, category: `LATENCY`
+(observability gap — can't verify performance target).
+
+---
+
+### Check 3K — Gas Price & Spike Detection
+
+**Goal:** Verify gas prices are sane and no active gas spikes are blocking
+execution on any chain.
+
+The `GasPriceOptimizer` uses EMA-based spike detection with chain-specific
+thresholds and pre-submission refresh.
+
+**Method:**
+```bash
+# Execution engine stats include gas information
+curl -sf http://localhost:3005/stats | jq .
+curl -sf http://localhost:3005/health | jq .
+```
+
+Parse for gas-related fields per chain. Also check Prometheus metrics:
+```bash
+curl -sf http://localhost:3005/metrics
+# Parse: arbitrage_gas_price_gwei{chain="<name>"}
+```
+
+**Flag:** Any chain with gas price = 0 → **HIGH**, category: `GAS_SPIKE`
+(gas price not being fetched — execution will fail or use stale values).
+**Flag:** Any chain with active gas spike detected → **MEDIUM**,
+category: `GAS_SPIKE` (execution temporarily blocked on that chain).
+**Flag:** Gas price above chain max threshold → **HIGH**, category: `GAS_SPIKE`
+(chain thresholds: Ethereum max 500 gwei, Arbitrum max 10 gwei).
+
+---
+
+### Check 3L — Simulation Provider Health
+
+**Goal:** Verify transaction simulation providers are available. Without
+simulation, trades either skip validation (risky) or fail.
+
+The `SimulationService` supports: Tenderly, Alchemy, Local (eth_call), Helius (Solana).
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/stats | jq .
+```
+
+Parse for simulation provider status fields. Check:
+- Which providers are configured and healthy
+- Simulation success rate
+- Whether simulation is being used (vs skipped)
+
+**Flag:** All simulation providers unhealthy → **HIGH**, category: `SIMULATION`
+(all trades will skip simulation or fail).
+**Flag:** Simulation success rate <50% → **MEDIUM**, category: `SIMULATION`.
+**Flag:** No simulation providers configured → **MEDIUM**, category: `SIMULATION`.
+
+---
+
+### Check 3M — Execution Probability & Success Rate
+
+**Goal:** Verify execution success rates are healthy. Low success rates
+mean capital is being wasted on gas for failed transactions.
+
+The `ExecutionProbabilityTracker` persists per-chain/DEX success rates to Redis.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/probability-tracker | jq .
+```
+
+Parse for:
+- Overall execution success rate
+- Per-chain success rates
+- Recent profitable execution rate
+
+**Flag:** Overall success rate <30% → **HIGH**, category: `EXECUTION_PROBABILITY`
+(most executions failing — gas wasted).
+**Flag:** Any chain with 0% success rate and >0 attempts → **HIGH**,
+category: `EXECUTION_PROBABILITY` (chain execution completely broken).
+**Flag:** Endpoint returns empty/error → **MEDIUM**, category: `EXECUTION_PROBABILITY`
+(blind spot — can't verify execution health).
+
+---
+
+### Check 3N — Bridge Recovery Status
+
+**Goal:** Verify no bridge transactions are stuck. Stuck bridges mean
+capital is locked and unavailable for trading.
+
+The `BridgeRecoveryManager` tracks: pending, bridging, bridge_completed_sell_pending,
+recovered, failed.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/bridge-recovery | jq .
+```
+
+Parse for:
+- Total pending bridge transactions
+- Any transactions stuck >24 hours
+- Any transactions in `failed` state
+
+**Flag:** Any bridge stuck >24 hours → **HIGH**, category: `BRIDGE_RECOVERY`
+(capital locked).
+**Flag:** >3 concurrent pending bridges → **MEDIUM**, category: `BRIDGE_RECOVERY`
+(approaching concurrency limit of 3).
+**Flag:** Any corrupt bridge entries → **HIGH**, category: `BRIDGE_RECOVERY`
+(data integrity issue).
+
+---
+
+### Check 3O — Memory Health Per Service
+
+**Goal:** Verify memory usage is within platform-aware thresholds. The
+`EnhancedHealthMonitor` uses different thresholds per platform:
+- Fly.io: warning 60%, critical 78%
+- Oracle Cloud: warning 80%, critical 95%
+- Local dev: warning 80%, critical 95%
+
+**Method:**
+Parse memory information from each service's `/health` response (collected
+in Check 3A). Look for RSS memory, heap used, heap total fields.
+
+```bash
+# Also check Redis memory
+redis-cli INFO memory
+# Parse: used_memory_human, used_memory_peak_human, maxmemory
+```
+
+**Flag:** Any service using >80% of its memory allocation → **HIGH**,
+category: `MEMORY` (approaching OOM).
+**Flag:** Redis memory >75% of maxmemory → **HIGH**, category: `MEMORY`
+(Redis eviction risk).
+**Flag:** Memory info not available in health response → **LOW**,
+category: `MEMORY`.
+
+---
+
+Output:
+```
+PHASE 3 COMPLETE — Runtime Validation
+  Services healthy: <n>/7
+  Leader elected: YES/NO
+  Circuit breakers: all CLOSED / <list open chains>
+  DLQ entries: <n>
+  Stream topology: <n>/19 streams correct
+  Consumer groups: <n>/5 healthy
+  Pending messages: <total across all groups>
+  WebSocket health: <n>/<total> chains receiving data
+  Drawdown state: NORMAL / CAUTION / HALT / RECOVERY
+  Pipeline latency p95: <n>ms (target: <50ms)
+  Gas spikes active: <n> chains
+  Simulation providers: <n> healthy
+  Execution success rate: <n>%
+  Bridge recoveries pending: <n>
+  Memory: all OK / <services above threshold>
+  CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>  LOW: <n>
+```
 
 ---
 
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## ORCHESTRATOR — ACTIVE MONITORING (minutes 0–10)
+## PHASE 4 — PIPELINE SMOKE TEST (~90 seconds)
+## Validates the full data flow end-to-end in simulation mode.
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-While the 4 agents run, you maintain the session and watch for emergencies.
+Record findings to `./monitor-session/findings/smoke-test.jsonl`:
+```json
+{
+  "phase": "SMOKE_TEST",
+  "findingId": "SM-001",
+  "category": "PIPELINE_FLOW|PIPELINE_STALL|TRACE_INCOMPLETE|DLQ_GROWTH|DETECTION_RATE|RISK_STATE",
+  "severity": "CRITICAL|HIGH|MEDIUM|INFO",
+  "stream": "<stream name>",
+  "evidence": "<XLEN values, endpoint data, trace details>",
+  "expected": "<what should happen>",
+  "actual": "<what happened>",
+  "recommendation": "<fix>"
+}
+```
 
-**Every 2 minutes, run these health checks:**
+---
+
+### Step 4A — Capture initial stream lengths
 
 ```bash
-# 1. Verify all 4 agents are still writing (should have modified files < 3min ago)
-echo "=== Agent health check ===" 
-find ./monitor-session/findings/ -name "*.jsonl" \
-  -printf "%T@ %f\n" | sort -n | while read ts file; do
-  age=$(( $(date +%s) - ${ts%.*} ))
-  if [ $age -gt 180 ]; then
-    echo "WARNING: $file has not been updated in ${age}s — agent may be stuck"
-  else
-    echo "OK: $file (${age}s ago)"
-  fi
-done
-
-# 2. Check for CRITICAL findings requiring immediate awareness
-CRITICALS=$(grep -c '"severity":"CRITICAL"' \
-  ./monitor-session/findings/*.jsonl 2>/dev/null || echo 0)
-echo "Current CRITICAL finding count: $CRITICALS"
-
-# 3. Check Redis is still responsive
-redis-cli PING || echo "ALERT: Redis not responding!"
-
-# 4. Verify all 7 service processes are still alive
-NODECOUNT=$(ps aux | grep node | grep -v grep | wc -l)
-echo "Node processes running: $NODECOUNT"
-
-# 5. Spot-check consumer lag on all streams
-for stream in $(cat ./monitor-session/streams/discovered_streams.txt 2>/dev/null); do
+echo "=== SMOKE TEST BASELINE ===" > ./monitor-session/streams/smoke-baseline.txt
+for stream in stream:price-updates stream:opportunities \
+  stream:execution-requests stream:execution-results \
+  stream:dead-letter-queue stream:forwarding-dlq; do
   LEN=$(redis-cli XLEN $stream)
-  echo "Stream $stream: $LEN messages"
+  echo "$stream: $LEN" >> ./monitor-session/streams/smoke-baseline.txt
+  echo "$stream: $LEN"
 done
 ```
 
-**If an agent stops writing for >3 minutes:** Restart it with its original
-prompt. Log the restart event to `./monitor-session/agent-restarts.log`.
+---
 
-**If a CRITICAL finding appears:** Log it to
-`./monitor-session/critical-alerts.log` but **do NOT stop monitoring early**.
-All agents must complete the full 10-minute window to capture the full picture.
+### Step 4B — Wait for pipeline flow (60s timeout, poll every 10s)
+
+In simulation mode, the partitions automatically generate simulated price data
+which feeds into the detection → execution pipeline.
+
+Poll the 4 critical streams every 10 seconds for up to 60 seconds:
+
+```bash
+# Poll loop (adapt to bash tool constraints — may need to run as individual checks)
+for i in 1 2 3 4 5 6; do
+  sleep 10
+  echo "=== Poll $i ($(($i * 10))s) ==="
+  redis-cli XLEN stream:price-updates
+  redis-cli XLEN stream:opportunities
+  redis-cli XLEN stream:execution-requests
+  redis-cli XLEN stream:execution-results
+done
+```
+
+**Expected cascade:**
+1. `stream:price-updates` length grows first (partitions publishing prices)
+2. `stream:opportunities` length grows next (detectors finding arbitrage)
+3. `stream:execution-requests` length grows (coordinator forwarding)
+4. `stream:execution-results` length grows (execution engine completing)
+
+**Flag:** `stream:price-updates` not growing after 30s → **CRITICAL**
+(partitions not publishing — simulation mode may not be working).
+**Flag:** `stream:opportunities` not growing after 45s → **HIGH**
+(detectors not finding opportunities — may be expected if simulation
+doesn't produce viable arb, but worth flagging).
+**Flag:** `stream:execution-requests` not growing but `stream:opportunities` is →
+**CRITICAL** (coordinator is not forwarding — pipeline broken).
+**Flag:** `stream:execution-results` not growing but `stream:execution-requests` is →
+**CRITICAL** (execution engine not processing — pipeline broken).
+
+---
+
+### Step 4C — Verify endpoint data matches stream flow
+
+```bash
+# Coordinator should show recent opportunities
+curl -sf http://localhost:3000/api/opportunities 2>/dev/null | jq '.length // 0'
+
+# Execution engine should show execution attempts
+curl -sf http://localhost:3005/stats 2>/dev/null | jq .
+
+# Execution engine health should show success metrics
+curl -sf http://localhost:3005/health 2>/dev/null | jq '{queueSize, activeExecutions, successRate}'
+```
+
+**Flag:** Coordinator `/api/opportunities` returns empty but `stream:opportunities`
+has entries → **HIGH** (coordinator consuming but not tracking).
+**Flag:** Execution engine stats show 0 attempts but `stream:execution-requests`
+has entries → **HIGH** (consumer not processing queue).
+
+Note: These endpoints may require authentication. If they return 401/403,
+record as **INFO** (auth is working correctly in simulation mode) and skip
+the data validation.
+
+---
+
+### Step 4D — Trace one message through the pipeline
+
+If `stream:execution-results` has entries, trace one message back through
+the pipeline:
+
+```bash
+# Get the latest execution result
+redis-cli XREVRANGE stream:execution-results + - COUNT 1
+```
+
+From the result message, extract the `_trace_traceId` field (set by the
+trace context propagation system in `shared/core/src/tracing/`).
+
+If a traceId is found:
+```bash
+# Search for the same traceId in upstream streams
+redis-cli XRANGE stream:opportunities - + COUNT 100
+# (Search the output for matching _trace_traceId)
+
+redis-cli XRANGE stream:execution-requests - + COUNT 100
+# (Search the output for matching _trace_traceId)
+```
+
+**Expected trace:**
+```
+stream:opportunities (traceId: X) → stream:execution-requests (traceId: X) → stream:execution-results (traceId: X)
+```
+
+**Flag:** traceId present in result but missing from upstream → **MEDIUM**
+(trace context not propagated correctly across services).
+**Flag:** No traceId in any message → **MEDIUM** (trace context system not active).
+
+---
+
+### Step 4E — DLQ growth check
+
+```bash
+redis-cli XLEN stream:dead-letter-queue
+redis-cli XLEN stream:forwarding-dlq
+```
+
+Compare against the baseline captured in Step 4A.
+
+**Flag:** DLQ grew during smoke test → **HIGH** (messages are failing in the
+normal pipeline flow — read the new DLQ entries for details).
+**Flag:** Forwarding DLQ grew → **CRITICAL** (coordinator forwarding is broken).
+
+---
+
+### Step 4F — Per-Chain Detection Granularity
+
+**Goal:** Verify every partition is detecting on ALL its assigned chains,
+not just some. A partition reporting "healthy" with only 1 of 3 chains
+active is a silent detection gap.
+
+**Method:**
+Re-check partition `/stats` endpoints (from Check 3H) and compare per-chain
+message counts against the beginning of the smoke test.
+
+```bash
+curl -sf http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon active
+curl -sf http://localhost:3002/stats | jq .  # P2: expect Arb + OP + Base + ... active
+curl -sf http://localhost:3003/stats | jq .  # P3: expect ETH + AVAX + FTM active
+curl -sf http://localhost:3004/stats | jq .  # P4: expect Solana active
+```
+
+For each partition, verify every assigned chain shows:
+- Message count increased during smoke test
+- Price update rate >0 (chain is actively producing data)
+
+**Expected chain coverage:**
+- P1: BSC, Polygon (2 chains)
+- P2: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll (7 active chains;
+  Mantle and Mode are stubs — acceptable if missing)
+- P3: Ethereum, Avalanche, Fantom (3 chains)
+- P4: Solana (1 chain)
+
+**Flag:** Any non-stub chain with 0 messages during smoke test → **HIGH**,
+category: `DETECTION_RATE` (chain is configured but not producing data).
+**Flag:** Partition reporting fewer chains than expected → **MEDIUM**,
+category: `DETECTION_RATE`.
+
+---
+
+### Step 4G — Risk State Verification Post-Smoke
+
+**Goal:** Verify the drawdown circuit breaker is still in NORMAL state
+after the smoke test. In simulation mode with `EXECUTION_SIMULATION_MODE=true`,
+simulated executions should not trigger the drawdown breaker.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/health | jq .
+curl -sf http://localhost:3005/stats | jq .
+```
+
+Re-check the risk management state fields (same as Check 3I).
+
+**Flag:** Drawdown state changed from NORMAL to CAUTION/HALT during smoke test →
+**HIGH**, category: `RISK_STATE` (simulated execution is triggering risk controls
+— the simulation mock may be reporting losses).
+**Flag:** Consecutive loss count >0 during simulated execution → **MEDIUM**,
+category: `RISK_STATE` (simulation configuration may need adjustment).
+
+---
+
+Output:
+```
+PHASE 4 COMPLETE — Pipeline Smoke Test
+  Price updates published: <n>
+  Opportunities detected: <n>
+  Execution requests forwarded: <n>
+  Execution results received: <n>
+  Pipeline: FLOWING / STALLED at <stage>
+  Trace complete: YES / NO / PARTIAL
+  DLQ growth: <n> new entries
+  Per-chain detection: <n>/<total> chains active across all partitions
+  Risk state post-smoke: NORMAL / CAUTION / HALT / RECOVERY
+  CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>
+```
 
 ---
 
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## ORCHESTRATOR — SHUTDOWN SEQUENCE (at exactly 10 minutes)
+## PHASE 5 — SHUTDOWN & REPORT (~30 seconds)
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Step 1 — Signal all agents to stop:**
-```bash
-touch ./monitor-session/STOP
-echo "STOP signal sent at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-sleep 10  # give agents time to flush final findings
-```
+### Step 5A — Capture final stream state
 
-**Step 2 — Capture final Redis stream state:**
 ```bash
-for stream in $(cat ./monitor-session/streams/discovered_streams.txt); do
-  echo "=== FINAL STATE: $stream ===" \
-    >> ./monitor-session/streams/final_state.json
-  redis-cli XINFO STREAM $stream >> ./monitor-session/streams/final_state.json
-  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/final_state.json
-
-  # Get all remaining pending messages
-  redis-cli XINFO GROUPS $stream | grep "^name" | awk '{print $2}' | \
-  while read group; do
-    PENDING=$(redis-cli XPENDING $stream $group - + 100)
-    echo "  Pending in $group: $PENDING" \
-      >> ./monitor-session/streams/final_state.json
-  done
+for stream in $(cat ./monitor-session/streams/discovered.txt 2>/dev/null); do
+  echo "=== FINAL: $stream ===" >> ./monitor-session/streams/final-state.txt
+  redis-cli XINFO STREAM $stream >> ./monitor-session/streams/final-state.txt
+  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/final-state.txt
+  redis-cli XLEN $stream >> ./monitor-session/streams/final-state.txt
 done
 
-# Compare final vs baseline to measure stream growth during session
-diff ./monitor-session/streams/baseline.json \
-     ./monitor-session/streams/final_state.json \
-  > ./monitor-session/streams/session_drift.diff
-
-echo "Unresolved pending messages at shutdown:"
-grep -i "pending" ./monitor-session/streams/final_state.json | grep -v "^0"
-```
-
-**Step 3 — Gracefully stop all services:**
-```bash
-npm run dev:stop 2>&1 | tee ./monitor-session/logs/shutdown.log
-sleep 15  # allow services to drain in-flight messages
-
-# Verify clean shutdown
-echo "=== Remaining Redis connections after shutdown ==="
-redis-cli CLIENT LIST
-```
-
-**Step 4 — Stop Redis:**
-```bash
-redis-cli BGSAVE  # flush data for inspection if needed
-npm run dev:redis:stop
-```
-
-**Step 5 — Verify no zombie processes:**
-```bash
-ZOMBIES=$(ps aux | grep node | grep -v grep | wc -l)
-if [ "$ZOMBIES" -gt 0 ]; then
-  echo "WARNING: $ZOMBIES node processes still running after shutdown"
-  ps aux | grep node | grep -v grep
-else
-  echo "Clean shutdown confirmed — no zombie processes"
-fi
-
-# Verify Redis port is free
-lsof -i :6379 && echo "WARNING: Redis port still in use" || echo "Port 6379 free"
+redis-cli INFO memory > ./monitor-session/streams/redis-memory-final.txt
 ```
 
 ---
 
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## ORCHESTRATOR — FINAL REPORT SYNTHESIS
-## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Merge and sort all agent findings:**
-```bash
-SESSION_ID=$(cat ./monitor-session/SESSION_ID)
-
-# Merge all JSONL files into one sorted JSON array
-cat ./monitor-session/findings/*.jsonl 2>/dev/null | \
-  jq -s 'sort_by(.severity, .timestamp)' \
-  > ./monitor-session/all-findings.json
-
-# Summary counts
-echo "=== FINDING COUNTS BY SEVERITY ==="
-cat ./monitor-session/all-findings.json | \
-  jq 'group_by(.severity) | 
-      map({severity: .[0].severity, count: length}) | 
-      sort_by(.severity)'
-
-echo "=== FINDING COUNTS BY CATEGORY ==="
-cat ./monitor-session/all-findings.json | \
-  jq 'group_by(.category) | 
-      map({category: .[0].category, count: length}) | 
-      sort_by(-.count)'
-
-echo "=== FINDING COUNTS BY SERVICE ==="
-cat ./monitor-session/all-findings.json | \
-  jq 'group_by(.service // "unknown") | 
-      map({service: .[0].service, count: length}) | 
-      sort_by(-.count)'
-```
-
-**Write the final report to:**
-`./monitor-session/REPORT_<SESSION_ID>.md`
-
----
-
-The report must contain all of the following sections:
-
-### 1. Executive Dashboard
-
-| Metric | Value |
-|---|---|
-| Session ID | `<SESSION_ID>` |
-| Session duration | 10 minutes |
-| Services monitored | 7 |
-| Streams discovered | `<n>` |
-| Total findings | `<n>` |
-| CRITICAL findings | `<n>` |
-| HIGH findings | `<n>` |
-| MEDIUM findings | `<n>` |
-| Unacked messages at shutdown | `<n>` |
-| Streams with consumer lag | `<n>` |
-| Config/Doc drifts found | `<n>` |
-| Overall system health | 🔴 CRITICAL / 🟡 DEGRADED / 🟢 HEALTHY |
-
----
-
-### 2. Critical Findings (immediate action required)
-
-For every CRITICAL finding — provide full detail from the JSON, then add your
-Orchestrator-level cross-agent analysis:
-
-- Does this finding connect to findings from other agents?
-- If Log Watcher LW-xx and Stream Analyst RSA-xx describe the same root cause
-  from different angles → explain the full causal chain
-- What is the blast radius if this is not fixed?
-
----
-
-### 3. Redis Streams Health Map
-
-For every stream discovered, produce a final health table:
-
-| Stream | Length | Pending | Lag | Oldest Pending | Status | Verdict |
-|---|---|---|---|---|---|---|
-| `stream-name` | 0 | 0 | 0 | 0s | HEALTHY | ✅ |
-
-Flag any stream that **degraded** during the session compared to the baseline
-snapshot taken at startup.
-
----
-
-### 4. Cross-Service Event Flow Reconstruction
-
-Using correlation IDs found in logs + stream message IDs from Stream Analyst,
-reconstruct the event flows that occurred during the session.
-
-For each traceable flow:
-```
-[T+0:00] service-A published → stream:payments (msg: 1234567890123-0)
-[T+0:01] service-B consumed  → stream:payments (correlationId: abc-123, lag: 1s)
-[T+0:02] service-B published → stream:notifications (correlationId: abc-123)
-[T+0:02] service-C consumed  → stream:notifications ✅ ACKed
-```
-
-Flag any flow where:
-- A message was published but no consumption was logged
-- A consumption was logged but no ACK followed
-- A correlationId appears in a producer but never in any consumer log
-
----
-
-### 5. Config & Documentation Drift Registry
-
-Full table of all drifts found by Config Auditor:
-
-| Type | Service | Expected | Actual | Source of Truth | Risk |
-|---|---|---|---|---|---|
-| CONFIG_DRIFT | service-x | group: `payments-v2` | group: `payments` | config.yml L14 | HIGH |
-
----
-
-### 6. Enhancement Roadmap
-
-Organized by priority from Enhancement Scout:
-
-**P0 — Fix before next deploy:**
-(list with evidence, effort, and code snippet if available)
-
-**P1 — Fix this sprint:**
-(list with justification and impact)
-
-**P2 — Backlog (prioritized):**
-(list with effort estimates)
-
----
-
-### 7. Logging & Observability Gap Analysis
-
-Based on what you *couldn't* see during this session, document every gap
-that reduced monitoring fidelity. For each gap:
-
-- **What was invisible:** e.g., no way to trace a message from service-A to service-C
-- **Why it matters:** e.g., when service-C fails, there's no way to know which upstream event caused it
-- **Exact code change required:** provide file path and the specific instrumentation to add
-
-**Priority instrumentation to add before the next monitoring session:**
-
-**A. Correlation & Trace IDs (P0 — eliminates biggest blind spot)**
-
-Every Redis Stream event payload must carry:
-```json
-{
-  "correlationId": "<UUID generated at the request/event boundary>",
-  "traceId": "<distributed trace ID>",
-  "spanId": "<current span>",
-  "originService": "<name of publishing service>",
-  "publishedAt": "<ISO8601 timestamp>",
-  "schemaVersion": "1.0"
-}
-```
-
-Implement a shared `createEventEnvelope(channel, payload, ctx)` utility that
-enforces this schema and prevents bare `XADD` calls without trace context.
-
-**B. Structured JSON Logging (P1 — makes logs machine-parseable)**
-
-All services must emit logs in this format:
-```json
-{
-  "level": "info|warn|error",
-  "timestamp": "<ISO8601 with milliseconds>",
-  "service": "<service name>",
-  "correlationId": "<from context>",
-  "traceId": "<from context>",
-  "event": "<machine-readable event name>",
-  "message": "<human-readable description>",
-  "durationMs": 0,
-  "error": null
-}
-```
-
-Identify which services currently use `console.log` or unstructured logging
-and list the exact files that need updating.
-
-**C. Redis Stream Lifecycle Events (P1 — full event audit trail)**
-
-Add a shared Redis wrapper that auto-instruments every operation:
-
-On publish → log:
-```json
-{ "event": "redis.publish", "stream": "<name>", "correlationId": "<id>",
-  "messageId": "<returned stream ID>", "payloadFields": ["<field names>"],
-  "publishedAt": "<ISO8601>" }
-```
-
-On consume → log:
-```json
-{ "event": "redis.consume", "stream": "<name>", "correlationId": "<id>",
-  "messageId": "<stream ID>", "consumer": "<service name>",
-  "receivedAt": "<ISO8601>", "lagMs": "<receivedAt - publishedAt>" }
-```
-
-On ACK → log:
-```json
-{ "event": "redis.ack", "stream": "<name>", "correlationId": "<id>",
-  "messageId": "<stream ID>", "processingDurationMs": 0 }
-```
-
-On failure → log:
-```json
-{ "event": "redis.failed", "stream": "<name>", "correlationId": "<id>",
-  "messageId": "<stream ID>", "error": "<message>",
-  "deliveryCount": 0, "willRetry": true }
-```
-
-**D. Consumer Lag Health Reporting (P2 — backpressure early warning)**
-
-Each consumer service should emit a health log every 60 seconds:
-```json
-{ "event": "redis.channelHealth", "stream": "<name>",
-  "consumerGroup": "<name>", "messagesConsumedLastMinute": 0,
-  "avgLagMs": 0, "maxLagMs": 0, "pendingCount": 0,
-  "errorsLastMinute": 0 }
-```
-
-Alert threshold: lag consistently >500ms → investigate consumer capacity.
-
-**E. Startup & Shutdown Events (P2 — clean operational baseline)**
-
-Every service must emit on start:
-```json
-{ "event": "service.started", "service": "<name>", "port": 0,
-  "subscribedStreams": ["<stream names>"], "publishedStreams": ["<stream names>"],
-  "consumerGroups": ["<group names>"], "timestamp": "<ISO8601>" }
-```
-
-Every service must emit on graceful shutdown:
-```json
-{ "event": "service.shutdown", "service": "<name>",
-  "reason": "SIGTERM|manual|error", "pendingMessages": 0,
-  "timestamp": "<ISO8601>" }
-```
-
-**F. Cross-Service Timeline Reconstruction Recipe**
-
-Once A–E are implemented, use this to reconstruct any event trace:
+### Step 5B — Stop services
 
 ```bash
-# Reconstruct full trace for a correlationId across all service logs
-CORRELATION_ID="your-id-here"
+npm run dev:stop
+sleep 5
+```
 
-cat ./monitor-session/logs/*.log | \
-  jq -R 'try fromjson' | \
-  jq -s --arg id "$CORRELATION_ID" \
-    '[.[] | select(.correlationId == $id)] | sort_by(.timestamp)' | \
-  jq '.[] | "\(.timestamp) [\(.service)] \(.event): \(.message)"' -r
+Verify clean shutdown:
+```bash
+# Check no node processes remain
+tasklist | grep -i node | grep -v grep || echo "Clean shutdown — no node processes"
 ```
 
 ---
 
-### 8. Next Session Improvements
+### Step 5C — Stop Redis
 
-Before running this monitoring session again, implement these changes
-(in priority order) to get higher fidelity findings next time:
-
-List each improvement with: what gap it closes, which agent benefits most,
-and estimated implementation time.
+```bash
+redis-cli SHUTDOWN NOSAVE 2>/dev/null || echo "Redis already stopped"
+```
 
 ---
 
-*Report generated by MONITORING.md v1.0*
-*Session: `<SESSION_ID>`*
-*Completed: `<ISO8601 timestamp>`*
+### Step 5D — Generate the report
+
+Read ALL finding files:
+- `./monitor-session/findings/static-analysis.jsonl`
+- `./monitor-session/findings/startup.jsonl`
+- `./monitor-session/findings/runtime.jsonl`
+- `./monitor-session/findings/smoke-test.jsonl`
+
+Count findings by severity across all phases.
+
+**GO/NO-GO DECISION RULES:**
+- Any **CRITICAL** finding → **NO-GO**
+- More than 3 **HIGH** findings → **NO-GO**
+- All else → **GO** (with warnings listed)
+
+Write the final report to `./monitor-session/REPORT_<SESSION_ID>.md` using
+this template:
+
+---
+
+```markdown
+# Pre-Deploy Validation Report
+
+**Session:** <SESSION_ID>
+**Date:** <ISO8601>
+**Duration:** <total elapsed time>
+
+---
+
+## Decision: GO / NO-GO
+
+| Severity | Count |
+|----------|-------|
+| CRITICAL | <n> |
+| HIGH | <n> |
+| MEDIUM | <n> |
+| LOW | <n> |
+| INFO | <n> |
+| **Total** | **<n>** |
+
+**Reason:** <if NO-GO, list the blocking findings>
+
+---
+
+## Phase 1: Static Analysis
+
+| Check | Status | Findings |
+|-------|--------|----------|
+| Stream Declarations | PASS/FAIL | <count> |
+| Consumer Groups | PASS/FAIL | <count> |
+| MAXLEN Enforcement | PASS/FAIL | <count> |
+| XACK After Consume | PASS/FAIL | <count> |
+| Environment Variables | PASS/FAIL | <count> |
+| Nullish Coalescing | PASS/FAIL | <count> |
+| HMAC Signing | PASS/FAIL | <count> |
+| Feature Flags | PASS/FAIL | <count> |
+| Risk Configuration | PASS/FAIL | <count> |
+
+<detailed findings here if any>
+
+---
+
+## Phase 2: Service Readiness
+
+| Service | Port | Status | Startup Time |
+|---------|------|--------|-------------|
+| Coordinator | 3000 | READY/FAILED | <ms> |
+| P1 Asia-Fast | 3001 | READY/FAILED | <ms> |
+| P2 L2-Turbo | 3002 | READY/FAILED | <ms> |
+| P3 High-Value | 3003 | READY/FAILED | <ms> |
+| P4 Solana | 3004 | READY/FAILED | <ms> |
+| Execution Engine | 3005 | READY/FAILED | <ms> |
+| Cross-Chain | 3006 | READY/FAILED | <ms> |
+
+Streams discovered: <n>/19
+Missing: <list>
+
+---
+
+## Phase 3: Runtime Validation
+
+### Service Health
+| Service | Status | Details |
+|---------|--------|---------|
+| ... | healthy/degraded/unhealthy | ... |
+
+### Leader Election
+- Leader: <instance ID>
+- Lock TTL: <seconds>
+
+### Circuit Breakers
+| Chain | State |
+|-------|-------|
+| ... | CLOSED/OPEN/HALF_OPEN |
+
+### DLQ Status
+| Queue | Length |
+|-------|--------|
+| dead-letter-queue | <n> |
+| forwarding-dlq | <n> |
+
+### WebSocket & Provider Health
+| Chain | Partition | Messages | Last Update | Reconnects | Status |
+|-------|-----------|----------|-------------|------------|--------|
+| BSC | P1 | <n> | <age> | <n> | HEALTHY/STALE/DEAD |
+| Polygon | P1 | <n> | <age> | <n> | HEALTHY/STALE/DEAD |
+| ... | ... | ... | ... | ... | ... |
+
+### Risk Management State
+- Drawdown state: NORMAL / CAUTION / HALT / RECOVERY
+- Consecutive losses: <n>
+- Daily PnL: <value>
+- Position sizing factor: 100% / 75% / 50% / 0%
+
+### Pipeline Latency
+| Partition | p50 | p95 | p99 | Status |
+|-----------|-----|-----|-----|--------|
+| P1 Asia-Fast | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
+| P2 L2-Turbo | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
+| P3 High-Value | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
+| P4 Solana | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
+
+### Gas & Simulation
+| Chain | Gas (gwei) | Spike Active | Sim Provider | Sim Success Rate |
+|-------|------------|-------------|--------------|-----------------|
+| ... | <n> | YES/NO | <provider> | <n>% |
+
+### Execution Probability
+- Overall success rate: <n>%
+- Profitable execution rate: <n>%
+- Per-chain breakdown: <table if available>
+
+### Bridge Recovery
+| Status | Count |
+|--------|-------|
+| Pending | <n> |
+| Stuck >24h | <n> |
+| Failed | <n> |
+
+### Memory Health
+| Service | RSS | Heap Used | Threshold | Status |
+|---------|-----|-----------|-----------|--------|
+| ... | <n>MB | <n>MB | <n>% | OK / WARNING / CRITICAL |
+
+Redis memory: <used> / <max>
+
+### Redis Stream Health Map
+
+| Stream | Exists | Length | Groups | Consumers | Pending | Oldest Pending | Status |
+|--------|--------|--------|--------|-----------|---------|----------------|--------|
+| stream:price-updates | YES | <n> | 2 | <n> | <n> | <age> | HEALTHY |
+| stream:opportunities | YES | <n> | 1 | <n> | <n> | <age> | HEALTHY |
+| ... | ... | ... | ... | ... | ... | ... | ... |
+
+---
+
+## Phase 4: Pipeline Smoke Test
+
+### Stream Flow Cascade
+| Stream | Baseline | Final | Growth | Status |
+|--------|----------|-------|--------|--------|
+| stream:price-updates | <n> | <n> | +<n> | FLOWING/STALLED |
+| stream:opportunities | <n> | <n> | +<n> | FLOWING/STALLED |
+| stream:execution-requests | <n> | <n> | +<n> | FLOWING/STALLED |
+| stream:execution-results | <n> | <n> | +<n> | FLOWING/STALLED |
+
+### Pipeline Verdict: FLOWING / STALLED AT <stage>
+
+### Message Trace
+<traced message details if available>
+
+### DLQ Growth: <n> new entries
+
+### Per-Chain Detection Coverage
+| Partition | Chain | Messages During Smoke | Status |
+|-----------|-------|-----------------------|--------|
+| P1 | BSC | <n> | ACTIVE / SILENT |
+| P1 | Polygon | <n> | ACTIVE / SILENT |
+| P2 | Arbitrum | <n> | ACTIVE / SILENT |
+| P2 | Optimism | <n> | ACTIVE / SILENT |
+| P2 | Base | <n> | ACTIVE / SILENT |
+| P2 | zkSync | <n> | ACTIVE / SILENT |
+| P2 | Linea | <n> | ACTIVE / SILENT |
+| P2 | Blast | <n> | ACTIVE / SILENT |
+| P2 | Scroll | <n> | ACTIVE / SILENT |
+| P3 | Ethereum | <n> | ACTIVE / SILENT |
+| P3 | Avalanche | <n> | ACTIVE / SILENT |
+| P3 | Fantom | <n> | ACTIVE / SILENT |
+| P4 | Solana | <n> | ACTIVE / SILENT |
+
+### Risk State Post-Smoke
+- Drawdown state: NORMAL / changed to <state>
+- Consecutive losses during smoke: <n>
+
+---
+
+## All Findings (sorted by severity)
+
+<for each finding, include all JSON fields formatted as a readable block>
+
+---
+
+*Report generated by monitoring.md v2.1*
+*Session: <SESSION_ID>*
+*Completed: <ISO8601>*
+```
+
+---
+
+*End of orchestrator instructions.*

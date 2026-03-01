@@ -1,0 +1,14 @@
+[
+  "stream:pending-opportunities",
+  "stream:system-failover",
+  "stream:opportunities",
+  "stream:swap-events",
+  "stream:service-degradation",
+  "stream:dead-letter-queue",
+  "stream:whale-alerts",
+  "stream:price-updates",
+  "stream:execution-results",
+  "stream:health",
+  "stream:volume-aggregates",
+  "stream:execution-requests"
+]
