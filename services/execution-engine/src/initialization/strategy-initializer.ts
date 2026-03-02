@@ -25,6 +25,7 @@ import { ExecutionStrategyFactory, createStrategyFactory } from '../strategies/s
 import { BackrunStrategy } from '../strategies/backrun.strategy';
 import { UniswapXFillerStrategy } from '../strategies/uniswapx-filler.strategy';
 import type { ISimulationService } from '../services/simulation/types';
+import { MockSimulationService } from '../services/simulation/mock-simulation.service';
 import { initializeTxSimulationService } from '../services/tx-simulation-initializer';
 import type { ProviderServiceImpl } from '../services/provider.service';
 import type {
@@ -432,7 +433,13 @@ export async function initializeAllStrategies(deps: StrategyInitDeps): Promise<S
 
   // Initialize tx simulation service
   let txSimulationService: ISimulationService | null = null;
-  if (!isSimulationMode && providerService) {
+  if (isSimulationMode) {
+    // RT-009 FIX: Use mock simulation service in simulation/dev mode so the
+    // full pipeline path (simulation→execution) is exercised and /stats
+    // reports a healthy simulation provider instead of "no providers".
+    txSimulationService = new MockSimulationService();
+    logger.info('Using MockSimulationService for simulation mode');
+  } else if (providerService) {
     txSimulationService = initializeTxSimulationService(providerService, logger);
   }
 

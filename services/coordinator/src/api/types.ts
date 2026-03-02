@@ -63,6 +63,14 @@ export interface SystemMetrics {
   priceUpdatesReceived: number;
   // P1-7 FIX: Track dropped opportunities for monitoring
   opportunitiesDropped: number;
+  // RT-007 FIX: DLQ error classification counters
+  dlqMetrics?: {
+    total: number;
+    expired: number;
+    validation: number;
+    transient: number;
+    unknown: number;
+  };
   // SM-001 FIX: Per-reason rejection/deferral counters for pipeline observability
   forwardingMetrics?: {
     expired: number;

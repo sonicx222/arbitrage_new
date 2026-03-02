@@ -193,9 +193,35 @@ export class CircuitBreakerManager {
     return first.done ? null : first.value;
   }
 
-  /** Get status of first chain breaker (backward compatibility). */
+  /**
+   * Get status of first chain breaker (backward compatibility).
+   *
+   * RT-004 FIX: Returns a default CLOSED status when the manager is enabled
+   * but no chain breakers have been lazily created yet. Previously returned
+   * null in this case, causing the API to report "disabled" even when the
+   * manager was initialized and ready.
+   */
   getStatus(): CircuitBreakerStatus | null {
-    return this.getCircuitBreaker()?.getStatus() ?? null;
+    if (!this.enabled) return null;
+
+    const breaker = this.getCircuitBreaker();
+    if (breaker) return breaker.getStatus();
+
+    // Enabled but no chain breakers created yet — return default CLOSED status
+    return {
+      state: 'CLOSED',
+      enabled: true,
+      consecutiveFailures: 0,
+      cooldownRemaining: 0,
+      lastStateChange: Date.now(),
+      metrics: {
+        totalFailures: 0,
+        totalSuccesses: 0,
+        timesTripped: 0,
+        totalOpenTimeMs: 0,
+        lastTrippedAt: null,
+      },
+    };
   }
 
   /** Check if any chain's circuit breaker is open. */

@@ -915,12 +915,18 @@ describe('initializeAllStrategies', () => {
       expect(result.txSimulationService).not.toBeNull();
     });
 
-    test('should skip tx simulation service in simulation mode', async () => {
+    test('should use mock simulation service in simulation mode', async () => {
       const deps = createDefaultDeps({ isSimulationMode: true });
       const result = await initializeAllStrategies(deps);
 
+      // RT-009 FIX: In simulation mode, a MockSimulationService is used
+      // instead of null to exercise the full simulation→execution pipeline
       expect(initializeTxSimulationService).not.toHaveBeenCalled();
-      expect(result.txSimulationService).toBeNull();
+      expect(result.txSimulationService).not.toBeNull();
+      // Verify it's the mock (always returns success metrics with 0 counts)
+      const metrics = result.txSimulationService!.getAggregatedMetrics();
+      expect(metrics.totalSimulations).toBe(0);
+      expect(metrics.successfulSimulations).toBe(0);
     });
 
     test('should skip tx simulation service when no provider service', async () => {

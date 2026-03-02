@@ -1836,8 +1836,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   /**
    * RT-007 FIX: Handle dead-letter queue messages.
-   * Logs the failure details for observability and acknowledges the message
-   * so it doesn't remain pending indefinitely.
+   * Classifies errors by type (expired, validation, transient) and maintains
+   * counters exposed via systemMetrics for monitoring dashboards.
    */
   private async handleDlqMessage(message: StreamMessage): Promise<void> {
     const data = message.data as Record<string, unknown>;
@@ -1848,13 +1848,36 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const errorCode = getString(rawData, '_dlq_errorCode', 'unknown');
     const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
 
-    this.logger.warn('DLQ entry processed', {
+    // Classify error type from error code prefix convention:
+    // [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable errors
+    const dlq = this.systemMetrics.dlqMetrics!;
+    dlq.total++;
+
+    if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
+      dlq.expired++;
+    } else if (errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')) {
+      dlq.validation++;
+    } else if (errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')) {
+      dlq.transient++;
+    } else {
+      dlq.unknown++;
+    }
+
+    this.logger.warn('DLQ entry classified', {
       messageId: message.id,
       originalStream,
       errorCode,
       opportunityId,
       type: getString(rawData, 'type', 'unknown'),
       chain: getString(rawData, 'chain', 'unknown'),
+      classification: errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')
+        ? 'expired'
+        : errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')
+          ? 'validation'
+          : errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')
+            ? 'transient'
+            : 'unknown',
+      dlqTotals: { ...dlq },
     });
   }
 
@@ -2050,7 +2073,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Price feed metrics (S3.3.5)
       priceUpdatesReceived: 0,
       // P1-7 FIX: Track dropped opportunities
-      opportunitiesDropped: 0
+      opportunitiesDropped: 0,
+      // RT-007 FIX: DLQ error classification counters
+      dlqMetrics: {
+        total: 0,
+        expired: 0,
+        validation: 0,
+        transient: 0,
+        unknown: 0,
+      },
     };
   }
 
