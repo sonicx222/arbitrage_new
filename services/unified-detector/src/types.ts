@@ -90,6 +90,10 @@ export interface ExtendedPair extends Pair {
   // At 100-1000 Sync events/sec, this eliminates ~2000 BigInt parses/sec
   reserve0BigInt?: bigint;
   reserve1BigInt?: bigint;
+  // P0 Fix DET-001: Flag pairs whose reserves are synthetic (derived from swap amounts,
+  // not actual pool liquidity). Curve and Balancer events emit trade amounts, not reserves.
+  // When true, amountIn calculations and slippage estimates are unreliable.
+  syntheticReserves?: boolean;
 }
 
 /**

@@ -1787,11 +1787,14 @@ export class ChainDetectorInstance extends EventEmitter {
 
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
 
-      // Update reserves with swap amounts as synthetic reserves
+      // Update reserves with swap amounts as synthetic reserves.
+      // P0 Fix DET-001: Mark as synthetic so detection applies confidence discount.
+      // Swap amounts reflect marginal exchange rate, not actual pool liquidity.
       pair.reserve0 = tokensSold.toString();
       pair.reserve1 = tokensBought.toString();
       pair.reserve0BigInt = tokensSold;
       pair.reserve1BigInt = tokensBought;
+      pair.syntheticReserves = true;
       pair.blockNumber = blockNumber;
       pair.lastUpdate = now;
 
@@ -1846,11 +1849,13 @@ export class ChainDetectorInstance extends EventEmitter {
 
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${poolAddress}`);
 
-      // Use swap amounts as synthetic reserves (marginal exchange rate)
+      // Use swap amounts as synthetic reserves (marginal exchange rate).
+      // P0 Fix DET-001: Mark as synthetic so detection applies confidence discount.
       pair.reserve0 = amountIn.toString();
       pair.reserve1 = amountOut.toString();
       pair.reserve0BigInt = amountIn;
       pair.reserve1BigInt = amountOut;
+      pair.syntheticReserves = true;
       pair.blockNumber = blockNumber;
       pair.lastUpdate = now;
 
@@ -2111,6 +2116,14 @@ export class ChainDetectorInstance extends EventEmitter {
       const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
 
       if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
+        // P0 Fix DET-001: Discount confidence when either pair has synthetic reserves.
+        // Curve/Balancer swap amounts are NOT actual pool reserves — amountIn calculations
+        // and slippage estimates are unreliable. The 0.3 multiplier reflects that synthetic
+        // reserves only provide directional price signal, not reliable liquidity depth.
+        if (currentSnapshot.syntheticReserves || otherSnapshot.syntheticReserves) {
+          opportunity.confidence = (opportunity.confidence ?? 1) * 0.3;
+        }
+
         // ML Signal Integration: Apply cached signal confidence (HOT PATH)
         // O(1) Map.get() + timestamp check — sub-microsecond impact
         if (FEATURE_FLAGS.useSignalCacheRead && this.signalCache.size > 0) {

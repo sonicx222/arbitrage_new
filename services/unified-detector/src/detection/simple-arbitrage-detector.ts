@@ -56,6 +56,8 @@ export interface PairSnapshot {
   // PERF 10.1: Cached BigInt values for hot-path calculations
   reserve0BigInt: bigint;
   reserve1BigInt: bigint;
+  // P0 Fix DET-001: Flag pairs with synthetic reserves (Curve/Balancer swap amounts)
+  syntheticReserves?: boolean;
 }
 
 /** FIX 2.2: Rejection statistics for observability */

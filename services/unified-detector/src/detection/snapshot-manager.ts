@@ -63,6 +63,8 @@ export interface ExtendedPair {
   blockNumber: number;
   lastUpdate?: number;
   name?: string;
+  // P0 Fix DET-001: Flag pairs with synthetic reserves (Curve/Balancer swap amounts)
+  syntheticReserves?: boolean;
 }
 
 /**
@@ -141,6 +143,7 @@ export class SnapshotManager {
       blockNumber: pair.blockNumber,
       reserve0BigInt,
       reserve1BigInt,
+      syntheticReserves: pair.syntheticReserves,
     };
   }
 

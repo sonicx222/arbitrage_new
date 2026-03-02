@@ -1375,14 +1375,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (!this.opportunityRouter) return [];
 
     // Build batch entries with trace contexts
-    const batch: Array<{ data: Record<string, unknown>; traceContext?: TraceContext }> = [];
+    // P0 Fix DF-001: Include stream message ID (msg.id) so the router can return it for XACK.
+    // Previously only data was passed, causing the router to return opportunity data IDs
+    // (e.g., "multi_ethereum_...") instead of stream message IDs (e.g., "1772460218224-0").
+    // Redis XACK silently ignores non-matching IDs, leaving ALL messages permanently pending.
+    const batch: Array<{ streamMessageId: string; data: Record<string, unknown>; traceContext?: TraceContext }> = [];
     for (const msg of messages) {
       const data = msg.data as Record<string, unknown>;
       const parentCtx = extractContext(data);
       const traceContext: TraceContext = parentCtx
         ? createChildContext(parentCtx, 'coordinator')
         : createTraceContext('coordinator');
-      batch.push({ data, traceContext });
+      batch.push({ streamMessageId: msg.id, data, traceContext });
     }
 
     // Delegate to OpportunityRouter for dedup + TTL-priority processing

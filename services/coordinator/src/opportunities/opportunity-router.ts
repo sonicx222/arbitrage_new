@@ -494,13 +494,16 @@ export class OpportunityRouter {
    * - Ensuring fast-chain opportunities (Arbitrum 2s TTL) are processed before
    *   slow-chain opportunities (Ethereum 30s TTL) instead of FIFO order
    *
-   * @param batch - Array of raw opportunity data records from a single xreadgroup call
+   * @param batch - Array of raw opportunity data records from a single xreadgroup call.
+   *   Each entry includes `streamMessageId` (the Redis stream message ID for XACK).
    * @param isLeader - Whether this instance should forward to execution
-   * @param traceContextFactory - Factory for creating trace contexts per message
-   * @returns Array of opportunity IDs that were successfully processed
+   * @returns Array of stream message IDs that were successfully processed (for XACK).
+   *   P0 Fix DF-001: Returns stream message IDs (e.g., "1772460218224-0"), NOT opportunity
+   *   data IDs (e.g., "multi_ethereum_..."). Previously returned data IDs which Redis XACK
+   *   silently ignored, causing all messages to remain permanently pending.
    */
   async processOpportunityBatch(
-    batch: Array<{ data: Record<string, unknown>; traceContext?: TraceContext }>,
+    batch: Array<{ streamMessageId: string; data: Record<string, unknown>; traceContext?: TraceContext }>,
     isLeader: boolean,
   ): Promise<string[]> {
     if (batch.length === 0) return [];
@@ -509,8 +512,10 @@ export class OpportunityRouter {
     if (batch.length === 1) {
       const entry = batch[0];
       const processed = await this.processOpportunity(entry.data, isLeader, entry.traceContext);
-      const id = entry.data.id as string | undefined;
-      return processed && id ? [id] : [];
+      // P0 Fix DF-001: Return stream message ID, not opportunity data ID.
+      // Always ACK the message — even if processing fails, we don't want
+      // permanently pending messages. Failed messages go to DLQ via processOpportunity.
+      return [entry.streamMessageId];
     }
 
     const now = Date.now();
@@ -520,6 +525,7 @@ export class OpportunityRouter {
     interface ParsedOpp {
       data: Record<string, unknown>;
       id: string;
+      streamMessageId: string;  // P0 Fix DF-001: Redis stream message ID for XACK
       chain: string;
       pairKey: string;  // chain:buyDex:sellDex:tokenIn:tokenOut
       expiresAt: number;
@@ -532,7 +538,12 @@ export class OpportunityRouter {
     for (const entry of batch) {
       const data = entry.data;
       const id = data.id as string | undefined;
-      if (!id || typeof id !== 'string') continue;
+      // P0 Fix DF-002: ACK messages with missing/invalid IDs instead of silently skipping.
+      // Without ACK, these messages remain permanently pending in the PEL.
+      if (!id || typeof id !== 'string') {
+        processedIds.push(entry.streamMessageId);
+        continue;
+      }
 
       const chain = typeof data.chain === 'string' ? data.chain : 'unknown';
       const buyDex = typeof data.buyDex === 'string' ? data.buyDex : '';
@@ -553,14 +564,19 @@ export class OpportunityRouter {
         const originalTtl = expiresAt - timestamp;
         effectiveExpiresAt = timestamp + originalTtl * this.config.simulationTtlMultiplier;
       }
+      // P0 Fix DF-002: ACK expired messages instead of silently skipping.
+      // Previously expired messages were skipped with `continue` before being added
+      // to `parsed`, so their IDs were never returned for XACK.
       if (effectiveExpiresAt < now) {
         expiredInBatch++;
+        processedIds.push(entry.streamMessageId);
         continue;
       }
 
       parsed.push({
         data,
         id,
+        streamMessageId: entry.streamMessageId,
         chain,
         pairKey: `${chain}:${buyDex}:${sellDex}:${tokenIn}:${tokenOut}`,
         expiresAt,
@@ -601,18 +617,19 @@ export class OpportunityRouter {
     const results = await Promise.all(
       sorted.map(opp => this.processOpportunity(opp.data, isLeader, opp.traceContext))
     );
+    // P0 Fix DF-001: Use stream message IDs for XACK, not opportunity data IDs.
+    // ACK all processed messages regardless of success — failed messages are already
+    // routed to DLQ by processOpportunity. Leaving them unACKed causes unbounded PEL growth.
     for (let i = 0; i < sorted.length; i++) {
-      if (results[i]) {
-        processedIds.push(sorted[i].id);
-      }
+      processedIds.push(sorted[i].streamMessageId);
     }
 
-    // Also mark deduplicated (skipped) opportunities as "processed" for ACK purposes
-    // since they were intentionally superseded by a fresher version
+    // Also ACK deduplicated (skipped) opportunities — they were intentionally
+    // superseded by a fresher version and must not remain pending.
     const processedSet = new Set(processedIds);
     for (const opp of parsed) {
-      if (!processedSet.has(opp.id)) {
-        processedIds.push(opp.id);
+      if (!processedSet.has(opp.streamMessageId)) {
+        processedIds.push(opp.streamMessageId);
       }
     }
 
