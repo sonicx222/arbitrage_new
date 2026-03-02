@@ -1,0 +1,16 @@
+{
+  "sepolia": {
+    "network": "sepolia",
+    "chainId": 11155111,
+    "contractAddress": "0xb38498De6C09F110EbC946CaEEd73BA8640f5C65",
+    "ownerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "deployerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "transactionHash": "0xffe6ba68bc78bde1ae3deb7269aef27641dce8eb1b4aa65a0ce99863fcdb2ae3",
+    "blockNumber": 10368335,
+    "timestamp": 1772452188,
+    "minimumProfit": "0",
+    "approvedRouters": [],
+    "gasUsed": "2710382",
+    "verified": true
+  }
+}

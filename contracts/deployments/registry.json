@@ -42,9 +42,9 @@
     "BalancerV2FlashArbitrage": null,
     "SyncSwapFlashArbitrage": null,
     "DaiFlashMintArbitrage": null,
-    "CommitRevealArbitrage": null,
+    "CommitRevealArbitrage": "0xb38498De6C09F110EbC946CaEEd73BA8640f5C65",
     "MultiPathQuoter": "0xE5b26749430ed50917b75689B654a4C5808b23FB",
-    "deployedAt": 1772401884,
+    "deployedAt": 1772452188,
     "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
     "verified": false,
     "FlashLoanArbitrage_deployedAt": 1772401704,
@@ -52,7 +52,10 @@
     "FlashLoanArbitrage_verified": true,
     "MultiPathQuoter_deployedAt": 1772401884,
     "MultiPathQuoter_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
-    "MultiPathQuoter_verified": true
+    "MultiPathQuoter_verified": true,
+    "CommitRevealArbitrage_deployedAt": 1772452188,
+    "CommitRevealArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "CommitRevealArbitrage_verified": true
   },
   "arbitrumSepolia": {
     "FlashLoanArbitrage": "0xE5b26749430ed50917b75689B654a4C5808b23FB",

@@ -124,6 +124,7 @@ export function hasAaveV3(chain: string): boolean {
  */
 export const PANCAKESWAP_V3_FACTORIES: Readonly<Record<string, string>> = {
   bsc: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  bscTestnet: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   ethereum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   arbitrum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   zksync: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
@@ -217,6 +218,8 @@ export function hasBalancerV2(chain: string): boolean {
 export const SYNCSWAP_VAULTS: Readonly<Record<string, string>> = {
   zksync: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // zkSync Era Mainnet
   scroll: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',  // Scroll Mainnet (RPC-verified 2026-02-26)
+  'zksync-sepolia': '0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8',  // zkSync Era Sepolia (Staging)
+  'zksync-testnet': '0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8',  // Alias for zksync-sepolia
   // linea: TBD - SyncSwap not yet deployed to Linea mainnet
 } as const;
 

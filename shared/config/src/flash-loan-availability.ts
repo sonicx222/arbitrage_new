@@ -236,6 +236,26 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     morpho: false,
   },
 
+  'zksync-testnet': {
+    aave_v3: false,
+    balancer_v2: false,
+    pancakeswap_v3: false,
+    spookyswap: false,
+    syncswap: true, // SyncSwap Vault: 0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8 (Staging)
+    dai_flash_mint: false,
+    morpho: false,
+  },
+
+  bscTestnet: {
+    aave_v3: false,
+    balancer_v2: false,
+    pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
+    syncswap: false,
+    dai_flash_mint: false,
+    morpho: false,
+  },
+
   'solana-devnet': {
     aave_v3: false,
     balancer_v2: false,
