@@ -18,6 +18,36 @@ import type { TraceContext } from '@arbitrage/core/tracing';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 
 /**
+ * Parse a numeric field that may arrive as a string from Redis Streams.
+ * Redis Streams serialize all values as strings, so `typeof data.X === 'number'`
+ * always fails for stream-sourced data. This handles both native numbers (from
+ * direct calls) and string representations (from Redis).
+ *
+ * @see SA-058/RT-005: Type erasure caused 98.6% EE validation rejection
+ */
+function parseNumericField(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isNaN(value) ? undefined : value;
+  if (typeof value === 'string' && value !== '') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
+/**
+ * Parse a boolean field that may arrive as a string from Redis Streams.
+ * Handles both native booleans and string representations ("true"/"false").
+ */
+function parseBooleanField(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+  }
+  return undefined;
+}
+
+/**
  * Logger interface for dependency injection
  */
 export interface OpportunityRouterLogger {
@@ -320,7 +350,7 @@ export class OpportunityRouter {
       return false;
     }
 
-    const timestamp = typeof data.timestamp === 'number' ? data.timestamp : Date.now();
+    const timestamp = parseNumericField(data.timestamp) ?? Date.now();
 
     // Duplicate detection
     const existing = this.opportunities.get(id);
@@ -335,7 +365,7 @@ export class OpportunityRouter {
     }
 
     // Input validation for profit percentage
-    const profitPercentage = typeof data.profitPercentage === 'number' ? data.profitPercentage : undefined;
+    const profitPercentage = parseNumericField(data.profitPercentage);
     if (profitPercentage !== undefined) {
       if (profitPercentage < this.config.minProfitPercentage || profitPercentage > this.config.maxProfitPercentage) {
         this._rejectedProfit++;
@@ -379,7 +409,7 @@ export class OpportunityRouter {
     const opportunity: ArbitrageOpportunity = {
       id,
       type: typeof data.type === 'string' ? data.type as ArbitrageOpportunity['type'] : undefined,
-      confidence: typeof data.confidence === 'number' ? data.confidence : 0,
+      confidence: parseNumericField(data.confidence) ?? 0,
       timestamp,
       chain: typeof data.chain === 'string' ? data.chain : undefined,
       buyDex: typeof data.buyDex === 'string' ? data.buyDex : undefined,
@@ -394,15 +424,15 @@ export class OpportunityRouter {
       token0,
       token1,
       amountIn: typeof data.amountIn === 'string' ? data.amountIn : undefined,
-      buyPrice: typeof data.buyPrice === 'number' ? data.buyPrice : undefined,
-      sellPrice: typeof data.sellPrice === 'number' ? data.sellPrice : undefined,
-      expectedProfit: typeof data.expectedProfit === 'number' ? data.expectedProfit : undefined,
-      estimatedProfit: typeof data.estimatedProfit === 'number' ? data.estimatedProfit : undefined,
+      buyPrice: parseNumericField(data.buyPrice),
+      sellPrice: parseNumericField(data.sellPrice),
+      expectedProfit: parseNumericField(data.expectedProfit),
+      estimatedProfit: parseNumericField(data.estimatedProfit),
       gasEstimate: typeof data.gasEstimate === 'string' ? data.gasEstimate : undefined,
-      expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : undefined,
+      expiresAt: parseNumericField(data.expiresAt),
       status: typeof data.status === 'string' ? data.status as ArbitrageOpportunity['status'] : undefined,
-      blockNumber: typeof data.blockNumber === 'number' ? data.blockNumber : undefined,
-      useFlashLoan: typeof data.useFlashLoan === 'boolean' ? data.useFlashLoan : undefined,
+      blockNumber: parseNumericField(data.blockNumber),
+      useFlashLoan: parseBooleanField(data.useFlashLoan),
       buyPair: typeof data.buyPair === 'string' ? data.buyPair : undefined,
       sellPair: typeof data.sellPair === 'string' ? data.sellPair : undefined,
     };

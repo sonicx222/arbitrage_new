@@ -44,7 +44,7 @@ import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrag
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
-import { safeParseInt } from '@arbitrage/config';
+import { safeParseInt, safeParseFloat } from '@arbitrage/config';
 import { serializeOpportunityForStream } from './utils/stream-serialization';
 
 // Import extracted API modules
@@ -419,7 +419,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       executionCbResetMs: config?.executionCbResetMs ?? safeParseInt(process.env.EXECUTION_CB_RESET_MS, 60000),
       // RT-002 FIX: Configurable backpressure thresholds
       consecutiveExpiredThreshold: config?.consecutiveExpiredThreshold ?? safeParseInt(process.env.CONSECUTIVE_EXPIRED_THRESHOLD, 10),
-      executionStreamBackpressureRatio: config?.executionStreamBackpressureRatio ?? parseFloat(process.env.EXECUTION_STREAM_BACKPRESSURE_RATIO ?? '0.95'),
+      executionStreamBackpressureRatio: config?.executionStreamBackpressureRatio ?? safeParseFloat(process.env.EXECUTION_STREAM_BACKPRESSURE_RATIO, 0.95),
       // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
     };
 

@@ -32,6 +32,7 @@ import {
 } from '@arbitrage/core/service-lifecycle';
 import { parseEnvInt } from '@arbitrage/core/utils';
 import { createLogger, parseStandbyConfig } from '@arbitrage/core';
+import { safeParseInt } from '@arbitrage/config';
 import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
@@ -43,7 +44,8 @@ import { getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core/redis
 const logger = createLogger('execution-engine');
 
 // Health check port (default: 3005)
-const HEALTH_CHECK_PORT = parseInt(process.env.HEALTH_CHECK_PORT || process.env.EXECUTION_ENGINE_PORT || '3005', 10);
+// SA-060 FIX: Use safeParseInt to prevent NaN port causing server bind to random OS port
+const HEALTH_CHECK_PORT = safeParseInt(process.env.HEALTH_CHECK_PORT || process.env.EXECUTION_ENGINE_PORT, 3005);
 
 let healthServer: Server | null = null;
 

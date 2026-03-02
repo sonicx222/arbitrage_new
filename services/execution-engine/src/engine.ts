@@ -45,7 +45,7 @@ import { disconnectWithTimeout, parseEnvIntSafe } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger, NonceManager, getNonceManager, TradeLogger, R2Uploader, type TradeLoggerConfig, type R2UploaderConfig } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
-import { FEATURE_FLAGS, DEXES, R2_CONFIG } from '@arbitrage/config';
+import { FEATURE_FLAGS, DEXES, R2_CONFIG, safeParseFloat } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
 import {
   initializeMevProviders,
@@ -670,7 +670,7 @@ export class ExecutionEngineService {
           config: {
             enabled: process.env.BALANCE_MONITOR_ENABLED !== 'false',
             checkIntervalMs: parseEnvIntSafe('BALANCE_MONITOR_INTERVAL_MS', 60000, 5000),
-            lowBalanceThresholdEth: parseFloat(process.env.BALANCE_MONITOR_LOW_THRESHOLD_ETH ?? '0.01'),
+            lowBalanceThresholdEth: safeParseFloat(process.env.BALANCE_MONITOR_LOW_THRESHOLD_ETH, 0.01),
           },
         });
         await this.balanceMonitor.start();
