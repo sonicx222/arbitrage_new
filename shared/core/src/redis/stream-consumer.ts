@@ -41,6 +41,14 @@ export interface StreamConsumerConfig {
   config: ConsumerGroupConfig;
   /** Handler function for each message */
   handler: (message: StreamMessage) => Promise<void>;
+  /**
+   * OPT-1: Optional batch handler that receives ALL messages from a single xreadgroup call.
+   * When provided, messages are passed as an array instead of being processed one-by-one.
+   * The batch handler is responsible for acknowledging messages (autoAck still applies per-message
+   * for successfully handled messages). Returns the list of message IDs that were successfully processed.
+   * Messages not in the returned list are left unacknowledged for retry.
+   */
+  batchHandler?: (messages: StreamMessage[]) => Promise<string[]>;
   /** Number of messages to fetch per read (default: 10) */
   batchSize?: number;
   /** Block time in ms (default: 1000, 0 = non-blocking) */
@@ -307,42 +315,74 @@ export class StreamConsumer {
       pollSucceeded = true;
       this.consecutiveErrors = 0;
 
-      for (const message of messages) {
-        if (!this.running) break;
+      // OPT-1: Batch handler path — pass all messages at once for dedup/priority processing
+      if (this.config.batchHandler && messages.length > 0) {
+        try {
+          const processedIds = await this.config.batchHandler(messages);
+          const processedSet = new Set(processedIds);
+          this.stats.messagesProcessed += processedSet.size;
+          this.stats.messagesFailed += messages.length - processedSet.size;
+          if (processedSet.size > 0) {
+            this.stats.lastProcessedAt = Date.now();
+          }
 
-        // P3 Fix DI-7: Warn once per unrecognized schema version
-        const sv = (message.data as Record<string, unknown>)?.schemaVersion;
-        if (typeof sv === 'string' && sv !== StreamConsumer.KNOWN_SCHEMA_VERSION
-            && !StreamConsumer.warnedSchemaVersions.has(sv)) {
-          StreamConsumer.warnedSchemaVersions.add(sv);
-          this.config.logger?.warn?.('Unrecognized message schema version — processing anyway', {
-            schemaVersion: sv,
-            knownVersion: StreamConsumer.KNOWN_SCHEMA_VERSION,
+          // Auto-acknowledge successfully processed messages
+          if (this.config.autoAck) {
+            for (const id of processedIds) {
+              await this.client.xack(
+                this.config.config.streamName,
+                this.config.config.groupName,
+                id
+              );
+            }
+          }
+        } catch (batchError) {
+          this.stats.messagesFailed += messages.length;
+          this.config.logger?.error('Stream batch handler failed', {
+            error: batchError,
             stream: this.config.config.streamName,
+            batchSize: messages.length,
           });
         }
+      } else {
+        // Per-message handler path (original behavior)
+        for (const message of messages) {
+          if (!this.running) break;
 
-        try {
-          await this.config.handler(message);
-          this.stats.messagesProcessed++;
-          this.stats.lastProcessedAt = Date.now();
-
-          // Auto-acknowledge if enabled
-          if (this.config.autoAck) {
-            await this.client.xack(
-              this.config.config.streamName,
-              this.config.config.groupName,
-              message.id
-            );
+          // P3 Fix DI-7: Warn once per unrecognized schema version
+          const sv = (message.data as Record<string, unknown>)?.schemaVersion;
+          if (typeof sv === 'string' && sv !== StreamConsumer.KNOWN_SCHEMA_VERSION
+              && !StreamConsumer.warnedSchemaVersions.has(sv)) {
+            StreamConsumer.warnedSchemaVersions.add(sv);
+            this.config.logger?.warn?.('Unrecognized message schema version — processing anyway', {
+              schemaVersion: sv,
+              knownVersion: StreamConsumer.KNOWN_SCHEMA_VERSION,
+              stream: this.config.config.streamName,
+            });
           }
-        } catch (handlerError) {
-          this.stats.messagesFailed++;
-          this.config.logger?.error('Stream message handler failed', {
-            error: handlerError,
-            stream: this.config.config.streamName,
-            messageId: message.id
-          });
-          // Don't ack failed messages - they'll be retried
+
+          try {
+            await this.config.handler(message);
+            this.stats.messagesProcessed++;
+            this.stats.lastProcessedAt = Date.now();
+
+            // Auto-acknowledge if enabled
+            if (this.config.autoAck) {
+              await this.client.xack(
+                this.config.config.streamName,
+                this.config.config.groupName,
+                message.id
+              );
+            }
+          } catch (handlerError) {
+            this.stats.messagesFailed++;
+            this.config.logger?.error('Stream message handler failed', {
+              error: handlerError,
+              stream: this.config.config.streamName,
+              messageId: message.id
+            });
+            // Don't ack failed messages - they'll be retried
+          }
         }
       }
     } catch (error) {

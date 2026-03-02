@@ -477,6 +477,123 @@ export class OpportunityRouter {
   }
 
   /**
+   * OPT-1+2: Process a batch of opportunity messages with dedup and TTL-priority scheduling.
+   *
+   * Instead of processing each message sequentially (FIFO), this method:
+   * 1. Groups opportunities by chain+pair key
+   * 2. Within each group, keeps only the freshest opportunity (highest expiresAt/timestamp)
+   * 3. Sorts remaining opportunities by remaining TTL ascending (shortest-remaining first)
+   * 4. Processes in TTL-priority order
+   *
+   * This addresses the 97.7% expiration rate (RT-005) by:
+   * - Deduplicating stale updates for the same pair (reduces processing volume)
+   * - Ensuring fast-chain opportunities (Arbitrum 2s TTL) are processed before
+   *   slow-chain opportunities (Ethereum 30s TTL) instead of FIFO order
+   *
+   * @param batch - Array of raw opportunity data records from a single xreadgroup call
+   * @param isLeader - Whether this instance should forward to execution
+   * @param traceContextFactory - Factory for creating trace contexts per message
+   * @returns Array of opportunity IDs that were successfully processed
+   */
+  async processOpportunityBatch(
+    batch: Array<{ data: Record<string, unknown>; traceContext?: TraceContext }>,
+    isLeader: boolean,
+  ): Promise<string[]> {
+    if (batch.length === 0) return [];
+
+    // If batch is just 1 message, skip grouping overhead
+    if (batch.length === 1) {
+      const entry = batch[0];
+      const processed = await this.processOpportunity(entry.data, isLeader, entry.traceContext);
+      const id = entry.data.id as string | undefined;
+      return processed && id ? [id] : [];
+    }
+
+    const now = Date.now();
+    const processedIds: string[] = [];
+
+    // Step 1: Parse all messages and compute grouping keys
+    interface ParsedOpp {
+      data: Record<string, unknown>;
+      id: string;
+      chain: string;
+      pairKey: string;  // chain:buyDex:sellDex:tokenIn:tokenOut
+      expiresAt: number;
+      timestamp: number;
+      traceContext?: TraceContext;
+    }
+
+    const parsed: ParsedOpp[] = [];
+    for (const entry of batch) {
+      const data = entry.data;
+      const id = data.id as string | undefined;
+      if (!id || typeof id !== 'string') continue;
+
+      const chain = typeof data.chain === 'string' ? data.chain : 'unknown';
+      const buyDex = typeof data.buyDex === 'string' ? data.buyDex : '';
+      const sellDex = typeof data.sellDex === 'string' ? data.sellDex : '';
+      const tokenIn = typeof data.tokenIn === 'string' ? data.tokenIn :
+                       typeof data.token0 === 'string' ? data.token0 : '';
+      const tokenOut = typeof data.tokenOut === 'string' ? data.tokenOut :
+                        typeof data.token1 === 'string' ? data.token1 : '';
+      const expiresAt = typeof data.expiresAt === 'number' ? data.expiresAt : now + 60000;
+      const timestamp = typeof data.timestamp === 'number' ? data.timestamp : now;
+
+      parsed.push({
+        data,
+        id,
+        chain,
+        pairKey: `${chain}:${buyDex}:${sellDex}:${tokenIn}:${tokenOut}`,
+        expiresAt,
+        timestamp,
+        traceContext: entry.traceContext,
+      });
+    }
+
+    // Step 2: Group by pair key, keep only freshest per group
+    const freshest = new Map<string, ParsedOpp>();
+    for (const opp of parsed) {
+      const existing = freshest.get(opp.pairKey);
+      if (!existing || opp.expiresAt > existing.expiresAt ||
+          (opp.expiresAt === existing.expiresAt && opp.timestamp > existing.timestamp)) {
+        freshest.set(opp.pairKey, opp);
+      }
+    }
+
+    // Step 3: Sort by remaining TTL ascending (shortest-remaining first)
+    // This ensures fast-chain opportunities (Arbitrum 2s) are processed before
+    // slow-chain opportunities (Ethereum 30s) which have more time left.
+    const sorted = Array.from(freshest.values());
+    sorted.sort((a, b) => (a.expiresAt - now) - (b.expiresAt - now));
+
+    this.logger.debug('Batch opportunity processing', {
+      batchSize: batch.length,
+      parsedCount: parsed.length,
+      dedupedCount: sorted.length,
+      droppedDuplicates: parsed.length - sorted.length,
+    });
+
+    // Step 4: Process in TTL-priority order
+    for (const opp of sorted) {
+      const processed = await this.processOpportunity(opp.data, isLeader, opp.traceContext);
+      if (processed) {
+        processedIds.push(opp.id);
+      }
+    }
+
+    // Also mark deduplicated (skipped) opportunities as "processed" for ACK purposes
+    // since they were intentionally superseded by a fresher version
+    const processedSet = new Set(processedIds);
+    for (const opp of parsed) {
+      if (!processedSet.has(opp.id)) {
+        processedIds.push(opp.id);
+      }
+    }
+
+    return processedIds;
+  }
+
+  /**
    * Forward an opportunity to the execution engine via Redis Streams.
    *
    * P1-7 FIX: Now includes retry logic with exponential backoff and DLQ support.
