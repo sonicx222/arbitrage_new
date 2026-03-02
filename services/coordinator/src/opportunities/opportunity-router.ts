@@ -453,7 +453,7 @@ export class OpportunityRouter {
     this.opportunities.set(id, opportunity);
     this._totalOpportunities++;
 
-    // ADR-033: Downgraded from info to debug — at 181 opps/s, structured logging
+    // ADR-037: Downgraded from info to debug — at 181 opps/s, structured logging
     // on every opportunity adds ~0.1-0.5ms per message in the hot path.
     this.logger.debug('Opportunity detected', {
       id,
@@ -609,7 +609,7 @@ export class OpportunityRouter {
       droppedDuplicates: parsed.length - sorted.length,
     });
 
-    // ADR-033: Step 4: Process in parallel for throughput.
+    // ADR-037: Step 4: Process in parallel for throughput.
     // Validation (dedup, profit, chain, expiry) is CPU-only with no shared mutable state
     // between opportunities. Forwarding (XADD) calls are independent Redis writes.
     // Promise.all executes all forwards concurrently instead of sequentially,
@@ -714,7 +714,7 @@ export class OpportunityRouter {
           this.logger.info('Execution circuit breaker closed - recovered');
         }
 
-        // ADR-033: Downgraded from info to debug — at peak throughput, two info logs
+        // ADR-037: Downgraded from info to debug — at peak throughput, two info logs
         // per forwarded opportunity add ~0.2-1ms of structured logging overhead.
         this.logger.debug('Forwarded opportunity to execution engine', {
           id: opportunity.id,

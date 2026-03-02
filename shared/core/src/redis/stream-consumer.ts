@@ -326,7 +326,7 @@ export class StreamConsumer {
             this.stats.lastProcessedAt = Date.now();
           }
 
-          // ADR-033: Auto-acknowledge successfully processed messages using pipelined
+          // ADR-037: Auto-acknowledge successfully processed messages using pipelined
           // batch XACK. At batch size 200, this reduces ACK overhead from ~20-40ms
           // (200 sequential round-trips) to ~0.5ms (1 pipelined round-trip).
           if (this.config.autoAck && processedIds.length > 0) {

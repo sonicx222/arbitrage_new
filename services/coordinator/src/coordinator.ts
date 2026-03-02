@@ -165,7 +165,7 @@ export interface CoordinatorDependencies {
   /** Factory function to get Redis Streams client */
   getRedisStreamsClient?: () => Promise<RedisStreamsClient>;
   /**
-   * ADR-033: Factory to create a dedicated (non-singleton) Redis Streams client.
+   * ADR-037: Factory to create a dedicated (non-singleton) Redis Streams client.
    * Used by the opportunities consumer to isolate from other consumers.
    * Defaults to createRedisStreamsClient from @arbitrage/core/redis.
    */
@@ -246,7 +246,7 @@ interface StreamMessageData {
 export class CoordinatorService implements CoordinatorStateProvider {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
-  // ADR-033: Dedicated Redis connection for the opportunities stream consumer.
+  // ADR-037: Dedicated Redis connection for the opportunities stream consumer.
   // Isolates the high-throughput opportunity consumption from 7 other stream
   // consumers sharing the main connection, eliminating TCP socket contention.
   private opportunityStreamsClient: RedisStreamsClient | null = null;
@@ -346,7 +346,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       perfLogger: deps?.perfLogger ?? getPerformanceLogger('coordinator'),
       getRedisClient: deps?.getRedisClient ?? getRedisClient,
       getRedisStreamsClient: deps?.getRedisStreamsClient ?? getRedisStreamsClient,
-      // ADR-033: Default to createRedisStreamsClient for a dedicated (non-singleton)
+      // ADR-037: Default to createRedisStreamsClient for a dedicated (non-singleton)
       // Redis connection. This gives the opportunities consumer its own TCP socket.
       createDedicatedStreamsClient: deps?.createDedicatedStreamsClient ?? createRedisStreamsClient,
       createServiceState: deps?.createServiceState ?? createServiceState,
@@ -562,6 +562,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
         consumerName: this.config.consumerId,
         startId: '0',
         resetToStartIdOnExistingGroup: false
+      },
+      // P1 Fix DF-004: Monitor forwarding DLQ — forwarding failures from OpportunityRouter
+      // go to a separate stream (stream:forwarding-dlq) that was never consumed.
+      // Without this, forwarding failures are never auto-recovered or even observed.
+      {
+        streamName: RedisStreamsClient.STREAMS.FORWARDING_DLQ,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '0',
+        resetToStartIdOnExistingGroup: false
       }
     ];
 
@@ -611,7 +621,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Initialize Redis Streams client
       this.streamsClient = await this.deps.getRedisStreamsClient();
 
-      // ADR-033: Create dedicated Redis Streams connection for the opportunities consumer.
+      // ADR-037: Create dedicated Redis Streams connection for the opportunities consumer.
       // The coordinator runs 8 stream consumers on one event loop. When all consumers
       // share a single ioredis connection, their XREADGROUP/XACK calls serialize at the
       // TCP socket level. A dedicated connection for the highest-throughput stream
@@ -865,7 +875,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         this.server = null;
       }
 
-      // ADR-033: Disconnect dedicated opportunities streams client
+      // ADR-037: Disconnect dedicated opportunities streams client
       await disconnectWithTimeout(this.opportunityStreamsClient, 'Opportunity streams client', 5000, this.logger);
       this.opportunityStreamsClient = null;
 
@@ -1037,6 +1047,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Without this, the consumer group exists but consumers=0, meaning DLQ entries
       // accumulate without being processed or acknowledged.
       [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: (msg) => this.handleDlqMessage(msg),
+      // P1 Fix DF-004: Reuse DLQ handler for forwarding DLQ — same logging/monitoring.
+      [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: (msg) => this.handleDlqMessage(msg),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -1084,7 +1096,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         return { autoAck: false }; // Deferred ACK - handled by streamConsumerManager.wrapHandler
       };
 
-      // ADR-033: Use dedicated Redis connection for the opportunities consumer
+      // ADR-037: Use dedicated Redis connection for the opportunities consumer
       // to eliminate TCP socket contention with 7 other stream consumers.
       const isOpportunitiesStream = groupConfig.streamName === RedisStreams.OPPORTUNITIES;
       const clientForConsumer = (isOpportunitiesStream && this.opportunityStreamsClient)

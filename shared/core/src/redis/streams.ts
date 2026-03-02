@@ -913,7 +913,7 @@ export class RedisStreamsClient {
   }
 
   /**
-   * ADR-033: Pipelined batch XACK — acknowledge multiple message IDs in a single
+   * ADR-037: Pipelined batch XACK — acknowledge multiple message IDs in a single
    * Redis pipeline round-trip instead of N sequential calls.
    *
    * At batch size 200, this reduces ACK overhead from ~20-40ms (200 round-trips)
@@ -1613,7 +1613,7 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
 }
 
 /**
- * ADR-033: Create a new, non-singleton RedisStreamsClient instance.
+ * ADR-037: Create a new, non-singleton RedisStreamsClient instance.
  *
  * Unlike getRedisStreamsClient() which returns a shared singleton, this factory
  * creates a dedicated connection for services that need isolation from other

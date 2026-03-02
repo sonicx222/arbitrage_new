@@ -60,6 +60,11 @@ async function main() {
       // but the event loop is saturated by the accumulated stream message burst (~500 msgs).
       // Requiring at least one chain to have price data ensures the service has processed
       // initial updates and the event loop has cleared the startup burst.
+      //
+      // P1 Fix ST-007: This readiness check is correct by design — the cross-chain detector
+      // depends on price data arriving from partitions via stream:price-updates, which can
+      // take 60-90s in simulation mode. Monitoring tools should allow >90s readiness timeout
+      // for this service (vs 30s for partitions).
       readyCheck: () => {
         if (!detector.isRunning()) return false;
         const details = detector.getHealthDetails();

@@ -449,7 +449,7 @@ describe('OpportunityRouter', () => {
 
       await router.processOpportunity(data, false);
 
-      // ADR-033: Downgraded from info to debug for hot-path performance
+      // ADR-037: Downgraded from info to debug for hot-path performance
       expect(logger.debug).toHaveBeenCalledWith(
         'Opportunity detected',
         expect.objectContaining({
@@ -570,7 +570,7 @@ describe('OpportunityRouter', () => {
 
       await router.forwardToExecutionEngine(opp);
 
-      // ADR-033: Downgraded from info to debug for hot-path performance
+      // ADR-037: Downgraded from info to debug for hot-path performance
       expect(logger.debug).toHaveBeenCalledWith(
         expect.stringContaining('Forwarded opportunity'),
         expect.objectContaining({

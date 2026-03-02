@@ -220,8 +220,10 @@ export class FastLaneConsumer {
 
     this.fastLaneStats.enqueued++;
     this.stats.opportunitiesReceived++;
+    // P1 Fix DF-003: Add opportunity.chain fallback for same-chain arbs (which don't
+    // set buyChain). Matches the pattern in opportunity.consumer.ts:657.
     recordOpportunityDetected(
-      opportunity.buyChain ?? 'unknown',
+      opportunity.buyChain ?? opportunity.chain ?? 'unknown',
       opportunity.type ?? 'unknown',
     );
 
