@@ -180,13 +180,17 @@ describe('Circuit Breaker API Endpoints', () => {
       expect(mockEngine.getCircuitBreakerStatus).toHaveBeenCalled();
     });
 
-    it('should return 503 when circuit breaker is disabled', async () => {
+    it('should return 200 with disabled status when circuit breaker is not enabled', async () => {
       mockEngine.getCircuitBreakerStatus.mockReturnValue(null);
 
       const response = await makeRequest(server, 'GET', '/circuit-breaker');
 
-      expect(response.statusCode).toBe(503);
-      expect(response.body.error).toBe('Circuit breaker not available');
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toMatchObject({
+        enabled: false,
+        state: 'disabled',
+        message: 'Circuit breaker is not enabled',
+      });
     });
 
     it('should include metrics in response', async () => {
