@@ -32,7 +32,7 @@ import {
 } from '@arbitrage/core/service-lifecycle';
 import { parseEnvInt } from '@arbitrage/core/utils';
 import { createLogger, parseStandbyConfig } from '@arbitrage/core';
-import { safeParseInt } from '@arbitrage/config';
+import { safeParseInt, safeParseFloat } from '@arbitrage/config';
 import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
@@ -62,13 +62,14 @@ export function getSimulationConfigFromEnv(): SimulationConfig | undefined {
     return undefined;
   }
 
+  // SA-FIX: Use safeParseFloat/safeParseInt with NaN guards instead of raw parseFloat/parseInt
   return {
     enabled: true,
-    successRate: parseFloat(process.env.EXECUTION_SIMULATION_SUCCESS_RATE || '0.85'),
-    executionLatencyMs: parseInt(process.env.EXECUTION_SIMULATION_LATENCY_MS || '500', 10),
-    gasUsed: parseInt(process.env.EXECUTION_SIMULATION_GAS_USED || '200000', 10),
-    gasCostMultiplier: parseFloat(process.env.EXECUTION_SIMULATION_GAS_COST_MULTIPLIER || '0.1'),
-    profitVariance: parseFloat(process.env.EXECUTION_SIMULATION_PROFIT_VARIANCE || '0.2'),
+    successRate: safeParseFloat(process.env.EXECUTION_SIMULATION_SUCCESS_RATE, 0.85),
+    executionLatencyMs: safeParseInt(process.env.EXECUTION_SIMULATION_LATENCY_MS, 500),
+    gasUsed: safeParseInt(process.env.EXECUTION_SIMULATION_GAS_USED, 200000),
+    gasCostMultiplier: safeParseFloat(process.env.EXECUTION_SIMULATION_GAS_COST_MULTIPLIER, 0.1),
+    profitVariance: safeParseFloat(process.env.EXECUTION_SIMULATION_PROFIT_VARIANCE, 0.2),
     logSimulatedExecutions: process.env.EXECUTION_SIMULATION_LOG !== 'false'
   };
 }
@@ -88,9 +89,10 @@ export function getSimulationConfigFromEnv(): SimulationConfig | undefined {
 export function getCircuitBreakerConfigFromEnv() {
   return {
     enabled: process.env.CIRCUIT_BREAKER_ENABLED !== 'false', // Default: true
-    failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10),
-    cooldownPeriodMs: parseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MS || '300000', 10),
-    halfOpenMaxAttempts: parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS || '1', 10),
+    // SA-FIX: Use safeParseInt with NaN guards
+    failureThreshold: safeParseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD, 5),
+    cooldownPeriodMs: safeParseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MS, 300000),
+    halfOpenMaxAttempts: safeParseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS, 1),
   };
 }
 
@@ -414,7 +416,8 @@ async function main() {
     // executions, then runs post-drain cleanup (R2 upload, trade logger, consumers, Redis).
     // Without this, the 10s default force-kills the process before drain completes,
     // abandoning in-flight cross-chain trades.
-    const drainTimeoutMs = parseInt(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS ?? '30000', 10);
+    // SA-FIX: Use safeParseInt with NaN guard
+    const drainTimeoutMs = safeParseInt(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS, 30000);
     const POST_DRAIN_CLEANUP_BUFFER_MS = 15_000; // R2 upload, trade logger, consumers, Redis
     setupServiceShutdown({
       logger,
