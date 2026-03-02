@@ -40,6 +40,22 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
   // Without this, monitoring scripts need special-case logic for coordinator.
   app.use('/', createHealthRoutes(state));
 
+  // FIX: GCP probes /ready (not /health/ready). Add explicit /ready alias at root
+  // so coordinator-standby.yaml readinessProbe gets 200 instead of 404.
+  app.get('/ready', (_req: Request, res: Response) => {
+    const isRunning = state.getIsRunning();
+    const systemHealth = state.getSystemMetrics().systemHealth;
+    const isReady = isRunning && systemHealth > 0;
+
+    const statusCode = isReady ? 200 : 503;
+    res.status(statusCode).json({
+      status: isReady ? 'ready' : 'not_ready',
+      isRunning,
+      systemHealth,
+      timestamp: Date.now(),
+    });
+  });
+
   // RT-004 FIX: Unauthenticated /metrics and /stats at root for uniform monitoring.
   // Partitions and execution engine expose these without auth; coordinator only had
   // them under /api/ with auth, making monitoring scripts fail silently.

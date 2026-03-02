@@ -86,6 +86,7 @@ interface RedisConnectionOptions {
   enableReadyCheck: boolean;
   maxRetriesPerRequest: number;
   lazyConnect: boolean;
+  connectTimeout?: number;
   retryStrategy?: (times: number) => number | null;
   reconnectOnError?: (err: Error) => boolean;
 }
@@ -216,21 +217,26 @@ export class RedisClient {
       enableReadyCheck: false,
       maxRetriesPerRequest: 3,
       lazyConnect: true,
-      // Align with RedisStreamsClient: exponential backoff, give up after 15 retries (~4.5 min).
-      // Previously relied on ioredis default (infinite retries with min(times*50, 2000) backoff).
+      // Align with RedisStreamsClient: capped exponential backoff, NEVER give up.
+      // Returning null tells ioredis to stop reconnecting permanently, which would
+      // require a full service restart to recover from a transient Redis outage.
       retryStrategy: (times: number) => {
-        if (times > 15) {
-          this.logger.error('Redis connection failed after 15 retries, giving up', {
-            totalRetries: times,
-          });
-          return null;
-        }
-        const delay = Math.min(Math.round(200 * Math.pow(2, times - 1)), 30000);
-        if (times === 1 || times % 3 === 0) {
+        const delay = Math.min(Math.round(200 * Math.pow(2, Math.min(times - 1, 18))), 60000);
+        if (times === 1 || times % 5 === 0) {
           this.logger.warn('Redis client reconnecting', { attempt: times, delayMs: delay });
+        }
+        if (times > 30 && times % 10 === 0) {
+          this.logger.error('Redis connection failing persistently', {
+            totalRetries: times,
+            delayMs: delay,
+          });
         }
         return delay;
       },
+      // P3-FIX: Add connectTimeout to prevent indefinite hang during initial connection.
+      // Without this, Redis client can block forever if Redis is unreachable.
+      // Matches RedisStreamsClient connectTimeout value.
+      connectTimeout: 5000,
       // Reconnect on READONLY errors (Redis failover scenario)
       reconnectOnError: (err: Error) => {
         return err.message?.includes('READONLY') ?? false;

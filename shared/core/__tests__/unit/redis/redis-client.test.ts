@@ -156,6 +156,12 @@ describe('RedisClient', () => {
     it('should set maxRetriesPerRequest to 3', () => {
       expect(mockInstances[0].lastOptions.maxRetriesPerRequest).toBe(3);
     });
+
+    it('should set connectTimeout to 5000ms to prevent indefinite hang on startup', () => {
+      // Bug #4 regression: without connectTimeout, getRedisClient() blocks forever
+      // if Redis is unreachable at service start. Matches RedisStreamsClient value.
+      expect(mockInstances[0].lastOptions.connectTimeout).toBe(5000);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -175,15 +181,29 @@ describe('RedisClient', () => {
       expect(strategy(3)).toBe(800);
     });
 
-    it('should cap backoff at 30000ms', () => {
+    it('should cap backoff at 60000ms', () => {
       const strategy = mockInstances[0].lastOptions.retryStrategy;
-      // Very high attempt number should not exceed 30000ms
-      expect(strategy(10)).toBeLessThanOrEqual(30000);
+      // Very high attempt number should not exceed 60000ms
+      expect(strategy(10)).toBeLessThanOrEqual(60000);
+      expect(strategy(100)).toBeLessThanOrEqual(60000);
     });
 
-    it('should give up after 15 retries', () => {
+    it('should never give up retrying', () => {
       const strategy = mockInstances[0].lastOptions.retryStrategy;
-      expect(strategy(16)).toBeNull();
+      // Bug #3 regression: retryStrategy previously returned null after 15 retries,
+      // permanently killing the ioredis client for the lifetime of the process.
+      expect(typeof strategy(16)).toBe('number');
+      expect(typeof strategy(50)).toBe('number');
+      expect(typeof strategy(100)).toBe('number');
+    });
+
+    it('should use capped exponential backoff matching RedisStreamsClient', () => {
+      const strategy = mockInstances[0].lastOptions.retryStrategy;
+      // Formula: min(round(200 * 2^min(n-1, 18)), 60000)
+      expect(strategy(1)).toBe(200);   // 200 * 2^0
+      expect(strategy(2)).toBe(400);   // 200 * 2^1
+      expect(strategy(19)).toBe(60000); // 200 * 2^18 = 52,428,800 -> capped
+      expect(strategy(20)).toBe(60000); // exponent capped at 18
     });
 
     it('should reconnect on READONLY error', () => {

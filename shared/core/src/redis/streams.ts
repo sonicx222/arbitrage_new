@@ -873,7 +873,7 @@ export class RedisStreamsClient {
         // are HMAC-authenticated and can be verified when read/replayed.
         try {
           for (const rejectedId of rejectedIds) {
-            await this.xadd(
+            await this.xaddWithLimit(
               RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
               {
                 originalStream: config.streamName,

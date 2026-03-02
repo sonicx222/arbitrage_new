@@ -5,9 +5,12 @@
  * - GET /api/health (main health status)
  * - GET /api/health/live (liveness probe)
  * - GET /api/health/ready (readiness probe)
+ * - GET /ready (root-level readiness alias via setupAllRoutes)
  *
  * @see services/coordinator/src/api/routes/health.routes.ts
+ * @see services/coordinator/src/api/routes/index.ts
  * @see E26 finding from SERVICES_EXTENDED_ANALYSIS_2026-02-28.md
+ * @see Bug #2 fix in docs/reports/MONITORING_ENHANCEMENT_RESEARCH_2026-03-02.md
  */
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
@@ -25,6 +28,12 @@ jest.mock('@arbitrage/security', () => ({
   validateHealthRequest: jest.fn(),
 }));
 
+jest.mock('@arbitrage/core/monitoring', () => ({
+  getStreamHealthMonitor: jest.fn(() => ({
+    getPrometheusMetrics: jest.fn(async () => '# TYPE test_counter counter\ntest_counter 1'),
+  })),
+}));
+
 function applySecurityMocks(): void {
   const { validateHealthRequest } = require('@arbitrage/security') as {
     validateHealthRequest: jest.Mock;
@@ -33,6 +42,7 @@ function applySecurityMocks(): void {
 }
 
 import { createHealthRoutes } from '../../../../src/api/routes/health.routes';
+import { setupAllRoutes } from '../../../../src/api/routes/index';
 import supertest from 'supertest';
 
 // =============================================================================
@@ -255,5 +265,98 @@ describe('Health Routes', () => {
       expect(res.status).toBe(503);
       expect(res.body.status).toBe('not_ready');
     });
+  });
+});
+
+// =============================================================================
+// Regression: Bug #2 — root-level /ready endpoint
+//
+// setupAllRoutes() registers GET /ready directly on the Express app so that
+// infrastructure tooling (GCP readiness probes, Fly.io, monitoring scripts)
+// that uses a uniform "/ready" path gets 200 from the coordinator.
+// Previously the coordinator only had /api/health/ready and /health/ready,
+// causing GCP coordinator-standby.yaml readinessProbe to return 404.
+// =============================================================================
+
+describe('setupAllRoutes — GET /ready (root-level readiness alias)', () => {
+  beforeEach(() => {
+    // setupAllRoutes calls createMetricsRoutes/createAdminRoutes which call apiAuth()/apiAuthorize()
+    // at route-registration time. These need to return pass-through middleware functions.
+    const security = require('@arbitrage/security') as {
+      apiAuth: jest.Mock;
+      apiAuthorize: jest.Mock;
+    };
+    security.apiAuth.mockImplementation(() => (_req: any, _res: any, next: any) => next());
+    security.apiAuthorize.mockImplementation(() => (_req: any, _res: any, next: any) => next());
+  });
+
+  function createFullTestApp(state: CoordinatorStateProvider): express.Application {
+    const app = express();
+    app.use(express.json());
+    setupAllRoutes(app, state);
+    return app;
+  }
+
+  it('should return 200 when coordinator is running with positive system health', async () => {
+    const state = createMockStateProvider({
+      getIsRunning: jest.fn(() => true),
+      getSystemMetrics: jest.fn(() => ({
+        totalOpportunities: 0, totalExecutions: 0, successfulExecutions: 0,
+        totalProfit: 0, averageLatency: 0, averageMemory: 0,
+        systemHealth: 80, activeServices: 1, lastUpdate: Date.now(),
+        whaleAlerts: 0, pendingOpportunities: 0, totalSwapEvents: 0,
+        totalVolumeUsd: 0, volumeAggregatesProcessed: 0, activePairsTracked: 0,
+        priceUpdatesReceived: 0, opportunitiesDropped: 0,
+      })),
+    });
+    const app = createFullTestApp(state);
+
+    const res = await supertest(app).get('/ready');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ready');
+    expect(res.body.isRunning).toBe(true);
+    expect(res.body.systemHealth).toBe(80);
+  });
+
+  it('should return 503 when coordinator is not running', async () => {
+    const state = createMockStateProvider({
+      getIsRunning: jest.fn(() => false),
+      getSystemMetrics: jest.fn(() => ({
+        totalOpportunities: 0, totalExecutions: 0, successfulExecutions: 0,
+        totalProfit: 0, averageLatency: 0, averageMemory: 0,
+        systemHealth: 0, activeServices: 0, lastUpdate: Date.now(),
+        whaleAlerts: 0, pendingOpportunities: 0, totalSwapEvents: 0,
+        totalVolumeUsd: 0, volumeAggregatesProcessed: 0, activePairsTracked: 0,
+        priceUpdatesReceived: 0, opportunitiesDropped: 0,
+      })),
+    });
+    const app = createFullTestApp(state);
+
+    const res = await supertest(app).get('/ready');
+
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('not_ready');
+    expect(res.body.isRunning).toBe(false);
+  });
+
+  it('should return 503 when systemHealth is zero even if running', async () => {
+    const state = createMockStateProvider({
+      getIsRunning: jest.fn(() => true),
+      getSystemMetrics: jest.fn(() => ({
+        totalOpportunities: 0, totalExecutions: 0, successfulExecutions: 0,
+        totalProfit: 0, averageLatency: 0, averageMemory: 0,
+        systemHealth: 0, activeServices: 0, lastUpdate: Date.now(),
+        whaleAlerts: 0, pendingOpportunities: 0, totalSwapEvents: 0,
+        totalVolumeUsd: 0, volumeAggregatesProcessed: 0, activePairsTracked: 0,
+        priceUpdatesReceived: 0, opportunitiesDropped: 0,
+      })),
+    });
+    const app = createFullTestApp(state);
+
+    const res = await supertest(app).get('/ready');
+
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('not_ready');
   });
 });
