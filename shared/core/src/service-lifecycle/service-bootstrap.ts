@@ -228,6 +228,61 @@ export function setupServiceShutdown(config: ServiceShutdownConfig): ServiceShut
 }
 
 // =============================================================================
+// Response Timeout Helper (ST-002 FIX)
+// =============================================================================
+
+/** Maximum time for health/ready handlers before sending 504 */
+const HANDLER_TIMEOUT_MS = 3000;
+
+/**
+ * ST-002 FIX: Wraps an async handler with a response timeout.
+ * Prevents indefinite HTTP request hangs when the event loop is saturated
+ * by CPU-bound operations during startup (e.g., cross-chain detector initial processing).
+ *
+ * @see health-server.ts withResponseTimeout — same pattern for partition services
+ */
+function withResponseTimeout(
+  res: ServerResponse,
+  serviceName: string,
+  handler: () => Promise<void>,
+  logger: Logger,
+): void {
+  let responded = false;
+  const timer = setTimeout(() => {
+    if (!responded) {
+      responded = true;
+      logger.warn('Health handler timed out — event loop may be saturated', {
+        service: serviceName,
+        timeoutMs: HANDLER_TIMEOUT_MS,
+      });
+      res.writeHead(504, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        service: serviceName,
+        status: 'timeout',
+        error: `Handler did not respond within ${HANDLER_TIMEOUT_MS}ms`,
+      }));
+    }
+  }, HANDLER_TIMEOUT_MS);
+
+  handler().then(() => {
+    clearTimeout(timer);
+    responded = true;
+  }).catch((error) => {
+    clearTimeout(timer);
+    if (!responded) {
+      responded = true;
+      logger.error('Health handler error', { error: (error as Error).message });
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        service: serviceName,
+        status: 'error',
+        error: 'Internal health check failed',
+      }));
+    }
+  });
+}
+
+// =============================================================================
 // Simple Health Server
 // =============================================================================
 
@@ -265,7 +320,9 @@ export function createSimpleHealthServer(config: SimpleHealthServerConfig): Serv
     }
 
     if (url === '/health') {
-      try {
+      // ST-002 FIX: Wrap with response timeout to prevent indefinite hang
+      // when event loop is saturated during startup processing burst.
+      withResponseTimeout(res, serviceName, async () => {
         const result = await healthCheck();
         const statusCode = result.statusCode ??
           (result.status === 'healthy' || result.status === 'degraded' ? 200 : 503);
@@ -280,22 +337,18 @@ export function createSimpleHealthServer(config: SimpleHealthServerConfig): Serv
 
         res.writeHead(statusCode, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(response));
-      } catch (error) {
-        logger.error('Health check failed', { error: (error as Error).message });
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+      }, logger);
+    } else if (url === '/ready') {
+      // ST-002 FIX: Wrap /ready with response timeout to prevent indefinite hang
+      // when event loop is blocked by CPU-bound operations during startup.
+      withResponseTimeout(res, serviceName, async () => {
+        const ready = readyCheck ? readyCheck() : true;
+        res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           service: serviceName,
-          status: 'error',
-          error: 'Internal health check failed',
+          ready,
         }));
-      }
-    } else if (url === '/ready') {
-      const ready = readyCheck ? readyCheck() : true;
-      res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        service: serviceName,
-        ready,
-      }));
+      }, logger);
     } else if (url === '/live') {
       // P3 Fix O-11: Kubernetes/Fly.io liveness probe — always 200 if process is responsive
       res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -602,6 +602,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       );
 
       // R2: Initialize opportunity router after streams client is available
+      // RT-005 FIX: Apply simulation TTL multiplier from env var to extend opportunity TTLs
+      // in simulation mode, preventing 97.7% expiration due to single-threaded processing lag.
+      const simulationTtlMultiplier = safeParseInt(
+        process.env.SIMULATION_OPPORTUNITY_TTL_MULTIPLIER, 1
+      );
       this.opportunityRouter = new OpportunityRouter(
         this.logger,
         this.executionCircuitBreaker,
@@ -611,6 +616,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
           instanceId: this.config.leaderElection.instanceId,
           executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+          simulationTtlMultiplier,
         },
         (alert) => this.sendAlert({
           type: alert.type,
@@ -1184,8 +1190,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // skip the consumer backlog by resetting the group position to '$' (latest).
       // This breaks the death spiral where stale messages waste processing time,
       // causing even more messages to expire and the backlog to grow indefinitely.
+      // RT-005 FIX: Lowered threshold from 50 to 10 to skip stale backlogs faster.
+      // At 130+ opps/s, 50 consecutive expired = ~0.4s of stale processing. By the
+      // time skip fires, hundreds more stale messages have arrived. A threshold of 10
+      // detects lag within ~0.08s, reducing wasted processing by 5x.
       const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
-      if (consecutiveExpired >= 50 && this.streamsClient) {
+      if (consecutiveExpired >= 10 && this.streamsClient) {
         this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
           consecutiveExpired,
           stream: RedisStreams.OPPORTUNITIES,

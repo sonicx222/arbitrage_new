@@ -284,7 +284,10 @@ export class StreamBatcher<T = Record<string, unknown>> {
         timestamp: Date.now()
       };
 
-      await this.client.xadd(this.streamName, batchedMessage);
+      // SA-002 FIX: Use xaddWithLimit to enforce MAXLEN from STREAM_MAX_LENGTHS.
+      // Previously called xadd() which bypassed MAXLEN, allowing batched streams
+      // to grow unboundedly under sustained high throughput.
+      await this.client.xaddWithLimit(this.streamName, batchedMessage);
 
       // Update stats
       this.stats.totalBatchFlushes++;

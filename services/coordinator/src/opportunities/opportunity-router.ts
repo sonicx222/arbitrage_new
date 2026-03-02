@@ -102,6 +102,13 @@ export interface OpportunityRouterConfig {
   /** FIX W2-8: MAXLEN for execution requests stream to prevent unbounded growth (default: 5000) */
   executionStreamMaxLen?: number;
   /**
+   * RT-005 FIX: Multiplier for chain-specific TTLs in simulation mode (default: 1).
+   * In simulation mode with high realism, detectors produce 130+ opps/s but chain-specific
+   * TTLs (e.g., Arbitrum 15s) expire before the single-threaded coordinator can process them.
+   * Setting this to e.g., 5 gives 5x more time for processing without changing production behavior.
+   */
+  simulationTtlMultiplier?: number;
+  /**
    * RT-003 FIX: Grace period in ms after router creation before forwarding begins (default: 5000).
    * Prevents the startup race where the coordinator forwards opportunities before
    * the execution engine consumer is ready, causing the first message to expire in
@@ -151,6 +158,8 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   // (Redis, nonce manager, providers, KMS, MEV, strategies, risk management,
   // bridge recovery, consumer group creation) typically takes 7-12s.
   startupGracePeriodMs: 15000,
+  // RT-005 FIX: Default 1x (no change). Set via SIMULATION_OPPORTUNITY_TTL_MULTIPLIER env var.
+  simulationTtlMultiplier: 1,
 };
 
 /**
@@ -190,7 +199,10 @@ export class OpportunityRouter {
   // backlog to avoid the death spiral where processing stale messages causes
   // even more messages to expire.
   private _consecutiveExpired = 0;
-  private static readonly CONSECUTIVE_EXPIRED_WARN_THRESHOLD = 20;
+  // RT-005 FIX: Lowered from 20 to 5 to warn earlier about consumer lag.
+  // The coordinator auto-skip threshold is now 10, so warning at 5 gives
+  // operators advance notice before the skip fires.
+  private static readonly CONSECUTIVE_EXPIRED_WARN_THRESHOLD = 5;
 
   constructor(
     logger: OpportunityRouterLogger,
@@ -407,7 +419,17 @@ export class OpportunityRouter {
     // Without this, the coordinator forwards already-expired opportunities from its
     // consumer backlog. The execution engine then rejects them all with VAL_EXPIRED
     // (200-265s lag), producing 0 execution results and growing the DLQ continuously.
-    if (opportunity.expiresAt !== undefined && opportunity.expiresAt < Date.now()) {
+    //
+    // RT-005 FIX: Apply simulation TTL multiplier to extend effective expiry.
+    // In simulation mode, detectors produce 130+ opps/s with short chain-specific TTLs
+    // (e.g., Arbitrum 15s). The single-threaded coordinator can't keep up, causing 97.7%
+    // expiration. The multiplier extends TTLs without changing production behavior.
+    let effectiveExpiresAt = opportunity.expiresAt;
+    if (effectiveExpiresAt !== undefined && this.config.simulationTtlMultiplier > 1 && opportunity.timestamp) {
+      const originalTtl = effectiveExpiresAt - opportunity.timestamp;
+      effectiveExpiresAt = opportunity.timestamp + originalTtl * this.config.simulationTtlMultiplier;
+    }
+    if (effectiveExpiresAt !== undefined && effectiveExpiresAt < Date.now()) {
       this._rejectedExpired++;
       this._consecutiveExpired++;
 
@@ -416,13 +438,13 @@ export class OpportunityRouter {
       if (this._consecutiveExpired === OpportunityRouter.CONSECUTIVE_EXPIRED_WARN_THRESHOLD) {
         this.logger.warn('Consumer lag detected: many consecutive opportunities expired before processing', {
           consecutiveExpired: this._consecutiveExpired,
-          latestExpiredAgoMs: Date.now() - opportunity.expiresAt,
+          latestExpiredAgoMs: Date.now() - effectiveExpiresAt,
           chain: opportunity.chain,
         });
       } else if (this._consecutiveExpired > 0 && this._consecutiveExpired % 100 === 0) {
         this.logger.warn('Consumer lag persisting: opportunities continue to expire', {
           consecutiveExpired: this._consecutiveExpired,
-          latestExpiredAgoMs: Date.now() - opportunity.expiresAt,
+          latestExpiredAgoMs: Date.now() - effectiveExpiresAt,
         });
       }
 

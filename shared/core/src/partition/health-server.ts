@@ -268,13 +268,19 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         res.end(body);
       }, logger);
     } else if (req.url === '/ready') {
-      const ready = detector.isRunning();
-      res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        service: config.serviceName,
-        ready,
-        chains: detector.getChains()
-      }));
+      // ST-001 FIX: Wrap /ready with response timeout to prevent indefinite hang when
+      // event loop is blocked by CPU-bound path finding during startup.
+      // Previously /ready had no timeout wrapper (unlike /health and /stats),
+      // causing Kubernetes readiness probes to fail during initial burst.
+      withResponseTimeout(res, config.serviceName, async () => {
+        const ready = detector.isRunning();
+        res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          service: config.serviceName,
+          ready,
+          chains: detector.getChains()
+        }));
+      }, logger);
     } else if (req.url === '/metrics') {
       // W2-H7: Prometheus metrics endpoint for scraping
       try {
