@@ -196,7 +196,7 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
       instanceId: config.instanceId || `unified-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
       regionId: config.regionId || partition?.region || 'asia-southeast1',
       enableCrossRegionHealth: config.enableCrossRegionHealth ?? false,
-      healthCheckPort: config.healthCheckPort ?? 3001
+      healthCheckPort: config.healthCheckPort ?? 3007
     };
 
     this.partition = partition || null;

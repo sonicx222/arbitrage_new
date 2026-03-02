@@ -609,3 +609,89 @@ describe('Edge Cases', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+// =============================================================================
+// Regression: Bug #5 — Stream deserialization numeric field type coercion
+//
+// serializeOpportunityForStream() converts numeric fields to strings for Redis
+// (Redis Streams store all values as strings). validateMessageStructure() must
+// convert them back to numbers before returning the ArbitrageOpportunity.
+// Previously, fields arrived as strings at runtime despite being typed as number,
+// causing potential silent failures in strict type checks and business logic.
+// =============================================================================
+
+describe('validateMessageStructure — numeric field deserialization from Redis strings', () => {
+  it('should convert string profitPercentage to number', () => {
+    const result = validateMessageStructure(
+      createValidMessage({ profitPercentage: '2.5', confidence: 0.85, expectedProfit: 0.02 })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(typeof result.opportunity.profitPercentage).toBe('number');
+      expect(result.opportunity.profitPercentage).toBe(2.5);
+    }
+  });
+
+  it('should convert string confidence to number', () => {
+    const result = validateMessageStructure(
+      createValidMessage({ confidence: '0.85', expectedProfit: 0.02 })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(typeof result.opportunity.confidence).toBe('number');
+      expect(result.opportunity.confidence).toBe(0.85);
+    }
+  });
+
+  it('should convert string expectedProfit to number', () => {
+    const result = validateMessageStructure(
+      createValidMessage({ confidence: 0.85, expectedProfit: '0.02' })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(typeof result.opportunity.expectedProfit).toBe('number');
+      expect(result.opportunity.expectedProfit).toBe(0.02);
+    }
+  });
+
+  it('should convert string estimatedProfit to number', () => {
+    const result = validateMessageStructure(
+      createValidMessage({ confidence: 0.85, expectedProfit: 0.02, estimatedProfit: '0.015' })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(typeof result.opportunity.estimatedProfit).toBe('number');
+      expect(result.opportunity.estimatedProfit).toBe(0.015);
+    }
+  });
+
+  it('should handle all 4 numeric fields as strings simultaneously (Redis round-trip)', () => {
+    // Simulates the full serializeOpportunityForStream() -> Redis -> deserialize path
+    const result = validateMessageStructure(
+      createValidMessage({
+        profitPercentage: '2.5',
+        confidence: '0.85',
+        expectedProfit: '0.02',
+        estimatedProfit: '0.015',
+      })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(typeof result.opportunity.profitPercentage).toBe('number');
+      expect(typeof result.opportunity.confidence).toBe('number');
+      expect(typeof result.opportunity.expectedProfit).toBe('number');
+      expect(typeof result.opportunity.estimatedProfit).toBe('number');
+    }
+  });
+
+  it('should leave already-numeric fields untouched (no double conversion)', () => {
+    const result = validateMessageStructure(
+      createValidMessage({ profitPercentage: 2.5, confidence: 0.85, expectedProfit: 0.02 })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.opportunity.profitPercentage).toBe(2.5);
+      expect(result.opportunity.confidence).toBe(0.85);
+    }
+  });
+});

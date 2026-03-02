@@ -85,8 +85,8 @@ async function main() {
       logger,
       serviceName: 'Cross-Chain Detector',
       onShutdown: async () => {
-        await closeHealthServer(healthServer);
         await detector.stop();
+        await closeHealthServer(healthServer);
       },
     });
 

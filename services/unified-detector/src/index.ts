@@ -10,7 +10,7 @@
  * - REDIS_URL: Redis connection URL
  * - LOG_LEVEL: Logging level (default: info)
  * - REGION_ID: Region for cross-region health reporting
- * - HEALTH_CHECK_PORT: HTTP health check port (default: 3001)
+ * - HEALTH_CHECK_PORT: HTTP health check port (default: 3007)
  *
  * @see ADR-003: Partitioned Chain Detectors
  */
@@ -393,14 +393,15 @@ async function main(): Promise<void> {
         // BUG-FIX: Clear health cache to prevent stale data on restart scenarios
         healthCache = null;
 
-        // Close health server first (with timeout via shared utility)
-        await closeHealthServer(healthServer);
-
         // BUG-FIX: Remove event listeners from detector to prevent memory leaks
         // This is important if the process doesn't exit (e.g., in tests)
         detector.removeAllListeners();
 
+        // Drain service first, then close health server so load balancers
+        // can still reach the health endpoint during the drain window.
         await detector.stop();
+
+        await closeHealthServer(healthServer);
 
         // Log publisher stats before cleanup
         if (opportunityPublisher) {

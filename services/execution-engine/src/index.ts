@@ -431,8 +431,8 @@ async function main() {
           redisHealthCheckInterval = null;
         }
         await orderflowConsumer.stop();
-        await closeHealthServer(healthServer);
         await engine.stop();
+        await closeHealthServer(healthServer);
       },
     });
 

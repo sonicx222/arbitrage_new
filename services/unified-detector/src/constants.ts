@@ -56,17 +56,13 @@
 /**
  * Default port for health check HTTP endpoint.
  *
- * FIX 3.2: When running multiple partitions on the same host, use different ports:
- * | Partition     | Port | Environment Override       |
- * |---------------|------|---------------------------|
- * | asia-fast     | 3001 | HEALTH_CHECK_PORT=3001    |
- * | l2-turbo      | 3002 | HEALTH_CHECK_PORT=3002    |
- * | high-value    | 3003 | HEALTH_CHECK_PORT=3003    |
- * | solana-native | 3004 | HEALTH_CHECK_PORT=3004    |
+ * FIX 3.2: When running multiple partitions on the same host, use different ports
+ * via HEALTH_CHECK_PORT env var. The default (3007) matches the unified-detector
+ * port assignment in shared/constants/service-ports.json.
  *
  * The code handles EADDRINUSE with helpful error messages if ports collide.
  */
-export const DEFAULT_HEALTH_CHECK_PORT = 3001;
+export const DEFAULT_HEALTH_CHECK_PORT = 3007;
 
 /** Default interval for metrics collection (60 seconds) */
 export const DEFAULT_METRICS_INTERVAL_MS = 60_000;

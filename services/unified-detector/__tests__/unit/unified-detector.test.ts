@@ -675,3 +675,23 @@ describe('UnifiedChainDetector', () => {
   });
 
 });
+
+// =============================================================================
+// Regression: Bug #6 — DEFAULT_HEALTH_CHECK_PORT must be 3007
+//
+// Previously the constant was 3001 (partition-asia-fast's port), which would
+// cause the unified-detector to conflict with P1 when run standalone without
+// the HEALTH_CHECK_PORT env var override.
+// =============================================================================
+
+import { DEFAULT_HEALTH_CHECK_PORT } from '../../src/constants';
+
+describe('DEFAULT_HEALTH_CHECK_PORT constant', () => {
+  it('should be 3007 (unified-detector port per service-ports.json)', () => {
+    expect(DEFAULT_HEALTH_CHECK_PORT).toBe(3007);
+  });
+
+  it('should NOT be 3001 (that port belongs to partition-asia-fast)', () => {
+    expect(DEFAULT_HEALTH_CHECK_PORT).not.toBe(3001);
+  });
+});

@@ -321,6 +321,22 @@ export function validateMessageStructure(
   }
 
   // All validations passed
+  // FIX: Deserialize numeric fields that were converted to strings by serializeOpportunityForStream().
+  // Redis Streams store all values as strings, so profitPercentage, confidence,
+  // expectedProfit, and estimatedProfit arrive as strings despite being typed as numbers.
+  if (typeof data.profitPercentage === 'string') {
+    data.profitPercentage = parseFloat(data.profitPercentage as string);
+  }
+  if (typeof data.confidence === 'string') {
+    data.confidence = parseFloat(data.confidence as string);
+  }
+  if (typeof data.expectedProfit === 'string') {
+    data.expectedProfit = parseFloat(data.expectedProfit as string);
+  }
+  if (typeof data.estimatedProfit === 'string') {
+    data.estimatedProfit = parseFloat(data.estimatedProfit as string);
+  }
+
   return {
     valid: true,
     opportunity: data as unknown as ArbitrageOpportunity,
