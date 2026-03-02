@@ -23,7 +23,7 @@ import {
 } from '@arbitrage/core/partition';
 import { createLogger } from '@arbitrage/core';
 import type { PartitionServiceConfig } from '@arbitrage/core/partition';
-import { getPartition, PARTITION_IDS } from '@arbitrage/config';
+import { getPartition, PARTITION_IDS, safeParseFloat, safeParseInt } from '@arbitrage/config';
 import type { UnifiedDetectorConfig } from '@arbitrage/unified-detector';
 import type { SolanaArbitrageConfig } from './arbitrage-detector';
 import { selectSolanaRpcUrl, isDevnetMode, redactRpcUrl } from './rpc-config';
@@ -80,14 +80,15 @@ export function assembleSolanaConfig(logger: ReturnType<typeof createLogger>): {
     // Include for backward compatibility with monitoring/logging
     // P2-FIX #19: Store redacted URL to prevent API key leakage in logs/monitoring
     rpcUrl: redactRpcUrl(SOLANA_RPC_URL),
-    minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD ?? String(DEFAULT_MIN_PROFIT_THRESHOLD)),
+    // SA-FIX: Use safeParseFloat/safeParseInt with NaN guards instead of raw parseFloat/parseInt
+    minProfitThreshold: safeParseFloat(process.env.MIN_PROFIT_THRESHOLD, DEFAULT_MIN_PROFIT_THRESHOLD),
     crossChainEnabled: process.env.CROSS_CHAIN_ENABLED !== 'false',
     triangularEnabled: process.env.TRIANGULAR_ENABLED !== 'false',
-    maxTriangularDepth: parseInt(process.env.MAX_TRIANGULAR_DEPTH ?? '3', 10),
-    opportunityExpiryMs: parseInt(process.env.OPPORTUNITY_EXPIRY_MS ?? '1000', 10),
+    maxTriangularDepth: safeParseInt(process.env.MAX_TRIANGULAR_DEPTH, 3),
+    opportunityExpiryMs: safeParseInt(process.env.OPPORTUNITY_EXPIRY_MS, 1000),
     // P3-25: Make defaultTradeValueUsd configurable to align with EVM partition thresholds.
     // Used for gas cost estimation in cross-chain and intra-Solana detection.
-    defaultTradeValueUsd: parseFloat(process.env.SOLANA_DEFAULT_TRADE_VALUE_USD ?? '1000'),
+    defaultTradeValueUsd: safeParseFloat(process.env.SOLANA_DEFAULT_TRADE_VALUE_USD, 1000),
     // Issue 1.3: Chain identifier for Solana
     chainId: isDevnetMode() ? 'solana-devnet' : 'solana',
   };

@@ -358,7 +358,14 @@ export class DlqConsumer {
         // Track as recently replayed to prevent re-replay
         this.recentlyReplayed.set(candidate.id, now);
         replayed++;
-      } catch {
+      } catch (replayError) {
+        // SA-FIX: Log replay errors instead of swallowing them silently
+        this.logger.warn('DLQ auto-recovery replay failed', {
+          messageId: candidate.id,
+          opportunityId: candidate.data.opportunityId,
+          originalError: candidate.data.error,
+          replayError: getErrorMessage(replayError),
+        });
         failed++;
       }
     }

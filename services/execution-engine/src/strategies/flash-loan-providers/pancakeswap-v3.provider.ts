@@ -237,8 +237,12 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
 
           return { pool: poolAddress, feeTier };
         }
-      } catch {
-        // Continue to next fee tier if this one fails
+      } catch (error) {
+        // SA-FIX: Log fee tier lookup failures instead of silently skipping
+        getProviderLogger().debug?.('PancakeSwap V3 pool lookup failed for fee tier', {
+          chain: this.chain, feeTier, tokenA, tokenB,
+          error: (error as Error).message,
+        });
         continue;
       }
     }
@@ -286,7 +290,12 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
           });
           return { pool: poolAddress, feeTier };
         }
-      } catch {
+      } catch (error) {
+        // SA-FIX: Log static pool lookup failures instead of silently skipping
+        getProviderLogger().debug?.('PancakeSwap V3 static pool lookup failed for fee tier', {
+          feeTier, tokenA, tokenB,
+          error: (error as Error).message,
+        });
         continue;
       }
     }

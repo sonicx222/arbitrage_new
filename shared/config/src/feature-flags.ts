@@ -766,6 +766,13 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
     const msg = 'UniswapX Filler Strategy enabled - Dutch auction orders will be filled';
     if (logger) { logger.info(msg); } else { console.info(msg); }
   }
+  // SA-060 FIX: Cross-dependency check — backrun requires MEV-Share base feature
+  if (FEATURE_FLAGS.useMevShareBackrun && !FEATURE_FLAGS.useMevShare) {
+    const msg =
+      'FEATURE_MEV_SHARE_BACKRUN is enabled but FEATURE_MEV_SHARE is not. ' +
+      'Backrun strategy requires MEV-Share rebate mode. Enable FEATURE_MEV_SHARE=true or disable FEATURE_MEV_SHARE_BACKRUN.';
+    if (logger) { logger.warn(msg); } else { console.warn(`WARNING: ${msg}`); }
+  }
   if (FEATURE_FLAGS.useMevShareBackrun) {
     const msg = 'MEV-Share Backrun event processing enabled - SSE event stream will be consumed';
     if (logger) { logger.info(msg); } else { console.info(msg); }

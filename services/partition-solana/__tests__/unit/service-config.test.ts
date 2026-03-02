@@ -78,6 +78,17 @@ jest.mock('@arbitrage/config', () => ({
     HIGH_VALUE: 'high-value',
     SOLANA_NATIVE: 'solana-native',
   },
+  // SA-FIX: Include NaN-safe parsing utils now used by service-config.ts
+  safeParseFloat: (value: string | undefined, defaultValue: number) => {
+    if (value === undefined) return defaultValue;
+    const parsed = parseFloat(value);
+    return Number.isNaN(parsed) ? defaultValue : parsed;
+  },
+  safeParseInt: (value: string | undefined, defaultValue: number) => {
+    if (value === undefined) return defaultValue;
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? defaultValue : parsed;
+  },
 }));
 
 // Stub @arbitrage/unified-detector (only used for type imports)

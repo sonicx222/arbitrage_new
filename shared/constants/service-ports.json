@@ -12,7 +12,8 @@
     "cross-chain-detector": 3006,
     "unified-detector": 3007,
     "mempool-detector": 3008,
-    "monolith": 3100
+    "monolith": 3100,
+    "coordinator-worker": 3009
   },
 
   "partitions": {
@@ -45,6 +46,7 @@
     "unified-detector": "UNIFIED_DETECTOR_PORT",
     "mempool-detector": "MEMPOOL_DETECTOR_PORT",
     "redis": "REDIS_PORT",
-    "monolith": "MONOLITH_PORT"
+    "monolith": "MONOLITH_PORT",
+    "coordinator-worker": "COORDINATOR_WORKER_PORT"
   }
 }

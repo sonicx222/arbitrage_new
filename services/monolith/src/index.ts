@@ -51,6 +51,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { createLogger } from '@arbitrage/core';
+import { safeParseInt } from '@arbitrage/config';
 import { WorkerManager, type ServiceWorkerConfig } from './worker-manager';
 
 const logger = createLogger('monolith');
@@ -60,8 +61,9 @@ const logger = createLogger('monolith');
 // =============================================================================
 
 // FIX 5: Default to port 3100 to match .env.example and avoid conflict with Coordinator (port 3000)
-const HEALTH_PORT = parseInt(process.env.MONOLITH_HEALTH_PORT ?? '3100', 10);
-const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.MONOLITH_SHUTDOWN_TIMEOUT_MS ?? '30000', 10);
+// SA-FIX: Use safeParseInt with NaN guards instead of raw parseInt
+const HEALTH_PORT = safeParseInt(process.env.MONOLITH_HEALTH_PORT, 3100);
+const SHUTDOWN_TIMEOUT_MS = safeParseInt(process.env.MONOLITH_SHUTDOWN_TIMEOUT_MS, 30000);
 const REDIS_URL = process.env.MONOLITH_REDIS_URL ?? process.env.REDIS_URL ?? 'redis://localhost:6379';
 
 /**
@@ -72,7 +74,7 @@ const REDIS_URL = process.env.MONOLITH_REDIS_URL ?? process.env.REDIS_URL ?? 're
  *
  * @see shared/core/src/caching/price-matrix.ts
  */
-const PRICE_MATRIX_SLOTS = parseInt(process.env.PRICE_MATRIX_SLOTS ?? '1000', 10);
+const PRICE_MATRIX_SLOTS = safeParseInt(process.env.PRICE_MATRIX_SLOTS, 1000);
 const BYTES_PER_SLOT = 16;
 
 // =============================================================================
@@ -101,6 +103,7 @@ function buildServiceConfigs(): ServiceWorkerConfig[] {
         // Fix #9: Coordinator's health server must not conflict with the monolith's
         // unified health server on the monolith port. Use a separate port for the coordinator
         // worker that doesn't conflict with the monolith health server (3100).
+        // SA-FIX: Port 3009 is registered as 'coordinator-worker' in service-ports.json.
         HEALTH_CHECK_PORT: '3009',
         REDIS_URL,
       },

@@ -566,6 +566,17 @@ export function createConfigMocks(options: PartitionConfigOptions = {}) {
       SOLANA_NATIVE: 'solana-native',
     },
     CHAINS: chainsData,
+    // SA-FIX: Include NaN-safe parsing utils now used by partition service-config files
+    safeParseFloat: (value: string | undefined, defaultValue: number) => {
+      if (value === undefined) return defaultValue;
+      const parsed = parseFloat(value);
+      return Number.isNaN(parsed) ? defaultValue : parsed;
+    },
+    safeParseInt: (value: string | undefined, defaultValue: number) => {
+      if (value === undefined) return defaultValue;
+      const parsed = parseInt(value, 10);
+      return Number.isNaN(parsed) ? defaultValue : parsed;
+    },
   };
 }
 
