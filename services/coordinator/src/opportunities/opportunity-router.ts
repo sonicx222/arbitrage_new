@@ -140,7 +140,11 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   duplicateWindowMs: 5000,
   instanceId: 'coordinator',
   executionRequestsStream: RedisStreams.EXECUTION_REQUESTS,
-  minProfitPercentage: -100,
+  // P0 FIX: Raised from -100 to 0.1%. Previously allowed negative-profit
+  // opportunities through, flooding the execution engine with ~88 opps/sec
+  // while it could only process ~0.1/sec. A 0.1% minimum profit threshold
+  // filters out clearly unprofitable opportunities at the coordinator level.
+  minProfitPercentage: 0.1,
   // P0-3 FIX: Lowered from 10,000% to 100%. Even 100% (doubling money) is
   // extremely generous for a single arbitrage trade. The previous 10,000% cap
   // allowed astronomically unrealistic profits through to execution.

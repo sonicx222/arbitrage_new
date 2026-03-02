@@ -277,15 +277,24 @@ describe('OpportunityRouter', () => {
 
   describe('cleanupExpiredOpportunities', () => {
     it('should remove opportunities that have explicitly expired', async () => {
-      const pastTimestamp = Date.now() - 10000;
+      // Store opportunity with future expiresAt so it passes the processOpportunity
+      // expiry check (SM-001 FIX rejects already-expired opportunities before storing)
+      const now = Date.now();
+      const expiresAt = now + 5000;
       await router.processOpportunity(
-        { id: 'expired-1', expiresAt: pastTimestamp, timestamp: Date.now() },
+        { id: 'expired-1', expiresAt, timestamp: now },
         false,
       );
+      expect(router.getPendingCount()).toBe(1);
+
+      // Advance Date.now() past the expiry to simulate time passing
+      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(expiresAt + 1000);
 
       const removed = router.cleanupExpiredOpportunities();
       expect(removed).toBe(1);
       expect(router.getPendingCount()).toBe(0);
+
+      dateNowSpy.mockRestore();
     });
 
     it('should remove opportunities older than TTL', async () => {

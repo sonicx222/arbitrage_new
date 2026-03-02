@@ -40,7 +40,7 @@ import type {
   QueueService,
   ConsumerConfig,
 } from '../types';
-import { DEFAULT_CONSUMER_CONFIG, DLQ_STREAM } from '../types';
+import { DEFAULT_CONSUMER_CONFIG, DLQ_STREAM, ValidationErrorCode } from '../types';
 import { createCancellableTimeout } from '../services/simulation/types';
 import { recordOpportunityDetected } from '../services/prometheus-metrics';
 
@@ -461,6 +461,31 @@ export class OpportunityConsumer {
   private async handleStreamMessage(
     message: { id: string; data: unknown }
   ): Promise<void> {
+    // P0 FIX: Early O(1) expiry check BEFORE full validation.
+    // At 88 opps/sec inflow, 97% expire before processing. Full validation
+    // (field checks, type validation, cross-chain fields) + DLQ write wastes
+    // CPU and 2 Redis round-trips per message. This fast-path reduces it to
+    // 1 Redis call (XACK only, no DLQ) and skips all validation overhead.
+    if (message.data && typeof message.data === 'object') {
+      const rawExpiresAt = (message.data as Record<string, unknown>).expiresAt;
+      let expiresAtMs: number | undefined;
+      if (typeof rawExpiresAt === 'number') {
+        expiresAtMs = rawExpiresAt;
+      } else if (typeof rawExpiresAt === 'string' && rawExpiresAt.length > 0) {
+        expiresAtMs = Number(rawExpiresAt);
+        if (!Number.isFinite(expiresAtMs)) expiresAtMs = undefined;
+      }
+
+      if (expiresAtMs !== undefined && expiresAtMs < Date.now()) {
+        this.stats.opportunitiesReceived++;
+        this.stats.validationErrors++;
+        // ACK immediately — expired messages are permanent rejections.
+        // Skip DLQ to prevent flooding (expired msgs are expected, not errors).
+        await this.ackMessage(message.id);
+        return;
+      }
+    }
+
     // Validate message structure and content
     const validation = this.validateMessage(message);
 
@@ -590,16 +615,28 @@ export class OpportunityConsumer {
       ? `${validation.code}: ${validation.details}`
       : validation.code;
 
-    // FIX 6.2: Use warn instead of error - validation failures are expected
-    // (malformed messages from upstream), not system errors
-    this.logger.warn('Message validation failed - moving to DLQ', {
-      messageId: message.id,
-      code: validation.code,
-      details: validation.details,
-    });
+    // P0 FIX: Skip DLQ for expired messages — they're expected stale data,
+    // not processing errors. At 88 opps/sec with 97% expiry rate, DLQ was
+    // growing at 3/sec purely from expired messages, drowning real errors.
+    const isExpired = validation.code === ValidationErrorCode.EXPIRED;
 
-    // Move to Dead Letter Queue for analysis
-    await this.moveToDeadLetterQueue(message, new Error(errorMessage));
+    if (isExpired) {
+      this.logger.debug('Expired opportunity skipped (no DLQ)', {
+        messageId: message.id,
+        details: validation.details,
+      });
+    } else {
+      // FIX 6.2: Use warn instead of error - validation failures are expected
+      // (malformed messages from upstream), not system errors
+      this.logger.warn('Message validation failed - moving to DLQ', {
+        messageId: message.id,
+        code: validation.code,
+        details: validation.details,
+      });
+
+      // Move to Dead Letter Queue for analysis (real errors only)
+      await this.moveToDeadLetterQueue(message, new Error(errorMessage));
+    }
 
     // ACK to prevent infinite redelivery
     await this.ackMessage(message.id);

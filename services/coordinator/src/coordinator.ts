@@ -652,6 +652,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const simulationTtlMultiplier = safeParseInt(
         process.env.SIMULATION_OPPORTUNITY_TTL_MULTIPLIER, 1
       );
+      // P0 FIX: Configurable minimum profit percentage to reduce execution volume.
+      // Default 0.1% filters clearly unprofitable opportunities at coordinator level.
+      const minProfitPct = process.env.COORDINATOR_MIN_PROFIT_PERCENTAGE;
+      const minProfitPercentage = minProfitPct !== undefined ? parseFloat(minProfitPct) : undefined;
       this.opportunityRouter = new OpportunityRouter(
         this.logger,
         this.executionCircuitBreaker,
@@ -662,6 +666,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
           instanceId: this.config.leaderElection.instanceId,
           executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
           simulationTtlMultiplier,
+          ...(minProfitPercentage !== undefined && Number.isFinite(minProfitPercentage)
+            ? { minProfitPercentage }
+            : {}),
         },
         (alert) => this.sendAlert({
           type: alert.type,
