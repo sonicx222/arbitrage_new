@@ -84,6 +84,8 @@ import {
 } from './confidence-calculator';
 // Finding #7: Whale analysis extracted for SRP
 import { WhaleAnalyzer } from './whale-analyzer';
+// RT-019 FIX: Wire up Prometheus metrics recording
+import { recordDetectionCycle, recordOpportunityDetected } from './prometheus-metrics';
 // TYPE-CONSOLIDATION: Import shared types from types.ts
 import {
   CrossChainOpportunity,
@@ -1400,6 +1402,12 @@ export class CrossChainDetectorService {
         mlPredictionsUsed: this.mlPredictionsCache.size,
         cycleId, // FIX #23: Include cycle ID for traceability
       });
+
+      // RT-019 FIX: Record Prometheus metrics for operational visibility
+      recordDetectionCycle();
+      for (const opp of validOpportunities) {
+        recordOpportunityDetected(opp.sourceChain, opp.targetChain);
+      }
     } catch (error) {
       this.logger.error('Failed to detect cross-chain opportunities', { error });
     }

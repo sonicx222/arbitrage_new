@@ -425,7 +425,11 @@ export class BridgeRecoveryManager {
 
       const signingKey = getHmacSigningKey();
 
-      for (const key of keys) {
+      // SA-107 FIX: Filter out corrupt dead-letter keys that match the
+      // bridge:recovery:* pattern. Without this, corrupt keys (bridge:recovery:corrupt:*)
+      // are re-scanned, fail to parse, and spawn new corrupt keys in an infinite chain.
+      const filteredKeys = keys.filter(k => !k.includes(':corrupt:'));
+      for (const key of filteredKeys) {
         try {
           // redis.get<T>() returns parsed JSON directly (no need for JSON.parse)
           const raw = await this.redis.get(key);

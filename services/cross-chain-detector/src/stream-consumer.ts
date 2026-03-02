@@ -115,7 +115,11 @@ export interface StreamConsumerEvents {
 // =============================================================================
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
-const DEFAULT_PRICE_UPDATES_BATCH_SIZE = 50;
+// RT-006 FIX: Increased from 50 to 500. With 13 chains and 78 DEXs producing
+// price updates, the old batch size of 50 per poll cycle (~1.1s) only sustained
+// ~45 msg/s, causing lag=937 behind the coordinator-group. 500 per cycle sustains
+// ~450 msg/s, comfortably above observed ingest rates.
+const DEFAULT_PRICE_UPDATES_BATCH_SIZE = 500;
 const DEFAULT_WHALE_ALERTS_BATCH_SIZE = 10;
 const DEFAULT_PENDING_OPPORTUNITY_BATCH_SIZE = 20;
 // FIX: Use 1 second block timeout instead of infinite (0)

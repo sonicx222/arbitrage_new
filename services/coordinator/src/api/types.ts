@@ -81,6 +81,13 @@ export interface SystemMetrics {
     notLeader: number;
     circuitOpen: number;
   };
+  // SM-009 FIX: Backpressure state for monitoring — reports execution stream
+  // fill ratio and active backpressure flag so operators can see when the
+  // execution engine is falling behind.
+  backpressure?: {
+    executionStreamDepthRatio: number;
+    active: boolean;
+  };
 }
 
 // =============================================================================

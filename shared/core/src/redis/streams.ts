@@ -488,6 +488,13 @@ export class RedisStreamsClient {
       // Without this, getRedisStreamsClient() can block forever if Redis is unreachable,
       // causing cross-chain detector (and other services) to never reach RUNNING state.
       connectTimeout: 5000,
+      // SA-052 FIX: Reconnect on READONLY errors (Redis failover scenario).
+      // Parity with RedisClient (client.ts) — without this, stream clients get stuck
+      // sending commands to a read-only replica after failover, failing all XADD/XREADGROUP
+      // operations until manual restart.
+      reconnectOnError: (err: Error) => {
+        return err.message?.includes('READONLY') ?? false;
+      },
     };
 
     // DI: Use injected Redis constructor or default

@@ -26,6 +26,8 @@ import { ArbitrageOpportunity } from '@arbitrage/types';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating
 import { Logger, CrossChainOpportunity } from './types';
+// RT-019 FIX: Wire up Prometheus metrics recording
+import { recordOpportunityPublished, recordPublishError, recordOpportunityDeduplicated } from './prometheus-metrics';
 
 // =============================================================================
 // Types
@@ -248,6 +250,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     const dedupeKey = generateDedupeKey(opportunity);
 
     if (!shouldPublish(opportunity, dedupeKey)) {
+      recordOpportunityDeduplicated();
       return false;
     }
 
@@ -275,6 +278,8 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       );
 
       perfLogger.logArbitrageOpportunity(enrichedOpp);
+      // RT-019 FIX: Record successful publish for Prometheus
+      recordOpportunityPublished(opportunity.sourceChain, opportunity.targetChain);
 
       // Fast lane: publish high-confidence, high-profit opportunities
       // to stream:fast-lane for coordinator bypass (fire-and-forget)
@@ -294,6 +299,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       return true;
     } catch (error) {
       logger.error('Failed to publish arbitrage opportunity', { error: (error as Error).message });
+      recordPublishError();
       return false;
     }
   }

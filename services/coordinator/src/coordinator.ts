@@ -2176,6 +2176,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
               RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
             );
             this.cachedExecutionStreamDepthRatio = lag.lagRatio;
+
+            // SM-009 FIX: Expose backpressure state in systemMetrics so health/metrics
+            // endpoints report it. Without this, operators can't see stream saturation.
+            this.systemMetrics.backpressure = {
+              executionStreamDepthRatio: lag.lagRatio,
+              active: lag.lagRatio > this.executionStreamBackpressureRatio,
+            };
           }
 
         } catch (error) {

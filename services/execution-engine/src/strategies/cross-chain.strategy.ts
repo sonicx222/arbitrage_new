@@ -1980,7 +1980,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           100
         );
         cursor = nextCursor;
-        keys.push(...foundKeys);
+        // SA-107 FIX: Exclude corrupt dead-letter keys (bridge:recovery:corrupt:*)
+        // that match the bridge:recovery:* SCAN pattern
+        const validKeys = foundKeys.filter((k: string) => !k.includes(':corrupt:'));
+        keys.push(...validKeys);
         if (keys.length >= MAX_RECOVERY_KEYS) {
           this.logger.warn('Bridge recovery key scan hit limit, processing partial set', {
             limit: MAX_RECOVERY_KEYS,
