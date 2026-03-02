@@ -67,6 +67,45 @@ function getSimulationExpiresAt(chainId: string, strategyTtlMs?: number): number
 }
 
 // =============================================================================
+// SM-009 FIX: Token address + amount helpers for execution validation
+// =============================================================================
+
+/**
+ * Get token address from pair config, falling back to a deterministic mock
+ * address derived from the symbol. The execution engine validation only
+ * checks `typeof tokenIn === 'string' && tokenIn !== ''`, so any non-empty
+ * address works in simulation mode.
+ */
+function getTokenAddress(pair: SimulatedPairConfig, isToken0: boolean): string {
+  if (isToken0 && pair.token0Address) return pair.token0Address;
+  if (!isToken0 && pair.token1Address) return pair.token1Address;
+  // Deterministic mock: 0x + hex-encoded symbol, zero-padded to 40 chars
+  const symbol = isToken0 ? pair.token0Symbol : pair.token1Symbol;
+  const hex = Buffer.from(symbol.toUpperCase()).toString('hex');
+  return '0x' + hex.padStart(40, '0');
+}
+
+/**
+ * Calculate raw amountIn string from USD position size.
+ * Returns all-digit string in smallest denomination (e.g. wei for 18-decimal tokens).
+ */
+function calculateRawAmountIn(
+  positionSizeUsd: number,
+  tokenSymbol: string,
+  decimals: number,
+): string {
+  const tokenPrice = getTokenPrice(tokenSymbol) || 1;
+  const tokenAmount = positionSizeUsd / tokenPrice;
+  // Use safe integer range (8 decimal precision), pad remaining zeros
+  const precision = Math.min(decimals, 8);
+  const scaledAmount = Math.floor(tokenAmount * (10 ** precision));
+  if (scaledAmount <= 0) return '1' + '0'.repeat(decimals); // fallback: 1 token
+  return decimals > precision
+    ? scaledAmount.toString() + '0'.repeat(decimals - precision)
+    : scaledAmount.toString();
+}
+
+// =============================================================================
 // ChainSimulator
 // =============================================================================
 
@@ -589,6 +628,14 @@ export class ChainSimulator extends EventEmitter {
       buyDex: buyPair.pair.dex,
       sellDex: sellPair.pair.dex,
       tokenPair,
+      // SM-009 FIX: Populate execution-required token fields
+      tokenIn: getTokenAddress(buyPair.pair, true),
+      tokenOut: getTokenAddress(buyPair.pair, false),
+      amountIn: calculateRawAmountIn(
+        positionSize,
+        buyPair.pair.token0Symbol,
+        buyPair.pair.token0Decimals,
+      ),
       buyPrice: minPrice,
       sellPrice: maxPrice,
       profitPercentage: netProfit * 100,
@@ -638,6 +685,7 @@ export class ChainSimulator extends EventEmitter {
     base: {
       id: string; chain: string; buyChain: string; sellChain: string;
       buyDex: string; sellDex: string; tokenPair: string;
+      tokenIn: string; tokenOut: string; amountIn: string;
       buyPrice: number; sellPrice: number; profitPercentage: number;
       estimatedProfitUsd: number; confidence: number; timestamp: number;
       expiresAt: number; isSimulated: true; expectedGasCost: number;
@@ -838,6 +886,25 @@ export class ChainSimulator extends EventEmitter {
     const buyDex = uniqueDexes[0];
     const sellDex = uniqueDexes[1];
 
+    // SM-009 FIX: Find pair configs for first token in path to populate tokenIn/tokenOut
+    const firstToken = path[0];
+    const firstPair = this.config.pairs.find(
+      p => p.token0Symbol === firstToken || p.token1Symbol === firstToken
+    );
+    const tokenInAddress = firstPair
+      ? getTokenAddress(firstPair, firstPair.token0Symbol === firstToken)
+      : '0x' + Buffer.from(firstToken.toUpperCase()).toString('hex').padStart(40, '0');
+    const lastToken = path[path.length - 2]; // second-to-last (last === first for circular)
+    const lastPair = this.config.pairs.find(
+      p => p.token0Symbol === lastToken || p.token1Symbol === lastToken
+    );
+    const tokenOutAddress = lastPair
+      ? getTokenAddress(lastPair, lastPair.token0Symbol === lastToken)
+      : '0x' + Buffer.from(lastToken.toUpperCase()).toString('hex').padStart(40, '0');
+    const firstDecimals = firstPair
+      ? (firstPair.token0Symbol === firstToken ? firstPair.token0Decimals : firstPair.token1Decimals)
+      : 18;
+
     const opportunity: SimulatedOpportunity = {
       id: `sim-${this.config.chainId}-${type}-${++this.opportunityId}`,
       type,
@@ -847,6 +914,10 @@ export class ChainSimulator extends EventEmitter {
       buyDex,
       sellDex,
       tokenPair: `${path[0]}/${path[1]}`,
+      // SM-009 FIX: Populate execution-required token fields
+      tokenIn: tokenInAddress,
+      tokenOut: tokenOutAddress,
+      amountIn: calculateRawAmountIn(positionSize, firstToken, firstDecimals),
       buyPrice: 1,
       sellPrice: 1 + netProfit,
       profitPercentage: netProfit * 100,

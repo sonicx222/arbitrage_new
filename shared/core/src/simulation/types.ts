@@ -153,6 +153,20 @@ export interface SimulatedOpportunity {
   buyDex: string;
   sellDex: string;
   tokenPair: string;
+
+  // =========================================================================
+  // Execution-Required Token Fields (SM-009 FIX)
+  // =========================================================================
+
+  /** Token address being swapped in (required by execution engine validation) */
+  tokenIn?: string;
+
+  /** Token address being swapped out (required by execution engine validation) */
+  tokenOut?: string;
+
+  /** Raw amount in (smallest denomination, all-digit string, e.g. "1000000000000000000") */
+  amountIn?: string;
+
   buyPrice: number;
   sellPrice: number;
   profitPercentage: number;
@@ -218,6 +232,10 @@ export interface SimulatedPairConfig {
   token1Decimals: number;
   dex: string;
   fee: number;  // As percentage (0.003 = 0.3%)
+  /** Token0 contract address (SM-009 FIX: for execution validation) */
+  token0Address?: string;
+  /** Token1 contract address (SM-009 FIX: for execution validation) */
+  token1Address?: string;
 }
 
 // =============================================================================

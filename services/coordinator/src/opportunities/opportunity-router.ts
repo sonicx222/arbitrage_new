@@ -172,6 +172,15 @@ export class OpportunityRouter {
   private _totalExecutions = 0;
   // P1-7 FIX: Track dropped opportunities for monitoring
   private _opportunitiesDropped = 0;
+  // SM-001 FIX: Per-reason rejection counters for pipeline observability.
+  // Without these, the monitoring tool can only see 0 forwards but not WHY.
+  private _rejectedExpired = 0;
+  private _rejectedDuplicate = 0;
+  private _rejectedProfit = 0;
+  private _rejectedChain = 0;
+  private _deferredGracePeriod = 0;
+  private _deferredNotLeader = 0;
+  private _deferredCircuitOpen = 0;
   // P1-8 FIX: Shutdown flag to cancel in-flight retry delays
   private _shuttingDown = false;
   // RT-003 FIX: Startup grace period — defer forwarding until execution engine consumer is ready
@@ -252,6 +261,30 @@ export class OpportunityRouter {
   }
 
   /**
+   * SM-001 FIX: Get per-reason rejection/deferral counters for pipeline observability.
+   * Exposes why opportunities are not being forwarded to execution.
+   */
+  getForwardingMetrics(): {
+    expired: number;
+    duplicate: number;
+    profitRejected: number;
+    chainRejected: number;
+    gracePeriodDeferred: number;
+    notLeader: number;
+    circuitOpen: number;
+  } {
+    return {
+      expired: this._rejectedExpired,
+      duplicate: this._rejectedDuplicate,
+      profitRejected: this._rejectedProfit,
+      chainRejected: this._rejectedChain,
+      gracePeriodDeferred: this._deferredGracePeriod,
+      notLeader: this._deferredNotLeader,
+      circuitOpen: this._deferredCircuitOpen,
+    };
+  }
+
+  /**
    * Process an incoming opportunity.
    * Handles duplicate detection, validation, storage, and optional forwarding.
    *
@@ -276,6 +309,7 @@ export class OpportunityRouter {
     // Duplicate detection
     const existing = this.opportunities.get(id);
     if (existing && Math.abs((existing.timestamp ?? 0) - timestamp) < this.config.duplicateWindowMs) {
+      this._rejectedDuplicate++;
       this.logger.debug('Duplicate opportunity detected, skipping', {
         id,
         existingTimestamp: existing.timestamp,
@@ -288,6 +322,7 @@ export class OpportunityRouter {
     const profitPercentage = typeof data.profitPercentage === 'number' ? data.profitPercentage : undefined;
     if (profitPercentage !== undefined) {
       if (profitPercentage < this.config.minProfitPercentage || profitPercentage > this.config.maxProfitPercentage) {
+        this._rejectedProfit++;
         this.logger.warn('Invalid profit percentage, rejecting opportunity', {
           id,
           profitPercentage,
@@ -305,6 +340,7 @@ export class OpportunityRouter {
     if (rawChain) {
       const normalized = normalizeChainId(rawChain);
       if (!isCanonicalChainId(normalized)) {
+        this._rejectedChain++;
         this.logger.warn('Unknown chain in opportunity, rejecting', {
           id,
           chain: rawChain,
@@ -372,6 +408,7 @@ export class OpportunityRouter {
     // consumer backlog. The execution engine then rejects them all with VAL_EXPIRED
     // (200-265s lag), producing 0 execution results and growing the DLQ continuously.
     if (opportunity.expiresAt !== undefined && opportunity.expiresAt < Date.now()) {
+      this._rejectedExpired++;
       this._consecutiveExpired++;
 
       // Log at WARN level periodically when consumer is lagging — debug-only logging
@@ -404,6 +441,7 @@ export class OpportunityRouter {
     if (isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
       await this.forwardToExecutionEngine(opportunity, traceContext);
     } else {
+      if (!isLeader) this._deferredNotLeader++;
       const reason = !isLeader ? 'not_leader' : 'status_not_pending';
       this.logger.debug('Opportunity stored but not forwarded', {
         id,
@@ -441,6 +479,7 @@ export class OpportunityRouter {
     // (~1.6s) and lands in the DLQ every startup cycle.
     const elapsedSinceStart = Date.now() - this._createdAt;
     if (elapsedSinceStart < this.config.startupGracePeriodMs) {
+      this._deferredGracePeriod++;
       this.logger.debug('Startup grace period active — deferring opportunity forwarding', {
         id: opportunity.id,
         elapsedMs: elapsedSinceStart,
@@ -451,6 +490,7 @@ export class OpportunityRouter {
 
     // Check circuit breaker before attempting to forward
     if (this.circuitBreaker.isCurrentlyOpen()) {
+      this._deferredCircuitOpen++;
       this.logger.debug('Execution circuit open, skipping opportunity forwarding', {
         id: opportunity.id,
         failures: this.circuitBreaker.getFailures(),

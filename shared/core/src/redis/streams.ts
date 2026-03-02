@@ -399,7 +399,7 @@ export class RedisStreamsClient {
   static readonly STREAM_MAX_LENGTHS: Record<string, number> = {
     [RedisStreamsClient.STREAMS.PRICE_UPDATES]: 100000,    // High volume, keep more history
     [RedisStreamsClient.STREAMS.SWAP_EVENTS]: 50000,       // Medium volume
-    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 10000,     // Lower volume, important data
+    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 50000,     // RT-003 FIX: Increased from 10K — 34K+ opps/run were causing trimming
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history

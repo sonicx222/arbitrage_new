@@ -66,6 +66,10 @@ export interface PairForSimulation {
   token0Decimals: number;
   token1Decimals: number;
   fee: number;
+  /** Token0 contract address (SM-009 FIX) */
+  token0Address?: string;
+  /** Token1 contract address (SM-009 FIX) */
+  token1Address?: string;
 }
 
 // =============================================================================
@@ -118,7 +122,9 @@ export class ChainSimulationHandler {
       token0Decimals: pair.token0Decimals,
       token1Decimals: pair.token1Decimals,
       dex: pair.dex,
-      fee: pair.fee
+      fee: pair.fee,
+      token0Address: pair.token0Address,
+      token1Address: pair.token1Address,
     }));
 
     if (simulatedPairs.length === 0) {

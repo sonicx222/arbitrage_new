@@ -988,6 +988,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => this.handlePriceUpdateMessage(msg),
       // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
       [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: (msg) => this.handleExecutionResultMessage(msg),
+      // RT-007 FIX: Register DLQ consumer so the consumer group has active consumers.
+      // Without this, the consumer group exists but consumers=0, meaning DLQ entries
+      // accumulate without being processed or acknowledged.
+      [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: (msg) => this.handleDlqMessage(msg),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -1173,6 +1177,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
       // P1-7 FIX: Always sync dropped opportunities (not just when processed)
       this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
+      // SM-001 FIX: Sync per-reason forwarding metrics for /stats observability
+      this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
 
       // Consumer lag detection: if too many consecutive opportunities expired,
       // skip the consumer backlog by resetting the group position to '$' (latest).
@@ -1612,6 +1618,30 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // P2-5: Do not reset stream errors from execution results.
     // Only the opportunity handler (primary data path) should reset errors.
+  }
+
+  /**
+   * RT-007 FIX: Handle dead-letter queue messages.
+   * Logs the failure details for observability and acknowledges the message
+   * so it doesn't remain pending indefinitely.
+   */
+  private async handleDlqMessage(message: StreamMessage): Promise<void> {
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
+
+    const rawData = unwrapMessageData(data);
+    const originalStream = getString(rawData, '_dlq_originalStream', 'unknown');
+    const errorCode = getString(rawData, '_dlq_errorCode', 'unknown');
+    const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
+
+    this.logger.warn('DLQ entry processed', {
+      messageId: message.id,
+      originalStream,
+      errorCode,
+      opportunityId,
+      type: getString(rawData, 'type', 'unknown'),
+      chain: getString(rawData, 'chain', 'unknown'),
+    });
   }
 
   /**

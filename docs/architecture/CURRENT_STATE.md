@@ -74,30 +74,46 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ## Redis Streams Topology (ADR-002)
 
-### Stream Names
+### Stream Names (24 declared in `shared/types/src/events.ts`)
 
-| Stream | Purpose | Producers | Consumers |
-|--------|---------|-----------|-----------|
-| `stream:price-updates` | Real-time price data | Partition Detectors | Cross-Chain Detector, Execution Engine |
-| `stream:swap-events` | DEX swap events | Partition Detectors | Analytics, Quality Monitor |
-| `stream:opportunities` | Arbitrage opportunities | Partition Detectors | Execution Engine |
-| `stream:whale-alerts` | Large trade notifications | All Detectors | Alert Service |
-| `stream:volume-aggregates` | Volume aggregation data | Partition Detectors | Coordinator |
-| `stream:health` | Service health data | All Services | Coordinator |
-| `stream:execution-requests` | Forwarded opportunities | Coordinator | Execution Engine |
-| `stream:pending-opportunities` | Mempool pending txs | Mempool Detector | Execution Engine |
-| `stream:circuit-breaker` | Circuit breaker events | Execution Engine | All Services |
-| `stream:system-failover` | Failover coordination | CrossRegionHealthManager | All Services |
+| Stream | MAXLEN | Purpose | Lifecycle |
+|--------|--------|---------|-----------|
+| `stream:price-updates` | 100,000 | Real-time price data from partition detectors | ACTIVE |
+| `stream:swap-events` | 50,000 | DEX swap events | IDLE |
+| `stream:opportunities` | 50,000 | Arbitrage opportunities from detectors | ACTIVE |
+| `stream:whale-alerts` | 5,000 | Large trade notifications | IDLE |
+| `stream:service-health` | 1,000 | Per-service health reports | IDLE |
+| `stream:service-events` | 5,000 | Service lifecycle events | IDLE |
+| `stream:coordinator-events` | 5,000 | Coordinator broadcasts | IDLE |
+| `stream:health` | 1,000 | Service heartbeats | ACTIVE |
+| `stream:health-alerts` | 5,000 | Health monitor alerts | ON-DEMAND |
+| `stream:execution-requests` | 5,000 | Forwarded opportunities from coordinator | ACTIVE |
+| `stream:execution-results` | 5,000 | Execution outcomes from engine | ACTIVE |
+| `stream:pending-opportunities` | 10,000 | Mempool pending transactions | IDLE |
+| `stream:volume-aggregates` | 10,000 | Volume aggregation data | IDLE |
+| `stream:circuit-breaker` | 5,000 | Circuit breaker state events | IDLE |
+| `stream:system-failover` | 1,000 | Cross-region failover coordination | ON-DEMAND |
+| `stream:system-commands` | 1,000 | System control commands | ON-DEMAND |
+| `stream:system-failures` | 5,000 | Self-healing failure events | ON-DEMAND |
+| `stream:system-control` | 1,000 | Self-healing control commands | ON-DEMAND |
+| `stream:system-scaling` | 1,000 | Self-healing scaling commands | ON-DEMAND |
+| `stream:service-degradation` | 5,000 | Graceful degradation events | ON-DEMAND |
+| `stream:fast-lane` | 5,000 | High-confidence coordinator bypass | ACTIVE |
+| `stream:dead-letter-queue` | 10,000 | Failed message dead-letter queue | ACTIVE |
+| `stream:dlq-alerts` | 5,000 | DLQ alert notifications | ON-DEMAND |
+| `stream:forwarding-dlq` | 5,000 | DLQ forwarding failures | ON-DEMAND |
 
-### Consumer Groups
+### Consumer Groups (7 active)
 
 | Group | Members | Streams | Purpose |
 |-------|---------|---------|---------|
-| `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results | Orchestration, health monitoring, opportunity routing |
+| `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue | Orchestration, health monitoring, opportunity routing |
+| `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities | Cross-chain opportunity detection |
 | `execution-engine-group` | Execution Engine | execution-requests | Processes forwarded opportunities |
 | `execution-engine` | Fast Lane Consumer | fast-lane | Processes fast-lane high-priority opportunities |
-| `cross-chain-detector-group` | Cross-Chain Detector | price-updates, swap-events, whale-alerts | Cross-chain opportunity detection |
-| `analytics-group` | Quality Monitor | swap-events | Processes events for analytics |
+| `mempool-detector-group` | Mempool Detector | pending-opportunities | Pre-block pending transaction detection |
+| `orderflow-pipeline` | Coordinator | pending-opportunities | Orderflow pipeline processing |
+| `failover-coordinator` | Coordinator | system-failover | Failover coordination |
 
 ---
 

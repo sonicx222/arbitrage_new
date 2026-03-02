@@ -63,6 +63,16 @@ export interface SystemMetrics {
   priceUpdatesReceived: number;
   // P1-7 FIX: Track dropped opportunities for monitoring
   opportunitiesDropped: number;
+  // SM-001 FIX: Per-reason rejection/deferral counters for pipeline observability
+  forwardingMetrics?: {
+    expired: number;
+    duplicate: number;
+    profitRejected: number;
+    chainRejected: number;
+    gracePeriodDeferred: number;
+    notLeader: number;
+    circuitOpen: number;
+  };
 }
 
 // =============================================================================

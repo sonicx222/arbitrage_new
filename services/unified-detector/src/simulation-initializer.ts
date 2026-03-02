@@ -219,7 +219,10 @@ export class SimulationInitializer {
         token1Symbol,
         token0Decimals: token0?.decimals ?? 18,
         token1Decimals: token1?.decimals ?? 18,
-        fee: pair.fee ?? 0.003  // Default 0.3% fee
+        fee: pair.fee ?? 0.003,  // Default 0.3% fee
+        // SM-009 FIX: Pass real token addresses for execution validation
+        token0Address: pair.token0,
+        token1Address: pair.token1,
       });
     }
 
