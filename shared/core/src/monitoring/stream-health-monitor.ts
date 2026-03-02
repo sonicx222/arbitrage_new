@@ -594,10 +594,16 @@ export class StreamHealthMonitor {
       lines.push(`stream_consumer_groups{stream="${name}"} ${info.consumerGroups}`);
     }
 
-    lines.push('# HELP stream_health_status Stream health status (1=healthy, 0.5=warning, 0=critical)');
+    // RT-009 FIX: Map 'unknown' to -1 (not 0) so idle/uninitialized streams are
+    // distinguishable from 'critical'. Streams with no data yet (length=0,
+    // lastGeneratedId='0-0') are 'unknown', not broken.
+    lines.push('# HELP stream_health_status Stream health status (1=healthy, 0.5=warning, 0=critical, -1=unknown/idle)');
     lines.push('# TYPE stream_health_status gauge');
     for (const [name, info] of Object.entries(health.streams)) {
-      const statusValue = info.status === 'healthy' ? 1 : info.status === 'warning' ? 0.5 : 0;
+      const statusValue = info.status === 'healthy' ? 1
+        : info.status === 'warning' ? 0.5
+        : info.status === 'unknown' ? -1
+        : 0;
       lines.push(`stream_health_status{stream="${name}"} ${statusValue}`);
     }
 

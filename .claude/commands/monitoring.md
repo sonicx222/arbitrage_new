@@ -33,19 +33,19 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 |---------|------|----------------|------|
 | Coordinator | 3000 | `/api/health/ready` | Orchestration, leader election, opportunity routing |
 | P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon, Avalanche, Fantom |
-| P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll, Mantle, Mode |
+| P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, Blast, Scroll |
 | P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, zkSync, Linea |
 | P4 Solana | 3004 | `/ready` | Chain detector: Solana |
 | Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
 | Cross-Chain | 3006 | `/ready` | Cross-chain arbitrage detection |
 
-### Redis Streams (19 declared in `shared/types/src/events.ts`)
+### Redis Streams (24 declared in `shared/types/src/events.ts`)
 
 | Stream | MAXLEN | Producer(s) | Consumer Group(s) |
 |--------|--------|-------------|-------------------|
 | `stream:price-updates` | 100,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:swap-events` | 50,000 | P1-P4 partitions | coordinator-group |
-| `stream:opportunities` | 10,000 | P1-P4, cross-chain detector | coordinator-group |
+| `stream:opportunities` | 50,000 | P1-P4, cross-chain detector | coordinator-group |
 | `stream:whale-alerts` | 5,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:service-health` | 1,000 | All services | — |
 | `stream:service-events` | 5,000 | All services | — |
@@ -59,11 +59,16 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 | `stream:circuit-breaker` | 5,000 | Execution engine | — |
 | `stream:system-failover` | 1,000 | Coordinator | — |
 | `stream:system-commands` | 1,000 | Coordinator | — |
-| `stream:fast-lane` | — | Fast lane (feature-gated) | execution-engine |
+| `stream:fast-lane` | 5,000 | Fast lane (feature-gated) | execution-engine |
 | `stream:dead-letter-queue` | 10,000 | Any service | coordinator-group |
-| `stream:forwarding-dlq` | — | Coordinator | — |
+| `stream:dlq-alerts` | 5,000 | DLQ manager (on-demand) | — |
+| `stream:forwarding-dlq` | 5,000 | Coordinator | — |
+| `stream:system-failures` | 5,000 | Self-healing (on-demand) | — |
+| `stream:system-control` | 1,000 | Self-healing (on-demand) | — |
+| `stream:system-scaling` | 1,000 | Self-healing (on-demand) | — |
+| `stream:service-degradation` | 5,000 | Degradation monitor (on-demand) | — |
 
-### Consumer Groups (5 active)
+### Consumer Groups (7 active)
 
 | Group | Service | Streams |
 |-------|---------|---------|
@@ -72,6 +77,8 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 | `execution-engine-group` | Execution Engine | execution-requests |
 | `execution-engine` | Execution Engine (fast lane) | fast-lane |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities |
+| `orderflow-pipeline` | Coordinator (orderflow) | pending-opportunities |
+| `failover-coordinator` | Coordinator (failover) | system-failover |
 
 ### Pipeline Data Flow (Critical Path)
 
@@ -256,21 +263,25 @@ severity: **LOW**, category: `HMAC_SIGNING`.
 and profit-impacting features should be explicitly documented.
 
 **Method:**
-1. Read `shared/config/src/feature-flags.ts` to get all 16 `FEATURE_*` flags.
+1. Read `shared/config/src/feature-flags.ts` to get all 23 `FEATURE_*` flags.
 2. List each flag with its pattern (opt-in `=== 'true'` or opt-out `!== 'false'`).
 3. Verify cross-dependencies:
    - `FEATURE_SIGNAL_CACHE_READ` requires `FEATURE_ML_SIGNAL_SCORING`
    - `FEATURE_COMMIT_REVEAL_REDIS` requires `REDIS_URL`
+   - `FEATURE_SOLANA_EXECUTION` requires `SOLANA_RPC_URL`
 4. Check `.env.example` documents all feature flags with descriptions.
 
-**Expected flags (16 total):**
+**Expected flags (23 total):**
 `FEATURE_BATCHED_QUOTER`, `FEATURE_FLASH_LOAN_AGGREGATOR`, `FEATURE_COMMIT_REVEAL`,
 `FEATURE_COMMIT_REVEAL_REDIS`, `FEATURE_DEST_CHAIN_FLASH_LOAN`,
 `FEATURE_MOMENTUM_TRACKING`, `FEATURE_ML_SIGNAL_SCORING`,
 `FEATURE_SIGNAL_CACHE_READ`, `FEATURE_LIQUIDITY_DEPTH_SIZING`,
 `FEATURE_DYNAMIC_L1_FEES` (opt-out — ON by default),
 `FEATURE_ORDERFLOW_PIPELINE`, `FEATURE_KMS_SIGNING`, `FEATURE_FAST_LANE`,
-`FEATURE_BACKRUN_STRATEGY`, `FEATURE_UNISWAPX_FILLER`, `FEATURE_MEV_SHARE_BACKRUN`
+`FEATURE_BACKRUN_STRATEGY`, `FEATURE_UNISWAPX_FILLER`, `FEATURE_MEV_SHARE_BACKRUN`,
+`FEATURE_SOLANA_EXECUTION`, `FEATURE_STATISTICAL_ARB`, `FEATURE_MEV_SHARE`,
+`FEATURE_ADAPTIVE_RISK_SCORING`, `FEATURE_TIMEBOOST`, `FEATURE_FLASHBOTS_PROTECT_L2`,
+`FEATURE_COW_BACKRUN`
 
 **Flag:** Cross-dependency violation in code → severity: **HIGH**,
 category: `FEATURE_FLAG`.
@@ -657,6 +668,10 @@ curl -sf http://localhost:3006/metrics >> ./monitor-session/metrics_t1.txt
 **Flag:** Counters NOT incrementing between scrapes → **MEDIUM** (metrics may be
 stale or service is idle — in simulation mode, counters should be incrementing).
 **Flag:** Metrics endpoint returns empty/error → **MEDIUM**.
+
+**Note:** Cross-chain detector (port 3006) `/metrics` may return empty during the
+first ~30s of startup. Prometheus counters only appear after their first increment.
+This is expected and not a finding if the endpoint returns data on the second scrape.
 
 ---
 
@@ -1096,8 +1111,16 @@ For each partition, verify every assigned chain shows:
 - P3: Ethereum, zkSync, Linea (3 chains)
 - P4: Solana (1 chain)
 
+**Note on P4 Solana `pairsMonitored=0`:** This is expected. Solana uses
+`SolanaArbitrageDetector` (program-account-based detection) rather than the
+EVM-style pair-initializer. The pair-initializer uses `ethers.solidityPacked`
+which requires EVM hex addresses, not Solana base58 addresses. Solana
+opportunities come from the separate arbitrage detector, so `pairsMonitored=0`
+with active opportunity detection is normal. Do NOT flag this as a finding.
+
 **Flag:** Any non-stub chain with 0 messages during smoke test → **HIGH**,
 category: `DETECTION_RATE` (chain is configured but not producing data).
+**Exception:** P4 Solana `pairsMonitored=0` is expected (see note above).
 **Flag:** Partition reporting fewer chains than expected → **MEDIUM**,
 category: `DETECTION_RATE`.
 

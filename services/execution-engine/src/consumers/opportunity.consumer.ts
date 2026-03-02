@@ -578,6 +578,11 @@ export class OpportunityConsumer {
       return;
     }
 
+    // RT-012 FIX: Count as received before incrementing validation errors.
+    // opportunitiesReceived is documented as "before validation" but was only
+    // incremented in handleArbitrageOpportunity (after validation), causing the
+    // counter to show 0 even when messages arrived but failed field validation.
+    this.stats.opportunitiesReceived++;
     // Increment validation error counter for non-system validation failures
     this.stats.validationErrors++;
 
