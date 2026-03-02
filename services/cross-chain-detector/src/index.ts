@@ -55,7 +55,16 @@ async function main() {
           mlPredictorActive: details.mlPredictorActive,
         };
       },
-      readyCheck: () => detector.isRunning() && detector.getHealthDetails().redisConnected,
+      // ST-007 FIX: Require chainsMonitored > 0 in addition to isRunning + redisConnected.
+      // Without this, /ready returns 200 the instant the state transitions to RUNNING,
+      // but the event loop is saturated by the accumulated stream message burst (~500 msgs).
+      // Requiring at least one chain to have price data ensures the service has processed
+      // initial updates and the event loop has cleared the startup burst.
+      readyCheck: () => {
+        if (!detector.isRunning()) return false;
+        const details = detector.getHealthDetails();
+        return details.redisConnected && details.chainsMonitored > 0;
+      },
       additionalRoutes: {
         '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {
           const text = await getMetricsText();
