@@ -857,8 +857,11 @@ export class PriceMatrix implements Resettable {
       return;
     }
 
-    // Phase 1: Resolve all indices (reuse array to avoid allocation)
-    const resolved: Array<{ index: number; price: number; relativeTs: number }> = [];
+    // P2 Fix OPT-003: Pre-allocate resolved array to avoid dynamic resizing.
+    // At ~500 pairs with batch updates of 10-50, this eliminates repeated
+    // array growth copies during the resolution phase.
+    const resolved = new Array<{ index: number; price: number; relativeTs: number }>(updates.length);
+    let resolvedCount = 0;
     const maxPairs = this.config.maxPairs;
 
     for (const update of updates) {
@@ -875,14 +878,14 @@ export class PriceMatrix implements Resettable {
       const index = this.getIndexForKey(update.key);
       if (index < 0) continue;
 
-      resolved.push({
+      resolved[resolvedCount++] = {
         index,
         price: update.price,
         relativeTs: Math.floor((update.timestamp - this.timestampEpoch) / 1000)
-      });
+      };
     }
 
-    if (resolved.length === 0) {
+    if (resolvedCount === 0) {
       return;
     }
 
@@ -893,7 +896,8 @@ export class PriceMatrix implements Resettable {
 
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
       // Optimized SharedArrayBuffer path with Fix #7 sequence counter protocol
-      for (const { index, price, relativeTs } of resolved) {
+      for (let ri = 0; ri < resolvedCount; ri++) {
+        const { index, price, relativeTs } = resolved[ri];
         // FIX W2-10: Monotonic timestamp enforcement in batch path (matches OP-5 in setPrice)
         // Skip stale prices where existing timestamp is newer
         const currentTs = Atomics.load(timestamps, index);
@@ -907,7 +911,8 @@ export class PriceMatrix implements Resettable {
       }
     } else {
       // Fallback path
-      for (const { index, price, relativeTs } of resolved) {
+      for (let ri = 0; ri < resolvedCount; ri++) {
+        const { index, price, relativeTs } = resolved[ri];
         // FIX W2-10: Monotonic timestamp enforcement in batch fallback path
         if (timestamps[index] > relativeTs) continue;
 
@@ -919,7 +924,7 @@ export class PriceMatrix implements Resettable {
       }
     }
 
-    this.stats.writes += resolved.length;
+    this.stats.writes += resolvedCount;
     this.stats.batchWrites++;
   }
 
@@ -932,7 +937,14 @@ export class PriceMatrix implements Resettable {
     }
 
     this.stats.batchReads++;
-    return keys.map(key => this.getPrice(key));
+
+    // P2 Fix OPT-006: Pre-allocate array instead of keys.map() to avoid
+    // closure allocation per element on the hot path.
+    const results = new Array<PriceEntry | null>(keys.length);
+    for (let i = 0; i < keys.length; i++) {
+      results[i] = this.getPrice(keys[i]);
+    }
+    return results;
   }
 
   /**

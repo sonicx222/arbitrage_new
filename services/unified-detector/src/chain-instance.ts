@@ -2201,11 +2201,10 @@ export class ChainDetectorInstance extends EventEmitter {
       return result;
     }
 
-    // Cache miss - compute the key (allocates strings)
-    // Safety: Defensive toLowerCase() in case inputs aren't pre-normalized
-    const t0 = token0.toLowerCase();
-    const t1 = token1.toLowerCase();
-    result = t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+    // Cache miss - compute the key
+    // P2 Fix OPT-001: Removed redundant toLowerCase() — addresses are already normalized
+    // to lowercase at pair creation (initializePairs). Saves 2 string allocations per cache miss.
+    result = token0 < token1 ? `${token0}_${token1}` : `${token1}_${token0}`;
 
     // FIX 10.1: Amortized O(1) eviction - delete oldest entries incrementally
     // Previous implementation used O(n) spread+slice which caused latency spikes.

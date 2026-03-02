@@ -111,10 +111,10 @@ CircuitBreakerManager
 ### Integration Points
 
 ```typescript
-// In ExecutionEngine.executeOpportunity()
+// In ExecutionPipeline.executeOpportunity()
 // Per-chain: only block the affected chain
-const chain = opportunity.buyChain;
-if (this.circuitBreakerManager.isOpen(chain)) {
+const oppChain = opportunity.buyChain ?? opportunity.chain;
+if (this.deps.cbManager && !this.deps.cbManager.canExecute(oppChain)) {
   this.stats.circuitBreakerBlocks++;
   return; // Skip execution for this chain only
 }
@@ -218,7 +218,7 @@ const cbManager = new CircuitBreakerManager({
 
 // Per-chain usage
 cbManager.recordFailure('ethereum'); // Only affects Ethereum breaker
-cbManager.isOpen('arbitrum');         // Arbitrum breaker is independent
+cbManager.canExecute('arbitrum');     // Arbitrum breaker is independent
 ```
 
 ## Success Criteria

@@ -187,17 +187,21 @@ describe('SnapshotManager', () => {
       const pairs = new Map<string, ExtendedPair>();
       pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
-      const first = shortTtlManager.createPairsSnapshot(pairs);
+      shortTtlManager.createPairsSnapshot(pairs);
+      const versionBefore = shortTtlManager.getSnapshotVersion();
 
       // Advance Date.now() past TTL to expire cache
       const originalDateNow = Date.now;
       Date.now = () => originalDateNow() + 20;
 
       const second = shortTtlManager.createPairsSnapshot(pairs);
+      const versionAfter = shortTtlManager.getSnapshotVersion();
 
       Date.now = originalDateNow;
 
-      expect(first).not.toBe(second); // Different reference (refreshed)
+      // OPT-002: Map is reused, so check version increment instead of reference
+      expect(versionAfter).toBeGreaterThan(versionBefore);
+      expect(second.size).toBe(1);
 
       shortTtlManager.clear();
     });
@@ -206,10 +210,14 @@ describe('SnapshotManager', () => {
       const pairs = new Map<string, ExtendedPair>();
       pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
-      const first = manager.createPairsSnapshot(pairs);
-      const second = manager.createPairsSnapshot(pairs, true); // Force refresh
+      manager.createPairsSnapshot(pairs);
+      const versionBefore = manager.getSnapshotVersion();
 
-      expect(first).not.toBe(second); // Different reference
+      manager.createPairsSnapshot(pairs, true); // Force refresh
+      const versionAfter = manager.getSnapshotVersion();
+
+      // OPT-002: Map is reused, so check version increment instead of reference
+      expect(versionAfter).toBeGreaterThan(versionBefore);
     });
   });
 

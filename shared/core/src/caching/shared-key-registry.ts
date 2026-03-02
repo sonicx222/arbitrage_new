@@ -9,6 +9,8 @@
  * - Keys stored in insertion order (not sorted, to avoid reordering overhead)
  * - Workers perform linear scan (acceptable for ~1000 keys, <1ms)
  * - Alternative: Sort and binary search for >10k keys
+ * - TODO OPT-004: At maxKeys=10000 cap, linear scan degrades to ~5-10ms.
+ *   Consider hash-based index (FNV-1a over SharedArrayBuffer) if key count grows.
  *
  * Memory overhead: 64 bytes per key
  * - 1,000 keys = 64KB

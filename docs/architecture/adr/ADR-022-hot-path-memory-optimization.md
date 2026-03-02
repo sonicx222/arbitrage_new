@@ -179,15 +179,15 @@ The "clear-half" strategy is chosen because:
 
 ### Files Modified
 
-1. **shared/core/src/partitioned-detector.ts**
-   - Ring buffer for `eventLatencies` (lines 188-193)
-   - Normalization cache with eviction (lines 197-199, 258-310)
+1. **shared/core/src/partition/** (refactored from former `partitioned-detector.ts`)
+   - Ring buffer for `eventLatencies`
+   - Normalization cache with eviction
    - Updated `recordEventLatency()` method
    - Updated `getPartitionHealth()` average calculation
 
 2. **Test files updated**
-   - `shared/core/__tests__/unit/partitioned-detector.test.ts`
-   - `tests/integration/s3.1.1-partitioned-detector.integration.test.ts`
+   - `shared/core/__tests__/unit/partition-service-*.test.ts`
+   - `services/partition-*/__tests__/unit/partition-service.test.ts`
 
 ### Verification
 
@@ -195,8 +195,8 @@ The "clear-half" strategy is chosen because:
 # Type check passes
 npm run typecheck
 
-# All tests pass (161+ tests)
-npm test -- --testPathPattern="partitioned-detector"
+# All tests pass
+npm test -- --testPathPattern="partition"
 ```
 
 ## Alternatives Considered

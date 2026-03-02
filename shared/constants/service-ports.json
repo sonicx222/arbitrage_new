@@ -11,7 +11,8 @@
     "execution-engine": 3005,
     "cross-chain-detector": 3006,
     "unified-detector": 3007,
-    "mempool-detector": 3008
+    "mempool-detector": 3008,
+    "monolith": 3100
   },
 
   "partitions": {
@@ -43,6 +44,7 @@
     "cross-chain-detector": "CROSS_CHAIN_DETECTOR_PORT",
     "unified-detector": "UNIFIED_DETECTOR_PORT",
     "mempool-detector": "MEMPOOL_DETECTOR_PORT",
-    "redis": "REDIS_PORT"
+    "redis": "REDIS_PORT",
+    "monolith": "MONOLITH_PORT"
   }
 }

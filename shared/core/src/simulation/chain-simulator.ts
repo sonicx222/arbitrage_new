@@ -129,6 +129,10 @@ export class ChainSimulator extends EventEmitter {
   private logger = createLogger('chain-simulator');
   private opportunityId = 0;
 
+  // P2 Fix OPT-005: Pre-index pairs by DEX to avoid O(N) filter on every swap.
+  // Built once at construction, avoids ~1000 array copies/sec under burst regime.
+  private pairsByDex: Map<string, SimulatedPairConfig[]> = new Map();
+
   /**
    * Fix P3-004: Configurable position size range for realistic opportunity sizing.
    */
@@ -148,6 +152,7 @@ export class ChainSimulator extends EventEmitter {
     this.minPositionSize = config.minPositionSize ?? 1000;
     this.maxPositionSize = config.maxPositionSize ?? 50000;
     this.initializeReserves();
+    this.buildDexIndex();
   }
 
   /**
@@ -161,6 +166,18 @@ export class ChainSimulator extends EventEmitter {
     const logRandom = logMin + Math.random() * (logMax - logMin);
     const positionSize = Math.exp(logRandom);
     return Math.round(positionSize / 10) * 10;
+  }
+
+  private buildDexIndex(): void {
+    this.pairsByDex.clear();
+    for (const pair of this.config.pairs) {
+      let bucket = this.pairsByDex.get(pair.dex);
+      if (!bucket) {
+        bucket = [];
+        this.pairsByDex.set(pair.dex, bucket);
+      }
+      bucket.push(pair);
+    }
   }
 
   private initializeReserves(): void {
@@ -439,8 +456,9 @@ export class ChainSimulator extends EventEmitter {
   private selectSwapPair(dex: string): SimulatedPairConfig | null {
     if (this.config.pairs.length === 0) return null;
 
-    const dexPairs = this.config.pairs.filter(p => p.dex === dex);
-    const candidates = dexPairs.length > 0 ? dexPairs : this.config.pairs;
+    // P2 Fix OPT-005: Use pre-indexed map instead of O(N) filter per swap
+    const dexPairs = this.pairsByDex.get(dex);
+    const candidates = dexPairs && dexPairs.length > 0 ? dexPairs : this.config.pairs;
 
     const weights = candidates.map(p => {
       const key = `${p.token0Symbol}/${p.token1Symbol}`;

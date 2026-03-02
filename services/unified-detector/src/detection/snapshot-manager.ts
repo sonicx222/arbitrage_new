@@ -170,8 +170,16 @@ export class SnapshotManager {
       return this.snapshotCache;
     }
 
-    // Create fresh snapshots
-    const snapshots = new Map<string, PairSnapshot>();
+    // P2 Fix OPT-002: Reuse existing Map instead of allocating a new one every refresh.
+    // At 100ms TTL with ~500 pairs, this eliminates ~10 Map allocations/sec and the
+    // corresponding GC pressure from abandoned Maps.
+    let snapshots: Map<string, PairSnapshot>;
+    if (this.snapshotCache) {
+      snapshots = this.snapshotCache;
+      snapshots.clear();
+    } else {
+      snapshots = new Map<string, PairSnapshot>();
+    }
 
     for (const [, pair] of pairs) {
       const snapshot = this.createPairSnapshot(pair);
