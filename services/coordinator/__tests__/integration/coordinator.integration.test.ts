@@ -136,12 +136,17 @@ describe('CoordinatorService Integration', () => {
     const getStreamHealthMonitorMock = jest.fn();
     getStreamHealthMonitorMock.mockReturnValue(createMockStreamHealthMonitor());
 
+    // ADR-037: Mock dedicated streams client factory to return the same client
+    const createDedicatedStreamsClientMock = jest.fn<() => Promise<RedisStreamsClient>>();
+    createDedicatedStreamsClientMock.mockResolvedValue(streamsClient);
+
     // Create dependencies object with real Redis + mock non-Redis deps
     mockDeps = {
       logger: createMockLogger(),
       perfLogger: createMockPerfLogger() as any,
       getRedisClient: getRedisClientMock as any,
       getRedisStreamsClient: getRedisStreamsClientMock as any,
+      createDedicatedStreamsClient: createDedicatedStreamsClientMock as any,
       createServiceState: createServiceStateFn as any,
       getStreamHealthMonitor: getStreamHealthMonitorMock as any,
       StreamConsumer: createMockStreamConsumerClass() as any

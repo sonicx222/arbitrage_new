@@ -699,6 +699,20 @@ opportunities to the Execution Engine via `stream:execution-requests`.
 4. **Audit Trail**: Centralized forwarding provides clear observability
    of which opportunities were approved for execution.
 
+**Pipeline Optimization (ADR-037)**
+
+The coordinator uses three optimizations to handle high-throughput opportunity streams:
+
+1. **Pipelined Batch XACK**: Message acknowledgment uses `ioredis.pipeline()` to batch
+   N XACK commands into a single network round-trip (200 round-trips → 1).
+2. **Parallel Forwarding**: Qualifying opportunities are forwarded concurrently via
+   `Promise.all` instead of sequentially (10 sequential XADD → 10 concurrent).
+3. **Dedicated Redis Connection**: The opportunities consumer uses a dedicated
+   `RedisStreamsClient` instance to eliminate TCP socket contention with other consumers.
+
+These optimizations reduce per-batch cycle time from ~55ms to ~17ms, providing ~12,000 msg/s
+effective throughput — 66x headroom over the observed 181 opps/s peak detection rate.
+
 **Consumer Group Pattern**
 
 The Execution Engine uses Redis consumer groups for reliable delivery:

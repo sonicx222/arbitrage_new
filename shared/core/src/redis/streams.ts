@@ -912,6 +912,53 @@ export class RedisStreamsClient {
     }
   }
 
+  /**
+   * ADR-033: Pipelined batch XACK — acknowledge multiple message IDs in a single
+   * Redis pipeline round-trip instead of N sequential calls.
+   *
+   * At batch size 200, this reduces ACK overhead from ~20-40ms (200 round-trips)
+   * to ~0.5ms (1 pipelined round-trip), a 40-80x improvement.
+   *
+   * @param streamName - The stream to acknowledge messages on
+   * @param groupName - The consumer group name
+   * @param messageIds - Array of message IDs to acknowledge
+   * @returns Total number of messages successfully acknowledged
+   */
+  async batchXack(streamName: string, groupName: string, messageIds: string[]): Promise<number> {
+    if (messageIds.length === 0) return 0;
+
+    // For small batches, single xack with variadic args is sufficient
+    if (messageIds.length <= 5) {
+      return this.xack(streamName, groupName, ...messageIds);
+    }
+
+    try {
+      const pipeline = this.client.pipeline();
+      for (const id of messageIds) {
+        pipeline.xack(streamName, groupName, id);
+      }
+      const results = await pipeline.exec();
+      if (!results) return 0;
+
+      let totalAcked = 0;
+      for (const [err, result] of results) {
+        if (err) {
+          this.logger.error('Pipeline XACK error for individual message', {
+            error: err.message,
+            streamName,
+            groupName,
+          });
+        } else {
+          totalAcked += (result as number) ?? 0;
+        }
+      }
+      return totalAcked;
+    } catch (error) {
+      this.logger.error('Pipeline XACK error', { error, streamName, groupName, count: messageIds.length });
+      throw error;
+    }
+  }
+
   // ===========================================================================
   // Stream Information
   // ===========================================================================
@@ -1563,6 +1610,52 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
   }
   // Instance was reset during initialization, retry
   return getRedisStreamsClient(url, password);
+}
+
+/**
+ * ADR-033: Create a new, non-singleton RedisStreamsClient instance.
+ *
+ * Unlike getRedisStreamsClient() which returns a shared singleton, this factory
+ * creates a dedicated connection for services that need isolation from other
+ * consumers sharing the main connection. Used by the coordinator to give the
+ * high-throughput opportunities consumer its own TCP socket, eliminating
+ * contention with 7 other stream consumers.
+ *
+ * The caller owns the returned instance and must call disconnect() on cleanup.
+ */
+export async function createRedisStreamsClient(url?: string, password?: string): Promise<RedisStreamsClient> {
+  let redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
+  let redisPassword: string | undefined;
+  if (process.env.REDIS_MEMORY_MODE === 'true') {
+    redisPassword = undefined;
+    redisUrl = redisUrl.replace(/redis:\/\/:[^@]+@/, 'redis://');
+  } else {
+    redisPassword = resolveRedisPassword(password);
+  }
+
+  const rawSigningKey = process.env.STREAM_SIGNING_KEY;
+  let signingKey: string | undefined;
+  if (rawSigningKey !== undefined) {
+    const trimmed = rawSigningKey.trim();
+    if (trimmed.length > 0) {
+      signingKey = trimmed;
+    }
+  }
+  const previousSigningKey = process.env.STREAM_SIGNING_KEY_PREVIOUS?.trim() || undefined;
+  const legacyHmacCompat = process.env.LEGACY_HMAC_COMPAT === 'true';
+
+  const instance = new RedisStreamsClient(redisUrl, redisPassword, {
+    signingKey,
+    previousSigningKey,
+    legacySignatureCompatEnabled: legacyHmacCompat,
+  });
+
+  const isHealthy = await instance.ping();
+  if (!isHealthy) {
+    throw new Error('Failed to connect dedicated Redis Streams client');
+  }
+
+  return instance;
 }
 
 export async function resetRedisStreamsInstance(): Promise<void> {

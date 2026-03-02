@@ -453,7 +453,9 @@ export class OpportunityRouter {
     this.opportunities.set(id, opportunity);
     this._totalOpportunities++;
 
-    this.logger.info('Opportunity detected', {
+    // ADR-033: Downgraded from info to debug — at 181 opps/s, structured logging
+    // on every opportunity adds ~0.1-0.5ms per message in the hot path.
+    this.logger.debug('Opportunity detected', {
       id,
       chain: opportunity.chain,
       profitPercentage: opportunity.profitPercentage,
@@ -591,11 +593,17 @@ export class OpportunityRouter {
       droppedDuplicates: parsed.length - sorted.length,
     });
 
-    // Step 4: Process in TTL-priority order
-    for (const opp of sorted) {
-      const processed = await this.processOpportunity(opp.data, isLeader, opp.traceContext);
-      if (processed) {
-        processedIds.push(opp.id);
+    // ADR-033: Step 4: Process in parallel for throughput.
+    // Validation (dedup, profit, chain, expiry) is CPU-only with no shared mutable state
+    // between opportunities. Forwarding (XADD) calls are independent Redis writes.
+    // Promise.all executes all forwards concurrently instead of sequentially,
+    // reducing batch forwarding time from N*RTT to ~1*RTT.
+    const results = await Promise.all(
+      sorted.map(opp => this.processOpportunity(opp.data, isLeader, opp.traceContext))
+    );
+    for (let i = 0; i < sorted.length; i++) {
+      if (results[i]) {
+        processedIds.push(sorted[i].id);
       }
     }
 
@@ -689,7 +697,9 @@ export class OpportunityRouter {
           this.logger.info('Execution circuit breaker closed - recovered');
         }
 
-        this.logger.info('Forwarded opportunity to execution engine', {
+        // ADR-033: Downgraded from info to debug — at peak throughput, two info logs
+        // per forwarded opportunity add ~0.2-1ms of structured logging overhead.
+        this.logger.debug('Forwarded opportunity to execution engine', {
           id: opportunity.id,
           chain: opportunity.chain,
           profitPercentage: opportunity.profitPercentage,

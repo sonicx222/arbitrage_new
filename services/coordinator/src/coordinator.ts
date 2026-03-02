@@ -32,6 +32,7 @@ import {
   getRedisClient,
   RedisStreamsClient,
   getRedisStreamsClient,
+  createRedisStreamsClient,
   ConsumerGroupConfig,
   StreamConsumer,
   unwrapBatchMessages,
@@ -163,6 +164,12 @@ export interface CoordinatorDependencies {
   getRedisClient?: () => Promise<RedisClient>;
   /** Factory function to get Redis Streams client */
   getRedisStreamsClient?: () => Promise<RedisStreamsClient>;
+  /**
+   * ADR-033: Factory to create a dedicated (non-singleton) Redis Streams client.
+   * Used by the opportunities consumer to isolate from other consumers.
+   * Defaults to createRedisStreamsClient from @arbitrage/core/redis.
+   */
+  createDedicatedStreamsClient?: () => Promise<RedisStreamsClient>;
   /** Factory function to create service state manager */
   createServiceState?: (config: { serviceName: string; transitionTimeoutMs: number }) => ServiceStateManager;
   /** Factory function to get stream health monitor */
@@ -239,6 +246,10 @@ interface StreamMessageData {
 export class CoordinatorService implements CoordinatorStateProvider {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
+  // ADR-033: Dedicated Redis connection for the opportunities stream consumer.
+  // Isolates the high-throughput opportunity consumption from 7 other stream
+  // consumers sharing the main connection, eliminating TCP socket contention.
+  private opportunityStreamsClient: RedisStreamsClient | null = null;
   private logger: Logger;
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;
@@ -335,6 +346,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       perfLogger: deps?.perfLogger ?? getPerformanceLogger('coordinator'),
       getRedisClient: deps?.getRedisClient ?? getRedisClient,
       getRedisStreamsClient: deps?.getRedisStreamsClient ?? getRedisStreamsClient,
+      // ADR-033: Default to createRedisStreamsClient for a dedicated (non-singleton)
+      // Redis connection. This gives the opportunities consumer its own TCP socket.
+      createDedicatedStreamsClient: deps?.createDedicatedStreamsClient ?? createRedisStreamsClient,
       createServiceState: deps?.createServiceState ?? createServiceState,
       getStreamHealthMonitor: deps?.getStreamHealthMonitor ?? getStreamHealthMonitor,
       StreamConsumer: deps?.StreamConsumer ?? StreamConsumer
@@ -597,6 +611,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Initialize Redis Streams client
       this.streamsClient = await this.deps.getRedisStreamsClient();
 
+      // ADR-033: Create dedicated Redis Streams connection for the opportunities consumer.
+      // The coordinator runs 8 stream consumers on one event loop. When all consumers
+      // share a single ioredis connection, their XREADGROUP/XACK calls serialize at the
+      // TCP socket level. A dedicated connection for the highest-throughput stream
+      // (opportunities at 181+ opps/s) eliminates this contention.
+      this.opportunityStreamsClient = await this.deps.createDedicatedStreamsClient();
+
       // R2: Initialize stream consumer manager after streams client is available
       this.streamConsumerManager = new StreamConsumerManager(
         this.streamsClient,
@@ -844,6 +865,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
         this.server = null;
       }
 
+      // ADR-033: Disconnect dedicated opportunities streams client
+      await disconnectWithTimeout(this.opportunityStreamsClient, 'Opportunity streams client', 5000, this.logger);
+      this.opportunityStreamsClient = null;
+
       // P0-NEW-6 FIX: Disconnect Redis Streams client with timeout
       await disconnectWithTimeout(this.streamsClient, 'Streams client', 5000, this.logger);
       this.streamsClient = null;
@@ -1059,7 +1084,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
         return { autoAck: false }; // Deferred ACK - handled by streamConsumerManager.wrapHandler
       };
 
-      const consumer = new StreamConsumerClass(this.streamsClient, {
+      // ADR-033: Use dedicated Redis connection for the opportunities consumer
+      // to eliminate TCP socket contention with 7 other stream consumers.
+      const isOpportunitiesStream = groupConfig.streamName === RedisStreams.OPPORTUNITIES;
+      const clientForConsumer = (isOpportunitiesStream && this.opportunityStreamsClient)
+        ? this.opportunityStreamsClient
+        : this.streamsClient;
+
+      const consumer = new StreamConsumerClass(clientForConsumer, {
         config: groupConfig,
         handler: wrappedHandler,
         ...getBatchConfig(),

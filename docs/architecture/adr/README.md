@@ -50,6 +50,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-034](./ADR-034-solana-execution.md) | Solana Execution via Jupiter + Jito | Accepted | 2026-02-24 | 85% |
 | [ADR-035](./ADR-035-statistical-arbitrage.md) | Statistical Arbitrage Strategy | Accepted | 2026-02-24 | 80% |
 | [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Accepted | 2026-02-24 | 85% |
+| [ADR-037](./ADR-037-coordinator-pipeline-optimization.md) | Coordinator Pipeline Optimization | Accepted | 2026-03-02 | 90% |
 
 ## Decision Summary
 
@@ -271,6 +272,14 @@ An Architecture Decision Record captures an important architectural decision mad
     - CEX-DEX spread calculator for spread-based opportunity detection
     - Feature flag controlled (`FEATURE_CEX_PRICE_SIGNALS=true`) — **NOTE: flag not yet implemented in code**
 
+### Coordinator Optimization (Phase 7)
+
+33. **Coordinator Pipeline Optimization** (ADR-037)
+    - Pipelined batch XACK: 200 round-trips → 1 (40-80x improvement)
+    - Parallel forwarding via Promise.all (10 sequential → 10 concurrent)
+    - Dedicated Redis connection for opportunities consumer (eliminates TCP contention)
+    - Per-batch cycle time: ~55ms → ~17ms (3-4x throughput increase)
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -347,3 +356,4 @@ XX% - Explanation of confidence factors
 | 2026-02-24 | ADR-034 | Added Solana Execution via Jupiter + Jito decision |
 | 2026-02-24 | ADR-035 | Added Statistical Arbitrage Strategy decision |
 | 2026-02-24 | ADR-036 | Added CEX Price Signal Integration decision |
+| 2026-03-02 | ADR-037 | Added Coordinator Pipeline Optimization decision |

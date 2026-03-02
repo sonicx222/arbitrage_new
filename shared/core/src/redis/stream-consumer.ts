@@ -326,15 +326,15 @@ export class StreamConsumer {
             this.stats.lastProcessedAt = Date.now();
           }
 
-          // Auto-acknowledge successfully processed messages
-          if (this.config.autoAck) {
-            for (const id of processedIds) {
-              await this.client.xack(
-                this.config.config.streamName,
-                this.config.config.groupName,
-                id
-              );
-            }
+          // ADR-033: Auto-acknowledge successfully processed messages using pipelined
+          // batch XACK. At batch size 200, this reduces ACK overhead from ~20-40ms
+          // (200 sequential round-trips) to ~0.5ms (1 pipelined round-trip).
+          if (this.config.autoAck && processedIds.length > 0) {
+            await this.client.batchXack(
+              this.config.config.streamName,
+              this.config.config.groupName,
+              processedIds
+            );
           }
         } catch (batchError) {
           this.stats.messagesFailed += messages.length;
