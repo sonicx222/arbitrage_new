@@ -141,11 +141,14 @@ export { DegradationLevel } from './health';
 
 /**
  * StreamHealthMonitor interface for dependency injection.
+ * P3 FIX: Extended to support auto-alert wiring and stream management.
  */
 interface StreamHealthMonitor {
   setConsumerGroup: (group: string) => void;
-  start?: () => void;
-  stop?: () => void;
+  addStream?: (streamName: string) => void;
+  onAlert?: (handler: (alert: { type: string; severity: 'info' | 'warning' | 'critical'; stream: string; message: string; timestamp: number }) => void) => void;
+  start?: (intervalMs?: number) => Promise<void>;
+  stop?: () => Promise<void>;
 }
 
 /**
@@ -337,6 +340,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private streamConsumerManager: StreamConsumerManager | null = null;
   private healthMonitor: HealthMonitor | null = null;
   private opportunityRouter: OpportunityRouter | null = null;
+  // P3 FIX: Store reference for auto-alert wiring and shutdown
+  private streamHealthMonitor: StreamHealthMonitor | null = null;
 
   constructor(config?: Partial<CoordinatorConfig>, deps?: CoordinatorDependencies) {
     // REFACTOR: Initialize dependencies with defaults or injected values
@@ -733,7 +738,43 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Configure StreamHealthMonitor to use our consumer group
       // This fixes the XPENDING errors when monitoring stream health
       const streamHealthMonitor = this.deps.getStreamHealthMonitor();
+      this.streamHealthMonitor = streamHealthMonitor;
       streamHealthMonitor.setConsumerGroup(this.config.consumerGroup);
+
+      // P3 FIX: Add critical pipeline streams to monitoring and wire auto-alerts.
+      // The default monitored set covers price-updates, opportunities, etc. but misses
+      // execution-requests, execution-results, and dead-letter-queue — the critical path.
+      if (streamHealthMonitor.addStream) {
+        streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_REQUESTS);
+        streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_RESULTS);
+        streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE);
+      }
+
+      // P3 FIX: Register alert handler to route stream health alerts to coordinator's
+      // sendAlert() system (Discord/Slack via AlertNotifier + cooldown management).
+      // Without this, StreamHealthMonitor's triggerAlert() only logs — no external notification.
+      if (streamHealthMonitor.onAlert) {
+        streamHealthMonitor.onAlert((alert) => {
+          this.sendAlert({
+            type: `stream_health:${alert.type}`,
+            message: `[${alert.stream}] ${alert.message}`,
+            severity: alert.severity === 'critical' ? 'critical' : alert.severity === 'warning' ? 'high' : 'low',
+            data: { stream: alert.stream },
+            timestamp: alert.timestamp,
+          });
+        });
+      }
+
+      // P3 FIX: Start periodic stream health monitoring (30s interval).
+      // Previously, start() was never called — StreamHealthMonitor was configured
+      // but sat idle, meaning stream lag and consumer lag were never checked.
+      if (streamHealthMonitor.start) {
+        streamHealthMonitor.start(30_000).catch((error) => {
+          this.logger.warn('Failed to start stream health monitoring (non-fatal)', {
+            error: (error as Error).message,
+          });
+        });
+      }
 
       // P1-8 FIX: Initialize and start LeadershipElectionService (replaces inline leadership code)
       this.leadershipElection = new LeadershipElectionService({
@@ -918,6 +959,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private async clearAllIntervals(): Promise<void> {
     // P2-11: Use IntervalManager for centralized cleanup
     await this.intervalManager.clearAll();
+
+    // P3 FIX: Stop stream health monitoring during shutdown
+    if (this.streamHealthMonitor?.stop) {
+      try {
+        await this.streamHealthMonitor.stop();
+      } catch (error) {
+        this.logger.warn('Failed to stop stream health monitor during shutdown', {
+          error: (error as Error).message,
+        });
+      }
+      this.streamHealthMonitor = null;
+    }
 
     // H1 FIX: Use Promise.allSettled to ensure all consumers are stopped even if
     // some throw. Promise.all rejects on first error, losing subsequent results.

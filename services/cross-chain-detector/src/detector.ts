@@ -330,7 +330,14 @@ export class CrossChainDetectorService {
         streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
         groupName: 'cross-chain-detector-group',
         consumerName: this.instanceId,
-        startId: '$'
+        // P3 FIX: Use '0' to bootstrap from existing price data on first startup.
+        // With '$', the detector waits 60-147s for new price updates from partitions
+        // before chainsMonitored > 0 (readiness gate). Using '0' lets the detector
+        // process any existing messages in the stream, populating price state immediately.
+        // On subsequent restarts the consumer group remembers its position, so this
+        // only affects the very first run (or after a Redis flush).
+        // PriceDataManager's 5-minute cleanup handles stale entries.
+        startId: '0'
       },
       {
         streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
