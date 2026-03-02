@@ -129,23 +129,40 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
       return false;
     }
 
+    // OPT-5: Defer TF.js model creation to first prediction request.
+    // Previously, getLSTMPredictor() was called here which eagerly loads TF.js and
+    // creates a 2-layer LSTM model (~40MB+ memory). This blocks the event loop during
+    // startup and inflates RSS to 130MB+ before any predictions are needed.
+    // Now we just mark as initialized; the predictor is created lazily via ensurePredictor().
+    isInitialized = true;
+    logger.info('ML predictions enabled (predictor will be created on first use)');
+    return true;
+  }
+
+  /**
+   * OPT-5: Lazily create the LSTMPredictor on first use.
+   * Returns true if the predictor is ready, false otherwise.
+   */
+  function ensurePredictor(): boolean {
+    if (mlPredictor) return true;
+    if (!mlConfig.enabled || !isInitialized) return false;
+
     try {
       mlPredictor = getLSTMPredictor();
-      isInitialized = true;
-      logger.info('ML predictor initialized (TensorFlow.js LSTM)');
+      logger.info('ML predictor created on first use (TensorFlow.js LSTM)');
       return true;
     } catch (error) {
-      logger.warn('ML predictor initialization failed, continuing without ML predictions', {
+      logger.warn('ML predictor creation failed, continuing without ML predictions', {
         error: (error as Error).message,
       });
-      mlPredictor = null;
       isInitialized = false;
       return false;
     }
   }
 
   function isReady(): boolean {
-    return mlConfig.enabled && isInitialized && mlPredictor !== null;
+    if (!mlConfig.enabled || !isInitialized) return false;
+    return ensurePredictor();
   }
 
   // ===========================================================================

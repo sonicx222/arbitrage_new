@@ -284,7 +284,10 @@ export class StreamBatcher<T = Record<string, unknown>> {
         timestamp: Date.now()
       };
 
-      await this.client.xadd(this.streamName, batchedMessage);
+      // SA-002 FIX: Use xaddWithLimit to enforce MAXLEN from STREAM_MAX_LENGTHS.
+      // Previously called xadd() which bypassed MAXLEN, allowing batched streams
+      // to grow unboundedly under sustained high throughput.
+      await this.client.xaddWithLimit(this.streamName, batchedMessage);
 
       // Update stats
       this.stats.totalBatchFlushes++;
@@ -399,7 +402,7 @@ export class RedisStreamsClient {
   static readonly STREAM_MAX_LENGTHS: Record<string, number> = {
     [RedisStreamsClient.STREAMS.PRICE_UPDATES]: 100000,    // High volume, keep more history
     [RedisStreamsClient.STREAMS.SWAP_EVENTS]: 50000,       // Medium volume
-    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 50000,     // RT-003 FIX: Increased from 10K — 34K+ opps/run were causing trimming
+    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 100000,    // OPT-4: Increased from 50K — at 130+ opps/s, 50K only holds ~6 min; 100K gives ~12 min buffer
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history

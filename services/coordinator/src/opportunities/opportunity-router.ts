@@ -102,6 +102,13 @@ export interface OpportunityRouterConfig {
   /** FIX W2-8: MAXLEN for execution requests stream to prevent unbounded growth (default: 5000) */
   executionStreamMaxLen?: number;
   /**
+   * RT-005 FIX: Multiplier for chain-specific TTLs in simulation mode (default: 1).
+   * In simulation mode with high realism, detectors produce 130+ opps/s but chain-specific
+   * TTLs (e.g., Arbitrum 15s) expire before the single-threaded coordinator can process them.
+   * Setting this to e.g., 5 gives 5x more time for processing without changing production behavior.
+   */
+  simulationTtlMultiplier?: number;
+  /**
    * RT-003 FIX: Grace period in ms after router creation before forwarding begins (default: 5000).
    * Prevents the startup race where the coordinator forwards opportunities before
    * the execution engine consumer is ready, causing the first message to expire in
@@ -151,6 +158,8 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   // (Redis, nonce manager, providers, KMS, MEV, strategies, risk management,
   // bridge recovery, consumer group creation) typically takes 7-12s.
   startupGracePeriodMs: 15000,
+  // RT-005 FIX: Default 1x (no change). Set via SIMULATION_OPPORTUNITY_TTL_MULTIPLIER env var.
+  simulationTtlMultiplier: 1,
 };
 
 /**
@@ -190,7 +199,10 @@ export class OpportunityRouter {
   // backlog to avoid the death spiral where processing stale messages causes
   // even more messages to expire.
   private _consecutiveExpired = 0;
-  private static readonly CONSECUTIVE_EXPIRED_WARN_THRESHOLD = 20;
+  // RT-005 FIX: Lowered from 20 to 5 to warn earlier about consumer lag.
+  // The coordinator auto-skip threshold is now 10, so warning at 5 gives
+  // operators advance notice before the skip fires.
+  private static readonly CONSECUTIVE_EXPIRED_WARN_THRESHOLD = 5;
 
   constructor(
     logger: OpportunityRouterLogger,
@@ -407,7 +419,17 @@ export class OpportunityRouter {
     // Without this, the coordinator forwards already-expired opportunities from its
     // consumer backlog. The execution engine then rejects them all with VAL_EXPIRED
     // (200-265s lag), producing 0 execution results and growing the DLQ continuously.
-    if (opportunity.expiresAt !== undefined && opportunity.expiresAt < Date.now()) {
+    //
+    // RT-005 FIX: Apply simulation TTL multiplier to extend effective expiry.
+    // In simulation mode, detectors produce 130+ opps/s with short chain-specific TTLs
+    // (e.g., Arbitrum 15s). The single-threaded coordinator can't keep up, causing 97.7%
+    // expiration. The multiplier extends TTLs without changing production behavior.
+    let effectiveExpiresAt = opportunity.expiresAt;
+    if (effectiveExpiresAt !== undefined && this.config.simulationTtlMultiplier > 1 && opportunity.timestamp) {
+      const originalTtl = effectiveExpiresAt - opportunity.timestamp;
+      effectiveExpiresAt = opportunity.timestamp + originalTtl * this.config.simulationTtlMultiplier;
+    }
+    if (effectiveExpiresAt !== undefined && effectiveExpiresAt < Date.now()) {
       this._rejectedExpired++;
       this._consecutiveExpired++;
 
@@ -416,13 +438,13 @@ export class OpportunityRouter {
       if (this._consecutiveExpired === OpportunityRouter.CONSECUTIVE_EXPIRED_WARN_THRESHOLD) {
         this.logger.warn('Consumer lag detected: many consecutive opportunities expired before processing', {
           consecutiveExpired: this._consecutiveExpired,
-          latestExpiredAgoMs: Date.now() - opportunity.expiresAt,
+          latestExpiredAgoMs: Date.now() - effectiveExpiresAt,
           chain: opportunity.chain,
         });
       } else if (this._consecutiveExpired > 0 && this._consecutiveExpired % 100 === 0) {
         this.logger.warn('Consumer lag persisting: opportunities continue to expire', {
           consecutiveExpired: this._consecutiveExpired,
-          latestExpiredAgoMs: Date.now() - opportunity.expiresAt,
+          latestExpiredAgoMs: Date.now() - effectiveExpiresAt,
         });
       }
 
@@ -452,6 +474,123 @@ export class OpportunityRouter {
     }
 
     return true;
+  }
+
+  /**
+   * OPT-1+2: Process a batch of opportunity messages with dedup and TTL-priority scheduling.
+   *
+   * Instead of processing each message sequentially (FIFO), this method:
+   * 1. Groups opportunities by chain+pair key
+   * 2. Within each group, keeps only the freshest opportunity (highest expiresAt/timestamp)
+   * 3. Sorts remaining opportunities by remaining TTL ascending (shortest-remaining first)
+   * 4. Processes in TTL-priority order
+   *
+   * This addresses the 97.7% expiration rate (RT-005) by:
+   * - Deduplicating stale updates for the same pair (reduces processing volume)
+   * - Ensuring fast-chain opportunities (Arbitrum 2s TTL) are processed before
+   *   slow-chain opportunities (Ethereum 30s TTL) instead of FIFO order
+   *
+   * @param batch - Array of raw opportunity data records from a single xreadgroup call
+   * @param isLeader - Whether this instance should forward to execution
+   * @param traceContextFactory - Factory for creating trace contexts per message
+   * @returns Array of opportunity IDs that were successfully processed
+   */
+  async processOpportunityBatch(
+    batch: Array<{ data: Record<string, unknown>; traceContext?: TraceContext }>,
+    isLeader: boolean,
+  ): Promise<string[]> {
+    if (batch.length === 0) return [];
+
+    // If batch is just 1 message, skip grouping overhead
+    if (batch.length === 1) {
+      const entry = batch[0];
+      const processed = await this.processOpportunity(entry.data, isLeader, entry.traceContext);
+      const id = entry.data.id as string | undefined;
+      return processed && id ? [id] : [];
+    }
+
+    const now = Date.now();
+    const processedIds: string[] = [];
+
+    // Step 1: Parse all messages and compute grouping keys
+    interface ParsedOpp {
+      data: Record<string, unknown>;
+      id: string;
+      chain: string;
+      pairKey: string;  // chain:buyDex:sellDex:tokenIn:tokenOut
+      expiresAt: number;
+      timestamp: number;
+      traceContext?: TraceContext;
+    }
+
+    const parsed: ParsedOpp[] = [];
+    for (const entry of batch) {
+      const data = entry.data;
+      const id = data.id as string | undefined;
+      if (!id || typeof id !== 'string') continue;
+
+      const chain = typeof data.chain === 'string' ? data.chain : 'unknown';
+      const buyDex = typeof data.buyDex === 'string' ? data.buyDex : '';
+      const sellDex = typeof data.sellDex === 'string' ? data.sellDex : '';
+      const tokenIn = typeof data.tokenIn === 'string' ? data.tokenIn :
+                       typeof data.token0 === 'string' ? data.token0 : '';
+      const tokenOut = typeof data.tokenOut === 'string' ? data.tokenOut :
+                        typeof data.token1 === 'string' ? data.token1 : '';
+      const expiresAt = typeof data.expiresAt === 'number' ? data.expiresAt : now + 60000;
+      const timestamp = typeof data.timestamp === 'number' ? data.timestamp : now;
+
+      parsed.push({
+        data,
+        id,
+        chain,
+        pairKey: `${chain}:${buyDex}:${sellDex}:${tokenIn}:${tokenOut}`,
+        expiresAt,
+        timestamp,
+        traceContext: entry.traceContext,
+      });
+    }
+
+    // Step 2: Group by pair key, keep only freshest per group
+    const freshest = new Map<string, ParsedOpp>();
+    for (const opp of parsed) {
+      const existing = freshest.get(opp.pairKey);
+      if (!existing || opp.expiresAt > existing.expiresAt ||
+          (opp.expiresAt === existing.expiresAt && opp.timestamp > existing.timestamp)) {
+        freshest.set(opp.pairKey, opp);
+      }
+    }
+
+    // Step 3: Sort by remaining TTL ascending (shortest-remaining first)
+    // This ensures fast-chain opportunities (Arbitrum 2s) are processed before
+    // slow-chain opportunities (Ethereum 30s) which have more time left.
+    const sorted = Array.from(freshest.values());
+    sorted.sort((a, b) => (a.expiresAt - now) - (b.expiresAt - now));
+
+    this.logger.debug('Batch opportunity processing', {
+      batchSize: batch.length,
+      parsedCount: parsed.length,
+      dedupedCount: sorted.length,
+      droppedDuplicates: parsed.length - sorted.length,
+    });
+
+    // Step 4: Process in TTL-priority order
+    for (const opp of sorted) {
+      const processed = await this.processOpportunity(opp.data, isLeader, opp.traceContext);
+      if (processed) {
+        processedIds.push(opp.id);
+      }
+    }
+
+    // Also mark deduplicated (skipped) opportunities as "processed" for ACK purposes
+    // since they were intentionally superseded by a fresher version
+    const processedSet = new Set(processedIds);
+    for (const opp of parsed) {
+      if (!processedSet.has(opp.id)) {
+        processedIds.push(opp.id);
+      }
+    }
+
+    return processedIds;
   }
 
   /**

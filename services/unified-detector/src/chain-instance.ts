@@ -657,6 +657,23 @@ export class ChainDetectorInstance extends EventEmitter {
         timeoutMs: MULTI_LEG_TIMEOUT_MS
       });
 
+      // OPT-3: Pre-start worker pool so initial path-finding calls use workers instead of
+      // falling back to synchronous execution. Without this, the first burst of WebSocket
+      // events triggers sync path-finding (3+ seconds per chain) which blocks the event loop
+      // and causes /ready to hang during startup (ST-001 root cause).
+      try {
+        const { getWorkerPool } = await import('@arbitrage/core/async');
+        const pool = getWorkerPool();
+        if (typeof pool.start === 'function') {
+          await pool.start();
+          this.logger.debug('Worker pool pre-started for multi-leg path finding');
+        }
+      } catch (error) {
+        this.logger.debug('Worker pool pre-start skipped (non-critical)', {
+          error: getErrorMessage(error),
+        });
+      }
+
       // Initialize swap event filter for whale detection
       this.swapEventFilter = getSwapEventFilter({
         minUsdValue: 10,

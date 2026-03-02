@@ -602,6 +602,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       );
 
       // R2: Initialize opportunity router after streams client is available
+      // RT-005 FIX: Apply simulation TTL multiplier from env var to extend opportunity TTLs
+      // in simulation mode, preventing 97.7% expiration due to single-threaded processing lag.
+      const simulationTtlMultiplier = safeParseInt(
+        process.env.SIMULATION_OPPORTUNITY_TTL_MULTIPLIER, 1
+      );
       this.opportunityRouter = new OpportunityRouter(
         this.logger,
         this.executionCircuitBreaker,
@@ -611,6 +616,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
           instanceId: this.config.leaderElection.instanceId,
           executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+          simulationTtlMultiplier,
         },
         (alert) => this.sendAlert({
           type: alert.type,
@@ -1019,12 +1025,24 @@ export class CoordinatorService implements CoordinatorStateProvider {
         || groupConfig.streamName === RedisStreams.PRICE_UPDATES;
       const batchSize = isHighThroughput ? 50 : 10;
       const blockMs = isHighThroughput ? 200 : 100;
+      // OPT-1: For opportunities stream, use batch handler for dedup + TTL priority.
+      // Batch mode bypasses the per-message handler; autoAck: true lets StreamConsumer
+      // ACK the IDs returned by the batch handler. Other streams keep deferred ACK
+      // via streamConsumerManager.wrapHandler.
+      const useOpportunityBatch = groupConfig.streamName === RedisStreams.OPPORTUNITIES
+        && !!this.opportunityRouter;
+
       const consumer = new StreamConsumerClass(this.streamsClient, {
         config: groupConfig,
         handler: wrappedHandler,
+        ...(useOpportunityBatch ? {
+          batchHandler: (messages: StreamMessage[]) => this.handleOpportunityBatch(messages),
+          autoAck: true,
+        } : {
+          autoAck: false, // Deferred ACK - handled by streamConsumerManager.wrapHandler
+        }),
         batchSize,
         blockMs,
-        autoAck: false, // Deferred ACK - handled by streamConsumerManager.wrapHandler
         logger: {
           error: (msg, ctx) => {
             this.logger.error(msg, ctx);
@@ -1184,8 +1202,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // skip the consumer backlog by resetting the group position to '$' (latest).
       // This breaks the death spiral where stale messages waste processing time,
       // causing even more messages to expire and the backlog to grow indefinitely.
+      // RT-005 FIX: Lowered threshold from 50 to 10 to skip stale backlogs faster.
+      // At 130+ opps/s, 50 consecutive expired = ~0.4s of stale processing. By the
+      // time skip fires, hundreds more stale messages have arrived. A threshold of 10
+      // detects lag within ~0.08s, reducing wasted processing by 5x.
       const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
-      if (consecutiveExpired >= 50 && this.streamsClient) {
+      if (consecutiveExpired >= 10 && this.streamsClient) {
         this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
           consecutiveExpired,
           stream: RedisStreams.OPPORTUNITIES,
@@ -1277,6 +1299,77 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     this.streamConsumerManager?.resetErrors();
+  }
+
+  /**
+   * OPT-1+2: Batch handler for the opportunities stream.
+   *
+   * Instead of processing each message one-by-one (where stale/duplicate
+   * opportunities waste time), this handler:
+   * 1. Extracts trace contexts for cross-service correlation
+   * 2. Delegates to OpportunityRouter.processOpportunityBatch() which:
+   *    - Groups by chain+pair key and keeps only the freshest per group
+   *    - Sorts by remaining TTL ascending (shortest-remaining first)
+   * 3. Syncs coordinator metrics from the router
+   * 4. Checks consumer lag and skips stale backlogs if needed
+   *
+   * @returns Array of message IDs successfully processed (for ACK)
+   */
+  private async handleOpportunityBatch(messages: StreamMessage[]): Promise<string[]> {
+    if (!this.opportunityRouter) return [];
+
+    // Build batch entries with trace contexts
+    const batch: Array<{ data: Record<string, unknown>; traceContext?: TraceContext }> = [];
+    for (const msg of messages) {
+      const data = msg.data as Record<string, unknown>;
+      const parentCtx = extractContext(data);
+      const traceContext: TraceContext = parentCtx
+        ? createChildContext(parentCtx, 'coordinator')
+        : createTraceContext('coordinator');
+      batch.push({ data, traceContext });
+    }
+
+    // Delegate to OpportunityRouter for dedup + TTL-priority processing
+    const processedIds = await this.opportunityRouter.processOpportunityBatch(
+      batch,
+      this.getIsLeader(),
+    );
+
+    // Sync metrics from router
+    this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
+    this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
+    this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
+    this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
+    this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
+
+    if (processedIds.length > 0) {
+      this.streamConsumerManager?.resetErrors();
+    }
+
+    // Consumer lag detection: if too many consecutive expired, skip stale backlog
+    const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
+    if (consecutiveExpired >= 10 && this.streamsClient) {
+      this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
+        consecutiveExpired,
+        stream: RedisStreams.OPPORTUNITIES,
+      });
+      try {
+        await this.streamsClient.createConsumerGroup({
+          streamName: RedisStreams.OPPORTUNITIES,
+          groupName: this.config.consumerGroup,
+          consumerName: this.config.consumerId,
+          startId: '$',
+          resetToStartIdOnExistingGroup: true,
+        });
+        this.opportunityRouter.resetConsecutiveExpired();
+      } catch (error) {
+        this.logger.error('Failed to reset opportunity consumer group position', {
+          error: getErrorMessage(error),
+        });
+      }
+    }
+
+    return processedIds;
   }
 
   /**

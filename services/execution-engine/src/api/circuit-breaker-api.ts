@@ -188,10 +188,16 @@ function handleGetStatus(
   const status = engine.getCircuitBreakerStatus();
 
   if (!status) {
-    sendJson(res, 503, {
-      error: 'Circuit breaker not available',
+    // RT-003 FIX: Return 200 with disabled status instead of 503.
+    // When circuit breaker is disabled (cbManager not initialized), 503 misleads
+    // monitoring tools into flagging the endpoint as "unreachable" when the service
+    // is healthy — the feature is simply not enabled.
+    sendJson(res, 200, {
+      enabled: false,
+      state: 'disabled',
+      message: 'Circuit breaker is not enabled',
       timestamp,
-    } as ErrorResponse);
+    });
     return;
   }
 

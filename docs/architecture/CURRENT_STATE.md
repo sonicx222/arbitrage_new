@@ -110,10 +110,10 @@ This document provides a snapshot of the current arbitrage trading system archit
 | `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue | Orchestration, health monitoring, opportunity routing |
 | `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities | Cross-chain opportunity detection |
 | `execution-engine-group` | Execution Engine | execution-requests | Processes forwarded opportunities |
-| `execution-engine` | Fast Lane Consumer | fast-lane | Processes fast-lane high-priority opportunities |
+| `execution-engine-group` | Fast Lane Consumer | fast-lane | Processes fast-lane high-priority opportunities |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities | Pre-block pending transaction detection |
 | `orderflow-pipeline` | Coordinator | pending-opportunities | Orderflow pipeline processing |
-| `failover-coordinator` | Coordinator | system-failover | Failover coordination |
+| `failover-{serviceName}` | Coordinator | system-failover | Failover coordination (dynamic per-service group) |
 
 ---
 

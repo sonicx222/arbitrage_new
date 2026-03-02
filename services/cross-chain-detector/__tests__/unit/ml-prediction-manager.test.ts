@@ -114,8 +114,10 @@ describe('MLPredictionManager', () => {
       const result = await manager.initialize();
 
       expect(result).toBe(true);
+      // OPT-5: initialize() defers predictor creation; isReady() triggers lazy creation
+      expect(mockLogger.info).toHaveBeenCalledWith('ML predictions enabled (predictor will be created on first use)');
       expect(manager.isReady()).toBe(true);
-      expect(mockLogger.info).toHaveBeenCalledWith('ML predictor initialized (TensorFlow.js LSTM)');
+      expect(mockLogger.info).toHaveBeenCalledWith('ML predictor created on first use (TensorFlow.js LSTM)');
     });
 
     it('should return false when ML is disabled', async () => {
