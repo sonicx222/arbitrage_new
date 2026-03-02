@@ -495,7 +495,10 @@ export class ExecutionPipeline {
         this.deps.cbManager?.recordSuccess(chain);
         recordExecutionSuccess(chain, opportunity.type ?? 'unknown');
         if (result.actualProfit) {
-          recordVolume(chain, result.actualProfit);
+          // RT-006 FIX: Convert from wei (1e18) to ETH before recording.
+          // Raw wei amounts (e.g., 1.74e18 per trade) were producing impossible
+          // cumulative values like 1.64e20 "USD" on the volume_usd_total metric.
+          recordVolume(chain, result.actualProfit / 1e18);
         }
       } else {
         this.deps.stats.failedExecutions++;

@@ -403,19 +403,8 @@ export class OpportunityRouter {
       sellPair: typeof data.sellPair === 'string' ? data.sellPair : undefined,
     };
 
-    // Store opportunity
-    this.opportunities.set(id, opportunity);
-    this._totalOpportunities++;
-
-    this.logger.info('Opportunity detected', {
-      id,
-      chain: opportunity.chain,
-      profitPercentage: opportunity.profitPercentage,
-      buyDex: opportunity.buyDex,
-      sellDex: opportunity.sellDex,
-    });
-
-    // P3-FIX: Check expiry BEFORE forwarding to execution engine.
+    // P3-FIX / SM-001 FIX: Check expiry BEFORE storing and forwarding.
+    // Previously the expiry check was after storage, wasting memory on stale opportunities.
     // Without this, the coordinator forwards already-expired opportunities from its
     // consumer backlog. The execution engine then rejects them all with VAL_EXPIRED
     // (200-265s lag), producing 0 execution results and growing the DLQ continuously.
@@ -448,7 +437,7 @@ export class OpportunityRouter {
         });
       }
 
-      return true; // Still counts as processed (stored), just not forwarded
+      return true; // Counts as processed for ACK — don't re-process expired messages
     }
 
     // Reset consecutive expired counter when a fresh opportunity is found
@@ -458,6 +447,19 @@ export class OpportunityRouter {
       });
       this._consecutiveExpired = 0;
     }
+
+    // Store opportunity only after passing expiry check (SM-001 FIX: avoids
+    // wasting memory on stale opportunities during coordinator backlog)
+    this.opportunities.set(id, opportunity);
+    this._totalOpportunities++;
+
+    this.logger.info('Opportunity detected', {
+      id,
+      chain: opportunity.chain,
+      profitPercentage: opportunity.profitPercentage,
+      buyDex: opportunity.buyDex,
+      sellDex: opportunity.sellDex,
+    });
 
     // Forward to execution engine if leader and pending
     if (isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
@@ -524,6 +526,7 @@ export class OpportunityRouter {
     }
 
     const parsed: ParsedOpp[] = [];
+    let expiredInBatch = 0;
     for (const entry of batch) {
       const data = entry.data;
       const id = data.id as string | undefined;
@@ -538,6 +541,20 @@ export class OpportunityRouter {
                         typeof data.token1 === 'string' ? data.token1 : '';
       const expiresAt = typeof data.expiresAt === 'number' ? data.expiresAt : now + 60000;
       const timestamp = typeof data.timestamp === 'number' ? data.timestamp : now;
+
+      // SM-001 FIX: Pre-filter expired opportunities before dedup and forwarding.
+      // At high realism (~115 opps/s), the coordinator backlog grows faster than
+      // it can drain. Without this filter, expired opportunities pass through dedup
+      // and processOpportunity only to be rejected, wasting CPU and growing the DLQ.
+      let effectiveExpiresAt = expiresAt;
+      if (this.config.simulationTtlMultiplier > 1) {
+        const originalTtl = expiresAt - timestamp;
+        effectiveExpiresAt = timestamp + originalTtl * this.config.simulationTtlMultiplier;
+      }
+      if (effectiveExpiresAt < now) {
+        expiredInBatch++;
+        continue;
+      }
 
       parsed.push({
         data,
@@ -568,6 +585,7 @@ export class OpportunityRouter {
 
     this.logger.debug('Batch opportunity processing', {
       batchSize: batch.length,
+      expiredPreFilter: expiredInBatch,
       parsedCount: parsed.length,
       dedupedCount: sorted.length,
       droppedDuplicates: parsed.length - sorted.length,

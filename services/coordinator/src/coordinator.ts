@@ -190,6 +190,9 @@ interface CoordinatorConfig {
   // OP-22 FIX: Configurable execution circuit breaker thresholds
   executionCbThreshold?: number;   // Failures before opening CB (default: 5)
   executionCbResetMs?: number;     // Time before half-open attempt (default: 60000)
+  // RT-002 FIX: Configurable backpressure thresholds
+  consecutiveExpiredThreshold?: number;       // Consecutive expired threshold for backlog skip (default: 10)
+  executionStreamBackpressureRatio?: number;  // Execution stream depth ratio for backpressure (default: 0.95)
   // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
 }
 
@@ -294,6 +297,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // logs a warning. When ratio > 0.95, forwarding is skipped to prevent MAXLEN trimming.
   private cachedExecutionStreamDepthRatio = 0;
 
+  // RT-002 FIX: Configurable backpressure thresholds (resolved from config in constructor)
+  private readonly consecutiveExpiredThreshold: number;
+  private readonly executionStreamBackpressureRatio: number;
+
   // Configuration
   private readonly config: CoordinatorConfig;
 
@@ -391,8 +398,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // OP-22 FIX: Configurable execution circuit breaker thresholds
       executionCbThreshold: config?.executionCbThreshold ?? safeParseInt(process.env.EXECUTION_CB_THRESHOLD, 5),
       executionCbResetMs: config?.executionCbResetMs ?? safeParseInt(process.env.EXECUTION_CB_RESET_MS, 60000),
+      // RT-002 FIX: Configurable backpressure thresholds
+      consecutiveExpiredThreshold: config?.consecutiveExpiredThreshold ?? safeParseInt(process.env.CONSECUTIVE_EXPIRED_THRESHOLD, 10),
+      executionStreamBackpressureRatio: config?.executionStreamBackpressureRatio ?? parseFloat(process.env.EXECUTION_STREAM_BACKPRESSURE_RATIO ?? '0.95'),
       // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
     };
+
+    // RT-002 FIX: Resolve backpressure thresholds from config
+    this.consecutiveExpiredThreshold = this.config.consecutiveExpiredThreshold ?? 10;
+    this.executionStreamBackpressureRatio = this.config.executionStreamBackpressureRatio ?? 0.95;
 
     // OP-22 FIX: Initialize CB with configurable thresholds (previously hardcoded 5, 60000)
     this.executionCircuitBreaker = new SimpleCircuitBreaker(
@@ -1023,24 +1037,32 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // consumer to fall behind, leading to expired opportunities being silently dropped.
       const isHighThroughput = groupConfig.streamName === RedisStreams.OPPORTUNITIES
         || groupConfig.streamName === RedisStreams.PRICE_UPDATES;
-      const batchSize = isHighThroughput ? 50 : 10;
+      const batchSize = isHighThroughput ? 200 : 10;
       const blockMs = isHighThroughput ? 200 : 100;
       // OPT-1: For opportunities stream, use batch handler for dedup + TTL priority.
+      // RT-001: For price-updates stream, use batch handler to reduce per-message overhead.
       // Batch mode bypasses the per-message handler; autoAck: true lets StreamConsumer
       // ACK the IDs returned by the batch handler. Other streams keep deferred ACK
       // via streamConsumerManager.wrapHandler.
       const useOpportunityBatch = groupConfig.streamName === RedisStreams.OPPORTUNITIES
         && !!this.opportunityRouter;
+      const usePriceUpdateBatch = groupConfig.streamName === RedisStreams.PRICE_UPDATES;
+
+      // Determine batch handler and autoAck based on stream type
+      const getBatchConfig = (): { batchHandler?: (messages: StreamMessage[]) => Promise<string[]>; autoAck: boolean } => {
+        if (useOpportunityBatch) {
+          return { batchHandler: (messages: StreamMessage[]) => this.handleOpportunityBatch(messages), autoAck: true };
+        }
+        if (usePriceUpdateBatch) {
+          return { batchHandler: (messages: StreamMessage[]) => this.handlePriceUpdateBatch(messages), autoAck: true };
+        }
+        return { autoAck: false }; // Deferred ACK - handled by streamConsumerManager.wrapHandler
+      };
 
       const consumer = new StreamConsumerClass(this.streamsClient, {
         config: groupConfig,
         handler: wrappedHandler,
-        ...(useOpportunityBatch ? {
-          batchHandler: (messages: StreamMessage[]) => this.handleOpportunityBatch(messages),
-          autoAck: true,
-        } : {
-          autoAck: false, // Deferred ACK - handled by streamConsumerManager.wrapHandler
-        }),
+        ...getBatchConfig(),
         batchSize,
         blockMs,
         logger: {
@@ -1206,10 +1228,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // At 130+ opps/s, 50 consecutive expired = ~0.4s of stale processing. By the
       // time skip fires, hundreds more stale messages have arrived. A threshold of 10
       // detects lag within ~0.08s, reducing wasted processing by 5x.
+      // RT-002 FIX: Threshold is now configurable via consecutiveExpiredThreshold
       const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
-      if (consecutiveExpired >= 10 && this.streamsClient) {
+      if (consecutiveExpired >= this.consecutiveExpiredThreshold && this.streamsClient) {
         this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
           consecutiveExpired,
+          threshold: this.consecutiveExpiredThreshold,
           stream: RedisStreams.OPPORTUNITIES,
         });
         try {
@@ -1347,10 +1371,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Consumer lag detection: if too many consecutive expired, skip stale backlog
+    // RT-002 FIX: Threshold is now configurable via consecutiveExpiredThreshold
     const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
-    if (consecutiveExpired >= 10 && this.streamsClient) {
+    if (consecutiveExpired >= this.consecutiveExpiredThreshold && this.streamsClient) {
       this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
         consecutiveExpired,
+        threshold: this.consecutiveExpiredThreshold,
         stream: RedisStreams.OPPORTUNITIES,
       });
       try {
@@ -1662,6 +1688,46 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
+   * RT-001 FIX: Batch handler for the price-updates stream.
+   *
+   * Processes all messages in a single batch instead of one-by-one,
+   * reducing per-message overhead at high throughput (200 messages/poll).
+   * Follows the same pattern as handleOpportunityBatch.
+   *
+   * @returns Array of message IDs successfully processed (for ACK)
+   */
+  private async handlePriceUpdateBatch(messages: StreamMessage[]): Promise<string[]> {
+    const processedIds: string[] = [];
+
+    for (const msg of messages) {
+      const data = msg.data as Record<string, unknown>;
+      if (!data) {
+        processedIds.push(msg.id);
+        continue;
+      }
+
+      // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
+      const items = unwrapBatchMessages<Record<string, unknown>>(data);
+
+      for (const item of items) {
+        const rawUpdate = unwrapMessageData(item);
+        const chain = getString(rawUpdate, 'chain', 'unknown');
+        const dex = getString(rawUpdate, 'dex', 'unknown');
+        const pairKey = getString(rawUpdate, 'pairKey', '');
+
+        if (!pairKey) continue;
+
+        this.systemMetrics.priceUpdatesReceived++;
+        this.trackActivePair(pairKey, chain, dex);
+      }
+
+      processedIds.push(msg.id);
+    }
+
+    return processedIds;
+  }
+
+  /**
    * OP-10 FIX: Handle execution result messages from stream:execution-results.
    * Updates successfulExecutions and totalProfit metrics that were previously always zero.
    *
@@ -1837,11 +1903,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // P1 Fix: End-to-end backpressure — skip forwarding when execution stream is
     // near MAXLEN capacity. Dropping newest opportunities is safer than having MAXLEN
     // trim oldest (potentially in-progress) messages from the stream.
-    if (this.cachedExecutionStreamDepthRatio > 0.95) {
+    // RT-002 FIX: Threshold is now configurable via executionStreamBackpressureRatio
+    if (this.cachedExecutionStreamDepthRatio > this.executionStreamBackpressureRatio) {
       this.systemMetrics.opportunitiesDropped++;
       this.logger.warn('Execution stream backpressure — skipping forwarding', {
         id: opportunity.id,
         depthRatio: this.cachedExecutionStreamDepthRatio,
+        threshold: this.executionStreamBackpressureRatio,
         totalDropped: this.systemMetrics.opportunitiesDropped,
         action: 'Execution engine may be overloaded — check consumer health',
       });

@@ -96,12 +96,9 @@ export class SimulationStrategy extends BaseExecutionStrategy {
     // Generate simulated transaction hash
     const simulatedTxHash = this.generateSimulatedTxHash();
 
-    // Fix 4.3: Update execution stats to match real strategy behavior
-    if (isSuccess) {
-      ctx.stats.successfulExecutions++;
-    } else {
-      ctx.stats.failedExecutions++;
-    }
+    // RT-004 FIX: Removed stats increment here — ExecutionPipeline.executeOpportunity()
+    // already increments successfulExecutions/failedExecutions after strategy.execute()
+    // returns. Double-counting caused impossible 177% success rate.
 
     // Log simulated execution if enabled
     if (this.config.logSimulatedExecutions) {
