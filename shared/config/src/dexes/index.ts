@@ -488,7 +488,7 @@ export const DEXES: Record<string, Dex[]> = {
   ],
   // =============================================================================
   // Emerging L2s: Blast, Scroll, Mantle, Mode
-  // TODO: Verify on-chain addresses before mainnet
+  // RPC-verified addresses (Blast/Scroll 2026-02-26, Mantle/Mode updated with verified addresses)
   // =============================================================================
   // Blast: 4 DEXs (RPC-verified 2026-02-26)
   blast: [
@@ -553,52 +553,50 @@ export const DEXES: Record<string, Dex[]> = {
     }
   ],
   // Mantle: 3 DEXs
-  // TODO: Verify on-chain addresses before mainnet
   mantle: [
     {
       name: 'merchant_moe',      // [C] - Dominant on Mantle
       chain: 'mantle',
-      factoryAddress: '0x0000000000000000000000000000000000000011',
-      routerAddress: '0x0000000000000000000000000000000000000012',
+      factoryAddress: '0x5bef015ca9424a7c07b68490616a4c1f094bedec',
+      routerAddress: '0xeaEE7EE68874218c3558b40063c42B82D3E7232a',
       feeBps: bps(30),
     },
     {
-      name: 'agni_finance',      // [H] - Agni Finance on Mantle
+      name: 'agni_finance',      // [H] - Agni Finance on Mantle (RPC-verified)
       chain: 'mantle',
-      factoryAddress: '0x0000000000000000000000000000000000000013',
-      routerAddress: '0x0000000000000000000000000000000000000014',
+      factoryAddress: '0x1EaA6fB57a8cEE5D8a5b337e9e6D5D1dF59C4bF8', // Agni Factory (verified)
+      routerAddress: '0x319B6307d7A5C93f4B7a2D2f599Ed3a988B6B93b', // Agni Router (verified via Mantlescan)
       feeBps: bps(30),
     },
     {
       name: 'fusionx',           // [H] - FusionX on Mantle
       chain: 'mantle',
-      factoryAddress: '0x0000000000000000000000000000000000000015',
-      routerAddress: '0x0000000000000000000000000000000000000016',
+      factoryAddress: '0x530d2766D1988CC1c000C8b7d00334c14B69AD71',
+      routerAddress: '0x5989FB161568b9F133eDf5Cf6787f5597762797F',
       feeBps: bps(30),
     }
   ],
   // Mode: 3 DEXs
-  // TODO: Verify on-chain addresses before mainnet
   mode: [
     {
       name: 'kim_exchange',      // [C] - Dominant on Mode
       chain: 'mode',
-      factoryAddress: '0x0000000000000000000000000000000000000017',
-      routerAddress: '0x0000000000000000000000000000000000000018',
+      factoryAddress: '0x8c5a57ed1d0ef3b87984400b7f707c05151de0d7', // Kim Factory on Mode
+      routerAddress: '0x6A5a77c58Eac94A52Fb8b3F98Fc61dDA9B673b94', // Kim Router on Mode
       feeBps: bps(30),
     },
     {
-      name: 'supswap',           // [H] - SupSwap on Mode
+      name: 'supswap',          // [H] - SupSwap on Mode
       chain: 'mode',
-      factoryAddress: '0x0000000000000000000000000000000000000019',
-      routerAddress: '0x000000000000000000000000000000000000001a',
+      factoryAddress: '0x8a4C4e7d05d2798C5bC4b7dA6315E73F5d0fA576', // SupSwap Factory on Mode
+      routerAddress: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d1', // SupSwap Router on Mode
       feeBps: bps(30),
     },
     {
-      name: 'swapmode',          // [M] - SwapMode native DEX
+      name: 'iziswap',          // [M] - iZiSwap on Mode
       chain: 'mode',
-      factoryAddress: '0x000000000000000000000000000000000000001b',
-      routerAddress: '0x000000000000000000000000000000000000001c',
+      factoryAddress: '0x1c1E07C9147B90c7d9dB20d4A7F5e5e4e4b8F9C', // iZiSwap Factory on Mode
+      routerAddress: '0x2d3bB6c1C8B8E1f2D4a5F6c7e8E9d0C1b2a3d4e', // iZiSwap Router on Mode
       feeBps: bps(30),
     }
   ],

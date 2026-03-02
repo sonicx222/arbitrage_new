@@ -217,7 +217,7 @@ export function hasBalancerV2(chain: string): boolean {
 export const SYNCSWAP_VAULTS: Readonly<Record<string, string>> = {
   zksync: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // zkSync Era Mainnet
   scroll: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',  // Scroll Mainnet (RPC-verified 2026-02-26)
-  // linea: TBD - To be added when deploying to Linea
+  // linea: TBD - SyncSwap not yet deployed to Linea mainnet
 } as const;
 
 /**
@@ -514,6 +514,16 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
   blast: {
     USDB: '0x4300000000000000000000000000000000000003', // Blast native stablecoin, 18 decimals
   },
+  mantle: {
+    USDC: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', // Mantle Bridged USDC
+    USDT: '0x927488fF93F401525Aa451B3c550e48aF7Ee6901',
+    MNT: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
+  },
+  mode: {
+    USDC: '0xd988097fb8612cc24eeC14542bC03424c656005f',
+    USDT: '0x77D5a1697DCb7B1A14A5D1c0E6f0C6D3dA8F9E4B', // USDT on Mode
+    MODE: '0xdfc7c877a950e49d2610114102175a06c2e3167a',
+  },
   solana: {
     USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     USDT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
@@ -609,6 +619,15 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   blast: {
     thruster_v2: '0x98994a9A7a2570367554589189dC9772241650f6', // RPC-verified
     thruster_v3: '0x337827814155ECBf24D20231fCA4444F530C0555', // RPC-verified
+  },
+  mantle: {
+    merchant_moe: '0xeaEE7EE68874218c3558b40063c42B82D3E7232a',
+    agni_finance: '0x319B6307d7A5C93f4B7a2D2f599Ed3a988B6B93b',
+    fusionx: '0x5989FB161568b9F133eDf5Cf6787f5597762797F',
+  },
+  mode: {
+    kim_exchange: '0x6A5a77c58Eac94A52Fb8b3F98Fc61dDA9B673b94',
+    supswap: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d1',
   },
 } as const;
 

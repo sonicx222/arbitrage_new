@@ -179,3 +179,5 @@ full_codebase.txt
 
 # Git worktrees
 .worktrees/
+data/trades/trades-2026-03-02.jsonl
+services/execution-engine/src/strategies/error-selectors.generated.ts
