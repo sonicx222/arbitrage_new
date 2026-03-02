@@ -59,7 +59,7 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 | `stream:circuit-breaker` | 5,000 | Execution engine | — |
 | `stream:system-failover` | 1,000 | Coordinator | — |
 | `stream:system-commands` | 1,000 | Coordinator | — |
-| `stream:fast-lane` | 5,000 | Fast lane (feature-gated) | execution-engine |
+| `stream:fast-lane` | 5,000 | Fast lane (feature-gated) | execution-engine-group |
 | `stream:dead-letter-queue` | 10,000 | Any service | coordinator-group |
 | `stream:dlq-alerts` | 5,000 | DLQ manager (on-demand) | — |
 | `stream:forwarding-dlq` | 5,000 | Coordinator | — |
@@ -68,14 +68,13 @@ The final report goes to `./monitor-session/REPORT_<SESSION_ID>.md`.
 | `stream:system-scaling` | 1,000 | Self-healing (on-demand) | — |
 | `stream:service-degradation` | 5,000 | Degradation monitor (on-demand) | — |
 
-### Consumer Groups (7 active)
+### Consumer Groups (6 active)
 
 | Group | Service | Streams |
 |-------|---------|---------|
 | `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue |
 | `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities |
-| `execution-engine-group` | Execution Engine | execution-requests |
-| `execution-engine` | Execution Engine (fast lane) | fast-lane |
+| `execution-engine-group` | Execution Engine | execution-requests, fast-lane |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities |
 | `orderflow-pipeline` | Coordinator (orderflow) | pending-opportunities |
 | `failover-coordinator` | Coordinator (failover) | system-failover |
@@ -159,7 +158,7 @@ the System Inventory above.
    under `services/` and `shared/`.
 2. Extract group name string literals.
 3. Compare against expected: `coordinator-group`, `cross-chain-detector-group`,
-   `execution-engine-group`, `execution-engine`, `mempool-detector-group`.
+   `execution-engine-group`, `mempool-detector-group`.
 
 **Flag:** Any group name NOT in the expected list → severity: **CRITICAL**,
 category: `CONSUMER_GROUP`.
