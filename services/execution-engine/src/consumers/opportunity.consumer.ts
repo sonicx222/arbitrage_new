@@ -651,8 +651,10 @@ export class OpportunityConsumer {
    */
   private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): HandleResult {
     this.stats.opportunitiesReceived++;
+    // RT-007 FIX: Fall back to opportunity.chain for same-chain arbs (which don't
+    // set buyChain). Matches the pattern in ExecutionPipeline.executeOpportunity().
     recordOpportunityDetected(
-      opportunity.buyChain ?? 'unknown',
+      opportunity.buyChain ?? opportunity.chain ?? 'unknown',
       opportunity.type ?? 'unknown',
     );
 
