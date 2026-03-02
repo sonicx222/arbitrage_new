@@ -63,6 +63,8 @@ export interface PipelineDeps {
   stats: ExecutionStats;
   queueService: QueueService;
   maxConcurrentExecutions: number;
+  /** P2 OPT: Max concurrent executions per individual chain (0 = no per-chain limit) */
+  maxConcurrentPerChain: number;
 
   // Execution components
   lockManager: DistributedLockManager;
@@ -105,6 +107,8 @@ export class ExecutionPipeline {
   private readonly deps: PipelineDeps;
   private isProcessingQueue = false;
   private activeExecutionCount = 0;
+  /** P2 OPT: Per-chain active execution tracking for fair chain isolation */
+  private readonly perChainExecutionCount = new Map<string, number>();
 
   /** Track CB re-enqueue attempts per opportunity to prevent infinite loops */
   private readonly cbReenqueueCounts = new Map<string, number>();
@@ -169,6 +173,19 @@ export class ExecutionPipeline {
 
         // Clear re-enqueue tracking when proceeding
         this.cbReenqueueCounts.delete(opportunity.id);
+
+        // P2 OPT: Per-chain concurrency gating — prevents one busy chain from
+        // starving others by consuming all global execution slots
+        const maxPerChain = this.deps.maxConcurrentPerChain ?? 0;
+        if (maxPerChain > 0) {
+          const chainCount = this.perChainExecutionCount.get(oppChain) ?? 0;
+          if (chainCount >= maxPerChain) {
+            this.deps.queueService.enqueue(opportunity);
+            continue;
+          }
+          this.perChainExecutionCount.set(oppChain, chainCount + 1);
+        }
+
         this.activeExecutionCount++;
 
         this.executeOpportunityWithLock(opportunity)
@@ -184,6 +201,13 @@ export class ExecutionPipeline {
               this.activeExecutionCount--;
             } else {
               this.deps.logger.warn('activeExecutionCount was already 0, not decrementing');
+            }
+            // P2 OPT: Decrement per-chain counter
+            if (maxPerChain > 0) {
+              const current = this.perChainExecutionCount.get(oppChain) ?? 0;
+              if (current > 0) {
+                this.perChainExecutionCount.set(oppChain, current - 1);
+              }
             }
             if (
               this.deps.stateManager.isRunning() &&

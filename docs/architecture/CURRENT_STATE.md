@@ -80,7 +80,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 |--------|--------|---------|-----------|
 | `stream:price-updates` | 100,000 | Real-time price data from partition detectors | ACTIVE |
 | `stream:swap-events` | 50,000 | DEX swap events | IDLE |
-| `stream:opportunities` | 50,000 | Arbitrage opportunities from detectors | ACTIVE |
+| `stream:opportunities` | 100,000 | Arbitrage opportunities from detectors | ACTIVE |
 | `stream:whale-alerts` | 5,000 | Large trade notifications | IDLE |
 | `stream:service-health` | 1,000 | Per-service health reports | IDLE |
 | `stream:service-events` | 5,000 | Service lifecycle events | IDLE |

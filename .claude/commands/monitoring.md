@@ -59,7 +59,7 @@ sequentially — correctness is more important than speed.
 |--------|--------|-------------|-------------------|
 | `stream:price-updates` | 100,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:swap-events` | 50,000 | P1-P4 partitions | coordinator-group |
-| `stream:opportunities` | 50,000 | P1-P4, cross-chain detector | coordinator-group |
+| `stream:opportunities` | 100,000 | P1-P4, cross-chain detector | coordinator-group |
 | `stream:whale-alerts` | 5,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:service-health` | 1,000 | All services | — |
 | `stream:service-events` | 5,000 | All services | — |
@@ -91,7 +91,7 @@ sequentially — correctness is more important than speed.
 | `execution-engine-group` | Execution Engine | execution-requests, fast-lane |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities |
 | `orderflow-pipeline` | Coordinator (orderflow) | pending-opportunities |
-| `failover-coordinator` | Coordinator (failover) | system-failover |
+| `failover-{serviceName}` | Coordinator (failover) | system-failover | (dynamic: created by CrossRegionHealthManager at runtime) |
 
 ### Pipeline Data Flow (Critical Path)
 

@@ -328,7 +328,9 @@ export interface ConsumerConfig {
 }
 
 export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
-  batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 10, 1, 100),
+  // P2 OPT: Increased from 10 to 50 — reduces Redis round-trips by 5x.
+  // At 130+ opps/s inflow, batch=10 means 13+ XREADGROUP/s; batch=50 means ~3/s.
+  batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 50, 1, 100),
   blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 200, 100, 10000),
   shutdownAckTimeoutMs: parseEnvTimeout('CONSUMER_SHUTDOWN_ACK_TIMEOUT_MS', 5000, 1000, 30000),
   pendingMessageMaxAgeMs: parseEnvTimeout('CONSUMER_PENDING_MAX_AGE_MS', 10 * 60 * 1000, 60000, 3600000),

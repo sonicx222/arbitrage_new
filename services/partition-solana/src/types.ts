@@ -10,6 +10,8 @@
  * @see R1 - Solana Arbitrage Detection Modules extraction
  */
 
+import type { PipelineTimestamps } from '@arbitrage/types';
+
 // =============================================================================
 // Token Types
 // =============================================================================
@@ -150,6 +152,9 @@ export interface SolanaArbitrageOpportunity {
   path?: TriangularPathStep[];
   /** Estimated output amount */
   estimatedOutput?: number;
+
+  /** P2 OPT: Pipeline latency timestamps for observability parity with EVM partitions */
+  pipelineTimestamps?: PipelineTimestamps;
 }
 
 // =============================================================================

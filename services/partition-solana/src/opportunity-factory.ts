@@ -146,6 +146,8 @@ export class OpportunityFactory {
       timestamp,
       expiresAt: timestamp + this.expiryMs,
       status: 'pending',
+      // P2 OPT: Pipeline timestamps for latency tracking parity with EVM partitions
+      pipelineTimestamps: { wsReceivedAt: timestamp, detectedAt: timestamp },
     };
   }
 
@@ -180,6 +182,7 @@ export class OpportunityFactory {
       timestamp,
       expiresAt: timestamp + this.expiryMs,
       status: 'pending',
+      pipelineTimestamps: { wsReceivedAt: timestamp, detectedAt: timestamp },
     };
   }
 
@@ -232,6 +235,7 @@ export class OpportunityFactory {
       timestamp,
       expiresAt: timestamp + this.expiryMs * crossChainExpiryMultiplier,
       status: 'pending',
+      pipelineTimestamps: { wsReceivedAt: timestamp, detectedAt: timestamp },
     };
   }
 

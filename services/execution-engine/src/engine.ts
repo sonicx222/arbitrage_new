@@ -250,6 +250,7 @@ export class ExecutionEngineService {
   // FIX 10.1: Pre-computed last gas prices for O(1) hot path access
   private lastGasPrices: Map<string, bigint> = new Map();
   private readonly maxConcurrentExecutions: number;
+  private readonly maxConcurrentPerChain: number;
 
   // W1-42 FIX: Extracted execution pipeline
   private executionPipeline: ExecutionPipeline | null = null;
@@ -395,6 +396,10 @@ export class ExecutionEngineService {
     const envMaxConcurrent = parseInt(process.env.MAX_CONCURRENT_EXECUTIONS ?? '', 10);
     this.maxConcurrentExecutions = config.maxConcurrentExecutions
       ?? (!Number.isNaN(envMaxConcurrent) && envMaxConcurrent > 0 ? envMaxConcurrent : 5);
+
+    // P2 OPT: Per-chain concurrent execution limit (0 = no per-chain limit)
+    const envPerChain = parseInt(process.env.MAX_CONCURRENT_PER_CHAIN ?? '', 10);
+    this.maxConcurrentPerChain = !Number.isNaN(envPerChain) && envPerChain > 0 ? envPerChain : 0;
 
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
@@ -1120,6 +1125,7 @@ export class ExecutionEngineService {
       stats: this.stats,
       queueService: this.queueService,
       maxConcurrentExecutions: this.maxConcurrentExecutions,
+      maxConcurrentPerChain: this.maxConcurrentPerChain,
       lockManager: this.lockManager,
       lockConflictTracker: this.lockConflictTracker,
       opportunityConsumer: this.opportunityConsumer,

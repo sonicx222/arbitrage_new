@@ -26,6 +26,7 @@ import { LRUCache, NumericRollingWindow } from '@arbitrage/core/data-structures'
 import { createLogger } from '@arbitrage/core/logger';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
+import { getLatencyTracker } from '@arbitrage/core/monitoring/latency-tracker';
 
 // Import extracted modules
 import { VersionedPoolStore } from './pool/versioned-pool-store';
@@ -802,6 +803,11 @@ export class SolanaArbitrageDetector extends EventEmitter {
       source: 'solana-arbitrage-detector',
     };
     const data = propagateContext(baseData, traceCtx) as Record<string, string>;
+
+    // P2 OPT: Record pipeline latency for observability parity with EVM partitions
+    if (opportunity.pipelineTimestamps) {
+      getLatencyTracker().recordFromTimestamps(opportunity.pipelineTimestamps);
+    }
 
     for (let attempt = 1; attempt <= REDIS_RETRY.MAX_ATTEMPTS; attempt++) {
       try {
