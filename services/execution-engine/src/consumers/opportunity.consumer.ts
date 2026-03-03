@@ -84,9 +84,13 @@ export interface PendingMessageInfo {
  * handleStreamMessage can decide whether to ACK (permanent) or leave in PEL
  * for redelivery (transient).
  *
+ * SM-003 FIX: Backpressure-rejected messages are now ACKed immediately to prevent
+ * zombie PEL entries. When Redis MAXLEN trims the stream, un-ACKed PEL entries become
+ * orphans that can never be processed or reclaimed, blocking consumer advancement.
+ *
  * - 'queued': Successfully enqueued for execution (deferred ACK)
  * - 'rejected': Permanent rejection (business rules, duplicate) — ACK immediately
- * - 'backpressure': Transient rejection (queue full) — do NOT ACK, leave in PEL
+ * - 'backpressure': Transient rejection (queue full) — ACK immediately (SM-003)
  */
 export type HandleResult = 'queued' | 'rejected' | 'backpressure';
 
@@ -574,11 +578,12 @@ export class OpportunityConsumer {
       // Permanent rejection (business rules, duplicate) - ACK immediately
       await this.ackMessage(message.id);
     } else {
-      // P0-7 FIX: Transient rejection (backpressure) - do NOT ACK.
-      // Message stays in PEL and will be redelivered by Redis once the
-      // consumer resumes and the queue drains. This prevents permanent
-      // loss of opportunities during temporary backpressure.
-      this.logger.debug('Backpressure: message left in PEL for redelivery', {
+      // SM-003 FIX: ACK backpressure-rejected messages to prevent zombie PEL entries.
+      // When Redis MAXLEN trims the stream, un-ACKed PEL entries become orphans that
+      // can never be processed or reclaimed. ACKing immediately is safe because the
+      // message is being discarded anyway (queue is full).
+      await this.ackMessage(message.id);
+      this.logger.debug('Backpressure: message ACKed and discarded', {
         messageId: message.id,
         opportunityId: opportunity.id,
         queueSize: this.queueService.size(),
@@ -670,7 +675,8 @@ export class OpportunityConsumer {
    *
    * P0-7 FIX: Returns HandleResult instead of boolean to distinguish transient
    * (backpressure) from permanent (business rules, duplicate) rejections.
-   * Backpressure rejections leave the message in PEL for Redis redelivery.
+   * SM-003 FIX: Backpressure rejections are ACKed immediately by handleStreamMessage
+   * to prevent zombie PEL entries when MAXLEN trimming removes stream data.
    *
    * Thread Safety Note (Fix 5.1):
    * =============================
@@ -749,8 +755,8 @@ export class OpportunityConsumer {
           id: opportunity.id,
           queueSize: this.queueService.size(),
         });
-        // P0-7 FIX: Return 'backpressure' so the message is NOT ACKed.
-        // It stays in PEL and will be redelivered when queue drains.
+        // SM-003 FIX: Return 'backpressure' — caller (handleStreamMessage) will ACK
+        // immediately to prevent zombie PEL entries from MAXLEN trimming.
         return 'backpressure';
       }
 

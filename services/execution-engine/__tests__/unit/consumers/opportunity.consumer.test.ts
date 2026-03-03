@@ -215,23 +215,44 @@ describe('OpportunityConsumer - Backpressure', () => {
     );
   });
 
-  it('should NOT ACK messages rejected due to queue backpressure (P0-7 FIX)', async () => {
+  it('should ACK messages rejected due to queue backpressure (SM-003 FIX)', async () => {
     const opportunity = createMockOpportunity();
     const message = { id: 'msg-backpressure', data: opportunity };
 
     await (consumer as any).handleStreamMessage(message);
 
-    // P0-7 FIX: Backpressure-rejected messages must NOT be ACKed.
-    // They stay in Redis PEL for redelivery when queue drains.
-    expect(mockStreamsClient.xack).not.toHaveBeenCalled();
+    // SM-003 FIX: Backpressure-rejected messages are ACKed to prevent zombie PEL entries.
+    // When MAXLEN trims the stream data, un-ACKed PEL entries become orphans.
+    expect(mockStreamsClient.xack).toHaveBeenCalled();
     expect(consumer.getPendingCount()).toBe(0);
     expect(mockLogger.debug).toHaveBeenCalledWith(
-      'Backpressure: message left in PEL for redelivery',
+      'Backpressure: message ACKed and discarded',
       expect.objectContaining({
         messageId: 'msg-backpressure',
         opportunityId: opportunity.id,
       })
     );
+  });
+
+  it('should ACK XCLAIMed messages that hit backpressure (SM-003 + recovery interaction)', async () => {
+    // Regression test 3a: recoverOrphanedMessages also calls handleStreamMessage.
+    // Recovered messages that hit backpressure must be ACKed, not re-left in PEL.
+    const opportunity = createMockOpportunity();
+    const message = { id: 'msg-recovered-bp', data: opportunity };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStreamsClient.xack).toHaveBeenCalled();
+    expect(consumer.getPendingCount()).toBe(0);
+  });
+
+  it('should not throw when ACK fails for a backpressure-rejected message (SM-003 resilience)', async () => {
+    // Regression test 3b: ackMessage swallows Redis errors — backpressure path must not throw.
+    mockStreamsClient.xack.mockRejectedValue(new Error('Redis unavailable'));
+    const opportunity = createMockOpportunity();
+    const message = { id: 'msg-bp-ack-fail', data: opportunity };
+
+    await expect((consumer as any).handleStreamMessage(message)).resolves.toBeUndefined();
   });
 });
 
@@ -374,7 +395,7 @@ describe('OpportunityConsumer - Message Handling', () => {
     await (consumer as any).handleStreamMessage(message);
 
     // Queue errors (exceptions) are caught internally and treated as permanent rejections
-    // The message is ACKed to prevent redelivery (unlike backpressure which is transient)
+    // The message is ACKed to prevent redelivery
     expect(mockStreamsClient.xack).toHaveBeenCalled();
   });
 
