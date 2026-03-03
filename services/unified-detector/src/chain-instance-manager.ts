@@ -261,15 +261,19 @@ export function createChainInstanceManager(
           if (instance.isConnected()) {
             startedChains.push(chainId);
           } else {
-            // FIX B1: Remove instance that started but failed to connect
-            chainInstances.delete(chainId);
+            // C2-FIX: Keep failed instance in map instead of deleting.
+            // The old B1 fix deleted failed instances, causing getChains() to return
+            // an empty array when all chains fail. This made the health endpoint report
+            // "status: starting" permanently (totalChains === 0) instead of showing
+            // "0/N chains healthy". The instance retains its error status and can be
+            // used by slow recovery to retry later.
             failedChains.push(chainId);
           }
         })
         .catch((error) => {
           clearTimeout(startTimeoutId);
-          // FIX B1: Remove failed instance from map to prevent stale entries
-          chainInstances.delete(chainId);
+          // C2-FIX: Keep failed instance in map (same rationale as above).
+          // The instance's status will be 'error', which getStats() reports accurately.
           logger.error(`Failed to start chain instance: ${chainId}`, {
             error: (error as Error).message,
           });

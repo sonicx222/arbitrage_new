@@ -237,8 +237,10 @@ describe('ChainInstanceManager', () => {
       expect(errorHandler).toHaveBeenCalledWith({ chainId: 'ethereum', error: mockError });
     });
 
-    // FIX B1: Test that failed instances are removed from the map
-    it('should remove failed instances from map (B1 fix)', async () => {
+    // C2-FIX: Failed instances remain in map so health reporting shows correct chain count.
+    // Previously (B1), failed instances were deleted, causing health to report "0/0 (starting)"
+    // instead of "0/N (unhealthy)" when all chains fail.
+    it('should keep failed instances in map for accurate health reporting (C2 fix)', async () => {
       let callCount = 0;
       const mockFactory: ChainInstanceFactory = jest.fn().mockImplementation((cfg) => {
         callCount++;
@@ -257,13 +259,17 @@ describe('ChainInstanceManager', () => {
 
       const result = await manager.startAll();
 
-      // Only successful chain should be in the map
+      // Both chains should be in the map (failed + successful)
       expect(result.chainsStarted).toBe(1);
       expect(result.chainsFailed).toBe(1);
-      expect(manager.getChains()).toHaveLength(1);
+      expect(manager.getChains()).toHaveLength(2);
       expect(manager.getChains()).toContain('polygon');
-      expect(manager.getChains()).not.toContain('ethereum');
-      expect(manager.getChainInstance('ethereum')).toBeUndefined();
+      expect(manager.getChains()).toContain('ethereum');
+      // Failed instance is still accessible for health reporting
+      expect(manager.getChainInstance('ethereum')).toBeDefined();
+      // Only connected chains are reported as healthy
+      expect(manager.getHealthyChains()).toHaveLength(1);
+      expect(manager.getHealthyChains()).toContain('polygon');
     });
   });
 

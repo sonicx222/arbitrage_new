@@ -432,16 +432,24 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
   // ===========================================================================
 
   describe('handleConnectionError', () => {
-    it('should increment reconnect attempts', () => {
+    // C1-FIX: handleConnectionError now only increments the chain-level counter
+    // on the WS manager's "Max reconnection attempts reached" sentinel error.
+    // Regular connection errors are logged at debug and don't increment.
+
+    it('should increment reconnect attempts only on WS manager sentinel error', () => {
       const instance = createInstance();
       const initialAttempts = (instance as any).reconnectAttempts;
 
+      // Regular WS error should NOT increment chain-level counter
       (instance as any).handleConnectionError(new Error('Connection lost'));
+      expect((instance as any).reconnectAttempts).toBe(initialAttempts);
 
+      // WS manager sentinel SHOULD increment chain-level counter
+      (instance as any).handleConnectionError(new Error('Max reconnection attempts reached'));
       expect((instance as any).reconnectAttempts).toBe(initialAttempts + 1);
     });
 
-    it('should emit error when max reconnect attempts reached', () => {
+    it('should emit error when max reconnect attempts reached via sentinel', () => {
       const instance = createInstance();
       const errorHandler = jest.fn();
       instance.on('error', errorHandler);
@@ -449,7 +457,8 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       // Set reconnect attempts to just below max
       (instance as any).reconnectAttempts = (instance as any).MAX_RECONNECT_ATTEMPTS - 1;
 
-      (instance as any).handleConnectionError(new Error('Connection lost'));
+      // Sentinel error triggers chain-level max check
+      (instance as any).handleConnectionError(new Error('Max reconnection attempts reached'));
 
       expect(errorHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -458,7 +467,7 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       );
     });
 
-    it('should set status to error when max attempts reached', () => {
+    it('should set status to error when max attempts reached via sentinel', () => {
       const instance = createInstance();
       (instance as any).reconnectAttempts = (instance as any).MAX_RECONNECT_ATTEMPTS - 1;
       const statusHandler = jest.fn();
@@ -466,24 +475,26 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       // Must listen for 'error' to prevent Node.js EventEmitter from throwing
       instance.on('error', jest.fn());
 
-      (instance as any).handleConnectionError(new Error('Connection lost'));
+      // Sentinel error triggers chain-level status change
+      (instance as any).handleConnectionError(new Error('Max reconnection attempts reached'));
 
       expect((instance as any).status).toBe('error');
       expect(statusHandler).toHaveBeenCalledWith('error');
     });
 
-    it('should not emit error before max attempts', () => {
+    it('should not emit error for regular WS connection errors', () => {
       const instance = createInstance();
       const errorHandler = jest.fn();
       instance.on('error', errorHandler);
 
+      // Regular WS error should not trigger chain-level error
       (instance as any).handleConnectionError(new Error('Connection lost'));
 
       expect(errorHandler).not.toHaveBeenCalled();
       expect((instance as any).status).not.toBe('error');
     });
 
-    it('should clean up old wsManager before slow recovery reconnection', () => {
+    it('should clean up old wsManager via disconnect before slow recovery reconnection', () => {
       jest.useFakeTimers();
       try {
         const instance = createInstance();
@@ -494,9 +505,9 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
         (instance as any).wsManager = oldWsManager;
         (instance as any).factorySubscriptionService = { stop: jest.fn() };
 
-        // Trigger max reconnect attempts to start slow recovery timer
+        // Trigger max reconnect attempts via sentinel to start slow recovery timer
         (instance as any).reconnectAttempts = (instance as any).MAX_RECONNECT_ATTEMPTS - 1;
-        (instance as any).handleConnectionError(new Error('Connection lost'));
+        (instance as any).handleConnectionError(new Error('Max reconnection attempts reached'));
 
         // Slow recovery timer should now be set
         expect((instance as any).slowRecoveryTimer).not.toBeNull();
@@ -504,8 +515,8 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
         // Advance timer to trigger slow recovery tick
         jest.advanceTimersByTime((instance as any).SLOW_RECOVERY_INTERVAL_MS);
 
-        // Old wsManager should have had removeAllListeners called
-        expect(oldWsManager.removeAllListeners).toHaveBeenCalled();
+        // H1-FIX: Old wsManager should have disconnect() called (not just removeAllListeners)
+        expect(oldWsManager.disconnect).toHaveBeenCalled();
         // Old references should be nulled before re-initialization
         expect((instance as any).factorySubscriptionService).toBeNull();
       } finally {

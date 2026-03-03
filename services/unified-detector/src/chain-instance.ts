@@ -1016,24 +1016,40 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private handleConnectionError(error: Error): void {
-    this.reconnectAttempts++;
+    // C1-FIX: The WebSocketManager has its own reconnection system (10 attempts + slow recovery).
+    // It fires error callbacks for EVERY individual retry AND a sentinel "Max reconnection attempts
+    // reached" error when exhausted. Previously, the chain-level counter incremented on ALL of these,
+    // causing it to reach attempt 58 when maxAttempts was 5 (double-counting bug).
+    //
+    // Fix: Only increment the chain-level counter on the WS manager's sentinel error.
+    // Individual connection errors are handled by the WS manager's internal retries.
+    const isMaxAttemptsReached = error.message === 'Max reconnection attempts reached';
 
-    // FIX H9: Log the actual error at each attempt so operators can diagnose connection failures
-    this.logger.warn('WebSocket connection error', {
-      chain: this.chainId,
-      attempt: this.reconnectAttempts,
-      maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
-      error: error.message,
-    });
+    if (isMaxAttemptsReached) {
+      // WS manager exhausted all its retry attempts for the current URL rotation cycle.
+      // This represents one complete chain-level reconnection attempt.
+      this.reconnectAttempts++;
+      this.logger.warn('WebSocket reconnection cycle exhausted', {
+        chain: this.chainId,
+        chainAttempt: this.reconnectAttempts,
+        maxChainAttempts: this.MAX_RECONNECT_ATTEMPTS,
+      });
 
-    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
-      this.status = 'error';
-      this.emit('statusChange', this.status);
-      this.emit('error', new Error(`Max reconnect attempts reached for ${this.chainId}`));
+      if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+        this.status = 'error';
+        this.emit('statusChange', this.status);
+        this.emit('error', new Error(`Max reconnect attempts reached for ${this.chainId}`));
 
-      // Start slow recovery: retry connection every 5 minutes
-      // Clear any existing timer first to prevent duplicates (e.g., if called again after recovery fails)
-      this.startSlowRecoveryTimer();
+        // Start slow recovery: retry connection every 5 minutes
+        this.startSlowRecoveryTimer();
+      }
+    } else {
+      // H2-FIX: Individual WS connection errors are logged at debug to reduce noise.
+      // The WS manager handles retries internally — no chain-level counter increment needed.
+      this.logger.debug('WebSocket connection error (WS manager handling retry)', {
+        chain: this.chainId,
+        error: error.message,
+      });
     }
   }
 
@@ -1105,10 +1121,13 @@ export class ChainDetectorInstance extends EventEmitter {
       this.status = 'connecting';
       this.emit('statusChange', this.status);
 
-      // Clean up old WebSocket manager before creating a new one to prevent
-      // stale event handlers from the previous connection firing into callbacks
+      // H1-FIX: Call disconnect() instead of just removeAllListeners().
+      // disconnect() properly clears recovery timers, reconnect timers, heartbeat,
+      // pending requests/confirmations, closes the WebSocket, and clears all handlers.
+      // Previously, only removeAllListeners() was called, leaving orphaned timers and
+      // WebSocket objects that continued attempting connections in the background.
       if (this.wsManager) {
-        this.wsManager.removeAllListeners();
+        this.wsManager.disconnect();
         this.wsManager = null;
       }
       // Factory subscription service depends on the dead wsManager — null it out

@@ -436,7 +436,7 @@ describe('UnifiedChainDetector', () => {
       expect(opportunityHandler).toHaveBeenCalledWith(mockOpportunity);
     });
 
-    it('should handle failed chain instances (Bug 4.1 fix)', async () => {
+    it('should handle failed chain instances (C2 fix: keep in map for health reporting)', async () => {
       let callCount = 0;
       const mockFactory = jest.fn().mockImplementation((cfg) => {
         callCount++;
@@ -458,11 +458,16 @@ describe('UnifiedChainDetector', () => {
 
       await detector.start();
 
-      // Only successful chain should be in the list
+      // C2-FIX: Both chains remain in the map (failed + successful)
+      // so health endpoint reports "1/2 healthy" instead of "1/1 (starting)"
       const chains = detector.getChains();
-      expect(chains).toHaveLength(1);
+      expect(chains).toHaveLength(2);
       expect(chains).toContain('polygon');
-      expect(chains).not.toContain('ethereum');
+      expect(chains).toContain('ethereum');
+      // Only connected chains are healthy
+      const healthyChains = detector.getHealthyChains();
+      expect(healthyChains).toHaveLength(1);
+      expect(healthyChains).toContain('polygon');
     });
   });
 
