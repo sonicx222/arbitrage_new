@@ -229,7 +229,14 @@ export class TradeLogger {
       if (content !== 'ok') {
         throw new Error('Read-back verification failed');
       }
-      await fsp.unlink(testFile);
+      try {
+        await fsp.unlink(testFile);
+      } catch (unlinkErr) {
+        // Ignore ENOENT — file may have been cleaned up by OS security tools
+        // (e.g. Windows Defender) between writeFile and unlink.
+        // We already verified the write succeeded via readFile, so the dir IS writable.
+        if ((unlinkErr as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkErr;
+      }
       this.dirEnsured = true;
       this.logger.info('Trade log directory validated', { outputDir: this.config.outputDir });
     } catch (error) {

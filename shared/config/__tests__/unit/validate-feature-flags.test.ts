@@ -122,10 +122,15 @@ describe('validateFeatureFlags', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
-      const { validateFeatureFlags } = await importWithFlags({
+      const { validateFeatureFlags, MULTI_PATH_QUOTER_ADDRESSES } = await importWithFlags({
         FEATURE_BATCHED_QUOTER: 'true',
-        // No MULTI_PATH_QUOTER_* entries → no deployed contracts
       });
+
+      // Clear hardcoded testnet entries (sepolia, arbitrumSepolia) so the "no deployed
+      // contracts" warning fires. service-config.ts has these by default in the source.
+      for (const key of Object.keys(MULTI_PATH_QUOTER_ADDRESSES)) {
+        delete MULTI_PATH_QUOTER_ADDRESSES[key];
+      }
 
       validateFeatureFlags();
 

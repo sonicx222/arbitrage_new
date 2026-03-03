@@ -238,6 +238,10 @@ describe('[Integration] Coordinator -> Execution Engine (Real Components)', () =
 
   describe('Execution Result Data Shape', () => {
     it('result contains expected fields and coordinator metadata is preserved', async () => {
+      // Clear stale results that may have leaked in from previous test's async writes
+      // completing after beforeEach's flushall(). Ensures we only see THIS test's result.
+      await redis.del(RedisStreams.EXECUTION_RESULTS);
+
       const detectedAt = Date.now();
       const opportunity = createTestOpportunity({
         id: `shape-${Date.now()}`,

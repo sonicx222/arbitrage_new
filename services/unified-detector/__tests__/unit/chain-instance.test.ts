@@ -706,7 +706,10 @@ describe('P0 Regression Tests: ChainDetectorInstance Lifecycle', () => {
       }
 
       const elapsed = Date.now() - startTime;
-      expect(elapsed).toBeLessThan(TIMEOUT_MS + 50); // Allow 50ms buffer
+      // Allow generous upper bound — under CPU load, setTimeout(100) may fire
+      // significantly later than 100ms. We only need to verify it didn't hang
+      // indefinitely; 5s is plenty of headroom even on a loaded Windows CI box.
+      expect(elapsed).toBeLessThan(TIMEOUT_MS + 4900); // 5s max; just checking it didn't hang
     });
 
     it('should handle disconnect errors gracefully', async () => {

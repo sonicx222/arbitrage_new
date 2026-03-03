@@ -630,7 +630,7 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   },
   mode: {
     kim_exchange: '0x6A5a77c58Eac94A52Fb8b3F98Fc61dDA9B673b94',
-    supswap: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d1',
+    supswap: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d10',
   },
 } as const;
 

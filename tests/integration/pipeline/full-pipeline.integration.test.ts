@@ -415,6 +415,10 @@ describe('[Integration] Full Pipeline: Opportunity -> Execution -> Result', () =
     }, 20000);
 
     it('should handle invalid opportunity gracefully', async () => {
+      // Clear any stale results that may have leaked in from the previous test's
+      // async engine operations completing after beforeEach's flushall() ran.
+      await redis.del(RedisStreams.EXECUTION_RESULTS);
+
       // Publish malformed message directly to execution-requests
       // (missing required fields like 'id', 'amountIn', etc.)
       await redis.xadd(

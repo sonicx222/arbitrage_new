@@ -407,7 +407,7 @@ export class FlashLoanNotSupportedError extends Error {
 /**
  * Testnet chain identifiers used for statistics computation.
  */
-const TESTNET_CHAINS = new Set(['sepolia', 'arbitrumSepolia', 'zksync-sepolia', 'solana-devnet']);
+const TESTNET_CHAINS = new Set(['sepolia', 'arbitrumSepolia', 'zksync-sepolia', 'zksync-testnet', 'bscTestnet', 'solana-devnet']);
 
 /**
  * Flash loan protocol statistics (for monitoring and planning)

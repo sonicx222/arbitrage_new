@@ -591,7 +591,7 @@ export const DEXES: Record<string, Dex[]> = {
       // UNVERIFIED: Addresses have sequential hex patterns suggesting placeholders.
       // TODO: Verify on Mode mainnet via RPC before enabling for production.
       factoryAddress: '0x8a4C4e7d05d2798C5bC4b7dA6315E73F5d0fA576',
-      routerAddress: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d1',
+      routerAddress: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d10',
       feeBps: bps(30),
     },
     {
@@ -599,8 +599,8 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'mode',
       // UNVERIFIED: Addresses have sequential hex patterns suggesting placeholders.
       // TODO: Verify on Mode mainnet via RPC before enabling for production.
-      factoryAddress: '0x1c1E07C9147B90c7d9dB20d4A7F5e5e4e4b8F9C',
-      routerAddress: '0x2d3bB6c1C8B8E1f2D4a5F6c7e8E9d0C1b2a3d4e',
+      factoryAddress: '0x1c1e07c9147b90c7d9db20d4a7f5e5e4e4b8f9c0',
+      routerAddress: '0x2d3bb6c1c8b8e1f2d4a5f6c7e8e9d0c1b2a3d4e0',
       feeBps: bps(30),
     }
   ],

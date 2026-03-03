@@ -27,7 +27,7 @@ import * as path from 'path';
 function createMockStreamHealthMonitor() {
   return {
     setConsumerGroup: jest.fn(),
-    start: jest.fn(),
+    start: jest.fn().mockResolvedValue(undefined),
     stop: jest.fn()
   };
 }

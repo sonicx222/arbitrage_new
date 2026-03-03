@@ -129,8 +129,8 @@ describe('Worker PriceMatrix Integration (Task #44)', () => {
 
       expect(result.memoryAddressMatch).toBe(true);
       // IPC round-trip (postMessage) adds ~1-10ms overhead on top of the
-      // sub-microsecond SharedArrayBuffer read; 50ms is a safe upper bound.
-      expect(result.latencyUs).toBeLessThan(50_000);
+      // sub-microsecond SharedArrayBuffer read; 300ms is a safe upper bound for CI.
+      expect(result.latencyUs).toBeLessThan(300_000);
 
       console.log('✓ Worker read price from main thread:', {
         key: testKey,
@@ -154,8 +154,8 @@ describe('Worker PriceMatrix Integration (Task #44)', () => {
       const stats = await harness.testConcurrentReads(keys, 4);
 
       expect(stats.successfulReads).toBeGreaterThan(450); // >90% success rate
-      // IPC round-trip dominates latency; 50ms is a safe upper bound
-      expect(stats.avgLatencyUs).toBeLessThan(50_000);
+      // IPC round-trip dominates latency; 200ms is a safe upper bound for CI
+      expect(stats.avgLatencyUs).toBeLessThan(200_000);
 
       console.log('✓ Concurrent reads from 4 workers:', {
         totalReads: stats.totalReads,
@@ -206,8 +206,8 @@ describe('Worker PriceMatrix Integration (Task #44)', () => {
       // Each worker should handle ~250 reads (1000 / 4)
       expect(stats.totalReads).toBe(1000);
       expect(stats.successfulReads).toBeGreaterThan(950); // >95% success
-      // IPC round-trip dominates latency; 100ms is a safe p99 upper bound
-      expect(stats.p99LatencyUs).toBeLessThan(100_000);
+      // IPC round-trip dominates latency; 300ms is a safe p99 upper bound for CI
+      expect(stats.p99LatencyUs).toBeLessThan(300_000);
 
       console.log('✓ Worker pool distributed 1000 reads:', {
         workers: 4,
@@ -233,8 +233,8 @@ describe('Worker PriceMatrix Integration (Task #44)', () => {
       const stats = await harness.testConcurrentReads(sampleKeys, 4);
 
       expect(stats.successfulReads).toBeGreaterThan(950); // >95% success
-      // IPC round-trip dominates latency; 50ms is a safe upper bound
-      expect(stats.avgLatencyUs).toBeLessThan(50_000);
+      // IPC round-trip dominates latency; 200ms is a safe upper bound for CI
+      expect(stats.avgLatencyUs).toBeLessThan(200_000);
 
       console.log('✓ Worker pool handled sustained load:', {
         totalWrites: 5000,

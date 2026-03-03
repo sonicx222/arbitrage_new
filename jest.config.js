@@ -163,8 +163,10 @@ module.exports = {
         '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
         '<rootDir>/shared/test-utils/src/setup/jest.integration.setup.ts'
       ],
-      // P2-3.1: Moderate parallelism for integration tests (I/O-bound, shared Redis)
-      maxWorkers: process.env.CI ? 2 : '50%',
+      // Integration tests MUST run serially to prevent Redis key collisions between
+      // parallel test files. Multiple workers sharing the same Redis instance cause
+      // non-deterministic failures (lock TTL races, stream key pollution, etc.).
+      maxWorkers: 1,
       testTimeout: 60000, // 60s - allows for Redis/service startup
       ...projectConfig
     },

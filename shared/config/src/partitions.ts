@@ -248,8 +248,8 @@ export const PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-     // Scroll, Blast, Mantle, and Mode now have real or partial contract addresses configured
-     chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode'],
+    // Mantle and Mode remain stubs (unverified factory addresses) — keep in high-value until verified
+    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
     region: 'asia-southeast1',
     provider: 'fly',
     resourceProfile: 'standard', // 5 chains

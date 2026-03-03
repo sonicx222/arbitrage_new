@@ -827,8 +827,10 @@ describe('OpportunityRouter', () => {
   describe('cleanupExpiredOpportunities', () => {
     it('should remove opportunities that have explicitly expired (expiresAt < now)', async () => {
       const now = Date.now();
+      // SM-001 FIX: processOpportunity rejects already-expired opportunities before storing.
+      // Use a future expiresAt so both get stored, then advance time past one of them.
       await router.processOpportunity(
-        createOpportunityData({ id: 'opp-expired', expiresAt: now - 1000, timestamp: now }),
+        createOpportunityData({ id: 'opp-will-expire', expiresAt: now + 100, timestamp: now }),
         false,
       );
       await router.processOpportunity(
@@ -838,11 +840,16 @@ describe('OpportunityRouter', () => {
 
       expect(router.getPendingCount()).toBe(2);
 
+      // Advance time past opp-will-expire's expiry
+      jest.spyOn(Date, 'now').mockReturnValue(now + 200);
+
       const removed = router.cleanupExpiredOpportunities();
+
+      jest.restoreAllMocks();
 
       expect(removed).toBe(1);
       expect(router.getPendingCount()).toBe(1);
-      expect(router.getOpportunities().has('opp-expired')).toBe(false);
+      expect(router.getOpportunities().has('opp-will-expire')).toBe(false);
       expect(router.getOpportunities().has('opp-fresh')).toBe(true);
     });
 
@@ -1109,7 +1116,8 @@ describe('OpportunityRouter', () => {
       expect(noStreamRouter.getTotalExecutions()).toBe(0);
     });
 
-    it('should handle a profit percentage of exactly zero (valid)', async () => {
+    it('should reject a profit percentage of exactly zero (below minimum 0.1)', async () => {
+      // P0 FIX: minProfitPercentage raised from -100 to 0.1 — zero is no longer valid.
       const data = createOpportunityData({
         id: 'opp-zero-profit',
         profitPercentage: 0,
@@ -1117,15 +1125,15 @@ describe('OpportunityRouter', () => {
 
       const result = await router.processOpportunity(data, false);
 
-      expect(result).toBe(true);
-      const opp = router.getOpportunities().get('opp-zero-profit')!;
-      expect(opp.profitPercentage).toBe(0);
+      expect(result).toBe(false);
+      expect(router.getOpportunities().has('opp-zero-profit')).toBe(false);
     });
 
     it('should handle profit percentage at exact boundaries', async () => {
+      // P0 FIX: minProfitPercentage is now 0.1; -100 is rejected.
       const dataMin = createOpportunityData({
         id: 'opp-min-boundary',
-        profitPercentage: -100,
+        profitPercentage: 0.1,
       });
       // P0-3 FIX: maxProfitPercentage lowered from 10000 to 100
       const dataMax = createOpportunityData({

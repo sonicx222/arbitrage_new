@@ -566,23 +566,26 @@ describe('SimulationStrategy', () => {
       expect(ctx.stats.simulationsSkipped).toBe(initialSkipped + 1);
     });
 
-    it('should increment successfulExecutions on success', async () => {
+    it('should return success result and increment simulationsSkipped on success', async () => {
       // Mock to always succeed
       Math.random = jest.fn().mockReturnValue(0.5);
 
       const config = createDefaultConfig({ successRate: 1.0 });
       const strategy = new SimulationStrategy(logger, config);
       const opportunity = createMockOpportunity();
-      const initialSuccessful = ctx.stats.successfulExecutions;
+      const initialSkipped = ctx.stats.simulationsSkipped;
 
       const executePromise = strategy.execute(opportunity, ctx);
       jest.advanceTimersByTime(100);
-      await executePromise;
+      const result = await executePromise;
 
-      expect(ctx.stats.successfulExecutions).toBe(initialSuccessful + 1);
+      // RT-004 FIX: SimulationStrategy does not increment successfulExecutions —
+      // ExecutionPipeline.executeOpportunity() handles that after strategy.execute() returns.
+      expect(result.success).toBe(true);
+      expect(ctx.stats.simulationsSkipped).toBe(initialSkipped + 1);
     });
 
-    it('should increment failedExecutions on failure', async () => {
+    it('should return failure result and increment simulationsSkipped on failure', async () => {
       // Mock to always fail
       let callCount = 0;
       Math.random = jest.fn(() => {
@@ -594,16 +597,19 @@ describe('SimulationStrategy', () => {
       const config = createDefaultConfig({ successRate: 0.9 });
       const strategy = new SimulationStrategy(logger, config);
       const opportunity = createMockOpportunity();
-      const initialFailed = ctx.stats.failedExecutions;
+      const initialSkipped = ctx.stats.simulationsSkipped;
 
       const executePromise = strategy.execute(opportunity, ctx);
       jest.advanceTimersByTime(100);
-      await executePromise;
+      const result = await executePromise;
 
-      expect(ctx.stats.failedExecutions).toBe(initialFailed + 1);
+      // RT-004 FIX: SimulationStrategy does not increment failedExecutions —
+      // ExecutionPipeline.executeOpportunity() handles that after strategy.execute() returns.
+      expect(result.success).toBe(false);
+      expect(ctx.stats.simulationsSkipped).toBe(initialSkipped + 1);
     });
 
-    it('should track stats across multiple executions', async () => {
+    it('should track simulationsSkipped across multiple executions', async () => {
       Math.random = jest.fn().mockReturnValue(0.5);
 
       const config = createDefaultConfig({ successRate: 1.0 });
@@ -617,8 +623,9 @@ describe('SimulationStrategy', () => {
         await executePromise;
       }
 
+      // RT-004 FIX: Only simulationsSkipped is tracked here; successfulExecutions
+      // is incremented by ExecutionPipeline, not by the strategy itself.
       expect(ctx.stats.simulationsSkipped).toBe(3);
-      expect(ctx.stats.successfulExecutions).toBe(3);
     });
   });
 });
