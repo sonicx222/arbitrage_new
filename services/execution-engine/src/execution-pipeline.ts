@@ -45,6 +45,8 @@ import type { EVCalculation, PositionSize, TradingAllowedResult } from '@arbitra
 import {
   recordExecutionAttempt,
   recordExecutionSuccess,
+  recordExecutionFailure,
+  recordExecutionLatency,
   recordVolume,
 } from './services/prometheus-metrics';
 
@@ -484,8 +486,14 @@ export class ExecutionPipeline {
       await this.deps.publishExecutionResult(result, opportunity);
       this.deps.perfLogger.logExecutionResult(result);
 
-      // Record outcome for risk management
-      if (this.deps.getRiskManagementEnabled() && !this.deps.getIsSimulationMode() && this.deps.riskOrchestrator) {
+      // Record outcome for risk management.
+      // RT-010 FIX: Guard no longer excludes simulation mode — ProbabilityTracker must
+      // accumulate data from simulated executions to produce useful win-rate estimates.
+      // Note: drawdown breaker also receives simulated trade results (intended: system learns
+      // risk patterns before going live; daily reset at UTC midnight bounds any carry-over).
+      // Note: riskOrchestrator.assess() remains simulation-mode-gated (line ~400) so the
+      // breaker cannot block simulated trades regardless of accumulated state.
+      if (this.deps.getRiskManagementEnabled() && this.deps.riskOrchestrator) {
         const currentGasPrice = this.deps.getLastGasPrice(chain);
 
         this.deps.riskOrchestrator.recordOutcome({
@@ -527,7 +535,10 @@ export class ExecutionPipeline {
       } else {
         this.deps.stats.failedExecutions++;
         this.deps.cbManager?.recordFailure(chain);
+        recordExecutionFailure(chain, opportunity.type ?? 'unknown', result.error ?? 'unknown');
       }
+
+      recordExecutionLatency(chain, opportunity.type ?? 'unknown', latencyMs);
 
       this.deps.perfLogger.logEventLatency('opportunity_execution', latencyMs, {
         success: result.success,
@@ -537,8 +548,10 @@ export class ExecutionPipeline {
     } catch (error) {
       this.deps.stats.failedExecutions++;
       this.deps.cbManager?.recordFailure(chain);
+      recordExecutionFailure(chain, opportunity.type ?? 'unknown', 'exception');
 
-      if (this.deps.getRiskManagementEnabled() && !this.deps.getIsSimulationMode() && this.deps.riskOrchestrator) {
+      // RT-010 FIX: Record failure outcome regardless of simulation mode (see success path above).
+      if (this.deps.getRiskManagementEnabled() && this.deps.riskOrchestrator) {
         this.deps.riskOrchestrator.recordOutcome({
           chain,
           dex,

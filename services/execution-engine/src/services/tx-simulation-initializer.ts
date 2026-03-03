@@ -17,6 +17,7 @@ import type { ISimulationService, ISimulationProvider } from './simulation/types
 import { SimulationService } from './simulation/simulation.service';
 import { createTenderlyProvider } from './simulation/tenderly-provider';
 import { createAlchemyProvider } from './simulation/alchemy-provider';
+import { LocalSimulationProvider } from './simulation/local-provider';
 import type { Logger } from '../types';
 
 /**
@@ -102,11 +103,33 @@ export function initializeTxSimulationService(
     }
   }
 
+  // RT-009: Auto-register local ETH RPC simulation as zero-config fallback
   if (providers.length === 0) {
-    logger.info('Transaction simulation service not initialized - no providers configured', {
-      hint: 'Set TENDERLY_API_KEY/TENDERLY_ACCOUNT_SLUG/TENDERLY_PROJECT_SLUG or ALCHEMY_API_KEY',
+    for (const chain of configuredChains) {
+      const provider = providerSource.getProvider(chain);
+      if (provider) {
+        const localProvider = new LocalSimulationProvider({
+          type: 'local',
+          chain,
+          provider,
+          enabled: true,
+        });
+        providers.push(localProvider);
+        logger.debug('Local simulation provider initialized (fallback)', { chain });
+      }
+    }
+
+    if (providers.length === 0) {
+      logger.info('Transaction simulation service not initialized - no providers or RPC endpoints configured', {
+        hint: 'Set TENDERLY_API_KEY/TENDERLY_ACCOUNT_SLUG/TENDERLY_PROJECT_SLUG or ALCHEMY_API_KEY for best results',
+      });
+      return null;
+    }
+
+    logger.info('Using local RPC simulation providers (no Tenderly/Alchemy keys configured)', {
+      providerCount: providers.length,
+      chains: configuredChains,
     });
-    return null;
   }
 
   // Read config from environment with defaults

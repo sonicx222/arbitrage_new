@@ -137,6 +137,8 @@ describe('Health Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('healthy');
       expect(res.body.systemHealth).toBe(95);
+      expect(res.body.uptime).toEqual(expect.any(Number));
+      expect(res.body.isLeader).toBe(true);
       expect(res.body.timestamp).toBeDefined();
       // No instanceId or services in unauthenticated response
       expect(res.body.instanceId).toBeUndefined();
@@ -161,6 +163,7 @@ describe('Health Routes', () => {
       expect(res.body.isLeader).toBe(true);
       expect(res.body.instanceId).toBe('coordinator-test-123');
       expect(res.body.systemHealth).toBe(95);
+      expect(res.body.uptime).toEqual(expect.any(Number));
       expect(res.body.services).toBeDefined();
       expect(res.body.timestamp).toBeDefined();
     });

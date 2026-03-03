@@ -46,6 +46,8 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
         res.json({
           status,
           systemHealth,
+          uptime: process.uptime(),
+          isLeader: state.getIsLeader(),
           timestamp: Date.now()
         });
         return;
@@ -58,6 +60,7 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
         isLeader: state.getIsLeader(),
         instanceId: state.getInstanceId(),
         systemHealth,
+        uptime: process.uptime(),
         services: Object.fromEntries(serviceHealth),
         timestamp: Date.now()
       });

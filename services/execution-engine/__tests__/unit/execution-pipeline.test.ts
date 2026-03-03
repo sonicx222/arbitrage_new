@@ -15,6 +15,8 @@ import { ExecutionPipeline, type PipelineDeps } from '../../src/execution-pipeli
 jest.mock('../../src/services/prometheus-metrics', () => ({
   recordExecutionAttempt: jest.fn(),
   recordExecutionSuccess: jest.fn(),
+  recordExecutionFailure: jest.fn(),
+  recordExecutionLatency: jest.fn(),
   recordVolume: jest.fn(),
 }));
 

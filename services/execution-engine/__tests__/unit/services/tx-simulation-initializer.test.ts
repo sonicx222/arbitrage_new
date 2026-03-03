@@ -30,8 +30,16 @@ jest.mock('../../../src/services/simulation/alchemy-provider', () => ({
   })),
 }));
 
+jest.mock('../../../src/services/simulation/local-provider', () => ({
+  LocalSimulationProvider: jest.fn().mockImplementation((config) => ({
+    _type: 'local',
+    chain: config.chain,
+  })),
+}));
+
 import { createTenderlyProvider } from '../../../src/services/simulation/tenderly-provider';
 import { createAlchemyProvider } from '../../../src/services/simulation/alchemy-provider';
+import { LocalSimulationProvider } from '../../../src/services/simulation/local-provider';
 import { SimulationService } from '../../../src/services/simulation/simulation.service';
 
 describe('initializeTxSimulationService', () => {
@@ -71,13 +79,33 @@ describe('initializeTxSimulationService', () => {
     process.env = originalEnv;
   });
 
-  it('should return null when no providers configured', () => {
+  it('should use local RPC providers as fallback when no API keys configured', () => {
+    // RT-009 FIX: When no Tenderly/Alchemy keys, auto-register LocalSimulationProvider per chain.
+    const result = initializeTxSimulationService(mockProviderSource, mockLogger);
+
+    expect(result).not.toBeNull();
+    expect(LocalSimulationProvider).toHaveBeenCalledTimes(2); // 2 chains (ethereum, arbitrum)
+    expect(LocalSimulationProvider).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'local',
+      chain: 'ethereum',
+      enabled: true,
+    }));
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Using local RPC simulation providers (no Tenderly/Alchemy keys configured)',
+      expect.objectContaining({ providerCount: 2 }),
+    );
+  });
+
+  it('should return null when no API keys AND no RPC providers available', () => {
+    // Only returns null when local fallback also finds zero providers.
+    mockProviderSource.getProvider = jest.fn().mockReturnValue(undefined);
+
     const result = initializeTxSimulationService(mockProviderSource, mockLogger);
 
     expect(result).toBeNull();
     expect(mockLogger.info).toHaveBeenCalledWith(
-      'Transaction simulation service not initialized - no providers configured',
-      expect.objectContaining({ hint: expect.any(String) }),
+      expect.stringContaining('not initialized'),
+      expect.any(Object),
     );
   });
 
@@ -164,7 +192,7 @@ describe('initializeTxSimulationService', () => {
     }));
   });
 
-  it('should handle Tenderly initialization error gracefully', () => {
+  it('should fall back to local providers when Tenderly initialization fails', () => {
     process.env.TENDERLY_API_KEY = 'test-key';
     process.env.TENDERLY_ACCOUNT_SLUG = 'test-account';
     process.env.TENDERLY_PROJECT_SLUG = 'test-project';
@@ -175,11 +203,13 @@ describe('initializeTxSimulationService', () => {
 
     const result = initializeTxSimulationService(mockProviderSource, mockLogger);
 
-    expect(result).toBeNull(); // Falls through to no providers
+    // RT-009: Tenderly fails → falls through to local RPC fallback (not null)
+    expect(result).not.toBeNull();
     expect(mockLogger.warn).toHaveBeenCalledWith(
       'Failed to initialize Tenderly provider',
       expect.objectContaining({ error: expect.stringContaining('Tenderly init failed') }),
     );
+    expect(LocalSimulationProvider).toHaveBeenCalled();
   });
 
   it('should skip chains where getProvider returns undefined', () => {
