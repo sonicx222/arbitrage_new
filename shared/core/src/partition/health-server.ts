@@ -300,7 +300,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         latencyLines.push(`pipeline_latency_p99_ms ${latencyMetrics.e2e.p99}`);
         latencyLines.push('# HELP pipeline_events_total Total pipeline events tracked');
         latencyLines.push('# TYPE pipeline_events_total counter');
-        latencyLines.push(`pipeline_events_total ${latencyMetrics.e2e.count}`);
+        latencyLines.push(`pipeline_events_total ${latencyMetrics.e2e.totalRecorded}`);
 
         const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n';
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });

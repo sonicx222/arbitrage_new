@@ -664,6 +664,34 @@ describe('DrawdownCircuitBreaker', () => {
       expect(stats.dailyPnLFraction).toBeCloseTo(-0.01, 4);
     });
 
+    // RT-010 Regression: dailyPnLFraction must be 0 (not NaN/Infinity) when capital is 0
+    it('should return dailyPnLFraction = 0 when totalCapital is zero', () => {
+      const zeroCapBreaker = new DrawdownCircuitBreaker(createMockConfig({
+        totalCapital: 0n,
+        enabled: false,
+      }));
+      zeroCapBreaker.recordTradeResult(createWinningTrade(ONE_ETH * 1000000n));
+
+      const stats = zeroCapBreaker.getStats();
+      expect(stats.dailyPnLFraction).toBe(0);
+      expect(Number.isFinite(stats.dailyPnLFraction)).toBe(true);
+    });
+
+    // RT-010 Regression: dailyPnLFraction must be Infinity (not 1.056e+22) on BigInt overflow
+    it('should return Infinity and log a warning when dailyPnL exceeds MAX_SAFE_INTEGER relative to capital', () => {
+      // Simulate: 10^22 wei profit against 1 wei capital → raw BigInt >> MAX_SAFE_INTEGER
+      const tinyCapBreaker = new DrawdownCircuitBreaker(createMockConfig({
+        totalCapital: 1n, // 1 wei capital
+        enabled: false,
+      }));
+      // Win 10^22 wei — vastly exceeds MAX_SAFE_INTEGER (9007199254740991)
+      tinyCapBreaker.recordTradeResult(createWinningTrade(10000000000000000000000n));
+
+      const stats = tinyCapBreaker.getStats();
+      // Must be Infinity not an imprecise float like 1.056e+22
+      expect(stats.dailyPnLFraction).toBe(Infinity);
+    });
+
     it('should track halt and caution counts', () => {
       // Trigger caution
       breaker.recordTradeResult(createLosingTrade(35n * ONE_ETH / 10n));

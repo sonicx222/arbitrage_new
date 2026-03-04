@@ -33,8 +33,10 @@ export interface PercentileStats {
   p95: number;
   /** 99th percentile in milliseconds */
   p99: number;
-  /** Total number of recorded samples */
+  /** Number of samples currently in the ring buffer (capped at capacity) */
   count: number;
+  /** Cumulative total of all recorded samples (not capped by capacity) */
+  totalRecorded: number;
   /** Average latency in milliseconds */
   avg: number;
 }
@@ -89,6 +91,8 @@ class LatencyRingBuffer {
   private index = 0;
   private count = 0;
   private sum = 0;
+  /** Cumulative total of all recorded samples (not capped by capacity) */
+  totalRecorded = 0;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -101,6 +105,8 @@ class LatencyRingBuffer {
   record(latencyMs: number): void {
     // Guard against NaN poisoning the running sum
     if (Number.isNaN(latencyMs)) return;
+
+    this.totalRecorded++;
 
     if (this.count === this.capacity) {
       this.sum -= this.buffer[this.index];
@@ -160,6 +166,7 @@ class LatencyRingBuffer {
     this.index = 0;
     this.count = 0;
     this.sum = 0;
+    this.totalRecorded = 0;
   }
 }
 
@@ -379,7 +386,7 @@ export class LatencyTracker {
     const count = buffer.getCount();
 
     if (count === 0) {
-      return { p50: 0, p95: 0, p99: 0, count: 0, avg: 0 };
+      return { p50: 0, p95: 0, p99: 0, count: 0, totalRecorded: buffer.totalRecorded, avg: 0 };
     }
 
     const sorted = buffer.getSortedSamples();
@@ -389,6 +396,7 @@ export class LatencyTracker {
       p95: this.percentileFromSorted(sorted, 0.95),
       p99: this.percentileFromSorted(sorted, 0.99),
       count,
+      totalRecorded: buffer.totalRecorded,
       avg: buffer.getAverage(),
     };
   }

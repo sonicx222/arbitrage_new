@@ -35,11 +35,16 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
     // Cast needed: security package has its own @types/express installation
     validateHealthRequest as unknown as RequestHandler,
     (req: Request, res: Response) => {
-      const systemHealth = state.getSystemMetrics().systemHealth;
+      // RT-022 FIX: Richer health response with services, streams, backpressure.
+      const metrics = state.getSystemMetrics();
+      const systemHealth = metrics.systemHealth;
       // FIX #24: Use 'healthy'/'degraded' to match other services.
-      // Coordinator used 'ok' while all others used 'healthy', breaking
-      // uniform monitoring (status === 'healthy' checks would miss coordinator).
       const status = systemHealth >= 50 ? 'healthy' : 'degraded';
+      const serviceHealth = state.getServiceHealthMap();
+      const servicesSummary = {
+        total: serviceHealth.size,
+        healthy: [...serviceHealth.values()].filter(s => s.status === 'healthy').length,
+      };
 
       // Minimal response for unauthenticated requests (load balancer probes)
       if (!(req as Request & { user?: unknown }).user) {
@@ -48,20 +53,29 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
           systemHealth,
           uptime: process.uptime(),
           isLeader: state.getIsLeader(),
+          services: servicesSummary,
+          backpressure: metrics.backpressure ?? null,
           timestamp: Date.now()
         });
         return;
       }
 
       // Full response for authenticated requests
-      const serviceHealth = state.getServiceHealthMap();
       res.json({
         status,
         isLeader: state.getIsLeader(),
         instanceId: state.getInstanceId(),
         systemHealth,
         uptime: process.uptime(),
-        services: Object.fromEntries(serviceHealth),
+        services: {
+          summary: servicesSummary,
+          details: Object.fromEntries(serviceHealth),
+        },
+        backpressure: metrics.backpressure ?? null,
+        streams: {
+          dlq: metrics.dlqMetrics ?? null,
+          forwarding: metrics.forwardingMetrics ?? null,
+        },
         timestamp: Date.now()
       });
     }

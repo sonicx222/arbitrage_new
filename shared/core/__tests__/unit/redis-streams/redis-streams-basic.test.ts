@@ -419,4 +419,64 @@ describe('RedisStreamsClient - Basic Operations', () => {
       // Should not throw — the handler uses fallback serialization
     });
   });
+
+  // RT-005 Regression: onReady must fire callback on each Redis reconnection
+  describe('onReady — reconnection handler', () => {
+    it('should register a callback on the ioredis "ready" event', () => {
+      const callback = jest.fn().mockResolvedValue(undefined);
+      client.onReady(callback);
+
+      const readyHandlers = mockRedis.on.mock.calls.filter(
+        (call: any[]) => call[0] === 'ready'
+      );
+      expect(readyHandlers.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should invoke callback when Redis emits "ready"', async () => {
+      const callback = jest.fn().mockResolvedValue(undefined);
+      client.onReady(callback);
+
+      const readyHandler = mockRedis.on.mock.calls.find(
+        (call: any[]) => call[0] === 'ready'
+      );
+      expect(readyHandler).toBeDefined();
+
+      // Simulate Redis emitting "ready" (e.g., after restart)
+      await readyHandler[1]();
+
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not throw when callback rejects — error is logged internally', async () => {
+      const failingCallback = jest.fn().mockRejectedValue(new Error('group create failed'));
+      client.onReady(failingCallback);
+
+      const readyHandler = mockRedis.on.mock.calls.find(
+        (call: any[]) => call[0] === 'ready'
+      );
+      expect(readyHandler).toBeDefined();
+
+      // The handler is fire-and-forget: it calls callback().catch(...) and returns undefined.
+      // Calling it should not throw synchronously — the rejection is caught internally.
+      expect(() => readyHandler[1]()).not.toThrow();
+
+      // Drain microtask queue so the .catch() error handler runs (to avoid unhandled rejection)
+      await new Promise(resolve => setImmediate(resolve));
+    });
+
+    it('should invoke callback on each subsequent "ready" event (not just once)', async () => {
+      const callback = jest.fn().mockResolvedValue(undefined);
+      client.onReady(callback);
+
+      const readyHandler = mockRedis.on.mock.calls.find(
+        (call: any[]) => call[0] === 'ready'
+      );
+
+      // Simulate two Redis restarts
+      await readyHandler[1]();
+      await readyHandler[1]();
+
+      expect(callback).toHaveBeenCalledTimes(2);
+    });
+  });
 });

@@ -20,7 +20,7 @@ const collector = new PrometheusMetricsCollector();
 
 const exporter = new PrometheusExporter(collector, {
   format: ExportFormat.PROMETHEUS,
-  metricPrefix: 'arbitrage_crosschain_',
+  metricPrefix: 'cross_chain_',
 });
 
 // ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ const exporter = new PrometheusExporter(collector, {
 // ---------------------------------------------------------------------------
 
 collector.defineMetric({
-  name: 'opportunities_detected_total',
+  name: 'opportunities_total',
   type: MetricType.COUNTER,
   description: 'Total cross-chain opportunities detected',
   labels: ['source_chain', 'target_chain'],
@@ -67,7 +67,7 @@ collector.defineMetric({
 // ---------------------------------------------------------------------------
 
 export function recordOpportunityDetected(sourceChain: string, targetChain: string): void {
-  collector.incrementCounter('opportunities_detected_total', { source_chain: sourceChain, target_chain: targetChain });
+  collector.incrementCounter('opportunities_total', { source_chain: sourceChain, target_chain: targetChain });
 }
 
 export function recordOpportunityPublished(sourceChain: string, targetChain: string): void {

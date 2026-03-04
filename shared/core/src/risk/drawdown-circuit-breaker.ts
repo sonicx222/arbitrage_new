@@ -394,9 +394,28 @@ export class DrawdownCircuitBreaker {
   getStats(): DrawdownStats {
     const capital = this.config.totalCapital;
     // FIX P3-20: Consistent 8-decimal precision
-    const dailyPnLFraction = capital > 0n
-      ? Number(this.state.dailyPnL * 100000000n / capital) / 100000000
-      : 0;
+    // SM-FIX: Guard against BigInt->Number overflow when dailyPnL dwarfs capital.
+    // Number() of a BigInt exceeding MAX_SAFE_INTEGER yields imprecise floats (e.g., 1.056e+22).
+    // Cap to +/-Infinity and log a warning so operators notice denomination mismatches.
+    let dailyPnLFraction = 0;
+    if (capital > 0n) {
+      const rawBigInt = this.state.dailyPnL * 100000000n / capital;
+      if (rawBigInt > 9007199254740991n) {
+        dailyPnLFraction = Infinity;
+        logger.warn('dailyPnLFraction overflow: dailyPnL too large relative to capital', {
+          dailyPnL: this.state.dailyPnL.toString(),
+          capital: capital.toString(),
+        });
+      } else if (rawBigInt < -9007199254740991n) {
+        dailyPnLFraction = -Infinity;
+        logger.warn('dailyPnLFraction overflow: dailyPnL too large relative to capital', {
+          dailyPnL: this.state.dailyPnL.toString(),
+          capital: capital.toString(),
+        });
+      } else {
+        dailyPnLFraction = Number(rawBigInt) / 100000000;
+      }
+    }
 
     return {
       currentState: this.state.state,

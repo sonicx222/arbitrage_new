@@ -140,9 +140,10 @@ describe('Health Routes', () => {
       expect(res.body.uptime).toEqual(expect.any(Number));
       expect(res.body.isLeader).toBe(true);
       expect(res.body.timestamp).toBeDefined();
-      // No instanceId or services in unauthenticated response
+      // No instanceId in unauthenticated response (RT-022 FIX: services summary now included)
       expect(res.body.instanceId).toBeUndefined();
-      expect(res.body.services).toBeUndefined();
+      expect(res.body.services).toEqual({ total: 2, healthy: 1 });
+      expect(res.body.backpressure).toBeNull();
     });
 
     it('should return full response for authenticated requests', async () => {
@@ -165,6 +166,10 @@ describe('Health Routes', () => {
       expect(res.body.systemHealth).toBe(95);
       expect(res.body.uptime).toEqual(expect.any(Number));
       expect(res.body.services).toBeDefined();
+      expect(res.body.services.summary).toEqual({ total: 2, healthy: 1 });
+      expect(res.body.services.details).toBeDefined();
+      expect(res.body.backpressure).toBeNull();
+      expect(res.body.streams).toBeDefined();
       expect(res.body.timestamp).toBeDefined();
     });
 

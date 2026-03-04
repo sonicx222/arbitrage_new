@@ -169,6 +169,7 @@ describe('LatencyTracker', () => {
         p95: 0,
         p99: 0,
         count: 0,
+        totalRecorded: 0,
         avg: 0,
       };
       expect(metrics.e2e).toEqual(emptyStats);
@@ -274,6 +275,29 @@ describe('LatencyTracker', () => {
       smallTracker.recordE2ELatency(5);
       smallTracker.recordE2ELatency(6);
       expect(smallTracker.getMetrics().e2e.count).toBe(3);
+    });
+
+    it('totalRecorded should increase beyond buffer capacity (RT-024 regression)', () => {
+      // Regression guard: totalRecorded must NOT be capped at buffer capacity.
+      // This is the fix for the frozen pipeline_events_total Prometheus metric.
+      const smallTracker = new LatencyTracker({ bufferCapacity: 5 });
+
+      for (let i = 1; i <= 20; i++) {
+        smallTracker.recordE2ELatency(i);
+      }
+
+      const metrics = smallTracker.getMetrics();
+      // count is capped at capacity
+      expect(metrics.e2e.count).toBe(5);
+      // totalRecorded is cumulative — must reflect all 20 recordings
+      expect(metrics.e2e.totalRecorded).toBe(20);
+    });
+
+    it('totalRecorded should reset to 0 after clear', () => {
+      const smallTracker = new LatencyTracker({ bufferCapacity: 5 });
+      for (let i = 1; i <= 10; i++) smallTracker.recordE2ELatency(i);
+      smallTracker.reset();
+      expect(smallTracker.getMetrics().e2e.totalRecorded).toBe(0);
     });
   });
 
@@ -445,7 +469,7 @@ describe('LatencyTracker', () => {
       expect(metrics).toHaveProperty('stageBreakdown');
 
       // Verify PercentileStats shape
-      const statsKeys = ['p50', 'p95', 'p99', 'count', 'avg'];
+      const statsKeys = ['p50', 'p95', 'p99', 'count', 'totalRecorded', 'avg'];
       for (const key of statsKeys) {
         expect(metrics.e2e).toHaveProperty(key);
         expect(typeof (metrics.e2e as unknown as Record<string, unknown>)[key]).toBe('number');
