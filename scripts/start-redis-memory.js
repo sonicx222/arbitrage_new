@@ -69,14 +69,14 @@ async function main() {
   logger.warning('Starting Redis in-memory server...');
 
   try {
-    // Memory optimization: cap Redis at 128MB with LRU eviction to prevent
-    // unbounded growth during monitoring/dev sessions. Production configs use
-    // 256-512MB (see infrastructure/oracle/redis/redis-production.conf).
-    const maxMemoryMb = parseInt(process.env.REDIS_MAXMEMORY_MB ?? '128', 10);
+    // SM-006/RT-019 FIX: 512MB default accommodates stream-heavy workloads
+    // (128MB caused eviction under sustained monitoring). Override via env var.
+    // Production configs use similar or higher (see infrastructure/oracle/redis/).
+    const maxMemoryMb = parseInt(process.env.REDIS_MAXMEMORY_MB ?? '512', 10);
     const redisServer = new RedisMemoryServer({
       instance: {
         port: port,
-        args: ['--maxmemory', `${maxMemoryMb}mb`, '--maxmemory-policy', 'allkeys-lru']
+        args: ['--maxmemory', `${maxMemoryMb}mb`, '--maxmemory-policy', 'noeviction']
       }
     });
 

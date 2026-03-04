@@ -86,6 +86,8 @@ import { ActivePairsTracker } from './tracking';
 // OP-3 FIX: Import trace context utilities for cross-service correlation
 import { extractContext, createTraceContext, createChildContext } from '@arbitrage/core/tracing';
 import type { TraceContext } from '@arbitrage/core/tracing';
+// LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
+import { withLogContext } from '@arbitrage/core/logging';
 
 // P2-11: Import IntervalManager for centralized interval lifecycle management
 import { IntervalManager } from '@arbitrage/core/async';
@@ -705,6 +707,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Create consumer groups for all streams
       await this.createConsumerGroups();
 
+      // Register reconnection handler AFTER the initial createConsumerGroups() call.
+      // ioredis has already emitted 'ready' for the initial connection by this point,
+      // so this callback fires ONLY on subsequent reconnections (e.g., after Redis
+      // restart). On reconnection all consumer groups are wiped — recreating them here
+      // ensures the pipeline resumes without waiting for NOGROUP errors in StreamConsumers.
+      this.streamsClient.onReady(async () => {
+        this.logger.warn('Redis Streams reconnected — recreating consumer groups', {
+          groups: this.consumerGroups.length,
+          instanceId: this.config.leaderElection.instanceId,
+        });
+        await this.createConsumerGroups();
+      });
+
       // ST-010 FIX: Trim stale DLQ entries from previous sessions at startup.
       // Without this, the DLQ accumulates entries across restarts (348+ entries observed),
       // creating noise in monitoring and consuming Redis memory. Trims entries older than
@@ -1311,6 +1326,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       ? createChildContext(parentCtx, 'coordinator')
       : createTraceContext('coordinator');
 
+    // LOG-OPT Task 4: Bind trace context to ALS so all downstream log calls
+    // automatically include traceId/spanId — no manual passing needed.
+    return withLogContext(traceCtx, async () => {
+
     // R2: Delegate to opportunity router
     if (this.opportunityRouter) {
       // P2 FIX #19: Use getIsLeader() to always read canonical leadership state
@@ -1434,6 +1453,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     this.streamConsumerManager?.resetErrors();
+
+    }); // end withLogContext
   }
 
   /**

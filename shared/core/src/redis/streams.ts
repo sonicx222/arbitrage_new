@@ -521,6 +521,30 @@ export class RedisStreamsClient {
     });
   }
 
+  /**
+   * Register a callback that fires on each Redis reconnection.
+   *
+   * Safe to call after service startup because ioredis has already emitted the
+   * initial 'ready' event by the time startup completes. Any callback registered
+   * here will only fire on SUBSEQUENT reconnections (e.g., after Redis restarts).
+   *
+   * Use this to re-establish state that Redis drops on restart — consumer groups,
+   * subscriptions, etc. In-memory Redis (dev:redis:memory) drops all stream and
+   * group state on process restart; calling createConsumerGroups() here ensures
+   * the pipeline recovers without manual intervention.
+   *
+   * @param callback - Async function called on each Redis reconnection
+   */
+  onReady(callback: () => Promise<void>): void {
+    this.client.on('ready', () => {
+      callback().catch((err: Error) => {
+        this.logger.error('Redis onReady callback failed', {
+          error: err.message,
+        });
+      });
+    });
+  }
+
   // ===========================================================================
   // S-5: HMAC Message Signing
   // ===========================================================================
