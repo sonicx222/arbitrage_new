@@ -696,8 +696,11 @@ describe('Partition Service Utilities', () => {
   // ===========================================================================
 
   describe('SHUTDOWN_TIMEOUT_MS', () => {
-    it('should be 5000ms', () => {
-      expect(SHUTDOWN_TIMEOUT_MS).toBe(5000);
+    it('should exceed Redis connectTimeout (3000ms) to satisfy SA-008 shutdown hierarchy', () => {
+      // SA-008 FIX: shutdown > connectTimeout to avoid race on Redis reconnect.
+      // Redis clients use connectTimeout=3000ms; shutdown (8000ms) must outlast that.
+      expect(SHUTDOWN_TIMEOUT_MS).toBe(8000);
+      expect(SHUTDOWN_TIMEOUT_MS).toBeGreaterThan(3000);
     });
   });
 

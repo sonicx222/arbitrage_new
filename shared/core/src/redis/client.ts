@@ -235,8 +235,9 @@ export class RedisClient {
       },
       // P3-FIX: Add connectTimeout to prevent indefinite hang during initial connection.
       // Without this, Redis client can block forever if Redis is unreachable.
-      // Matches RedisStreamsClient connectTimeout value.
-      connectTimeout: 5000,
+      // SA-008: Set to 3000ms (< 5000ms partition shutdownTimeout) to ensure shutdown completes
+      // before Redis reconnect attempt can outlast the shutdown window.
+      connectTimeout: 3000,
       // Reconnect on READONLY errors (Redis failover scenario)
       reconnectOnError: (err: Error) => {
         return err.message?.includes('READONLY') ?? false;

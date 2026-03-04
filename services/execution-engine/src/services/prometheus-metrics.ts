@@ -51,6 +51,15 @@ collector.defineMetric({
   labels: ['chain', 'strategy'],
 });
 
+// RT-008: Standard schema alias — monitoring validation expects `arbitrage_executions_total`
+// while alert rules use `arbitrage_execution_attempts_total`. Both are kept in sync.
+collector.defineMetric({
+  name: 'executions_total',
+  type: MetricType.COUNTER,
+  description: 'Total execution attempts (alias for execution_attempts_total)',
+  labels: ['chain', 'strategy'],
+});
+
 collector.defineMetric({
   name: 'execution_success_total',
   type: MetricType.COUNTER,
@@ -136,6 +145,8 @@ collector.defineMetric({
  */
 export function recordExecutionAttempt(chain: string, strategy: string): void {
   collector.incrementCounter('execution_attempts_total', { chain, strategy });
+  // RT-008: Keep alias in sync with primary counter
+  collector.incrementCounter('executions_total', { chain, strategy });
 }
 
 /**
@@ -198,6 +209,21 @@ export function recordVolume(chain: string, volumeUsd: number): void {
  */
 export function recordExecutionLatency(chain: string, strategy: string, latencyMs: number): void {
   collector.recordHistogram('execution_latency_ms', latencyMs, { chain, strategy });
+}
+
+/**
+ * RT-008 FIX: Initialize gas price gauges to 0 for all configured chains.
+ *
+ * Called once at engine startup so `arbitrage_gas_price_gwei` always appears
+ * in Prometheus /metrics output, even when no RPC providers are configured
+ * (local dev) and GasPriceOptimizer has not yet updated any values.
+ *
+ * @param chains - List of chain identifiers to initialize (e.g. ['bsc', 'ethereum'])
+ */
+export function initializeGasPriceGauges(chains: string[]): void {
+  for (const chain of chains) {
+    collector.setGauge('gas_price_gwei', 0, { chain });
+  }
 }
 
 /**

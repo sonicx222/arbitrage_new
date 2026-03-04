@@ -14,6 +14,24 @@ import { EventEmitter } from 'events';
 import { createPartitionHealthServer } from '../../src/partition';
 import type { PartitionServiceConfig, PartitionDetectorInterface } from '../../src/partition';
 
+// Mock monitoring singletons used by /metrics endpoint
+jest.mock('../../src/monitoring/stream-health-monitor', () => ({
+  getStreamHealthMonitor: () => ({
+    getPrometheusMetrics: jest.fn().mockResolvedValue(''),
+    start: jest.fn(),
+    stop: jest.fn(),
+  }),
+}));
+
+jest.mock('../../src/monitoring/latency-tracker', () => ({
+  getLatencyTracker: () => ({
+    getMetrics: jest.fn().mockReturnValue({
+      e2e: { p50: 3, p95: 5, p99: 8, totalRecorded: 42 },
+    }),
+    recordLatency: jest.fn(),
+  }),
+}));
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -312,7 +330,7 @@ describe('createPartitionHealthServer', () => {
       expect(body.partitionId).toBe('test-partition');
       expect(body.chains).toEqual(['bsc', 'polygon']);
       expect(body.region).toBe('us-east1');
-      expect(body.endpoints).toEqual(['/health', '/ready', '/stats', '/metrics']);
+      expect(body.endpoints).toEqual(['/health', '/ready', '/stats', '/metrics', 'PUT /log-level']);
     });
   });
 
@@ -337,7 +355,7 @@ describe('createPartitionHealthServer', () => {
 
       expect(res.statusCode).toBe(405);
       expect(JSON.parse(res.body).error).toBe('Method Not Allowed');
-      expect(res.headers.allow).toBe('GET');
+      expect(res.headers.allow).toBe('GET, PUT');
     });
   });
 
@@ -433,6 +451,41 @@ describe('createPartitionHealthServer', () => {
 
       // Verify getHealthyChains was only called once (first request)
       expect(detector.getHealthyChains).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /metrics — RT-007 regression: standard schema metric names
+  // ---------------------------------------------------------------------------
+
+  describe('GET /metrics (RT-007 schema compliance)', () => {
+    it('should expose events_processed_total counter', async () => {
+      port = await startServer();
+
+      const res = await request(port, '/metrics');
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('# TYPE events_processed_total counter');
+      expect(res.body).toMatch(/events_processed_total \d+/);
+    });
+
+    it('should expose price_updates_total counter', async () => {
+      port = await startServer();
+
+      const res = await request(port, '/metrics');
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('# TYPE price_updates_total counter');
+      expect(res.body).toMatch(/price_updates_total \d+/);
+    });
+
+    it('should still expose pipeline_events_total for backwards compatibility', async () => {
+      port = await startServer();
+
+      const res = await request(port, '/metrics');
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('# TYPE pipeline_events_total counter');
     });
   });
 });

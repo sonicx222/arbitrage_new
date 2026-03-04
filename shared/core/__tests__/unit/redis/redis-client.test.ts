@@ -157,10 +157,11 @@ describe('RedisClient', () => {
       expect(mockInstances[0].lastOptions.maxRetriesPerRequest).toBe(3);
     });
 
-    it('should set connectTimeout to 5000ms to prevent indefinite hang on startup', () => {
+    it('should set connectTimeout to 3000ms to prevent indefinite hang on startup', () => {
       // Bug #4 regression: without connectTimeout, getRedisClient() blocks forever
-      // if Redis is unreachable at service start. Matches RedisStreamsClient value.
-      expect(mockInstances[0].lastOptions.connectTimeout).toBe(5000);
+      // if Redis is unreachable at service start.
+      // SA-008: 3000ms < 5000ms partition shutdownTimeout (timeout hierarchy: shutdown > redis-connect).
+      expect(mockInstances[0].lastOptions.connectTimeout).toBe(3000);
     });
   });
 

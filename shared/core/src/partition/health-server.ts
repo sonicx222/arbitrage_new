@@ -15,6 +15,7 @@ import { getLatencyTracker } from '../monitoring/latency-tracker';
 import { setLogLevel } from '../logging/pino-logger';
 import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
+import { getPriceUpdatesTotal } from './handlers';
 
 // =============================================================================
 // Health Check Cache (PERF-FIX)
@@ -341,6 +342,13 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         latencyLines.push('# HELP pipeline_events_total Total pipeline events tracked');
         latencyLines.push('# TYPE pipeline_events_total counter');
         latencyLines.push(`pipeline_events_total ${latencyMetrics.e2e.totalRecorded}`);
+        // RT-007: Standard schema aliases expected by monitoring validation
+        latencyLines.push('# HELP events_processed_total Total events processed by this partition');
+        latencyLines.push('# TYPE events_processed_total counter');
+        latencyLines.push(`events_processed_total ${latencyMetrics.e2e.totalRecorded}`);
+        latencyLines.push('# HELP price_updates_total Total price update events received');
+        latencyLines.push('# TYPE price_updates_total counter');
+        latencyLines.push(`price_updates_total ${getPriceUpdatesTotal()}`);
 
         const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n';
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
@@ -447,8 +455,14 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
 // Graceful Shutdown (P15 Refactor)
 // =============================================================================
 
-/** Default timeout for shutdown operations in milliseconds */
-export const SHUTDOWN_TIMEOUT_MS = 5000;
+/**
+ * Default timeout for shutdown operations in milliseconds.
+ *
+ * SA-008 FIX: Must exceed Redis connectTimeout (5000ms) so the Redis client
+ * has time to complete its connection attempt before shutdown forcibly exits.
+ * Previously matched connectTimeout exactly — a race condition under reconnect.
+ */
+export const SHUTDOWN_TIMEOUT_MS = 8000;
 
 /** Default timeout for health server close during startup failure cleanup */
 export const HEALTH_SERVER_CLOSE_TIMEOUT_MS = 1000;
