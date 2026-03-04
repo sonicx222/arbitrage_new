@@ -455,10 +455,14 @@ export class StreamConsumerManager {
    * Move a failed message to the Dead Letter Queue.
    *
    * DLQ entries include:
-   * - Original message data
+   * - Original message data (full payload + promoted routing fields)
    * - Error details
    * - Source stream for replay
    * - Timestamp for TTL-based cleanup
+   *
+   * HIGH-4 FIX: Field names use _dlq_ prefix to match coordinator's handleDlqMessage()
+   * reader expectations. Key routing fields (id, opportunityId, type, chain) are promoted
+   * to the top level so the coordinator can classify the DLQ entry without parsing originalData.
    */
   private async moveToDeadLetterQueue(
     message: StreamMessage,
@@ -466,16 +470,28 @@ export class StreamConsumerManager {
     sourceStream: string
   ): Promise<void> {
     try {
-      await this.streamsClient.xaddWithLimit(this.config.dlqStream, {
+      // HIGH-4 FIX: Build DLQ entry with coordinator-compatible field names
+      const dlqEntry: Record<string, unknown> = {
         originalMessageId: message.id,
-        originalStream: sourceStream,
+        _dlq_originalStream: sourceStream,   // renamed: coordinator reads '_dlq_originalStream'
+        _dlq_errorCode: error.message,       // renamed: coordinator reads '_dlq_errorCode'
         originalData: JSON.stringify(message.data),
-        error: error.message,
         errorStack: error.stack?.substring(0, 500), // Truncate stack trace
         timestamp: Date.now(),
         service: 'coordinator',
         instanceId: this.config.instanceId,
-      });
+      };
+
+      // HIGH-4 FIX: Promote key routing fields from original payload to top level.
+      // Without this, coordinator.handleDlqMessage() cannot read id/type/chain for
+      // classification because they are nested inside the originalData JSON string.
+      for (const field of ['id', 'opportunityId', 'type', 'chain'] as const) {
+        if (message.data[field] !== undefined) {
+          dlqEntry[field] = String(message.data[field]);
+        }
+      }
+
+      await this.streamsClient.xaddWithLimit(this.config.dlqStream, dlqEntry);
 
       this.logger.debug('Message moved to DLQ', {
         originalMessageId: message.id,
@@ -534,11 +550,12 @@ export class StreamConsumerManager {
         // File doesn't exist yet — proceed to create it
       }
 
+      // HIGH-4 FIX: Use consistent field names matching the Redis DLQ schema
       const entry = JSON.stringify({
         originalMessageId: message.id,
-        originalStream: sourceStream,
+        _dlq_originalStream: sourceStream,
+        _dlq_errorCode: error.message,
         originalData: message.data,
-        error: error.message,
         timestamp: Date.now(),
         service: 'coordinator',
         instanceId: this.config.instanceId,

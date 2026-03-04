@@ -24,6 +24,9 @@
     "ethers": "^6.16.0",
     "ioredis": "^5.4.1"
   },
+  "optionalDependencies": {
+    "@tensorflow/tfjs-node": "4.22.0"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.12",
     "@types/node": "^22.5.4",

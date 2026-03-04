@@ -455,8 +455,15 @@ export class CrossChainDetectorService {
       await this.streamConsumer!.createConsumerGroups();
       this.streamConsumer!.start();
 
-      // Phase 3: Initialize ML predictor (TensorFlow.js LSTM)
-      await this.initializeMLPredictor();
+      // HIGH-2 FIX: Initialize ML predictor in background to avoid 58s startup block.
+      // LSTM warmup (orthogonal matrix ops) is CPU-intensive; service can accept traffic
+      // without it — graceful degradation to no-ML mode until initialization completes.
+      // Set TF_FORCE_BACKEND=tensorflow in .env to use @tensorflow/tfjs-node (5-20x faster).
+      void this.initializeMLPredictor().catch(err => {
+        this.logger.warn('ML predictor background initialization failed', {
+          error: (err as Error).message,
+        });
+      });
 
       // Phase 3: Initialize whale activity tracker
       this.initializeWhaleTracker();

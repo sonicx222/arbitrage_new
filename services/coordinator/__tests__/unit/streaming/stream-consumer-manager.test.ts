@@ -159,8 +159,8 @@ describe('StreamConsumerManager', () => {
       expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:dead-letter-queue',
         expect.objectContaining({
-          originalStream: 'stream:opportunities',
-          error: 'Orphaned PEL message recovered via XCLAIM',
+          _dlq_originalStream: 'stream:opportunities',
+          _dlq_errorCode: 'Orphaned PEL message recovered via XCLAIM',
         }),
       );
 
@@ -329,8 +329,8 @@ describe('StreamConsumerManager', () => {
       expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:dead-letter-queue',
         expect.objectContaining({
-          originalStream: 'stream:opportunities',
-          error: 'Processing failed',
+          _dlq_originalStream: 'stream:opportunities',
+          _dlq_errorCode: 'Processing failed',
           service: 'coordinator',
         }),
       );
@@ -441,8 +441,8 @@ describe('StreamConsumerManager', () => {
       expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:dead-letter-queue',
         expect.objectContaining({
-          originalStream: 'stream:opportunities',
-          error: 'Unexpected token in JSON',
+          _dlq_originalStream: 'stream:opportunities',
+          _dlq_errorCode: 'Unexpected token in JSON',
         }),
       );
 

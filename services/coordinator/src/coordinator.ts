@@ -641,6 +641,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
           maxStreamErrors: 10, // Threshold before alerting
           dlqStream: CoordinatorService.DLQ_STREAM,
           instanceId: this.config.leaderElection.instanceId,
+          // XCLAIM-FIX: Reduce from default 60s to 30s to match opportunity TTL.
+          // Orphaned opportunity messages older than 30s are stale and unsafe to reprocess.
+          orphanClaimMinIdleMs: 30_000,
         },
         (alert) => this.sendAlert({
           type: alert.type,
@@ -2420,6 +2423,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (this.logger) {
       if (isAuthEnabled()) {
         this.logger.info('API authentication enabled');
+      } else if (process.env.NODE_ENV === 'production') {
+        // MED-3 FIX: Escalate to error in production — unauthenticated production API is a security incident
+        this.logger.error('API authentication NOT configured in PRODUCTION - endpoints are unprotected. Set JWT_SECRET or API_KEYS env vars immediately.');
       } else {
         this.logger.warn('API authentication NOT configured - endpoints are unprotected. Set JWT_SECRET or API_KEYS env vars for production.');
       }

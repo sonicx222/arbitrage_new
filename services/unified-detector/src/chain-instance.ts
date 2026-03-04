@@ -1255,7 +1255,35 @@ export class ChainDetectorInstance extends EventEmitter {
         }
 
         if (adapter) {
-          await adapter.initialize();
+          // MED-1 FIX: Retry adapter initialization with exponential backoff.
+          // RPC endpoints may be transiently unavailable at startup — 3 attempts
+          // with 1s/2s delays handle the common "provider not yet ready" case.
+          const MAX_ADAPTER_RETRIES = 3;
+          let lastAdapterError: Error | null = null;
+          for (let attempt = 0; attempt < MAX_ADAPTER_RETRIES; attempt++) {
+            if (attempt > 0) {
+              await new Promise<void>(resolve => setTimeout(resolve, 1000 * (2 ** (attempt - 1))));
+            }
+            try {
+              await adapter.initialize();
+              lastAdapterError = null;
+              break;
+            } catch (retryError) {
+              lastAdapterError = retryError as Error;
+              if (attempt < MAX_ADAPTER_RETRIES - 1) {
+                this.logger.warn('Vault adapter init attempt failed, retrying', {
+                  dex: dex.name,
+                  chainId: this.chainId,
+                  attempt: attempt + 1,
+                  maxAttempts: MAX_ADAPTER_RETRIES,
+                  error: (retryError as Error).message,
+                });
+              }
+            }
+          }
+          if (lastAdapterError) {
+            throw lastAdapterError; // re-throw to fall into outer catch
+          }
           await registry.register(adapter);
           registeredCount++;
         }
