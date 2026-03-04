@@ -37,7 +37,8 @@ import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
 } from './api';
-import { getMetricsText, updateHealthGauges } from './services/prometheus-metrics';
+import { getMetricsText, updateHealthGauges, initializeGasPriceGauges } from './services/prometheus-metrics';
+import { getSupportedExecutionChains } from '@arbitrage/config';
 // P2 Fix DI-6: Import for stream lag monitoring
 import { getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core/redis';
 
@@ -310,6 +311,10 @@ async function main() {
     const simulationConfig = getSimulationConfigFromEnv();
     const standbyConfig = getStandbyConfigFromEnv();
     const circuitBreakerConfig = getCircuitBreakerConfigFromEnv();
+
+    // RT-008 FIX: Initialize gas_price_gwei gauge to 0 for all configured chains
+    // so the metric appears in /metrics output even before any gas fetches occur.
+    initializeGasPriceGauges(getSupportedExecutionChains());
 
     logger.info('Starting Execution Engine Service', { port: HEALTH_CHECK_PORT });
     logger.debug('Execution engine startup config', {
