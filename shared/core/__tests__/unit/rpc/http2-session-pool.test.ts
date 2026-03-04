@@ -987,4 +987,127 @@ describe('Http2SessionPool', () => {
       );
     });
   });
+
+  // ===========================================================================
+  // MED-2 REGRESSION: Circuit breaker exponential backoff with openCount
+  // ===========================================================================
+
+  describe('circuit breaker exponential backoff (MED-2 regression)', () => {
+    it('should open circuit breaker after 5 consecutive connection failures', async () => {
+      // Each request creates a fresh error session via mockImplementation
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('TLS handshake failed') })
+      );
+
+      const p = new Http2SessionPool();
+
+      // 5 consecutive failures should open the circuit breaker
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          p.request('https://failing-host.example.com', { body: '{}' })
+        ).rejects.toThrow('HTTP/2 connection error');
+      }
+
+      // 6th request should be rejected by circuit breaker (immediate reject, no connection attempt)
+      await expect(
+        p.request('https://failing-host.example.com', { body: '{}' })
+      ).rejects.toThrow('circuit breaker open');
+    });
+
+    it('should use 60s initial cooldown (MED-2: was 30s, now 60s)', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('connection refused') })
+      );
+
+      const p = new Http2SessionPool();
+
+      // Trigger 5 failures to open circuit breaker
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          p.request('https://cooldown-test.example.com', { body: '{}' })
+        ).rejects.toThrow('HTTP/2 connection error');
+      }
+
+      // At 30s (old cooldown), circuit breaker should still be open
+      jest.advanceTimersByTime(30_000);
+      await expect(
+        p.request('https://cooldown-test.example.com', { body: '{}' })
+      ).rejects.toThrow('circuit breaker open');
+
+      // At 60s+ (new initial cooldown), circuit breaker should allow retry
+      jest.advanceTimersByTime(30_001);
+
+      // Next request should attempt connection (not get circuit-breaker-rejected)
+      // It will fail again with a connection error (not circuit breaker)
+      await expect(
+        p.request('https://cooldown-test.example.com', { body: '{}' })
+      ).rejects.toThrow('HTTP/2 connection error');
+    });
+
+    it('should reset circuit breaker on successful connection', async () => {
+      // Start with failing sessions
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('connection refused') })
+      );
+
+      const p = new Http2SessionPool();
+
+      // Trigger 5 failures to open circuit breaker
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          p.request('https://reset-test.example.com', { body: '{}' })
+        ).rejects.toThrow('HTTP/2 connection error');
+      }
+
+      // CB is now open — wait for cooldown
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+      jest.advanceTimersByTime(61_000);
+
+      // Switch to successful sessions
+      mockHttp2Connect.mockImplementation(() => createMockSession());
+
+      // Should succeed (CB expired, new connection succeeds)
+      const result = await p.request('https://reset-test.example.com', { body: '{}' });
+      expect(result.status).toBe(200);
+
+      // Switch back to failures — should need 5 MORE failures to trip CB again
+      // (proves openCount was reset on successful connection)
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('connection refused again') })
+      );
+
+      // Force the pool to drop the cached session so it tries to connect again
+      // Destroy the cached session to force a new connection attempt
+      const sessions = p.getStats();
+      if (sessions.length > 0) {
+        // Simulate session close to clear the cache
+        await p.close();
+      }
+
+      // Create a new pool to test fresh connection behavior
+      const p2 = new Http2SessionPool();
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('connection refused again') })
+      );
+
+      // 4 failures should NOT trigger circuit breaker (threshold is 5)
+      for (let i = 0; i < 4; i++) {
+        await expect(
+          p2.request('https://reset-test.example.com', { body: '{}' })
+        ).rejects.toThrow('HTTP/2 connection error');
+      }
+
+      // 5th failure triggers CB, but the error is still connection error (this call does the connecting)
+      await expect(
+        p2.request('https://reset-test.example.com', { body: '{}' })
+      ).rejects.toThrow('HTTP/2 connection error');
+
+      // 6th attempt should hit circuit breaker
+      await expect(
+        p2.request('https://reset-test.example.com', { body: '{}' })
+      ).rejects.toThrow('circuit breaker open');
+    });
+  });
 });

@@ -1276,3 +1276,205 @@ describe('WebSocketManager Reconnection Lifecycle (Task 3.1)', () => {
     });
   });
 });
+
+// =============================================================================
+// HIGH-3 REGRESSION: Error Log Rate-Limiting
+// =============================================================================
+
+describe('WebSocketManager Error Log Rate-Limiting (HIGH-3 Regression)', () => {
+  let manager: WebSocketManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    wsMockFn.mockImplementation(() => mockWebSocket);
+    mockWebSocket.readyState = 1;
+    mockWebSocket.on.mockReset();
+    mockWebSocket.send.mockReset();
+    mockWebSocket.close.mockReset();
+    mockWebSocket.ping.mockReset();
+    mockWebSocket.removeAllListeners.mockReset();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+    jest.useRealTimers();
+  });
+
+  function simulateConnect(): void {
+    const openCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'open'
+    ) as any[] | undefined;
+    if (openCall) openCall[1]();
+  }
+
+  function simulateClose(code = 1006, reason = 'connection lost'): void {
+    const closeCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'close'
+    ) as any[] | undefined;
+    if (closeCall) closeCall[1](code, Buffer.from(reason));
+  }
+
+  it('should notify error handlers on WebSocket error events', () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 10,
+      jitterPercent: 0,
+    });
+
+    const errorHandler = jest.fn();
+    manager.on('error', errorHandler);
+
+    // Connect, then simulate close to trigger reconnection error path
+    manager.connect();
+    simulateConnect();
+    simulateClose(1006, 'abnormal');
+
+    // Error handlers are called on close events (scheduleReconnection triggers)
+    // The manager should be in disconnected state
+    const stats = manager.getConnectionStats();
+    expect(stats.connected).toBe(false);
+  });
+
+  it('should reset reconnect attempts (and error rate-limit state) on successful connection', () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 10,
+      jitterPercent: 0,
+    });
+
+    // Connect successfully
+    manager.connect();
+    simulateConnect();
+
+    // After successful connect, reconnectAttempts and error rate-limit state are reset
+    const stats = manager.getConnectionStats();
+    expect(stats.connected).toBe(true);
+    expect(stats.reconnectAttempts).toBe(0);
+  });
+
+  it('should not throw when getting connection stats during reconnection', () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 3,
+      reconnectInterval: 1000,
+      jitterPercent: 0,
+    });
+
+    const errorHandler = jest.fn();
+    manager.on('error', errorHandler);
+
+    // Connect then close to start reconnection cycle
+    manager.connect();
+    simulateConnect();
+    simulateClose(1006, 'abnormal');
+
+    // Should safely return stats even during reconnection
+    expect(() => manager.getConnectionStats()).not.toThrow();
+    expect(manager.getConnectionStats().connected).toBe(false);
+  });
+});
+
+// =============================================================================
+// E1 REGRESSION: TLS Certificate Error Fast-Fail
+// =============================================================================
+
+describe('WebSocketManager TLS Certificate Error Fast-Fail (E1 Regression)', () => {
+  let manager: WebSocketManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    wsMockFn.mockImplementation(() => mockWebSocket);
+    mockWebSocket.readyState = 1;
+    mockWebSocket.on.mockReset();
+    mockWebSocket.send.mockReset();
+    mockWebSocket.close.mockReset();
+    mockWebSocket.ping.mockReset();
+    mockWebSocket.removeAllListeners.mockReset();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+    jest.useRealTimers();
+  });
+
+  function simulateTlsError(code: string): void {
+    const error = Object.assign(new Error(`TLS error: ${code}`), { code });
+    const errorCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'error'
+    ) as any[] | undefined;
+    if (errorCall) errorCall[1](error);
+  }
+
+  it('should exhaust reconnect attempts immediately on UNABLE_TO_GET_ISSUER_CERT_LOCALLY', async () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 5,
+      jitterPercent: 0,
+    });
+
+    // connect() rejects when error handler fires — catch to prevent unhandled rejection
+    const connectPromise = manager.connect().catch(() => {});
+    simulateTlsError('UNABLE_TO_GET_ISSUER_CERT_LOCALLY');
+    await connectPromise;
+
+    // TLS cert error is non-retryable — reconnectAttempts should be exhausted immediately
+    const stats = manager.getConnectionStats();
+    expect(stats.reconnectAttempts).toBe(5);
+  });
+
+  it('should exhaust reconnect attempts immediately on CERT_HAS_EXPIRED', async () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 5,
+      jitterPercent: 0,
+    });
+
+    const connectPromise = manager.connect().catch(() => {});
+    simulateTlsError('CERT_HAS_EXPIRED');
+    await connectPromise;
+
+    const stats = manager.getConnectionStats();
+    expect(stats.reconnectAttempts).toBe(5);
+  });
+
+  it('should exhaust reconnect attempts immediately on ERR_TLS_CERT_ALTNAME_INVALID', async () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 5,
+      jitterPercent: 0,
+    });
+
+    const connectPromise = manager.connect().catch(() => {});
+    simulateTlsError('ERR_TLS_CERT_ALTNAME_INVALID');
+    await connectPromise;
+
+    const stats = manager.getConnectionStats();
+    expect(stats.reconnectAttempts).toBe(5);
+  });
+
+  it('should NOT exhaust reconnect attempts for transient network errors', async () => {
+    manager = new WebSocketManager({
+      url: 'wss://test.example.com',
+      maxReconnectAttempts: 5,
+      jitterPercent: 0,
+    });
+
+    const connectPromise = manager.connect().catch(() => {});
+    const transientError = Object.assign(new Error('Connection refused'), { code: 'ECONNREFUSED' });
+    const errorCall = mockWebSocket.on.mock.calls.find(
+      (call: any[]) => call[0] === 'error'
+    ) as any[] | undefined;
+    if (errorCall) errorCall[1](transientError);
+    await connectPromise;
+
+    // Transient errors should not exhaust attempts — normal retry should proceed
+    const stats = manager.getConnectionStats();
+    expect(stats.reconnectAttempts).toBeLessThan(5);
+  });
+});

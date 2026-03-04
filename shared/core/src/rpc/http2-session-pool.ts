@@ -53,6 +53,8 @@ interface SessionEntry {
 /** F3-FIX: Per-origin circuit breaker state to prevent infinite connection retries */
 interface CircuitBreakerEntry {
   consecutiveFailures: number;
+  /** Number of times the circuit has opened for this origin (for exponential backoff) */
+  openCount: number;
   /** Timestamp when the circuit breaker opens (rejects immediately until this time) */
   openUntil: number;
   /** Last time we logged an error for this origin (for log suppression) */
@@ -72,8 +74,10 @@ export class Http2SessionPool {
   /** F3-FIX: Per-origin circuit breaker to prevent connection retry floods */
   private readonly circuitBreakers: Map<string, CircuitBreakerEntry> = new Map();
   private static readonly CB_FAILURE_THRESHOLD = 5;
-  private static readonly CB_INITIAL_COOLDOWN_MS = 30_000;
-  private static readonly CB_MAX_COOLDOWN_MS = 300_000;
+  // MED-2: Exponential backoff per opening: 60s → 2min → 4min → 8min → cap 15min.
+  // Previously 30s initial + 5min cap caused CB to re-open every 60-90s indefinitely.
+  private static readonly CB_INITIAL_COOLDOWN_MS = 60_000;
+  private static readonly CB_MAX_COOLDOWN_MS = 900_000;
   /** Suppress repeated error logs — only log once per 30s per origin */
   private static readonly ERROR_LOG_INTERVAL_MS = 30_000;
 
@@ -184,7 +188,7 @@ export class Http2SessionPool {
 
     const existing = this.sessions.get(origin);
     if (existing && !existing.session.closed && !existing.session.destroyed) {
-      // F3-FIX: Reset circuit breaker on successful session reuse
+      // F3-FIX: Reset circuit breaker (including openCount) on successful session reuse
       if (cb) this.circuitBreakers.delete(origin);
       return existing.session;
     }
@@ -209,7 +213,7 @@ export class Http2SessionPool {
       session.on('connect', () => {
         clearTimeout(connectTimeout);
 
-        // F3-FIX: Reset circuit breaker on successful connection
+        // F3-FIX: Reset circuit breaker (including openCount) on successful connection
         this.circuitBreakers.delete(origin);
 
         const entry: SessionEntry = {
@@ -298,6 +302,7 @@ export class Http2SessionPool {
     const now = Date.now();
     const existing = this.circuitBreakers.get(origin);
     const failures = (existing?.consecutiveFailures ?? 0) + 1;
+    const openCount = existing?.openCount ?? 0;
 
     // Log suppression: only log once per ERROR_LOG_INTERVAL_MS per origin
     const shouldLog = !existing || (now - existing.lastLoggedAt) >= Http2SessionPool.ERROR_LOG_INTERVAL_MS;
@@ -311,15 +316,18 @@ export class Http2SessionPool {
     }
 
     if (failures >= Http2SessionPool.CB_FAILURE_THRESHOLD) {
-      // Exponential backoff: 30s * 2^(cycles-1), max 5min
-      const cycles = Math.floor(failures / Http2SessionPool.CB_FAILURE_THRESHOLD);
+      // MED-2: Exponential backoff per OPENING, not per failure count batch.
+      // Each time the CB opens and the half-open retry fails, openCount increments,
+      // doubling the cooldown: 60s → 2min → 4min → 8min → cap 15min.
+      const nextOpenCount = openCount + 1;
       const cooldownMs = Math.min(
-        Http2SessionPool.CB_INITIAL_COOLDOWN_MS * Math.pow(2, cycles - 1),
+        Http2SessionPool.CB_INITIAL_COOLDOWN_MS * Math.pow(2, nextOpenCount - 1),
         Http2SessionPool.CB_MAX_COOLDOWN_MS
       );
 
       this.circuitBreakers.set(origin, {
         consecutiveFailures: failures,
+        openCount: nextOpenCount,
         openUntil: now + cooldownMs,
         lastLoggedAt: shouldLog ? now : (existing?.lastLoggedAt ?? now),
       });
@@ -329,11 +337,13 @@ export class Http2SessionPool {
           origin,
           cooldownMs,
           consecutiveFailures: failures,
+          openCount: nextOpenCount,
         });
       }
     } else {
       this.circuitBreakers.set(origin, {
         consecutiveFailures: failures,
+        openCount,
         openUntil: 0,
         lastLoggedAt: shouldLog ? now : (existing?.lastLoggedAt ?? now),
       });

@@ -1138,7 +1138,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const isHighThroughput = groupConfig.streamName === RedisStreams.OPPORTUNITIES
         || groupConfig.streamName === RedisStreams.PRICE_UPDATES;
       const batchSize = isHighThroughput ? 200 : 10;
-      const blockMs = isHighThroughput ? 200 : 100;
+      // LATENCY: Opportunities stream uses 20ms blocking read to minimize detection-to-dispatch
+      // latency toward the <50ms hot-path target. Price-updates use 200ms (high-throughput,
+      // coordinator doesn't dispatch on them directly so higher polling latency is acceptable).
+      const blockMs = groupConfig.streamName === RedisStreams.OPPORTUNITIES ? 20
+        : isHighThroughput ? 200 : 100;
       // OPT-1: For opportunities stream, use batch handler for dedup + TTL priority.
       // RT-001: For price-updates stream, use batch handler to reduce per-message overhead.
       // Batch mode bypasses the per-message handler; autoAck: true lets StreamConsumer

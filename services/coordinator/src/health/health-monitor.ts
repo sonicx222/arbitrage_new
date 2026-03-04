@@ -507,9 +507,16 @@ export class HealthMonitor {
     let activeServices = 0;
     let totalMemory = 0;
     let totalLatency = 0;
+    // MED-6: Track operational services (executors + detectors) separately.
+    // The coordinator's own health entry must not inflate systemHealth — it is
+    // not an operational service for trading purposes. This aligns systemHealth
+    // with the degradation level triggers in evaluateDegradationLevel().
+    let operationalActive = 0;
+    let operationalTotal = 0;
+    const { executionEngine, detectorPattern } = this.config.servicePatterns;
 
-    for (const health of serviceHealth.values()) {
-      // Count healthy services
+    for (const [name, health] of serviceHealth.entries()) {
+      // Count ALL healthy services (for metrics.activeServices informational count)
       if (health.status === 'healthy') {
         activeServices++;
       }
@@ -519,10 +526,21 @@ export class HealthMonitor {
       // Calculate latency - use explicit if available, else from heartbeat
       const latency = health.latency ?? (health.lastHeartbeat ? now - health.lastHeartbeat : 0);
       totalLatency += latency;
+
+      // Count only operational services for systemHealth percentage
+      const isOperational = name === executionEngine || name.includes(detectorPattern);
+      if (isOperational) {
+        operationalTotal++;
+        if (health.status === 'healthy') operationalActive++;
+      }
     }
 
     const totalServices = Math.max(serviceHealth.size, 1);
-    const systemHealth = (activeServices / totalServices) * 100;
+    // MED-5: Round to 1 decimal. MED-6: Use operational services only so that
+    // a coordinator-only startup shows 0% (consistent with READ_ONLY degradation).
+    const systemHealth = Math.round(
+      (operationalActive / Math.max(operationalTotal, 1)) * 100 * 10
+    ) / 10;
     const avgMemory = totalMemory / totalServices;
     const avgLatency = totalLatency / totalServices;
 

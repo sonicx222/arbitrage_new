@@ -827,15 +827,16 @@ describe('HealthMonitor', () => {
       expect(metrics.activeServices).toBe(2);
     });
 
-    it('should calculate systemHealth as percentage of healthy services', () => {
+    it('should calculate systemHealth as percentage of healthy operational services', () => {
       const metrics = createEmptyMetrics();
       const serviceMap = new Map<string, ServiceHealth>();
-      serviceMap.set('s1', createServiceHealth({ status: 'healthy' }));
-      serviceMap.set('s2', createServiceHealth({ status: 'unhealthy' }));
+      // MED-6: systemHealth uses operational service names (detector/execution-engine)
+      serviceMap.set('detector-1', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('detector-2', createServiceHealth({ status: 'unhealthy' }));
 
       monitor.updateMetrics(serviceMap, metrics);
 
-      // 1 healthy out of 2 = 50%
+      // 1 healthy out of 2 operational = 50%
       expect(metrics.systemHealth).toBe(50);
     });
 
@@ -934,7 +935,8 @@ describe('HealthMonitor', () => {
     it('should mutate the metrics object in place', () => {
       const metrics = createEmptyMetrics();
       const serviceMap = new Map<string, ServiceHealth>();
-      serviceMap.set('s1', createServiceHealth({ status: 'healthy', memoryUsage: 200 }));
+      // MED-6: use an operational service name so systemHealth counts it
+      serviceMap.set('detector-1', createServiceHealth({ status: 'healthy', memoryUsage: 200 }));
 
       monitor.updateMetrics(serviceMap, metrics);
 
@@ -944,12 +946,13 @@ describe('HealthMonitor', () => {
       expect(metrics.averageMemory).toBe(200);
     });
 
-    it('should calculate 100% systemHealth when all services are healthy', () => {
+    it('should calculate 100% systemHealth when all operational services are healthy', () => {
       const metrics = createEmptyMetrics();
       const serviceMap = new Map<string, ServiceHealth>();
-      serviceMap.set('s1', createServiceHealth({ status: 'healthy' }));
-      serviceMap.set('s2', createServiceHealth({ status: 'healthy' }));
-      serviceMap.set('s3', createServiceHealth({ status: 'healthy' }));
+      // MED-6: use operational service names (executor + detectors)
+      serviceMap.set('detector-1', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('detector-2', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('execution-engine', createServiceHealth({ status: 'healthy' }));
 
       monitor.updateMetrics(serviceMap, metrics);
 
@@ -1927,6 +1930,94 @@ describe('HealthMonitor', () => {
       expect(DegradationLevel[2]).toBe('DETECTION_ONLY');
       expect(DegradationLevel[3]).toBe('READ_ONLY');
       expect(DegradationLevel[4]).toBe('COMPLETE_OUTAGE');
+    });
+  });
+
+  // ===========================================================================
+  // MED-5 / MED-6 REGRESSION: systemHealth operational services + rounding
+  // ===========================================================================
+
+  describe('systemHealth operational services and rounding (MED-5/MED-6 regression)', () => {
+    it('should exclude non-operational services from systemHealth calculation', () => {
+      const metrics = createEmptyMetrics();
+      const serviceMap = new Map<string, ServiceHealth>();
+      // Coordinator is not an operational service — should NOT affect systemHealth
+      serviceMap.set('coordinator', createServiceHealth({ status: 'healthy' }));
+      // Detectors and execution-engine ARE operational
+      serviceMap.set('detector-1', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('execution-engine', createServiceHealth({ status: 'unhealthy' }));
+
+      monitor.updateMetrics(serviceMap, metrics);
+
+      // 1 healthy operational (detector-1) out of 2 operational (detector-1, execution-engine) = 50%
+      // Coordinator healthy but not counted in systemHealth
+      expect(metrics.systemHealth).toBe(50);
+      // activeServices still counts all healthy services (coordinator + detector-1)
+      expect(metrics.activeServices).toBe(2);
+    });
+
+    it('should return 0% systemHealth when only coordinator is running', () => {
+      const metrics = createEmptyMetrics();
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('coordinator', createServiceHealth({ status: 'healthy' }));
+
+      monitor.updateMetrics(serviceMap, metrics);
+
+      // No operational services → 0% (consistent with READ_ONLY degradation)
+      expect(metrics.systemHealth).toBe(0);
+    });
+
+    it('should round systemHealth to 1 decimal place (MED-5)', () => {
+      const metrics = createEmptyMetrics();
+      const serviceMap = new Map<string, ServiceHealth>();
+      // 1 healthy out of 3 operational = 33.333...%
+      serviceMap.set('detector-1', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('detector-2', createServiceHealth({ status: 'unhealthy' }));
+      serviceMap.set('execution-engine', createServiceHealth({ status: 'unhealthy' }));
+
+      monitor.updateMetrics(serviceMap, metrics);
+
+      // Should be 33.3 (rounded to 1 decimal), not 33.333333...
+      expect(metrics.systemHealth).toBe(33.3);
+    });
+
+    it('should round 2 of 7 operational healthy to 28.6% not 28.571428...', () => {
+      const metrics = createEmptyMetrics();
+      const serviceMap = new Map<string, ServiceHealth>();
+      serviceMap.set('detector-1', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('detector-2', createServiceHealth({ status: 'healthy' }));
+      serviceMap.set('detector-3', createServiceHealth({ status: 'unhealthy' }));
+      serviceMap.set('detector-4', createServiceHealth({ status: 'unhealthy' }));
+      serviceMap.set('detector-5', createServiceHealth({ status: 'unhealthy' }));
+      serviceMap.set('detector-6', createServiceHealth({ status: 'unhealthy' }));
+      serviceMap.set('execution-engine', createServiceHealth({ status: 'unhealthy' }));
+
+      monitor.updateMetrics(serviceMap, metrics);
+
+      expect(metrics.systemHealth).toBe(28.6);
+    });
+
+    it('should respect custom servicePatterns for operational service detection', () => {
+      const customMonitor = new HealthMonitor(mockLogger, mockOnAlert, {
+        servicePatterns: {
+          executionEngine: 'custom-exec',
+          detectorPattern: 'scanner',
+        },
+      });
+
+      const metrics = createEmptyMetrics();
+      const serviceMap = new Map<string, ServiceHealth>();
+      // 'execution-engine' is NOT operational with custom patterns
+      serviceMap.set('execution-engine', createServiceHealth({ status: 'healthy' }));
+      // 'custom-exec' IS operational with custom patterns
+      serviceMap.set('custom-exec', createServiceHealth({ status: 'healthy' }));
+      // 'scanner-1' matches detectorPattern 'scanner'
+      serviceMap.set('scanner-1', createServiceHealth({ status: 'unhealthy' }));
+
+      customMonitor.updateMetrics(serviceMap, metrics);
+
+      // 1 healthy operational (custom-exec) out of 2 operational (custom-exec, scanner-1) = 50%
+      expect(metrics.systemHealth).toBe(50);
     });
   });
 });

@@ -128,6 +128,12 @@ export class WebSocketManager {
   private static readonly RECOVERY_QUIET_THRESHOLD = 5;
   /** Absolute cap on recovery cycles to prevent infinite reconnection loops */
   private static readonly MAX_RECOVERY_CYCLES = 20;
+  // HIGH-3: Rate-limit reconnection error logs. First failure logs full detail;
+  // subsequent failures within 60s are counted silently. When the interval
+  // expires, the next failure logs a summary ("N attempts in last 60s") + detail.
+  private lastReconnectErrorLoggedAt = 0;
+  private suppressedReconnectErrors = 0;
+  private static readonly RECONNECT_ERROR_LOG_INTERVAL_MS = 60_000;
   private isConnecting = false;
   private isConnected = false;
   // P2-FIX: Track if reconnection is actively in progress to prevent overlapping attempts
@@ -456,6 +462,9 @@ export class WebSocketManager {
           this.isConnected = true;
           this.reconnectAttempts = 0;
           this.recoveryCycles = 0; // P3 Fix F-6: Reset recovery cycles on successful connection
+          // HIGH-3: Reset error rate-limit state so the next error cycle logs immediately
+          this.lastReconnectErrorLoggedAt = 0;
+          this.suppressedReconnectErrors = 0;
 
           // CQ8-ALT: Track connection metrics via health tracker
           this.healthTracker.onConnected();
@@ -496,8 +505,37 @@ export class WebSocketManager {
 
         this.ws.on('error', (error) => {
           this.clearConnectionTimeout();
-          this.logger.error('WebSocket error', { error });
           this.isConnecting = false;
+          // HIGH-3: Rate-limit error logs. First failure: full detail.
+          // Subsequent failures within 60s: suppressed (count only).
+          // At interval expiry: summary + full detail of next failure.
+          const nowErr = Date.now();
+          const firstError = this.lastReconnectErrorLoggedAt === 0;
+          const intervalExpired = (nowErr - this.lastReconnectErrorLoggedAt) >= WebSocketManager.RECONNECT_ERROR_LOG_INTERVAL_MS;
+          if (firstError || intervalExpired) {
+            if (this.suppressedReconnectErrors > 0) {
+              this.logger.warn(`WebSocket reconnection still failing: ${this.suppressedReconnectErrors} attempts suppressed in last 60s`, {
+                chainId: this.chainId,
+              });
+              this.suppressedReconnectErrors = 0;
+            }
+            this.logger.error('WebSocket error', { error });
+            this.lastReconnectErrorLoggedAt = nowErr;
+          } else {
+            this.suppressedReconnectErrors++;
+          }
+
+          // E1-FIX: TLS certificate errors are non-retryable — the cert won't change.
+          // Immediately exhaust reconnect attempts so scheduleReconnection() takes the
+          // "max attempts reached" path on the next call, skipping 30-40s of futile retries.
+          if (this.isTlsCertificateError(error)) {
+            const tlsCode = (error as NodeJS.ErrnoException).code ?? 'TLS_ERROR';
+            this.logger.warn('TLS certificate error — fast-failing reconnection (non-retryable)', {
+              chainId: this.chainId,
+              code: tlsCode,
+            });
+            this.reconnectAttempts = this.config.maxReconnectAttempts ?? 10;
+          }
 
           // CQ8-ALT: Classify error and apply appropriate handling
           if (this.rotationStrategy.isAuthError(error)) {
@@ -1588,7 +1626,9 @@ export class WebSocketManager {
         this.isReconnecting = false;
       } catch (error) {
         this.isReconnecting = false;
-        this.logger.error(`Reconnection to ${maskUrlApiKeys(this.getCurrentUrl())} failed`, { error });
+        // HIGH-3: WebSocket error handler already rate-limits the error log when
+        // the failure came from ws.on('error'). Use debug here to avoid double-logging.
+        this.logger.debug(`Reconnection to ${maskUrlApiKeys(this.getCurrentUrl())} failed`, { error });
 
         // P2-FIX: Only schedule next attempt if not disconnected
         if (!this.isDisconnected) {
@@ -1596,6 +1636,39 @@ export class WebSocketManager {
         }
       }
     }, delay);
+  }
+
+  /**
+   * E1-FIX: Detect non-retryable TLS certificate errors.
+   *
+   * These errors are deterministic — retrying the same URL will always produce
+   * the same failure because the certificate problem is server-side.
+   * Fast-failing prevents 30-40s of futile retry cycles on startup.
+   *
+   * NOT classified as TLS: network timeouts, connection refused, DNS failures —
+   * those are transient and should use the normal retry logic.
+   */
+  private isTlsCertificateError(error: unknown): boolean {
+    if (!error) return false;
+
+    const code = (error as NodeJS.ErrnoException).code ?? '';
+    const message = ((error as Error).message ?? '').toLowerCase();
+
+    // Node.js TLS error codes that are permanently non-retryable
+    const tlsCodes = [
+      'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',   // Untrusted CA (e.g. corporate proxy, self-signed)
+      'CERT_HAS_EXPIRED',                     // Certificate past its notAfter date
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',      // Cannot verify leaf cert signature
+      'ERR_TLS_CERT_ALTNAME_INVALID',         // Hostname mismatch in SAN/CN
+      'SELF_SIGNED_CERT_IN_CHAIN',            // Self-signed cert in chain
+      'DEPTH_ZERO_SELF_SIGNED_CERT',          // Root is self-signed
+    ];
+
+    if (tlsCodes.includes(code)) return true;
+
+    // Fallback: message-based detection when error has no .code property
+    const tlsPatterns = ['certificate', 'self signed', 'unable to get issuer cert', 'cert altname'];
+    return tlsPatterns.some(pattern => message.includes(pattern));
   }
 
   private startHeartbeat(): void {
