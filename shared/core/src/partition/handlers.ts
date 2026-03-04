@@ -12,6 +12,8 @@ import { Server } from 'http';
 import { parentPort } from 'worker_threads';
 import { createLogger } from '../logger';
 import { setupParentPortListener } from '../async/lifecycle-utils';
+// LOG-OPT Fix 4: Token-bucket sampler for high-frequency debug events
+import { LogSampler } from '../logging/log-sampler';
 import type { PartitionDetectorInterface } from './config';
 import { shutdownPartitionService } from './health-server';
 
@@ -45,16 +47,27 @@ export function setupDetectorEventHandlers(
   logger: ReturnType<typeof createLogger>,
   partitionId: string
 ): DetectorEventHandlerCleanup {
+  // LOG-OPT Fix 2: Child logger with partition binding — eliminates per-call `partition` field
+  const pLog = logger.child({ partition: partitionId });
+
   // FIX #20: Pre-compute debug flag ONCE to avoid per-event evaluation overhead.
   // priceUpdate events fire 1000+/sec - this eliminates method call + nullish coalescing per event.
-  const debugEnabled = logger.isLevelEnabled?.('debug') ?? logger.level === 'debug';
+  // Uses pLog (child logger) which inherits the same level as parent.
+  const debugEnabled = pLog.isLevelEnabled?.('debug') ?? pLog.level === 'debug';
+
+  // LOG-OPT Fix 4: Token-bucket sampler for high-frequency debug events.
+  // At LOG_LEVEL=debug, price updates fire 1000+/sec — sampler caps output at 100/sec
+  // with 1% probabilistic sampling beyond the cap, making debug logs usable for live analysis.
+  const sampler = new LogSampler({
+    maxPerSec: parseInt(process.env.LOG_SAMPLE_MAX_PER_SEC ?? '100', 10),
+    sampleRate: parseFloat(process.env.LOG_SAMPLE_RATE ?? '0.01'),
+  });
 
   // FIX #9: Store handler references for cleanup (same pattern as setupProcessHandlers)
   const priceUpdateHandler = (update: { chain: string; dex: string; price: number }) => {
-    // Only create log object if debug level is enabled
-    if (debugEnabled) {
-      logger.debug('Price update', {
-        partition: partitionId,
+    // LOG-OPT Fix 4: Only log if debug enabled AND sampler allows it
+    if (debugEnabled && sampler.shouldLog('price-update')) {
+      pLog.debug('Price update', {
         chain: update.chain,
         dex: update.dex,
         price: update.price
@@ -73,30 +86,33 @@ export function setupDetectorEventHandlers(
     // P2-1 FIX: Reduced from INFO to DEBUG. At ~18k opportunities per 10min,
     // INFO-level logging generates ~4,000 lines/sec. Partition-level summaries
     // (aggregated counts) remain at INFO for operational visibility.
-    logger.debug('Arbitrage opportunity detected', {
-      partition: partitionId,
-      id: opp.id,
-      type: opp.type,
-      buyDex: opp.buyDex,
-      sellDex: opp.sellDex,
-      profit: opp.expectedProfit,
-      percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
-    });
+    // LOG-OPT Fix 1: Guard with debugEnabled to prevent V8 object literal allocation at ~30/sec
+    if (debugEnabled) {
+      pLog.debug('Arbitrage opportunity detected', {
+        id: opp.id,
+        type: opp.type,
+        buyDex: opp.buyDex,
+        sellDex: opp.sellDex,
+        profit: opp.expectedProfit,
+        percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
+      });
+    }
   };
 
+  // LOG-OPT Fix 3: Static strings + structured chainId field (no template literals)
   const chainErrorHandler = ({ chainId, error }: { chainId: string; error: Error }) => {
-    logger.error(`Chain error: ${chainId}`, {
-      partition: partitionId,
+    pLog.error('Chain error', {
+      chainId,
       error: error.message
     });
   };
 
   const chainConnectedHandler = ({ chainId }: { chainId: string }) => {
-    logger.info(`Chain connected: ${chainId}`, { partition: partitionId });
+    pLog.info('Chain connected', { chainId });
   };
 
   const chainDisconnectedHandler = ({ chainId }: { chainId: string }) => {
-    logger.warn(`Chain disconnected: ${chainId}`, { partition: partitionId });
+    pLog.warn('Chain disconnected', { chainId });
   };
 
   // FIX: Handle statusChange event emitted by UnifiedChainDetector's chainInstanceManager
@@ -110,22 +126,25 @@ export function setupDetectorEventHandlers(
     const isDegradation = newStatus === 'error' || newStatus === 'disconnected';
 
     if (isDegradation) {
-      logger.warn(`Chain status degraded: ${chainId}`, {
-        partition: partitionId,
+      // LOG-OPT Fix 3: Static string + structured fields
+      pLog.warn('Chain status degraded', {
+        chainId,
         from: oldStatus,
         to: newStatus
       });
     } else if (isRecovery) {
-      logger.info(`Chain status recovered: ${chainId}`, {
-        partition: partitionId,
+      // LOG-OPT Fix 3: Static string + structured fields
+      pLog.info('Chain status recovered', {
+        chainId,
         from: oldStatus,
         to: newStatus
       });
     } else {
       // FIX 10.3: Conditional debug logging for status changes
       if (debugEnabled) {
-        logger.debug(`Chain status changed: ${chainId}`, {
-          partition: partitionId,
+        // LOG-OPT Fix 3: Static string + structured fields
+        pLog.debug('Chain status changed', {
+          chainId,
           from: oldStatus,
           to: newStatus
         });
@@ -134,7 +153,7 @@ export function setupDetectorEventHandlers(
   };
 
   const failoverEventHandler = (event: unknown) => {
-    logger.warn('Failover event received', { partition: partitionId, ...event as object });
+    pLog.warn('Failover event received', { ...event as object });
   };
 
   // Register all handlers

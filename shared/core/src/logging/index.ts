@@ -46,6 +46,10 @@ export {
 } from './otel-transport';
 export type { OtelTransportConfig } from './otel-transport';
 
+// Log sampling (Issue H: high-frequency debug event rate limiting)
+export { LogSampler } from './log-sampler';
+export type { LogSamplerConfig } from './log-sampler';
+
 // Testing implementations
 export {
   RecordingLogger,

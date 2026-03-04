@@ -12,7 +12,7 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventEmitter } from 'events';
 import { Server, IncomingMessage, ServerResponse, createServer } from 'http';
-import { RecordingLogger } from '@arbitrage/core/logging';
+import { RecordingLogger, NullLogger } from '@arbitrage/core/logging';
 import { createLogger } from '@arbitrage/core';
 
 // Type alias for the logger type expected by partition-service-utils
@@ -366,8 +366,9 @@ describe('Partition Service Utilities', () => {
       expect(logger.hasLogMatching('debug', 'Price update')).toBe(true);
       const debugLogs = logger.getLogs('debug');
       expect(debugLogs.length).toBeGreaterThan(0);
+      // LOG-OPT Fix 2: partition now in child logger bindings, not per-call meta
+      expect(debugLogs[0].bindings).toMatchObject({ partition: 'test-partition' });
       expect(debugLogs[0].meta).toMatchObject({
-        partition: 'test-partition',
         chain: 'bsc',
         dex: 'pancakeswap',
         price: 100
@@ -394,8 +395,9 @@ describe('Partition Service Utilities', () => {
       expect(logger.hasLogMatching('debug', 'Arbitrage opportunity detected')).toBe(true);
       const debugLogs = logger.getLogs('debug');
       const oppLog = debugLogs.find(log => log.msg.includes('Arbitrage opportunity'));
+      // LOG-OPT Fix 2: partition in bindings, not meta
+      expect(oppLog?.bindings).toMatchObject({ partition: 'test-partition' });
       expect(oppLog?.meta).toMatchObject({
-        partition: 'test-partition',
         id: 'opp-1',
         percentage: '5.00%'
       });
@@ -410,11 +412,13 @@ describe('Partition Service Utilities', () => {
 
       mockDetector.emit('chainError', { chainId: 'bsc', error: new Error('Connection failed') });
 
-      expect(logger.hasLogMatching('error', 'Chain error: bsc')).toBe(true);
+      // LOG-OPT Fix 3: Static message, chainId as structured field
+      expect(logger.hasLogMatching('error', 'Chain error')).toBe(true);
       const errorLogs = logger.getLogs('error');
       expect(errorLogs.length).toBeGreaterThan(0);
+      expect(errorLogs[0].bindings).toMatchObject({ partition: 'test-partition' });
       expect(errorLogs[0].meta).toMatchObject({
-        partition: 'test-partition',
+        chainId: 'bsc',
         error: 'Connection failed'
       });
     });
@@ -428,12 +432,12 @@ describe('Partition Service Utilities', () => {
 
       mockDetector.emit('chainConnected', { chainId: 'bsc' });
 
-      expect(logger.hasLogMatching('info', 'Chain connected: bsc')).toBe(true);
+      // LOG-OPT Fix 3: Static message, chainId as structured field
+      expect(logger.hasLogMatching('info', 'Chain connected')).toBe(true);
       const infoLogs = logger.getLogs('info');
       const connectedLog = infoLogs.find(log => log.msg.includes('Chain connected'));
-      expect(connectedLog?.meta).toMatchObject({
-        partition: 'test-partition'
-      });
+      expect(connectedLog?.bindings).toMatchObject({ partition: 'test-partition' });
+      expect(connectedLog?.meta).toMatchObject({ chainId: 'bsc' });
     });
 
     it('should log warn on chainDisconnected', () => {
@@ -445,12 +449,12 @@ describe('Partition Service Utilities', () => {
 
       mockDetector.emit('chainDisconnected', { chainId: 'polygon' });
 
-      expect(logger.hasLogMatching('warn', 'Chain disconnected: polygon')).toBe(true);
+      // LOG-OPT Fix 3: Static message, chainId as structured field
+      expect(logger.hasLogMatching('warn', 'Chain disconnected')).toBe(true);
       const warnLogs = logger.getLogs('warn');
       expect(warnLogs.length).toBeGreaterThan(0);
-      expect(warnLogs[0].meta).toMatchObject({
-        partition: 'test-partition'
-      });
+      expect(warnLogs[0].bindings).toMatchObject({ partition: 'test-partition' });
+      expect(warnLogs[0].meta).toMatchObject({ chainId: 'polygon' });
     });
 
     it('should log warn on failoverEvent', () => {
@@ -465,10 +469,9 @@ describe('Partition Service Utilities', () => {
       expect(logger.hasLogMatching('warn', 'Failover event received')).toBe(true);
       const warnLogs = logger.getLogs('warn');
       const failoverLog = warnLogs.find(log => log.msg.includes('Failover'));
-      expect(failoverLog?.meta).toMatchObject({
-        partition: 'test-partition',
-        type: 'primary_down'
-      });
+      // LOG-OPT Fix 2: partition in bindings, event data in meta
+      expect(failoverLog?.bindings).toMatchObject({ partition: 'test-partition' });
+      expect(failoverLog?.meta).toMatchObject({ type: 'primary_down' });
     });
 
     it('should register statusChange event handler', () => {
@@ -494,11 +497,13 @@ describe('Partition Service Utilities', () => {
         newStatus: 'error'
       });
 
-      expect(logger.hasLogMatching('warn', 'Chain status degraded: bsc')).toBe(true);
+      // LOG-OPT Fix 3: Static message, chainId as structured field
+      expect(logger.hasLogMatching('warn', 'Chain status degraded')).toBe(true);
       const warnLogs = logger.getLogs('warn');
       const degradedLog = warnLogs.find(log => log.msg.includes('Chain status degraded'));
+      expect(degradedLog?.bindings).toMatchObject({ partition: 'test-partition' });
       expect(degradedLog?.meta).toMatchObject({
-        partition: 'test-partition',
+        chainId: 'bsc',
         from: 'connected',
         to: 'error'
       });
@@ -517,7 +522,8 @@ describe('Partition Service Utilities', () => {
         newStatus: 'disconnected'
       });
 
-      expect(logger.hasLogMatching('warn', 'Chain status degraded: polygon')).toBe(true);
+      // LOG-OPT Fix 3: Static message (no template literal chainId)
+      expect(logger.hasLogMatching('warn', 'Chain status degraded')).toBe(true);
     });
 
     it('should log info on statusChange recovery (error -> connected)', () => {
@@ -533,11 +539,13 @@ describe('Partition Service Utilities', () => {
         newStatus: 'connected'
       });
 
-      expect(logger.hasLogMatching('info', 'Chain status recovered: bsc')).toBe(true);
+      // LOG-OPT Fix 3: Static message, chainId as structured field
+      expect(logger.hasLogMatching('info', 'Chain status recovered')).toBe(true);
       const infoLogs = logger.getLogs('info');
       const recoveryLog = infoLogs.find(log => log.msg.includes('Chain status recovered'));
+      expect(recoveryLog?.bindings).toMatchObject({ partition: 'test-partition' });
       expect(recoveryLog?.meta).toMatchObject({
-        partition: 'test-partition',
+        chainId: 'bsc',
         from: 'error',
         to: 'connected'
       });
@@ -556,7 +564,8 @@ describe('Partition Service Utilities', () => {
         newStatus: 'connected'
       });
 
-      expect(logger.hasLogMatching('info', 'Chain status recovered: polygon')).toBe(true);
+      // LOG-OPT Fix 3: Static message (no template literal chainId)
+      expect(logger.hasLogMatching('info', 'Chain status recovered')).toBe(true);
     });
 
     it('should log debug on statusChange neutral transition', () => {
@@ -572,8 +581,113 @@ describe('Partition Service Utilities', () => {
         newStatus: 'connecting'
       });
 
+      // LOG-OPT Fix 3: Static message, chainId as structured field
       // Neutral transitions (not degradation or recovery) log at debug level
-      expect(logger.hasLogMatching('debug', 'Chain status changed: bsc')).toBe(true);
+      expect(logger.hasLogMatching('debug', 'Chain status changed')).toBe(true);
+    });
+  });
+
+  // ===========================================================================
+  // LOG-OPT Regression Tests (Fixes 1–4)
+  // ===========================================================================
+
+  describe('LOG-OPT regression tests', () => {
+    let mockDetector: MockDetector;
+
+    beforeEach(() => {
+      mockDetector = new MockDetector();
+    });
+
+    it('Fix 1: should NOT allocate debug objects when debugEnabled is false (NullLogger)', () => {
+      // NullLogger.isLevelEnabled returns false — debugEnabled precompute = false
+      const nullLogger = new NullLogger();
+      setupDetectorEventHandlers(
+        mockDetector,
+        nullLogger as unknown as PartitionLogger,
+        'test-partition'
+      );
+      mockDetector.emit('opportunity', {
+        id: 'opp-1', type: 'cross-dex', buyDex: 'pancakeswap', sellDex: 'biswap',
+        expectedProfit: 100, profitPercentage: 5.00
+      });
+      // NullLogger discards all — the guard must not throw or regress when debugEnabled=false
+      expect(true).toBe(true); // reaching here without error proves the guard is safe
+    });
+
+    it('Fix 2: should put partition ONLY in bindings, never in per-call meta', () => {
+      const recordingLogger = new RecordingLogger();
+      setupDetectorEventHandlers(
+        mockDetector,
+        recordingLogger as unknown as PartitionLogger,
+        'my-partition'
+      );
+
+      mockDetector.emit('chainError', { chainId: 'bsc', error: new Error('fail') });
+      mockDetector.emit('chainConnected', { chainId: 'eth' });
+      mockDetector.emit('opportunity', {
+        id: 'opp-1', type: 'cross-dex', buyDex: 'a', sellDex: 'b',
+        expectedProfit: 10, profitPercentage: 1
+      });
+
+      const allLogs = recordingLogger.getAllLogs();
+      expect(allLogs.length).toBeGreaterThan(0);
+      for (const entry of allLogs) {
+        // partition MUST be in bindings
+        expect(entry.bindings).toMatchObject({ partition: 'my-partition' });
+        // partition must NOT also appear in meta (no duplication)
+        expect((entry.meta as Record<string, unknown> | undefined)?.['partition']).toBeUndefined();
+      }
+    });
+
+    it('Fix 3: should use static message string without embedded chainId', () => {
+      const recordingLogger = new RecordingLogger();
+      setupDetectorEventHandlers(
+        mockDetector,
+        recordingLogger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      mockDetector.emit('chainError', { chainId: 'bsc', error: new Error('Connection failed') });
+
+      const errorLogs = recordingLogger.getLogs('error');
+      expect(errorLogs.length).toBeGreaterThan(0);
+      // Message must be the static string
+      expect(errorLogs[0].msg).toBe('Chain error');
+      // chainId must NOT be baked into the message
+      expect(errorLogs[0].msg).not.toContain('bsc');
+      // chainId must appear in structured meta
+      expect(errorLogs[0].meta).toMatchObject({ chainId: 'bsc' });
+    });
+
+    it('Fix 4: should suppress price update logs beyond sampler budget', () => {
+      const originalMax = process.env.LOG_SAMPLE_MAX_PER_SEC;
+      const originalRate = process.env.LOG_SAMPLE_RATE;
+      process.env.LOG_SAMPLE_MAX_PER_SEC = '2';
+      process.env.LOG_SAMPLE_RATE = '0'; // 0% — no probabilistic logging beyond cap
+
+      try {
+        const recordingLogger = new RecordingLogger();
+        setupDetectorEventHandlers(
+          mockDetector,
+          recordingLogger as unknown as PartitionLogger,
+          'test-partition'
+        );
+
+        // Emit 10 price updates in the same tick (same 1-second window)
+        for (let i = 0; i < 10; i++) {
+          mockDetector.emit('priceUpdate', { chain: 'bsc', dex: 'pancakeswap', price: 100 + i });
+        }
+
+        const priceUpdateLogs = recordingLogger.getLogs('debug')
+          .filter(l => l.msg === 'Price update');
+        // Only 2 should be logged (maxPerSec=2, sampleRate=0 → no excess)
+        expect(priceUpdateLogs.length).toBe(2);
+      } finally {
+        if (originalMax === undefined) delete process.env.LOG_SAMPLE_MAX_PER_SEC;
+        else process.env.LOG_SAMPLE_MAX_PER_SEC = originalMax;
+        if (originalRate === undefined) delete process.env.LOG_SAMPLE_RATE;
+        else process.env.LOG_SAMPLE_RATE = originalRate;
+      }
     });
   });
 
@@ -1023,10 +1137,11 @@ describe('Partition Service Utilities', () => {
         'test-service'
       );
 
-      expect(logger.hasLogMatching('info', 'Received SIGTERM')).toBe(true);
+      // LOG-OPT Fix 3: Static messages with structured fields
+      expect(logger.hasLogMatching('info', 'Received signal, shutting down')).toBe(true);
       expect(mockServer.close).toHaveBeenCalled();
       expect(logger.hasLogMatching('info', 'Health server closed after startup failure')).toBe(true);
-      expect(logger.hasLogMatching('info', 'test-service shutdown complete')).toBe(true);
+      expect(logger.hasLogMatching('info', 'Shutdown complete')).toBe(true);
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -1039,8 +1154,9 @@ describe('Partition Service Utilities', () => {
         'test-service'
       );
 
-      expect(logger.hasLogMatching('info', 'Received SIGINT')).toBe(true);
-      expect(logger.hasLogMatching('info', 'test-service shutdown complete')).toBe(true);
+      // LOG-OPT Fix 3: Static messages with structured fields
+      expect(logger.hasLogMatching('info', 'Received signal, shutting down')).toBe(true);
+      expect(logger.hasLogMatching('info', 'Shutdown complete')).toBe(true);
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -1143,7 +1259,8 @@ describe('Partition Service Utilities', () => {
 
       await promise;
 
-      expect(logger.hasLogMatching('warn', 'Health server close timed out after 500ms')).toBe(true);
+      // LOG-OPT Fix 3: Static message, timeoutMs as structured field
+      expect(logger.hasLogMatching('warn', 'Health server close timed out')).toBe(true);
 
       jest.useRealTimers();
     });

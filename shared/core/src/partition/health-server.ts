@@ -353,7 +353,8 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   server.listen(port, bindAddress, () => {
     // P0-2 FIX: Promote bind confirmation from debug to info level so operators
     // can verify the server actually bound (previously invisible at default log level)
-    logger.info(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
+    // LOG-OPT Fix 3: Static string + structured fields
+    logger.info('Health server listening', { serviceName: config.serviceName, bindAddress, port });
   });
 
   // CRITICAL-FIX: Handle fatal server errors appropriately
@@ -446,7 +447,8 @@ export async function closeServerWithTimeout(
 
     const timeout = setTimeout(() => {
       if (logger) {
-        logger.warn(`Health server close timed out after ${timeoutMs}ms`);
+        // LOG-OPT Fix 3: Static string + structured fields
+        logger.warn('Health server close timed out', { timeoutMs });
       }
       safeResolve();
     }, timeoutMs);
@@ -484,7 +486,8 @@ export async function shutdownPartitionService(
   logger: ReturnType<typeof createLogger>,
   serviceName: string
 ): Promise<void> {
-  logger.info(`Received ${signal}, shutting down ${serviceName}...`);
+  // LOG-OPT Fix 3: Static string + structured fields
+  logger.info('Received signal, shutting down', { signal, serviceName });
 
   try {
     // Close health server first with timeout (P8-FIX, safeResolve pattern)
@@ -499,16 +502,19 @@ export async function shutdownPartitionService(
       new Promise<void>((resolve) => {
         setTimeout(() => {
           timedOut = true;
-          logger.warn(`${serviceName} detector.stop() timed out after ${SHUTDOWN_TIMEOUT_MS}ms — async operations may still be running`);
+          // LOG-OPT Fix 3: Static string + structured fields
+          logger.warn('Detector stop timed out, async operations may still be running', { serviceName, timeoutMs: SHUTDOWN_TIMEOUT_MS });
           resolve();
         }, SHUTDOWN_TIMEOUT_MS);
       }),
     ]);
     if (timedOut) {
-      logger.error(`${serviceName} shutdown incomplete (timed out) — exiting with code 1`);
+      // LOG-OPT Fix 3: Static string + structured fields
+      logger.error('Shutdown incomplete (timed out), exiting with code 1', { serviceName });
       process.exit(1);
     }
-    logger.info(`${serviceName} shutdown complete`);
+    // LOG-OPT Fix 3: Static string + structured fields
+    logger.info('Shutdown complete', { serviceName });
     process.exit(0);
   } catch (error) {
     logger.error('Error during shutdown', { error });

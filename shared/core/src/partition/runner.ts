@@ -159,8 +159,14 @@ export function createPartitionServiceRunner(
 
     const startupStartTime = Date.now();
 
-    logger.info(`Starting ${config.serviceName} (${detectorConfig.chains.length} chains, port ${detectorConfig.healthCheckPort})`);
-    logger.debug(`${config.serviceName} startup config`, {
+    // LOG-OPT Fix 3: Static strings + structured fields
+    logger.info('Starting partition service', {
+      serviceName: config.serviceName,
+      chainCount: detectorConfig.chains.length,
+      port: detectorConfig.healthCheckPort,
+    });
+    logger.debug('Partition startup config', {
+      serviceName: config.serviceName,
       partitionId: config.partitionId,
       chains: detectorConfig.chains,
       region: config.region,
@@ -189,8 +195,15 @@ export function createPartitionServiceRunner(
 
       const chains = detector.getChains();
       const healthyChains = detector.getHealthyChains();
-      logger.info(`${config.serviceName} started: ${healthyChains.length}/${chains.length} chains healthy, ${(startupDurationMs / 1000).toFixed(1)}s`);
-      logger.debug(`${config.serviceName} startup details`, {
+      // LOG-OPT Fix 3: Static strings + structured fields
+      logger.info('Partition service started', {
+        serviceName: config.serviceName,
+        healthyChains: healthyChains.length,
+        totalChains: chains.length,
+        startupSeconds: (startupDurationMs / 1000).toFixed(1),
+      });
+      logger.debug('Partition startup details', {
+        serviceName: config.serviceName,
         partitionId: detector.getPartitionId(),
         chains,
         healthyChains,
@@ -230,7 +243,8 @@ export function createPartitionServiceRunner(
         errorContext.hint = 'Connection timed out.';
       }
 
-      logger.error(`Failed to start ${config.serviceName}`, errorContext);
+      // LOG-OPT Fix 3: Static string + structured fields
+      logger.error('Failed to start partition service', { serviceName: config.serviceName, ...errorContext });
 
       // Cleanup health server if it was created
       if (healthServerRef.current) {
@@ -294,7 +308,8 @@ export function runPartitionService(
     runner.start().catch((error) => {
       try {
         if (options.logger) {
-          options.logger.error(`Fatal error in ${options.config.serviceName}`, { error });
+          // LOG-OPT Fix 3: Static string + structured fields
+          options.logger.error('Fatal error in partition service', { serviceName: options.config.serviceName, error });
         } else {
           console.error(`Fatal error in ${options.config.serviceName}:`, error);
         }
