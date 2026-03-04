@@ -15,6 +15,8 @@
 import pino, { Logger as PinoLoggerType, LoggerOptions, DestinationStream } from 'pino';
 import type { ILogger, IPerformanceLogger, LoggerConfig, LogLevel, LogMeta } from './types';
 import { resolveOtelConfig, createOtelTransport, OtelTransportStream } from './otel-transport';
+// LOG-OPT Task 3: ALS trace context for automatic traceId/spanId injection via mixin
+import { getLogContext } from './log-context';
 
 // =============================================================================
 // Singleton Cache
@@ -337,6 +339,16 @@ export function createPinoLogger(config: string | LoggerConfig): ILogger {
     level: logLevel,
     serializers,
     formatters: formatters(),
+    // LOG-OPT Task 3: ALS-based automatic trace context injection.
+    // Called by Pino per log entry (only when level passes filter — hot-path safe).
+    // Returns {} when no ALS context is active (startup, tests using RecordingLogger).
+    mixin: () => {
+      const ctx = getLogContext();
+      if (!ctx) return {};
+      return ctx.parentSpanId
+        ? { traceId: ctx.traceId, spanId: ctx.spanId, parentSpanId: ctx.parentSpanId }
+        : { traceId: ctx.traceId, spanId: ctx.spanId };
+    },
     // Base context for all log entries
     base: {
       service: name,

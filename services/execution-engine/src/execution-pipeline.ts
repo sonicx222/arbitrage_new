@@ -49,6 +49,8 @@ import {
   recordExecutionLatency,
   recordVolume,
 } from './services/prometheus-metrics';
+// LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
+import { withLogContext } from '@arbitrage/core/logging';
 
 // =============================================================================
 // Pipeline Dependencies Interface
@@ -241,6 +243,14 @@ export class ExecutionPipeline {
 
   private async executeOpportunityWithLock(opportunity: ArbitrageOpportunity): Promise<void> {
     const traceId = (opportunity as unknown as Record<string, unknown>)._traceId as string | undefined;
+    const spanId = (opportunity as unknown as Record<string, unknown>)._spanId as string | undefined;
+
+    // LOG-OPT Task 4: Restore ALS trace context for the execution phase.
+    // The opportunity traversed the priority queue in a different async context,
+    // so we re-enter the ALS context here using the trace IDs stamped at ingest time.
+    // This ensures all log calls during lock acquisition, execution, and result
+    // publishing automatically include traceId/spanId via the Pino mixin.
+    const runExecution = async (): Promise<void> => {
     const lockResourceId = `opportunity:${opportunity.id}`;
 
     const lockResult = await this.deps.lockManager.withLock(
@@ -318,6 +328,11 @@ export class ExecutionPipeline {
     }
 
     await this.deps.opportunityConsumer.ackMessageAfterExecution(opportunity.id);
+    }; // end runExecution
+
+    return traceId && spanId
+      ? withLogContext({ traceId, spanId }, runExecution)
+      : runExecution();
   }
 
   // ===========================================================================
@@ -340,7 +355,6 @@ export class ExecutionPipeline {
         this.deps.stats.executionTimeouts++;
         this.deps.logger.error('Execution timed out', {
           opportunityId: opportunity.id,
-          traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
           timeoutMs: EXECUTION_TIMEOUT_MS,
         });
       }
@@ -387,7 +401,6 @@ export class ExecutionPipeline {
 
       this.deps.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
-        traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
         type: opportunity.type,
         buyChain: chain,
         buyDex: dex,

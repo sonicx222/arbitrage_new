@@ -32,6 +32,8 @@ import {
   createTraceContext,
   type TraceContext,
 } from '@arbitrage/core/tracing';
+// LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
+import { withLogContext } from '@arbitrage/core/logging';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
@@ -535,7 +537,14 @@ export class OpportunityConsumer {
       ? createChildContext(parentTrace, 'execution-engine')
       : createTraceContext('execution-engine');
 
-    // Attach traceId to opportunity for downstream logging
+    // LOG-OPT Task 4: Bind trace context to ALS for automatic log injection.
+    // All log calls in the synchronous handler scope (validation, queuing, rejection)
+    // will automatically include traceId/spanId via the Pino mixin.
+    // Note: _traceId/_spanId stamps are retained for the deferred async execution
+    // path in execution-pipeline.ts, which runs outside this async chain.
+    return withLogContext(traceCtx, async () => {
+
+    // Attach traceId to opportunity for downstream logging (deferred execution path)
     (opportunity as unknown as Record<string, unknown>)._traceId = traceCtx.traceId;
     (opportunity as unknown as Record<string, unknown>)._spanId = traceCtx.spanId;
 
@@ -589,6 +598,7 @@ export class OpportunityConsumer {
         queueSize: this.queueService.size(),
       });
     }
+    }); // end withLogContext
   }
 
   /**

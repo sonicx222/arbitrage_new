@@ -50,6 +50,10 @@ export type { OtelTransportConfig } from './otel-transport';
 export { LogSampler } from './log-sampler';
 export type { LogSamplerConfig } from './log-sampler';
 
+// ALS trace context (Task 3: automatic traceId/spanId injection via Pino mixin)
+export { withLogContext, getLogContext, resetLogContext } from './log-context';
+export type { LogContext } from './log-context';
+
 // Testing implementations
 export {
   RecordingLogger,
