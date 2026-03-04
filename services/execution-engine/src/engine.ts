@@ -764,6 +764,8 @@ export class ExecutionEngineService {
         getSimulationMetricsSnapshot: () => this.simulationMetricsCollector?.getSnapshot() ?? null,
         // Fix 4: Expose strategy-specific metrics (backrun, UniswapX) in health data
         getStrategyMetrics: () => this.getStrategyMetrics(),
+        // CRIT-2 FIX: Expose provider health count for accurate health status
+        getHealthyProviderCount: () => this.getHealthyProvidersCount(),
       });
       this.healthMonitoringManager.start();
 

@@ -371,6 +371,40 @@ describe('initializePairs', () => {
     });
   });
 
+  describe('non-EVM chain handling (CRIT-1)', () => {
+    it('should return empty results for Solana (non-EVM) chain without calling generatePairAddress', () => {
+      const solanaDex: Dex = {
+        name: 'raydium',
+        chain: 'solana',
+        factoryAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // base58
+        feeBps: 25 as unknown as Dex['feeBps'],
+        routerAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+        enabled: true,
+      };
+
+      const solanaTokens: Token[] = [
+        { symbol: 'SOL', address: 'So11111111111111111111111111111111111111112', decimals: 9, chainId: 101 },
+        { symbol: 'USDC', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, chainId: 101 },
+      ];
+
+      const config: PairInitializerConfig = {
+        chainId: 'solana',
+        dexes: [solanaDex],
+        tokens: solanaTokens,
+      };
+
+      const result = initializePairs(config, mockGetTokenPairKey);
+
+      // CRIT-1: Solana should return empty — no ethers.solidityPacked call with base58 addresses
+      expect(result.pairs.size).toBe(0);
+      expect(result.pairsByAddress.size).toBe(0);
+      expect(result.pairsByTokens.size).toBe(0);
+      expect(result.pairAddressesCache).toHaveLength(0);
+      // generatePairAddress should NOT have been called
+      expect(mockSolidityPacked).not.toHaveBeenCalled();
+    });
+  });
+
   describe('initial pair state', () => {
     it('should set initial reserves to "0"', () => {
       const config: PairInitializerConfig = {

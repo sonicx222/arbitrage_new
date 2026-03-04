@@ -607,7 +607,7 @@ export class ChainDetectorInstance extends EventEmitter {
    * P0-NEW-3 FIX: Internal start implementation separated for promise tracking
    */
   private async performStart(): Promise<void> {
-    // Check if this is a non-EVM chain in simulation mode
+    // Check if this is a non-EVM chain (e.g., Solana)
     const isNonEvmChain = !isEvmChain(this.chainId);
 
     this.logger.debug('Starting ChainDetectorInstance', {
@@ -619,20 +619,33 @@ export class ChainDetectorInstance extends EventEmitter {
       isEvmChain: !isNonEvmChain
     });
 
-    // S3.3.1 FIX: Non-EVM chains (like Solana) need special handling in simulation mode
-    // The EVM-based ChainSimulator generates Sync events which don't apply to Solana
-    if (this.simulationMode && isNonEvmChain) {
-      this.logger.warn('Non-EVM chain in simulation mode - using simplified simulation', {
-        chainId: this.chainId,
-        note: 'Solana simulation generates synthetic price updates without real DEX events'
-      });
-      // Set status to connected and start a simplified simulation
-      this.status = 'connected';
-      this.isRunning = true;
-      this.emit('statusChange', this.status);
-      // REFACTOR: Start non-EVM simulation via extracted initializer
-      this.simulationInitializer = this.createSimulationInitializer();
-      await this.simulationInitializer.initializeNonEvmSimulation();
+    // CRIT-1 FIX: Non-EVM chains (like Solana) cannot use EVM infrastructure:
+    // - ethers.JsonRpcProvider requires EVM RPC endpoints
+    // - WebSocket subscriptions use eth_subscribe (EVM-only)
+    // - generatePairAddress() uses ethers.solidityPacked which rejects base58 addresses
+    // Solana detection is handled by SolanaArbitrageDetector in partition-solana/src/index.ts
+    if (isNonEvmChain) {
+      if (this.simulationMode) {
+        this.logger.warn('Non-EVM chain in simulation mode - using simplified simulation', {
+          chainId: this.chainId,
+          note: 'Solana simulation generates synthetic price updates without real DEX events'
+        });
+        this.status = 'connected';
+        this.isRunning = true;
+        this.emit('statusChange', this.status);
+        this.simulationInitializer = this.createSimulationInitializer();
+        await this.simulationInitializer.initializeNonEvmSimulation();
+      } else {
+        // Production mode: Non-EVM chains use native detection pipelines (e.g., SolanaArbitrageDetector)
+        // Mark as connected so the partition service can wire its chain-specific detector
+        this.logger.info('Non-EVM chain in production mode - skipping EVM infrastructure', {
+          chainId: this.chainId,
+          note: 'Detection handled by chain-specific detector (e.g., SolanaArbitrageDetector)'
+        });
+        this.status = 'connected';
+        this.isRunning = true;
+        this.emit('statusChange', this.status);
+      }
       return;
     }
 

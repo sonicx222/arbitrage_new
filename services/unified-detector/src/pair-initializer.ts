@@ -15,7 +15,7 @@
 import { ethers } from 'ethers';
 import { bpsToDecimal } from '@arbitrage/core/components';
 import { validateFee } from '@arbitrage/core/utils';
-import { isVaultModelDex } from '@arbitrage/config';
+import { isVaultModelDex, isEvmChain } from '@arbitrage/config';
 import type { Dex, Token } from '@arbitrage/types';
 import type { ExtendedPair } from './types';
 
@@ -91,6 +91,13 @@ export function initializePairs(
   const pairs = new Map<string, ExtendedPair>();
   const pairsByAddress = new Map<string, ExtendedPair>();
   const pairsByTokens = new Map<string, ExtendedPair[]>();
+
+  // CRIT-1 FIX: Non-EVM chains (Solana) use base58 addresses that fail ethers.solidityPacked
+  // validation. generatePairAddress() is EVM-only (CREATE2 address derivation).
+  // Solana pair discovery uses program account subscriptions via SolanaArbitrageDetector instead.
+  if (!isEvmChain(config.chainId)) {
+    return { pairs, pairsByAddress, pairsByTokens, pairAddressesCache: [] };
+  }
 
   for (const dex of config.dexes) {
     // P0-1: Skip vault-model DEXes (Balancer V2, GMX, Platypus, Beethoven X).

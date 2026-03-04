@@ -194,6 +194,8 @@ function createMockDeps(overrides?: Partial<HealthMonitoringDependencies>): Heal
     getQueueService: jest.fn().mockReturnValue(mockQueueService),
     getOpportunityConsumer: jest.fn().mockReturnValue(mockConsumer),
     getSimulationMetricsSnapshot: jest.fn().mockReturnValue(null),
+    // CRIT-2 FIX: Default to 5 healthy providers (healthy state)
+    getHealthyProviderCount: jest.fn().mockReturnValue(5),
     ...overrides,
   };
 }
@@ -539,6 +541,78 @@ describe('HealthMonitoringManager', () => {
       expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
         'stream:health',
         expect.objectContaining({ simulationStatus: 'degraded' }),
+      );
+    });
+  });
+
+  // =========================================================================
+  // CRIT-2 FIX: Health status includes provider health
+  // =========================================================================
+
+  describe('provider health in status (CRIT-2)', () => {
+    it('should report status "degraded" when 0 providers are healthy', async () => {
+      const mockStreamsClient = createMockStreamsClient();
+      const mockRedisClient = createMockRedisClient();
+      deps = createMockDeps({
+        getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
+        getRedis: jest.fn().mockReturnValue(mockRedisClient),
+        getHealthyProviderCount: jest.fn().mockReturnValue(0),
+      });
+      manager = new HealthMonitoringManager(deps);
+      manager.start();
+
+      jest.advanceTimersByTime(30001);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Redis Streams health publish should have status "degraded"
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        'stream:health',
+        expect.objectContaining({ status: 'degraded' }),
+      );
+      // Redis service health should also reflect "degraded"
+      expect(mockRedisClient.updateServiceHealth).toHaveBeenCalledWith(
+        'execution-engine',
+        expect.objectContaining({ status: 'degraded' }),
+      );
+    });
+
+    it('should report status "healthy" when providers are healthy and running', async () => {
+      const mockStreamsClient = createMockStreamsClient();
+      deps = createMockDeps({
+        getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
+        getHealthyProviderCount: jest.fn().mockReturnValue(10),
+      });
+      manager = new HealthMonitoringManager(deps);
+      manager.start();
+
+      jest.advanceTimersByTime(30001);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        'stream:health',
+        expect.objectContaining({ status: 'healthy' }),
+      );
+    });
+
+    it('should report status "unhealthy" when not running', async () => {
+      const mockStreamsClient = createMockStreamsClient();
+      deps = createMockDeps({
+        getStreamsClient: jest.fn().mockReturnValue(mockStreamsClient),
+        stateManager: createMockStateManager(false) as any,
+        getHealthyProviderCount: jest.fn().mockReturnValue(5),
+      });
+      manager = new HealthMonitoringManager(deps);
+      manager.start();
+
+      jest.advanceTimersByTime(30001);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        'stream:health',
+        expect.objectContaining({ status: 'unhealthy' }),
       );
     });
   });

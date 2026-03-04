@@ -1026,4 +1026,85 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       expect(result2).toBeUndefined();
     });
   });
+
+  // ===========================================================================
+  // CRIT-1 Regression: Non-EVM chain production mode startup
+  // ===========================================================================
+  //
+  // Before the CRIT-1 fix, the non-EVM early-exit guard only applied in
+  // simulation mode: `if (this.simulationMode && isNonEvmChain)`.
+  // In production, Solana chains fell through to `initializePairs()` which calls
+  // `ethers.solidityPacked(['address', ...], [raydiumBase58, solBase58, usdcBase58])`.
+  // ethers.js throws `invalid address` for Solana base58 program IDs, crashing P4.
+  //
+  // The fix extends the guard to cover BOTH modes: `if (isNonEvmChain)`.
+  // In production, the instance becomes a health/status stub — actual detection
+  // is handled by SolanaArbitrageDetector via P4 lifecycle hooks.
+  //
+  // @see CRIT-1 in docs/reports/EXTENDED_DEEP_ANALYSIS_2026-03-03.md
+
+  describe('CRIT-1 Regression — Non-EVM chain production mode startup', () => {
+    beforeEach(() => {
+      const config = require('@arbitrage/config');
+      // Add solana to CHAINS mock so the constructor guard doesn't throw.
+      // The chainConfig values are not used in the non-EVM path (early return before any EVM call).
+      config.CHAINS['solana'] = {
+        name: 'Solana',
+        wsUrl: 'wss://api.mainnet-beta.solana.com',
+        rpcUrl: 'https://api.mainnet-beta.solana.com',
+        chainId: 101,
+      };
+      // Override: isEvmChain returns false for Solana
+      config.isEvmChain.mockReturnValue(false);
+    });
+
+    afterEach(() => {
+      const config = require('@arbitrage/config');
+      delete config.CHAINS['solana'];
+      // Restore default: all known chains in this mock are EVM
+      config.isEvmChain.mockReturnValue(true);
+    });
+
+    it('should start successfully in production mode without EVM pair initialization', async () => {
+      const instance = createInstance({ chainId: 'solana' });
+      const initializePairsSpy = jest.spyOn(instance as any, 'initializePairs').mockResolvedValue(undefined);
+      const initializeVaultAdaptersSpy = jest.spyOn(instance as any, 'initializeVaultAdapters').mockResolvedValue(undefined);
+
+      await expect(instance.start()).resolves.toBeUndefined();
+
+      expect((instance as any).status).toBe('connected');
+      expect((instance as any).isRunning).toBe(true);
+      expect(initializePairsSpy).not.toHaveBeenCalled();
+      expect(initializeVaultAdaptersSpy).not.toHaveBeenCalled();
+    });
+
+    it('should emit statusChange("connected") on non-EVM production start', async () => {
+      const instance = createInstance({ chainId: 'solana' });
+      const statusChanges: string[] = [];
+      instance.on('statusChange', (s: string) => statusChanges.push(s));
+
+      await instance.start();
+
+      expect(statusChanges).toContain('connected');
+    });
+
+    it('should not throw when ethers.solidityPacked would reject Solana base58 addresses', async () => {
+      // Regression case: before the fix, initializePairs() was called for Solana, reaching
+      // ethers.solidityPacked(['address','address','address'], [raydiumBase58, ...]) which throws:
+      //   invalid address (argument="addr", value="675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8")
+      // With the fix, initializePairs() is never called for non-EVM chains.
+      const { ethers } = require('ethers');
+      ethers.solidityPacked.mockImplementation(() => {
+        throw new Error('invalid address (argument="addr", value="675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", code=INVALID_ARGUMENT)');
+      });
+
+      const instance = createInstance({ chainId: 'solana' });
+
+      // Must resolve cleanly even though solidityPacked would throw
+      await expect(instance.start()).resolves.toBeUndefined();
+
+      // Restore for other tests
+      ethers.solidityPacked.mockReturnValue('0x1234');
+    });
+  });
 });

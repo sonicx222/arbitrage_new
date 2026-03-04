@@ -83,6 +83,8 @@ export interface HealthMonitoringDependencies {
   getSimulationMetricsSnapshot: () => SimulationMetricsSnapshot | null;
   /** Fix 4: Get strategy-specific metrics (backrun, uniswapx) */
   getStrategyMetrics?: () => Record<string, unknown>;
+  /** CRIT-2 FIX: Get healthy RPC provider count for accurate health status */
+  getHealthyProviderCount: () => number;
 }
 
 // =============================================================================
@@ -205,9 +207,16 @@ export class HealthMonitoringManager {
       : 0;
     this.lastHeapUsed = currentHeapUsed;
 
+    // CRIT-2 FIX: Include provider health in status. With 0 healthy providers,
+    // the engine cannot execute any trade — report "degraded" not "healthy".
+    const isRunning = this.deps.stateManager.isRunning();
+    const healthyProviderCount = this.deps.getHealthyProviderCount();
+    const healthStatus: ServiceHealth['status'] = !isRunning ? 'unhealthy' :
+      healthyProviderCount === 0 ? 'degraded' : 'healthy';
+
     const health: ServiceHealth = {
       name: 'execution-engine',
-      status: this.deps.stateManager.isRunning() ? 'healthy' : 'unhealthy',
+      status: healthStatus,
       uptime: process.uptime(),
       memoryUsage: currentHeapUsed,
       cpuUsage: this.cpuTracker.getUsagePercent(),
