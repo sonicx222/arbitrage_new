@@ -311,7 +311,7 @@ async function main() {
     const standbyConfig = getStandbyConfigFromEnv();
     const circuitBreakerConfig = getCircuitBreakerConfigFromEnv();
 
-    logger.info(`Starting Execution Engine Service on port ${HEALTH_CHECK_PORT}`);
+    logger.info('Starting Execution Engine Service', { port: HEALTH_CHECK_PORT });
     logger.debug('Execution engine startup config', {
       simulationMode: simulationConfig?.enabled ?? false,
       isStandby: standbyConfig.isStandby,

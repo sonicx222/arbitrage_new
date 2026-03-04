@@ -50,10 +50,11 @@ export function setupDetectorEventHandlers(
   // LOG-OPT Fix 2: Child logger with partition binding — eliminates per-call `partition` field
   const pLog = logger.child({ partition: partitionId });
 
-  // FIX #20: Pre-compute debug flag ONCE to avoid per-event evaluation overhead.
-  // priceUpdate events fire 1000+/sec - this eliminates method call + nullish coalescing per event.
-  // Uses pLog (child logger) which inherits the same level as parent.
-  const debugEnabled = pLog.isLevelEnabled?.('debug') ?? pLog.level === 'debug';
+  // LOG-OPT Task 8: Use inline level check instead of pre-computed boolean.
+  // Pre-computed `debugEnabled` became stale after hot-reload via PUT /log-level.
+  // `pLog.isLevelEnabled('debug')` reads the current level on every call (~0.1μs overhead
+  // vs boolean read) — acceptable for hot-path safety and hot-reload correctness.
+  // Pino propagates parent level changes to child loggers automatically.
 
   // LOG-OPT Fix 4: Token-bucket sampler for high-frequency debug events.
   // At LOG_LEVEL=debug, price updates fire 1000+/sec — sampler caps output at 100/sec
@@ -66,7 +67,7 @@ export function setupDetectorEventHandlers(
   // FIX #9: Store handler references for cleanup (same pattern as setupProcessHandlers)
   const priceUpdateHandler = (update: { chain: string; dex: string; price: number }) => {
     // LOG-OPT Fix 4: Only log if debug enabled AND sampler allows it
-    if (debugEnabled && sampler.shouldLog('price-update')) {
+    if ((pLog.isLevelEnabled?.('debug') ?? false) && sampler.shouldLog('price-update')) {
       pLog.debug('Price update', {
         chain: update.chain,
         dex: update.dex,
@@ -86,8 +87,8 @@ export function setupDetectorEventHandlers(
     // P2-1 FIX: Reduced from INFO to DEBUG. At ~18k opportunities per 10min,
     // INFO-level logging generates ~4,000 lines/sec. Partition-level summaries
     // (aggregated counts) remain at INFO for operational visibility.
-    // LOG-OPT Fix 1: Guard with debugEnabled to prevent V8 object literal allocation at ~30/sec
-    if (debugEnabled) {
+    // LOG-OPT Fix 1: Guard with inline level check (supports hot-reload, Task 8)
+    if (pLog.isLevelEnabled?.('debug') ?? false) {
       pLog.debug('Arbitrage opportunity detected', {
         id: opp.id,
         type: opp.type,
@@ -141,7 +142,7 @@ export function setupDetectorEventHandlers(
       });
     } else {
       // FIX 10.3: Conditional debug logging for status changes
-      if (debugEnabled) {
+      if (pLog.isLevelEnabled?.('debug') ?? false) {
         // LOG-OPT Fix 3: Static string + structured fields
         pLog.debug('Chain status changed', {
           chainId,
@@ -214,7 +215,7 @@ export function setupProcessHandlers(
   const shutdown = async (signal: string) => {
     // P19-FIX: Skip if already shutting down
     if (isShuttingDown) {
-      logger.info(`Already shutting down, ignoring ${signal}`);
+      logger.info('Already shutting down, ignoring signal', { signal });
       return;
     }
     isShuttingDown = true;
@@ -236,13 +237,13 @@ export function setupProcessHandlers(
   const sigtermHandler = () => shutdown('SIGTERM');
   const sigintHandler = () => shutdown('SIGINT');
   const uncaughtHandler = (error: Error) => {
-    logger.error(`Uncaught exception in ${serviceName}`, { error });
+    logger.error('Uncaught exception', { service: serviceName, error });
     shutdown('uncaughtException').catch(() => {
       process.exit(1);
     });
   };
   const rejectionHandler = (reason: unknown, promise: Promise<unknown>) => {
-    logger.error(`Unhandled rejection in ${serviceName}`, { reason, promise });
+    logger.error('Unhandled rejection', { service: serviceName, reason, promise });
 
     // FIX #4: Count rejections within time window; trigger shutdown if threshold exceeded
     const now = Date.now();
@@ -252,8 +253,10 @@ export function setupProcessHandlers(
       rejectionTimestamps.shift();
     }
     if (rejectionTimestamps.length >= REJECTION_THRESHOLD) {
-      logger.error(`${REJECTION_THRESHOLD} unhandled rejections within ${REJECTION_WINDOW_MS / 1000}s window - triggering shutdown`, {
+      logger.error('Unhandled rejection threshold exceeded, triggering shutdown', {
         service: serviceName,
+        threshold: REJECTION_THRESHOLD,
+        windowSec: REJECTION_WINDOW_MS / 1000,
         rejectionCount: rejectionTimestamps.length,
       });
       shutdown('unhandledRejection').catch(() => {

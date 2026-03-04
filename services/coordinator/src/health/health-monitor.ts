@@ -337,7 +337,7 @@ export class HealthMonitor {
             // First detection: log WARN with full details
             this.staleLogState.set(name, { firstLoggedAt: now, lastEscalationAge: 0 });
             // FIX #3: Include service name in message text for discoverability
-            this.logger.warn(`Service ${name} heartbeat stale, marking unhealthy`, {
+            this.logger.warn('Service heartbeat stale, marking unhealthy', {
               service: name,
               lastHeartbeat: health.lastHeartbeat,
               ageMs: age,

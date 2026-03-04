@@ -438,7 +438,8 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
             const dataSample = data && typeof data === 'object'
               ? { chain: (data as Record<string, unknown>).chain, dex: (data as Record<string, unknown>).dex, price: (data as Record<string, unknown>).price }
               : undefined;
-            logger.warn(`Skipping invalid ${errorLabel} message`, {
+            logger.warn('Skipping invalid stream message', {
+              streamType: errorLabel,
               messageId: message.id,
               ...(reason ? { reason } : {}),
               ...(dataSample ? { dataSample } : {}),
@@ -462,7 +463,7 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
         err.code === 'ERR_TIMEOUT' ||
         err.message?.includes('timeout');
       if (!isTimeout) {
-        logger.error(`Error consuming ${errorLabel} stream`, { error: err.message });
+        logger.error('Error consuming stream', { streamType: errorLabel, error: err.message });
       }
     }
   }
@@ -542,7 +543,8 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
       const streamNames = ['priceUpdates', 'whaleAlerts', 'pendingOpportunities'];
       results.forEach((result, index) => {
         if (result.status === 'rejected') {
-          logger.error(`Stream consumption failed: ${streamNames[index]}`, {
+          logger.error('Stream consumption failed', {
+            stream: streamNames[index],
             error: (result.reason as Error).message,
           });
           emitter.emit('error', result.reason as Error);

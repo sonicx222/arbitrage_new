@@ -852,7 +852,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       const listenCallback = () => {
-        this.logger.info(`Coordinator dashboard available at http://${bindHost ?? 'localhost'}:${serverPort}`, {
+        this.logger.info('Coordinator dashboard available', {
+          url: `http://${bindHost ?? 'localhost'}:${serverPort}`,
           isLeader: this.isLeader,
           bindHost: bindHost ?? '0.0.0.0',
           authEnabled: authConfigured,

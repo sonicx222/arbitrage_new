@@ -71,7 +71,7 @@ async function main() {
     const portEnvName = process.env.COORDINATOR_PORT ? 'COORDINATOR_PORT' : 'PORT';
     const port = parseEnvInt(portEnvName, 3000, 1, 65535);
 
-    logger.info(`Starting Coordinator Service on port ${port}`);
+    logger.info('Starting Coordinator Service', { port });
     logger.debug('Coordinator startup config', {
       isStandby: standbyConfig.isStandby,
       canBecomeLeader: standbyConfig.canBecomeLeader,
@@ -197,7 +197,7 @@ async function main() {
       },
     });
 
-    logger.info(`Coordinator Service is running on port ${port}`);
+    logger.info('Coordinator Service is running', { port });
 
   } catch (error) {
     logger.error('Failed to start Coordinator Service', { error });

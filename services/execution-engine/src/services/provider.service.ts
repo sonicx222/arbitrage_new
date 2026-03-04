@@ -224,7 +224,7 @@ export class ProviderServiceImpl implements IProviderService {
           consecutiveFailures: 0
         });
       } catch (error) {
-        this.logger.warn(`Failed to initialize provider for ${chainName}`, { error });
+        this.logger.warn('Failed to initialize provider', { chainName, error });
         // Note: Use direct set here since this is initial state
         this.providerHealth.set(chainName, {
           healthy: false,
@@ -270,7 +270,7 @@ export class ProviderServiceImpl implements IProviderService {
         });
         healthyProviders.push(chainName);
 
-        this.logger.debug(`Provider connectivity verified for ${chainName}`);
+        this.logger.debug('Provider connectivity verified', { chainName });
       } catch (error) {
         // Mark as unhealthy - Fix 10.2: Use helper to update cache
         const health = this.providerHealth.get(chainName) || {
@@ -288,7 +288,8 @@ export class ProviderServiceImpl implements IProviderService {
         unhealthyProviders.push(chainName);
         this.stats.providerHealthCheckFailures++;
 
-        this.logger.warn(`Provider connectivity failed for ${chainName}`, {
+        this.logger.warn('Provider connectivity failed', {
+          chainName,
           error: getErrorMessage(error)
         });
       }
@@ -345,7 +346,8 @@ export class ProviderServiceImpl implements IProviderService {
             this.checkAndReconnectProvider(chainName, provider)
               .catch((err) => {
                 // Error isolation: one provider failure doesn't affect others
-                this.logger.warn(`Health check error for ${chainName}`, {
+                this.logger.warn('Health check error', {
+                  chainName,
                   error: getErrorMessage(err)
                 });
               })
@@ -390,7 +392,8 @@ export class ProviderServiceImpl implements IProviderService {
       // Update health status
       if (!health.healthy) {
         // Provider recovered
-        this.logger.info(`Provider recovered for ${chainName}`, {
+        this.logger.info('Provider recovered', {
+          chainName,
           previousFailures: health.consecutiveFailures
         });
       }
@@ -413,7 +416,8 @@ export class ProviderServiceImpl implements IProviderService {
       });
       this.stats.providerHealthCheckFailures++;
 
-      this.logger.warn(`Provider health check failed for ${chainName}`, {
+      this.logger.warn('Provider health check failed', {
+        chainName,
         consecutiveFailures: newFailures,
         error: getErrorMessage(error)
       });
@@ -433,7 +437,7 @@ export class ProviderServiceImpl implements IProviderService {
     if (!chainConfig) return;
 
     try {
-      this.logger.info(`Attempting provider reconnection for ${chainName}`);
+      this.logger.info('Attempting provider reconnection', { chainName });
 
       // Create new provider instance (with HTTP/2 if enabled)
       const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
@@ -504,9 +508,10 @@ export class ProviderServiceImpl implements IProviderService {
         this.onProviderReconnectCallback(chainName);
       }
 
-      this.logger.info(`Provider reconnection successful for ${chainName}`);
+      this.logger.info('Provider reconnection successful', { chainName });
     } catch (error) {
-      this.logger.error(`Provider reconnection failed for ${chainName}`, {
+      this.logger.error('Provider reconnection failed', {
+        chainName,
         error: getErrorMessage(error)
       });
     }
@@ -535,7 +540,7 @@ export class ProviderServiceImpl implements IProviderService {
           Object.keys(CHAINS),
           this.logger,
         );
-        this.logger.info(`HD wallet derivation complete`, {
+        this.logger.info('HD wallet derivation complete', {
           chainsWithHDWallets: hdWallets.size,
         });
       } catch (error) {
@@ -554,7 +559,8 @@ export class ProviderServiceImpl implements IProviderService {
         // Valid format: 64 hex chars (without 0x) or 66 chars (with 0x prefix)
         const keyWithoutPrefix = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
         if (!/^[0-9a-fA-F]{64}$/.test(keyWithoutPrefix)) {
-          this.logger.error(`Invalid private key format for ${chainName}`, {
+          this.logger.error('Invalid private key format', {
+            chainName,
             hint: 'Private key must be 64 hex characters (or 66 with 0x prefix)',
             envVar: `${chainName.toUpperCase()}_PRIVATE_KEY`,
             hasHexPrefix: privateKey.startsWith('0x'),
@@ -572,12 +578,13 @@ export class ProviderServiceImpl implements IProviderService {
             if (this.nonceManager) {
               this.nonceManager.registerWallet(chainName, wallet);
             }
-            this.logger.info(`Initialized wallet for ${chainName}`, {
+            this.logger.info('Initialized wallet', {
+              chainName,
               address: wallet.address,
               source: 'private-key',
             });
           } catch (error) {
-            this.logger.error(`Failed to initialize wallet for ${chainName}`, { error });
+            this.logger.error('Failed to initialize wallet', { chainName, error });
           }
         }
         continue;
@@ -600,13 +607,14 @@ export class ProviderServiceImpl implements IProviderService {
             if (this.nonceManager) {
               this.nonceManager.registerWallet(chainName, wallet);
             }
-            this.logger.info(`Initialized wallet for ${chainName}`, {
+            this.logger.info('Initialized wallet', {
+              chainName,
               address: wallet.address,
               source: 'hd-derivation',
               path: hdWallet.path,
             });
           } catch (error) {
-            this.logger.error(`Failed to initialize HD-derived wallet for ${chainName}`, { error });
+            this.logger.error('Failed to initialize HD-derived wallet', { chainName, error });
           }
         }
         continue;
@@ -629,13 +637,14 @@ export class ProviderServiceImpl implements IProviderService {
               const nm = this.nonceManager;
               const registrationPromise = kmsSigner.getAddress().then(addr => {
                 nm.registerSigner(chainName, addr, provider);
-                this.logger.debug(`Registered KMS signer with NonceManager for ${chainName}`, { address: addr.slice(0, 10) + '...' });
+                this.logger.debug('Registered KMS signer with NonceManager', { chainName, address: addr.slice(0, 10) + '...' });
               }).catch(err => {
-                this.logger.warn(`Failed to register KMS signer with NonceManager for ${chainName}`, { error: err });
+                this.logger.warn('Failed to register KMS signer with NonceManager', { chainName, error: err });
               });
               this.kmsRegistrationPromises.push(registrationPromise);
             }
-            this.logger.info(`Initialized KMS signer for ${chainName}`, {
+            this.logger.info('Initialized KMS signer', {
+              chainName,
               keyId: process.env[`KMS_KEY_ID_${chainName.toUpperCase()}`] ?? process.env.KMS_KEY_ID ?? 'unknown',
               source: 'kms',
             });
@@ -644,7 +653,7 @@ export class ProviderServiceImpl implements IProviderService {
         }
       }
 
-      this.logger.debug(`No wallet configured for ${chainName} (no private key, mnemonic, or KMS key)`);
+      this.logger.debug('No wallet configured', { chainName, reason: 'no_private_key_mnemonic_or_kms' });
     }
   }
 

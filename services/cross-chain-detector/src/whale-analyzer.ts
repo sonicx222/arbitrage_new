@@ -232,7 +232,8 @@ export class WhaleAnalyzer {
         try {
           const isSuperWhale = whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd;
           const triggerType = isSuperWhale ? 'Super whale' : 'Significant whale activity';
-          this.logger.info(`${triggerType} detected, triggering immediate opportunity scan`, {
+          this.logger.info('Whale activity detected, triggering immediate opportunity scan', {
+            triggerType,
             token: whaleTx.token,
             chain: whaleTx.chain,
             usdValue: whaleTx.usdValue,

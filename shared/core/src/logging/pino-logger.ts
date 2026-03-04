@@ -29,6 +29,12 @@ import { getLogContext } from './log-context';
 const loggerCache = new Map<string, ILogger>();
 
 /**
+ * Cache of raw Pino instances, used by setLogLevel for hot-reload.
+ * Parallel to loggerCache (ILogger wrappers) — keyed by service name.
+ */
+const rawLoggerCache = new Map<string, PinoLoggerType>();
+
+/**
  * Singleton OTEL transport stream shared by all loggers.
  * Created lazily on first logger creation when OTEL_EXPORTER_ENDPOINT is set.
  */
@@ -40,6 +46,29 @@ let sharedOtelTransport: OtelTransportStream | null = null;
  */
 export function resetLoggerCache(): void {
   loggerCache.clear();
+  rawLoggerCache.clear();
+}
+
+/**
+ * Change the log level for all active logger instances at runtime.
+ *
+ * Updates all cached Pino root loggers. Pino propagates the change to
+ * any child loggers created from them automatically via its internal
+ * children registry.
+ *
+ * Called by the `PUT /log-level` health endpoint and coordinator admin route.
+ * After this call, inline `isLevelEnabled?.('debug')` guards in handlers.ts
+ * pick up the new level immediately (unlike the stale pre-computed `debugEnabled`
+ * boolean that this replaces).
+ *
+ * @param level - New log level to apply globally
+ * @see health-server.ts — PUT /log-level partition endpoint
+ * @see admin.routes.ts — PUT /admin/log-level coordinator endpoint
+ */
+export function setLogLevel(level: LogLevel): void {
+  for (const pinoInstance of rawLoggerCache.values()) {
+    pinoInstance.level = level;
+  }
 }
 
 /**
@@ -415,6 +444,8 @@ export function createPinoLogger(config: string | LoggerConfig): ILogger {
 
   // Cache and return
   loggerCache.set(cacheKey, logger);
+  // Track raw Pino instance for setLogLevel hot-reload
+  rawLoggerCache.set(cacheKey, pinoInstance);
 
   // If bindings requested, create a child logger (but don't cache the child)
   return bindings ? logger.child(bindings) : logger;

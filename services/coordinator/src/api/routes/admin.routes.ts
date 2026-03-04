@@ -10,6 +10,8 @@
 import { Router, Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
+import { setLogLevel } from '@arbitrage/core/logging';
+import type { LogLevel } from '@arbitrage/core/logging';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -131,12 +133,51 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
       const logger = state.getLogger();
 
       try {
-        logger.info(`Restarting service: ${service}`);
+        logger.info('Restarting service', { service });
         // In production, implement service restart logic via orchestration
         res.json({ success: true, message: `Restart requested for ${service}` });
       } catch (_error) {
         res.status(500).json({ success: false, error: 'Internal server error' });
       }
+    }
+  );
+
+  /**
+   * PUT /admin/log-level
+   * Change log level at runtime (hot-reload). Does not require leader status.
+   *
+   * Body: { "level": "debug" | "info" | "warn" | "error" | "trace" | "fatal" }
+   * Returns: { "level": "<new-level>" }
+   *
+   * @see setLogLevel in @arbitrage/core/logging
+   * @see ADR-038: Structured Log Format Standards
+   */
+  const logLevelLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10,
+    message: { error: 'Too many log level changes', retryAfter: 60 }
+  });
+
+  const validLogLevels: string[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+
+  router.put(
+    '/log-level',
+    logLevelLimiter as RequestHandler,
+    writeAuth as unknown as RequestHandler,
+    apiAuthorize('services', 'write') as unknown as RequestHandler,
+    (req: Request, res: Response) => {
+      const logger = state.getLogger();
+      const { level } = req.body as { level?: string };
+
+      if (!level || !validLogLevels.includes(level)) {
+        res.status(400).json({ error: `Invalid level. Must be one of: ${validLogLevels.join(', ')}` });
+        return;
+      }
+
+      const newLevel = level as LogLevel;
+      setLogLevel(newLevel);
+      logger.info('Log level changed via hot-reload', { newLevel });
+      res.json({ level: newLevel });
     }
   );
 

@@ -33,6 +33,7 @@ export {
   PinoPerformanceLogger,
   resetLoggerCache,
   resetPerformanceLoggerCache,
+  setLogLevel,
   // OTEL transport lifecycle
   getOtelTransport,
   shutdownOtelTransport,

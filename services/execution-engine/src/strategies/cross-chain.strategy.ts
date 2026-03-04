@@ -368,7 +368,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     opportunityId: string,
     data: Record<string, unknown>,
   ): void {
-    this.logger.info(`[CROSS_CHAIN_AUDIT] ${phase}`, {
+    this.logger.info('cross_chain_audit', {
+      phase,
       opportunityId,
       ...data,
     });

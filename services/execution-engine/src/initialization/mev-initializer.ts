@@ -85,7 +85,7 @@ export async function initializeMevProviders(
     // Skip if no provider or wallet available
     if (!provider || !wallet) {
       // Use info level for expected skips (consistent with other initializers)
-      logger.info(`Skipping MEV provider for ${chainName}: no provider or wallet available`);
+      logger.info('Skipping MEV provider', { chainName, reason: 'no_provider_or_wallet' });
       return { chainName, success: false, skipped: true, reason: 'no_provider_or_wallet' };
     }
 
@@ -93,19 +93,19 @@ export async function initializeMevProviders(
 
     // Explicitly handle unconfigured chains
     if (!chainSettings) {
-      logger.info(`Skipping MEV provider for ${chainName}: chain not in MEV_CONFIG.chainSettings`);
+      logger.info('Skipping MEV provider', { chainName, reason: 'chain_not_in_config' });
       return { chainName, success: false, skipped: true, reason: 'unconfigured' };
     }
 
     // Skip if explicitly disabled in config
     if (chainSettings.enabled === false) {
-      logger.info(`Skipping MEV provider for ${chainName}: disabled in config`);
+      logger.info('Skipping MEV provider', { chainName, reason: 'disabled' });
       return { chainName, success: false, skipped: true, reason: 'disabled' };
     }
 
     // Skip Solana - it requires JitoProvider with different types
     if (chainSettings.strategy === 'jito') {
-      logger.info(`Skipping MEV provider for ${chainName}: requires JitoProvider (not EVM compatible)`);
+      logger.info('Skipping MEV provider', { chainName, reason: 'jito_not_supported' });
       return { chainName, success: false, skipped: true, reason: 'jito_not_supported' };
     }
 
@@ -131,11 +131,12 @@ export async function initializeMevProviders(
       if (!cachedProvider) {
         // Use standardized error format: component:chain:reason
         const errorMsg = `mev:${chainName}:provider_not_cached`;
-        logger.warn(`MEV provider created but not cached for ${chainName}`, { error: errorMsg });
+        logger.warn('MEV provider not cached after creation', { chainName, error: errorMsg });
         return { chainName, success: false, skipped: false, error: errorMsg };
       }
 
-      logger.info(`MEV provider initialized for ${chainName}`, {
+      logger.info('MEV provider initialized', {
+        chainName,
         strategy: mevProvider.strategy,
         enabled: mevProvider.isEnabled(),
       });
@@ -145,7 +146,8 @@ export async function initializeMevProviders(
       // Use standardized error format: component:chain:error_details
       const errorDetails = getErrorMessage(error);
       const standardizedError = `mev:${chainName}:${errorDetails}`;
-      logger.warn(`Failed to initialize MEV provider for ${chainName}`, {
+      logger.warn('Failed to initialize MEV provider', {
+        chainName,
         error: standardizedError,
       });
       return { chainName, success: false, skipped: false, error: standardizedError };

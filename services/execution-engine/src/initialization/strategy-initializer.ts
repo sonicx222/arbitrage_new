@@ -70,7 +70,7 @@ function parseNumericEnv(key: string, logger: Logger): number | undefined {
   if (!raw) return undefined;
   const parsed = Number(raw);
   if (isNaN(parsed)) {
-    logger.warn(`Invalid numeric env var ${key}='${raw}', ignoring (using default)`);
+    logger.warn('Invalid numeric env var, ignoring', { key, value: raw });
     return undefined;
   }
   return parsed;

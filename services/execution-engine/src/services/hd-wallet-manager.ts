@@ -111,7 +111,7 @@ export function derivePerChainWallets(
     const index = CHAIN_DERIVATION_INDEX[chainName];
     if (index === undefined) {
       // Non-EVM chain (e.g., Solana) — skip HD derivation
-      logger.debug(`Skipping HD derivation for ${chainName} (no EVM derivation index)`);
+      logger.debug('Skipping HD derivation', { chainName, reason: 'no_evm_derivation_index' });
       continue;
     }
 
@@ -120,13 +120,15 @@ export function derivePerChainWallets(
       // Derive from base node — just one level (the chain index)
       const derived = baseNode.deriveChild(index);
       wallets.set(chainName, derived);
-      logger.info(`Derived HD wallet for ${chainName}`, {
+      logger.info('Derived HD wallet', {
+        chainName,
         address: derived.address,
         path: derivationPath,
         index,
       });
     } catch (error) {
-      logger.error(`Failed to derive HD wallet for ${chainName}`, {
+      logger.error('Failed to derive HD wallet', {
+        chainName,
         path: derivationPath,
         error: getErrorMessage(error),
       });

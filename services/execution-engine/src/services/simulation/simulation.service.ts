@@ -192,12 +192,14 @@ export class SimulationService implements ISimulationService {
 
     for (const type of this.config.providerPriority) {
       if (!validTypes.includes(type)) {
-        this.logger.error(`Invalid provider type '${type}' in providerPriority`, {
+        this.logger.error('Invalid provider type in providerPriority', {
+          type,
           validTypes,
           configuredPriority: this.config.providerPriority,
         });
       } else if (!registeredProviders.includes(type)) {
-        this.logger.warn(`Provider '${type}' in priority but not registered`, {
+        this.logger.warn('Provider in priority but not registered', {
+          type,
           registeredProviders,
           configuredPriority: this.config.providerPriority,
         });

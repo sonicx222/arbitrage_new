@@ -443,8 +443,9 @@ export class ExecutionPipeline {
               reason: riskDecision.rejectionReason,
             });
           } else {
-            this.deps.logger.debug(`Trade rejected: ${riskDecision.rejectionReason}`, {
+            this.deps.logger.debug('Trade rejected', {
               id: opportunity.id,
+              reason: riskDecision.rejectionReason,
               code: riskDecision.rejectionCode,
             });
           }
@@ -469,8 +470,9 @@ export class ExecutionPipeline {
         }
 
         if (drawdownCheck?.state === 'CAUTION' || drawdownCheck?.state === 'RECOVERY') {
-          this.deps.logger.debug(`Trading with reduced position size (${drawdownCheck.state})`, {
+          this.deps.logger.debug('Trading with reduced position size', {
             id: opportunity.id,
+            drawdownState: drawdownCheck.state,
             sizeMultiplier: drawdownCheck.sizeMultiplier,
           });
         }

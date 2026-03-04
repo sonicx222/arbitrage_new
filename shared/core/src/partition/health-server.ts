@@ -12,6 +12,8 @@ import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { createLogger } from '../logger';
 import { getStreamHealthMonitor } from '../monitoring/stream-health-monitor';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
+import { setLogLevel } from '../logging/pino-logger';
+import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
 
 // =============================================================================
@@ -189,9 +191,47 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   const statsCache = createStatsCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // SEC-02: Reject non-GET methods (all legitimate consumers use GET)
+    // LOG-OPT Task 8: Log level hot-reload — accepts PUT /log-level, all other
+    // endpoints are GET-only (SEC-02).
+    if (req.method === 'PUT' && req.url === '/log-level') {
+      // Require auth token for level changes (same policy as /stats)
+      if (authToken) {
+        const authHeader = req.headers['authorization'];
+        if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+      }
+      const body = await new Promise<string>((resolve, reject) => {
+        let data = '';
+        req.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        req.on('end', () => resolve(data));
+        req.on('error', reject);
+      });
+      try {
+        const parsed = JSON.parse(body) as { level?: string };
+        const validLevels: string[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+        if (!parsed.level || !validLevels.includes(parsed.level)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Invalid level. Must be one of: ${validLevels.join(', ')}` }));
+          return;
+        }
+        const newLevel = parsed.level as LogLevel;
+        setLogLevel(newLevel);
+        logger.info('Log level changed via hot-reload', { newLevel, service: config.serviceName });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ level: newLevel }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+      }
+      return;
+    }
+
+    // SEC-02: Reject non-GET methods for all other endpoints
     if (req.method !== 'GET') {
-      res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET' });
+      res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET, PUT' });
       res.end(JSON.stringify({ error: 'Method Not Allowed' }));
       return;
     }
@@ -318,7 +358,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         partitionId: config.partitionId,
         chains: config.defaultChains,
         region: config.region,
-        endpoints: ['/health', '/ready', '/stats', '/metrics']
+        endpoints: ['/health', '/ready', '/stats', '/metrics', 'PUT /log-level']
       }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
