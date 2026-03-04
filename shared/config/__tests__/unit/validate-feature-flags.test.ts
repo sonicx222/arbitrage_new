@@ -629,4 +629,110 @@ describe('validateFeatureFlags', () => {
       warnSpy.mockRestore();
     });
   });
+
+  // ===========================================================================
+  // M1 REGRESSION: SOLANA EXECUTION VALIDATION (useSolanaExecution flag)
+  // ===========================================================================
+
+  describe('useSolanaExecution flag (M1 regression)', () => {
+    it('should throw in production when SOLANA_EXECUTION enabled but SOLANA_RPC_URL missing', async () => {
+      const { validateFeatureFlags } = await importWithFlags({
+        NODE_ENV: 'production',
+        FEATURE_SOLANA_EXECUTION: 'true',
+        SOLANA_RPC_URL: undefined,
+      });
+
+      expect(() => validateFeatureFlags()).toThrow('SOLANA_RPC_URL');
+    });
+
+    it('should warn (not throw) in development when SOLANA_EXECUTION enabled but SOLANA_RPC_URL missing', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        NODE_ENV: 'development',
+        FEATURE_SOLANA_EXECUTION: 'true',
+        SOLANA_RPC_URL: undefined,
+      });
+
+      expect(() => validateFeatureFlags()).not.toThrow();
+
+      const warnCalls = warnSpy.mock.calls.flat().join(' ');
+      expect(warnCalls).toContain('FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should warn (not throw) in test env when SOLANA_EXECUTION enabled but SOLANA_RPC_URL missing', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        NODE_ENV: 'test',
+        FEATURE_SOLANA_EXECUTION: 'true',
+        SOLANA_RPC_URL: undefined,
+      });
+
+      expect(() => validateFeatureFlags()).not.toThrow();
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should log success when SOLANA_EXECUTION enabled and SOLANA_RPC_URL is set', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_SOLANA_EXECUTION: 'true',
+        SOLANA_RPC_URL: 'https://api.mainnet-beta.solana.com',
+      });
+
+      validateFeatureFlags();
+
+      const infoCalls = infoSpy.mock.calls.flat().join(' ');
+      expect(infoCalls).toContain('Solana Execution enabled');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it('should use provided logger for Solana execution validation warning', async () => {
+      const mockLogger = {
+        info: jest.fn(),
+        warn: jest.fn(),
+      };
+
+      const { validateFeatureFlags } = await importWithFlags({
+        NODE_ENV: 'development',
+        FEATURE_SOLANA_EXECUTION: 'true',
+        SOLANA_RPC_URL: undefined,
+      });
+
+      validateFeatureFlags(mockLogger);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set'),
+      );
+    });
+
+    it('should not validate Solana execution when flag is disabled', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+
+      const { validateFeatureFlags } = await importWithFlags({
+        FEATURE_SOLANA_EXECUTION: undefined, // defaults to false
+      });
+
+      validateFeatureFlags();
+
+      const allOutput = [...warnSpy.mock.calls, ...infoSpy.mock.calls].flat().join(' ');
+      expect(allOutput).not.toContain('SOLANA_RPC_URL');
+      expect(allOutput).not.toContain('Solana Execution enabled');
+
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+  });
 });

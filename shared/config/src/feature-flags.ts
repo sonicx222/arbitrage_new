@@ -741,11 +741,16 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
   }
 
   // RT-012: Validate Solana execution requires RPC URL
+  // M1-FIX: Hard-fail in production — Solana execution without an RPC URL cannot
+  // function at all. Warn only in development/test to preserve local dev experience.
   if (FEATURE_FLAGS.useSolanaExecution) {
     if (!process.env.SOLANA_RPC_URL) {
       const message =
         'FEATURE_SOLANA_EXECUTION is enabled but SOLANA_RPC_URL is not set. ' +
         'Solana execution strategy will be unavailable at runtime.';
+      if (isProduction) {
+        throw new Error(`CRITICAL: ${message} Set SOLANA_RPC_URL or disable FEATURE_SOLANA_EXECUTION.`);
+      }
       if (logger) {
         logger.warn(message);
       } else {
