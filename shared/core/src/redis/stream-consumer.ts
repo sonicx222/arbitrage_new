@@ -391,6 +391,25 @@ export class StreamConsumer {
       if (errorMessage.includes('timeout')) {
         pollSucceeded = true; // Timeout is not an error — reset backoff
         this.consecutiveErrors = 0;
+      } else if (errorMessage.includes('NOGROUP') || errorMessage.includes('no such key')) {
+        // Consumer group was lost — e.g. Redis/Memurai restarted and dropped all group
+        // state. Recreate it so the next poll succeeds instead of staying broken forever.
+        try {
+          await this.client.createConsumerGroup(this.config.config);
+          this.config.logger?.warn?.('Consumer group recreated after Redis restart', {
+            stream: this.config.config.streamName,
+            group: this.config.config.groupName,
+          });
+          pollSucceeded = true; // treat as recoverable — no backoff
+          this.consecutiveErrors = 0;
+        } catch (recreateError) {
+          this.consecutiveErrors++;
+          this.config.logger?.error('Failed to recreate consumer group after NOGROUP error', {
+            error: recreateError instanceof Error ? recreateError.message : String(recreateError),
+            stream: this.config.config.streamName,
+            group: this.config.config.groupName,
+          });
+        }
       } else {
         this.consecutiveErrors++;
         this.config.logger?.error('Error consuming stream', {
