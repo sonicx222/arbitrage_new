@@ -476,6 +476,131 @@ describe('StreamConsumer', () => {
 
       await consumer.stop();
     });
+
+    it('should resume polling after pause/resume cycle spanning multiple poll cycles (stale pollTimer regression)', async () => {
+      // Regression test for the execution engine consumer stall:
+      // After several poll cycles, schedulePoll() left the expired setTimeout handle
+      // in pollTimer. When poll() ended with paused=true and then resume() ran,
+      // it checked !this.pollTimer → false (stale handle) → never restarted polling.
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0,
+        interPollDelayMs: 10,
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      // Return messages for first few polls, then empty
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+      mockRedis.xack.mockResolvedValue(1);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      // Let several poll cycles complete to accumulate stale timer handles
+      await jest.advanceTimersByTimeAsync(100);
+
+      const callsBefore = mockRedis.xreadgroup.mock.calls.length;
+      expect(callsBefore).toBeGreaterThanOrEqual(3);
+
+      // Now pause (simulating backpressure engaging during a poll)
+      consumer.pause();
+      expect(consumer.isPaused()).toBe(true);
+
+      // Advance time — no polls should run while paused
+      mockRedis.xreadgroup.mockClear();
+      await jest.advanceTimersByTimeAsync(200);
+      expect(mockRedis.xreadgroup).not.toHaveBeenCalled();
+
+      // Resume — this is the critical moment. Before the fix, the stale pollTimer
+      // caused resume() to skip schedulePoll(), permanently stalling the consumer.
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+      consumer.resume();
+
+      expect(consumer.isPaused()).toBe(false);
+
+      // Advance time — polling MUST restart after resume
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Verify poll restarted by checking xreadgroup was called after resume
+      expect(mockRedis.xreadgroup).toHaveBeenCalled();
+
+      await consumer.stop();
+    });
+
+    it('should not create duplicate polls when resume is called during active poll', async () => {
+      // Guards against a secondary issue: if resume() fires while poll() is
+      // still executing (e.g., 1-second fallback interval releases backpressure
+      // during an xreadgroup await), we must not start a second concurrent poll.
+      // The isPolling flag prevents this — the active poll will handle scheduling.
+      let pauseCallback: ((isPaused: boolean) => void) | undefined;
+      const handler = createMockHandler();
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0,
+        interPollDelayMs: 10,
+        onPauseStateChange: (isPaused) => {
+          pauseCallback?.(isPaused);
+        },
+      };
+
+      // First xreadgroup: handler will pause then resume during processing
+      let handlerCallCount = 0;
+      const consumer = new StreamConsumer(client, config);
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      handler.mockImplementation(async () => {
+        handlerCallCount++;
+        if (handlerCallCount === 1) {
+          // Simulate backpressure: pause, then resume while handler is still running
+          consumer.pause();
+          consumer.resume();
+        }
+      });
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+      mockRedis.xack.mockResolvedValue(1);
+
+      consumer.start();
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Should have processed the message
+      expect(handlerCallCount).toBeGreaterThanOrEqual(1);
+
+      // Consumer should still be running (not stalled, not crashed)
+      expect(consumer.getStats().isRunning).toBe(true);
+      expect(consumer.isPaused()).toBe(false);
+
+      await consumer.stop();
+    });
   });
 
   describe('Error Handling', () => {

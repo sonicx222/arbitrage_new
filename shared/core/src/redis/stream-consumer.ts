@@ -115,6 +115,8 @@ export class StreamConsumer {
   private paused = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private pollPromise: Promise<void> | null = null;
+  /** Whether poll() is currently executing (guards against double-poll on resume) */
+  private isPolling = false;
   /** Consecutive poll errors for exponential backoff */
   private consecutiveErrors = 0;
   private static readonly MAX_ERROR_BACKOFF_MS = 30_000;
@@ -203,8 +205,13 @@ export class StreamConsumer {
       stream: this.config.config.streamName
     });
     this.config.onPauseStateChange?.(false);
-    // Restart polling if we were running
-    if (this.running && !this.pollTimer) {
+    // Restart polling if running and no active poll or pending timer.
+    // isPolling guard prevents starting a second concurrent poll when resume()
+    // fires while poll() is still executing (e.g., 1-second fallback interval
+    // dequeues enough to release backpressure during an await in poll()).
+    // In that case, the active poll() will check this.paused at the end and
+    // schedule the next poll itself.
+    if (this.running && !this.pollTimer && !this.isPolling) {
       this.schedulePoll();
     }
   }
@@ -218,8 +225,14 @@ export class StreamConsumer {
 
   /**
    * Schedule a poll() invocation, tracking its promise for clean shutdown.
+   *
+   * FIX: Clear pollTimer to prevent stale handle from blocking resume().
+   * When setTimeout fires and calls schedulePoll(), the expired timer handle
+   * remained in pollTimer (truthy but meaningless). resume() checked
+   * `!this.pollTimer` and skipped restarting the poll — permanent stall.
    */
   private schedulePoll(): void {
+    this.pollTimer = null;
     this.pollPromise = this.poll();
   }
 
@@ -291,7 +304,12 @@ export class StreamConsumer {
   }
 
   private async poll(): Promise<void> {
-    if (!this.running || this.paused) return;
+    this.isPolling = true;
+
+    if (!this.running || this.paused) {
+      this.isPolling = false;
+      return;
+    }
 
     // P0 Fix ES-003: Periodically check for stuck pending messages
     if (this.config.maxDeliveryCount) {
@@ -419,6 +437,13 @@ export class StreamConsumer {
         });
       }
     }
+
+    // Mark poll as complete before scheduling decision.
+    // This must happen BEFORE the this.paused check so that if resume()
+    // was called during this poll (clearing paused), the scheduling branch
+    // runs correctly. And if resume() runs AFTER this point (poll ended
+    // with paused=true), it sees isPolling=false and can restart polling.
+    this.isPolling = false;
 
     // Schedule next poll if still running and not paused
     if (this.running && !this.paused) {
