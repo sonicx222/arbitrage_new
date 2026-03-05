@@ -6,7 +6,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';  // BUG-FIX: Import at module level (was require per call)
 import { Request, Response, NextFunction } from 'express';
 import { getErrorMessage } from '@arbitrage/core/resilience';
-import { createLogger } from '@arbitrage/core';
+import { createLogger, parseEnvIntSafe } from '@arbitrage/core';
 import { getRedisClient } from '@arbitrage/core/redis';
 
 // =============================================================================
@@ -93,7 +93,7 @@ export class AuthService {
 
     this.jwtSecret = process.env.JWT_SECRET;
     this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '1h'; // Reduced from 24h for security
-    this.bcryptRounds = parseInt(process.env.BCRYPT_ROUNDS || '12');
+    this.bcryptRounds = parseEnvIntSafe('BCRYPT_ROUNDS', 12);
 
     // DI: Use injected logger or create default
     this.logger = (deps?.logger ?? createLogger('auth-service')) as AuthServiceLogger;

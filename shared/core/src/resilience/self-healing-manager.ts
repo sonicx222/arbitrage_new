@@ -33,7 +33,7 @@ const SELF_HEALING_DEFAULTS = {
 };
 
 const CIRCUIT_BREAKER_DEFAULTS = {
-  failureThreshold: SYSTEM_CONSTANTS?.circuitBreaker?.defaultFailureThreshold ?? 3,
+  failureThreshold: SYSTEM_CONSTANTS?.circuitBreaker?.defaultFailureThreshold ?? 5,
   recoveryTimeoutMs: SYSTEM_CONSTANTS?.circuitBreaker?.defaultRecoveryTimeoutMs ?? 30000,
   monitoringPeriodMs: SYSTEM_CONSTANTS?.circuitBreaker?.defaultMonitoringPeriodMs ?? 60000,
   successThreshold: SYSTEM_CONSTANTS?.circuitBreaker?.defaultSuccessThreshold ?? 2,

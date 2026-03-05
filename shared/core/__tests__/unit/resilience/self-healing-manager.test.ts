@@ -99,7 +99,7 @@ jest.mock('../../../../config/src', () => ({
       simulatedRestartFailureRate: 0,
     },
     circuitBreaker: {
-      defaultFailureThreshold: 3,
+      defaultFailureThreshold: 5,
       defaultRecoveryTimeoutMs: 100,
       defaultMonitoringPeriodMs: 200,
       defaultSuccessThreshold: 2,

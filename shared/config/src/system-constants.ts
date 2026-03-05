@@ -77,7 +77,7 @@ export const SYSTEM_CONSTANTS = {
   // Circuit breaker configuration
   circuitBreaker: {
     /** Default failure threshold */
-    defaultFailureThreshold: 3,
+    defaultFailureThreshold: 5,
     /** Default recovery timeout in milliseconds */
     defaultRecoveryTimeoutMs: 30000,
     /** Default monitoring period in milliseconds */
