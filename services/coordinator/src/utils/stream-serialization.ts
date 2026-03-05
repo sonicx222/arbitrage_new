@@ -46,8 +46,11 @@ export function serializeOpportunityForStream(
     // For these string fields || and ?? behave identically in practice.
     buyDex: opportunity.buyDex ?? '',
     sellDex: opportunity.sellDex ?? '',
-    profitPercentage: opportunity.profitPercentage?.toString() ?? '0',
-    confidence: opportunity.confidence?.toString() ?? '0',
+    // SA-1N-003 FIX: Guard against NaN/Infinity producing poison stream messages
+    profitPercentage: (opportunity.profitPercentage != null && isFinite(opportunity.profitPercentage))
+      ? opportunity.profitPercentage.toString() : '0',
+    confidence: (opportunity.confidence != null && isFinite(opportunity.confidence))
+      ? opportunity.confidence.toString() : '0',
     timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
     tokenIn: opportunity.tokenIn ?? '',
     tokenOut: opportunity.tokenOut ?? '',
@@ -56,8 +59,10 @@ export function serializeOpportunityForStream(
     // expectedProfit/estimatedProfit are needed for business rule checks (LOW_PROFIT gate).
     // buyChain/sellChain are required for cross-chain opportunity validation.
     // gasEstimate is needed for execution cost calculations.
-    expectedProfit: opportunity.expectedProfit?.toString() ?? '0',
-    estimatedProfit: opportunity.estimatedProfit?.toString() ?? '0',
+    expectedProfit: (opportunity.expectedProfit != null && isFinite(opportunity.expectedProfit))
+      ? opportunity.expectedProfit.toString() : '0',
+    estimatedProfit: (opportunity.estimatedProfit != null && isFinite(opportunity.estimatedProfit))
+      ? opportunity.estimatedProfit.toString() : '0',
     gasEstimate: opportunity.gasEstimate ?? '0',
     // F1 FIX: Only serialize expiresAt when it has a numeric value.
     // Previously used `?? ''` which produced an empty string that passes the

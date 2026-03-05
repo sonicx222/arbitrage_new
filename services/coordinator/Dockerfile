@@ -16,7 +16,8 @@ USER coordinator
 
 EXPOSE 3000
 
+## SA-1Q-008 FIX: Use wget instead of curl — node:22-alpine includes wget but not curl
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/api/health || exit 1
+    CMD wget -qO- http://localhost:3000/api/health || exit 1
 
 CMD ["npm", "start"]

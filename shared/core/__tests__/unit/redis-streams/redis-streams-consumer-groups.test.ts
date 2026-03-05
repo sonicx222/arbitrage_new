@@ -419,8 +419,12 @@ describe('RedisStreamsClient - Consumer Groups', () => {
       const sentMessages: any[] = [];
       mockRedis.xadd
         .mockRejectedValueOnce(new Error('Redis connection lost'))
-        .mockImplementation(async (_stream: string, _id: string, _field: string, value: string) => {
-          sentMessages.push(JSON.parse(value));
+        .mockImplementation(async (...args: unknown[]) => {
+          // SA-1C-004: xaddWithLimit now includes MAXLEN args, so find 'data' field by name
+          const dataIdx = args.indexOf('data');
+          if (dataIdx !== -1 && dataIdx + 1 < args.length) {
+            sentMessages.push(JSON.parse(args[dataIdx + 1] as string));
+          }
           return '1234-0';
         });
 

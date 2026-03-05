@@ -507,10 +507,12 @@ export class CrossChainDetectorService {
   }
 
   // P0-NEW-6 FIX: Timeout constant for shutdown operations
-  // SA-019 FIX: Increased from 5000ms to 10000ms to provide buffer above the Redis
-  // connectTimeout (5000ms). When both values are equal, a Redis connection attempt
-  // that takes exactly connectTimeout ms could race with the shutdown deadline.
-  private static readonly SHUTDOWN_TIMEOUT_MS = 10000;
+  // SA-1R-003 FIX: Lowered from 10000ms to 4000ms per disconnect operation.
+  // stop() calls disconnectWithTimeout twice sequentially (streamsClient + redis),
+  // so total internal budget is 2×4s = 8s. The service-level force-exit timer
+  // (setupServiceShutdown default 10s) must exceed this: 10s > 8s ✓.
+  // Previous value (10s per disconnect = 20s total) exceeded the 10s force-exit.
+  private static readonly SHUTDOWN_TIMEOUT_MS = 4000;
 
   async stop(): Promise<void> {
     const result = await this.stateManager.executeStop(async () => {

@@ -539,7 +539,9 @@ export class EnhancedHealthMonitor {
 
     // Store health snapshot
     const redis = await this.redis;
-    await redis.set('health:snapshot', health, 300); // 5 minutes TTL
+    // SA-1O-002 FIX: Use 'health:system:snapshot' to avoid prefix collision with
+    // 'health:${serviceName}' keys written by self-healing-manager.
+    await redis.set('health:system:snapshot', health, 300); // 5 minutes TTL
 
     // Log health status
     logger.debug('Health check completed', {

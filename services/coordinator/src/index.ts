@@ -182,9 +182,13 @@ async function main() {
     await coordinator.start(port);
 
     // Graceful shutdown with shared bootstrap utility
+    // SA-1R-002 FIX: Explicit 15s timeout — coordinator stop() calls server.close(),
+    // Redis disconnect (connectTimeout=3s), and crossRegionManager cleanup sequentially.
+    // Default 10s left minimal headroom; 15s ensures all operations complete.
     setupServiceShutdown({
       logger,
       serviceName: 'Coordinator',
+      shutdownTimeoutMs: 15000,
       onShutdown: async () => {
         // P1-2 FIX: Remove event listeners before destroying manager to prevent memory leak
         crossRegionManager.removeAllListeners();

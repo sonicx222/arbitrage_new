@@ -385,6 +385,8 @@ export class RedisStreamsClient {
   private legacySignatureCompatEnabled: boolean;
   /** P0 Fix ES-002: Circuit breaker to prevent thundering herd on Redis failures during xadd. */
   private xaddCircuitBreaker: SimpleCircuitBreaker;
+  /** SA-1C-004: Track warned streams to avoid log spam for unknown MAXLEN lookups */
+  private warnedUnknownStreams = new Set<string>();
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -729,12 +731,25 @@ export class RedisStreamsClient {
    * P0 Fix: Approximate MAXLEN can discard unread messages when consumers lag.
    * Use checkStreamLag() in health checks to monitor lag and alert before message loss.
    */
+  /** SA-1C-004: Default MAXLEN for streams not in STREAM_MAX_LENGTHS registry */
+  private static readonly DEFAULT_STREAM_MAX_LENGTH = 5000;
+
   async xaddWithLimit<T = Record<string, unknown>>(
     streamName: string,
     message: T,
     options: Omit<XAddOptions, 'maxLen'> = {}
   ): Promise<string> {
-    const maxLen = RedisStreamsClient.STREAM_MAX_LENGTHS[streamName];
+    let maxLen = RedisStreamsClient.STREAM_MAX_LENGTHS[streamName];
+    if (maxLen === undefined) {
+      maxLen = RedisStreamsClient.DEFAULT_STREAM_MAX_LENGTH;
+      if (!this.warnedUnknownStreams.has(streamName)) {
+        this.warnedUnknownStreams.add(streamName);
+        this.logger.warn('Stream not in STREAM_MAX_LENGTHS registry, using default', {
+          streamName,
+          defaultMaxLen: maxLen,
+        });
+      }
+    }
     return this.xadd(streamName, message, '*', {
       ...options,
       maxLen,

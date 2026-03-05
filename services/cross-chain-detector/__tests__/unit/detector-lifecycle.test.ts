@@ -403,13 +403,13 @@ describe('CrossChainDetectorService', () => {
       expect(disconnectWithTimeout).toHaveBeenCalledWith(
         mockStreamsClient,
         'Streams client',
-        10000, // SA-019 FIX: Increased from 5000 to avoid race with Redis connectTimeout
+        4000, // SA-1R-003 FIX: 4s per disconnect × 2 = 8s < 10s force-exit
         sharedMockLogger
       );
       expect(disconnectWithTimeout).toHaveBeenCalledWith(
         mockRedisClient,
         'Redis',
-        10000, // SA-019 FIX: Increased from 5000 to avoid race with Redis connectTimeout
+        4000, // SA-1R-003 FIX: 4s per disconnect × 2 = 8s < 10s force-exit
         sharedMockLogger
       );
     });

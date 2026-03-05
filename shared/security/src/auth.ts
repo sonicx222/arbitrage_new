@@ -827,8 +827,13 @@ export function apiAuthorize(resource: string, action: string) {
               return next();
             }
           }
-        } catch {
-          // Fall through to forbidden
+        } catch (authError) {
+          // SA-1M-004 FIX: Log authorization errors instead of silently swallowing
+          moduleLogger.warn('Authorization check failed, denying access', {
+            resource,
+            action,
+            error: authError instanceof Error ? authError.message : String(authError),
+          });
         }
       }
 
