@@ -3,6 +3,7 @@
 // P0-FIX: Uses BigInt for precise wei calculations to prevent precision loss
 
 import { createLogger } from '../logger';
+import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
 import { getHierarchicalCache } from '../caching/hierarchical-cache';
 import {
   getGasPriceCache,
@@ -119,9 +120,9 @@ export type { DynamicSlippageConfig } from '../utils/amm-math';
 export class CrossDexTriangularArbitrage {
   private cache = getHierarchicalCache();
   // W2-L1 FIX: Use ?? for convention compliance (|| treats '' as falsy)
-  private minProfitThreshold = parseFloat(process.env.TRIANGULAR_MIN_PROFIT ?? '0.005');
-  private maxSlippage = parseFloat(process.env.SLIPPAGE_MAX ?? '0.10');
-  private maxExecutionTime = parseInt(process.env.TRIANGULAR_MAX_EXECUTION_TIME_MS ?? '5000', 10);
+  private minProfitThreshold = parseEnvFloatSafe('TRIANGULAR_MIN_PROFIT', 0.005, 0);
+  private maxSlippage = parseEnvFloatSafe('SLIPPAGE_MAX', 0.10, 0);
+  private maxExecutionTime = parseEnvIntSafe('TRIANGULAR_MAX_EXECUTION_TIME_MS', 5000, 100);
 
   /** T1.2: Dynamic slippage configuration */
   private slippageConfig: DynamicSlippageConfig;

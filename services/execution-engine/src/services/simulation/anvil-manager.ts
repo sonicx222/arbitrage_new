@@ -27,6 +27,7 @@ import { ethers } from 'ethers';
 // Fix 6.3: Import shared rolling average utility to eliminate duplication
 import { CHAIN_IDS, getSimulationErrorMessage, updateRollingAverage, extractRevertReason } from './types';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 
 // =============================================================================
 // Types
@@ -140,7 +141,7 @@ export interface AnvilForkMetrics {
  * - Supports ANVIL_PORT environment variable for deployment flexibility
  * - Default changed from 8545 to 8546 to avoid conflict with standard Ethereum nodes
  */
-const DEFAULT_PORT = parseInt(process.env.ANVIL_PORT || '8546', 10);
+const DEFAULT_PORT = parseEnvIntSafe('ANVIL_PORT', 8546, 1);
 const DEFAULT_ANVIL_PATH = 'anvil';
 const DEFAULT_CACHE_SIZE = 500;
 const DEFAULT_ACCOUNTS = 1;

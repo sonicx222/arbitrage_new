@@ -9,6 +9,8 @@
  * @see multi-leg-path-finder.ts
  */
 
+import { parseEnvIntSafe, parseEnvFloatSafe } from './env-utils';
+
 // =============================================================================
 // BigInt Precision Constants
 // =============================================================================
@@ -55,10 +57,10 @@ export interface DynamicSlippageConfig {
  */
 // W2-L1 FIX: Use ?? for convention compliance
 export const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
-  baseSlippage: parseFloat(process.env.SLIPPAGE_BASE ?? '0.003'),
+  baseSlippage: parseEnvFloatSafe('SLIPPAGE_BASE', 0.003, 0),
   priceImpactScale: 5.0,
-  maxSlippage: parseFloat(process.env.SLIPPAGE_MAX ?? '0.10'),
-  minLiquidityUsd: parseInt(process.env.SLIPPAGE_MIN_LIQUIDITY_USD ?? '100000', 10),
+  maxSlippage: parseEnvFloatSafe('SLIPPAGE_MAX', 0.10, 0),
+  minLiquidityUsd: parseEnvIntSafe('SLIPPAGE_MIN_LIQUIDITY_USD', 100000, 0),
   liquidityPenaltyScale: 2.0
 };
 

@@ -59,8 +59,10 @@ export function configureMiddleware(app: Application, logger: MinimalLogger): vo
   // OP-23 FIX: Configurable rate limits via env vars (previously hardcoded)
   // NOTE: Uses in-memory store (express-rate-limit default). Suitable for single-instance
   // deployment. For multi-instance, replace with rate-limit-redis or similar Redis-backed store.
-  const rateLimitWindowMs = parseInt(process.env.API_RATE_LIMIT_WINDOW_MS || '', 10) || (15 * 60 * 1000);
-  const rateLimitMax = parseInt(process.env.API_RATE_LIMIT_MAX || '', 10) || 100;
+  const rawWindowMs = parseInt(process.env.API_RATE_LIMIT_WINDOW_MS ?? '', 10);
+  const rateLimitWindowMs = Number.isNaN(rawWindowMs) || rawWindowMs <= 0 ? 15 * 60 * 1000 : rawWindowMs;
+  const rawMax = parseInt(process.env.API_RATE_LIMIT_MAX ?? '', 10);
+  const rateLimitMax = Number.isNaN(rawMax) || rawMax <= 0 ? 100 : rawMax;
   const limiter = rateLimit({
     windowMs: rateLimitWindowMs,
     max: rateLimitMax,

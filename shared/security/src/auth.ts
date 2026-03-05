@@ -404,8 +404,8 @@ export class AuthService {
 
     const lockoutUntil = await this.redis?.get(lockoutKey);
     if (lockoutUntil) {
-      const lockoutTime = parseInt(lockoutUntil);
-      if (Date.now() < lockoutTime) {
+      const lockoutTime = parseInt(lockoutUntil, 10);
+      if (Number.isNaN(lockoutTime) || Date.now() < lockoutTime) {
         const remainingMinutes = Math.ceil((lockoutTime - Date.now()) / (60 * 1000));
         throw new Error(`Account locked due to too many failed attempts. Try again in ${remainingMinutes} minutes.`);
       } else {

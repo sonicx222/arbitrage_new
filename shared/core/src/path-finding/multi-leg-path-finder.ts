@@ -15,6 +15,7 @@
  */
 
 import { createLogger } from '../logger';
+import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
 import {
   getGasPriceCache,
   GAS_UNITS,
@@ -137,24 +138,23 @@ export interface PathFinderStats {
  * - MULTI_LEG_MAX_CANDIDATES: Max candidates per hop (default: 15)
  */
 const DEFAULT_CONFIG: MultiLegPathConfig = {
-  // W2-L1 FIX: Use ?? for convention compliance
-  minProfitThreshold: parseFloat(process.env.MULTI_LEG_MIN_PROFIT ?? '0.001'),
+  minProfitThreshold: parseEnvFloatSafe('MULTI_LEG_MIN_PROFIT', 0.001, 0),
   maxPathLength: 6,  // 6 tokens = 5 hops = matches contract MAX_SWAP_HOPS
   minPathLength: 5,
-  maxCandidatesPerHop: parseInt(process.env.MULTI_LEG_MAX_CANDIDATES ?? '15', 10),
-  timeoutMs: parseInt(process.env.MULTI_LEG_TIMEOUT_MS ?? '5000', 10),
+  maxCandidatesPerHop: parseEnvIntSafe('MULTI_LEG_MAX_CANDIDATES', 15, 1),
+  timeoutMs: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS', 5000, 100),
   minConfidence: 0.4,
   chainTimeoutMs: {
-    ethereum: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ETHEREUM ?? '5000', 10),
-    arbitrum: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ARBITRUM ?? '1500', 10),
-    optimism: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_OPTIMISM ?? '2000', 10),
-    base: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_BASE ?? '2000', 10),
-    polygon: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_POLYGON ?? '3000', 10),
-    bsc: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_BSC ?? '3000', 10),
-    avalanche: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_AVALANCHE ?? '3000', 10),
-    fantom: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_FANTOM ?? '3000', 10),
-    zksync: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_ZKSYNC ?? '2000', 10),
-    linea: parseInt(process.env.MULTI_LEG_TIMEOUT_MS_LINEA ?? '2000', 10),
+    ethereum: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_ETHEREUM', 5000, 100),
+    arbitrum: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_ARBITRUM', 1500, 100),
+    optimism: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_OPTIMISM', 2000, 100),
+    base: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_BASE', 2000, 100),
+    polygon: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_POLYGON', 3000, 100),
+    bsc: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_BSC', 3000, 100),
+    avalanche: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_AVALANCHE', 3000, 100),
+    fantom: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_FANTOM', 3000, 100),
+    zksync: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_ZKSYNC', 2000, 100),
+    linea: parseEnvIntSafe('MULTI_LEG_TIMEOUT_MS_LINEA', 2000, 100),
   }
 };
 

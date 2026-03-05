@@ -28,6 +28,7 @@ import {
   getKnownRouterAddresses,
 } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
+import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import {
   HierarchicalCache,
   createHierarchicalCache,
@@ -274,13 +275,13 @@ export class ChainDetectorInstance extends EventEmitter {
   private lastWsReceivedAt: number = 0;
   private reconnectAttempts: number = 0;
   // FIX L2: Configurable reconnect parameters via env vars
-  private readonly MAX_RECONNECT_ATTEMPTS = parseInt(process.env.WS_MAX_RECONNECT_ATTEMPTS ?? '5', 10);
+  private readonly MAX_RECONNECT_ATTEMPTS = parseEnvIntSafe('WS_MAX_RECONNECT_ATTEMPTS', 5, 1);
   // Slow recovery: After max reconnect attempts, retry periodically
   private slowRecoveryTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly SLOW_RECOVERY_INTERVAL_MS = parseInt(process.env.WS_SLOW_RECOVERY_INTERVAL_MS ?? '300000', 10);
+  private readonly SLOW_RECOVERY_INTERVAL_MS = parseEnvIntSafe('WS_SLOW_RECOVERY_INTERVAL_MS', 300000, 1000);
   /** F2-FIX: Track slow recovery cycles to prevent infinite reconnection loops */
   private slowRecoveryCycles: number = 0;
-  private readonly MAX_SLOW_RECOVERY_CYCLES = parseInt(process.env.WS_MAX_SLOW_RECOVERY_CYCLES ?? '10', 10);
+  private readonly MAX_SLOW_RECOVERY_CYCLES = parseEnvIntSafe('WS_MAX_SLOW_RECOVERY_CYCLES', 10, 1);
 
   // P0-NEW-3/P0-NEW-4 FIX: Lifecycle promises to prevent race conditions
   // These ensure concurrent start/stop calls are handled correctly
@@ -761,7 +762,7 @@ export class ChainDetectorInstance extends EventEmitter {
       // but value was hardcoded). Default 10ms for backward compat.
       // FIX H1: Set maxQueueSize to prevent unbounded memory growth during Redis outages.
       // StreamBatcher drops messages with a warning when queue exceeds this limit.
-      const batcherMaxWaitMs = parseInt(process.env.PRICE_BATCHER_MAX_WAIT_MS ?? '10', 10);
+      const batcherMaxWaitMs = parseEnvIntSafe('PRICE_BATCHER_MAX_WAIT_MS', 10, 1);
       this.priceUpdateBatcher = this.streamsClient.createBatcher<PriceUpdate>(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
         { maxBatchSize: 50, maxWaitMs: batcherMaxWaitMs, maxQueueSize: 10000 }

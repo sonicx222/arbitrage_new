@@ -32,6 +32,7 @@
  */
 
 import { notifySingletonAccess } from '../singleton-tracking';
+import { parseEnvIntSafe } from '../utils/env-utils';
 
 export interface MutexStats {
   /** Number of times the mutex was acquired */
@@ -251,10 +252,10 @@ interface MutexEntry {
 const namedMutexes = new Map<string, MutexEntry>();
 
 /** Cleanup interval in milliseconds (default: 5 minutes). Override via MUTEX_CLEANUP_INTERVAL_MS env var. */
-const MUTEX_CLEANUP_INTERVAL_MS = parseInt(process.env.MUTEX_CLEANUP_INTERVAL_MS ?? '', 10) || 5 * 60 * 1000;
+const MUTEX_CLEANUP_INTERVAL_MS = parseEnvIntSafe('MUTEX_CLEANUP_INTERVAL_MS', 5 * 60 * 1000, 1000);
 
 /** TTL for unused mutexes in milliseconds (default: 10 minutes). Override via MUTEX_IDLE_TTL_MS env var. */
-const MUTEX_IDLE_TTL_MS = parseInt(process.env.MUTEX_IDLE_TTL_MS ?? '', 10) || 10 * 60 * 1000;
+const MUTEX_IDLE_TTL_MS = parseEnvIntSafe('MUTEX_IDLE_TTL_MS', 10 * 60 * 1000, 1000);
 
 let cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
 

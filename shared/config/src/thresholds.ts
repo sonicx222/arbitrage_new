@@ -30,7 +30,7 @@ export const ARBITRAGE_CONFIG = {
   predictiveEnabled: false, // Enable in Phase 3
   // Additional config properties for opportunity calculation
   defaultAmount: 10000, // Default trade amount in USD (flash loans need $10k+ to cover gas)
-  estimatedGasCost: parseFloat(process.env.ESTIMATED_GAS_COST_USD ?? '15'), // Env: ESTIMATED_GAS_COST_USD. Global fallback (mainnet-oriented). Use getEstimatedGasCostUsd() for per-chain values.
+  estimatedGasCost: (() => { const v = parseFloat(process.env.ESTIMATED_GAS_COST_USD ?? ''); return Number.isNaN(v) ? 15 : v; })(), // Env: ESTIMATED_GAS_COST_USD. Global fallback (mainnet-oriented). Use getEstimatedGasCostUsd() for per-chain values.
   opportunityTimeoutMs: 30000, // 30 seconds
   minProfitThreshold: 2, // Minimum $2 net profit (per-chain % thresholds in chainMinProfits are primary filter)
   minConfidenceThreshold: 0.7, // Minimum 70% confidence

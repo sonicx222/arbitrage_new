@@ -27,7 +27,7 @@ import { ethers } from 'ethers';
 import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
 import { getErrorMessage } from '@arbitrage/core/resilience';
-import { parseEnvIntSafe } from '@arbitrage/core/utils';
+import { parseEnvIntSafe, parseEnvFloatSafe } from '@arbitrage/core/utils';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
 import { CUSTOM_ERROR_SELECTORS } from './error-selectors.generated';
@@ -104,9 +104,9 @@ interface HybridModeConfig {
 }
 
 const DEFAULT_HYBRID_CONFIG: HybridModeConfig = {
-  successRate: parseFloat(process.env.EXECUTION_HYBRID_SUCCESS_RATE || '0.95'),
+  successRate: parseEnvFloatSafe('EXECUTION_HYBRID_SUCCESS_RATE', 0.95, 0),
   mockGasUsed: BigInt(process.env.EXECUTION_HYBRID_GAS_USED || '150000'),
-  mockLatencyMs: parseInt(process.env.EXECUTION_HYBRID_LATENCY_MS || '100', 10),
+  mockLatencyMs: parseEnvIntSafe('EXECUTION_HYBRID_LATENCY_MS', 100, 0),
 };
 
 /**
@@ -142,7 +142,7 @@ const ERC20_APPROVE_ABI = [
 /**
  * Issue 3.3 Fix: Configurable swap deadline in seconds.
  */
-const SWAP_DEADLINE_SECONDS = parseInt(process.env.SWAP_DEADLINE_SECONDS || '300', 10);
+const SWAP_DEADLINE_SECONDS = parseEnvIntSafe('SWAP_DEADLINE_SECONDS', 300, 1);
 
 /**
  * Phase 2 Enhancement: Default RBF retry configuration.

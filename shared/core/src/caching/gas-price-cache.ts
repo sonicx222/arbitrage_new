@@ -17,6 +17,7 @@
 
 import { createLogger, type Logger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { parseEnvIntSafe } from '../utils/env-utils';
 import { CHAINS, NATIVE_TOKEN_PRICES, FEATURE_FLAGS, isEvmChainSafe } from '@arbitrage/config';
 
 // =============================================================================
@@ -202,10 +203,10 @@ const L1_DATA_FEE_USD: Record<string, number> = {
 // =============================================================================
 
 /** TTL for cached L1 oracle values in milliseconds (default: 5 minutes). */
-const L1_ORACLE_CACHE_TTL_MS = parseInt(process.env.L1_ORACLE_CACHE_TTL_MS ?? '300000', 10);
+const L1_ORACLE_CACHE_TTL_MS = parseEnvIntSafe('L1_ORACLE_CACHE_TTL_MS', 300000, 1000);
 
 /** How often to refresh L1 oracle cache in milliseconds (default: 60 seconds). */
-const L1_ORACLE_REFRESH_INTERVAL_MS = parseInt(process.env.L1_ORACLE_REFRESH_INTERVAL_MS ?? '60000', 10);
+const L1_ORACLE_REFRESH_INTERVAL_MS = parseEnvIntSafe('L1_ORACLE_REFRESH_INTERVAL_MS', 60000, 1000);
 
 /** Typical arbitrage tx calldata size in bytes for L1 cost estimation. */
 const L1_CALLDATA_BYTES = 500;

@@ -113,6 +113,38 @@ export function parseEnvIntSafe(
 }
 
 /**
+ * Parse and validate a float environment variable (safe mode).
+ *
+ * Returns defaultValue if the env var is not set or not a valid number.
+ * Logs a warning for invalid values instead of throwing.
+ *
+ * @param name - Environment variable name
+ * @param defaultValue - Default value if env var is not set or invalid
+ * @param min - Minimum valid value (inclusive). Values below this return min.
+ * @returns Parsed float value
+ */
+export function parseEnvFloatSafe(
+  name: string,
+  defaultValue: number,
+  min?: number
+): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return defaultValue;
+  }
+  const parsed = parseFloat(raw);
+  if (Number.isNaN(parsed)) {
+    logger.warn(`[ENV] Invalid float value for ${name}: "${raw}" - using default ${defaultValue}`);
+    return defaultValue;
+  }
+  if (min !== undefined && parsed < min) {
+    logger.warn(`[ENV] Value for ${name} (${parsed}) below minimum ${min} - using minimum`);
+    return min;
+  }
+  return parsed;
+}
+
+/**
  * Parse a boolean environment variable.
  *
  * @param name - Environment variable name

@@ -12,6 +12,7 @@
  */
 
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import { ethers } from 'ethers';
 import type { ISimulationService, ISimulationProvider } from './simulation/types';
 import { SimulationService } from './simulation/simulation.service';
@@ -133,8 +134,8 @@ export function initializeTxSimulationService(
   }
 
   // Read config from environment with defaults
-  const minProfitForSimulation = parseInt(process.env.SIMULATION_MIN_PROFIT || '50', 10);
-  const timeCriticalThresholdMs = parseInt(process.env.SIMULATION_TIME_CRITICAL_MS || '2000', 10);
+  const minProfitForSimulation = parseEnvIntSafe('SIMULATION_MIN_PROFIT', 50, 0);
+  const timeCriticalThresholdMs = parseEnvIntSafe('SIMULATION_TIME_CRITICAL_MS', 2000, 100);
 
   const service = new SimulationService({
     providers,

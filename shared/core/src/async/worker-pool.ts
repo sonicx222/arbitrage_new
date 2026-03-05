@@ -8,7 +8,10 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { createLogger } from '../logger';
 import { clearTimeoutSafe } from './lifecycle-utils';
+import { parseEnvIntSafe } from '../utils/env-utils';
 import { WORKER_POOL_CONFIG, PLATFORM_NAME } from '@arbitrage/config';
+
+const WORKER_MAX_OLD_GEN_MB = parseEnvIntSafe('WORKER_MAX_OLD_GEN_MB', 256, 16);
 
 const logger = createLogger('worker-pool');
 
@@ -507,7 +510,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
         // the SharedArrayBuffer price matrix (524K+ pair slots) plus JSON parsing.
         // Override via WORKER_MAX_OLD_GEN_MB env var for constrained environments.
         resourceLimits: {
-          maxOldGenerationSizeMb: parseInt(process.env.WORKER_MAX_OLD_GEN_MB || '256', 10),
+          maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB,
           maxYoungGenerationSizeMb: 16,
         }
       };
@@ -780,7 +783,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
           keyRegistryBuffer: this.keyRegistryBuffer
         },
         resourceLimits: {
-          maxOldGenerationSizeMb: parseInt(process.env.WORKER_MAX_OLD_GEN_MB || '256', 10),
+          maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB,
           maxYoungGenerationSizeMb: 16,
         }
       };
@@ -1162,7 +1165,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
           keyRegistryBuffer: this.keyRegistryBuffer
         },
         resourceLimits: {
-          maxOldGenerationSizeMb: parseInt(process.env.WORKER_MAX_OLD_GEN_MB || '256', 10),
+          maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB,
           maxYoungGenerationSizeMb: 16,
         }
       });

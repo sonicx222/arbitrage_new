@@ -14,6 +14,7 @@ import { createLogger } from '../logger';
 import { setupParentPortListener } from '../async/lifecycle-utils';
 // LOG-OPT Fix 4: Token-bucket sampler for high-frequency debug events
 import { LogSampler } from '../logging/log-sampler';
+import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
 import type { PartitionDetectorInterface } from './config';
 import { shutdownPartitionService } from './health-server';
 
@@ -76,8 +77,8 @@ export function setupDetectorEventHandlers(
   // At LOG_LEVEL=debug, price updates fire 1000+/sec — sampler caps output at 100/sec
   // with 1% probabilistic sampling beyond the cap, making debug logs usable for live analysis.
   const sampler = new LogSampler({
-    maxPerSec: parseInt(process.env.LOG_SAMPLE_MAX_PER_SEC ?? '100', 10),
-    sampleRate: parseFloat(process.env.LOG_SAMPLE_RATE ?? '0.01'),
+    maxPerSec: parseEnvIntSafe('LOG_SAMPLE_MAX_PER_SEC', 100, 1),
+    sampleRate: parseEnvFloatSafe('LOG_SAMPLE_RATE', 0.01, 0),
   });
 
   // FIX #9: Store handler references for cleanup (same pattern as setupProcessHandlers)

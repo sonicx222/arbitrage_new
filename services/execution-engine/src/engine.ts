@@ -797,7 +797,7 @@ export class ExecutionEngineService {
         });
         const drainStart = Date.now();
         // Configurable drain timeout: cross-chain bridge confirmations can take 30-60s
-        const drainTimeoutMs = parseInt(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS ?? '30000', 10);
+        const drainTimeoutMs = parseEnvIntSafe('SHUTDOWN_DRAIN_TIMEOUT_MS', 30000, 1000);
         while (
           (this.executionPipeline?.getActiveExecutionCount() ?? 0) > 0 &&
           Date.now() - drainStart < drainTimeoutMs

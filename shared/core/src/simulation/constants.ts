@@ -13,6 +13,7 @@ import type {
   MarketRegime,
   RegimeConfig,
 } from './types';
+import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
 
 // =============================================================================
 // Default Configuration
@@ -20,8 +21,8 @@ import type {
 
 export const DEFAULT_CONFIG: SimulationConfig = {
   // W2-L1 FIX: Use ?? for convention compliance
-  volatility: parseFloat(process.env.SIMULATION_VOLATILITY ?? '0.02'),
-  updateIntervalMs: parseInt(process.env.SIMULATION_UPDATE_INTERVAL_MS ?? '1000', 10),
+  volatility: parseEnvFloatSafe('SIMULATION_VOLATILITY', 0.02, 0),
+  updateIntervalMs: parseEnvIntSafe('SIMULATION_UPDATE_INTERVAL_MS', 1000, 100),
   arbitrageChance: 0.05, // 5% chance per update
   arbitrageSpread: 0.005, // 0.5% spread
   // S3.1.2: All 11 chains across 4 partitions
