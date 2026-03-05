@@ -1,0 +1,513 @@
+{
+  "sessionId": "20260304_212433",
+  "timestamp": "2026-03-04T21:11:14.501Z",
+  "gitSha": "b531e95c5cf6997d2feda17bdd62e1077e5ff8ac",
+  "decision": "GO",
+  "summary": {
+    "CRITICAL": 0,
+    "HIGH": 1,
+    "MEDIUM": 8,
+    "LOW": 5,
+    "INFO": 57,
+    "total": 71
+  },
+  "findings": [
+    {
+      "findingId": "SA-001",
+      "phase": "STATIC",
+      "category": "STREAM_DECLARATION",
+      "severity": "INFO",
+      "title": "All production stream references use RedisStreams constant"
+    },
+    {
+      "findingId": "SA-002",
+      "phase": "STATIC",
+      "category": "CONSUMER_GROUP",
+      "severity": "INFO",
+      "title": "All consumer groups consistent — dynamic failover group confirmed"
+    },
+    {
+      "findingId": "SA-003",
+      "phase": "STATIC",
+      "category": "MAXLEN",
+      "severity": "INFO",
+      "title": "All 24 streams have MAXLEN; HMAC DLQ path uses xaddWithLimit()"
+    },
+    {
+      "findingId": "SA-004",
+      "phase": "STATIC",
+      "category": "MISSING_ACK",
+      "severity": "INFO",
+      "title": "XACK handled internally by StreamConsumer abstraction"
+    },
+    {
+      "findingId": "SA-005",
+      "phase": "STATIC",
+      "category": "ENV_VAR",
+      "severity": "HIGH",
+      "title": "15 undocumented behavior-controlling env vars"
+    },
+    {
+      "findingId": "SA-006",
+      "phase": "STATIC",
+      "category": "ENV_VAR",
+      "severity": "MEDIUM",
+      "title": "~44 undocumented custom env vars"
+    },
+    {
+      "findingId": "SA-007",
+      "phase": "STATIC",
+      "category": "ENV_VAR",
+      "severity": "INFO",
+      "title": "Env var drift summary: 0 CRITICAL, 15 HIGH, ~44 MEDIUM undocumented"
+    },
+    {
+      "findingId": "SA-008",
+      "phase": "STATIC",
+      "category": "ANTI_PATTERN",
+      "severity": "INFO",
+      "title": "Zero || 0 anti-pattern instances in production TypeScript"
+    },
+    {
+      "findingId": "SA-009",
+      "phase": "STATIC",
+      "category": "HMAC_SIGNING",
+      "severity": "INFO",
+      "title": "HMAC signing fully documented and implemented"
+    },
+    {
+      "findingId": "SA-010",
+      "phase": "STATIC",
+      "category": "FEATURE_FLAG",
+      "severity": "MEDIUM",
+      "title": "FEATURE_DYNAMIC_L1_FEES not documented in .env.example"
+    },
+    {
+      "findingId": "SA-011",
+      "phase": "STATIC",
+      "category": "FEATURE_FLAG",
+      "severity": "MEDIUM",
+      "title": "FEATURE_FLASHBOTS_PROTECT_L2 not documented in .env.example"
+    },
+    {
+      "findingId": "SA-012",
+      "phase": "STATIC",
+      "category": "FEATURE_FLAG",
+      "severity": "INFO",
+      "title": "All 23 feature flags present; no cross-dependency violations"
+    },
+    {
+      "findingId": "SA-013",
+      "phase": "STATIC",
+      "category": "RISK_CONFIG",
+      "severity": "INFO",
+      "title": "Risk configuration fully documented with cross-validation"
+    },
+    {
+      "findingId": "SA-014",
+      "phase": "STATIC",
+      "category": "UNSAFE_PARSE",
+      "severity": "INFO",
+      "title": "Production code uses safe parse utilities — no unprotected parseInt found"
+    },
+    {
+      "findingId": "SA-015",
+      "phase": "STATIC",
+      "category": "REDIS_CLIENT_PARITY",
+      "severity": "INFO",
+      "title": "RedisClient and RedisStreamsClient fully aligned — split-brain FIXED"
+    },
+    {
+      "findingId": "SA-016",
+      "phase": "STATIC",
+      "category": "PORT_COLLISION",
+      "severity": "INFO",
+      "title": "No port collisions — unified-detector port corrected to 3007"
+    },
+    {
+      "findingId": "SA-017",
+      "phase": "STATIC",
+      "category": "SILENT_ERROR",
+      "severity": "LOW",
+      "title": "estimateUsdValue() silently returns undefined on failure (no logging)"
+    },
+    {
+      "findingId": "SA-018",
+      "phase": "STATIC",
+      "category": "SILENT_ERROR",
+      "severity": "LOW",
+      "title": "getWalletBalance() silently returns 'unavailable' on RPC error"
+    },
+    {
+      "findingId": "SA-019",
+      "phase": "STATIC",
+      "category": "SILENT_ERROR",
+      "severity": "LOW",
+      "title": "Stream lag health check swallowed in unified-detector (documented)"
+    },
+    {
+      "findingId": "SA-020",
+      "phase": "STATIC",
+      "category": "SILENT_ERROR",
+      "severity": "LOW",
+      "title": "Block height expiry check swallowed in Solana strategy (documented)"
+    },
+    {
+      "findingId": "SA-021",
+      "phase": "STATIC",
+      "category": "SILENT_ERROR",
+      "severity": "INFO",
+      "title": "4 silent catches found — all LOW severity with documented intent"
+    },
+    {
+      "findingId": "SA-022",
+      "phase": "STATIC",
+      "category": "STREAM_TYPE_FIDELITY",
+      "severity": "INFO",
+      "title": "Stream serialization type fidelity confirmed — parseFloat() restores all numeric fields"
+    },
+    {
+      "findingId": "SA-023",
+      "phase": "STATIC",
+      "category": "REDIS_KEY_REGISTRY",
+      "severity": "INFO",
+      "title": "10 unique Redis key prefixes — no collisions"
+    },
+    {
+      "findingId": "SA-024",
+      "phase": "STATIC",
+      "category": "ADR_COMPLIANCE",
+      "severity": "INFO",
+      "title": "ADR-022: No spread operators in price-matrix hot-path loops"
+    },
+    {
+      "findingId": "SA-025",
+      "phase": "STATIC",
+      "category": "ADR_COMPLIANCE",
+      "severity": "LOW",
+      "title": "ADR-033: No 30s global stale price threshold — using chain-aware freshness (5s default)"
+    },
+    {
+      "findingId": "SA-026",
+      "phase": "STATIC",
+      "category": "ADR_COMPLIANCE",
+      "severity": "INFO",
+      "title": "ADR-002: No direct inter-service HTTP calls"
+    },
+    {
+      "findingId": "SA-027",
+      "phase": "STATIC",
+      "category": "ADR_COMPLIANCE",
+      "severity": "INFO",
+      "title": "ADR-018: Circuit breaker default threshold = 5 confirmed"
+    },
+    {
+      "findingId": "SA-028",
+      "phase": "STATIC",
+      "category": "ADR_COMPLIANCE",
+      "severity": "INFO",
+      "title": "ADR-005: SharedArrayBuffer confirmed as L1 cache"
+    },
+    {
+      "findingId": "SA-029",
+      "phase": "STATIC",
+      "category": "INFRA_DRIFT",
+      "severity": "INFO",
+      "title": "Infrastructure configs aligned — Fly.io and Docker match code"
+    },
+    {
+      "findingId": "SA-030",
+      "phase": "STATIC",
+      "category": "TIMEOUT_HIERARCHY",
+      "severity": "INFO",
+      "title": "Timeout hierarchy valid across all services"
+    },
+    {
+      "findingId": "ST-001",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-002",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-003",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-004",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-005",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-006",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-007",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "ST-008",
+      "phase": "STARTUP",
+      "category": "STREAM_TOPOLOGY",
+      "severity": "MEDIUM",
+      "title": ""
+    },
+    {
+      "findingId": "ST-009",
+      "phase": "STARTUP",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-001",
+      "phase": "RUNTIME",
+      "category": "SERVICE_HEALTH",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-002",
+      "phase": "RUNTIME",
+      "category": "SERVICE_HEALTH",
+      "severity": "MEDIUM",
+      "title": ""
+    },
+    {
+      "findingId": "RT-003",
+      "phase": "RUNTIME",
+      "category": "LEADER_ELECTION",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-004",
+      "phase": "RUNTIME",
+      "category": "CIRCUIT_BREAKER",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-005",
+      "phase": "RUNTIME",
+      "category": "DLQ",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-006",
+      "phase": "RUNTIME",
+      "category": "STREAM_TOPOLOGY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-007",
+      "phase": "RUNTIME",
+      "category": "STREAM_TOPOLOGY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-008",
+      "phase": "RUNTIME",
+      "category": "CONSUMER_LAG",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-009",
+      "phase": "RUNTIME",
+      "category": "METRICS",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-010",
+      "phase": "RUNTIME",
+      "category": "WEBSOCKET_HEALTH",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-011",
+      "phase": "RUNTIME",
+      "category": "RISK_STATE",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-012",
+      "phase": "RUNTIME",
+      "category": "LATENCY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-013",
+      "phase": "RUNTIME",
+      "category": "GAS_SPIKE",
+      "severity": "MEDIUM",
+      "title": ""
+    },
+    {
+      "findingId": "RT-014",
+      "phase": "RUNTIME",
+      "category": "SIMULATION",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-015",
+      "phase": "RUNTIME",
+      "category": "EXECUTION_PROBABILITY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-016",
+      "phase": "RUNTIME",
+      "category": "BRIDGE_RECOVERY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-017",
+      "phase": "RUNTIME",
+      "category": "MEMORY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-018",
+      "phase": "RUNTIME",
+      "category": "HEALTH_SCHEMA",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-019",
+      "phase": "RUNTIME",
+      "category": "METRICS_COMPLETENESS",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-020",
+      "phase": "RUNTIME",
+      "category": "SERVICE_READY",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "RT-021",
+      "phase": "RUNTIME",
+      "category": "METRICS",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-001",
+      "phase": "SMOKE_TEST",
+      "category": "PIPELINE_FLOW",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-002",
+      "phase": "SMOKE_TEST",
+      "category": "PIPELINE_FLOW",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-003",
+      "phase": "SMOKE_TEST",
+      "category": "PIPELINE_FLOW",
+      "severity": "MEDIUM",
+      "title": ""
+    },
+    {
+      "findingId": "SM-004",
+      "phase": "SMOKE_TEST",
+      "category": "PIPELINE_FLOW",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-005",
+      "phase": "SMOKE_TEST",
+      "category": "TRACE_INCOMPLETE",
+      "severity": "MEDIUM",
+      "title": ""
+    },
+    {
+      "findingId": "SM-006",
+      "phase": "SMOKE_TEST",
+      "category": "DLQ_GROWTH",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-007",
+      "phase": "SMOKE_TEST",
+      "category": "DETECTION_RATE",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-008",
+      "phase": "SMOKE_TEST",
+      "category": "RISK_STATE",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-009",
+      "phase": "SMOKE_TEST",
+      "category": "BACKPRESSURE",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-010",
+      "phase": "SMOKE_TEST",
+      "category": "PARTITION_FLOW",
+      "severity": "INFO",
+      "title": ""
+    },
+    {
+      "findingId": "SM-011",
+      "phase": "SMOKE_TEST",
+      "category": "PIPELINE_FLOW",
+      "severity": "INFO",
+      "title": ""
+    }
+  ]
+}
