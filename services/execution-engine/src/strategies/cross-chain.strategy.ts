@@ -183,7 +183,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (!Number.isFinite(humanAmount) || humanAmount <= 0) return undefined;
 
       return humanAmount * priceUsd;
-    } catch {
+    } catch (error) {
+      this.logger.debug('estimateTradeSizeUsd: price estimation failed', { error, tokenSymbol, chain });
       return undefined;
     }
   }

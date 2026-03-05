@@ -93,6 +93,19 @@ The 5-minute cleanup threshold serves a different purpose (memory management) th
 ### Neutral
 - **Not exposed as environment variable**: Configured via code, not `.env`. Appropriate for a tuning parameter that rarely changes.
 
+### Note on Layer-Specific Freshness Thresholds
+
+The 30-second threshold in this ADR applies specifically to the **cross-chain detection layer** (`services/cross-chain-detector/`). Other layers use different freshness windows appropriate to their purpose:
+
+| Layer | Default | Location | Purpose |
+|-------|---------|----------|---------|
+| Cross-chain hard rejection | 30000ms | `DetectorConfig.maxPriceAgeMs` | This ADR — prevents false arb across bridge delays |
+| L1 cache freshness gate | 5000ms | `PriceMatrix.getPriceWithFreshnessCheck()` | Hot-path single-chain execution; 5s is appropriate for sub-second L2 blocks |
+| Chain-aware confidence age | 5000–30000ms | `getConfidenceMaxAgeMs(chainId)` | Per-chain staleness for EVM detector pipeline |
+| Chain-aware opportunity TTL | 1000–30000ms | `getOpportunityTimeoutMs(chainId)` | Opportunity expiry (Solana 1s, Ethereum 30s) |
+
+The 5s default in `getPriceWithFreshnessCheck()` is **intentional** — it serves real-time execution decisions on single chains where opportunities expire in 1–30s depending on block time. Using 30s here would allow stale prices for fast chains (Arbitrum 2s TTL, Solana 1s TTL). Callers can pass a custom `maxAgeMs` argument for chain-specific thresholds.
+
 ## Alternatives Considered
 
 ### 1. Increase soft penalty rate
