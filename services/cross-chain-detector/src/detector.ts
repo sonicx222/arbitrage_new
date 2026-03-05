@@ -1468,6 +1468,14 @@ export class CrossChainDetectorService {
       return opportunities;
     }
 
+    // RT-OPT-001 FIX: Reject same-chain pairs early. When two DEXes on the
+    // same chain have a price difference, the min/max finder above selects them
+    // as a "cross-chain" opportunity. These always fail execution validation
+    // (VAL_SAME_CHAIN) and waste pipeline throughput + DLQ writes.
+    if (lowestPrice.chain === highestPrice.chain) {
+      return opportunities;
+    }
+
     // FIX #11: Hard staleness rejection - reject prices beyond max age
     // This prevents trading on outdated prices even when confidence boosters
     // (whale + ML) could push stale opportunities above the threshold.

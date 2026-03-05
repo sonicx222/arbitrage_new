@@ -396,6 +396,23 @@ export class OpportunityRouter {
       }
     }
 
+    // RT-OPT-002 FIX: Defense-in-depth — reject cross-chain opportunities where
+    // buyChain equals sellChain before forwarding to execution engine. The primary
+    // filter is in the cross-chain detector (RT-OPT-001), but if it's bypassed or
+    // a code change reintroduces same-chain opps, this prevents DLQ flooding.
+    const oppType = typeof data.type === 'string' ? data.type : undefined;
+    const buyChain = typeof data.buyChain === 'string' ? data.buyChain : undefined;
+    const sellChain = typeof data.sellChain === 'string' ? data.sellChain : undefined;
+    if (oppType === 'cross-chain' && buyChain && sellChain && buyChain === sellChain) {
+      this._rejectedChain++;
+      this.logger.debug('Rejecting cross-chain opportunity with same buyChain/sellChain', {
+        id,
+        buyChain,
+        sellChain,
+      });
+      return false;
+    }
+
     // Build opportunity object — pass through ALL fields required by downstream
     // consumers (serializer, execution engine validation).
     // P0-1 FIX: Previously only 9 fields were whitelisted, dropping tokenIn, tokenOut,

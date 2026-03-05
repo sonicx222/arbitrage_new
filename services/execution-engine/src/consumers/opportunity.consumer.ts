@@ -633,11 +633,18 @@ export class OpportunityConsumer {
     // P0 FIX: Skip DLQ for expired messages — they're expected stale data,
     // not processing errors. At 88 opps/sec with 97% expiry rate, DLQ was
     // growing at 3/sec purely from expired messages, drowning real errors.
-    const isExpired = validation.code === ValidationErrorCode.EXPIRED;
+    //
+    // RT-OPT-005 FIX: Also skip DLQ for SAME_CHAIN — cross-chain opportunities
+    // where buyChain equals sellChain are 100% predictable, non-recoverable
+    // rejections. Writing them to DLQ wastes 2 Redis round-trips per message
+    // and drowns real errors (was 100% of DLQ entries before RT-OPT-001 fix).
+    const skipDlq = validation.code === ValidationErrorCode.EXPIRED ||
+      validation.code === ValidationErrorCode.SAME_CHAIN;
 
-    if (isExpired) {
-      this.logger.debug('Expired opportunity skipped (no DLQ)', {
+    if (skipDlq) {
+      this.logger.debug('Validation failure skipped (no DLQ)', {
         messageId: message.id,
+        code: validation.code,
         details: validation.details,
       });
     } else {
