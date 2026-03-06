@@ -229,9 +229,9 @@ describe('Service Config Module', () => {
       }
     });
 
-    it('should have valid Aave V3 fee (9 basis points)', () => {
-      expect(FLASH_LOAN_PROVIDERS['ethereum'].fee).toBe(9);
-      expect(FLASH_LOAN_PROVIDERS['arbitrum'].fee).toBe(9);
+    it('should have valid Aave V3 fee (5 basis points, updated March 2024)', () => {
+      expect(FLASH_LOAN_PROVIDERS['ethereum'].fee).toBe(5);
+      expect(FLASH_LOAN_PROVIDERS['arbitrum'].fee).toBe(5);
     });
 
     it('should have provider for new chains', () => {

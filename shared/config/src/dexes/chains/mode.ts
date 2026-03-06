@@ -13,6 +13,7 @@ export const MODE_DEXES: Dex[] = [
     factoryAddress: '0x8c5a57ed1d0ef3b87984400b7f707c05151de0d7',
     routerAddress: '0x6A5a77c58Eac94A52Fb8b3F98Fc61dDA9B673b94',
     feeBps: bps(30),
+    verified: false,  // Not yet RPC-verified on Mode mainnet
   },
   {
     name: 'supswap',          // [H]

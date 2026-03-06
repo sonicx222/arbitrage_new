@@ -51,8 +51,8 @@ describe('flash-loan-providers', () => {
       expect(AAVE_V3_PROVIDER.addresses).toBe(AAVE_V3_POOLS);
     });
 
-    it('should have 9 bps fee', () => {
-      expect(AAVE_V3_PROVIDER.feeBps).toBe(9);
+    it('should have 5 bps fee (updated March 2024 governance vote)', () => {
+      expect(AAVE_V3_PROVIDER.feeBps).toBe(5);
     });
 
     it('should cover 7 mainnet chains', () => {

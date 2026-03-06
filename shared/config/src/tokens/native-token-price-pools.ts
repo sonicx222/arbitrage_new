@@ -52,13 +52,13 @@ export const NATIVE_TOKEN_PRICE_POOLS: Record<string, NativeTokenPricePool> = {
     stablecoinSymbol: 'USDC',
   },
   bsc: {
-    // PancakeSwap V2: WBNB/BUSD
-    poolAddress: '0x58F876857a02D6762E0101bb5C46A8c1ED44Dc16',
-    token0IsNative: false, // token0=BUSD, token1=WBNB
-    stablecoinDecimals: 18,
+    // PancakeSwap V2: WBNB/USDT (BUSD deprecated by Binance late 2023)
+    poolAddress: '0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE',
+    token0IsNative: true, // token0=WBNB, token1=USDT
+    stablecoinDecimals: 18, // BSC USDT uses 18 decimals
     nativeDecimals: 18,
     dex: 'PancakeSwap V2',
-    stablecoinSymbol: 'BUSD',
+    stablecoinSymbol: 'USDT',
   },
   polygon: {
     // QuickSwap V2: WMATIC/USDC

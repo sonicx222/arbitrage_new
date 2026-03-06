@@ -502,8 +502,8 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
     USDB: '0x4300000000000000000000000000000000000003', // Blast native stablecoin, 18 decimals
   },
   mantle: {
-    USDC: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', // Mantle Bridged USDC
-    USDT: '0x927488fF93F401525Aa451B3c550e48aF7Ee6901',
+    USDC: '0x09Bc4E0D10F09B1CdA8b8BB72C1e89F10B53BcA6', // Mantle Bridged USDC (chainId 5000)
+    USDT: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', // Mantle USDT (aligned with CORE_TOKENS)
     MNT: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
   },
   mode: {
