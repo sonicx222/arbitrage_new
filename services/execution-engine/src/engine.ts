@@ -394,11 +394,11 @@ export class ExecutionEngineService {
     );
 
     // Max concurrent executions: config > env var > mode-appropriate default
-    // RT-006 FIX: Simulation mode uses higher default (20) since there's no real
+    // RT-006 FIX: Simulation mode uses higher default (50) since there's no real
     // blockchain to saturate — prevents artificial consumer lag where detection
-    // outpaces execution at 250 msg/sec vs 10 exec/sec with old default of 5.
+    // outpaces execution. RT-LAG FIX: Increased from 20 to 50 to match ~100 opps/s detection rate.
     const envMaxConcurrent = parseInt(process.env.MAX_CONCURRENT_EXECUTIONS ?? '', 10);
-    const defaultConcurrency = this.isSimulationMode ? 20 : 5;
+    const defaultConcurrency = this.isSimulationMode ? 50 : 5;
     this.maxConcurrentExecutions = config.maxConcurrentExecutions
       ?? (!Number.isNaN(envMaxConcurrent) && envMaxConcurrent > 0 ? envMaxConcurrent : defaultConcurrency);
 

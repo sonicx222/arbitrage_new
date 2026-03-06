@@ -124,9 +124,13 @@ jest.mock('@arbitrage/core/logging', () => ({
   ServiceLogger: {},
 }));
 
-jest.mock('@arbitrage/core/utils', () => ({
-  parseEnvIntSafe: jest.fn().mockReturnValue(undefined),
-}));
+jest.mock('@arbitrage/core/utils', () => {
+  const actual = jest.requireActual('@arbitrage/core/utils') as Record<string, unknown>;
+  return {
+    ...actual,
+    parseEnvIntSafe: jest.fn().mockReturnValue(undefined),
+  };
+});
 
 jest.mock('@arbitrage/core/components', () => ({
   isValidPrice: jest.fn().mockReturnValue(true),

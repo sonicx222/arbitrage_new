@@ -204,7 +204,7 @@ interface CoordinatorConfig {
   executionCbResetMs?: number;     // Time before half-open attempt (default: 60000)
   // RT-002 FIX: Configurable backpressure thresholds
   consecutiveExpiredThreshold?: number;       // Consecutive expired threshold for backlog skip (default: 10)
-  executionStreamBackpressureRatio?: number;  // Execution stream depth ratio for backpressure (default: 0.95)
+  executionStreamBackpressureRatio?: number;  // Execution stream depth ratio for backpressure (default: 0.7)
   // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
 }
 
@@ -421,13 +421,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
       executionCbResetMs: config?.executionCbResetMs ?? safeParseInt(process.env.EXECUTION_CB_RESET_MS, 60000),
       // RT-002 FIX: Configurable backpressure thresholds
       consecutiveExpiredThreshold: config?.consecutiveExpiredThreshold ?? safeParseInt(process.env.CONSECUTIVE_EXPIRED_THRESHOLD, 10),
-      executionStreamBackpressureRatio: config?.executionStreamBackpressureRatio ?? safeParseFloat(process.env.EXECUTION_STREAM_BACKPRESSURE_RATIO, 0.95),
+      executionStreamBackpressureRatio: config?.executionStreamBackpressureRatio ?? safeParseFloat(process.env.EXECUTION_STREAM_BACKPRESSURE_RATIO, 0.7),
       // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
     };
 
     // RT-002 FIX: Resolve backpressure thresholds from config
     this.consecutiveExpiredThreshold = this.config.consecutiveExpiredThreshold ?? 10;
-    this.executionStreamBackpressureRatio = this.config.executionStreamBackpressureRatio ?? 0.95;
+    this.executionStreamBackpressureRatio = this.config.executionStreamBackpressureRatio ?? 0.7;
 
     // OP-22 FIX: Initialize CB with configurable thresholds (previously hardcoded 5, 60000)
     this.executionCircuitBreaker = new SimpleCircuitBreaker(

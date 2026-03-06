@@ -218,16 +218,15 @@ jest.mock('@arbitrage/core/service-lifecycle', () => ({
   ServiceState: {},
 }));
 
-jest.mock('@arbitrage/core/utils', () => ({
-  disconnectWithTimeout: async () => {
-    disconnectCalled = true;
-  },
-  parseEnvIntSafe: (envVal: string | undefined, defaultVal: number) => {
-    if (!envVal) return defaultVal;
-    const parsed = parseInt(envVal, 10);
-    return isNaN(parsed) ? defaultVal : parsed;
-  },
-}));
+jest.mock('@arbitrage/core/utils', () => {
+  const actual = jest.requireActual('@arbitrage/core/utils') as Record<string, unknown>;
+  return {
+    ...actual,
+    disconnectWithTimeout: async () => {
+      disconnectCalled = true;
+    },
+  };
+});
 
 jest.mock('@arbitrage/core', () => {
   const actual = jest.requireActual('@arbitrage/core') as Record<string, unknown>;

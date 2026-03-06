@@ -548,7 +548,7 @@ describe('Admin Routes', () => {
           .post('/api/services/coordinator/restart')
           .expect(200);
 
-        expect(mockLogger.info).toHaveBeenCalledWith('Restarting service: coordinator');
+        expect(mockLogger.info).toHaveBeenCalledWith('Restarting service', { service: 'coordinator' });
       });
     });
 

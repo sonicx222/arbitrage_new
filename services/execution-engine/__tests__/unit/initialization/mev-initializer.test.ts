@@ -252,8 +252,9 @@ describe('initializeMevProviders', () => {
       await initializeMevProviders(providerService as any, mockLogger);
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        'MEV provider initialized for ethereum',
+        'MEV provider initialized',
         expect.objectContaining({
+          chainName: 'ethereum',
           strategy: 'flashbots',
           enabled: true,
         }),
@@ -306,7 +307,8 @@ describe('initializeMevProviders', () => {
       expect(result.success).toBe(true);
       expect(result.providersInitialized).toBe(0);
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping MEV provider for ethereum: no provider or wallet'),
+        'Skipping MEV provider',
+        expect.objectContaining({ chainName: 'ethereum', reason: 'no_provider_or_wallet' }),
       );
     });
 
@@ -332,7 +334,8 @@ describe('initializeMevProviders', () => {
       expect(result.success).toBe(true);
       expect(result.skippedChains).toContain('unknown-chain');
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping MEV provider for unknown-chain: chain not in MEV_CONFIG.chainSettings'),
+        'Skipping MEV provider',
+        expect.objectContaining({ chainName: 'unknown-chain', reason: 'chain_not_in_config' }),
       );
     });
 
@@ -345,7 +348,8 @@ describe('initializeMevProviders', () => {
       expect(result.success).toBe(true);
       expect(result.skippedChains).toContain('bsc');
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping MEV provider for bsc: disabled in config'),
+        'Skipping MEV provider',
+        expect.objectContaining({ chainName: 'bsc', reason: 'disabled' }),
       );
     });
 
@@ -357,7 +361,8 @@ describe('initializeMevProviders', () => {
       expect(result.success).toBe(true);
       expect(result.skippedChains).toContain('solana');
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping MEV provider for solana: requires JitoProvider'),
+        'Skipping MEV provider',
+        expect.objectContaining({ chainName: 'solana', reason: 'jito_not_supported' }),
       );
     });
 
@@ -402,8 +407,9 @@ describe('initializeMevProviders', () => {
       await initializeMevProviders(providerService as any, mockLogger);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Failed to initialize MEV provider for ethereum',
+        'Failed to initialize MEV provider',
         expect.objectContaining({
+          chainName: 'ethereum',
           error: expect.stringContaining('mev:ethereum:Connection refused'),
         }),
       );
@@ -480,8 +486,9 @@ describe('initializeMevProviders', () => {
       expect(result.success).toBe(false);
       expect(result.providersInitialized).toBe(0);
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'MEV provider created but not cached for ethereum',
+        'MEV provider not cached after creation',
         expect.objectContaining({
+          chainName: 'ethereum',
           error: 'mev:ethereum:provider_not_cached',
         }),
       );

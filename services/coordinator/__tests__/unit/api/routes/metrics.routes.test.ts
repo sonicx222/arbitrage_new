@@ -50,6 +50,9 @@ jest.mock('@arbitrage/core/monitoring', () => ({
   getRuntimeMonitor: jest.fn(() => ({
     getPrometheusMetrics: jest.fn(() => ''),
   })),
+  getProviderLatencyTracker: jest.fn(() => ({
+    getPrometheusMetrics: jest.fn(() => ''),
+  })),
 }));
 
 jest.mock('@arbitrage/core/data-structures', () => ({
@@ -167,9 +170,10 @@ describe('Metrics Routes', () => {
     mockStreamMonitor.getPrometheusMetrics.mockResolvedValue(mockPrometheusMetrics);
     const { getRedisClient } = require('@arbitrage/core/redis') as { getRedisClient: jest.Mock };
     getRedisClient.mockResolvedValue(mockRedisClient);
-    const { getStreamHealthMonitor, getRuntimeMonitor } = require('@arbitrage/core/monitoring') as { getStreamHealthMonitor: jest.Mock; getRuntimeMonitor: jest.Mock };
+    const { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker } = require('@arbitrage/core/monitoring') as { getStreamHealthMonitor: jest.Mock; getRuntimeMonitor: jest.Mock; getProviderLatencyTracker: jest.Mock };
     getStreamHealthMonitor.mockReturnValue(mockStreamMonitor);
     getRuntimeMonitor.mockReturnValue({ getPrometheusMetrics: jest.fn(() => '') });
+    getProviderLatencyTracker.mockReturnValue({ getPrometheusMetrics: jest.fn(() => '') });
   });
 
   // ===========================================================================

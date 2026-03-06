@@ -200,8 +200,8 @@ describe('ProviderServiceImpl - initializeWallets', () => {
 
     // Verify source logged as 'private-key' for ethereum
     expect(mockConfig.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('Initialized wallet for ethereum'),
-      expect.objectContaining({ source: 'private-key' }),
+      'Initialized wallet',
+      expect.objectContaining({ chainName: 'ethereum', source: 'private-key' }),
     );
   });
 
@@ -230,8 +230,8 @@ describe('ProviderServiceImpl - initializeWallets', () => {
 
     // Verify source logged as 'hd-derivation'
     expect(mockConfig.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('Initialized wallet for ethereum'),
-      expect.objectContaining({ source: 'hd-derivation' }),
+      'Initialized wallet',
+      expect.objectContaining({ chainName: 'ethereum', source: 'hd-derivation' }),
     );
   });
 
@@ -248,8 +248,9 @@ describe('ProviderServiceImpl - initializeWallets', () => {
 
     // Should log an error about invalid format
     expect(mockConfig.logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid private key format for ethereum'),
+      'Invalid private key format',
       expect.objectContaining({
+        chainName: 'ethereum',
         hint: 'Private key must be 64 hex characters (or 66 with 0x prefix)',
         envVar: 'ETHEREUM_PRIVATE_KEY',
       }),
@@ -306,10 +307,12 @@ describe('ProviderServiceImpl - initializeWallets', () => {
     service.initializeWallets();
 
     expect(mockConfig.logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining('No wallet configured for ethereum'),
+      'No wallet configured',
+      expect.objectContaining({ chainName: 'ethereum' }),
     );
     expect(mockConfig.logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining('No wallet configured for arbitrum'),
+      'No wallet configured',
+      expect.objectContaining({ chainName: 'arbitrum' }),
     );
   });
 
@@ -337,8 +340,8 @@ describe('ProviderServiceImpl - initializeWallets', () => {
     // Per-chain key should still work
     expect(MockWallet).toHaveBeenCalledWith(VALID_PRIVATE_KEY, expect.anything());
     expect(mockConfig.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('Initialized wallet for ethereum'),
-      expect.objectContaining({ source: 'private-key' }),
+      'Initialized wallet',
+      expect.objectContaining({ chainName: 'ethereum', source: 'private-key' }),
     );
   });
 
@@ -352,8 +355,8 @@ describe('ProviderServiceImpl - initializeWallets', () => {
 
     expect(MockWallet).toHaveBeenCalledWith(VALID_PRIVATE_KEY_NO_PREFIX, expect.anything());
     expect(mockConfig.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('Initialized wallet for ethereum'),
-      expect.objectContaining({ source: 'private-key' }),
+      'Initialized wallet',
+      expect.objectContaining({ chainName: 'ethereum', source: 'private-key' }),
     );
   });
 });

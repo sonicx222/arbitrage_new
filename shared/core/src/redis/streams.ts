@@ -408,7 +408,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
-    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 25000, // P1-003 FIX: Increased from 5000 — at 10 opps/s, 5K holds ~8 min; 25K gives ~40 min buffer
+    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 100000, // RT-MAXLEN FIX: Increased from 25K — at 100 opps/s, 25K fills in ~4 min causing active trimming; 100K gives ~17 min buffer
     [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
     [RedisStreamsClient.STREAMS.CIRCUIT_BREAKER]: 5000,        // Circuit breaker events, critical alerts
     [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume
@@ -418,7 +418,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.SERVICE_HEALTH]: 1000,           // Low volume health checks
     [RedisStreamsClient.STREAMS.SERVICE_EVENTS]: 5000,           // Medium volume service events
     [RedisStreamsClient.STREAMS.COORDINATOR_EVENTS]: 5000,       // Medium volume coordinator events
-    [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: 5000,        // Critical trading result data
+    [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: 25000,       // RT-ER-CAP FIX: Increased from 5K — at ~46 exec/s, 5K fills in ~2 min; 25K gives ~9 min buffer
     [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: 10000,       // Failed ops, keep more history
     [RedisStreamsClient.STREAMS.DLQ_ALERTS]: 5000,               // Alert data
     [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: 5000,           // Forwarded failures

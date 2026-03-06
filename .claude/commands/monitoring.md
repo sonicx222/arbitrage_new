@@ -7,7 +7,7 @@
 #   - New checks: runtime performance (B1-B6), provider quality (C1-C5),
 #     detection quality (D2-D4), business intelligence (A2-A4, F4-F5),
 #     stream transit time (F1), placeholder checks for E1-E5/F2-F3/D1/D5
-#   - Fixed MAXLEN drift: opportunities=500K, execution-requests=25K
+#   - Fixed MAXLEN drift: opportunities=500K, execution-requests=100K, execution-results=25K
 #   - Added self-healing-manager consumer group to inventory
 #   - Fixed coordinator-group streams (9, was 8 — added forwarding-dlq)
 #   - Added all 24 streams to topology check (was 19)
@@ -80,8 +80,8 @@ sequentially — correctness is more important than speed.
 | `stream:coordinator-events` | 5,000 | Coordinator | — |
 | `stream:health` | 1,000 | All services | coordinator-group |
 | `stream:health-alerts` | 5,000 | Health monitor | — |
-| `stream:execution-requests` | 25,000 | Coordinator | execution-engine-group |
-| `stream:execution-results` | 5,000 | Execution engine | coordinator-group |
+| `stream:execution-requests` | 100,000 | Coordinator | execution-engine-group |
+| `stream:execution-results` | 25,000 | Execution engine | coordinator-group |
 | `stream:pending-opportunities` | 10,000 | Mempool detector | cross-chain-detector-group |
 | `stream:volume-aggregates` | 10,000 | Volume aggregator | coordinator-group |
 | `stream:circuit-breaker` | 5,000 | Execution engine | — |
@@ -1676,7 +1676,7 @@ curl -sf http://localhost:3001/metrics 2>/dev/null | grep stream_trimmed
 ```bash
 # Check streams at risk of MAXLEN trimming
 for stream_info in "stream:price-updates:100000" "stream:opportunities:500000" \
-  "stream:execution-requests:25000" "stream:fast-lane:5000"; do
+  "stream:execution-requests:100000" "stream:fast-lane:5000"; do
   STREAM=$(echo $stream_info | cut -d: -f1-2)
   MAXLEN=$(echo $stream_info | cut -d: -f3)
   XLEN=$(redis-cli XLEN $STREAM)
@@ -2579,7 +2579,7 @@ curl -sf http://localhost:3000/api/health/ready | jq .
 ```bash
 EXEC_LEN=$(redis-cli XLEN stream:execution-requests)
 echo "execution-requests length: $EXEC_LEN"
-# The MAXLEN for execution-requests is declared in the System Inventory (25,000)
+# The MAXLEN for execution-requests is declared in the System Inventory (100,000)
 # Backpressure ratio threshold is typically 0.8 (80%)
 ```
 
