@@ -44,6 +44,7 @@ import {
   getSimulationConfigFromEnv,
   getCircuitBreakerConfigFromEnv,
   getStandbyConfigFromEnv,
+  getChainGroupConfigFromEnv,
 } from '../../src/index';
 import { getCrossRegionEnvConfig, parseEnvInt } from '@arbitrage/core/utils';
 
@@ -67,6 +68,7 @@ describe('Index Config Parsing', () => {
     delete process.env.IS_STANDBY;
     delete process.env.QUEUE_PAUSED_ON_START;
     delete process.env.REGION_ID;
+    delete process.env.EXECUTION_CHAIN_GROUP;
 
     // Restore mock implementation after jest.resetAllMocks() in global afterEach (setupTests.ts)
     (getCrossRegionEnvConfig as jest.Mock).mockImplementation(
@@ -243,6 +245,80 @@ describe('Index Config Parsing', () => {
       expect(config.failoverTimeoutMs).toBeGreaterThan(0);
       expect(config.leaderHeartbeatIntervalMs).toBeGreaterThan(0);
       expect(config.leaderLockTtlMs).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // getChainGroupConfigFromEnv (M4 — ADR-038)
+  // ===========================================================================
+  describe('getChainGroupConfigFromEnv', () => {
+    it('should return undefined when EXECUTION_CHAIN_GROUP is not set', () => {
+      const config = getChainGroupConfigFromEnv();
+      expect(config).toBeUndefined();
+    });
+
+    it('should return undefined for empty string', () => {
+      process.env.EXECUTION_CHAIN_GROUP = '';
+      const config = getChainGroupConfigFromEnv();
+      expect(config).toBeUndefined();
+    });
+
+    it('should return fast group config', () => {
+      process.env.EXECUTION_CHAIN_GROUP = 'fast';
+      const config = getChainGroupConfigFromEnv();
+
+      expect(config).toBeDefined();
+      expect(config!.chainGroup).toBe('fast');
+      expect(config!.executionStreamName).toBe('stream:exec-requests-fast');
+    });
+
+    it('should return l2 group config', () => {
+      process.env.EXECUTION_CHAIN_GROUP = 'l2';
+      const config = getChainGroupConfigFromEnv();
+
+      expect(config).toBeDefined();
+      expect(config!.chainGroup).toBe('l2');
+      expect(config!.executionStreamName).toBe('stream:exec-requests-l2');
+    });
+
+    it('should return premium group config', () => {
+      process.env.EXECUTION_CHAIN_GROUP = 'premium';
+      const config = getChainGroupConfigFromEnv();
+
+      expect(config).toBeDefined();
+      expect(config!.chainGroup).toBe('premium');
+      expect(config!.executionStreamName).toBe('stream:exec-requests-premium');
+    });
+
+    it('should return solana group config', () => {
+      process.env.EXECUTION_CHAIN_GROUP = 'solana';
+      const config = getChainGroupConfigFromEnv();
+
+      expect(config).toBeDefined();
+      expect(config!.chainGroup).toBe('solana');
+      expect(config!.executionStreamName).toBe('stream:exec-requests-solana');
+    });
+
+    it('should return undefined for invalid group name', () => {
+      process.env.EXECUTION_CHAIN_GROUP = 'invalid';
+      const config = getChainGroupConfigFromEnv();
+      expect(config).toBeUndefined();
+    });
+
+    it('should handle case-insensitive group names', () => {
+      process.env.EXECUTION_CHAIN_GROUP = 'FAST';
+      const config = getChainGroupConfigFromEnv();
+
+      expect(config).toBeDefined();
+      expect(config!.chainGroup).toBe('fast');
+    });
+
+    it('should handle whitespace-padded group names', () => {
+      process.env.EXECUTION_CHAIN_GROUP = '  l2  ';
+      const config = getChainGroupConfigFromEnv();
+
+      expect(config).toBeDefined();
+      expect(config!.chainGroup).toBe('l2');
     });
   });
 });

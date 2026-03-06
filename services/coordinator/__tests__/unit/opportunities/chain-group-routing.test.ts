@@ -16,6 +16,7 @@ jest.mock('@arbitrage/core', () => ({
   }),
 }));
 
+
 import {
   OpportunityRouter,
   type OpportunityRouterLogger,
@@ -283,6 +284,110 @@ describe('OpportunityRouter — backward compatibility (no chain-group routing)'
     expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
       customStream,
       expect.any(Object)
+    );
+  });
+});
+
+// =============================================================================
+// M5: Coordinator wiring validation — getStreamForChain resolver mapping
+// =============================================================================
+
+describe('OpportunityRouter — coordinator wiring (getStreamForChain resolver)', () => {
+  let mockLogger: OpportunityRouterLogger;
+  let mockCircuitBreaker: jest.Mocked<CircuitBreaker>;
+  let mockStreamsClient: jest.Mocked<OpportunityStreamsClient>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockCircuitBreaker = createMockCircuitBreaker();
+    mockStreamsClient = createMockStreamsClient();
+  });
+
+  // Validates that the resolver (matching getStreamForChain from @arbitrage/config,
+  // used by coordinator at line 683) routes all chains in each group correctly.
+  // Uses testChainGroupResolver which mirrors the real getStreamForChain mappings.
+
+  it.each([
+    ['bsc', 'stream:exec-requests-fast'],
+    ['polygon', 'stream:exec-requests-fast'],
+    ['avalanche', 'stream:exec-requests-fast'],
+    ['fantom', 'stream:exec-requests-fast'],
+  ])('fast group: %s → %s', async (chain, expectedStream) => {
+    const router = new OpportunityRouter(mockLogger, mockCircuitBreaker, mockStreamsClient, {
+      ...STARTUP_GRACE_BYPASS,
+      chainGroupStreamResolver: testChainGroupResolver,
+    });
+
+    const opp = buildOpportunity({ chain, type: 'intra-chain' });
+    await router.processOpportunity(opp as unknown as Record<string, unknown>, true);
+
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(expectedStream, expect.any(Object));
+  });
+
+  it.each([
+    ['arbitrum', 'stream:exec-requests-l2'],
+    ['optimism', 'stream:exec-requests-l2'],
+    ['base', 'stream:exec-requests-l2'],
+    ['scroll', 'stream:exec-requests-l2'],
+    ['blast', 'stream:exec-requests-l2'],
+  ])('l2 group: %s → %s', async (chain, expectedStream) => {
+    const router = new OpportunityRouter(mockLogger, mockCircuitBreaker, mockStreamsClient, {
+      ...STARTUP_GRACE_BYPASS,
+      chainGroupStreamResolver: testChainGroupResolver,
+    });
+
+    const opp = buildOpportunity({ chain, type: 'intra-chain' });
+    await router.processOpportunity(opp as unknown as Record<string, unknown>, true);
+
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(expectedStream, expect.any(Object));
+  });
+
+  it.each([
+    ['ethereum', 'stream:exec-requests-premium'],
+    ['zksync', 'stream:exec-requests-premium'],
+    ['linea', 'stream:exec-requests-premium'],
+  ])('premium group: %s → %s', async (chain, expectedStream) => {
+    const router = new OpportunityRouter(mockLogger, mockCircuitBreaker, mockStreamsClient, {
+      ...STARTUP_GRACE_BYPASS,
+      chainGroupStreamResolver: testChainGroupResolver,
+    });
+
+    const opp = buildOpportunity({ chain, type: 'intra-chain' });
+    await router.processOpportunity(opp as unknown as Record<string, unknown>, true);
+
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(expectedStream, expect.any(Object));
+  });
+
+  it('solana group: solana → stream:exec-requests-solana', async () => {
+    const router = new OpportunityRouter(mockLogger, mockCircuitBreaker, mockStreamsClient, {
+      ...STARTUP_GRACE_BYPASS,
+      chainGroupStreamResolver: testChainGroupResolver,
+    });
+
+    const opp = buildOpportunity({ chain: 'solana', type: 'solana' });
+    await router.processOpportunity(opp as unknown as Record<string, unknown>, true);
+
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+      'stream:exec-requests-solana',
+      expect.any(Object),
+    );
+  });
+
+  it('unknown chain falls back to legacy stream', async () => {
+    const router = new OpportunityRouter(mockLogger, mockCircuitBreaker, mockStreamsClient, {
+      ...STARTUP_GRACE_BYPASS,
+      executionRequestsStream: 'stream:execution-requests',
+      chainGroupStreamResolver: testChainGroupResolver,
+    });
+
+    // 'mantle' is not assigned to any group — resolver returns legacy stream
+    const opp = buildOpportunity({ chain: 'mantle', type: 'intra-chain' });
+    await router.processOpportunity(opp as unknown as Record<string, unknown>, true);
+
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+      'stream:execution-requests',
+      expect.any(Object),
     );
   });
 });

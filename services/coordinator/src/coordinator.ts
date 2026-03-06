@@ -1100,8 +1100,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
     }
 
-    // Phase 2 (ADR-038): Pre-create per-chain-group streams when routing is enabled.
-    // EE instances subscribe before the coordinator starts — streams must exist.
+    // Phase 2 (ADR-038): Pre-create per-chain-group streams AND consumer groups
+    // when routing is enabled. EE instances subscribe before the coordinator starts —
+    // streams and consumer groups must exist. H3 FIX: Without consumer group
+    // pre-creation, EE instances that start after the coordinator would fail their
+    // first XREADGROUP with NOGROUP error.
     if (process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true') {
       const groupStreams = [
         RedisStreamsClient.STREAMS.EXEC_REQUESTS_FAST,
@@ -1119,6 +1122,26 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.info('Chain-group execution stream initialized', { stream: streamName });
         } catch (error) {
           this.logger.warn('Failed to initialize chain-group execution stream', {
+            error, stream: streamName,
+          });
+        }
+        // H3 FIX: Create consumer group for each chain-group stream.
+        // Uses MKSTREAM flag (built into createConsumerGroup) as belt-and-suspenders.
+        // startId '$' — same rationale as other trading streams (stale opps are dangerous).
+        try {
+          await this.streamsClient.createConsumerGroup({
+            streamName,
+            groupName: 'execution-engine-group',
+            consumerName: 'ee-init', // Required by type but unused by XGROUP CREATE
+            startId: '$',
+            resetToStartIdOnExistingGroup: true,
+          });
+          this.logger.info('Chain-group consumer group ready', {
+            stream: streamName,
+            group: 'execution-engine-group',
+          });
+        } catch (error) {
+          this.logger.warn('Failed to create chain-group consumer group', {
             error, stream: streamName,
           });
         }

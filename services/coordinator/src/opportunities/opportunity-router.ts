@@ -490,13 +490,41 @@ export class OpportunityRouter {
       }
     }
 
+    // H2 FIX (ADR-038): Validate buyChain/sellChain against canonical chain ID whitelist.
+    // Without this, an unrecognized buyChain bypasses the resolver and falls back to the
+    // legacy stream silently — the opportunity executes but on the wrong EE instance.
+    const oppType = typeof data.type === 'string' ? data.type : undefined;
+    const buyChain = typeof data.buyChain === 'string' ? data.buyChain : undefined;
+    const sellChain = typeof data.sellChain === 'string' ? data.sellChain : undefined;
+    if (buyChain) {
+      const normalizedBuy = normalizeChainId(buyChain);
+      if (!isCanonicalChainId(normalizedBuy)) {
+        this._rejectedChain++;
+        this.logger.warn('Unknown buyChain in opportunity, rejecting', {
+          id,
+          buyChain,
+          normalizedBuyChain: normalizedBuy,
+        });
+        return false;
+      }
+    }
+    if (sellChain) {
+      const normalizedSell = normalizeChainId(sellChain);
+      if (!isCanonicalChainId(normalizedSell)) {
+        this._rejectedChain++;
+        this.logger.warn('Unknown sellChain in opportunity, rejecting', {
+          id,
+          sellChain,
+          normalizedSellChain: normalizedSell,
+        });
+        return false;
+      }
+    }
+
     // RT-OPT-002 FIX: Defense-in-depth — reject cross-chain opportunities where
     // buyChain equals sellChain before forwarding to execution engine. The primary
     // filter is in the cross-chain detector (RT-OPT-001), but if it's bypassed or
     // a code change reintroduces same-chain opps, this prevents DLQ flooding.
-    const oppType = typeof data.type === 'string' ? data.type : undefined;
-    const buyChain = typeof data.buyChain === 'string' ? data.buyChain : undefined;
-    const sellChain = typeof data.sellChain === 'string' ? data.sellChain : undefined;
     if (oppType === 'cross-chain' && buyChain && sellChain && buyChain === sellChain) {
       this._rejectedChain++;
       this.logger.debug('Rejecting cross-chain opportunity with same buyChain/sellChain', {
