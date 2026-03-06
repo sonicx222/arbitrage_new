@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SSEProvider, useSSEData } from './context/SSEContext';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
+import { ChainsTab } from './tabs/ChainsTab';
 import type { Tab } from './lib/types';
 
 const TABS: Tab[] = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'];
@@ -45,7 +46,8 @@ function Dashboard() {
       <main className="flex-1 p-4 overflow-auto">
         {tab === 'Overview' && <OverviewTab />}
         {tab === 'Execution' && <ExecutionTab />}
-        {tab !== 'Overview' && tab !== 'Execution' && (
+        {tab === 'Chains' && <ChainsTab />}
+        {tab !== 'Overview' && tab !== 'Execution' && tab !== 'Chains' && (
           <div className="text-gray-500 text-xs">{tab} — coming soon</div>
         )}
       </main>
