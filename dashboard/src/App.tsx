@@ -1,15 +1,31 @@
 import { useState } from 'react';
+import { SSEProvider, useSSEData } from './context/SSEContext';
+import type { Tab } from './lib/types';
 
-const TABS = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'] as const;
-type Tab = (typeof TABS)[number];
+const TABS: Tab[] = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'];
 
-export default function App() {
+function ConnectionDot() {
+  const { status } = useSSEData();
+  const color = status === 'connected' ? 'bg-accent-green' : status === 'connecting' ? 'bg-accent-yellow' : 'bg-accent-red';
+  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} title={status} />;
+}
+
+function Dashboard() {
   const [tab, setTab] = useState<Tab>('Overview');
+  const { metrics } = useSSEData();
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-surface-light border-b border-gray-800 px-4 py-2 flex items-center justify-between">
-        <span className="text-accent-green font-bold">ARBITRAGE SYSTEM</span>
+        <div className="flex items-center gap-3">
+          <span className="text-accent-green font-bold text-sm">ARBITRAGE SYSTEM</span>
+          <ConnectionDot />
+          {metrics && (
+            <span className="text-xs text-gray-500">
+              Health: {metrics.systemHealth.toFixed(0)}%
+            </span>
+          )}
+        </div>
         <nav className="flex gap-1">
           {TABS.map((t) => (
             <button
@@ -24,11 +40,19 @@ export default function App() {
           ))}
         </nav>
       </header>
-      <main className="flex-1 p-4">
-        <div className="text-gray-400">
-          {tab} tab — content coming soon
+      <main className="flex-1 p-4 overflow-auto">
+        <div className="text-gray-400 text-xs">
+          {tab} tab — content coming in next tasks
         </div>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <SSEProvider>
+      <Dashboard />
+    </SSEProvider>
   );
 }
