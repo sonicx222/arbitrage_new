@@ -14,7 +14,7 @@ export type FlashLoanProviderStatus = 'active' | 'deferred' | 'stub';
 export interface FlashLoanProviderDescriptor {
   /** Protocol identifier matching FlashLoanProtocol union type */
   protocol: FlashLoanProtocol;
-  /** Flash loan fee in basis points (e.g., 9 = 0.09%) */
+  /** Flash loan fee in basis points (e.g., 5 = 0.05%) */
   feeBps: number;
   /** Contract addresses by chain (references from addresses.ts) */
   addresses: Readonly<Record<string, string>>;

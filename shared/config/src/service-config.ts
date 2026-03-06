@@ -7,6 +7,7 @@
  */
 
 import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, MORPHO_BLUE_POOLS, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_VAULTS } from './addresses';
+import { FlashLoanProvidersSchema } from './schemas';
 import { safeParseFloat, safeParseInt } from './utils/env-parsing';
 
 // =============================================================================
@@ -77,7 +78,7 @@ export function isLocalhostUrl(url: string): boolean {
 }
 
 // Validate Redis URL - warn if using localhost in production
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 if (isLocalhostUrl(redisUrl)) {
   warnOnProductionDefault('REDIS_URL', redisUrl);
 }
@@ -263,8 +264,8 @@ export const SUPPORTED_EXECUTION_CHAINS = new Set([
   'linea',
   'blast',
   'scroll',
-  'mantle',
-  'mode',
+  'mantle',  // stub — no verified flash loan provider; see D9-MANTLE-MODE-PARTITIONS in deferred-items.ts
+  'mode',    // stub — no verified flash loan provider; see D9-MANTLE-MODE-PARTITIONS in deferred-items.ts
   // M6 FIX: 'solana' removed — Solana uses SolanaExecutionStrategy (not BaseExecutionStrategy),
   // which routes via strategy-factory.ts (opportunity.chain === 'solana') and never calls
   // isExecutionSupported(). Including 'solana' here returned true regardless of FEATURE_SOLANA_EXECUTION.
@@ -477,6 +478,17 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   // not traditional flash loans. supportsFlashLoan('solana') returns false.
   // All consumers access via optional chaining (FLASH_LOAN_PROVIDERS[chain]?.protocol).
 };
+
+// M2 FIX: Load-time Zod validation for FLASH_LOAN_PROVIDERS (production only)
+if (process.env.NODE_ENV !== 'test' &&
+    !process.env.JEST_WORKER_ID &&
+    process.env.SKIP_CONFIG_VALIDATION !== 'true') {
+  const result = FlashLoanProvidersSchema.safeParse(FLASH_LOAN_PROVIDERS);
+  if (!result.success) {
+    const errors = result.error.errors.map(e => `  - ${e.path.join('.')}: ${e.message}`).join('\n');
+    console.warn(`[FLASH_LOAN_VALIDATION] Schema validation warnings:\n${errors}`);
+  }
+}
 
 /**
  * Morpho Blue flash loan providers — zero-fee alternative.

@@ -6,7 +6,7 @@
  * - TOKEN_METADATA: Chain-specific token addresses for USD estimation
  *
  * Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
- * Total: 128 tokens across 15 chains
+ * Total: 173 tokens across 15 chains
  *
  * @see S3.1.2: New chain tokens
  * @see S3.2.1: Avalanche token expansion
@@ -16,11 +16,11 @@
 import { Token } from '../../../types';
 
 // =============================================================================
-// TOKEN CONFIGURATIONS - 128 Tokens
+// TOKEN CONFIGURATIONS - 135 Tokens
 // Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
 // =============================================================================
 export const CORE_TOKENS: Record<string, Token[]> = {
-  // Arbitrum: 12 tokens
+  // Arbitrum: 13 tokens
   arbitrum: [
     // Anchor tokens
     { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18, chainId: 42161 },
@@ -109,7 +109,7 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0x9e1028F5F1D5eDE59748FFceE5532509976840E0', symbol: 'PERP', decimals: 18, chainId: 10 },
     { address: '0x3c8B650257cFb5f272f799F5e2b4e65093a11a05', symbol: 'VELO', decimals: 18, chainId: 10 }
   ],
-  // Ethereum: 8 tokens (selective - large arbs only)
+  // Ethereum: 13 tokens (LST/LRT expansion for arbitrage surface)
   ethereum: [
     // Anchor tokens
     { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', decimals: 18, chainId: 1 },
