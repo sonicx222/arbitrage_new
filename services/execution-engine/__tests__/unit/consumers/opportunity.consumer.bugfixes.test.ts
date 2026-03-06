@@ -117,12 +117,12 @@ describe('OpportunityConsumer - Configurable Settings', () => {
 
     consumer.start();
 
-    // Default batchSize is 50, blockMs is 200
+    // Default batchSize is 50, blockMs is 20 (P1-001 FIX: reduced from 200ms)
     expect(mockLogger.info).toHaveBeenCalledWith(
       'Stream consumer started with blocking reads',
       expect.objectContaining({
         batchSize: 50,
-        blockMs: 200,
+        blockMs: 20,
       })
     );
   });

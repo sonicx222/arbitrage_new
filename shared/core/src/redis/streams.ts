@@ -408,7 +408,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
-    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 5000, // Execution requests, critical for trading
+    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 25000, // P1-003 FIX: Increased from 5000 — at 10 opps/s, 5K holds ~8 min; 25K gives ~40 min buffer
     [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
     [RedisStreamsClient.STREAMS.CIRCUIT_BREAKER]: 5000,        // Circuit breaker events, critical alerts
     [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume
@@ -486,6 +486,11 @@ export class RedisStreamsClient {
       },
       maxRetriesPerRequest: 3,
       lazyConnect: true,
+      // SA-1K-001 FIX: Align with RedisClient (client.ts:217) — skip ready check to avoid
+      // blocking reconnections when Redis reports not-ready during failover.
+      enableReadyCheck: false,
+      // SA-1K-002 FIX: Align with RedisClient (client.ts:216) — faster failover recovery.
+      retryDelayOnFailover: 100,
       // P3-FIX: Add connectTimeout to prevent indefinite hang during initial connection.
       // Without this, getRedisStreamsClient() can block forever if Redis is unreachable,
       // causing cross-chain detector (and other services) to never reach RUNNING state.
@@ -1027,17 +1032,26 @@ export class RedisStreamsClient {
   }
 
   /**
-   * P0 Fix ES-006: Check stream length against MAXLEN and warn when lag exceeds 80%.
-   * Use this to detect when consumers are falling behind and at risk of losing
-   * messages to MAXLEN trimming.
+   * P0 Fix ES-006: Check stream length against MAXLEN and warn when lag exceeds thresholds.
+   *
+   * P1-003 FIX: Added active backpressure signaling at 60% and lagCriticalTotal counter.
+   * Previously only warned at 80% with no corrective action. Now returns `backpressure: true`
+   * at 60% so callers can throttle publishing before messages are lost to MAXLEN trimming.
    *
    * When groupName is provided, also checks XPENDING for the consumer group's
    * actual pending message count, giving a more accurate picture of consumer lag.
    *
    * @param streamName - The stream to check
    * @param groupName - Optional consumer group to check pending messages for
-   * @returns Object with stream length, maxLen, lag metrics, and whether lag is critical (>80%)
+   * @returns Object with stream length, maxLen, lag metrics, backpressure signal, and critical flag
    */
+  private lagCriticalTotal = 0;
+
+  /** Number of times checkStreamLag returned critical=true. Use for Prometheus export. */
+  getLagCriticalTotal(): number {
+    return this.lagCriticalTotal;
+  }
+
   async checkStreamLag(
     streamName: string,
     groupName?: string
@@ -1045,13 +1059,14 @@ export class RedisStreamsClient {
     length: number;
     maxLen: number;
     lagRatio: number;
+    backpressure: boolean;
     critical: boolean;
     pendingCount: number;
     pendingRatio: number;
   }> {
     const maxLen = RedisStreamsClient.STREAM_MAX_LENGTHS[streamName] ?? 0;
     if (maxLen === 0) {
-      return { length: 0, maxLen: 0, lagRatio: 0, critical: false, pendingCount: 0, pendingRatio: 0 };
+      return { length: 0, maxLen: 0, lagRatio: 0, backpressure: false, critical: false, pendingCount: 0, pendingRatio: 0 };
     }
 
     const length = await this.xlen(streamName);
@@ -1070,10 +1085,12 @@ export class RedisStreamsClient {
       }
     }
 
+    // P1-003 FIX: Backpressure at 60% — callers should throttle publishing
+    const backpressure = lagRatio > 0.6 || pendingRatio > 0.6;
     const critical = lagRatio > 0.8 || pendingRatio > 0.8;
 
-    if (critical) {
-      this.logger.warn('Stream lag critical — unread messages at risk of MAXLEN trimming', {
+    if (backpressure && !critical) {
+      this.logger.warn('Stream lag elevated — backpressure active, consider throttling publishers', {
         streamName,
         length,
         maxLen,
@@ -1082,7 +1099,19 @@ export class RedisStreamsClient {
       });
     }
 
-    return { length, maxLen, lagRatio, critical, pendingCount, pendingRatio };
+    if (critical) {
+      this.lagCriticalTotal++;
+      this.logger.warn('Stream lag critical — unread messages at risk of MAXLEN trimming', {
+        streamName,
+        length,
+        maxLen,
+        lagRatio: Math.round(lagRatio * 100) / 100,
+        lagCriticalTotal: this.lagCriticalTotal,
+        ...(groupName ? { groupName, pendingCount, pendingRatio: Math.round(pendingRatio * 100) / 100 } : {}),
+      });
+    }
+
+    return { length, maxLen, lagRatio, backpressure, critical, pendingCount, pendingRatio };
   }
 
   /**

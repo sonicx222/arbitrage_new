@@ -918,7 +918,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     // Fix 9.3: Use extracted bridge profitability helper
     // Validate profit still viable after bridge fees
-    const ethPriceUsd = getDefaultPrice('ETH');
+    // P1-002 FIX: Use chain-native token price, not ETH price for all chains.
+    // getDefaultPrice('ETH') overestimated bridge gas costs ~4000x on BSC/Polygon/Avalanche/Fantom.
+    const DEFAULT_BRIDGE_NATIVE_TOKEN_PRICE_USD = 2000;
+    let nativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
+    if (!Number.isFinite(nativeTokenPriceUsd) || nativeTokenPriceUsd <= 0) {
+      nativeTokenPriceUsd = DEFAULT_BRIDGE_NATIVE_TOKEN_PRICE_USD;
+    }
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
 
@@ -973,7 +979,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const bridgeProfitability = this.checkBridgeProfitability(
       gasFeeWei,
       expectedProfit,
-      ethPriceUsd,
+      nativeTokenPriceUsd,
       { chain: sourceChain }
     );
 
@@ -982,7 +988,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         opportunityId: opportunity.id,
         bridgeFeeEth: bridgeProfitability.bridgeFeeEth,
         bridgeFeeUsd: bridgeProfitability.bridgeFeeUsd,
-        ethPriceUsd,
+        nativeTokenPriceUsd,
         expectedProfit,
         feePercentage: bridgeProfitability.feePercentageOfProfit.toFixed(2),
       });

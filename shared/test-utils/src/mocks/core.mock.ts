@@ -99,8 +99,9 @@ function createMockStreamsClientInstance() {
       getStats: jest.fn().mockReturnValue({ queued: 0, flushed: 0, errors: 0 }),
       destroy: jest.fn(),
     }),
-    checkStreamLag: jest.fn<() => Promise<{ length: number; maxLen: number; lagRatio: number; critical: boolean; pendingCount: number; pendingRatio: number }>>()
-      .mockResolvedValue({ length: 0, maxLen: 5000, lagRatio: 0, critical: false, pendingCount: 0, pendingRatio: 0 }),
+    checkStreamLag: jest.fn<() => Promise<{ length: number; maxLen: number; lagRatio: number; backpressure: boolean; critical: boolean; pendingCount: number; pendingRatio: number }>>()
+      .mockResolvedValue({ length: 0, maxLen: 5000, lagRatio: 0, backpressure: false, critical: false, pendingCount: 0, pendingRatio: 0 }),
+    getLagCriticalTotal: jest.fn<() => number>().mockReturnValue(0),
     getXaddCircuitBreakerStatus: jest.fn().mockReturnValue({ failures: 0, isOpen: false, lastFailure: 0, threshold: 5, resetTimeoutMs: 30000 }),
     getClient: jest.fn().mockReturnValue(createMockRedisClient()),
   };

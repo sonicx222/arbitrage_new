@@ -331,7 +331,9 @@ export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
   // P2 OPT: Increased from 10 to 50 — reduces Redis round-trips by 5x.
   // At 130+ opps/s inflow, batch=10 means 13+ XREADGROUP/s; batch=50 means ~3/s.
   batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 50, 1, 100),
-  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 200, 100, 10000),
+  // P1-001 FIX: 200ms default added avg 100ms idle-wait to every opportunity, making
+  // <50ms target unreachable. 20ms default with 10ms floor — ~50 XREADGROUP/s is trivial for Redis.
+  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 20, 10, 10000),
   shutdownAckTimeoutMs: parseEnvTimeout('CONSUMER_SHUTDOWN_ACK_TIMEOUT_MS', 5000, 1000, 30000),
   pendingMessageMaxAgeMs: parseEnvTimeout('CONSUMER_PENDING_MAX_AGE_MS', 10 * 60 * 1000, 60000, 3600000),
   stalePendingCleanupIntervalMs: parseEnvTimeout('CONSUMER_STALE_CLEANUP_INTERVAL_MS', 60000, 0, 300000),
@@ -856,13 +858,16 @@ export const TRANSACTION_TIMEOUT_MS = parseEnvTimeout(
 );
 
 /**
- * Shutdown timeout for graceful cleanup.
- * Environment: SHUTDOWN_TIMEOUT_MS (default: 5000)
+ * Shutdown timeout for graceful cleanup (per-disconnect).
+ * SA-1R-001 FIX: Raised from 5000ms to 8000ms to give comfortable margin
+ * for 3 sequential Redis disconnects (lock manager + streams + redis),
+ * each with 3000ms connectTimeout.
+ * Environment: SHUTDOWN_TIMEOUT_MS (default: 8000)
  * Valid range: 1000ms - 30000ms
  */
 export const SHUTDOWN_TIMEOUT_MS = parseEnvTimeout(
   'SHUTDOWN_TIMEOUT_MS',
-  5000,
+  8000,
   1000,
   30000
 );
