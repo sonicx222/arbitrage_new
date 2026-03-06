@@ -47,7 +47,7 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
     description: 'Linea SyncSwap flash loans via Vault (EIP-3156)',
     status: 'deferred',
     blocker: 'SyncSwap Vault not deployed to Linea mainnet',
-    files: ['addresses.ts', 'service-config.ts'],
+    files: ['addresses.ts', 'service-config.ts', 'flash-loan-providers/syncswap.ts'],
   },
   {
     id: 'D3-BLAST-FLASH-LOAN',
@@ -75,7 +75,7 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
     description: 'Implement MorphoFlashArbitrage.sol contract',
     status: 'deferred',
     blocker: 'No MorphoFlashArbitrage.sol contract yet',
-    files: ['contracts/src/', 'flash-loan-availability.ts'],
+    files: ['contracts/src/', 'flash-loan-availability.ts', 'flash-loan-providers/morpho.ts'],
   },
   {
     id: 'D9-MANTLE-MODE-PARTITIONS',
