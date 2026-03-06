@@ -183,6 +183,19 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           '# HELP arbitrage_executions_successful_total Total successful executions',
           '# TYPE arbitrage_executions_successful_total counter',
           `arbitrage_executions_successful_total ${sys.successfulExecutions}`,
+          // Phase 1 Admission Control metrics
+          '# HELP arbitrage_opportunities_admitted_total Opportunities admitted through admission gate',
+          '# TYPE arbitrage_opportunities_admitted_total counter',
+          `arbitrage_opportunities_admitted_total ${sys.admissionMetrics?.admitted ?? 0}`,
+          '# HELP arbitrage_opportunities_shed_total Opportunities shed by admission gate (explicit drop)',
+          '# TYPE arbitrage_opportunities_shed_total counter',
+          `arbitrage_opportunities_shed_total ${sys.admissionMetrics?.shed ?? 0}`,
+          '# HELP arbitrage_admission_avg_score_admitted Average score of admitted opportunities',
+          '# TYPE arbitrage_admission_avg_score_admitted gauge',
+          `arbitrage_admission_avg_score_admitted ${sys.admissionMetrics?.avgScoreAdmitted ?? 0}`,
+          '# HELP arbitrage_admission_avg_score_shed Average score of shed opportunities',
+          '# TYPE arbitrage_admission_avg_score_shed gauge',
+          `arbitrage_admission_avg_score_shed ${sys.admissionMetrics?.avgScoreShed ?? 0}`,
           '',
         ].join('\n');
         const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();

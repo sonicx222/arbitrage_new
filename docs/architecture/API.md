@@ -212,7 +212,21 @@ Returns a text/plain formatted Redis usage dashboard. Has a 5-second timeout. Re
 
 **Auth:** Required. Permission: `read:metrics`.
 
-Returns stream health metrics in Prometheus text exposition format (`text/plain; version=0.0.4`). Exposes `stream_length`, `stream_pending`, `stream_consumer_groups`, and `stream_health_status` gauges.
+Returns stream health metrics in Prometheus text exposition format (`text/plain; version=0.0.4`).
+
+**Stream gauges:** `stream_length`, `stream_pending`, `stream_consumer_groups`, `stream_health_status`.
+
+**Runtime gauges:** Event loop latency, memory usage, CPU usage (from `RuntimeMonitor`).
+
+**Provider gauges:** RPC provider latency percentiles (from `ProviderLatencyTracker`).
+
+**Coordinator counters:** `arbitrage_opportunities_total`, `arbitrage_opportunities_dropped_total`, `arbitrage_executions_total`, `arbitrage_executions_successful_total`.
+
+**Admission control metrics (Phase 1):**
+- `arbitrage_opportunities_admitted_total` (counter) — Opportunities admitted through admission gate
+- `arbitrage_opportunities_shed_total` (counter) — Opportunities explicitly shed by admission gate
+- `arbitrage_admission_avg_score_admitted` (gauge) — Average score of admitted opportunities
+- `arbitrage_admission_avg_score_shed` (gauge) — Average score of shed opportunities
 
 ### Admin Routes (Authenticated, Rate-Limited)
 

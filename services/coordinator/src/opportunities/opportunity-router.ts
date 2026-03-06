@@ -16,6 +16,7 @@ import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOppor
 import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
+import { scoreOpportunity } from './opportunity-scoring';
 
 /**
  * Parse a numeric field that may arrive as a string from Redis Streams.
@@ -132,6 +133,13 @@ export interface OpportunityRouterConfig {
   /** FIX W2-8: MAXLEN for execution requests stream to prevent unbounded growth (default: 5000) */
   executionStreamMaxLen?: number;
   /**
+   * Phase 1 Admission Control: Maximum opportunities to forward per batch (default: 0 = unlimited).
+   * When > 0, only the top-K highest-scored opportunities are forwarded; the rest are
+   * explicitly shed with logging. Score = expectedProfit × confidence × (1/ttlRemaining).
+   * @see docs/reports/EXECUTION_BOTTLENECK_RESEARCH_2026-03-06.md — Phase 1
+   */
+  maxForwardPerBatch?: number;
+  /**
    * RT-005 FIX: Multiplier for chain-specific TTLs in simulation mode (default: 1).
    * In simulation mode with high realism, detectors produce 130+ opps/s but chain-specific
    * TTLs (e.g., Arbitrum 15s) expire before the single-threaded coordinator can process them.
@@ -187,6 +195,8 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   dlqStream: RedisStreams.FORWARDING_DLQ,
   // FIX W2-8: Prevent unbounded stream growth (matches RedisStreamsClient.STREAM_MAX_LENGTHS)
   executionStreamMaxLen: 5000,
+  // Phase 1 Admission Control: 0 = unlimited (disabled by default)
+  maxForwardPerBatch: 0,
   // RT-003 FIX: Grace period for execution engine consumer initialization.
   // RT-004 FIX: Increased from 5s to 15s — execution engine initialization
   // (Redis, nonce manager, providers, KMS, MEV, strategies, risk management,
@@ -226,6 +236,13 @@ export class OpportunityRouter {
   private _deferredCircuitOpen = 0;
   // P1-8 FIX: Shutdown flag to cancel in-flight retry delays
   private _shuttingDown = false;
+  // Phase 1 Admission Control: Scoring + admission gate metrics
+  private _admittedTotal = 0;
+  private _shedTotal = 0;
+  private _admittedScoreSum = 0;
+  private _shedScoreSum = 0;
+  // Execution stream depth ratio (set externally by coordinator for dynamic admission budget)
+  private _executionStreamDepthRatio = 0;
   // RT-003 FIX: Startup grace period — defer forwarding until execution engine consumer is ready
   private readonly _createdAt = Date.now();
   // Consumer lag detection: tracks consecutive expired opportunities.
@@ -328,6 +345,57 @@ export class OpportunityRouter {
       notLeader: this._deferredNotLeader,
       circuitOpen: this._deferredCircuitOpen,
     };
+  }
+
+  /**
+   * Phase 1 Admission Control: Set the current execution stream depth ratio.
+   * Called by the coordinator when it updates the cached stream depth.
+   * Used to dynamically compute admission budget when maxForwardPerBatch is 0.
+   */
+  setExecutionStreamDepthRatio(ratio: number): void {
+    this._executionStreamDepthRatio = ratio;
+  }
+
+  /**
+   * Phase 1 Admission Control: Get admission metrics for monitoring.
+   */
+  getAdmissionMetrics(): {
+    admitted: number;
+    shed: number;
+    avgScoreAdmitted: number;
+    avgScoreShed: number;
+  } {
+    return {
+      admitted: this._admittedTotal,
+      shed: this._shedTotal,
+      avgScoreAdmitted: this._admittedTotal > 0 ? this._admittedScoreSum / this._admittedTotal : 0,
+      avgScoreShed: this._shedTotal > 0 ? this._shedScoreSum / this._shedTotal : 0,
+    };
+  }
+
+  /**
+   * Phase 1 Admission Control: Compute the admission budget for this batch.
+   * Returns the maximum number of opportunities to forward.
+   *
+   * When maxForwardPerBatch > 0: uses that fixed limit.
+   * When maxForwardPerBatch === 0 (default): dynamically adjusts based on stream depth ratio.
+   *   - Depth <= 0.3: unlimited (forward all)
+   *   - Depth 0.3-0.5: forward 75% of candidates
+   *   - Depth 0.5-0.7: forward 25% of candidates
+   *   - Depth > 0.7: forward 0 (full backpressure — existing behavior)
+   */
+  private computeAdmissionBudget(candidateCount: number): number {
+    const maxPerBatch = this.config.maxForwardPerBatch ?? 0;
+    if (maxPerBatch > 0) {
+      return maxPerBatch;
+    }
+
+    // Dynamic budget based on stream depth
+    const depth = this._executionStreamDepthRatio;
+    if (depth <= 0.3) return candidateCount; // Unlimited
+    if (depth <= 0.5) return Math.max(1, Math.ceil(candidateCount * 0.75));
+    if (depth <= 0.7) return Math.max(1, Math.ceil(candidateCount * 0.25));
+    return 0; // Full backpressure
   }
 
   /**
@@ -532,18 +600,16 @@ export class OpportunityRouter {
   }
 
   /**
-   * OPT-1+2: Process a batch of opportunity messages with dedup and TTL-priority scheduling.
+   * OPT-1+2: Process a batch of opportunity messages with dedup, scoring, and admission control.
    *
-   * Instead of processing each message sequentially (FIFO), this method:
-   * 1. Groups opportunities by chain+pair key
-   * 2. Within each group, keeps only the freshest opportunity (highest expiresAt/timestamp)
-   * 3. Sorts remaining opportunities by remaining TTL ascending (shortest-remaining first)
-   * 4. Processes in TTL-priority order
+   * Pipeline:
+   * 1. Groups opportunities by chain+pair key, keeps only freshest per group
+   * 2. Scores each candidate: expectedProfit × confidence × (1 / max(ttlRemainingMs, 100))
+   * 3. Admission gate: forwards top-K by score (K = admission budget from stream depth)
+   * 4. Explicitly sheds low-score opportunities with logging and metrics
    *
-   * This addresses the 97.7% expiration rate (RT-005) by:
-   * - Deduplicating stale updates for the same pair (reduces processing volume)
-   * - Ensuring fast-chain opportunities (Arbitrum 2s TTL) are processed before
-   *   slow-chain opportunities (Ethereum 30s TTL) instead of FIFO order
+   * Single-message batches also respect admission backpressure (budget = 0 at depth > 0.7)
+   * but skip grouping/scoring overhead.
    *
    * @param batch - Array of raw opportunity data records from a single xreadgroup call.
    *   Each entry includes `streamMessageId` (the Redis stream message ID for XACK).
@@ -552,6 +618,7 @@ export class OpportunityRouter {
    *   P0 Fix DF-001: Returns stream message IDs (e.g., "1772460218224-0"), NOT opportunity
    *   data IDs (e.g., "multi_ethereum_..."). Previously returned data IDs which Redis XACK
    *   silently ignored, causing all messages to remain permanently pending.
+   * @see docs/reports/EXECUTION_BOTTLENECK_RESEARCH_2026-03-06.md — Phase 1
    */
   async processOpportunityBatch(
     batch: Array<{ streamMessageId: string; data: Record<string, unknown>; traceContext?: TraceContext }>,
@@ -559,10 +626,16 @@ export class OpportunityRouter {
   ): Promise<string[]> {
     if (batch.length === 0) return [];
 
-    // If batch is just 1 message, skip grouping overhead
+    // If batch is just 1 message, skip grouping/scoring overhead.
+    // P3-A FIX: Still respect admission backpressure — if budget is 0 (full
+    // backpressure at depth > 0.7), shed the opportunity instead of forwarding.
     if (batch.length === 1) {
       const entry = batch[0];
-      const processed = await this.processOpportunity(entry.data, isLeader, entry.traceContext);
+      if (this.computeAdmissionBudget(1) === 0) {
+        this._shedTotal++;
+        return [entry.streamMessageId];
+      }
+      await this.processOpportunity(entry.data, isLeader, entry.traceContext);
       // P0 Fix DF-001: Return stream message ID, not opportunity data ID.
       // Always ACK the message — even if processing fails, we don't want
       // permanently pending messages. Failed messages go to DLQ via processOpportunity.
@@ -583,6 +656,8 @@ export class OpportunityRouter {
       timestamp: number;
       traceContext?: TraceContext;
     }
+    // P3-007 FIX: Type alias for scored opportunities (eliminates 7 repeated casts)
+    type ScoredOpp = ParsedOpp & { _score: number };
 
     const parsed: ParsedOpp[] = [];
     let expiredInBatch = 0;
@@ -603,8 +678,13 @@ export class OpportunityRouter {
                        typeof data.token0 === 'string' ? data.token0 : '';
       const tokenOut = typeof data.tokenOut === 'string' ? data.tokenOut :
                         typeof data.token1 === 'string' ? data.token1 : '';
-      const expiresAt = typeof data.expiresAt === 'number' ? data.expiresAt : now + 60000;
-      const timestamp = typeof data.timestamp === 'number' ? data.timestamp : now;
+      // P1-001 FIX: Use parseNumericField instead of typeof check.
+      // Redis Streams serialize all values as strings, so typeof === 'number'
+      // always fails for stream-sourced data. Without this fix, expiresAt defaults
+      // to now+60000 for all opps, neutralizing TTL-based pre-filtering, dedup
+      // freshness, and the urgency component of admission control scoring.
+      const expiresAt = parseNumericField(data.expiresAt) ?? (now + 60000);
+      const timestamp = parseNumericField(data.timestamp) ?? now;
 
       // SM-001 FIX: Pre-filter expired opportunities before dedup and forwarding.
       // At high realism (~115 opps/s), the coordinator backlog grows faster than
@@ -646,33 +726,83 @@ export class OpportunityRouter {
       }
     }
 
-    // Step 3: Sort by remaining TTL ascending (shortest-remaining first)
-    // This ensures fast-chain opportunities (Arbitrum 2s) are processed before
-    // slow-chain opportunities (Ethereum 30s) which have more time left.
-    const sorted = Array.from(freshest.values());
-    sorted.sort((a, b) => (a.expiresAt - now) - (b.expiresAt - now));
+    // Step 3: Score and sort by admission priority (descending score).
+    // Phase 1 Admission Control: Replaces pure TTL sort with profit-weighted scoring.
+    // Score = expectedProfit × confidence × (1 / max(ttlRemainingMs, 100)).
+    // This naturally prioritizes urgent high-profit opportunities.
+    const candidates = Array.from(freshest.values());
+    for (const opp of candidates) {
+      (opp as ScoredOpp)._score = scoreOpportunity({
+        expectedProfit: parseNumericField(opp.data.expectedProfit),
+        confidence: parseNumericField(opp.data.confidence),
+        expiresAt: opp.expiresAt,
+      }, now);
+    }
+    // Safe cast: all candidates now have _score set by the loop above
+    const scored = candidates as ScoredOpp[];
+    scored.sort((a, b) => b._score - a._score);
+
+    // Step 3b: Admission gate — limit forwarding to top-K by score.
+    const admissionBudget = this.computeAdmissionBudget(scored.length);
+    const admitted = admissionBudget >= scored.length
+      ? scored
+      : scored.slice(0, admissionBudget);
+    const shedCount = scored.length - admitted.length;
+
+    // Track admission metrics
+    if (shedCount > 0) {
+      this._shedTotal += shedCount;
+      for (let i = admissionBudget; i < scored.length; i++) {
+        this._shedScoreSum += scored[i]._score;
+      }
+      this.logger.info('Admission control: shed low-score opportunities', {
+        admitted: admitted.length,
+        shed: shedCount,
+        totalCandidates: scored.length,
+        admissionBudget,
+        streamDepthRatio: this._executionStreamDepthRatio,
+        minAdmittedScore: admitted.length > 0 ? admitted[admitted.length - 1]._score : 0,
+        maxShedScore: admissionBudget < scored.length ? scored[admissionBudget]._score : 0,
+      });
+    }
+    if (admitted.length > 0) {
+      this._admittedTotal += admitted.length;
+      for (const opp of admitted) {
+        this._admittedScoreSum += opp._score;
+      }
+    }
 
     this.logger.debug('Batch opportunity processing', {
       batchSize: batch.length,
       expiredPreFilter: expiredInBatch,
       parsedCount: parsed.length,
-      dedupedCount: sorted.length,
-      droppedDuplicates: parsed.length - sorted.length,
+      dedupedCount: scored.length,
+      droppedDuplicates: parsed.length - scored.length,
+      admitted: admitted.length,
+      shed: shedCount,
     });
 
-    // ADR-037: Step 4: Process in parallel for throughput.
+    // ADR-037: Step 4: Process admitted opportunities in parallel for throughput.
     // Validation (dedup, profit, chain, expiry) is CPU-only with no shared mutable state
     // between opportunities. Forwarding (XADD) calls are independent Redis writes.
     // Promise.all executes all forwards concurrently instead of sequentially,
     // reducing batch forwarding time from N*RTT to ~1*RTT.
     const results = await Promise.all(
-      sorted.map(opp => this.processOpportunity(opp.data, isLeader, opp.traceContext))
+      admitted.map(opp => this.processOpportunity(opp.data, isLeader, opp.traceContext))
     );
+
+    // P2-001+P2-002 FIX: Shed opportunities are NOT processed through processOpportunity.
+    // Previously, shed opps were processed with isLeader=false, which caused:
+    // - P2-001: _deferredNotLeader counter inflation (metric pollution)
+    // - P2-002: Storage in opportunities map blocked re-admission within dedup window
+    // Shed opps are already tracked via _shedTotal/_shedScoreSum and ACKed below.
+
     // P0 Fix DF-001: Use stream message IDs for XACK, not opportunity data IDs.
     // ACK all processed messages regardless of success — failed messages are already
     // routed to DLQ by processOpportunity. Leaving them unACKed causes unbounded PEL growth.
-    for (let i = 0; i < sorted.length; i++) {
-      processedIds.push(sorted[i].streamMessageId);
+    // Phase 1: ACK both admitted and shed opportunities (all scored candidates).
+    for (let i = 0; i < scored.length; i++) {
+      processedIds.push(scored[i].streamMessageId);
     }
 
     // Also ACK deduplicated (skipped) opportunities — they were intentionally
@@ -1029,5 +1159,10 @@ export class OpportunityRouter {
     this._totalExecutions = 0;
     this._opportunitiesDropped = 0;
     this._shuttingDown = false;
+    this._admittedTotal = 0;
+    this._shedTotal = 0;
+    this._admittedScoreSum = 0;
+    this._shedScoreSum = 0;
+    this._executionStreamDepthRatio = 0;
   }
 }

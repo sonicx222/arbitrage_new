@@ -1350,6 +1350,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
       // SM-001 FIX: Sync per-reason forwarding metrics for /stats observability
       this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
+      // Phase 1 Admission Control: Sync admission metrics for Prometheus/health
+      this.systemMetrics.admissionMetrics = this.opportunityRouter.getAdmissionMetrics();
 
       // Consumer lag detection: if too many consecutive opportunities expired,
       // skip the consumer backlog by resetting the group position to '$' (latest).
@@ -1502,6 +1504,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
     this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
     this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
+    this.systemMetrics.admissionMetrics = this.opportunityRouter.getAdmissionMetrics();
 
     if (processedIds.length > 0) {
       this.streamConsumerManager?.resetErrors();
@@ -2204,6 +2207,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
               RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
             );
             this.cachedExecutionStreamDepthRatio = lag.lagRatio;
+
+            // Phase 1 Admission Control: Propagate stream depth to router for dynamic budget
+            this.opportunityRouter?.setExecutionStreamDepthRatio(lag.lagRatio);
 
             // SM-009 FIX: Expose backpressure state in systemMetrics so health/metrics
             // endpoints report it. Without this, operators can't see stream saturation.

@@ -88,6 +88,13 @@ export interface SystemMetrics {
     executionStreamDepthRatio: number;
     active: boolean;
   };
+  // Phase 1 Admission Control: Scoring + admission gate metrics
+  admissionMetrics?: {
+    admitted: number;
+    shed: number;
+    avgScoreAdmitted: number;
+    avgScoreShed: number;
+  };
 }
 
 // =============================================================================
