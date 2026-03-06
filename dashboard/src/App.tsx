@@ -3,6 +3,7 @@ import { SSEProvider, useSSEData } from './context/SSEContext';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
 import { ChainsTab } from './tabs/ChainsTab';
+import { RiskTab } from './tabs/RiskTab';
 import type { Tab } from './lib/types';
 
 const TABS: Tab[] = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'];
@@ -47,7 +48,8 @@ function Dashboard() {
         {tab === 'Overview' && <OverviewTab />}
         {tab === 'Execution' && <ExecutionTab />}
         {tab === 'Chains' && <ChainsTab />}
-        {tab !== 'Overview' && tab !== 'Execution' && tab !== 'Chains' && (
+        {tab === 'Risk' && <RiskTab />}
+        {tab !== 'Overview' && tab !== 'Execution' && tab !== 'Chains' && tab !== 'Risk' && (
           <div className="text-gray-500 text-xs">{tab} — coming soon</div>
         )}
       </main>
