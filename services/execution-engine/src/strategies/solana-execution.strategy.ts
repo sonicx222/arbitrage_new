@@ -27,6 +27,7 @@ import {
   createErrorResult,
   createSkippedResult,
 } from '@arbitrage/types';
+import { getNativeTokenPrice } from '@arbitrage/config';
 import type { ExecutionStrategy, StrategyContext, Logger } from '../types';
 import type { JupiterSwapClient } from '../solana/jupiter-client';
 import type { SolanaTransactionBuilder } from '../solana/transaction-builder';
@@ -380,13 +381,18 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
           });
         }
 
+        // H-005 FIX: Convert lamports to USD. Pipeline expects actualProfit in
+        // human-readable USD (see ADR-040). 1 SOL = 1e9 lamports.
+        const solPriceUsd = getNativeTokenPrice('solana', { suppressWarning: true });
+        const actualProfitUsd = Number(netProfitLamports) / 1e9 * solPriceUsd;
+
         return createSuccessResult(
           opportunity.id,
           txHash,
           chain,
           dex,
           {
-            actualProfit: Number(netProfitLamports),
+            actualProfit: actualProfitUsd,
             latencyMs: Date.now() - startTime,
             usedMevProtection: !submissionResult.usedFallback,
           },

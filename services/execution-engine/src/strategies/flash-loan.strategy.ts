@@ -78,7 +78,8 @@ import { PancakeSwapV3FlashLoanProvider } from './flash-loan-providers/pancakesw
 // Finding #7: Batch quoting extracted for SRP
 import { BatchQuoteManager } from './batch-quote-manager';
 // Step 3: V3 swap adapter for exactInputSingle encoding
-import { V3SwapAdapter, isV3Dex } from './v3-swap-adapter';
+// H-002: V3SwapAdapter removed — on-chain contract only supports V2 routing.
+// V3 support requires contract upgrade (new SwapStep struct + V3 router dispatch).
 
 // =============================================================================
 // Constants
@@ -337,7 +338,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   // Finding #7: Batch quoting delegated to BatchQuoteManager
   private readonly batchQuoteManager: BatchQuoteManager;
   // Step 3: V3 swap adapter for exactInputSingle encoding
-  private readonly v3SwapAdapter: V3SwapAdapter;
+  // H-002: v3SwapAdapter removed — on-chain contract only supports V2 routing
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -442,7 +443,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     this.config = config;
 
     // Step 3: Initialize V3 swap adapter (stateless, no config needed)
-    this.v3SwapAdapter = new V3SwapAdapter();
+    // H-002: V3SwapAdapter instantiation removed — on-chain contract only supports V2 routing
 
     // Pre-compute router Sets for O(1) lookup in isRouterApproved() hot path
     this.approvedRoutersSets = new Map();
@@ -1357,29 +1358,19 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     // Issue 10.2 Fix: Use cached interface instead of creating new one
-    // Convert SwapStep[] to tuple array format for ABI encoding
-    // Step 3: V3 steps encode calldata via V3SwapAdapter for exactInputSingle routing.
-    // The encoded calldata is passed as the router field so the on-chain contract
-    // can distinguish V3 calls. V2 steps pass through unchanged.
+    // Convert SwapStep[] to tuple array format for ABI encoding.
+    // H-002 FIX: On-chain SwapStep struct is V2-only (address router, address tokenIn,
+    // address tokenOut, uint256 amountOutMin). SwapHelpers.executeSingleSwap() always
+    // calls IDexRouter.swapExactTokensForTokens(). V3 calldata cannot be passed through
+    // the current contract architecture. V3 steps are logged as warnings and routed
+    // through their V3-compatible router address (which will attempt V2-style call).
     const swapPathTuples = swapPath.map(step => {
       if (step.isV3 && step.feeTier != null) {
-        // V3 step: encode the exactInputSingle calldata for downstream use
-        const v3Calldata = this.v3SwapAdapter.encodeExactInputSingle({
-          tokenIn: step.tokenIn,
-          tokenOut: step.tokenOut,
-          fee: step.feeTier,
-          recipient: asset, // Contract address as recipient placeholder
-          deadline: BigInt(getSwapDeadline()),
-          amountIn: amount, // Will be overridden by on-chain logic
-          amountOutMinimum: step.amountOutMin,
-          sqrtPriceLimitX96: 0n, // No price limit
-        });
-
-        this.logger.debug('Encoded V3 swap step', {
+        this.logger.warn('V3 swap step in flash loan path — on-chain contract only supports V2 routing', {
           tokenIn: step.tokenIn,
           tokenOut: step.tokenOut,
           feeTier: step.feeTier,
-          calldataLength: v3Calldata.length,
+          router: step.router,
         });
       }
 

@@ -138,14 +138,24 @@ interface ParseBodyResult {
   error?: string;
 }
 
+/** Maximum request body size (bytes). Prevents memory exhaustion from oversized POST bodies. */
+const MAX_BODY_SIZE = 4096;
+
 /**
  * Parse request body as JSON.
  * Returns a result object indicating success/failure instead of silently swallowing errors.
+ * H-003 FIX: Enforces MAX_BODY_SIZE to prevent memory exhaustion DoS.
  */
 async function parseBody(req: IncomingMessage): Promise<ParseBodyResult> {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', (chunk) => (body += chunk));
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy();
+        resolve({ success: false, data: {}, error: `Request body exceeds maximum size (${MAX_BODY_SIZE} bytes)` });
+      }
+    });
     req.on('error', (err) => {
       resolve({ success: false, data: {}, error: `Request error: ${err.message}` });
     });

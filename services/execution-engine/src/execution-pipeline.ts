@@ -681,18 +681,18 @@ export class ExecutionPipeline {
         recordExecutionSuccess(chain, strategy);
         recordOpportunityOutcome(chain, 'success');
         if (result.actualProfit != null) {
-          // RT-006 FIX: Convert from wei (1e18) to ETH before recording.
-          recordVolume(chain, result.actualProfit / 1e18);
+          // H-001 FIX: actualProfit is already in human-readable units (USD for EVM
+          // strategies via calculateActualProfit(), USD for Solana after lamport conversion).
+          // Previously divided by 1e18 assuming wei, but no strategy returns wei.
+          recordVolume(chain, result.actualProfit);
 
           // Phase 3 (F4): Record profit per execution
-          recordProfitPerExecution(chain, strategy, result.actualProfit / 1e18);
+          recordProfitPerExecution(chain, strategy, result.actualProfit);
 
           // Phase 3 (A3): Record profit slippage (expected vs actual)
-          // expectedProfit is in ETH (e.g. 0.05), actualProfit is in wei (e.g. 50000000000000000).
-          // Convert actualProfit to ETH to match expectedProfit before computing the ratio.
+          // Both expectedProfit and actualProfit are in the same units (USD).
           if (opportunity.expectedProfit != null && opportunity.expectedProfit !== 0) {
-            const actualProfitEth = result.actualProfit / 1e18;
-            const slippagePct = ((opportunity.expectedProfit - actualProfitEth) / Math.abs(opportunity.expectedProfit)) * 100;
+            const slippagePct = ((opportunity.expectedProfit - result.actualProfit) / Math.abs(opportunity.expectedProfit)) * 100;
             if (Number.isFinite(slippagePct)) {
               recordProfitSlippage(chain, strategy, slippagePct);
             }
