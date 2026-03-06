@@ -62,9 +62,9 @@ describe('BridgeProfitabilityAnalyzer', () => {
       // Fee percentage: 20% < 50% default
       const bridgeFeeWei = ethers.parseEther('0.01');
       const expectedProfitUsd = 100;
-      const ethPriceUsd = 2000;
+      const nativeTokenPriceUsd = 2000;
 
-      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, ethPriceUsd);
+      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, nativeTokenPriceUsd);
 
       expect(result.isProfitable).toBe(true);
       expect(result.bridgeFeeEth).toBeCloseTo(0.01);
@@ -80,9 +80,9 @@ describe('BridgeProfitabilityAnalyzer', () => {
       // Fee percentage: 83.3% > 50% default
       const bridgeFeeWei = ethers.parseEther('0.05');
       const expectedProfitUsd = 120;
-      const ethPriceUsd = 2000;
+      const nativeTokenPriceUsd = 2000;
 
-      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, ethPriceUsd);
+      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, nativeTokenPriceUsd);
 
       expect(result.isProfitable).toBe(false);
       expect(result.bridgeFeeUsd).toBeCloseTo(100);
@@ -97,9 +97,9 @@ describe('BridgeProfitabilityAnalyzer', () => {
       // Fee percentage: 20% > 10% custom threshold
       const bridgeFeeWei = ethers.parseEther('0.01');
       const expectedProfitUsd = 100;
-      const ethPriceUsd = 2000;
+      const nativeTokenPriceUsd = 2000;
 
-      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, ethPriceUsd, {
+      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, nativeTokenPriceUsd, {
         maxFeePercentage: 10,
       });
 
@@ -131,9 +131,9 @@ describe('BridgeProfitabilityAnalyzer', () => {
       // 1 ETH bridge fee
       const bridgeFeeWei = ethers.parseEther('1.0');
       const expectedProfitUsd = 5000;
-      const ethPriceUsd = 3000;
+      const nativeTokenPriceUsd = 3000;
 
-      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, ethPriceUsd);
+      const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, nativeTokenPriceUsd);
 
       expect(result.bridgeFeeEth).toBeCloseTo(1.0);
       expect(result.bridgeFeeUsd).toBeCloseTo(3000);

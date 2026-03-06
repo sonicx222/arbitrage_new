@@ -178,7 +178,7 @@ describe('FlashLoanStrategy', () => {
         estimatedGasUnits: 300000n,
         gasPriceWei: ethers.parseUnits('30', 'gwei'),
         chain: 'ethereum',
-        ethPriceUsd: 2000,
+        nativeTokenPriceUsd: 2000,
       });
 
       expect(analysis.isProfitable).toBe(true);
@@ -194,7 +194,7 @@ describe('FlashLoanStrategy', () => {
         estimatedGasUnits: 500000n, // High gas
         gasPriceWei: ethers.parseUnits('100', 'gwei'), // High gas price
         chain: 'ethereum',
-        ethPriceUsd: 2000,
+        nativeTokenPriceUsd: 2000,
       });
 
       expect(analysis.isProfitable).toBe(false);
@@ -208,7 +208,7 @@ describe('FlashLoanStrategy', () => {
         estimatedGasUnits: 300000n,
         gasPriceWei: ethers.parseUnits('30', 'gwei'),
         chain: 'ethereum',
-        ethPriceUsd: 2000,
+        nativeTokenPriceUsd: 2000,
       });
 
       // 10 ETH * 0.09% = 0.009 ETH = $18 at $2000/ETH
@@ -222,7 +222,7 @@ describe('FlashLoanStrategy', () => {
         estimatedGasUnits: 300000n,
         gasPriceWei: ethers.parseUnits('30', 'gwei'),
         chain: 'ethereum',
-        ethPriceUsd: 2000,
+        nativeTokenPriceUsd: 2000,
       });
 
       // Flash loan execution includes flash loan fee
@@ -241,7 +241,7 @@ describe('FlashLoanStrategy', () => {
         estimatedGasUnits: 300000n,
         gasPriceWei: ethers.parseUnits('30', 'gwei'),
         chain: 'ethereum',
-        ethPriceUsd: 2000,
+        nativeTokenPriceUsd: 2000,
         userCapitalWei: ethers.parseEther('1'), // Small capital - insufficient
       });
 
@@ -256,7 +256,7 @@ describe('FlashLoanStrategy', () => {
         estimatedGasUnits: 300000n,
         gasPriceWei: ethers.parseUnits('30', 'gwei'),
         chain: 'ethereum',
-        ethPriceUsd: 2000,
+        nativeTokenPriceUsd: 2000,
         userCapitalWei: ethers.parseEther('100'), // Sufficient capital
       });
 

@@ -72,7 +72,7 @@ export interface BridgeProfitabilityAnalyzerConfig {
  * Usage:
  * ```typescript
  * const analyzer = new BridgeProfitabilityAnalyzer(logger);
- * const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, ethPriceUsd, { chain: 'ethereum' });
+ * const result = analyzer.analyze(bridgeFeeWei, expectedProfitUsd, nativeTokenPriceUsd, { chain: 'ethereum' });
  * if (!result.isProfitable) {
  *   logger.warn('Bridge fees too high', { reason: result.reason });
  * }

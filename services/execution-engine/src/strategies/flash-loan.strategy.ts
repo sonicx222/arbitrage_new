@@ -646,7 +646,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         estimatedGasUnits: estimatedGas,
         gasPriceWei: gasPrice,
         chain,
-        ethPriceUsd: nativeTokenPriceUsd,
+        nativeTokenPriceUsd,
       });
 
       if (!profitAnalysis.isProfitable) {
@@ -944,7 +944,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         estimatedGasUnits: simulatedGasUnits,
         gasPriceWei: gasPrice,
         chain,
-        ethPriceUsd: nativeTokenPriceUsd,
+        nativeTokenPriceUsd,
       });
 
       if (!revalidatedProfit.isProfitable) {

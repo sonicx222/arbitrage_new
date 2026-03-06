@@ -34,7 +34,8 @@ export interface ProfitabilityParams {
   estimatedGasUnits: bigint;
   gasPriceWei: bigint;
   chain: string;
-  ethPriceUsd: number;
+  /** Price of native token in USD (e.g., ETH for Ethereum, BNB for BSC, AVAX for Avalanche) */
+  nativeTokenPriceUsd: number;
   userCapitalWei?: bigint;
 }
 
@@ -91,7 +92,7 @@ export interface FlashLoanFeeCalculatorConfig {
  *   estimatedGasUnits: 500000n,
  *   gasPriceWei: parseGwei('30'),
  *   chain: 'ethereum',
- *   ethPriceUsd: 2000,
+ *   nativeTokenPriceUsd: 2000,
  * });
  * ```
  */
@@ -157,19 +158,19 @@ export class FlashLoanFeeCalculator {
       estimatedGasUnits,
       gasPriceWei,
       chain,
-      ethPriceUsd,
+      nativeTokenPriceUsd,
       userCapitalWei,
     } = params;
 
     // Calculate flash loan fee in wei, then USD
     const flashLoanFeeWei = this.calculateFlashLoanFee(flashLoanAmountWei, chain);
     const flashLoanFeeEth = parseFloat(ethers.formatEther(flashLoanFeeWei));
-    const flashLoanFeeUsd = flashLoanFeeEth * ethPriceUsd;
+    const flashLoanFeeUsd = flashLoanFeeEth * nativeTokenPriceUsd;
 
     // Calculate gas cost in USD
     const gasCostWei = estimatedGasUnits * gasPriceWei;
     const gasCostEth = parseFloat(ethers.formatEther(gasCostWei));
-    const gasCostUsd = gasCostEth * ethPriceUsd;
+    const gasCostUsd = gasCostEth * nativeTokenPriceUsd;
 
     // Total costs for flash loan execution
     const totalCosts = flashLoanFeeUsd + gasCostUsd;

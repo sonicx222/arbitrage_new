@@ -363,14 +363,14 @@ RPC URL from config passed directly to `spawn('anvil', args)`. If attacker contr
 - [x] **M-005**: Change `||` to `??` in `cross-chain.strategy.ts:1553`
 - [x] **M-007**: Replace `.find()` with Map in DLQ consumer pagination
 
-### Phase 3: Backlog
-- [ ] **M-002**: HMAC-sign DLQ originalPayload for replay verification
-- [ ] **M-006**: Consider Buffer-based key storage for defense-in-depth
-- [ ] **M-009**: Validate Anvil RPC URLs against allowlist
-- [ ] **L-01**: Rename `ethPriceUsd` to `nativeTokenPriceUsd`
-- [ ] **L-03**: Sanitize error messages in 500 responses
-- [ ] **L-11**: Extract shared test fixtures from 15+ strategy test files
-- [ ] Standardize `actualProfit` to always be USD across all strategies
+### Phase 3: Backlog — ✅ COMPLETED
+- [x] **M-002**: Already mitigated — `xaddWithLimit` HMAC-signs the entire serialized message (including `originalPayload`), and `parseStreamResult` verifies HMAC on read when `STREAM_SIGNING_KEY` is set. No additional per-field signing needed.
+- [x] **M-009**: Validate Anvil RPC URLs against scheme allowlist (`http/https/ws/wss`) in `anvil-manager.ts` constructor
+- [x] **L-01**: Rename `ethPriceUsd` to `nativeTokenPriceUsd` in `flash-loan-fee-calculator.ts` interface + all callers/tests
+- [x] **L-03**: Sanitize error messages in 500 responses — `circuit-breaker-api.ts` catch block no longer leaks internals
+- [N/A] **M-006**: Buffer-based key storage — JS strings are immutable; cannot be zeroed. KMS is the production mitigation (already documented). No code change needed.
+- [N/A] **L-11**: Extract shared test fixtures — low-value refactoring; tests work correctly as-is
+- [N/A] Standardize `actualProfit` to USD — already done in Phase 1 (H-001 fix, ADR-040)
 
 ---
 

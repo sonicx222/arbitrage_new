@@ -155,6 +155,27 @@ const GET_RESERVES_SELECTOR = '0x0902f1ac';
 const RESERVES_RETURN_TYPES = ['uint112', 'uint112', 'uint32'];
 
 // =============================================================================
+// Validation
+// =============================================================================
+
+/** Allowed RPC URL schemes. Rejects file://, ftp://, and bare hostnames. */
+const ALLOWED_RPC_SCHEMES = /^(https?|wss?):\/\//i;
+
+/**
+ * M-009 FIX: Validate RPC URL against an allowlist of safe schemes.
+ * Prevents env-var injection pointing Anvil at a malicious or local-file RPC.
+ *
+ * @throws {Error} if the URL scheme is not http/https/ws/wss
+ */
+function validateRpcUrl(url: string): void {
+  if (!ALLOWED_RPC_SCHEMES.test(url)) {
+    throw new Error(
+      `Invalid RPC URL scheme: "${url}". Only http://, https://, ws://, and wss:// are allowed.`,
+    );
+  }
+}
+
+// =============================================================================
 // AnvilForkManager Implementation
 // =============================================================================
 

@@ -360,8 +360,9 @@ describe('Circuit Breaker API Endpoints', () => {
       const response = await makeRequest(server, 'GET', '/circuit-breaker');
 
       expect(response.statusCode).toBe(500);
-      expect(response.body.error).toContain('Internal server error');
-      expect(response.body.error).toContain('Database connection failed');
+      expect(response.body.error).toBe('Internal server error');
+      // L-03 FIX: Internal error details must NOT leak to the client
+      expect(response.body.error).not.toContain('Database connection failed');
     });
   });
 

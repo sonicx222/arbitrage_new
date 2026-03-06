@@ -102,7 +102,7 @@ describe('FlashLoanFeeCalculator', () => {
       estimatedGasUnits: 500000n,
       gasPriceWei: ethers.parseUnits('30', 'gwei'),
       chain: 'ethereum',
-      ethPriceUsd: 2000,
+      nativeTokenPriceUsd: 2000,
     };
 
     it('should return profitable analysis when profit exceeds costs', () => {
@@ -176,7 +176,7 @@ describe('FlashLoanFeeCalculator', () => {
     it('should calculate gas cost correctly', () => {
       const analysis = calculator.analyzeProfitability(baseParams);
 
-      // Gas cost = estimatedGasUnits * gasPriceWei in ETH * ethPriceUsd
+      // Gas cost = estimatedGasUnits * gasPriceWei in ETH * nativeTokenPriceUsd
       // 500000 * 30 gwei = 15,000,000 gwei = 0.015 ETH
       // 0.015 ETH * $2000 = $30
       expect(analysis.gasCostUsd).toBeCloseTo(30, 0);
