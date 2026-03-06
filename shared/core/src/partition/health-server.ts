@@ -458,7 +458,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
 /**
  * Default timeout for shutdown operations in milliseconds.
  *
- * SA-008 FIX: Must exceed Redis connectTimeout (5000ms) so the Redis client
+ * SA-008 FIX: Must exceed Redis connectTimeout (3000ms) so the Redis client
  * has time to complete its connection attempt before shutdown forcibly exits.
  * Previously matched connectTimeout exactly — a race condition under reconnect.
  */

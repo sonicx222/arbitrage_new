@@ -105,8 +105,9 @@ describe('WhaleAnalyzer', () => {
       await analyzer.analyzeWhaleImpact(superWhaleTx);
 
       expect(deps.logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Super whale'),
+        'Whale activity detected, triggering immediate opportunity scan',
         expect.objectContaining({
+          triggerType: 'Super whale',
           token: 'WETH/USDC',
           chain: 'ethereum',
           usdValue: 600000,
@@ -138,19 +139,20 @@ describe('WhaleAnalyzer', () => {
 
       await analyzer.analyzeWhaleImpact(regularWhaleTx);
 
-      // Should NOT say "Super whale"
+      // Should log with triggerType "Significant whale activity" (not "Super whale")
       expect(deps.logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Significant whale activity'),
+        'Whale activity detected, triggering immediate opportunity scan',
         expect.objectContaining({
+          triggerType: 'Significant whale activity',
           usdValue: 50000,
           isSuperWhale: false,
         }),
       );
 
-      // Should NOT say "Super whale" in the log
+      // Should NOT have triggerType "Super whale" in the log data
       expect(deps.logger.info).not.toHaveBeenCalledWith(
-        expect.stringContaining('Super whale'),
         expect.anything(),
+        expect.objectContaining({ triggerType: 'Super whale' }),
       );
     });
 

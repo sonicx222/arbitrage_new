@@ -1,0 +1,21 @@
+{
+  "sessionId": "20260305_220843",
+  "sha": "7265a96a",
+  "timestamp": "2026-03-05T22:15:00.000Z",
+  "verdict": "GO",
+  "counts": {
+    "CRITICAL": 0,
+    "HIGH": 0,
+    "MEDIUM": 5,
+    "LOW": 2,
+    "INFO": 42
+  },
+  "total": 49,
+  "servicesHealthy": 7,
+  "pipelineLatencyP95": 3,
+  "execSuccessRate": 84.90,
+  "dlqEntries": 0,
+  "backpressureActive": true,
+  "riskState": "NORMAL",
+  "redisMemoryPct": 12.1
+}

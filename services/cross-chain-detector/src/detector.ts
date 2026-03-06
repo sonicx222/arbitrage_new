@@ -601,7 +601,7 @@ export class CrossChainDetectorService {
     this.priceDataManager = createPriceDataManager({
       logger: this.logger,
       cleanupFrequency: 100,
-      maxPriceAgeMs: 5 * 60 * 1000, // 5 minutes
+      maxPriceAgeMs: 5 * 60 * 1000, // 5 min — storage cleanup, NOT detection (ADR-033 Layer 3; detection uses 30s at line ~1486)
     });
 
     // Create OpportunityPublisher
