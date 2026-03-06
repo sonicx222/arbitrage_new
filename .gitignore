@@ -186,3 +186,8 @@ data/trades/*.jsonl
 
 # Auto-generated files
 services/execution-engine/src/strategies/error-selectors.generated.ts
+
+# Dashboard build output
+services/coordinator/public/
+dashboard/dist/
+dashboard/node_modules/

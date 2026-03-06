@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-surface text-gray-100 font-mono text-sm;
+}
+
+@layer components {
+  .card {
+    @apply bg-surface-light rounded-lg p-4 border border-gray-800;
+  }
+  .status-healthy { @apply text-accent-green; }
+  .status-degraded { @apply text-accent-yellow; }
+  .status-unhealthy { @apply text-accent-red; }
+}
