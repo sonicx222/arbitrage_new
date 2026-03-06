@@ -34,6 +34,8 @@ export interface DeferredItem {
 // Registry
 // =============================================================================
 
+// NOTE: IDs are non-sequential. D6 and D8 were resolved and removed during config refactoring.
+// ID numbering is stable (not renumbered after removal) to preserve git-history references.
 export const DEFERRED_ITEMS: readonly DeferredItem[] = [
   {
     id: 'D1-BALANCER-V2-MULTI-CHAIN',

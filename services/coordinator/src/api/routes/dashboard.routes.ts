@@ -1,71 +1,48 @@
 /**
  * Dashboard Routes
  *
- * HTML dashboard for visual system monitoring.
+ * Serves the React SPA dashboard when built assets exist in public/,
+ * falls back to a minimal server-rendered HTML dashboard otherwise.
  *
- * C4 FIX: DASHBOARD_AUTH_TOKEN is required in production. Without it, the dashboard
- * exposes instance ID, service topology, trading metrics, and profit data to anyone
- * who can reach the port (e.g., container deployments with port forwarding).
+ * C4 FIX: DASHBOARD_AUTH_TOKEN is required in production.
  *
+ * @see docs/plans/2026-03-06-react-dashboard-design.md
  * @see coordinator.ts (parent service)
  * @throws Error if NODE_ENV=production and DASHBOARD_AUTH_TOKEN is not set
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
- * Escape HTML special characters to prevent XSS.
- * Defense-in-depth for values interpolated into HTML.
- */
-function escapeHtml(str: string): string {
-  const htmlEscapes: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  };
-  return str.replace(/[&<>"']/g, char => htmlEscapes[char]);
-}
-
-// FIX: Cache interface moved inside factory for instance-scoping
-interface DashboardCache {
-  html: string;
-  timestamp: number;
-}
-
-const CACHE_TTL_MS = 1000; // 1 second cache - dashboard auto-refreshes every 10s anyway
-
-/**
  * Create dashboard router.
- * FIX: Cache is now instance-scoped (per router) instead of module-level.
- * This prevents cache sharing between tests or multiple coordinator instances.
+ *
+ * Serves React SPA from public/ when available, otherwise falls back
+ * to a minimal HTML dashboard for dev without frontend build.
  *
  * @param state - Coordinator state provider
  * @returns Express router with dashboard endpoint
  */
 export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
   // C4 FIX: Require DASHBOARD_AUTH_TOKEN in production.
-  // Dashboard exposes instance ID, service topology, trading metrics, and profit data.
-  // Without auth, container deployments with port forwarding would expose sensitive data.
   if (process.env.NODE_ENV === 'production' && !process.env.DASHBOARD_AUTH_TOKEN) {
     throw new Error(
-      'DASHBOARD_AUTH_TOKEN is required in production. ' +
-      'Without it, the dashboard endpoint exposes instance ID, service topology, ' +
-      'trading metrics, and profit data without authentication. ' +
-      'Set DASHBOARD_AUTH_TOKEN environment variable to enable dashboard authentication.'
+      'DASHBOARD_AUTH_TOKEN is required in production. '
+      + 'Set DASHBOARD_AUTH_TOKEN environment variable to enable dashboard authentication.'
     );
   }
 
   const router = Router();
-
-  // Auth: if DASHBOARD_AUTH_TOKEN is set, require Bearer token
   const dashboardAuthToken = process.env.DASHBOARD_AUTH_TOKEN;
+
+  // Auth middleware: if DASHBOARD_AUTH_TOKEN is set, require Bearer token
   if (dashboardAuthToken) {
-    router.use((_req: Request, res: Response, next: NextFunction) => {
-      const authHeader = _req.headers.authorization;
+    router.use((req: Request, res: Response, next: NextFunction) => {
+      const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
         res.status(401).send('Unauthorized');
         return;
@@ -80,106 +57,32 @@ export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
     });
   }
 
-  // FIX: Instance-scoped cache (was module-level, could cause issues in tests)
-  let dashboardCache: DashboardCache | null = null;
+  // Try to serve React SPA from built assets
+  // At runtime, __dirname is dist/api/routes/ — go up 3 levels to coordinator/, then into public/
+  const publicDir = path.join(__dirname, '..', '..', '..', 'public');
+  const indexPath = path.join(publicDir, 'index.html');
 
-  /**
-   * GET /
-   * Returns HTML dashboard with system status.
-   * FIX: Added caching to reduce CPU usage for high-frequency polling.
-   */
-  router.get('/', (_req: Request, res: Response) => {
-    const now = Date.now();
+  if (fs.existsSync(indexPath)) {
+    // Serve static assets (JS, CSS, images)
+    router.use(express.static(publicDir));
 
-    // Return cached HTML if still fresh
-    if (dashboardCache && (now - dashboardCache.timestamp) < CACHE_TTL_MS) {
-      res.send(dashboardCache.html);
-      return;
-    }
-    const isLeader = state.getIsLeader();
-    const metrics = state.getSystemMetrics();
-    const serviceHealth = state.getServiceHealthMap();
-    const instanceId = state.getInstanceId();
-
-    const leaderBadge = isLeader
-      ? '<span style="background:green;color:white;padding:2px 8px;border-radius:3px;">LEADER</span>'
-      : '<span style="background:orange;color:white;padding:2px 8px;border-radius:3px;">STANDBY</span>';
-
-    // Build HTML string
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Arbitrage System Dashboard</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
-          .metric { background: #16213e; padding: 15px; margin: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-          .healthy { color: #00ff88; }
-          .unhealthy { color: #ff4444; }
-          .degraded { color: #ffaa00; }
-          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-          h1 { color: #00ff88; }
-          h3 { color: #4da6ff; margin-bottom: 10px; }
-          .leader-status { margin-bottom: 20px; }
-        </style>
-      </head>
-      <body>
-        <h1>🏦 Professional Arbitrage System Dashboard</h1>
-        <div class="leader-status">Status: ${leaderBadge}</div>
-
-        <div class="grid">
-          <div class="metric">
-            <h3>System Health</h3>
-            <div class="${metrics.systemHealth > 80 ? 'healthy' : metrics.systemHealth > 50 ? 'degraded' : 'unhealthy'}">
-              ${metrics.systemHealth.toFixed(1)}%
-            </div>
-            <small>${metrics.activeServices} services active</small>
-          </div>
-
-          <div class="metric">
-            <h3>Opportunities</h3>
-            <div>Detected: ${metrics.totalOpportunities}</div>
-            <div>Pending: ${metrics.pendingOpportunities}</div>
-            <div>Whale Alerts: ${metrics.whaleAlerts}</div>
-          </div>
-
-          <div class="metric">
-            <h3>Trading Performance</h3>
-            <div>Executions: ${metrics.totalExecutions}</div>
-            <div>Success Rate: ${metrics.totalExecutions > 0 ?
-              ((metrics.successfulExecutions / metrics.totalExecutions) * 100).toFixed(1) : 0}%</div>
-            <div>Total Profit: $${metrics.totalProfit.toFixed(2)}</div>
-          </div>
-
-          <div class="metric">
-            <h3>Service Status</h3>
-            ${Array.from(serviceHealth.entries()).map(([name, health]) =>
-              `<div class="${health.status === 'healthy' ? 'healthy' : health.status === 'degraded' ? 'degraded' : 'unhealthy'}">
-                ${escapeHtml(name)}: ${escapeHtml(health.status)}
-              </div>`
-            ).join('') || '<div>No services reporting</div>'}
-          </div>
-        </div>
-
-        <div class="metric">
-          <h3>System Information</h3>
-          <div>Instance: ${escapeHtml(instanceId)}</div>
-          <div>Last Update: ${new Date(metrics.lastUpdate).toLocaleString()}</div>
-          <div>Uptime: ${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m</div>
-        </div>
-
-        <script>
-          // Auto-refresh every 10 seconds
-          setTimeout(() => window.location.reload(), 10000);
-        </script>
-      </body>
-      </html>
-    `;
-
-    // FIX: Cache the HTML for subsequent requests
-    dashboardCache = { html, timestamp: now };
-    res.send(html);
-  });
+    // SPA fallback: serve index.html for all non-asset routes
+    router.get('*', (_req: Request, res: Response) => {
+      res.sendFile(indexPath);
+    });
+  } else {
+    // Fallback: minimal legacy HTML dashboard (dev without frontend build)
+    router.get('/', (_req: Request, res: Response) => {
+      const metrics = state.getSystemMetrics();
+      const serviceHealth = state.getServiceHealthMap();
+      res.send(`<!DOCTYPE html><html><head><title>Arbitrage Dashboard</title>
+        <style>body{font-family:monospace;background:#1a1a2e;color:#eee;padding:20px}</style></head>
+        <body><h2>Arbitrage System (legacy view)</h2>
+        <p>Health: ${metrics.systemHealth.toFixed(1)}% | Services: ${serviceHealth.size} | Executions: ${metrics.totalExecutions}</p>
+        <p><small>Build the React dashboard: <code>cd dashboard && npm run build</code></small></p>
+        <script>setTimeout(()=>location.reload(),10000)</script></body></html>`);
+    });
+  }
 
   return router;
 }

@@ -8,7 +8,7 @@
 
 import { COMMIT_REVEAL_CONTRACTS, hasCommitRevealContract } from './addresses';
 import { MULTI_PATH_QUOTER_ADDRESSES, hasMultiPathQuoter, isProduction } from './service-config';
-import { safeParseFloat, safeParseInt } from './utils/env-parsing';
+import { safeParseFloat, safeParseFloatBounded, safeParseInt } from './utils/env-parsing';
 
 // =============================================================================
 // FEATURE FLAGS (Task 1.2: Batched Quoting)
@@ -377,10 +377,11 @@ export const FLASH_LOAN_AGGREGATOR_CONFIG = {
    * Controls how providers are ranked
    */
   weights: {
-    fees: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_FEES, 0.5),
-    liquidity: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY, 0.3),
-    reliability: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY, 0.15),
-    latency: safeParseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY, 0.05),
+    // Clamped [0, 1] — negative weights would invert provider rankings without tripping sum validation
+    fees: safeParseFloatBounded(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_FEES, 0.5, 0, 1, 'FLASH_LOAN_AGGREGATOR_WEIGHT_FEES'),
+    liquidity: safeParseFloatBounded(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY, 0.3, 0, 1, 'FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY'),
+    reliability: safeParseFloatBounded(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY, 0.15, 0, 1, 'FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY'),
+    latency: safeParseFloatBounded(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY, 0.05, 0, 1, 'FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY'),
   },
 
   /**

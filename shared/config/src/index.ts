@@ -6,7 +6,7 @@
  *
  * - chains/: Blockchain configurations (15 chains)
  * - dexes/chains/: Per-chain DEX configurations (78 DEXes across 15 chains)
- * - tokens/: Token configurations (128 tokens)
+ * - tokens/: Token configurations (173 tokens)
  * - flash-loan-providers/: Per-protocol flash loan descriptors (7 protocols)
  * - thresholds.ts: Performance and arbitrage thresholds
  * - mev-config.ts: MEV protection settings
@@ -579,4 +579,4 @@ export {
 // =============================================================================
 // ENVIRONMENT VARIABLE PARSING UTILITIES
 // =============================================================================
-export { safeParseInt, safeParseFloat } from './utils/env-parsing';
+export { safeParseInt, safeParseFloat, safeParseFloatBounded, safeParseIntBounded, safeParseBigInt } from './utils/env-parsing';

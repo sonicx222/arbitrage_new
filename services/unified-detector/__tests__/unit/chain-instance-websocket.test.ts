@@ -181,7 +181,7 @@ jest.mock('@arbitrage/config', () => ({
   },
   ARBITRAGE_CONFIG: {
     minProfitPercentage: 0.003,
-    slippageTolerance: 0.10,
+    slippageTolerance: 0.01,
   },
   getEnabledDexes: jest.fn().mockReturnValue([
     {

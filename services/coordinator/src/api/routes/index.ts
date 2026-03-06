@@ -13,12 +13,14 @@ import { createHealthRoutes } from './health.routes';
 import { createMetricsRoutes } from './metrics.routes';
 import { createDashboardRoutes } from './dashboard.routes';
 import { createAdminRoutes } from './admin.routes';
+import { createSSERoutes } from './sse.routes';
 
 // Re-export individual route factories
 export { createHealthRoutes } from './health.routes';
 export { createMetricsRoutes } from './metrics.routes';
 export { createDashboardRoutes } from './dashboard.routes';
 export { createAdminRoutes } from './admin.routes';
+export { createSSERoutes } from './sse.routes';
 
 /**
  * Setup all routes on an Express application.
@@ -27,13 +29,11 @@ export { createAdminRoutes } from './admin.routes';
  * @param state - Coordinator state provider
  */
 export function setupAllRoutes(app: Application, state: CoordinatorStateProvider): void {
-  // Dashboard - root path (public)
-  app.use('/', createDashboardRoutes(state));
-
-  // API routes
+  // API routes (must be registered BEFORE dashboard SPA catch-all)
   app.use('/api', createHealthRoutes(state));
   app.use('/api', createMetricsRoutes(state));
   app.use('/api', createAdminRoutes(state));
+  app.use('/api', createSSERoutes(state));
 
   // RT-009 FIX: Mount health routes at root for uniform monitoring.
   // Partitions expose /health, /health/live, /health/ready directly.
@@ -97,4 +97,7 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
       instanceId: state.getInstanceId(),
     });
   });
+
+  // Dashboard SPA - MUST be last (catch-all `*` would intercept API routes if mounted earlier)
+  app.use('/', createDashboardRoutes(state));
 }

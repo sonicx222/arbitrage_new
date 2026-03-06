@@ -517,6 +517,10 @@ const ALL_CHAINS: Record<string, Record<string, unknown>> = {
   ethereum: { id: 1, name: 'Ethereum', blockTime: 12 },
   zksync: { id: 324, name: 'zkSync Era', blockTime: 1 },
   linea: { id: 59144, name: 'Linea', blockTime: 2 },
+  blast: { id: 81457, name: 'Blast' },
+  scroll: { id: 534352, name: 'Scroll' },
+  mantle: { id: 5000, name: 'Mantle' },
+  mode: { id: 34443, name: 'Mode' },
   solana: { id: 0, name: 'Solana' },
 };
 
@@ -533,7 +537,7 @@ export function createConfigMocks(options: PartitionConfigOptions = {}) {
     name: options.name ?? 'Asia Fast Chains',
     chains: options.chains ?? ['bsc', 'polygon', 'avalanche', 'fantom'],
     region: options.region ?? 'asia-southeast1',
-    provider: options.provider ?? 'oracle',
+    provider: options.provider ?? 'fly',
     resourceProfile: options.resourceProfile ?? 'heavy',
     priority: options.priority ?? 1,
     maxMemoryMB: options.maxMemoryMB ?? 768,

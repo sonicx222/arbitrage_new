@@ -62,12 +62,17 @@ const PARTITION_TO_GROUP: Record<string, ExecutionChainGroup> = {
 
 /** Pre-computed chain → execution group (O(1) lookup, built at module load) */
 const CHAIN_TO_GROUP = new Map<string, ExecutionChainGroup>();
+/** Pre-computed group → chain list (O(1) lookup, built at module load) */
+const GROUP_TO_CHAINS = new Map<ExecutionChainGroup, string[]>();
 for (const partition of PARTITIONS) {
   const group = PARTITION_TO_GROUP[partition.partitionId];
   if (group) {
+    const chains: string[] = [];
     for (const chainId of partition.chains) {
       CHAIN_TO_GROUP.set(chainId, group);
+      chains.push(chainId);
     }
+    GROUP_TO_CHAINS.set(group, chains);
   }
 }
 
@@ -99,12 +104,12 @@ export function getStreamForChain(chainId: string): string {
 /**
  * Returns the chain IDs assigned to a given execution group.
  * Returns a copy of the array to prevent mutation.
+ *
+ * O(1) — uses pre-computed Map built at module load.
  */
 export function getChainsForExecutionGroup(group: ExecutionChainGroup): string[] {
-  const partitionId = Object.entries(PARTITION_TO_GROUP).find(([, g]) => g === group)?.[0];
-  if (!partitionId) return [];
-  const partition = PARTITIONS.find(p => p.partitionId === partitionId);
-  return partition ? [...partition.chains] : [];
+  const chains = GROUP_TO_CHAINS.get(group);
+  return chains ? [...chains] : [];
 }
 
 /**
