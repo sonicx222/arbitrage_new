@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { SSEProvider, useSSEData } from './context/SSEContext';
+import { OverviewTab } from './tabs/OverviewTab';
 import type { Tab } from './lib/types';
 
 const TABS: Tab[] = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'];
@@ -41,9 +42,10 @@ function Dashboard() {
         </nav>
       </header>
       <main className="flex-1 p-4 overflow-auto">
-        <div className="text-gray-400 text-xs">
-          {tab} tab — content coming in next tasks
-        </div>
+        {tab === 'Overview' && <OverviewTab />}
+        {tab !== 'Overview' && (
+          <div className="text-gray-500 text-xs">{tab} — coming soon</div>
+        )}
       </main>
     </div>
   );
