@@ -21,7 +21,8 @@ import {
   SimulatedPairConfig,
 } from '@arbitrage/core/simulation';
 
-import { ArbitrageOpportunity, PriceUpdate } from '@arbitrage/types';
+import { ArbitrageOpportunity, PriceUpdate, SwapEvent } from '@arbitrage/types';
+import type { WhaleAlert } from '@arbitrage/core/analytics';
 import type { Logger } from '../types';
 
 // =============================================================================
@@ -55,6 +56,18 @@ export interface SimulationCallbacks {
    * If not provided, sync events will only trigger block/event callbacks.
    */
   onSyncEvent?: (event: { address: string; reserve0: string; reserve1: string; blockNumber: number }) => void;
+  /**
+   * Phase 2 (Whale/Swap Events): Callback for simulated swap events.
+   * Published to stream:swap-events via WhaleAlertPublisher.
+   * Emitted by ChainSimulator when SIMULATION_WHALE_RATE support is active (Phase 1).
+   */
+  onSwapEvent?: (event: SwapEvent) => void;
+  /**
+   * Phase 2 (Whale/Swap Events): Callback for simulated whale alerts.
+   * Published to stream:whale-alerts and fed to WhaleActivityTracker.
+   * Emitted by ChainSimulator for swaps exceeding whale threshold (Phase 1).
+   */
+  onWhaleAlert?: (alert: WhaleAlert) => void;
 }
 
 export interface PairForSimulation {
@@ -151,6 +164,22 @@ export class ChainSimulationHandler {
       if (this.isStopping || !this.isRunning) return;
       callbacks.onOpportunity(opportunity);
     });
+
+    // Phase 2: Forward swap events from ChainSimulator to callbacks (Phase 1 adds emission)
+    if (callbacks.onSwapEvent) {
+      this.chainSimulator.on('swapEvent', (event: SwapEvent) => {
+        if (this.isStopping || !this.isRunning) return;
+        callbacks.onSwapEvent!(event);
+      });
+    }
+
+    // Phase 2: Forward whale alerts from ChainSimulator to callbacks (Phase 1 adds emission)
+    if (callbacks.onWhaleAlert) {
+      this.chainSimulator.on('whaleAlert', (alert: WhaleAlert) => {
+        if (this.isStopping || !this.isRunning) return;
+        callbacks.onWhaleAlert!(alert);
+      });
+    }
 
     // Start the simulator
     this.chainSimulator.start();

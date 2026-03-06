@@ -65,6 +65,8 @@ const createMockCallbacks = (): SimulationCallbacks & { mocks: Record<string, je
   const onBlockUpdate = jest.fn();
   const onEventProcessed = jest.fn();
   const onSyncEvent = jest.fn();
+  const onSwapEvent = jest.fn();
+  const onWhaleAlert = jest.fn();
 
   return {
     onPriceUpdate,
@@ -72,12 +74,16 @@ const createMockCallbacks = (): SimulationCallbacks & { mocks: Record<string, je
     onBlockUpdate,
     onEventProcessed,
     onSyncEvent,
+    onSwapEvent,
+    onWhaleAlert,
     mocks: {
       onPriceUpdate,
       onOpportunity,
       onBlockUpdate,
       onEventProcessed,
       onSyncEvent,
+      onSwapEvent,
+      onWhaleAlert,
     }
   };
 };
@@ -272,6 +278,96 @@ describe('ChainSimulationHandler', () => {
       getMockChainSimulator().emit('blockUpdate', { blockNumber: 12345678 });
 
       expect(callbacks.mocks.onBlockUpdate).not.toHaveBeenCalled();
+    });
+
+    // Phase 2: Swap event and whale alert forwarding
+
+    it('should forward swapEvent from ChainSimulator to onSwapEvent callback', async () => {
+      const pairs = createSamplePairs();
+      const callbacks = createMockCallbacks();
+
+      await handler.initializeEvmSimulation(pairs, callbacks);
+
+      const mockSwapEvent = {
+        pairAddress: '0x1234',
+        sender: '0xsender',
+        recipient: '0xrecipient',
+        amount0In: '1000000000000000000',
+        amount1In: '0',
+        amount0Out: '0',
+        amount1Out: '3000000000',
+        to: '0xrecipient',
+        blockNumber: 12345678,
+        transactionHash: '0xhash',
+        timestamp: Date.now(),
+        dex: 'uniswap',
+        chain: 'ethereum',
+      };
+
+      getMockChainSimulator().emit('swapEvent', mockSwapEvent);
+
+      expect(callbacks.mocks.onSwapEvent).toHaveBeenCalledWith(mockSwapEvent);
+    });
+
+    it('should forward whaleAlert from ChainSimulator to onWhaleAlert callback', async () => {
+      const pairs = createSamplePairs();
+      const callbacks = createMockCallbacks();
+
+      await handler.initializeEvmSimulation(pairs, callbacks);
+
+      const mockWhaleAlert = {
+        event: {
+          pairAddress: '0x1234',
+          sender: '0xwhale',
+          recipient: '0xrecipient',
+          amount0In: '50000000000000000000',
+          amount1In: '0',
+          amount0Out: '0',
+          amount1Out: '150000000000',
+          to: '0xrecipient',
+          blockNumber: 12345678,
+          transactionHash: '0xhash',
+          timestamp: Date.now(),
+          dex: 'uniswap',
+          chain: 'ethereum',
+        },
+        usdValue: 150000,
+        timestamp: Date.now(),
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairAddress: '0x1234',
+      };
+
+      getMockChainSimulator().emit('whaleAlert', mockWhaleAlert);
+
+      expect(callbacks.mocks.onWhaleAlert).toHaveBeenCalledWith(mockWhaleAlert);
+    });
+
+    it('should not forward swapEvent when callback not provided', async () => {
+      const pairs = createSamplePairs();
+      const callbacks = createMockCallbacks();
+      delete (callbacks as Partial<SimulationCallbacks>).onSwapEvent;
+
+      await handler.initializeEvmSimulation(pairs, callbacks);
+
+      // Emitting swapEvent should not throw when callback is undefined
+      expect(() => {
+        getMockChainSimulator().emit('swapEvent', { pairAddress: '0x1234' });
+      }).not.toThrow();
+    });
+
+    it('should not forward swapEvent or whaleAlert when stopping', async () => {
+      const pairs = createSamplePairs();
+      const callbacks = createMockCallbacks();
+
+      await handler.initializeEvmSimulation(pairs, callbacks);
+      await handler.stop();
+
+      getMockChainSimulator().emit('swapEvent', { pairAddress: '0x1234' });
+      getMockChainSimulator().emit('whaleAlert', { usdValue: 100000 });
+
+      expect(callbacks.mocks.onSwapEvent).not.toHaveBeenCalled();
+      expect(callbacks.mocks.onWhaleAlert).not.toHaveBeenCalled();
     });
   });
 

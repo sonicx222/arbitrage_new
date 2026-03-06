@@ -20,8 +20,14 @@ jest.mock('@arbitrage/core/async', () => ({
   stopAndNullify: mockStopAndNullify,
 }));
 
+const mockRecordTransaction = jest.fn();
+const mockGetWhaleActivityTracker = jest.fn().mockReturnValue({
+  recordTransaction: mockRecordTransaction,
+  getStats: jest.fn().mockReturnValue({ totalTransactionsTracked: 0 }),
+});
 jest.mock('@arbitrage/core/analytics', () => ({
   PairActivityTracker: jest.fn(),
+  getWhaleActivityTracker: mockGetWhaleActivityTracker,
 }));
 
 const mockInitializeEvmSimulation = jest.fn().mockResolvedValue(undefined);
@@ -131,6 +137,10 @@ beforeEach(() => {
     initializeNonEvmSimulation: mockInitializeNonEvmSimulation,
     stop: mockStop,
   }));
+  mockGetWhaleActivityTracker.mockReturnValue({
+    recordTransaction: mockRecordTransaction,
+    getStats: jest.fn().mockReturnValue({ totalTransactionsTracked: 0 }),
+  });
 });
 
 afterEach(() => {
@@ -625,6 +635,215 @@ describe('SimulationInitializer', () => {
       await initializer.initializeEvmSimulation();
 
       expect(initializer.getSimulationHandler()).not.toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 2: Whale/Swap event callbacks
+  // ---------------------------------------------------------------------------
+
+  describe('whale/swap event callbacks (Phase 2)', () => {
+    const mockPublishSwapEvent = jest.fn().mockResolvedValue(undefined);
+    const mockPublishWhaleAlert = jest.fn().mockResolvedValue(undefined);
+
+    const createMockPublisher = () => ({
+      publishSwapEvent: mockPublishSwapEvent,
+      publishWhaleAlert: mockPublishWhaleAlert,
+      estimateUsdValue: jest.fn().mockReturnValue(100000),
+      estimateSwapUsdValue: jest.fn().mockReturnValue(100000),
+    });
+
+    beforeEach(() => {
+      mockPublishSwapEvent.mockClear();
+      mockPublishWhaleAlert.mockClear();
+      mockRecordTransaction.mockClear();
+    });
+
+    it('should include onSwapEvent callback when publisher is provided', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({
+        pairs,
+        whaleAlertPublisher: createMockPublisher() as any,
+      });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      expect(callbacks.onSwapEvent).toBeDefined();
+      expect(typeof callbacks.onSwapEvent).toBe('function');
+    });
+
+    it('should include onWhaleAlert callback when publisher is provided', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({
+        pairs,
+        whaleAlertPublisher: createMockPublisher() as any,
+      });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      expect(callbacks.onWhaleAlert).toBeDefined();
+      expect(typeof callbacks.onWhaleAlert).toBe('function');
+    });
+
+    it('should NOT include onSwapEvent/onWhaleAlert when publisher is null', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({ pairs, whaleAlertPublisher: null });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      expect(callbacks.onSwapEvent).toBeUndefined();
+      expect(callbacks.onWhaleAlert).toBeUndefined();
+    });
+
+    it('should NOT include onSwapEvent/onWhaleAlert when publisher is not provided', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({ pairs });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      expect(callbacks.onSwapEvent).toBeUndefined();
+      expect(callbacks.onWhaleAlert).toBeUndefined();
+    });
+
+    it('onSwapEvent should call publishSwapEvent on publisher', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({
+        pairs,
+        whaleAlertPublisher: createMockPublisher() as any,
+      });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      const mockSwapEvent = {
+        pairAddress: '0x1234',
+        sender: '0xsender',
+        recipient: '0xrecipient',
+        amount0In: '1000',
+        amount1In: '0',
+        amount0Out: '0',
+        amount1Out: '3000',
+        to: '0xrecipient',
+        blockNumber: 100,
+        transactionHash: '0xhash',
+        timestamp: Date.now(),
+        dex: 'uniswap',
+        chain: 'ethereum',
+      };
+
+      callbacks.onSwapEvent(mockSwapEvent);
+
+      expect(mockPublishSwapEvent).toHaveBeenCalledWith(mockSwapEvent);
+    });
+
+    it('onWhaleAlert should publish whale alert and record transaction in tracker', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({
+        pairs,
+        whaleAlertPublisher: createMockPublisher() as any,
+      });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      const mockAlert = {
+        event: {
+          pairAddress: '0x1234',
+          sender: '0xwhale',
+          recipient: '0xrecipient',
+          amount0In: '50000000000000000000',
+          amount1In: '0',
+          amount0Out: '0',
+          amount1Out: '150000000000',
+          to: '0xrecipient',
+          blockNumber: 100,
+          transactionHash: '0xhash',
+          timestamp: Date.now(),
+          dex: 'uniswap',
+          chain: 'ethereum',
+        },
+        usdValue: 150000,
+        timestamp: Date.now(),
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairAddress: '0x1234',
+      };
+
+      callbacks.onWhaleAlert(mockAlert);
+
+      // Should publish to Redis stream
+      expect(mockPublishWhaleAlert).toHaveBeenCalledWith(mockAlert);
+
+      // Should feed to WhaleActivityTracker (usdValue >= 50K threshold)
+      expect(mockRecordTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          walletAddress: '0xwhale',
+          chain: 'ethereum',
+          dex: 'uniswap',
+          usdValue: 150000,
+          direction: 'sell', // amount0In > 0 = sell
+        })
+      );
+    });
+
+    it('onWhaleAlert should not record transaction below whale threshold', async () => {
+      const pair = createMockPair();
+      const pairs = new Map([['sushiswap_WETH_USDC', pair]]);
+      const deps = createMockDeps({
+        pairs,
+        whaleAlertPublisher: createMockPublisher() as any,
+      });
+      const initializer = new SimulationInitializer(deps);
+
+      await initializer.initializeEvmSimulation();
+
+      const callbacks = mockInitializeEvmSimulation.mock.calls[0][1];
+      const mockAlert = {
+        event: {
+          pairAddress: '0x1234',
+          sender: '0xsmallfish',
+          recipient: '0xrecipient',
+          amount0In: '0',
+          amount1In: '100',
+          amount0Out: '50',
+          amount1Out: '0',
+          to: '0xrecipient',
+          blockNumber: 100,
+          transactionHash: '0xhash',
+          timestamp: Date.now(),
+          dex: 'uniswap',
+          chain: 'ethereum',
+        },
+        usdValue: 1000, // Below $50K threshold
+        timestamp: Date.now(),
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairAddress: '0x1234',
+      };
+
+      callbacks.onWhaleAlert(mockAlert);
+
+      // Should still publish (alert already qualified by ChainSimulator)
+      expect(mockPublishWhaleAlert).toHaveBeenCalledWith(mockAlert);
+
+      // Should NOT record in tracker (below threshold)
+      expect(mockRecordTransaction).not.toHaveBeenCalled();
     });
   });
 });

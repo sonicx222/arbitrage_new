@@ -20,12 +20,15 @@
  */
 
 import { PairActivityTracker } from '@arbitrage/core/analytics';
+import { getWhaleActivityTracker } from '@arbitrage/core/analytics';
+import type { TrackedWhaleTransaction } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
 
 import type {
   Dex,
   Token,
   PriceUpdate,
+  SwapEvent,
   ArbitrageOpportunity,
 } from '@arbitrage/types';
 
@@ -34,6 +37,7 @@ import {
   PairForSimulation,
   SimulationCallbacks,
 } from './simulation';
+import type { WhaleAlertPublisher } from './publishers/whale-alert.publisher';
 import type { SnapshotManager } from './detection';
 import type { ExtendedPair, Logger } from './types';
 import {
@@ -47,6 +51,10 @@ import {
   DEFAULT_SIMULATION_VOLATILITY,
   MIN_SIMULATION_VOLATILITY,
   MAX_SIMULATION_VOLATILITY,
+  DEFAULT_SIMULATION_WHALE_RATE,
+  MIN_SIMULATION_WHALE_RATE,
+  MAX_SIMULATION_WHALE_RATE,
+  DEFAULT_WHALE_THRESHOLD_USD,
 } from './constants';
 
 /**
@@ -78,6 +86,12 @@ export interface SimulationInitializerDeps {
   onOpportunityFound: () => void;
   onEventProcessed: () => void;
   onBlockUpdate: (blockNumber: number) => void;
+
+  /**
+   * Phase 2 (Whale/Swap Events): Optional publisher for swap events and whale alerts.
+   * When provided, simulation callbacks will publish to Redis streams.
+   */
+  whaleAlertPublisher?: WhaleAlertPublisher | null;
 }
 
 /**
@@ -235,8 +249,11 @@ export class SimulationInitializer {
    */
   private createSimulationCallbacks(): SimulationCallbacks {
     const deps = this.deps;
+    const publisher = deps.whaleAlertPublisher;
+    const whaleTracker = getWhaleActivityTracker();
+    const whaleThresholdUsd = DEFAULT_WHALE_THRESHOLD_USD;
 
-    return {
+    const callbacks: SimulationCallbacks = {
       onPriceUpdate: (update: PriceUpdate) => {
         deps.emit('priceUpdate', update);
       },
@@ -261,8 +278,54 @@ export class SimulationInitializer {
       // EVM simulation: Handle sync events through pair state management
       onSyncEvent: (event) => {
         this.handleSimulatedSyncEvent(event);
-      }
+      },
     };
+
+    // Phase 2 (Whale/Swap Events): Wire swap event publishing when publisher is available
+    if (publisher) {
+      callbacks.onSwapEvent = (event: SwapEvent) => {
+        publisher.publishSwapEvent(event);
+        deps.logger.debug('Simulated swap event published', {
+          pairAddress: event.pairAddress,
+          dex: event.dex,
+          chain: event.chain,
+        });
+      };
+
+      callbacks.onWhaleAlert = (alert) => {
+        // Publish to stream:whale-alerts
+        publisher.publishWhaleAlert(alert);
+
+        // Feed to WhaleActivityTracker for pattern analysis
+        const trackedTx: TrackedWhaleTransaction = {
+          transactionHash: alert.event.transactionHash ?? `sim-${Date.now()}`,
+          walletAddress: alert.event.sender ?? 'unknown',
+          chain: alert.chain,
+          dex: alert.dex,
+          pairAddress: alert.pairAddress,
+          tokenIn: alert.event.amount0In !== '0' ? alert.pairAddress : alert.event.to,
+          tokenOut: alert.event.amount0Out !== '0' ? alert.pairAddress : alert.event.to,
+          amountIn: 0,
+          amountOut: 0,
+          usdValue: alert.usdValue,
+          direction: BigInt(alert.event.amount0In ?? '0') > 0n ? 'sell' : 'buy',
+          timestamp: alert.timestamp,
+          priceImpact: 0,
+        };
+
+        if (trackedTx.usdValue >= whaleThresholdUsd) {
+          whaleTracker.recordTransaction(trackedTx);
+        }
+
+        deps.logger.debug('Simulated whale alert published', {
+          usdValue: alert.usdValue,
+          dex: alert.dex,
+          chain: alert.chain,
+        });
+      };
+    }
+
+    return callbacks;
   }
 
   // ===========================================================================

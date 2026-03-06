@@ -137,6 +137,18 @@ export const MIN_SIMULATION_VOLATILITY = 0;
 /** Maximum allowed simulation volatility (100% = price can double or halve) */
 export const MAX_SIMULATION_VOLATILITY = 1.0;
 
+/** Default whale rate: fraction of simulated swaps that are whale-sized (5%) */
+export const DEFAULT_SIMULATION_WHALE_RATE = 0.05;
+
+/** Minimum whale rate (0% = no whales) */
+export const MIN_SIMULATION_WHALE_RATE = 0;
+
+/** Maximum whale rate (50% = half of all swaps are whales) */
+export const MAX_SIMULATION_WHALE_RATE = 0.5;
+
+/** Default USD threshold for whale detection in simulation ($50K, matches WhaleTrackerConfig) */
+export const DEFAULT_WHALE_THRESHOLD_USD = 50_000;
+
 // =============================================================================
 // WebSocket Configuration (FIX 2.3: Added documentation for timeout values)
 // =============================================================================

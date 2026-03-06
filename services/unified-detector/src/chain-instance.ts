@@ -979,6 +979,8 @@ export class ChainDetectorInstance extends EventEmitter {
         this.lastBlockNumber = blockNumber;
         this.lastBlockTimestamp = Date.now();
       },
+      // Phase 2 (Whale/Swap Events): Pass publisher for simulation stream publishing
+      whaleAlertPublisher: this.whaleAlertPublisher,
     });
   }
 
