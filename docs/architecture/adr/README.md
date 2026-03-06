@@ -51,6 +51,8 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-035](./ADR-035-statistical-arbitrage.md) | Statistical Arbitrage Strategy | Accepted | 2026-02-24 | 80% |
 | [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Accepted | 2026-02-24 | 85% |
 | [ADR-037](./ADR-037-coordinator-pipeline-optimization.md) | Coordinator Pipeline Optimization | Accepted | 2026-03-02 | 90% |
+| [ADR-038](./ADR-038-chain-grouped-execution.md) | Chain-Grouped Execution Engines | Accepted | 2026-03-06 | 92% |
+| [ADR-039](./ADR-039-async-pipeline-split.md) | Async Pipeline Split with SimulationWorker | Accepted | 2026-03-06 | 90% |
 
 ## Decision Summary
 
@@ -280,6 +282,22 @@ An Architecture Decision Record captures an important architectural decision mad
     - Dedicated Redis connection for opportunities consumer (eliminates TCP contention)
     - Per-batch cycle time: ~55ms → ~17ms (3-4x throughput increase)
 
+### Execution Throughput (Phase 8)
+
+34. **Chain-Grouped Execution Engines** (ADR-038)
+    - Separate exec-request streams per chain group (fast/l2/premium/solana)
+    - Each stream has its own consumer group — no cross-group competition
+    - MAXLEN 25K per stream (10K for solana) prevents silent data loss from trimming
+    - Enables independent EE instances per chain group for horizontal scaling
+
+35. **Async Pipeline Split with SimulationWorker** (ADR-039)
+    - SimulationWorker pre-validates opps via BatchQuoterService (single `eth_call`)
+    - Unprofitable opps (expectedProfit ≤ 0) dropped before consuming EE slots
+    - Pre-simulated opps stamped with `preSimulatedAt` + `preSimulationScore`
+    - Staleness filter in EE drops results older than 2× chain block time
+    - Fail-open: BatchQuoter errors forward the opp rather than drop it
+    - Enabled via `ASYNC_PIPELINE_SPLIT=true`; backward-compatible when unset
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -357,3 +375,5 @@ XX% - Explanation of confidence factors
 | 2026-02-24 | ADR-035 | Added Statistical Arbitrage Strategy decision |
 | 2026-02-24 | ADR-036 | Added CEX Price Signal Integration decision |
 | 2026-03-02 | ADR-037 | Added Coordinator Pipeline Optimization decision |
+| 2026-03-06 | ADR-038 | Added Chain-Grouped Execution Engines decision |
+| 2026-03-06 | ADR-039 | Added Async Pipeline Split with SimulationWorker decision |

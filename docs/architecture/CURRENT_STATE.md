@@ -1,8 +1,8 @@
 # Current Architecture State
 
-**Date:** February 25, 2026
-**Version:** 1.3
-**Last Updated:** 2026-02-25
+**Date:** March 6, 2026
+**Version:** 1.4
+**Last Updated:** 2026-03-06
 
 ---
 
@@ -74,7 +74,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ## Redis Streams Topology (ADR-002)
 
-### Stream Names (24 declared in `shared/types/src/events.ts`)
+### Stream Names (29 declared in `shared/types/src/events.ts`)
 
 | Stream | MAXLEN | Purpose | Lifecycle |
 |--------|--------|---------|-----------|
@@ -102,6 +102,11 @@ This document provides a snapshot of the current arbitrage trading system archit
 | `stream:dead-letter-queue` | 10,000 | Failed message dead-letter queue | ACTIVE |
 | `stream:dlq-alerts` | 5,000 | DLQ alert notifications | ON-DEMAND |
 | `stream:forwarding-dlq` | 5,000 | DLQ forwarding failures | ON-DEMAND |
+| `stream:exec-requests-fast` | 25,000 | Exec requests: BSC, Polygon, Avalanche, Fantom (ADR-038) | ACTIVE |
+| `stream:exec-requests-l2` | 25,000 | Exec requests: Arbitrum, Optimism, Base, Scroll, Blast (ADR-038) | ACTIVE |
+| `stream:exec-requests-premium` | 25,000 | Exec requests: Ethereum, zkSync, Linea (ADR-038) | ACTIVE |
+| `stream:exec-requests-solana` | 10,000 | Exec requests: Solana (ADR-038) | ACTIVE |
+| `stream:pre-simulated` | 25,000 | Pre-validated opps from SimulationWorker (ADR-039, requires ASYNC_PIPELINE_SPLIT=true) | ACTIVE |
 
 ### Consumer Groups (7 active)
 
@@ -109,8 +114,9 @@ This document provides a snapshot of the current arbitrage trading system archit
 |-------|---------|---------|---------|
 | `coordinator-group` | Coordinator | health, opportunities (dedicated connection — ADR-037), whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue | Orchestration, health monitoring, opportunity routing |
 | `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities | Cross-chain opportunity detection |
-| `execution-engine-group` | Execution Engine | execution-requests | Processes forwarded opportunities |
+| `execution-engine-group` | Execution Engine | exec-requests-{fast\|l2\|premium\|solana} (ADR-038), or stream:pre-simulated when ASYNC_PIPELINE_SPLIT=true (ADR-039) | Processes forwarded opportunities |
 | `execution-engine-group` | Fast Lane Consumer | fast-lane | Processes fast-lane high-priority opportunities |
+| `simulation-worker-group` | SimulationWorker | exec-requests-{fast\|l2\|premium\|solana} | Pre-validates opps via BatchQuoterService; publishes to stream:pre-simulated (ADR-039) |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities | Pre-block pending transaction detection |
 | `orderflow-pipeline` | Coordinator | pending-opportunities | Orderflow pipeline processing |
 | `failover-{serviceName}` | Coordinator | system-failover | Failover coordination (dynamic per-service group) |
@@ -260,6 +266,10 @@ ETHEREUM_WS_URL=wss://...
 - [ADR-035: Statistical Arbitrage](adr/ADR-035-statistical-arbitrage.md) - Triple-gate signal strategy
 - [ADR-036: CEX Price Signals](adr/ADR-036-cex-price-signals.md) - Binance WebSocket feed
 
+### Execution Throughput
+- [ADR-038: Chain-Grouped Execution](adr/ADR-038-chain-grouped-execution.md) - Per-group exec-request streams, horizontal EE scaling
+- [ADR-039: Async Pipeline Split](adr/ADR-039-async-pipeline-split.md) - SimulationWorker pre-filtering, staleness protection
+
 ---
 
 ## Recent Architectural Changes (Since v1.0)
@@ -279,6 +289,8 @@ ETHEREUM_WS_URL=wss://...
 | 2026-02-24 | Statistical arbitrage strategy (triple-gate signals) | ADR-035 |
 | 2026-02-24 | Binance CEX price signal integration | ADR-036 |
 | 2026-02-24 | Self-hosted Redis 7 on Oracle ARM (replaces Upstash) | ADR-002, ADR-006 |
+| 2026-03-06 | Chain-grouped exec-request streams (4 streams, per-group consumer isolation) | ADR-038 |
+| 2026-03-06 | SimulationWorker async pre-filtering; stream:pre-simulated; staleness filter in EE | ADR-039 |
 
 ---
 

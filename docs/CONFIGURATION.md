@@ -1,7 +1,7 @@
 # Configuration Reference
 
-> **Last Updated:** 2026-02-25
-> **Version:** 1.1
+> **Last Updated:** 2026-03-06
+> **Version:** 1.2
 
 This document provides a comprehensive reference for all configuration options in the arbitrage system.
 
@@ -125,6 +125,8 @@ See `services/execution-engine/src/services/hd-wallet-manager.ts` for implementa
 | `PORT` | HTTP server port | Service-specific |
 | `METRICS_ENABLED` | Enable Prometheus metrics | `true` |
 | `SIMULATION_MODE` | Run without executing | `false` |
+| `EXECUTION_CHAIN_GROUP` | Chain group this EE instance handles (`fast`, `l2`, `premium`, `solana`). Leave unset for legacy single-EE mode. | unset (ADR-038) |
+| `ASYNC_PIPELINE_SPLIT` | Enable SimulationWorker pre-filtering. When `true`, EE consumes from `stream:pre-simulated` instead of raw exec-request streams. | `false` (ADR-039) |
 
 ### Feature Flags
 
