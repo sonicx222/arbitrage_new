@@ -346,6 +346,21 @@ export class DlqConsumer {
       try {
         // Parse and replay the original payload
         const replayData = JSON.parse(candidate.data.originalPayload!) as Record<string, unknown>;
+
+        // M-004 FIX: Check if the opportunity has expired before replaying.
+        // Without this, expired messages create a DLQ → replay → DLQ loop
+        // until the cooldown period expires.
+        const expiresAt = replayData.expiresAt;
+        if (typeof expiresAt === 'number' && expiresAt < now) {
+          continue; // skip expired — would be immediately re-rejected
+        }
+        if (typeof expiresAt === 'string') {
+          const expiresAtMs = Number(expiresAt);
+          if (Number.isFinite(expiresAtMs) && expiresAtMs < now) {
+            continue;
+          }
+        }
+
         replayData.replayed = true;
         replayData.originalError = candidate.data.error;
         replayData.replayedAt = now;

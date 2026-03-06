@@ -142,6 +142,8 @@ export class ExecutionPipeline {
   private static readonly MAX_CB_REENQUEUE_ATTEMPTS = 3;
   /** Prevent unbounded growth of cbReenqueueCounts map */
   private static readonly MAX_CB_REENQUEUE_MAP_SIZE = 10_000;
+  /** M-001 FIX: Max items processed synchronously before yielding to event loop */
+  private static readonly MAX_SYNC_ITEMS_PER_PASS = 200;
 
   constructor(deps: PipelineDeps) {
     this.deps = deps;
@@ -165,6 +167,9 @@ export class ExecutionPipeline {
     try {
       // H-001 FIX: Track consecutive per-chain skips to prevent infinite loop
       let perChainSkips = 0;
+      // M-001 FIX: Limit synchronous iterations to prevent event loop blockage
+      // when a large queue has all items CB-blocked or per-chain-blocked.
+      let itemsProcessedThisPass = 0;
 
       while (
         this.deps.queueService.size() > 0 &&
@@ -172,6 +177,17 @@ export class ExecutionPipeline {
       ) {
         const opportunity = this.deps.queueService.dequeue();
         if (!opportunity) break;
+
+        // M-001 FIX: Yield to event loop after processing MAX_SYNC_ITEMS_PER_PASS items
+        if (++itemsProcessedThisPass > ExecutionPipeline.MAX_SYNC_ITEMS_PER_PASS) {
+          this.deps.queueService.enqueue(opportunity); // put it back
+          setImmediate(() => {
+            if (!this.isProcessingQueue) {
+              this.processQueueItems();
+            }
+          });
+          break;
+        }
 
         // Per-chain circuit breaker check
         // H-002 FIX: Use same chain resolution as executeOpportunity — fall back

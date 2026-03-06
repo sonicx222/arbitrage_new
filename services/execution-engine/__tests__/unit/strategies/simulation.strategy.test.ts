@@ -298,12 +298,13 @@ describe('SimulationStrategy', () => {
     });
 
     describe('default values', () => {
-      it('should use default chain when buyChain is not specified', async () => {
+      it('should use opportunity.chain when buyChain is not specified (same-chain arb)', async () => {
         Math.random = jest.fn().mockReturnValue(0.5);
 
         const config = createDefaultConfig();
         const strategy = new SimulationStrategy(logger, config);
-        const opportunity = createMockOpportunity({ buyChain: undefined });
+        // M-002 FIX: Same-chain arbs have chain set but not buyChain
+        const opportunity = createMockOpportunity({ buyChain: undefined, chain: 'ethereum' });
 
         const executePromise = strategy.execute(opportunity, ctx);
         jest.advanceTimersByTime(100);

@@ -45,8 +45,10 @@ export class SimulationStrategy extends BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     ctx: StrategyContext
   ): Promise<ExecutionResult> {
-    const chain = opportunity.buyChain || 'ethereum';
-    const dex = opportunity.buyDex || 'unknown';
+    // M-002 FIX: Use same chain resolution as execution pipeline — fall back to
+    // opportunity.chain for same-chain arbs, not hardcoded 'ethereum'.
+    const chain = opportunity.buyChain ?? opportunity.chain ?? 'unknown';
+    const dex = opportunity.buyDex ?? 'unknown';
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
 

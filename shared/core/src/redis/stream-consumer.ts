@@ -62,6 +62,13 @@ export interface StreamConsumerConfig {
   /** OP-27 FIX: Inter-poll delay in ms between batch reads (default: 10, 0 = no delay) */
   interPollDelayMs?: number;
   /**
+   * Phase 3 (F1): Callback for stream message transit time in milliseconds.
+   * Called for each processed message with the time between publish (from Redis
+   * message ID) and consumption. Allows services to record transit time metrics
+   * without coupling the consumer to a specific metrics library.
+   */
+  onMessageTransitTime?: (transitTimeMs: number, streamName: string) => void;
+  /**
    * P0 Fix ES-003: Maximum delivery attempts before routing message to DLQ.
    * When set, periodically checks pending messages via XPENDING RANGE.
    * Messages exceeding this count are XACKed and routed to the dead-letter queue.
@@ -87,6 +94,18 @@ export interface StreamConsumerStats {
 // =============================================================================
 // StreamConsumer Class
 // =============================================================================
+
+/**
+ * Phase 3 (F1): Extract timestamp from Redis Stream message ID.
+ * Redis message IDs have format "timestamp-sequence" (e.g., "1709712345678-0").
+ * Returns the timestamp portion as milliseconds since epoch, or null if unparseable.
+ */
+function extractTimestampFromMessageId(id: string): number | null {
+  const dashIndex = id.indexOf('-');
+  if (dashIndex <= 0) return null;
+  const ts = Number(id.substring(0, dashIndex));
+  return Number.isFinite(ts) && ts > 0 ? ts : null;
+}
 
 /**
  * P2-1 FIX: Reusable stream consumer that encapsulates the common pattern of:
@@ -122,7 +141,9 @@ export class StreamConsumer {
   private static readonly MAX_ERROR_BACKOFF_MS = 30_000;
   private static readonly BASE_ERROR_DELAY_MS = 100;
   // P3 Fix DI-7: Track warned schema versions to avoid log spam (once per unknown version)
+  // M-003 FIX: Bounded Set to prevent unbounded growth in long-running processes.
   private static readonly warnedSchemaVersions = new Set<string>();
+  private static readonly MAX_WARNED_SCHEMA_VERSIONS = 100;
   private static readonly KNOWN_SCHEMA_VERSION = '1';
   /** P0 Fix ES-003: Counter for periodic pending message cleanup */
   private pollCycleCount = 0;
@@ -344,6 +365,22 @@ export class StreamConsumer {
             this.stats.lastProcessedAt = Date.now();
           }
 
+          // Phase 3 (F1): Record transit time for batch-processed messages
+          if (this.config.onMessageTransitTime && processedSet.size > 0) {
+            const now = Date.now();
+            for (const msg of messages) {
+              if (processedSet.has(msg.id)) {
+                const publishTs = extractTimestampFromMessageId(msg.id);
+                if (publishTs) {
+                  const transitMs = now - publishTs;
+                  if (transitMs >= 0) {
+                    this.config.onMessageTransitTime(transitMs, this.config.config.streamName);
+                  }
+                }
+              }
+            }
+          }
+
           // ADR-037: Auto-acknowledge successfully processed messages using pipelined
           // batch XACK. At batch size 200, this reduces ACK overhead from ~20-40ms
           // (200 sequential round-trips) to ~0.5ms (1 pipelined round-trip).
@@ -371,6 +408,10 @@ export class StreamConsumer {
           const sv = (message.data as Record<string, unknown>)?.schemaVersion;
           if (typeof sv === 'string' && sv !== StreamConsumer.KNOWN_SCHEMA_VERSION
               && !StreamConsumer.warnedSchemaVersions.has(sv)) {
+            // M-003 FIX: Prevent unbounded Set growth — clear when limit reached
+            if (StreamConsumer.warnedSchemaVersions.size >= StreamConsumer.MAX_WARNED_SCHEMA_VERSIONS) {
+              StreamConsumer.warnedSchemaVersions.clear();
+            }
             StreamConsumer.warnedSchemaVersions.add(sv);
             this.config.logger?.warn?.('Unrecognized message schema version — processing anyway', {
               schemaVersion: sv,
@@ -383,6 +424,17 @@ export class StreamConsumer {
             await this.config.handler(message);
             this.stats.messagesProcessed++;
             this.stats.lastProcessedAt = Date.now();
+
+            // Phase 3 (F1): Record stream message transit time
+            if (this.config.onMessageTransitTime) {
+              const publishTs = extractTimestampFromMessageId(message.id);
+              if (publishTs) {
+                const transitMs = Date.now() - publishTs;
+                if (transitMs >= 0) {
+                  this.config.onMessageTransitTime(transitMs, this.config.config.streamName);
+                }
+              }
+            }
 
             // Auto-acknowledge if enabled
             if (this.config.autoAck) {
