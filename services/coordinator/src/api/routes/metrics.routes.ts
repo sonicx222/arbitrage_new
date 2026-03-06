@@ -10,7 +10,7 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import { findKLargest } from '@arbitrage/core/data-structures';
-import { getStreamHealthMonitor, getRuntimeMonitor } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker } from '@arbitrage/core/monitoring';
 import { getRedisClient } from '@arbitrage/core/redis';
 import type { CoordinatorStateProvider } from '../types';
 
@@ -185,7 +185,8 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           `arbitrage_executions_successful_total ${sys.successfulExecutions}`,
           '',
         ].join('\n');
-        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics + runtimeMetrics + coordinatorMetrics);
+        const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
+        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics + runtimeMetrics + providerMetrics + coordinatorMetrics);
       } catch (_error) {
         res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
       }

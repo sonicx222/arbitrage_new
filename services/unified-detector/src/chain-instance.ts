@@ -314,6 +314,18 @@ export class ChainDetectorInstance extends EventEmitter {
   /** Phase 1 Enhanced Monitoring: Count stale price rejections for observability */
   private stalePriceRejections = 0;
 
+  // Phase 2 Enhanced Monitoring: WebSocket message rate counters (C2)
+  private readonly wsMessageCounts = new Map<string, number>();
+
+  // Phase 2 Enhanced Monitoring: Detection cycle timing (D3, D4)
+  private static readonly DETECTION_CYCLE_BUFFER_SIZE = 200;
+  private detectionCycleDurations = new Float64Array(ChainDetectorInstance.DETECTION_CYCLE_BUFFER_SIZE);
+  private detectionCycleIndex = 0;
+  private detectionCycleCount = 0;
+  private detectionCycleOpportunities = new Float64Array(ChainDetectorInstance.DETECTION_CYCLE_BUFFER_SIZE);
+  private detectionOppIndex = 0;
+  private detectionOppCount = 0;
+
   // Swap event filtering and whale detection
   private swapEventFilter: SwapEventFilter | null = null;
   private whaleAlertUnsubscribe: (() => void) | null = null;
@@ -1506,16 +1518,21 @@ export class ChainDetectorInstance extends EventEmitter {
           // Log event
           const topic0 = result.topics[0];
           if (topic0 === EVENT_SIGNATURES.SYNC) {
+            this.incrementWsCounter('sync');
             this.handleSyncEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
+            this.incrementWsCounter('swap_v2');
             this.handleSwapEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V3) {
+            this.incrementWsCounter('swap_v3');
             // P0-4: V3 Swap events carry sqrtPriceX96 + liquidity for price/reserve updates
             this.handleSwapV3Event(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE) {
+            this.incrementWsCounter('curve');
             // P0-5: Curve TokenExchange events for StableSwap pools
             this.handleCurveTokenExchangeEvent(result, messageReceivedAt);
           } else if (topic0 === EVENT_SIGNATURES.BALANCER_SWAP) {
+            this.incrementWsCounter('balancer');
             // P0-5: Balancer V2 Swap events from the Vault
             this.handleBalancerSwapEvent(result, messageReceivedAt);
           } else if (this.factorySubscriptionService && this.useFactoryMode) {
@@ -1537,6 +1554,7 @@ export class ChainDetectorInstance extends EventEmitter {
           }
         } else if (result && 'number' in result && result.number) {
           // New block
+          this.incrementWsCounter('newHeads');
           this.handleNewBlock(result as EthereumBlockHeader);
         }
       }
@@ -2155,9 +2173,16 @@ export class ChainDetectorInstance extends EventEmitter {
     // Guard against processing during shutdown (consistent with base-detector.ts)
     if (this.isStopping || !this.isRunning) return;
 
+    // Phase 2 Enhanced Monitoring (D3): Time the detection cycle
+    const cycleStart = performance.now();
+    let cycleOpportunities = 0;
+
     // Create snapshot of the updated pair first
     const currentSnapshot = this.createPairSnapshot(updatedPair);
-    if (!currentSnapshot) return;
+    if (!currentSnapshot) {
+      this.recordDetectionCycle(performance.now() - cycleStart, 0);
+      return;
+    }
 
     // P0-PERF FIX: O(1) lookup instead of O(N) iteration
     // Get only pairs with the same token pair (typically 2-5 pairs across DEXes)
@@ -2223,9 +2248,13 @@ export class ChainDetectorInstance extends EventEmitter {
         }
 
         this.opportunitiesFound++;
+        cycleOpportunities++;
         this.emitOpportunity(opportunity);
       }
     }
+
+    // Phase 2 Enhanced Monitoring (D3/D4): Record detection cycle metrics
+    this.recordDetectionCycle(performance.now() - cycleStart, cycleOpportunities);
 
     // P0-PERF FIX: Check throttle BEFORE creating expensive snapshots
     // This prevents O(N) snapshot creation when throttled
@@ -2545,6 +2574,82 @@ export class ChainDetectorInstance extends EventEmitter {
     return this.status;
   }
 
+  // ===========================================================================
+  // Phase 2 Enhanced Monitoring: Internal helpers
+  // ===========================================================================
+
+  /**
+   * Phase 2 (C2): Increment WebSocket message counter for an event type.
+   * Hot path: O(1) Map.get + Map.set.
+   */
+  private incrementWsCounter(eventType: string): void {
+    this.wsMessageCounts.set(eventType, (this.wsMessageCounts.get(eventType) ?? 0) + 1);
+  }
+
+  /**
+   * Phase 2 (D3/D4): Record detection cycle duration and opportunities count.
+   * Hot path: O(1) ring buffer write.
+   */
+  private recordDetectionCycle(durationMs: number, opportunities: number): void {
+    // Duration ring buffer
+    this.detectionCycleDurations[this.detectionCycleIndex] = durationMs;
+    this.detectionCycleIndex = (this.detectionCycleIndex + 1) % ChainDetectorInstance.DETECTION_CYCLE_BUFFER_SIZE;
+    if (this.detectionCycleCount < ChainDetectorInstance.DETECTION_CYCLE_BUFFER_SIZE) {
+      this.detectionCycleCount++;
+    }
+    // Opportunities ring buffer
+    this.detectionCycleOpportunities[this.detectionOppIndex] = opportunities;
+    this.detectionOppIndex = (this.detectionOppIndex + 1) % ChainDetectorInstance.DETECTION_CYCLE_BUFFER_SIZE;
+    if (this.detectionOppCount < ChainDetectorInstance.DETECTION_CYCLE_BUFFER_SIZE) {
+      this.detectionOppCount++;
+    }
+  }
+
+  /**
+   * Phase 2 (C5): Calculate max price staleness across all monitored pairs.
+   * Cold path: called on getStats() only.
+   */
+  private calculateMaxPriceStaleness(): number {
+    if (this.pairs.size === 0) return 0;
+    const now = Date.now();
+    let maxStaleness = 0;
+    for (const pair of this.pairs.values()) {
+      if (pair.lastUpdate > 0) {
+        const staleness = now - pair.lastUpdate;
+        if (staleness > maxStaleness) {
+          maxStaleness = staleness;
+        }
+      }
+    }
+    return maxStaleness;
+  }
+
+  /**
+   * Phase 2 (D3): Calculate average detection cycle duration from ring buffer.
+   * Cold path: O(n) where n <= DETECTION_CYCLE_BUFFER_SIZE.
+   */
+  private calculateAvgDetectionCycleDuration(): number {
+    if (this.detectionCycleCount === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < this.detectionCycleCount; i++) {
+      sum += this.detectionCycleDurations[i];
+    }
+    return sum / this.detectionCycleCount;
+  }
+
+  /**
+   * Phase 2 (D4): Calculate average opportunities per detection cycle from ring buffer.
+   * Cold path: O(n) where n <= DETECTION_CYCLE_BUFFER_SIZE.
+   */
+  private calculateAvgOpportunitiesPerCycle(): number {
+    if (this.detectionOppCount === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < this.detectionOppCount; i++) {
+      sum += this.detectionCycleOpportunities[i];
+    }
+    return sum / this.detectionOppCount;
+  }
+
   getStats(): ChainStats {
     // FIX 10.4: Calculate average from ring buffer (O(n) but only 100 elements)
     let avgLatency = 0;
@@ -2564,6 +2669,12 @@ export class ChainDetectorInstance extends EventEmitter {
       ? this.priceCache.getStats()
       : undefined;
 
+    // Phase 2 Enhanced Monitoring: WebSocket message counts as plain object
+    const wsMessageCountsObj: Record<string, number> = {};
+    for (const [key, count] of this.wsMessageCounts) {
+      wsMessageCountsObj[key] = count;
+    }
+
     return {
       chainId: this.chainId,
       status: this.status,
@@ -2574,6 +2685,11 @@ export class ChainDetectorInstance extends EventEmitter {
       pairsMonitored: this.pairs.size,
       hotPairsCount: activityStats.hotPairs,
       stalePriceRejections: this.stalePriceRejections,
+      // Phase 2 Enhanced Monitoring metrics
+      wsMessageCounts: wsMessageCountsObj,
+      maxPriceStalenessMs: this.calculateMaxPriceStaleness(),
+      avgDetectionCycleDurationMs: this.calculateAvgDetectionCycleDuration(),
+      avgOpportunitiesPerCycle: this.calculateAvgOpportunitiesPerCycle(),
       // PHASE2-TASK39: Optional cache statistics
       ...(cacheStats && { priceCache: cacheStats })
     };

@@ -118,3 +118,18 @@ export type {
   MemoryMetrics,
   GcMetrics,
 } from './runtime-monitor';
+
+// Provider Latency Tracker (Phase 2 Enhanced Monitoring: C1, C3, C4)
+export {
+  ProviderLatencyTracker,
+  getProviderLatencyTracker,
+  resetProviderLatencyTracker,
+} from './provider-latency-tracker';
+export type {
+  ProviderPercentileStats,
+  RpcCallMetrics,
+  ReconnectionMetrics,
+  RpcErrorMetrics,
+  ProviderLatencyMetrics,
+  ProviderLatencyTrackerConfig,
+} from './provider-latency-tracker';

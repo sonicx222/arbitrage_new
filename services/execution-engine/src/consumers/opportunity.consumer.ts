@@ -43,6 +43,7 @@ import type {
   ConsumerConfig,
 } from '../types';
 import { DEFAULT_CONSUMER_CONFIG, DLQ_STREAM, ValidationErrorCode } from '../types';
+import { recordStreamTransitTime } from '../services/prometheus-metrics';
 import { createCancellableTimeout } from '../services/simulation/types';
 import { recordOpportunityDetected } from '../services/prometheus-metrics';
 
@@ -308,6 +309,8 @@ export class OpportunityConsumer {
         error: (msg: string, ctx?: Record<string, unknown>) => this.logger.error(msg, ctx),
         debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx),
       },
+      // Phase 3 (F1): Record stream message transit time as Prometheus histogram
+      onMessageTransitTime: recordStreamTransitTime,
       onPauseStateChange: (isPaused) => {
         this.logger.info('Stream consumer pause state changed', {
           isPaused,

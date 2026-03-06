@@ -63,6 +63,18 @@ export interface ChainStats {
 
   /** Phase 1 Enhanced Monitoring: Stale price rejections during arbitrage detection */
   stalePriceRejections?: number;
+
+  /** Phase 2 Enhanced Monitoring: WebSocket message counts by event type (C2) */
+  wsMessageCounts?: Record<string, number>;
+
+  /** Phase 2 Enhanced Monitoring: Max price staleness across all pairs in ms (C5) */
+  maxPriceStalenessMs?: number;
+
+  /** Phase 2 Enhanced Monitoring: Average detection cycle duration in ms (D3) */
+  avgDetectionCycleDurationMs?: number;
+
+  /** Phase 2 Enhanced Monitoring: Average opportunities found per detection cycle (D4) */
+  avgOpportunitiesPerCycle?: number;
 }
 
 // =============================================================================

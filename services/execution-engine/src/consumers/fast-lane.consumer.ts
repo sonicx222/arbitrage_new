@@ -18,6 +18,7 @@ import { stopAndNullify } from '@arbitrage/core/async';
 import { RedisStreamsClient, ConsumerGroupConfig, StreamConsumer } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ARBITRAGE_CONFIG, FEATURE_FLAGS } from '@arbitrage/config';
+import { recordStreamTransitTime } from '../services/prometheus-metrics';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   Logger,
@@ -141,6 +142,8 @@ export class FastLaneConsumer {
       autoAck: true, // Immediate ACK — fast lane is best-effort
       // P3 Fix L-4: Zero inter-poll delay for fast lane (latency-sensitive)
       interPollDelayMs: 0,
+      // Phase 3 (F1): Record stream message transit time as Prometheus histogram
+      onMessageTransitTime: recordStreamTransitTime,
       logger: {
         error: (msg: string, ctx?: Record<string, unknown>) => this.logger.error(msg, ctx),
         debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx),

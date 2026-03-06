@@ -1,6 +1,20 @@
 # Pre-Deploy Validation
 # Single-Orchestrator Pipeline — Redis Streams + 7 Services
-# Version: 2.6
+# Version: 3.0
+#
+# Changelog v3.0 (2026-03-06):
+#   - Phase 3 restructured into 8 subsections (35 checks, was 18)
+#   - New checks: runtime performance (B1-B6), provider quality (C1-C5),
+#     detection quality (D2-D4), business intelligence (A2-A4, F4-F5),
+#     stream transit time (F1), placeholder checks for E1-E5/F2-F3/D1/D5
+#   - Fixed MAXLEN drift: opportunities=500K, execution-requests=25K
+#   - Added self-healing-manager consumer group to inventory
+#   - Fixed coordinator-group streams (9, was 8 — added forwarding-dlq)
+#   - Added all 24 streams to topology check (was 19)
+#   - Added fast-lane to smoke test E2E validation
+#   - Removed deleted stream-monitor.js references
+#   - Updated Prometheus expected metrics with 25+ new metric names
+#   - Expanded report template with 4 new sections
 
 ---
 
@@ -59,14 +73,14 @@ sequentially — correctness is more important than speed.
 |--------|--------|-------------|-------------------|
 | `stream:price-updates` | 100,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:swap-events` | 50,000 | P1-P4 partitions | coordinator-group |
-| `stream:opportunities` | 100,000 | P1-P4, cross-chain detector | coordinator-group |
+| `stream:opportunities` | 500,000 | P1-P4, cross-chain detector | coordinator-group |
 | `stream:whale-alerts` | 5,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:service-health` | 1,000 | All services | — |
 | `stream:service-events` | 5,000 | All services | — |
 | `stream:coordinator-events` | 5,000 | Coordinator | — |
 | `stream:health` | 1,000 | All services | coordinator-group |
 | `stream:health-alerts` | 5,000 | Health monitor | — |
-| `stream:execution-requests` | 5,000 | Coordinator | execution-engine-group |
+| `stream:execution-requests` | 25,000 | Coordinator | execution-engine-group |
 | `stream:execution-results` | 5,000 | Execution engine | coordinator-group |
 | `stream:pending-opportunities` | 10,000 | Mempool detector | cross-chain-detector-group |
 | `stream:volume-aggregates` | 10,000 | Volume aggregator | coordinator-group |
@@ -76,21 +90,22 @@ sequentially — correctness is more important than speed.
 | `stream:fast-lane` | 5,000 | Fast lane (feature-gated) | execution-engine-group |
 | `stream:dead-letter-queue` | 10,000 | Any service | coordinator-group |
 | `stream:dlq-alerts` | 5,000 | DLQ manager (on-demand) | — |
-| `stream:forwarding-dlq` | 5,000 | Coordinator | — |
-| `stream:system-failures` | 5,000 | Self-healing (on-demand) | — |
-| `stream:system-control` | 1,000 | Self-healing (on-demand) | — |
-| `stream:system-scaling` | 1,000 | Self-healing (on-demand) | — |
+| `stream:forwarding-dlq` | 5,000 | Coordinator | coordinator-group |
+| `stream:system-failures` | 5,000 | Self-healing (on-demand) | self-healing-manager |
+| `stream:system-control` | 1,000 | Self-healing (on-demand) | self-healing-manager |
+| `stream:system-scaling` | 1,000 | Self-healing (on-demand) | self-healing-manager |
 | `stream:service-degradation` | 5,000 | Degradation monitor (on-demand) | — |
 
-### Consumer Groups (6 active)
+### Consumer Groups (7 active)
 
 | Group | Service | Streams |
 |-------|---------|---------|
-| `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue |
+| `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue, forwarding-dlq |
 | `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities |
 | `execution-engine-group` | Execution Engine | execution-requests, fast-lane |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities |
 | `orderflow-pipeline` | Coordinator (orderflow) | pending-opportunities |
+| `self-healing-manager` | Expert Self-Healing Manager | system-failures, system-control, system-scaling | (dynamic: created on first use) |
 | `failover-{serviceName}` | Coordinator (failover) | system-failover | (dynamic: created by CrossRegionHealthManager at runtime) |
 
 ### Pipeline Data Flow (Critical Path)
@@ -709,6 +724,8 @@ audits — they target the rules most likely to drift silently.
 Grep for: \.\.\.\w+ in these files only:
   shared/core/src/price-matrix.ts
   shared/core/src/partitioned-detector.ts
+  shared/core/src/monitoring/provider-latency-tracker.ts  (ring buffer, zero-alloc recording)
+  shared/core/src/monitoring/runtime-monitor.ts           (perf_hooks, GC observer)
   services/execution-engine/src/
   services/unified-detector/src/
 Exclude: test files, comments, function signatures (rest params)
@@ -716,6 +733,15 @@ Only flag spread inside loops (for/while/forEach/map/reduce/filter)
 ```
 **Flag:** Spread operator in loop on hot-path file → severity: **HIGH**,
 category: `ADR_COMPLIANCE` (ADR-022 violation — allocation in hot path).
+
+**ADR-022 (Ring Buffer Pattern):** Verify monitoring ring buffers use Float64Array.
+```
+Read shared/core/src/monitoring/provider-latency-tracker.ts
+Confirm: RingBuffer class uses Float64Array (not regular Array)
+Confirm: record() method is O(1) (no sort, no push, index wrapping only)
+```
+**Flag:** Ring buffer uses Array instead of Float64Array → severity: **MEDIUM**,
+category: `ADR_COMPLIANCE` (ADR-022 violation — typed arrays required for zero-alloc).
 
 **ADR-033 (Stale Price Window):** The stale price rejection threshold must be 30s.
 ```
@@ -1044,7 +1070,21 @@ STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000/api/healt
 echo "Port 3000 /api/health/ready: $STATUS"
 ```
 
-2. Also read infrastructure health check configs to verify they use the correct paths:
+2. Test Prometheus metrics endpoints (Phase 3 requires these):
+
+```bash
+# Partitions, Execution Engine, Cross-Chain expose /metrics
+for port in 3001 3002 3003 3004 3005 3006; do
+  STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:$port/metrics 2>/dev/null || echo "000")
+  echo "Port $port /metrics: $STATUS"
+done
+
+# Coordinator exposes /api/metrics/prometheus (different path)
+STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000/api/metrics/prometheus 2>/dev/null || echo "000")
+echo "Port 3000 /api/metrics/prometheus: $STATUS"
+```
+
+3. Also read infrastructure health check configs to verify they use the correct paths:
 
 ```bash
 # Check Fly.io configs for health check paths
@@ -1052,7 +1092,7 @@ echo "Port 3000 /api/health/ready: $STATUS"
 Use Grep to search `infrastructure/fly/*.toml` for `path =` in health check sections.
 Use Grep to search `infrastructure/docker/docker-compose*.yml` for health check paths.
 
-3. Compare infrastructure health check paths against the actual service endpoints.
+4. Compare infrastructure health check paths against the actual service endpoints.
 
 **Flag:** Coordinator returns 404 on `/ready` (standard path) → severity: **HIGH**,
 category: `SERVICE_READY` (infrastructure tools using uniform path will fail).
@@ -1060,6 +1100,10 @@ category: `SERVICE_READY` (infrastructure tools using uniform path will fail).
 category: `SERVICE_READY` (service missing readiness endpoint).
 **Flag:** Infrastructure config uses a path that returns 404 on the target service →
 severity: **HIGH**, category: `CONFIG_DRIFT` (deployment health check will fail).
+**Flag:** Any service `/metrics` endpoint returns non-200 → severity: **MEDIUM**,
+category: `METRICS_ENDPOINT` (Phase 3 enhanced monitoring checks will fail).
+**Flag:** Coordinator `/api/metrics/prometheus` returns non-200 → severity: **MEDIUM**,
+category: `METRICS_ENDPOINT` (coordinator metrics scraping will fail).
 **Info:** All services respond on their documented paths → severity: **INFO**,
 category: `SERVICE_READY`.
 
@@ -1070,7 +1114,7 @@ Output:
 PHASE 2 COMPLETE — Startup
   Services ready: <n>/7 (list names)
   Services failed: <n> (list names)
-  Streams discovered: <n>/19
+  Streams discovered: <n>/24
   Missing streams: <list>
   Unexpected streams: <list>
   Readiness endpoints: <n>/7 consistent
@@ -1078,9 +1122,11 @@ PHASE 2 COMPLETE — Startup
 
 ---
 
+
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-## PHASE 3 — RUNTIME VALIDATION (~90 seconds)
+## PHASE 3 — RUNTIME VALIDATION (~120 seconds)
 ## All services should be running. Uses curl + redis-cli.
+## 8 subsections, 35 checks. Enhanced monitoring metrics integrated.
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Record all findings to `./monitor-session/findings/runtime.jsonl`:
@@ -1088,7 +1134,7 @@ Record all findings to `./monitor-session/findings/runtime.jsonl`:
 {
   "phase": "RUNTIME",
   "findingId": "RT-001",
-  "category": "SERVICE_HEALTH|LEADER_ELECTION|CIRCUIT_BREAKER|DLQ|DLQ_ROOT_CAUSE|STREAM_TOPOLOGY|CONSUMER_LAG|STUCK_MESSAGE|DEAD_CONSUMER|METRICS|METRICS_COMPLETENESS|WEBSOCKET_HEALTH|PROVIDER_HEALTH|RISK_STATE|LATENCY|GAS_SPIKE|SIMULATION|EXECUTION_PROBABILITY|BRIDGE_RECOVERY|MEMORY|HEALTH_SCHEMA",
+  "category": "SERVICE_HEALTH|LEADER_ELECTION|CIRCUIT_BREAKER|CB_TRANSITIONS|BACKPRESSURE|DLQ|DLQ_ROOT_CAUSE|STREAM_TOPOLOGY|CONSUMER_LAG|STUCK_MESSAGE|DEAD_CONSUMER|STREAM_TRANSIT|METRICS|METRICS_COMPLETENESS|RUNTIME_PERFORMANCE|PROVIDER_QUALITY|DETECTION_QUALITY|BUSINESS_INTELLIGENCE|WEBSOCKET_HEALTH|PROVIDER_HEALTH|RISK_STATE|LATENCY|GAS_SPIKE|SIMULATION|EXECUTION_PROBABILITY|BRIDGE_RECOVERY|MEMORY|HEALTH_SCHEMA",
   "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
   "service": "<service name>",
   "stream": "<stream name if applicable>",
@@ -1101,6 +1147,8 @@ Record all findings to `./monitor-session/findings/runtime.jsonl`:
 ```
 
 ---
+
+## ── Section 3.1: Service Health & Schema ──
 
 ### Check 3A — Service Health Matrix
 
@@ -1161,481 +1209,11 @@ redis-cli TTL coordinator:leader:lock
 
 ---
 
-### Check 3C — Circuit Breaker States
-
-```bash
-curl -sf http://localhost:3005/circuit-breaker | jq .
-```
-
-**Flag:** Any chain in `OPEN` state → **HIGH** (chain is blocked from execution).
-**Flag:** Any chain in `HALF_OPEN` state → **MEDIUM** (chain recovering).
-**Flag:** Endpoint unreachable → **HIGH**.
-
----
-
-### Check 3D — Dead Letter Queue Status
-
-```bash
-redis-cli XLEN stream:dead-letter-queue
-redis-cli XLEN stream:forwarding-dlq
-redis-cli XLEN stream:dlq-alerts
-```
-
-**Flag:** `stream:dead-letter-queue` length > 0 → **HIGH** (messages failing on startup).
-**Flag:** `stream:forwarding-dlq` length > 0 → **CRITICAL** (coordinator can't reach
-execution engine — the critical pipeline path is broken).
-
-If DLQ has entries, read the most recent messages to understand what's failing:
-```bash
-redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 5
-redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 5
-```
-
----
-
-### Check 3E — Redis Stream Topology Validation
-
-For each of the 19 expected streams, verify the stream exists and has the
-correct consumer groups attached:
-
-```bash
-for stream in stream:price-updates stream:swap-events stream:opportunities \
-  stream:whale-alerts stream:service-health stream:service-events \
-  stream:coordinator-events stream:health stream:health-alerts \
-  stream:execution-requests stream:execution-results \
-  stream:pending-opportunities stream:volume-aggregates \
-  stream:circuit-breaker stream:system-failover stream:system-commands \
-  stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq; do
-
-  echo "=== $stream ==="
-  redis-cli XINFO STREAM $stream 2>&1
-  redis-cli XINFO GROUPS $stream 2>&1
-done
-```
-
-For each stream, verify:
-1. **Exists** — `XINFO STREAM` succeeds. Missing → **MEDIUM**.
-2. **Has expected consumer groups** — compare `XINFO GROUPS` output against the
-   System Inventory table. Missing group → **HIGH**.
-3. **Consumer groups have active consumers** — `consumers` field > 0 for each
-   group. Zero consumers → **CRITICAL** (dead consumer group).
-4. **Stream length is reasonable** — not 0 (for active streams like `price-updates`)
-   and not at MAXLEN cap (indicates producer outpacing consumer trim).
-
----
-
-### Check 3F — Consumer Lag & Pending Messages (Per-Service Discovery)
-
-**Goal:** Check pending messages for EVERY consumer group on EVERY active stream,
-not just hardcoded stream/group pairs. Services may create consumer groups
-dynamically (e.g., `failover-coordinator`), and the hardcoded list can drift.
-
-**Method — Part 1 (Dynamic discovery):**
-For each stream discovered in Step 2D, query all consumer groups:
-
-```bash
-# For each discovered stream, get ALL consumer groups dynamically
-for stream in $(cat ./monitor-session/streams/discovered.txt); do
-  echo "=== $stream ==="
-  redis-cli XINFO GROUPS $stream 2>&1
-done
-```
-
-Parse the output to build a complete map:
-```
-stream → [group1, group2, ...] → per-group pending count
-```
-
-**Method — Part 2 (Per-group pending check):**
-For each (stream, group) pair discovered above:
-
-```bash
-redis-cli XPENDING <stream> <group>
-```
-
-This returns: total pending, min-id, max-id, consumer list with per-consumer pending.
-
-**Method — Part 3 (Cross-reference with expected owners):**
-For each consumer group, verify it belongs to the expected service:
-
-| Group Pattern | Expected Owner |
-|---------------|---------------|
-| `coordinator-group` | Coordinator (port 3000) |
-| `cross-chain-detector-group` | Cross-Chain Detector (port 3006) |
-| `execution-engine-group` | Execution Engine (port 3005) |
-| `mempool-detector-group` | Mempool Detector (port 3008) |
-| `orderflow-pipeline` | Coordinator (orderflow subsystem) |
-| `failover-*` | Cross-Region Health Manager (dynamic) |
-
-Flag any group not matching a known pattern.
-
-**Also check the hardcoded critical pairs (backward compatibility):**
-```bash
-redis-cli XPENDING stream:price-updates coordinator-group
-redis-cli XPENDING stream:price-updates cross-chain-detector-group
-redis-cli XPENDING stream:opportunities coordinator-group
-redis-cli XPENDING stream:whale-alerts coordinator-group
-redis-cli XPENDING stream:whale-alerts cross-chain-detector-group
-redis-cli XPENDING stream:execution-requests execution-engine-group
-redis-cli XPENDING stream:execution-results coordinator-group
-redis-cli XPENDING stream:health coordinator-group
-redis-cli XPENDING stream:dead-letter-queue coordinator-group
-```
-
-**Thresholds (per group):**
-- Pending count > 50 → **HIGH** (consumer falling behind).
-- Pending count > 100 → **CRITICAL** (consumer overwhelmed).
-- Any message pending for > 30 seconds (check oldest pending entry) → **HIGH**
-  (stuck message — consumer may have crashed without ACKing).
-- Any message with delivery count > 3 → **HIGH** (message being retried
-  repeatedly — likely a poison message).
-
-**Additional per-service checks:**
-- **Lag delta**: For shared streams (e.g., `stream:price-updates` consumed by both
-  `coordinator-group` and `cross-chain-detector-group`), compare pending counts
-  between groups. If one group has >10x the pending count of the other →
-  severity: **HIGH**, category: `CONSUMER_LAG` (one consumer is significantly
-  slower than its peer on the same stream).
-- **Unknown group**: Consumer group not matching any expected pattern →
-  severity: **MEDIUM**, category: `CONSUMER_LAG` (rogue or undocumented consumer).
-
----
-
-### Check 3G — Prometheus Metrics Validation
-
-Scrape metrics from all services twice, 15 seconds apart:
-
-```bash
-# First scrape
-curl -sf http://localhost:3001/metrics > ./monitor-session/metrics_t0.txt
-curl -sf http://localhost:3005/metrics >> ./monitor-session/metrics_t0.txt
-curl -sf http://localhost:3006/metrics >> ./monitor-session/metrics_t0.txt
-
-sleep 15
-
-# Second scrape
-curl -sf http://localhost:3001/metrics > ./monitor-session/metrics_t1.txt
-curl -sf http://localhost:3005/metrics >> ./monitor-session/metrics_t1.txt
-curl -sf http://localhost:3006/metrics >> ./monitor-session/metrics_t1.txt
-```
-
-**Flag:** Counters NOT incrementing between scrapes → **MEDIUM** (metrics may be
-stale or service is idle — in simulation mode, counters should be incrementing).
-**Flag:** Metrics endpoint returns empty/error → **MEDIUM**.
-
-**Note:** Cross-chain detector (port 3006) `/metrics` may return empty during the
-first ~30s of startup. Prometheus counters only appear after their first increment.
-This is expected and not a finding if the endpoint returns data on the second scrape.
-
----
-
-### Check 3H — WebSocket & Provider Health Per Chain
-
-**Goal:** Verify RPC WebSocket connections are alive and receiving data for
-every active chain. A dead WebSocket means zero detection on that chain.
-
-The system uses a "6-Provider Shield" per chain (`shared/core/src/websocket-manager.ts`)
-with chain-specific staleness thresholds:
-- **Fast chains** (Arbitrum, Solana): 5s
-- **Medium chains** (Polygon, BSC, Optimism, Base, Avalanche, Fantom): 10s
-- **Slow chains** (Ethereum, zkSync, Linea): 15s
-
-**Method:**
-1. Hit each partition's `/stats` endpoint and parse the per-chain stats:
-```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon, AVAX, FTM
-curl -sf http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, zkSync, Linea, Blast, Scroll
-curl -sf http://localhost:3003/stats | jq .  # P3: ETH, zkSync, Linea
-curl -sf http://localhost:3004/stats | jq .  # P4: Solana
-```
-
-2. For each chain, check:
-   - `lastMessageTimestamp` (or equivalent) — is it recent?
-   - `reconnectCount` — high count indicates unstable provider
-   - `activeSubscriptions` — should be >0 for each chain
-   - `messagesReceived` — should be >0 (chains producing data)
-
-**Flag:** Any chain with no messages received → **CRITICAL**, category: `WEBSOCKET_HEALTH`
-(dead WebSocket = zero detection on that chain).
-**Flag:** Any chain with `lastMessage` older than its staleness threshold →
-**HIGH**, category: `WEBSOCKET_HEALTH`.
-**Flag:** Any chain with reconnectCount > 5 → **HIGH**, category: `PROVIDER_HEALTH`
-(unstable provider — frequent reconnections cause data gaps).
-**Flag:** Any chain with 0 active subscriptions → **CRITICAL**,
-category: `WEBSOCKET_HEALTH`.
-
----
-
-### Check 3I — Risk Management State (Drawdown Circuit Breaker)
-
-**Goal:** Verify the drawdown circuit breaker is in NORMAL state. The system
-can pass all health checks while producing zero profit because the drawdown
-breaker is in HALT state — the #1 profitability blind spot.
-
-States: NORMAL (100% sizing) → CAUTION (75%) → HALT (0% — trading stopped)
-→ RECOVERY (50%)
-
-**Method:**
-```bash
-# Execution engine health includes risk state information
-curl -sf http://localhost:3005/health | jq .
-curl -sf http://localhost:3005/stats | jq .
-```
-
-Parse the response for drawdown/risk state fields. Look for:
-- `drawdownState` or `riskState` or similar field
-- `consecutiveLosses` — 5 consecutive losses triggers HALT
-- `dailyPnl` — daily loss >5% triggers HALT
-
-**Flag:** Drawdown state is `HALT` → **CRITICAL**, category: `RISK_STATE`
-(system is alive but not trading — invisible failure).
-**Flag:** Drawdown state is `CAUTION` → **HIGH**, category: `RISK_STATE`
-(trading at reduced capacity — 75% sizing).
-**Flag:** Drawdown state is `RECOVERY` → **MEDIUM**, category: `RISK_STATE`
-(recovering — 50% sizing).
-**Flag:** Risk state information not available in endpoint → **MEDIUM**,
-category: `RISK_STATE` (blind spot — can't verify trading status).
-
----
-
-### Check 3J — Pipeline Latency vs <50ms Target
-
-**Goal:** Verify hot-path latency is within the <50ms target (ADR-022).
-Exceeding this target means opportunities expire before execution,
-especially on fast chains (Arbitrum 2s TTL, Solana 1s TTL).
-
-The `LatencyTracker` tracks 4 pipeline stages with Float64Array ring buffers:
-`ws_receive`, `batcher_flush`, `detector_process`, `opportunity_publish`.
-
-**Method:**
-```bash
-# Partition metrics expose pipeline latency percentiles
-curl -sf http://localhost:3001/metrics  # Parse pipeline_latency_p50, p95, p99
-curl -sf http://localhost:3002/metrics
-curl -sf http://localhost:3003/metrics
-curl -sf http://localhost:3004/metrics
-```
-
-Parse Prometheus metrics for:
-- `pipeline_latency_p95` — should be <50ms
-- `pipeline_latency_p99` — should be <100ms (some headroom)
-- `pipeline_latency_p50` — should be <20ms (median)
-
-**Flag:** Any partition with `pipeline_latency_p95` > 50ms → **HIGH**,
-category: `LATENCY` (exceeding hot-path target).
-**Flag:** Any partition with `pipeline_latency_p99` > 100ms → **HIGH**,
-category: `LATENCY` (tail latency too high).
-**Flag:** Latency metrics not present → **MEDIUM**, category: `LATENCY`
-(observability gap — can't verify performance target).
-
----
-
-### Check 3K — Gas Price & Spike Detection
-
-**Goal:** Verify gas prices are sane and no active gas spikes are blocking
-execution on any chain.
-
-The `GasPriceOptimizer` uses EMA-based spike detection with chain-specific
-thresholds and pre-submission refresh.
-
-**Method:**
-```bash
-# Execution engine stats include gas information
-curl -sf http://localhost:3005/stats | jq .
-curl -sf http://localhost:3005/health | jq .
-```
-
-Parse for gas-related fields per chain. Also check Prometheus metrics:
-```bash
-curl -sf http://localhost:3005/metrics
-# Parse: arbitrage_gas_price_gwei{chain="<name>"}
-```
-
-**Flag:** Any chain with gas price = 0 → **HIGH**, category: `GAS_SPIKE`
-(gas price not being fetched — execution will fail or use stale values).
-**Flag:** Any chain with active gas spike detected → **MEDIUM**,
-category: `GAS_SPIKE` (execution temporarily blocked on that chain).
-**Flag:** Gas price above chain max threshold → **HIGH**, category: `GAS_SPIKE`
-(chain thresholds: Ethereum max 500 gwei, Arbitrum max 10 gwei).
-
----
-
-### Check 3L — Simulation Provider Health
-
-**Goal:** Verify transaction simulation providers are available. Without
-simulation, trades either skip validation (risky) or fail.
-
-The `SimulationService` supports: Tenderly, Alchemy, Local (eth_call), Helius (Solana).
-
-**Method:**
-```bash
-curl -sf http://localhost:3005/stats | jq .
-```
-
-Parse for simulation provider status fields. Check:
-- Which providers are configured and healthy
-- Simulation success rate
-- Whether simulation is being used (vs skipped)
-
-**Flag:** All simulation providers unhealthy → **HIGH**, category: `SIMULATION`
-(all trades will skip simulation or fail).
-**Flag:** Simulation success rate <50% → **MEDIUM**, category: `SIMULATION`.
-**Flag:** No simulation providers configured → **MEDIUM**, category: `SIMULATION`.
-
----
-
-### Check 3M — Execution Probability & Success Rate
-
-**Goal:** Verify execution success rates are healthy. Low success rates
-mean capital is being wasted on gas for failed transactions.
-
-The `ExecutionProbabilityTracker` persists per-chain/DEX success rates to Redis.
-
-**Method:**
-```bash
-curl -sf http://localhost:3005/probability-tracker | jq .
-```
-
-Parse for:
-- Overall execution success rate
-- Per-chain success rates
-- Recent profitable execution rate
-
-**Flag:** Overall success rate <30% → **HIGH**, category: `EXECUTION_PROBABILITY`
-(most executions failing — gas wasted).
-**Flag:** Any chain with 0% success rate and >0 attempts → **HIGH**,
-category: `EXECUTION_PROBABILITY` (chain execution completely broken).
-**Flag:** Endpoint returns empty/error → **MEDIUM**, category: `EXECUTION_PROBABILITY`
-(blind spot — can't verify execution health).
-
----
-
-### Check 3N — Bridge Recovery Status
-
-**Goal:** Verify no bridge transactions are stuck. Stuck bridges mean
-capital is locked and unavailable for trading.
-
-The `BridgeRecoveryManager` tracks: pending, bridging, bridge_completed_sell_pending,
-recovered, failed.
-
-**Method:**
-```bash
-curl -sf http://localhost:3005/bridge-recovery | jq .
-```
-
-Parse for:
-- Total pending bridge transactions
-- Any transactions stuck >24 hours
-- Any transactions in `failed` state
-
-**Flag:** Any bridge stuck >24 hours → **HIGH**, category: `BRIDGE_RECOVERY`
-(capital locked).
-**Flag:** >3 concurrent pending bridges → **MEDIUM**, category: `BRIDGE_RECOVERY`
-(approaching concurrency limit of 3).
-**Flag:** Any corrupt bridge entries → **HIGH**, category: `BRIDGE_RECOVERY`
-(data integrity issue).
-
----
-
-### Check 3O — Memory Health Per Service
-
-**Goal:** Verify memory usage is within platform-aware thresholds. The
-`EnhancedHealthMonitor` uses different thresholds per platform:
-- Fly.io: warning 60%, critical 78%
-- Oracle Cloud: warning 80%, critical 95%
-- Local dev: warning 80%, critical 95%
-
-**Method:**
-Parse memory information from each service's `/health` response (collected
-in Check 3A). Look for RSS memory, heap used, heap total fields.
-
-```bash
-# Also check Redis memory
-redis-cli INFO memory
-# Parse: used_memory_human, used_memory_peak_human, maxmemory
-```
-
-**Flag:** Any service using >80% of its memory allocation → **HIGH**,
-category: `MEMORY` (approaching OOM).
-**Flag:** Redis memory >75% of maxmemory → **HIGH**, category: `MEMORY`
-(Redis eviction risk).
-**Flag:** Memory info not available in health response → **LOW**,
-category: `MEMORY`.
-
----
-
-### Check 3P — DLQ Root Cause Analysis
-
-**Goal:** When the DLQ has entries (detected in Check 3D), analyze WHY messages
-are failing instead of just reporting the count. A DLQ with 710 entries and 67%
-rejection rate (as seen in previous runs) is alarming — but without root cause
-analysis, the finding is actionable only as "DLQ is growing."
-
-**Prerequisite:** Only run this check if Check 3D found DLQ length > 0.
-
-**Method:**
-1. Read the most recent 50 DLQ entries to build a root cause profile:
-
-```bash
-redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 50
-```
-
-2. For each entry, extract these fields (DLQ entries include metadata about the failure):
-   - `reason` or `error` — why the message was rejected
-   - `originalStream` — which stream the message came from
-   - `originalId` — the original message ID
-   - `service` — which service rejected it (if available)
-   - `timestamp` — when the rejection happened
-
-3. Group findings by rejection reason:
-
-| Reason | Count (of 50 sampled) | % of Sample | Source Stream |
-|--------|----------------------|-------------|---------------|
-| (from data) | | | |
-
-4. Identify the top-3 rejection reasons.
-
-5. Also check the forwarding DLQ (coordinator → execution engine failures):
-```bash
-redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 20
-```
-
-6. Check DLQ growth rate: compare current XLEN against the baseline from Step 2D.
-   Calculate entries per minute.
-
-**Flag:** Single rejection reason accounts for >50% of DLQ entries →
-severity: **HIGH**, category: `DLQ_ROOT_CAUSE` (systemic failure — one root cause
-is dominating; fix it to eliminate majority of DLQ entries).
-**Flag:** DLQ growing at >1 entry/second → severity: **HIGH**,
-category: `DLQ_ROOT_CAUSE` (active failure — system is actively producing failures).
-**Flag:** DLQ entries show `hmac_verification_failed` reason → severity: **CRITICAL**,
-category: `DLQ_ROOT_CAUSE` (HMAC signing key mismatch — all inter-service messages
-are being rejected).
-**Flag:** DLQ entries show `execution_timeout` or `simulation_failed` →
-severity: **MEDIUM**, category: `DLQ_ROOT_CAUSE` (execution-side issue — check
-simulation providers and RPC endpoints).
-**Flag:** Forwarding DLQ has entries → severity: **CRITICAL**,
-category: `DLQ_ROOT_CAUSE` (coordinator cannot reach execution engine — critical
-pipeline break).
-**Info:** DLQ entries analyzed with root cause distribution → severity: **INFO**,
-category: `DLQ_ROOT_CAUSE`.
-
-**Recommendation format:** Include the top-3 reasons in the finding recommendation:
-```
-"Top DLQ reasons: 1) <reason> (N%), 2) <reason> (N%), 3) <reason> (N%).
-Fix #1 to eliminate <N>% of DLQ entries."
-```
-
----
-
-### Check 3Q — Health Endpoint Response Schema Validation
+### Check 3C — Health Endpoint Response Schema Validation
 
 **Goal:** Verify that each service's `/health` response contains the expected
-fields with correct types. If a service changes its health response format
-(drops a field, changes a type), downstream monitoring tools, load balancers,
-and this validation pipeline will silently get wrong data.
+fields with correct types. Schema drift breaks downstream monitoring tools.
 
-**Method:**
 Use the `/health` responses already collected in Check 3A. For each service,
 validate the response against its expected schema.
 
@@ -1661,10 +1239,15 @@ Required fields:
   uptime: number (seconds)
   eventsProcessed: number
   chains: array<string> | number (active chain count)
-Optional fields:
+Optional fields (v3.0 — enhanced monitoring):
   pairsMonitored: number
   lastPriceUpdate: string (ISO8601) | number (timestamp)
   memoryUsage: object { rss, heapUsed, heapTotal }
+  stalePriceRejections: number (D2 metric)
+  wsMessageCounts: Record<string, number> (C2 metric)
+  maxPriceStalenessMs: number (C5 metric)
+  avgDetectionCycleDurationMs: number (D3 metric)
+  avgOpportunitiesPerCycle: number (D4 metric)
 ```
 
 **Execution Engine** (`/health`):
@@ -1676,7 +1259,7 @@ Optional fields:
   queueSize: number
   activeExecutions: number
   successRate: number
-  drawdownState: string
+  drawdownState: string (NORMAL|CAUTION|HALT|RECOVERY)
   consecutiveLosses: number
   memoryUsage: object
 ```
@@ -1713,17 +1296,928 @@ category: `HEALTH_SCHEMA`.
 
 ---
 
-### Check 3R — Prometheus Metrics Completeness
+## ── Section 3.2: Risk & Circuit Breakers ──
 
-**Goal:** Verify that all expected metrics exist in each service's Prometheus
-scrape output. Check 3G validates that counters increment; this check validates
-that the expected metrics are actually being exposed. A missing metric is an
-observability blind spot — you can't alert on what you can't measure.
+### Check 3D — Circuit Breaker States
+
+```bash
+curl -sf http://localhost:3005/circuit-breaker | jq .
+```
+
+**Flag:** Any chain in `OPEN` state → **HIGH** (chain is blocked from execution).
+**Flag:** Any chain in `HALF_OPEN` state → **MEDIUM** (chain recovering).
+**Flag:** Endpoint unreachable → **HIGH**.
+
+---
+
+### Check 3E — Risk Management State (Drawdown Circuit Breaker)
+
+**Goal:** Verify the drawdown circuit breaker is in NORMAL state. The system
+can pass all health checks while producing zero profit because the drawdown
+breaker is in HALT state — the #1 profitability blind spot.
+
+States: NORMAL (100% sizing) → CAUTION (75%) → HALT (0% — trading stopped)
+→ RECOVERY (50%)
 
 **Method:**
-Use the metrics scraped in Check 3G (from `./monitor-session/metrics_t0.txt`
-and `metrics_t1.txt`). Parse the Prometheus text format and check for expected
-metric names.
+```bash
+curl -sf http://localhost:3005/health | jq .
+curl -sf http://localhost:3005/stats | jq .
+```
+
+Parse the response for drawdown/risk state fields. Look for:
+- `drawdownState` or `riskState` or similar field
+- `consecutiveLosses` — 5 consecutive losses triggers HALT
+- `dailyPnl` — daily loss >5% triggers HALT
+
+**Flag:** Drawdown state is `HALT` → **CRITICAL**, category: `RISK_STATE`
+(system is alive but not trading — invisible failure).
+**Flag:** Drawdown state is `CAUTION` → **HIGH**, category: `RISK_STATE`
+(trading at reduced capacity — 75% sizing).
+**Flag:** Drawdown state is `RECOVERY` → **MEDIUM**, category: `RISK_STATE`
+(recovering — 50% sizing).
+**Flag:** Risk state information not available in endpoint → **MEDIUM**,
+category: `RISK_STATE` (blind spot — can't verify trading status).
+
+---
+
+### Check 3F — Circuit Breaker Transition History (Placeholder: E1-E2)
+
+**Goal:** Verify circuit breaker transition history is available and no
+flapping is occurring. This check validates metrics from research GAP-7
+(state machine observability).
+
+**Method:**
+```bash
+# Check for circuit breaker transition metrics
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep -i circuit_breaker_transition
+```
+
+**If metric `circuit_breaker_transitions_total` exists:**
+- Parse transitions by `from_state` and `to_state` labels
+- **Flag:** >5 transitions in session → **MEDIUM**, category: `CB_TRANSITIONS`
+  (circuit breaker flapping — thresholds may be miscalibrated)
+- **Flag:** CLOSED→OPEN transitions for same chain >3 → **HIGH**,
+  category: `CB_TRANSITIONS` (chain is repeatedly failing)
+
+**If metric does NOT exist:**
+- Record as **INFO**, category: `CB_TRANSITIONS`:
+  "Circuit breaker transition history not yet implemented (research E1-E2).
+  Current state-only check in 3D is the fallback."
+
+---
+
+### Check 3G — Backpressure Episode Tracking (Placeholder: E4-E5)
+
+**Goal:** Verify backpressure episode metrics are available and consistent
+with current backpressure state.
+
+**Method:**
+```bash
+curl -sf http://localhost:3000/api/health | jq '{backpressure}'
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep -i backpressure_episodes
+```
+
+**If metric `backpressure_episodes_total` exists:**
+- Compare episode count with current backpressure state from coordinator health
+- **Flag:** Episodes >0 but backpressure currently inactive and stream fill <20% →
+  **INFO** (backpressure activated and resolved — healthy behavior)
+- **Flag:** Episodes >10 in session → **MEDIUM**, category: `BACKPRESSURE`
+  (frequent backpressure — execution engine too slow or detection too fast)
+
+**If metric does NOT exist:**
+- Record as **INFO**, category: `BACKPRESSURE`:
+  "Backpressure episode tracking not yet implemented (research E4-E5).
+  Manual check via coordinator health + stream fill ratio is the fallback."
+
+---
+
+## ── Section 3.3: Data Flow & DLQ ──
+
+### Check 3H — Dead Letter Queue Status
+
+```bash
+redis-cli XLEN stream:dead-letter-queue
+redis-cli XLEN stream:forwarding-dlq
+redis-cli XLEN stream:dlq-alerts
+```
+
+**Flag:** `stream:dead-letter-queue` length > 0 → **HIGH** (messages failing on startup).
+**Flag:** `stream:forwarding-dlq` length > 0 → **CRITICAL** (coordinator can't reach
+execution engine — the critical pipeline path is broken).
+
+If DLQ has entries, read the most recent messages to understand what's failing:
+```bash
+redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 5
+redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 5
+```
+
+---
+
+### Check 3I — Redis Stream Topology Validation
+
+For ALL 24 declared streams, verify the stream exists and has the
+correct consumer groups attached:
+
+```bash
+for stream in stream:price-updates stream:swap-events stream:opportunities \
+  stream:whale-alerts stream:service-health stream:service-events \
+  stream:coordinator-events stream:health stream:health-alerts \
+  stream:execution-requests stream:execution-results \
+  stream:pending-opportunities stream:volume-aggregates \
+  stream:circuit-breaker stream:system-failover stream:system-commands \
+  stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq \
+  stream:dlq-alerts stream:system-failures stream:system-control \
+  stream:system-scaling stream:service-degradation; do
+
+  echo "=== $stream ==="
+  redis-cli XINFO STREAM $stream 2>&1
+  redis-cli XINFO GROUPS $stream 2>&1
+done
+```
+
+For each stream, verify:
+1. **Exists** — `XINFO STREAM` succeeds. Missing → **MEDIUM** for on-demand
+   streams (system-failures, system-control, system-scaling, service-degradation,
+   dlq-alerts — only created when triggered). Missing → **HIGH** for active streams.
+2. **Has expected consumer groups** — compare `XINFO GROUPS` output against the
+   System Inventory table. Missing group → **HIGH**.
+3. **Consumer groups have active consumers** — `consumers` field > 0 for each
+   group. Zero consumers → **CRITICAL** (dead consumer group).
+4. **Stream length is reasonable** — not 0 (for active streams like `price-updates`)
+   and not at MAXLEN cap (indicates producer outpacing consumer trim).
+
+**Note on on-demand streams:** The 5 on-demand streams (`system-failures`,
+`system-control`, `system-scaling`, `service-degradation`, `dlq-alerts`) may
+not exist in Redis during normal operation. Their absence is **MEDIUM** (not
+CRITICAL) since they're created on first use. Their consumer groups
+(`self-healing-manager` for the first 3) are also created dynamically.
+
+---
+
+### Check 3J — Consumer Lag & Pending Messages (Per-Service Discovery)
+
+**Goal:** Check pending messages for EVERY consumer group on EVERY active stream,
+not just hardcoded stream/group pairs. Services may create consumer groups
+dynamically (e.g., `failover-coordinator`, `self-healing-manager`), and the
+hardcoded list can drift.
+
+**Method — Part 1 (Dynamic discovery):**
+For each stream discovered in Step 2D, query all consumer groups:
+
+```bash
+for stream in $(cat ./monitor-session/streams/discovered.txt); do
+  echo "=== $stream ==="
+  redis-cli XINFO GROUPS $stream 2>&1
+done
+```
+
+Parse the output to build a complete map:
+```
+stream → [group1, group2, ...] → per-group pending count
+```
+
+**Method — Part 2 (Per-group pending check):**
+For each (stream, group) pair discovered above:
+
+```bash
+redis-cli XPENDING <stream> <group>
+```
+
+This returns: total pending, min-id, max-id, consumer list with per-consumer pending.
+
+**Method — Part 3 (Cross-reference with expected owners):**
+For each consumer group, verify it belongs to the expected service:
+
+| Group Pattern | Expected Owner |
+|---------------|---------------|
+| `coordinator-group` | Coordinator (port 3000) |
+| `cross-chain-detector-group` | Cross-Chain Detector (port 3006) |
+| `execution-engine-group` | Execution Engine (port 3005) |
+| `mempool-detector-group` | Mempool Detector (port 3008) |
+| `orderflow-pipeline` | Coordinator (orderflow subsystem) |
+| `self-healing-manager` | Expert Self-Healing Manager (dynamic) |
+| `failover-*` | Cross-Region Health Manager (dynamic) |
+
+Flag any group not matching a known pattern.
+
+**Also check ALL known critical pairs (comprehensive list):**
+```bash
+redis-cli XPENDING stream:price-updates coordinator-group
+redis-cli XPENDING stream:price-updates cross-chain-detector-group
+redis-cli XPENDING stream:opportunities coordinator-group
+redis-cli XPENDING stream:whale-alerts coordinator-group
+redis-cli XPENDING stream:whale-alerts cross-chain-detector-group
+redis-cli XPENDING stream:execution-requests execution-engine-group
+redis-cli XPENDING stream:execution-results coordinator-group
+redis-cli XPENDING stream:health coordinator-group
+redis-cli XPENDING stream:dead-letter-queue coordinator-group
+redis-cli XPENDING stream:forwarding-dlq coordinator-group
+redis-cli XPENDING stream:fast-lane execution-engine-group
+redis-cli XPENDING stream:swap-events coordinator-group
+redis-cli XPENDING stream:volume-aggregates coordinator-group
+redis-cli XPENDING stream:pending-opportunities cross-chain-detector-group
+redis-cli XPENDING stream:pending-opportunities orderflow-pipeline
+```
+
+**Thresholds (per group):**
+- Pending count > 50 → **HIGH** (consumer falling behind).
+- Pending count > 100 → **CRITICAL** (consumer overwhelmed).
+- Any message pending for > 30 seconds (check oldest pending entry) → **HIGH**
+  (stuck message — consumer may have crashed without ACKing).
+- Any message with delivery count > 3 → **HIGH** (message being retried
+  repeatedly — likely a poison message).
+
+**Additional per-service checks:**
+- **Lag delta**: For shared streams (e.g., `stream:price-updates` consumed by both
+  `coordinator-group` and `cross-chain-detector-group`), compare pending counts
+  between groups. If one group has >10x the pending count of the other →
+  severity: **HIGH**, category: `CONSUMER_LAG` (one consumer is significantly
+  slower than its peer on the same stream).
+- **Unknown group**: Consumer group not matching any expected pattern →
+  severity: **MEDIUM**, category: `CONSUMER_LAG` (rogue or undocumented consumer).
+
+---
+
+### Check 3K — DLQ Root Cause Analysis
+
+**Goal:** When the DLQ has entries (detected in Check 3H), analyze WHY messages
+are failing instead of just reporting the count.
+
+**Prerequisite:** Only run this check if Check 3H found DLQ length > 0.
+
+**Method:**
+1. Read the most recent 50 DLQ entries to build a root cause profile:
+
+```bash
+redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 50
+```
+
+2. For each entry, extract these fields:
+   - `reason` or `error` — why the message was rejected
+   - `originalStream` — which stream the message came from
+   - `originalId` — the original message ID
+   - `service` — which service rejected it (if available)
+   - `timestamp` — when the rejection happened
+
+3. Group findings by rejection reason:
+
+| Reason | Count (of 50 sampled) | % of Sample | Source Stream |
+|--------|----------------------|-------------|---------------|
+| (from data) | | | |
+
+4. Identify the top-3 rejection reasons.
+
+5. Also check the forwarding DLQ (coordinator → execution engine failures):
+```bash
+redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 20
+```
+
+6. Check DLQ growth rate: compare current XLEN against the baseline from Step 2D.
+   Calculate entries per minute.
+
+7. **NEW: Check DLQ local fallback files** — If Redis DLQ write fails, the system
+   writes to local JSONL files. Check for recent fallback activity:
+```bash
+ls -la ./data/dlq-fallback-*.jsonl 2>/dev/null
+ls -la ./data/dlq-forwarding-fallback-*.jsonl 2>/dev/null
+```
+   **Flag:** Fallback files exist with today's date → severity: **HIGH**,
+   category: `DLQ_ROOT_CAUSE` (Redis DLQ write is failing — messages going to disk).
+
+**Flag:** Single rejection reason accounts for >50% of DLQ entries →
+severity: **HIGH**, category: `DLQ_ROOT_CAUSE` (systemic failure).
+**Flag:** DLQ growing at >1 entry/second → severity: **HIGH**,
+category: `DLQ_ROOT_CAUSE` (active failure — system is actively producing failures).
+**Flag:** DLQ entries show `hmac_verification_failed` reason → severity: **CRITICAL**,
+category: `DLQ_ROOT_CAUSE` (HMAC signing key mismatch).
+**Flag:** Forwarding DLQ has entries → severity: **CRITICAL**,
+category: `DLQ_ROOT_CAUSE` (coordinator cannot reach execution engine).
+**Info:** DLQ entries analyzed with root cause distribution → severity: **INFO**,
+category: `DLQ_ROOT_CAUSE`.
+
+---
+
+### Check 3L — Stream Transit Time (F1)
+
+**Goal:** Validate cross-service message transit time. The `stream_message_transit_ms`
+metric measures the time a message spends in Redis between publish and consume.
+This is the research GAP-6 metric — critical for verifying the pipeline is actually
+fast, not just appearing fast.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep stream_message_transit
+```
+
+Parse the `stream_message_transit_ms` histogram. Look for per-stream breakdowns.
+
+**Flag:** p95 transit time > 100ms on any stream → severity: **HIGH**,
+category: `STREAM_TRANSIT` (messages spending too long in Redis — consumers lagging
+or Redis under pressure).
+**Flag:** p95 transit time > 50ms → severity: **MEDIUM**, category: `STREAM_TRANSIT`.
+**Flag:** Metric not present → severity: **MEDIUM**, category: `STREAM_TRANSIT`
+(observability gap — cross-service latency invisible).
+**Flag:** Transit time on `stream:execution-requests` > 200ms → severity: **HIGH**,
+category: `STREAM_TRANSIT` (critical path — opportunities going stale between
+coordinator and execution engine).
+**Info:** All stream transit times < 50ms → severity: **INFO**,
+category: `STREAM_TRANSIT`.
+
+**Context:** In simulation mode with all services on localhost, transit times should
+be <10ms. In production with network hops, 20-50ms is acceptable. >100ms indicates
+a real bottleneck.
+
+---
+
+### Check 3M — Stream ACK Delay (Placeholder: F2)
+
+**Goal:** Measure time between message read (xreadgroup) and acknowledgment (xack).
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep stream_ack_delay
+```
+
+**If metric `stream_ack_delay_ms` exists:**
+- Parse per-stream/consumer-group breakdown
+- **Flag:** p95 ack delay > 500ms → **MEDIUM** (slow processing)
+- **Flag:** p95 ack delay > 2000ms → **HIGH** (very slow — risk of redelivery)
+
+**If metric does NOT exist:**
+- Record as **INFO**, category: `STREAM_TRANSIT`:
+  "Stream ACK delay tracking not yet implemented (research F2). Check 3J
+  pending message age is the fallback for detecting slow consumers."
+
+---
+
+### Check 3N — MAXLEN Trim Detection (Placeholder: F3)
+
+**Goal:** Detect when MAXLEN trimming causes silent data loss — messages
+trimmed before any consumer reads them.
+
+**Method:**
+```bash
+# Check for trim counter metric
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep stream_trimmed
+curl -sf http://localhost:3001/metrics 2>/dev/null | grep stream_trimmed
+```
+
+**If metric `stream_trimmed_messages_total` exists:**
+- **Flag:** Any non-zero trim count on `stream:execution-requests` or
+  `stream:fast-lane` → **HIGH** (critical path data loss)
+- **Flag:** Non-zero trim count on `stream:price-updates` → **MEDIUM**
+  (price data lost before consumption)
+
+**If metric does NOT exist (expected currently):**
+- Perform a manual approximation: For each active stream, compare XLEN against
+  MAXLEN. If XLEN >= 90% of MAXLEN, trimming is actively occurring:
+
+```bash
+# Check streams at risk of MAXLEN trimming
+for stream_info in "stream:price-updates:100000" "stream:opportunities:500000" \
+  "stream:execution-requests:25000" "stream:fast-lane:5000"; do
+  STREAM=$(echo $stream_info | cut -d: -f1-2)
+  MAXLEN=$(echo $stream_info | cut -d: -f3)
+  XLEN=$(redis-cli XLEN $STREAM)
+  RATIO=$(echo "scale=2; $XLEN * 100 / $MAXLEN" | bc 2>/dev/null || echo "N/A")
+  echo "$STREAM: $XLEN / $MAXLEN ($RATIO%)"
+done
+```
+
+- **Flag:** Any stream at >90% of MAXLEN → severity: **HIGH**, category: `STREAM_TRANSIT`
+  (active trimming — consumers may be losing messages).
+- **Flag:** Any stream at >80% of MAXLEN → severity: **MEDIUM** (approaching trim).
+- Record as **INFO**: "MAXLEN trim counter not yet implemented (research F3).
+  Manual XLEN-vs-MAXLEN check used as approximation."
+
+---
+
+## ── Section 3.4: Runtime Performance ──
+
+### Check 3O — Event Loop Health (B1)
+
+**Goal:** Verify event loop delay is within the <50ms hot-path target (ADR-022).
+Event loop lag is the #1 hidden cause of latency spikes — GC pauses, blocking
+I/O, or CPU saturation all manifest as event loop delay.
+
+**Method:**
+Scrape `runtime_eventloop_delay_*` metrics from all services:
+
+```bash
+for port in 3001 3002 3003 3004 3005; do
+  echo "=== Port $port ==="
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay
+done
+# Coordinator uses /api/metrics/prometheus
+curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_eventloop_delay
+```
+
+Parse: `runtime_eventloop_delay_p99_ms`, `runtime_eventloop_delay_p50_ms`,
+`runtime_eventloop_delay_mean_ms`, `runtime_eventloop_delay_max_ms`.
+
+**Flag:** Any service with `runtime_eventloop_delay_p99_ms` > 50ms → severity: **HIGH**,
+category: `RUNTIME_PERFORMANCE` (event loop blocking — violates hot-path target).
+**Flag:** Any service with `runtime_eventloop_delay_p99_ms` > 20ms → severity: **MEDIUM**,
+category: `RUNTIME_PERFORMANCE` (event loop starting to lag).
+**Flag:** `runtime_eventloop_delay_max_ms` > 200ms → severity: **HIGH**,
+category: `RUNTIME_PERFORMANCE` (severe event loop stall — likely GC or sync I/O).
+**Flag:** Metrics not present → severity: **MEDIUM**, category: `RUNTIME_PERFORMANCE`
+(RuntimeMonitor may not be started — check service index.ts for `getRuntimeMonitor().start()`).
+**Info:** All services p99 < 20ms → severity: **INFO**, category: `RUNTIME_PERFORMANCE`.
+
+---
+
+### Check 3P — GC Pressure (B2)
+
+**Goal:** Verify GC is not causing latency spikes. Major GC (mark-sweep-compact)
+events cause stop-the-world pauses that block the event loop.
+
+**Method:**
+```bash
+for port in 3001 3002 3003 3004 3005; do
+  echo "=== Port $port ==="
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_gc
+done
+curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_gc
+```
+
+Parse: `runtime_gc_pause_total_ms`, `runtime_gc_count_total`, `runtime_gc_major_count_total`.
+
+**Flag:** `runtime_gc_major_count_total` > 10 in session → severity: **MEDIUM**,
+category: `RUNTIME_PERFORMANCE` (frequent major GC — heap may be too small or
+leaking. ADR-022 ring buffers should minimize allocations).
+**Flag:** `runtime_gc_pause_total_ms` > 500ms cumulative → severity: **MEDIUM**,
+category: `RUNTIME_PERFORMANCE` (significant time spent in GC).
+**Flag:** Major GC count > total GC count * 0.1 → severity: **HIGH**,
+category: `RUNTIME_PERFORMANCE` (>10% of GCs are major — heap pressure).
+**Info:** Report GC metrics per service for the report.
+
+---
+
+### Check 3Q — Memory Breakdown (B3-B6, replaces old 3O)
+
+**Goal:** Verify memory usage is within thresholds using detailed breakdown
+from RuntimeMonitor, not just RSS.
+
+**Method:**
+```bash
+for port in 3001 3002 3003 3004 3005; do
+  echo "=== Port $port ==="
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_memory
+done
+curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_memory
+```
+
+Parse: `runtime_memory_heap_used_mb`, `runtime_memory_heap_total_mb`,
+`runtime_memory_rss_mb`, `runtime_memory_external_mb`, `runtime_memory_array_buffers_mb`.
+
+**Flag:** Any service with `heap_used / heap_total` > 85% → severity: **HIGH**,
+category: `MEMORY` (heap pressure — approaching OOM).
+**Flag:** Any service with `rss_mb` > 500 → severity: **HIGH**, category: `MEMORY`
+(high RSS — may cause OOM kill on constrained platforms like Fly.io).
+**Flag:** `external_mb` > 200 → severity: **MEDIUM**, category: `MEMORY`
+(SharedArrayBuffer/external memory growth — check L1 price matrix).
+**Flag:** Memory metrics not present → severity: **LOW**, category: `MEMORY`
+(fall back to /health memoryUsage field).
+
+Also check Redis memory:
+```bash
+redis-cli INFO memory
+# Parse: used_memory_human, used_memory_peak_human, maxmemory
+```
+
+**Flag:** Redis memory >75% of maxmemory → **HIGH**, category: `MEMORY`
+(Redis eviction risk).
+
+---
+
+## ── Section 3.5: Provider Quality ──
+
+### Check 3R — Provider Latency & Connectivity (Enhanced, C1)
+
+**Goal:** Verify RPC providers are responsive with per-chain latency visibility.
+Goes beyond binary connected/disconnected to show actual response times.
+
+**Method — Part 1 (Connection status from /stats):**
+```bash
+curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon, AVAX, FTM
+curl -sf http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, Blast, Scroll
+curl -sf http://localhost:3003/stats | jq .  # P3: ETH, zkSync, Linea
+curl -sf http://localhost:3004/stats | jq .  # P4: Solana
+```
+
+For each chain, check connection status, messagesReceived, activeSubscriptions.
+
+**Method — Part 2 (RPC latency from /metrics):**
+```bash
+for port in 3001 3002 3003 3004; do
+  echo "=== Port $port ==="
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_rpc_call_duration
+done
+```
+
+Parse `provider_rpc_call_duration_ms{chain="...",quantile="0.95"}` for each chain.
+
+**Flag:** Any chain with 0 messages received → **CRITICAL**, category: `WEBSOCKET_HEALTH`
+(dead WebSocket = zero detection on that chain).
+**Flag:** Any chain with 0 active subscriptions → **CRITICAL**,
+category: `WEBSOCKET_HEALTH`.
+**Flag:** Any chain with RPC p95 > 500ms → **HIGH**, category: `PROVIDER_QUALITY`
+(degraded provider — may cause stale prices).
+**Flag:** Any chain with RPC p95 > 200ms → **MEDIUM**, category: `PROVIDER_QUALITY`.
+**Flag:** RPC latency metrics not present → **INFO** (provider latency tracker
+may not be wired into providers yet — connection status check is the fallback).
+
+---
+
+### Check 3S — RPC Error Rate (C4)
+
+**Goal:** Detect elevated RPC error rates that indicate degraded or failing providers.
+
+**Method:**
+```bash
+for port in 3001 3002 3003 3004; do
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_rpc_errors_total
+done
+```
+
+Parse `provider_rpc_errors_total{chain="...",error_type="..."}`.
+
+**Flag:** Any chain with total errors > 10 in session → severity: **MEDIUM**,
+category: `PROVIDER_QUALITY` (elevated error rate).
+**Flag:** Any chain where `error_type="rate_limit"` count > 5 → severity: **HIGH**,
+category: `PROVIDER_QUALITY` (rate limited — provider is throttling us).
+**Flag:** Any chain where `error_type="timeout"` count > 10 → severity: **HIGH**,
+category: `PROVIDER_QUALITY` (provider timeouts — may need fallback provider).
+**Info:** Zero errors across all chains → severity: **INFO**, category: `PROVIDER_QUALITY`.
+
+---
+
+### Check 3T — Reconnection Frequency (C3)
+
+**Goal:** Detect unstable WebSocket connections. Frequent reconnections cause
+data gaps during the reconnection window.
+
+**Method:**
+```bash
+for port in 3001 3002 3003 3004; do
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_ws_reconnection
+done
+```
+
+Parse `provider_ws_reconnection_duration_ms{chain="...",quantile="0.95"}`.
+
+**Flag:** Any chain with > 5 reconnections in session → severity: **HIGH**,
+category: `PROVIDER_QUALITY` (unstable provider — frequent reconnections cause
+data gaps that lead to stale prices).
+**Flag:** Reconnection p95 > 10s → severity: **MEDIUM**, category: `PROVIDER_QUALITY`
+(slow recovery — long data gaps during reconnection).
+**Info:** No reconnections or very few → severity: **INFO**, category: `PROVIDER_QUALITY`.
+
+Also cross-reference with `/stats` reconnection counts from Check 3R.
+
+---
+
+### Check 3U — WebSocket Message Rate (C2)
+
+**Goal:** Verify all chains are receiving WebSocket messages at expected rates.
+A chain with zero messages means zero detection.
+
+**Method:**
+```bash
+for port in 3001 3002 3003 3004; do
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_ws_messages_total
+done
+```
+
+Parse `provider_ws_messages_total{chain="...",event_type="..."}`.
+
+**Flag:** Any active chain with 0 messages total → severity: **CRITICAL**,
+category: `WEBSOCKET_HEALTH` (dead WebSocket — no events being received).
+**Flag:** Any chain with message rate >10x lower than peer chains → severity: **MEDIUM**,
+category: `WEBSOCKET_HEALTH` (degraded — significantly fewer events than expected).
+**Info:** All chains receiving messages → severity: **INFO**, category: `WEBSOCKET_HEALTH`.
+
+---
+
+### Check 3V — Price Staleness (C5, D2)
+
+**Goal:** Verify prices are fresh and stale price rejection is working correctly.
+Stale prices are the #1 cause of failed trades.
+
+**Method:**
+```bash
+curl -sf http://localhost:3001/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf http://localhost:3002/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf http://localhost:3003/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf http://localhost:3004/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+```
+
+**Flag:** `maxPriceStalenessMs` > 30000 (30s) on any partition → severity: **HIGH**,
+category: `PROVIDER_QUALITY` (ADR-033 stale price threshold violated — detection
+is working with outdated prices).
+**Flag:** `maxPriceStalenessMs` > 15000 → severity: **MEDIUM**, category: `PROVIDER_QUALITY`.
+**Flag:** `stalePriceRejections` > 0 → severity: **INFO** (stale price filtering
+is working correctly — report the count per partition).
+**Flag:** Fields not present in /stats → severity: **INFO** (enhanced detection
+metrics not yet exposed — upgrade chain-instance.ts).
+
+---
+
+## ── Section 3.6: Detection Quality ──
+
+### Check 3W — Detection Cycle Timing (D3)
+
+**Goal:** Verify detection cycles complete within the <50ms hot-path budget.
+A slow detection cycle means opportunities are found late and may be stale
+by the time they reach execution.
+
+**Method:**
+```bash
+curl -sf http://localhost:3001/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf http://localhost:3002/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf http://localhost:3003/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf http://localhost:3004/stats | jq '{avgDetectionCycleDurationMs}'
+```
+
+**Flag:** `avgDetectionCycleDurationMs` > 50 on any partition → severity: **HIGH**,
+category: `DETECTION_QUALITY` (exceeds hot-path target — opportunities will be stale).
+**Flag:** `avgDetectionCycleDurationMs` > 20 → severity: **MEDIUM**,
+category: `DETECTION_QUALITY` (approaching target).
+**Flag:** Field not present → severity: **INFO** (metric not yet exposed).
+**Info:** All partitions < 20ms → severity: **INFO**, category: `DETECTION_QUALITY`.
+
+---
+
+### Check 3X — Opportunities Per Cycle (D4)
+
+**Goal:** Verify detection is finding opportunities. Zero opportunities across
+all partitions after 60s of uptime indicates detection logic issues.
+
+**Method:**
+```bash
+curl -sf http://localhost:3001/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf http://localhost:3002/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf http://localhost:3003/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf http://localhost:3004/stats | jq '{avgOpportunitiesPerCycle}'
+```
+
+**Flag:** `avgOpportunitiesPerCycle` is 0 across ALL partitions after > 60s uptime
+→ severity: **MEDIUM**, category: `DETECTION_QUALITY` (no opportunities being
+detected — may be expected in low-realism simulation).
+**Info:** Report per-partition breakdown for the report.
+
+---
+
+### Check 3Y — Cache Effectiveness (Placeholder: D1, D5)
+
+**Goal:** Verify pair cache and price snapshot cache are effective. High eviction
+rates or low hit rates indicate cache thrashing.
+
+**Method:**
+```bash
+for port in 3001 3002 3003 3004; do
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep pair_cache
+done
+```
+
+**If metrics `pair_cache_hit_total` and `pair_cache_miss_total` exist:**
+- Calculate hit rate: `hits / (hits + misses) * 100`
+- **Flag:** Hit rate < 50% → severity: **MEDIUM**, category: `DETECTION_QUALITY`
+  (cache thrashing — increase cache size or reduce pair space)
+- **Flag:** Hit rate < 20% → severity: **HIGH** (cache is ineffective)
+
+**If metrics do NOT exist:**
+- Record as **INFO**, category: `DETECTION_QUALITY`:
+  "Pair cache hit/miss counters not yet implemented (research D1/D5).
+  Cache size from partition stats is the only visibility."
+
+---
+
+## ── Section 3.7: Execution & Business Intelligence ──
+
+### Check 3Z — Gas & Spike Detection
+
+**Goal:** Verify gas prices are sane and no active gas spikes are blocking execution.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/stats | jq .
+curl -sf http://localhost:3005/health | jq .
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep arbitrage_gas_price_gwei
+```
+
+**Flag:** Any chain with gas price = 0 → **HIGH**, category: `GAS_SPIKE`
+(gas price not being fetched — execution will fail or use stale values).
+**Flag:** Any chain with active gas spike detected → **MEDIUM**, category: `GAS_SPIKE`.
+**Flag:** Gas price above chain max threshold → **HIGH**, category: `GAS_SPIKE`
+(chain thresholds: Ethereum max 500 gwei, Arbitrum max 10 gwei).
+
+---
+
+### Check 3AA — Simulation Provider Health
+
+**Goal:** Verify transaction simulation providers are available.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/stats | jq .
+```
+
+Parse for simulation provider status fields. Check:
+- Which providers are configured and healthy
+- Simulation success rate
+- Whether simulation is being used (vs skipped)
+
+**Flag:** All simulation providers unhealthy → **HIGH**, category: `SIMULATION`.
+**Flag:** Simulation success rate <50% → **MEDIUM**, category: `SIMULATION`.
+**Flag:** No simulation providers configured → **MEDIUM**, category: `SIMULATION`.
+
+---
+
+### Check 3AB — Execution Probability & Success Rate
+
+**Goal:** Verify execution success rates are healthy. Low success rates
+mean capital is being wasted on gas for failed transactions.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/probability-tracker | jq .
+```
+
+**Flag:** Overall success rate <30% → **HIGH**, category: `EXECUTION_PROBABILITY`.
+**Flag:** Any chain with 0% success rate and >0 attempts → **HIGH**,
+category: `EXECUTION_PROBABILITY`.
+**Flag:** Endpoint returns empty/error → **MEDIUM**, category: `EXECUTION_PROBABILITY`.
+
+---
+
+### Check 3AC — Bridge Recovery Status
+
+**Goal:** Verify no bridge transactions are stuck (capital locked).
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/bridge-recovery | jq .
+```
+
+**Flag:** Any bridge stuck >24 hours → **HIGH**, category: `BRIDGE_RECOVERY`.
+**Flag:** >3 concurrent pending bridges → **MEDIUM**, category: `BRIDGE_RECOVERY`.
+**Flag:** Any corrupt bridge entries → **HIGH**, category: `BRIDGE_RECOVERY`.
+
+---
+
+### Check 3AD — Opportunity Outcome Distribution (A2)
+
+**Goal:** Understand WHY executions succeed or fail by analyzing the outcome
+distribution. This is the research GAP-1 metric that transforms debugging
+from "84% success rate" to "8% revert, 5% timeout, 3% stale on BSC".
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep opportunity_outcome_total
+```
+
+Parse `opportunity_outcome_total{chain="...",outcome="..."}`. Expected outcomes:
+`success`, `revert`, `timeout`, `stale`, `gas_too_high`, `nonce_error`, `error`.
+
+Calculate outcome percentages per chain and overall:
+- success rate = success / total * 100
+- revert rate = revert / total * 100
+- timeout rate = timeout / total * 100
+
+**Flag:** Revert rate > 30% on any chain → severity: **HIGH**,
+category: `BUSINESS_INTELLIGENCE` (contract reverts — check simulation or price accuracy).
+**Flag:** Timeout rate > 20% on any chain → severity: **MEDIUM**,
+category: `BUSINESS_INTELLIGENCE` (execution too slow for chain block time).
+**Flag:** Stale rate > 20% → severity: **MEDIUM**, category: `BUSINESS_INTELLIGENCE`
+(opportunities expiring before execution — pipeline too slow or detection too late).
+**Flag:** `gas_too_high` rate > 10% → severity: **MEDIUM**, category: `BUSINESS_INTELLIGENCE`
+(gas spike causing rejections — check gas spike thresholds).
+**Info:** Report full outcome distribution table for the report.
+
+---
+
+### Check 3AE — Profit Slippage (A3)
+
+**Goal:** Measure the gap between expected profit (from detection) and actual
+profit (from execution). Large slippage means the detection algorithm is
+overestimating opportunities.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep profit_slippage_pct
+```
+
+Parse `profit_slippage_pct` histogram. Positive slippage = expected > actual
+(overestimate). Negative = actual > expected (underestimate).
+
+**Flag:** Median slippage > 50% → severity: **HIGH**, category: `BUSINESS_INTELLIGENCE`
+(detection consistently overestimates profit — most trades will be less profitable
+than expected, or unprofitable).
+**Flag:** Median slippage > 25% → severity: **MEDIUM**, category: `BUSINESS_INTELLIGENCE`.
+**Info:** Report per-chain/strategy slippage breakdown.
+
+**Note:** In simulation mode, slippage patterns may not reflect production behavior
+since simulated execution uses mock prices.
+
+---
+
+### Check 3AF — Opportunity Age at Execution (A4)
+
+**Goal:** Measure how stale opportunities are when they reach the execution engine.
+Stale opportunities have already moved in price — executing them wastes gas.
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep opportunity_age_at_execution
+```
+
+Parse `opportunity_age_at_execution_ms{chain="..."}` histogram.
+
+**Chain-specific TTL thresholds:**
+- Fast chains (Arbitrum, Solana): opportunity TTL ~2s / ~1s
+- Medium chains (BSC, Polygon, Base, Optimism): TTL ~5s
+- Slow chains (Ethereum): TTL ~12s
+
+**Flag:** p95 age > chain-specific TTL → severity: **HIGH**,
+category: `BUSINESS_INTELLIGENCE` (executing stale opportunities — the pipeline
+is too slow for this chain's block time).
+**Flag:** p95 age > 5000ms on any fast chain → severity: **HIGH**,
+category: `BUSINESS_INTELLIGENCE`.
+**Flag:** Median age > 2000ms on any chain → severity: **MEDIUM**,
+category: `BUSINESS_INTELLIGENCE`.
+**Info:** Report per-chain age distribution.
+
+---
+
+### Check 3AG — Profit & Gas Efficiency (F4, F5, placeholder F6)
+
+**Goal:** Evaluate per-execution profitability and gas efficiency.
+This answers: "Are we making money, and how much is gas eating?"
+
+**Method:**
+```bash
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep profit_per_execution
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep gas_cost_per_execution
+```
+
+Parse `profit_per_execution{chain="...",strategy="..."}` and
+`gas_cost_per_execution{chain="..."}` histograms.
+
+**Flag:** Median profit ≤ 0 across all chains → severity: **HIGH**,
+category: `BUSINESS_INTELLIGENCE` (system is losing money on average).
+**Flag:** Any chain where median gas cost > median profit → severity: **HIGH**,
+category: `BUSINESS_INTELLIGENCE` (gas is eating all the profit on this chain).
+**Flag:** Metrics not present → severity: **MEDIUM**, category: `BUSINESS_INTELLIGENCE`
+(no profitability visibility — Phase 3 metrics may not be wired).
+**Info:** Report per-chain profit and gas tables.
+
+**Placeholder (F6):** When `profit_to_gas_ratio` gauge is implemented, add check:
+ratio < 1.5 → MEDIUM (thin margins), ratio < 1.0 → HIGH (unprofitable after gas).
+
+---
+
+## ── Section 3.8: Observability ──
+
+### Check 3AH — Prometheus Metrics Validation
+
+Scrape metrics from all services twice, 15 seconds apart:
+
+```bash
+# First scrape (partitions + execution + cross-chain)
+for port in 3001 3002 3003 3004 3005 3006; do
+  curl -sf http://localhost:$port/metrics >> ./monitor-session/metrics_t0.txt
+done
+# Coordinator (different endpoint)
+curl -sf http://localhost:3000/api/metrics/prometheus >> ./monitor-session/metrics_t0.txt
+
+sleep 15
+
+# Second scrape
+for port in 3001 3002 3003 3004 3005 3006; do
+  curl -sf http://localhost:$port/metrics >> ./monitor-session/metrics_t1.txt
+done
+curl -sf http://localhost:3000/api/metrics/prometheus >> ./monitor-session/metrics_t1.txt
+```
+
+**Flag:** Counters NOT incrementing between scrapes → **MEDIUM** (metrics may be
+stale or service is idle — in simulation mode, counters should be incrementing).
+**Flag:** Metrics endpoint returns empty/error → **MEDIUM**.
+
+**Note:** Cross-chain detector (port 3006) `/metrics` may return empty during the
+first ~30s of startup. Prometheus counters only appear after their first increment.
+
+---
+
+### Check 3AI — Metrics Completeness
+
+**Goal:** Verify that all expected metrics exist in each service's Prometheus
+scrape output.
+
+Use the metrics from `./monitor-session/metrics_t1.txt` (second scrape, more
+likely to have all metrics).
 
 **Expected metrics per service:**
 
@@ -1736,10 +2230,23 @@ Required metrics:
   price_updates_total (counter)
   opportunities_detected_total (counter)
   events_processed_total (counter)
+Required (v3.0 — runtime monitor):
+  runtime_eventloop_delay_p50_ms
+  runtime_eventloop_delay_p99_ms
+  runtime_memory_heap_used_mb
+  runtime_memory_rss_mb
+  runtime_gc_pause_total_ms
+  runtime_gc_count_total
+Required (v3.0 — provider quality):
+  provider_rpc_call_duration_ms (per-chain)
+  provider_rpc_errors_total (per-chain)
+  provider_ws_messages_total (per-chain)
+  websocket_connections_active (per-chain)
 Optional metrics:
   websocket_reconnections_total
   pairs_monitored (gauge)
-  memory_rss_bytes (gauge)
+  provider_ws_reconnection_duration_ms
+  provider_rpc_method_duration_ms
 ```
 
 **Execution Engine** (port 3005 `/metrics`):
@@ -1748,10 +2255,30 @@ Required metrics:
   arbitrage_executions_total (counter)
   arbitrage_execution_success_total (counter)
   arbitrage_gas_price_gwei (gauge, per-chain)
+Required (v3.0 — business intelligence):
+  opportunity_outcome_total (counter, per-chain/outcome)
+  profit_slippage_pct (histogram)
+  opportunity_age_at_execution_ms (histogram)
+  profit_per_execution (histogram)
+  gas_cost_per_execution (histogram)
+  stream_message_transit_ms (histogram)
 Optional metrics:
   arbitrage_profit_total (counter)
   arbitrage_simulation_success_rate (gauge)
   execution_queue_depth (gauge)
+```
+
+**Coordinator** (`/api/metrics/prometheus`):
+```
+Required metrics:
+  arbitrage_opportunities_total (counter)
+  arbitrage_executions_total (counter)
+  arbitrage_executions_successful_total (counter)
+Required (v3.0 — runtime):
+  runtime_eventloop_delay_p99_ms
+  runtime_memory_heap_used_mb
+Optional metrics:
+  arbitrage_opportunities_dropped_total (counter)
 ```
 
 **Cross-Chain Detector** (port 3006 `/metrics`):
@@ -1763,48 +2290,53 @@ Optional metrics:
   partitions_connected (gauge)
 ```
 
-**Validation:**
-1. For each service, parse the Prometheus text output (lines starting with metric name)
-2. Check each required metric name exists (prefix match — labels may vary)
-3. Report missing required metrics
-4. Optionally report missing optional metrics
-
-**Note:** Prometheus metrics only appear after their first increment. If a
-service just started, some counter metrics may not yet be present. Use the
-second scrape (metrics_t1) for validation, as it's 15s after the first and
-more likely to have all metrics. Cross-reference with Check 3G — if 3G
-reports "endpoint returns empty/error", skip this check for that service.
-
 **Flag:** Required metric missing from service → severity: **MEDIUM**,
-category: `METRICS_COMPLETENESS` (observability gap — can't alert on this metric).
+category: `METRICS_COMPLETENESS` (observability gap).
 **Flag:** More than 50% of required metrics missing → severity: **HIGH**,
 category: `METRICS_COMPLETENESS` (service metrics system may be broken).
-**Flag:** Metrics endpoint returns no data → severity: **MEDIUM**,
-category: `METRICS_COMPLETENESS` (already flagged in 3G, but note here for completeness).
 **Info:** All required metrics present → severity: **INFO**,
 category: `METRICS_COMPLETENESS`.
 
 ---
 
-Output:
+### Phase 3 Summary
+
+After all 35 checks across 8 subsections, read `./monitor-session/findings/runtime.jsonl`
+and output a summary:
 ```
-PHASE 3 COMPLETE — Runtime Validation (18 checks)
+PHASE 3 COMPLETE — Runtime Validation (35 checks, 8 subsections)
+  3.1 Service Health & Schema: 3A health, 3B leader, 3C schema
+  3.2 Risk & Circuit Breakers: 3D CB states, 3E drawdown, 3F CB history*, 3G backpressure*
+  3.3 Data Flow & DLQ: 3H DLQ, 3I topology, 3J lag, 3K root cause, 3L transit, 3M ack*, 3N trim*
+  3.4 Runtime Performance: 3O event loop, 3P GC, 3Q memory
+  3.5 Provider Quality: 3R latency, 3S errors, 3T reconnect, 3U WS rate, 3V staleness
+  3.6 Detection Quality: 3W cycle timing, 3X opps/cycle, 3Y cache*
+  3.7 Execution & BI: 3Z gas, 3AA sim, 3AB probability, 3AC bridge, 3AD outcomes, 3AE slippage, 3AF age, 3AG profit
+  3.8 Observability: 3AH prometheus, 3AI completeness
+  (* = placeholder for not-yet-implemented metrics)
   Services healthy: <n>/7
   Leader elected: YES/NO
   Circuit breakers: all CLOSED / <list open chains>
   DLQ entries: <n> | Top reason: <reason> (<n>%)
-  Stream topology: <n>/19 streams correct
+  Stream topology: <n>/24 streams correct
   Consumer groups: <n> discovered, <n> healthy
-  Pending messages: <total across all groups> (per-service breakdown available)
-  WebSocket health: <n>/<total> chains receiving data
+  Pending messages: <total across all groups>
+  Stream transit p95: <n>ms
+  Event loop p99: <n>ms (target: <50ms)
+  GC major events: <n>
+  Memory: all OK / <services above threshold>
+  Provider quality: <n>/<total> chains healthy RPC
+  Detection cycle avg: <n>ms (target: <50ms)
   Drawdown state: NORMAL / CAUTION / HALT / RECOVERY
-  Pipeline latency p95: <n>ms (target: <50ms)
-  Gas spikes active: <n> chains
+  Execution outcomes: <n>% success, <n>% revert, <n>% timeout
+  Profit slippage median: <n>%
+  Opp age p95: <n>ms
+  Pipeline latency p95: <n>ms
+  Gas spikes: <n> chains
   Simulation providers: <n> healthy
   Execution success rate: <n>%
   Bridge recoveries pending: <n>
-  Memory: all OK / <services above threshold>
-  Health schemas: <n>/7 services valid
+  Health schemas: <n>/7 valid
   Metrics completeness: <n>/<total> required metrics present
   CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>  LOW: <n>
 ```
@@ -1839,7 +2371,7 @@ Record findings to `./monitor-session/findings/smoke-test.jsonl`:
 echo "=== SMOKE TEST BASELINE ===" > ./monitor-session/streams/smoke-baseline.txt
 for stream in stream:price-updates stream:opportunities \
   stream:execution-requests stream:execution-results \
-  stream:dead-letter-queue stream:forwarding-dlq; do
+  stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq; do
   LEN=$(redis-cli XLEN $stream)
   echo "$stream: $LEN" >> ./monitor-session/streams/smoke-baseline.txt
   echo "$stream: $LEN"
@@ -2047,7 +2579,7 @@ curl -sf http://localhost:3000/api/health/ready | jq .
 ```bash
 EXEC_LEN=$(redis-cli XLEN stream:execution-requests)
 echo "execution-requests length: $EXEC_LEN"
-# The MAXLEN for execution-requests is declared in the System Inventory (50,000)
+# The MAXLEN for execution-requests is declared in the System Inventory (25,000)
 # Backpressure ratio threshold is typically 0.8 (80%)
 ```
 
@@ -2125,67 +2657,103 @@ category: `PARTITION_FLOW`.
 
 ---
 
-### Step 4J — Stream Monitor Integration
+### Step 4J — Fast-Lane Stream Validation
 
-**Goal:** Leverage the dedicated `stream-monitor.js` daemon for continuous
-stream health analysis during the smoke test. The stream monitor (452 lines)
-provides deeper stream analytics than the polling in Step 4B, including
-consumer lag trends, throughput rates, and anomaly detection.
+**Goal:** Verify the `stream:fast-lane` is functional if fast-lane execution is
+configured. The fast-lane consumer (`fast-lane.consumer.ts`) reads from this stream
+and executes high-confidence opportunities with reduced validation overhead.
 
 **Method:**
 
-1. Check if `stream-monitor.js` exists:
 ```bash
-ls -la ./monitor-session/stream-monitor.js 2>/dev/null && echo "FOUND" || echo "NOT_FOUND"
+# Check if fast-lane stream exists and has data
+FAST_LEN=$(redis-cli XLEN stream:fast-lane 2>/dev/null || echo "0")
+echo "stream:fast-lane length: $FAST_LEN"
+
+# Check if fast-lane consumer group exists
+redis-cli XINFO GROUPS stream:fast-lane 2>/dev/null
 ```
 
-2. If found, launch it as a background process at the START of Phase 4
-   (before Step 4A) and let it run through the entire smoke test:
+If fast-lane XLEN grew during the smoke test (compare to baseline from 4A):
+- Verify execution engine `/stats` shows fast-lane processing
+- Check for pending entries in the consumer group
+
+**Flag:** Fast-lane stream exists but consumer group missing → severity: **HIGH**,
+category: `PIPELINE_FLOW` (fast-lane messages will accumulate unprocessed).
+**Flag:** Fast-lane consumer group exists but PEL growing (not ACKing) → severity: **MEDIUM**,
+category: `PIPELINE_FLOW` (fast-lane consumer may be stalled).
+**Info:** Fast-lane stream empty → severity: **INFO**,
+category: `PIPELINE_FLOW` (no high-confidence opportunities during smoke — expected with simulation).
+
+---
+
+### Step 4K — Business Intelligence Smoke Check
+
+**Goal:** Verify the Phase 3 business intelligence metrics (A2-A4, F4-F5)
+are actually recording data during the smoke test. These metrics were added
+recently and may not be wired into all code paths.
+
+**Method:**
+
 ```bash
-node ./monitor-session/stream-monitor.js \
-  --output ./monitor-session/findings/stream-analyst.jsonl \
-  --duration 90 &
-STREAM_MONITOR_PID=$!
-echo "Stream monitor started: PID $STREAM_MONITOR_PID"
+# Scrape execution engine metrics for BI counters
+curl -sf http://localhost:3005/metrics 2>/dev/null | grep -E "opportunity_outcome_total|profit_slippage_pct|opportunity_age_at_execution|profit_per_execution|gas_cost_per_execution"
 ```
 
-3. After Step 4G completes (end of smoke test), stop the monitor:
+Compare against the metrics scraped at the beginning of the smoke test.
+
+**Expected:** If execution attempts occurred during the smoke test
+(`stream:execution-results` grew), then:
+- `opportunity_outcome_total` should have non-zero values
+- `opportunity_age_at_execution_ms` should have recorded samples
+
+If no execution attempts occurred, these metrics being zero is expected.
+
+**Flag:** Executions occurred but `opportunity_outcome_total` is 0 → severity: **MEDIUM**,
+category: `BUSINESS_INTELLIGENCE` (outcome tracking not wired).
+**Flag:** Executions occurred but `opportunity_age_at_execution_ms` is 0 → severity: **MEDIUM**,
+category: `BUSINESS_INTELLIGENCE` (age tracking not wired).
+**Info:** No executions during smoke → skip BI check (expected in low-activity simulation).
+
+---
+
+### Step 4L — Runtime Performance Delta
+
+**Goal:** Compare runtime performance metrics from Phase 3 (event loop,
+GC, memory) against values at the end of the smoke test to detect resource
+degradation under load.
+
+**Method:**
+
 ```bash
-if [ -n "$STREAM_MONITOR_PID" ]; then
-  kill $STREAM_MONITOR_PID 2>/dev/null
-  wait $STREAM_MONITOR_PID 2>/dev/null
-  echo "Stream monitor stopped"
-fi
+# Scrape event loop delay after smoke test
+for port in 3001 3002 3003 3004 3005 3006; do
+  echo "=== Port $port ==="
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay_p99_ms
+  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_memory_rss_mb
+done
+curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep -E "runtime_eventloop_delay_p99_ms|runtime_memory_rss_mb"
 ```
 
-4. Read and summarize `stream-analyst.jsonl` findings:
-```bash
-cat ./monitor-session/findings/stream-analyst.jsonl 2>/dev/null | wc -l
-```
-Report any CRITICAL or HIGH findings from the stream analyst.
+Compare against Phase 3 values (Check 3O, 3Q).
 
-**Note:** If `stream-monitor.js` is not found, skip this step with an **INFO**
-finding noting the stream monitor is not available. The smoke test still works
-without it — the monitor provides supplementary analytics.
-
-**Flag:** Stream monitor found CRITICAL issues → severity: **CRITICAL**,
-category: `PIPELINE_FLOW` (stream analyst detected severe stream problem).
-**Flag:** Stream monitor found HIGH issues → severity: **HIGH**,
-category: `PIPELINE_FLOW`.
-**Info:** Stream monitor not found → severity: **INFO**,
-category: `PIPELINE_FLOW` (optional component, smoke test still valid).
-**Info:** Stream monitor ran successfully with no issues → severity: **INFO**,
-category: `PIPELINE_FLOW`.
+**Flag:** Event loop p99 increased >5x during smoke → severity: **HIGH**,
+category: `RUNTIME_DEGRADATION` (event loop blocking under load).
+**Flag:** RSS grew >50% during smoke → severity: **MEDIUM**,
+category: `RUNTIME_DEGRADATION` (possible memory leak under load).
+**Info:** Runtime metrics stable → severity: **INFO**,
+category: `RUNTIME_DEGRADATION`.
 
 ---
 
 Output:
 ```
-PHASE 4 COMPLETE — Pipeline Smoke Test (10 steps)
+PHASE 4 COMPLETE — Pipeline Smoke Test (12 steps)
   Price updates published: <n>
   Opportunities detected: <n>
   Execution requests forwarded: <n>
   Execution results received: <n>
+  Fast-lane processed: <n>
   Pipeline: FLOWING / STALLED at <stage>
   Trace complete: YES / NO / PARTIAL
   DLQ growth: <n> new entries
@@ -2193,7 +2761,8 @@ PHASE 4 COMPLETE — Pipeline Smoke Test (10 steps)
   Risk state post-smoke: NORMAL / CAUTION / HALT / RECOVERY
   Backpressure: INACTIVE / ACTIVE (ratio: <n>%)
   Partition flow: <n>/4 partitions actively processing
-  Stream monitor: RAN / NOT_AVAILABLE (<n> findings)
+  BI metrics recording: YES / NO / N/A (no executions)
+  Runtime stability: STABLE / DEGRADED
   CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>
 ```
 
@@ -2248,10 +2817,8 @@ Read ALL finding files:
 - `./monitor-session/findings/startup.jsonl`
 - `./monitor-session/findings/runtime.jsonl`
 - `./monitor-session/findings/smoke-test.jsonl`
-- `./monitor-session/findings/stream-analyst.jsonl` (if exists — from Step 4J)
 
-Count findings by severity across all phases. If `stream-analyst.jsonl` exists,
-include its findings in the severity counts and GO/NO-GO calculation.
+Count findings by severity across all phases.
 
 **GO/NO-GO DECISION RULES:**
 - Any **CRITICAL** finding → **NO-GO**
@@ -2444,7 +3011,7 @@ this template:
 | Execution Engine | 3005 | READY/FAILED | <ms> |
 | Cross-Chain | 3006 | READY/FAILED | <ms> |
 
-Streams discovered: <n>/19
+Streams discovered: <n>/24
 Missing: <list>
 
 ### Readiness Endpoint Consistency
@@ -2460,105 +3027,93 @@ Missing: <list>
 
 ---
 
-## Phase 3: Runtime Validation
+## Phase 3: Runtime Validation (35 checks, 8 subsections)
 
-### Service Health
-| Service | Status | Details |
-|---------|--------|---------|
-| ... | healthy/degraded/unhealthy | ... |
+### 3.1 Service Health & Schema
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3A Service Health Matrix | PASS/FAIL | <count> |
+| 3B Leader Election | PASS/FAIL | <count> |
+| 3C Health Schema Validation | PASS/FAIL | <count> |
 
-### Leader Election
-- Leader: <instance ID>
-- Lock TTL: <seconds>
+### 3.2 Risk & Circuit Breakers
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3D Circuit Breaker States | PASS/FAIL | <count> |
+| 3E Drawdown & Risk | PASS/FAIL | <count> |
+| 3F CB Transition History* | PASS/FAIL | <count> |
+| 3G Backpressure Episodes* | PASS/FAIL | <count> |
 
-### Circuit Breakers
-| Chain | State |
-|-------|-------|
-| ... | CLOSED/OPEN/HALF_OPEN |
+### 3.3 Data Flow & DLQ
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3H DLQ Analysis | PASS/FAIL | <count> |
+| 3I Stream Topology | PASS/FAIL | <count> |
+| 3J Consumer Lag | PASS/FAIL | <count> |
+| 3K Root Cause Analysis | PASS/FAIL | <count> |
+| 3L Stream Transit Time | PASS/FAIL | <count> |
+| 3M ACK Delay* | PASS/FAIL | <count> |
+| 3N MAXLEN Trim Detection* | PASS/FAIL | <count> |
 
-### DLQ Status & Root Cause
-| Queue | Length | Growth Rate |
-|-------|--------|-------------|
-| dead-letter-queue | <n> | <n>/min |
-| forwarding-dlq | <n> | <n>/min |
+### 3.4 Runtime Performance (Enhanced Monitoring)
+| Service | Event Loop p99 | GC Major | RSS MB | Status |
+|---------|---------------|----------|--------|--------|
+| ... | <ms> | <count> | <MB> | OK / WARN |
 
-**Top DLQ Rejection Reasons (sampled from last 50 entries):**
-| Reason | Count | % | Source Stream |
-|--------|-------|---|---------------|
-| <reason 1> | <n> | <n>% | <stream> |
-| <reason 2> | <n> | <n>% | <stream> |
-| <reason 3> | <n> | <n>% | <stream> |
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3O Event Loop Health | PASS/FAIL | <count> |
+| 3P GC Pressure | PASS/FAIL | <count> |
+| 3Q Memory Breakdown | PASS/FAIL | <count> |
 
-### WebSocket & Provider Health
-| Chain | Partition | Messages | Last Update | Reconnects | Status |
-|-------|-----------|----------|-------------|------------|--------|
-| BSC | P1 | <n> | <age> | <n> | HEALTHY/STALE/DEAD |
-| Polygon | P1 | <n> | <age> | <n> | HEALTHY/STALE/DEAD |
-| ... | ... | ... | ... | ... | ... |
+### 3.5 Provider Quality (Enhanced Monitoring)
+| Chain | RPC p95 | Errors | Reconnects | WS msgs | Status |
+|-------|---------|--------|------------|---------|--------|
+| ... | <ms> | <count> | <count> | <count> | OK / DEGRADED |
 
-### Risk Management State
-- Drawdown state: NORMAL / CAUTION / HALT / RECOVERY
-- Consecutive losses: <n>
-- Daily PnL: <value>
-- Position sizing factor: 100% / 75% / 50% / 0%
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3R Provider Latency | PASS/FAIL | <count> |
+| 3S RPC Error Rate | PASS/FAIL | <count> |
+| 3T Reconnection Frequency | PASS/FAIL | <count> |
+| 3U WebSocket Message Rate | PASS/FAIL | <count> |
+| 3V Price Staleness | PASS/FAIL | <count> |
 
-### Pipeline Latency
-| Partition | p50 | p95 | p99 | Status |
-|-----------|-----|-----|-----|--------|
-| P1 Asia-Fast | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
-| P2 L2-Turbo | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
-| P3 High-Value | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
-| P4 Solana | <n>ms | <n>ms | <n>ms | OK / OVER TARGET |
+### 3.6 Detection Quality
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3W Detection Cycle Timing | PASS/FAIL | <count> |
+| 3X Opportunities Per Cycle | PASS/FAIL | <count> |
+| 3Y Cache Effectiveness* | PASS/FAIL | <count> |
 
-### Gas & Simulation
-| Chain | Gas (gwei) | Spike Active | Sim Provider | Sim Success Rate |
-|-------|------------|-------------|--------------|-----------------|
-| ... | <n> | YES/NO | <provider> | <n>% |
+### 3.7 Execution & Business Intelligence
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3Z Gas Spike | PASS/FAIL | <count> |
+| 3AA Simulation Providers | PASS/FAIL | <count> |
+| 3AB Execution Probability | PASS/FAIL | <count> |
+| 3AC Bridge Recovery | PASS/FAIL | <count> |
+| 3AD Opportunity Outcomes | PASS/FAIL | <count> |
+| 3AE Profit Slippage | PASS/FAIL | <count> |
+| 3AF Opportunity Age | PASS/FAIL | <count> |
+| 3AG Profit & Gas Efficiency | PASS/FAIL | <count> |
 
-### Execution Probability
-- Overall success rate: <n>%
-- Profitable execution rate: <n>%
-- Per-chain breakdown: <table if available>
-
-### Bridge Recovery
-| Status | Count |
-|--------|-------|
-| Pending | <n> |
-| Stuck >24h | <n> |
-| Failed | <n> |
-
-### Memory Health
-| Service | RSS | Heap Used | Threshold | Status |
-|---------|-----|-----------|-----------|--------|
-| ... | <n>MB | <n>MB | <n>% | OK / WARNING / CRITICAL |
-
-Redis memory: <used> / <max>
-
-### Redis Stream Health Map
-
-| Stream | Exists | Length | Groups | Consumers | Pending | Oldest Pending | Status |
-|--------|--------|--------|--------|-----------|---------|----------------|--------|
-| stream:price-updates | YES | <n> | 2 | <n> | <n> | <age> | HEALTHY |
-| stream:opportunities | YES | <n> | 1 | <n> | <n> | <age> | HEALTHY |
-| ... | ... | ... | ... | ... | ... | ... | ... |
-
-### Health Endpoint Schema Validation
-| Service | Required Fields | Missing | Type Mismatches | Status |
-|---------|----------------|---------|-----------------|--------|
-| Coordinator | <n> | <n> | <n> | VALID / INVALID |
-| P1 Asia-Fast | <n> | <n> | <n> | VALID / INVALID |
-| P2 L2-Turbo | <n> | <n> | <n> | VALID / INVALID |
-| P3 High-Value | <n> | <n> | <n> | VALID / INVALID |
-| P4 Solana | <n> | <n> | <n> | VALID / INVALID |
-| Execution Engine | <n> | <n> | <n> | VALID / INVALID |
-| Cross-Chain | <n> | <n> | <n> | VALID / INVALID |
-
-### Prometheus Metrics Completeness
-| Service | Required | Present | Missing | Status |
-|---------|----------|---------|---------|--------|
-| P1 Asia-Fast | <n> | <n> | <list> | COMPLETE / GAPS |
+### 3.8 Observability
+| Service | Expected | Found | Missing | Status |
+|---------|----------|-------|---------|--------|
+| Partitions P1-P4 | <n> | <n> | <list> | COMPLETE / GAPS |
 | Execution Engine | <n> | <n> | <list> | COMPLETE / GAPS |
+| Coordinator | <n> | <n> | <list> | COMPLETE / GAPS |
 | Cross-Chain | <n> | <n> | <list> | COMPLETE / GAPS |
+
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3AH Prometheus Scrape | PASS/FAIL | <count> |
+| 3AI Metrics Completeness | PASS/FAIL | <count> |
+
+_* = placeholder check for not-yet-implemented metrics_
+
+<detailed findings here if any>
 
 ---
 
@@ -2571,6 +3126,7 @@ Redis memory: <used> / <max>
 | stream:opportunities | <n> | <n> | +<n> | FLOWING/STALLED |
 | stream:execution-requests | <n> | <n> | +<n> | FLOWING/STALLED |
 | stream:execution-results | <n> | <n> | +<n> | FLOWING/STALLED |
+| stream:fast-lane | <n> | <n> | +<n> | FLOWING/STALLED/EMPTY |
 
 ### Pipeline Verdict: FLOWING / STALLED AT <stage>
 
@@ -2615,10 +3171,17 @@ Redis memory: <used> / <max>
 | P3 High-Value | <n> | <n> | +<n> | ACTIVE / SILENT |
 | P4 Solana | <n> | <n> | +<n> | ACTIVE / SILENT |
 
-### Stream Monitor Analysis
-- Status: RAN / NOT_AVAILABLE
-- Findings: <n> (CRITICAL: <n>, HIGH: <n>, MEDIUM: <n>)
-<stream analyst findings summary if available>
+### Business Intelligence
+| Metric | Value | Status |
+|--------|-------|--------|
+| opportunity_outcome_total | <n> | RECORDING / NOT_RECORDING / N/A |
+| profit_slippage_pct samples | <n> | RECORDING / NOT_RECORDING / N/A |
+| opportunity_age_at_execution_ms | <n> | RECORDING / NOT_RECORDING / N/A |
+
+### Runtime Stability Post-Smoke
+| Service | EL p99 (Phase 3) | EL p99 (Post-Smoke) | RSS (Phase 3) | RSS (Post-Smoke) | Status |
+|---------|-------------------|---------------------|----------------|-------------------|--------|
+| ... | <ms> | <ms> | <MB> | <MB> | STABLE / DEGRADED |
 
 ---
 
@@ -2628,7 +3191,7 @@ Redis memory: <used> / <max>
 
 ---
 
-*Report generated by monitoring.md v2.6*
+*Report generated by monitoring.md v3.0*
 *Session: <SESSION_ID>*
 *Completed: <ISO8601>*
 ```

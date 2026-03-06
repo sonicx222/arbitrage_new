@@ -1,0 +1,38 @@
+{
+  "sessionId": "20260306_074441",
+  "timestamp": "2026-03-06T07:44:41Z",
+  "gitSha": "450787ad18828a4028d13a5e58a417098328c69b",
+  "decision": "GO",
+  "summary": {
+    "critical": 0,
+    "high": 3,
+    "medium": 9,
+    "low": 10,
+    "info": 52,
+    "total": 74
+  },
+  "findings": [
+    {"findingId": "SA-1B-002", "phase": "STATIC", "category": "CONSUMER_GROUP", "severity": "LOW", "title": "mempool config uses || instead of ??"},
+    {"findingId": "SA-1E-001", "phase": "STATIC", "category": "ENV_VAR", "severity": "MEDIUM", "title": "204 undocumented env vars"},
+    {"findingId": "SA-1G-001", "phase": "STATIC", "category": "HMAC_SIGNING", "severity": "LOW", "title": "STREAM_PREVIOUS_SIGNING_KEY not documented"},
+    {"findingId": "SA-1J-002", "phase": "STATIC", "category": "UNSAFE_PARSE", "severity": "LOW", "title": "test-utils parseInt missing radix"},
+    {"findingId": "SA-1K-001", "phase": "STATIC", "category": "REDIS_CLIENT_PARITY", "severity": "MEDIUM", "title": "enableReadyCheck misaligned"},
+    {"findingId": "SA-1K-002", "phase": "STATIC", "category": "REDIS_CLIENT_PARITY", "severity": "LOW", "title": "retryDelayOnFailover misaligned"},
+    {"findingId": "SA-1M-001", "phase": "STATIC", "category": "SILENT_ERROR", "severity": "LOW", "title": "HTTP/2 pool close catch"},
+    {"findingId": "SA-1M-002", "phase": "STATIC", "category": "SILENT_ERROR", "severity": "LOW", "title": "monolith shutdown catch"},
+    {"findingId": "SA-1N-001", "phase": "STATIC", "category": "STREAM_TYPE_FIDELITY", "severity": "MEDIUM", "title": "getOptionalNumber drops string-encoded numerics"},
+    {"findingId": "SA-1N-002", "phase": "STATIC", "category": "STREAM_TYPE_FIDELITY", "severity": "LOW", "title": "parseStreamResult no schema validation"},
+    {"findingId": "SA-1O-001", "phase": "STATIC", "category": "REDIS_KEY_REGISTRY", "severity": "LOW", "title": "metrics:recent global key naming inconsistent"},
+    {"findingId": "SA-1Q-001", "phase": "STATIC", "category": "INFRA_DRIFT", "severity": "MEDIUM", "title": "execution engine Fly.io port diverges"},
+    {"findingId": "SA-1R-001", "phase": "STATIC", "category": "TIMEOUT_HIERARCHY", "severity": "LOW", "title": "execution engine shutdown 5s tight"},
+    {"findingId": "SA-1R-005", "phase": "STATIC", "category": "TIMEOUT_HIERARCHY", "severity": "LOW", "title": "bootstrap shutdown not validated"},
+    {"findingId": "ST-001", "phase": "STARTUP", "category": "SERVICE_READY", "severity": "HIGH", "title": "P1 Asia-Fast slow startup 136s"},
+    {"findingId": "ST-008", "phase": "STARTUP", "category": "STREAM_TOPOLOGY", "severity": "MEDIUM", "title": "7/19 expected streams missing (on-demand)"},
+    {"findingId": "RT-005", "phase": "RUNTIME", "category": "STREAM_TOPOLOGY", "severity": "MEDIUM", "title": "7/19 expected streams missing at runtime"},
+    {"findingId": "RT-006", "phase": "RUNTIME", "category": "CONSUMER_LAG", "severity": "HIGH", "title": "execution engine consumer lag 749 pending"},
+    {"findingId": "RT-011", "phase": "RUNTIME", "category": "GAS_SPIKE", "severity": "MEDIUM", "title": "all chain gas prices report 0 gwei"},
+    {"findingId": "RT-017", "phase": "RUNTIME", "category": "METRICS_COMPLETENESS", "severity": "MEDIUM", "title": "some expected metric names differ"},
+    {"findingId": "SM-002", "phase": "SMOKE_TEST", "category": "RISK_STATE", "severity": "HIGH", "title": "risk state changed NORMAL to CAUTION"},
+    {"findingId": "SM-006", "phase": "SMOKE_TEST", "category": "TRACE_INCOMPLETE", "severity": "MEDIUM", "title": "trace context not propagated in execution results"}
+  ]
+}

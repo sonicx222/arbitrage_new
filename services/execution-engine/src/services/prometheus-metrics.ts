@@ -133,6 +133,54 @@ collector.defineMetric({
   labels: [],
 });
 
+// Phase 2 Enhanced Monitoring (A2): Opportunity outcome categorization
+collector.defineMetric({
+  name: 'opportunity_outcome_total',
+  type: MetricType.COUNTER,
+  description: 'Opportunity execution outcomes by category',
+  labels: ['chain', 'outcome'],
+});
+
+// Phase 3 Business Intelligence (A3): Expected vs actual profit tracking
+collector.defineMetric({
+  name: 'profit_slippage_pct',
+  type: MetricType.HISTOGRAM,
+  description: 'Percentage difference between expected and actual profit ((expected - actual) / |expected| * 100)',
+  labels: ['chain', 'strategy'],
+});
+
+// Phase 3 Business Intelligence (A4): Opportunity age at execution
+collector.defineMetric({
+  name: 'opportunity_age_at_execution_ms',
+  type: MetricType.HISTOGRAM,
+  description: 'Time from detection to execution start in milliseconds',
+  labels: ['chain'],
+});
+
+// Phase 3 Business Intelligence (F4): Per-execution profit histogram
+collector.defineMetric({
+  name: 'profit_per_execution',
+  type: MetricType.HISTOGRAM,
+  description: 'Profit per execution in native token units (wei / 1e18)',
+  labels: ['chain', 'strategy'],
+});
+
+// Phase 3 Business Intelligence (F5): Gas cost per execution
+collector.defineMetric({
+  name: 'gas_cost_per_execution',
+  type: MetricType.HISTOGRAM,
+  description: 'Gas cost per execution in native token units',
+  labels: ['chain'],
+});
+
+// Phase 3 Business Intelligence (F1): Stream message transit time
+collector.defineMetric({
+  name: 'stream_message_transit_ms',
+  type: MetricType.HISTOGRAM,
+  description: 'Time between message publish and consumption in milliseconds',
+  labels: ['stream'],
+});
+
 // ---------------------------------------------------------------------------
 // Recording functions
 // ---------------------------------------------------------------------------
@@ -209,6 +257,70 @@ export function recordVolume(chain: string, volumeUsd: number): void {
  */
 export function recordExecutionLatency(chain: string, strategy: string, latencyMs: number): void {
   collector.recordHistogram('execution_latency_ms', latencyMs, { chain, strategy });
+}
+
+/**
+ * Phase 2 Enhanced Monitoring (A2): Record an opportunity execution outcome.
+ *
+ * @param chain - Chain identifier (e.g. "bsc", "ethereum")
+ * @param outcome - Outcome category: 'success' | 'revert' | 'timeout' | 'stale' | 'gas_too_high' | 'skipped' | 'error'
+ */
+export function recordOpportunityOutcome(chain: string, outcome: string): void {
+  collector.incrementCounter('opportunity_outcome_total', { chain, outcome });
+}
+
+/**
+ * Phase 3 (A3): Record profit slippage percentage.
+ * Positive values mean expected > actual (overestimated).
+ * Negative values mean expected < actual (underestimated).
+ *
+ * @param chain - Chain identifier
+ * @param strategy - Strategy name
+ * @param slippagePct - Percentage difference: (expected - actual) / |expected| * 100
+ */
+export function recordProfitSlippage(chain: string, strategy: string, slippagePct: number): void {
+  collector.recordHistogram('profit_slippage_pct', slippagePct, { chain, strategy });
+}
+
+/**
+ * Phase 3 (A4): Record opportunity age at execution start.
+ *
+ * @param chain - Chain identifier
+ * @param ageMs - Time from detection to execution start in milliseconds
+ */
+export function recordOpportunityAge(chain: string, ageMs: number): void {
+  collector.recordHistogram('opportunity_age_at_execution_ms', ageMs, { chain });
+}
+
+/**
+ * Phase 3 (F4): Record profit per execution.
+ *
+ * @param chain - Chain identifier
+ * @param strategy - Strategy name
+ * @param profit - Profit in native token units (wei / 1e18)
+ */
+export function recordProfitPerExecution(chain: string, strategy: string, profit: number): void {
+  collector.recordHistogram('profit_per_execution', profit, { chain, strategy });
+}
+
+/**
+ * Phase 3 (F5): Record gas cost per execution.
+ *
+ * @param chain - Chain identifier
+ * @param gasCost - Gas cost in native token units
+ */
+export function recordGasCostPerExecution(chain: string, gasCost: number): void {
+  collector.recordHistogram('gas_cost_per_execution', gasCost, { chain });
+}
+
+/**
+ * Phase 3 (F1): Record stream message transit time.
+ *
+ * @param transitTimeMs - Time between publish and consumption in milliseconds
+ * @param streamName - Redis stream name
+ */
+export function recordStreamTransitTime(transitTimeMs: number, streamName: string): void {
+  collector.recordHistogram('stream_message_transit_ms', transitTimeMs, { stream: streamName });
 }
 
 /**

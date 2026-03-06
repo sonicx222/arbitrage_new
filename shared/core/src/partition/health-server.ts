@@ -13,6 +13,7 @@ import { createLogger } from '../logger';
 import { getStreamHealthMonitor } from '../monitoring/stream-health-monitor';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
 import { getRuntimeMonitor } from '../monitoring/runtime-monitor';
+import { getProviderLatencyTracker } from '../monitoring/provider-latency-tracker';
 import { setLogLevel } from '../logging/pino-logger';
 import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
@@ -381,8 +382,11 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         // Phase 1 Enhanced Monitoring: Runtime health metrics (event loop, GC, memory)
         const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
 
+        // Phase 2 Enhanced Monitoring: Provider/RPC quality metrics (C1, C2, C3, C4)
+        const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
+
         const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
-        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics;
+        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics;
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
         res.end(body);
       } catch (error) {
