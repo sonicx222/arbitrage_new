@@ -1312,11 +1312,12 @@ describe('ExecutionPipeline', () => {
     it('should compute slippage correctly when expectedProfit and actualProfit are in same units', async () => {
       const { recordProfitSlippage } = require('../../src/services/prometheus-metrics');
 
-      // expectedProfit = 100 (raw units), actualProfit = 80 (raw units)
+      // expectedProfit = 100 ETH, actualProfit = 80 ETH in wei (80e18)
+      // actualProfitEth = 80e18 / 1e18 = 80
       // slippage = (100 - 80) / |100| * 100 = 20%
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 80,
+        actualProfit: 80e18,
         gasCost: 5,
       });
 
@@ -1340,11 +1341,12 @@ describe('ExecutionPipeline', () => {
     it('should compute negative slippage when actual exceeds expected', async () => {
       const { recordProfitSlippage } = require('../../src/services/prometheus-metrics');
 
-      // expectedProfit = 100, actualProfit = 120
+      // expectedProfit = 100 ETH, actualProfit = 120 ETH in wei (120e18)
+      // actualProfitEth = 120e18 / 1e18 = 120
       // slippage = (100 - 120) / |100| * 100 = -20% (underestimated)
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 120,
+        actualProfit: 120e18,
         gasCost: 5,
       });
 

@@ -156,6 +156,16 @@ export class ExecutionPipeline {
   /** M-001 FIX: Max items processed synchronously before yielding to event loop */
   private static readonly MAX_SYNC_ITEMS_PER_PASS = 200;
 
+  /**
+   * In-memory dedup: tracks recently-executed opportunity IDs to prevent
+   * sequential re-execution of the same opportunity. The distributed lock
+   * only prevents *concurrent* execution — once the lock is released after
+   * completion, a second copy of the same message can acquire the lock and
+   * execute again. This Set catches that case.
+   */
+  private readonly recentlyExecutedIds = new Set<string>();
+  private static readonly MAX_RECENTLY_EXECUTED_IDS = 10_000;
+
   constructor(deps: PipelineDeps) {
     this.deps = deps;
   }
@@ -297,6 +307,21 @@ export class ExecutionPipeline {
     return this.activeExecutionCount;
   }
 
+  /**
+   * Record an opportunity ID as recently executed to prevent sequential re-execution.
+   * Bounded to MAX_RECENTLY_EXECUTED_IDS — oldest entries are evicted when full.
+   */
+  private recordExecutedId(id: string): void {
+    if (this.recentlyExecutedIds.size >= ExecutionPipeline.MAX_RECENTLY_EXECUTED_IDS) {
+      // Evict oldest entry (Set iteration order is insertion order)
+      const oldest = this.recentlyExecutedIds.values().next().value;
+      if (oldest !== undefined) {
+        this.recentlyExecutedIds.delete(oldest);
+      }
+    }
+    this.recentlyExecutedIds.add(id);
+  }
+
   // ===========================================================================
   // Lock Acquisition & Execution
   // ===========================================================================
@@ -311,6 +336,18 @@ export class ExecutionPipeline {
     // This ensures all log calls during lock acquisition, execution, and result
     // publishing automatically include traceId/spanId via the Pino mixin.
     const runExecution = async (): Promise<void> => {
+    // In-memory dedup: skip if this opportunity was already executed in this instance.
+    // The distributed lock prevents concurrent execution but not sequential re-execution
+    // after the lock is released.
+    if (this.recentlyExecutedIds.has(opportunity.id)) {
+      this.deps.logger.debug('Opportunity skipped - already executed (in-memory dedup)', {
+        opportunityId: opportunity.id,
+        traceId,
+      });
+      await this.deps.opportunityConsumer.ackMessageAfterExecution(opportunity.id);
+      return;
+    }
+
     const lockResourceId = `opportunity:${opportunity.id}`;
 
     const lockResult = await this.deps.lockManager.withLock(
@@ -349,6 +386,7 @@ export class ExecutionPipeline {
             );
 
             if (retryResult.success) {
+              this.recordExecutedId(opportunity.id);
               await this.deps.opportunityConsumer.ackMessageAfterExecution(opportunity.id);
               return;
             } else if (retryResult.reason === 'execution_error') {
@@ -386,6 +424,9 @@ export class ExecutionPipeline {
     } else {
       this.deps.lockConflictTracker.clear(opportunity.id);
     }
+
+    // Record in dedup set after execution attempt (success or error — prevents re-execution)
+    this.recordExecutedId(opportunity.id);
 
     await this.deps.opportunityConsumer.ackMessageAfterExecution(opportunity.id);
     }; // end runExecution
