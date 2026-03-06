@@ -403,8 +403,12 @@ export function createCircuitBreakerApiHandler(
         timestamp,
       } as ErrorResponse);
     } catch (error) {
+      // L-03 FIX: Don't leak internal error details in HTTP response.
+      // Log the full error server-side for debugging.
+      // eslint-disable-next-line no-console -- no logger available in this module
+      console.error('[circuit-breaker-api] Internal server error', error);
       sendJson(res, 500, {
-        error: `Internal server error: ${error instanceof Error ? error.message : 'unknown'}`,
+        error: 'Internal server error',
         timestamp,
       } as ErrorResponse);
     }

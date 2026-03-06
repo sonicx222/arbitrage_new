@@ -198,6 +198,10 @@ export class AnvilForkManager {
   private startPromise: Promise<void> | null = null;
 
   constructor(config: AnvilForkConfig) {
+    // M-009 FIX: Validate RPC URL before accepting it.
+    // Prevents env var injection pointing Anvil at a malicious RPC.
+    validateRpcUrl(config.rpcUrl);
+
     this.config = {
       rpcUrl: config.rpcUrl,
       chain: config.chain,
