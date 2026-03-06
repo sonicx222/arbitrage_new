@@ -42,6 +42,7 @@
     "build:metrics": "cd shared/metrics && npm run build",
     "build:core": "cd shared/core && npm run build",
     "build:ml": "cd shared/ml && npm run build",
+    "build:dashboard": "cd dashboard && npm run build",
     "build:clean": "npm run clean:cache && node scripts/clean-dist.js && npm run build",
     "build:validate": "node scripts/validate-build.js",
     "build:workspaces": "npm run build --workspaces --if-present",
