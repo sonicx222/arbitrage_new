@@ -75,7 +75,8 @@ export const RISK_CONFIG = {
      * Maximum consecutive losses before transitioning to HALT.
      * Default: 5
      */
-    maxConsecutiveLosses: parseEnvInt('RISK_MAX_CONSECUTIVE_LOSSES', 5, 1),
+    // SM-002 FIX: Default raised from 5 to 8 to prevent false CAUTION in simulation
+    maxConsecutiveLosses: parseEnvInt('RISK_MAX_CONSECUTIVE_LOSSES', 8, 1),
 
     /**
      * Position size multiplier during RECOVERY state (0-1).

@@ -67,7 +67,11 @@ export function getSimulationConfigFromEnv(): SimulationConfig | undefined {
   return {
     enabled: true,
     successRate: safeParseFloat(process.env.EXECUTION_SIMULATION_SUCCESS_RATE, 0.85),
-    executionLatencyMs: safeParseInt(process.env.EXECUTION_SIMULATION_LATENCY_MS, 500),
+    // RT-006 FIX: Reduced default from 500ms to 50ms. Real blockchain latency
+    // is 2-30s, but 500ms sim delay with 5 concurrency yielded only 10 exec/sec
+    // vs 250 msg/sec inflow, causing 749+ pending message lag. 50ms keeps
+    // simulation realistic enough while matching pipeline throughput.
+    executionLatencyMs: safeParseInt(process.env.EXECUTION_SIMULATION_LATENCY_MS, 50),
     gasUsed: safeParseInt(process.env.EXECUTION_SIMULATION_GAS_USED, 200000),
     gasCostMultiplier: safeParseFloat(process.env.EXECUTION_SIMULATION_GAS_COST_MULTIPLIER, 0.1),
     profitVariance: safeParseFloat(process.env.EXECUTION_SIMULATION_PROFIT_VARIANCE, 0.2),

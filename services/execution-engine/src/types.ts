@@ -645,7 +645,7 @@ export function resolveSimulationConfig(config?: SimulationConfig): ResolvedSimu
   return {
     enabled: config?.enabled ?? false,
     successRate: config?.successRate ?? 0.85,
-    executionLatencyMs: config?.executionLatencyMs ?? 500,
+    executionLatencyMs: config?.executionLatencyMs ?? 50,
     gasUsed: config?.gasUsed ?? 200000,
     gasCostMultiplier: config?.gasCostMultiplier ?? 0.1,
     profitVariance: config?.profitVariance ?? 0.2,

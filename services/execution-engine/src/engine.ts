@@ -392,10 +392,14 @@ export class ExecutionEngineService {
       this.logger,
     );
 
-    // Max concurrent executions: config > env var > default 5
+    // Max concurrent executions: config > env var > mode-appropriate default
+    // RT-006 FIX: Simulation mode uses higher default (20) since there's no real
+    // blockchain to saturate — prevents artificial consumer lag where detection
+    // outpaces execution at 250 msg/sec vs 10 exec/sec with old default of 5.
     const envMaxConcurrent = parseInt(process.env.MAX_CONCURRENT_EXECUTIONS ?? '', 10);
+    const defaultConcurrency = this.isSimulationMode ? 20 : 5;
     this.maxConcurrentExecutions = config.maxConcurrentExecutions
-      ?? (!Number.isNaN(envMaxConcurrent) && envMaxConcurrent > 0 ? envMaxConcurrent : 5);
+      ?? (!Number.isNaN(envMaxConcurrent) && envMaxConcurrent > 0 ? envMaxConcurrent : defaultConcurrency);
 
     // P2 OPT: Per-chain concurrent execution limit (0 = no per-chain limit)
     const envPerChain = parseInt(process.env.MAX_CONCURRENT_PER_CHAIN ?? '', 10);

@@ -41,7 +41,10 @@ const logger = createLogger('drawdown-circuit-breaker');
 const DEFAULT_CONFIG: DrawdownConfig = {
   maxDailyLoss: 0.05, // 5% of capital
   cautionThreshold: 0.03, // 3% triggers caution
-  maxConsecutiveLosses: 5,
+  // SM-002 FIX: Raised from 5 to 8. With 15% random failure rate, 5 consecutive
+  // losses has ~44% probability per 100-trade window, causing false CAUTION triggers.
+  // At 8, probability drops to ~2.6% per 100 trades — real loss clustering still detected.
+  maxConsecutiveLosses: 8,
   recoveryMultiplier: 0.5, // 50% sizing in recovery
   cautionMultiplier: 0.75, // FIX 2.1/4.1: 75% sizing in caution (was hardcoded)
   recoveryWinsRequired: 3,

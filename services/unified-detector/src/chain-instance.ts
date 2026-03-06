@@ -1223,7 +1223,10 @@ export class ChainDetectorInstance extends EventEmitter {
     const registry = getAdapterRegistry();
     // FIX #10: Configure vault adapter provider with request timeout
     const vaultFetchReq = new ethers.FetchRequest(this.chainConfig.rpcUrl);
-    vaultFetchReq.timeout = 10_000;
+    // ST-001 FIX: Reduced from 10s to 3s — vault RPCs that don't respond in 3s
+    // won't be useful for real-time arbitrage. Combined with parallelization below,
+    // this reduces worst-case startup from ~66s/chain to ~9s/chain.
+    vaultFetchReq.timeout = 3_000;
     // P1 Fix LW-012: Use staticNetwork to prevent infinite retry loop (see main provider fix)
     const vaultNumericChainId = this.chainConfig.id;
     const vaultStaticNetwork = vaultNumericChainId
@@ -1234,65 +1237,71 @@ export class ChainDetectorInstance extends EventEmitter {
       vaultStaticNetwork,
       { staticNetwork: !!vaultStaticNetwork }
     );
+
+    // ST-001 FIX: Initialize all vault adapters in parallel instead of sequentially.
+    // Previously, each adapter was initialized one-by-one with 3 retries × 10s timeout,
+    // causing Avalanche (3 vault DEXes) to take ~66s. With parallel init + 3s timeout,
+    // all adapters resolve in ~9s worst-case (single retry window).
+    const initAdapter = async (dex: typeof vaultDexes[0]): Promise<boolean> => {
+      let adapter;
+      const dexName = dex.name.toLowerCase();
+      const baseConfig = {
+        name: dex.name,
+        chain: this.chainId,
+        primaryAddress: dex.factoryAddress, // Vault address for vault-model DEXes
+        provider,
+      };
+
+      if (dexName === 'gmx') {
+        adapter = new GmxAdapter({ ...baseConfig, secondaryAddress: dex.routerAddress });
+      } else if (dexName === 'platypus') {
+        adapter = new PlatypusAdapter({ ...baseConfig, secondaryAddress: dex.routerAddress });
+      } else if (dexName === 'balancer_v2' || dexName === 'beethoven_x') {
+        adapter = new BalancerV2Adapter(baseConfig);
+      }
+
+      if (!adapter) return false;
+
+      const MAX_ADAPTER_RETRIES = 3;
+      let lastAdapterError: Error | null = null;
+      for (let attempt = 0; attempt < MAX_ADAPTER_RETRIES; attempt++) {
+        if (attempt > 0) {
+          await new Promise<void>(resolve => setTimeout(resolve, 1000 * (2 ** (attempt - 1))));
+        }
+        try {
+          await adapter.initialize();
+          lastAdapterError = null;
+          break;
+        } catch (retryError) {
+          lastAdapterError = retryError as Error;
+          if (attempt < MAX_ADAPTER_RETRIES - 1) {
+            this.logger.warn('Vault adapter init attempt failed, retrying', {
+              dex: dex.name,
+              chainId: this.chainId,
+              attempt: attempt + 1,
+              maxAttempts: MAX_ADAPTER_RETRIES,
+              error: (retryError as Error).message,
+            });
+          }
+        }
+      }
+      if (lastAdapterError) {
+        throw lastAdapterError;
+      }
+      await registry.register(adapter);
+      return true;
+    };
+
+    const results = await Promise.allSettled(vaultDexes.map(dex => initAdapter(dex)));
     let registeredCount = 0;
-
-    for (const dex of vaultDexes) {
-      try {
-        let adapter;
-        const dexName = dex.name.toLowerCase();
-        const baseConfig = {
-          name: dex.name,
-          chain: this.chainId,
-          primaryAddress: dex.factoryAddress, // Vault address for vault-model DEXes
-          provider,
-        };
-
-        if (dexName === 'gmx') {
-          adapter = new GmxAdapter({ ...baseConfig, secondaryAddress: dex.routerAddress });
-        } else if (dexName === 'platypus') {
-          adapter = new PlatypusAdapter({ ...baseConfig, secondaryAddress: dex.routerAddress });
-        } else if (dexName === 'balancer_v2' || dexName === 'beethoven_x') {
-          adapter = new BalancerV2Adapter(baseConfig);
-        }
-
-        if (adapter) {
-          // MED-1 FIX: Retry adapter initialization with exponential backoff.
-          // RPC endpoints may be transiently unavailable at startup — 3 attempts
-          // with 1s/2s delays handle the common "provider not yet ready" case.
-          const MAX_ADAPTER_RETRIES = 3;
-          let lastAdapterError: Error | null = null;
-          for (let attempt = 0; attempt < MAX_ADAPTER_RETRIES; attempt++) {
-            if (attempt > 0) {
-              await new Promise<void>(resolve => setTimeout(resolve, 1000 * (2 ** (attempt - 1))));
-            }
-            try {
-              await adapter.initialize();
-              lastAdapterError = null;
-              break;
-            } catch (retryError) {
-              lastAdapterError = retryError as Error;
-              if (attempt < MAX_ADAPTER_RETRIES - 1) {
-                this.logger.warn('Vault adapter init attempt failed, retrying', {
-                  dex: dex.name,
-                  chainId: this.chainId,
-                  attempt: attempt + 1,
-                  maxAttempts: MAX_ADAPTER_RETRIES,
-                  error: (retryError as Error).message,
-                });
-              }
-            }
-          }
-          if (lastAdapterError) {
-            throw lastAdapterError; // re-throw to fall into outer catch
-          }
-          await registry.register(adapter);
-          registeredCount++;
-        }
-      } catch (error) {
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === 'fulfilled' && (results[i] as PromiseFulfilledResult<boolean>).value) {
+        registeredCount++;
+      } else if (results[i].status === 'rejected') {
         this.logger.warn('Failed to initialize adapter for vault-model DEX', {
-          dex: dex.name,
+          dex: vaultDexes[i].name,
           chainId: this.chainId,
-          error: (error as Error).message,
+          error: (results[i] as PromiseRejectedResult).reason?.message ?? 'unknown',
         });
       }
     }

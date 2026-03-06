@@ -116,7 +116,7 @@ describe('Index Config Parsing', () => {
       expect(config).toBeDefined();
       expect(config!.enabled).toBe(true);
       expect(config!.successRate).toBe(0.85);
-      expect(config!.executionLatencyMs).toBe(500);
+      expect(config!.executionLatencyMs).toBe(50);
       expect(config!.gasUsed).toBe(200000);
       expect(config!.gasCostMultiplier).toBe(0.1);
       expect(config!.profitVariance).toBe(0.2);

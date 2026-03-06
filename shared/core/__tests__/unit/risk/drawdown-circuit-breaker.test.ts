@@ -111,7 +111,7 @@ describe('DrawdownCircuitBreaker', () => {
       const config = partialBreaker.getConfig();
       expect(config.maxDailyLoss).toBe(0.05);
       expect(config.cautionThreshold).toBe(0.03);
-      expect(config.maxConsecutiveLosses).toBe(5);
+      expect(config.maxConsecutiveLosses).toBe(8);
     });
 
     it('should throw error for invalid maxDailyLoss', () => {
