@@ -70,6 +70,13 @@ export interface OpportunityConsumerConfig {
   onOpportunityQueued?: (opportunity: ArbitrageOpportunity) => void;
   /** Consumer configuration overrides */
   consumerConfig?: Partial<ConsumerConfig>;
+  /**
+   * Phase 2 (ADR-038): Redis stream to consume from.
+   * When set, consumes from the specified per-chain-group stream instead of the
+   * legacy single EXECUTION_REQUESTS stream. Set via EXECUTION_CHAIN_GROUP env var.
+   * Defaults to RedisStreams.EXECUTION_REQUESTS for backward compatibility.
+   */
+  streamName?: string;
 }
 
 export interface PendingMessageInfo {
@@ -168,10 +175,12 @@ export class OpportunityConsumer {
 
     // Define consumer group configuration
     // Architecture Note: Consumes from EXECUTION_REQUESTS (forwarded by coordinator leader)
-    // This ensures only leader-approved opportunities are executed
+    // This ensures only leader-approved opportunities are executed.
+    // Phase 2 (ADR-038): When EXECUTION_CHAIN_GROUP is set, consumes from the per-group
+    // stream instead (e.g., stream:exec-requests-fast for the fast group).
     // @see ARCHITECTURE_V2.md Section 5.4 - Broker Pattern
     this.consumerGroup = {
-      streamName: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+      streamName: config.streamName ?? RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
       groupName: 'execution-engine-group',
       consumerName: this.instanceId,
       startId: '$',

@@ -153,6 +153,20 @@ export interface OpportunityRouterConfig {
    * transit and land in the DLQ.
    */
   startupGracePeriodMs?: number;
+  /**
+   * Phase 2 (ADR-038): Chain-group stream resolver.
+   * When provided, routes each opportunity to the per-group stream matching its buyChain
+   * (or chain for intra-chain opportunities) instead of the single executionRequestsStream.
+   * Falls back to executionRequestsStream when the chain is unknown or the resolver
+   * returns the default stream.
+   *
+   * Usage: pass `getStreamForChain` from `@arbitrage/config` to enable chain-group routing.
+   * Leave undefined to use the legacy single-stream mode (backward compatible).
+   *
+   * @see shared/config/src/execution-chain-groups.ts
+   * @see docs/reports/EXECUTION_BOTTLENECK_RESEARCH_2026-03-06.md — Phase 2
+   */
+  chainGroupStreamResolver?: (chainId: string) => string;
 }
 
 /**
@@ -170,9 +184,19 @@ const DEFAULT_CHAIN_TTL_OVERRIDES: Record<string, number> = {
 };
 
 /**
+ * Internal resolved config — all fields filled, callback fields may be undefined.
+ * Using an explicit type (not Required<>) so chainGroupStreamResolver can be truthfully
+ * typed as `fn | undefined` — Required<> would strip undefined from the union, causing
+ * TypeScript to incorrectly treat the `if (resolver)` check as always-truthy.
+ */
+type ResolvedRouterConfig = Omit<Required<OpportunityRouterConfig>, 'chainGroupStreamResolver'> & {
+  chainGroupStreamResolver: ((chainId: string) => string) | undefined;
+};
+
+/**
  * Default configuration
  */
-const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
+const DEFAULT_CONFIG: ResolvedRouterConfig = {
   maxOpportunities: 1000,
   opportunityTtlMs: 60000,
   duplicateWindowMs: 5000,
@@ -204,6 +228,8 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   startupGracePeriodMs: 15000,
   // RT-005 FIX: Default 1x (no change). Set via SIMULATION_OPPORTUNITY_TTL_MULTIPLIER env var.
   simulationTtlMultiplier: 1,
+  // Phase 2 (ADR-038): undefined = legacy single-stream mode (backward compatible)
+  chainGroupStreamResolver: undefined,
 };
 
 /**
@@ -212,7 +238,7 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
  * Manages the lifecycle of arbitrage opportunities from detection to execution.
  */
 export class OpportunityRouter {
-  private readonly config: Required<OpportunityRouterConfig>;
+  private readonly config: ResolvedRouterConfig;
   private readonly logger: OpportunityRouterLogger;
   private readonly streamsClient: OpportunityStreamsClient | null;
   private readonly circuitBreaker: CircuitBreaker;
@@ -876,6 +902,14 @@ export class OpportunityRouter {
     // OP-3 FIX: Pass trace context for cross-service correlation
     const messageData = serializeOpportunityForStream(opportunity, this.config.instanceId, traceContext);
 
+    // Phase 2 (ADR-038): Route to per-chain-group stream when resolver is configured.
+    // Uses buyChain for cross-chain opps (buy-side determines execution group);
+    // falls back to chain for intra-chain opps; falls back to single stream if unknown.
+    const chainId = opportunity.buyChain ?? opportunity.chain;
+    const targetStream = (this.config.chainGroupStreamResolver && chainId)
+      ? this.config.chainGroupStreamResolver(chainId)
+      : this.config.executionRequestsStream;
+
     // P1-7 FIX: Retry loop with exponential backoff
     // P1-8 FIX: Check shutdown flag before each attempt
     let lastError: Error | null = null;
@@ -887,7 +921,7 @@ export class OpportunityRouter {
       }
       try {
         // SA-005 FIX: Use xaddWithLimit for automatic MAXLEN from STREAM_MAX_LENGTHS
-        await this.streamsClient.xaddWithLimit(this.config.executionRequestsStream, messageData);
+        await this.streamsClient.xaddWithLimit(targetStream, messageData);
 
         // Success - record and return
         const justRecovered = this.circuitBreaker.recordSuccess();
@@ -900,6 +934,7 @@ export class OpportunityRouter {
         this.logger.debug('Forwarded opportunity to execution engine', {
           id: opportunity.id,
           chain: opportunity.chain,
+          stream: targetStream,
           profitPercentage: opportunity.profitPercentage,
           attempt: attempt + 1,
         });

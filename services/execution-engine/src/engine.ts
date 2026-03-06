@@ -241,6 +241,7 @@ export class ExecutionEngineService {
   private readonly circuitBreakerConfig: Required<CircuitBreakerConfig>;
   private readonly pendingStateConfig: PendingStateEngineConfig; // Phase 2 config
   private readonly consumerConfig: Partial<ConsumerConfig> | undefined; // Consumer tuning
+  private readonly executionStreamName: string | undefined; // Phase 2 (ADR-038): per-group stream
 
   // S6: Standby activation management extracted to StandbyManager
   private standbyManager: StandbyManager | null = null;
@@ -357,6 +358,9 @@ export class ExecutionEngineService {
 
     // Store consumer config for passing to OpportunityConsumer
     this.consumerConfig = config.consumerConfig;
+
+    // Phase 2 (ADR-038): store per-chain-group stream name (set by index.ts from env)
+    this.executionStreamName = config.executionStreamName;
 
     // Task 3: A/B testing config (enabled via environment variable)
     // FIX P0-2: Validate env var parseFloat/parseInt to prevent NaN propagation
@@ -698,6 +702,7 @@ export class ExecutionEngineService {
       });
 
       // Initialize opportunity consumer
+      // Phase 2 (ADR-038): pass streamName to consume from per-group stream when configured
       this.opportunityConsumer = new OpportunityConsumer({
         logger: this.logger,
         streamsClient: this.streamsClient,
@@ -705,6 +710,7 @@ export class ExecutionEngineService {
         stats: this.stats,
         instanceId: this.instanceId,
         consumerConfig: this.consumerConfig,
+        streamName: this.executionStreamName,
       });
 
       // Create consumer groups and start consuming

@@ -409,6 +409,12 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
     [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 100000, // RT-MAXLEN FIX: Increased from 25K — at 100 opps/s, 25K fills in ~4 min causing active trimming; 100K gives ~17 min buffer
+    // Phase 2: Per-chain-group streams (ADR-038). 25K each ≈ 100K total equivalent.
+    // Each group processes a subset of chains, so individual volumes are lower.
+    [RedisStreamsClient.STREAMS.EXEC_REQUESTS_FAST]:    25000, // fast group: bsc/polygon/avax/ftm
+    [RedisStreamsClient.STREAMS.EXEC_REQUESTS_L2]:      25000, // l2 group: arb/opt/base/scroll/blast
+    [RedisStreamsClient.STREAMS.EXEC_REQUESTS_PREMIUM]: 25000, // premium group: eth/zksync/linea
+    [RedisStreamsClient.STREAMS.EXEC_REQUESTS_SOLANA]:  10000, // solana group (lower volume)
     [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
     [RedisStreamsClient.STREAMS.CIRCUIT_BREAKER]: 5000,        // Circuit breaker events, critical alerts
     [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume

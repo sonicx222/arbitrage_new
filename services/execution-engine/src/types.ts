@@ -713,6 +713,13 @@ export interface ExecutionEngineConfig {
   tradeLoggerConfig?: Partial<TradeLoggerConfig>;
   /** Maximum number of concurrent executions (default: 5) */
   maxConcurrentExecutions?: number;
+  /**
+   * Phase 2 (ADR-038): Redis stream to consume from.
+   * When set via EXECUTION_CHAIN_GROUP env var, consumes from the per-chain-group stream
+   * (e.g., 'stream:exec-requests-fast') instead of the legacy EXECUTION_REQUESTS stream.
+   * Defaults to undefined (uses EXECUTION_REQUESTS for backward compatibility).
+   */
+  executionStreamName?: string;
 }
 
 /**

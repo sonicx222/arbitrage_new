@@ -32,7 +32,7 @@ import {
 } from '@arbitrage/core/service-lifecycle';
 import { parseEnvInt } from '@arbitrage/core/utils';
 import { createLogger, parseStandbyConfig } from '@arbitrage/core';
-import { safeParseInt, safeParseFloat } from '@arbitrage/config';
+import { safeParseInt, safeParseFloat, getExecutionGroupFromEnv, EXECUTION_GROUP_STREAMS } from '@arbitrage/config';
 import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
@@ -99,6 +99,26 @@ export function getCircuitBreakerConfigFromEnv() {
     failureThreshold: safeParseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD, 5),
     cooldownPeriodMs: safeParseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MS, 300000),
     halfOpenMaxAttempts: safeParseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS, 1),
+  };
+}
+
+/**
+ * Phase 2 (ADR-038): Parse chain-group configuration from environment variables.
+ *
+ * Returns the Redis stream name for this EE instance's chain group, or undefined
+ * when EXECUTION_CHAIN_GROUP is not set (legacy single-EE mode).
+ *
+ * Environment Variables:
+ * - EXECUTION_CHAIN_GROUP: Chain group to consume (fast | l2 | premium | solana)
+ *
+ * Exported for unit testing -- not part of the public service API.
+ */
+export function getChainGroupConfigFromEnv(): { executionStreamName: string; chainGroup: string } | undefined {
+  const group = getExecutionGroupFromEnv();
+  if (!group) return undefined;
+  return {
+    chainGroup: group,
+    executionStreamName: EXECUTION_GROUP_STREAMS[group],
   };
 }
 
@@ -317,12 +337,19 @@ async function main() {
     const simulationConfig = getSimulationConfigFromEnv();
     const standbyConfig = getStandbyConfigFromEnv();
     const circuitBreakerConfig = getCircuitBreakerConfigFromEnv();
+    // Phase 2 (ADR-038): chain-group routing — undefined = legacy single-EE mode
+    const chainGroupConfig = getChainGroupConfigFromEnv();
 
     // RT-008 FIX: Initialize gas_price_gwei gauge to 0 for all configured chains
     // so the metric appears in /metrics output even before any gas fetches occur.
     initializeGasPriceGauges(getSupportedExecutionChains());
 
-    logger.info('Starting Execution Engine Service', { port: HEALTH_CHECK_PORT });
+    logger.info('Starting Execution Engine Service', {
+      port: HEALTH_CHECK_PORT,
+      // Phase 2: log chain group for operational visibility
+      chainGroup: chainGroupConfig?.chainGroup ?? 'legacy-single-ee',
+      executionStream: chainGroupConfig?.executionStreamName ?? 'stream:execution-requests',
+    });
     logger.debug('Execution engine startup config', {
       simulationMode: simulationConfig?.enabled ?? false,
       isStandby: standbyConfig.isStandby,
@@ -331,6 +358,7 @@ async function main() {
       healthCheckPort: HEALTH_CHECK_PORT,
       circuitBreakerEnabled: circuitBreakerConfig.enabled,
       circuitBreakerThreshold: circuitBreakerConfig.failureThreshold,
+      chainGroup: chainGroupConfig?.chainGroup,
     });
 
     // Generate unique instance ID
@@ -345,6 +373,8 @@ async function main() {
         regionId: standbyConfig.regionId
       },
       circuitBreakerConfig,
+      // Phase 2 (ADR-038): set per-group stream when EXECUTION_CHAIN_GROUP is configured
+      executionStreamName: chainGroupConfig?.executionStreamName,
     });
 
     // Initialize CrossRegionHealthManager for cross-region failover (ADR-007)

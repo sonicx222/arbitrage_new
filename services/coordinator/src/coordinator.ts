@@ -44,7 +44,7 @@ import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrag
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
-import { safeParseInt, safeParseFloat } from '@arbitrage/config';
+import { safeParseInt, safeParseFloat, getStreamForChain } from '@arbitrage/config';
 import { serializeOpportunityForStream } from './utils/stream-serialization';
 
 // Import extracted API modules
@@ -666,6 +666,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Default 0.1% filters clearly unprofitable opportunities at coordinator level.
       const minProfitPct = process.env.COORDINATOR_MIN_PROFIT_PERCENTAGE;
       const minProfitPercentage = minProfitPct !== undefined ? parseFloat(minProfitPct) : undefined;
+      // Phase 2 (ADR-038): Enable chain-group routing when COORDINATOR_CHAIN_GROUP_ROUTING=true.
+      // When enabled, each opportunity is routed to its chain-group stream (fast/l2/premium/solana)
+      // instead of the single legacy stream. EE instances must set EXECUTION_CHAIN_GROUP accordingly.
+      const chainGroupRoutingEnabled = process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true';
       this.opportunityRouter = new OpportunityRouter(
         this.logger,
         this.executionCircuitBreaker,
@@ -676,6 +680,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           instanceId: this.config.leaderElection.instanceId,
           executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
           simulationTtlMultiplier,
+          ...(chainGroupRoutingEnabled ? { chainGroupStreamResolver: getStreamForChain } : {}),
           ...(minProfitPercentage !== undefined && Number.isFinite(minProfitPercentage)
             ? { minProfitPercentage }
             : {}),
@@ -1093,6 +1098,31 @@ export class CoordinatorService implements CoordinatorStateProvider {
         error,
         stream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
       });
+    }
+
+    // Phase 2 (ADR-038): Pre-create per-chain-group streams when routing is enabled.
+    // EE instances subscribe before the coordinator starts — streams must exist.
+    if (process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true') {
+      const groupStreams = [
+        RedisStreamsClient.STREAMS.EXEC_REQUESTS_FAST,
+        RedisStreamsClient.STREAMS.EXEC_REQUESTS_L2,
+        RedisStreamsClient.STREAMS.EXEC_REQUESTS_PREMIUM,
+        RedisStreamsClient.STREAMS.EXEC_REQUESTS_SOLANA,
+      ];
+      for (const streamName of groupStreams) {
+        try {
+          await this.streamsClient.xaddWithLimit(streamName, {
+            type: 'stream-init',
+            message: 'Chain-group stream initialization - safe to ignore',
+            timestamp: Date.now().toString(),
+          });
+          this.logger.info('Chain-group execution stream initialized', { stream: streamName });
+        } catch (error) {
+          this.logger.warn('Failed to initialize chain-group execution stream', {
+            error, stream: streamName,
+          });
+        }
+      }
     }
   }
 

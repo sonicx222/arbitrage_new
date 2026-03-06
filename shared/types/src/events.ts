@@ -31,8 +31,15 @@ export const RedisStreams = {
   HEALTH_ALERTS: 'stream:health-alerts',               // [ON-DEMAND] Producer: enhanced-health-monitor
 
   // Execution streams
-  EXECUTION_REQUESTS: 'stream:execution-requests',     // [ACTIVE] Producer: coordinator
+  EXECUTION_REQUESTS: 'stream:execution-requests',     // [ACTIVE] Producer: coordinator (legacy single-EE mode)
   EXECUTION_RESULTS: 'stream:execution-results',       // [ACTIVE] Producer: execution-engine
+
+  // Phase 2: Per-chain-group execution streams (ADR-038)
+  // Each stream is consumed by exactly one EE group (EXECUTION_CHAIN_GROUP env var).
+  EXEC_REQUESTS_FAST:    'stream:exec-requests-fast',    // [ACTIVE] Group: bsc,polygon,avalanche,fantom
+  EXEC_REQUESTS_L2:      'stream:exec-requests-l2',      // [ACTIVE] Group: arbitrum,optimism,base,scroll,blast
+  EXEC_REQUESTS_PREMIUM: 'stream:exec-requests-premium', // [ACTIVE] Group: ethereum,zksync,linea
+  EXEC_REQUESTS_SOLANA:  'stream:exec-requests-solana',  // [ACTIVE] Group: solana
 
   // Mempool & detection streams
   PENDING_OPPORTUNITIES: 'stream:pending-opportunities', // [IDLE] Future: mempool-detector

@@ -356,6 +356,19 @@ export { SYSTEM_CONSTANTS } from './system-constants';
 export * from './partitions';
 
 // =============================================================================
+// EXECUTION CHAIN GROUP CONFIGURATION (Phase 2: ADR-038)
+// =============================================================================
+export {
+  EXECUTION_CHAIN_GROUPS,
+  EXECUTION_GROUP_STREAMS,
+  getExecutionGroupForChain,
+  getStreamForChain,
+  getChainsForExecutionGroup,
+  getExecutionGroupFromEnv,
+  type ExecutionChainGroup,
+} from './execution-chain-groups';
+
+// =============================================================================
 // CONFIG MANAGER (Task 2.1)
 // =============================================================================
 export {
