@@ -717,7 +717,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           ExecutionErrorCode.FLASH_LOAN_ERROR,
           errorMessage || 'Unknown error during flash loan execution'
         ),
-        opportunity.buyChain || 'unknown'
+        opportunity.buyChain ?? opportunity.chain ?? 'unknown'
       );
     }
   }

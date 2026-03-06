@@ -175,7 +175,14 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     try {
       const priceUsd = getDefaultPrice(tokenSymbol);
-      if (priceUsd <= 0) return undefined;
+      if (priceUsd <= 0) {
+        // L-005 FIX: Log when token has no default price — helps identify
+        // tokens that need pricing data for accurate bridge cost estimation.
+        this.logger.debug('No default price for token — falling back to default trade size estimate', {
+          tokenSymbol, chain,
+        });
+        return undefined;
+      }
 
       const decimals = getTokenDecimals(chain, '', tokenSymbol);
       const humanAmount = parseFloat(ethers.formatUnits(amountWei, decimals));

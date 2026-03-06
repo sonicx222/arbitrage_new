@@ -58,6 +58,17 @@ import {
 import { withLogContext } from '@arbitrage/core/logging';
 
 // =============================================================================
+// L-002 FIX: Pipeline-internal extended type for trace context fields.
+// These are stamped by opportunity.consumer.ts (not part of the public type)
+// and read here for ALS context restoration. Avoids double-cast via `as unknown`.
+// =============================================================================
+
+interface TracedOpportunity extends ArbitrageOpportunity {
+  _traceId?: string;
+  _spanId?: string;
+}
+
+// =============================================================================
 // Phase 2 Enhanced Monitoring (A2): Outcome Classification
 // =============================================================================
 
@@ -245,7 +256,7 @@ export class ExecutionPipeline {
           .catch((error) => {
             this.deps.logger.error('Execution failed for opportunity', {
               opportunityId: opportunity.id,
-              traceId: (opportunity as unknown as Record<string, unknown>)._traceId,
+              traceId: (opportunity as TracedOpportunity)._traceId,
               error: getErrorMessage(error),
             });
           })
@@ -291,8 +302,8 @@ export class ExecutionPipeline {
   // ===========================================================================
 
   private async executeOpportunityWithLock(opportunity: ArbitrageOpportunity): Promise<void> {
-    const traceId = (opportunity as unknown as Record<string, unknown>)._traceId as string | undefined;
-    const spanId = (opportunity as unknown as Record<string, unknown>)._spanId as string | undefined;
+    const traceId = (opportunity as TracedOpportunity)._traceId;
+    const spanId = (opportunity as TracedOpportunity)._spanId;
 
     // LOG-OPT Task 4: Restore ALS trace context for the execution phase.
     // The opportunity traversed the priority queue in a different async context,
@@ -319,7 +330,7 @@ export class ExecutionPipeline {
 
         if (shouldForceRelease) {
           this.deps.logger.warn('Detected potential crashed lock holder - force releasing lock', {
-            id: opportunity.id,
+            opportunityId: opportunity.id,
             traceId,
             conflictCount: this.deps.lockConflictTracker.getConflictInfo(opportunity.id)?.count,
           });
@@ -342,7 +353,7 @@ export class ExecutionPipeline {
               return;
             } else if (retryResult.reason === 'execution_error') {
               this.deps.logger.error('Opportunity execution failed after crash recovery', {
-                id: opportunity.id,
+                opportunityId: opportunity.id,
                 traceId,
                 error: retryResult.error,
               });
@@ -354,20 +365,20 @@ export class ExecutionPipeline {
 
         this.deps.stats.lockConflicts++;
         this.deps.logger.debug('Opportunity skipped - already being executed by another instance', {
-          id: opportunity.id,
+          opportunityId: opportunity.id,
           traceId,
         });
         return;
       } else if (lockResult.reason === 'redis_error') {
         this.deps.logger.error('Opportunity skipped - Redis unavailable', {
-          id: opportunity.id,
+          opportunityId: opportunity.id,
           traceId,
           error: lockResult.error?.message,
         });
         return;
       } else if (lockResult.reason === 'execution_error') {
         this.deps.logger.error('Opportunity execution failed', {
-          id: opportunity.id,
+          opportunityId: opportunity.id,
           traceId,
           error: lockResult.error,
         });
@@ -420,10 +431,9 @@ export class ExecutionPipeline {
   private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     const startTime = performance.now();
 
-    // Phase 1 Enhanced Monitoring: Stamp execution start
-    const ts = opportunity.pipelineTimestamps ?? {};
-    ts.executionStartedAt = Date.now();
-    opportunity.pipelineTimestamps = ts;
+    // Phase 1 Enhanced Monitoring: Stamp execution start.
+    // L-006 FIX: Use a local copy instead of mutating the opportunity object.
+    const ts = { ...(opportunity.pipelineTimestamps ?? {}), executionStartedAt: Date.now() };
 
     // Same-chain arbitrage opportunities set 'chain' but not 'buyChain'.
     // Fall back to 'chain' for same-chain arbs; only cross-chain arbs need buyChain explicitly.
@@ -433,7 +443,7 @@ export class ExecutionPipeline {
         opportunity.id,
         'Missing required chain field (neither buyChain nor chain set)',
         'unknown',
-        opportunity.buyDex || 'unknown'
+        opportunity.buyDex ?? 'unknown'
       );
       await this.deps.publishExecutionResult(errorResult, opportunity);
       this.deps.opportunityConsumer.markComplete(opportunity.id);
@@ -441,7 +451,7 @@ export class ExecutionPipeline {
     }
 
     const chain = resolvedBuyChain;
-    const dex = opportunity.buyDex || 'unknown';
+    const dex = opportunity.buyDex ?? 'unknown';
     const strategy = opportunity.type ?? 'unknown';
 
     // Phase 3 (A4): Record opportunity age at execution start
@@ -464,7 +474,7 @@ export class ExecutionPipeline {
       recordExecutionAttempt(chain, strategy);
 
       this.deps.logger.info('Executing arbitrage opportunity', {
-        id: opportunity.id,
+        opportunityId: opportunity.id,
         type: opportunity.type,
         buyChain: chain,
         buyDex: dex,
@@ -502,13 +512,13 @@ export class ExecutionPipeline {
 
           if (riskDecision.rejectionCode === 'DRAWDOWN_HALT') {
             this.deps.logger.warn('Trade blocked by drawdown circuit breaker', {
-              id: opportunity.id,
+              opportunityId: opportunity.id,
               state: drawdownCheck?.state,
               reason: riskDecision.rejectionReason,
             });
           } else {
             this.deps.logger.debug('Trade rejected', {
-              id: opportunity.id,
+              opportunityId: opportunity.id,
               reason: riskDecision.rejectionReason,
               code: riskDecision.rejectionCode,
             });
@@ -528,7 +538,7 @@ export class ExecutionPipeline {
 
         if (positionSize && riskDecision.recommendedSize) {
           this.deps.logger.debug('Position sized for trade', {
-            id: opportunity.id,
+            opportunityId: opportunity.id,
             recommendedSize: riskDecision.recommendedSize.toString(),
             fractionOfCapital: positionSize.fractionOfCapital,
             sizeMultiplier: drawdownCheck?.sizeMultiplier ?? 1.0,
@@ -537,7 +547,7 @@ export class ExecutionPipeline {
 
         if (drawdownCheck?.state === 'CAUTION' || drawdownCheck?.state === 'RECOVERY') {
           this.deps.logger.debug('Trading with reduced position size', {
-            id: opportunity.id,
+            opportunityId: opportunity.id,
             drawdownState: drawdownCheck.state,
             sizeMultiplier: drawdownCheck.sizeMultiplier,
           });
@@ -554,7 +564,7 @@ export class ExecutionPipeline {
 
         if (abVariants.size > 0) {
           this.deps.logger.debug('A/B variant assignments', {
-            id: opportunity.id,
+            opportunityId: opportunity.id,
             variants: Object.fromEntries(abVariants),
           });
         }
@@ -682,10 +692,12 @@ export class ExecutionPipeline {
 
       await this.deps.publishExecutionResult(errorResult, opportunity);
     } finally {
-      // Phase 1 Enhanced Monitoring: Stamp execution completion
-      const completionTs = opportunity.pipelineTimestamps ?? {};
-      completionTs.executionCompletedAt = Date.now();
-      opportunity.pipelineTimestamps = completionTs;
+      // Phase 1 Enhanced Monitoring: Stamp execution completion.
+      // L-006 FIX: Single assignment instead of mutate-then-assign.
+      opportunity.pipelineTimestamps = {
+        ...(opportunity.pipelineTimestamps ?? {}),
+        executionCompletedAt: Date.now(),
+      };
 
       this.deps.opportunityConsumer.markComplete(opportunity.id);
     }

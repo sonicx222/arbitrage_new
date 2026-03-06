@@ -161,12 +161,17 @@ export const VALID_OPPORTUNITY_TYPES = new Set([
   'solana',           // SolanaExecutionStrategy (Solana-native)
   'statistical',      // StatisticalArbitrageStrategy (mean-reversion)
 
-  // Secondary types that route to IntraChainStrategy fallback
+  // Secondary types that route to IntraChainStrategy fallback.
+  // L-004 NOTE: These pass validation intentionally — they don't have dedicated
+  // strategies but are handled by IntraChainStrategy as the default fallback.
+  // If adding new types, also register a strategy in strategy-factory.ts or
+  // document the fallthrough behavior here.
   'multi-leg',        // Falls back to IntraChainStrategy
   'predictive',       // Falls back to IntraChainStrategy
   'intra-dex',        // Falls back to IntraChainStrategy
 
-  // Legacy types (kept for backward compatibility during transition)
+  // Legacy types (kept for backward compatibility during transition).
+  // These are emitted by older detector versions still in rotation.
   'intra-solana',     // Solana partition intra-chain opportunities
   'intra-chain',      // Legacy EVM chain simulator type (replaced by cross-dex/simple)
 ]);

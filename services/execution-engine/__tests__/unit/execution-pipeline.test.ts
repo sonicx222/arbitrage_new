@@ -439,7 +439,7 @@ describe('ExecutionPipeline', () => {
       expect(deps.lockConflictTracker.recordConflict).toHaveBeenCalledWith('opp-1');
       expect(deps.logger.debug).toHaveBeenCalledWith(
         'Opportunity skipped - already being executed by another instance',
-        expect.objectContaining({ id: 'opp-1' })
+        expect.objectContaining({ opportunityId: 'opp-1' })
       );
     });
 
@@ -499,7 +499,7 @@ describe('ExecutionPipeline', () => {
       expect(deps.stats.staleLockRecoveries).toBe(1);
       expect(deps.logger.error).toHaveBeenCalledWith(
         'Opportunity execution failed after crash recovery',
-        expect.objectContaining({ id: 'opp-1', error: 'Strategy threw' })
+        expect.objectContaining({ opportunityId: 'opp-1', error: 'Strategy threw' })
       );
       expect(deps.opportunityConsumer.ackMessageAfterExecution).toHaveBeenCalledWith('opp-1');
     });
@@ -524,7 +524,7 @@ describe('ExecutionPipeline', () => {
       expect(deps.logger.error).toHaveBeenCalledWith(
         'Opportunity skipped - Redis unavailable',
         expect.objectContaining({
-          id: 'opp-1',
+          opportunityId: 'opp-1',
           error: 'Connection refused',
         })
       );
@@ -551,7 +551,7 @@ describe('ExecutionPipeline', () => {
 
       expect(deps.logger.error).toHaveBeenCalledWith(
         'Opportunity execution failed',
-        expect.objectContaining({ id: 'opp-1', error: 'Strategy reverted' })
+        expect.objectContaining({ opportunityId: 'opp-1', error: 'Strategy reverted' })
       );
       expect(deps.opportunityConsumer.ackMessageAfterExecution).toHaveBeenCalledWith('opp-1');
     });
@@ -861,7 +861,7 @@ describe('ExecutionPipeline', () => {
       );
       expect(deps.logger.warn).toHaveBeenCalledWith(
         'Trade blocked by drawdown circuit breaker',
-        expect.objectContaining({ id: 'opp-1', state: 'HALT' })
+        expect.objectContaining({ opportunityId: 'opp-1', state: 'HALT' })
       );
     });
 
