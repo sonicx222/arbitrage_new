@@ -29,21 +29,16 @@ export { createSSERoutes } from './sse.routes';
  * @param state - Coordinator state provider
  */
 export function setupAllRoutes(app: Application, state: CoordinatorStateProvider): void {
-  // Dashboard - root path (public)
-  app.use('/', createDashboardRoutes(state));
-
-  // API routes
+  // API routes (must be registered BEFORE dashboard SPA catch-all)
   app.use('/api', createHealthRoutes(state));
   app.use('/api', createMetricsRoutes(state));
   app.use('/api', createAdminRoutes(state));
+  app.use('/api', createSSERoutes(state));
 
   // RT-009 FIX: Mount health routes at root for uniform monitoring.
   // Partitions expose /health, /health/live, /health/ready directly.
   // Without this, monitoring scripts need special-case logic for coordinator.
   app.use('/', createHealthRoutes(state));
-
-  // SSE route for React dashboard
-  app.use('/api', createSSERoutes(state));
 
   // FIX: GCP probes /ready (not /health/ready). Add explicit /ready alias at root
   // so coordinator-standby.yaml readinessProbe gets 200 instead of 404.
@@ -102,4 +97,7 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
       instanceId: state.getInstanceId(),
     });
   });
+
+  // Dashboard SPA - MUST be last (catch-all `*` would intercept API routes if mounted earlier)
+  app.use('/', createDashboardRoutes(state));
 }

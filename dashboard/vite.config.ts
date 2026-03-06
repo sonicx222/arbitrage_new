@@ -7,6 +7,15 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../services/coordinator/public'),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          recharts: ['recharts'],
+          react: ['react', 'react-dom'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,
@@ -16,6 +25,7 @@ export default defineConfig({
       '/stats': 'http://localhost:3000',
       '/metrics': 'http://localhost:3000',
       '/ready': 'http://localhost:3000',
+      '/circuit-breaker': 'http://localhost:3005',
     },
   },
 });
