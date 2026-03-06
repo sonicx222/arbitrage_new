@@ -16,7 +16,10 @@
  */
 
 import { EventEmitter } from 'events';
+import { createHash } from 'node:crypto';
 import { createLogger } from '../logger';
+import type { SwapEvent } from '@arbitrage/types';
+import type { WhaleAlert } from '../analytics/swap-event-filter';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { getBlockTimeMs, getOpportunityTimeoutMs } from '@arbitrage/config';
 import type {
@@ -56,6 +59,15 @@ import { CHAIN_THROUGHPUT_PROFILES, getNativeTokenPrice, selectWeightedDex } fro
  * headroom so opportunities survive the coordinator's XREADGROUP cycle.
  */
 const SIMULATION_TTL_MULTIPLIER = 3;
+
+/** Default fraction of simulated swaps that are whale-sized. Overridden by SIMULATION_WHALE_RATE. */
+const DEFAULT_WHALE_RATE = 0.05;
+
+/**
+ * Default USD threshold above which a swap emits a 'whaleAlert' event.
+ * Matches EVENT_CONFIG.swapEvents.whaleThreshold. Overridden by SIMULATION_WHALE_THRESHOLD_USD.
+ */
+const DEFAULT_WHALE_THRESHOLD_USD = 50_000;
 
 /**
  * Compute expiresAt for a simulated opportunity.
@@ -120,6 +132,10 @@ function calculateRawAmountIn(
  * - 'syncEvent': SimulatedSyncEvent - Mimics real Sync events from DEX pairs
  * - 'opportunity': SimulatedOpportunity - When arbitrage is detected
  * - 'blockUpdate': { blockNumber: number } - New block notifications
+ * - 'swapEvent': SwapEvent - Individual swap data (medium/high realism only)
+ * - 'whaleAlert': WhaleAlert - Large swap notifications (>= whaleThreshold, medium/high realism only)
+ *
+ * @see docs/reports/SIMULATED_WHALE_SWAP_EVENTS_RESEARCH_2026-03-06.md — Phase 1 Tasks 1-3
  */
 export class ChainSimulator extends EventEmitter {
   private config: ChainSimulatorConfig;
@@ -149,6 +165,29 @@ export class ChainSimulator extends EventEmitter {
   private readonly fastLaneRate: number;
   private fastLaneOpportunityId = 0;
 
+  // ===========================================================================
+  // Phase 1: Whale Simulation Fields (Tasks 1-3)
+  // ===========================================================================
+
+  /** Fraction of simulated swaps that are whale-sized. Read from SIMULATION_WHALE_RATE. */
+  private readonly whaleRate: number;
+
+  /** USD threshold above which a swap emits a 'whaleAlert' event. */
+  private readonly whaleThresholdUsd: number;
+
+  /**
+   * Deterministic wallet pool: 100 normal wallets + 10 whale wallets.
+   * Addresses are derived via sha256(sim-wallet-{chainId}-{i}) so they are
+   * unique per chain but stable across simulator restarts.
+   */
+  private readonly walletPool: string[];
+
+  /**
+   * First 10 entries of walletPool reserved for whale transactions.
+   * Reusing a small set enables WhaleActivityTracker pattern detection.
+   */
+  private readonly whaleWallets: string[];
+
   /**
    * Market regime state for high-realism simulation.
    * Transitions via Markov chain each tick.
@@ -163,6 +202,19 @@ export class ChainSimulator extends EventEmitter {
     this.maxPositionSize = config.maxPositionSize ?? 50000;
     const envRate = process.env.SIMULATION_FAST_LANE_RATE;
     this.fastLaneRate = envRate !== undefined ? parseFloat(envRate) : (config.fastLaneRate ?? DEFAULT_FAST_LANE_RATE);
+
+    // Phase 1 whale simulation init
+    const envWhaleRate = process.env.SIMULATION_WHALE_RATE;
+    this.whaleRate = envWhaleRate !== undefined ? parseFloat(envWhaleRate) : DEFAULT_WHALE_RATE;
+    const envWhaleThreshold = process.env.SIMULATION_WHALE_THRESHOLD_USD;
+    this.whaleThresholdUsd = envWhaleThreshold !== undefined
+      ? parseFloat(envWhaleThreshold)
+      : DEFAULT_WHALE_THRESHOLD_USD;
+
+    // Build 100-wallet pool; first 10 are the whale sub-pool
+    this.walletPool = this.buildWalletPool(110);
+    this.whaleWallets = this.walletPool.slice(0, 10);
+
     this.initializeReserves();
     this.buildDexIndex();
   }
@@ -488,7 +540,10 @@ export class ChainSimulator extends EventEmitter {
 
   /**
    * Execute a single simulated swap: apply random-walk price change
-   * to pair reserves and emit a syncEvent.
+   * to pair reserves, emit a syncEvent, and (new in Phase 1) emit a
+   * 'swapEvent' with full SwapEvent data plus a 'whaleAlert' for large trades.
+   *
+   * @see docs/reports/SIMULATED_WHALE_SWAP_EVENTS_RESEARCH_2026-03-06.md — Task 1 & 3
    */
   private executeSwap(pair: SimulatedPairConfig): void {
     const reserves = this.reserves.get(pair.address.toLowerCase());
@@ -515,7 +570,120 @@ export class ChainSimulator extends EventEmitter {
       reserves.reserve1 = BigInt(Math.floor(Number(reserves.reserve0) / decimalFactor));
     }
 
+    // [Phase 1 - Task 1] Emit SwapEvent for this simulated swap
+    const isWhale = Math.random() < this.whaleRate;
+    const profile = CHAIN_THROUGHPUT_PROFILES[this.config.chainId];
+    const tradeSize = this.sampleTradeSize(profile, isWhale);
+    const wallet = this.selectWallet(isWhale);
+    const swapEvent = this.buildSwapEvent(pair, priceChange, tradeSize, wallet);
+    this.emit('swapEvent', swapEvent);
+
+    // [Phase 1 - Task 3] Emit WhaleAlert for large trades
+    if (tradeSize >= this.whaleThresholdUsd) {
+      const whaleAlert: WhaleAlert = {
+        event: swapEvent,
+        usdValue: tradeSize,
+        timestamp: swapEvent.timestamp,
+        chain: this.config.chainId,
+        dex: pair.dex,
+        pairAddress: pair.address,
+      };
+      this.emit('whaleAlert', whaleAlert);
+    }
+
     this.emitSyncEvent(pair, reserves.reserve0, reserves.reserve1);
+  }
+
+  // ===========================================================================
+  // Phase 1: Whale Simulation Methods (Tasks 1-2)
+  // ===========================================================================
+
+  /**
+   * Build a deterministic wallet address pool using sha256.
+   * Each address is unique per chainId, preventing cross-chain address collisions.
+   * Produces 40-char lowercase hex strings prefixed with '0x'.
+   *
+   * @see docs/reports/SIMULATED_WHALE_SWAP_EVENTS_RESEARCH_2026-03-06.md — Task 2
+   */
+  private buildWalletPool(count: number): string[] {
+    return Array.from({ length: count }, (_, i) =>
+      '0x' + createHash('sha256')
+        .update(`sim-wallet-${this.config.chainId}-${i}`)
+        .digest('hex')
+        .slice(0, 40)
+    );
+  }
+
+  /**
+   * Select a wallet address for a simulated swap.
+   * Whale wallets (first 10 of the pool) are reused repeatedly to produce
+   * the repeat-transaction patterns that WhaleActivityTracker needs.
+   */
+  private selectWallet(isWhale: boolean): string {
+    const pool = isWhale ? this.whaleWallets : this.walletPool;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /**
+   * Sample a trade size in USD using log-normal distribution within the
+   * chain's configured trade size range. Whale trades use 2-10x the max
+   * normal size to guarantee they exceed the whale threshold.
+   *
+   * @see docs/reports/SIMULATED_WHALE_SWAP_EVENTS_RESEARCH_2026-03-06.md — Section 5.4
+   */
+  private sampleTradeSize(profile: ChainThroughputProfile | undefined, isWhale: boolean): number {
+    const [min, max] = profile?.tradeSizeRange ?? [1000, 50_000];
+    if (isWhale) {
+      // Whale trades: 2-10x the max normal trade size
+      return max * (2 + Math.random() * 8);
+    }
+    // Log-normal distribution for realistic normal trade sizes
+    const logMin = Math.log(min);
+    const logMax = Math.log(max);
+    const logMean = (logMin + logMax) / 2;
+    const logStd = (logMax - logMin) / 4;
+    const size = Math.exp(gaussianRandom(logMean, logStd));
+    return Math.max(min, Math.min(size, max * 1.5)); // Soft cap at 150% of max
+  }
+
+  /**
+   * Build a SwapEvent from a simulated pair swap.
+   * Direction is inferred from priceChange sign:
+   *   priceChange >= 0 → reserve1 decreased → token0 flowed IN, token1 flowed OUT (sell token0)
+   *   priceChange <  0 → reserve1 increased → token1 flowed IN, token0 flowed OUT (buy token0)
+   */
+  private buildSwapEvent(
+    pair: SimulatedPairConfig,
+    priceChange: number,
+    tradeSize: number,
+    wallet: string,
+  ): SwapEvent {
+    // token0 is "in" when reserve1 decreased (priceChange >= 0)
+    const tokenInIsToken0 = priceChange >= 0;
+    const inSymbol = tokenInIsToken0 ? pair.token0Symbol : pair.token1Symbol;
+    const outSymbol = tokenInIsToken0 ? pair.token1Symbol : pair.token0Symbol;
+    const inDecimals = tokenInIsToken0 ? pair.token0Decimals : pair.token1Decimals;
+    const outDecimals = tokenInIsToken0 ? pair.token1Decimals : pair.token0Decimals;
+
+    const inAmount = calculateRawAmountIn(tradeSize, inSymbol, inDecimals);
+    const outAmount = calculateRawAmountIn(tradeSize, outSymbol, outDecimals);
+
+    return {
+      pairAddress: pair.address,
+      sender: wallet,
+      recipient: wallet,
+      to: wallet,
+      amount0In: tokenInIsToken0 ? inAmount : '0',
+      amount1In: tokenInIsToken0 ? '0' : inAmount,
+      amount0Out: tokenInIsToken0 ? '0' : outAmount,
+      amount1Out: tokenInIsToken0 ? outAmount : '0',
+      blockNumber: this.blockNumber,
+      transactionHash: '0x' + this.generateRandomHash(),
+      timestamp: Date.now(),
+      dex: pair.dex,
+      chain: this.config.chainId,
+      usdValue: tradeSize,
+    };
   }
 
   private emitAllSyncEvents(): void {

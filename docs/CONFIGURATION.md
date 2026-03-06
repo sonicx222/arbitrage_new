@@ -125,6 +125,11 @@ See `services/execution-engine/src/services/hd-wallet-manager.ts` for implementa
 | `PORT` | HTTP server port | Service-specific |
 | `METRICS_ENABLED` | Enable Prometheus metrics | `true` |
 | `SIMULATION_MODE` | Run without executing | `false` |
+| `SIMULATION_REALISM_LEVEL` | Simulation fidelity: `low` (flat interval, no swap events), `medium` (block-driven, swap+whale events), `high` (full regime model) | `medium` |
+| `SIMULATION_UPDATE_INTERVAL_MS` | Override block interval in simulation (forces legacy mode — disables swap/whale events). Range: 100–60000. | unset |
+| `SIMULATION_VOLATILITY` | Price volatility per block in simulation. Range: 0–1.0. | `0.02` |
+| `SIMULATION_WHALE_RATE` | Fraction of simulated swaps that are whale-sized (triggers whale alerts). Range: 0–0.5. | `0.05` |
+| `SIMULATION_WHALE_THRESHOLD_USD` | USD value above which a simulated swap emits a whale alert to `stream:whale-alerts`. | `50000` |
 | `EXECUTION_CHAIN_GROUP` | Chain group this EE instance handles (`fast`, `l2`, `premium`, `solana`). Leave unset for legacy single-EE mode. | unset (ADR-038) |
 | `ASYNC_PIPELINE_SPLIT` | Enable SimulationWorker pre-filtering. When `true`, EE consumes from `stream:pre-simulated` instead of raw exec-request streams. | `false` (ADR-039) |
 

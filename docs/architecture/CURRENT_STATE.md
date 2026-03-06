@@ -79,9 +79,9 @@ This document provides a snapshot of the current arbitrage trading system archit
 | Stream | MAXLEN | Purpose | Lifecycle |
 |--------|--------|---------|-----------|
 | `stream:price-updates` | 100,000 | Real-time price data from partition detectors | ACTIVE |
-| `stream:swap-events` | 50,000 | DEX swap events | IDLE |
+| `stream:swap-events` | 50,000 | DEX swap events | ACTIVE (simulation) |
 | `stream:opportunities` | 100,000 | Arbitrage opportunities from detectors | ACTIVE |
-| `stream:whale-alerts` | 5,000 | Large trade notifications | IDLE |
+| `stream:whale-alerts` | 5,000 | Large trade notifications | ACTIVE (simulation) |
 | `stream:service-health` | 1,000 | Per-service health reports | IDLE |
 | `stream:service-events` | 5,000 | Service lifecycle events | IDLE |
 | `stream:coordinator-events` | 5,000 | Coordinator broadcasts | IDLE |
