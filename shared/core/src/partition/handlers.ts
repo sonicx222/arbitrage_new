@@ -14,6 +14,9 @@ import { createLogger } from '../logger';
 import { setupParentPortListener } from '../async/lifecycle-utils';
 // LOG-OPT Fix 4: Token-bucket sampler for high-frequency debug events
 import { LogSampler } from '../logging/log-sampler';
+// P2-002 FIX: ALS wrapper for opportunity trace context propagation
+import { withLogContext } from '../logging/log-context';
+import { generateTraceId, generateSpanId } from '../tracing/trace-context';
 import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
 import type { PartitionDetectorInterface } from './config';
 import { shutdownPartitionService } from './health-server';
@@ -95,6 +98,9 @@ export function setupDetectorEventHandlers(
     }
   };
 
+  // P2-002 FIX: Wrap opportunity handler in withLogContext() so detection decision logs
+  // include traceId/spanId for end-to-end correlation with execution outcomes.
+  // ALS overhead ~1-3μs per call — negligible at ~30 opps/sec (vs 1000+/sec priceUpdate).
   const opportunityHandler = (opp: {
     id: string;
     type: string;
@@ -103,20 +109,22 @@ export function setupDetectorEventHandlers(
     expectedProfit: number;
     profitPercentage: number;
   }) => {
-    // P2-1 FIX: Reduced from INFO to DEBUG. At ~18k opportunities per 10min,
-    // INFO-level logging generates ~4,000 lines/sec. Partition-level summaries
-    // (aggregated counts) remain at INFO for operational visibility.
-    // LOG-OPT Fix 1: Guard with inline level check (supports hot-reload, Task 8)
-    if (pLog.isLevelEnabled?.('debug') ?? false) {
-      pLog.debug('Arbitrage opportunity detected', {
-        id: opp.id,
-        type: opp.type,
-        buyDex: opp.buyDex,
-        sellDex: opp.sellDex,
-        profit: opp.expectedProfit,
-        percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
-      });
-    }
+    withLogContext({ traceId: generateTraceId(), spanId: generateSpanId() }, () => {
+      // P2-1 FIX: Reduced from INFO to DEBUG. At ~18k opportunities per 10min,
+      // INFO-level logging generates ~4,000 lines/sec. Partition-level summaries
+      // (aggregated counts) remain at INFO for operational visibility.
+      // LOG-OPT Fix 1: Guard with inline level check (supports hot-reload, Task 8)
+      if (pLog.isLevelEnabled?.('debug') ?? false) {
+        pLog.debug('Arbitrage opportunity detected', {
+          id: opp.id,
+          type: opp.type,
+          buyDex: opp.buyDex,
+          sellDex: opp.sellDex,
+          profit: opp.expectedProfit,
+          percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
+        });
+      }
+    });
   };
 
   // LOG-OPT Fix 3: Static strings + structured chainId field (no template literals)

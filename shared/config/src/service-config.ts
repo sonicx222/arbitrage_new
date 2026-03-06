@@ -468,6 +468,11 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   //   protocol: 'syncswap',
   //   fee: 30  // 0.3% flash loan fee (30 bps)
   // },
+  // P2-006: Blast — no flash loan provider available. Aave V3 is not deployed on Blast.
+  // Opportunities on Blast are limited to direct execution only until a Blast-native
+  // lending protocol (e.g., Juice Finance, Orbit Protocol) is verified and integrated.
+  // TODO: Integrate Blast-native flash loan provider when contract addresses are verified.
+  //
   // NOTE: Solana is intentionally omitted — it uses Jupiter atomic swaps,
   // not traditional flash loans. supportsFlashLoan('solana') returns false.
   // All consumers access via optional chaining (FLASH_LOAN_PROVIDERS[chain]?.protocol).

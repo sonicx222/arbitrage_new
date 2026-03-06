@@ -471,7 +471,10 @@ export class StreamConsumerManager {
   ): Promise<void> {
     try {
       // HIGH-4 FIX: Build DLQ entry with coordinator-compatible field names
+      // P2-007 FIX: Add _dlq_schema discriminator so EE's autoRecoverRetryable()
+      // can distinguish coordinator entries from EE entries in the shared DLQ stream.
       const dlqEntry: Record<string, unknown> = {
+        _dlq_schema: 'coordinator_v1',
         originalMessageId: message.id,
         _dlq_originalStream: sourceStream,   // renamed: coordinator reads '_dlq_originalStream'
         _dlq_errorCode: error.message,       // renamed: coordinator reads '_dlq_errorCode'
@@ -552,6 +555,7 @@ export class StreamConsumerManager {
 
       // HIGH-4 FIX: Use consistent field names matching the Redis DLQ schema
       const entry = JSON.stringify({
+        _dlq_schema: 'coordinator_v1',
         originalMessageId: message.id,
         _dlq_originalStream: sourceStream,
         _dlq_errorCode: error.message,

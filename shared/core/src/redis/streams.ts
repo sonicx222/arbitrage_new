@@ -464,6 +464,20 @@ export class RedisStreamsClient {
       );
     }
 
+    // P2-008 FIX: Log legacy HMAC compat status at startup. When enabled, HMAC verification
+    // computes up to 4 digests per message (current key + previous key × with/without stream name).
+    // Set LEGACY_SIGNATURE_COMPAT=false once all services use OP-18 format to reduce to 1-2 attempts.
+    if (this.signingKey) {
+      this.logger.info('HMAC signing initialized', {
+        legacySignatureCompat: this.legacySignatureCompatEnabled,
+        hasPreviousKey: !!this.previousSigningKey,
+        maxHmacOpsPerMessage: this.legacySignatureCompatEnabled && this.previousSigningKey ? 4
+          : this.previousSigningKey ? 2
+          : this.legacySignatureCompatEnabled ? 2
+          : 1,
+      });
+    }
+
     // FIX #8: Only include password when defined to avoid ioredis warning on password-free servers
     const options: Record<string, unknown> = {
       ...(password ? { password } : {}),

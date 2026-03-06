@@ -63,7 +63,25 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
     try {
       const monitor = getStreamHealthMonitor();
       const metrics = await monitor.getPrometheusMetrics();
-      res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics);
+      // P2-004 FIX: Add coordinator system metrics to Prometheus output.
+      // opportunitiesDropped was only available via /stats JSON — not scrapable by Prometheus.
+      const sys = state.getSystemMetrics();
+      const coordinatorMetrics = [
+        '# HELP arbitrage_opportunities_dropped_total Total opportunities dropped (all reasons)',
+        '# TYPE arbitrage_opportunities_dropped_total counter',
+        `arbitrage_opportunities_dropped_total ${sys.opportunitiesDropped}`,
+        '# HELP arbitrage_opportunities_total Total opportunities received',
+        '# TYPE arbitrage_opportunities_total counter',
+        `arbitrage_opportunities_total ${sys.totalOpportunities}`,
+        '# HELP arbitrage_executions_total Total executions attempted',
+        '# TYPE arbitrage_executions_total counter',
+        `arbitrage_executions_total ${sys.totalExecutions}`,
+        '# HELP arbitrage_executions_successful_total Total successful executions',
+        '# TYPE arbitrage_executions_successful_total counter',
+        `arbitrage_executions_successful_total ${sys.successfulExecutions}`,
+        '',
+      ].join('\n');
+      res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics + coordinatorMetrics);
     } catch (_error) {
       res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
     }

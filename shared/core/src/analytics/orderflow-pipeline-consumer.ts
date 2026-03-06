@@ -20,6 +20,7 @@ import type { Logger } from '../logger';
 import type { StreamMessage, ConsumerGroupConfig } from '../redis/streams';
 import type { PendingOpportunity, PendingSwapIntent } from '@arbitrage/types';
 import { getErrorMessage } from '../resilience/error-handling';
+import { parseEnvIntSafe } from '../utils/env-utils';
 // ---------------------------------------------------------------------------
 // Local type definitions (structurally compatible with @arbitrage/ml exports)
 // to break circular @arbitrage/core ↔ @arbitrage/ml build dependency.
@@ -58,25 +59,20 @@ interface IOrderflowPredictor {
 // Configuration
 // =============================================================================
 
+// P2-003 FIX: Migrate 4x parseInt to parseEnvIntSafe for NaN protection.
+// Misconfigured env vars would produce NaN TTL, cache size, poll interval, and batch size.
+
 /** TTL for cached predictions in milliseconds (default: 30 seconds). */
-const ORDERFLOW_PREDICTION_CACHE_TTL_MS = parseInt(
-  process.env.ORDERFLOW_PREDICTION_CACHE_TTL_MS ?? '30000', 10
-);
+const ORDERFLOW_PREDICTION_CACHE_TTL_MS = parseEnvIntSafe('ORDERFLOW_PREDICTION_CACHE_TTL_MS', 30000, 1000);
 
 /** Maximum entries in prediction cache before eviction (default: 10000). */
-const ORDERFLOW_PREDICTION_CACHE_MAX_SIZE = parseInt(
-  process.env.ORDERFLOW_PREDICTION_CACHE_MAX_SIZE ?? '10000', 10
-);
+const ORDERFLOW_PREDICTION_CACHE_MAX_SIZE = parseEnvIntSafe('ORDERFLOW_PREDICTION_CACHE_MAX_SIZE', 10000, 100);
 
 /** Stream poll interval in milliseconds (default: 100ms). */
-const ORDERFLOW_POLL_INTERVAL_MS = parseInt(
-  process.env.ORDERFLOW_POLL_INTERVAL_MS ?? '100', 10
-);
+const ORDERFLOW_POLL_INTERVAL_MS = parseEnvIntSafe('ORDERFLOW_POLL_INTERVAL_MS', 100, 10);
 
 /** Batch size for XREADGROUP COUNT (default: 50). */
-const ORDERFLOW_BATCH_SIZE = parseInt(
-  process.env.ORDERFLOW_BATCH_SIZE ?? '50', 10
-);
+const ORDERFLOW_BATCH_SIZE = parseEnvIntSafe('ORDERFLOW_BATCH_SIZE', 50, 1);
 
 /** Stream name for pending opportunities — uses canonical constant. */
 const PENDING_OPPORTUNITIES_STREAM = RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES;

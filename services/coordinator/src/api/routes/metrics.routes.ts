@@ -10,7 +10,7 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import { findKLargest } from '@arbitrage/core/data-structures';
-import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, getRuntimeMonitor } from '@arbitrage/core/monitoring';
 import { getRedisClient } from '@arbitrage/core/redis';
 import type { CoordinatorStateProvider } from '../types';
 
@@ -167,7 +167,25 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
       try {
         const monitor = getStreamHealthMonitor();
         const metrics = await monitor.getPrometheusMetrics();
-        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics);
+        const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
+        // P2-004 FIX: Include coordinator system metrics (dropped opportunities, totals)
+        const sys = state.getSystemMetrics();
+        const coordinatorMetrics = [
+          '# HELP arbitrage_opportunities_dropped_total Total opportunities dropped (all reasons)',
+          '# TYPE arbitrage_opportunities_dropped_total counter',
+          `arbitrage_opportunities_dropped_total ${sys.opportunitiesDropped}`,
+          '# HELP arbitrage_opportunities_total Total opportunities received',
+          '# TYPE arbitrage_opportunities_total counter',
+          `arbitrage_opportunities_total ${sys.totalOpportunities}`,
+          '# HELP arbitrage_executions_total Total executions attempted',
+          '# TYPE arbitrage_executions_total counter',
+          `arbitrage_executions_total ${sys.totalExecutions}`,
+          '# HELP arbitrage_executions_successful_total Total successful executions',
+          '# TYPE arbitrage_executions_successful_total counter',
+          `arbitrage_executions_successful_total ${sys.successfulExecutions}`,
+          '',
+        ].join('\n');
+        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics + runtimeMetrics + coordinatorMetrics);
       } catch (_error) {
         res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
       }

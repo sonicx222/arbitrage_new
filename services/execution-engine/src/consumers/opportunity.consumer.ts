@@ -889,7 +889,10 @@ export class OpportunityConsumer {
         });
       }
 
+      // P2-007 FIX: Add _dlq_schema discriminator so coordinator's handleDlqMessage()
+      // can distinguish EE entries from coordinator entries in the shared DLQ stream.
       const dlqData = {
+        _dlq_schema: 'execution_engine_v1',
         originalMessageId: message.id,
         originalStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
         opportunityId: data?.id ?? 'unknown',

@@ -330,9 +330,10 @@ export const FALLBACK_GAS_SCALING_PER_STEP = 0.25;
  * Default: 2.0x — conservative to avoid unprofitable trades on stale data.
  * Configurable via GAS_FALLBACK_SAFETY_FACTOR env var.
  */
-export const GAS_FALLBACK_SAFETY_FACTOR = parseFloat(
-  process.env.GAS_FALLBACK_SAFETY_FACTOR ?? '2.0'
-);
+// P2-001 FIX: Add NaN guard — misconfigured env var (e.g., 'abc') would produce NaN
+// that propagates silently into all gas calculations.
+const _rawGasFallbackFactor = parseFloat(process.env.GAS_FALLBACK_SAFETY_FACTOR ?? '2.0');
+export const GAS_FALLBACK_SAFETY_FACTOR = Number.isNaN(_rawGasFallbackFactor) ? 2.0 : _rawGasFallbackFactor;
 
 // =============================================================================
 // GasPriceCache Class

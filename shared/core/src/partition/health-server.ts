@@ -12,6 +12,7 @@ import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { createLogger } from '../logger';
 import { getStreamHealthMonitor } from '../monitoring/stream-health-monitor';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
+import { getRuntimeMonitor } from '../monitoring/runtime-monitor';
 import { setLogLevel } from '../logging/pino-logger';
 import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
@@ -350,7 +351,38 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         latencyLines.push('# TYPE price_updates_total counter');
         latencyLines.push(`price_updates_total ${getPriceUpdatesTotal()}`);
 
-        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n';
+        // P2-005 FIX: WebSocket health gauges per chain — exposes connection status
+        // as Prometheus metrics for per-chain alerting (e.g., chain disconnected > 5min).
+        // Previously only visible via /stats JSON, not scrapable by Prometheus.
+        const wsLines: string[] = [];
+        try {
+          const stats = detector.getStats();
+          if (stats.chainStats.size > 0) {
+            wsLines.push('# HELP websocket_connections_active WebSocket connection active (1=connected, 0=not)');
+            wsLines.push('# TYPE websocket_connections_active gauge');
+            wsLines.push('# HELP websocket_chain_status Chain connection status (0=disconnected, 1=connecting, 2=connected, 3=error)');
+            wsLines.push('# TYPE websocket_chain_status gauge');
+            for (const [chainId, rawStats] of stats.chainStats) {
+              const chainStats = rawStats as { status?: string };
+              const status = chainStats.status ?? 'disconnected';
+              const active = status === 'connected' ? 1 : 0;
+              const statusCode = status === 'disconnected' ? 0
+                : status === 'connecting' ? 1
+                : status === 'connected' ? 2
+                : 3; // error
+              wsLines.push(`websocket_connections_active{chain="${chainId}"} ${active}`);
+              wsLines.push(`websocket_chain_status{chain="${chainId}"} ${statusCode}`);
+            }
+          }
+        } catch (_wsErr) {
+          // Non-critical — don't fail /metrics if WS stats unavailable
+        }
+
+        // Phase 1 Enhanced Monitoring: Runtime health metrics (event loop, GC, memory)
+        const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
+
+        const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
+        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics;
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
         res.end(body);
       } catch (error) {
