@@ -283,6 +283,150 @@ describe('SimulationWorker — simulation mode (with BatchQuoter)', () => {
 });
 
 // =============================================================================
+// Tests — H-004: Chain-specific flash loan fee lookup
+// =============================================================================
+
+describe('SimulationWorker — H-004: chain-specific flash loan fee', () => {
+  let worker: SimulationWorker;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockBatchQuoter: jest.Mocked<SimulationWorkerBatchQuoter>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    capturedHandler = null;
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    mockBatchQuoter = createMockBatchQuoter(50000n);
+
+    worker = new SimulationWorker(mockLogger, mockStreamsClient as any, mockBatchQuoter, BASE_CONFIG);
+  });
+
+  it('should pass BSC fee (25 bps) to BatchQuoter for BSC chain', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ chain: 'bsc' }));
+
+    expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(BigInt),
+      25, // PancakeSwap V3 fee: 25 bps
+    );
+  });
+
+  it('should pass Aave V3 fee (9 bps) for Ethereum chain', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ chain: 'ethereum' }));
+
+    expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(BigInt),
+      9, // Aave V3 fee: 9 bps
+    );
+  });
+
+  it('should pass Balancer V2 fee (0 bps) for Fantom chain', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ chain: 'fantom' }));
+
+    expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(BigInt),
+      0, // Balancer V2 / Beethoven X fee: 0 bps
+    );
+  });
+
+  it('should pass SyncSwap fee (30 bps) for zkSync chain', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ chain: 'zksync' }));
+
+    expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(BigInt),
+      30, // SyncSwap fee: 30 bps
+    );
+  });
+
+  it('should fall back to default 9 bps for unknown chain', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ chain: 'unknown-chain' }));
+
+    expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(BigInt),
+      9, // Default (Aave V3)
+    );
+  });
+
+  it('should fall back to default 9 bps when chain field is missing', async () => {
+    const msg = buildStreamMessage();
+    delete (msg as Record<string, unknown>)['chain'];
+
+    await worker.start();
+    await capturedHandler!(msg);
+
+    expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(BigInt),
+      9, // Default
+    );
+  });
+});
+
+// =============================================================================
+// Tests — M-003: computeScore normalization
+// =============================================================================
+
+describe('SimulationWorker — M-003: computeScore normalization', () => {
+  let worker: SimulationWorker;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    capturedHandler = null;
+    mockStreamsClient = createMockStreamsClient();
+
+    // Pass-through mode (no batchQuoter) to test computeScore directly
+    worker = new SimulationWorker(createMockLogger(), mockStreamsClient as any, null, BASE_CONFIG);
+  });
+
+  it('should produce different scores for different profit levels', async () => {
+    await worker.start();
+
+    // Low profit: $5
+    await capturedHandler!(buildStreamMessage({ expectedProfit: 5, confidence: '0.9' }));
+    const [, low] = (mockStreamsClient.xaddWithLimit as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+
+    // High profit: $80
+    await capturedHandler!(buildStreamMessage({ expectedProfit: 80, confidence: '0.9' }));
+    const [, high] = (mockStreamsClient.xaddWithLimit as jest.Mock).mock.calls[1] as [string, Record<string, unknown>];
+
+    const lowScore = Number(low['preSimulationScore']);
+    const highScore = Number(high['preSimulationScore']);
+
+    // Previously both would saturate to ~1.0, now they should differ
+    expect(highScore).toBeGreaterThan(lowScore);
+    expect(lowScore).toBeLessThan(0.1); // $5 / 100 * 0.9 = 0.045
+    expect(highScore).toBeGreaterThan(0.5); // $80 / 100 * 0.9 = 0.72
+  });
+
+  it('should cap score at 1.0 for very large profits', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ expectedProfit: 500, confidence: '1.0' }));
+
+    const [, published] = (mockStreamsClient.xaddWithLimit as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+    expect(Number(published['preSimulationScore'])).toBe(1);
+  });
+
+  it('should return 0 for zero profit', async () => {
+    await worker.start();
+    await capturedHandler!(buildStreamMessage({ expectedProfit: 0, confidence: '0.9' }));
+
+    const [, published] = (mockStreamsClient.xaddWithLimit as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+    expect(Number(published['preSimulationScore'])).toBe(0);
+  });
+});
+
+// =============================================================================
 // Tests — lifecycle
 // =============================================================================
 

@@ -1550,7 +1550,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const bridgeGasCostUsd = bridgeGasCostNative * sourceNativeTokenPriceUsd;
 
     const sellGasCostNative = sellReceipt
-      ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice || destGasPrice)))
+      ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice ?? destGasPrice)))
       : 0;
     const sellGasCostUsd = sellGasCostNative * destNativeTokenPriceUsd;
 

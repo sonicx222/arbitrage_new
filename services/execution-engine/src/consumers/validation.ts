@@ -329,37 +329,47 @@ export function validateMessageStructure(
   // FIX: Deserialize numeric fields that were converted to strings by serializeOpportunityForStream().
   // Redis Streams store all values as strings, so numeric fields arrive as strings despite
   // being typed as numbers. SA-3N-004 FIX: Restore ALL numeric fields, not just 4 of 8.
+  // M-004 FIX: Added Number.isFinite() guards to prevent NaN propagation from corrupted data.
   if (typeof data.profitPercentage === 'string') {
-    data.profitPercentage = parseFloat(data.profitPercentage as string);
+    const parsed = parseFloat(data.profitPercentage as string);
+    data.profitPercentage = Number.isFinite(parsed) ? parsed : 0;
   }
   if (typeof data.confidence === 'string') {
-    data.confidence = parseFloat(data.confidence as string);
+    const parsed = parseFloat(data.confidence as string);
+    data.confidence = Number.isFinite(parsed) ? parsed : 0;
   }
   if (typeof data.expectedProfit === 'string') {
-    data.expectedProfit = parseFloat(data.expectedProfit as string);
+    const parsed = parseFloat(data.expectedProfit as string);
+    data.expectedProfit = Number.isFinite(parsed) ? parsed : 0;
   }
   if (typeof data.estimatedProfit === 'string') {
-    data.estimatedProfit = parseFloat(data.estimatedProfit as string);
+    const parsed = parseFloat(data.estimatedProfit as string);
+    data.estimatedProfit = Number.isFinite(parsed) ? parsed : 0;
   }
   // SA-3N-004: buyPrice, sellPrice, blockNumber remain strings without explicit restoration.
   // Downstream code using buyPrice + sellPrice would concatenate instead of adding.
   if (typeof data.buyPrice === 'string') {
-    data.buyPrice = parseFloat(data.buyPrice as string);
+    const parsed = parseFloat(data.buyPrice as string);
+    data.buyPrice = Number.isFinite(parsed) ? parsed : 0;
   }
   if (typeof data.sellPrice === 'string') {
-    data.sellPrice = parseFloat(data.sellPrice as string);
+    const parsed = parseFloat(data.sellPrice as string);
+    data.sellPrice = Number.isFinite(parsed) ? parsed : 0;
   }
   if (typeof data.blockNumber === 'string') {
-    data.blockNumber = parseInt(data.blockNumber as string, 10);
+    const parsed = parseInt(data.blockNumber as string, 10);
+    data.blockNumber = Number.isFinite(parsed) ? parsed : 0;
   }
   // SA-3N-001: timestamp remains a string after deserialization. JS minus-operator coerces
   // strings to numbers so Date.now() - timestamp works, but typeof check would fail.
   if (typeof data.timestamp === 'string') {
-    data.timestamp = Number(data.timestamp);
+    const parsed = Number(data.timestamp);
+    data.timestamp = Number.isFinite(parsed) ? parsed : Date.now();
   }
   // SA-3N-001: expiresAt is validated above but not written back to the data object.
   if (typeof data.expiresAt === 'string') {
-    data.expiresAt = Number(data.expiresAt);
+    const parsed = Number(data.expiresAt);
+    data.expiresAt = Number.isFinite(parsed) ? parsed : 0;
   }
 
   return {

@@ -891,7 +891,9 @@ export class ExecutionEngineService {
       // Stop simulation metrics collector (Phase 1.1.3)
       this.simulationMetricsCollector = await stopAndNullify(this.simulationMetricsCollector);
 
-      // Finding #7: Circuit breaker manager has no async cleanup needed
+      // M-001 FIX: Call stopAll() to flush final totalOpenTimeMs metrics before nullification.
+      // stopAll() is synchronous — stops all chain breakers and clears the internal map.
+      this.cbManager?.stopAll();
       this.cbManager = null;
 
       // Task 3: Stop A/B testing framework

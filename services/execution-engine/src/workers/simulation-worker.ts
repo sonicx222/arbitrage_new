@@ -23,6 +23,7 @@
 import { StreamConsumer } from '@arbitrage/core/redis';
 import type { RedisStreamsClient } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
 import type { Logger } from '../types';
 import type {
   QuoteRequest,
@@ -81,8 +82,24 @@ export interface SimulationWorkerStats {
 // Constants
 // =============================================================================
 
-/** Aave V3 flash loan fee: 9 basis points (0.09%) */
-const FLASH_LOAN_FEE_BPS = 9;
+/**
+ * H-004 FIX: Default flash loan fee (Aave V3: 9 bps) for chains not in FLASH_LOAN_PROVIDERS.
+ * Used as fallback when chain is unknown or has no configured flash loan provider.
+ */
+const DEFAULT_FLASH_LOAN_FEE_BPS = 9;
+
+/**
+ * H-004 FIX: Look up flash loan fee in basis points for a given chain.
+ * Uses FLASH_LOAN_PROVIDERS (single source of truth) instead of hardcoding Aave V3's 9 bps.
+ *
+ * Actual fees by chain: Aave V3 (9 bps), Balancer V2 (0 bps), PancakeSwap V3 (25 bps),
+ * SyncSwap (30 bps). Previously all chains used 9 bps, causing ~60% of paths to be
+ * scored with incorrect fee assumptions.
+ */
+function getFlashLoanFeeBps(chain: string): number {
+  const provider = FLASH_LOAN_PROVIDERS[chain.toLowerCase()];
+  return provider?.fee ?? DEFAULT_FLASH_LOAN_FEE_BPS;
+}
 
 // =============================================================================
 // SimulationWorker
@@ -216,10 +233,14 @@ export class SimulationWorker {
             },
           ];
 
+          // H-004 FIX: Use chain-specific flash loan fee instead of hardcoded Aave V3 fee
+          const chain = String(data['chain'] ?? '');
+          const feeBps = getFlashLoanFeeBps(chain);
+
           const result = await this.batchQuoter.simulateArbitragePath(
             requests,
             amountIn,
-            FLASH_LOAN_FEE_BPS,
+            feeBps,
           );
 
           if (result.expectedProfit <= 0n) {
@@ -285,9 +306,13 @@ export class SimulationWorker {
   private computeScore(data: Record<string, unknown>): number {
     const profit = Number(data['expectedProfit'] ?? 0);
     const confidence = Number(data['confidence'] ?? 0.5);
-    // Clamp to [0, 1]: profit * confidence is a basic profitability proxy.
-    // Real deployments can replace this with a more sophisticated model.
-    return Math.min(1, Math.max(0, profit * confidence));
+    // M-003 FIX: Normalize profit to [0,1] before multiplying by confidence.
+    // Previously, profit * confidence saturated to 1.0 for any expectedProfit > 2
+    // with confidence >= 0.5, making all opportunities score identically.
+    // Denominator of 100 maps expectedProfit in USD to a 0-1 range
+    // (e.g., $50 profit → 0.5, $100+ profit → 1.0).
+    const normalizedProfit = Math.min(1, Math.max(0, profit / 100));
+    return Math.min(1, Math.max(0, normalizedProfit * confidence));
   }
 
   /**

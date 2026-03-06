@@ -694,4 +694,52 @@ describe('validateMessageStructure — numeric field deserialization from Redis 
       expect(result.opportunity.confidence).toBe(0.85);
     }
   });
+
+  // M-004 regression: NaN guard for corrupted Redis string data
+  it('should fall back to 0 when numeric string fields are NaN (corrupted data)', () => {
+    const result = validateMessageStructure(
+      createValidMessage({
+        profitPercentage: 'not-a-number',
+        confidence: 'NaN',
+        expectedProfit: 'undefined',
+        estimatedProfit: '',
+        buyPrice: 'corrupted',
+        sellPrice: 'Infinity',
+      })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.opportunity.profitPercentage).toBe(0);
+      expect(result.opportunity.confidence).toBe(0);
+      expect(result.opportunity.expectedProfit).toBe(0);
+      expect(result.opportunity.estimatedProfit).toBe(0);
+      expect(result.opportunity.buyPrice).toBe(0);
+      expect(result.opportunity.sellPrice).toBe(0);
+    }
+  });
+
+  it('should fall back to 0 when blockNumber string is NaN', () => {
+    const result = validateMessageStructure(
+      createValidMessage({ blockNumber: 'abc' })
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.opportunity.blockNumber).toBe(0);
+    }
+  });
+
+  it('should fall back to Date.now() when timestamp string is NaN', () => {
+    const before = Date.now();
+    const result = validateMessageStructure(
+      createValidMessage({ timestamp: 'invalid' })
+    );
+    const after = Date.now();
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      // Timestamp should be a current time fallback, not NaN
+      expect(Number.isFinite(result.opportunity.timestamp)).toBe(true);
+      expect(result.opportunity.timestamp).toBeGreaterThanOrEqual(before);
+      expect(result.opportunity.timestamp).toBeLessThanOrEqual(after);
+    }
+  });
 });

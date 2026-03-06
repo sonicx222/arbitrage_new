@@ -428,6 +428,11 @@ export class DlqConsumer {
       let targetMessage: { id: string; data: unknown } | undefined;
       let pagesScanned = 0;
 
+      // M-007 FIX: Use Map for O(1) lookup instead of .find() per page.
+      // Build a Map keyed by message ID as we paginate, then look up the target.
+      // This avoids O(pageSize) linear scan per page when the target is near the end.
+      const messageMap = new Map<string, { id: string; data: unknown }>();
+
       do {
         const messages = await this.streamsClient.xread(DLQ_STREAM, cursor, {
           count: this.maxMessagesPerScan,
@@ -436,12 +441,17 @@ export class DlqConsumer {
         if (messages.length === 0) break;
         pagesScanned++;
 
-        targetMessage = messages.find(m => m.id === messageId);
-        if (targetMessage) break;
+        for (const m of messages) {
+          messageMap.set(m.id, m);
+        }
+
+        if (messageMap.has(messageId)) break;
 
         // Advance cursor to last message ID for next page
         cursor = messages[messages.length - 1].id;
-      } while (!targetMessage && pagesScanned < MAX_REPLAY_PAGES);
+      } while (pagesScanned < MAX_REPLAY_PAGES);
+
+      targetMessage = messageMap.get(messageId);
 
       if (pagesScanned >= MAX_REPLAY_PAGES && !targetMessage) {
         this.logger.warn('DLQ replay scan hit page limit', {
