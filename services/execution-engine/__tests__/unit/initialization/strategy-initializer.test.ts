@@ -969,7 +969,8 @@ describe('initializeAllStrategies', () => {
 
       // NaN should be treated as invalid, undefined is passed, BackrunStrategy uses its own default
       expect((deps.logger as MockLogger).warn).toHaveBeenCalledWith(
-        expect.stringContaining("Invalid numeric env var BACKRUN_MIN_PROFIT_USD='not-a-number'"),
+        'Invalid numeric env var, ignoring',
+        expect.objectContaining({ key: 'BACKRUN_MIN_PROFIT_USD', value: 'not-a-number' }),
       );
       expect(BackrunStrategy).toHaveBeenCalledWith(
         deps.logger,

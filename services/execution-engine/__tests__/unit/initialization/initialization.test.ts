@@ -360,7 +360,8 @@ describe('Initialization Module', () => {
       // Should succeed but with 0 providers (solana is skipped)
       expect(result.success).toBe(true);
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping MEV provider for solana'),
+        'Skipping MEV provider',
+        expect.objectContaining({ chainName: 'solana' }),
       );
 
       config.MEV_CONFIG.enabled = false;

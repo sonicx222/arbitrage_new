@@ -626,12 +626,11 @@ export class ExecutionPipeline {
           recordProfitPerExecution(chain, strategy, result.actualProfit / 1e18);
 
           // Phase 3 (A3): Record profit slippage (expected vs actual)
-          // H-003 FIX: Both expectedProfit and actualProfit are in the same raw
-          // units (wei-scale). The /1e18 was already applied to actualProfit for
-          // volume and per-execution metrics above, but the slippage ratio must
-          // use consistent units — the 1e18 divisors cancel in the ratio.
+          // expectedProfit is in ETH (e.g. 0.05), actualProfit is in wei (e.g. 50000000000000000).
+          // Convert actualProfit to ETH to match expectedProfit before computing the ratio.
           if (opportunity.expectedProfit != null && opportunity.expectedProfit !== 0) {
-            const slippagePct = ((opportunity.expectedProfit - result.actualProfit) / Math.abs(opportunity.expectedProfit)) * 100;
+            const actualProfitEth = result.actualProfit / 1e18;
+            const slippagePct = ((opportunity.expectedProfit - actualProfitEth) / Math.abs(opportunity.expectedProfit)) * 100;
             if (Number.isFinite(slippagePct)) {
               recordProfitSlippage(chain, strategy, slippagePct);
             }

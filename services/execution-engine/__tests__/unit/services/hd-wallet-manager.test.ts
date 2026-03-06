@@ -113,7 +113,8 @@ describe('HD Wallet Manager', () => {
       expect(wallets.has('ethereum')).toBe(true);
       expect(wallets.has('solana')).toBe(false);
       expect(logger.debug).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping HD derivation for solana'),
+        'Skipping HD derivation',
+        expect.objectContaining({ chainName: 'solana' }),
       );
     });
 
@@ -178,12 +179,12 @@ describe('HD Wallet Manager', () => {
 
       expect(logger.info).toHaveBeenCalledTimes(2);
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Derived HD wallet for ethereum'),
-        expect.objectContaining({ index: 0 }),
+        'Derived HD wallet',
+        expect.objectContaining({ chainName: 'ethereum', index: 0 }),
       );
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Derived HD wallet for bsc'),
-        expect.objectContaining({ index: 1 }),
+        'Derived HD wallet',
+        expect.objectContaining({ chainName: 'bsc', index: 1 }),
       );
     });
   });
