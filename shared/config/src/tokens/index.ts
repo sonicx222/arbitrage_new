@@ -6,7 +6,7 @@
  * - TOKEN_METADATA: Chain-specific token addresses for USD estimation
  *
  * Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
- * Total: 173 tokens across 15 chains
+ * Total: 135 tokens across 15 chains
  *
  * @see S3.1.2: New chain tokens
  * @see S3.2.1: Avalanche token expansion

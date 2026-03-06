@@ -24,14 +24,14 @@ export const BLAST_DEXES: Dex[] = [
     name: 'bladeswap',         // [H]
     chain: 'blast',
     factoryAddress: '0x5C346464d33F90bABaf70dB6388507CC889C1070',
-    routerAddress: '0x5C346464d33F90bABaf70dB6388507CC889C1070',
+    routerAddress: '0x5C346464d33F90bABaf70dB6388507CC889C1070', // Single-contract model (factory===router) — RPC-verified
     feeBps: bps(30),
   },
   {
     name: 'fenix_finance',     // [H] - Solidly fork
     chain: 'blast',
     factoryAddress: '0xa19C51D91891D3DF7C13Ed22a2f89d328A82950f',
-    routerAddress: '0xa19C51D91891D3DF7C13Ed22a2f89d328A82950f',
+    routerAddress: '0xa19C51D91891D3DF7C13Ed22a2f89d328A82950f', // Single-contract model (factory===router) — RPC-verified
     feeBps: bps(30),
   },
 ];

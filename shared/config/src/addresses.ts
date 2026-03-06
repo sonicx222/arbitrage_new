@@ -4,7 +4,7 @@
  * P3-CONFIG: Single source of truth for all contract addresses.
  * Eliminates duplicate address definitions and prevents address drift.
  *
- * @see docs/refactoring-roadmap.md - P3-CONFIG: Create canonical address file
+ * @see shared/config/src/schemas/index.ts - Zod validation schemas for addresses
  *
  * ## Address Organization
  * - AAVE_V3_POOLS: Aave V3 Pool addresses by chain (flash loans)
@@ -197,7 +197,7 @@ export function hasBalancerV2(chain: string): boolean {
  * EIP-3156 compliant flash loan interface and 0.3% flash loan fee.
  *
  * @see https://syncswap.xyz/
- * @see docs/syncswap_api_dpcu.md
+ * @see shared/config/src/flash-loan-providers/syncswap.ts - SyncSwap flash loan descriptor
  */
 export const SYNCSWAP_VAULTS: Readonly<Record<string, string>> = {
   zksync: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // zkSync Era Mainnet

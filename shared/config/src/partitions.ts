@@ -213,7 +213,7 @@ export function getNonEvmChains(): string[] {
  *
  * S3.1.2: 4-Partition Architecture
  * - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom) - EVM high-throughput chains
- * - P2: L2-Turbo (Arbitrum, Optimism, Base, Blast, Scroll, Mantle, Mode) - Ethereum L2 rollups
+ * - P2: L2-Turbo (Arbitrum, Optimism, Base, Blast, Scroll) - Ethereum L2 rollups
  * - P3: High-Value (Ethereum, zkSync, Linea) - High-value EVM chains
  * - P4: Solana-Native (Solana) - Non-EVM, dedicated partition
  */
@@ -248,7 +248,8 @@ export const PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    // Mantle and Mode remain stubs (unverified factory addresses) — keep in high-value until verified
+    // Mantle and Mode remain stubs (unverified factory addresses) — excluded from all partitions
+    // until factory addresses are verified. See D9-MANTLE-MODE-PARTITIONS in deferred-items.ts.
     chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
     region: 'asia-southeast1',
     provider: 'fly',
@@ -301,7 +302,7 @@ export const PARTITIONS: PartitionConfig[] = [
  * NOTE: These are disabled templates for planned Phase 2 expansion.
  * - All partitions have `enabled: false`
  * - Used in tests to verify disabled partitions are excluded from getEnabledPartitions()
- * - Will be activated when Phase 2 chains are added (e.g., Scroll)
+ * - Will be activated when future expansion chains are added
  *
  * @see partitions.test.ts - Tests verify these remain disabled
  */
@@ -401,11 +402,14 @@ export function getPartition(partitionId: string): PartitionConfig | undefined {
   return PARTITION_BY_ID.get(partitionId);
 }
 
+// Pre-computed enabled partitions to avoid repeated .filter() on each call
+const ENABLED_PARTITIONS = PARTITIONS.filter(p => p.enabled);
+
 /**
  * Get all enabled partitions.
  */
 export function getEnabledPartitions(): PartitionConfig[] {
-  return PARTITIONS.filter(p => p.enabled);
+  return ENABLED_PARTITIONS;
 }
 
 /**
@@ -671,11 +675,13 @@ export const PHASE_METRICS = {
   current: {
     phase: 1,
     chains: Object.keys(CHAINS).length,
-    dexes: Object.values(DEXES).flat().length,
-    tokens: Object.values(CORE_TOKENS).flat().length,
+    dexes: Object.values(DEXES).reduce((sum, arr) => sum + arr.length, 0),
+    tokens: Object.values(CORE_TOKENS).reduce((sum, arr) => sum + arr.length, 0),
     targetOpportunities: 500  // Increased with more chains/DEXes
   },
   targets: {
+    // NOTE: phase1 targets are historical milestones, now exceeded by the live config.
+    // Current: 15 chains, 78 DEXes, 135 tokens. Targets below preserved for historical reference.
     // Phase 1 with vault-model adapters:
     // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
     // - 49 DEXes (46 + 3 newly enabled: GMX, Platypus, Beethoven X with adapters)

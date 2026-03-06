@@ -21,7 +21,7 @@ export const MEMPOOL_CONFIG = {
   /** bloXroute BDN Configuration */
   bloxroute: {
     /** Authorization header for bloXroute API */
-    authHeader: process.env.BLOXROUTE_AUTH_HEADER || '',
+    authHeader: process.env.BLOXROUTE_AUTH_HEADER ?? '',
     /** bloXroute WebSocket endpoint */
     wsEndpoint: process.env.BLOXROUTE_WS_ENDPOINT || 'wss://eth.blxrbdn.com/ws',
     /** bloXroute BSC WebSocket endpoint */

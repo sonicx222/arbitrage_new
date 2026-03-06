@@ -226,7 +226,7 @@ export const RISK_CONFIG = {
      * Redis key prefix for persistence.
      * Default: 'risk:probabilities:'
      */
-    redisKeyPrefix: process.env.RISK_REDIS_KEY_PREFIX || 'risk:probabilities:',
+    redisKeyPrefix: process.env.RISK_REDIS_KEY_PREFIX ?? 'risk:probabilities:',
   },
 
   // ===========================================================================
