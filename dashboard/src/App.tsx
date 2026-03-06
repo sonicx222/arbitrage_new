@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { SSEProvider, useSSEData } from './context/SSEContext';
+import { LoginScreen } from './components/LoginScreen';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
 import { ChainsTab } from './tabs/ChainsTab';
@@ -16,7 +17,7 @@ function ConnectionDot() {
   return <span className={`inline-block w-2 h-2 rounded-full ${color}`} title={status} />;
 }
 
-function Dashboard() {
+function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>('Overview');
   const { metrics } = useSSEData();
 
@@ -32,19 +33,28 @@ function Dashboard() {
             </span>
           )}
         </div>
-        <nav className="flex gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                tab === t ? 'bg-accent-green/20 text-accent-green' : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
+        <div className="flex items-center gap-2">
+          <nav className="flex gap-1">
+            {TABS.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                  tab === t ? 'bg-accent-green/20 text-accent-green' : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </nav>
+          <button
+            onClick={onLogout}
+            className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-300 ml-2"
+            title="Logout"
+          >
+            Logout
+          </button>
+        </div>
       </header>
       <main className="flex-1 p-4 overflow-auto">
         {tab === 'Overview' && <OverviewTab />}
@@ -59,9 +69,27 @@ function Dashboard() {
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!localStorage.getItem('dashboard_token'));
+  const [sseKey, setSSEKey] = useState(0);
+
+  const handleLogin = useCallback(() => {
+    setAuthed(true);
+    setSSEKey((k) => k + 1); // Force SSE reconnect with new token
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('dashboard_token');
+    localStorage.removeItem('cb_api_key');
+    setAuthed(false);
+  }, []);
+
+  if (!authed) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
-    <SSEProvider>
-      <Dashboard />
+    <SSEProvider key={sseKey}>
+      <Dashboard onLogout={handleLogout} />
     </SSEProvider>
   );
 }
