@@ -9,8 +9,8 @@
  * Design notes:
  * - `type` and `chain` use `||` intentionally: empty string should
  *   also trigger the default value ('simple' / 'unknown').
- * - `timestamp` uses `||` intentionally: empty string should trigger
- *   Date.now() fallback.
+ * - `timestamp` uses `??` (P3-003): preserves explicit 0; null/undefined
+ *   falls back to Date.now().
  * - All other string fields use `??` (nullish coalescing) to preserve
  *   empty strings as valid values.
  *

@@ -340,12 +340,16 @@ describe('SolanaArbitrageDetector', () => {
       expect(result[0].status).toBe('pending');
     });
 
-    it('should set expiresAt based on config', async () => {
+    it('should set expiresAt based on config capped by canonical timeout', async () => {
       createProfitableSnapshot();
       const before = Date.now();
       const result = await detector.checkArbitrage();
 
-      expect(result[0].expiresAt).toBeGreaterThanOrEqual(before + defaultConfig.opportunityExpiryMs);
+      // P3-006: expiresAt is now Math.min(config.opportunityExpiryMs, getOpportunityTimeoutMs('solana'))
+      // getOpportunityTimeoutMs('solana') = 1000ms, config = 30000ms, so effective = 1000ms
+      const { getOpportunityTimeoutMs } = await import('@arbitrage/config');
+      const effectiveExpiry = Math.min(defaultConfig.opportunityExpiryMs, getOpportunityTimeoutMs('solana'));
+      expect(result[0].expiresAt).toBeGreaterThanOrEqual(before + effectiveExpiry);
     });
 
     it('should generate unique ID with solana prefix', async () => {
