@@ -261,6 +261,17 @@ export interface ArbitrageOpportunity {
   pipelineTimestamps?: PipelineTimestamps;
   netProfit?: number;
   /**
+   * Phase 3 (ADR-039): Async pipeline split — set by SimulationWorker when this opportunity
+   * has been pre-validated. Unix ms timestamp of when the worker ran its simulation check.
+   * ExecutionPipeline uses this for the staleness filter (reject if age > 2× block time).
+   */
+  preSimulatedAt?: number;
+  /**
+   * Phase 3 (ADR-039): Profitability score computed by SimulationWorker.
+   * 0-1 range: higher = more profitable relative to gas cost. Used for ordering.
+   */
+  preSimulationScore?: number;
+  /**
    * P0 Fix #2: MEV-Share backrun target metadata.
    * Present when type === 'backrun'. Contains the target transaction
    * details needed to construct a backrun bundle.

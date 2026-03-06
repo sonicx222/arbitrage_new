@@ -720,6 +720,13 @@ export interface ExecutionEngineConfig {
    * Defaults to undefined (uses EXECUTION_REQUESTS for backward compatibility).
    */
   executionStreamName?: string;
+  /**
+   * Phase 3 (ADR-039): Enable async pipeline split mode.
+   * When true, a SimulationWorker pre-validates opportunities and the EE
+   * consumes from stream:pre-simulated instead of the raw exec-request stream.
+   * Controlled via ASYNC_PIPELINE_SPLIT=true environment variable.
+   */
+  asyncPipelineSplit?: boolean;
 }
 
 /**

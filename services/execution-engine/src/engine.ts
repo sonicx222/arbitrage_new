@@ -147,6 +147,8 @@ import {
 } from './services/balance-monitor';
 // W1-42 FIX: Extracted execution pipeline
 import { ExecutionPipeline, type PipelineDeps } from './execution-pipeline';
+// Phase 3 (ADR-039): Async pipeline split
+import { SimulationWorker } from './workers/simulation-worker';
 
 // Re-export types for consumers
 export type {
@@ -242,6 +244,7 @@ export class ExecutionEngineService {
   private readonly pendingStateConfig: PendingStateEngineConfig; // Phase 2 config
   private readonly consumerConfig: Partial<ConsumerConfig> | undefined; // Consumer tuning
   private readonly executionStreamName: string | undefined; // Phase 2 (ADR-038): per-group stream
+  private readonly asyncPipelineSplit: boolean; // Phase 3 (ADR-039): async pipeline split
 
   // S6: Standby activation management extracted to StandbyManager
   private standbyManager: StandbyManager | null = null;
@@ -256,6 +259,9 @@ export class ExecutionEngineService {
 
   // W1-42 FIX: Extracted execution pipeline
   private executionPipeline: ExecutionPipeline | null = null;
+
+  // Phase 3 (ADR-039): Async pipeline simulation worker
+  private simulationWorker: SimulationWorker | null = null;
 
   // P1 FIX: Lock conflict tracking extracted to dedicated class
   // Tracks repeated lock conflicts to detect crashed lock holders
@@ -361,6 +367,9 @@ export class ExecutionEngineService {
 
     // Phase 2 (ADR-038): store per-chain-group stream name (set by index.ts from env)
     this.executionStreamName = config.executionStreamName;
+
+    // Phase 3 (ADR-039): async pipeline split mode
+    this.asyncPipelineSplit = config.asyncPipelineSplit ?? false;
 
     // Task 3: A/B testing config (enabled via environment variable)
     // FIX P0-2: Validate env var parseFloat/parseInt to prevent NaN propagation
@@ -701,8 +710,10 @@ export class ExecutionEngineService {
         onSimulationModeChanged: (mode) => { this.isSimulationMode = mode; this.invalidateStrategyContext(); },
       });
 
-      // Initialize opportunity consumer
-      // Phase 2 (ADR-038): pass streamName to consume from per-group stream when configured
+      // Initialize opportunity consumer.
+      // Phase 2 (ADR-038): pass streamName to consume from per-group stream when configured.
+      // Phase 3 (ADR-039): when asyncPipelineSplit=true, consume from stream:pre-simulated
+      //   (SimulationWorker pre-validates opps and publishes there with preSimulatedAt stamped).
       this.opportunityConsumer = new OpportunityConsumer({
         logger: this.logger,
         streamsClient: this.streamsClient,
@@ -710,7 +721,9 @@ export class ExecutionEngineService {
         stats: this.stats,
         instanceId: this.instanceId,
         consumerConfig: this.consumerConfig,
-        streamName: this.executionStreamName,
+        streamName: this.asyncPipelineSplit
+          ? RedisStreams.PRE_SIMULATED
+          : this.executionStreamName,
       });
 
       // Create consumer groups and start consuming
@@ -741,6 +754,27 @@ export class ExecutionEngineService {
         });
         await this.fastLaneConsumer.createConsumerGroup();
         this.fastLaneConsumer.start();
+      }
+
+      // Phase 3 (ADR-039): Start simulation worker for async pipeline split
+      if (this.asyncPipelineSplit) {
+        const sourceStream = this.executionStreamName ?? RedisStreams.EXECUTION_REQUESTS;
+        this.simulationWorker = new SimulationWorker(
+          this.logger,
+          this.streamsClient!,
+          null, // BatchQuoter requires a deployed MultiPathQuoter — pass null for pass-through mode
+          {
+            sourceStream,
+            targetStream: RedisStreams.PRE_SIMULATED,
+            consumerGroupName: 'simulation-worker-group',
+            consumerName: `sim-worker-${this.instanceId}`,
+          },
+        );
+        await this.simulationWorker.start();
+        this.logger.info('SimulationWorker started (ASYNC_PIPELINE_SPLIT=true)', {
+          sourceStream,
+          targetStream: RedisStreams.PRE_SIMULATED,
+        });
       }
 
       // Start execution processing
@@ -874,6 +908,12 @@ export class ExecutionEngineService {
         await this.mevShareListener.stop();
         this.mevShareListener.removeAllListeners();
         this.mevShareListener = null;
+      }
+
+      // Phase 3 (ADR-039): Stop simulation worker before consumers
+      if (this.simulationWorker) {
+        await this.simulationWorker.stop();
+        this.simulationWorker = null;
       }
 
       // Stop consumers

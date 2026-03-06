@@ -415,6 +415,9 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.EXEC_REQUESTS_L2]:      25000, // l2 group: arb/opt/base/scroll/blast
     [RedisStreamsClient.STREAMS.EXEC_REQUESTS_PREMIUM]: 25000, // premium group: eth/zksync/linea
     [RedisStreamsClient.STREAMS.EXEC_REQUESTS_SOLANA]:  10000, // solana group (lower volume)
+    // Phase 3: Pre-simulated stream (ADR-039). Only populated when ASYNC_PIPELINE_SPLIT=true.
+    // Smaller than exec-requests since SimulationWorker filters unprofitable/stale opps.
+    [RedisStreamsClient.STREAMS.PRE_SIMULATED]:         25000, // pre-validated, awaiting EE execution
     [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
     [RedisStreamsClient.STREAMS.CIRCUIT_BREAKER]: 5000,        // Circuit breaker events, critical alerts
     [RedisStreamsClient.STREAMS.SYSTEM_FAILOVER]: 1000,        // Failover coordination, low volume

@@ -31,6 +31,7 @@ import {
   createSkippedResult,
   ExecutionErrorCode,
 } from './types';
+import { CHAINS } from '@arbitrage/config';
 import { createCancellableTimeout } from './services/simulation/types';
 import type { ExecutionStrategyFactory } from './strategies/strategy-factory';
 import type { OpportunityConsumer } from './consumers/opportunity.consumer';
@@ -494,6 +495,26 @@ export class ExecutionPipeline {
     const chain = resolvedBuyChain;
     const dex = opportunity.buyDex ?? 'unknown';
     const strategy = opportunity.type ?? 'unknown';
+
+    // Phase 3 (ADR-039): Staleness filter for pre-simulated opportunities.
+    // Reject opps older than 2× the chain's block time — by then the on-chain
+    // state has changed enough that the pre-simulation result is unreliable.
+    // Opps without preSimulatedAt (legacy / non-async-pipeline path) are unaffected.
+    if (opportunity.preSimulatedAt !== undefined) {
+      const chainConfig = CHAINS[chain];
+      const blockTimeSec = chainConfig?.blockTime ?? 12; // default: Ethereum 12s
+      const stalenessWindowMs = 2 * blockTimeSec * 1000;
+      const ageMs = Date.now() - opportunity.preSimulatedAt;
+      if (ageMs >= stalenessWindowMs) {
+        this.deps.logger.warn('Dropping stale pre-simulated opportunity', {
+          opportunityId: opportunity.id,
+          ageMs,
+          stalenessWindowMs,
+          chain,
+        });
+        return;
+      }
+    }
 
     // Phase 3 (A4): Record opportunity age at execution start
     const detectedAt = ts.detectedAt;

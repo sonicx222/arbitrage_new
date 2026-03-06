@@ -384,6 +384,8 @@ async function main() {
       circuitBreakerConfig,
       // Phase 2 (ADR-038): set per-group stream when EXECUTION_CHAIN_GROUP is configured
       executionStreamName: chainGroupConfig?.executionStreamName,
+      // Phase 3 (ADR-039): async pipeline split (SimulationWorker pre-validates opps)
+      asyncPipelineSplit: process.env.ASYNC_PIPELINE_SPLIT === 'true',
     });
 
     // Initialize CrossRegionHealthManager for cross-region failover (ADR-007)

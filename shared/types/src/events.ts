@@ -41,6 +41,11 @@ export const RedisStreams = {
   EXEC_REQUESTS_PREMIUM: 'stream:exec-requests-premium', // [ACTIVE] Group: ethereum,zksync,linea
   EXEC_REQUESTS_SOLANA:  'stream:exec-requests-solana',  // [ACTIVE] Group: solana
 
+  // Phase 3: Async pipeline split (ADR-039)
+  // SimulationWorker pre-validates opps and publishes scored results here.
+  // EE consumes this stream when ASYNC_PIPELINE_SPLIT=true.
+  PRE_SIMULATED: 'stream:pre-simulated',                 // [ACTIVE when ASYNC_PIPELINE_SPLIT=true] Producer: simulation-worker
+
   // Mempool & detection streams
   PENDING_OPPORTUNITIES: 'stream:pending-opportunities', // [IDLE] Future: mempool-detector
   VOLUME_AGGREGATES: 'stream:volume-aggregates',       // [IDLE] Future: volume aggregation
