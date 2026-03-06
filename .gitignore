@@ -179,5 +179,10 @@ full_codebase.txt
 
 # Git worktrees
 .worktrees/
-data/trades/trades-2026-03-02.jsonl
+
+# Runtime-generated data (DLQ fallbacks, trade logs)
+data/*.jsonl
+data/trades/*.jsonl
+
+# Auto-generated files
 services/execution-engine/src/strategies/error-selectors.generated.ts
