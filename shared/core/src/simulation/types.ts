@@ -222,6 +222,8 @@ export interface ChainSimulatorConfig {
   minPositionSize?: number;
   /** Maximum position size in USD (default: 50000) */
   maxPositionSize?: number;
+  /** Fast-lane opportunity generation rate (0-1). @default 0.15 via SIMULATION_FAST_LANE_RATE */
+  fastLaneRate?: number;
 }
 
 export interface SimulatedPairConfig {

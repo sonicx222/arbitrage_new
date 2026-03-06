@@ -38,7 +38,10 @@ import {
   REGIME_CONFIGS,
   transitionRegime,
   selectWeightedStrategyType,
+  DEFAULT_FAST_LANE_RATE,
+  selectFastLaneStrategyType,
 } from './constants';
+import { FAST_LANE_CONFIG } from '@arbitrage/config';
 import { getSimulationRealismLevel } from './mode-utils';
 import { gaussianRandom, poissonRandom, weightedRandomSelect } from './math-utils';
 import { CHAIN_THROUGHPUT_PROFILES, getNativeTokenPrice, selectWeightedDex } from './throughput-profiles';
@@ -140,6 +143,13 @@ export class ChainSimulator extends EventEmitter {
   private readonly maxPositionSize: number;
 
   /**
+   * Fast-lane opportunity generation rate (0-1).
+   * Read from SIMULATION_FAST_LANE_RATE env var, config, or DEFAULT_FAST_LANE_RATE.
+   */
+  private readonly fastLaneRate: number;
+  private fastLaneOpportunityId = 0;
+
+  /**
    * Market regime state for high-realism simulation.
    * Transitions via Markov chain each tick.
    */
@@ -151,6 +161,8 @@ export class ChainSimulator extends EventEmitter {
     this.blockNumber = Math.floor(Date.now() / 1000);
     this.minPositionSize = config.minPositionSize ?? 1000;
     this.maxPositionSize = config.maxPositionSize ?? 50000;
+    const envRate = process.env.SIMULATION_FAST_LANE_RATE;
+    this.fastLaneRate = envRate !== undefined ? parseFloat(envRate) : (config.fastLaneRate ?? DEFAULT_FAST_LANE_RATE);
     this.initializeReserves();
     this.buildDexIndex();
   }
@@ -341,6 +353,9 @@ export class ChainSimulator extends EventEmitter {
     if (shouldCreateArbitrage) {
       this.detectAndEmitOpportunities();
     }
+
+    // Fast-lane opportunity generation (independent from regular arb detection)
+    this.tryGenerateFastLaneOpportunity();
   }
 
   // =============================================================================
@@ -425,6 +440,9 @@ export class ChainSimulator extends EventEmitter {
     if (Math.random() < this.config.arbitrageChance) {
       this.generateMultiHopOpportunity();
     }
+
+    // Fast-lane opportunity generation (independent from regular arb detection)
+    this.tryGenerateFastLaneOpportunity();
   }
 
   /**
@@ -970,6 +988,120 @@ export class ChainSimulator extends EventEmitter {
       tokens.add(pair.token1Symbol);
     }
     return Array.from(tokens);
+  }
+
+  // =============================================================================
+  // Fast Lane Opportunity Generator
+  // =============================================================================
+
+  /**
+   * Try to generate a fast-lane-eligible opportunity based on the configured rate.
+   * Called once per tick/block. Generates opportunities guaranteed to pass
+   * FAST_LANE_CONFIG thresholds (confidence >= minConfidence, profit >= minProfitUsd).
+   *
+   * Opportunities are emitted on both 'fastLaneOpportunity' and 'opportunity' events
+   * so they flow through the normal pipeline AND are identifiable as fast-lane candidates.
+   */
+  private tryGenerateFastLaneOpportunity(): void {
+    if (this.fastLaneRate <= 0) return;
+    if (this.config.pairs.length < 2) return;
+    if (Math.random() >= this.fastLaneRate) return;
+
+    this.generateFastLaneOpportunity();
+  }
+
+  private generateFastLaneOpportunity(): void {
+    // Pick a random pair for buy/sell
+    const buyIdx = Math.floor(Math.random() * this.config.pairs.length);
+    let sellIdx = Math.floor(Math.random() * this.config.pairs.length);
+    // Ensure different DEXes
+    if (this.config.pairs[buyIdx].dex === this.config.pairs[sellIdx].dex) {
+      // Find a pair with a different DEX
+      for (let i = 0; i < this.config.pairs.length; i++) {
+        if (this.config.pairs[i].dex !== this.config.pairs[buyIdx].dex) {
+          sellIdx = i;
+          break;
+        }
+      }
+    }
+
+    const buyPair = this.config.pairs[buyIdx];
+    const sellPair = this.config.pairs[sellIdx];
+
+    const selectedType = selectFastLaneStrategyType();
+    const flashLoanFee = 0.0009;
+
+    // Confidence: uniform in [minConfidence, 0.99] — always above fast-lane threshold
+    const minConf = FAST_LANE_CONFIG.minConfidence;
+    const confidence = minConf + Math.random() * (0.99 - minConf);
+
+    // Position size: higher range for fast-lane to ensure profit threshold
+    const minProfitUsd = FAST_LANE_CONFIG.minProfitUsd;
+    // Net profit %: 1-5% range ensures meaningful USD profit
+    const netProfitPct = 0.01 + Math.random() * 0.04;
+    // Position size: ensure expectedProfit >= minProfitUsd after gas
+    // expectedProfit = positionSize * netProfitPct * (1 - flashLoanFee) - gasCost
+    // Solve for positionSize: (minProfitUsd + gasCost) / (netProfitPct * (1 - flashLoanFee))
+    const estimatedGasCost = this.currentGasPrice.gasCostUsd > 0
+      ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4)
+      : 5 + Math.random() * 15;
+    const useFlashLoan = selectedType === 'flash-loan' || selectedType === 'triangular'
+      || selectedType === 'multi-leg' || selectedType === 'statistical';
+    const feeMultiplier = useFlashLoan ? (1 - flashLoanFee) : 1;
+    const minPositionSize = (minProfitUsd + estimatedGasCost + 50) / (netProfitPct * feeMultiplier);
+    const positionSize = Math.max(minPositionSize, 5000 + Math.random() * 50000);
+
+    const estimatedProfitUsd = netProfitPct * positionSize;
+    const expectedProfit = estimatedProfitUsd * feeMultiplier - estimatedGasCost;
+
+    const now = Date.now();
+    const tokenPair = `${buyPair.token0Symbol}/${buyPair.token1Symbol}`;
+    const basePrice = getTokenPrice(buyPair.token0Symbol) / getTokenPrice(buyPair.token1Symbol);
+
+    const opportunity: SimulatedOpportunity = {
+      id: `sim-${this.config.chainId}-fl-${++this.fastLaneOpportunityId}`,
+      type: selectedType,
+      chain: this.config.chainId,
+      buyChain: this.config.chainId,
+      sellChain: this.config.chainId,
+      buyDex: buyPair.dex,
+      sellDex: sellPair.dex,
+      tokenPair,
+      tokenIn: getTokenAddress(buyPair, true),
+      tokenOut: getTokenAddress(buyPair, false),
+      amountIn: calculateRawAmountIn(positionSize, buyPair.token0Symbol, buyPair.token0Decimals),
+      buyPrice: basePrice,
+      sellPrice: basePrice * (1 + netProfitPct),
+      profitPercentage: netProfitPct * 100,
+      estimatedProfitUsd,
+      confidence,
+      timestamp: now,
+      expiresAt: getSimulationExpiresAt(
+        this.config.chainId,
+        // Multi-hop types use shorter strategy-specific TTL (matches generateMultiHopOpportunity)
+        (selectedType === 'triangular' || selectedType === 'multi-leg') ? 3000 : undefined,
+      ),
+      isSimulated: true,
+      useFlashLoan,
+      expectedGasCost: estimatedGasCost,
+      expectedProfit,
+      pipelineTimestamps: {
+        wsReceivedAt: now - 8,
+        publishedAt: now - 5,
+        consumedAt: now - 2,
+      },
+      ...(useFlashLoan ? { flashLoanFee } : {}),
+    };
+
+    // Emit on both events — 'opportunity' for normal pipeline, 'fastLaneOpportunity' for identification
+    this.emit('opportunity', opportunity);
+    this.emit('fastLaneOpportunity', opportunity);
+    this.logger.debug('Simulated fast-lane opportunity', {
+      id: opportunity.id,
+      type: opportunity.type,
+      confidence: confidence.toFixed(3),
+      expectedProfit: expectedProfit.toFixed(2),
+    });
   }
 
   getBlockNumber(): number {

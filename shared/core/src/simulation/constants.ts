@@ -378,6 +378,52 @@ export function selectWeightedStrategyType(): SimulatedOpportunityType {
 }
 
 // =============================================================================
+// Fast Lane Strategy Distribution
+// =============================================================================
+
+/**
+ * Default fast-lane opportunity generation rate.
+ * Fraction of ticks that produce a fast-lane-eligible opportunity.
+ * Overridden by SIMULATION_FAST_LANE_RATE env var.
+ *
+ * @default 0.15 (15% of ticks)
+ */
+export const DEFAULT_FAST_LANE_RATE = 0.15;
+
+/**
+ * Strategy type weights for fast-lane opportunities.
+ * Tuned for high-confidence, high-profit types that are realistic fast-lane
+ * candidates. Weights sum to 1.0.
+ *
+ * Excludes types with inherently low confidence (backrun, predictive)
+ * and solana (handled by non-EVM simulator).
+ */
+export const FAST_LANE_STRATEGY_WEIGHTS: Partial<Record<SimulatedOpportunityType, number>> = {
+  'flash-loan': 0.30,
+  'cross-dex': 0.25,
+  'simple': 0.15,
+  'triangular': 0.10,
+  'intra-dex': 0.08,
+  'statistical': 0.05,
+  'uniswapx': 0.04,
+  'multi-leg': 0.03,
+};
+
+/**
+ * Select a strategy type for fast-lane opportunities using weighted random.
+ * Falls back to 'flash-loan' if weights don't sum to 1.0.
+ */
+export function selectFastLaneStrategyType(): SimulatedOpportunityType {
+  const rand = Math.random();
+  let cumulative = 0;
+  for (const [type, weight] of Object.entries(FAST_LANE_STRATEGY_WEIGHTS)) {
+    cumulative += weight as number;
+    if (rand < cumulative) return type as SimulatedOpportunityType;
+  }
+  return 'flash-loan';
+}
+
+// =============================================================================
 // Market Regime Model
 // =============================================================================
 
