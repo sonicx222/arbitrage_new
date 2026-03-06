@@ -162,7 +162,10 @@ const DLQ_ESCALATION_AFTER = 6; // Escalate to error after 6 consecutive breache
 let cachedConsumerLag = { pendingCount: 0, minId: null as string | null, maxId: null as string | null };
 const CONSUMER_LAG_WARNING_THRESHOLD = 50;
 
-function startRedisHealthMonitor(engine: ExecutionEngineService): void {
+function startRedisHealthMonitor(
+  engine: ExecutionEngineService,
+  chainGroupConfig?: { executionStreamName: string; chainGroup: string },
+): void {
   // Check Redis health every 10 seconds and cache the result
   redisHealthCheckInterval = setInterval(async () => {
     cachedRedisHealthy = await engine.isRedisHealthy();
@@ -205,8 +208,14 @@ function startRedisHealthMonitor(engine: ExecutionEngineService): void {
     // P2 Fix DI-6: Monitor stream length vs MAXLEN to detect message loss risk
     try {
       const streamsClient = await getRedisStreamsClient();
+      // Phase 2 (ADR-038): Monitor the actual stream this EE consumes, not always
+      // the legacy stream. When EXECUTION_CHAIN_GROUP is set, the EE consumes from
+      // a per-group stream (e.g., stream:exec-requests-fast) whose MAXLEN trimming
+      // would otherwise go undetected.
+      const executionStream = chainGroupConfig?.executionStreamName
+        ?? RedisStreamsClient.STREAMS.EXECUTION_REQUESTS;
       const criticalStreams = [
-        RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        executionStream,
         RedisStreamsClient.STREAMS.OPPORTUNITIES,
       ];
       for (const streamName of criticalStreams) {
@@ -443,7 +452,7 @@ async function main() {
 
     // Start health server first
     healthServer = createHealthServer(engine);
-    startRedisHealthMonitor(engine);
+    startRedisHealthMonitor(engine, chainGroupConfig);
 
     await engine.start();
 

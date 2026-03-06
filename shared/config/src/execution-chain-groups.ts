@@ -119,5 +119,11 @@ export function getExecutionGroupFromEnv(): ExecutionChainGroup | null {
   if (raw === 'fast' || raw === 'l2' || raw === 'premium' || raw === 'solana') {
     return raw;
   }
+  // Warn when the env var is set but not a recognized group — likely a typo.
+  // The EE silently falls back to legacy single-stream mode without this warning.
+  console.warn(
+    `[WARN] EXECUTION_CHAIN_GROUP="${process.env.EXECUTION_CHAIN_GROUP}" is not a valid group ` +
+    `(expected: fast | l2 | premium | solana). Falling back to legacy single-EE mode.`
+  );
   return null;
 }

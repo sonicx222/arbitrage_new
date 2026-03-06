@@ -906,7 +906,7 @@ export class OpportunityConsumer {
       const dlqData = {
         _dlq_schema: 'execution_engine_v1',
         originalMessageId: message.id,
-        originalStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        originalStream: this.consumerGroup.streamName,
         opportunityId: data?.id ?? 'unknown',
         opportunityType: data?.type ?? 'unknown',
         error: error.message,
