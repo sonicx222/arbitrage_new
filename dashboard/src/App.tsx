@@ -5,6 +5,7 @@ import { ExecutionTab } from './tabs/ExecutionTab';
 import { ChainsTab } from './tabs/ChainsTab';
 import { RiskTab } from './tabs/RiskTab';
 import { StreamsTab } from './tabs/StreamsTab';
+import { AdminTab } from './tabs/AdminTab';
 import type { Tab } from './lib/types';
 
 const TABS: Tab[] = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'];
@@ -51,9 +52,7 @@ function Dashboard() {
         {tab === 'Chains' && <ChainsTab />}
         {tab === 'Risk' && <RiskTab />}
         {tab === 'Streams' && <StreamsTab />}
-        {tab !== 'Overview' && tab !== 'Execution' && tab !== 'Chains' && tab !== 'Risk' && tab !== 'Streams' && (
-          <div className="text-gray-500 text-xs">{tab} — coming soon</div>
-        )}
+        {tab === 'Admin' && <AdminTab />}
       </main>
     </div>
   );
