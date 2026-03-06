@@ -6,7 +6,7 @@
  * - Fee structures
  * - Priority classifications: [C] Critical, [H] High, [M] Medium
  *
- * Total: 78 DEXes across 15 chains (57 EVM + 7 Solana + 14 Emerging L2s)
+ * Total: 78 DEXes across 15 chains (71 EVM + 7 Solana)
  *
  * Split into per-chain files under ./chains/ for maintainability.
  * This file aggregates them and provides lookup helpers.

@@ -28,10 +28,16 @@ describe('Risk Configuration', () => {
             expect(() => validateRiskConfig()).not.toThrow();
         });
 
-        it('should throw error for invalid maxDailyLoss', () => {
-            // Mock the implementation to test validation logic directly
-            // We can't easily change const exports, so we test the validator specifically
-            // or we rely on the parser tests below
+        it('should throw when defaultWinProbability is below minWinProbability', () => {
+            // validateRiskConfig reads RISK_CONFIG which is computed at module load.
+            // Re-require the module with env vars that trigger the cross-validation error.
+            process.env.RISK_DEFAULT_WIN_PROBABILITY = '0.20';
+            process.env.RISK_MIN_WIN_PROBABILITY = '0.60';
+
+            jest.resetModules();
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { validateRiskConfig: validate } = require('../../src/risk-config');
+            expect(() => validate()).toThrow('RISK_DEFAULT_WIN_PROBABILITY');
         });
 
         it('should require TOTAL_CAPITAL in production', () => {

@@ -31,11 +31,10 @@ jest.mock('@arbitrage/config', () => ({
   ],
   ARBITRAGE_CONFIG: {
     gasPriceSpikeMultiplier: 2,
-    maxGasPrice: '500',
-    minProfitThreshold: '0.001',
-    maxTradeSize: '10',
-    defaultSlippageBps: 50,
-    slippageTolerance: 0.05,
+    maxGasPrice: 50000000000,
+    minProfitThreshold: 2,
+    maxTradeSize: '1000000000000000000',
+    slippageTolerance: 0.01,
   },
 }));
 

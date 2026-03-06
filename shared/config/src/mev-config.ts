@@ -226,6 +226,7 @@ for (const [chain, settings] of Object.entries(MEV_CONFIG.chainSettings)) {
   const envKey = `MEV_PRIORITY_FEE_${chain.toUpperCase()}_GWEI`;
   const envVal = process.env[envKey];
   if (envVal !== undefined) {
+    // NB: cannot import safeParseFloat from @arbitrage/core (build order: config → core)
     const parsed = parseFloat(envVal);
     if (!Number.isNaN(parsed) && parsed >= 0) {
       settings.priorityFeeGwei = parsed;

@@ -32,13 +32,19 @@ jest.mock('ethers', () => ({
 }));
 
 // Mock @arbitrage/config — the factory reads FLASH_LOAN_PROVIDERS at module level
+// Protocol/address/fee values mirror the real service-config.ts FLASH_LOAN_PROVIDERS.
+// Fee uses AAVE_V3_FEE_BPS (9) for aave_v3 chains to match the exported constant.
 const MOCK_FLASH_LOAN_PROVIDERS: Record<string, { address: string; protocol: string; fee: number }> = {
-  ethereum: { address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', protocol: 'aave_v3', fee: 9 },
-  arbitrum: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', fee: 9 },
-  polygon: { address: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', protocol: 'balancer_v2', fee: 0 },
-  bsc: { address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4', protocol: 'pancakeswap_v3', fee: 25 },
-  zksync: { address: '0x621425a1Ef6abE91058E9712575dcc4258F8d091', protocol: 'syncswap', fee: 30 },
-  fantom: { address: '0xF491e7B69E4244ad4002BC14e878a34207E38c29', protocol: 'spookyswap', fee: 30 },
+  ethereum:  { address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', protocol: 'aave_v3',        fee: 9  },
+  arbitrum:  { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
+  polygon:   { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
+  base:      { address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5', protocol: 'aave_v3',        fee: 9  },
+  optimism:  { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
+  avalanche: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
+  scroll:    { address: '0x11fCfe756c05AD438e312a7fd934381537D3cFfe', protocol: 'aave_v3',        fee: 9  },
+  bsc:       { address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4', protocol: 'pancakeswap_v3', fee: 25 },
+  zksync:    { address: '0x621425a1Ef6abE91058E9712575dcc4258F8d091', protocol: 'syncswap',       fee: 30 },
+  fantom:    { address: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', protocol: 'balancer_v2',    fee: 0  },
 };
 
 jest.mock('@arbitrage/config', () => {
@@ -63,11 +69,10 @@ jest.mock('@arbitrage/config', () => {
     getAaveV3FeeBpsBigInt: () => BigInt(9),
     ARBITRAGE_CONFIG: {
       gasPriceSpikeMultiplier: 2,
-      maxGasPrice: '500',
-      minProfitThreshold: '0.001',
-      maxTradeSize: '10',
-      defaultSlippageBps: 50,
-      slippageTolerance: 0.05,
+      maxGasPrice: 50000000000,
+      minProfitThreshold: 2,
+      maxTradeSize: '1000000000000000000',
+      slippageTolerance: 0.01,
     },
   };
 });
@@ -130,6 +135,7 @@ const createFullConfig = (): FlashLoanProviderConfig => ({
     polygon: '0x3456789012345678901234567890123456789012',
     bsc: '0x4567890123456789012345678901234567890123',
     zksync: '0x5678901234567890123456789012345678901234',
+    fantom: '0x6789012345678901234567890123456789012345',  // balancer_v2 (Beethoven X)
   },
   approvedRouters: {
     ethereum: ['0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
@@ -137,6 +143,7 @@ const createFullConfig = (): FlashLoanProviderConfig => ({
     polygon: ['0xcccccccccccccccccccccccccccccccccccccccc'],
     bsc: ['0xdddddddddddddddddddddddddddddddddddddd'],
     zksync: ['0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'],
+    fantom: ['0xffffffffffffffffffffffffffffffffffffffff'],
   },
 });
 
@@ -169,7 +176,7 @@ describe('FlashLoanProviderFactory', () => {
     it('should create factory with valid config', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
       expect(factory).toBeDefined();
-      // Factory warns about fantom (spookyswap) not having a contract in fullConfig
+      // Factory may warn about chains (base, optimism, avalanche, scroll) not having contracts
       // — only assert no *error* was logged
       expect(mockLogger.error).not.toHaveBeenCalled();
     });
@@ -200,12 +207,12 @@ describe('FlashLoanProviderFactory', () => {
       expect(provider).toBeInstanceOf(AaveV3FlashLoanProvider);
     });
 
-    it('should create BalancerV2FlashLoanProvider for polygon', () => {
+    it('should create AaveV3FlashLoanProvider for polygon', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
       const provider = factory.getProvider('polygon');
 
       expect(provider).toBeDefined();
-      expect(provider).toBeInstanceOf(BalancerV2FlashLoanProvider);
+      expect(provider).toBeInstanceOf(AaveV3FlashLoanProvider);
     });
 
     it('should create PancakeSwapV3FlashLoanProvider for bsc', () => {
@@ -224,12 +231,12 @@ describe('FlashLoanProviderFactory', () => {
       expect(provider).toBeInstanceOf(SyncSwapFlashLoanProvider);
     });
 
-    it('should create UnsupportedFlashLoanProvider for fantom (spookyswap)', () => {
+    it('should create BalancerV2FlashLoanProvider for fantom (Beethoven X)', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
       const provider = factory.getProvider('fantom');
 
       expect(provider).toBeDefined();
-      expect(provider).toBeInstanceOf(UnsupportedFlashLoanProvider);
+      expect(provider).toBeInstanceOf(BalancerV2FlashLoanProvider);
     });
 
     it('should return undefined for unconfigured chain', () => {
@@ -275,14 +282,15 @@ describe('FlashLoanProviderFactory', () => {
       expect(factory.isFullySupported('ethereum')).toBe(true);
     });
 
-    it('should return true for Balancer V2 chains with contract', () => {
+    it('should return true for Balancer V2 chains with contract (fantom)', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
-      expect(factory.isFullySupported('polygon')).toBe(true);
+      expect(factory.isFullySupported('fantom')).toBe(true);
     });
 
-    it('should return false for unsupported protocols (spookyswap)', () => {
+    it('should return false for chain with no contract configured (base)', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
-      expect(factory.isFullySupported('fantom')).toBe(false);
+      // base is aave_v3 in FLASH_LOAN_PROVIDERS but has no contract in createFullConfig()
+      expect(factory.isFullySupported('base')).toBe(false);
     });
 
     it('should return false for unconfigured chains', () => {
@@ -309,10 +317,10 @@ describe('FlashLoanProviderFactory', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
 
       expect(factory.getProtocol('ethereum')).toBe('aave_v3');
-      expect(factory.getProtocol('polygon')).toBe('balancer_v2');
+      expect(factory.getProtocol('polygon')).toBe('aave_v3');
       expect(factory.getProtocol('bsc')).toBe('pancakeswap_v3');
       expect(factory.getProtocol('zksync')).toBe('syncswap');
-      expect(factory.getProtocol('fantom')).toBe('spookyswap');
+      expect(factory.getProtocol('fantom')).toBe('balancer_v2');
     });
 
     it('should return undefined for unconfigured chains', () => {
@@ -372,8 +380,8 @@ describe('FlashLoanProviderFactory', () => {
       expect(summary.ethereum.hasContract).toBe(true);
 
       expect(summary.fantom).toBeDefined();
-      expect(summary.fantom.protocol).toBe('spookyswap');
-      expect(summary.fantom.status).toBe('not_implemented');
+      expect(summary.fantom.protocol).toBe('balancer_v2');
+      expect(summary.fantom.status).toBe('fully_supported');
     });
 
     it('should show partial_support when no contract deployed for supported protocol', () => {
@@ -399,14 +407,14 @@ describe('FlashLoanProviderFactory', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
       const chains = factory.getFullySupportedChains();
 
-      // ethereum, arbitrum (aave_v3), polygon (balancer_v2), bsc (pancakeswap_v3), zksync (syncswap)
+      // ethereum, arbitrum, polygon (aave_v3); bsc (pancakeswap_v3); zksync (syncswap); fantom (balancer_v2)
       expect(chains).toContain('ethereum');
       expect(chains).toContain('arbitrum');
       expect(chains).toContain('polygon');
       expect(chains).toContain('bsc');
       expect(chains).toContain('zksync');
-      // fantom has unsupported protocol
-      expect(chains).not.toContain('fantom');
+      // fantom now uses balancer_v2 (supported) and has a contract in createFullConfig
+      expect(chains).toContain('fantom');
     });
 
     it('should exclude chains without contract addresses', () => {
@@ -428,9 +436,9 @@ describe('FlashLoanProviderFactory', () => {
       expect(factory.getSupportStatus('ethereum')).toBe('fully_supported');
     });
 
-    it('should return not_implemented for unsupported protocols', () => {
+    it('should return fully_supported for balancer_v2 (fantom) with contract', () => {
       const factory = new FlashLoanProviderFactory(mockLogger as any, createFullConfig());
-      expect(factory.getSupportStatus('fantom')).toBe('not_implemented');
+      expect(factory.getSupportStatus('fantom')).toBe('fully_supported');
     });
 
     it('should return not_implemented for unconfigured chains', () => {
