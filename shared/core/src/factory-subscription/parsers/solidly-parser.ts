@@ -56,6 +56,8 @@ export function parseSolidlyPairCreatedEvent(log: RawEventLog): PairCreatedEvent
       isStable,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse Solidly PairCreated event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }

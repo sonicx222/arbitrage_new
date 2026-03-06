@@ -352,11 +352,17 @@ export class WorkerManager extends EventEmitter {
     if (!worker) return;
 
     return new Promise<void>((resolve) => {
+      // SA-4R5 FIX: Per-worker timeout must be less than overall shutdown timeout.
+      // Workers stop in parallel (Promise.allSettled), so if one hangs for the full
+      // shutdownTimeoutMs, it races with the process-level shutdown timer.
+      const perWorkerTimeout = this.shutdownTimeoutMs > 2000
+        ? this.shutdownTimeoutMs - 2000
+        : Math.floor(this.shutdownTimeoutMs * 0.8);
       const timeout = setTimeout(() => {
         logger.warn(`Force-terminating worker: ${name}`);
         // SA-1M-002 FIX: Log termination errors instead of silently swallowing
         worker.terminate().then(() => resolve()).catch(e => { logger.debug('Worker terminate error', { name, error: (e as Error).message }); resolve(); });
-      }, this.shutdownTimeoutMs);
+      }, perWorkerTimeout);
 
       // Request graceful shutdown via message
       try {

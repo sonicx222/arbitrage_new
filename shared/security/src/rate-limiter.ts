@@ -14,6 +14,8 @@ const logger = createLogger('rate-limiter');
 export interface RateLimitConfig {
   windowMs: number; // Time window in milliseconds
   maxRequests: number; // Maximum requests per window
+  // SA-3O-003: Rate limiter key prefixes are top-level ('api', 'arbitrage', 'auth', 'critical').
+  // No collision today: auth.ts uses 3-segment keys (auth:blacklist:x) vs 2-segment here (auth:x).
   keyPrefix?: string; // Redis key prefix
   skipSuccessfulRequests?: boolean; // Don't count successful requests
   skipFailedRequests?: boolean; // Don't count failed requests

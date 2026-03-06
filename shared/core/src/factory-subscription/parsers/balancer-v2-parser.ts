@@ -77,6 +77,8 @@ export function parseBalancerPoolRegisteredEvent(log: RawEventLog): PairCreatedE
       requiresTokenLookup: true,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse Balancer PoolRegistered event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }
@@ -148,6 +150,8 @@ export function parseBalancerTokensRegisteredEvent(log: RawEventLog): BalancerTo
 
     return { poolId, tokens };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse Balancer TokensRegistered event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }

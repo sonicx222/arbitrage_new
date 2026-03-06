@@ -630,6 +630,8 @@ export class MultiLegPathFinder {
 
       return { amountOutBigInt, step };
     } catch (error) {
+      // SA-3M-002 FIX: Log simulation failures for debugging (persistent failures on specific pools would be invisible)
+      logger.debug('Swap simulation failed', { fromToken, toToken, dex: pool.dex, error: (error as Error).message });
       return null;
     }
   }

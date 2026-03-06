@@ -51,6 +51,8 @@ export function parseAlgebraPoolCreatedEvent(log: RawEventLog): PairCreatedEvent
       transactionHash: log.transactionHash,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability (factory events are infrequent)
+    console.debug('Failed to parse Algebra Pool event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }

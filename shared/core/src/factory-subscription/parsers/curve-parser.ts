@@ -90,6 +90,8 @@ export function parseCurvePlainPoolDeployedEvent(log: RawEventLog): PairCreatedE
       isMetaPool: false,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse Curve PlainPoolDeployed event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }
@@ -158,6 +160,8 @@ export function parseCurveMetaPoolDeployedEvent(log: RawEventLog): PairCreatedEv
       isMetaPool: true,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse Curve MetaPoolDeployed event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }

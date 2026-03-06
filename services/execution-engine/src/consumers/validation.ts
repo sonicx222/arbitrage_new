@@ -327,8 +327,8 @@ export function validateMessageStructure(
 
   // All validations passed
   // FIX: Deserialize numeric fields that were converted to strings by serializeOpportunityForStream().
-  // Redis Streams store all values as strings, so profitPercentage, confidence,
-  // expectedProfit, and estimatedProfit arrive as strings despite being typed as numbers.
+  // Redis Streams store all values as strings, so numeric fields arrive as strings despite
+  // being typed as numbers. SA-3N-004 FIX: Restore ALL numeric fields, not just 4 of 8.
   if (typeof data.profitPercentage === 'string') {
     data.profitPercentage = parseFloat(data.profitPercentage as string);
   }
@@ -340,6 +340,26 @@ export function validateMessageStructure(
   }
   if (typeof data.estimatedProfit === 'string') {
     data.estimatedProfit = parseFloat(data.estimatedProfit as string);
+  }
+  // SA-3N-004: buyPrice, sellPrice, blockNumber remain strings without explicit restoration.
+  // Downstream code using buyPrice + sellPrice would concatenate instead of adding.
+  if (typeof data.buyPrice === 'string') {
+    data.buyPrice = parseFloat(data.buyPrice as string);
+  }
+  if (typeof data.sellPrice === 'string') {
+    data.sellPrice = parseFloat(data.sellPrice as string);
+  }
+  if (typeof data.blockNumber === 'string') {
+    data.blockNumber = parseInt(data.blockNumber as string, 10);
+  }
+  // SA-3N-001: timestamp remains a string after deserialization. JS minus-operator coerces
+  // strings to numbers so Date.now() - timestamp works, but typeof check would fail.
+  if (typeof data.timestamp === 'string') {
+    data.timestamp = Number(data.timestamp);
+  }
+  // SA-3N-001: expiresAt is validated above but not written back to the data object.
+  if (typeof data.expiresAt === 'string') {
+    data.expiresAt = Number(data.expiresAt);
   }
 
   return {

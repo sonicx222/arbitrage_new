@@ -1031,6 +1031,10 @@ export class RedisClient {
   }
 
   // Service health tracking
+  // SA-3O-002: Redis key hierarchy for health: prefix:
+  //   health:<serviceName>      — per-service health (e.g., health:coordinator)
+  //   health:system:snapshot    — system-wide snapshot (SA-1O-002 fix)
+  // RESERVED: 'system' must NOT be used as a serviceName to avoid key collision.
   async updateServiceHealth(serviceName: string, health: ServiceHealth): Promise<void> {
     const key = `health:${serviceName}`;
     await this.set(key, health, 300); // 5 minute TTL

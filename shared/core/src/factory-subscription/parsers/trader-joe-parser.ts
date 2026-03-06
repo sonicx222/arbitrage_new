@@ -53,6 +53,8 @@ export function parseTraderJoePairCreatedEvent(log: RawEventLog): PairCreatedEve
       binStep,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse Trader Joe LBPairCreated event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }

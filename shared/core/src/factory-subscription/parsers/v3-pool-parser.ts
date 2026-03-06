@@ -59,6 +59,8 @@ export function parseV3PoolCreatedEvent(log: RawEventLog): PairCreatedEvent | nu
       tickSpacing,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse V3 PoolCreated event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }

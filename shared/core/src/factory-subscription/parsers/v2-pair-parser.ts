@@ -50,6 +50,8 @@ export function parseV2PairCreatedEvent(log: RawEventLog): PairCreatedEvent | nu
       transactionHash: log.transactionHash,
     };
   } catch (error) {
+    // SA-3M-001 FIX: Log parse failures for observability
+    console.debug('Failed to parse V2 PairCreated event', { error: (error as Error).message, txHash: log?.transactionHash });
     return null;
   }
 }
