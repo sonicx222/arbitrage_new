@@ -53,6 +53,8 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-037](./ADR-037-coordinator-pipeline-optimization.md) | Coordinator Pipeline Optimization | Accepted | 2026-03-02 | 90% |
 | [ADR-038](./ADR-038-chain-grouped-execution.md) | Chain-Grouped Execution Engines | Accepted | 2026-03-06 | 92% |
 | [ADR-039](./ADR-039-async-pipeline-split.md) | Async Pipeline Split with SimulationWorker | Accepted | 2026-03-06 | 90% |
+| [ADR-040](./ADR-040-real-time-native-token-pricing.md) | Real-Time Native Token Pricing and Gas Cost Calibration | Accepted | 2026-03-06 | 90% |
+| [ADR-041](./ADR-041-blockchain-config-architecture-refactor.md) | Blockchain Configuration Architecture Refactor | Accepted | 2026-03-06 | 92% |
 
 ## Decision Summary
 
@@ -298,6 +300,20 @@ An Architecture Decision Record captures an important architectural decision mad
     - Fail-open: BatchQuoter errors forward the opp rather than drop it
     - Enabled via `ASYNC_PIPELINE_SPLIT=true`; backward-compatible when unset
 
+### Native Token Pricing & Config Refactoring
+
+36. **Real-Time Native Token Pricing and Gas Cost Calibration** (ADR-040)
+    - Real-time native token prices for accurate gas cost USD estimation
+    - Per-chain pricing pools (e.g., WBNB/BUSD on BSC, WAVAX/USDC on Avalanche)
+    - Eliminates hardcoded ETH price assumption across non-ETH chains
+
+37. **Blockchain Configuration Architecture Refactor** (ADR-041)
+    - Incremental refactor of 30-file config system (~9,000 LOC)
+    - Per-protocol flash loan descriptors (7 providers, single-file-per-protocol)
+    - Per-chain DEX files replacing 1,500-line monolith
+    - Address deduplication via canonical `addresses.ts` references
+    - Deferred item tracking with automated CI alerts
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -377,3 +393,5 @@ XX% - Explanation of confidence factors
 | 2026-03-02 | ADR-037 | Added Coordinator Pipeline Optimization decision |
 | 2026-03-06 | ADR-038 | Added Chain-Grouped Execution Engines decision |
 | 2026-03-06 | ADR-039 | Added Async Pipeline Split with SimulationWorker decision |
+| 2026-03-06 | ADR-040 | Added Real-Time Native Token Pricing decision |
+| 2026-03-06 | ADR-041 | Added Blockchain Configuration Architecture Refactor decision |
