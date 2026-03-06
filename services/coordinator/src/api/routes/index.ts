@@ -13,12 +13,14 @@ import { createHealthRoutes } from './health.routes';
 import { createMetricsRoutes } from './metrics.routes';
 import { createDashboardRoutes } from './dashboard.routes';
 import { createAdminRoutes } from './admin.routes';
+import { createSSERoutes } from './sse.routes';
 
 // Re-export individual route factories
 export { createHealthRoutes } from './health.routes';
 export { createMetricsRoutes } from './metrics.routes';
 export { createDashboardRoutes } from './dashboard.routes';
 export { createAdminRoutes } from './admin.routes';
+export { createSSERoutes } from './sse.routes';
 
 /**
  * Setup all routes on an Express application.
@@ -39,6 +41,9 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
   // Partitions expose /health, /health/live, /health/ready directly.
   // Without this, monitoring scripts need special-case logic for coordinator.
   app.use('/', createHealthRoutes(state));
+
+  // SSE route for React dashboard
+  app.use('/api', createSSERoutes(state));
 
   // FIX: GCP probes /ready (not /health/ready). Add explicit /ready alias at root
   // so coordinator-standby.yaml readinessProbe gets 200 instead of 404.
