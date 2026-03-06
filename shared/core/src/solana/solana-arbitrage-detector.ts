@@ -12,6 +12,7 @@
  */
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import { getOpportunityTimeoutMs } from '@arbitrage/config';
 import { meetsThreshold } from '../components/price-calculator';
 import { bpsToDecimal } from '../utils/fee-utils';
 import type { SolanaDetectorLogger, SolanaPool } from './solana-types';
@@ -135,7 +136,9 @@ export function createSolanaArbitrageDetector(
       expectedProfit: netProfit,
       confidence: safeConfidence,
       timestamp,
-      expiresAt: timestamp + config.opportunityExpiryMs,
+      // P3-006 FIX: Cap caller-provided expiry with canonical chain timeout
+      // to prevent stale opportunity execution if config.opportunityExpiryMs is too high
+      expiresAt: timestamp + Math.min(config.opportunityExpiryMs, getOpportunityTimeoutMs('solana')),
       gasEstimate: SOLANA_DEFAULT_GAS_ESTIMATE,
       status: 'pending'
     };

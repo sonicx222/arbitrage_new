@@ -1513,24 +1513,28 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
     let destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
 
-    const DEFAULT_NATIVE_TOKEN_PRICE_USD = 2000;
+    // P3-001 FIX: Use per-chain fallback prices instead of global $2000.
+    // getNativeTokenPrice() already has per-chain data (BSC=$650, Polygon=$0.50, etc.)
+    // with a built-in fallback of $1000 for unknown chains. The $2000 global fallback
+    // was wildly incorrect for non-ETH chains (4000x overestimate on Polygon).
+    const LAST_RESORT_PRICE_USD = 1000; // Only if getNativeTokenPrice itself fails
     if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
       this.logger.warn('Invalid source chain native token price, using fallback', {
         opportunityId: opportunity.id,
         sourceChain,
         originalPrice: sourceNativeTokenPriceUsd,
-        fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
+        fallbackPrice: LAST_RESORT_PRICE_USD,
       });
-      sourceNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+      sourceNativeTokenPriceUsd = LAST_RESORT_PRICE_USD;
     }
     if (!Number.isFinite(destNativeTokenPriceUsd) || destNativeTokenPriceUsd <= 0) {
       this.logger.warn('Invalid dest chain native token price, using fallback', {
         opportunityId: opportunity.id,
         destChain,
         originalPrice: destNativeTokenPriceUsd,
-        fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
+        fallbackPrice: LAST_RESORT_PRICE_USD,
       });
-      destNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+      destNativeTokenPriceUsd = LAST_RESORT_PRICE_USD;
     }
 
     const bridgeGasCostNative = bridgeResult.gasUsed

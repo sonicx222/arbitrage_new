@@ -54,11 +54,18 @@ export function getOptionalString(data: Record<string, unknown>, key: string): s
 
 /**
  * Safely extract an optional number value from an object.
- * Returns undefined if the field is missing or not a number.
+ * Returns undefined if the field is missing or not a valid number.
+ * SA-1N-001 FIX: Also handles string-encoded numerics from Redis stream
+ * deserialization, where all values are converted to strings via .toString().
  */
 export function getOptionalNumber(data: Record<string, unknown>, key: string): number | undefined {
   const value = data[key];
-  return typeof value === 'number' && !isNaN(value) ? value : undefined;
+  if (typeof value === 'number') return isNaN(value) ? undefined : value;
+  if (typeof value === 'string' && value !== '') {
+    const parsed = Number(value);
+    return isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
 }
 
 /**

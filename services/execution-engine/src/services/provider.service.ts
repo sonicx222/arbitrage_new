@@ -812,6 +812,7 @@ export class ProviderServiceImpl implements IProviderService {
     // Fix 10.2: Reset cached count
     this.cachedHealthyCount = 0;
     // Close HTTP/2 sessions (fire-and-forget during sync clear)
-    closeDefaultHttp2Pool().catch(() => {});
+    // SA-1M-001 FIX: Log cleanup errors instead of silently swallowing
+    closeDefaultHttp2Pool().catch(e => this.logger.debug('HTTP/2 pool close error during cleanup', { error: (e as Error).message }));
   }
 }

@@ -284,12 +284,14 @@ export class LatencyTracker {
       detectedAt,
       coordinatorAt,
       executionReceivedAt,
+      executionStartedAt,
+      executionCompletedAt,
     } = timestamps;
 
     // E2E latency: from WS receive to the last available timestamp
     if (wsReceivedAt !== undefined) {
       const endTimestamp =
-        executionReceivedAt ?? coordinatorAt ?? detectedAt ?? publishedAt;
+        executionCompletedAt ?? executionStartedAt ?? executionReceivedAt ?? coordinatorAt ?? detectedAt ?? publishedAt;
       if (endTimestamp !== undefined) {
         this.e2eBuffer.record(endTimestamp - wsReceivedAt);
       }
@@ -317,6 +319,13 @@ export class LatencyTracker {
     }
     if (detectedAt !== undefined && coordinatorAt !== undefined) {
       this.recordStageLatency('opportunity_publish', coordinatorAt - detectedAt);
+    }
+    // Phase 1 Enhanced Monitoring: Execution phase stages
+    if (executionReceivedAt !== undefined && executionStartedAt !== undefined) {
+      this.recordStageLatency('execution_queue_wait', executionStartedAt - executionReceivedAt);
+    }
+    if (executionStartedAt !== undefined && executionCompletedAt !== undefined) {
+      this.recordStageLatency('execution_duration', executionCompletedAt - executionStartedAt);
     }
   }
 

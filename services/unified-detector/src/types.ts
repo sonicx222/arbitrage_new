@@ -60,6 +60,9 @@ export interface ChainStats {
 
   /** Number of hot pairs (high activity) for volatility-based prioritization */
   hotPairsCount?: number;
+
+  /** Phase 1 Enhanced Monitoring: Stale price rejections during arbitrage detection */
+  stalePriceRejections?: number;
 }
 
 // =============================================================================

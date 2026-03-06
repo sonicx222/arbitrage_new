@@ -131,6 +131,16 @@ export interface PipelineTimestamps {
   coordinatorAt?: number;
   /** Execution engine received execution request */
   executionReceivedAt?: number;
+  /** Execution pipeline started processing */
+  executionStartedAt?: number;
+  /** Transaction simulation completed */
+  simulationAt?: number;
+  /** Transaction submitted to mempool/RPC */
+  txSubmittedAt?: number;
+  /** Transaction confirmed on chain */
+  txConfirmedAt?: number;
+  /** Execution pipeline completed (success or failure) */
+  executionCompletedAt?: number;
 }
 
 export interface PriceUpdate {

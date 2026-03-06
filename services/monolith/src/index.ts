@@ -354,7 +354,8 @@ process.on('uncaughtException', (error: Error) => {
   });
   // Attempt graceful shutdown before exit
   if (workerManager) {
-    workerManager.stop().catch(() => {}).finally(() => process.exit(1));
+    // SA-1M-002 FIX: Log shutdown errors instead of silently swallowing
+    workerManager.stop().catch(e => logger.debug('Monolith shutdown error', { error: (e as Error).message })).finally(() => process.exit(1));
   } else {
     process.exit(1);
   }

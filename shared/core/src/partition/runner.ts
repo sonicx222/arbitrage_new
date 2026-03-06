@@ -26,6 +26,7 @@ import {
 } from './config';
 import { createPartitionHealthServer, closeServerWithTimeout } from './health-server';
 import { setupDetectorEventHandlers, setupProcessHandlers } from './handlers';
+import { getRuntimeMonitor } from '../monitoring/runtime-monitor';
 import type { ProcessHandlerCleanup } from './handlers';
 import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './router';
 // F4 FIX: Import Redis + OpportunityPublisher for auto-wiring in dev mode
@@ -176,6 +177,9 @@ export function createPartitionServiceRunner(
     });
 
     try {
+      // Phase 1 Enhanced Monitoring: Start runtime monitor for event loop, GC, and memory metrics
+      getRuntimeMonitor().start();
+
       // Start health check server first
       healthServerRef.current = createPartitionHealthServer({
         port: detectorConfig.healthCheckPort,

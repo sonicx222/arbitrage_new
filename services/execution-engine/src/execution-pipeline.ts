@@ -371,6 +371,11 @@ export class ExecutionPipeline {
   private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     const startTime = performance.now();
 
+    // Phase 1 Enhanced Monitoring: Stamp execution start
+    const ts = opportunity.pipelineTimestamps ?? {};
+    ts.executionStartedAt = Date.now();
+    opportunity.pipelineTimestamps = ts;
+
     // Same-chain arbitrage opportunities set 'chain' but not 'buyChain'.
     // Fall back to 'chain' for same-chain arbs; only cross-chain arbs need buyChain explicitly.
     const resolvedBuyChain = opportunity.buyChain ?? opportunity.chain;
@@ -591,6 +596,11 @@ export class ExecutionPipeline {
 
       await this.deps.publishExecutionResult(errorResult, opportunity);
     } finally {
+      // Phase 1 Enhanced Monitoring: Stamp execution completion
+      const completionTs = opportunity.pipelineTimestamps ?? {};
+      completionTs.executionCompletedAt = Date.now();
+      opportunity.pipelineTimestamps = completionTs;
+
       this.deps.opportunityConsumer.markComplete(opportunity.id);
     }
   }

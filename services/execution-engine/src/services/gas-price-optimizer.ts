@@ -17,6 +17,7 @@
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getGasSpikeMultiplier } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
+import { parseEnvFloatSafe } from '@arbitrage/core/utils/env-utils';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger, GasBaselineEntry } from '../types';
 import { updateGasPrice as updateGasPriceMetric } from './prometheus-metrics';
@@ -179,24 +180,26 @@ export function validateGasPrice(chain: string, configuredPrice: number): number
  * Finding 3.2 Fix: Gas prices are now configurable via environment variables.
  * Environment variable format: GAS_PRICE_<CHAIN>_GWEI (e.g., GAS_PRICE_ETHEREUM_GWEI=50)
  */
+// P3-002 FIX: Migrate parseFloat to parseEnvFloatSafe for consistency with project convention.
+// parseEnvFloatSafe handles undefined, NaN, and min-bound; validateGasPrice adds chain-specific bounds.
 export const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
-  ethereum: validateGasPrice('ethereum', parseFloat(process.env.GAS_PRICE_ETHEREUM_GWEI || '50')),
-  arbitrum: validateGasPrice('arbitrum', parseFloat(process.env.GAS_PRICE_ARBITRUM_GWEI || '0.1')),
-  optimism: validateGasPrice('optimism', parseFloat(process.env.GAS_PRICE_OPTIMISM_GWEI || '0.001')),
-  base: validateGasPrice('base', parseFloat(process.env.GAS_PRICE_BASE_GWEI || '0.001')),
-  polygon: validateGasPrice('polygon', parseFloat(process.env.GAS_PRICE_POLYGON_GWEI || '35')),
-  bsc: validateGasPrice('bsc', parseFloat(process.env.GAS_PRICE_BSC_GWEI || '3')),
-  avalanche: validateGasPrice('avalanche', parseFloat(process.env.GAS_PRICE_AVALANCHE_GWEI || '25')),
-  fantom: validateGasPrice('fantom', parseFloat(process.env.GAS_PRICE_FANTOM_GWEI || '35')),
-  zksync: validateGasPrice('zksync', parseFloat(process.env.GAS_PRICE_ZKSYNC_GWEI || '0.25')),
-  linea: validateGasPrice('linea', parseFloat(process.env.GAS_PRICE_LINEA_GWEI || '0.5')),
-  blast: validateGasPrice('blast', parseFloat(process.env.GAS_PRICE_BLAST_GWEI || '0.001')),
-  scroll: validateGasPrice('scroll', parseFloat(process.env.GAS_PRICE_SCROLL_GWEI || '0.5')),
+  ethereum: validateGasPrice('ethereum', parseEnvFloatSafe('GAS_PRICE_ETHEREUM_GWEI', 50, 0)),
+  arbitrum: validateGasPrice('arbitrum', parseEnvFloatSafe('GAS_PRICE_ARBITRUM_GWEI', 0.1, 0)),
+  optimism: validateGasPrice('optimism', parseEnvFloatSafe('GAS_PRICE_OPTIMISM_GWEI', 0.001, 0)),
+  base: validateGasPrice('base', parseEnvFloatSafe('GAS_PRICE_BASE_GWEI', 0.001, 0)),
+  polygon: validateGasPrice('polygon', parseEnvFloatSafe('GAS_PRICE_POLYGON_GWEI', 35, 0)),
+  bsc: validateGasPrice('bsc', parseEnvFloatSafe('GAS_PRICE_BSC_GWEI', 3, 0)),
+  avalanche: validateGasPrice('avalanche', parseEnvFloatSafe('GAS_PRICE_AVALANCHE_GWEI', 25, 0)),
+  fantom: validateGasPrice('fantom', parseEnvFloatSafe('GAS_PRICE_FANTOM_GWEI', 35, 0)),
+  zksync: validateGasPrice('zksync', parseEnvFloatSafe('GAS_PRICE_ZKSYNC_GWEI', 0.25, 0)),
+  linea: validateGasPrice('linea', parseEnvFloatSafe('GAS_PRICE_LINEA_GWEI', 0.5, 0)),
+  blast: validateGasPrice('blast', parseEnvFloatSafe('GAS_PRICE_BLAST_GWEI', 0.001, 0)),
+  scroll: validateGasPrice('scroll', parseEnvFloatSafe('GAS_PRICE_SCROLL_GWEI', 0.5, 0)),
   // IMPORTANT: Mantle uses MNT (~$0.80) as native token, NOT ETH (~$3200).
   // Gas cost calculations that assume ETH pricing will overestimate by ~4000x.
   // When Mantle exits stub status, add MNT-aware gas cost conversion.
-  mantle: validateGasPrice('mantle', parseFloat(process.env.GAS_PRICE_MANTLE_GWEI || '0.02')),
-  mode: validateGasPrice('mode', parseFloat(process.env.GAS_PRICE_MODE_GWEI || '0.001')),
+  mantle: validateGasPrice('mantle', parseEnvFloatSafe('GAS_PRICE_MANTLE_GWEI', 0.02, 0)),
+  mode: validateGasPrice('mode', parseEnvFloatSafe('GAS_PRICE_MODE_GWEI', 0.001, 0)),
 };
 
 /**

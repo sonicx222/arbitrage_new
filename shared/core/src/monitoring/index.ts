@@ -105,3 +105,16 @@ export * from './v8-profiler';
 
 // CPU Usage Tracker (H2)
 export { CpuUsageTracker } from './cpu-usage-tracker';
+
+// Runtime Monitor (Phase 1 Enhanced Monitoring)
+export {
+  RuntimeMonitor,
+  getRuntimeMonitor,
+  resetRuntimeMonitor,
+} from './runtime-monitor';
+export type {
+  RuntimeMetrics,
+  EventLoopMetrics,
+  MemoryMetrics,
+  GcMetrics,
+} from './runtime-monitor';

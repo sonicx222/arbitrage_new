@@ -341,8 +341,11 @@ export class MetricsCollector {
       if (data && typeof data === 'object') {
         return data as ExperimentMetrics;
       }
-    } catch {
-      // Redis error - return undefined
+    } catch (error) {
+      // P3-008 FIX: Log Redis read failure instead of silently returning undefined
+      if (this.logger) {
+        (this.logger.warn ?? this.logger.error).call(this.logger, 'Failed to load A/B testing metrics from Redis', { key, error: String(error) });
+      }
     }
 
     return undefined;

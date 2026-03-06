@@ -33,11 +33,33 @@ import type { TraceContext } from '@arbitrage/core/tracing';
  * @param traceContext - Optional trace context for cross-service correlation
  * @returns Flat string map for Redis Stream message data
  */
+// P3-004: Track malformed opportunities to avoid log spam (once per missing field combo)
+const _warnedMissingFields = new Set<string>();
+
 export function serializeOpportunityForStream(
   opportunity: ArbitrageOpportunity,
   instanceId: string,
   traceContext?: TraceContext,
 ): Record<string, string> {
+  // P3-004 FIX: Lightweight publish-side validation — catch malformed opportunities
+  // before they enter EXECUTION_REQUESTS and get rejected into DLQ by consumer validation.
+  // Does not throw — logs once per missing-field pattern to avoid hot-path impact.
+  const missing: string[] = [];
+  if (!opportunity.id) missing.push('id');
+  if (!opportunity.chain) missing.push('chain');
+  if (!opportunity.buyDex) missing.push('buyDex');
+  if (!opportunity.sellDex) missing.push('sellDex');
+  if (missing.length > 0) {
+    const key = missing.join(',');
+    if (!_warnedMissingFields.has(key)) {
+      _warnedMissingFields.add(key);
+      // eslint-disable-next-line no-console -- module-level, no logger available
+      console.warn(`[serializeOpportunityForStream] Missing required fields: ${key}`, {
+        opportunityId: opportunity.id ?? 'unknown',
+      });
+    }
+  }
+
   const result: Record<string, string> = {
     id: opportunity.id,
     type: opportunity.type || 'simple',
@@ -51,7 +73,8 @@ export function serializeOpportunityForStream(
       ? opportunity.profitPercentage.toString() : '0',
     confidence: (opportunity.confidence != null && isFinite(opportunity.confidence))
       ? opportunity.confidence.toString() : '0',
-    timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
+    // P3-003 FIX: Use ?? instead of || so explicit timestamp 0 is preserved (not replaced by Date.now())
+    timestamp: (opportunity.timestamp ?? Date.now()).toString(),
     tokenIn: opportunity.tokenIn ?? '',
     tokenOut: opportunity.tokenOut ?? '',
     amountIn: opportunity.amountIn ?? '',

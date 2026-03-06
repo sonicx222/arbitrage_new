@@ -41,6 +41,7 @@ import {
 } from '@arbitrage/core/risk';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { extractContext, createTraceContext, propagateContext } from '@arbitrage/core/tracing';
+import type { TraceContext } from '@arbitrage/core/tracing';
 import { disconnectWithTimeout, parseEnvIntSafe } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger, NonceManager, getNonceManager, TradeLogger, R2Uploader, type TradeLoggerConfig, type R2UploaderConfig } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
@@ -1219,12 +1220,32 @@ export class ExecutionEngineService {
     if (!this.streamsClient) return;
 
     try {
-      // SM-006: Propagate trace context from the opportunity into the result
-      // so end-to-end traces are complete across the pipeline.
-      const parentCtx = opportunity ? extractContext(opportunity as unknown as Record<string, unknown>) : null;
-      const traceCtx = parentCtx
-        ? parentCtx
-        : createTraceContext('execution-engine');
+      // SM-006 FIX: Propagate trace context from the opportunity into the result.
+      // The opportunity carries trace IDs in two possible formats:
+      // 1. _trace_ prefixed fields (from Redis Streams message propagation)
+      // 2. _traceId/_spanId (stamped by opportunity.consumer.ts for deferred execution)
+      // Try extractContext first (format 1), then fall back to format 2.
+      let traceCtx: TraceContext | null = null;
+      if (opportunity) {
+        const oppRecord = opportunity as unknown as Record<string, unknown>;
+        traceCtx = extractContext(oppRecord);
+        if (!traceCtx) {
+          // Fall back to _traceId/_spanId stamped by opportunity consumer
+          const traceId = oppRecord._traceId as string | undefined;
+          const spanId = oppRecord._spanId as string | undefined;
+          if (traceId && spanId) {
+            traceCtx = {
+              traceId,
+              spanId,
+              serviceName: 'execution-engine',
+              timestamp: Date.now(),
+            };
+          }
+        }
+      }
+      if (!traceCtx) {
+        traceCtx = createTraceContext('execution-engine');
+      }
       const enrichedResult = propagateContext(result as unknown as Record<string, unknown>, traceCtx);
 
       await this.streamsClient.xaddWithLimit(RedisStreams.EXECUTION_RESULTS, enrichedResult);

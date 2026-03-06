@@ -867,7 +867,9 @@ export class EnhancedHealthMonitor {
 
     const redis = await this.redis;
     // Store in Redis for short-term analysis
-    await redis.set('metrics:recent', metricsToFlush.slice(-50), 3600); // 1 hour TTL
+    // SA-1O-001 FIX: Use metrics:system:recent to avoid prefix collision with
+    // per-service keys (metrics:${serviceName}:recent in client.ts)
+    await redis.set('metrics:system:recent', metricsToFlush.slice(-50), 3600); // 1 hour TTL
 
     logger.debug('Flushed health metrics', { count: metricsToFlush.length });
   }

@@ -129,6 +129,12 @@ export class TradeLogger {
   private readonly config: TradeLoggerConfig;
   private readonly logger: ServiceLogger;
   private dirEnsured = false;
+  // P3-009 FIX: Track write success/failure for health check observability.
+  // Piggybacks on actual logTrade() calls — no periodic disk probes needed.
+  private _writeSuccessCount = 0;
+  private _writeFailureCount = 0;
+  private _lastWriteError: string | null = null;
+  private _lastSuccessfulWriteMs = 0;
 
   constructor(config: Partial<TradeLoggerConfig> = {}, logger: ServiceLogger) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -165,11 +171,15 @@ export class TradeLogger {
 
       const line = JSON.stringify(entry) + '\n';
       await fsp.appendFile(filePath, line, 'utf8');
+      this._writeSuccessCount++;
+      this._lastSuccessfulWriteMs = Date.now();
     } catch (error) {
+      this._writeFailureCount++;
+      this._lastWriteError = getErrorMessage(error);
       // Never crash the execution engine due to logging failures
       this.logger.warn('Failed to write trade log entry', {
         opportunityId: result.opportunityId,
-        error: getErrorMessage(error),
+        error: this._lastWriteError,
       });
     }
   }
@@ -207,6 +217,25 @@ export class TradeLogger {
    */
   isEnabled(): boolean {
     return this.config.enabled;
+  }
+
+  /**
+   * P3-009 FIX: Get disk write health status for inclusion in health checks.
+   * Returns counters and last error — callers can use writeFailureCount > 0
+   * with lastSuccessfulWriteMs to detect disk-full or permission issues.
+   */
+  getWriteHealth(): {
+    writeSuccessCount: number;
+    writeFailureCount: number;
+    lastWriteError: string | null;
+    lastSuccessfulWriteMs: number;
+  } {
+    return {
+      writeSuccessCount: this._writeSuccessCount,
+      writeFailureCount: this._writeFailureCount,
+      lastWriteError: this._lastWriteError,
+      lastSuccessfulWriteMs: this._lastSuccessfulWriteMs,
+    };
   }
 
   /**

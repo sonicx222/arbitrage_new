@@ -311,6 +311,8 @@ export class ChainDetectorInstance extends EventEmitter {
   // FIX M8: Use per-chain staleness from thresholds.ts instead of hardcoded 30s.
   // Ethereum: 30s, BSC: 9s, Arbitrum: 4s, Solana: 3s — matches block time ratios.
   private readonly MAX_STALENESS_MS: number;
+  /** Phase 1 Enhanced Monitoring: Count stale price rejections for observability */
+  private stalePriceRejections = 0;
 
   // Swap event filtering and whale detection
   private swapEventFilter: SwapEventFilter | null = null;
@@ -2177,7 +2179,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
       // P1-FIX: Skip stale pairs to prevent false arbitrage from outdated reserves.
       // lastUpdate is 0 at initialization (correctly filtered as stale).
-      if (now - otherPair.lastUpdate > this.MAX_STALENESS_MS) continue;
+      if (now - otherPair.lastUpdate > this.MAX_STALENESS_MS) {
+        this.stalePriceRejections++;
+        continue;
+      }
 
       // Create snapshot only for pairs we'll actually compare
       const otherSnapshot = this.createPairSnapshot(otherPair);
@@ -2568,6 +2573,7 @@ export class ChainDetectorInstance extends EventEmitter {
       avgBlockLatencyMs: avgLatency,
       pairsMonitored: this.pairs.size,
       hotPairsCount: activityStats.hotPairs,
+      stalePriceRejections: this.stalePriceRejections,
       // PHASE2-TASK39: Optional cache statistics
       ...(cacheStats && { priceCache: cacheStats })
     };

@@ -38,6 +38,7 @@ import {
   createCircuitBreakerApiHandler,
 } from './api';
 import { getMetricsText, updateHealthGauges, initializeGasPriceGauges } from './services/prometheus-metrics';
+import { getRuntimeMonitor } from '@arbitrage/core/monitoring';
 import { getSupportedExecutionChains } from '@arbitrage/config';
 // P2 Fix DI-6: Import for stream lag monitoring
 import { getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core/redis';
@@ -280,8 +281,9 @@ function createHealthServer(engine: ExecutionEngineService): Server {
     additionalRoutes: {
       '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {
         const text = await getMetricsText();
+        const runtimeText = getRuntimeMonitor().getPrometheusMetrics();
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
-        res.end(text);
+        res.end(text + runtimeText);
       },
       '/stats': async (_req: IncomingMessage, res: ServerResponse) => {
         const stats = engine.getStats();
@@ -415,6 +417,9 @@ async function main() {
 
     await engine.start();
 
+    // Phase 1 Enhanced Monitoring: Start runtime monitor
+    getRuntimeMonitor().start();
+
     // Start orderflow pipeline consumer (no-op if FEATURE_ORDERFLOW_PIPELINE != true)
     const orderflowConsumer = getOrderflowPipelineConsumer();
     await orderflowConsumer.start();
@@ -428,6 +433,13 @@ async function main() {
     // SA-FIX: Use safeParseInt with NaN guard
     const drainTimeoutMs = safeParseInt(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS, 30000);
     const POST_DRAIN_CLEANUP_BUFFER_MS = 15_000; // R2 upload, trade logger, consumers, Redis
+    // SA-1R-005 FIX: Validate shutdown timeout hierarchy at startup
+    const totalShutdownMs = drainTimeoutMs + POST_DRAIN_CLEANUP_BUFFER_MS;
+    if (totalShutdownMs <= drainTimeoutMs) {
+      logger.error('Invalid shutdown timeout hierarchy: total must exceed drain', {
+        drainTimeoutMs, postDrainBufferMs: POST_DRAIN_CLEANUP_BUFFER_MS, totalShutdownMs,
+      });
+    }
     setupServiceShutdown({
       logger,
       serviceName: 'Execution Engine',

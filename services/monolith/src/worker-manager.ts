@@ -354,7 +354,8 @@ export class WorkerManager extends EventEmitter {
     return new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
         logger.warn(`Force-terminating worker: ${name}`);
-        worker.terminate().then(() => resolve()).catch(() => resolve());
+        // SA-1M-002 FIX: Log termination errors instead of silently swallowing
+        worker.terminate().then(() => resolve()).catch(e => { logger.debug('Worker terminate error', { name, error: (e as Error).message }); resolve(); });
       }, this.shutdownTimeoutMs);
 
       // Request graceful shutdown via message

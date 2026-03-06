@@ -102,6 +102,11 @@ export class CrossChainPriceTracker {
   /** Cache for normalized token pairs to avoid repeated string allocations */
   private normalizedPairCache: Map<string, string> = new Map();
 
+  /** Phase 1 Enhanced Monitoring: Pair cache hit/miss counters */
+  private pairCacheHits = 0;
+  private pairCacheMisses = 0;
+  private pairCacheEvictions = 0;
+
   constructor(
     config: CrossChainPriceTrackerConfig = {},
     logger: PriceTrackerLogger,
@@ -302,8 +307,10 @@ export class CrossChainPriceTracker {
     // Check cache first
     const cached = this.normalizedPairCache.get(pairKey);
     if (cached !== undefined) {
+      this.pairCacheHits++;
       return cached;
     }
+    this.pairCacheMisses++;
 
     // Parse pair key using lastIndexOf to avoid array allocation
     const lastSep = pairKey.lastIndexOf('_');
@@ -345,6 +352,7 @@ export class CrossChainPriceTracker {
         this.normalizedPairCache.delete(cacheKey);
         deleted++;
       }
+      this.pairCacheEvictions += deleted;
     }
     this.normalizedPairCache.set(key, value);
   }
@@ -356,7 +364,12 @@ export class CrossChainPriceTracker {
   /**
    * Get statistics about tracked prices.
    */
-  getStats(): { chainCount: number; totalPrices: number; perChainStats: Map<string, number> } {
+  getStats(): {
+    chainCount: number;
+    totalPrices: number;
+    perChainStats: Map<string, number>;
+    pairCache: { hits: number; misses: number; evictions: number; size: number };
+  } {
     const perChainStats = new Map<string, number>();
     let totalPrices = 0;
 
@@ -370,6 +383,12 @@ export class CrossChainPriceTracker {
       chainCount: this.chainPrices.size,
       totalPrices,
       perChainStats,
+      pairCache: {
+        hits: this.pairCacheHits,
+        misses: this.pairCacheMisses,
+        evictions: this.pairCacheEvictions,
+        size: this.normalizedPairCache.size,
+      },
     };
   }
 }

@@ -32,12 +32,14 @@ primary_region = "sjc"
   NODE_ENV = "production"
   REGION_ID = "us-west1"
   LOG_LEVEL = "info"
-  HEALTH_CHECK_PORT = "8080"
+  # SA-1Q-001 FIX: Aligned with service-ports.json (3005) and Docker Compose.
+  # Was 8080, diverging from all other services which use their canonical ports.
+  HEALTH_CHECK_PORT = "3005"
   ENABLE_CROSS_REGION_HEALTH = "true"
   # RPC URLs and private keys set via secrets (fly secrets set)
 
 [http_service]
-  internal_port = 8080
+  internal_port = 3005
   force_https = true
   auto_stop_machines = false
   auto_start_machines = true
@@ -56,9 +58,8 @@ primary_region = "sjc"
   cpus = 1
   memory_mb = 384
 
-[metrics]
-  port = 9091
-  path = "/metrics"
+# P3-007: [metrics] port=9091 removed — no process listens on 9091.
+# Prometheus metrics are served on the health check port at /metrics.
 
 [checks]
   [checks.health]

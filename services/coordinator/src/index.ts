@@ -29,7 +29,7 @@ export { CoordinatorService } from './coordinator';
 
 // Internal imports for bootstrapping
 import { CoordinatorService } from './coordinator';
-import { getCrossRegionHealthManager, resetCrossRegionHealthManager } from '@arbitrage/core/monitoring';
+import { getCrossRegionHealthManager, resetCrossRegionHealthManager, getRuntimeMonitor } from '@arbitrage/core/monitoring';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { setupServiceShutdown, runServiceMain } from '@arbitrage/core/service-lifecycle';
 import { parseEnvInt } from '@arbitrage/core/utils';
@@ -177,6 +177,9 @@ async function main() {
         });
       }
     });
+
+    // Phase 1 Enhanced Monitoring: Start runtime monitor
+    getRuntimeMonitor().start();
 
     // Start coordinator service
     await coordinator.start(port);
