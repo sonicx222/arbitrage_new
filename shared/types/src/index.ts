@@ -69,6 +69,8 @@ export interface Dex {
   enabled?: boolean; // Optional: defaults to true if not specified
   /** S3.3.2: DEX type classification (primarily for Solana non-factory DEXs) */
   type?: DexType;
+  /** Whether addresses have been verified on-chain (RPC or explorer). Defaults to true if omitted. */
+  verified?: boolean;
 }
 
 export interface Token {

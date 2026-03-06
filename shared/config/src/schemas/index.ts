@@ -146,6 +146,7 @@ export const DexSchema = z.object({
   fee: BasisPointsSchema.describe('Trading fee in basis points (e.g., 30 = 0.30%)'),
   enabled: z.boolean().optional().default(true),
   type: DexTypeSchema.optional(),
+  verified: z.boolean().optional().describe('Whether addresses are verified on-chain'),
 });
 
 /**

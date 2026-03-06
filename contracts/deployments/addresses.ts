@@ -22,34 +22,33 @@ import {
 } from '@arbitrage/config';
 
 // =============================================================================
-// Type-Safe Chain Identifiers (Phase 3 Fix)
+// Type-Safe Chain Identifiers — imported from @arbitrage/types (single source of truth)
 // =============================================================================
 
+import type {
+  EVMMainnetChainId,
+  TestnetChainId,
+  ChainId,
+} from '@arbitrage/types';
+
 /**
- * Testnet chain identifiers
+ * Testnet chain identifiers used in deployment scripts.
+ *
+ * Extends the canonical TestnetChainId with deployment-specific names
+ * (camelCase variants used by Hardhat configs, additional testnets).
  *
  * P1-006 FIX: Added 'baseSepolia' (referenced in deploy scripts but missing from type)
  */
-export type TestnetChain = 'sepolia' | 'arbitrumSepolia' | 'baseSepolia' | 'bscTestnet' | 'polygonAmoy' | 'zksync-testnet' | 'zksync-sepolia';
+export type TestnetChain = TestnetChainId | 'arbitrumSepolia' | 'baseSepolia' | 'bscTestnet' | 'polygonAmoy' | 'zksync-testnet';
 
 /**
- * EVM mainnet chain identifiers
+ * EVM mainnet chain identifiers.
+ * Extends canonical EVMMainnetChainId with deployment alias 'zksync-mainnet'.
  */
-export type EVMMainnetChain =
-  | 'ethereum'
-  | 'polygon'
-  | 'arbitrum'
-  | 'base'
-  | 'optimism'
-  | 'bsc'
-  | 'avalanche'
-  | 'fantom'
-  | 'zksync'
-  | 'zksync-mainnet'
-  | 'linea';
+export type EVMMainnetChain = EVMMainnetChainId | 'zksync-mainnet';
 
 /**
- * All supported chain identifiers
+ * All supported chain identifiers for deployments.
  */
 export type SupportedChain = TestnetChain | EVMMainnetChain;
 
@@ -94,35 +93,31 @@ export const TESTNET_CHAINS: readonly TestnetChain[] = [
 ] as const;
 
 /**
- * Chain name alias map (module-level constant to avoid allocation on every call).
+ * Chain name alias map for deployment contexts.
  *
- * Maps non-canonical names to their canonical form:
+ * Maps deployment-specific names to canonical forms used in address records:
  * - 'zksync-mainnet' → 'zksync'
  * - 'zksync-sepolia' → 'zksync-testnet'
  *
- * **Why Normalization**: Different contexts use different names:
- * - Hardhat config: 'zksync-mainnet'
- * - Block explorers: 'zksync'
- * - Internal config: 'zksync'
+ * Note: For canonical chain normalization, use normalizeChainId() from @arbitrage/types.
+ * This local normalizer handles deployment-specific aliases that don't map to canonical ChainId.
  */
-const CHAIN_ALIASES: Readonly<Record<string, string>> = {
+const DEPLOYMENT_CHAIN_ALIASES: Readonly<Record<string, string>> = {
   'zksync-mainnet': 'zksync',
   'zksync-sepolia': 'zksync-testnet',
 };
 
 /**
- * Normalize chain name to canonical form.
+ * Normalize chain name to canonical form for deployment address lookups.
  *
  * Chain name matching is **case-sensitive**, consistent with all other lookups
- * in this module (Map keys, Record keys, etc.). Only known aliases are resolved:
- * - 'zksync-mainnet' → 'zksync'
- * - 'zksync-sepolia' → 'zksync-testnet'
+ * in this module (Map keys, Record keys, etc.).
  *
  * @param chain - Chain name (exact case required)
- * @returns Canonical chain name
+ * @returns Canonical chain name for address lookups
  */
 export function normalizeChainName(chain: string): string {
-  return CHAIN_ALIASES[chain] || chain;
+  return DEPLOYMENT_CHAIN_ALIASES[chain] || chain;
 }
 
 /**

@@ -30,40 +30,24 @@
  */
 
 // =============================================================================
-// Type Definitions
+// Type Definitions — imported from @arbitrage/types (single source of truth)
 // =============================================================================
+
+import type {
+  EVMMainnetChainId,
+  TestnetChainId,
+  ChainId,
+} from '@arbitrage/types';
 
 /**
  * EVM chain identifiers supported by the system.
+ * Re-exported from @arbitrage/types for backward compatibility.
+ * @see shared/types/src/chains.ts (canonical source)
  */
-export type EVMChainId =
-  | 'ethereum'
-  | 'polygon'
-  | 'arbitrum'
-  | 'base'
-  | 'optimism'
-  | 'bsc'
-  | 'avalanche'
-  | 'fantom'
-  | 'zksync'
-  | 'linea'
-  | 'blast'
-  | 'scroll'
-  | 'mantle'
-  | 'mode';
+export type EVMChainId = EVMMainnetChainId;
 
-/**
- * All chain identifiers including non-EVM.
- */
-export type ChainId = EVMChainId | 'solana';
-
-/**
- * Testnet chain identifiers.
- */
-export type TestnetChainId =
-  | 'sepolia'
-  | 'arbitrumSepolia'
-  | 'solana-devnet';
+// Re-export for consumers that import from addresses.ts
+export type { ChainId, TestnetChainId };
 
 // =============================================================================
 // Aave V3 Pool Addresses
