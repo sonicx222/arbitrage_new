@@ -48,9 +48,32 @@ import {
   recordExecutionFailure,
   recordExecutionLatency,
   recordVolume,
+  recordOpportunityOutcome,
+  recordProfitSlippage,
+  recordOpportunityAge,
+  recordProfitPerExecution,
+  recordGasCostPerExecution,
 } from './services/prometheus-metrics';
 // LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
 import { withLogContext } from '@arbitrage/core/logging';
+
+// =============================================================================
+// Phase 2 Enhanced Monitoring (A2): Outcome Classification
+// =============================================================================
+
+/**
+ * Classify a failure/error reason into an outcome category for metrics.
+ * Used by recordOpportunityOutcome to bucket failures into actionable categories.
+ */
+function classifyFailureOutcome(reason: string): string {
+  const lower = reason.toLowerCase();
+  if (lower.includes('timeout')) return 'timeout';
+  if (lower.includes('revert')) return 'revert';
+  if (lower.includes('gas') && (lower.includes('high') || lower.includes('exceed') || lower.includes('price'))) return 'gas_too_high';
+  if (lower.includes('stale') || lower.includes('expired') || lower.includes('outdated')) return 'stale';
+  if (lower.includes('nonce')) return 'nonce_error';
+  return 'error';
+}
 
 // =============================================================================
 // Pipeline Dependencies Interface
@@ -140,6 +163,9 @@ export class ExecutionPipeline {
     this.isProcessingQueue = true;
 
     try {
+      // H-001 FIX: Track consecutive per-chain skips to prevent infinite loop
+      let perChainSkips = 0;
+
       while (
         this.deps.queueService.size() > 0 &&
         this.activeExecutionCount < this.deps.maxConcurrentExecutions
@@ -148,7 +174,9 @@ export class ExecutionPipeline {
         if (!opportunity) break;
 
         // Per-chain circuit breaker check
-        const oppChain = opportunity.buyChain || 'unknown';
+        // H-002 FIX: Use same chain resolution as executeOpportunity — fall back
+        // to opportunity.chain for same-chain arbs where buyChain is undefined.
+        const oppChain = opportunity.buyChain ?? opportunity.chain ?? 'unknown';
         if (this.deps.cbManager && !this.deps.cbManager.canExecute(oppChain)) {
           const reenqueueCount = (this.cbReenqueueCounts.get(opportunity.id) ?? 0) + 1;
           if (reenqueueCount >= ExecutionPipeline.MAX_CB_REENQUEUE_ATTEMPTS) {
@@ -179,14 +207,19 @@ export class ExecutionPipeline {
         this.cbReenqueueCounts.delete(opportunity.id);
 
         // P2 OPT: Per-chain concurrency gating — prevents one busy chain from
-        // starving others by consuming all global execution slots
+        // starving others by consuming all global execution slots.
+        // H-001 FIX: Track consecutive skips to break out when all items are at capacity,
+        // preventing an infinite synchronous loop that blocks the event loop.
         const maxPerChain = this.deps.maxConcurrentPerChain ?? 0;
         if (maxPerChain > 0) {
           const chainCount = this.perChainExecutionCount.get(oppChain) ?? 0;
           if (chainCount >= maxPerChain) {
             this.deps.queueService.enqueue(opportunity);
+            perChainSkips++;
+            if (perChainSkips >= this.deps.queueService.size()) break; // all remaining items at capacity
             continue;
           }
+          perChainSkips = 0; // reset on successful dispatch
           this.perChainExecutionCount.set(oppChain, chainCount + 1);
         }
 
@@ -393,6 +426,16 @@ export class ExecutionPipeline {
 
     const chain = resolvedBuyChain;
     const dex = opportunity.buyDex || 'unknown';
+    const strategy = opportunity.type ?? 'unknown';
+
+    // Phase 3 (A4): Record opportunity age at execution start
+    const detectedAt = ts.detectedAt;
+    if (detectedAt) {
+      const ageMs = (ts.executionStartedAt ?? Date.now()) - detectedAt;
+      if (ageMs >= 0 && Number.isFinite(ageMs)) {
+        recordOpportunityAge(chain, ageMs);
+      }
+    }
 
     let evCalc: EVCalculation | null = null;
     let positionSize: PositionSize | null = null;
@@ -402,7 +445,7 @@ export class ExecutionPipeline {
     try {
       this.deps.opportunityConsumer.markActive(opportunity.id);
       this.deps.stats.executionAttempts++;
-      recordExecutionAttempt(chain, opportunity.type ?? 'unknown');
+      recordExecutionAttempt(chain, strategy);
 
       this.deps.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
@@ -462,6 +505,8 @@ export class ExecutionPipeline {
             dex
           );
           await this.deps.publishExecutionResult(skippedResult, opportunity);
+          // Phase 2 (A2): Record skipped outcome
+          recordOpportunityOutcome(chain, 'skipped');
           return;
         }
 
@@ -545,20 +590,42 @@ export class ExecutionPipeline {
       if (result.success) {
         this.deps.stats.successfulExecutions++;
         this.deps.cbManager?.recordSuccess(chain);
-        recordExecutionSuccess(chain, opportunity.type ?? 'unknown');
-        if (result.actualProfit) {
+        recordExecutionSuccess(chain, strategy);
+        recordOpportunityOutcome(chain, 'success');
+        if (result.actualProfit != null) {
           // RT-006 FIX: Convert from wei (1e18) to ETH before recording.
-          // Raw wei amounts (e.g., 1.74e18 per trade) were producing impossible
-          // cumulative values like 1.64e20 "USD" on the volume_usd_total metric.
           recordVolume(chain, result.actualProfit / 1e18);
+
+          // Phase 3 (F4): Record profit per execution
+          recordProfitPerExecution(chain, strategy, result.actualProfit / 1e18);
+
+          // Phase 3 (A3): Record profit slippage (expected vs actual)
+          // H-003 FIX: Both expectedProfit and actualProfit are in the same raw
+          // units (wei-scale). The /1e18 was already applied to actualProfit for
+          // volume and per-execution metrics above, but the slippage ratio must
+          // use consistent units — the 1e18 divisors cancel in the ratio.
+          if (opportunity.expectedProfit != null && opportunity.expectedProfit !== 0) {
+            const slippagePct = ((opportunity.expectedProfit - result.actualProfit) / Math.abs(opportunity.expectedProfit)) * 100;
+            if (Number.isFinite(slippagePct)) {
+              recordProfitSlippage(chain, strategy, slippagePct);
+            }
+          }
         }
       } else {
         this.deps.stats.failedExecutions++;
         this.deps.cbManager?.recordFailure(chain);
-        recordExecutionFailure(chain, opportunity.type ?? 'unknown', result.error ?? 'unknown');
+        const failureReason = result.error ?? 'unknown';
+        recordExecutionFailure(chain, strategy, failureReason);
+        // Phase 2 (A2): Categorize failure outcome
+        recordOpportunityOutcome(chain, classifyFailureOutcome(failureReason));
       }
 
-      recordExecutionLatency(chain, opportunity.type ?? 'unknown', latencyMs);
+      // Phase 3 (F5): Record gas cost per execution (success or failure)
+      if (result.gasCost != null && Number.isFinite(result.gasCost)) {
+        recordGasCostPerExecution(chain, result.gasCost);
+      }
+
+      recordExecutionLatency(chain, strategy, latencyMs);
 
       this.deps.perfLogger.logEventLatency('opportunity_execution', latencyMs, {
         success: result.success,
@@ -568,7 +635,10 @@ export class ExecutionPipeline {
     } catch (error) {
       this.deps.stats.failedExecutions++;
       this.deps.cbManager?.recordFailure(chain);
-      recordExecutionFailure(chain, opportunity.type ?? 'unknown', 'exception');
+      const errorMsg = getErrorMessage(error);
+      recordExecutionFailure(chain, strategy, 'exception');
+      // Phase 2 (A2): Categorize exception outcome
+      recordOpportunityOutcome(chain, classifyFailureOutcome(errorMsg));
 
       // RT-010 FIX: Record failure outcome regardless of simulation mode (see success path above).
       if (this.deps.getRiskManagementEnabled() && this.deps.riskOrchestrator) {

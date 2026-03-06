@@ -18,6 +18,11 @@ jest.mock('../../src/services/prometheus-metrics', () => ({
   recordExecutionFailure: jest.fn(),
   recordExecutionLatency: jest.fn(),
   recordVolume: jest.fn(),
+  recordOpportunityOutcome: jest.fn(),
+  recordProfitSlippage: jest.fn(),
+  recordOpportunityAge: jest.fn(),
+  recordProfitPerExecution: jest.fn(),
+  recordGasCostPerExecution: jest.fn(),
 }));
 
 // Make this file a module to avoid TS2451 redeclaration errors
@@ -1130,6 +1135,257 @@ describe('ExecutionPipeline', () => {
         expect.any(Number),
         expect.objectContaining({ success: true, profit: 50 })
       );
+    });
+  });
+
+  // ===========================================================================
+  // H-001: Per-chain concurrency gating — infinite loop prevention
+  // ===========================================================================
+
+  describe('processQueueItems — per-chain concurrency gating (H-001)', () => {
+    it('should break out of loop when all queued items are at per-chain capacity', () => {
+      deps = createMockDeps({ maxConcurrentPerChain: 1 });
+      pipeline = new ExecutionPipeline(deps);
+
+      const opp1 = createMockOpportunity({ id: 'opp-eth-1', buyChain: 'ethereum' });
+      const opp2 = createMockOpportunity({ id: 'opp-eth-2', buyChain: 'ethereum' });
+      const opp3 = createMockOpportunity({ id: 'opp-eth-3', buyChain: 'ethereum' });
+
+      // Without H-001 fix, this would loop forever (dequeue → re-enqueue → dequeue …).
+      // The queue always has items because skipped ones get re-enqueued.
+      let dequeueCount = 0;
+      let queueSize = 3;
+      deps.queueService.size.mockImplementation(() => queueSize);
+      deps.queueService.dequeue.mockImplementation(() => {
+        dequeueCount++;
+        queueSize--;
+        if (dequeueCount > 10) {
+          throw new Error('Infinite loop detected: dequeue called >10 times');
+        }
+        return [opp1, opp2, opp3][(dequeueCount - 1) % 3];
+      });
+      deps.queueService.enqueue.mockImplementation(() => {
+        queueSize++;
+      });
+
+      pipeline.processQueueItems();
+
+      // opp1 dispatched (perChainCount→1, skips reset to 0), opp2 skipped (re-enqueued,
+      // skips=1), opp3 skipped (re-enqueued, skips=2). After re-enqueue, size()=3.
+      // 2 < 3, so dequeue again: opp2 again (skips=3). After re-enqueue, size()=3.
+      // 3 >= 3 → break.
+      expect(dequeueCount).toBeLessThanOrEqual(5); // 1 dispatched + up to 4 skipped
+      expect(deps.queueService.enqueue).toHaveBeenCalled();
+    });
+
+    it('should dispatch items for different chains even when one chain is at capacity', async () => {
+      deps = createMockDeps({ maxConcurrentPerChain: 1 });
+      pipeline = new ExecutionPipeline(deps);
+
+      const oppEth = createMockOpportunity({ id: 'opp-eth', buyChain: 'ethereum' });
+      const oppBsc = createMockOpportunity({ id: 'opp-bsc', buyChain: 'bsc' });
+
+      deps.queueService.size
+        .mockReturnValueOnce(2)  // while loop check
+        .mockReturnValueOnce(1)  // while loop check
+        .mockReturnValueOnce(0)  // while loop exits
+        .mockReturnValue(0);     // .finally() checks
+      deps.queueService.dequeue
+        .mockReturnValueOnce(oppEth)
+        .mockReturnValueOnce(oppBsc);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      // Both should be dispatched — they're on different chains
+      expect(deps.strategyFactory.execute).toHaveBeenCalledTimes(2);
+      expect(deps.queueService.enqueue).not.toHaveBeenCalled(); // nothing re-enqueued
+    });
+
+    it('should reset perChainSkips counter when a dispatch succeeds between skips', () => {
+      deps = createMockDeps({ maxConcurrentPerChain: 1 });
+      pipeline = new ExecutionPipeline(deps);
+
+      // Queue: eth1 (dispatched), eth2 (skipped), bsc1 (dispatched, resets counter), eth3 (skipped)
+      const oppEth1 = createMockOpportunity({ id: 'eth1', buyChain: 'ethereum' });
+      const oppEth2 = createMockOpportunity({ id: 'eth2', buyChain: 'ethereum' });
+      const oppBsc = createMockOpportunity({ id: 'bsc1', buyChain: 'bsc' });
+      const oppEth3 = createMockOpportunity({ id: 'eth3', buyChain: 'ethereum' });
+
+      // Simulate realistic queue: size decrements on dequeue, increments on enqueue
+      let queueSize = 4;
+      deps.queueService.size.mockImplementation(() => queueSize);
+      const dequeueOrder = [oppEth1, oppEth2, oppBsc, oppEth3];
+      let dequeueIdx = 0;
+      deps.queueService.dequeue.mockImplementation(() => {
+        queueSize--;
+        return dequeueOrder[dequeueIdx++];
+      });
+      deps.queueService.enqueue.mockImplementation(() => {
+        queueSize++;
+      });
+
+      pipeline.processQueueItems();
+
+      // eth1 dispatched (skips reset to 0), eth2 skipped (re-enqueued, skips=1),
+      // bsc1 dispatched (skips reset to 0), eth3 skipped (re-enqueued, skips=1),
+      // then size check → 2 remaining but skips(1) < size(2), dequeue eth2 again →
+      // skipped (skips=2), 2 >= size(2) → break
+      expect(deps.queueService.enqueue).toHaveBeenCalled(); // eth2 + eth3 re-enqueued
+    });
+  });
+
+  // ===========================================================================
+  // H-002: Chain resolution consistency
+  // ===========================================================================
+
+  describe('processQueueItems — chain resolution (H-002)', () => {
+    it('should use opportunity.chain for CB check when buyChain is undefined (same-chain arb)', () => {
+      const mockCbManager = {
+        canExecute: jest.fn().mockReturnValue(true),
+        recordSuccess: jest.fn(),
+        recordFailure: jest.fn(),
+      };
+      deps.cbManager = mockCbManager;
+
+      // Same-chain arb: buyChain is undefined, chain is 'arbitrum'
+      const opp = createMockOpportunity({ buyChain: undefined, chain: 'arbitrum' });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+
+      // H-002: Should check CB with 'arbitrum', not 'unknown'
+      expect(mockCbManager.canExecute).toHaveBeenCalledWith('arbitrum');
+    });
+
+    it('should use buyChain for CB check when buyChain is set (cross-chain arb)', () => {
+      const mockCbManager = {
+        canExecute: jest.fn().mockReturnValue(true),
+        recordSuccess: jest.fn(),
+        recordFailure: jest.fn(),
+      };
+      deps.cbManager = mockCbManager;
+
+      const opp = createMockOpportunity({ buyChain: 'polygon', chain: 'ethereum' });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+
+      // Cross-chain: buyChain takes precedence
+      expect(mockCbManager.canExecute).toHaveBeenCalledWith('polygon');
+    });
+
+    it('should fall back to "unknown" when both buyChain and chain are undefined', () => {
+      const mockCbManager = {
+        canExecute: jest.fn().mockReturnValue(true),
+        recordSuccess: jest.fn(),
+        recordFailure: jest.fn(),
+      };
+      deps.cbManager = mockCbManager;
+
+      const opp = createMockOpportunity({ buyChain: undefined, chain: undefined });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+
+      expect(mockCbManager.canExecute).toHaveBeenCalledWith('unknown');
+    });
+  });
+
+  // ===========================================================================
+  // H-003: Profit slippage metric unit consistency
+  // ===========================================================================
+
+  describe('executeOpportunity — profit slippage (H-003)', () => {
+    it('should compute slippage correctly when expectedProfit and actualProfit are in same units', async () => {
+      const { recordProfitSlippage } = require('../../src/services/prometheus-metrics');
+
+      // expectedProfit = 100 (raw units), actualProfit = 80 (raw units)
+      // slippage = (100 - 80) / |100| * 100 = 20%
+      deps.strategyFactory.execute.mockResolvedValue({
+        success: true,
+        actualProfit: 80,
+        gasCost: 5,
+      });
+
+      const opp = createMockOpportunity({ expectedProfit: 100 });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(recordProfitSlippage).toHaveBeenCalledWith(
+        'ethereum',
+        'intra-chain',
+        20 // (100 - 80) / 100 * 100 = 20%
+      );
+    });
+
+    it('should compute negative slippage when actual exceeds expected', async () => {
+      const { recordProfitSlippage } = require('../../src/services/prometheus-metrics');
+
+      // expectedProfit = 100, actualProfit = 120
+      // slippage = (100 - 120) / |100| * 100 = -20% (underestimated)
+      deps.strategyFactory.execute.mockResolvedValue({
+        success: true,
+        actualProfit: 120,
+        gasCost: 5,
+      });
+
+      const opp = createMockOpportunity({ expectedProfit: 100 });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(recordProfitSlippage).toHaveBeenCalledWith(
+        'ethereum',
+        'intra-chain',
+        -20 // (100 - 120) / 100 * 100 = -20%
+      );
+    });
+
+    it('should not record slippage when expectedProfit is 0', async () => {
+      const { recordProfitSlippage } = require('../../src/services/prometheus-metrics');
+      (recordProfitSlippage as jest.Mock).mockClear();
+
+      deps.strategyFactory.execute.mockResolvedValue({
+        success: true,
+        actualProfit: 50,
+        gasCost: 5,
+      });
+
+      const opp = createMockOpportunity({ expectedProfit: 0 });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(recordProfitSlippage).not.toHaveBeenCalled();
     });
   });
 });
