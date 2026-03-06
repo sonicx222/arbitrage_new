@@ -163,7 +163,7 @@ export {
 // =============================================================================
 // DEX CONFIGURATIONS
 // =============================================================================
-export { DEXES, getEnabledDexes } from './dexes';
+export { DEXES, getEnabledDexes, getVerifiedDexes } from './dexes';
 
 // =============================================================================
 // DEX FACTORY REGISTRY (Phase 2.1.1)
@@ -208,6 +208,16 @@ export {
   getTokenDecimals,
   hasKnownDecimals
 } from './tokens';
+
+// Native token price pool config (ADR-040: Real-Time Native Token Pricing)
+export {
+  NATIVE_TOKEN_PRICE_POOLS,
+  V2_PAIR_ABI,
+  ETH_NATIVE_CHAINS,
+  MIN_POOL_TVL_USD,
+  calculateNativeTokenPrice,
+  type NativeTokenPricePool,
+} from './tokens/native-token-price-pools';
 
 // =============================================================================
 // THRESHOLDS
@@ -532,6 +542,17 @@ export {
   internTokenSymbolUpper,
   internDexName,
 } from './utils/string-interning';
+
+// =============================================================================
+// DEFERRED ITEM TRACKING (Task 6: Config Refactoring)
+// =============================================================================
+export {
+  DEFERRED_ITEMS,
+  getUnresolvedDeferredItems,
+  getDeferredItemsByStatus,
+  type DeferredItem,
+  type DeferredItemStatus,
+} from './deferred-items';
 
 // =============================================================================
 // ENVIRONMENT VARIABLE PARSING UTILITIES

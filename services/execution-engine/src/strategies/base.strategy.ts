@@ -28,6 +28,7 @@ import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getS
 import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { parseEnvIntSafe, parseEnvFloatSafe } from '@arbitrage/core/utils';
+import { getGasPriceCache } from '@arbitrage/core/caching/gas-price-cache';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
 import { CUSTOM_ERROR_SELECTORS } from './error-selectors.generated';
@@ -1428,10 +1429,30 @@ export abstract class BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity
   ): Promise<number> {
     const gasPrice = receipt.gasPrice ?? BigInt(0);
-    const gasCost = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
+    // Gas cost in native token units (ETH, BNB, MATIC, etc.)
+    const gasCostNative = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
+    // ADR-040: Convert gas cost to USD using per-chain native token price.
+    // Previously this subtracted native-token-denominated gas from USD-denominated
+    // expectedProfit, causing systematic undercount on non-ETH chains (BSC, Polygon, etc.)
+    const chain = opportunity.chain ?? 'ethereum';
+    const nativeTokenPriceUsd = getNativeTokenPrice(chain);
+    const gasCostUsd = gasCostNative * nativeTokenPriceUsd;
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
-    return expectedProfit - gasCost;
+
+    // ADR-040: Record gas calibration data for feedback loop.
+    // Compares estimated gas cost (from detection) with actual gas cost (from receipt).
+    const estimatedGasCostUsd = opportunity.gasCost ?? 0;
+    if (estimatedGasCostUsd > 0 && gasCostUsd > 0) {
+      try {
+        const operationType = opportunity.type ?? 'simple';
+        getGasPriceCache().recordGasCalibration(chain, operationType, estimatedGasCostUsd, gasCostUsd);
+      } catch {
+        // Non-critical — don't let calibration failure break profit calculation
+      }
+    }
+
+    return expectedProfit - gasCostUsd;
   }
 
   // ===========================================================================

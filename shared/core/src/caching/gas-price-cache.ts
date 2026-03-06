@@ -18,7 +18,7 @@
 import { createLogger, type Logger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
 import { parseEnvIntSafe } from '../utils/env-utils';
-import { CHAINS, NATIVE_TOKEN_PRICES, FEATURE_FLAGS, isEvmChainSafe } from '@arbitrage/config';
+import { CHAINS, NATIVE_TOKEN_PRICES, FEATURE_FLAGS, isEvmChainSafe, NATIVE_TOKEN_PRICE_POOLS, V2_PAIR_ABI, ETH_NATIVE_CHAINS, calculateNativeTokenPrice } from '@arbitrage/config';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -95,6 +95,18 @@ export interface GasCostEstimate {
   usesFallback: boolean;
   /** Chain name */
   chain: string;
+}
+
+/**
+ * ADR-040: Gas calibration entry — EMA of actual/estimated gas cost ratio.
+ */
+export interface GasCalibrationEntry {
+  /** EMA of actual/estimated ratio (1.0 = perfectly calibrated) */
+  ratio: number;
+  /** Number of samples accumulated */
+  sampleCount: number;
+  /** Last update timestamp */
+  lastUpdated: number;
 }
 
 /**
@@ -364,6 +376,13 @@ export class GasPriceCache {
   private staleWarnLastLogged: Map<string, number> = new Map();
   private static readonly STALE_WARN_INTERVAL_MS = 30_000; // Log at most once per 30s per chain
 
+  // ADR-040: Gas calibration EMA data (key = "chain:operationType")
+  private calibrationData: Map<string, GasCalibrationEntry> = new Map();
+  private static readonly CALIBRATION_EMA_ALPHA = 0.1; // EMA smoothing factor (10% weight to new sample)
+  private static readonly CALIBRATION_MIN_SAMPLES = 5; // Minimum samples before applying calibration
+  private static readonly CALIBRATION_RATIO_MIN = 0.5; // Floor: never reduce estimate by more than 50%
+  private static readonly CALIBRATION_RATIO_MAX = 2.0; // Ceiling: never increase estimate by more than 100%
+
   constructor(config: Partial<GasPriceCacheConfig> = {}, deps?: GasPriceCacheDeps) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // DI: Use provided logger or create default
@@ -486,11 +505,15 @@ export class GasPriceCache {
   /**
    * Estimate gas cost in USD for an operation.
    *
+   * ADR-040: When operationType is provided and sufficient calibration samples
+   * exist, the estimate is adjusted by the EMA calibration ratio (actual/estimated).
+   *
    * @param chain - Chain name
    * @param gasUnits - Number of gas units (use GAS_UNITS constants)
+   * @param operationType - Optional operation type for calibration lookup
    * @returns Gas cost estimate with metadata
    */
-  estimateGasCostUsd(chain: string, gasUnits: number): GasCostEstimate {
+  estimateGasCostUsd(chain: string, gasUnits: number, operationType?: string): GasCostEstimate {
     const chainLower = chain.toLowerCase();
     const gasPrice = this.getGasPrice(chainLower);
     const nativePrice = this.getNativeTokenPrice(chainLower);
@@ -505,9 +528,20 @@ export class GasPriceCache {
     // Fix 3: Use dynamic oracle value when available, otherwise static fallback.
     // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P0-5
     const l1DataFeeUsd = this.getL1DataFee(chainLower);
-    const costUsd = l2ExecutionCostUsd + l1DataFeeUsd;
+    let costUsd = l2ExecutionCostUsd + l1DataFeeUsd;
 
-    this.logger.debug('L1 fee estimation', {
+    // ADR-040: Apply calibration ratio from post-execution feedback loop
+    if (operationType) {
+      const calibrationRatio = this.getCalibrationRatio(chainLower, operationType);
+      if (calibrationRatio !== 1.0) {
+        this.logger.debug('Applying gas calibration', {
+          chain: chainLower, operationType, calibrationRatio, rawCostUsd: costUsd,
+        });
+        costUsd *= calibrationRatio;
+      }
+    }
+
+    this.logger.debug('Gas cost estimation', {
       chain: chainLower,
       l1DataFeeUsd,
       l2ExecutionCostUsd,
@@ -534,7 +568,7 @@ export class GasPriceCache {
    */
   estimateMultiLegGasCost(chain: string, numHops: number): number {
     const gasUnits = GAS_UNITS.multiLegBase + (numHops * GAS_UNITS.multiLegPerHop);
-    const estimate = this.estimateGasCostUsd(chain, gasUnits);
+    const estimate = this.estimateGasCostUsd(chain, gasUnits, 'multiLeg');
     return estimate.costUsd;
   }
 
@@ -545,7 +579,7 @@ export class GasPriceCache {
    * @returns Gas cost in USD
    */
   estimateTriangularGasCost(chain: string): number {
-    const estimate = this.estimateGasCostUsd(chain, GAS_UNITS.triangularArbitrage);
+    const estimate = this.estimateGasCostUsd(chain, GAS_UNITS.triangularArbitrage, 'triangular');
     return estimate.costUsd;
   }
 
@@ -584,7 +618,7 @@ export class GasPriceCache {
         gasUnits = GAS_UNITS.simpleSwap;
     }
 
-    const estimate = this.estimateGasCostUsd(chain, gasUnits);
+    const estimate = this.estimateGasCostUsd(chain, gasUnits, operationType);
     return estimate.costUsd / tradeAmountUsd;
   }
 
@@ -645,6 +679,9 @@ export class GasPriceCache {
       const failed = results.filter(r => r.status === 'rejected').length;
 
       this.logger.info('Gas price refresh completed', { succeeded, failed, total: chains.length });
+
+      // ADR-040: Refresh native token prices from on-chain DEX pools
+      await this.refreshNativeTokenPrices();
     } finally {
       this.isRefreshing = false;
     }
@@ -732,6 +769,86 @@ export class GasPriceCache {
       lastUpdated: Date.now(),
       isFallback: false
     });
+  }
+
+  /**
+   * ADR-040: Record a gas calibration sample from post-execution comparison.
+   *
+   * Called by execution strategies after each trade to record the ratio of
+   * actual gas cost to estimated gas cost. Maintains an EMA per chain/operation.
+   *
+   * @param chain - Chain name
+   * @param operationType - Operation type ('simple', 'triangular', 'quadrilateral', 'multiLeg')
+   * @param estimatedCostUsd - Gas cost estimated at detection time (USD)
+   * @param actualCostUsd - Actual gas cost from transaction receipt (USD)
+   */
+  recordGasCalibration(
+    chain: string,
+    operationType: string,
+    estimatedCostUsd: number,
+    actualCostUsd: number,
+  ): void {
+    if (estimatedCostUsd <= 0 || actualCostUsd <= 0 || !Number.isFinite(estimatedCostUsd) || !Number.isFinite(actualCostUsd)) {
+      return; // Skip invalid data
+    }
+
+    const rawRatio = actualCostUsd / estimatedCostUsd;
+
+    // Reject extreme outliers (>5x deviation) to prevent EMA corruption
+    if (rawRatio < 0.1 || rawRatio > 10) {
+      this.logger.warn('Gas calibration outlier rejected', {
+        chain, operationType, estimatedCostUsd, actualCostUsd, rawRatio,
+      });
+      return;
+    }
+
+    const key = `${chain.toLowerCase()}:${operationType}`;
+    const existing = this.calibrationData.get(key);
+
+    if (existing) {
+      // EMA update: new = alpha * sample + (1 - alpha) * old
+      const alpha = GasPriceCache.CALIBRATION_EMA_ALPHA;
+      existing.ratio = alpha * rawRatio + (1 - alpha) * existing.ratio;
+      existing.sampleCount++;
+      existing.lastUpdated = Date.now();
+    } else {
+      this.calibrationData.set(key, {
+        ratio: rawRatio,
+        sampleCount: 1,
+        lastUpdated: Date.now(),
+      });
+    }
+
+    this.logger.debug('Gas calibration recorded', {
+      chain, operationType, rawRatio,
+      emaRatio: this.calibrationData.get(key)?.ratio,
+      samples: this.calibrationData.get(key)?.sampleCount,
+    });
+  }
+
+  /**
+   * ADR-040: Get calibration ratio for a chain/operation type.
+   *
+   * Returns the clamped EMA ratio if enough samples have been collected.
+   * Returns 1.0 (uncalibrated) if insufficient data.
+   *
+   * @param chain - Chain name
+   * @param operationType - Operation type
+   * @returns Calibration ratio to multiply estimates by (1.0 = no adjustment)
+   */
+  getCalibrationRatio(chain: string, operationType: string): number {
+    const key = `${chain.toLowerCase()}:${operationType}`;
+    const entry = this.calibrationData.get(key);
+
+    if (!entry || entry.sampleCount < GasPriceCache.CALIBRATION_MIN_SAMPLES) {
+      return 1.0; // Not enough data — return uncalibrated
+    }
+
+    // Clamp to safe range
+    return Math.max(
+      GasPriceCache.CALIBRATION_RATIO_MIN,
+      Math.min(GasPriceCache.CALIBRATION_RATIO_MAX, entry.ratio),
+    );
   }
 
   // ===========================================================================
@@ -832,23 +949,37 @@ export class GasPriceCache {
         const oracleAddress = L1_ORACLE_ADDRESSES[chain];
         let l1BaseFeeWei: bigint;
 
+        let feeWei: bigint;
+
         if (chain === 'arbitrum') {
           // ArbGasInfo.getL1BaseFeeEstimate() returns uint256 (L1 base fee in wei)
           const abi = ['function getL1BaseFeeEstimate() external view returns (uint256)'];
           const oracle = new ethers.Contract(oracleAddress, abi, provider);
           l1BaseFeeWei = await oracle.getL1BaseFeeEstimate();
+          // Arbitrum: manual calculation (no blob-aware method)
+          const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
+          feeWei = l1BaseFeeWei * l1GasUsed;
         } else {
-          // OP Stack: GasPriceOracle.l1BaseFee() returns uint256
-          const abi = ['function l1BaseFee() external view returns (uint256)'];
-          const oracle = new ethers.Contract(oracleAddress, abi, provider);
-          l1BaseFeeWei = await oracle.l1BaseFee();
+          // ADR-040: OP Stack blob-aware L1 fee estimation.
+          // Post-Dencun (EIP-4844), OP Stack GasPriceOracle has getL1FeeUpperBound(uint256)
+          // which accounts for blob vs calldata pricing automatically. Falls back to
+          // legacy l1BaseFee() * calldata model if the new method is unavailable.
+          try {
+            const blobAbi = ['function getL1FeeUpperBound(uint256 _unsignedTxSize) external view returns (uint256)'];
+            const oracle = new ethers.Contract(oracleAddress, blobAbi, provider);
+            feeWei = await oracle.getL1FeeUpperBound(L1_CALLDATA_BYTES);
+            l1BaseFeeWei = feeWei; // for logging
+          } catch {
+            // Fallback: pre-Dencun l1BaseFee() method
+            const legacyAbi = ['function l1BaseFee() external view returns (uint256)'];
+            const oracle = new ethers.Contract(oracleAddress, legacyAbi, provider);
+            l1BaseFeeWei = await oracle.l1BaseFee();
+            const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
+            feeWei = l1BaseFeeWei * l1GasUsed;
+          }
         }
 
-        // Calculate L1 data cost in USD:
-        // cost = l1BaseFee (wei) * calldataBytes * 16 (gas per non-zero byte) / 1e18 * ethPrice
-        const l1GasUsed = BigInt(L1_CALLDATA_BYTES) * 16n;
-        const l1CostWei = l1BaseFeeWei * l1GasUsed;
-        const l1CostEth = Number(l1CostWei) / 1e18;
+        const l1CostEth = Number(feeWei) / 1e18;
         const feeUsd = l1CostEth * ethPrice;
 
         this.l1OracleCache.set(chain, {
@@ -1078,6 +1209,68 @@ export class GasPriceCache {
       });
     } catch (error) {
       this.logger.warn('Mantle L1 fee estimation failed, using static fallback', { error });
+    }
+  }
+
+  /**
+   * ADR-040: Refresh native token prices by querying on-chain DEX V2 pools.
+   *
+   * Queries getReserves() on the configured V2-style pair for each chain
+   * to derive the native token's USD price. Falls back to static prices
+   * on failure. For ETH-native L2 chains without their own pool, copies
+   * ethereum's price.
+   *
+   * Called as part of the 60s refresh cycle (piggybacked on refreshAll).
+   * Adds ~1 RPC call per chain per cycle — within free tier limits.
+   */
+  private async refreshNativeTokenPrices(): Promise<void> {
+    const { ethers } = await import('ethers');
+    const poolChains = Object.keys(NATIVE_TOKEN_PRICE_POOLS);
+
+    const results = await Promise.allSettled(
+      poolChains.map(async (chain) => {
+        const pool = NATIVE_TOKEN_PRICE_POOLS[chain];
+        const chainConfig = CHAINS[chain];
+        if (!chainConfig || !pool) return;
+
+        let provider = this.providers.get(chain);
+        if (!provider) {
+          const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+          provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
+          this.providers.set(chain, provider);
+        }
+
+        const contract = new ethers.Contract(pool.poolAddress, [...V2_PAIR_ABI], provider);
+        const [reserve0, reserve1] = await contract.getReserves();
+
+        const price = calculateNativeTokenPrice(BigInt(reserve0), BigInt(reserve1), pool);
+        if (price !== null) {
+          this.setNativeTokenPrice(chain, price);
+          this.logger.debug('Native token price updated from on-chain pool', {
+            chain, price, dex: pool.dex,
+          });
+        } else {
+          this.logger.warn('Native token price calculation returned null (zero reserves or out-of-range)', {
+            chain, poolAddress: pool.poolAddress,
+          });
+        }
+      })
+    );
+
+    // For ETH-native L2 chains without their own pool, use ethereum's price
+    const ethPrice = this.getNativeTokenPrice('ethereum');
+    if (!ethPrice.isFallback) {
+      for (const chain of ETH_NATIVE_CHAINS) {
+        if (!NATIVE_TOKEN_PRICE_POOLS[chain]) {
+          this.setNativeTokenPrice(chain, ethPrice.priceUsd);
+        }
+      }
+    }
+
+    const succeeded = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) {
+      this.logger.warn('Native token price refresh partial failure', { succeeded, failed });
     }
   }
 

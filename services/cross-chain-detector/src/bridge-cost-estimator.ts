@@ -8,7 +8,7 @@
  * @see ADR-014: Modular Detector Components
  */
 
-import { calculateBridgeCostUsd } from '@arbitrage/config';
+import { calculateBridgeCostUsd, getNativeTokenPrice } from '@arbitrage/config';
 import { PriceUpdate } from '@arbitrage/types';
 import { BridgeLatencyPredictor } from './bridge-predictor';
 // FIX 6.1: Use consistent Logger alias (Logger = ModuleLogger in types.ts)
@@ -256,13 +256,15 @@ export function createBridgeCostEstimator(config: BridgeCostEstimatorConfig): Br
       );
 
       if (prediction && prediction.confidence > minPredictionConfidence) {
-        // Convert from wei to USD (assumes ETH-like cost structure)
+        // Convert from wei to USD using per-chain native token price.
+        // ADR-040: Previously used single ETH price for all chains, causing
+        // wrong USD conversion for BSC (BNB), Polygon (MATIC), etc.
         const costWei = prediction.estimatedCost;
-        const costEth = costWei / 1e18;
+        const costNative = costWei / 1e18;
 
-        // FIX 1.2: Use mutable ETH price (should be updated periodically by caller)
-        // This keeps the function synchronous for hot-path performance
-        const costUsd = costEth * currentEthPriceUsd;
+        // Use source chain's native token price for gas cost conversion
+        const nativePrice = getNativeTokenPrice(sourceChain);
+        const costUsd = costNative * nativePrice;
 
         return {
           costUsd,

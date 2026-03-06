@@ -158,6 +158,11 @@ jest.mock('@arbitrage/config', () => ({
   FEATURE_FLAGS: mockFeatureFlags,
   // W2-12/W2-13 fix: isEvmChainSafe used to skip non-EVM chains in refreshChain()
   isEvmChainSafe: (chain: string) => !chain.startsWith('solana'),
+  // ADR-040: Native token price pool config (imported by refreshNativeTokenPrices)
+  NATIVE_TOKEN_PRICE_POOLS: {},
+  V2_PAIR_ABI: ['function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)'],
+  ETH_NATIVE_CHAINS: ['arbitrum', 'optimism', 'base', 'zksync', 'linea', 'blast', 'scroll', 'mode'],
+  calculateNativeTokenPrice: jest.fn().mockReturnValue(3500),
 }));
 
 // =============================================================================
@@ -763,6 +768,197 @@ describe('L1 Oracle Integration', () => {
       // Linea should have a cost estimate (either from Ethereum base fee derivation or static fallback)
       const lineaEstimate = cache.estimateGasCostUsd('linea', 150000);
       expect(lineaEstimate.costUsd).toBeGreaterThan(0);
+    });
+  });
+});
+
+// =============================================================================
+// ADR-040: Gas Calibration Tests
+// =============================================================================
+describe('Gas Calibration (ADR-040)', () => {
+  let cache: GasPriceCache;
+
+  beforeEach(async () => {
+    await resetGasPriceCache();
+    logger.clear();
+    cache = new GasPriceCache({
+      refreshIntervalMs: 60000,
+      staleThresholdMs: 120000,
+      autoRefresh: false,
+    }, { logger: logger as any });
+  });
+
+  afterEach(async () => {
+    await cache.stop();
+    await resetGasPriceCache();
+  });
+
+  describe('recordGasCalibration', () => {
+    it('should record a calibration sample', () => {
+      cache.recordGasCalibration('ethereum', 'simple', 1.0, 1.2);
+
+      // After 1 sample (< MIN_SAMPLES=5), ratio should still be 1.0 (uncalibrated)
+      expect(cache.getCalibrationRatio('ethereum', 'simple')).toBe(1.0);
+    });
+
+    it('should apply calibration after minimum samples reached', () => {
+      // Record 5 samples all showing 1.5x actual/estimated ratio
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('arbitrum', 'triangular', 1.0, 1.5);
+      }
+
+      const ratio = cache.getCalibrationRatio('arbitrum', 'triangular');
+      expect(ratio).toBeGreaterThan(1.0);
+      expect(ratio).toBeLessThanOrEqual(2.0);
+    });
+
+    it('should use EMA to smooth calibration samples', () => {
+      // First 5 samples at 1.5x
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('ethereum', 'simple', 1.0, 1.5);
+      }
+      const ratioAfterFirst = cache.getCalibrationRatio('ethereum', 'simple');
+
+      // Now add a sample at 1.0x — should move EMA toward 1.0 but not jump there
+      cache.recordGasCalibration('ethereum', 'simple', 1.0, 1.0);
+      const ratioAfterSecond = cache.getCalibrationRatio('ethereum', 'simple');
+
+      expect(ratioAfterSecond).toBeLessThan(ratioAfterFirst);
+      expect(ratioAfterSecond).toBeGreaterThan(1.0);
+    });
+
+    it('should reject outlier samples (ratio < 0.1 or > 10)', () => {
+      // Record 5 valid samples
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('bsc', 'simple', 1.0, 1.2);
+      }
+      const ratioBefore = cache.getCalibrationRatio('bsc', 'simple');
+
+      // Record an extreme outlier — should be rejected
+      cache.recordGasCalibration('bsc', 'simple', 1.0, 15.0);
+      const ratioAfter = cache.getCalibrationRatio('bsc', 'simple');
+
+      expect(ratioAfter).toBe(ratioBefore);
+    });
+
+    it('should skip invalid inputs (zero or negative)', () => {
+      cache.recordGasCalibration('ethereum', 'simple', 0, 1.0);
+      cache.recordGasCalibration('ethereum', 'simple', 1.0, 0);
+      cache.recordGasCalibration('ethereum', 'simple', -1, 1.0);
+      cache.recordGasCalibration('ethereum', 'simple', 1.0, -1);
+      cache.recordGasCalibration('ethereum', 'simple', NaN, 1.0);
+      cache.recordGasCalibration('ethereum', 'simple', 1.0, Infinity);
+
+      // None should have been recorded
+      expect(cache.getCalibrationRatio('ethereum', 'simple')).toBe(1.0);
+    });
+
+    it('should maintain separate calibrations per chain and operation type', () => {
+      // 5 samples for arbitrum:triangular at 1.5x
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('arbitrum', 'triangular', 1.0, 1.5);
+      }
+      // 5 samples for bsc:simple at 0.8x
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('bsc', 'simple', 1.0, 0.8);
+      }
+
+      const arbRatio = cache.getCalibrationRatio('arbitrum', 'triangular');
+      const bscRatio = cache.getCalibrationRatio('bsc', 'simple');
+
+      expect(arbRatio).toBeGreaterThan(1.0);
+      expect(bscRatio).toBeLessThan(1.0);
+    });
+  });
+
+  describe('getCalibrationRatio', () => {
+    it('should return 1.0 for unknown chain/operation', () => {
+      expect(cache.getCalibrationRatio('unknown', 'simple')).toBe(1.0);
+    });
+
+    it('should clamp ratio to [0.5, 2.0]', () => {
+      // Record samples suggesting very low ratio (0.3x)
+      for (let i = 0; i < 10; i++) {
+        cache.recordGasCalibration('ethereum', 'lowtest', 1.0, 0.3);
+      }
+      expect(cache.getCalibrationRatio('ethereum', 'lowtest')).toBeGreaterThanOrEqual(0.5);
+
+      // Record samples suggesting very high ratio (5x) — accepted by outlier filter (< 10)
+      for (let i = 0; i < 10; i++) {
+        cache.recordGasCalibration('ethereum', 'hightest', 1.0, 5.0);
+      }
+      expect(cache.getCalibrationRatio('ethereum', 'hightest')).toBeLessThanOrEqual(2.0);
+    });
+
+    it('should be case insensitive for chain', () => {
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('Ethereum', 'simple', 1.0, 1.3);
+      }
+      expect(cache.getCalibrationRatio('ethereum', 'simple')).toBeGreaterThan(1.0);
+    });
+  });
+
+  describe('estimateGasCostUsd with calibration', () => {
+    it('should apply calibration ratio when operationType is provided', async () => {
+      await cache.start();
+
+      // Get baseline estimate without calibration
+      const baseline = cache.estimateGasCostUsd('ethereum', 200000);
+
+      // Record calibration data showing actual is 1.5x estimated
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('ethereum', 'triangular', 1.0, 1.5);
+      }
+
+      // Now estimate with operationType — should be higher than baseline
+      const calibrated = cache.estimateGasCostUsd('ethereum', 200000, 'triangular');
+
+      expect(calibrated.costUsd).toBeGreaterThan(baseline.costUsd);
+    });
+
+    it('should NOT apply calibration when operationType is omitted', async () => {
+      await cache.start();
+
+      // Record calibration data
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('ethereum', 'simple', 1.0, 1.5);
+      }
+
+      // Estimate without operationType
+      const estimate = cache.estimateGasCostUsd('ethereum', 200000);
+      // Estimate with a different operationType that has no data
+      const estimateOther = cache.estimateGasCostUsd('ethereum', 200000, 'other');
+
+      // Both should be the same (no calibration applied)
+      expect(estimate.costUsd).toBe(estimateOther.costUsd);
+    });
+
+    it('should pass operationType through from estimateTriangularGasCost', async () => {
+      await cache.start();
+
+      const baselineCost = cache.estimateTriangularGasCost('ethereum');
+
+      // Record calibration showing actual is 1.5x
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('ethereum', 'triangular', 1.0, 1.5);
+      }
+
+      const calibratedCost = cache.estimateTriangularGasCost('ethereum');
+      expect(calibratedCost).toBeGreaterThan(baselineCost);
+    });
+
+    it('should pass operationType through from estimateMultiLegGasCost', async () => {
+      await cache.start();
+
+      const baselineCost = cache.estimateMultiLegGasCost('ethereum', 3);
+
+      // Record calibration showing actual is 1.5x
+      for (let i = 0; i < 5; i++) {
+        cache.recordGasCalibration('ethereum', 'multiLeg', 1.0, 1.5);
+      }
+
+      const calibratedCost = cache.estimateMultiLegGasCost('ethereum', 3);
+      expect(calibratedCost).toBeGreaterThan(baselineCost);
     });
   });
 });
