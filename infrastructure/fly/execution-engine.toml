@@ -17,7 +17,7 @@
 # Notes:
 # - Hot-path service: latency-critical (<50ms target)
 # - Requires wallet private keys via secrets (NEVER in env/toml)
-# - Internal port 8080 (overrides code default of 3005 via HEALTH_CHECK_PORT env var)
+# - Internal port 3005 (aligned with service-ports.json and HEALTH_CHECK_PORT env var)
 # - 384MB RAM for multi-chain transaction signing and gas estimation
 
 app = "arbitrage-execution-engine"
@@ -67,7 +67,7 @@ primary_region = "sjc"
     interval = "15s"
     method = "GET"
     path = "/health"
-    port = 8080
+    port = 3005
     timeout = "5s"
     type = "http"
 
@@ -76,7 +76,7 @@ primary_region = "sjc"
     interval = "15s"
     method = "GET"
     path = "/ready"
-    port = 8080
+    port = 3005
     timeout = "5s"
     type = "http"
 

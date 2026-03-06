@@ -2195,11 +2195,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.updateSystemMetrics();
           this.checkForAlerts();
 
-          // Report own health to stream (for other services to consume)
-          await this.reportHealth();
-
-          // P1 Fix: Monitor execution stream depth for backpressure detection.
-          // Cached value is checked in forwardToExecution() to prevent message loss.
+          // RT-BP01 FIX: Backpressure check BEFORE reportHealth() — if reportHealth()
+          // throws, the catch block would skip the lag check, leaving the cached ratio
+          // stale and preventing backpressure from ever activating. This caused the
+          // stream to hit MAXLEN with ratio stuck at 0.375 instead of 1.0.
           if (this.streamsClient) {
             const lag = await this.streamsClient.checkStreamLag(
               RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
@@ -2212,6 +2211,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
               executionStreamDepthRatio: lag.lagRatio,
               active: lag.lagRatio > this.executionStreamBackpressureRatio,
             };
+          }
+
+          // Report own health to stream (for other services to consume).
+          // Wrapped in its own try/catch so failures don't affect backpressure.
+          try {
+            await this.reportHealth();
+          } catch (healthError) {
+            this.logger.warn('Health report failed', { error: healthError });
           }
 
         } catch (error) {

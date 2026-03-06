@@ -466,7 +466,7 @@ export class RedisStreamsClient {
 
     // P2-008 FIX: Log legacy HMAC compat status at startup. When enabled, HMAC verification
     // computes up to 4 digests per message (current key + previous key × with/without stream name).
-    // Set LEGACY_SIGNATURE_COMPAT=false once all services use OP-18 format to reduce to 1-2 attempts.
+    // Set LEGACY_HMAC_COMPAT=false once all services use OP-18 format to reduce to 1-2 attempts.
     if (this.signingKey) {
       this.logger.info('HMAC signing initialized', {
         legacySignatureCompat: this.legacySignatureCompatEnabled,
