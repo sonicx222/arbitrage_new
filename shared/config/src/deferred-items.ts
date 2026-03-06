@@ -40,7 +40,7 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
     description: 'Deploy BalancerV2FlashArbitrage.sol to ethereum, polygon, arbitrum, optimism, base',
     status: 'deferred',
     blocker: 'Contract deployment required',
-    files: ['service-config.ts', 'flash-loan-availability.ts'],
+    files: ['service-config.ts', 'flash-loan-availability.ts', 'flash-loan-providers/balancer-v2.ts'],
   },
   {
     id: 'D2-LINEA-SYNCSWAP',
@@ -68,7 +68,7 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
     description: 'Verify Mode DEX addresses (supswap, iziswap) via RPC',
     status: 'stub',
     blocker: 'Addresses have sequential hex patterns',
-    files: ['dexes/index.ts'],
+    files: ['dexes/chains/mode.ts'],
   },
   {
     id: 'D7-MORPHO-FLASH-ARBITRAGE',
@@ -82,7 +82,7 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
     description: 'Finalize Mantle/Mode partition assignment',
     status: 'stub',
     blocker: 'Unverified factory addresses',
-    files: ['partitions.ts', 'dexes/index.ts'],
+    files: ['partitions.ts', 'dexes/chains/mantle.ts', 'dexes/chains/mode.ts'],
   },
 ] as const;
 

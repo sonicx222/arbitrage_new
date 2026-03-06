@@ -3,6 +3,7 @@
  * @see S3.2.2
  */
 import { Dex, FeeBasisPoints } from '../../../../types';
+import { BALANCER_V2_VAULTS } from '../../addresses';
 
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
@@ -31,8 +32,8 @@ export const FANTOM_DEXES: Dex[] = [
   {
     name: 'beethoven_x',      // [H] - Balancer V2 fork
     chain: 'fantom',
-    factoryAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',
-    routerAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',
+    factoryAddress: BALANCER_V2_VAULTS.fantom,  // Single source: addresses.ts (Beethoven X Vault)
+    routerAddress: BALANCER_V2_VAULTS.fantom,    // Vault is also router
     feeBps: bps(30),
     enabled: true,
   },

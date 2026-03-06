@@ -3,6 +3,7 @@
  * @see Phase 4: expanded from 3→5
  */
 import { Dex, FeeBasisPoints } from '../../../../types';
+import { BALANCER_V2_VAULTS } from '../../addresses';
 
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
@@ -31,8 +32,8 @@ export const OPTIMISM_DEXES: Dex[] = [
   {
     name: 'balancer_v2',      // [H] - 0% flash loan fees
     chain: 'optimism',
-    factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
-    routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    factoryAddress: BALANCER_V2_VAULTS.optimism,  // Single source: addresses.ts
+    routerAddress: BALANCER_V2_VAULTS.optimism,    // Vault is also router
     feeBps: bps(30),
     enabled: true,
   },

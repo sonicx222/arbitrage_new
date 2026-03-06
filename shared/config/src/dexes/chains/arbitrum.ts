@@ -3,6 +3,7 @@
  * @see S2.2.1: Arbitrum DEX expansion (6→9), Phase 4 (9→10)
  */
 import { Dex, FeeBasisPoints } from '../../../../types';
+import { BALANCER_V2_VAULTS } from '../../addresses';
 
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
@@ -52,8 +53,8 @@ export const ARBITRUM_DEXES: Dex[] = [
   {
     name: 'balancer_v2',      // [H] - Major liquidity protocol
     chain: 'arbitrum',
-    factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
-    routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    factoryAddress: BALANCER_V2_VAULTS.arbitrum,  // Single source: addresses.ts
+    routerAddress: BALANCER_V2_VAULTS.arbitrum,    // Vault is also router
     feeBps: bps(30),
     enabled: true,
   },

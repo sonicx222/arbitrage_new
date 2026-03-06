@@ -3,6 +3,7 @@
  * @see Phase 0 Item 3: expanded from 2→5
  */
 import { Dex, FeeBasisPoints } from '../../../../types';
+import { BALANCER_V2_VAULTS } from '../../addresses';
 
 const bps = (value: number): FeeBasisPoints => value as FeeBasisPoints;
 
@@ -31,8 +32,8 @@ export const ETHEREUM_DEXES: Dex[] = [
   {
     name: 'balancer_v2',      // [H] - $1B+ TVL, weighted pools
     chain: 'ethereum',
-    factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
-    routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    factoryAddress: BALANCER_V2_VAULTS.ethereum,  // Single source: addresses.ts
+    routerAddress: BALANCER_V2_VAULTS.ethereum,    // Vault is also router
     feeBps: bps(30),
     enabled: true,
   },

@@ -114,6 +114,13 @@ describe('deferred-items', () => {
       expect(todos).toHaveLength(0);
     });
 
+    it('D5 should reference per-chain mode file', () => {
+      const d5 = DEFERRED_ITEMS.find(i => i.id === 'D5-MODE-DEX-VERIFICATION');
+      expect(d5).toBeDefined();
+      expect(d5!.status).toBe('stub');
+      expect(d5!.files).toContain('dexes/chains/mode.ts');
+    });
+
     it('stub + deferred counts should equal total items', () => {
       const stubs = getDeferredItemsByStatus('stub');
       const deferred = getDeferredItemsByStatus('deferred');

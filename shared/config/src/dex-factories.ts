@@ -21,6 +21,7 @@
 
 import { DEXES } from './dexes';
 import { CHAINS } from './chains';
+import { BALANCER_V2_VAULTS } from './addresses';
 
 // =============================================================================
 // Types
@@ -456,7 +457,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       chain: 'arbitrum',
     },
     {
-      address: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+      address: BALANCER_V2_VAULTS.arbitrum,  // Single source: addresses.ts
       dexName: 'balancer_v2',
       type: 'balancer_v2',
       chain: 'arbitrum',
@@ -688,7 +689,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       supportsFactoryEvents: false,
     },
     {
-      address: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+      address: BALANCER_V2_VAULTS.ethereum,  // Single source: addresses.ts
       dexName: 'balancer_v2',
       type: 'balancer_v2',
       chain: 'ethereum',
@@ -762,7 +763,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       chain: 'fantom',
     },
     {
-      address: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',
+      address: BALANCER_V2_VAULTS.fantom,  // Single source: addresses.ts (Beethoven X Vault)
       dexName: 'beethoven_x',
       type: 'balancer_v2',
       chain: 'fantom',

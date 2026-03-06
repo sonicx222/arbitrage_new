@@ -4,9 +4,10 @@
  * This is the main entry point that re-exports all configuration modules.
  * The configuration has been split into organized submodules for maintainability:
  *
- * - chains/: Blockchain configurations (11 chains)
- * - dexes/: DEX configurations (52 DEXes)
- * - tokens/: Token configurations (112 tokens)
+ * - chains/: Blockchain configurations (15 chains)
+ * - dexes/chains/: Per-chain DEX configurations (78 DEXes across 15 chains)
+ * - tokens/: Token configurations (128 tokens)
+ * - flash-loan-providers/: Per-protocol flash loan descriptors (7 protocols)
  * - thresholds.ts: Performance and arbitrage thresholds
  * - mev-config.ts: MEV protection settings
  * - event-config.ts: Event monitoring settings
@@ -15,6 +16,7 @@
  * - cross-chain.ts: Cross-chain token normalization
  * - system-constants.ts: System-wide constants
  * - partitions.ts: Partition configurations (ADR-003)
+ * - deferred-items.ts: Machine-readable deferred work tracking
  *
  * All exports are maintained for backward compatibility.
  *
@@ -329,6 +331,26 @@ export {
   FLASH_LOAN_STATS,
 } from './flash-loan-availability';
 export type { FlashLoanProtocol } from './flash-loan-availability';
+
+// =============================================================================
+// FLASH LOAN PROVIDER DESCRIPTORS (Task 1: Consolidated Config)
+// =============================================================================
+export {
+  ALL_PROVIDERS,
+  PROVIDER_BY_PROTOCOL,
+  getProviderDescriptor,
+  getActiveProviders,
+  getProvidersByStatus,
+  AAVE_V3_PROVIDER,
+  BALANCER_V2_PROVIDER,
+  PANCAKESWAP_V3_PROVIDER,
+  SYNCSWAP_PROVIDER,
+  DAI_FLASH_MINT_PROVIDER,
+  MORPHO_PROVIDER,
+  SPOOKYSWAP_PROVIDER,
+  type FlashLoanProviderDescriptor,
+  type FlashLoanProviderStatus,
+} from './flash-loan-providers';
 
 // =============================================================================
 // CROSS-CHAIN NORMALIZATION
