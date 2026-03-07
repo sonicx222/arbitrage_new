@@ -264,8 +264,9 @@ export const SUPPORTED_EXECUTION_CHAINS = new Set([
   'linea',
   'blast',
   'scroll',
-  'mantle',  // stub — no verified flash loan provider; see D9-MANTLE-MODE-PARTITIONS in deferred-items.ts
-  'mode',    // stub — no verified flash loan provider; see D9-MANTLE-MODE-PARTITIONS in deferred-items.ts
+  // H-09 FIX: Mantle and Mode removed — stubs with no verified DEX factories.
+  // Execution attempts would fail at router level, wasting gas.
+  // Re-add when DEX factories are verified; see D9-MANTLE-MODE-PARTITIONS in deferred-items.ts
   // M6 FIX: 'solana' removed — Solana uses SolanaExecutionStrategy (not BaseExecutionStrategy),
   // which routes via strategy-factory.ts (opportunity.chain === 'solana') and never calls
   // isExecutionSupported(). Including 'solana' here returned true regardless of FEATURE_SOLANA_EXECUTION.

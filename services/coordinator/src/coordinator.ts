@@ -1255,6 +1255,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
         ...getBatchConfig(),
         batchSize,
         blockMs,
+        // H-04 FIX: Zero inter-poll delay for opportunities consumer (hot-path, <50ms target).
+        // Default is 10ms which adds unnecessary latency. EE consumers already use 0.
+        ...(isOpportunitiesStream ? { interPollDelayMs: 0 } : {}),
         logger: {
           error: (msg, ctx) => {
             this.logger.error(msg, ctx);

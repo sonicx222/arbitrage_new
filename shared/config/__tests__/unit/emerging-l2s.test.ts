@@ -49,6 +49,8 @@ interface EmergingL2TestData {
   minTokenCount: number;
   requiredTokenSymbols: string[];
   mevStrategy: string;
+  /** H-09 FIX: Stubs (mantle, mode) removed from SUPPORTED_EXECUTION_CHAINS */
+  isExecutionStub?: boolean;
 }
 
 const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
@@ -84,6 +86,7 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     minTokenCount: 2,
     requiredTokenSymbols: ['WMNT', 'USDC'],
     mevStrategy: 'sequencer',
+    isExecutionStub: true,
   },
   {
     chainKey: 'mode',
@@ -95,6 +98,7 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     minTokenCount: 2,
     requiredTokenSymbols: ['WETH', 'USDC'],
     mevStrategy: 'sequencer',
+    isExecutionStub: true,
   },
 ];
 
@@ -256,8 +260,9 @@ describe('Emerging L2s Configuration', () => {
       // Execution Support
       // -----------------------------------------------------------------------
       describe('Execution support', () => {
-        it('is in SUPPORTED_EXECUTION_CHAINS', () => {
-          expect(isExecutionSupported(chainData.chainKey)).toBe(true);
+        it('is in SUPPORTED_EXECUTION_CHAINS (stubs excluded)', () => {
+          const expected = !chainData.isExecutionStub;
+          expect(isExecutionSupported(chainData.chainKey)).toBe(expected);
         });
       });
 
