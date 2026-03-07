@@ -14,10 +14,11 @@ import { getStreamHealthMonitor } from '../monitoring/stream-health-monitor';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
 import { getRuntimeMonitor } from '../monitoring/runtime-monitor';
 import { getProviderLatencyTracker } from '../monitoring/provider-latency-tracker';
-import { setLogLevel } from '../logging/pino-logger';
+import { setLogLevel, getOtelTransport } from '../logging/pino-logger';
 import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
 import { getPriceUpdatesTotal } from './handlers';
+import { getPublishDropsTotal } from './runner';
 
 // =============================================================================
 // Health Check Cache (PERF-FIX)
@@ -351,6 +352,10 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         latencyLines.push('# HELP price_updates_total Total price update events received');
         latencyLines.push('# TYPE price_updates_total counter');
         latencyLines.push(`price_updates_total ${getPriceUpdatesTotal()}`);
+        // M-01 FIX: Publish drop counter for monitoring backpressure
+        latencyLines.push('# HELP opportunity_publish_drops_total Opportunities dropped due to concurrent publish limit');
+        latencyLines.push('# TYPE opportunity_publish_drops_total counter');
+        latencyLines.push(`opportunity_publish_drops_total ${getPublishDropsTotal()}`);
 
         // P2-005 FIX: WebSocket health gauges per chain — exposes connection status
         // as Prometheus metrics for per-chain alerting (e.g., chain disconnected > 5min).
@@ -385,8 +390,21 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         // Phase 2 Enhanced Monitoring: Provider/RPC quality metrics (C1, C2, C3, C4)
         const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
 
+        // M-10 FIX: Expose OTEL transport drop/export counts for monitoring
+        const otelLines: string[] = [];
+        const otelTransport = getOtelTransport();
+        if (otelTransport) {
+          otelLines.push('# HELP otel_logs_exported_total OTEL log records successfully exported');
+          otelLines.push('# TYPE otel_logs_exported_total counter');
+          otelLines.push(`otel_logs_exported_total ${otelTransport.exportCount}`);
+          otelLines.push('# HELP otel_logs_dropped_total OTEL log records dropped due to export errors');
+          otelLines.push('# TYPE otel_logs_dropped_total counter');
+          otelLines.push(`otel_logs_dropped_total ${otelTransport.dropCount}`);
+        }
+        const otelBlock = otelLines.length > 0 ? otelLines.join('\n') + '\n' : '';
+
         const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
-        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics;
+        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics + otelBlock;
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
         res.end(body);
       } catch (error) {

@@ -1,8 +1,0 @@
-{"phase":"STARTUP","findingId":"ST-001","category":"SERVICE_READY","severity":"INFO","service":"coordinator","port":3000,"evidence":"HTTP 200 on /api/health, status=healthy, isLeader=true, uptime=188s"}
-{"phase":"STARTUP","findingId":"ST-002","category":"SERVICE_READY","severity":"INFO","service":"partition-asia-fast","port":3001,"evidence":"HTTP 200 on /health, status=healthy, 4 chains active, uptime=117s"}
-{"phase":"STARTUP","findingId":"ST-003","category":"SERVICE_READY","severity":"INFO","service":"partition-l2-turbo","port":3002,"evidence":"HTTP 200 on /ready within 30s"}
-{"phase":"STARTUP","findingId":"ST-004","category":"SERVICE_READY","severity":"INFO","service":"partition-high-value","port":3003,"evidence":"HTTP 200 on /ready within 30s"}
-{"phase":"STARTUP","findingId":"ST-005","category":"SERVICE_READY","severity":"INFO","service":"partition-solana","port":3004,"evidence":"HTTP 200 on /ready within 30s"}
-{"phase":"STARTUP","findingId":"ST-006","category":"SERVICE_READY","severity":"INFO","service":"execution-engine","port":3005,"evidence":"HTTP 200 on /ready within 30s"}
-{"phase":"STARTUP","findingId":"ST-007","category":"SERVICE_READY","severity":"INFO","service":"cross-chain-detector","port":3006,"evidence":"HTTP 200 on /ready within 60s"}
-{"phase":"STARTUP","findingId":"ST-008","category":"SERVICE_READY","severity":"INFO","service":"all","evidence":"All 7 services respond healthy on /health endpoints."}

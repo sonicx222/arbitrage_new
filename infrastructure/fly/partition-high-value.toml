@@ -86,7 +86,9 @@ primary_region = "iad"
 
 # Processes
 [processes]
-  app = "node dist/index.js"
+  # M-12 FIX: --max-old-space-size prevents V8 default heap causing OOM on 768MB VM.
+  # ~75% of VM memory for heap, matching coordinator pattern (192/256 = 75%).
+  app = "node --max-old-space-size=576 dist/index.js"
 
 # Deploy strategy
 [deploy]

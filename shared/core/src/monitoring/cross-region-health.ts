@@ -753,8 +753,10 @@ export class CrossRegionHealthManager extends EventEmitter {
           streamName: RedisStreamsClient.STREAMS.SYSTEM_FAILOVER,
           groupName,
           consumerName,
-        }).catch(() => {
-          // Group may already exist, safe to ignore
+        }).catch((err: Error) => {
+          // M-16 FIX: Only ignore BUSYGROUP (group already exists), re-throw others
+          if (err?.message?.includes('BUSYGROUP')) return;
+          throw err;
         });
         this.startStreamConsumer(groupName, consumerName);
         this.logger.info('Subscribed to failover events via Redis Streams', { groupName });

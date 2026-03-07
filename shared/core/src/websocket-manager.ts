@@ -1589,10 +1589,21 @@ export class WebSocketManager {
           this.scheduleReconnection();
         }, recoveryDelayMs);
       } else if (this.recoveryCycles >= WebSocketManager.MAX_RECOVERY_CYCLES) {
-        this.logger.warn('Max recovery cycles reached — stopping reconnection permanently', {
+        // M-02 FIX: Instead of stopping permanently, continue at very slow rate (5min).
+        // This avoids requiring a service restart after long outages (>20 min).
+        const lifeSupportDelayMs = 300_000; // 5 minutes
+        this.logger.warn('Max recovery cycles reached — switching to life-support reconnection (5min intervals)', {
           recoveryCycles: this.recoveryCycles,
           maxRecoveryCycles: WebSocketManager.MAX_RECOVERY_CYCLES,
+          lifeSupportDelayMs,
         });
+        this.recoveryTimer = setTimeout(() => {
+          this.recoveryTimer = null;
+          if (this.isDisconnected) return;
+          this.reconnectAttempts = 0;
+          this.rotationStrategy.switchToNextUrl();
+          this.scheduleReconnection();
+        }, lifeSupportDelayMs);
       }
       return;
     }

@@ -184,6 +184,12 @@ full_codebase.txt
 data/*.jsonl
 data/trades/*.jsonl
 
+# Autopilot session workspace (runtime artifacts)
+autopilot-session/
+
+# Test-generated Redis config
+.redis-test-config.json
+
 # Auto-generated files
 services/execution-engine/src/strategies/error-selectors.generated.ts
 

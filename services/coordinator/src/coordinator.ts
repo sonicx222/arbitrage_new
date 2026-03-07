@@ -1066,9 +1066,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.warn(message, { successCount, failureCount });
       // If ALL consumer groups failed, the coordinator is non-functional
       if (successCount === 0 && failureCount > 0) {
-        this.logger.error('CRITICAL: All consumer groups failed - coordinator cannot consume streams', {
+        this.logger.error('CRITICAL: All consumer groups failed - coordinator cannot consume streams. Exiting for orchestrator restart.', {
           failureCount,
         });
+        // M-04 FIX: Exit instead of running as non-functional zombie.
+        // Orchestrator (Fly.io/Docker) will restart the process.
+        process.exit(1);
       }
     }
 
@@ -1544,6 +1547,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private async handleOpportunityBatch(messages: StreamMessage[]): Promise<string[]> {
     if (!this.opportunityRouter) return [];
 
+    // Capture for use inside withLogContext callback (TypeScript null narrowing)
+    const router = this.opportunityRouter;
+
+    // M-03 FIX: Wrap batch processing in withLogContext so all downstream logs
+    // include traceId/spanId. Uses a batch-level trace context for overall correlation.
+    const batchTraceCtx = createTraceContext('coordinator');
+    return withLogContext(batchTraceCtx, async () => {
+
     // Build batch entries with trace contexts
     // P0 Fix DF-001: Include stream message ID (msg.id) so the router can return it for XACK.
     // Previously only data was passed, causing the router to return opportunity data IDs
@@ -1560,18 +1571,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Delegate to OpportunityRouter for dedup + TTL-priority processing
-    const processedIds = await this.opportunityRouter.processOpportunityBatch(
+    const processedIds = await router.processOpportunityBatch(
       batch,
       this.getIsLeader(),
     );
 
     // Sync metrics from router
-    this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
-    this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
-    this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
-    this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
-    this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
-    this.systemMetrics.admissionMetrics = this.opportunityRouter.getAdmissionMetrics();
+    this.systemMetrics.totalOpportunities = router.getTotalOpportunities();
+    this.systemMetrics.pendingOpportunities = router.getPendingCount();
+    this.systemMetrics.totalExecutions = router.getTotalExecutions();
+    this.systemMetrics.opportunitiesDropped = router.getOpportunitiesDropped();
+    this.systemMetrics.forwardingMetrics = router.getForwardingMetrics();
+    this.systemMetrics.admissionMetrics = router.getAdmissionMetrics();
 
     if (processedIds.length > 0) {
       this.streamConsumerManager?.resetErrors();
@@ -1579,7 +1590,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // Consumer lag detection: if too many consecutive expired, skip stale backlog
     // RT-002 FIX: Threshold is now configurable via consecutiveExpiredThreshold
-    const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
+    const consecutiveExpired = router.getConsecutiveExpired();
     if (consecutiveExpired >= this.consecutiveExpiredThreshold && this.streamsClient) {
       this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
         consecutiveExpired,
@@ -1594,7 +1605,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           startId: '$',
           resetToStartIdOnExistingGroup: true,
         });
-        this.opportunityRouter.resetConsecutiveExpired();
+        router.resetConsecutiveExpired();
       } catch (error) {
         this.logger.error('Failed to reset opportunity consumer group position', {
           error: getErrorMessage(error),
@@ -1603,6 +1614,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     return processedIds;
+
+    }); // end withLogContext (M-03)
   }
 
   /**

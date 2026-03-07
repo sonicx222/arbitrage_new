@@ -532,10 +532,12 @@ export function createPartitionEntry(
       // but the actual runtime values are always ArbitrageOpportunity instances.
       detector.on('opportunity', (opp: Record<string, unknown> & { id: string }) => {
         if (inFlightPublishes >= MAX_CONCURRENT_PUBLISHES) {
+          _publishDropsTotal++;
           logger.warn('Concurrent publish limit reached, skipping', {
             opportunityId: opp.id,
             inFlight: inFlightPublishes,
             limit: MAX_CONCURRENT_PUBLISHES,
+            totalDropped: _publishDropsTotal,
           });
           return;
         }

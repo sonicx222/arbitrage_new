@@ -1148,10 +1148,13 @@ export class OpportunityConsumer {
   /**
    * Generate a content hash for an opportunity based on its economic properties.
    * Two opportunities with different IDs but the same economic content (same pair,
-   * same chains, same direction) will produce the same hash.
+   * same chains, same direction, same size) will produce the same hash.
+   *
+   * M-09 FIX: Include amountIn so opportunities with different trade sizes
+   * are not treated as duplicates within the 5s dedup window.
    */
   private getContentHash(opp: ArbitrageOpportunity): string {
-    return `${opp.token0 ?? ''}:${opp.token1 ?? ''}:${opp.buyChain ?? ''}:${opp.sellChain ?? ''}:${opp.buyDex ?? ''}:${opp.sellDex ?? ''}:${opp.type ?? ''}`;
+    return `${opp.token0 ?? ''}:${opp.token1 ?? ''}:${opp.buyChain ?? ''}:${opp.sellChain ?? ''}:${opp.buyDex ?? ''}:${opp.sellDex ?? ''}:${opp.type ?? ''}:${opp.amountIn ?? ''}`;
   }
 
   /**

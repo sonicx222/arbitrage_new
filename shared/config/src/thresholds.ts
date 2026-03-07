@@ -167,6 +167,45 @@ export function getEstimatedGasCostUsd(chainId: string): number {
 }
 
 // =============================================================================
+// CHAIN-SPECIFIC SLIPPAGE TOLERANCE (M-13)
+// ETH mainnet needs tighter slippage (higher gas = less room for error).
+// L2s and Solana can tolerate wider slippage (low gas, fast blocks).
+// =============================================================================
+
+/**
+ * Per-chain slippage tolerance overrides.
+ * Falls back to ARBITRAGE_CONFIG.slippageTolerance (1%) if chain not listed.
+ */
+export const chainSlippageTolerance: Record<string, number> = {
+  ethereum: 0.005,    // 0.5% — high gas, tighter slippage needed
+  bsc: 0.01,          // 1.0% — moderate
+  polygon: 0.01,      // 1.0% — standard
+  avalanche: 0.01,    // 1.0% — standard
+  fantom: 0.015,      // 1.5% — lower liquidity
+  arbitrum: 0.01,     // 1.0% — fast confirmations
+  optimism: 0.01,     // 1.0% — fast confirmations
+  base: 0.01,         // 1.0% — fast confirmations
+  zksync: 0.01,       // 1.0% — moderate liquidity
+  linea: 0.015,       // 1.5% — lower liquidity
+  blast: 0.015,       // 1.5% — lower liquidity
+  scroll: 0.015,      // 1.5% — lower liquidity
+  mantle: 0.02,       // 2.0% — low liquidity
+  mode: 0.02,         // 2.0% — low liquidity
+  solana: 0.02,       // 2.0% — fast blocks, wider tolerance ok
+};
+
+/**
+ * Get slippage tolerance for a specific chain.
+ * Uses chainSlippageTolerance with fallback to global ARBITRAGE_CONFIG.slippageTolerance.
+ *
+ * @param chainId - Chain identifier (case-insensitive)
+ * @returns Slippage tolerance as decimal (e.g., 0.01 = 1%)
+ */
+export function getSlippageTolerance(chainId: string): number {
+  return chainSlippageTolerance[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.slippageTolerance;
+}
+
+// =============================================================================
 // CHAIN-SPECIFIC GAS SPIKE MULTIPLIER
 // Per-chain gas spike detection thresholds. Ethereum experiences 5-10x
 // spikes during congestion, while L2s are much more stable.

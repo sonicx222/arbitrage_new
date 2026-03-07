@@ -136,7 +136,9 @@ export const DEFAULT_DETECTION_CONFIG = {
   normalizeLiquidStaking: false, // Phase 0 Item 2: LST price deviation IS the arb opportunity
   crossChainCosts: {
     bridgeFeeDefault: 0.001, // 0.1%
-    evmGasCostUsd: 15, // ~150k gas at 30 gwei, ETH ~$3000
+    // M-11 FIX: Lowered from $15 (Ethereum-level) to $2 as fallback for unknown chains.
+    // Per-chain costs are resolved via EVM_GAS_COSTS_USD lookup in getEvmGasCostUsd().
+    evmGasCostUsd: 2,
     solanaTxCostUsd: 0.01, // ~5000 compute units at priority
     latencyRiskPremium: 0.002, // 0.2% price movement risk during bridge
   },
