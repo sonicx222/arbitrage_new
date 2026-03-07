@@ -91,4 +91,5 @@ LABEL partition.provider="fly"
 LABEL partition.evm="false"
 
 # Start P4 partition service
-CMD ["node", "dist/index.js"]
+# --max-old-space-size=256: Prevent heap exhaustion (RT-3Q-004: heap at 96% with default 48MB)
+CMD ["node", "--max-old-space-size=256", "dist/index.js"]

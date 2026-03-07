@@ -85,7 +85,8 @@ primary_region = "sjc"
 
 # Processes
 [processes]
-  app = "node dist/index.js"
+  # RT-3Q-004: --max-old-space-size=256 prevents heap exhaustion (default ~48MB insufficient)
+  app = "node --max-old-space-size=256 dist/index.js"
 
 # Deploy strategy
 [deploy]

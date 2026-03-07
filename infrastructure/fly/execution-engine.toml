@@ -36,6 +36,12 @@ primary_region = "sjc"
   # Was 8080, diverging from all other services which use their canonical ports.
   HEALTH_CHECK_PORT = "3005"
   ENABLE_CROSS_REGION_HEALTH = "true"
+  # SM-002/ADR-038: Chain-group routing. Set to the group this EE instance handles.
+  # Options: fast (BSC,Polygon,AVAX,FTM), l2 (Arb,OP,Base,Scroll,Blast),
+  #          premium (ETH,zkSync,Linea), solana (Solana)
+  # When unset, consumes legacy stream:execution-requests (all chains).
+  # Deploy one EE per group for optimal throughput.
+  # EXECUTION_CHAIN_GROUP = "fast"
   # RPC URLs and private keys set via secrets (fly secrets set)
 
 [http_service]

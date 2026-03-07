@@ -33,6 +33,10 @@ primary_region = "sjc"
   ENABLE_CROSS_REGION_HEALTH = "true"
   IS_STANDBY = "false"
   CAN_BECOME_LEADER = "true"
+  # SM-002/ADR-038: Enable chain-group routing to distribute execution across
+  # multiple EE instances. Each EE sets EXECUTION_CHAIN_GROUP={fast|l2|premium|solana}.
+  # Without this, single EE throughput bottleneck causes growing consumer lag.
+  COORDINATOR_CHAIN_GROUP_ROUTING = "true"
 
 [http_service]
   internal_port = 3000

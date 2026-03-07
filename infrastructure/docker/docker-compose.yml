@@ -101,6 +101,8 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       - LOG_LEVEL=info
       - PORT=3000
+      # SM-002/ADR-038: Enable chain-group routing for multi-EE deployment
+      - COORDINATOR_CHAIN_GROUP_ROUTING=${COORDINATOR_CHAIN_GROUP_ROUTING:-false}
     depends_on:
       redis:
         condition: service_healthy
