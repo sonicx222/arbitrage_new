@@ -249,4 +249,190 @@ one JSON object per line. Non-conforming findings are discarded during triage.
 **Validation Phase (Cycle Step: VALIDATE):** Agent 12 runs alone to verify fixes.
 
 
-<!-- Phase 0, Cycle Loop, Agent Prompts, Triage, Fix, Rebuild, Validate, Converge, and Report sections follow -->
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PHASE 0 — BOOTSTRAP (~3 minutes)
+## Build, start Redis + services, capture baseline state.
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### Step 0A — Create session workspace
+
+```bash
+mkdir -p ./autopilot-session/{baseline,logs}
+mkdir -p ./autopilot-session/cycle-1/findings
+SESSION_ID=$(date +%Y%m%d_%H%M%S)
+echo $SESSION_ID > ./autopilot-session/SESSION_ID
+CURRENT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+echo $CURRENT_SHA > ./autopilot-session/current.sha
+START_TIME=$(date +%s)
+echo $START_TIME > ./autopilot-session/start-time.txt
+echo "Session $SESSION_ID initialized (git SHA: $CURRENT_SHA)"
+```
+
+Initialize session config:
+```json
+// Write to ./autopilot-session/config.json
+{
+  "session_id": "<SESSION_ID>",
+  "start_sha": "<CURRENT_SHA>",
+  "max_cycles": 5,
+  "time_limit_minutes": 110,
+  "max_fixes_per_cycle": 15,
+  "max_lines_per_cycle": 500
+}
+```
+
+---
+
+### Step 0B — Build all packages
+
+```bash
+npm run build
+```
+
+If build fails:
+```bash
+echo "Incremental build failed, trying clean build..."
+npm run build:clean
+```
+
+If clean build also fails → Record as **CRITICAL** finding, skip to PHASE FINAL.
+
+---
+
+### Step 0C — Start Redis
+
+```bash
+npm run dev:redis:memory &
+sleep 3
+redis-cli PING
+```
+
+If PING fails → **CRITICAL** finding. Skip to PHASE FINAL — nothing works without Redis.
+
+Verify stream command support:
+```bash
+redis-cli COMMAND INFO XADD XREAD XREADGROUP XPENDING XINFO XACK XLEN XCLAIM
+```
+
+If any stream command unsupported → **CRITICAL**. Report Redis version mismatch.
+
+---
+
+### Step 0D — Start services
+
+```bash
+npm run dev:monitor &
+echo $! > ./autopilot-session/services.pid
+```
+
+This starts all 7 services in simulation mode with memory-optimized settings:
+`CONSTRAINED_MEMORY=true`, `WORKER_POOL_SIZE=1`, `CACHE_L1_SIZE_MB=8`,
+`SIMULATION_REALISM_LEVEL=high`.
+
+---
+
+### Step 0E — Poll readiness (service-specific timeouts)
+
+Poll each service's ready endpoint every 5 seconds:
+
+| Service | Port | Endpoint | Timeout | Reason |
+|---------|------|----------|---------|--------|
+| Coordinator | 3000 | `/api/health/ready` | 30s | Standard |
+| P1 Asia-Fast | 3001 | `/ready` | 30s | Standard |
+| P2 L2-Turbo | 3002 | `/ready` | 30s | Standard |
+| P3 High-Value | 3003 | `/ready` | 30s | Standard |
+| P4 Solana | 3004 | `/ready` | 30s | Standard |
+| Execution Engine | 3005 | `/ready` | 30s | Standard |
+| Cross-Chain | 3006 | `/ready` | **120s** | Needs partition price data first |
+
+```bash
+# Example polling loop per service:
+for port_path in "3000:/api/health/ready:30" "3001:/ready:30" "3002:/ready:30" \
+  "3003:/ready:30" "3004:/ready:30" "3005:/ready:30" "3006:/ready:120"; do
+  PORT=$(echo $port_path | cut -d: -f1)
+  PATH_PART=$(echo $port_path | cut -d: -f2)
+  TIMEOUT=$(echo $port_path | cut -d: -f3)
+  ELAPSED=0
+  while [ $ELAPSED -lt $TIMEOUT ]; do
+    STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:$PORT$PATH_PART 2>/dev/null || echo "000")
+    if [ "$STATUS" = "200" ]; then echo "Port $PORT: READY"; break; fi
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
+  done
+  if [ $ELAPSED -ge $TIMEOUT ]; then echo "Port $PORT: FAILED (timeout ${TIMEOUT}s)"; fi
+done
+```
+
+**Failure handling:**
+- Any non-cross-chain service not ready after 30s → Record **CRITICAL** finding.
+- Cross-chain not ready after 120s → Record **HIGH** finding.
+- Continue with remaining services regardless.
+
+---
+
+### Step 0F — Capture baseline state
+
+**Stream baseline:**
+```bash
+redis-cli --scan --pattern 'stream:*' > ./autopilot-session/baseline/streams-discovered.txt
+
+for stream in $(cat ./autopilot-session/baseline/streams-discovered.txt); do
+  echo "=== $stream ===" >> ./autopilot-session/baseline/streams-raw.txt
+  redis-cli XINFO STREAM $stream >> ./autopilot-session/baseline/streams-raw.txt
+  redis-cli XINFO GROUPS $stream >> ./autopilot-session/baseline/streams-raw.txt
+  redis-cli XLEN $stream >> ./autopilot-session/baseline/streams-raw.txt
+done
+```
+
+**Service health baseline:**
+```bash
+for port in 3000 3001 3002 3003 3004 3005 3006; do
+  if [ $port -eq 3000 ]; then
+    curl -sf http://localhost:$port/api/health 2>/dev/null >> ./autopilot-session/baseline/health-all.txt
+  else
+    curl -sf http://localhost:$port/health 2>/dev/null >> ./autopilot-session/baseline/health-all.txt
+  fi
+done
+```
+
+**Service stats baseline:**
+```bash
+for port in 3001 3002 3003 3004 3005; do
+  curl -sf http://localhost:$port/stats 2>/dev/null >> ./autopilot-session/baseline/stats-all.txt
+done
+```
+
+**Prometheus metrics baseline:**
+```bash
+for port in 3001 3002 3003 3004 3005 3006; do
+  curl -sf http://localhost:$port/metrics 2>/dev/null >> ./autopilot-session/baseline/metrics-t0.txt
+done
+curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null >> ./autopilot-session/baseline/metrics-t0.txt
+```
+
+**Redis memory baseline:**
+```bash
+redis-cli INFO memory > ./autopilot-session/baseline/redis-memory.txt
+```
+
+**Unit test baseline:**
+```bash
+# Record current test failure count for regression comparison
+npm run test:unit 2>&1 | tail -20 > ./autopilot-session/baseline/test-baseline.txt
+```
+
+Output:
+```
+PHASE 0 COMPLETE — Bootstrap
+  Build: SUCCESS
+  Redis: CONNECTED
+  Services ready: <n>/7 (list)
+  Services failed: <n> (list)
+  Streams discovered: <n>
+  Baseline captured: YES
+  Elapsed: <n> seconds
+```
+
+---
+
+<!-- Cycle Loop, Agent Prompts, Triage, Fix, Rebuild, Validate, Converge, and Report sections follow -->
