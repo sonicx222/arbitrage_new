@@ -137,7 +137,7 @@ export class StreamHealthMonitor {
       lagWarning: 100,
       lagCritical: 1000,
       lengthWarning: 10000,
-      lengthCritical: 100000
+      lengthCritical: 80000
     };
 
     // Initialize default streams to monitor

@@ -12,7 +12,7 @@
 
 import fsPromises from 'fs/promises';
 import pathModule from 'path';
-import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity } from '@arbitrage/types';
+import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity, type PipelineTimestamps } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
@@ -575,6 +575,38 @@ export class OpportunityRouter {
       buyPair: typeof data.buyPair === 'string' ? data.buyPair : undefined,
       sellPair: typeof data.sellPair === 'string' ? data.sellPair : undefined,
     };
+
+    // SM-013 FIX: Carry pipelineTimestamps forward from the upstream detector.
+    // parseStreamResult() (streams.ts:1494) JSON.parses the single 'data' field, so
+    // pipelineTimestamps arrives as a nested JS object — NOT a string.
+    // The string fallback handles the flat-field serialization path (e.g. DLQ replay
+    // via serializeOpportunityForStream which JSON.stringifies nested objects).
+    const rawTs = data.pipelineTimestamps;
+    if (rawTs && typeof rawTs === 'object') {
+      const parsed = rawTs as Record<string, unknown>;
+      const pts: PipelineTimestamps = {};
+      if (typeof parsed.wsReceivedAt === 'number') pts.wsReceivedAt = parsed.wsReceivedAt;
+      if (typeof parsed.publishedAt === 'number') pts.publishedAt = parsed.publishedAt;
+      if (typeof parsed.consumedAt === 'number') pts.consumedAt = parsed.consumedAt;
+      if (typeof parsed.detectedAt === 'number') pts.detectedAt = parsed.detectedAt;
+      if (typeof parsed.coordinatorAt === 'number') pts.coordinatorAt = parsed.coordinatorAt;
+      if (typeof parsed.executionReceivedAt === 'number') pts.executionReceivedAt = parsed.executionReceivedAt;
+      opportunity.pipelineTimestamps = pts;
+    } else if (typeof rawTs === 'string') {
+      try {
+        const parsed = JSON.parse(rawTs) as Record<string, unknown>;
+        const pts: PipelineTimestamps = {};
+        if (typeof parsed.wsReceivedAt === 'number') pts.wsReceivedAt = parsed.wsReceivedAt;
+        if (typeof parsed.publishedAt === 'number') pts.publishedAt = parsed.publishedAt;
+        if (typeof parsed.consumedAt === 'number') pts.consumedAt = parsed.consumedAt;
+        if (typeof parsed.detectedAt === 'number') pts.detectedAt = parsed.detectedAt;
+        if (typeof parsed.coordinatorAt === 'number') pts.coordinatorAt = parsed.coordinatorAt;
+        if (typeof parsed.executionReceivedAt === 'number') pts.executionReceivedAt = parsed.executionReceivedAt;
+        opportunity.pipelineTimestamps = pts;
+      } catch {
+        this.logger.debug('Failed to parse pipelineTimestamps JSON', { rawTs: String(rawTs).substring(0, 100) });
+      }
+    }
 
     // P3-FIX / SM-001 FIX: Check expiry BEFORE storing and forwarding.
     // Previously the expiry check was after storage, wasting memory on stale opportunities.
