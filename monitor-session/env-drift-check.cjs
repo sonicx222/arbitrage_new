@@ -4,7 +4,9 @@ const fs = require('fs');
 const codeOut = execSync('grep -roh "process\\.env\\.[A-Z_]*[A-Z]" services/ shared/ --include="*.ts" --exclude-dir=node_modules --exclude-dir=__tests__', {encoding:'utf8',maxBuffer:10*1024*1024});
 const codeVars = [...new Set(codeOut.split('\n').filter(Boolean).map(s=>s.replace('process.env.','')))].sort();
 
-const envDoc = fs.readFileSync('.env.example','utf8').split('\n').filter(l=>/^[A-Z_]+=/.test(l)).map(l=>l.split('=')[0]);
+// Count both uncommented (VAR=) and commented-out (# VAR=) entries as documented.
+// Commented entries are intentional: secrets must not have live defaults in the template.
+const envDoc = fs.readFileSync('.env.example','utf8').split('\n').filter(l=>/^#?\s*[A-Z_]+=/.test(l)).map(l=>l.replace(/^#\s*/,'').split('=')[0]);
 const docSet = new Set(envDoc);
 
 const standard = new Set('NODE_ENV,PORT,CI,JEST_WORKER_ID,HOME,PATH,HOSTNAME,FLY_APP_NAME,FLY_REGION,FLY_ALLOC_ID,RENDER_SERVICE_NAME,RAILWAY_SERVICE_NAME,KOYEB_SERVICE_NAME,GITHUB_ACTIONS'.split(','));

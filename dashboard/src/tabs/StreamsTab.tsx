@@ -5,6 +5,7 @@ import { useSSEData } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber } from '../lib/format';
+import { CHART } from '../lib/theme';
 
 interface RedisStats {
   byCategory?: Record<string, number>;
@@ -86,11 +87,11 @@ export function StreamsTab() {
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Total Pending Messages</h3>
         <ResponsiveContainer width="100%" height={200}>
           <AreaChart data={lagData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-            <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#666' }} />
-            <YAxis tick={{ fontSize: 9, fill: '#666' }} />
-            <Tooltip contentStyle={{ background: '#16213e', border: '1px solid #333', fontSize: 11 }} />
-            <Area type="monotone" dataKey="pending" stroke="#ffaa00" fill="#ffaa00" fillOpacity={0.1} />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+            <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
+            <YAxis tick={{ fontSize: 9, fill: CHART.tick }} />
+            <Tooltip contentStyle={{ background: CHART.tooltipBg, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 11, color: CHART.tooltipText }} />
+            <Area type="monotone" dataKey="pending" stroke={CHART.area1} fill={CHART.area1} fillOpacity={0.1} />
           </AreaChart>
         </ResponsiveContainer>
       </div>

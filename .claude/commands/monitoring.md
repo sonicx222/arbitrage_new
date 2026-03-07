@@ -7,10 +7,11 @@
 #   - New checks: runtime performance (B1-B6), provider quality (C1-C5),
 #     detection quality (D2-D4), business intelligence (A2-A4, F4-F5),
 #     stream transit time (F1), placeholder checks for E1-E5/F2-F3/D1/D5
-#   - Fixed MAXLEN drift: opportunities=500K, execution-requests=100K, execution-results=25K
+#   - Fixed MAXLEN drift: opportunities=500K, execution-requests=100K, execution-results=100K
 #   - Added self-healing-manager consumer group to inventory
 #   - Fixed coordinator-group streams (9, was 8 — added forwarding-dlq)
-#   - Added all 24 streams to topology check (was 19)
+#   - Added all 29 streams to topology check (was 19, then 24)
+#   - SA-4Q6: Added 5 ADR-038/039 streams (exec-requests-{fast,l2,premium,solana}, pre-simulated)
 #   - Added fast-lane to smoke test E2E validation
 #   - Removed deleted stream-monitor.js references
 #   - Updated Prometheus expected metrics with 25+ new metric names
@@ -67,7 +68,7 @@ sequentially — correctness is more important than speed.
 | Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
 | Cross-Chain | 3006 | `/ready` | Cross-chain arbitrage detection |
 
-### Redis Streams (24 declared in `shared/types/src/events.ts`)
+### Redis Streams (29 declared in `shared/types/src/events.ts`)
 
 | Stream | MAXLEN | Producer(s) | Consumer Group(s) |
 |--------|--------|-------------|-------------------|
@@ -81,7 +82,12 @@ sequentially — correctness is more important than speed.
 | `stream:health` | 1,000 | All services | coordinator-group |
 | `stream:health-alerts` | 5,000 | Health monitor | — |
 | `stream:execution-requests` | 100,000 | Coordinator | execution-engine-group |
-| `stream:execution-results` | 25,000 | Execution engine | coordinator-group |
+| `stream:execution-results` | 100,000 | Execution engine | coordinator-group |
+| `stream:exec-requests-fast` | 25,000 | Coordinator (ADR-038) | execution-engine-group (fast) |
+| `stream:exec-requests-l2` | 25,000 | Coordinator (ADR-038) | execution-engine-group (l2) |
+| `stream:exec-requests-premium` | 25,000 | Coordinator (ADR-038) | execution-engine-group (premium) |
+| `stream:exec-requests-solana` | 10,000 | Coordinator (ADR-038) | execution-engine-group (solana) |
+| `stream:pre-simulated` | 25,000 | SimulationWorker (ADR-039) | execution-engine-group |
 | `stream:pending-opportunities` | 10,000 | Mempool detector | cross-chain-detector-group |
 | `stream:volume-aggregates` | 10,000 | Volume aggregator | coordinator-group |
 | `stream:circuit-breaker` | 5,000 | Execution engine | — |
@@ -102,7 +108,7 @@ sequentially — correctness is more important than speed.
 |-------|---------|---------|
 | `coordinator-group` | Coordinator | health, opportunities, whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue, forwarding-dlq |
 | `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities |
-| `execution-engine-group` | Execution Engine | execution-requests, fast-lane |
+| `execution-engine-group` | Execution Engine | execution-requests, fast-lane, exec-requests-fast, exec-requests-l2, exec-requests-premium, exec-requests-solana, pre-simulated |
 | `mempool-detector-group` | Mempool Detector | pending-opportunities |
 | `orderflow-pipeline` | Coordinator (orderflow) | pending-opportunities |
 | `self-healing-manager` | Expert Self-Healing Manager | system-failures, system-control, system-scaling | (dynamic: created on first use) |
@@ -271,7 +277,7 @@ declarations AND individual call sites.
 **Method — Part 1 (Config-level, existing):**
 1. Use Grep to find all stream names in `STREAM_MAX_LENGTHS` in
    `shared/types/src/events.ts` or `shared/core/src/redis/streams.ts`.
-2. Verify all 24 declared streams have a MAXLEN value.
+2. Verify all 29 declared streams have a MAXLEN value.
 
 **Method — Part 2 (Call-site level, NEW):**
 3. Use Grep to find all `this.xadd(` and `this.xaddWithLimit(` calls in `.ts` files
@@ -701,11 +707,18 @@ category: `REDIS_KEY_REGISTRY`.
 **Info:** Report total unique key prefixes discovered → severity: **INFO**,
 category: `REDIS_KEY_REGISTRY`.
 
-**Known key prefixes (as of v2.4):**
+**Known key prefixes (as of v3.1):**
 `coordinator:leader:lock`, `lock:execution:`, `lock:` (distributed lock default),
 `bridge:recovery:`, `bridge:recovery:corrupt:`, `commit-reveal:`, `region:health:`,
 `pair:`, `risk:probabilities:`, `ratelimit:`, `api:`, `arbitrage:`, `auth:`,
-`critical:`, `dlq:`, `price:`
+`critical:`, `dlq:`, `price:`,
+`health:` (per-service, e.g., `health:coordinator`),
+`health:system:snapshot` (system-wide snapshot),
+`health_state:` (self-healing service state),
+`metrics:system:recent` (recent system metrics),
+`quality:score:current`, `quality:detection:` (quality monitor),
+`opp:dedup:` (opportunity deduplication),
+`service-degradation:` (graceful degradation pub/sub)
 
 ---
 
@@ -1042,7 +1055,7 @@ done
 redis-cli INFO memory > ./monitor-session/streams/redis-memory-baseline.txt
 ```
 
-Compare discovered streams against the 19 expected streams from the System
+Compare discovered streams against the 29 expected streams from the System
 Inventory. Any expected stream that does NOT exist → **MEDIUM** finding.
 Any unexpected stream that DOES exist → **INFO** finding (may be legitimate).
 
@@ -1114,7 +1127,7 @@ Output:
 PHASE 2 COMPLETE — Startup
   Services ready: <n>/7 (list names)
   Services failed: <n> (list names)
-  Streams discovered: <n>/24
+  Streams discovered: <n>/29
   Missing streams: <list>
   Unexpected streams: <list>
   Readiness endpoints: <n>/7 consistent
@@ -1134,7 +1147,7 @@ Record all findings to `./monitor-session/findings/runtime.jsonl`:
 {
   "phase": "RUNTIME",
   "findingId": "RT-001",
-  "category": "SERVICE_HEALTH|LEADER_ELECTION|CIRCUIT_BREAKER|CB_TRANSITIONS|BACKPRESSURE|DLQ|DLQ_ROOT_CAUSE|STREAM_TOPOLOGY|CONSUMER_LAG|STUCK_MESSAGE|DEAD_CONSUMER|STREAM_TRANSIT|METRICS|METRICS_COMPLETENESS|RUNTIME_PERFORMANCE|PROVIDER_QUALITY|DETECTION_QUALITY|BUSINESS_INTELLIGENCE|WEBSOCKET_HEALTH|PROVIDER_HEALTH|RISK_STATE|LATENCY|GAS_SPIKE|SIMULATION|EXECUTION_PROBABILITY|BRIDGE_RECOVERY|MEMORY|HEALTH_SCHEMA",
+  "category": "SERVICE_HEALTH|LEADER_ELECTION|CIRCUIT_BREAKER|CB_TRANSITIONS|BACKPRESSURE|DLQ|DLQ_ROOT_CAUSE|STREAM_TOPOLOGY|CONSUMER_LAG|STUCK_MESSAGE|DEAD_CONSUMER|STREAM_TRANSIT|METRICS|METRICS_COMPLETENESS|RUNTIME_PERFORMANCE|PROVIDER_QUALITY|DETECTION_QUALITY|BUSINESS_INTELLIGENCE|WEBSOCKET_HEALTH|PROVIDER_HEALTH|RISK_STATE|LATENCY|GAS_SPIKE|SIMULATION|EXECUTION_PROBABILITY|BRIDGE_RECOVERY|MEMORY|HEALTH_SCHEMA|DASHBOARD_AVAILABILITY|DASHBOARD_SSE|DASHBOARD_SSE_COVERAGE|DASHBOARD_TYPE_SYNC|DASHBOARD_REST|DASHBOARD_KEY_MISMATCH|DASHBOARD_PROXY|DASHBOARD_STREAMS",
   "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
   "service": "<service name>",
   "stream": "<stream name if applicable>",
@@ -1416,7 +1429,7 @@ redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 5
 
 ### Check 3I — Redis Stream Topology Validation
 
-For ALL 24 declared streams, verify the stream exists and has the
+For ALL 29 declared streams, verify the stream exists and has the
 correct consumer groups attached:
 
 ```bash
@@ -1424,6 +1437,9 @@ for stream in stream:price-updates stream:swap-events stream:opportunities \
   stream:whale-alerts stream:service-health stream:service-events \
   stream:coordinator-events stream:health stream:health-alerts \
   stream:execution-requests stream:execution-results \
+  stream:exec-requests-fast stream:exec-requests-l2 \
+  stream:exec-requests-premium stream:exec-requests-solana \
+  stream:pre-simulated \
   stream:pending-opportunities stream:volume-aggregates \
   stream:circuit-breaker stream:system-failover stream:system-commands \
   stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq \
@@ -1447,11 +1463,16 @@ For each stream, verify:
 4. **Stream length is reasonable** — not 0 (for active streams like `price-updates`)
    and not at MAXLEN cap (indicates producer outpacing consumer trim).
 
-**Note on on-demand streams:** The 5 on-demand streams (`system-failures`,
+**Note on on-demand/feature-gated streams:** The 5 on-demand streams (`system-failures`,
 `system-control`, `system-scaling`, `service-degradation`, `dlq-alerts`) may
 not exist in Redis during normal operation. Their absence is **MEDIUM** (not
 CRITICAL) since they're created on first use. Their consumer groups
 (`self-healing-manager` for the first 3) are also created dynamically.
+The 5 ADR-038/039 streams (`exec-requests-fast`, `exec-requests-l2`,
+`exec-requests-premium`, `exec-requests-solana`, `pre-simulated`) are
+feature-gated: they only exist when `COORDINATOR_CHAIN_GROUP_ROUTING=true`
+(ADR-038) or `ASYNC_PIPELINE_SPLIT=true` (ADR-039). Their absence in
+legacy single-EE mode is expected — **INFO**, not a finding.
 
 ---
 
@@ -2299,12 +2320,444 @@ category: `METRICS_COMPLETENESS`.
 
 ---
 
+## ── Section 3.9: Dashboard Validation ──
+
+### Check 3AJ — Dashboard SPA Availability
+
+**Goal:** Verify the React dashboard SPA is built, served, and accessible.
+The coordinator serves the React SPA from `services/coordinator/public/` when
+built, falling back to a minimal legacy HTML page otherwise.
+
+**Method:**
+1. Check if the built SPA exists:
+```
+Glob: services/coordinator/public/index.html
+```
+If the file does NOT exist → the dashboard build was skipped.
+
+2. Verify the coordinator serves the SPA (not the legacy fallback):
+```bash
+DASHBOARD_HTML=$(curl -sf http://localhost:3000/ 2>/dev/null | head -20)
+echo "$DASHBOARD_HTML"
+```
+
+Check the response for React SPA markers:
+- Contains `<div id="root">` → React SPA is served
+- Contains `(legacy view)` → Legacy fallback (build missing)
+- Contains `Unauthorized` → Auth blocking dashboard access
+
+**Flag:** SPA not built (`index.html` missing from `services/coordinator/public/`) →
+severity: **HIGH**, category: `DASHBOARD_AVAILABILITY` (operators cannot access
+the monitoring dashboard — only the minimal legacy page is served).
+**Flag:** Coordinator serves legacy fallback instead of React SPA → severity: **HIGH**,
+category: `DASHBOARD_AVAILABILITY`.
+**Flag:** Dashboard returns 401 Unauthorized → severity: **MEDIUM**,
+category: `DASHBOARD_AVAILABILITY` (expected if `DASHBOARD_AUTH_TOKEN` is set —
+monitoring would need the token to test further).
+**Info:** React SPA served successfully → severity: **INFO**,
+category: `DASHBOARD_AVAILABILITY`.
+
+---
+
+### Check 3AK — SSE Event Stream Connectivity & Data Shape
+
+**Goal:** Verify the SSE endpoint is accessible and emitting data with correct
+event types and data shapes. The dashboard depends entirely on SSE for real-time
+data — if SSE is broken, all 6 tabs show "Waiting for data...".
+
+**Method:**
+1. Connect to the SSE endpoint and capture the first events (sent immediately on connect):
+```bash
+TOKEN="${DASHBOARD_AUTH_TOKEN:-}"
+URL="http://localhost:3000/api/events"
+if [ -n "$TOKEN" ]; then URL="$URL?token=$TOKEN"; fi
+timeout 10 curl -sf -N "$URL" 2>/dev/null | head -40 > ./monitor-session/findings/sse-capture.txt
+cat ./monitor-session/findings/sse-capture.txt
+```
+
+The SSE route sends `metrics`, `services`, and `circuit-breaker` events
+immediately on connect, so the first 3 events should appear within 1 second.
+
+2. Parse the SSE output for event types. Look for lines starting with `event: `:
+```
+event: metrics
+data: {"totalOpportunities":...}
+
+event: services
+data: {"partition-asia-fast":...}
+
+event: circuit-breaker
+data: {"state":"CLOSED",...}
+```
+
+3. Validate the `metrics` data shape. Parse the JSON from the first `metrics`
+event and verify these required fields exist (the dashboard calls `.toFixed()`
+and `.toLocaleTimeString()` on these — missing fields cause TypeError crashes):
+
+```
+Required (dashboard crashes if missing):
+  systemHealth: number     (OverviewTab: metrics.systemHealth.toFixed(0))
+  totalExecutions: number  (ExecutionTab: division for successRate)
+  successfulExecutions: number
+  totalProfit: number
+  averageLatency: number   (ExecutionTab chart)
+  activeServices: number
+  totalOpportunities: number
+  opportunitiesDropped: number
+  lastUpdate: number       (AdminTab: formatTime(metrics.lastUpdate))
+```
+
+4. Validate the `services` data shape. Parse the JSON and verify at least one
+service entry contains: `name`, `status`, `uptime`, `memoryUsage`, `cpuUsage`.
+
+5. Validate the `circuit-breaker` data shape. Parse the JSON and verify it
+contains: `state` (one of CLOSED|OPEN|HALF_OPEN), `consecutiveFailures`,
+`totalFailures`, `totalSuccesses`, `timestamp`.
+
+**Flag:** SSE endpoint returns non-200 or times out → severity: **CRITICAL**,
+category: `DASHBOARD_SSE` (dashboard will show "Waiting for data..." on all tabs).
+**Flag:** SSE endpoint returns 401 → severity: **HIGH**, category: `DASHBOARD_SSE`
+(auth token mismatch — dashboard SSE connection will fail permanently).
+**Flag:** `metrics` event missing a required field → severity: **HIGH**,
+category: `DASHBOARD_SSE` (dashboard component will crash on `.toFixed()` or
+similar calls on undefined — affects OverviewTab, ExecutionTab, RiskTab).
+**Flag:** `services` event values missing `name` or `status` → severity: **HIGH**,
+category: `DASHBOARD_SSE` (ServiceCard and ChainsTab will render broken).
+**Flag:** `circuit-breaker` event missing `state` field → severity: **HIGH**,
+category: `DASHBOARD_SSE` (CircuitBreakerGrid shows "UNKNOWN" permanently).
+**Flag:** No `metrics` event received within 10s → severity: **HIGH**,
+category: `DASHBOARD_SSE` (SSE connected but not emitting — send logic broken).
+**Info:** SSE emitting correct metrics, services, and circuit-breaker events →
+severity: **INFO**, category: `DASHBOARD_SSE`.
+
+---
+
+### Check 3AL — SSE Event Coverage
+
+**Goal:** Verify ALL event types the dashboard listens for are emitted by the
+server. The dashboard client registers listeners for 6 event types. If the
+server doesn't emit one, the corresponding UI component stays empty forever.
+
+**Method:**
+1. Read the SSE client event type list:
+```
+Read: dashboard/src/hooks/useSSE.ts
+```
+Extract the `eventTypes` array (line ~30).
+
+**Expected client event types:**
+`metrics`, `services`, `execution-result`, `alert`, `circuit-breaker`, `streams`
+
+2. Read the SSE server route:
+```
+Grep for: send\(  in services/coordinator/src/api/routes/sse.routes.ts
+```
+Extract all event type strings from `send('<type>', ...)` calls and
+`subscribeSSE` callback usage.
+
+3. Compare the two lists. Any event type expected by the client but not
+emitted by the server → dashboard component is non-functional.
+
+**Expected server emitted events (v3.1 — after SSE event broadcasting fix):**
+- `metrics` (periodic, 2s)
+- `services` (periodic, 5s)
+- `streams` (periodic, 10s)
+- `circuit-breaker` (initial + periodic 5s)
+- `execution-result` (via `subscribeSSE` callback)
+- `alert` (via `subscribeSSE` callback)
+
+4. Verify the `subscribeSSE` method is implemented on the coordinator. If the
+method exists in the interface but is not wired to actual events (execution
+results from `stream:execution-results`, alerts from the alert system), the
+`execution-result` and `alert` events will never fire even though the SSE
+route subscribes to them.
+
+```
+Grep for: subscribeSSE in services/coordinator/src/coordinator.ts
+```
+Verify the implementation calls the listener with `'execution-result'` and
+`'alert'` event types.
+
+**Flag:** Client expects event type not emitted by server → severity: **HIGH**,
+category: `DASHBOARD_SSE_COVERAGE` (dashboard component stays empty — operator
+has no visibility for that data).
+**Flag:** `subscribeSSE` method exists in interface but not implemented in
+coordinator → severity: **HIGH**, category: `DASHBOARD_SSE_COVERAGE`
+(LiveFeed and real-time alerts will never appear).
+**Info:** All 6 client event types have matching server emitters → severity: **INFO**,
+category: `DASHBOARD_SSE_COVERAGE`.
+
+---
+
+### Check 3AM — Dashboard Type Sync Audit
+
+**Goal:** Verify the dashboard's TypeScript types match the coordinator's API
+types. The dashboard declares this dependency in a comment at
+`dashboard/src/lib/types.ts:3`: `// Keep in sync with: services/coordinator/src/api/types.ts`.
+
+Type drift causes silent bugs: the dashboard accesses a field that doesn't
+exist at runtime (→ undefined → NaN in charts, crash on `.toFixed()`), or the
+backend sends a field the dashboard ignores (→ data invisible to operators).
+
+**Method:**
+1. Read both type files:
+   - `dashboard/src/lib/types.ts`
+   - `services/coordinator/src/api/types.ts`
+
+2. Compare `SystemMetrics` interface field-by-field:
+   - List fields present in backend but missing from dashboard (invisible data)
+   - List fields present in dashboard but missing from backend (crash risk)
+
+3. Compare `Alert` / `AlertSeverity` types:
+   - Verify severity enum values match
+   - Verify `Alert` interface fields match
+
+4. Compare `CircuitBreakerStatus` (dashboard) against `getCircuitBreakerSnapshot`
+return type (backend `CoordinatorStateProvider` interface):
+   - Verify field names and types match
+
+**Flag:** Backend `SystemMetrics` has field that dashboard type lacks → severity: **LOW**,
+category: `DASHBOARD_TYPE_SYNC` (backend data not displayed — functionality gap).
+**Flag:** Dashboard `SystemMetrics` has field that backend type lacks → severity: **HIGH**,
+category: `DASHBOARD_TYPE_SYNC` (dashboard accesses undefined field — crash risk
+on `.toFixed()`, `formatNumber()`, `formatUsd()` calls).
+**Flag:** `AlertSeverity` enum values differ between files → severity: **MEDIUM**,
+category: `DASHBOARD_TYPE_SYNC` (severity badge styling may not match).
+**Flag:** `CircuitBreakerStatus` fields don't match `getCircuitBreakerSnapshot` →
+severity: **HIGH**, category: `DASHBOARD_TYPE_SYNC` (CB display broken).
+**Info:** All shared types in sync → severity: **INFO**,
+category: `DASHBOARD_TYPE_SYNC`.
+
+---
+
+### Check 3AN — Dashboard REST Endpoint Validation
+
+**Goal:** Verify all REST endpoints the dashboard depends on return correct
+response shapes. Dashboard tabs that use REST polling (`RiskTab`, `StreamsTab`,
+`AdminTab`) will show loading states or errors if endpoints fail.
+
+**Method:**
+Test each dashboard REST dependency:
+
+1. **Leader endpoint** (AdminTab → `fetchJson('/api/leader')`):
+```bash
+curl -sf http://localhost:3000/api/leader 2>/dev/null | jq .
+```
+Expected: `{ isLeader: boolean, instanceId: string, lockKey: string }`
+Dashboard accesses: `leaderInfo?.isLeader`, `leaderInfo?.instanceId`
+
+2. **Alerts endpoint** (AdminTab → `fetchJson('/api/alerts')`):
+```bash
+curl -sf http://localhost:3000/api/alerts 2>/dev/null
+```
+Expected: `Alert[]` (array). If returns 401, record as INFO (auth working).
+Dashboard: renders table from array; empty array = "No alerts".
+
+3. **Redis stats endpoint** (StreamsTab → `fetchJson('/api/redis/stats')`):
+```bash
+curl -sf http://localhost:3000/api/redis/stats 2>/dev/null | jq .
+```
+Expected shape: object with optional fields `totalCommands`, `commandsPerSecond`,
+`memoryUsed`, `connectedClients`.
+
+4. **EE health for drawdown** (RiskTab → `fetchJson('/ee/health')`):
+```bash
+# Via coordinator proxy
+curl -sf http://localhost:3000/ee/health 2>/dev/null | jq '{riskState, simulationMode, healthyProviders, queueSize, activeExecutions, successRate}'
+```
+The RiskTab needs drawdown/risk state data that only the Execution Engine has.
+The coordinator proxies `/ee/health` to EE port 3005.
+
+Verify: the response contains `riskState` (the EE field name — note the
+dashboard's `EEHealthResponse` interface may use `drawdownState` as the field
+name; check for field name mismatch between EE response and dashboard type).
+
+**Note:** If the RiskTab uses `fetchJson('/health')` instead of `fetchJson('/ee/health')`,
+it will hit the coordinator's own health endpoint which does NOT contain risk state
+data → drawdown display always shows "UNKNOWN". Verify the RiskTab fetches the
+correct URL.
+
+```
+Grep for: fetchJson.*health  in dashboard/src/tabs/RiskTab.tsx
+```
+
+**Flag:** `/api/leader` returns non-JSON or missing `isLeader` → severity: **MEDIUM**,
+category: `DASHBOARD_REST` (AdminTab system info shows "..." placeholders).
+**Flag:** `/api/redis/stats` returns non-200 or error → severity: **MEDIUM**,
+category: `DASHBOARD_REST` (StreamsTab Redis panel stuck on "Loading...").
+**Flag:** `/ee/health` proxy returns 503 (EE unreachable) → severity: **HIGH**,
+category: `DASHBOARD_REST` (RiskTab drawdown state invisible — operators can't
+see if trading is halted).
+**Flag:** EE health response uses `riskState` but dashboard type expects
+`drawdownState` → severity: **HIGH**, category: `DASHBOARD_REST` (field name
+mismatch — drawdown display always "UNKNOWN" even when data is proxied correctly).
+**Flag:** RiskTab fetches `/health` instead of `/ee/health` → severity: **HIGH**,
+category: `DASHBOARD_REST` (routing error — hits coordinator health, not EE).
+**Flag:** `/api/alerts` returns 401 with no `DASHBOARD_AUTH_TOKEN` set →
+severity: **MEDIUM**, category: `DASHBOARD_REST` (expected with auth enabled).
+**Info:** All dashboard REST endpoints responding correctly → severity: **INFO**,
+category: `DASHBOARD_REST`.
+
+---
+
+### Check 3AO — Service Name Key Matching
+
+**Goal:** Verify the coordinator's service health map uses keys that match what
+the ChainsTab expects. The ChainsTab constructs service lookup keys using the
+pattern `partition-${partition.id}` and also looks up `cross-chain-detector`
+and `execution-engine` by exact name.
+
+**Method:**
+1. Get the actual service names from the coordinator:
+```bash
+curl -sf http://localhost:3000/stats 2>/dev/null | jq '.services | keys'
+```
+
+2. Read the dashboard's expected keys:
+```
+Read: dashboard/src/tabs/ChainsTab.tsx
+```
+Extract the partition `id` values and service name strings.
+
+**Expected dashboard keys (from ChainsTab.tsx):**
+```
+partition-asia-fast       (P1)
+partition-l2-turbo        (P2)
+partition-high-value      (P3)
+partition-solana-native   (P4)
+cross-chain-detector
+execution-engine
+```
+
+3. For each expected key, check if it exists in the coordinator's service map.
+A missing key means the entire partition or service card shows "unknown" status
+with no health data.
+
+**Flag:** Dashboard expects service key not present in coordinator's service map →
+severity: **HIGH**, category: `DASHBOARD_KEY_MISMATCH` (entire partition or
+service shows "unknown" status — operator has no health visibility for that service).
+**Flag:** Coordinator has service keys not displayed by dashboard → severity: **LOW**,
+category: `DASHBOARD_KEY_MISMATCH` (extra services not shown — minor visibility gap).
+**Info:** All dashboard service keys match coordinator → severity: **INFO**,
+category: `DASHBOARD_KEY_MISMATCH`.
+
+---
+
+### Check 3AP — Production Proxy Configuration
+
+**Goal:** Verify that REST endpoints the dashboard depends on are accessible in
+production (when SPA is served from the coordinator, not Vite dev server). The
+Vite dev server proxies routes to different backend services, but in production
+the coordinator serves the SPA directly — any route not handled by the
+coordinator returns 404 or hits the SPA catch-all.
+
+**Method:**
+1. Read the Vite dev proxy configuration:
+```
+Read: dashboard/vite.config.ts
+```
+Extract all proxy routes and their targets.
+
+2. Identify proxy routes targeting NON-coordinator services:
+
+| Vite Proxy Route | Target | Needs Coordinator Proxy? |
+|-----------------|--------|--------------------------|
+| `/api` | `localhost:3000` | No (coordinator handles directly) |
+| `/health` | `localhost:3000` | No |
+| `/circuit-breaker` | `localhost:3005` | **YES** (EE only) |
+| `/ee` | `localhost:3005` | **YES** (EE only) |
+
+3. For each non-coordinator proxy route, verify the coordinator has a matching
+production proxy:
+```
+Grep for: circuit-breaker|ee/health  in services/coordinator/src/api/routes/index.ts
+```
+
+4. Test the production proxy routes:
+```bash
+# EE health proxy (should return EE health data)
+curl -sf http://localhost:3000/ee/health 2>/dev/null | jq '.riskState // "NOT_PRESENT"'
+
+# Circuit breaker (should proxy to EE)
+curl -sf http://localhost:3000/circuit-breaker 2>/dev/null | jq '.state // "NOT_PRESENT"'
+```
+
+**Flag:** `/circuit-breaker` exists in Vite dev proxy but NOT proxied by coordinator →
+severity: **HIGH**, category: `DASHBOARD_PROXY` (CB open/close buttons fail in
+production with 404 — operator cannot emergency-halt trading via dashboard).
+**Flag:** `/ee/health` exists in Vite dev proxy but NOT proxied by coordinator →
+severity: **HIGH**, category: `DASHBOARD_PROXY` (RiskTab drawdown state invisible
+in production).
+**Flag:** Coordinator proxy returns 503 for `/ee/health` → severity: **MEDIUM**,
+category: `DASHBOARD_PROXY` (EE may not be running — proxy infrastructure works
+but target is down).
+**Info:** All dashboard proxy routes have production equivalents and respond →
+severity: **INFO**, category: `DASHBOARD_PROXY`.
+
+---
+
+### Check 3AQ — Stream Health Display Validation
+
+**Goal:** Verify the stream health data sent via SSE matches what the StreamsTab
+displays, and cross-reference against actual Redis stream state from Check 3I.
+
+**Method:**
+1. Capture the SSE `streams` event (emitted every 10s). If the SSE capture
+from Check 3AK already has a `streams` event, use that. Otherwise wait:
+```bash
+TOKEN="${DASHBOARD_AUTH_TOKEN:-}"
+URL="http://localhost:3000/api/events"
+if [ -n "$TOKEN" ]; then URL="$URL?token=$TOKEN"; fi
+timeout 15 curl -sf -N "$URL" 2>/dev/null | grep -A1 "event: streams" | head -5
+```
+
+2. Parse the `streams` data and validate against `StreamHealth` interface:
+```
+Expected shape per stream entry:
+{
+  [streamName: string]: {
+    length: number,
+    pending: number,
+    consumerGroups: number,
+    status: 'healthy' | 'warning' | 'critical' | 'unknown'
+  }
+}
+```
+
+3. Verify numeric fields are actually numbers (not strings from Redis
+deserialization). The StreamsTab calls `formatNumber(info.length)` and
+`formatNumber(info.pending)` — these expect `number` type, not `string`.
+
+4. Cross-reference streams in SSE data against streams discovered in Redis
+(from Check 3I stream topology). Any stream present in Redis but absent from
+the SSE `streams` event → the StreamsTab has a blind spot.
+
+5. Check that `status` field values are one of the expected enum values
+(`healthy`, `warning`, `critical`, `unknown`). The StatusBadge component uses
+this for color coding — unexpected values show gray (neutral) color.
+
+**Flag:** `streams` SSE event never received within 15s → severity: **MEDIUM**,
+category: `DASHBOARD_STREAMS` (stream health monitor may not be initialized —
+StreamsTab shows "No stream data yet").
+**Flag:** Active stream present in Redis but missing from SSE streams data →
+severity: **LOW**, category: `DASHBOARD_STREAMS` (dashboard blind spot —
+stream exists but not visible to operators in the Streams tab).
+**Flag:** `pending` or `length` field is string instead of number → severity: **MEDIUM**,
+category: `DASHBOARD_STREAMS` (numeric display and sorting will break —
+`formatNumber()` returns "NaN" for strings, sort comparisons fail).
+**Flag:** `status` field contains value not in expected enum → severity: **LOW**,
+category: `DASHBOARD_STREAMS` (StatusBadge renders as gray/neutral — minor UX issue).
+**Info:** Stream data matches Redis state and all fields are correct types →
+severity: **INFO**, category: `DASHBOARD_STREAMS`.
+
+---
+
 ### Phase 3 Summary
 
-After all 35 checks across 8 subsections, read `./monitor-session/findings/runtime.jsonl`
+After all 43 checks across 9 subsections, read `./monitor-session/findings/runtime.jsonl`
 and output a summary:
 ```
-PHASE 3 COMPLETE — Runtime Validation (35 checks, 8 subsections)
+PHASE 3 COMPLETE — Runtime Validation (43 checks, 9 subsections)
   3.1 Service Health & Schema: 3A health, 3B leader, 3C schema
   3.2 Risk & Circuit Breakers: 3D CB states, 3E drawdown, 3F CB history*, 3G backpressure*
   3.3 Data Flow & DLQ: 3H DLQ, 3I topology, 3J lag, 3K root cause, 3L transit, 3M ack*, 3N trim*
@@ -2313,12 +2766,13 @@ PHASE 3 COMPLETE — Runtime Validation (35 checks, 8 subsections)
   3.6 Detection Quality: 3W cycle timing, 3X opps/cycle, 3Y cache*
   3.7 Execution & BI: 3Z gas, 3AA sim, 3AB probability, 3AC bridge, 3AD outcomes, 3AE slippage, 3AF age, 3AG profit
   3.8 Observability: 3AH prometheus, 3AI completeness
+  3.9 Dashboard: 3AJ availability, 3AK SSE connectivity, 3AL SSE coverage, 3AM type sync, 3AN REST endpoints, 3AO service keys, 3AP proxy config, 3AQ stream display
   (* = placeholder for not-yet-implemented metrics)
   Services healthy: <n>/7
   Leader elected: YES/NO
   Circuit breakers: all CLOSED / <list open chains>
   DLQ entries: <n> | Top reason: <reason> (<n>%)
-  Stream topology: <n>/24 streams correct
+  Stream topology: <n>/29 streams correct
   Consumer groups: <n> discovered, <n> healthy
   Pending messages: <total across all groups>
   Stream transit p95: <n>ms
@@ -2338,6 +2792,7 @@ PHASE 3 COMPLETE — Runtime Validation (35 checks, 8 subsections)
   Bridge recoveries pending: <n>
   Health schemas: <n>/7 valid
   Metrics completeness: <n>/<total> required metrics present
+  Dashboard: SPA <AVAILABLE/MISSING> | SSE <CONNECTED/FAILED> | Events <n>/6 types | Types <IN_SYNC/DRIFT> | REST <n>/<total> OK | Keys <MATCH/MISMATCH> | Proxy <OK/GAPS>
   CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>  LOW: <n>
 ```
 
@@ -3011,7 +3466,7 @@ this template:
 | Execution Engine | 3005 | READY/FAILED | <ms> |
 | Cross-Chain | 3006 | READY/FAILED | <ms> |
 
-Streams discovered: <n>/24
+Streams discovered: <n>/29
 Missing: <list>
 
 ### Readiness Endpoint Consistency
@@ -3027,7 +3482,7 @@ Missing: <list>
 
 ---
 
-## Phase 3: Runtime Validation (35 checks, 8 subsections)
+## Phase 3: Runtime Validation (43 checks, 9 subsections)
 
 ### 3.1 Service Health & Schema
 | Check | Status | Findings |
@@ -3110,6 +3565,20 @@ Missing: <list>
 |-------|--------|----------|
 | 3AH Prometheus Scrape | PASS/FAIL | <count> |
 | 3AI Metrics Completeness | PASS/FAIL | <count> |
+
+### 3.9 Dashboard Validation
+| Check | Status | Findings |
+|-------|--------|----------|
+| 3AJ SPA Availability | PASS/FAIL | <count> |
+| 3AK SSE Connectivity & Data Shape | PASS/FAIL | <count> |
+| 3AL SSE Event Coverage | PASS/FAIL | <count> |
+| 3AM Type Sync Audit | PASS/FAIL | <count> |
+| 3AN REST Endpoint Validation | PASS/FAIL | <count> |
+| 3AO Service Name Key Matching | PASS/FAIL | <count> |
+| 3AP Production Proxy Config | PASS/FAIL | <count> |
+| 3AQ Stream Health Display | PASS/FAIL | <count> |
+
+Dashboard: SPA <AVAILABLE/MISSING> | SSE <CONNECTED/FAILED> | Events <n>/6 types | Types <IN_SYNC/DRIFT> | REST <n>/<total> OK | Keys <MATCH/MISMATCH> | Proxy <OK/GAPS>
 
 _* = placeholder check for not-yet-implemented metrics_
 

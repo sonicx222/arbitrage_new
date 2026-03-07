@@ -1,4 +1,3 @@
-// dashboard/src/components/LiveFeed.tsx
 import type { FeedItem } from '../lib/types';
 import { formatTime, formatUsd } from '../lib/format';
 
@@ -9,12 +8,23 @@ interface Props {
 export function LiveFeed({ items }: Props) {
   return (
     <div className="card flex flex-col h-full">
-      <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Live Activity</h4>
-      <div className="flex-1 overflow-y-auto space-y-1 text-xs">
-        {items.length === 0 && <div className="text-gray-600">Waiting for events...</div>}
-        {items.map((item) => (
-          <div key={item.id} className="flex gap-2 py-0.5 border-b border-gray-800/50">
-            <span className="text-gray-500 shrink-0">{formatTime(item.kind === 'execution' ? item.data.timestamp : item.data.timestamp)}</span>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Live Activity</h4>
+        <span className="text-[10px] font-mono text-gray-600">{items.length} events</span>
+      </div>
+      <div className="flex-1 overflow-y-auto space-y-0.5 text-xs font-mono">
+        {items.length === 0 && (
+          <div className="text-gray-600 flex items-center justify-center h-20">Waiting for events...</div>
+        )}
+        {items.map((item, i) => (
+          <div
+            key={item.id}
+            className="flex gap-2 py-1.5 px-2 rounded-md border-b border-gray-800/50 hover:bg-surface-lighter/30 transition-colors"
+            style={i === 0 ? { animation: 'slideUp 0.3s ease-out' } : undefined}
+          >
+            <span className="text-gray-600 shrink-0">
+              {formatTime(item.kind === 'execution' ? item.data.timestamp : item.data.timestamp)}
+            </span>
             {item.kind === 'execution' ? (
               <>
                 <span className={item.data.success ? 'text-accent-green' : 'text-accent-red'}>

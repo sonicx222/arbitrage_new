@@ -2,15 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-surface text-gray-100 font-mono text-sm;
+:root {
+  --font-display: 'Manrope';
+  --font-body: 'Manrope';
+  --font-mono: 'JetBrains Mono';
+
+  --surface: 9 9 11;
+  --surface-light: 24 24 27;
+  --surface-lighter: 39 39 42;
+
+  --accent-green: 34 197 94;
+  --accent-red: 239 68 68;
+  --accent-yellow: 212 167 116;
+  --accent-blue: 96 165 250;
+
+  --card-bg: rgba(24, 24, 27, 0.8);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --header-bg: rgba(9, 9, 11, 0.88);
+  --badge-bg: rgba(39, 39, 42, 0.6);
+  --scrollbar-thumb: #3f3f46;
+
+  color-scheme: dark;
 }
+
+body {
+  @apply bg-surface text-gray-100 text-sm;
+  font-family: var(--font-body), system-ui, sans-serif;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(212, 167, 116, 0.015) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(96, 165, 250, 0.015) 0%, transparent 50%),
+    rgb(var(--surface));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
 
 @layer components {
   .card {
-    @apply bg-surface-light rounded-lg p-4 border border-gray-800;
+    background: var(--card-bg);
+    @apply rounded-xl p-5 border border-gray-800;
+    box-shadow: var(--card-shadow);
+    backdrop-filter: blur(12px);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card:hover {
+    border-color: rgba(212, 167, 116, 0.18);
   }
   .status-healthy { @apply text-accent-green; }
   .status-degraded { @apply text-accent-yellow; }
   .status-unhealthy { @apply text-accent-red; }
+}
+
+/* Typography */
+table { font-family: var(--font-mono), ui-monospace, monospace; }
+th {
+  font-family: var(--font-body), system-ui, sans-serif;
+  @apply font-semibold tracking-wider uppercase;
+  font-size: 0.625rem;
+}
+
+/* Glass header */
+header {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Tab content transitions */
+main > * { animation: fadeIn 0.15s ease-out; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

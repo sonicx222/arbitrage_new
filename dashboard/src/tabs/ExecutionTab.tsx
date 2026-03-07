@@ -4,6 +4,7 @@ import { useSSEData } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { formatUsd, formatPct, formatNumber, formatTime } from '../lib/format';
+import { CHART } from '../lib/theme';
 
 const EXPLORER_URLS: Record<string, string> = {
   ethereum: 'https://etherscan.io/tx/',
@@ -55,11 +56,11 @@ export function ExecutionTab() {
           <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Avg Latency (ms)</h4>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#666' }} />
-              <YAxis tick={{ fontSize: 9, fill: '#666' }} />
-              <Tooltip contentStyle={{ background: '#16213e', border: '1px solid #333', fontSize: 11 }} />
-              <Line type="monotone" dataKey="latency" stroke="#4da6ff" dot={false} strokeWidth={1.5} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
+              <YAxis tick={{ fontSize: 9, fill: CHART.tick }} />
+              <Tooltip contentStyle={{ background: CHART.tooltipBg, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 11, color: CHART.tooltipText }} />
+              <Line type="monotone" dataKey="latency" stroke={CHART.line1} dot={false} strokeWidth={1.5} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -67,11 +68,11 @@ export function ExecutionTab() {
           <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Success Rate (%)</h4>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#666' }} />
-              <YAxis tick={{ fontSize: 9, fill: '#666' }} domain={[0, 100]} />
-              <Tooltip contentStyle={{ background: '#16213e', border: '1px solid #333', fontSize: 11 }} />
-              <Line type="monotone" dataKey="successRate" stroke="#00ff88" dot={false} strokeWidth={1.5} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
+              <YAxis tick={{ fontSize: 9, fill: CHART.tick }} domain={[0, 100]} />
+              <Tooltip contentStyle={{ background: CHART.tooltipBg, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 11, color: CHART.tooltipText }} />
+              <Line type="monotone" dataKey="successRate" stroke={CHART.line2} dot={false} strokeWidth={1.5} />
             </LineChart>
           </ResponsiveContainer>
         </div>
