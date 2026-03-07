@@ -83,8 +83,8 @@ services:
   # which adds io-threads, slowlog, dangerous command disabling, and 512mb memory.
   #
   # Redis maxmemory per deployment tier:
-  #   docker-compose.yml (dev/base):         256mb
-  #   docker-compose.partition.yml (prod):   256mb
+  #   docker-compose.yml (dev/base):         512mb
+  #   docker-compose.partition.yml (prod):   512mb
   #   docker-compose.testnet.yml:            128mb
   #   oracle/redis-production.conf (ARM):    512mb (24GB host, headroom for AOF rewrite)
   #   cloud-init-partition (Oracle ARM):     512mb

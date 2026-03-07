@@ -20,4 +20,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -qO- http://localhost:3000/api/health || exit 1
 
-CMD ["npm", "start"]
+# RT-3P-001: --max-old-space-size=192 reduces major GC pressure (15.8% major GC ratio at default)
+CMD ["node", "--max-old-space-size=192", "dist/index.js"]

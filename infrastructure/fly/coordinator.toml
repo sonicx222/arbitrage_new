@@ -72,7 +72,9 @@ primary_region = "sjc"
     type = "http"
 
 [processes]
-  app = "node dist/index.js"
+  # RT-3P-001: --max-old-space-size=192 reduces major GC pressure on 256MB VM.
+  # Without this, V8 defaults to ~128MB heap, triggering frequent major GCs (15.8% ratio observed).
+  app = "node --max-old-space-size=192 dist/index.js"
 
 [deploy]
   release_command = "echo 'Coordinator primary deploying...'"

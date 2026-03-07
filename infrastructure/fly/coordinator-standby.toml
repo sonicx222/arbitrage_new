@@ -30,6 +30,9 @@ primary_region = "sjc"
   ENABLE_CROSS_REGION_HEALTH = "true"
   IS_STANDBY = "true"
   CAN_BECOME_LEADER = "true"
+  # SM-002/ADR-038: Must mirror primary coordinator for seamless failover.
+  # Without this, standby activation reverts to legacy single-stream routing.
+  COORDINATOR_CHAIN_GROUP_ROUTING = "true"
 
 [http_service]
   internal_port = 3000
@@ -65,7 +68,8 @@ primary_region = "sjc"
     type = "http"
 
 [processes]
-  app = "node dist/index.js"
+  # RT-3P-001: --max-old-space-size=192 reduces major GC pressure on 256MB VM.
+  app = "node --max-old-space-size=192 dist/index.js"
 
 [deploy]
   release_command = "echo 'Coordinator standby deploying...'"

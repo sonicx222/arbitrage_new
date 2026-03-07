@@ -1680,6 +1680,8 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
       // P1 Fix: Flip default to OFF (explicit opt-in). All producers now include stream name
       // in signatures (OP-18), so legacy compat is no longer needed by default.
       // Set to 'true' only during migration from pre-OP-18 producers.
+      // TODO(breaking-change): Remove LEGACY_HMAC_COMPAT shim once all deployments
+      // use STREAM_LEGACY_HMAC_COMPAT (target: next major version). Tracked as SA-1E-002.
       if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
         const factoryLogger = createLogger('redis-streams-factory');
         factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
@@ -1745,6 +1747,7 @@ export async function createRedisStreamsClient(url?: string, password?: string):
     }
   }
   const previousSigningKey = process.env.STREAM_SIGNING_KEY_PREVIOUS?.trim() || undefined;
+  // TODO(breaking-change): Remove LEGACY_HMAC_COMPAT shim (SA-1E-002).
   if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
     const factoryLogger = createLogger('redis-streams-factory');
     factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
