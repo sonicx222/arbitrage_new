@@ -72,6 +72,15 @@ export function setLogLevel(level: LogLevel): void {
 }
 
 /**
+ * Get the current log level from the first active logger instance.
+ * Falls back to LOG_LEVEL env var or 'info' if no loggers exist yet.
+ */
+export function getLogLevel(): LogLevel {
+  const first = rawLoggerCache.values().next().value;
+  return (first?.level ?? process.env.LOG_LEVEL ?? 'info') as LogLevel;
+}
+
+/**
  * Get the shared OTEL transport instance (for shutdown/stats).
  * Returns null if OTEL is not configured.
  */

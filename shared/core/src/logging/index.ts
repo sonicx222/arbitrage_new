@@ -34,6 +34,7 @@ export {
   resetLoggerCache,
   resetPerformanceLoggerCache,
   setLogLevel,
+  getLogLevel,
   // OTEL transport lifecycle
   getOtelTransport,
   shutdownOtelTransport,

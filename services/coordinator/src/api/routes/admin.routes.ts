@@ -10,7 +10,7 @@
 import { Router, Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
-import { setLogLevel } from '@arbitrage/core/logging';
+import { setLogLevel, getLogLevel } from '@arbitrage/core/logging';
 import type { LogLevel } from '@arbitrage/core/logging';
 import type { CoordinatorStateProvider } from '../types';
 
@@ -141,6 +141,14 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
       }
     }
   );
+
+  /**
+   * GET /admin/log-level
+   * Returns the current log level. Read-only, no auth required.
+   */
+  router.get('/log-level', (_req: Request, res: Response) => {
+    res.json({ level: getLogLevel() });
+  });
 
   /**
    * PUT /admin/log-level

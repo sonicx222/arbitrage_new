@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useCallback, useRef, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useCallback, useRef, useEffect, useMemo, type ReactNode } from 'react';
 import { useSSE, type SSEStatus } from '../hooks/useSSE';
 import { formatTime } from '../lib/format';
 import { getItem } from '../lib/storage';
@@ -145,16 +145,34 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   const { status } = useSSE({ url, onEvent });
 
   // M-02: Reset chart/feed data on reconnection to avoid false continuity
+  // H-04 FIX: Backfill recent alerts from REST after reconnect
   const prevStatusRef = useRef<SSEStatus>(status);
   useEffect(() => {
     if (prevStatusRef.current !== 'connected' && status === 'connected') {
       dispatch({ type: 'reset' });
+      // Backfill recent alerts that were missed during disconnect
+      fetch(`/api/alerts${token ? `?token=${encodeURIComponent(token)}` : ''}`)
+        .then(res => res.ok ? res.json() : [])
+        .then((alerts: unknown[]) => {
+          if (Array.isArray(alerts)) {
+            for (const alert of alerts.slice(0, 20)) {
+              if (validatePayload('alert', alert)) {
+                dispatch({ type: 'alert', payload: alert as never });
+              }
+            }
+          }
+        })
+        .catch(() => { /* Network error — alerts will arrive via SSE when available */ });
     }
     prevStatusRef.current = status;
-  }, [status]);
+  }, [status, token]);
+
+  // H-01 FIX: Memoize provider value to prevent re-renders from parent renders.
+  // New object only created when state or status actually changes.
+  const value = useMemo(() => ({ ...state, status }), [state, status]);
 
   return (
-    <SSEContext.Provider value={{ ...state, status }}>
+    <SSEContext.Provider value={value}>
       {children}
     </SSEContext.Provider>
   );

@@ -52,8 +52,11 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
       'X-Accel-Buffering': 'no',
     });
 
+    // H-04 FIX: Monotonic SSE message IDs enable Last-Event-Id on reconnect
+    let messageId = 0;
     const send = (event: string, data: unknown) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      messageId++;
+      res.write(`id: ${messageId}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
     // Send initial state immediately

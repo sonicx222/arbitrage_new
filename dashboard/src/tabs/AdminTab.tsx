@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSSEData } from '../context/SSEContext';
 import { useSetLogLevel, useRestartService, useAckAlert, fetchJson } from '../hooks/useApi';
@@ -21,6 +21,22 @@ export function AdminTab() {
   const [activeLogLevel, setActiveLogLevel] = useState<string>('info');
   const [logLevelMsg, setLogLevelMsg] = useState('');
   const [actionMsg, setActionMsg] = useState('');
+
+  // M-04 FIX: Fetch current log level from server on mount (not hardcoded)
+  const { data: logLevelData } = useQuery<{ level: string }>({
+    queryKey: ['log-level'],
+    queryFn: () => fetchJson('/api/log-level'),
+    staleTime: 30000,
+    retry: 1,
+  });
+  // Sync server-reported level into local state once on initial fetch
+  const logLevelSynced = useRef(false);
+  useEffect(() => {
+    if (logLevelData?.level && !logLevelSynced.current) {
+      logLevelSynced.current = true;
+      setActiveLogLevel(logLevelData.level);
+    }
+  }, [logLevelData?.level]);
 
   // Fetch alerts on tab mount
   const { data: alerts = [] } = useQuery<Alert[]>({
