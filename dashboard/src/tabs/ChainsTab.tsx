@@ -9,11 +9,14 @@ import portConfig from '../../../shared/constants/service-ports.json';
 // If a service name is renamed in the JSON, TypeScript flags the mismatch here.
 type KnownService = keyof typeof portConfig.services;
 
-const PARTITIONS: { svcKey: KnownService; name: string; region: string; chains: string[] }[] = [
-  { svcKey: 'partition-asia-fast', name: 'P1: Asia-Fast', region: 'Singapore', chains: ['bsc', 'polygon', 'avalanche', 'fantom'] },
-  { svcKey: 'partition-l2-turbo', name: 'P2: L2-Turbo', region: 'Singapore', chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'] },
-  { svcKey: 'partition-high-value', name: 'P3: High-Value', region: 'US-East', chains: ['ethereum', 'zksync', 'linea'] },
-  { svcKey: 'partition-solana', name: 'P4: Solana', region: 'US-West', chains: ['solana'] },
+// RT-3AO-001 FIX: Partition services register health as `unified-detector-${partitionId}`,
+// not as `partition-*` from service-ports.json. The `healthKey` maps to the actual key
+// in the coordinator's serviceHealth map (sent via SSE 'services' event).
+const PARTITIONS: { svcKey: KnownService; healthKey: string; name: string; region: string; chains: string[] }[] = [
+  { svcKey: 'partition-asia-fast', healthKey: 'unified-detector-asia-fast', name: 'P1: Asia-Fast', region: 'Singapore', chains: ['bsc', 'polygon', 'avalanche', 'fantom'] },
+  { svcKey: 'partition-l2-turbo', healthKey: 'unified-detector-l2-turbo', name: 'P2: L2-Turbo', region: 'Singapore', chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'] },
+  { svcKey: 'partition-high-value', healthKey: 'unified-detector-high-value', name: 'P3: High-Value', region: 'US-East', chains: ['ethereum', 'zksync', 'linea'] },
+  { svcKey: 'partition-solana', healthKey: 'unified-detector-solana-native', name: 'P4: Solana', region: 'US-West', chains: ['solana'] },
 ];
 
 export function ChainsTab() {
@@ -23,7 +26,8 @@ export function ChainsTab() {
     <div className="space-y-6 overflow-auto">
       <h2 className="text-sm font-bold text-gray-300">Chain Partitions</h2>
       {PARTITIONS.map((partition) => {
-        const svc = services[partition.svcKey];
+        // RT-3AO-001 FIX: Look up by healthKey (unified-detector-*) not svcKey (partition-*)
+        const svc = services[partition.healthKey];
         const partitionStatus = svc?.status ?? 'unknown';
 
         return (

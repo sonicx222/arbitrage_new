@@ -1205,10 +1205,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       );
 
       // Use larger batch size for high-throughput streams to prevent consumer lag.
-      // Opportunities and price-updates arrive at high rates; small batches cause the
-      // consumer to fall behind, leading to expired opportunities being silently dropped.
+      // Opportunities, price-updates, and execution-results arrive at high rates;
+      // small batches cause the consumer to fall behind (RT-3J-001: exec-results lag 29K+).
       const isHighThroughput = groupConfig.streamName === RedisStreams.OPPORTUNITIES
-        || groupConfig.streamName === RedisStreams.PRICE_UPDATES;
+        || groupConfig.streamName === RedisStreams.PRICE_UPDATES
+        || groupConfig.streamName === RedisStreams.EXECUTION_RESULTS;
       const batchSize = isHighThroughput ? 200 : 10;
       // LATENCY: Opportunities stream uses 20ms blocking read to minimize detection-to-dispatch
       // latency toward the <50ms hot-path target. Price-updates use 200ms (high-throughput,
@@ -1223,6 +1224,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const useOpportunityBatch = groupConfig.streamName === RedisStreams.OPPORTUNITIES
         && !!this.opportunityRouter;
       const usePriceUpdateBatch = groupConfig.streamName === RedisStreams.PRICE_UPDATES;
+      // RT-3J-001 FIX: Use batch handler for execution-results to eliminate per-message
+      // overhead. Consumer lag was 29K+ due to processing ~7/s vs EE producing ~65/s.
+      const useExecutionResultBatch = groupConfig.streamName === RedisStreams.EXECUTION_RESULTS;
 
       // Determine batch handler and autoAck based on stream type
       const getBatchConfig = (): { batchHandler?: (messages: StreamMessage[]) => Promise<string[]>; autoAck: boolean } => {
@@ -1231,6 +1235,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
         }
         if (usePriceUpdateBatch) {
           return { batchHandler: (messages: StreamMessage[]) => this.handlePriceUpdateBatch(messages), autoAck: true };
+        }
+        if (useExecutionResultBatch) {
+          return { batchHandler: (messages: StreamMessage[]) => this.handleExecutionResultBatch(messages), autoAck: true };
         }
         return { autoAck: false }; // Deferred ACK - handled by streamConsumerManager.wrapHandler
       };
@@ -1924,12 +1931,94 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
+   * RT-3J-001 FIX: Batch handler for the execution-results stream.
+   *
+   * Replaces per-message handleExecutionResultMessage to eliminate consumer lag.
+   * The coordinator was consuming ~7 results/s vs EE producing ~65/s, causing
+   * lag of 29K+ messages. Root cause: per-message deferred ACK overhead, per-message
+   * logging, and per-message SSE emit on the same event loop tick as 8 other consumers.
+   *
+   * Batch mode: reads up to 200 messages per poll, processes all in one pass,
+   * emits SSE per result (preserving dashboard feed), logs one summary per batch.
+   *
+   * @returns Array of message IDs successfully processed (for ACK)
+   * @see services/execution-engine/src/engine.ts publishExecutionResult()
+   */
+  private async handleExecutionResultBatch(messages: StreamMessage[]): Promise<string[]> {
+    const processedIds: string[] = [];
+    let batchSuccesses = 0;
+    let batchFailures = 0;
+    let batchProfit = 0;
+
+    for (const msg of messages) {
+      const data = msg.data as Record<string, unknown>;
+      if (!data) {
+        processedIds.push(msg.id);
+        continue;
+      }
+
+      const rawResult = unwrapMessageData(data);
+      const success = rawResult.success === true || rawResult.success === 'true';
+      const opportunityId = getString(rawResult, 'opportunityId', '');
+      const chain = getString(rawResult, 'chain', 'unknown');
+
+      if (!opportunityId) {
+        processedIds.push(msg.id);
+        continue;
+      }
+
+      if (success) {
+        this.systemMetrics.successfulExecutions++;
+        batchSuccesses++;
+        const actualProfit = getNumber(rawResult, 'actualProfit', 0);
+        if (actualProfit > 0) {
+          this.systemMetrics.totalProfit += actualProfit;
+          batchProfit += actualProfit;
+        }
+      } else {
+        batchFailures++;
+      }
+
+      // Preserve per-result SSE for dashboard feed
+      this.emitSSE('execution-result', {
+        opportunityId,
+        success,
+        chain,
+        dex: getString(rawResult, 'dex', 'unknown'),
+        actualProfit: getNumber(rawResult, 'actualProfit', 0),
+        gasUsed: getNumber(rawResult, 'gasUsed', 0),
+        gasCost: getNumber(rawResult, 'gasCost', 0),
+        error: getOptionalString(rawResult, 'error'),
+        transactionHash: getOptionalString(rawResult, 'transactionHash'),
+        latencyMs: getNumber(rawResult, 'latencyMs', 0),
+        timestamp: getNumber(rawResult, 'timestamp', Date.now()),
+      });
+
+      processedIds.push(msg.id);
+    }
+
+    // Single summary log per batch instead of per-message logging
+    if (batchSuccesses > 0 || batchFailures > 0) {
+      this.logger.info('Execution results batch processed', {
+        batchSize: messages.length,
+        successes: batchSuccesses,
+        failures: batchFailures,
+        batchProfit,
+        totalSuccessful: this.systemMetrics.successfulExecutions,
+        totalProfit: this.systemMetrics.totalProfit,
+      });
+    }
+
+    return processedIds;
+  }
+
+  /**
    * OP-10 FIX: Handle execution result messages from stream:execution-results.
    * Updates successfulExecutions and totalProfit metrics that were previously always zero.
    *
-   * The execution engine publishes results after each trade attempt.
-   * The coordinator consumes these to maintain aggregate trading metrics
-   * for the dashboard and health monitoring.
+   * NOTE: This per-message handler is retained for the deferred-ACK code path
+   * (fallback if batch handler is not configured). The primary path now uses
+   * handleExecutionResultBatch (RT-3J-001 FIX).
    *
    * @see services/execution-engine/src/engine.ts publishExecutionResult()
    * @see shared/types/src/execution.ts ExecutionResult interface
