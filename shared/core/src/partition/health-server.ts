@@ -17,8 +17,7 @@ import { getProviderLatencyTracker } from '../monitoring/provider-latency-tracke
 import { setLogLevel, getOtelTransport } from '../logging/pino-logger';
 import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
-import { getPriceUpdatesTotal } from './handlers';
-import { getPublishDropsTotal } from './runner';
+import { getPriceUpdatesTotal, getPublishDropsTotal } from './handlers';
 
 // =============================================================================
 // Health Check Cache (PERF-FIX)

@@ -25,7 +25,7 @@ import {
   validateAndFilterChains,
 } from './config';
 import { createPartitionHealthServer, closeServerWithTimeout } from './health-server';
-import { setupDetectorEventHandlers, setupProcessHandlers } from './handlers';
+import { setupDetectorEventHandlers, setupProcessHandlers, incrementPublishDrops } from './handlers';
 import { getRuntimeMonitor } from '../monitoring/runtime-monitor';
 import type { ProcessHandlerCleanup } from './handlers';
 import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './router';
@@ -532,12 +532,11 @@ export function createPartitionEntry(
       // but the actual runtime values are always ArbitrageOpportunity instances.
       detector.on('opportunity', (opp: Record<string, unknown> & { id: string }) => {
         if (inFlightPublishes >= MAX_CONCURRENT_PUBLISHES) {
-          _publishDropsTotal++;
+          incrementPublishDrops();
           logger.warn('Concurrent publish limit reached, skipping', {
             opportunityId: opp.id,
             inFlight: inFlightPublishes,
             limit: MAX_CONCURRENT_PUBLISHES,
-            totalDropped: _publishDropsTotal,
           });
           return;
         }

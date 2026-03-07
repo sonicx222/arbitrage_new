@@ -37,6 +37,23 @@ export function getPriceUpdatesTotal(): number {
   return _priceUpdatesTotal;
 }
 
+/**
+ * M-01 FIX: Cumulative count of opportunity publish drops due to concurrency limit.
+ * Exposed via /metrics as `opportunity_publish_drops_total`.
+ * Module-level (not per-handler) so it survives handler reinstantiation.
+ */
+let _publishDropsTotal = 0;
+
+/** Increment the publish drop counter. */
+export function incrementPublishDrops(): void {
+  _publishDropsTotal++;
+}
+
+/** Returns the cumulative publish drop counter value. */
+export function getPublishDropsTotal(): number {
+  return _publishDropsTotal;
+}
+
 // =============================================================================
 // Event Handlers (P16 Refactor)
 // =============================================================================
