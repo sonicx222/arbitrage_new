@@ -1,7 +1,7 @@
 # Configuration Reference
 
-> **Last Updated:** 2026-03-06
-> **Version:** 1.2
+> **Last Updated:** 2026-03-07
+> **Version:** 1.3
 
 This document provides a comprehensive reference for all configuration options in the arbitrage system.
 
@@ -67,6 +67,10 @@ Each chain requires HTTP and WebSocket endpoints:
 | `ZKSYNC_WS_URL` | zkSync WebSocket | `wss://mainnet.era.zksync.io/ws` |
 | `LINEA_RPC_URL` | Linea | `https://rpc.linea.build` |
 | `LINEA_WS_URL` | Linea WebSocket | `wss://linea.drpc.org` |
+| `BLAST_RPC_URL` | Blast | `https://rpc.blast.io` |
+| `BLAST_WS_URL` | Blast WebSocket | `wss://blast.drpc.org` |
+| `SCROLL_RPC_URL` | Scroll | `https://rpc.scroll.io` |
+| `SCROLL_WS_URL` | Scroll WebSocket | `wss://scroll.drpc.org` |
 | `SOLANA_RPC_URL` | Solana | `https://api.mainnet-beta.solana.com` |
 | `SOLANA_WS_URL` | Solana WebSocket | `wss://api.mainnet-beta.solana.com` |
 
@@ -132,6 +136,43 @@ See `services/execution-engine/src/services/hd-wallet-manager.ts` for implementa
 | `SIMULATION_WHALE_THRESHOLD_USD` | USD value above which a simulated swap emits a whale alert to `stream:whale-alerts`. | `50000` |
 | `EXECUTION_CHAIN_GROUP` | Chain group this EE instance handles (`fast`, `l2`, `premium`, `solana`). Leave unset for legacy single-EE mode. | unset (ADR-038) |
 | `ASYNC_PIPELINE_SPLIT` | Enable SimulationWorker pre-filtering. When `true`, EE consumes from `stream:pre-simulated` instead of raw exec-request streams. | `false` (ADR-039) |
+| `COORDINATOR_CHAIN_GROUP_ROUTING` | Enable chain-group stream routing. When `true`, coordinator routes opportunities to per-group streams (`stream:exec-requests-{fast\|l2\|premium\|solana}`) instead of single `stream:execution-requests`. | `false` (ADR-038) |
+
+### Native Token Pricing (ADR-040)
+
+Per-chain native token price fetching for accurate gas cost estimation in USD.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NATIVE_TOKEN_PRICE_REFRESH_MS` | Interval for refreshing native token prices from on-chain V2 pools | `60000` (60s) |
+| `GAS_CALIBRATION_ENABLED` | Enable EMA-based gas calibration feedback loop (adjusts estimates using actual execution data) | `true` |
+| `GAS_CALIBRATION_MIN_SAMPLES` | Minimum execution samples before applying calibration ratio | `5` |
+| `GAS_CALIBRATION_CLAMP_MIN` | Lower clamp for calibration ratio (prevents overcorrection) | `0.5` |
+| `GAS_CALIBRATION_CLAMP_MAX` | Upper clamp for calibration ratio | `2.0` |
+
+**How it works:** Each chain's gas cost is estimated using `estimateGasCostUsd(chain, gasUnits, operationType?)`. The native token price is fetched from configured V2 pool reserves (e.g., WETH/USDC on Ethereum, WBNB/BUSD on BSC). When ≥5 execution samples exist, an EMA calibration ratio adjusts estimates toward observed actual costs.
+
+**Key files:** `shared/config/src/tokens/native-token-price-pools.ts`, `shared/core/src/caching/gas-price-cache.ts`
+
+### Observability (OpenTelemetry)
+
+When configured, Pino logs are exported via OTLP/HTTP alongside console output. Trace context (`traceId`, `spanId`, `parentSpanId`) propagates across Redis Streams for cross-service correlation.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OTEL_EXPORTER_ENDPOINT` | OTLP/HTTP endpoint for trace/log export (e.g., `http://localhost:4318`) | unset (disabled) |
+| `OTEL_SERVICE_NAME` | Service name for trace attribution | Service-specific |
+
+**Key files:** `shared/core/src/tracing/`, `shared/core/src/logging/otel-transport.ts`
+
+### Redis Stream Security
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `STREAM_SIGNING_KEY` | HMAC-SHA256 signing key for Redis Streams messages. When set, all messages are signed on write and verified on read using `crypto.timingSafeEqual`. Unsigned or invalid messages are rejected. | unset (signing disabled) |
+| `LEGACY_HMAC_COMPAT` | Enable backward-compatible HMAC verification during key rotation. Accepts both old and new signing keys. | `false` |
+
+**Key files:** `shared/core/src/redis-streams.ts`
 
 ### Feature Flags
 
@@ -266,7 +307,7 @@ export const PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    chains: ['arbitrum', 'optimism', 'base'],
+    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
     region: 'asia-southeast1',
     provider: 'fly',
     resourceProfile: 'standard',
@@ -660,6 +701,29 @@ This checks:
 - Redis connectivity
 - Contract addresses are configured
 - Gas price sanity checks
+
+---
+
+## Stream MAXLEN Tuning
+
+Redis Streams use approximate MAXLEN trimming to prevent unbounded growth. These values are hardcoded in `shared/core/src/redis/streams.ts` (`STREAM_MAX_LENGTHS`). Adjust by modifying the source and rebuilding.
+
+| Stream | MAXLEN | Rationale |
+|--------|--------|-----------|
+| `stream:opportunities` | 500,000 | At 130+ opps/s, holds ~64 min buffer |
+| `stream:execution-requests` | 100,000 | At 100 opps/s, holds ~17 min buffer |
+| `stream:execution-results` | 100,000 | Matches exec-requests capacity |
+| `stream:price-updates` | 100,000 | High volume, 1 hour effective |
+| `stream:swap-events` | 50,000 | Medium volume |
+| `stream:exec-requests-fast` | 25,000 | ADR-038: per-group stream |
+| `stream:exec-requests-l2` | 25,000 | ADR-038: per-group stream |
+| `stream:exec-requests-premium` | 25,000 | ADR-038: per-group stream |
+| `stream:exec-requests-solana` | 10,000 | ADR-038: lower Solana throughput |
+| `stream:pre-simulated` | 25,000 | ADR-039: post-SimulationWorker |
+| `stream:dead-letter-queue` | 10,000 | Failed ops, longer retention |
+| Other streams | 1,000-5,000 | Low volume health/alerts/events |
+
+**Monitoring:** Use `checkStreamLag(streamName, groupName)` from `RedisStreamsClient` to monitor lag ratio. Backpressure activates at 60% fill, critical alert at 80%.
 
 ---
 

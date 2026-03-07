@@ -1,8 +1,8 @@
 # Data Flow Architecture
 
-> **Last Updated:** 2026-02-05
-> **Version:** 1.0
-> **Related:** [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md), [ADR-002](adr/ADR-002-redis-streams.md)
+> **Last Updated:** 2026-03-07
+> **Version:** 1.1
+> **Related:** [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md), [ADR-002](adr/ADR-002-redis-streams.md), [ADR-038](adr/ADR-038-chain-grouped-execution.md), [ADR-039](adr/ADR-039-async-pipeline-split.md)
 
 This document visualizes the complete data flow through the arbitrage detection and execution system.
 
@@ -27,7 +27,7 @@ This document visualizes the complete data flow through the arbitrage detection 
 ║                                                                                    ║
 ║  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐          ║
 ║  │ BLOCKCHAINS │    │   MEMPOOL   │    │   BRIDGES   │    │  EXTERNAL   │          ║
-║  │ (11 chains) │    │ (bloXroute) │    │  (5 active) │    │    APIs     │          ║
+║  │ (15 chains) │    │ (bloXroute) │    │  (5 active) │    │    APIs     │          ║
 ║  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘          ║
 ║         │                  │                  │                  │                 ║
 ║         ▼                  ▼                  ▼                  ▼                 ║
@@ -36,6 +36,7 @@ This document visualizes the complete data flow through the arbitrage detection 
 ║  ║  ┌──────────────────────────────────────────────────────────────────────┐  ║    ║
 ║  ║  │ P1: Asia-Fast   P2: L2-Turbo   P3: High-Value   P4: Solana           │  ║    ║
 ║  ║  │ BSC/Poly/Avax   Arb/OP/Base    ETH/zkSync/Linea SOL                  │  ║    ║
+║  ║  │  Ftm            Scroll/Blast                                          │  ║    ║
 ║  ║  │       │              │               │              │                │  ║    ║
 ║  ║  │       └──────────────┴───────────────┴──────────────┘                │  ║    ║
 ║  ║  │                             │                                        │  ║    ║
@@ -87,6 +88,10 @@ This document visualizes the complete data flow through the arbitrage detection 
 ║  ║         Leader Election + Pre-Exec Filters + Risk Limits                   ║    ║
 ║  ║                            │                                               ║    ║
 ║  ║             stream:execution-requests (~10/min)                            ║    ║
+║  ║             ── OR (ADR-038 chain-group routing) ──                        ║    ║
+║  ║             stream:exec-requests-{fast|l2|premium|solana}                 ║    ║
+║  ║             ── OR (ADR-039 async pipeline split) ──                       ║    ║
+║  ║             → SimulationWorker → stream:pre-simulated                     ║    ║
 ║  ╚════════════════════════════╪═══════════════════════════════════════════════╝    ║
 ║                               │                                                    ║
 ║                               ▼                                                    ║
@@ -376,9 +381,9 @@ This document visualizes the complete data flow through the arbitrage detection 
 │                                            │  ┌───────────────────────┐  │      │
 │                                            │  │  ROUTING DECISION     │  │      │
 │                                            │  │                       │  │      │
-│                                            │  │  Chain-specific exec? │  │      │
-│                                            │  │  Primary or backup?   │  │      │
-│                                            │  │  Load balancing?      │  │      │
+│                                            │  │  Chain-group routing?  │  │      │
+│                                            │  │  (ADR-038: fast/l2/   │  │      │
+│                                            │  │   premium/solana)     │  │      │
 │                                            │  │                       │  │      │
 │                                            │  └───────────┬───────────┘  │      │
 │                                            │              │              │      │
@@ -473,6 +478,11 @@ This document visualizes the complete data flow through the arbitrage detection 
 | `stream:price-updates` | Partition Detectors | Cross-Chain, Dashboard | ~50/sec | 1 hour |
 | `stream:opportunities` | Analyzers | Coordinator | ~10/min | 24 hours |
 | `stream:execution-requests` | Coordinator | Execution Engine | ~10/min | 24 hours |
+| `stream:exec-requests-fast` | Coordinator | EE (fast group) | ~10/min | 24 hours |
+| `stream:exec-requests-l2` | Coordinator | EE (l2 group) | ~10/min | 24 hours |
+| `stream:exec-requests-premium` | Coordinator | EE (premium group) | ~10/min | 24 hours |
+| `stream:exec-requests-solana` | Coordinator | EE (solana group) | ~10/min | 24 hours |
+| `stream:pre-simulated` | SimulationWorker | Execution Engine | ~5/min | 24 hours |
 | `stream:whale-alerts` | Detectors | All Services | ~5/hour | 24 hours |
 | `stream:volume-aggregates` | Detectors | Analyzer | ~20/min | 1 hour |
 | `stream:pending-opportunities` | Mempool Detector | Cross-Chain | ~100/min | 1 hour |
@@ -494,7 +504,7 @@ This document visualizes the complete data flow through the arbitrage detection 
 │  Same-chain detection:    <50ms           Events processed:     ~1000/sec        │
 │  Cross-chain detection:   <100ms          Opportunities/day:    500+             │
 │  Execution submission:    <200ms          Executions/day:       50+              │
-│  Bridge opportunity:      <10s            Redis commands/day:   <10K             │
+│  Bridge opportunity:      <10s            Redis commands/day:   unlimited (self) │
 │                                                                                  │
 │  RELIABILITY TARGETS                      PROFITABILITY TARGETS                  │
 │  ───────────────────                      ─────────────────────                  │
@@ -516,3 +526,7 @@ This document visualizes the complete data flow through the arbitrage detection 
 - [ADR-002: Redis Streams](adr/ADR-002-redis-streams.md) - Message broker decision
 - [ADR-005: Hierarchical Cache](adr/ADR-005-hierarchical-cache.md) - Caching strategy
 - [ADR-022: Hot-Path Optimization](adr/ADR-022-hot-path-memory-optimization.md) - Performance patterns
+- [ADR-037: Coordinator Pipeline Optimization](adr/ADR-037-coordinator-pipeline-optimization.md) - Batch XACK, parallel forwarding
+- [ADR-038: Chain-Grouped Execution](adr/ADR-038-chain-grouped-execution.md) - Per-chain-group routing
+- [ADR-039: Async Pipeline Split](adr/ADR-039-async-pipeline-split.md) - SimulationWorker pre-filtering
+- [ADR-040: Real-Time Native Token Pricing](adr/ADR-040-real-time-native-token-pricing.md) - Per-chain gas cost in USD

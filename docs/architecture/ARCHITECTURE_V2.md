@@ -1,7 +1,7 @@
-# Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
+# Architecture Design v2.12 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.11
-> **Last Updated:** 2026-02-28
+> **Document Version:** 2.12
+> **Last Updated:** 2026-03-07
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **16 blockchains** configured (14 EVM + Solana + 1 additional), **2 stubs** (Mantle, Mode), with **78 DEXs** (71 EVM + 7 Solana) and **112+ tokens** (current)
+- Monitor **15 blockchains** operational (14 EVM + Solana), **2 stubs** (Mantle, Mode), with **78 DEXs** (71 EVM + 7 Solana) and **112+ tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -104,7 +104,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 │                              ┌─────────────────────────┐                             │
 │                              │   GLOBAL COORDINATOR    │                             │
 │                              │   (Leader Election)     │                             │
-│                              │   Koyeb US-East         │                             │
+│                              │   Fly.io US-East        │                             │
 │                              └───────────┬─────────────┘                             │
 │                                          │                                            │
 │    ┌─────────────────────────────────────┼────────────────────────────────────┐      │
@@ -114,15 +114,16 @@ Build a **professional and reliable profitable arbitrage application** with:
 │ │ ASIA-PACIFIC   │ │  US-EAST       │ │  US-WEST       │ │ US-WEST (SOL)  │ │ EXEC ││
 │ │ ────────────   │ │  ───────       │ │  ───────       │ │ ────────────   │ │      ││
 │ │                │ │                │ │                │ │                │ │      ││
-│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │ Rail ││
-│ ││ Partition 1  ││ ││ Partition 3  ││ ││ Cross-Chain  ││ ││ Partition 4  ││ │ way  ││
+│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │Fly.io││
+│ ││ Partition 1  ││ ││ Partition 3  ││ ││ Cross-Chain  ││ ││ Partition 4  ││ │      ││
 │ ││BSC/Poly/Avax ││ ││ETH/zkS/Linea ││ ││ Detector     ││ ││ SOLANA       ││ │      ││
-│ ││ Oracle ARM   ││ ││ Oracle ARM   ││ ││ Oracle AMD   ││ ││ Fly.io US-W  ││ │ + Bkp││
-│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │Render││
+│ ││  Ftm         ││ ││              ││ ││              ││ ││ Fly.io US-W  ││ │      ││
+│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │      ││
 │ │                │ │                │ │                │ │                │ │      ││
 │ │┌──────────────┐│ │                │ │                │ │ @solana/web3  │ │      ││
 │ ││ Partition 2  ││ │                │ │                │ │ Account Subs  │ │      ││
-│ ││ ARB/OP/Base  ││ │                │ │                │ │ Helius RPC    │ │      ││
+│ ││ARB/OP/Base   ││ │                │ │                │ │ Helius RPC    │ │      ││
+│ ││Scroll/Blast  ││ │                │ │                │ │                │ │      ││
 │ ││ Fly.io SG    ││ │                │ │                │ │                │ │      ││
 │ │└──────────────┘│ │                │ │                │ │                │ │      ││
 │ └────────────────┘ └────────────────┘ └────────────────┘ └────────────────┘ └──────┘│
@@ -220,17 +221,18 @@ The architecture combines two patterns:
 │  └── Execution Planner (Route optimization)                                     │
 │                                                                                  │
 │  LAYER 4: EXECUTION                                                              │
-│  ├── Execution Engine Primary (MEV-protected trades - **EVM ONLY**)             │
+│  ├── Execution Engine (MEV-protected trades, EVM + Solana)                      │
 │  │   ├── Transaction Simulation (Tenderly/Alchemy pre-flight) ✅ NEW            │
 │  │   ├── Circuit Breaker (Consecutive failure protection) ✅ NEW                │
 │  │   ├── DexLookupService (O(1) DEX/router lookups) ✅ NEW                      │
 │  │   ├── SwapBuilder (Cached swap step construction) ✅ NEW                     │
-│  │   └── Strategy Factory (Intra-chain, Cross-chain, Flash Loan)                │
-│  ├── Execution Engine Backup (Failover - **EVM ONLY**)                          │
+│  │   ├── Strategy Factory (Intra-chain, Cross-chain, Flash Loan, Solana)        │
+│  │   ├── Chain-Group Routing (ADR-038: 4 per-group streams) ✅ NEW              │
+│  │   └── SimulationWorker Pre-filter (ADR-039: async pipeline split) ✅ NEW     │
 │  ├── Flash Loan Strategy (Aave V3, Balancer V2, PancakeSwap V3, SyncSwap, DAI Flash Mint) ✅ │
 │  ├── Flash Loan Contracts (6 variants — see §10.6) ✅                           │
 │  ├── CommitRevealArbitrage (MEV-protected commit-reveal scheme) ✅ NEW          │
-│  └── Solana Executor (Jito bundles, priority fees) ⚠️ **DETECTION ONLY**       │
+│  └── Solana Executor (Jupiter + Jito bundles, priority fees) ✅ ADR-034         │
 │                                                                                  │
 │  LAYER 5: COORDINATION                                                           │
 │  ├── Global Coordinator (Health, leader election)                               │
@@ -626,6 +628,11 @@ The hard rejection runs **before** any confidence calculation, ensuring that wha
 | `stream:price-updates` | Detectors | Cross-Chain, Coordinator | ~50/sec | 1 hour |
 | `stream:opportunities` | Analyzers | Coordinator | ~10/min | 24 hours |
 | `stream:execution-requests` | Coordinator | Execution Engine | ~10/min | 24 hours |
+| `stream:exec-requests-fast` | Coordinator | EE (fast group) | ~10/min | 24 hours |
+| `stream:exec-requests-l2` | Coordinator | EE (l2 group) | ~10/min | 24 hours |
+| `stream:exec-requests-premium` | Coordinator | EE (premium group) | ~10/min | 24 hours |
+| `stream:exec-requests-solana` | Coordinator | EE (solana group) | ~10/min | 24 hours |
+| `stream:pre-simulated` | SimulationWorker | Execution Engine | ~5/min | 24 hours |
 | `stream:execution-results` | Execution Engine | Coordinator | ~10/min | 24 hours |
 | `stream:whale-alerts` | Detectors | Coordinator, All | ~5/hour | 24 hours |
 | `stream:swap-events` | Detectors | Coordinator | ~30/min | 1 hour |
@@ -692,7 +699,7 @@ opportunities to the Execution Engine via `stream:execution-requests`.
    - Cross-instance deduplication
 
 3. **Routing Decisions**: Coordinator can route to specific executors:
-   - Chain-specific execution engines
+   - Chain-group routing via 4 per-group streams (ADR-038, when `COORDINATOR_CHAIN_GROUP_ROUTING=true`)
    - Standby activation (ADR-007)
    - Load balancing across instances
 
@@ -712,6 +719,31 @@ The coordinator uses three optimizations to handle high-throughput opportunity s
 
 These optimizations reduce per-batch cycle time from ~55ms to ~17ms, providing ~12,000 msg/s
 effective throughput — 66x headroom over the observed 181 opps/s peak detection rate.
+
+**Chain-Group Routing (ADR-038)**
+
+When `COORDINATOR_CHAIN_GROUP_ROUTING=true`, the coordinator routes opportunities to per-chain-group
+streams instead of the single `stream:execution-requests`:
+
+| Group | Stream | Chains | MAXLEN |
+|-------|--------|--------|--------|
+| fast | `stream:exec-requests-fast` | BSC, Polygon, Avalanche, Fantom | 25,000 |
+| l2 | `stream:exec-requests-l2` | Arbitrum, Optimism, Base, Scroll, Blast | 25,000 |
+| premium | `stream:exec-requests-premium` | Ethereum, zkSync, Linea | 25,000 |
+| solana | `stream:exec-requests-solana` | Solana | 10,000 |
+
+Each EE instance sets `EXECUTION_CHAIN_GROUP={fast|l2|premium|solana}` to consume its group's stream.
+Fully backward compatible — unset env vars use the legacy single-stream path.
+
+**Async Pipeline Split (ADR-039)**
+
+When `ASYNC_PIPELINE_SPLIT=true`, a SimulationWorker pre-filters opportunities before the EE:
+
+```
+stream:execution-requests → SimulationWorker → stream:pre-simulated → Execution Engine
+```
+
+The SimulationWorker discards stale and unprofitable opportunities, reducing EE load.
 
 **Consumer Group Pattern**
 
@@ -791,7 +823,7 @@ New chains are added by:
 // Chain assignment algorithm
 function assignChainToPartition(chain: ChainConfig): number {
   // Group by block time similarity
-  if (chain.blockTime < 1) return PARTITION_L2_FAST;      // Arbitrum, etc.
+  if (chain.blockTime < 1) return PARTITION_L2_TURBO;      // Arbitrum, etc.
   if (chain.blockTime < 5) return PARTITION_ASIA_FAST;   // BSC, Polygon
   return PARTITION_HIGH_VALUE;                            // Ethereum, etc.
 }
@@ -806,14 +838,14 @@ Within each partition, scale by:
 
 ### 6.3 Resource Scaling Projections
 
-| Scale | Chains | DEXs | Tokens | Pairs | Events/sec | Redis Cmds/day |
-|-------|--------|------|--------|-------|------------|----------------|
-| Current | 5 | 10 | 23 | 50 | ~100 | ~3,000 |
-| Phase 1 | 7 | 25 | 60 | 150 | ~300 | ~5,000 |
-| Phase 2 | 9 | 45 | 110 | 350 | ~500 | ~7,000 |
-| Phase 3 | 11 (10 EVM + Solana) | 54 | 143 | 500 | ~1000 | ~9,500 |
+| Scale | Chains | DEXs | Tokens | Pairs | Events/sec | Notes |
+|-------|--------|------|--------|-------|------------|-------|
+| Phase 1 (historical) | 5 | 10 | 23 | 50 | ~100 | Initial launch |
+| Phase 2 (historical) | 9 | 45 | 110 | 350 | ~500 | L2 expansion |
+| **Current (Mar 2026)** | **15** | **78** | **112** | **~500** | **~1000** | **14 EVM + Solana, 2 stubs** |
+| Target (Q2 2026) | 15 | 80 | 143 | ~600 | ~1200 | +Mantle/Mode verified, +31 tokens |
 
-With self-hosted Redis on Oracle ARM, there are no command limits. Legacy Upstash deployments use batching to stay within 10K/day.
+With self-hosted Redis (Fly.io sidecar or Oracle ARM), there are no command limits.
 
 **Solana Impact**:
 - Adds ~200 events/sec due to fast block times
@@ -828,15 +860,15 @@ With self-hosted Redis on Oracle ARM, there are no command limits. Legacy Upstas
 
 | Provider | Service | Region | Resources | Cost |
 |----------|---------|--------|-----------|------|
-| Oracle Cloud ARM | Partition 1, 3 | SG, US | 4 OCPU, 24GB | $0 |
-| Oracle Cloud AMD | Cross-Chain Detector | US | 1 OCPU, 1GB | $0 |
-| Fly.io | Partition 2 | Singapore | 512MB | $0 |
-| Railway | Executor Primary | US-West | 512MB | $0 |
-| Render | Executor Backup | US-East | 512MB | $0 |
-| Koyeb | Coordinator | US-East | 256MB | $0 |
-| GCP | Standby Coordinator | US-Central | 1GB | $0 |
+| Fly.io | Coordinator | US-East | 256MB | $0 |
+| Fly.io | Coordinator Standby | US-East | 256MB | $0 |
+| Fly.io | Partition 1 (Asia-Fast) | Singapore | 512MB | $0 |
+| Fly.io | Partition 2 (L2-Turbo) | Singapore | 512MB | $0 |
+| Fly.io | Partition 3 (High-Value) | US-East | 512MB | $0 |
+| Fly.io | Partition 4 (Solana) | US-West | 512MB | $0 |
+| Fly.io | Execution Engine | US-East | 512MB | $0 |
+| Fly.io | Cross-Chain Detector | US-East | 512MB | $0 |
 | Self-hosted Redis 7 | Redis Streams + Cache | Per-instance (localhost) | No limit | $0 |
-| Vercel | Dashboard | Edge | 100GB-hrs | $0 |
 
 > **Note**: Original design included MongoDB Atlas for opportunity logging.
 > Current implementation uses Redis-only architecture for simplicity.
@@ -850,7 +882,7 @@ With self-hosted Redis on Oracle ARM, there are no command limits. Legacy Upstas
 - No command limits (localhost, <0.1ms RTT)
 - Deployed as Docker sidecar on each Oracle ARM instance
 - AOF persistence with everysec fsync
-- 512MB maxmemory with allkeys-lru eviction
+- 512MB maxmemory with noeviction policy (fails writes when full, preventing silent data loss)
 - Set `REDIS_SELF_HOSTED=true` to enable
 
 **Upstash Redis (legacy, 10K commands/day)**
@@ -937,21 +969,25 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 
 ## 9. Chain, DEX, and Token Selection
 
-### 9.1 Recommended Chain Coverage (11 Chains)
+### 9.1 Chain Coverage (15 Operational + 2 Stubs)
 
-| Tier | Chain | Priority | Arb Score | Partition | Phase |
-|------|-------|----------|-----------|-----------|-------|
-| T1 | **Arbitrum** | IMMEDIATE | 95 | P2: L2-Turbo | Current |
-| T1 | **BSC** | IMMEDIATE | 92 | P1: Asia-Fast | Current |
-| T1 | **Base** | IMMEDIATE | 88 | P2: L2-Turbo | Current |
-| T1 | **Solana** | HIGH | 90 | P4: Solana | Phase 2 |
-| T2 | **Polygon** | IMMEDIATE | 82 | P1: Asia-Fast | Current |
-| T2 | **Optimism** | IMMEDIATE | 78 | P2: L2-Turbo | Phase 1 |
-| T2 | **Avalanche** | PHASE 2 | 75 | P1: Asia-Fast | Phase 2 |
-| T3 | **Ethereum** | SELECTIVE | 65 | P3: High-Value | Current |
-| T3 | **Fantom** | PHASE 2 | 60 | P1: Asia-Fast | Phase 2 |
-| T3 | **zkSync Era** | PHASE 3 | 55 | P3: High-Value | Phase 3 |
-| T3 | **Linea** | PHASE 3 | 50 | P3: High-Value | Phase 3 |
+| Tier | Chain | Arb Score | Partition | Status |
+|------|-------|-----------|-----------|--------|
+| T1 | **Arbitrum** | 95 | P2: L2-Turbo | Operational |
+| T1 | **BSC** | 92 | P1: Asia-Fast | Operational |
+| T1 | **Solana** | 90 | P4: Solana | Operational (ADR-034) |
+| T1 | **Base** | 88 | P2: L2-Turbo | Operational |
+| T2 | **Polygon** | 82 | P1: Asia-Fast | Operational |
+| T2 | **Optimism** | 78 | P2: L2-Turbo | Operational |
+| T2 | **Avalanche** | 75 | P1: Asia-Fast | Operational |
+| T3 | **Ethereum** | 65 | P3: High-Value | Operational |
+| T3 | **Fantom** | 60 | P1: Asia-Fast | Operational |
+| T3 | **Blast** | 58 | P2: L2-Turbo | Operational (RPC-verified 2026-02-26) |
+| T3 | **Scroll** | 56 | P2: L2-Turbo | Operational (RPC-verified 2026-02-26) |
+| T3 | **zkSync Era** | 55 | P3: High-Value | Operational |
+| T3 | **Linea** | 50 | P3: High-Value | Operational |
+| Stub | **Mantle** | — | Unassigned | Stub (unverified DEX factories) |
+| Stub | **Mode** | — | Unassigned | Stub (unverified DEX factories) |
 
 **Why Solana is T1**:
 - $1-2B+ daily DEX volume (top 3 globally)
@@ -1036,14 +1072,17 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 | High-Volume | 35 | 3-5 | 11 | PEPE, SHIB, stETH, BONK, WIF |
 | Solana-Native | 15 | - | 15 | RAY, ORCA, JTO, PYTH, mSOL, jitoSOL |
 
-### 9.4 Implementation Phases
+### 9.4 Implementation Phases (Historical)
 
-| Phase | Chains | DEXs | Tokens | Pairs | Timeline |
-|-------|--------|------|--------|-------|----------|
-| **Current** | 5 | 10 | 23 | ~50 | Now |
-| **Phase 1** | 7 | 25 | 60 | ~150 | Week 1-2 |
-| **Phase 2** | 9 + Solana | 52 | 125 | ~450 | Week 3-4 |
-| **Phase 3** | 11 | 54 | 143 | ~500 | Week 5-6 |
+All original phases are complete. Current state as of March 2026:
+
+| Phase | Chains | DEXs | Tokens | Status |
+|-------|--------|------|--------|--------|
+| Phase 1 | 7 | 25 | 60 | Complete |
+| Phase 2 | 9 + Solana | 52 | 125 | Complete |
+| Phase 3 | 11 | 54 | 143 | Complete |
+| Phase 4 (Emerging L2) | +4 (Blast, Scroll, Mantle, Mode) | +14 | 112 | 2 operational, 2 stubs |
+| **Current** | **15** | **78** | **112** | **14 EVM + Solana** |
 
 ---
 
@@ -1157,12 +1196,12 @@ SimulationService now routes requests based on chain:
    - Contract: `CommitRevealArbitrage.sol`
    - Two-phase commit-reveal pattern for MEV protection when private mempools unavailable
 
-7. **Morpho Blue** (0% fee, EIP-3156)
+7. **Morpho Blue** (0% fee, EIP-3156) — *Config only, no contract deployed*
    - Chains: Ethereum, Base
    - EIP-3156 compliant flash loan interface with zero fees
-   - Ideal for high-frequency, low-margin arbitrage where flash loan fees would erode profit
+   - Provider config in `shared/config/src/flash-loan-providers/morpho.ts`; no Solidity contract yet
 
-**Strategy Selection**: Automatically selects lowest-fee protocol with sufficient liquidity.
+**Strategy Selection**: Automatically selects lowest-fee protocol with sufficient liquidity. 6 flash loan contracts are deployed (items 1-6 above); Morpho Blue is configured but awaiting contract implementation.
 
 **Status**: Fully implemented, testnet deployment pending.
 
@@ -1271,7 +1310,7 @@ SimulationService now routes requests based on chain:
 
 ---
 
-## 11. Feature Implementation Status (2026-01-25)
+## 11. Feature Implementation Status (Historical, 2026-01-25)
 
 > **Full Evaluation Report**: [docs/reports/deepseek_evaluation_consolidated.md](../reports/deepseek_evaluation_consolidated.md)
 
@@ -1389,6 +1428,13 @@ The following Architecture Decision Records document key decisions:
 - [ADR-035: Statistical Arbitrage Strategy](./adr/ADR-035-statistical-arbitrage.md)
 - [ADR-036: CEX Price Signal Integration](./adr/ADR-036-cex-price-signals.md)
 
+### Pipeline & Execution Scaling - Phase 7 (ADR-037 to ADR-041)
+- [ADR-037: Coordinator Pipeline Optimization](./adr/ADR-037-coordinator-pipeline-optimization.md)
+- [ADR-038: Chain-Grouped Execution](./adr/ADR-038-chain-grouped-execution.md)
+- [ADR-039: Async Pipeline Split](./adr/ADR-039-async-pipeline-split.md)
+- [ADR-040: Real-Time Native Token Pricing](./adr/ADR-040-real-time-native-token-pricing.md)
+- [ADR-041: Blockchain Config Architecture Refactor](./adr/ADR-041-blockchain-config-architecture-refactor.md)
+
 ---
 
 ## Appendix: Document History
@@ -1408,6 +1454,7 @@ The following Architecture Decision Records document key decisions:
 | 2.9 | 2026-02-14 | Analytics Module | Added §4.8 Analytics Module documenting 9 analytics components, updated Layer 2/3 component hierarchy with PriceMomentum, PriceOracle, PairActivityTracker, SwapEventFilter, MLOpportunityScorer, PerformanceAnalyticsEngine |
 | 2.10 | 2026-02-24 | Phase 6 Expansion | Added 4 emerging L2 chain configs (Blast, Scroll, Mantle, Mode) to P2 partition — 2 operational (Blast, Scroll with verified DEX addresses), 2 stubs (Mantle, Mode pending factory verification). Solana execution via Jupiter + Jito (ADR-034), statistical arbitrage strategy (ADR-035), CEX price signal integration (ADR-036), updated chain/DEX counts (57→71 DEXs) |
 | 2.11 | 2026-02-28 | DEX Count Correction | Corrected DEX counts to match source config (71→78 DEXs: 57 core EVM + 8 verified emerging L2 + 6 stubs + 7 Solana). Updated §9.2 DEX distribution diagram with verified DEX names per chain. Blast/Scroll (8 DEXs) confirmed operational with RPC-verified factory addresses (2026-02-26). |
+| 2.12 | 2026-03-07 | Staleness Fixes | Fixed deployment providers (Koyeb/Railway/Render → Fly.io), chain count (16→15), P2 chains (+Scroll/Blast), Solana executor status (DETECTION ONLY → ADR-034 complete), Redis eviction (allkeys-lru → noeviction), scaling projections (5→15 chains current). Added ADR-037 to ADR-041, chain-group routing (ADR-038), SimulationWorker (ADR-039), 5 new streams. Clarified Morpho Blue config-only status. |
 
 ---
 

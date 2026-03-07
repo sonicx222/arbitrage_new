@@ -1,7 +1,7 @@
 # API Reference
 
-> **Last Updated:** 2026-02-25
-> **Version:** 2.0
+> **Last Updated:** 2026-03-07
+> **Version:** 2.1
 
 This document provides the API reference for all service HTTP endpoints in the arbitrage system. All services use `createSimpleHealthServer` (from `@arbitrage/core/service-lifecycle`) or Express for their HTTP layer.
 
@@ -80,7 +80,7 @@ The coordinator uses Express with the following middleware stack (applied global
 - **Helmet** -- Security headers (CSP, HSTS, X-Frame-Options, etc.)
 - **CORS** -- Configurable via `ALLOWED_ORIGINS` env var (required in production)
 - **JSON parsing** -- 1MB limit
-- **Rate limiting** -- Configurable via `API_RATE_LIMIT_WINDOW_MS` (default: 15 min) and `API_RATE_LIMIT_MAX` (default: 100 requests per window)
+- **Rate limiting** -- Configurable via `API_RATE_LIMIT_WINDOW_MS` (default: 15 min) and `API_RATE_LIMIT_MAX` (default: 100 requests per window). Responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` headers.
 - **Request logging** -- Logs method, URL, status, duration, client IP
 
 ### Route Groups
@@ -662,6 +662,21 @@ Returns 200 when service is running and at least one feed is connected, 503 othe
   "batcherStats": { "..." : "..." }
 }
 ```
+
+---
+
+## Monolith Mode
+
+**Base URL:** `http://localhost:3100`
+
+When running in monolith mode (`services/monolith/`), all 7 services run in a single process via worker threads. The monolith health endpoint aggregates health from all workers.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Aggregated health from all worker services |
+| `GET /ready` | Ready when all workers are healthy |
+
+Individual worker services still listen on their original ports (3000-3006) within the process.
 
 ---
 

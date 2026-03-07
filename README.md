@@ -19,7 +19,7 @@ A production-ready, institutional-grade arbitrage detection and execution system
 For detailed technical information, refer to the `docs/` folder:
 
 ### Architecture & Design
-- [**System Architecture**](docs/architecture/ARCHITECTURE_V2.md): Comprehensive system design (v2.11)
+- [**System Architecture**](docs/architecture/ARCHITECTURE_V2.md): Comprehensive system design (v2.12)
 - [**Data Flow**](docs/architecture/DATA_FLOW.md): Visual diagrams of data flow and processing pipelines
 - [**Current State**](docs/architecture/CURRENT_STATE.md): Service inventory and partition mapping
 - [**Architecture Decision Records**](docs/architecture/adr/README.md): 41 ADRs with rationale and confidence levels
@@ -38,7 +38,12 @@ For detailed technical information, refer to the `docs/` folder:
 
 ### Operations & Security
 - [**Monitoring Setup**](docs/operations/MONITORING_SETUP.md): Prometheus, Grafana, alerting
+- [**Metrics Reference**](docs/operations/METRICS_REFERENCE.md): All 56 Prometheus metrics with PromQL examples
+- [**Troubleshooting Guide**](docs/operations/TROUBLESHOOTING_PRODUCTION.md): Diagnostic decision trees for production issues
+- [**Incident Response Runbook**](docs/operations/INCIDENT_RESPONSE_RUNBOOK.md): Severity levels, response procedures, recovery checklists
 - [**Secrets Management**](docs/security/SECRETS_MANAGEMENT.md): Key rotation and security practices
+- [**Auth Configuration**](docs/security/AUTH_CONFIGURATION.md): API keys, JWT, permissions, rate limiting
+- [**Redis Stream Signing**](docs/security/REDIS_STREAM_SIGNING.md): HMAC setup, zero-downtime key rotation
 - [**Redis Key Registry**](docs/redis-key-registry.md): All Redis key patterns and TTLs
 
 ### Reports & Research

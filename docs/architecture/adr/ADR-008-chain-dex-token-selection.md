@@ -1,7 +1,7 @@
 # ADR-008: Chain, DEX, and Token Selection Strategy
 
 ## Status
-**Accepted** | 2025-01-10 | **Updated** 2025-01-12 (Solana added)
+**Accepted** | 2025-01-10 | **Updated** 2025-01-12 (Solana added) | **Amended** 2026-03-07 (15 chains, 78 DEXs)
 
 ## Context
 
@@ -324,3 +324,36 @@ All phases remain within free tier limits (Helius 100K). Self-hosted Redis on Or
 - Covers 95%+ of available arbitrage opportunity volume
 - Solana adds 25-35% more opportunities with proven ecosystem
 - Mature Solana tooling (@solana/web3.js, Helius RPC)
+
+---
+
+## Amendment: Current State (March 2026)
+
+All original phases are complete. The system has expanded beyond the original 11-chain target:
+
+### Current Coverage
+
+| Metric | Original Target | Actual (Mar 2026) | Notes |
+|--------|----------------|-------------------|-------|
+| Chains | 11 (10 EVM + Solana) | **15** (14 EVM + Solana) | +4 emerging L2s |
+| DEXs | 62 (55 EVM + 7 Solana) | **78** (71 EVM + 7 Solana) | +8 verified L2 + 6 stubs |
+| Tokens | 165 | **112** (current) | 143 target (31 remaining) |
+
+### Additional Chains (Phase 4: Emerging L2s)
+
+| Chain | Partition | DEXs | Status |
+|-------|-----------|------|--------|
+| **Blast** | P2: L2-Turbo | 4 (Thruster V3/V2, BladeSwap, Fenix) | Operational (RPC-verified 2026-02-26) |
+| **Scroll** | P2: L2-Turbo | 4 (SyncSwap, Uniswap V3, SushiSwap V3, Ambient) | Operational (RPC-verified 2026-02-26) |
+| **Mantle** | Unassigned | 3 (Merchant MOE, Agni Finance, FusionX) | Stub (unverified factories) |
+| **Mode** | Unassigned | 3 (Kim Exchange, SupSwap, SwapMode) | Stub (unverified factories) |
+
+### Partition Updates
+
+Blast and Scroll were assigned to P2 (L2-Turbo) based on their L2 rollup characteristics. Mantle and Mode remain excluded from all partitions pending DEX factory verification. See `shared/config/src/deferred-items.ts` for D9-MANTLE-MODE-PARTITIONS.
+
+### Infrastructure Changes
+
+- Self-hosted Redis on Fly.io replaces Upstash — no 10K commands/day limit
+- Chain-grouped execution (ADR-038) routes to 4 per-group streams
+- All services deployed on Fly.io (original plan used 6+ providers)
