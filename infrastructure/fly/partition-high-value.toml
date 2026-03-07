@@ -36,6 +36,9 @@ primary_region = "iad"
   LOG_LEVEL = "info"
   HEALTH_CHECK_PORT = "3003"
   ENABLE_CROSS_REGION_HEALTH = "true"
+  # RT-3Q-001 FIX: Explicit memory constraints for 768MB VM.
+  CONSTRAINED_MEMORY = "true"
+  CACHE_L1_SIZE_MB = "8"
   # Chain-specific RPC URLs set via secrets
 
 [http_service]

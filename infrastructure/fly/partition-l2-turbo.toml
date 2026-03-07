@@ -33,6 +33,9 @@ primary_region = "sin"
   LOG_LEVEL = "info"
   HEALTH_CHECK_PORT = "3002"
   ENABLE_CROSS_REGION_HEALTH = "true"
+  # RT-3Q-001 FIX: Explicit memory constraints for 640MB VM.
+  CONSTRAINED_MEMORY = "true"
+  CACHE_L1_SIZE_MB = "8"
   # Chain-specific RPC URLs set via secrets
 
 [http_service]
