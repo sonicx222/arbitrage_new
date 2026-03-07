@@ -1340,4 +1340,489 @@ SendMessage findings summary to team lead when done.
 
 ---
 
-<!-- Triage, Fix Implementer, Rebuild, Regression Guard, Convergence, and Report sections follow -->
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## STEP 2 — TRIAGE (orchestrator executes directly)
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After all analysis agents report back:
+
+### 2A — Collect all findings
+
+Read all JSONL files from ./autopilot-session/cycle-{CYCLE}/findings/*.jsonl.
+Parse each line as a JSON finding object. Build a unified findings array.
+
+### 2B — Deduplicate
+
+Two findings are duplicates if they have the same file + line + category.
+Keep the higher-severity instance. Record dedup count.
+
+### 2C — Cross-reference with blocklist
+
+Read ./autopilot-session/blocked-findings.json (if exists).
+Remove any findings whose id matches a blocked finding.
+Mark them as "blocked" in triage output.
+
+### 2D — Cross-reference with previous cycle
+
+If CYCLE > 1: read ./autopilot-session/cycle-{PREV}/triage.json.
+Classify each finding as NEW, EXISTING, or RESOLVED.
+Resolved = was in previous cycle but not in current (fixed by last cycle's changes).
+
+### 2E — Prioritize and build fix manifest
+
+Sort fixable findings by: CRITICAL first, then HIGH, then MEDIUM.
+LOW findings are NEVER included in fix manifest — deferred to report.
+Cap at 15 fixes per cycle.
+
+Write ./autopilot-session/cycle-{CYCLE}/triage.json:
+```json
+{
+  "cycle": N,
+  "total_findings": X,
+  "by_severity": {"CRITICAL": N, "HIGH": N, "MEDIUM": N, "LOW": N},
+  "new_findings": N,
+  "resolved_findings": N,
+  "fixable": N,
+  "deferred": N,
+  "blocked": N
+}
+```
+
+Write ./autopilot-session/cycle-{CYCLE}/fix-manifest.json:
+```json
+{
+  "cycle": N,
+  "total_findings": X,
+  "fixable": Y,
+  "deferred": Z,
+  "fixes": [sorted array of fixable findings with priority rank],
+  "deferred_items": [LOW + unfixable findings with reasons]
+}
+```
+
+### 2F — Check if fixes needed
+
+If fixable == 0:
+  Write empty fixes-applied.json. Skip to STEP 6 (convergence check).
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## STEP 3 — FIX (fix-implementer agent)
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dispatch the fix-implementer agent with the fix manifest.
+
+### Agent 11: "fix-implementer" (model: opus, subagent_type: general-purpose)
+
+PROMPT:
+```
+CRITICAL: When done, use SendMessage to report what was fixed and what failed.
+
+You are the FIX IMPLEMENTER in an autonomous optimization loop.
+Read the fix manifest at: ./autopilot-session/cycle-{CYCLE}/fix-manifest.json
+Apply fixes in priority order. Write results to: ./autopilot-session/cycle-{CYCLE}/fixes-applied.json
+
+RULES:
+- Read EVERY target file BEFORE editing it. Understand context first.
+- Run `npm run typecheck` after EACH file change. If it fails, revert that change
+  and mark the finding as fix_failed. Move to the next fix.
+- Run the targeted test command from the fix manifest after each logical fix.
+  If tests fail with NEW failures (compare to baseline), revert and mark fix_failed.
+- Record every change in fixes-applied.json: finding_id, files_changed,
+  lines_added, lines_removed, status (applied|failed).
+- HARD CAP: Stop after 15 fixes regardless of remaining manifest items.
+- Do NOT refactor beyond what the finding requires.
+- Do NOT change public APIs or interfaces (adding fields OK, removing/renaming NO).
+- Do NOT modify test assertions to make tests pass — tests are the oracle.
+- Do NOT touch files outside the fix manifest scope.
+- When editing shared/ packages, remember build order: types -> config -> core -> ml.
+  If you change shared/types, you may need to rebuild downstream.
+
+OUTPUT FORMAT for fixes-applied.json:
+```json
+{
+  "cycle": N,
+  "fixes": [
+    {
+      "finding_id": "SA-003",
+      "status": "applied",
+      "files_changed": ["path/to/file.ts"],
+      "lines_added": 3,
+      "lines_removed": 2,
+      "description": "Replaced hardcoded stream name with RedisStreams constant"
+    },
+    {
+      "finding_id": "EX-007",
+      "status": "failed",
+      "reason": "Typecheck failed after edit — type mismatch in downstream consumer",
+      "files_changed": []
+    }
+  ],
+  "summary": {
+    "total_attempted": 10,
+    "applied": 8,
+    "failed": 2,
+    "skipped": 5
+  }
+}
+```
+
+SendMessage your summary to the team lead when done: how many applied, how many failed, which files changed.
+```
+
+After fix-implementer completes, the orchestrator:
+1. Read fixes-applied.json
+2. Count total lines changed (sum lines_added + lines_removed across all applied fixes)
+3. If total lines > 500: REVERT all changes (git checkout -- .), mark cycle as "exceeded_line_cap"
+4. Run `npm run typecheck` as a final safety check
+5. If typecheck fails: REVERT, mark cycle as "typecheck_failed"
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## STEP 4 — REBUILD & RESTART (~2 minutes)
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 4A — Stop services
+
+npm run dev:stop
+sleep 5
+
+Verify clean shutdown:
+tasklist | grep -i node | grep -v grep || echo "Clean shutdown"
+
+### 4B — Rebuild
+
+npm run build
+
+If build fails:
+  echo "Incremental build failed, trying clean build..."
+  npm run build:clean
+  If still fails:
+    git checkout -- .  (revert all changes)
+    npm run build      (rebuild on clean code)
+    Mark cycle as "build_failed" in cycle-summary.json
+    Skip to STEP 6 with 0 fixes applied
+
+### 4C — Restart services
+
+npm run dev:monitor &
+
+### 4D — Poll readiness
+
+Same polling logic as Phase 0 Step 0E.
+30s timeout per service, 120s for cross-chain.
+
+If services fail to start after fixes:
+  This indicates the fixes broke startup. REVERT:
+  npm run dev:stop
+  git checkout -- .
+  npm run build
+  npm run dev:monitor &
+  (re-poll readiness)
+  Mark cycle as "startup_failed"
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## STEP 5 — VALIDATE (regression-guard agent)
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dispatch regression-guard agent to verify fixes didn't break anything.
+
+### Agent 12: "regression-guard" (model: opus, subagent_type: general-purpose)
+
+PROMPT:
+```
+CRITICAL: When done, use SendMessage to report validation results.
+
+You are the REGRESSION GUARD. Verify that fixes applied this cycle did not
+introduce new issues. You receive NO information about WHY fixes were made —
+evaluate the system purely on its current state.
+
+Read: ./autopilot-session/cycle-{CYCLE}/fixes-applied.json (list of changed files)
+Read: ./autopilot-session/cycle-{CYCLE}/dirty-domains.json (which domains to check)
+Read: ./autopilot-session/baseline/ (original baseline for comparison)
+
+Write results to: ./autopilot-session/cycle-{CYCLE}/regression-results.json
+
+CHECKS:
+
+1. TYPECHECK
+   Run: npm run typecheck
+   Must exit 0. Any failure: mark as REGRESSION, severity CRITICAL.
+
+2. UNIT TESTS
+   Run: npm run test:unit
+   Compare failure count against baseline/test-baseline.txt.
+   New failures (count increased): REGRESSION, severity CRITICAL.
+
+3. SERVICE HEALTH
+   curl /health on all 7 services.
+   Any service unhealthy that was healthy at baseline: REGRESSION, severity CRITICAL.
+   Any service degraded that was healthy: REGRESSION, severity HIGH.
+
+4. DOMAIN-SPECIFIC RE-CHECKS
+   For each domain in dirty-domains.json, run a subset of that domain's analysis checks:
+   - streams-analyst dirty → check stream topology + consumer lag
+   - execution-analyst dirty → check success rate + risk state
+   - service-health-monitor dirty → check all /health endpoints
+   - static-analyst dirty → re-run affected static checks on changed files
+   - performance-profiler dirty → check event loop + memory
+   Compare against previous cycle's findings. Flag any NEW findings not in previous cycle.
+
+5. PIPELINE INTEGRITY
+   Quick E2E check: verify 4 critical streams still growing (15s observation).
+   Any stream that was flowing but stopped: REGRESSION, severity CRITICAL.
+
+OUTPUT FORMAT:
+```json
+{
+  "cycle": N,
+  "verdict": "PASS | FAIL",
+  "regressions": [
+    {
+      "type": "typecheck|test|health|domain|pipeline",
+      "severity": "CRITICAL|HIGH",
+      "description": "..."
+    }
+  ],
+  "new_findings": ["findings discovered during domain re-checks"],
+  "metrics_comparison": {
+    "baseline_success_rate": "X",
+    "current_success_rate": "Y",
+    "baseline_event_loop_p99": "X",
+    "current_event_loop_p99": "Y"
+  }
+}
+```
+
+If verdict is FAIL with any CRITICAL regression: the orchestrator will REVERT this cycle.
+
+SendMessage your verdict and regression details to the team lead.
+```
+
+After regression-guard completes:
+- If verdict == "FAIL" with CRITICAL regressions:
+    git revert HEAD --no-edit (if commit was already made)
+    OR git checkout -- . (if not yet committed)
+    Rebuild and restart on reverted code.
+    Add failed fixes to ./autopilot-session/blocked-findings.json
+    Mark cycle as "reverted" in cycle-summary.json
+- If verdict == "PASS" or "FAIL" with only HIGH/MEDIUM:
+    Proceed to STEP 6
+- Copy any new_findings from regression-guard into the next cycle's consideration
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## STEP 6 — COMMIT & CONVERGE
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 6A — Git commit (if fixes were applied and not reverted)
+
+Read fixes-applied.json. If applied count > 0 AND cycle not reverted:
+
+git add -A
+git commit -m "autopilot(cycle-{CYCLE}): fix {N} findings ({C}C/{H}H/{M}M)
+
+Findings fixed:
+{list each applied fix: - {finding_id}: {description}}
+
+Deferred: {list deferred items}
+
+Session: {SESSION_ID}, Cycle: {CYCLE}/5"
+
+Record commit SHA to ./autopilot-session/cycle-{CYCLE}/commit.sha
+
+### 6B — Compute dirty domains for next cycle
+
+Read fixes-applied.json for list of changed files.
+Apply file-to-domain mapping:
+
+FILE PATTERN → DIRTY DOMAINS:
+shared/core/src/redis/          → streams-analyst, e2e-flow-tracer
+services/execution-engine/      → execution-analyst, performance-profiler, e2e-flow-tracer
+services/coordinator/           → service-health-monitor, e2e-flow-tracer, dashboard-validator
+services/partition-*/           → detection-analyst, performance-profiler
+services/cross-chain-detector/  → detection-analyst, e2e-flow-tracer
+shared/config/                  → security-config-auditor, infra-auditor
+shared/types/                   → static-analyst, streams-analyst
+shared/core/                    → static-analyst, performance-profiler
+infrastructure/                 → infra-auditor
+dashboard/                      → dashboard-validator
+.env.example                    → security-config-auditor
+contracts/                      → (no agent — contracts not in runtime loop)
+
+Always include: e2e-flow-tracer (cross-cutting validation).
+
+Also add domains of any NEW findings from regression-guard's output.
+
+Write ./autopilot-session/cycle-{CYCLE}/dirty-domains.json:
+```json
+{
+  "changed_files": ["path/to/file.ts"],
+  "dirty_domains": ["streams-analyst", "execution-analyst", "e2e-flow-tracer"],
+  "reason": {
+    "streams-analyst": "shared/core/src/redis/streams.ts modified",
+    "execution-analyst": "services/execution-engine/src/consumer.ts modified",
+    "e2e-flow-tracer": "always included"
+  }
+}
+```
+
+### 6C — Write cycle summary
+
+Write ./autopilot-session/cycle-{CYCLE}/cycle-summary.json:
+```json
+{
+  "cycle": N,
+  "duration_min": X,
+  "agents_dispatched": N,
+  "findings_total": X,
+  "findings_by_severity": {"CRITICAL": N, "HIGH": N, "MEDIUM": N, "LOW": N},
+  "fixes_applied": N,
+  "fixes_failed": N,
+  "fixes_blocked": N,
+  "new_findings": N,
+  "resolved_findings": N,
+  "reverted": false,
+  "commit": "sha or null"
+}
+```
+
+### 6D — Update convergence tracking
+
+Read or create ./autopilot-session/convergence.json.
+Append this cycle's summary to the cycles array.
+
+### 6E — Check exit conditions
+
+remaining_fixable = findings where fixable=true AND severity != LOW
+                    AND not in blocked-findings.json
+
+EXIT CONDITIONS (check in order):
+1. remaining_fixable == 0 → exit_reason = "CONVERGED"
+2. new_findings == 0 AND fixes_applied == 0 → exit_reason = "PLATEAU"
+3. CYCLE == 5 → exit_reason = "MAX_CYCLES"
+4. elapsed_time > 110 min → exit_reason = "TIME_LIMIT"
+5. This cycle reverted AND previous cycle reverted → exit_reason = "STUCK"
+
+If any exit condition met:
+  Write exit_reason to convergence.json
+  Break to PHASE FINAL
+
+If no exit condition:
+  Create next cycle directory: mkdir -p ./autopilot-session/cycle-{NEXT}/findings
+  Continue to next cycle iteration
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PHASE FINAL — REPORT & CLEANUP
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### Final-A — Capture final system state
+
+For each service: curl /health, /stats → final state snapshot.
+Scrape /metrics from all services → final metrics.
+redis-cli INFO memory → final Redis state.
+
+### Final-B — Stop services
+
+npm run dev:stop
+sleep 5
+redis-cli SHUTDOWN NOSAVE 2>/dev/null || echo "Redis already stopped"
+
+### Final-C — Generate report
+
+Read convergence.json for cycle history.
+Read all cycle-N/triage.json for findings progression.
+Read all cycle-N/fixes-applied.json for fix details.
+Read baseline/ and final state for before/after comparison.
+
+Write ./autopilot-session/REPORT.md using this template:
+
+```markdown
+# Autopilot Optimization Report
+
+**Session:** {SESSION_ID}
+**Date:** {ISO8601}
+**Duration:** {elapsed} minutes ({CYCLES} cycles)
+**Git SHA (start):** {start_sha} → **(end):** {end_sha}
+**Exit reason:** {CONVERGED|PLATEAU|MAX_CYCLES|TIME_LIMIT|STUCK}
+
+---
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Cycles completed | {N} / 5 max |
+| Total findings discovered | {N} unique |
+| Automatically fixed | {N} |
+| Fix failures (reverted) | {N} |
+| Blocked (unsafe to auto-fix) | {N} |
+| Remaining (unfixable) | {N} |
+| Git commits produced | {N} |
+| Lines changed | {N} |
+
+### Severity Progression
+
+| Severity | Cycle 1 | Cycle 2 | ... | Final |
+|----------|---------|---------|-----|-------|
+| CRITICAL | N | N | ... | N |
+| HIGH | N | N | ... | N |
+| MEDIUM | N | N | ... | N |
+| LOW | N | N | ... | N |
+
+## Fixes Applied (by cycle)
+
+### Cycle N — commit {sha}
+| Finding | Severity | Description | Files |
+|---------|----------|-------------|-------|
+| {id} | {sev} | {desc} | {files} |
+
+## Remaining Items (not auto-fixable)
+
+| ID | Severity | Agent | Title | Reason |
+|----|----------|-------|-------|--------|
+
+## Blocked Items (fix caused regression)
+
+| ID | Severity | Blocked At | Regression Caused |
+|----|----------|-----------|-------------------|
+
+## System State at Exit
+
+### Service Health
+{final /health for all 7 services}
+
+### Pipeline Flow
+{final stream lengths, consumer lag, DLQ}
+
+### Key Metrics Comparison
+| Metric | Baseline | Final | Change |
+|--------|----------|-------|--------|
+| Execution success rate | X% | Y% | +/-Z% |
+| Event loop p99 | Xms | Yms | +/-Z% |
+| Stream transit p95 | Xms | Yms | +/-Z% |
+| DLQ entries | X | Y | +/-Z |
+| Consumer lag (EE) | X | Y | +/-Z |
+| Redis memory | XMB | YMB | +/-Z% |
+
+## Git Log
+
+{git log --oneline for all autopilot commits in this session}
+
+## Recommendations
+
+{List remaining items + blocked items with specific manual fix guidance}
+```
+
+### Final-D — Copy report to project docs
+
+cp ./autopilot-session/REPORT.md docs/reports/AUTOPILOT_REPORT_{SESSION_ID}.md
+
+Output: "Autopilot session {SESSION_ID} complete. Exit: {reason}. Report: docs/reports/AUTOPILOT_REPORT_{SESSION_ID}.md"
