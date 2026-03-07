@@ -61,6 +61,14 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
       debug: jest.fn(),
     })),
     getAlertHistory: jest.fn(() => []),
+    subscribeSSE: jest.fn(() => () => {}),
+    getCircuitBreakerSnapshot: jest.fn(() => ({
+      state: 'CLOSED' as const,
+      consecutiveFailures: 0,
+      lastFailureTime: null,
+      cooldownRemainingMs: 0,
+      timestamp: Date.now(),
+    })),
     ...overrides,
   };
 }
@@ -94,66 +102,28 @@ describe('Dashboard Routes', () => {
   // ===========================================================================
 
   describe('GET /', () => {
-    it('should return HTML dashboard', async () => {
+    it('should return HTML dashboard (React SPA)', async () => {
       const app = createTestApp(mockState);
       const res = await supertest(app).get('/');
 
       expect(res.status).toBe(200);
       expect(res.text).toContain('<!DOCTYPE html>');
-      expect(res.text).toContain('Arbitrage System Dashboard');
+      expect(res.text).toContain('Arbitrage Dashboard');
     });
 
-    it('should include system metrics in HTML', async () => {
+    it('should serve SPA with root div mount point', async () => {
       const app = createTestApp(mockState);
       const res = await supertest(app).get('/');
 
-      expect(res.text).toContain('95.0%'); // systemHealth
-      expect(res.text).toContain('5 services active'); // activeServices
-      expect(res.text).toContain('$1234.56'); // totalProfit
+      expect(res.text).toContain('<div id="root"></div>');
     });
 
-    it('should show LEADER badge when leader', async () => {
+    it('should serve SPA for unknown routes (catch-all)', async () => {
       const app = createTestApp(mockState);
-      const res = await supertest(app).get('/');
+      const res = await supertest(app).get('/some/unknown/route');
 
-      expect(res.text).toContain('LEADER');
-    });
-
-    it('should show STANDBY badge when not leader', async () => {
-      mockState = createMockStateProvider({
-        getIsLeader: jest.fn(() => false),
-      });
-      const app = createTestApp(mockState);
-      const res = await supertest(app).get('/');
-
-      expect(res.text).toContain('STANDBY');
-    });
-
-    it('should include service health status', async () => {
-      const app = createTestApp(mockState);
-      const res = await supertest(app).get('/');
-
-      expect(res.text).toContain('partition-asia-fast');
-      expect(res.text).toContain('healthy');
-    });
-
-    it('should escape HTML in instance ID', async () => {
-      mockState = createMockStateProvider({
-        getInstanceId: jest.fn(() => '<script>alert("xss")</script>'),
-      });
-      const app = createTestApp(mockState);
-      const res = await supertest(app).get('/');
-
-      expect(res.text).not.toContain('<script>alert("xss")</script>');
-      expect(res.text).toContain('&lt;script&gt;');
-    });
-
-    it('should include auto-refresh script', async () => {
-      const app = createTestApp(mockState);
-      const res = await supertest(app).get('/');
-
-      expect(res.text).toContain('setTimeout');
-      expect(res.text).toContain('window.location.reload()');
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('Arbitrage Dashboard');
     });
   });
 
@@ -186,7 +156,7 @@ describe('Dashboard Routes', () => {
         .set('Authorization', 'Bearer test-secret-token');
 
       expect(res.status).toBe(200);
-      expect(res.text).toContain('Arbitrage System Dashboard');
+      expect(res.text).toContain('Arbitrage Dashboard');
     });
 
     it('should reject invalid Bearer token', async () => {

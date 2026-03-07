@@ -86,6 +86,14 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
       debug: jest.fn()
     })),
     getAlertHistory: jest.fn(() => [...defaultAlertHistory]),
+    subscribeSSE: jest.fn(() => () => {}),
+    getCircuitBreakerSnapshot: jest.fn(() => ({
+      state: 'CLOSED' as const,
+      consecutiveFailures: 0,
+      lastFailureTime: null,
+      cooldownRemainingMs: 0,
+      timestamp: Date.now(),
+    })),
     ...overrides
   };
 }
@@ -129,15 +137,23 @@ describe('Route Factory Functions', () => {
       expect(router).toBeDefined();
     });
 
-    it('should register GET / route', () => {
+    it('should register GET route (SPA catch-all or legacy /)', () => {
       const mockState = createMockStateProvider();
       const router = createDashboardRoutes(mockState);
 
+      // SPA mode uses express.static + GET * catch-all; legacy uses GET /
       const routes = router.stack.filter((layer: any) => layer.route);
-      const dashboardRoute = routes.find((r: any) => r.route.path === '/') as any;
+      const dashboardRoute = routes.find((r: any) =>
+        r.route.path === '/' || r.route.path === '*'
+      ) as any;
 
-      expect(dashboardRoute).toBeDefined();
-      expect(dashboardRoute?.route?.methods?.get).toBe(true);
+      // If no named route, check for express.static middleware layer
+      if (!dashboardRoute) {
+        const hasStaticLayer = router.stack.some((layer: any) => layer.name === 'serveStatic');
+        expect(hasStaticLayer).toBe(true);
+      } else {
+        expect(dashboardRoute.route.methods.get).toBe(true);
+      }
     });
   });
 

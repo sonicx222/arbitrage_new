@@ -231,7 +231,7 @@ describe('configureMiddleware', () => {
           'GET, POST, PUT, DELETE, OPTIONS'
         );
         expect(res.headers['access-control-allow-headers']).toBe(
-          'Content-Type, Authorization, X-Requested-With'
+          'Content-Type, Authorization, X-Requested-With, X-API-Key'
         );
         expect(res.headers['access-control-allow-credentials']).toBe('true');
         done();
