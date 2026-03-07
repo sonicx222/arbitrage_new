@@ -488,6 +488,152 @@ describe('SimulationStrategy', () => {
   });
 
   // ===========================================================================
+  // WEI-BUG FIX: expectedProfit wei-vs-USD detection
+  // ===========================================================================
+
+  describe('wei expectedProfit normalization', () => {
+    it('should normalize wei-scale expectedProfit using profitPercentage', async () => {
+      Math.random = jest.fn()
+        .mockReturnValueOnce(0.5) // latency variance
+        .mockReturnValueOnce(0.5) // success check (0.5 < 1.0 = success)
+        .mockReturnValueOnce(0.5) // profit variance
+        .mockReturnValue(0.5); // tx hash generation
+
+      const config = createDefaultConfig({
+        successRate: 1.0,
+        profitVariance: 0,
+        gasCostMultiplier: 0,
+      });
+      const strategy = new SimulationStrategy(logger, config);
+      // Simulate simple-arbitrage-detector output: expectedProfit in wei (6.8e20),
+      // profitPercentage correctly set to 2.5 (meaning 2.5%)
+      const opportunity = createMockOpportunity({
+        expectedProfit: 6.8e20, // wei-scale value from Number(amountIn) * netProfitPct
+        profitPercentage: 2.5,  // correctly set as percentage
+      });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      const result = await executePromise;
+
+      expect(result.success).toBe(true);
+      // Should use profitPercentage: (2.5 / 100) * 5000 = $125
+      expect(result.actualProfit).toBeCloseTo(125, 0);
+    });
+
+    it('should pass through normal USD expectedProfit unchanged', async () => {
+      Math.random = jest.fn()
+        .mockReturnValueOnce(0.5) // latency variance
+        .mockReturnValueOnce(0.5) // success check
+        .mockReturnValueOnce(0.5) // profit variance
+        .mockReturnValue(0.5);
+
+      const config = createDefaultConfig({
+        successRate: 1.0,
+        profitVariance: 0,
+        gasCostMultiplier: 0,
+      });
+      const strategy = new SimulationStrategy(logger, config);
+      // Normal chain-simulator output: expectedProfit already in USD
+      const opportunity = createMockOpportunity({
+        expectedProfit: 42.50,
+        profitPercentage: 1.2,
+      });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      const result = await executePromise;
+
+      expect(result.success).toBe(true);
+      // Should use the original expectedProfit as-is (below threshold)
+      expect(result.actualProfit).toBeCloseTo(42.50, 1);
+    });
+
+    it('should pass through large expectedProfit if profitPercentage is missing', async () => {
+      Math.random = jest.fn()
+        .mockReturnValueOnce(0.5)
+        .mockReturnValueOnce(0.5)
+        .mockReturnValueOnce(0.5)
+        .mockReturnValue(0.5);
+
+      const config = createDefaultConfig({
+        successRate: 1.0,
+        profitVariance: 0,
+        gasCostMultiplier: 0,
+      });
+      const strategy = new SimulationStrategy(logger, config);
+      // Edge case: large profit but no profitPercentage — can't normalize
+      const opportunity = createMockOpportunity({
+        expectedProfit: 1e15,
+        profitPercentage: undefined,
+      });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      const result = await executePromise;
+
+      expect(result.success).toBe(true);
+      // Falls through — can't normalize without profitPercentage
+      expect(result.actualProfit).toBeCloseTo(1e15, -10);
+    });
+
+    it('should normalize borderline wei-scale profit (just above threshold)', async () => {
+      Math.random = jest.fn()
+        .mockReturnValueOnce(0.5)
+        .mockReturnValueOnce(0.5)
+        .mockReturnValueOnce(0.5)
+        .mockReturnValue(0.5);
+
+      const config = createDefaultConfig({
+        successRate: 1.0,
+        profitVariance: 0,
+        gasCostMultiplier: 0,
+      });
+      const strategy = new SimulationStrategy(logger, config);
+      // Just above $10,000 threshold — gets normalized
+      const opportunity = createMockOpportunity({
+        expectedProfit: 10_001,
+        profitPercentage: 5.0,
+      });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      const result = await executePromise;
+
+      expect(result.success).toBe(true);
+      // Normalized: (5.0 / 100) * 5000 = $250
+      expect(result.actualProfit).toBeCloseTo(250, 0);
+    });
+
+    it('should not normalize profit at exactly the threshold', async () => {
+      Math.random = jest.fn()
+        .mockReturnValueOnce(0.5)
+        .mockReturnValueOnce(0.5)
+        .mockReturnValueOnce(0.5)
+        .mockReturnValue(0.5);
+
+      const config = createDefaultConfig({
+        successRate: 1.0,
+        profitVariance: 0,
+        gasCostMultiplier: 0,
+      });
+      const strategy = new SimulationStrategy(logger, config);
+      // Exactly $10,000 — not normalized (> not >=)
+      const opportunity = createMockOpportunity({
+        expectedProfit: 10_000,
+        profitPercentage: 5.0,
+      });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      const result = await executePromise;
+
+      expect(result.success).toBe(true);
+      expect(result.actualProfit).toBeCloseTo(10_000, 0);
+    });
+  });
+
+  // ===========================================================================
   // Fix 1.1: Context Validation Logging Tests
   // ===========================================================================
 

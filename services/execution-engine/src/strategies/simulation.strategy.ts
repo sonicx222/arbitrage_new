@@ -50,7 +50,22 @@ export class SimulationStrategy extends BaseExecutionStrategy {
     const chain = opportunity.buyChain ?? opportunity.chain ?? 'unknown';
     const dex = opportunity.buyDex ?? 'unknown';
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
-    const expectedProfit = opportunity.expectedProfit ?? 0;
+    const rawExpectedProfit = opportunity.expectedProfit ?? 0;
+
+    // WEI-BUG FIX: simple-arbitrage-detector calculates expectedProfit as
+    // Number(amountIn) * netProfitPct where amountIn is in wei (1e16-1e19),
+    // producing values like 1e13-2e18. Chain-simulator correctly provides USD.
+    // Detect wei-scale values (> $10,000 threshold) and fall back to computing
+    // USD profit from profitPercentage (which is always correct in both paths).
+    const WEI_PROFIT_THRESHOLD = 10_000;
+    const DEFAULT_POSITION_SIZE_USD = 5_000;
+    let expectedProfit: number;
+    if (rawExpectedProfit > WEI_PROFIT_THRESHOLD && opportunity.profitPercentage != null) {
+      // profitPercentage is in percent (e.g., 2.5 means 2.5%), convert to fraction
+      expectedProfit = (opportunity.profitPercentage / 100) * DEFAULT_POSITION_SIZE_USD;
+    } else {
+      expectedProfit = rawExpectedProfit;
+    }
 
     // Fix 1.1: Validate basic opportunity structure (consistent with real strategies)
     if (!opportunity.id) {
