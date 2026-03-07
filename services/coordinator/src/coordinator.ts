@@ -303,6 +303,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // H2 FIX: Delta-based CPU usage tracking (replaces hardcoded 0)
   private readonly cpuTracker = new CpuUsageTracker();
 
+  // SSE event listeners (for pushing real-time events to dashboard clients)
+  private readonly sseListeners = new Set<(event: string, data: unknown) => void>();
+
   // M4 FIX: Pipeline starvation detection — track last time execution requests were seen
   private lastExecutionRequestTime = 0;
   private pipelineStarvationAlerted = false;
@@ -1968,6 +1971,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
     }
 
+    // Push execution result to SSE dashboard clients
+    this.emitSSE('execution-result', {
+      opportunityId,
+      success,
+      chain,
+      dex: getString(rawResult, 'dex', 'unknown'),
+      actualProfit: getNumber(rawResult, 'actualProfit', 0),
+      gasUsed: getNumber(rawResult, 'gasUsed', 0),
+      gasCost: getNumber(rawResult, 'gasCost', 0),
+      error: getOptionalString(rawResult, 'error'),
+      transactionHash: getOptionalString(rawResult, 'transactionHash'),
+      latencyMs: getNumber(rawResult, 'latencyMs', 0),
+      timestamp: getNumber(rawResult, 'timestamp', Date.now()),
+    });
+
     // P2-5: Do not reset stream errors from execution results.
     // Only the opportunity handler (primary data path) should reset errors.
   }
@@ -2493,6 +2511,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Log and send alert
     this.logger.warn('Alert triggered', { ...alert });
 
+    // Push alert to SSE dashboard clients
+    this.emitSSE('alert', alert);
+
     // Send to external channels (Discord/Slack) via AlertNotifier
     if (this.alertNotifier) {
       // Fire and forget - don't await to avoid blocking
@@ -2678,6 +2699,64 @@ export class CoordinatorService implements CoordinatorStateProvider {
    */
   getAlertHistory(limit: number = 100): Alert[] {
     return this.alertNotifier?.getAlertHistory(limit) ?? [];
+  }
+
+  /**
+   * Subscribe to real-time SSE events (execution results, alerts, circuit breaker).
+   * Returns an unsubscribe function for cleanup on client disconnect.
+   */
+  subscribeSSE(listener: (event: string, data: unknown) => void): () => void {
+    this.sseListeners.add(listener);
+    return () => { this.sseListeners.delete(listener); };
+  }
+
+  /**
+   * Emit an event to all subscribed SSE clients.
+   */
+  private emitSSE(event: string, data: unknown): void {
+    for (const listener of this.sseListeners) {
+      try {
+        listener(event, data);
+      } catch {
+        // Individual listener failure shouldn't affect others
+      }
+    }
+  }
+
+  /**
+   * Get execution circuit breaker state snapshot for SSE push.
+   * Maps SimpleCircuitBreakerStatus to the dashboard's expected format.
+   */
+  getCircuitBreakerSnapshot(): {
+    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    consecutiveFailures: number;
+    lastFailureTime: number | null;
+    cooldownRemainingMs: number;
+    timestamp: number;
+  } {
+    const status = this.executionCircuitBreaker.getStatus();
+    const cooldownRemaining = this.executionCircuitBreaker.getCooldownRemaining();
+
+    // Determine effective state:
+    // - CLOSED: not open
+    // - HALF_OPEN: open but cooldown expired (allowing recovery attempt)
+    // - OPEN: open and cooldown still active
+    let state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    if (!status.isOpen) {
+      state = 'CLOSED';
+    } else if (cooldownRemaining === 0) {
+      state = 'HALF_OPEN';
+    } else {
+      state = 'OPEN';
+    }
+
+    return {
+      state,
+      consecutiveFailures: status.failures,
+      lastFailureTime: status.lastFailure > 0 ? status.lastFailure : null,
+      cooldownRemainingMs: cooldownRemaining,
+      timestamp: Date.now(),
+    };
   }
 
   // ===========================================================================

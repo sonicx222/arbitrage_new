@@ -20,6 +20,11 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
   const dashboardAuthToken = process.env.DASHBOARD_AUTH_TOKEN;
 
+  // H-01 FIX: Require DASHBOARD_AUTH_TOKEN in production (matches dashboard.routes.ts startup guard)
+  if (process.env.NODE_ENV === 'production' && !dashboardAuthToken) {
+    throw new Error('DASHBOARD_AUTH_TOKEN is required in production for SSE endpoint security');
+  }
+
   router.get('/events', ((req: Request, res: Response) => {
     // Auth: validate token from query param (EventSource can't set headers)
     if (dashboardAuthToken) {

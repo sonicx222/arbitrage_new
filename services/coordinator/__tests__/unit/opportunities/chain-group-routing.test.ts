@@ -44,7 +44,8 @@ function createMockCircuitBreaker(): jest.Mocked<CircuitBreaker> {
     recordFailure: jest.fn().mockReturnValue(false),
     recordSuccess: jest.fn().mockReturnValue(false),
     getFailures: jest.fn().mockReturnValue(0),
-    getStatus: jest.fn().mockReturnValue({ isOpen: false, failures: 0, resetTimeoutMs: 60000 }),
+    getStatus: jest.fn().mockReturnValue({ isOpen: false, failures: 0, resetTimeoutMs: 60000, lastFailure: 0, threshold: 5 }),
+    getCooldownRemaining: jest.fn().mockReturnValue(0),
   };
 }
 

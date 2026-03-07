@@ -6,8 +6,10 @@
  * @see coordinator.ts (main service)
  */
 
-import { Application, Request, Response } from 'express';
+import http from 'http';
+import { Application, Request, Response, RequestHandler } from 'express';
 import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import type { CoordinatorStateProvider } from '../types';
 import { createHealthRoutes } from './health.routes';
 import { createMetricsRoutes } from './metrics.routes';
@@ -97,6 +99,98 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
       instanceId: state.getInstanceId(),
     });
   });
+
+  // EE proxy — dashboard needs direct access to execution engine endpoints.
+  // In dev, Vite proxies /ee/* and /circuit-breaker to EE port 3005.
+  // In production, coordinator proxies these for the SPA.
+  const eePort = parseInt(process.env.EXECUTION_ENGINE_PORT ?? '3005', 10);
+  if (Number.isNaN(eePort)) {
+    throw new Error(`Invalid EXECUTION_ENGINE_PORT: '${process.env.EXECUTION_ENGINE_PORT}'`);
+  }
+  const eeHost = process.env.EXECUTION_ENGINE_HOST ?? 'localhost';
+
+  const MAX_PROXY_RESPONSE_SIZE = 1024 * 1024; // 1MB limit
+
+  function proxyToEE(targetPath: string, req: Request, res: Response): void {
+    let responded = false;
+    const respond = (status: number, body: object) => {
+      if (responded) return;
+      responded = true;
+      res.status(status).json(body);
+    };
+
+    const options: http.RequestOptions = {
+      hostname: eeHost,
+      port: eePort,
+      path: targetPath,
+      method: req.method,
+      timeout: 5000,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(req.headers['x-api-key'] ? { 'x-api-key': req.headers['x-api-key'] as string } : {}),
+      },
+    };
+    const proxyReq = http.request(options, (proxyRes) => {
+      let body = '';
+      let bodySize = 0;
+      proxyRes.on('data', (chunk: Buffer) => {
+        bodySize += chunk.length;
+        if (bodySize > MAX_PROXY_RESPONSE_SIZE) {
+          proxyReq.destroy();
+          respond(502, { error: 'Execution engine response too large' });
+          return;
+        }
+        body += chunk.toString();
+      });
+      proxyRes.on('error', () => {
+        respond(502, { error: 'Execution engine connection lost' });
+      });
+      proxyRes.on('end', () => {
+        try {
+          respond(proxyRes.statusCode ?? 200, JSON.parse(body));
+        } catch {
+          respond(502, { error: 'Invalid response from execution engine' });
+        }
+      });
+    });
+    proxyReq.on('error', () => {
+      respond(503, { error: 'Execution engine unreachable' });
+    });
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      respond(504, { error: 'Execution engine timeout' });
+    });
+    if (req.method === 'POST' && req.body) {
+      proxyReq.write(JSON.stringify(req.body));
+    }
+    proxyReq.end();
+  }
+
+  // EE health proxy — RiskTab needs drawdown state, simulation mode, queue size
+  app.get('/ee/health', (req: Request, res: Response) => {
+    proxyToEE('/health', req, res);
+  });
+
+  // Circuit breaker proxy — AdminTab needs CB status + open/close controls (D-3)
+  // GET is read-only (public). POST requires coordinator-level auth (H5 fix).
+  const writeAuth = apiAuth();
+  app.get('/circuit-breaker', (req: Request, res: Response) => {
+    proxyToEE('/circuit-breaker', req, res);
+  });
+  app.post('/circuit-breaker/open',
+    writeAuth as unknown as RequestHandler,
+    apiAuthorize('services', 'write') as unknown as RequestHandler,
+    (req: Request, res: Response) => {
+      proxyToEE('/circuit-breaker/open', req, res);
+    },
+  );
+  app.post('/circuit-breaker/close',
+    writeAuth as unknown as RequestHandler,
+    apiAuthorize('services', 'write') as unknown as RequestHandler,
+    (req: Request, res: Response) => {
+      proxyToEE('/circuit-breaker/close', req, res);
+    },
+  );
 
   // Dashboard SPA - MUST be last (catch-all `*` would intercept API routes if mounted earlier)
   app.use('/', createDashboardRoutes(state));
