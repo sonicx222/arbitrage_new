@@ -65,6 +65,15 @@ primary_region = "sjc"
     timeout = "5s"
     type = "http"
 
+  [checks.ready]
+    grace_period = "60s"
+    interval = "15s"
+    method = "GET"
+    path = "/ready"
+    port = 3006
+    timeout = "5s"
+    type = "http"
+
 [processes]
   app = "node dist/index.js"
 
@@ -80,3 +89,9 @@ primary_region = "sjc"
 # OPTIMISM_RPC_URL - Optimism HTTP RPC
 # BSC_RPC_URL - BSC HTTP RPC
 # POLYGON_RPC_URL - Polygon HTTP RPC
+# AVALANCHE_RPC_URL - Avalanche HTTP RPC
+# FANTOM_RPC_URL - Fantom HTTP RPC
+# ZKSYNC_RPC_URL - zkSync Era HTTP RPC
+# LINEA_RPC_URL - Linea HTTP RPC
+# BLAST_RPC_URL - Blast HTTP RPC
+# SCROLL_RPC_URL - Scroll HTTP RPC

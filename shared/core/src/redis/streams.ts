@@ -427,7 +427,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.SERVICE_HEALTH]: 1000,           // Low volume health checks
     [RedisStreamsClient.STREAMS.SERVICE_EVENTS]: 5000,           // Medium volume service events
     [RedisStreamsClient.STREAMS.COORDINATOR_EVENTS]: 5000,       // Medium volume coordinator events
-    [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: 25000,       // RT-ER-CAP FIX: Increased from 5K — at ~46 exec/s, 5K fills in ~2 min; 25K gives ~9 min buffer
+    [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: 100000,      // RT-N02 FIX: Increased from 25K — at ~46 exec/s, 25K fills in ~9 min during coord lag spikes; 100K gives ~36 min buffer
     [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: 10000,       // Failed ops, keep more history
     [RedisStreamsClient.STREAMS.DLQ_ALERTS]: 5000,               // Alert data
     [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: 5000,           // Forwarded failures
@@ -475,7 +475,7 @@ export class RedisStreamsClient {
 
     // P2-008 FIX: Log legacy HMAC compat status at startup. When enabled, HMAC verification
     // computes up to 4 digests per message (current key + previous key × with/without stream name).
-    // Set LEGACY_HMAC_COMPAT=false once all services use OP-18 format to reduce to 1-2 attempts.
+    // Set STREAM_LEGACY_HMAC_COMPAT=false once all services use OP-18 format to reduce to 1-2 attempts.
     if (this.signingKey) {
       this.logger.info('HMAC signing initialized', {
         legacySignatureCompat: this.legacySignatureCompatEnabled,
@@ -1675,12 +1675,16 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
 
   initializingPromise = (async () => {
     try {
-      // P2 Fix L-1: Wire LEGACY_HMAC_COMPAT env var to disable legacy HMAC fallback paths.
+      // P2 Fix L-1: Wire STREAM_LEGACY_HMAC_COMPAT env var to disable legacy HMAC fallback paths.
       // When false, reduces HMAC computations from up to 4 per message to 1-2.
       // P1 Fix: Flip default to OFF (explicit opt-in). All producers now include stream name
       // in signatures (OP-18), so legacy compat is no longer needed by default.
       // Set to 'true' only during migration from pre-OP-18 producers.
-      const legacyHmacCompat = process.env.LEGACY_HMAC_COMPAT === 'true';
+      if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
+        const factoryLogger = createLogger('redis-streams-factory');
+        factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
+      }
+      const legacyHmacCompat = process.env.STREAM_LEGACY_HMAC_COMPAT === 'true';
 
       const instance = new RedisStreamsClient(redisUrl, redisPassword, {
         signingKey,
@@ -1741,7 +1745,11 @@ export async function createRedisStreamsClient(url?: string, password?: string):
     }
   }
   const previousSigningKey = process.env.STREAM_SIGNING_KEY_PREVIOUS?.trim() || undefined;
-  const legacyHmacCompat = process.env.LEGACY_HMAC_COMPAT === 'true';
+  if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
+    const factoryLogger = createLogger('redis-streams-factory');
+    factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
+  }
+  const legacyHmacCompat = process.env.STREAM_LEGACY_HMAC_COMPAT === 'true';
 
   const instance = new RedisStreamsClient(redisUrl, redisPassword, {
     signingKey,
