@@ -41,6 +41,9 @@ export const createMockStreamsClient = () => ({
   xack: jest.fn().mockResolvedValue(1),
   xadd: jest.fn().mockResolvedValue('stream-id'),
   xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
+  // H-03 FIX: Durable dedup methods
+  setNx: jest.fn().mockResolvedValue(true),
+  deleteKey: jest.fn().mockResolvedValue(undefined),
 });
 
 export const createMockStreamConsumer = () => {

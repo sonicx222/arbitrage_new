@@ -46,6 +46,7 @@ import {
 } from '@arbitrage/core/path-finding';
 import { RedisStreamsClient, StreamBatcher } from '@arbitrage/core/redis';
 import { createFastTraceContext, TRACE_FIELDS } from '@arbitrage/core/tracing';
+import { withLogContext } from '@arbitrage/core/logging';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { isSimulationMode } from '@arbitrage/core/simulation';
 import { disconnectWithTimeout, calculateVirtualReservesFromSqrtPriceX96 } from '@arbitrage/core/utils';
@@ -2087,6 +2088,12 @@ export class ChainDetectorInstance extends EventEmitter {
     // Counter-based IDs are sufficient for price update correlation (cross-service uniqueness not needed).
     // Also eliminated 3 object spreads by mutating update directly (hot-path allocation reduction).
     const traceCtx = createFastTraceContext(this.tracingServiceName);
+
+    // H-06 FIX: Bind trace context to ALS so any log calls within publishPriceUpdate
+    // (batcher drop warnings, fallback publish errors) include traceId/spanId.
+    // withLogContext overhead is ~1-3μs (ALS getStore), safe for hot-path.
+    withLogContext(traceCtx, () => {
+
     const enrichedUpdate = update as PriceUpdate & Record<string, unknown>;
     enrichedUpdate[TRACE_FIELDS.traceId] = traceCtx.traceId;
     enrichedUpdate[TRACE_FIELDS.spanId] = traceCtx.spanId;
@@ -2119,6 +2126,8 @@ export class ChainDetectorInstance extends EventEmitter {
         this.logger.error('Failed to publish price update', { error });
       });
     }
+
+    }); // end withLogContext
   }
 
   /**

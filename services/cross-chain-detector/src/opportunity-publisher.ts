@@ -22,6 +22,7 @@
 import { RedisStreamsClient } from '@arbitrage/core/redis';
 import { PerformanceLogger } from '@arbitrage/core';
 import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
+import { withLogContext } from '@arbitrage/core/logging';
 import { ArbitrageOpportunity } from '@arbitrage/types';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating
@@ -275,6 +276,9 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       traceCtx,
     ) as unknown as ArbitrageOpportunity;
 
+    // H-05 FIX: Wrap publish path in withLogContext so all local logs
+    // (publish success/failure, fast lane, cache) include traceId/spanId.
+    return withLogContext(traceCtx, async () => {
     try {
       // FIX 2.2: Use xaddWithLimit to prevent unbounded stream growth
       // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts
@@ -308,6 +312,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       recordPublishError();
       return false;
     }
+    }); // end withLogContext
   }
 
   // ===========================================================================

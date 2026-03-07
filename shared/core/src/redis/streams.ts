@@ -1037,6 +1037,38 @@ export class RedisStreamsClient {
   }
 
   // ===========================================================================
+  // H-03 FIX: Durable Key Operations (for Redis-backed dedup)
+  // ===========================================================================
+
+  /**
+   * H-03 FIX: SET key with TTL using NX (only if not exists).
+   * Returns true if key was set, false if it already existed.
+   * Used by EE opportunity consumer for crash-safe dedup of active executions.
+   */
+  async setNx(key: string, value: string, ttlMs: number): Promise<boolean> {
+    try {
+      const ttlSec = Math.ceil(ttlMs / 1000);
+      const result = await this.client.set(key, value, 'EX', ttlSec, 'NX');
+      return result === 'OK';
+    } catch (error) {
+      this.logger.warn('SET NX failed', { key, error: getErrorMessage(error) });
+      // Fail open: allow execution if Redis is unavailable (in-memory dedup still active)
+      return true;
+    }
+  }
+
+  /**
+   * H-03 FIX: Delete a key (for dedup cleanup on execution completion).
+   */
+  async deleteKey(key: string): Promise<void> {
+    try {
+      await this.client.del(key);
+    } catch (error) {
+      this.logger.warn('DEL failed', { key, error: getErrorMessage(error) });
+    }
+  }
+
+  // ===========================================================================
   // Stream Information
   // ===========================================================================
 
@@ -1072,9 +1104,42 @@ export class RedisStreamsClient {
    */
   private lagCriticalTotal = 0;
 
+  /** H-01 FIX: Per-stream lag metrics for Prometheus export and producer throttling. */
+  private readonly streamLagMetrics = new Map<string, {
+    lagRatio: number;
+    pendingRatio: number;
+    backpressure: boolean;
+    critical: boolean;
+    lastChecked: number;
+  }>();
+
   /** Number of times checkStreamLag returned critical=true. Use for Prometheus export. */
   getLagCriticalTotal(): number {
     return this.lagCriticalTotal;
+  }
+
+  /**
+   * H-01 FIX: Get per-stream lag metrics for Prometheus gauges and alerting.
+   * Updated on each checkStreamLag() call. Health endpoints should call this
+   * to expose `stream_lag_ratio{stream="..."}` and `stream_critical{stream="..."}`.
+   */
+  getStreamLagMetrics(): ReadonlyMap<string, {
+    lagRatio: number;
+    pendingRatio: number;
+    backpressure: boolean;
+    critical: boolean;
+    lastChecked: number;
+  }> {
+    return this.streamLagMetrics;
+  }
+
+  /**
+   * H-01 FIX: Check if a stream is at critical lag (>80%).
+   * Producers should call this before xaddWithLimit to throttle when lag is critical.
+   * Returns false if no lag data is available (safe default — don't block on missing data).
+   */
+  isStreamCritical(streamName: string): boolean {
+    return this.streamLagMetrics.get(streamName)?.critical ?? false;
   }
 
   async checkStreamLag(
@@ -1135,6 +1200,15 @@ export class RedisStreamsClient {
         ...(groupName ? { groupName, pendingCount, pendingRatio: Math.round(pendingRatio * 100) / 100 } : {}),
       });
     }
+
+    // H-01 FIX: Persist per-stream lag metrics for Prometheus export and isStreamCritical()
+    this.streamLagMetrics.set(streamName, {
+      lagRatio,
+      pendingRatio,
+      backpressure,
+      critical,
+      lastChecked: Date.now(),
+    });
 
     return { length, maxLen, lagRatio, backpressure, critical, pendingCount, pendingRatio };
   }

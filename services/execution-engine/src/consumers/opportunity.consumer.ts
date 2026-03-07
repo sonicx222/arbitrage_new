@@ -146,6 +146,9 @@ export class OpportunityConsumer {
   private consumerGroup: ConsumerGroupConfig;
   private pendingMessages: Map<string, PendingMessageInfo> = new Map();
   private activeExecutions: Set<string> = new Set();
+  // H-03 FIX: Redis key prefix for durable dedup. SET NX with TTL survives restarts.
+  private static readonly REDIS_DEDUP_PREFIX = 'ee:dedup:';
+  private static readonly REDIS_DEDUP_TTL_MS = 300_000; // 5 minutes (matches opportunity TTL)
 
   // P1 Fix: Content-based dedup to catch same economic opportunity from different detectors
   // (e.g., cross-chain detector and Solana partition both detecting the same arb).
@@ -560,6 +563,26 @@ export class OpportunityConsumer {
     (opportunity as unknown as Record<string, unknown>)._traceId = traceCtx.traceId;
     (opportunity as unknown as Record<string, unknown>)._spanId = traceCtx.spanId;
 
+    // H-03 FIX: Redis-backed dedup survives EE restarts. After crash, PEL entries
+    // are reclaimed via XCLAIM. Without durable dedup, already-executed opportunities
+    // could be re-processed. SET NX returns false if key exists (another instance or
+    // pre-crash instance already claimed this opportunity). In-memory check is still
+    // the fast path; Redis is the durable safety net.
+    const redisKey = OpportunityConsumer.REDIS_DEDUP_PREFIX + opportunity.id;
+    const claimed = await this.streamsClient.setNx(
+      redisKey,
+      this.instanceId,
+      OpportunityConsumer.REDIS_DEDUP_TTL_MS,
+    );
+    if (!claimed) {
+      this.stats.opportunitiesRejected++;
+      this.logger.debug('Opportunity rejected: Redis dedup (already claimed)', {
+        id: opportunity.id,
+      });
+      await this.ackMessage(message.id);
+      return;
+    }
+
     // Handle the opportunity - returns 'queued', 'rejected', or 'backpressure'
     const result = this.handleArbitrageOpportunity(opportunity);
 
@@ -598,12 +621,16 @@ export class OpportunityConsumer {
     } else if (result === 'rejected') {
       // Permanent rejection (business rules, duplicate) - ACK immediately
       await this.ackMessage(message.id);
+      // H-03 FIX: Release Redis dedup key on rejection so opportunity can be retried
+      this.streamsClient.deleteKey(redisKey).catch(() => {});
     } else {
       // SM-003 FIX: ACK backpressure-rejected messages to prevent zombie PEL entries.
       // When Redis MAXLEN trims the stream, un-ACKed PEL entries become orphans that
       // can never be processed or reclaimed. ACKing immediately is safe because the
       // message is being discarded anyway (queue is full).
       await this.ackMessage(message.id);
+      // H-03 FIX: Release Redis dedup key on backpressure so opportunity can be retried
+      this.streamsClient.deleteKey(redisKey).catch(() => {});
       this.logger.debug('Backpressure: message ACKed and discarded', {
         messageId: message.id,
         opportunityId: opportunity.id,
@@ -779,6 +806,8 @@ export class OpportunityConsumer {
       if (!this.queueService.enqueue(opportunity)) {
         // Rollback: remove from activeExecutions since enqueue failed
         this.activeExecutions.delete(opportunity.id);
+        // H-03 FIX: Also rollback Redis dedup key on enqueue failure
+        this.streamsClient.deleteKey(OpportunityConsumer.REDIS_DEDUP_PREFIX + opportunity.id).catch(() => {});
         this.stats.queueRejects++;
         this.logger.warn('Opportunity rejected due to queue backpressure', {
           id: opportunity.id,
@@ -947,9 +976,18 @@ export class OpportunityConsumer {
    *
    * CRITICAL: This must be called after execution completes to allow
    * re-processing of opportunities with the same ID.
+   *
+   * H-03 FIX: Also cleans up Redis dedup key. The key has a TTL so it
+   * auto-expires even if cleanup fails, but explicit delete speeds up
+   * re-processing of the same opportunity ID (e.g., retry after failure).
    */
   markComplete(opportunityId: string): void {
     this.activeExecutions.delete(opportunityId);
+    // H-03 FIX: Clean up Redis dedup key (fire-and-forget, TTL is safety net)
+    const redisKey = OpportunityConsumer.REDIS_DEDUP_PREFIX + opportunityId;
+    this.streamsClient.deleteKey(redisKey).catch(() => {
+      // Non-fatal: TTL will auto-expire the key
+    });
   }
 
   /**

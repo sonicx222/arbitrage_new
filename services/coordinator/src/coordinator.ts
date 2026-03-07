@@ -1211,10 +1211,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
         || groupConfig.streamName === RedisStreams.PRICE_UPDATES
         || groupConfig.streamName === RedisStreams.EXECUTION_RESULTS;
       const batchSize = isHighThroughput ? 200 : 10;
-      // LATENCY: Opportunities stream uses 20ms blocking read to minimize detection-to-dispatch
-      // latency toward the <50ms hot-path target. Price-updates use 200ms (high-throughput,
-      // coordinator doesn't dispatch on them directly so higher polling latency is acceptable).
-      const blockMs = groupConfig.streamName === RedisStreams.OPPORTUNITIES ? 20
+      // H-07 FIX: Opportunities stream uses 10ms blocking read (was 20ms).
+      // With EE also at 20ms, worst-case dual XREADGROUP was 40ms — exceeding <50ms target.
+      // Reducing coordinator to 10ms halves its contribution (worst case now 30ms total).
+      // Price-updates use 200ms (high-throughput, not on hot path).
+      const blockMs = groupConfig.streamName === RedisStreams.OPPORTUNITIES ? 10
         : isHighThroughput ? 200 : 100;
       // OPT-1: For opportunities stream, use batch handler for dedup + TTL priority.
       // RT-001: For price-updates stream, use batch handler to reduce per-message overhead.
@@ -1952,6 +1953,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     let batchSuccesses = 0;
     let batchFailures = 0;
     let batchProfit = 0;
+    // H-02 FIX: Collect trace IDs from results for batch summary log.
+    // EE injects trace context via propagateContext — extract for end-to-end correlation.
+    const traceIds: string[] = [];
 
     for (const msg of messages) {
       const data = msg.data as Record<string, unknown>;
@@ -1964,6 +1968,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const success = rawResult.success === true || rawResult.success === 'true';
       const opportunityId = getString(rawResult, 'opportunityId', '');
       const chain = getString(rawResult, 'chain', 'unknown');
+
+      // H-02 FIX: Extract trace context from EE result for log correlation
+      const resultTraceCtx = extractContext(data);
+      if (resultTraceCtx) {
+        traceIds.push(resultTraceCtx.traceId);
+      }
 
       if (!opportunityId) {
         processedIds.push(msg.id);
@@ -2009,6 +2019,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
         batchProfit,
         totalSuccessful: this.systemMetrics.successfulExecutions,
         totalProfit: this.systemMetrics.totalProfit,
+        // H-02 FIX: Include trace IDs for cross-service debugging correlation
+        traceIds: traceIds.length > 0 ? traceIds : undefined,
       });
     }
 
@@ -2029,6 +2041,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private async handleExecutionResultMessage(message: StreamMessage): Promise<void> {
     const data = message.data as Record<string, unknown>;
     if (!data) return;
+
+    // H-02 FIX: Extract trace context from EE result and bind to ALS
+    // for automatic traceId/spanId in all downstream log entries.
+    const resultTraceCtx = extractContext(data);
+    const traceCtx = resultTraceCtx ?? createTraceContext('coordinator');
+
+    return withLogContext(traceCtx, async () => {
 
     const rawResult = unwrapMessageData(data);
     const success = rawResult.success === true || rawResult.success === 'true';
@@ -2080,6 +2099,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // P2-5: Do not reset stream errors from execution results.
     // Only the opportunity handler (primary data path) should reset errors.
+
+    }); // end withLogContext
   }
 
   /**

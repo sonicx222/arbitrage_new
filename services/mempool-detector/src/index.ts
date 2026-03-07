@@ -54,6 +54,7 @@ import {
 import { getMetricsText } from './prometheus-metrics';
 // P2 Fix O-2: Import trace context for cross-service correlation
 import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
+import { withLogContext } from '@arbitrage/core/logging';
 import { RedisStreams, type PendingOpportunity, type PendingSwapIntent as SerializablePendingSwapIntent } from '@arbitrage/types';
 
 // =============================================================================
@@ -752,12 +753,15 @@ export class MempoolDetectorService extends EventEmitter {
           const pendingOpp = createPendingOpportunity(swapIntent);
           // P2 Fix O-2: Inject trace context for cross-service correlation
           const traceCtx = createTraceContext('mempool-detector');
+          // H-05 FIX: Wrap publish in withLogContext so local logs include traceId/spanId
+          withLogContext(traceCtx, () => {
           const tracedOpp = propagateContext(
             pendingOpp as unknown as Record<string, unknown>,
             traceCtx,
           ) as unknown as PendingOpportunity;
-          this.streamBatcher.add(tracedOpp);
+          this.streamBatcher!.add(tracedOpp);
           this.stats.opportunitiesPublished++;
+          }); // end withLogContext
         } catch (publishError) {
           this.logger.warn('Failed to add to stream batcher', {
             txHash: tx.hash,
