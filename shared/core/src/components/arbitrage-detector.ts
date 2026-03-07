@@ -225,7 +225,7 @@ export interface ArbitrageOpportunityData {
   sellPrice: number;
   /** Net profit percentage (e.g., 0.5 = 0.5%) */
   profitPercentage: number;
-  /** Net profit as decimal (e.g., 0.005 = 0.5%) */
+  /** Expected profit in USD (percentage spread × trade size) */
   expectedProfit: number;
   /** Confidence score (0-1) */
   confidence: number;
@@ -449,6 +449,15 @@ export function detectArbitrageForTokenPair(
         options.defaultTradeSizeUsd ?? 1000,
       );
     }
+  }
+
+  // Convert expectedProfit from decimal fraction to USD.
+  // Must happen AFTER enrichment so slippage math (which operates on decimals) stays correct.
+  // Enriched opportunities use their optimalTradeSizeUsd; others use the default.
+  const defaultTradeSize = options.defaultTradeSizeUsd ?? 1000;
+  for (const opp of opportunities) {
+    const tradeSizeUsd = opp.optimalTradeSizeUsd ?? defaultTradeSize;
+    opp.expectedProfit *= tradeSizeUsd;
   }
 
   return opportunities;

@@ -1,122 +1,127 @@
-# Professional Arbitrage Detection System
+# Professional Multi-Chain Arbitrage System
 
-A production-ready, institutional-grade arbitrage detection system built with microservices architecture. Achieves professional performance at zero infrastructure cost through strategic cloud provider utilization.
+A production-ready, institutional-grade arbitrage detection and execution system built with microservices architecture. Monitors 15 blockchains and 78 DEXs with <50ms detection latency at zero infrastructure cost.
 
-## Key Achievements
+## Key Metrics
 
-- **Latency**: <5ms (30x improvement)
+- **Chains**: 15 (14 EVM + Solana) across 4 partitioned detectors
+- **DEXs**: 78 (71 EVM + 7 Solana)
+- **Latency**: <50ms detection (same-chain EVM), <100ms (Solana)
 - **Scale**: 500+ opportunities/day
-- **Efficiency**: $0 infrastructure cost
-- **Resilience**: 99.95% target uptime
-- **Test Coverage**: 1126 tests across 35 test suites
+- **Cost**: $0 infrastructure (free-tier cloud providers)
+- **Resilience**: 99.9% target uptime with auto-failover
+- **Tests**: 438+ test files, ~13,475 test cases
 
 ---
 
-## Recent Code Quality Improvements (v1.1.0)
+## Documentation Hub
 
-The codebase has undergone a comprehensive code quality review addressing critical bugs, race conditions, and architectural inconsistencies:
-
-### P0 (Critical Fixes)
-- **Precision Loss Prevention**: Replaced floating-point arithmetic with BigInt for wei calculations in `cross-dex-triangular-arbitrage.ts` to prevent execution of unprofitable trades due to rounding errors
-- **Redis KEYS Elimination**: Replaced blocking `KEYS` command with cursor-based `SCAN` in `hierarchical-cache.ts` to prevent production Redis server blocking
-
-### P1 (Short-term Fixes)
-- **WebSocket Race Condition**: Added mutex pattern to `WebSocketManager.connect()` to prevent TOCTOU race conditions during reconnection
-- **Async Constructor Fix**: Fixed `SelfHealingManager` to properly await async initialization before operations
-- **Standardized Singleton Pattern**: Created `async-singleton.ts` utility for thread-safe lazy initialization across all modules
-
-### P2 (Medium-term Improvements)
-- **Type-Safe Events**: Created centralized event type registry (`shared/types/events.ts`) to eliminate stringly-typed events
-- **Configurable Constants**: Replaced magic numbers with centralized configuration in `SYSTEM_CONSTANTS` for Redis, cache, circuit breaker, and self-healing parameters
-
-### TypeScript Configuration
-- Fixed monorepo TypeScript configuration for proper cross-package imports
-- Added missing type exports (`BridgeLatencyData`, `CrossChainBridge`, `intra-dex`, `pairAddress`)
-- Resolved array type inference issues
-
----
-
-## 📚 Documentation Hub
-
-For detailed technical information, please refer to the specialized documentation in the `docs/` folder:
+For detailed technical information, refer to the `docs/` folder:
 
 ### Architecture & Design
-- [**System Architecture**](docs/architecture/ARCHITECTURE_V2.md): Comprehensive system design (v2.8)
-- [**Data Flow**](docs/architecture/DATA_FLOW.md): Visual diagrams of system data flow and processing pipelines
+- [**System Architecture**](docs/architecture/ARCHITECTURE_V2.md): Comprehensive system design (v2.11)
+- [**Data Flow**](docs/architecture/DATA_FLOW.md): Visual diagrams of data flow and processing pipelines
 - [**Current State**](docs/architecture/CURRENT_STATE.md): Service inventory and partition mapping
-- [**Architecture Decision Records**](docs/architecture/adr/README.md): 27 ADRs with rationale and confidence levels
+- [**Architecture Decision Records**](docs/architecture/adr/README.md): 41 ADRs with rationale and confidence levels
 
 ### Developer Guides
 - [**Local Development**](docs/local-development.md): Setup guide for Windows, macOS, and Linux
+- [**Configuration**](docs/CONFIGURATION.md): All environment variables and config options
 - [**Deployment Guide**](docs/deployment.md): Step-by-step setup for free-tier cloud providers
 - [**Trading Strategies**](docs/strategies.md): Arbitrage logic and token selection methodology
 - [**Code Conventions**](docs/agent/code_conventions.md): TypeScript best practices and patterns
-- [**Free Tier Reference**](docs/Free_Tiers.md): Cloud provider free tier limits and optimization
 
 ### Testing & Quality
 - [**Test Architecture**](docs/architecture/TEST_ARCHITECTURE.md): Testing strategy and patterns
 - [**Manual Test Steps**](docs/MANUAL_TESTSTEPS.md): Manual testing procedures
 - [**Integration Migration Guide**](docs/testing/integration-migration-guide.md): Test consolidation guide
 
+### Operations & Security
+- [**Monitoring Setup**](docs/operations/MONITORING_SETUP.md): Prometheus, Grafana, alerting
+- [**Secrets Management**](docs/security/SECRETS_MANAGEMENT.md): Key rotation and security practices
+- [**Redis Key Registry**](docs/redis-key-registry.md): All Redis key patterns and TTLs
+
 ### Reports & Research
-- [**Critical Assessment**](docs/reports/CRITICAL_ASSESSMENT_REPORT.md): System assessment and findings
-- [**Security Audit**](docs/reports/security_audit.md): NPM security and code hardening status
-- [**Flash Loan Research**](docs/research/FLASHLOAN_MEV_ENHANCEMENT_RESEARCH.md): MEV protection strategies
-- [**Secrets Management**](docs/security/SECRETS_MANAGEMENT.md): Security best practices
+- [**Profitability Audit**](docs/reports/PROFITABILITY_AUDIT_2026-02-24.md): Strategy economics and trade analysis
+- [**Research Evaluation**](docs/research/CONSOLIDATED_RESEARCH_EVALUATION.md): Enhancement research findings
+- [**Security Review**](contracts/docs/SECURITY_REVIEW.md): Contract security audit findings
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
-The system uses a globally distributed microservices architecture to minimize latency to blockchain sequencers.
+The system uses a partitioned microservices architecture with Redis Streams as the event backbone.
 
 ```mermaid
 graph TB
-    subgraph "Detectors"
-        BSC[BSC Detector]
-        ETH[ETH Detector]
-        ARB[Arbitrum Detector]
+    subgraph "P1: Asia-Fast"
+        BSC[BSC]
+        POLY[Polygon]
+        AVAX[Avalanche]
+        FTM[Fantom]
     end
-    subgraph "Analysis"
-        CC[Cross-Chain]
-        ML[ML Predictor]
+    subgraph "P2: L2-Turbo"
+        ARB[Arbitrum]
+        OP[Optimism]
+        BASE[Base]
+        SCROLL[Scroll]
+        BLAST[Blast]
+    end
+    subgraph "P3: High-Value"
+        ETH[Ethereum]
+        ZK[zkSync]
+        LINEA[Linea]
+    end
+    subgraph "P4: Solana"
+        SOL[Solana]
+    end
+    subgraph "Coordination"
+        COORD[Coordinator]
+        CC[Cross-Chain Detector]
     end
     subgraph "Execution"
-        EX[Trade Engine]
+        EE[Execution Engine]
     end
 
-    BSC --> CC
-    ETH --> CC
-    ARB --> CC
-    CC --> ML
-    ML --> EX
+    BSC & POLY & AVAX & FTM -->|Redis Streams| COORD
+    ARB & OP & BASE & SCROLL & BLAST -->|Redis Streams| COORD
+    ETH & ZK & LINEA -->|Redis Streams| COORD
+    SOL -->|Redis Streams| COORD
+    COORD -->|exec-requests| EE
+    CC -->|cross-chain opps| COORD
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Prerequisites
-- Node.js 18+
-- Docker & Docker Compose
-- Upstash Redis account (free)
+- Node.js >= 22.0.0
+- npm >= 9.0.0
+- Docker Desktop (optional, for Redis)
 
 ### 2. Installation
 ```bash
 git clone <repository-url>
-cd Optimized_Arb_Bot_V3
+cd arbitrage_new
 npm install
+npm run dev:setup    # Copy .env.example to .env
 ```
 
-### 3. Build & Run
+### 3. Start Services
 ```bash
-# Build WASM engine
-cd shared/webassembly && wasm-pack build --target web --out-dir dist
+# Start Redis (choose one)
+npm run dev:redis          # Docker (recommended)
+npm run dev:redis:memory   # In-memory (no Docker)
 
-# Run locally with Docker
-cd ../..
-docker-compose up -d
+# Start all services with hot reload
+npm run dev:all
+
+# OR minimal setup (Coordinator + P1 + Execution)
+npm run dev:minimal
 ```
+
+Visit **http://localhost:3000** for the coordinator dashboard.
 
 ---
 

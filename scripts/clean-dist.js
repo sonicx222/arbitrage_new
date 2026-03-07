@@ -177,4 +177,87 @@ for (const dir of ['shared', 'services', 'infrastructure']) {
   cleanStaleCompiledInSource(dir);
 }
 
+// Pass 2: Clean orphaned compiled artifacts in src/ directories.
+// These are files whose .ts source was moved or deleted — the existing pass only
+// catches artifacts that still have a .ts file alongside them.
+//
+// Rules:
+//   .d.ts.map, .js.map  → always compiled output, safe to delete if no .ts source
+//   .js                  → compiled output if no .ts source (skip config files)
+//   .d.ts with .d.ts.map → compiled pair, safe to delete
+//   .d.ts without .d.ts.map → may be hand-written ambient declaration, SKIP
+function cleanOrphanedCompiledInSource(baseDir) {
+  const exclude = ['node_modules', 'dist', 'typechain-types'];
+
+  function walk(dir) {
+    // Only scan inside src/ directories
+    const isSrcDir = dir.endsWith(path.sep + 'src') || dir.includes(path.sep + 'src' + path.sep);
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!exclude.includes(entry.name)) walk(fullPath);
+          continue;
+        }
+        if (!isSrcDir) continue;
+
+        // .d.ts.map → always compiled, delete if no .ts source
+        if (entry.name.endsWith('.d.ts.map')) {
+          const tsFile = fullPath.slice(0, fullPath.length - '.d.ts.map'.length) + '.ts';
+          if (!fs.existsSync(tsFile)) {
+            fs.unlinkSync(fullPath);
+            console.log(`Deleted orphaned .d.ts.map: ${path.relative(rootDir, fullPath)}`);
+            cleaned++;
+          }
+          continue;
+        }
+
+        // .js.map → always compiled, delete if no .ts source
+        if (entry.name.endsWith('.js.map')) {
+          const tsFile = fullPath.slice(0, fullPath.length - '.js.map'.length) + '.ts';
+          if (!fs.existsSync(tsFile)) {
+            fs.unlinkSync(fullPath);
+            console.log(`Deleted orphaned .js.map: ${path.relative(rootDir, fullPath)}`);
+            cleaned++;
+          }
+          continue;
+        }
+
+        // .d.ts → only delete if a companion .d.ts.map exists (proves it was compiled)
+        // Hand-written ambient declarations (e.g., aws-kms-client-kms.d.ts) have no .d.ts.map
+        if (entry.name.endsWith('.d.ts')) {
+          const tsFile = fullPath.slice(0, fullPath.length - '.d.ts'.length) + '.ts';
+          const mapFile = fullPath + '.map';
+          if (!fs.existsSync(tsFile) && fs.existsSync(mapFile)) {
+            fs.unlinkSync(fullPath);
+            console.log(`Deleted orphaned .d.ts: ${path.relative(rootDir, fullPath)}`);
+            cleaned++;
+          }
+          continue;
+        }
+
+        // .js → compiled output if no .ts source (skip config files)
+        if (entry.name.endsWith('.js') && !entry.name.endsWith('.config.js')) {
+          const tsFile = fullPath.replace(/\.js$/, '.ts');
+          if (!fs.existsSync(tsFile)) {
+            fs.unlinkSync(fullPath);
+            console.log(`Deleted orphaned .js: ${path.relative(rootDir, fullPath)}`);
+            cleaned++;
+          }
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  const fullBaseDir = path.join(rootDir, baseDir);
+  if (fs.existsSync(fullBaseDir)) walk(fullBaseDir);
+}
+
+for (const dir of ['shared', 'services', 'infrastructure']) {
+  cleanOrphanedCompiledInSource(dir);
+}
+
 console.log(`\n✓ Cleaned ${cleaned} items`);

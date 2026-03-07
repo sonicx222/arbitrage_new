@@ -358,13 +358,14 @@ describe('CoordinatorService Integration', () => {
       port = server.address().port;
     });
 
-    it('should serve dashboard with leader status', async () => {
+    it('should serve dashboard SPA shell', async () => {
       const response = await fetch(`http://localhost:${port}/`);
       expect(response.status).toBe(200);
 
       const html = await response.text();
-      expect(html).toContain('Arbitrage System Dashboard');
-      expect(html).toMatch(/LEADER|STANDBY/);
+      // Dashboard is a React SPA — check for the SPA shell structure
+      expect(html).toContain('Arbitrage Dashboard');
+      expect(html).toContain('<div id="root">');
     });
 
     it('should serve health endpoint with status', async () => {

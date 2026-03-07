@@ -35,7 +35,7 @@ SIMULATION_MODE=true npm start
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PARTITION_ID` | Partition to run (asia-fast, l2-fast, high-value) | `asia-fast` |
+| `PARTITION_ID` | Partition to run (asia-fast, l2-turbo, high-value, solana-native) | `asia-fast` |
 | `PARTITION_CHAINS` | Comma-separated chain IDs to monitor (overrides partition) | From partition config |
 | `REGION_ID` | Region identifier for cross-region health | From partition config |
 | `HEALTH_CHECK_PORT` | Port for HTTP health endpoint | `3001` |
@@ -49,8 +49,9 @@ SIMULATION_MODE=true npm start
 | Partition | Chains | Block Time | Region |
 |-----------|--------|------------|--------|
 | **asia-fast** | BSC, Polygon, Avalanche, Fantom | 2-3s | Singapore |
-| **l2-fast** | Arbitrum, Optimism, Base | <1s | Singapore |
+| **l2-turbo** | Arbitrum, Optimism, Base, Scroll, Blast | <1s | Singapore |
 | **high-value** | Ethereum, zkSync, Linea | >5s | US-East |
+| **solana-native** | Solana | ~0.4s | US-West |
 
 ## Usage Examples
 
@@ -61,11 +62,11 @@ SIMULATION_MODE=true npm start
 PARTITION_ID=asia-fast npm start
 ```
 
-### Run L2-Fast Partition
+### Run L2-Turbo Partition
 
 ```bash
-# Monitors Arbitrum, Optimism, Base
-PARTITION_ID=l2-fast npm start
+# Monitors Arbitrum, Optimism, Base, Scroll, Blast
+PARTITION_ID=l2-turbo npm start
 ```
 
 ### Run Specific Chains Only
@@ -230,9 +231,11 @@ cd services/ethereum-detector && npm start
 ### After (Recommended)
 
 ```bash
-# Running 2 partitions covers all 6 chains
-PARTITION_ID=asia-fast npm start   # bsc, polygon, avalanche, fantom
-PARTITION_ID=l2-fast npm start     # arbitrum, optimism, base
+# Running 4 partitions covers all 15 chains
+PARTITION_ID=asia-fast npm start     # bsc, polygon, avalanche, fantom
+PARTITION_ID=l2-turbo npm start     # arbitrum, optimism, base, scroll, blast
+PARTITION_ID=high-value npm start   # ethereum, zksync, linea
+PARTITION_ID=solana-native npm start # solana
 ```
 
 ## Related Documentation

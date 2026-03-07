@@ -13,11 +13,42 @@
  */
 
 import { ethers } from 'ethers';
-import type {
-  FlashLoanRequest,
-  FlashLoanSwapStep,
-  IFlashLoanProvider,
-} from '../../../../services/execution-engine/src/strategies/flash-loan-providers/types';
+import type { FlashLoanProtocol } from '@arbitrage/types';
+
+// Local type definitions mirroring services/execution-engine flash-loan-providers/types.ts
+// Defined here to avoid cross-package rootDir violation in tsc compilation.
+
+export interface FlashLoanSwapStep {
+  router: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountOutMin: bigint;
+}
+
+export interface FlashLoanRequest {
+  asset: string;
+  amount: bigint;
+  chain: string;
+  swapPath: FlashLoanSwapStep[];
+  minProfit: bigint;
+  initiator: string;
+  poolAddress?: string;
+}
+
+export interface IFlashLoanProvider {
+  readonly protocol: FlashLoanProtocol;
+  readonly chain: string;
+  readonly poolAddress: string;
+  isAvailable(): boolean;
+  getCapabilities(): { supportsMultiHop: boolean; supportsMultiAsset: boolean; maxLoanAmount: bigint; supportedTokens: string[]; status: string };
+  calculateFee(amount: bigint): { feeBps: number; feeAmount: bigint; protocol: FlashLoanProtocol };
+  buildCalldata(request: FlashLoanRequest): string;
+  buildTransaction(request: FlashLoanRequest, from: string): ethers.TransactionRequest;
+  estimateGas(request: FlashLoanRequest, provider: ethers.JsonRpcProvider): Promise<bigint>;
+  validate(request: FlashLoanRequest): { valid: boolean; error?: string };
+  getContractAddress(): string;
+  getApprovedRouters(): string[];
+}
 
 // =============================================================================
 // Shared Test Addresses

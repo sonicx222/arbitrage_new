@@ -382,10 +382,9 @@ describe('OpportunityPublisher', () => {
 
       const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
 
-      // expectedProfit = (percentageDiff / 100) * amountInTokens
-      // amountInTokens = defaultTradeSizeUsd / sourcePrice = 2500 / 2500 = 1.0
-      // expectedProfit = (1.5 / 100) * 1.0 = 0.015
-      expect(publishedOpp.expectedProfit).toBeCloseTo(0.015, 5);
+      // expectedProfit in USD = (percentageDiff / 100) * defaultTradeSizeUsd
+      // = (1.5 / 100) * 2500 = 37.5
+      expect(publishedOpp.expectedProfit).toBeCloseTo(37.5, 5);
       expect(publishedOpp.profitPercentage).toBeCloseTo(0.015, 5);
     });
 

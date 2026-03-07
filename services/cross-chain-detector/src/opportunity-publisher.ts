@@ -195,8 +195,10 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     const safeAmountInTokens = Math.min(amountInTokens, MAX_AMOUNT_IN_TOKENS);
     const amountInWei = BigInt(Math.floor(safeAmountInTokens * 1e18)).toString();
 
-    // Calculate expected profit in token units
-    const expectedProfitInTokens = (opportunity.percentageDiff / 100) * safeAmountInTokens;
+    // Calculate expected profit in USD.
+    // Token profit = (percentageDiff/100) * amountInTokens; converting back to USD
+    // via * sourcePrice cancels out: (pct/100) * (tradeUsd/price) * price = (pct/100) * tradeUsd.
+    const expectedProfitUsd = (opportunity.percentageDiff / 100) * defaultTradeSizeUsd;
 
     // Extract tokens from token string (format: "TOKEN0/TOKEN1")
     const tokenParts = opportunity.token.split('/');
@@ -213,7 +215,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       tokenIn,
       tokenOut,
       amountIn: amountInWei,
-      expectedProfit: expectedProfitInTokens,
+      expectedProfit: expectedProfitUsd,
       profitPercentage: opportunity.percentageDiff / 100,
       gasEstimate: '0', // Cross-chain, gas estimated separately
       confidence: opportunity.confidence,

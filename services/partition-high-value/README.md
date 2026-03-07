@@ -177,7 +177,7 @@ gcloud run deploy partition-high-value \
 
 ## Related Documentation
 
-- [IMPLEMENTATION_PLAN.md](../../docs/IMPLEMENTATION_PLAN.md) - S3.1.5 task details
+- [Architecture v2](../../docs/architecture/ARCHITECTURE_V2.md) - System architecture design
 - [ADR-003](../../docs/architecture/adr/ADR-003-partitioned-detectors.md) - Partition architecture
 - [Partition Configuration](../../shared/config/src/partitions.ts) - Partition definitions
 

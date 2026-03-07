@@ -1,8 +1,8 @@
 # Current Architecture State
 
-**Date:** March 6, 2026
-**Version:** 1.4
-**Last Updated:** 2026-03-06
+**Date:** March 7, 2026
+**Version:** 1.5
+**Last Updated:** 2026-03-07
 
 ---
 
@@ -80,15 +80,15 @@ This document provides a snapshot of the current arbitrage trading system archit
 |--------|--------|---------|-----------|
 | `stream:price-updates` | 100,000 | Real-time price data from partition detectors | ACTIVE |
 | `stream:swap-events` | 50,000 | DEX swap events | ACTIVE (simulation) |
-| `stream:opportunities` | 100,000 | Arbitrage opportunities from detectors | ACTIVE |
+| `stream:opportunities` | 500,000 | Arbitrage opportunities from detectors | ACTIVE |
 | `stream:whale-alerts` | 5,000 | Large trade notifications | ACTIVE (simulation) |
 | `stream:service-health` | 1,000 | Per-service health reports | IDLE |
 | `stream:service-events` | 5,000 | Service lifecycle events | IDLE |
 | `stream:coordinator-events` | 5,000 | Coordinator broadcasts | IDLE |
 | `stream:health` | 1,000 | Service heartbeats | ACTIVE |
 | `stream:health-alerts` | 5,000 | Health monitor alerts | ON-DEMAND |
-| `stream:execution-requests` | 5,000 | Forwarded opportunities from coordinator | ACTIVE |
-| `stream:execution-results` | 5,000 | Execution outcomes from engine | ACTIVE |
+| `stream:execution-requests` | 100,000 | Forwarded opportunities from coordinator (legacy single-stream; see ADR-038 per-group streams below) | ACTIVE |
+| `stream:execution-results` | 100,000 | Execution outcomes from engine | ACTIVE |
 | `stream:pending-opportunities` | 10,000 | Mempool pending transactions | IDLE |
 | `stream:volume-aggregates` | 10,000 | Volume aggregation data | IDLE |
 | `stream:circuit-breaker` | 5,000 | Circuit breaker state events | IDLE |
