@@ -77,6 +77,7 @@ export interface ExecutionResult {
   chain: string;
   dex: string;
   latencyMs?: number;
+  usedMevProtection?: boolean;
 }
 
 export type AlertSeverity = 'low' | 'warning' | 'high' | 'critical';
@@ -94,9 +95,7 @@ export interface CircuitBreakerStatus {
   state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
   consecutiveFailures: number;
   lastFailureTime: number | null;
-  lastSuccessTime: number | null;
-  totalFailures: number;
-  totalSuccesses: number;
+  cooldownRemainingMs: number;
   timestamp: number;
 }
 
@@ -113,3 +112,15 @@ export interface StreamHealth {
 export type FeedItem =
   | { kind: 'execution'; data: ExecutionResult; id: string }
   | { kind: 'alert'; data: Alert; id: string };
+
+// Chart data points for SSE-driven time series
+export interface ChartPoint {
+  time: string;
+  latency?: number;
+  successRate?: number;
+}
+
+export interface LagPoint {
+  time: string;
+  pending: number;
+}
