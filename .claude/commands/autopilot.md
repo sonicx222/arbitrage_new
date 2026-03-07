@@ -558,4 +558,786 @@ After Step 6, check if an exit condition was triggered:
 
 ### ═══ END CYCLE LOOP ═══
 
-<!-- Agent Prompts, Triage, Fix, Rebuild, Validate, Converge, and Report sections follow -->
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## AGENT PROMPTS — 10 Analysis Agents
+## Each agent is dispatched with model: "opus", subagent_type: "general-purpose"
+## Agent prompts below are templates — replace {CYCLE} with actual cycle number
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+### Agent 1: static-analyst
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the STATIC-ANALYST in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/static-analyst.jsonl
+
+Use ONLY Glob, Grep, and Read tools — no Bash, no running services needed.
+Finding ID prefix: SA-
+
+Each finding is one JSON line with fields:
+  id, agent("static-analyst"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+CHECKS:
+
+1. STREAM_DECLARATION [HIGH]
+   Grep for xadd|xReadGroup|createConsumerGroup in *.ts files under services/ and shared/.
+   Exclude node_modules and test files (*test*, *spec*, *__tests__*).
+   Flag any hardcoded stream name string (e.g., "stream:price-updates") that is NOT
+   referencing a constant from shared/types/src/events.ts or shared/constants/.
+   Each hardcoded stream name = one HIGH finding.
+
+2. MAXLEN_BYPASS [CRITICAL]
+   Grep for raw this\.xadd\( or redis\.xadd\( or client\.xadd\( calls that are NOT
+   inside xaddWithLimit(). Any direct xadd() call bypassing xaddWithLimit() means
+   the MAXLEN cap is not enforced → CRITICAL.
+
+3. MISSING_ACK [HIGH]
+   Find files that contain xReadGroup but do NOT contain xack in the same file.
+   Each such file = one HIGH finding (messages read but never acknowledged).
+
+4. ANTI_PATTERN [LOW]
+   Grep for `|| 0[^n]` and `|| 0n` in *.ts files (exclude node_modules).
+   Per CLAUDE.md, use ?? instead of || for numeric defaults.
+   Each occurrence = LOW finding.
+
+5. SILENT_ERROR [HIGH/LOW]
+   Grep for empty catch blocks: `catch\s*\([^)]*\)\s*\{\s*\}` in services/ and shared/
+   (exclude test files). If the file is in a hot-path directory (price-matrix, partitioned-
+   detector, execution-engine, unified-detector, redis/stream) → HIGH. Otherwise → LOW.
+
+6. STREAM_TYPE_FIDELITY [HIGH]
+   Read shared/core/src/redis/stream-serialization.ts (or equivalent).
+   Check for .toString() on numeric fields during serialization. Verify that
+   deserialization uses parseFloat/parseInt to restore types. If numeric fields
+   are serialized as strings but never parsed back → HIGH.
+
+7. ADR_COMPLIANCE [HIGH/MEDIUM]
+   a. ADR-022: Grep for spread operator (\.\.\.) inside loops (for/while/map/forEach/reduce)
+      in hot-path files (price-matrix.ts, partitioned-detector.ts, execution-engine/,
+      unified-detector/). Spread in hot-path loop → HIGH.
+   b. ADR-033: Read the stale price threshold config. If hardcoded and != 30000ms → HIGH.
+   c. ADR-002: Grep for axios|fetch|http\.request in services/ inter-service calls
+      (not external APIs). Inter-service HTTP → HIGH.
+   d. ADR-018: Read circuit breaker config. If threshold != 5 → HIGH.
+   e. ADR-005: Read price-matrix.ts. If SharedArrayBuffer is not used → HIGH.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 2: service-health-monitor
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the SERVICE-HEALTH-MONITOR in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/service-health-monitor.jsonl
+
+Use Bash (curl, redis-cli) and Read tools.
+Finding ID prefix: SH-
+
+Each finding is one JSON line with fields:
+  id, agent("service-health-monitor"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+CHECKS:
+
+1. SERVICE_HEALTH [CRITICAL/HIGH]
+   curl -sf each service health endpoint with 5s timeout:
+     - localhost:3000/api/health (coordinator — note different path)
+     - localhost:3001/health through localhost:3006/health
+   Parse JSON response. Check "status" field:
+     - "unhealthy" → CRITICAL
+     - "degraded" → HIGH
+     - Connection refused / timeout → CRITICAL (service unreachable)
+     - "healthy" → OK (no finding)
+   Record response time for each service.
+
+2. LEADER_ELECTION [CRITICAL/HIGH]
+   a. curl -sf localhost:3000/api/leader — check isLeader field.
+      isLeader=false → CRITICAL (no active leader, system cannot route).
+   b. redis-cli GET coordinator:leader:lock — should return a value.
+      Empty/nil → CRITICAL (lock missing).
+   c. redis-cli TTL coordinator:leader:lock — should be >5.
+      TTL < 5 → HIGH (lock about to expire, risk of leadership gap).
+      TTL = -1 → HIGH (no expiry set, lock will persist forever).
+      TTL = -2 → CRITICAL (key does not exist).
+
+3. HEALTH_SCHEMA [HIGH/MEDIUM]
+   For each /health response, validate required fields:
+     - "status" (string): must be present → HIGH if missing
+     - "uptime" (number): must be present and > 0 → HIGH if missing
+   Type checks:
+     - "status" must be string → MEDIUM if wrong type
+     - "uptime" must be number → MEDIUM if wrong type
+
+4. SERVICE_READY [HIGH]
+   a. curl -sf each ready endpoint:
+      - localhost:3000/api/health/ready (coordinator — note different path)
+      - localhost:3001/ready through localhost:3006/ready
+      Non-200 response → HIGH.
+   b. curl -sf each metrics endpoint:
+      - localhost:3000/api/metrics/prometheus (coordinator — note different path)
+      - localhost:3001/metrics through localhost:3006/metrics
+      Non-200 response → HIGH.
+
+5. SERVICE_HEALTH (detail) [HIGH/MEDIUM]
+   From coordinator /api/health response, extract systemHealth score (0-100).
+   Score < 50 → HIGH (system severely degraded).
+   Score < 70 → MEDIUM (system health concerning).
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 3: streams-analyst
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the STREAMS-ANALYST in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/streams-analyst.jsonl
+
+Use Bash (redis-cli, curl) and Read tools.
+Finding ID prefix: ST-
+
+Each finding is one JSON line with fields:
+  id, agent("streams-analyst"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+EXPECTED STREAMS (29 total — see System Inventory in this command for full list).
+Active streams (always present): price-updates, swap-events, opportunities,
+  execution-requests, execution-results, service-health, service-events,
+  coordinator-events, health, health-alerts, dead-letter-queue, forwarding-dlq,
+  dlq-alerts, pending-opportunities.
+On-demand streams (created when chain-group routing or other features enabled):
+  exec-requests-fast, exec-requests-l2, exec-requests-premium, exec-requests-solana,
+  pre-simulated, fast-lane, whale-alerts, volume-aggregates, circuit-breaker,
+  system-failover, system-commands, system-failures, system-control,
+  system-scaling, service-degradation.
+
+CHECKS:
+
+1. STREAM_TOPOLOGY [HIGH/MEDIUM/CRITICAL]
+   a. redis-cli --scan --pattern 'stream:*' to discover all streams.
+   b. For each discovered stream: XINFO STREAM, XINFO GROUPS, XLEN.
+   c. Compare discovered streams against the 29 expected.
+      Active stream missing → HIGH.
+      On-demand stream missing → MEDIUM (only if feature is enabled).
+   d. For each stream with consumer groups:
+      Consumer group missing (expected but not present) → HIGH.
+      Group has 0 consumers → CRITICAL (created but nobody reading).
+
+2. CONSUMER_LAG [HIGH/CRITICAL]
+   For each (stream, group) pair, run XPENDING:
+   a. Pending count > 50 → HIGH, > 100 → CRITICAL.
+   b. Oldest pending message > 30 seconds old → HIGH.
+   c. Any message with delivery count > 3 → HIGH (stuck, not processing).
+   d. If multiple consumers in a group, one consumer's pending > 10x another → HIGH
+      (unbalanced load).
+
+3. DLQ [HIGH/CRITICAL]
+   a. XLEN stream:dead-letter-queue — any entries > 0 → HIGH.
+   b. XLEN stream:forwarding-dlq — any entries > 0 → CRITICAL.
+   c. XLEN stream:dlq-alerts — any entries > 0 → HIGH.
+   d. If DLQ > 0, XREVRANGE stream:dead-letter-queue - + COUNT 5 to analyze root causes.
+      If any entry contains "hmac_verification_failed" → CRITICAL.
+   e. Check for DLQ fallback files: ls ./dlq-fallback-* 2>/dev/null. Present → HIGH.
+
+4. MAXLEN_FILL [HIGH/MEDIUM]
+   For each active stream, compare XLEN vs expected MAXLEN (from System Inventory).
+   Fill ratio = XLEN / MAXLEN.
+   > 90% → HIGH (approaching trim, data loss imminent).
+   > 80% → MEDIUM (elevated).
+   Record fill ratio for all streams.
+
+5. STREAM_TRANSIT [HIGH/MEDIUM]
+   Scrape stream_message_transit metric from EE (curl -sf localhost:3005/metrics).
+   Parse p95 and p99 values.
+   p95 > 100ms → HIGH (messages taking too long in transit).
+   p95 > 50ms → MEDIUM (elevated transit time).
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 4: performance-profiler
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the PERFORMANCE-PROFILER in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/performance-profiler.jsonl
+
+Use Bash (curl) and Read tools.
+Finding ID prefix: PP-
+
+Each finding is one JSON line with fields:
+  id, agent("performance-profiler"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+Scrape /metrics from all services:
+  - localhost:3000/api/metrics/prometheus (coordinator)
+  - localhost:3001/metrics through localhost:3006/metrics
+Save raw metrics to ./autopilot-session/cycle-{CYCLE}/findings/metrics-raw.txt
+
+CHECKS:
+
+1. RUNTIME_PERFORMANCE — Event Loop [HIGH/MEDIUM]
+   Parse runtime_eventloop_delay_p99_ms (or similar metric name) from each service.
+   p99 > 50ms → HIGH (hot-path latency target is <50ms).
+   p99 > 20ms → MEDIUM.
+   max > 200ms → HIGH (event loop blocked).
+   Record values for all services.
+
+2. RUNTIME_PERFORMANCE — GC [HIGH/MEDIUM]
+   Parse runtime_gc_major_duration_seconds_sum and runtime_gc_duration_seconds_sum.
+   Calculate major GC as percentage of total GC time.
+   Major > 10% of total → HIGH (excessive major GC, likely memory pressure).
+   Any single GC pause > 500ms → MEDIUM.
+
+3. MEMORY [HIGH/MEDIUM]
+   a. Per-service: parse process_heap_used_bytes and process_heap_total_bytes.
+      heap_used / heap_total > 85% → HIGH (heap pressure).
+      process_resident_memory_bytes > 500MB → HIGH (excessive RSS).
+      external_memory_bytes > 200MB → MEDIUM.
+   b. Redis: redis-cli INFO memory. Parse used_memory and maxmemory.
+      used_memory > 75% of maxmemory → HIGH.
+      Record used_memory_human and maxmemory_human.
+
+4. RUNTIME_DEGRADATION [HIGH/MEDIUM]
+   Read baseline metrics from ./autopilot-session/baseline/metrics-t0.txt.
+   Compare current metrics vs baseline:
+   a. Event loop p99 increased > 5x from baseline → HIGH.
+   b. RSS grew > 50% from baseline → MEDIUM.
+   c. If no baseline available, skip this check and note in findings.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 5: detection-analyst
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the DETECTION-ANALYST in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/detection-analyst.jsonl
+
+Use Bash (curl) and Read tools.
+Finding ID prefix: DA-
+
+Each finding is one JSON line with fields:
+  id, agent("detection-analyst"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+Scrape /stats and /metrics from partition services:
+  - localhost:3001/stats, localhost:3001/metrics (P1 Asia-Fast)
+  - localhost:3002/stats, localhost:3002/metrics (P2 L2-Turbo)
+  - localhost:3003/stats, localhost:3003/metrics (P3 High-Value)
+  - localhost:3004/stats, localhost:3004/metrics (P4 Solana)
+
+CHECKS:
+
+1. DETECTION_QUALITY — Cycle Timing [HIGH/MEDIUM]
+   From /stats, extract avgDetectionCycleDurationMs (or similar).
+   > 50ms → HIGH (exceeds hot-path latency target).
+   > 20ms → MEDIUM.
+   Record per-partition values.
+
+2. DETECTION_QUALITY — Opportunities/Cycle [MEDIUM]
+   From /stats, extract avgOpportunitiesPerCycle.
+   If = 0 across ALL partitions after service uptime > 60s → MEDIUM
+   (no opportunities being detected at all).
+
+3. PROVIDER_QUALITY — Staleness [HIGH/MEDIUM/INFO]
+   From /stats or /metrics, extract maxPriceStalenessMs.
+   > 30000ms → HIGH (exceeds ADR-033 stale threshold).
+   > 15000ms → MEDIUM.
+   If stalePriceRejections > 0 → INFO (stale data being correctly rejected).
+
+4. DETECTION_RATE — Coverage [HIGH]
+   Verify all assigned chains are active per partition:
+     P1: BSC, Polygon, Avalanche, Fantom (4 chains)
+     P2: Arbitrum, Optimism, Base, Blast, Scroll (5 active + Mantle/Mode stubs OK)
+     P3: Ethereum, zkSync, Linea (3 chains)
+     P4: Solana (1 chain)
+   NOTE: P4 pairsMonitored=0 is EXPECTED (uses SolanaArbitrageDetector, not EVM pair init).
+   NOTE: Mantle and Mode are stubs — 0 activity is expected.
+   Any non-stub chain with 0 messages produced → HIGH.
+
+5. WEBSOCKET_HEALTH [CRITICAL/MEDIUM]
+   From /metrics, extract provider_ws_messages_total per chain.
+   Any chain with 0 messages → CRITICAL (WebSocket dead).
+   Any chain with rate >10x lower than peer chains in same partition → MEDIUM.
+
+6. PROVIDER_QUALITY — RPC [HIGH/MEDIUM]
+   From /metrics, extract RPC latency percentiles.
+   p95 > 500ms → HIGH.
+   p95 > 200ms → MEDIUM.
+   rate_limit errors > 5 → HIGH.
+   timeout errors > 10 → HIGH.
+   WebSocket reconnections > 5 → HIGH.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 6: execution-analyst
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the EXECUTION-ANALYST in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/execution-analyst.jsonl
+
+Use Bash (curl) and Read tools.
+Finding ID prefix: EA-
+
+Each finding is one JSON line with fields:
+  id, agent("execution-analyst"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+Scrape /stats and /metrics from Execution Engine:
+  curl -sf localhost:3005/stats
+  curl -sf localhost:3005/metrics
+
+CHECKS:
+
+1. EXECUTION_PROBABILITY [HIGH]
+   From /stats, extract overall successRate.
+   successRate < 30% → HIGH (too many failures).
+   Check per-chain success rates if available.
+   Any chain with 0% success and > 0 attempts → HIGH.
+
+2. RISK_STATE [CRITICAL/HIGH/MEDIUM]
+   From /stats, extract drawdownState or riskState.
+   HALT → CRITICAL (trading halted by risk management).
+   CAUTION → HIGH (risk elevated).
+   RECOVERY → MEDIUM (recovering from drawdown).
+   Field not present in response → MEDIUM (risk state not exposed).
+
+3. BUSINESS_INTELLIGENCE — Outcomes [HIGH/MEDIUM]
+   From /metrics, extract opportunity_outcome_total counters by reason.
+   revert rate > 30% → HIGH (contracts reverting too often).
+   timeout rate > 20% → MEDIUM (execution too slow).
+   stale rate > 20% → MEDIUM (opportunities aging out).
+   gas_too_high rate > 10% → MEDIUM (gas estimation issues).
+
+4. BUSINESS_INTELLIGENCE — Slippage [HIGH/MEDIUM]
+   From /metrics, extract profit_slippage_pct histogram.
+   Median slippage > 50% → HIGH (predicted profit wildly inaccurate).
+   Median slippage > 25% → MEDIUM.
+
+5. BUSINESS_INTELLIGENCE — Age [HIGH/MEDIUM]
+   From /metrics, extract opportunity_age_at_execution_ms histogram.
+   p95 > chain-specific TTL (typically 5000ms) → HIGH (stale execution).
+   Median > 2000ms → MEDIUM (opportunities aging before execution).
+
+6. BUSINESS_INTELLIGENCE — Profit [HIGH]
+   From /metrics, extract profit distribution.
+   Median profit <= 0 → HIGH (system losing money on average).
+   If gas cost > profit on any chain → HIGH (gas exceeds revenue).
+
+7. CIRCUIT_BREAKER [HIGH/MEDIUM]
+   curl -sf localhost:3005/circuit-breaker (or /stats circuit breaker section).
+   Any circuit breaker in OPEN state → HIGH (chain/operation blocked).
+   Any in HALF_OPEN → MEDIUM (recovering, watch closely).
+
+8. BRIDGE_RECOVERY [HIGH/MEDIUM]
+   curl -sf localhost:3005/bridge-recovery (or check /stats for bridge info).
+   Any bridge transfer stuck > 24 hours → HIGH.
+   More than 3 concurrent recovery attempts → MEDIUM.
+   Any corrupt bridge state → HIGH.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 7: security-config-auditor
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the SECURITY-CONFIG-AUDITOR in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/security-config-auditor.jsonl
+
+Use ONLY Glob, Grep, and Read tools — no Bash, no running services needed.
+Finding ID prefix: SC-
+
+Each finding is one JSON line with fields:
+  id, agent("security-config-auditor"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+CHECKS:
+
+1. ENV_VAR [CRITICAL/HIGH/MEDIUM/LOW]
+   a. Grep for process\.env\.\w+ in services/ and shared/ (exclude node_modules, tests).
+      Collect all unique env var names.
+   b. Read .env.example. Collect all documented env var names (both commented and
+      uncommented lines matching ^#?\s*[A-Z_]+=).
+   c. Compare the two sets:
+      - Used but not in .env.example:
+        Contains KEY/SECRET/TOKEN/PASSWORD → CRITICAL (undocumented secret).
+        Contains TIMEOUT/THRESHOLD/MAX_/LIMIT → HIGH (undocumented behavior var).
+        Other → MEDIUM.
+      - In .env.example but never used in code → LOW (orphaned documentation).
+
+2. HMAC_SIGNING [CRITICAL/HIGH]
+   a. Read .env.example — verify STREAM_SIGNING_KEY is documented.
+      Missing → HIGH.
+   b. Read shared/core/src/redis/streams.ts (or equivalent). Verify HMAC-SHA256
+      signing is implemented on xadd and verification on xReadGroup.
+      Missing enforcement → CRITICAL.
+   c. Verify crypto.timingSafeEqual is used for comparison (not ===).
+      Non-constant-time comparison → CRITICAL.
+
+3. FEATURE_FLAG [HIGH/MEDIUM]
+   Read shared/config/src/feature-flags.ts (or equivalent).
+   Expected: 23 feature flags using === 'true' pattern (explicit opt-in).
+   a. Any flag using !== 'false' pattern → HIGH (fails open instead of closed).
+   b. Check cross-dependencies:
+      FEATURE_SIGNAL_CACHE_READ requires FEATURE_ML_SIGNAL_SCORING.
+      If dependent flag can be enabled without prerequisite → HIGH.
+   c. Any flag not documented in .env.example → MEDIUM.
+
+4. RISK_CONFIG [HIGH]
+   Read shared/config/src/risk-config.ts (or equivalent).
+   a. Check if RISK_TOTAL_CAPITAL is documented in .env.example → HIGH if missing.
+   b. Cross-validate: defaultWinProb >= minWinProb. Violation → HIGH.
+   c. Check all numeric thresholds have NaN guards → HIGH if missing.
+
+5. UNSAFE_PARSE [HIGH]
+   Grep for parseInt\(process\.env and parseFloat\(process\.env in services/ and shared/
+   (exclude node_modules, tests).
+   Raw parseInt/parseFloat without NaN guard or without using parseEnvIntSafe/
+   parseEnvFloatSafe → HIGH. Check surrounding code (3 lines) for isNaN/NaN checks.
+
+6. REDIS_CLIENT_PARITY [HIGH]
+   Read shared/core/src/redis/client.ts and shared/core/src/redis/streams.ts.
+   Compare connection config: retryStrategy, connectTimeout, maxRetriesPerRequest.
+   Any behavioral divergence between the two Redis clients → HIGH (inconsistent
+   reconnection behavior under failure).
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 8: infra-auditor
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the INFRA-AUDITOR in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/infra-auditor.jsonl
+
+Use ONLY Glob, Grep, and Read tools — no Bash, no running services needed.
+Finding ID prefix: IA-
+
+Each finding is one JSON line with fields:
+  id, agent("infra-auditor"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+CHECKS:
+
+1. PORT_COLLISION [HIGH/MEDIUM]
+   a. Read infrastructure/service-ports.json (or equivalent port registry).
+   b. Grep for DEFAULT_HEALTH_CHECK_PORT and listen( in service entry points.
+   c. Two services using same port → HIGH.
+   d. Service port != what is in service-ports.json → MEDIUM.
+
+2. INFRA_DRIFT — Fly.io & Docker Compose [HIGH/MEDIUM]
+   a. Glob for infrastructure/fly/*.toml and infrastructure/docker/docker-compose*.yml.
+   b. Read each file. Extract:
+      - internal_port / ports mappings
+      - health check paths and intervals
+      - Node.js base image version
+   c. Compare against service-ports.json:
+      Port mismatch → HIGH.
+      Health path mismatch (e.g., /health vs /api/health) → HIGH.
+   d. Node image not node:22-alpine → MEDIUM.
+
+3. TIMEOUT_HIERARCHY [HIGH/LOW]
+   Grep for shutdownTimeout|drainTimeout|connectTimeout|serverCloseTimeout|
+   SHUTDOWN_TIMEOUT|GRACEFUL_SHUTDOWN in services/ and shared/.
+   Collect all timeout values. Validate hierarchy:
+   a. shutdown timeout > drain timeout > server close timeout.
+      Violation → HIGH (can cause ungraceful shutdown).
+   b. shutdown timeout > Redis connect timeout.
+      Violation → HIGH.
+   c. Any timeout hardcoded (not from env or config) → LOW.
+
+4. INFRA_DRIFT — Dockerfiles [HIGH/MEDIUM]
+   a. Glob for **/Dockerfile in services/ and infrastructure/.
+   b. Read each Dockerfile. Check:
+      - Base image = node:22-alpine → MEDIUM if different.
+      - HEALTHCHECK interval = 15s → MEDIUM if different.
+      - EXPOSE port matches the service's actual listen port → HIGH if mismatch.
+   c. Cross-reference EXPOSE ports with service-ports.json.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 9: dashboard-validator
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the DASHBOARD-VALIDATOR in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/dashboard-validator.jsonl
+
+Use Bash (curl) and Glob/Grep/Read tools.
+Finding ID prefix: DV-
+
+Each finding is one JSON line with fields:
+  id, agent("dashboard-validator"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+CHECKS:
+
+1. DASHBOARD_AVAILABILITY [HIGH]
+   a. Glob for services/coordinator/public/index.html. Missing → HIGH.
+   b. curl -sf localhost:3000/ — should return HTML with React SPA.
+      Non-200 or no HTML → HIGH.
+
+2. DASHBOARD_SSE [HIGH]
+   a. curl -sf -N --max-time 10 localhost:3000/api/events 2>&1 | head -50
+      Expect SSE format (data: lines with JSON).
+   b. Check for expected event types: metrics, services, circuit-breaker.
+   c. Parse a metrics event data payload. Validate shape includes:
+      systemHealth, totalExecutions, successRate, activeChains.
+      Any required field missing → HIGH.
+
+3. DASHBOARD_SSE_COVERAGE [HIGH]
+   a. Read dashboard source for event type subscriptions:
+      Glob for services/coordinator/public/**/*.{js,ts,tsx}
+      or services/coordinator/src/dashboard/**/*.ts
+      Look for useSSE or EventSource or addEventListener patterns.
+      Extract event type names the client expects.
+   b. Grep for \.write\(|send\(|\.emit\( in SSE route files
+      (services/coordinator/src/api/*sse* or *events*).
+      Extract event type names the server emits.
+   c. Client expects event type not emitted by server → HIGH.
+
+4. DASHBOARD_TYPE_SYNC [HIGH/LOW]
+   a. Find dashboard types file (Glob: services/coordinator/public/**/types.ts
+      or services/coordinator/src/dashboard/**/types.ts).
+   b. Find backend API types file (services/coordinator/src/api/types.ts or similar).
+   c. Compare field names and types between dashboard and backend.
+      Dashboard field not in backend → HIGH (will be undefined at runtime).
+      Backend field not in dashboard → LOW (unused data, not breaking).
+
+5. DASHBOARD_REST [HIGH]
+   curl each coordinator REST endpoint and validate response shape:
+   a. localhost:3000/api/leader — expect { isLeader, leaderId, ... }
+   b. localhost:3000/api/alerts — expect array
+   c. localhost:3000/api/redis/stats — expect { connected, ... }
+   d. localhost:3005/health (proxy through coordinator or direct) —
+      Check for field naming consistency: riskState vs drawdownState.
+      Mismatch between what dashboard expects and what backend returns → HIGH.
+
+6. METRICS_COMPLETENESS [HIGH/MEDIUM]
+   a. curl -sf localhost:3000/api/metrics/prometheus > /tmp/metrics-t1.txt
+      sleep 15
+      curl -sf localhost:3000/api/metrics/prometheus > /tmp/metrics-t2.txt
+   b. Check these required metric families are present in both scrapes:
+      process_cpu_seconds_total, process_resident_memory_bytes,
+      runtime_eventloop_delay_p99_ms, executions_total, pipeline_events_total.
+   c. > 50% of required metrics missing → HIGH.
+      Any single required metric missing → MEDIUM.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+### Agent 10: e2e-flow-tracer
+
+```
+model: "opus"
+subagent_type: "general-purpose"
+```
+
+**Prompt:**
+
+```
+CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+to send your findings back to the team lead. Your text output is NOT visible
+to the team lead — only SendMessage delivers your results.
+
+You are the E2E-FLOW-TRACER in autopilot cycle {CYCLE}.
+Write findings as JSONL to: ./autopilot-session/cycle-{CYCLE}/findings/e2e-flow-tracer.jsonl
+
+Use Bash (redis-cli, curl) and Read tools.
+Finding ID prefix: EF-
+
+Each finding is one JSON line with fields:
+  id, agent("e2e-flow-tracer"), cycle({CYCLE}), severity, category, title,
+  file, line, evidence, expected, actual, fixable, fix_hint, domain_tags
+
+CHECKS:
+
+1. PIPELINE_FLOW [CRITICAL]
+   Measure 4 critical stream lengths at T=0 and T=30s:
+   a. T=0:
+      redis-cli XLEN stream:price-updates
+      redis-cli XLEN stream:opportunities
+      redis-cli XLEN stream:execution-requests
+      redis-cli XLEN stream:execution-results
+   b. Wait 30 seconds.
+   c. T=30:
+      Repeat same XLEN commands.
+   d. Calculate delta (T30 - T0) for each stream.
+   e. Expected cascade: prices growing → opportunities growing → requests growing
+      → results growing. Each downstream stage should show growth if upstream grew.
+      A stage NOT growing while its upstream IS growing → CRITICAL
+      (pipeline stage stalled — data entering but not exiting).
+
+2. TRACE_INCOMPLETE [MEDIUM]
+   a. XREVRANGE stream:execution-results - + COUNT 1
+      Extract the most recent result entry.
+   b. Look for _trace_traceId field in the entry.
+      No traceId field → MEDIUM (tracing not propagated to results).
+   c. If traceId found, search upstream:
+      redis-cli XREVRANGE stream:execution-requests - + COUNT 20
+      Check if any entry contains the same traceId.
+      TraceId not found in upstream → MEDIUM (trace broken mid-pipeline).
+
+3. PARTITION_FLOW [HIGH/MEDIUM]
+   a. curl -sf each partition /health at T=0:
+      localhost:3001/health, localhost:3002/health, localhost:3003/health, localhost:3004/health
+      Extract eventsProcessed (or equivalent counter).
+   b. Wait 30 seconds.
+   c. Repeat /health curls at T=30. Calculate delta.
+   d. Any partition with delta = 0 while other partitions have delta > 0 → HIGH
+      (partition stalled while peers active).
+   e. Any partition with delta > 0 but < 10% of peer average → MEDIUM
+      (partition significantly slower than peers).
+
+4. BACKPRESSURE [HIGH/MEDIUM]
+   a. curl -sf localhost:3000/api/health — extract backpressure state/ratio.
+   b. For active execution streams, calculate fill ratio = XLEN / MAXLEN:
+      stream:execution-requests (MAXLEN=100000)
+      stream:exec-requests-fast (MAXLEN=25000, if exists)
+      stream:exec-requests-l2 (MAXLEN=25000, if exists)
+   c. Fill > 80% but backpressure NOT active → HIGH
+      (should be applying backpressure but is not).
+   d. Fill < 20% but backpressure IS active → MEDIUM
+      (backpressure active unnecessarily, throttling throughput).
+
+5. PIPELINE_FLOW — Admission [MEDIUM]
+   a. curl -sf localhost:3005/stats — extract admission control metrics.
+      Look for shed/admitted/rejected counts.
+   b. If shed > 50% of total (shed + admitted) → MEDIUM
+      (execution engine shedding too many opportunities).
+   c. Record shed rate for trending across cycles.
+
+After completing all checks, write findings to the JSONL file.
+SendMessage findings summary to team lead when done.
+```
+
+---
+
+<!-- Triage, Fix Implementer, Rebuild, Regression Guard, Convergence, and Report sections follow -->
