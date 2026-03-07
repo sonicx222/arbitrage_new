@@ -363,6 +363,124 @@ describe('OpportunityRouter', () => {
       expect(opp.sellDex).toBeUndefined();
     });
 
+    // =========================================================================
+    // H-03: SM-013 pipelineTimestamps deserialization
+    // =========================================================================
+
+    it('should deserialize valid pipelineTimestamps JSON string', async () => {
+      const timestamps = {
+        wsReceivedAt: 1000,
+        publishedAt: 1010,
+        consumedAt: 1020,
+        detectedAt: 1030,
+      };
+      const data = createOpportunityData({
+        id: 'opp-pipeline-valid',
+        pipelineTimestamps: JSON.stringify(timestamps),
+      });
+
+      await router.processOpportunity(data, false);
+
+      const opp = router.getOpportunities().get('opp-pipeline-valid')!;
+      expect(opp.pipelineTimestamps).toEqual(timestamps);
+    });
+
+    it('should silently ignore malformed pipelineTimestamps JSON', async () => {
+      const data = createOpportunityData({
+        id: 'opp-pipeline-malformed',
+        pipelineTimestamps: '{invalid json!!!',
+      });
+
+      const result = await router.processOpportunity(data, false);
+
+      expect(result).toBe(true);
+      const opp = router.getOpportunities().get('opp-pipeline-malformed')!;
+      // pipelineTimestamps should NOT be set when JSON is malformed
+      expect(opp.pipelineTimestamps).toBeUndefined();
+    });
+
+    it('should handle pipelineTimestamps with missing fields (partial timestamps)', async () => {
+      const timestamps = { detectedAt: 1030 }; // only detectedAt present
+      const data = createOpportunityData({
+        id: 'opp-pipeline-partial',
+        pipelineTimestamps: JSON.stringify(timestamps),
+      });
+
+      await router.processOpportunity(data, false);
+
+      const opp = router.getOpportunities().get('opp-pipeline-partial')!;
+      expect(opp.pipelineTimestamps).toEqual({ detectedAt: 1030 });
+      expect(opp.pipelineTimestamps!.wsReceivedAt).toBeUndefined();
+      expect(opp.pipelineTimestamps!.publishedAt).toBeUndefined();
+      expect(opp.pipelineTimestamps!.consumedAt).toBeUndefined();
+    });
+
+    it('should deserialize pipelineTimestamps from parsed JS object (production path)', async () => {
+      // C-01 FIX: parseStreamResult() JSON.parses the single 'data' field,
+      // so pipelineTimestamps arrives as a nested JS object — not a string.
+      const timestamps = {
+        wsReceivedAt: 1000,
+        publishedAt: 1010,
+        consumedAt: 1020,
+        detectedAt: 1030,
+        coordinatorAt: 1040,
+        executionReceivedAt: 1050,
+      };
+      const data = createOpportunityData({
+        id: 'opp-pipeline-object',
+        pipelineTimestamps: timestamps, // object, not JSON.stringify
+      });
+
+      await router.processOpportunity(data, false);
+
+      const opp = router.getOpportunities().get('opp-pipeline-object')!;
+      expect(opp.pipelineTimestamps).toEqual(timestamps);
+    });
+
+    it('should handle partial pipelineTimestamps from parsed JS object', async () => {
+      const data = createOpportunityData({
+        id: 'opp-pipeline-object-partial',
+        pipelineTimestamps: { detectedAt: 1030, wsReceivedAt: 1000 },
+      });
+
+      await router.processOpportunity(data, false);
+
+      const opp = router.getOpportunities().get('opp-pipeline-object-partial')!;
+      expect(opp.pipelineTimestamps).toEqual({ detectedAt: 1030, wsReceivedAt: 1000 });
+      expect(opp.pipelineTimestamps!.publishedAt).toBeUndefined();
+    });
+
+    it('should ignore pipelineTimestamps when a primitive non-string type', async () => {
+      const data = createOpportunityData({
+        id: 'opp-pipeline-nonstring',
+        pipelineTimestamps: 12345, // number — neither object nor string
+      });
+
+      const result = await router.processOpportunity(data, false);
+
+      expect(result).toBe(true);
+      const opp = router.getOpportunities().get('opp-pipeline-nonstring')!;
+      expect(opp.pipelineTimestamps).toBeUndefined();
+    });
+
+    it('should ignore non-numeric timestamp values in pipelineTimestamps', async () => {
+      const timestamps = {
+        wsReceivedAt: 'not-a-number',
+        publishedAt: null,
+        detectedAt: 1030,
+      };
+      const data = createOpportunityData({
+        id: 'opp-pipeline-badvalues',
+        pipelineTimestamps: JSON.stringify(timestamps),
+      });
+
+      await router.processOpportunity(data, false);
+
+      const opp = router.getOpportunities().get('opp-pipeline-badvalues')!;
+      // Only detectedAt should be present (others are non-numeric, filtered out)
+      expect(opp.pipelineTimestamps).toEqual({ detectedAt: 1030 });
+    });
+
     it('should forward to execution engine when isLeader is true and status is pending', async () => {
       const data = createOpportunityData({ id: 'opp-leader', status: 'pending' });
 
