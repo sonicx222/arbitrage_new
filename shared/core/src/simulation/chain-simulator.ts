@@ -1071,7 +1071,9 @@ export class ChainSimulator extends EventEmitter {
     const path = shuffled.slice(0, hops);
     path.push(path[0]);
 
-    const baseProfit = 0.008 + Math.random() * 0.012;
+    // Per-chain multi-hop base profit from config (set by factory from profitProfile)
+    const [mhMin, mhMax] = this.config.multiHopBaseProfit ?? [0.008, 0.020];
+    const baseProfit = mhMin + Math.random() * (mhMax - mhMin);
     const feePerHop = 0.003;
     const totalFees = feePerHop * hops;
     const netProfit = baseProfit - totalFees;
@@ -1080,7 +1082,11 @@ export class ChainSimulator extends EventEmitter {
 
     const positionSize = this.calculatePositionSize();
     const estimatedProfitUsd = netProfit * positionSize;
-    const estimatedGasCost = 10 + Math.random() * 30;
+    // Use per-chain gas cost (with hop multiplier) instead of hardcoded $10-$40
+    const singleHopGas = this.currentGasPrice.gasCostUsd > 0
+      ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4)
+      : 5 + Math.random() * 15;
+    const estimatedGasCost = singleHopGas * hops;
     const flashLoanFee = 0.0009;
 
     const uniqueDexes = Array.from(new Set(this.config.pairs.map(p => p.dex)));
@@ -1205,8 +1211,9 @@ export class ChainSimulator extends EventEmitter {
 
     // Position size: higher range for fast-lane to ensure profit threshold
     const minProfitUsd = FAST_LANE_CONFIG.minProfitUsd;
-    // Net profit %: 1-5% range ensures meaningful USD profit
-    const netProfitPct = 0.01 + Math.random() * 0.04;
+    // Per-chain fast-lane spread from config (set by factory from profitProfile)
+    const [flMin, flMax] = this.config.fastLaneSpreadRange ?? [0.01, 0.05];
+    const netProfitPct = flMin + Math.random() * (flMax - flMin);
     // Position size: ensure expectedProfit >= minProfitUsd after gas
     // expectedProfit = positionSize * netProfitPct * (1 - flashLoanFee) - gasCost
     // Solve for positionSize: (minProfitUsd + gasCost) / (netProfitPct * (1 - flashLoanFee))
@@ -1310,14 +1317,22 @@ export function getChainSimulator(
   const key = chainId.toLowerCase();
 
   if (!chainSimulators.has(key)) {
+    // Read per-chain profit profile from throughput profiles (calibrated to real data)
+    const profile = CHAIN_THROUGHPUT_PROFILES[key];
+    const pp = profile?.profitProfile;
+
     const simulatorConfig: ChainSimulatorConfig = {
       chainId: key,
       pairs,
       updateIntervalMs: config?.updateIntervalMs ?? DEFAULT_CONFIG.updateIntervalMs,
       volatility: config?.volatility ?? DEFAULT_CONFIG.volatility,
       arbitrageChance: config?.arbitrageChance ?? 0.08,
-      minArbitrageSpread: config?.minArbitrageSpread ?? 0.003,
-      maxArbitrageSpread: config?.maxArbitrageSpread ?? 0.015
+      minArbitrageSpread: config?.minArbitrageSpread ?? pp?.minArbitrageSpread ?? 0.003,
+      maxArbitrageSpread: config?.maxArbitrageSpread ?? pp?.maxArbitrageSpread ?? 0.015,
+      minPositionSize: pp?.minPositionSizeUsd,
+      maxPositionSize: pp?.maxPositionSizeUsd,
+      fastLaneSpreadRange: pp?.fastLaneSpreadRange,
+      multiHopBaseProfit: pp?.multiHopBaseProfit,
     };
 
     chainSimulators.set(key, new ChainSimulator(simulatorConfig));

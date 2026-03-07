@@ -104,6 +104,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 150000,
       burstMultiplier: 5,
     },
+    // Ethereum: Extremely competitive (Flashbots/MEV bots), tight spreads, large positions
+    profitProfile: {
+      minArbitrageSpread: 0.0001,   // 0.01%
+      maxArbitrageSpread: 0.001,    // 0.1%
+      minPositionSizeUsd: 10000,
+      maxPositionSizeUsd: 200000,
+      fastLaneSpreadRange: [0.0005, 0.005],  // 0.05%-0.5%
+      multiHopBaseProfit: [0.002, 0.006],     // 0.2%-0.6% before fees
+    },
   },
 
   zksync: {
@@ -124,6 +133,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 500000,
       burstMultiplier: 3,
     },
+    // zkSync: Low liquidity, wider spreads but smaller positions
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.004,    // 0.4%
+      minPositionSizeUsd: 200,
+      maxPositionSizeUsd: 10000,
+      fastLaneSpreadRange: [0.002, 0.015],  // 0.2%-1.5%
+      multiHopBaseProfit: [0.004, 0.012],    // 0.4%-1.2% before fees
+    },
   },
 
   linea: {
@@ -143,6 +161,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.05,
       swapGasUnits: 150000,
       burstMultiplier: 2,
+    },
+    // Linea: Low liquidity, wider spreads, tiny positions
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.004,    // 0.4%
+      minPositionSizeUsd: 100,
+      maxPositionSizeUsd: 8000,
+      fastLaneSpreadRange: [0.002, 0.015],  // 0.2%-1.5%
+      multiHopBaseProfit: [0.004, 0.012],    // 0.4%-1.2% before fees
     },
   },
 
@@ -169,6 +196,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 120000,
       burstMultiplier: 2,
     },
+    // BSC: Moderate competition (PancakeSwap dominated), decent liquidity
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.003,    // 0.3%
+      minPositionSizeUsd: 500,
+      maxPositionSizeUsd: 30000,
+      fastLaneSpreadRange: [0.001, 0.01],   // 0.1%-1%
+      multiHopBaseProfit: [0.003, 0.008],    // 0.3%-0.8% before fees
+    },
   },
 
   polygon: {
@@ -189,6 +225,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 10,
       swapGasUnits: 150000,
       burstMultiplier: 3,
+    },
+    // Polygon: Moderate liquidity, many DEXes, moderate spreads
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.002,    // 0.2%
+      minPositionSizeUsd: 200,
+      maxPositionSizeUsd: 15000,
+      fastLaneSpreadRange: [0.001, 0.008],  // 0.1%-0.8%
+      multiHopBaseProfit: [0.003, 0.008],    // 0.3%-0.8% before fees
     },
   },
 
@@ -211,6 +256,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 150000,
       burstMultiplier: 3,
     },
+    // Avalanche: Moderate liquidity, Trader Joe dominated
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.0025,   // 0.25%
+      minPositionSizeUsd: 200,
+      maxPositionSizeUsd: 15000,
+      fastLaneSpreadRange: [0.001, 0.008],  // 0.1%-0.8%
+      multiHopBaseProfit: [0.003, 0.008],    // 0.3%-0.8% before fees
+    },
   },
 
   fantom: {
@@ -231,6 +285,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0,
       swapGasUnits: 130000,
       burstMultiplier: 2,
+    },
+    // Fantom: Low liquidity, wider spreads, very small positions
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.005,    // 0.5%
+      minPositionSizeUsd: 50,
+      maxPositionSizeUsd: 5000,
+      fastLaneSpreadRange: [0.002, 0.015],  // 0.2%-1.5%
+      multiHopBaseProfit: [0.005, 0.015],    // 0.5%-1.5% before fees
     },
   },
 
@@ -257,6 +320,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 800000,
       burstMultiplier: 3,
     },
+    // Arbitrum: Growing MEV competition, moderate spreads, decent liquidity
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.003,    // 0.3%
+      minPositionSizeUsd: 1000,
+      maxPositionSizeUsd: 50000,
+      fastLaneSpreadRange: [0.001, 0.01],   // 0.1%-1%
+      multiHopBaseProfit: [0.003, 0.010],    // 0.3%-1% before fees
+    },
   },
 
   optimism: {
@@ -278,6 +350,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 150000,
       burstMultiplier: 3,
     },
+    // Optimism: OP Stack L2, low gas, moderate liquidity (Velodrome dominated)
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.0025,   // 0.25%
+      minPositionSizeUsd: 500,
+      maxPositionSizeUsd: 25000,
+      fastLaneSpreadRange: [0.001, 0.008],  // 0.1%-0.8%
+      multiHopBaseProfit: [0.003, 0.008],    // 0.3%-0.8% before fees
+    },
   },
 
   base: {
@@ -298,6 +379,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.001,
       swapGasUnits: 150000,
       burstMultiplier: 3,
+    },
+    // Base: OP Stack L2, near-zero gas, Aerodrome dominated, growing searcher competition
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.0025,   // 0.25%
+      minPositionSizeUsd: 200,
+      maxPositionSizeUsd: 20000,
+      fastLaneSpreadRange: [0.001, 0.008],  // 0.1%-0.8%
+      multiHopBaseProfit: [0.003, 0.008],    // 0.3%-0.8% before fees
     },
   },
 
@@ -324,6 +414,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 150000,
       burstMultiplier: 3,
     },
+    // Blast: Emerging L2, low liquidity, wider spreads
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.004,    // 0.4%
+      minPositionSizeUsd: 200,
+      maxPositionSizeUsd: 12000,
+      fastLaneSpreadRange: [0.002, 0.012],  // 0.2%-1.2%
+      multiHopBaseProfit: [0.004, 0.012],    // 0.4%-1.2% before fees
+    },
   },
 
   scroll: {
@@ -344,6 +443,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.01,
       swapGasUnits: 400000,
       burstMultiplier: 3,
+    },
+    // Scroll: Emerging L2, low liquidity, higher gas than other L2s
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.004,    // 0.4%
+      minPositionSizeUsd: 100,
+      maxPositionSizeUsd: 8000,
+      fastLaneSpreadRange: [0.002, 0.012],  // 0.2%-1.2%
+      multiHopBaseProfit: [0.004, 0.012],    // 0.4%-1.2% before fees
     },
   },
 
@@ -366,6 +474,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       swapGasUnits: 150000,
       burstMultiplier: 2,
     },
+    // Mantle: Stub chain, minimal liquidity
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.005,    // 0.5%
+      minPositionSizeUsd: 100,
+      maxPositionSizeUsd: 5000,
+      fastLaneSpreadRange: [0.002, 0.015],  // 0.2%-1.5%
+      multiHopBaseProfit: [0.005, 0.015],    // 0.5%-1.5% before fees
+    },
   },
 
   mode: {
@@ -386,6 +503,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0,
       swapGasUnits: 150000,
       burstMultiplier: 2,
+    },
+    // Mode: Stub chain, minimal liquidity
+    profitProfile: {
+      minArbitrageSpread: 0.001,    // 0.1%
+      maxArbitrageSpread: 0.005,    // 0.5%
+      minPositionSizeUsd: 50,
+      maxPositionSizeUsd: 3000,
+      fastLaneSpreadRange: [0.002, 0.015],  // 0.2%-1.5%
+      multiHopBaseProfit: [0.005, 0.015],    // 0.5%-1.5% before fees
     },
   },
 
@@ -411,6 +537,15 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 500,
       swapGasUnits: 200000,   // compute units
       burstMultiplier: 4,
+    },
+    // Solana: High throughput, Jito MEV competition, near-zero gas, moderate spreads
+    profitProfile: {
+      minArbitrageSpread: 0.0005,   // 0.05%
+      maxArbitrageSpread: 0.003,    // 0.3%
+      minPositionSizeUsd: 100,
+      maxPositionSizeUsd: 10000,
+      fastLaneSpreadRange: [0.001, 0.01],   // 0.1%-1%
+      multiHopBaseProfit: [0.003, 0.010],    // 0.3%-1% before fees
     },
   },
 };

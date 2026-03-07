@@ -224,6 +224,10 @@ export interface ChainSimulatorConfig {
   maxPositionSize?: number;
   /** Fast-lane opportunity generation rate (0-1). @default 0.15 via SIMULATION_FAST_LANE_RATE */
   fastLaneRate?: number;
+  /** Fast-lane net profit spread range [min, max] as fractions. @default from profitProfile or [0.01, 0.05] */
+  fastLaneSpreadRange?: [number, number];
+  /** Multi-hop base profit range [min, max] as fractions before per-hop fees. @default from profitProfile or [0.008, 0.020] */
+  multiHopBaseProfit?: [number, number];
 }
 
 export interface SimulatedPairConfig {
@@ -330,6 +334,29 @@ export interface GasModel {
 }
 
 /**
+ * Per-chain profit calibration profile.
+ * Values derived from DeFi research (DEX volume data, MEV-Explore,
+ * Flashbots Protect, Dune Analytics on-chain arb patterns).
+ *
+ * Controls arbitrage spread ranges, position sizing, and multi-hop/fast-lane
+ * profit generation to produce realistic per-chain profit distributions.
+ */
+export interface ProfitProfile {
+  /** Minimum arbitrage spread (fraction, e.g. 0.0001 = 0.01%) */
+  minArbitrageSpread: number;
+  /** Maximum arbitrage spread (fraction, e.g. 0.001 = 0.1%) */
+  maxArbitrageSpread: number;
+  /** Minimum position size in USD */
+  minPositionSizeUsd: number;
+  /** Maximum position size in USD */
+  maxPositionSizeUsd: number;
+  /** Fast-lane net profit spread range [min, max] as fractions (e.g. [0.001, 0.01]) */
+  fastLaneSpreadRange: [number, number];
+  /** Multi-hop base profit range [min, max] as fractions before fees (e.g. [0.002, 0.008]) */
+  multiHopBaseProfit: [number, number];
+}
+
+/**
  * Per-chain throughput profile calibrated to real on-chain data.
  * Used by ChainSimulator to generate realistic block timing,
  * swap counts, DEX distribution, and gas costs.
@@ -351,6 +378,8 @@ export interface ChainThroughputProfile {
   tradeSizeRange: [number, number];
   /** Gas economics model */
   gasModel: GasModel;
+  /** Per-chain profit calibration (spreads, position sizes, multi-hop/fast-lane) */
+  profitProfile: ProfitProfile;
 }
 
 /**
