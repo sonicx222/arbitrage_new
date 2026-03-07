@@ -73,7 +73,7 @@ WORKDIR /app/services/cross-chain-detector
 # FIX 3.1: Health check port now configurable via HEALTH_CHECK_PORT env var
 # Override with: docker run -e HEALTH_CHECK_PORT=3005
 # The health check script reads the environment variable at runtime
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "const port = process.env.HEALTH_CHECK_PORT || process.env.CROSS_CHAIN_DETECTOR_PORT || '3006'; require('http').get('http://localhost:' + port + '/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 CMD ["node", "dist/index.js"]

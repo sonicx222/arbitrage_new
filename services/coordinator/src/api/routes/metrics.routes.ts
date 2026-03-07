@@ -165,8 +165,19 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
     apiAuthorize('metrics', 'read') as unknown as RequestHandler,
     (async (_req: Request, res: Response) => {
       try {
+        // DV-005 FIX: Wrap stream health in timeout to prevent hanging on Redis XINFO
         const monitor = getStreamHealthMonitor();
-        const metrics = await monitor.getPrometheusMetrics();
+        let streamMetrics: string;
+        try {
+          streamMetrics = await Promise.race([
+            monitor.getPrometheusMetrics(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Stream health timeout')), 5000)
+            ),
+          ]);
+        } catch {
+          streamMetrics = '# stream_health_monitor timed out\n';
+        }
         const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
         // P2-004 FIX: Include coordinator system metrics (dropped opportunities, totals)
         const sys = state.getSystemMetrics();
@@ -199,7 +210,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           '',
         ].join('\n');
         const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
-        res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics + runtimeMetrics + providerMetrics + coordinatorMetrics);
+        res.type('text/plain; version=0.0.4; charset=utf-8').send(streamMetrics + runtimeMetrics + providerMetrics + coordinatorMetrics);
       } catch (_error) {
         res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
       }

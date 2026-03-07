@@ -373,9 +373,9 @@ export class ExecutionEngineService {
 
     // Task 3: A/B testing config (enabled via environment variable)
     // FIX P0-2: Validate env var parseFloat/parseInt to prevent NaN propagation
-    const rawTrafficSplit = parseFloat(process.env.AB_TESTING_TRAFFIC_SPLIT || '0.1');
-    const rawMinSampleSize = parseInt(process.env.AB_TESTING_MIN_SAMPLE_SIZE || '100', 10);
-    const rawSignificance = parseFloat(process.env.AB_TESTING_SIGNIFICANCE || '0.05');
+    const rawTrafficSplit = parseFloat(process.env.AB_TESTING_TRAFFIC_SPLIT ?? '0.1');
+    const rawMinSampleSize = parseInt(process.env.AB_TESTING_MIN_SAMPLE_SIZE ?? '100', 10);
+    const rawSignificance = parseFloat(process.env.AB_TESTING_SIGNIFICANCE ?? '0.05');
 
     const validTrafficSplit = !Number.isNaN(rawTrafficSplit) && rawTrafficSplit > 0 && rawTrafficSplit < 1
       ? rawTrafficSplit : 0.1;
