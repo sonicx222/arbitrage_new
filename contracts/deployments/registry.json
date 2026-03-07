@@ -1,6 +1,6 @@
 {
   "_comment": "FlashLoanArbitrage (Aave V3) deployment registry - MANUALLY updated after deployment",
-  "_lastUpdated": "2026-02-10T00:00:00.000Z",
+  "_lastUpdated": "2026-03-07T00:00:00.000Z",
   "_version": "2.0.0",
   "_schema": {
     "description": "Central deployment registry. Each network key maps contract types to addresses.",
@@ -12,7 +12,8 @@
       "SyncSwapFlashArbitrage",
       "DaiFlashMintArbitrage",
       "CommitRevealArbitrage",
-      "MultiPathQuoter"
+      "MultiPathQuoter",
+      "UniswapV3Adapter"
     ],
     "networkStructure": {
       "<ContractType>": "Contract address string (e.g., '0x...') or null if not deployed",
@@ -32,6 +33,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -44,6 +46,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": "0xb38498De6C09F110EbC946CaEEd73BA8640f5C65",
     "MultiPathQuoter": "0xE5b26749430ed50917b75689B654a4C5808b23FB",
+    "UniswapV3Adapter": null,
     "deployedAt": 1772452188,
     "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
     "verified": false,
@@ -68,6 +71,9 @@
     "CommitRevealArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
     "CommitRevealArbitrage_verified": true,
     "MultiPathQuoter": "0xA99863BAe641bA1Fc375c7AaF921680bb943d588",
+    "UniswapV3Adapter": "0x1A9838ce19Ae905B4e5941a17891ba180F30F630",
+    "UniswapV3Adapter_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "UniswapV3Adapter_verified": false,
     "deployedAt": 1772402216,
     "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
     "verified": false,
@@ -86,6 +92,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -98,6 +105,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -110,6 +118,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -122,6 +131,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -135,6 +145,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -147,6 +158,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -159,6 +171,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -171,6 +184,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -183,6 +197,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -195,6 +210,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -207,6 +223,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -219,6 +236,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -231,6 +249,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
@@ -243,6 +262,7 @@
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
     "deployedAt": null,
     "deployedBy": null,
     "verified": false

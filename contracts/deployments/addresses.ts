@@ -273,6 +273,7 @@ export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
  */
 export const COMMIT_REVEAL_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
+  sepolia: '0xb38498De6C09F110EbC946CaEEd73BA8640f5C65',
   arbitrumSepolia: '0x9EA7A39B94E06BaFd034285ae665297427A84337',
 };
 
