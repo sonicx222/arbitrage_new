@@ -435,4 +435,127 @@ PHASE 0 COMPLETE — Bootstrap
 
 ---
 
-<!-- Cycle Loop, Agent Prompts, Triage, Fix, Rebuild, Validate, Converge, and Report sections follow -->
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## CYCLE LOOP — Up to 5 iterations
+## Each cycle: Analyze → Triage → Fix → Rebuild → Validate → Commit
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Initialize cycle tracking:
+```
+CYCLE=1
+CONSECUTIVE_REVERTS=0
+```
+
+### ═══ FOR CYCLE = 1 TO 5 ═══
+
+### Pre-Cycle Checks
+
+Before starting each cycle, verify these conditions:
+
+**1. Time check:**
+```bash
+CURRENT_TIME=$(date +%s)
+START_TIME=$(cat ./autopilot-session/start-time.txt)
+ELAPSED_MIN=$(( (CURRENT_TIME - START_TIME) / 60 ))
+if [ $ELAPSED_MIN -gt 110 ]; then
+  echo "TIME_LIMIT: ${ELAPSED_MIN} minutes elapsed (limit: 110)"
+  # → Exit to PHASE FINAL with exit_reason=TIME_LIMIT
+fi
+```
+
+**2. Consecutive revert check:**
+If CONSECUTIVE_REVERTS >= 2 → Exit to PHASE FINAL with exit_reason=STUCK.
+
+**3. Create cycle directory:**
+```bash
+mkdir -p ./autopilot-session/cycle-${CYCLE}/findings
+```
+
+**4. Determine agents to dispatch:**
+
+- **Cycle 1:** Dispatch ALL 10 analysis agents (full scan).
+- **Cycles 2-5:** Read `./autopilot-session/cycle-$((CYCLE-1))/dirty-domains.json`.
+  Only dispatch agents listed in `dirty_domains` array, plus ALWAYS include `e2e-flow-tracer`.
+
+---
+
+### STEP 1 — ANALYZE (parallel agent dispatch)
+
+Create an agent team for this cycle:
+```
+TeamCreate: name="autopilot-cycle-${CYCLE}"
+```
+
+Dispatch all required agents in a **SINGLE message with parallel Task calls**.
+Each agent Task MUST include:
+- `team_name`: `"autopilot-cycle-${CYCLE}"`
+- `model`: `"opus"` (MANDATORY — never rely on defaults)
+- `subagent_type`: `"general-purpose"`
+- The agent-specific prompt from the Agent Prompts section below
+
+**Template for each Task call:**
+```
+Task:
+  team_name: "autopilot-cycle-${CYCLE}"
+  model: "opus"
+  subagent_type: "general-purpose"
+  prompt: |
+    CRITICAL: When you finish your analysis, you MUST use the SendMessage tool
+    to send your findings back to the team lead. Your text output is NOT visible
+    to the team lead — only SendMessage delivers your results.
+
+    You are the {AGENT_NAME} in autopilot cycle {CYCLE}.
+    Write findings to: ./autopilot-session/cycle-{CYCLE}/findings/{agent-name}.jsonl
+
+    {AGENT-SPECIFIC INSTRUCTIONS — see Agent Prompts section}
+```
+
+**Stall handling:**
+Wait for all agents to report back via SendMessage. If any agent has not
+reported back within **2 minutes**, stop waiting and self-execute that agent's
+work directly as the orchestrator. Note in the cycle summary:
+"Agent {name} analysis executed by orchestrator (agent unresponsive)".
+
+After all agents complete (or are self-executed), proceed to STEP 2.
+
+---
+
+### STEP 2 — TRIAGE
+
+(See TRIAGE section below)
+
+---
+
+### STEP 3 — FIX
+
+(See FIX IMPLEMENTER section below)
+
+---
+
+### STEP 4 — REBUILD & RESTART
+
+(See REBUILD section below)
+
+---
+
+### STEP 5 — VALIDATE
+
+(See REGRESSION GUARD section below)
+
+---
+
+### STEP 6 — COMMIT & CONVERGE
+
+(See CONVERGENCE section below)
+
+---
+
+### Post-Cycle
+
+After Step 6, check if an exit condition was triggered:
+- If exit condition met → Break loop, proceed to PHASE FINAL.
+- If no exit condition → Increment CYCLE, reset CONSECUTIVE_REVERTS if this cycle was not reverted, continue loop.
+
+### ═══ END CYCLE LOOP ═══
+
+<!-- Agent Prompts, Triage, Fix, Rebuild, Validate, Converge, and Report sections follow -->
