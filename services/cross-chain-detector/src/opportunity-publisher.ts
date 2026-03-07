@@ -216,7 +216,11 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       tokenOut,
       amountIn: amountInWei,
       expectedProfit: expectedProfitUsd,
-      profitPercentage: opportunity.percentageDiff / 100,
+      // FIX M-010: percentageDiff is already in percent form (e.g., 5.0 = 5%).
+      // Use directly to match simple-detector convention (profitPercentage in percent).
+      // Previous /100 produced decimal form (0.05) causing coordinator rejection
+      // when minProfitPercentage=0.1 (percent) was compared against 0.05 (decimal).
+      profitPercentage: opportunity.percentageDiff,
       gasEstimate: '0', // Cross-chain, gas estimated separately
       confidence: opportunity.confidence,
       timestamp: Date.now(),

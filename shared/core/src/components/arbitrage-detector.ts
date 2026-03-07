@@ -60,16 +60,34 @@ function getCachedSlippage(pair: string, tradeSizeUsd: number, side: string): nu
   const key = `${pair}:${tradeSizeUsd}:${side}`;
   const entry = SLIPPAGE_CACHE.get(key);
   if (entry && Date.now() - entry.timestamp < SLIPPAGE_CACHE_TTL_MS) {
+    // FIX M-012: Move to end for LRU behavior (Map iteration order = insertion order)
+    SLIPPAGE_CACHE.delete(key);
+    SLIPPAGE_CACHE.set(key, entry);
     return entry.slippagePercent;
   }
+  // Stale entry — remove eagerly instead of leaving for eviction
+  if (entry) SLIPPAGE_CACHE.delete(key);
   return undefined;
 }
 
 function setCachedSlippage(pair: string, tradeSizeUsd: number, side: string, slippagePercent: number): void {
   const key = `${pair}:${tradeSizeUsd}:${side}`;
+  // FIX M-012: Evict stale entries first before falling back to LRU eviction.
+  // This prevents the cache from being dominated by expired entries.
   if (SLIPPAGE_CACHE.size >= SLIPPAGE_CACHE_MAX_SIZE) {
-    const oldest = SLIPPAGE_CACHE.keys().next().value;
-    if (oldest !== undefined) SLIPPAGE_CACHE.delete(oldest);
+    const now = Date.now();
+    for (const [k, v] of SLIPPAGE_CACHE) {
+      if (now - v.timestamp >= SLIPPAGE_CACHE_TTL_MS) {
+        SLIPPAGE_CACHE.delete(k);
+      }
+      // Stop early once we've freed enough space
+      if (SLIPPAGE_CACHE.size < SLIPPAGE_CACHE_MAX_SIZE) break;
+    }
+    // If still full after TTL sweep, evict oldest (LRU — first in iteration order)
+    if (SLIPPAGE_CACHE.size >= SLIPPAGE_CACHE_MAX_SIZE) {
+      const oldest = SLIPPAGE_CACHE.keys().next().value;
+      if (oldest !== undefined) SLIPPAGE_CACHE.delete(oldest);
+    }
   }
   SLIPPAGE_CACHE.set(key, { slippagePercent, timestamp: Date.now() });
 }
@@ -860,8 +878,10 @@ function calculateCrossChainConfidence(
   // Base confidence on price difference
   let confidence = Math.min(highPrice.price / lowPrice.price - 1, 0.5) * 2;
 
-  // Apply freshness penalty
-  const ageMs = Date.now() - lowPrice.timestamp;
+  // FIX H-005: Apply freshness penalty using the OLDER of the two timestamps.
+  // Previously only used lowPrice.timestamp, ignoring potentially stale highPrice data.
+  const now = Date.now();
+  const ageMs = Math.max(now - lowPrice.timestamp, now - highPrice.timestamp);
   const freshnessScore = Math.max(0.5, 1.0 - ageMs / maxAgeMs);
   confidence *= freshnessScore;
 

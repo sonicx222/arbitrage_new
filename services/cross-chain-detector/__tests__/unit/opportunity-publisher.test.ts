@@ -385,7 +385,8 @@ describe('OpportunityPublisher', () => {
       // expectedProfit in USD = (percentageDiff / 100) * defaultTradeSizeUsd
       // = (1.5 / 100) * 2500 = 37.5
       expect(publishedOpp.expectedProfit).toBeCloseTo(37.5, 5);
-      expect(publishedOpp.profitPercentage).toBeCloseTo(0.015, 5);
+      // FIX M-010: profitPercentage is now in percent form (1.5 = 1.5%), not decimal (0.015)
+      expect(publishedOpp.profitPercentage).toBeCloseTo(1.5, 5);
     });
 
     it('should set cross-chain specific fields', async () => {

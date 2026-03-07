@@ -260,8 +260,12 @@ export class SimpleArbitrageDetector {
       return null;
     }
 
-    // CRITICAL FIX: Calculate expectedProfit as ABSOLUTE value
-    const expectedProfitAbsolute = Number(amountIn) * netProfitPct;
+    // FIX H-004: Calculate expectedProfit in USD using profitPercentage and default trade size.
+    // Previous: Number(amountIn) * netProfitPct — amountIn is in wei (1e16-1e19),
+    // producing nonsensical values like 1e13. Use USD estimate instead.
+    // Consistent with cross-chain publisher pattern (DEFAULT_TRADE_SIZE_USD).
+    const DEFAULT_TRADE_SIZE_USD = 1000;
+    const expectedProfitUsd = netProfitPct * DEFAULT_TRADE_SIZE_USD;
 
     // FIX W2-35: Cache Date.now() once — avoids 3 syscalls per opportunity and ensures
     // consistent timestamps across id, timestamp, and expiresAt fields
@@ -284,7 +288,7 @@ export class SimpleArbitrageDetector {
       buyPrice: Math.min(price1, price2),
       sellPrice: Math.max(price1, price2),
       profitPercentage: netProfitPct * 100,
-      expectedProfit: expectedProfitAbsolute,
+      expectedProfit: expectedProfitUsd,
       estimatedProfit: 0,
       gasEstimate: String(this.config.gasEstimate),
       confidence: this.config.confidence,

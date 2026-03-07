@@ -13,7 +13,7 @@ const logger = createLogger('validation');
 
 // P2-1 FIX: Centralized supported chains list for consistency
 // When adding new chains, only update this array
-const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'optimism', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'] as const;
+const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'optimism', 'avalanche', 'fantom', 'zksync', 'linea', 'blast', 'scroll', 'mantle', 'mode', 'solana'] as const;
 type SupportedChain = typeof SUPPORTED_CHAINS[number];
 
 // Arbitrage opportunity validation

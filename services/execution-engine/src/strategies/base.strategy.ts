@@ -1442,7 +1442,21 @@ export abstract class BaseExecutionStrategy {
 
     // ADR-040: Record gas calibration data for feedback loop.
     // Compares estimated gas cost (from detection) with actual gas cost (from receipt).
-    const estimatedGasCostUsd = opportunity.gasCost ?? 0;
+    // FIX M-011: Detectors set gasEstimate (gas units string), not gasCost (USD).
+    // Derive USD estimate from gasEstimate via gas price cache when gasCost is absent.
+    let estimatedGasCostUsd = opportunity.gasCost ?? 0;
+    if (estimatedGasCostUsd === 0 && opportunity.gasEstimate) {
+      const gasUnits = parseInt(opportunity.gasEstimate, 10);
+      if (Number.isFinite(gasUnits) && gasUnits > 0) {
+        try {
+          const operationType = opportunity.type ?? 'simple';
+          const estimate = getGasPriceCache().estimateGasCostUsd(chain, gasUnits, operationType);
+          estimatedGasCostUsd = estimate.costUsd;
+        } catch {
+          // Non-critical — gas cache may not have data yet
+        }
+      }
+    }
     if (estimatedGasCostUsd > 0 && gasCostUsd > 0) {
       try {
         const operationType = opportunity.type ?? 'simple';
