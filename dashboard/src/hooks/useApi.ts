@@ -1,8 +1,9 @@
 // dashboard/src/hooks/useApi.ts
 import { useMutation } from '@tanstack/react-query';
+import { getItem } from '../lib/storage';
 
 function getToken(): string {
-  return localStorage.getItem('dashboard_token') ?? '';
+  return getItem('dashboard_token') ?? '';
 }
 
 async function apiFetch(url: string, options: RequestInit = {}): Promise<unknown> {
@@ -22,7 +23,7 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<unknown
   return res.json();
 }
 
-// Circuit breaker actions (hits EE on port 3005 in prod, proxied in dev)
+// Circuit breaker actions (proxied through coordinator with auth)
 export function useCircuitBreakerOpen() {
   return useMutation({
     mutationFn: (reason?: string) =>
@@ -30,7 +31,8 @@ export function useCircuitBreakerOpen() {
         method: 'POST',
         body: JSON.stringify({ reason }),
         headers: {
-          'X-API-Key': localStorage.getItem('cb_api_key') ?? '',
+          // X-API-Key for EE-level auth (forwarded by coordinator proxy)
+          'X-API-Key': getItem('cb_api_key') ?? '',
         },
       }),
   });
@@ -42,7 +44,7 @@ export function useCircuitBreakerClose() {
       apiFetch('/circuit-breaker/close', {
         method: 'POST',
         headers: {
-          'X-API-Key': localStorage.getItem('cb_api_key') ?? '',
+          'X-API-Key': getItem('cb_api_key') ?? '',
         },
       }),
   });

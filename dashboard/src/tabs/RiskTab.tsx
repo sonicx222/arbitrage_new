@@ -3,7 +3,7 @@ import { useSSEData } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { formatPct, formatNumber } from '../lib/format';
 
-const DRAWDOWN_STATES = ['NORMAL', 'CAUTION', 'HALT', 'RECOVERY'] as const;
+const RISK_STATES = ['NORMAL', 'CAUTION', 'HALT', 'RECOVERY'] as const;
 
 const stateColors: Record<string, string> = {
   NORMAL: 'border-accent-green text-accent-green',
@@ -20,7 +20,7 @@ const stateColorsMuted: Record<string, string> = {
 };
 
 interface EEHealthResponse {
-  drawdownState?: string;
+  riskState?: string;
   simulationMode?: boolean;
   healthyProviders?: number;
   queueSize?: number;
@@ -31,30 +31,37 @@ interface EEHealthResponse {
 export function RiskTab() {
   const { metrics } = useSSEData();
 
-  // Fetch EE health on tab mount for drawdown state
-  const { data: eeHealth } = useQuery<EEHealthResponse>({
+  // Fetch EE health on tab mount for risk state
+  // In dev, Vite proxies /ee/* to EE port 3005. In prod, coordinator proxies.
+  const { data: eeHealth, isError: eeUnreachable } = useQuery<EEHealthResponse>({
     queryKey: ['ee-health'],
-    queryFn: () => fetchJson('/health'),
+    queryFn: () => fetchJson('/ee/health'),
     refetchInterval: 10000,
     staleTime: 5000,
+    retry: 1,
   });
 
-  const currentDrawdownState = eeHealth?.drawdownState ?? 'UNKNOWN';
+  const currentRiskState = eeUnreachable ? 'UNREACHABLE' : (eeHealth?.riskState ?? 'UNKNOWN');
 
   return (
     <div className="space-y-4 overflow-auto">
-      {/* Drawdown State Machine */}
+      {/* Risk State Machine */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Drawdown Circuit Breaker</h3>
+        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Risk Circuit Breaker</h3>
+        {eeUnreachable && (
+          <div className="mb-2 px-2 py-1 bg-accent-red/10 border border-accent-red/30 rounded text-[10px] text-accent-red">
+            Execution Engine unreachable — check if the service is running
+          </div>
+        )}
         <div className="flex items-center gap-2 mb-3">
-          {DRAWDOWN_STATES.map((state, i) => (
+          {RISK_STATES.map((state, i) => (
             <div key={state} className="flex items-center gap-2">
               <div className={`px-4 py-2 rounded border-2 text-xs font-bold ${
-                currentDrawdownState === state ? stateColors[state] : stateColorsMuted[state]
-              } ${currentDrawdownState === state ? 'bg-surface-lighter' : ''}`}>
+                currentRiskState === state ? stateColors[state] : stateColorsMuted[state]
+              } ${currentRiskState === state ? 'bg-surface-lighter' : ''}`}>
                 {state}
               </div>
-              {i < DRAWDOWN_STATES.length - 1 && (
+              {i < RISK_STATES.length - 1 && (
                 <span className="text-gray-600">&rarr;</span>
               )}
             </div>
@@ -105,11 +112,11 @@ export function RiskTab() {
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Avg Score (admitted)</span>
-                  <span>{metrics.admissionMetrics.avgScoreAdmitted.toFixed(3)}</span>
+                  <span>{Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(3) : '-'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Avg Score (shed)</span>
-                  <span>{metrics.admissionMetrics.avgScoreShed.toFixed(3)}</span>
+                  <span>{Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(3) : '-'}</span>
                 </div>
               </div>
             </div>

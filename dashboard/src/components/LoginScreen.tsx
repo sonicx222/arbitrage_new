@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { setItem } from '../lib/storage';
 
 interface Props {
   onLogin: () => void;
@@ -7,11 +8,31 @@ interface Props {
 export function LoginScreen({ onLogin }: Props) {
   const [token, setToken] = useState('');
   const [cbKey, setCbKey] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (token) localStorage.setItem('dashboard_token', token);
-    if (cbKey) localStorage.setItem('cb_api_key', cbKey);
+    if (!token) return;
+    setError('');
+    setLoading(true);
+    try {
+      // Pre-validate token before storing (prevents infinite 401 SSE loop)
+      const res = await fetch('/api/events', {
+        method: 'HEAD',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401 || res.status === 403) {
+        setError('Invalid token');
+        setLoading(false);
+        return;
+      }
+    } catch {
+      // Network error — allow login attempt anyway (SSE will retry)
+    }
+    setItem('dashboard_token', token);
+    if (cbKey) setItem('cb_api_key', cbKey);
+    setLoading(false);
     onLogin();
   };
 
@@ -39,11 +60,13 @@ export function LoginScreen({ onLogin }: Props) {
             className="w-full bg-surface border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-accent-green outline-none"
           />
         </div>
+        {error && <div className="text-xs text-accent-red text-center">{error}</div>}
         <button
           type="submit"
-          className="w-full py-2 rounded bg-accent-green/20 text-accent-green font-medium text-sm hover:bg-accent-green/30 transition-colors"
+          disabled={loading}
+          className="w-full py-2 rounded bg-accent-green/20 text-accent-green font-medium text-sm hover:bg-accent-green/30 transition-colors disabled:opacity-50"
         >
-          Connect
+          {loading ? 'Validating...' : 'Connect'}
         </button>
         <p className="text-[10px] text-gray-600 text-center">
           Token is stored in localStorage for SSE auth

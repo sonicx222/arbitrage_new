@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useSSEData } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { ServiceCard } from '../components/ServiceCard';
@@ -19,7 +20,7 @@ export function OverviewTab() {
     : metrics.systemHealth >= 50 ? 'text-accent-yellow'
     : 'text-accent-red';
 
-  const serviceList = Object.values(services);
+  const serviceList = useMemo(() => Object.values(services), [services]);
 
   return (
     <div className="grid grid-cols-[1fr_320px] gap-4 h-full">
@@ -77,8 +78,8 @@ export function OverviewTab() {
                 <div className="mt-1 space-y-0.5">
                   <div className="flex justify-between"><span className="text-gray-500">Admitted</span><span className="text-accent-green">{formatNumber(metrics.admissionMetrics.admitted)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Shed</span><span className="text-accent-red">{formatNumber(metrics.admissionMetrics.shed)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Avg Score (admitted)</span><span>{metrics.admissionMetrics.avgScoreAdmitted.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Avg Score (shed)</span><span>{metrics.admissionMetrics.avgScoreShed.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Avg Score (admitted)</span><span>{Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(2) : '-'}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Avg Score (shed)</span><span>{Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(2) : '-'}</span></div>
                 </div>
               ) : <div className="text-gray-600 mt-1">No data</div>}
             </div>

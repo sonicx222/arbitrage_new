@@ -15,8 +15,13 @@ export function ServiceCard({ service }: Props) {
       </div>
       <div className="flex gap-3 text-[10px] text-gray-500">
         <span>{formatMemory(service.memoryUsage)}</span>
-        <span>{(service.cpuUsage * 100).toFixed(1)}%</span>
+        <span>{Number.isFinite(service.cpuUsage) ? (service.cpuUsage * 100).toFixed(1) : '0.0'}%</span>
       </div>
+      {service.error && (
+        <div className="text-[10px] text-accent-red truncate" title={service.error}>
+          {service.error}
+        </div>
+      )}
     </div>
   );
 }

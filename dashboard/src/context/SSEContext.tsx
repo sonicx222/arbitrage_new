@@ -1,6 +1,8 @@
-import { createContext, useContext, useReducer, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { useSSE, type SSEStatus } from '../hooks/useSSE';
-import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem } from '../lib/types';
+import { formatTime } from '../lib/format';
+import { getItem } from '../lib/storage';
+import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint } from '../lib/types';
 
 interface SSEState {
   metrics: SystemMetrics | null;
@@ -8,7 +10,11 @@ interface SSEState {
   circuitBreaker: CircuitBreakerStatus | null;
   streams: StreamHealth | null;
   feed: FeedItem[];
+  chartData: ChartPoint[];
+  lagData: LagPoint[];
   status: SSEStatus;
+  lastEventTime: number | null;
+  nextFeedId: number;
 }
 
 type SSEAction =
@@ -17,29 +23,63 @@ type SSEAction =
   | { type: 'execution-result'; payload: ExecutionResult }
   | { type: 'alert'; payload: Alert }
   | { type: 'circuit-breaker'; payload: CircuitBreakerStatus }
-  | { type: 'streams'; payload: StreamHealth };
+  | { type: 'streams'; payload: StreamHealth }
+  | { type: 'reset'; payload?: undefined };
 
 const MAX_FEED = 50;
-let feedCounter = 0;
+const MAX_CHART_POINTS = 90;
 
 function reducer(state: SSEState, action: SSEAction): SSEState {
+  const lastEventTime = Date.now();
   switch (action.type) {
-    case 'metrics':
-      return { ...state, metrics: action.payload };
+    case 'metrics': {
+      // Dedup by HH:MM:SS — safe at current 2s SSE interval. If interval drops
+      // below 1s, switch to counter-based dedup to avoid dropping data points.
+      const now = formatTime(Date.now());
+      const last = state.chartData[state.chartData.length - 1];
+      let chartData = state.chartData;
+      if (!last || last.time !== now) {
+        const successRate = action.payload.totalExecutions > 0
+          ? (action.payload.successfulExecutions / action.payload.totalExecutions) * 100
+          : 0;
+        chartData = [
+          ...state.chartData.slice(-MAX_CHART_POINTS),
+          { time: now, latency: action.payload.averageLatency, successRate },
+        ];
+      }
+      return { ...state, metrics: action.payload, chartData, lastEventTime };
+    }
     case 'services':
-      return { ...state, services: action.payload };
+      return { ...state, services: action.payload, lastEventTime };
     case 'circuit-breaker':
-      return { ...state, circuitBreaker: action.payload };
-    case 'streams':
-      return { ...state, streams: action.payload };
+      return { ...state, circuitBreaker: action.payload, lastEventTime };
+    case 'streams': {
+      const totalPending = Object.values(action.payload).reduce(
+        (sum, s) => sum + (s.pending ?? 0), 0,
+      );
+      const now = formatTime(Date.now());
+      const last = state.lagData[state.lagData.length - 1];
+      let lagData = state.lagData;
+      if (!last || last.time !== now) {
+        lagData = [
+          ...state.lagData.slice(-MAX_CHART_POINTS),
+          { time: now, pending: totalPending },
+        ];
+      }
+      return { ...state, streams: action.payload, lagData, lastEventTime };
+    }
     case 'execution-result': {
-      const item: FeedItem = { kind: 'execution', data: action.payload, id: `e-${++feedCounter}` };
-      return { ...state, feed: [item, ...state.feed].slice(0, MAX_FEED) };
+      const counter = state.nextFeedId + 1;
+      const item: FeedItem = { kind: 'execution', data: action.payload, id: `e-${counter}` };
+      return { ...state, feed: [item, ...state.feed.slice(0, MAX_FEED - 1)], nextFeedId: counter, lastEventTime };
     }
     case 'alert': {
-      const item: FeedItem = { kind: 'alert', data: action.payload, id: `a-${++feedCounter}` };
-      return { ...state, feed: [item, ...state.feed].slice(0, MAX_FEED) };
+      const counter = state.nextFeedId + 1;
+      const item: FeedItem = { kind: 'alert', data: action.payload, id: `a-${counter}` };
+      return { ...state, feed: [item, ...state.feed.slice(0, MAX_FEED - 1)], nextFeedId: counter, lastEventTime };
     }
+    case 'reset':
+      return { ...initialState, lastEventTime: Date.now() };
     default:
       return state;
   }
@@ -51,7 +91,11 @@ const initialState: SSEState = {
   circuitBreaker: null,
   streams: null,
   feed: [],
+  chartData: [],
+  lagData: [],
   status: 'connecting',
+  lastEventTime: null,
+  nextFeedId: 0,
 };
 
 const SSEContext = createContext<SSEState>(initialState);
@@ -60,18 +104,54 @@ export function useSSEData() {
   return useContext(SSEContext);
 }
 
+function isObj(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function validatePayload(event: string, data: unknown): boolean {
+  if (!isObj(data)) return false;
+  switch (event) {
+    case 'metrics':
+      return typeof data.totalExecutions === 'number' && typeof data.systemHealth === 'number';
+    case 'services':
+      return Object.values(data).every((v) => isObj(v) && typeof (v as Record<string, unknown>).name === 'string');
+    case 'execution-result':
+      return typeof data.success === 'boolean' && typeof data.chain === 'string';
+    case 'circuit-breaker':
+      return typeof data.state === 'string';
+    case 'streams':
+      return true; // Per-stream objects already validated by structure
+    case 'alert':
+      return typeof data.type === 'string' && typeof data.timestamp === 'number';
+    default:
+      return false;
+  }
+}
+
 export function SSEProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const token = localStorage.getItem('dashboard_token') ?? '';
-  const baseUrl = import.meta.env.DEV ? '' : '';
-  const url = `${baseUrl}/api/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  const token = getItem('dashboard_token') ?? '';
+  const url = `/api/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 
   const onEvent = useCallback((event: string, data: unknown) => {
+    if (!validatePayload(event, data)) {
+      console.warn(`[SSE] Skipping malformed ${event} payload`, data);
+      return;
+    }
     dispatch({ type: event as SSEAction['type'], payload: data as never });
   }, []);
 
   const { status } = useSSE({ url, onEvent });
+
+  // M-02: Reset chart/feed data on reconnection to avoid false continuity
+  const prevStatusRef = useRef<SSEStatus>(status);
+  useEffect(() => {
+    if (prevStatusRef.current !== 'connected' && status === 'connected') {
+      dispatch({ type: 'reset' });
+    }
+    prevStatusRef.current = status;
+  }, [status]);
 
   return (
     <SSEContext.Provider value={{ ...state, status }}>

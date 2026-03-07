@@ -1,34 +1,28 @@
-import { useRef } from 'react';
+import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useSSEData } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { formatUsd, formatPct, formatNumber, formatTime } from '../lib/format';
 
-interface ChartPoint {
-  time: string;
-  latency?: number;
-  successRate?: number;
-}
+const EXPLORER_URLS: Record<string, string> = {
+  ethereum: 'https://etherscan.io/tx/',
+  bsc: 'https://bscscan.com/tx/',
+  polygon: 'https://polygonscan.com/tx/',
+  arbitrum: 'https://arbiscan.io/tx/',
+  optimism: 'https://optimistic.etherscan.io/tx/',
+  base: 'https://basescan.org/tx/',
+  avalanche: 'https://snowtrace.io/tx/',
+  fantom: 'https://ftmscan.com/tx/',
+  zksync: 'https://explorer.zksync.io/tx/',
+  linea: 'https://lineascan.build/tx/',
+  blast: 'https://blastscan.io/tx/',
+  scroll: 'https://scrollscan.com/tx/',
+  solana: 'https://solscan.io/tx/',
+};
 
 export function ExecutionTab() {
-  const { metrics, feed } = useSSEData();
-  const chartDataRef = useRef<ChartPoint[]>([]);
-
-  // Accumulate chart data from metrics snapshots
-  if (metrics) {
-    const now = formatTime(Date.now());
-    const last = chartDataRef.current[chartDataRef.current.length - 1];
-    if (!last || last.time !== now) {
-      const successRate = metrics.totalExecutions > 0
-        ? (metrics.successfulExecutions / metrics.totalExecutions) * 100
-        : 0;
-      chartDataRef.current = [
-        ...chartDataRef.current.slice(-90),
-        { time: now, latency: metrics.averageLatency, successRate },
-      ];
-    }
-  }
+  const { metrics, feed, chartData } = useSSEData();
 
   if (!metrics) {
     return <div className="text-gray-500 text-xs">Waiting for execution data...</div>;
@@ -39,11 +33,10 @@ export function ExecutionTab() {
     : 0;
   const failedExecutions = metrics.totalExecutions - metrics.successfulExecutions;
 
-  const executions = feed
-    .filter((item) => item.kind === 'execution')
-    .slice(0, 50);
-
-  const chartData = chartDataRef.current;
+  const executions = useMemo(
+    () => feed.filter((item) => item.kind === 'execution').slice(0, 50),
+    [feed],
+  );
 
   return (
     <div className="space-y-4 overflow-auto">
@@ -100,6 +93,7 @@ export function ExecutionTab() {
                 <th className="text-left py-1 px-2">DEX</th>
                 <th className="text-right py-1 px-2">Profit</th>
                 <th className="text-right py-1 px-2">Latency</th>
+                <th className="text-left py-1 px-2">Tx</th>
               </tr>
             </thead>
             <tbody>
@@ -120,11 +114,24 @@ export function ExecutionTab() {
                       {exec.success && exec.actualProfit != null ? formatUsd(exec.actualProfit) : exec.error?.slice(0, 20) ?? '-'}
                     </td>
                     <td className="py-1 px-2 text-right text-gray-500">{exec.latencyMs != null ? `${exec.latencyMs}ms` : '-'}</td>
+                    <td className="py-1 px-2">
+                      {exec.transactionHash ? (
+                        <a
+                          href={`${EXPLORER_URLS[exec.chain.toLowerCase()] ?? ''}${exec.transactionHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent-blue hover:underline font-mono"
+                          title={exec.transactionHash}
+                        >
+                          {exec.transactionHash.slice(0, 8)}...
+                        </a>
+                      ) : <span className="text-gray-600">-</span>}
+                    </td>
                   </tr>
                 );
               })}
               {executions.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-4 text-gray-600">No executions yet</td></tr>
+                <tr><td colSpan={7} className="text-center py-4 text-gray-600">No executions yet</td></tr>
               )}
             </tbody>
           </table>

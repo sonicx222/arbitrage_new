@@ -143,6 +143,21 @@ export interface CoordinatorStateProvider {
 
   /** Get alert history for /api/alerts endpoint */
   getAlertHistory(limit?: number): Alert[];
+
+  /**
+   * Subscribe to real-time SSE events (execution results, alerts, circuit breaker state).
+   * Returns an unsubscribe function.
+   */
+  subscribeSSE(listener: (event: string, data: unknown) => void): () => void;
+
+  /** Get execution circuit breaker status for SSE push */
+  getCircuitBreakerSnapshot(): {
+    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    consecutiveFailures: number;
+    lastFailureTime: number | null;
+    cooldownRemainingMs: number;
+    timestamp: number;
+  };
 }
 
 // ===========================================================================

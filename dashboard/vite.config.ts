@@ -1,9 +1,15 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+  },
   build: {
     outDir: path.resolve(__dirname, '../services/coordinator/public'),
     emptyOutDir: true,
@@ -26,6 +32,10 @@ export default defineConfig({
       '/metrics': 'http://localhost:3000',
       '/ready': 'http://localhost:3000',
       '/circuit-breaker': 'http://localhost:3005',
+      '/ee': {
+        target: 'http://localhost:3005',
+        rewrite: (path: string) => path.replace(/^\/ee/, ''),
+      },
     },
   },
 });

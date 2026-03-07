@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, Component, type ReactNode, type ErrorInfo } from 'react';
 import { SSEProvider, useSSEData } from './context/SSEContext';
+import { getItem, removeItem } from './lib/storage';
 import { LoginScreen } from './components/LoginScreen';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
@@ -9,12 +10,76 @@ import { StreamsTab } from './tabs/StreamsTab';
 import { AdminTab } from './tabs/AdminTab';
 import type { Tab } from './lib/types';
 
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Dashboard error boundary caught:', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-surface">
+          <div className="card w-96 text-center space-y-4">
+            <h2 className="text-accent-red font-bold">Dashboard Error</h2>
+            <p className="text-xs text-gray-400">{this.state.error.message}</p>
+            <button
+              onClick={() => this.setState({ error: null })}
+              className="px-4 py-2 rounded bg-accent-green/20 text-accent-green text-sm hover:bg-accent-green/30"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 rounded bg-gray-700 text-gray-300 text-sm hover:bg-gray-600 ml-2"
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const TABS: Tab[] = ['Overview', 'Execution', 'Chains', 'Risk', 'Streams', 'Admin'];
 
+const STALE_THRESHOLD_MS = 10_000;
+
 function ConnectionDot() {
-  const { status } = useSSEData();
-  const color = status === 'connected' ? 'bg-accent-green' : status === 'connecting' ? 'bg-accent-yellow' : 'bg-accent-red';
-  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} title={status} />;
+  const { status, lastEventTime } = useSSEData();
+  const [isStale, setIsStale] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      if (lastEventTime && status === 'connected') {
+        setIsStale(Date.now() - lastEventTime > STALE_THRESHOLD_MS);
+      } else {
+        setIsStale(false);
+      }
+    };
+    check();
+    const id = setInterval(check, 3000);
+    return () => clearInterval(id);
+  }, [lastEventTime, status]);
+
+  const color = status !== 'connected'
+    ? (status === 'connecting' ? 'bg-accent-yellow' : 'bg-accent-red')
+    : isStale ? 'bg-accent-yellow' : 'bg-accent-green';
+  const label = status !== 'connected' ? status : isStale ? 'stale data' : 'connected';
+
+  return (
+    <>
+      <span className={`inline-block w-2 h-2 rounded-full ${color}`} title={label} />
+      {isStale && <span className="text-[10px] text-accent-yellow">Data stale</span>}
+    </>
+  );
 }
 
 function Dashboard({ onLogout }: { onLogout: () => void }) {
@@ -69,7 +134,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(() => !!localStorage.getItem('dashboard_token'));
+  const [authed, setAuthed] = useState(() => !!getItem('dashboard_token'));
   const [sseKey, setSSEKey] = useState(0);
 
   const handleLogin = useCallback(() => {
@@ -78,8 +143,8 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    localStorage.removeItem('dashboard_token');
-    localStorage.removeItem('cb_api_key');
+    removeItem('dashboard_token');
+    removeItem('cb_api_key');
     setAuthed(false);
   }, []);
 
@@ -89,7 +154,9 @@ export default function App() {
 
   return (
     <SSEProvider key={sseKey}>
-      <Dashboard onLogout={handleLogout} />
+      <ErrorBoundary>
+        <Dashboard onLogout={handleLogout} />
+      </ErrorBoundary>
     </SSEProvider>
   );
 }

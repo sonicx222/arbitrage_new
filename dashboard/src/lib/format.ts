@@ -1,14 +1,20 @@
 // dashboard/src/lib/format.ts
 
+function safe(n: number, fallback: string): string | null {
+  if (n == null || !Number.isFinite(n)) return fallback;
+  return null;
+}
+
 export function formatUsd(n: number): string {
-  return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(2)}`;
+  return safe(n, '$0.00') ?? (n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(2)}`);
 }
 
 export function formatPct(n: number): string {
-  return `${n.toFixed(1)}%`;
+  return safe(n, '0.0%') ?? `${n.toFixed(1)}%`;
 }
 
 export function formatDuration(seconds: number): string {
+  if (safe(seconds, '') !== null || seconds < 0) return '0m';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -19,11 +25,11 @@ export function formatTime(ts: number): string {
 }
 
 export function formatMemory(bytes: number): string {
-  return `${Math.round(bytes / 1024 / 1024)}MB`;
+  return safe(bytes, '0MB') ?? `${Math.round(bytes / 1024 / 1024)}MB`;
 }
 
 export function formatNumber(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  return safe(n, '0') ?? (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 }
 
 export function statusColor(status: string): string {

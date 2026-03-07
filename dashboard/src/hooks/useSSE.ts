@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 
-export type SSEStatus = 'connecting' | 'connected' | 'disconnected';
+export type SSEStatus = 'connecting' | 'connected';
 
 interface UseSSEOptions {
   url: string;
@@ -23,8 +23,8 @@ export function useSSE({ url, onEvent }: UseSSEOptions) {
 
     es.onopen = () => setStatus('connected');
     es.onerror = () => {
-      setStatus('disconnected');
-      // EventSource reconnects automatically
+      // EventSource reconnects automatically — show 'connecting' not 'disconnected'
+      setStatus('connecting');
     };
 
     const eventTypes = ['metrics', 'services', 'execution-result', 'alert', 'circuit-breaker', 'streams'];

@@ -1,41 +1,24 @@
-import { useRef } from 'react';
+import { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useSSEData } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { StatusBadge } from '../components/StatusBadge';
-import { formatNumber, formatTime } from '../lib/format';
-
-interface LagPoint {
-  time: string;
-  pending: number;
-}
+import { formatNumber } from '../lib/format';
 
 interface RedisStats {
+  byCategory?: Record<string, number>;
+  byCommand?: Record<string, number>;
   totalCommands?: number;
-  commandsPerSecond?: number;
-  memoryUsed?: number;
-  memoryLimit?: number;
-  connectedClients?: number;
-  uptimeSeconds?: number;
+  trackingStartedAt?: number;
+  lastCommandAt?: number;
+  commandsPerMinute?: number;
+  estimatedDailyUsage?: number;
+  dailyLimitPercent?: number;
 }
 
 export function StreamsTab() {
-  const { streams, metrics } = useSSEData();
-  const lagDataRef = useRef<LagPoint[]>([]);
-
-  // Accumulate lag data from SSE stream snapshots
-  if (streams) {
-    const totalPending = Object.values(streams).reduce((sum, s) => sum + (s.pending ?? 0), 0);
-    const now = formatTime(Date.now());
-    const last = lagDataRef.current[lagDataRef.current.length - 1];
-    if (!last || last.time !== now) {
-      lagDataRef.current = [
-        ...lagDataRef.current.slice(-90),
-        { time: now, pending: totalPending },
-      ];
-    }
-  }
+  const { streams, metrics, lagData } = useSSEData();
 
   // Redis stats (one-off fetch, refresh every 30s)
   const { data: redisStats } = useQuery<RedisStats>({
@@ -47,9 +30,12 @@ export function StreamsTab() {
   });
 
   // Sort streams by pending descending
-  const streamEntries = streams
-    ? Object.entries(streams).sort(([, a], [, b]) => (b.pending ?? 0) - (a.pending ?? 0))
-    : [];
+  const streamEntries = useMemo(
+    () => streams
+      ? Object.entries(streams).sort(([, a], [, b]) => (b.pending ?? 0) - (a.pending ?? 0))
+      : [],
+    [streams],
+  );
 
   return (
     <div className="space-y-4 overflow-auto">
@@ -99,7 +85,7 @@ export function StreamsTab() {
       <div className="card">
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Total Pending Messages</h3>
         <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={lagDataRef.current}>
+          <AreaChart data={lagData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#333" />
             <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#666' }} />
             <YAxis tick={{ fontSize: 9, fill: '#666' }} />
@@ -132,28 +118,30 @@ export function StreamsTab() {
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Redis Stats</h3>
           {redisStats ? (
             <div className="space-y-1.5 text-xs">
+              {redisStats.commandsPerMinute != null && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Commands/min</span>
+                  <span>{redisStats.commandsPerMinute.toFixed(1)}</span>
+                </div>
+              )}
               {redisStats.totalCommands != null && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">Total Commands</span>
                   <span>{formatNumber(redisStats.totalCommands)}</span>
                 </div>
               )}
-              {redisStats.commandsPerSecond != null && (
+              {redisStats.estimatedDailyUsage != null && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Commands/sec</span>
-                  <span>{redisStats.commandsPerSecond.toFixed(1)}</span>
+                  <span className="text-gray-500">Est. Daily</span>
+                  <span>{formatNumber(redisStats.estimatedDailyUsage)}</span>
                 </div>
               )}
-              {redisStats.connectedClients != null && (
+              {redisStats.dailyLimitPercent != null && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Clients</span>
-                  <span>{redisStats.connectedClients}</span>
-                </div>
-              )}
-              {redisStats.memoryUsed != null && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Memory</span>
-                  <span>{Math.round(redisStats.memoryUsed / 1024 / 1024)}MB</span>
+                  <span className="text-gray-500">Daily Limit %</span>
+                  <span className={redisStats.dailyLimitPercent > 80 ? 'text-accent-red' : redisStats.dailyLimitPercent > 50 ? 'text-accent-yellow' : ''}>
+                    {redisStats.dailyLimitPercent.toFixed(1)}%
+                  </span>
                 </div>
               )}
             </div>

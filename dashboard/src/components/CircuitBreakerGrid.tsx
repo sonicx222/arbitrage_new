@@ -12,6 +12,7 @@ export function CircuitBreakerGrid() {
   const [showClose, setShowClose] = useState(false);
   const [reason, setReason] = useState('');
 
+  const [errorMsg, setErrorMsg] = useState('');
   const state = circuitBreaker?.state ?? 'UNKNOWN';
   const failures = circuitBreaker?.consecutiveFailures ?? 0;
 
@@ -24,9 +25,9 @@ export function CircuitBreakerGrid() {
           <span className={`font-bold ${statusColor(state)}`}>{state}</span>
         </div>
         <span className="text-xs text-gray-500">Failures: {failures}</span>
-        {circuitBreaker && (
+        {circuitBreaker && circuitBreaker.cooldownRemainingMs > 0 && (
           <span className="text-xs text-gray-500">
-            Success: {circuitBreaker.totalSuccesses} / Fail: {circuitBreaker.totalFailures}
+            Cooldown: {Math.ceil(circuitBreaker.cooldownRemainingMs / 1000)}s
           </span>
         )}
       </div>
@@ -43,6 +44,7 @@ export function CircuitBreakerGrid() {
         >
           Force Close
         </button>
+        {errorMsg && <span className="text-[10px] text-accent-red ml-2">{errorMsg}</span>}
       </div>
 
       <ConfirmModal
@@ -53,7 +55,8 @@ export function CircuitBreakerGrid() {
         loading={openMutation.isPending}
         onConfirm={() => {
           openMutation.mutate(reason || 'Manual dashboard action', {
-            onSuccess: () => { setShowOpen(false); setReason(''); },
+            onSuccess: () => { setShowOpen(false); setReason(''); setErrorMsg(''); },
+            onError: (err) => { setShowOpen(false); setErrorMsg(`CB open failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 5000); },
           });
         }}
         onCancel={() => { setShowOpen(false); setReason(''); }}
@@ -77,7 +80,8 @@ export function CircuitBreakerGrid() {
         loading={closeMutation.isPending}
         onConfirm={() => {
           closeMutation.mutate(undefined, {
-            onSuccess: () => setShowClose(false),
+            onSuccess: () => { setShowClose(false); setErrorMsg(''); },
+            onError: (err) => { setShowClose(false); setErrorMsg(`CB close failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 5000); },
           });
         }}
         onCancel={() => setShowClose(false)}

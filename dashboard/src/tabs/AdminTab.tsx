@@ -1,29 +1,26 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSSEData } from '../context/SSEContext';
-import { useCircuitBreakerOpen, useCircuitBreakerClose, useSetLogLevel, useRestartService, useAckAlert, fetchJson } from '../hooks/useApi';
+import { useSetLogLevel, useRestartService, useAckAlert, fetchJson } from '../hooks/useApi';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { StatusBadge } from '../components/StatusBadge';
-import { formatTime, formatDuration, statusDot } from '../lib/format';
+import { formatTime, formatDuration } from '../lib/format';
 import type { Alert } from '../lib/types';
 
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 
 export function AdminTab() {
-  const { services, circuitBreaker, metrics } = useSSEData();
-  const cbOpen = useCircuitBreakerOpen();
-  const cbClose = useCircuitBreakerClose();
+  const { services, metrics } = useSSEData();
   const setLogLevel = useSetLogLevel();
   const restartService = useRestartService();
   const ackAlert = useAckAlert();
   const queryClient = useQueryClient();
 
-  const [showCBOpen, setShowCBOpen] = useState(false);
-  const [showCBClose, setShowCBClose] = useState(false);
-  const [cbReason, setCBReason] = useState('');
   const [restartTarget, setRestartTarget] = useState<string | null>(null);
   const [activeLogLevel, setActiveLogLevel] = useState<string>('info');
   const [logLevelMsg, setLogLevelMsg] = useState('');
+  const [actionMsg, setActionMsg] = useState('');
 
   // Fetch alerts on tab mount
   const { data: alerts = [] } = useQuery<Alert[]>({
@@ -34,17 +31,17 @@ export function AdminTab() {
     retry: 1,
   });
 
-  // Fetch leader status
+  // Fetch leader status (10s to reduce stale window for admin actions)
   const { data: leaderInfo } = useQuery<{ isLeader: boolean; instanceId: string; lockKey: string }>({
     queryKey: ['leader'],
     queryFn: () => fetchJson('/api/leader'),
-    refetchInterval: 30000,
-    staleTime: 15000,
+    refetchInterval: 10000,
+    staleTime: 5000,
     retry: 1,
   });
 
   const isLeader = leaderInfo?.isLeader ?? false;
-  const serviceList = Object.values(services);
+  const serviceList = useMemo(() => Object.values(services), [services]);
 
   return (
     <div className="space-y-4 overflow-auto">
@@ -74,28 +71,8 @@ export function AdminTab() {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Circuit Breaker Control */}
-        <div className="card">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Circuit Breaker Control</h3>
-          <div className="flex items-center gap-3 mb-3">
-            <span className={`w-3 h-3 rounded-full ${statusDot(circuitBreaker?.state ?? 'UNKNOWN')}`} />
-            <span className="text-sm font-bold">{circuitBreaker?.state ?? 'UNKNOWN'}</span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowCBOpen(true)}
-              className="px-3 py-1.5 text-xs rounded bg-accent-red/20 text-accent-red hover:bg-accent-red/30"
-            >
-              Force Open
-            </button>
-            <button
-              onClick={() => setShowCBClose(true)}
-              className="px-3 py-1.5 text-xs rounded bg-accent-green/20 text-accent-green hover:bg-accent-green/30"
-            >
-              Force Close
-            </button>
-          </div>
-        </div>
+        {/* Circuit Breaker Control — shared component (also in ExecutionTab) */}
+        <CircuitBreakerGrid />
 
         {/* Log Level */}
         <div className="card">
@@ -129,6 +106,7 @@ export function AdminTab() {
       <div className="card">
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
           Service Management {!isLeader && <span className="text-accent-yellow">(read-only — not leader)</span>}
+          {actionMsg && <span className="text-accent-red ml-2">{actionMsg}</span>}
         </h3>
         <div className="overflow-auto max-h-64">
           <table className="w-full text-xs">
@@ -202,8 +180,11 @@ export function AdminTab() {
                   <td className="py-1 px-2 text-center">
                     <button
                       onClick={() => {
-                        ackAlert.mutate(alert.type, {
+                        // Cooldown key format: ${type}_${service || 'system'}
+                        const cooldownKey = `${alert.type}_${alert.service ?? 'system'}`;
+                        ackAlert.mutate(cooldownKey, {
                           onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alerts'] }),
+                          onError: (err) => { setActionMsg(`Ack failed: ${err.message}`); setTimeout(() => setActionMsg(''), 5000); },
                         });
                       }}
                       className="px-2 py-0.5 text-[10px] rounded bg-gray-700 text-gray-400 hover:text-gray-200"
@@ -223,44 +204,6 @@ export function AdminTab() {
 
       {/* Modals */}
       <ConfirmModal
-        open={showCBOpen}
-        title="Force Open Circuit Breaker"
-        danger
-        confirmLabel="Open Circuit"
-        loading={cbOpen.isPending}
-        onConfirm={() => {
-          cbOpen.mutate(cbReason || 'Manual dashboard action', {
-            onSuccess: () => { setShowCBOpen(false); setCBReason(''); },
-          });
-        }}
-        onCancel={() => { setShowCBOpen(false); setCBReason(''); }}
-      >
-        <div>
-          <p className="mb-2">This will halt all executions.</p>
-          <input
-            type="text"
-            placeholder="Reason (optional)"
-            value={cbReason}
-            onChange={(e) => setCBReason(e.target.value)}
-            className="w-full bg-surface border border-gray-700 rounded px-2 py-1 text-xs"
-          />
-        </div>
-      </ConfirmModal>
-
-      <ConfirmModal
-        open={showCBClose}
-        title="Force Close Circuit Breaker"
-        confirmLabel="Close Circuit"
-        loading={cbClose.isPending}
-        onConfirm={() => {
-          cbClose.mutate(undefined, { onSuccess: () => setShowCBClose(false) });
-        }}
-        onCancel={() => setShowCBClose(false)}
-      >
-        This will resume executions.
-      </ConfirmModal>
-
-      <ConfirmModal
         open={!!restartTarget}
         title={`Restart ${restartTarget}?`}
         danger
@@ -269,7 +212,8 @@ export function AdminTab() {
         onConfirm={() => {
           if (restartTarget) {
             restartService.mutate(restartTarget, {
-              onSuccess: () => setRestartTarget(null),
+              onSuccess: () => { setRestartTarget(null); setActionMsg(''); },
+              onError: (err) => { setRestartTarget(null); setActionMsg(`Restart failed: ${err.message}`); setTimeout(() => setActionMsg(''), 5000); },
             });
           }
         }}

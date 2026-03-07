@@ -13,6 +13,9 @@ import crypto from 'crypto';
 import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
 import type { CoordinatorStateProvider } from '../types';
 
+const MAX_SSE_CONNECTIONS = 50;
+let activeSSEConnections = 0;
+
 export function createSSERoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
   const dashboardAuthToken = process.env.DASHBOARD_AUTH_TOKEN;
@@ -33,6 +36,14 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
       }
     }
 
+    // M5: Limit concurrent SSE connections to prevent resource exhaustion
+    // Checked after auth to avoid counting rejected connections
+    if (activeSSEConnections >= MAX_SSE_CONNECTIONS) {
+      res.status(503).json({ error: 'Too many SSE connections' });
+      return;
+    }
+    activeSSEConnections++;
+
     // SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -48,6 +59,12 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     // Send initial state immediately
     send('metrics', state.getSystemMetrics());
     send('services', Object.fromEntries(state.getServiceHealthMap()));
+    send('circuit-breaker', state.getCircuitBreakerSnapshot());
+
+    // Subscribe to real-time events (execution results, alerts)
+    const unsubscribe = state.subscribeSSE((event, data) => {
+      send(event, data);
+    });
 
     // Periodic pushes
     const metricsInterval = setInterval(() => {
@@ -61,12 +78,27 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     const streamsInterval = setInterval(async () => {
       try {
         const monitor = getStreamHealthMonitor();
-        const health = await monitor.getSummary();
-        send('streams', health);
+        const health = await monitor.checkStreamHealth();
+        // Map MonitoredStreamInfo to dashboard StreamHealth shape
+        const mapped: Record<string, { length: number; pending: number; consumerGroups: number; status: string }> = {};
+        for (const [name, info] of Object.entries(health.streams)) {
+          mapped[name] = {
+            length: info.length,
+            pending: info.pendingCount,
+            consumerGroups: info.consumerGroups,
+            status: info.status,
+          };
+        }
+        send('streams', mapped);
       } catch {
         // Stream monitor not available yet — skip
       }
     }, 10000);
+
+    // Push circuit breaker state every 5s
+    const cbInterval = setInterval(() => {
+      send('circuit-breaker', state.getCircuitBreakerSnapshot());
+    }, 5000);
 
     // Keepalive comment every 15s to prevent proxy timeouts
     const keepaliveInterval = setInterval(() => {
@@ -75,9 +107,12 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
 
     // Cleanup on disconnect
     req.on('close', () => {
+      activeSSEConnections--;
+      unsubscribe();
       clearInterval(metricsInterval);
       clearInterval(servicesInterval);
       clearInterval(streamsInterval);
+      clearInterval(cbInterval);
       clearInterval(keepaliveInterval);
     });
   }) as RequestHandler);
