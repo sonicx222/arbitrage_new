@@ -393,10 +393,16 @@ export class StreamConsumer {
           }
         } catch (batchError) {
           this.stats.messagesFailed += messages.length;
-          this.config.logger?.error('Stream batch handler failed', {
+          // DI-M-001 FIX: Include message IDs in error log for redelivery forensics.
+          // When a batch of 200 messages fails, operators need to know which IDs will
+          // be redelivered to diagnose potential redelivery storms.
+          this.config.logger?.error('Stream batch handler failed — all messages unACKed for redelivery', {
             error: batchError,
             stream: this.config.config.streamName,
             batchSize: messages.length,
+            messageIds: messages.map(m => m.id),
+            firstId: messages[0]?.id,
+            lastId: messages[messages.length - 1]?.id,
           });
         }
       } else {

@@ -294,15 +294,19 @@ export const chainConfidenceMaxAgeMs: Record<string, number> = {
   solana: 3000,      // ~400ms blocks — 3s is ~7.5 slots (accounts for WS delivery latency)
 };
 
+/** CD-012 FIX: Named constant for the global default confidence max age (ms).
+ * Used when no chain-specific override is configured in chainConfidenceMaxAgeMs. */
+const DEFAULT_CONFIDENCE_MAX_AGE_MS = 10000;
+
 /**
  * Get confidence maxAgeMs for a specific chain.
- * Uses chainConfidenceMaxAgeMs with fallback to 10000ms (global default).
+ * Uses chainConfidenceMaxAgeMs with fallback to DEFAULT_CONFIDENCE_MAX_AGE_MS.
  *
  * @param chainId - Chain identifier (case-insensitive)
  * @returns Maximum price data age in milliseconds
  */
 export function getConfidenceMaxAgeMs(chainId: string): number {
-  return chainConfidenceMaxAgeMs[chainId.toLowerCase()] ?? 10000;
+  return chainConfidenceMaxAgeMs[chainId.toLowerCase()] ?? DEFAULT_CONFIDENCE_MAX_AGE_MS;
 }
 
 // =============================================================================

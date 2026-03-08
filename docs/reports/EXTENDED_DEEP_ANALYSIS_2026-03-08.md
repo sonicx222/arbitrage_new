@@ -14,6 +14,7 @@
 **Total findings: 42** (0 Critical / 6 High + 2 retracted / 17 Medium / 17 Low)
 **Overall grade: A-**
 **Phase 1 remediation: 5/5 valid findings FIXED** (2 retracted as false positives)
+**Phase 2 remediation: 7/8 findings FIXED** (FM-005 backpressure deferred, DI-M-001 mitigated with forensic logging)
 
 The system is architecturally sound with comprehensive per-chain configuration, a well-layered 4-tier dedup system, end-to-end trace propagation, and correct seqlock/SharedArrayBuffer implementation. The main risks are in latency budget overruns (worst-case 55-75ms vs 50ms target), a few HMAC/dedup edge cases, and operational gaps (permanently silent WebSocket chains, missing flash loan providers).
 
@@ -103,7 +104,7 @@ All HIGH findings verified against Known Correct Patterns table and ADRs. None a
 | 6 | CC-M04 | Config | `shared/config/src/bridge-config.ts:562-584` | `validateRouteSymmetry()` exists but is not called at startup or in tests. One-directional routes cause fallback cost estimation. | cross-chain | MEDIUM |
 | 7 | FM-001 | Resilience | `shared/core/src/circuit-breaker/simple-circuit-breaker.ts:64-67` | SimpleCircuitBreaker state is in-memory only. Rapid crash-restart cycles bypass circuit protection (breaker resets to CLOSED). | failure-mode | HIGH |
 | 8 | FM-006 | Resilience | `services/execution-engine/src/engine.ts:854-858` | In-flight cross-chain trades exceeding `drainTimeoutMs` (30s) are abandoned during shutdown. Bridge recovery depends on EE restarting within Redis key TTL. | failure-mode | HIGH |
-| 9 | DI-M-001 | Delivery | `shared/core/src/redis/stream-consumer.ts:394-401` | Batch handler failure leaves ALL messages (up to 200) unACKed for redelivery. Transient error causes redelivery storm. | data-integrity | HIGH |
+| 9 | DI-M-001 | Delivery | `shared/core/src/redis/stream-consumer.ts:394-401` | Batch handler failure leaves ALL messages (up to 200) unACKed for redelivery. Transient error causes redelivery storm. **MITIGATED**: Error log now includes all message IDs for redelivery forensics. | data-integrity | HIGH |
 | 10 | DI-M-002 | Dedup | `services/coordinator/src/opportunities/opportunity-router.ts:450-458` | Coordinator dedup is in-memory Map only (no Redis layer). Lost on restart; burst of duplicate forwards until EE's Redis dedup catches them. | data-integrity | MEDIUM |
 | 11 | DI-M-003 | Observability | `shared/core/src/redis/streams.ts:1680-1685` | `unwrapBatchMessages()` uses `process.emitWarning()` for count mismatch — goes to stderr, not structured logging. | data-integrity | HIGH |
 | 12 | DI-M-004 | Integrity | Coordinator + EE (multiple files) | Schema validation reimplemented in parallel by coordinator (`opportunity-router.ts:440-577`) and EE (`consumers/validation.ts`). Schema drift possible. | data-integrity | MEDIUM |
@@ -274,13 +275,13 @@ No conflicts between agents were found. All 5 overlap-zone conclusions (Agent 2 
 ### Phase 2: Next Sprint (P2 — reliability and coverage)
 
 - [ ] **FM-005**: Add EE-to-coordinator backpressure signal (control stream key when consumer pauses). Score: 2.7
-- [ ] **DI-H-002**: Consider failing closed for Redis dedup or log WARN when fail-open activates. Score: 3.3
-- [ ] **DI-M-003**: Replace `process.emitWarning()` with structured logger in `unwrapBatchMessages()`. Score: 2.5
+- [x] **DI-H-002**: Enhanced fail-open WARN log with consequence context. **FIXED.**
+- [x] **DI-M-003**: Added optional logger parameter to `unwrapBatchMessages()`, wired in coordinator + cross-chain callers. **FIXED.**
 - [ ] **DI-M-004**: Extract shared `parseOpportunityFromStream()` function in `@arbitrage/core`. Score: 2.0
-- [ ] **FM-001**: Persist coordinator execution CB state to Redis key for crash-restart resilience. Score: 2.5
-- [ ] **CC-M04**: Call `validateRouteSymmetry()` at coordinator startup. Score: 2.5
-- [ ] **CD-005**: Add `DEDUP_FAIL_CLOSED`, `AB_TESTING_ENABLED`, `RPC_BATCHING_ENABLED` to `.env.example`. Score: 2.5
-- [ ] **CD-012**: Extract `getConfidenceMaxAgeMs` fallback to named constant. Score: 2.0
+- [x] **FM-001**: Added `restoreState()` to SimpleCircuitBreaker; coordinator now persists/restores CB state via Redis (5-min TTL). **FIXED.**
+- [x] **CC-M04**: Coordinator now calls `validateRouteSymmetry()` at startup with WARN log for asymmetric routes. **FIXED.**
+- [x] **CD-005**: Uncommented `AB_TESTING_ENABLED` and `DEDUP_FAIL_CLOSED` in `.env.example`. **FIXED.**
+- [x] **CD-012**: Extracted `DEFAULT_CONFIDENCE_MAX_AGE_MS` named constant in `thresholds.ts`. **FIXED.**
 
 ### Phase 3: Backlog (P3 — hardening and optimization)
 

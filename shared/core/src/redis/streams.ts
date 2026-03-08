@@ -1055,7 +1055,12 @@ export class RedisStreamsClient {
       const result = await this.client.set(key, value, 'EX', ttlSec, 'NX');
       return result === 'OK';
     } catch (error) {
-      this.logger.warn('SET NX failed', { key, error: getErrorMessage(error) });
+      // DI-H-002 FIX: Explicit warn about fail-open consequence
+      this.logger.warn('SET NX failed — dedup fail-open, duplicate execution possible', {
+        key,
+        error: getErrorMessage(error),
+        consequence: 'in-memory dedup still active; flash loan atomicity prevents fund loss',
+      });
       // Fail open: allow execution if Redis is unavailable (in-memory dedup still active)
       return true;
     }
@@ -1704,14 +1709,20 @@ function isBatchEnvelope<T>(data: unknown): data is BatchEnvelope<T> {
  * @param data - Raw message data from Redis stream (may be batch or single)
  * @returns Array of individual messages
  */
-export function unwrapBatchMessages<T>(data: unknown): T[] {
+export function unwrapBatchMessages<T>(
+  data: unknown,
+  logger?: { warn: (msg: string, ctx?: Record<string, unknown>) => void },
+): T[] {
   if (isBatchEnvelope<T>(data)) {
     // FIX L8: Validate count matches actual messages length to detect truncation/corruption
     if (data.count !== data.messages.length) {
-      process.emitWarning(
-        `Batch envelope count mismatch: declared ${data.count}, actual ${data.messages.length}`,
-        'BatchIntegrityWarning'
-      );
+      // DI-M-003 FIX: Use structured logger when available, fall back to process.emitWarning
+      const msg = `Batch envelope count mismatch: declared ${data.count}, actual ${data.messages.length}`;
+      if (logger) {
+        logger.warn(msg, { declaredCount: data.count, actualCount: data.messages.length });
+      } else {
+        process.emitWarning(msg, 'BatchIntegrityWarning');
+      }
     }
     return data.messages;
   }

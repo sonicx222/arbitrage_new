@@ -44,7 +44,7 @@ import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrag
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
-import { safeParseInt, safeParseFloat, getStreamForChain } from '@arbitrage/config';
+import { safeParseInt, safeParseFloat, getStreamForChain, validateRouteSymmetry } from '@arbitrage/config';
 import { serializeOpportunityForStream } from './utils/stream-serialization';
 
 // Import extracted API modules
@@ -628,6 +628,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Initialize Redis client (for legacy operations)
       this.redis = await this.deps.getRedisClient() as RedisClient;
 
+      // FM-001 FIX: Restore execution circuit breaker state from Redis.
+      // Prevents rapid crash-restart cycles from bypassing circuit protection.
+      try {
+        const stored = await this.redis.get<{ failures: number; isOpen: boolean; lastFailure: number }>('coordinator:cb:execution');
+        if (stored) {
+          this.executionCircuitBreaker.restoreState(stored);
+          this.logger.info('Restored execution circuit breaker state from Redis', {
+            failures: stored.failures,
+            isOpen: stored.isOpen,
+          });
+        }
+      } catch {
+        // Non-fatal — start with fresh CB state if restore fails
+      }
+
       // Initialize Redis Streams client
       this.streamsClient = await this.deps.getRedisStreamsClient();
 
@@ -748,6 +763,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
         // Non-fatal — DLQ trim failure shouldn't block startup
         this.logger.warn('Failed to trim stale DLQ entries at startup', {
           error: (error as Error).message,
+        });
+      }
+
+      // CC-M04 FIX: Validate bridge route symmetry at startup.
+      // One-directional routes cause fallback cost estimation for return legs.
+      const routeWarnings = validateRouteSymmetry();
+      if (routeWarnings.length > 0) {
+        this.logger.warn('Asymmetric bridge routes detected — return-leg cost estimation may use fallbacks', {
+          asymmetricCount: routeWarnings.length,
+          warnings: routeWarnings.slice(0, 10), // Cap log size
         });
       }
 
@@ -1875,7 +1900,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
     // For non-batched messages, returns single-element array (backward compatible)
-    const items = unwrapBatchMessages<Record<string, unknown>>(data);
+    const items = unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
 
     let validCount = 0;
     for (const item of items) {
@@ -1929,7 +1954,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
-      const items = unwrapBatchMessages<Record<string, unknown>>(data);
+      const items = unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
 
       for (const item of items) {
         const rawUpdate = unwrapMessageData(item);
@@ -2201,6 +2226,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const justOpened = this.executionCircuitBreaker.recordFailure();
     const status = this.executionCircuitBreaker.getStatus();
 
+    // FM-001 FIX: Persist CB state to Redis for crash-restart resilience
+    this.persistCircuitBreakerState();
+
     if (justOpened) {
       this.logger.warn('Execution circuit breaker opened', {
         failures: status.failures,
@@ -2228,7 +2256,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     if (justRecovered) {
       this.logger.info('Execution circuit breaker closed - recovered');
+      // FM-001 FIX: Persist recovered state to Redis
+      this.persistCircuitBreakerState();
     }
+  }
+
+  /** FM-001 FIX: Persist circuit breaker state to Redis for crash-restart resilience.
+   * Fire-and-forget — CB state persistence is non-critical. */
+  private persistCircuitBreakerState(): void {
+    if (!this.redis) return;
+    const status = this.executionCircuitBreaker.getStatus();
+    // TTL = 5 minutes — stale CB state older than this is irrelevant after a long restart
+    // RedisClient.set() auto-serializes with JSON.stringify and uses SETEX when ttl is provided
+    this.redis.set(
+      'coordinator:cb:execution',
+      { failures: status.failures, isOpen: status.isOpen, lastFailure: status.lastFailure },
+      300,
+    ).catch(() => { /* non-critical */ });
   }
 
   /**

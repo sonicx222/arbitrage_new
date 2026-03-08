@@ -180,6 +180,28 @@ export class SimpleCircuitBreaker {
     const elapsed = Date.now() - this.lastFailure;
     return Math.max(0, this.resetTimeoutMs - elapsed);
   }
+
+  /**
+   * FM-001 FIX: Restore state from an external snapshot (e.g., loaded from Redis).
+   * Enables crash-restart resilience by persisting/restoring state externally.
+   *
+   * Usage pattern:
+   * ```typescript
+   * // On startup: load from Redis, restore
+   * const stored = await redis.get('cb:execution');
+   * if (stored) breaker.restoreState(JSON.parse(stored));
+   *
+   * // On state change: persist to Redis
+   * await redis.set('cb:execution', JSON.stringify(breaker.getStatus()), 'EX', 300);
+   * ```
+   *
+   * @param status - Previously saved status from getStatus()
+   */
+  restoreState(status: Pick<SimpleCircuitBreakerStatus, 'failures' | 'isOpen' | 'lastFailure'>): void {
+    this.failures = status.failures;
+    this.isOpen = status.isOpen;
+    this.lastFailure = status.lastFailure;
+  }
 }
 
 /**
