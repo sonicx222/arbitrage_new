@@ -1,6 +1,6 @@
 /**
  * Mode DEX Configurations — 3 DEXes
- * Note: supswap and iziswap have unverified addresses (sequential hex patterns).
+ * Updated with RPC-validated factory/router pairs on 2026-03-08.
  */
 import { Dex, FeeBasisPoints } from '../../../../types';
 
@@ -10,25 +10,25 @@ export const MODE_DEXES: Dex[] = [
   {
     name: 'kim_exchange',      // [C] - Dominant on Mode
     chain: 'mode',
-    factoryAddress: '0x8c5a57ed1d0ef3b87984400b7f707c05151de0d7',
-    routerAddress: '0x6A5a77c58Eac94A52Fb8b3F98Fc61dDA9B673b94',
+    factoryAddress: '0xc02155946dd8C89D3D3238A6c8A64D04E2CD4500',
+    routerAddress: '0x5D61c537393cf21893BE619E36fC94cd73C77DD3',
     feeBps: bps(30),
-    verified: false,  // Not yet RPC-verified on Mode mainnet
+    verified: true,   // RPC-validated (factory code + router.factory() match)
   },
   {
-    name: 'supswap',          // [H]
+    name: 'supswap',           // [H]
     chain: 'mode',
-    factoryAddress: '0x8a4C4e7d05d2798C5bC4b7dA6315E73F5d0fA576',
-    routerAddress: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d10',
+    factoryAddress: '0xa0b018Fe0d00ed075fb9b0eEe26d25cf72e1F693',
+    routerAddress: '0x016e131C05fb007b5ab286A6D614A5dab99BD415',
     feeBps: bps(30),
-    verified: false,  // Addresses have sequential hex patterns — verify on Mode mainnet via RPC
+    verified: true,   // RPC-validated (factory code + router.factory() match)
   },
   {
-    name: 'iziswap',          // [M]
+    name: 'swapmode',          // [M]
     chain: 'mode',
-    factoryAddress: '0x1c1e07c9147b90c7d9db20d4a7f5e5e4e4b8f9c0',
-    routerAddress: '0x2d3bb6c1c8b8e1f2d4a5f6c7e8e9d0c1b2a3d4e0',
+    factoryAddress: '0xfb926356BAf861c93C3557D7327Dbe8734A71891',
+    routerAddress: '0xc1e624c810d297fd70ef53b0e08f44fabe468591',
     feeBps: bps(30),
-    verified: false,  // Addresses have sequential hex patterns — verify on Mode mainnet via RPC
+    verified: true,   // RPC-validated (factory code + router.factory() match)
   },
 ];

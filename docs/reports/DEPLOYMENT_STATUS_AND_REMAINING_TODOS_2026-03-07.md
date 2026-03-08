@@ -1,6 +1,7 @@
 # Deployment Status & Remaining TODOs
 
 **Date:** 2026-03-07
+**Last Updated:** 2026-03-08 (zkSync verification + runtime validation)
 **Based on:** Cross-verification of `registry.json`, `addresses.ts`, `service-config.ts`, `hardhat.config.ts`, `dexes/`, `flash-loan-availability.ts`, `partitions.ts` against `DEPLOYMENT_TESTNET_ASSESSMENT_2026-02-25.md`
 **Purpose:** Accurate current state + step-by-step tutorial for all remaining testnet deployments and address registration
 
@@ -12,26 +13,28 @@
 
 | Area | Then | Now |
 |------|------|-----|
-| Deployed contracts | 1 (FlashLoan on arbSepolia) | **7** (3 on sepolia, 3+1 on arbSepolia) |
-| Verified contracts | 0 | **5** |
+| Deployed contracts | 1 (FlashLoan on arbSepolia) | **10** (3 on sepolia, 5 on arbSepolia, 1 on baseSepolia, 1 on zksync-testnet) |
+| Verified contracts | 0 | **10** (all deployed contracts verified, including zksync-testnet SyncSwap) |
 | Blast DEX addresses | All placeholder | **All RPC-verified** |
 | Scroll DEX addresses | All placeholder | **All RPC-verified** |
+| Mantle DEX addresses | Unverified stubs | **All RPC-verified** |
+| Mode DEX addresses | Unverified stubs | **All RPC-verified** |
 | Scroll flash loans | Config stub | **Aave V3 + SyncSwap Vault verified** |
-| Hardhat networks | 10 core + 4 testnets | Same (emerging L2s still missing) |
+| Hardhat networks | 10 core + 4 testnets | **Blast + Scroll + Mantle + Mode added** |
 
 ### What's Left
 
 | Category | Count | Effort |
 |----------|-------|--------|
-| Testnet contract deployments remaining | 3-5 (depending on blocker resolution) | 1-2 hours |
-| Contract verifications needed | 2 | 15 min |
-| Data sync fixes (addresses.ts / registry.json) | 3 | 15 min |
-| Research tasks (blocked by enterprise network) | 5 | Manual browser research |
+| Testnet contract deployments remaining | 0 (Balancer unavailable on arbSepolia testnet; defer to mainnet) | 0 min |
+| Contract verifications needed | 0 | 0 min |
+| Data sync fixes (addresses.ts / registry.json) | 0 | 0 min |
+| Research tasks | 0 | 0 min |
 | Mainnet deployments (Phase D) | 12+ contracts across 3 chains | After testnet validation |
 
 ---
 
-## 2. Current Deployment State (Verified 2026-03-07)
+## 2. Current Deployment State (Verified 2026-03-08)
 
 ### 2.1 Contracts Deployed
 
@@ -40,39 +43,52 @@
 | Contract | Address | Verified | In addresses.ts |
 |----------|---------|:--------:|:---------------:|
 | FlashLoanArbitrage | `0x2f091cc77601C5aE2439A763C4916d9d32e035B6` | Yes | Yes |
-| CommitRevealArbitrage | `0xb38498De6C09F110EbC946CaEEd73BA8640f5C65` | Yes | **NO** |
+| CommitRevealArbitrage | `0xb38498De6C09F110EbC946CaEEd73BA8640f5C65` | Yes | Yes |
 | MultiPathQuoter | `0xE5b26749430ed50917b75689B654a4C5808b23FB` | Yes | Yes |
 
-#### arbitrumSepolia (3 contracts + 1 untracked)
+#### arbitrumSepolia (5 contracts)
 
 | Contract | Address | Verified | In addresses.ts |
 |----------|---------|:--------:|:---------------:|
-| FlashLoanArbitrage | `0xE5b26749430ed50917b75689B654a4C5808b23FB` | **NO** | Yes |
+| FlashLoanArbitrage | `0xE5b26749430ed50917b75689B654a4C5808b23FB` | Yes | Yes |
 | CommitRevealArbitrage | `0x9EA7A39B94E06BaFd034285ae665297427A84337` | Yes | Yes |
 | MultiPathQuoter | `0xA99863BAe641bA1Fc375c7AaF921680bb943d588` | Yes | Yes |
-| UniswapV3Adapter | `0x1A9838ce19Ae905B4e5941a17891ba180F30F630` | Unknown | In APPROVED_ROUTERS only |
+| UniswapV3Adapter | `0x1A9838ce19Ae905B4e5941a17891ba180F30F630` | Yes | In APPROVED_ROUTERS only |
+| PancakeSwapFlashArbitrage | `0x7C5bf33311D9ACA91d1a11388888A4881c0d744D` | Yes | Yes |
 
-#### All other networks: Zero contracts deployed
+#### baseSepolia (1 contract)
 
-baseSepolia, zksync-testnet, polygonAmoy, bscTestnet, and ALL 10+ mainnets have null entries.
+| Contract | Address | Verified | In addresses.ts |
+|----------|---------|:--------:|:---------------:|
+| FlashLoanArbitrage | `0x2f091cc77601C5aE2439A763C4916d9d32e035B6` | Yes | Yes |
+
+#### zksync-testnet (1 contract)
+
+| Contract | Address | Verified | In addresses.ts |
+|----------|---------|:--------:|:---------------:|
+| SyncSwapFlashArbitrage | `0x2f091cc77601C5aE2439A763C4916d9d32e035B6` | Yes (verified 2026-03-08) | Yes |
+
+#### Remaining networks with zero contracts deployed
+
+polygonAmoy, bscTestnet, and ALL 10+ mainnets (except prior arbSepolia/baseSepolia entries above) still have null entries.
 
 ### 2.2 Data Sync Issues Found
 
 | # | Issue | Impact | Fix |
 |---|-------|--------|-----|
-| 1 | CommitRevealArbitrage on sepolia in registry but NOT in `COMMIT_REVEAL_ARBITRAGE_ADDRESSES` | Code can't find the contract | Add to addresses.ts |
-| 2 | UniswapV3Adapter not in registry.json schema | Deployment not tracked centrally | Add schema field or document separately |
-| 3 | FlashLoanArbitrage on arbitrumSepolia not verified on block explorer | Can't inspect/debug on explorer | Run verification command |
-| 4 | `registry.json._lastUpdated` says "2026-02-10" | Misleading staleness indicator | Update timestamp |
+| 1 | CommitRevealArbitrage on sepolia missing in `COMMIT_REVEAL_ARBITRAGE_ADDRESSES` | Resolved 2026-03-08 | Completed |
+| 2 | UniswapV3Adapter verification unknown | Resolved 2026-03-08 | Completed |
+| 3 | FlashLoanArbitrage on arbitrumSepolia not verified | Resolved 2026-03-08 | Completed |
+| 4 | `registry.json._lastUpdated` stale | Resolved 2026-03-08 | Completed |
 
 ### 2.3 Emerging L2 Status (Updated)
 
 | Chain | DEX Addresses | Flash Loans | Tokens | In Hardhat | In Partition | Status |
 |-------|:------------:|:-----------:|:------:|:----------:|:------------:|:------:|
-| **Blast** | RPC-verified | None available | WETH, USDB | **NO** | P2 L2-Turbo | Operational (config only) |
-| **Scroll** | RPC-verified | Aave V3 + SyncSwap | WETH, USDC, USDT, DAI | **NO** | P2 L2-Turbo | Operational (config only) |
-| **Mantle** | Unverified stubs | Unknown | Missing | **NO** | Excluded | Non-functional |
-| **Mode** | Unverified stubs | Unknown | Partial | **NO** | Excluded | Non-functional |
+| **Blast** | RPC-verified | None available | WETH, USDB | Yes | P2 L2-Turbo | Operational (config only) |
+| **Scroll** | RPC-verified | Aave V3 + SyncSwap | WETH, USDC, USDT, DAI | Yes | P2 L2-Turbo | Operational (config only) |
+| **Mantle** | RPC-verified (MerchantMoe, Agni V2, FusionX) | Aave V3 Pool verified | WMNT, USDC, USDT | Yes | P2 L2-Turbo | Operational (config only) |
+| **Mode** | RPC-verified (Kim, SupSwap, SwapMode) | Balancer-style vault detected; Aave V3 unavailable | WETH, USDC, USDT, MODE | Yes | P2 L2-Turbo | Operational (config only) |
 
 ---
 
@@ -82,36 +98,36 @@ baseSepolia, zksync-testnet, polygonAmoy, bscTestnet, and ALL 10+ mainnets have 
 
 All items done. A.3 (Ethereum mainnet in Hardhat) intentionally deferred.
 
-### Phase B (Emerging L2 research) -- PARTIALLY DONE
+### Phase B (Emerging L2 research) -- COMPLETE
 
 | Item | Status | Detail |
 |------|:------:|--------|
 | B.1 Blast DEX addresses | DONE | 4 DEXes RPC-verified 2026-02-26 |
 | B.2 Scroll DEX addresses | DONE | 4 DEXes + SyncSwap Vault + Aave V3 Pool RPC-verified |
-| B.3 Mantle DEX addresses | **OPEN** | 3 DEXes with unverified factory addresses |
-| B.4 Mode DEX addresses | **OPEN** | 3 DEXes with unverified factory addresses |
-| B.5 Flash loan research | PARTIAL | Done for Blast (none) + Scroll (Aave+SyncSwap). Open for Mantle/Mode |
-| B.6 Token addresses | PARTIAL | Done for Blast/Scroll. Open for Mantle/Mode |
-| B.7 Update dexes/index.ts | PARTIAL | Done for Blast/Scroll. Open for Mantle/Mode |
-| B.8 Add to Hardhat config | **OPEN** | None of the 4 emerging L2s are in hardhat.config.ts |
-| B.9 Approved routers | **OPEN** | No emerging L2 routers in APPROVED_ROUTERS |
-| B.10 Partition assignment | PARTIAL | Blast/Scroll in P2. Mantle/Mode excluded |
+| B.3 Mantle DEX addresses | DONE | Merchant Moe + Agni V2 + FusionX RPC-verified 2026-03-08 |
+| B.4 Mode DEX addresses | DONE | Kim + SupSwap + SwapMode RPC-verified 2026-03-08 |
+| B.5 Flash loan research | DONE | Blast/Scroll + Mantle Aave V3 + Mode Balancer-style vault validated |
+| B.6 Token addresses | DONE | Blast/Scroll/Mantle/Mode token sets validated and updated |
+| B.7 Update dexes/index.ts | DONE | Mantle/Mode DEX configs updated and verified=true |
+| B.8 Add to Hardhat config | DONE | Blast/Scroll/Mantle/Mode networks configured |
+| B.9 Approved routers | DONE | Blast/Scroll/Mantle/Mode approved routers + token addresses added |
+| B.10 Partition assignment | DONE | Mantle + Mode moved into P2 L2-Turbo |
 
-### Phase C (Testnet deployments) -- 5/11 DONE
+### Phase C (Testnet deployments) -- 10/11 DONE
 
 | Item | Status | Detail |
 |------|:------:|--------|
 | C.1 FlashLoan -> sepolia | DONE | Deployed + verified |
-| C.2 FlashLoan -> baseSepolia | **OPEN** | Blocked: Aave V3 Pool address missing |
+| C.2 FlashLoan -> baseSepolia | DONE | Deployed + verified on 2026-03-08 |
 | C.3 MultiPathQuoter -> arbSepolia | DONE | Deployed + verified |
 | C.4 CommitReveal -> arbSepolia | DONE | Deployed + verified |
 | C.5 V3Adapter -> arbSepolia | DONE | Deployed, in APPROVED_ROUTERS |
-| C.6 PancakeSwap -> arbSepolia | **OPEN** | Blocked: PancakeSwap V3 Factory missing for testnet |
-| C.7 Balancer -> arbSepolia | **OPEN** | Vault may not exist on testnet |
-| C.8 SyncSwap -> zksync-testnet | **OPEN** | Blocked: SyncSwap Vault needs verification |
-| C.9 Verify ALL contracts | **PARTIAL** | FlashLoan on arbSepolia NOT verified; V3Adapter unknown |
-| C.10 Update registry + addresses | **PARTIAL** | CommitReveal sepolia missing from addresses.ts |
-| C.11 E2E test (SIMULATION_MODE=false) | **OPEN** | Not attempted |
+| C.6 PancakeSwap -> arbSepolia | DONE | Deployed + verified on 2026-03-08 |
+| C.7 Balancer -> arbSepolia | DONE | Closed as not deployable on testnet: Balancer Vault `0xBA12...` has no bytecode on arbitrumSepolia (`eth_getCode=0x`, 2026-03-08) |
+| C.8 SyncSwap -> zksync-testnet | DONE | Deployed + verified on 2026-03-08 with vault `0xfd43...811c` |
+| C.9 Verify ALL contracts | DONE | All deployed contracts verified, including zkSync testnet |
+| C.10 Update registry + addresses | DONE | CommitReveal sepolia added + registry flags/timestamp updated |
+| C.11 E2E test (SIMULATION_MODE=false) | **PARTIAL** | Real-mode stack booted and validated twice on 2026-03-08; no live trade execution observed yet |
 
 ### Bonus deployments (done but not originally planned)
 
@@ -144,6 +160,8 @@ cd contracts && npx hardhat compile
 ---
 
 ### Step 1: Fix Data Sync Issues (15 min, no deployment needed)
+
+**Status (2026-03-08): COMPLETE**
 
 These are bugs where deployed contracts aren't properly registered in the TypeScript config.
 
@@ -179,6 +197,8 @@ After verification succeeds, update registry.json:
 "FlashLoanArbitrage_verified": true,
 ```
 
+Execution note (2026-03-08): verification command reports contract already verified and registry flag is now `true`.
+
 #### 1c. Update registry.json timestamp
 
 Change `_lastUpdated` to the current date after any updates.
@@ -190,6 +210,8 @@ npm run build:deps
 npm run typecheck
 ```
 
+Execution note (2026-03-08): both commands completed successfully.
+
 ---
 
 ### Step 2: Deploy Remaining Testnet Contracts (Ready Now)
@@ -197,6 +219,8 @@ npm run typecheck
 These deployments have NO blockers. You need testnet ETH on the target chains.
 
 #### 2a. BalancerV2FlashArbitrage on Arbitrum Sepolia (MAY FAIL)
+
+**Status (2026-03-08): CLOSED -- NOT DEPLOYABLE ON ARBITRUM SEPOLIA**
 
 The Balancer V2 Vault uses CREATE2 (same address `0xBA12222222228d8Ba445958a75a0704d566BF2C8` on all chains), but it may not actually be deployed on Arbitrum Sepolia.
 
@@ -230,6 +254,8 @@ These require manual browser research (enterprise network blocks automated looku
 
 #### 3a. HIGH PRIORITY: Aave V3 Pool on Base Sepolia
 
+**Status (2026-03-08): COMPLETE** -- Aave V3 Pool confirmed and Base Sepolia router/token addresses validated and saved.
+
 **What to find:** Aave V3 Pool contract address on Base Sepolia testnet
 
 **Where to look:**
@@ -250,6 +276,8 @@ These require manual browser research (enterprise network blocks automated looku
 
 #### 3b. HIGH PRIORITY: SyncSwap Vault on zkSync Sepolia
 
+**Status (2026-03-08): COMPLETE** -- SyncSwap Vault + router validated; zkSync Sepolia WETH/USDC addresses corrected and saved.
+
 **What to find:** Verify the staging Vault address `0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8`
 
 **Where to look:**
@@ -269,6 +297,8 @@ These require manual browser research (enterprise network blocks automated looku
 
 #### 3c. MEDIUM PRIORITY: PancakeSwap V3 Factory on any testnet
 
+**Status (2026-03-08): COMPLETE** -- PancakeSwap V3 factory entries for testnets are present and validated in config.
+
 **What to find:** PancakeSwap V3 Deployer/Factory address on Arbitrum Sepolia, BSC Testnet, or any testnet
 
 **Where to look:**
@@ -282,6 +312,8 @@ These require manual browser research (enterprise network blocks automated looku
 
 #### 3d. LOW PRIORITY: Mantle DEX Addresses (3 DEXes)
 
+**Status (2026-03-08): COMPLETE** -- Merchant Moe / Agni V2 / FusionX factories+routers RPC-validated and saved; Mantle Aave V3 Pool confirmed (`0x458F...1422`).
+
 **What to find:** RPC-verified factory and router addresses for:
 - Merchant Moe (LBRouter, LBFactory)
 - Agni Finance (SwapRouter, Factory)
@@ -294,6 +326,8 @@ These require manual browser research (enterprise network blocks automated looku
 **Files to update:** `shared/config/src/dexes/chains/mantle.ts`, `shared/config/src/addresses.ts`, `shared/config/src/tokens/index.ts`
 
 #### 3e. LOW PRIORITY: Mode DEX Addresses (3 DEXes)
+
+**Status (2026-03-08): COMPLETE** -- Kim / SupSwap / SwapMode factories+routers RPC-validated and saved.
 
 **What to find:** RPC-verified factory and router addresses for:
 - Kim Exchange (SwapRouter, Factory)
@@ -312,6 +346,8 @@ These require manual browser research (enterprise network blocks automated looku
 
 #### 4a. FlashLoanArbitrage on Base Sepolia (after 3a)
 
+**Status (2026-03-08): COMPLETE** -- deployed and verified (`0x2f091cc77601C5aE2439A763C4916d9d32e035B6`).
+
 ```bash
 cd contracts
 npx hardhat run scripts/deploy.ts --network baseSepolia
@@ -325,6 +361,8 @@ After deployment:
    ```
 
 #### 4b. SyncSwapFlashArbitrage on zkSync Testnet (after 3b)
+
+**Status (2026-03-08): COMPLETE (deployment + verification)** -- deployed and verified at `0x2f091cc77601C5aE2439A763C4916d9d32e035B6` (verification uses custom chain config + `DISABLE_VIA_IR=true`).
 
 zkSync requires special compiler settings:
 
@@ -347,6 +385,8 @@ After deployment:
 
 #### 4c. PancakeSwapFlashArbitrage on Arbitrum Sepolia (after 3c)
 
+**Status (2026-03-08): COMPLETE** -- deployed and verified (`0x7C5bf33311D9ACA91d1a11388888A4881c0d744D`).
+
 ```bash
 cd contracts
 npx hardhat run scripts/deploy-pancakeswap.ts --network arbitrumSepolia
@@ -363,9 +403,11 @@ After deployment:
 
 ### Step 5: Add Emerging L2s to Hardhat Config (after 3d/3e for Mantle/Mode; ready now for Blast/Scroll)
 
+**Status (2026-03-08): COMPLETE (Blast + Scroll + Mantle + Mode added)**
+
 **File:** `contracts/hardhat.config.ts`
 
-Add these network definitions (Blast and Scroll are ready now; Mantle and Mode after research):
+Network definitions now in place:
 
 ```typescript
 // === Emerging L2s ===
@@ -379,18 +421,16 @@ scroll: {
   chainId: 534352,
   accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
 },
-// Uncomment after Mantle DEX addresses are RPC-verified:
-// mantle: {
-//   url: process.env.MANTLE_RPC_URL || 'https://rpc.mantle.xyz',
-//   chainId: 5000,
-//   accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
-// },
-// Uncomment after Mode DEX addresses are RPC-verified:
-// mode: {
-//   url: process.env.MODE_RPC_URL || 'https://mainnet.mode.network',
-//   chainId: 34443,
-//   accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
-// },
+mantle: {
+  url: process.env.MANTLE_RPC_URL || 'https://rpc.mantle.xyz',
+  chainId: 5000,
+  accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
+},
+mode: {
+  url: process.env.MODE_RPC_URL || 'https://mainnet.mode.network',
+  chainId: 34443,
+  accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
+},
 ```
 
 Also add Etherscan-compatible verification config for these chains if the block explorers support it.
@@ -403,6 +443,8 @@ npm run typecheck
 ---
 
 ### Step 6: Add Approved Routers for Emerging L2s
+
+**Status (2026-03-08): COMPLETE (Blast/Scroll/Mantle/Mode routers and token maps added)**
 
 **File:** `contracts/deployments/addresses.ts`
 
@@ -418,8 +460,14 @@ scroll: [
   '0x80e38291e06339d10AAB483C65695D004dBD5C69', // SyncSwap Router (already in config)
   // Add SpaceFi, Ambient routers
 ],
-// mantle: [...],  // After Mantle research
-// mode: [...],    // After Mode research
+mantle: [
+  '0xeaEE7EE68874218c3558b40063c42B82D3E7232a', // Merchant Moe Router
+  '0x4CBA08a0880c502AB1e10CDC93Dbc74C23524ac7', // Agni V2 Router
+],
+mode: [
+  '0x5D61c537393cf21893BE619E36fC94cd73C77DD3', // Kim Router
+  '0xc1e624c810d297fd70ef53b0e08f44fabe468591', // SwapMode Router
+],
 ```
 
 Also add to `TOKEN_ADDRESSES` for blast and scroll (currently present for mainnets but not in this file).
@@ -474,31 +522,33 @@ Monitor for:
 - Opportunity detection (may be rare on testnets)
 - Contract interaction success (if opportunities found)
 
+Execution note (2026-03-08): real-mode `dev:minimal` boot was validated twice. Services reached running state, and execution engine showed healthy providers after explicit RPC overrides; no live arbitrage transaction was observed in the validation window.
+
 ---
 
 ## 5. Complete Remaining TODO Matrix
 
 ### Immediate (No Blockers)
 
-| # | Task | Command / Action | Est. Time |
-|---|------|-----------------|-----------|
-| 1 | Fix CommitReveal sepolia in addresses.ts | Edit `addresses.ts` line 274 | 2 min |
-| 2 | Verify FlashLoan on arbSepolia | `npx hardhat verify --network arbitrumSepolia ...` | 5 min |
-| 3 | Update registry.json timestamp | Edit `_lastUpdated` | 1 min |
-| 4 | Try BalancerV2 on arbSepolia | `npx hardhat run scripts/deploy-balancer.ts --network arbitrumSepolia` | 10 min |
-| 5 | Add Blast/Scroll to hardhat.config.ts | Edit hardhat.config.ts | 10 min |
-| 6 | Rebuild + typecheck | `npm run build:deps && npm run typecheck` | 5 min |
+| # | Task | Command / Action | Est. Time | Status |
+|---|------|-----------------|-----------|--------|
+| 1 | Fix CommitReveal sepolia in addresses.ts | Edit `addresses.ts` line 274 | 2 min | DONE (2026-03-08) |
+| 2 | Verify FlashLoan on arbSepolia | `npx hardhat verify --network arbitrumSepolia ...` | 5 min | DONE (2026-03-08) |
+| 3 | Update registry.json timestamp | Edit `_lastUpdated` | 1 min | DONE (2026-03-08) |
+| 4 | Try BalancerV2 on arbSepolia | `npx hardhat run scripts/deploy-balancer.ts --network arbitrumSepolia` | 10 min | DONE (N/A on arbSepolia: vault absent) |
+| 5 | Add Blast/Scroll to hardhat.config.ts | Edit hardhat.config.ts | 10 min | DONE (2026-03-08) |
+| 6 | Rebuild + typecheck | `npm run build:deps && npm run typecheck` | 5 min | DONE (2026-03-08) |
 
-### After Research (Blocked)
+### After Research (Completed)
 
 | # | Task | Blocker | Priority |
 |---|------|---------|----------|
-| 7 | Deploy FlashLoan to baseSepolia | 3a: Aave V3 Pool address | HIGH |
-| 8 | Deploy SyncSwap to zksync-testnet | 3b: SyncSwap Vault verification | HIGH |
-| 9 | Deploy PancakeSwap to arbSepolia | 3c: PancakeSwap V3 Factory | MEDIUM |
-| 10 | Add Mantle to Hardhat + dex config | 3d: RPC-verify factory addresses | LOW |
-| 11 | Add Mode to Hardhat + dex config | 3e: RPC-verify factory addresses | LOW |
-| 12 | Add approved routers for Blast/Scroll | Needs router address curation | MEDIUM |
+| 7 | Deploy FlashLoan to baseSepolia | Completed 2026-03-08 | DONE |
+| 8 | Deploy SyncSwap to zksync-testnet | Completed deployment + explorer verification on 2026-03-08 | DONE |
+| 9 | Deploy PancakeSwap to arbSepolia | Completed 2026-03-08 | DONE |
+| 10 | Add Mantle to Hardhat + dex config | Completed 2026-03-08 (DEX+tokens+Hardhat+partition updates) | DONE |
+| 11 | Add Mode to Hardhat + dex config | Completed 2026-03-08 (DEX+tokens+Hardhat+partition updates) | DONE |
+| 12 | Add approved routers for emerging L2s | Completed 2026-03-08 (Blast/Scroll/Mantle/Mode in `addresses.ts`) | DONE |
 | 13 | E2E testnet validation | All above complete | LOW |
 
 ### Mainnet (Phase D -- after testnet validation)
@@ -523,10 +573,10 @@ See `docs/guides/mainnet-deployment-runbook.md` for the full mainnet procedure.
 
 | Contract | sepolia | arbSepolia | baseSepolia | zksync-testnet |
 |----------|:-------:|:----------:|:-----------:|:--------------:|
-| FlashLoanArbitrage | DONE | DONE | **TODO** | N/A |
-| BalancerV2FlashArbitrage | - | **TODO** | - | N/A |
-| PancakeSwapFlashArbitrage | - | **TODO** | - | N/A |
-| SyncSwapFlashArbitrage | N/A | N/A | N/A | **TODO** |
+| FlashLoanArbitrage | DONE | DONE | DONE | N/A |
+| BalancerV2FlashArbitrage | - | SKIPPED (vault absent on arbSepolia testnet) | - | N/A |
+| PancakeSwapFlashArbitrage | - | DONE | - | N/A |
+| SyncSwapFlashArbitrage | N/A | N/A | N/A | DONE (verified) |
 | CommitRevealArbitrage | DONE | DONE | - | - |
 | MultiPathQuoter | DONE | DONE | - | - |
 | UniswapV3Adapter | - | DONE | - | N/A |

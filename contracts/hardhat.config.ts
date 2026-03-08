@@ -44,7 +44,8 @@ loadDeploymentEnv();
  * - sepolia, arbitrumSepolia, baseSepolia: Ethereum/L2 testnets
  * - polygonAmoy, bscTestnet: Additional testnets
  * - zksync, zksync-testnet: zkSync Era mainnet and testnet
- * - arbitrum, base, optimism: L2 mainnet (primary deployment targets)
+ * - arbitrum, base, optimism: Primary L2 mainnet targets
+ * - blast, scroll: Emerging L2 mainnets
  * - bsc, polygon, avalanche, fantom, linea: Additional mainnet chains
  * - ethereum: L1 mainnet (commented out — enable after L2 success)
  *
@@ -154,6 +155,27 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 10,
     },
+    // Emerging L2 networks
+    blast: {
+      url: process.env.BLAST_RPC_URL || 'https://rpc.blast.io',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 81457,
+    },
+    scroll: {
+      url: process.env.SCROLL_RPC_URL || 'https://rpc.scroll.io',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 534352,
+    },
+    mantle: {
+      url: process.env.MANTLE_RPC_URL || 'https://rpc.mantle.xyz',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 5000,
+    },
+    mode: {
+      url: process.env.MODE_RPC_URL || 'https://mainnet.mode.network',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 34443,
+    },
     // Production L1 and additional mainnet chains
     // Fallback URLs intentionally empty — Hardhat will fail if env var is missing,
     // preventing accidental deploys through unreliable public RPCs.
@@ -196,8 +218,73 @@ const config: HardhatUserConfig = {
     coinmarketcap: process.env.COINMARKETCAP_API_KEY,
   },
   etherscan: {
-    // Etherscan V2 requires a single etherscan.io API key for all supported chains.
-    apiKey: process.env.ETHERSCAN_API_KEY || '',
+    // Use per-network keys map so custom explorers (e.g. zkSync Sepolia)
+    // can use their own API URLs instead of forcing Etherscan v2 endpoint.
+    apiKey: {
+      mainnet: process.env.ETHERSCAN_API_KEY || '',
+      sepolia: process.env.ETHERSCAN_API_KEY || '',
+      arbitrum: process.env.ETHERSCAN_API_KEY || '',
+      arbitrumSepolia: process.env.ETHERSCAN_API_KEY || '',
+      base: process.env.ETHERSCAN_API_KEY || '',
+      baseSepolia: process.env.ETHERSCAN_API_KEY || '',
+      optimism: process.env.ETHERSCAN_API_KEY || '',
+      polygon: process.env.ETHERSCAN_API_KEY || '',
+      polygonAmoy: process.env.ETHERSCAN_API_KEY || '',
+      bsc: process.env.ETHERSCAN_API_KEY || '',
+      bscTestnet: process.env.ETHERSCAN_API_KEY || '',
+      avalanche: process.env.ETHERSCAN_API_KEY || '',
+      fantom: process.env.ETHERSCAN_API_KEY || '',
+      linea: process.env.ETHERSCAN_API_KEY || '',
+      blast: process.env.ETHERSCAN_API_KEY || '',
+      scroll: process.env.ETHERSCAN_API_KEY || '',
+      mantle: process.env.ETHERSCAN_API_KEY || '',
+      mode: process.env.ETHERSCAN_API_KEY || '',
+      'zksync-testnet':
+        process.env.ZKSYNC_ETHERSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || 'verify',
+    },
+    customChains: [
+      {
+        network: 'blast',
+        chainId: 81457,
+        urls: {
+          apiURL: 'https://api.blastscan.io/api',
+          browserURL: 'https://blastscan.io',
+        },
+      },
+      {
+        network: 'scroll',
+        chainId: 534352,
+        urls: {
+          apiURL: 'https://api.scrollscan.com/api',
+          browserURL: 'https://scrollscan.com',
+        },
+      },
+      {
+        network: 'mantle',
+        chainId: 5000,
+        urls: {
+          apiURL: 'https://api.mantlescan.xyz/api',
+          browserURL: 'https://mantlescan.xyz',
+        },
+      },
+      {
+        network: 'mode',
+        chainId: 34443,
+        urls: {
+          apiURL: 'https://explorer.mode.network/api',
+          browserURL: 'https://explorer.mode.network',
+        },
+      },
+      {
+        network: 'zksync-testnet',
+        chainId: 300,
+        urls: {
+          // zkSync Era Sepolia explorer exposes an Etherscan-compatible POST API.
+          apiURL: 'https://explorer.sepolia.era.zksync.dev/contract_verification',
+          browserURL: 'https://sepolia.explorer.zksync.io',
+        },
+      },
+    ],
   },
   sourcify: {
     // Keep disabled to avoid informational noise during verification runs.

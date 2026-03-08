@@ -67,11 +67,15 @@ export const AAVE_V3_POOLS: Readonly<Record<string, string>> = {
   base: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
   optimism: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
   avalanche: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
+  // Mantle mainnet (official Aave address book: AaveV3Mantle.POOL)
+  mantle: '0x458F293454fE0d67EC0655f3672301301DD51422',
   scroll: '0x11fCfe756c05AD438e312a7fd934381537D3cFfe', // RPC-verified 2026-02-26
 
   // Testnets
   sepolia: '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951',
   arbitrumSepolia: '0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff',
+  // Base Sepolia (official Aave address book: AaveV3BaseSepolia.POOL)
+  baseSepolia: '0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27',
 } as const;
 
 /**
@@ -111,6 +115,7 @@ export const PANCAKESWAP_V3_FACTORIES: Readonly<Record<string, string>> = {
   bscTestnet: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   ethereum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   arbitrum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  arbitrumSepolia: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   zksync: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
   base: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   opbnb: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
@@ -158,6 +163,7 @@ export const BALANCER_V2_VAULTS: Readonly<Record<string, string>> = {
   arbitrum: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
   optimism: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
   base: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+  mode: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // RPC-validated Balancer-style vault interface
   fantom: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', // Beethoven X
   // Testnets — same CREATE2 address where Balancer has deployed
   arbitrumSepolia: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
@@ -202,8 +208,9 @@ export function hasBalancerV2(chain: string): boolean {
 export const SYNCSWAP_VAULTS: Readonly<Record<string, string>> = {
   zksync: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // zkSync Era Mainnet
   scroll: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',  // Scroll Mainnet (RPC-verified 2026-02-26)
-  'zksync-sepolia': '0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8',  // zkSync Era Sepolia (Staging)
-  'zksync-testnet': '0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8',  // Alias for zksync-sepolia
+  // zkSync Era Sepolia: resolved from official SyncSwap router/pool-master `vault()` on-chain
+  'zksync-sepolia': '0xfd43b4DB521DA13490E79EB6CfbA19C9b012811c',
+  'zksync-testnet': '0xfd43b4DB521DA13490E79EB6CfbA19C9b012811c',  // Alias for zksync-sepolia
   // linea: TBD - SyncSwap not yet deployed to Linea mainnet
 } as const;
 
@@ -413,6 +420,9 @@ export const NATIVE_TOKENS: Readonly<Record<string, string>> = {
   // Testnets
   sepolia: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', // WETH
   arbitrumSepolia: '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73', // WETH
+  baseSepolia: '0x4200000000000000000000000000000000000006', // WETH predeploy (Base Sepolia)
+  'zksync-testnet': '0x701f3B10b5Cc30CA731fb97459175f45E0ac1247', // SyncSwap router wETH() on zkSync Sepolia
+  'zksync-sepolia': '0x701f3B10b5Cc30CA731fb97459175f45E0ac1247', // Alias for zksync-testnet
 } as const;
 
 /**
@@ -502,14 +512,24 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
     USDB: '0x4300000000000000000000000000000000000003', // Blast native stablecoin, 18 decimals
   },
   mantle: {
-    USDC: '0x09Bc4E0D10F09B1CdA8b8BB72C1e89F10B53BcA6', // Mantle Bridged USDC (chainId 5000)
+    USDC: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', // Mantle Bridged USDC (RPC/explorer-validated)
     USDT: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', // Mantle USDT (aligned with CORE_TOKENS)
     MNT: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
   },
   mode: {
     USDC: '0xd988097fb8612cc24eeC14542bC03424c656005f',
-    USDT: '0x77D5a1697DCb7B1A14A5D1c0E6f0C6D3dA8F9E4B', // USDT on Mode
+    USDT: '0xf0F161fDA2712DB8b566946122a5af183995e2eD', // Mode Bridged USDT (RPC/explorer-validated)
     MODE: '0xdfc7c877a950e49d2610114102175a06c2e3167a',
+  },
+  // Testnets
+  baseSepolia: {
+    USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // Circle USDC (official Base Sepolia)
+  },
+  'zksync-testnet': {
+    USDC: '0xAe045DE5638162fa134807Cb558E15A3F5A7F853', // Circle USDC (official zkSync Era testnet)
+  },
+  'zksync-sepolia': {
+    USDC: '0xAe045DE5638162fa134807Cb558E15A3F5A7F853', // Alias for zksync-testnet
   },
   solana: {
     USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -609,12 +629,11 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   },
   mantle: {
     merchant_moe: '0xeaEE7EE68874218c3558b40063c42B82D3E7232a',
-    agni_finance: '0x319B6307d7A5C93f4B7a2D2f599Ed3a988B6B93b',
-    fusionx: '0x5989FB161568b9F133eDf5Cf6787f5597762797F',
+    agni_finance: '0x4CBA08a0880c502AB1e10CDC93Dbc74C23524ac7',
   },
   mode: {
-    kim_exchange: '0x6A5a77c58Eac94A52Fb8b3F98Fc61dDA9B673b94',
-    supswap: '0x6f4e2e69b49f0e3d93c6d4934a0f4e4b2e8f7d10',
+    kim_exchange: '0x5D61c537393cf21893BE619E36fC94cd73C77DD3',
+    swapmode: '0xc1e624c810d297fd70ef53b0e08f44fabe468591',
   },
 } as const;
 

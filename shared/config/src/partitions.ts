@@ -248,16 +248,14 @@ export const PARTITIONS: PartitionConfig[] = [
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    // Mantle and Mode remain stubs (unverified factory addresses) — excluded from all partitions
-    // until factory addresses are verified. See D9-MANTLE-MODE-PARTITIONS in deferred-items.ts.
-    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
+    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'standard', // 5 chains
+    resourceProfile: 'heavy', // 7 chains
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 640, // 5 chains (increased from 512 for 3)
+    maxMemoryMB: 896, // 7 chains
     enabled: true,
     healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000
