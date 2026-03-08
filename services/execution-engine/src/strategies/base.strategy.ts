@@ -916,6 +916,10 @@ export abstract class BaseExecutionStrategy {
 
   /**
    * Verify opportunity prices are still valid before execution.
+   *
+   * In testnet execution mode (TESTNET_EXECUTION_MODE=true), profit and confidence
+   * thresholds are skipped because simulated prices don't reflect testnet token values.
+   * Staleness checks are still enforced.
    */
   protected async verifyOpportunityPrices(
     opportunity: ArbitrageOpportunity,
@@ -944,6 +948,19 @@ export abstract class BaseExecutionStrategy {
 
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
+
+    // Testnet execution mode: skip profit/confidence thresholds since simulated
+    // prices don't reflect testnet token values (testnet tokens have no real value).
+    // Staleness checks above are still enforced.
+    if (process.env.TESTNET_EXECUTION_MODE === 'true') {
+      this.logger.debug('Price verification passed (testnet mode - thresholds skipped)', {
+        opportunityId: opportunity.id,
+        age: opportunityAge,
+        profit: expectedProfit,
+      });
+      return { valid: true, currentProfit: expectedProfit };
+    }
+
     const minProfitThreshold = ARBITRAGE_CONFIG.minProfitThreshold ?? 10;
     const requiredProfit = minProfitThreshold * 1.2;
 

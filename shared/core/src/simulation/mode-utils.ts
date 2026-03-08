@@ -56,20 +56,42 @@ export function isHybridExecutionMode(): boolean {
 }
 
 /**
+ * Check if testnet execution mode is enabled.
+ *
+ * Testnet execution mode uses simulated prices (SIMULATION_MODE=true) but
+ * submits real transactions to testnet chains (EXECUTION_SIMULATION_MODE=false).
+ * Relaxes price verification thresholds since testnet tokens have no real value.
+ *
+ * Also enables:
+ * - Chain name normalization (ethereum -> sepolia, arbitrum -> arbitrumSepolia)
+ * - Token address mapping (mainnet -> testnet addresses)
+ * - Router/contract address resolution for testnet deployments
+ *
+ * Set via: TESTNET_EXECUTION_MODE=true
+ */
+export function isTestnetExecutionMode(): boolean {
+  return process.env.TESTNET_EXECUTION_MODE === 'true';
+}
+
+/**
  * Get simulation mode summary for logging/debugging.
  */
 export function getSimulationModeSummary(): {
   simulationMode: boolean;
   executionSimulation: boolean;
   hybridMode: boolean;
-  effectiveMode: 'production' | 'simulation' | 'hybrid';
+  testnetExecution: boolean;
+  effectiveMode: 'production' | 'simulation' | 'hybrid' | 'testnet-live';
 } {
   const simulationMode = isSimulationMode();
   const executionSimulation = isExecutionSimulationMode();
   const hybridMode = isHybridExecutionMode();
+  const testnetExecution = isTestnetExecutionMode();
 
-  let effectiveMode: 'production' | 'simulation' | 'hybrid' = 'production';
-  if (hybridMode) {
+  let effectiveMode: 'production' | 'simulation' | 'hybrid' | 'testnet-live' = 'production';
+  if (testnetExecution) {
+    effectiveMode = 'testnet-live';
+  } else if (hybridMode) {
     effectiveMode = 'hybrid';
   } else if (simulationMode || executionSimulation) {
     effectiveMode = 'simulation';
@@ -79,6 +101,7 @@ export function getSimulationModeSummary(): {
     simulationMode,
     executionSimulation,
     hybridMode,
+    testnetExecution,
     effectiveMode,
   };
 }

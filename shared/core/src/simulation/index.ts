@@ -62,6 +62,7 @@ export {
   isSimulationMode,
   isExecutionSimulationMode,
   isHybridExecutionMode,
+  isTestnetExecutionMode,
   getSimulationModeSummary,
   getSimulationRealismLevel,
 } from './mode-utils';

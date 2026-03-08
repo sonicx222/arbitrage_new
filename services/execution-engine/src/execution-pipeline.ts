@@ -57,6 +57,8 @@ import {
 } from './services/prometheus-metrics';
 // LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
 import { withLogContext } from '@arbitrage/core/logging';
+// Testnet execution: transform simulated opportunities to testnet addresses
+import { transformOpportunityForTestnet } from './services/testnet-resolver';
 
 // =============================================================================
 // L-002 FIX: Pipeline-internal extended type for trace context fields.
@@ -472,6 +474,21 @@ export class ExecutionPipeline {
 
   private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     const startTime = performance.now();
+
+    // Testnet execution mode: transform simulated opportunity addresses to testnet.
+    // Must happen before chain resolution since it remaps buyChain/sellChain/tokens.
+    if (process.env.TESTNET_EXECUTION_MODE === 'true') {
+      const transformed = transformOpportunityForTestnet(opportunity);
+      if (!transformed) {
+        this.deps.logger.debug('Skipping opportunity - no testnet support for chain', {
+          opportunityId: opportunity.id,
+          chain: opportunity.buyChain ?? opportunity.chain,
+        });
+        this.deps.opportunityConsumer.markComplete(opportunity.id);
+        return;
+      }
+      opportunity = transformed;
+    }
 
     // Phase 1 Enhanced Monitoring: Stamp execution start.
     // L-006 FIX: Use a local copy instead of mutating the opportunity object.
