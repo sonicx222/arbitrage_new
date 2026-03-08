@@ -67,8 +67,11 @@ export interface EventFilterHandlers {
 /**
  * Default batcher configurations per ADR-002 efficiency targets (50:1 ratio).
  */
+// LP-006 FIX: Aligned priceUpdates maxWaitMs from 100ms to 5ms to match
+// STANDARD_BATCHER_CONFIGS in publishing-service.ts (the actual runtime default).
+// 100ms was an ADR-002 draft value; production uses 5ms for latency sensitivity.
 export const DEFAULT_BATCHER_CONFIG = {
-  priceUpdates: { maxBatchSize: 50, maxWaitMs: 100 },
+  priceUpdates: { maxBatchSize: 50, maxWaitMs: 5 },
   swapEvents: { maxBatchSize: 100, maxWaitMs: 500 },
   whaleAlerts: { maxBatchSize: 10, maxWaitMs: 50 },
 } as const;

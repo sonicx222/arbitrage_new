@@ -15,6 +15,7 @@
 **Overall grade: A-**
 **Phase 1 remediation: 5/5 valid findings FIXED** (2 retracted as false positives)
 **Phase 2 remediation: 7/8 findings FIXED** (FM-005 backpressure deferred, DI-M-001 mitigated with forensic logging)
+**Phase 3 remediation: 6 findings FIXED** (LP-006, LP-007, DI-L-002, DI-L-003, DI-L-005, CD-003)
 
 The system is architecturally sound with comprehensive per-chain configuration, a well-layered 4-tier dedup system, end-to-end trace propagation, and correct seqlock/SharedArrayBuffer implementation. The main risks are in latency budget overruns (worst-case 55-75ms vs 50ms target), a few HMAC/dedup edge cases, and operational gaps (permanently silent WebSocket chains, missing flash loan providers).
 
@@ -286,13 +287,18 @@ No conflicts between agents were found. All 5 overlap-zone conclusions (Agent 2 
 ### Phase 3: Backlog (P3 — hardening and optimization)
 
 - [ ] **LP-004**: Set `STREAM_LEGACY_HMAC_COMPAT=false` in production (4x->1x HMAC per message)
-- [ ] **LP-007**: Remove redundant `Array.from(candidates)` in multi-leg DFS
+- [x] **LP-006**: Aligned DEFAULT_BATCHER_CONFIG priceUpdates maxWaitMs from 100ms to 5ms. **FIXED.**
+- [x] **LP-007**: Removed redundant `Array.from(candidates)` in multi-leg DFS. **FIXED.**
 - [ ] **LP-008**: Evaluate `ArrayBuffer.transfer()` for large worker payloads
 - [ ] **CC-H01**: Expand Fantom bridge routes (Multichain/Axelar)
 - [ ] **CC-H02**: Track SyncSwap Vault deployment on Linea for flash loan support
 - [ ] **CC-M03**: Add Solana bridge routes (deBridge, Mayan) for broader cross-chain surface
 - [ ] **FM-006**: Extend bridge recovery key TTL during graceful shutdown
 - [ ] **CD-008**: Modernize EE Dockerfile to multi-stage build
+- [x] **DI-L-002**: Made `warnedSchemaVersions` per-instance instead of static. **FIXED.**
+- [x] **DI-L-003**: Added WARN log for invalid-ID messages before ACK. **FIXED.**
+- [x] **DI-L-005**: Upgraded stale pending message cleanup log to info with full context. **FIXED.**
+- [x] **CD-003**: Made metrics API timeouts configurable via `METRICS_REDIS_TIMEOUT_MS` and `METRICS_STREAM_HEALTH_TIMEOUT_MS`. **FIXED.**
 
 ---
 
