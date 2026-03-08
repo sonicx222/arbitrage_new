@@ -20,13 +20,13 @@ RUN npm install
 
 # Build shared packages first
 WORKDIR /app/shared/types
-RUN npm run build || true
+RUN npm run build
 
 WORKDIR /app/shared/config
-RUN npm run build || true
+RUN npm run build
 
 WORKDIR /app/shared/core
-RUN npm run build || true
+RUN npm run build
 
 # Build service
 WORKDIR /app/services/unified-detector
@@ -43,7 +43,7 @@ COPY --from=builder /app/services/unified-detector/package*.json ./
 COPY --from=builder /app/shared ./shared
 
 # Install production dependencies only
-RUN npm install --production
+RUN npm ci --omit=dev
 
 # Set environment variables
 ENV NODE_ENV=production

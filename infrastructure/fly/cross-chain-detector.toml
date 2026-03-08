@@ -75,7 +75,7 @@ primary_region = "sjc"
     type = "http"
 
 [processes]
-  app = "node dist/index.js"
+  app = "node --max-old-space-size=192 dist/index.js"
 
 [deploy]
   release_command = "echo 'Cross-Chain Detector deploying...'"

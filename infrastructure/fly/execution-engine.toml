@@ -88,7 +88,7 @@ primary_region = "sjc"
 
 # Processes
 [processes]
-  app = "node dist/index.js"
+  app = "node --max-old-space-size=288 dist/index.js"
 
 # Deploy strategy
 [deploy]

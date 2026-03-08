@@ -286,7 +286,7 @@ export const DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT = 100;
  * @see docs/reports/RPC_DATA_OPTIMIZATION_RESEARCH.md
  */
 export const DEFAULT_USE_RESERVE_CACHE =
-  process.env.RESERVE_CACHE_ENABLED !== 'false';
+  process.env.RESERVE_CACHE_ENABLED === 'true';
 
 /**
  * Chains enabled for reserve caching.
