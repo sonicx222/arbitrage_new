@@ -13,6 +13,6 @@ export const SYNCSWAP_PROVIDER: FlashLoanProviderDescriptor = {
   protocol: 'syncswap',
   feeBps: 30,
   addresses: SYNCSWAP_VAULTS,
-  chains: ['zksync', 'scroll'],
+  chains: ['zksync', 'scroll', 'zksync-sepolia', 'zksync-testnet'],
   status: 'active',
 };

@@ -1,0 +1,19 @@
+{
+  "network": "arbitrumSepolia",
+  "chainId": 421614,
+  "contractAddress": "0x7C5bf33311D9ACA91d1a11388888A4881c0d744D",
+  "ownerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+  "deployerAddress": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+  "transactionHash": "0xbf9f6b2377bc1ee6d9d3a1779e842d0fdf5649e462d62598caef06dc37d09584",
+  "blockNumber": 248171800,
+  "timestamp": 1772986261,
+  "minimumProfit": "1000000000000000",
+  "approvedRouters": [
+    "0x101F443B4d1b059569D643917553c771E1b9663E",
+    "0x1A9838ce19Ae905B4e5941a17891ba180F30F630"
+  ],
+  "gasUsed": "2610466",
+  "verified": true,
+  "whitelistedPools": [],
+  "factoryAddress": "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+}

@@ -14,6 +14,6 @@ export const PANCAKESWAP_V3_PROVIDER: FlashLoanProviderDescriptor = {
   protocol: 'pancakeswap_v3',
   feeBps: 25,
   addresses: PANCAKESWAP_V3_FACTORIES,
-  chains: ['bsc', 'ethereum', 'arbitrum', 'base', 'zksync', 'linea'],
+  chains: ['bsc', 'ethereum', 'arbitrum', 'base', 'zksync', 'linea', 'arbitrumSepolia', 'bscTestnet'],
   status: 'active',
 };

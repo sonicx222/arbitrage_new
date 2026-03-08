@@ -225,14 +225,16 @@ export const CORE_TOKENS: Record<string, Token[]> = {
   mantle: [
     // Anchor tokens
     { address: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', symbol: 'WMNT', decimals: 18, chainId: 5000 },
-    { address: '0x09Bc4E0D10F09B1CdA8b8BB72C1e89F10B53BcA6', symbol: 'USDC', decimals: 6, chainId: 5000 },
+    { address: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', symbol: 'USDC', decimals: 6, chainId: 5000 },
     { address: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', symbol: 'USDT', decimals: 6, chainId: 5000 },
   ],
-  // Mode: 2 tokens
+  // Mode: 4 tokens
   mode: [
     // Anchor tokens
     { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18, chainId: 34443 },
     { address: '0xd988097fb8612cc24eeC14542bC03424c656005f', symbol: 'USDC', decimals: 6, chainId: 34443 },
+    { address: '0xf0F161fDA2712DB8b566946122a5af183995e2eD', symbol: 'USDT', decimals: 6, chainId: 34443 },
+    { address: '0xdfc7c877a950e49d2610114102175a06c2e3167a', symbol: 'MODE', decimals: 18, chainId: 34443 },
   ],
   // S3.3.3: Solana - 15 tokens (non-EVM - uses different address format)
   // Categories: anchor (1), stablecoin (2), defi (3), meme (2), governance (4), LST (3)
@@ -611,7 +613,7 @@ export const TOKEN_METADATA: Record<string, {
     weth: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT (no bridged WETH standard)
     nativeWrapper: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
     stablecoins: [
-      { address: '0x09Bc4E0D10F09B1CdA8b8BB72C1e89F10B53BcA6', symbol: 'USDC', decimals: 6 },
+      { address: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', symbol: 'USDC', decimals: 6 },
       { address: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', symbol: 'USDT', decimals: 6 }
     ]
   },
@@ -619,7 +621,8 @@ export const TOKEN_METADATA: Record<string, {
     weth: '0x4200000000000000000000000000000000000006',
     nativeWrapper: '0x4200000000000000000000000000000000000006', // WETH (native is ETH)
     stablecoins: [
-      { address: '0xd988097fb8612cc24eeC14542bC03424c656005f', symbol: 'USDC', decimals: 6 }
+      { address: '0xd988097fb8612cc24eeC14542bC03424c656005f', symbol: 'USDC', decimals: 6 },
+      { address: '0xf0F161fDA2712DB8b566946122a5af183995e2eD', symbol: 'USDT', decimals: 6 }
     ]
   },
   solana: {

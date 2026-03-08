@@ -461,6 +461,18 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     protocol: 'aave_v3',
     fee: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
   },
+  mantle: {
+    address: AAVE_V3_POOLS.mantle,  // Aave V3 Pool: 0x458F293454fE0d67EC0655f3672301301DD51422
+    protocol: 'aave_v3',
+    fee: 5
+  },
+  // Mode: Balancer-style Vault detected at canonical BA1222... address
+  // (getAuthorizer/getProtocolFeesCollector/WETH methods RPC-validated)
+  mode: {
+    address: BALANCER_V2_VAULTS.mode,
+    protocol: 'balancer_v2',
+    fee: 0
+  },
   // T-NEW-6 DEFERRED: Linea - SyncSwap flash loans via Vault (EIP-3156)
   // Blocked on: SyncSwap Vault deployment to Linea mainnet (no contract address available).
   // When available: uncomment linea entry below, add address to SYNCSWAP_VAULTS,

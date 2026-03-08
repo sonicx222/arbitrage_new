@@ -1,6 +1,6 @@
 {
   "_comment": "FlashLoanArbitrage (Aave V3) deployment registry - MANUALLY updated after deployment",
-  "_lastUpdated": "2026-03-07T00:00:00.000Z",
+  "_lastUpdated": "2026-03-08T17:04:49.884Z",
   "_version": "2.0.0",
   "_schema": {
     "description": "Central deployment registry. Each network key maps contract types to addresses.",
@@ -62,7 +62,7 @@
   },
   "arbitrumSepolia": {
     "FlashLoanArbitrage": "0xE5b26749430ed50917b75689B654a4C5808b23FB",
-    "PancakeSwapFlashArbitrage": null,
+    "PancakeSwapFlashArbitrage": "0x7C5bf33311D9ACA91d1a11388888A4881c0d744D",
     "BalancerV2FlashArbitrage": null,
     "SyncSwapFlashArbitrage": null,
     "DaiFlashMintArbitrage": null,
@@ -73,19 +73,22 @@
     "MultiPathQuoter": "0xA99863BAe641bA1Fc375c7AaF921680bb943d588",
     "UniswapV3Adapter": "0x1A9838ce19Ae905B4e5941a17891ba180F30F630",
     "UniswapV3Adapter_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
-    "UniswapV3Adapter_verified": false,
-    "deployedAt": 1772402216,
+    "UniswapV3Adapter_verified": true,
+    "deployedAt": 1772986261,
     "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
     "verified": false,
     "FlashLoanArbitrage_deployedAt": 1771948633,
     "FlashLoanArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
-    "FlashLoanArbitrage_verified": false,
+    "FlashLoanArbitrage_verified": true,
     "MultiPathQuoter_deployedAt": 1772402216,
     "MultiPathQuoter_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
-    "MultiPathQuoter_verified": true
+    "MultiPathQuoter_verified": true,
+    "PancakeSwapFlashArbitrage_deployedAt": 1772986261,
+    "PancakeSwapFlashArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "PancakeSwapFlashArbitrage_verified": true
   },
   "baseSepolia": {
-    "FlashLoanArbitrage": null,
+    "FlashLoanArbitrage": "0x2f091cc77601C5aE2439A763C4916d9d32e035B6",
     "PancakeSwapFlashArbitrage": null,
     "BalancerV2FlashArbitrage": null,
     "SyncSwapFlashArbitrage": null,
@@ -93,22 +96,28 @@
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
     "UniswapV3Adapter": null,
-    "deployedAt": null,
-    "deployedBy": null,
-    "verified": false
+    "deployedAt": 1772985876,
+    "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "verified": true,
+    "FlashLoanArbitrage_deployedAt": 1772985876,
+    "FlashLoanArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "FlashLoanArbitrage_verified": true
   },
   "zksync-testnet": {
     "FlashLoanArbitrage": null,
     "PancakeSwapFlashArbitrage": null,
     "BalancerV2FlashArbitrage": null,
-    "SyncSwapFlashArbitrage": null,
+    "SyncSwapFlashArbitrage": "0x2f091cc77601C5aE2439A763C4916d9d32e035B6",
     "DaiFlashMintArbitrage": null,
     "CommitRevealArbitrage": null,
     "MultiPathQuoter": null,
     "UniswapV3Adapter": null,
-    "deployedAt": null,
-    "deployedBy": null,
-    "verified": false
+    "deployedAt": 1772986417,
+    "deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "verified": true,
+    "SyncSwapFlashArbitrage_deployedAt": 1772986417,
+    "SyncSwapFlashArbitrage_deployedBy": "0x330E1aF8aF57C7b5D40F73D54825028fC50Bb748",
+    "SyncSwapFlashArbitrage_verified": true
   },
   "polygonAmoy": {
     "FlashLoanArbitrage": null,

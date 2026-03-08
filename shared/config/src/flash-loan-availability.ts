@@ -167,7 +167,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
   },
 
   mantle: {
-    aave_v3: false,
+    aave_v3: true, // Aave V3 Pool: 0x458F293454fE0d67EC0655f3672301301DD51422 (official address-book + RPC-validated)
     balancer_v2: false,
     pancakeswap_v3: false,
     spookyswap: false,
@@ -178,7 +178,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
 
   mode: {
     aave_v3: false,
-    balancer_v2: false,
+    balancer_v2: true, // Balancer-style Vault at 0xBA12222222228d8Ba445958a75a0704d566BF2C8 (RPC-validated interface)
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
@@ -219,6 +219,16 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
   arbitrumSepolia: {
     aave_v3: true, // Aave V3 Pool: 0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff
     balancer_v2: false,
+    pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+    spookyswap: false,
+    syncswap: false,
+    dai_flash_mint: false,
+    morpho: false,
+  },
+
+  baseSepolia: {
+    aave_v3: true, // Aave V3 Pool: 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27
+    balancer_v2: false,
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
@@ -231,7 +241,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     balancer_v2: false,
     pancakeswap_v3: false,
     spookyswap: false,
-    syncswap: true, // SyncSwap Vault: 0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8 (Staging)
+    syncswap: true, // SyncSwap Vault: 0xfd43b4DB521DA13490E79EB6CfbA19C9b012811c
     dai_flash_mint: false,
     morpho: false,
   },
@@ -241,7 +251,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     balancer_v2: false,
     pancakeswap_v3: false,
     spookyswap: false,
-    syncswap: true, // SyncSwap Vault: 0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8 (Staging)
+    syncswap: true, // SyncSwap Vault: 0xfd43b4DB521DA13490E79EB6CfbA19C9b012811c
     dai_flash_mint: false,
     morpho: false,
   },
@@ -407,7 +417,7 @@ export class FlashLoanNotSupportedError extends Error {
 /**
  * Testnet chain identifiers used for statistics computation.
  */
-const TESTNET_CHAINS = new Set(['sepolia', 'arbitrumSepolia', 'zksync-sepolia', 'zksync-testnet', 'bscTestnet', 'solana-devnet']);
+const TESTNET_CHAINS = new Set(['sepolia', 'arbitrumSepolia', 'baseSepolia', 'zksync-sepolia', 'zksync-testnet', 'bscTestnet', 'solana-devnet']);
 
 /**
  * Flash loan protocol statistics (for monitoring and planning)

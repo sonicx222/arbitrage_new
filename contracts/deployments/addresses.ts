@@ -71,6 +71,8 @@ export const MAINNET_CHAINS: readonly EVMMainnetChain[] = [
   'zksync',
   'zksync-mainnet',  // Alias for zksync (zkSync Era Mainnet)
   'linea',
+  'mantle',
+  'mode',
 ] as const;
 
 /**
@@ -183,6 +185,7 @@ export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
   arbitrumSepolia: '0xE5b26749430ed50917b75689B654a4C5808b23FB',
   sepolia: '0x2f091cc77601C5aE2439A763C4916d9d32e035B6',
+  baseSepolia: '0x2f091cc77601C5aE2439A763C4916d9d32e035B6',
 };
 
 // =============================================================================
@@ -220,6 +223,7 @@ export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
 // BSC: Deploy PancakeSwapFlashArbitrage.sol → set PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES.bsc
 export const PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
+  arbitrumSepolia: '0x7C5bf33311D9ACA91d1a11388888A4881c0d744D',
 };
 
 // =============================================================================
@@ -257,6 +261,7 @@ export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
 // zkSync: Deploy SyncSwapFlashArbitrage.sol → set SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES.zksync
 export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
   // Populated after deployment. See registry.json for deployment status.
+  'zksync-testnet': '0x2f091cc77601C5aE2439A763C4916d9d32e035B6',
 };
 
 // =============================================================================
@@ -312,11 +317,17 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   sepolia: [
     '0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008', // Uniswap V2 Router
   ],
-   arbitrumSepolia: [
-     '0x101F443B4d1b059569D643917553c771E1b9663E', // Uniswap V2 Router
-     '0x1A9838ce19Ae905B4e5941a17891ba180F30F630', // Uniswap V3 Adapter
-   ],
-  // NOTE: baseSepolia, polygonAmoy, bscTestnet, zksync-testnet routers not yet configured.
+  arbitrumSepolia: [
+    '0x101F443B4d1b059569D643917553c771E1b9663E', // Uniswap V2 Router
+    '0x1A9838ce19Ae905B4e5941a17891ba180F30F630', // Uniswap V3 Adapter
+  ],
+  baseSepolia: [
+    '0x1689E7B1F10000AE47eBfE339a4f69dECd19F602', // Uniswap V2 Router02 (Base docs + RPC-validated)
+  ],
+  'zksync-testnet': [
+    '0x3f39129e54d2331926c1E4bf034e111cf471AA97', // SyncSwap Router (zkSync Sepolia)
+  ],
+  // NOTE: polygonAmoy and bscTestnet routers not yet configured.
   // After deploying to these testnets, manually approve routers via addApprovedRouter() or
   // add addresses here and re-deploy. Check testnet DEX documentation for router addresses.
 
@@ -364,6 +375,20 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   ],
   linea: [
     '0x80e38291e06339d10AAB483C65695D004dBD5C69', // SyncSwap Router (V2-compatible)
+  ],
+  blast: [
+    '0x98994a9A7a2570367554589189dC9772241650f6', // Thruster V2 Router
+  ],
+  scroll: [
+    '0x80e38291e06339d10AAB483C65695D004dBD5C69', // SyncSwap Router
+  ],
+  mantle: [
+    '0xeaEE7EE68874218c3558b40063c42B82D3E7232a', // Merchant Moe Router (V2-compatible)
+    '0x4CBA08a0880c502AB1e10CDC93Dbc74C23524ac7', // Agni V2 Router
+  ],
+  mode: [
+    '0x5D61c537393cf21893BE619E36fC94cd73C77DD3', // Kim Router
+    '0xc1e624c810d297fd70ef53b0e08f44fabe468591', // SwapMode (PancakeRouter)
   ],
 };
 
@@ -446,6 +471,14 @@ export const TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
     WETH: '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73',
     USDC: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
   },
+  baseSepolia: {
+    WETH: '0x4200000000000000000000000000000000000006', // Canonical WETH predeploy
+    USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // Circle USDC (official Base Sepolia)
+  },
+  'zksync-testnet': {
+    WETH: '0x701f3B10b5Cc30CA731fb97459175f45E0ac1247', // SyncSwap router wETH() on zkSync Sepolia
+    USDC: '0xAe045DE5638162fa134807Cb558E15A3F5A7F853', // Circle USDC (official zkSync Era testnet)
+  },
   ethereum: {
     WETH: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
     USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -508,6 +541,27 @@ export const TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
     WETH: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f',
     USDC: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff',
     USDT: '0xA219439258ca9da29E9Cc4cE5596924745e12B93',
+  },
+  blast: {
+    WETH: '0x4300000000000000000000000000000000000004',
+    USDB: '0x4300000000000000000000000000000000000003',
+  },
+  scroll: {
+    WETH: '0x5300000000000000000000000000000000000004',
+    USDC: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4',
+    USDT: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df',
+    DAI: '0xcA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97',
+  },
+  mantle: {
+    WMNT: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8',
+    USDC: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9',
+    USDT: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE',
+  },
+  mode: {
+    WETH: '0x4200000000000000000000000000000000000006',
+    USDC: '0xd988097fb8612cc24eeC14542bC03424c656005f',
+    USDT: '0xf0F161fDA2712DB8b566946122a5af183995e2eD',
+    MODE: '0xdfc7c877a950e49d2610114102175a06c2e3167a',
   },
 };
 
