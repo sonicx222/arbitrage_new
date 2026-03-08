@@ -226,7 +226,7 @@ describe('Warming Flow Unit Tests', () => {
           `0x${i}`,
           Date.now()
         );
-        durations.push(result.durationUs || 0);
+        durations.push(result.durationUs ?? 0);
       }
 
       const avgDuration = durations.reduce((a, b) => a + b, 0) / iterations;

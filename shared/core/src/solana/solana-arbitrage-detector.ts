@@ -36,7 +36,8 @@ export interface ArbitrageDetectorConfig {
   /**
    * Minimum net profit ratio floor (default: 0.005 = 0.5%).
    * Ensures opportunities cover Solana tx costs (~5000 lamports base + priority fee).
-   * TODO: Replace with absolute profit check when trade amounts are available in this module.
+   * Note: This module only has price ratios, not trade amounts. Absolute profit
+   * checks (in lamports) happen downstream in the execution engine's Solana strategy.
    */
   minNetProfitFloor?: number;
 }

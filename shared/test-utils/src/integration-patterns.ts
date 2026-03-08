@@ -228,7 +228,7 @@ export async function createLevel2TestSetup(
     await config.beforeSetup(redis);
   }
 
-  // TODO: Add service initialization if configured
+  // Service initialization not yet implemented — Level 2 tests use direct mocks.
   const services = new Map<string, any>();
 
   return {
@@ -315,13 +315,8 @@ export async function createLevel3TestSetup(
   // Start Redis
   const redis = await createIsolatedRedisClient('level3-e2e-test');
 
-  // TODO: Start Anvil fork if configured
+  // Anvil fork and service startup not yet implemented — Level 3 tests are placeholders.
   const anvil: any = undefined;
-  if (config.fork) {
-    // anvil = await startAnvilFork(config.fork);
-  }
-
-  // TODO: Start services if configured
   const services = new Map<string, any>();
 
   return {

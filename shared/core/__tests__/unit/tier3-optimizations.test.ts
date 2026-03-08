@@ -1045,7 +1045,7 @@ describe('T3.12: Whale Activity Detection', () => {
         }));
       }
 
-      const normalConfidence = signals[signals.length - 1]?.confidence || 0;
+      const normalConfidence = signals[signals.length - 1]?.confidence ?? 0;
 
       // Add super whale trade ($500K+)
       tracker.recordTransaction(createWhaleTransaction({
