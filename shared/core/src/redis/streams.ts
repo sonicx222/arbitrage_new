@@ -405,7 +405,7 @@ export class RedisStreamsClient {
   static readonly STREAM_MAX_LENGTHS: Record<string, number> = {
     [RedisStreamsClient.STREAMS.PRICE_UPDATES]: 100000,    // High volume, keep more history
     [RedisStreamsClient.STREAMS.SWAP_EVENTS]: 50000,       // Medium volume
-    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 500000,    // RT-007: Increased from 100K — at 130+ opps/s, 100K holds ~12 min; 500K gives ~64 min buffer
+    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 200000,    // RT-007→ST-002 FIX: Reduced from 500K to 200K — at 130 opps/s, 200K gives ~25 min buffer; 500K consumed 348MB (68% of 512MB Redis)
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history

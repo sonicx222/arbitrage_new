@@ -91,7 +91,7 @@ const config: HardhatUserConfig = {
         blockNumber: process.env.FORK_BLOCK_NUMBER
           ? (process.env.FORK_BLOCK_NUMBER === 'latest'
              ? undefined
-             : parseInt(process.env.FORK_BLOCK_NUMBER))
+             : parseInt(process.env.FORK_BLOCK_NUMBER, 10))
           : undefined, // Default to latest
         enabled: process.env.FORK_ENABLED === 'true',
       },

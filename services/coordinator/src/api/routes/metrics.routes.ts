@@ -24,8 +24,10 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
 
   // CD-003 FIX: Configurable timeouts for Redis/stream health operations
-  const redisTimeoutMs = parseInt(process.env.METRICS_REDIS_TIMEOUT_MS ?? '5000', 10) || 5000;
-  const streamHealthTimeoutMs = parseInt(process.env.METRICS_STREAM_HEALTH_TIMEOUT_MS ?? '3000', 10) || 3000;
+  const rawRedisTimeout = parseInt(process.env.METRICS_REDIS_TIMEOUT_MS ?? '5000', 10);
+  const redisTimeoutMs = Number.isNaN(rawRedisTimeout) || rawRedisTimeout <= 0 ? 5000 : rawRedisTimeout;
+  const rawStreamTimeout = parseInt(process.env.METRICS_STREAM_HEALTH_TIMEOUT_MS ?? '3000', 10);
+  const streamHealthTimeoutMs = Number.isNaN(rawStreamTimeout) || rawStreamTimeout <= 0 ? 3000 : rawStreamTimeout;
 
   // Authentication middleware for all metrics routes (required: true is the default)
   const readAuth = apiAuth();
