@@ -106,7 +106,7 @@ interface HybridModeConfig {
 
 const DEFAULT_HYBRID_CONFIG: HybridModeConfig = {
   successRate: parseEnvFloatSafe('EXECUTION_HYBRID_SUCCESS_RATE', 0.95, 0),
-  mockGasUsed: BigInt(process.env.EXECUTION_HYBRID_GAS_USED || '150000'),
+  mockGasUsed: BigInt(process.env.EXECUTION_HYBRID_GAS_USED ?? '150000'),
   mockLatencyMs: parseEnvIntSafe('EXECUTION_HYBRID_LATENCY_MS', 100, 0),
 };
 

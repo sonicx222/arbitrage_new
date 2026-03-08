@@ -208,6 +208,11 @@ export class BloXrouteFeed extends EventEmitter {
         const url = this.config.endpoint;
         this.logger.info('Connecting to bloXroute BDN', { url });
 
+        // Clean up previous WebSocket listeners before creating new one (H-01 fix)
+        if (this.ws) {
+          this.ws.removeAllListeners();
+        }
+
         // Create WebSocket with auth header
         const headers: Record<string, string> = {};
         if (this.config.authHeader) {

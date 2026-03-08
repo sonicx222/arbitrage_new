@@ -1746,6 +1746,8 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
   }
 
   // OP-17 FIX: Resolve previous signing key for rotation window
+  // NOTE: || (not ??) is intentional — empty/whitespace string must become undefined,
+  // not be used as an HMAC signing key. ?? would preserve '' as a valid key.
   const rawPreviousKey = process.env.STREAM_SIGNING_KEY_PREVIOUS;
   const previousSigningKey = rawPreviousKey?.trim() || undefined;
 
@@ -1822,6 +1824,7 @@ export async function createRedisStreamsClient(url?: string, password?: string):
       signingKey = trimmed;
     }
   }
+  // NOTE: || (not ??) is intentional — empty string must become undefined, not a signing key.
   const previousSigningKey = process.env.STREAM_SIGNING_KEY_PREVIOUS?.trim() || undefined;
   // TODO(breaking-change): Remove LEGACY_HMAC_COMPAT shim (SA-1E-002).
   if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
