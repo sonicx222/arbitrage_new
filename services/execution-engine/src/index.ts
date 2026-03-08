@@ -229,8 +229,9 @@ function startRedisHealthMonitor(
           });
         }
       }
-    } catch {
-      // Stream lag check is non-critical — don't let it break the health monitor
+    } catch (error) {
+      // OBS-01 FIX: Stream lag check is non-critical, but silent failure hides MAXLEN trimming risk
+      logger.debug('Stream lag check failed', { error: getErrorMessage(error) });
     }
   }, 10_000);
   // Initial check
@@ -293,6 +294,9 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         currentDrawdown: drawdownStats?.currentDrawdown ?? null,
         dailyPnLFraction: drawdownStats?.dailyPnLFraction ?? null,
         haltCooldownRemainingMs: tradingAllowed?.haltCooldownRemaining ?? null,
+        // OBS-08 FIX: Surface trade logger disk health — silent write failures
+        // mean lost audit trail while operators see "healthy" status.
+        tradeLoggerHealth: engine.getTradeLoggerHealth(),
         uptime: process.uptime(),
         memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       };

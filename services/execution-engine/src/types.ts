@@ -332,8 +332,10 @@ export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
   // At 130+ opps/s inflow, batch=10 means 13+ XREADGROUP/s; batch=50 means ~3/s.
   batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 50, 1, 100),
   // P1-001 FIX: 200ms default added avg 100ms idle-wait to every opportunity, making
-  // <50ms target unreachable. 20ms default with 10ms floor — ~50 XREADGROUP/s is trivial for Redis.
-  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 20, 10, 10000),
+  // <50ms target unreachable. 10ms default matches coordinator — ~100 XREADGROUP/s is trivial for Redis.
+  // LP-001 FIX: Reduced from 20ms to 10ms. At 20ms, dual XREADGROUP worst-case was 30ms (coord 10 + EE 20).
+  // With both at 10ms, worst-case is 20ms, keeping pipeline well within 50ms target.
+  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 10, 5, 10000),
   shutdownAckTimeoutMs: parseEnvTimeout('CONSUMER_SHUTDOWN_ACK_TIMEOUT_MS', 5000, 1000, 30000),
   pendingMessageMaxAgeMs: parseEnvTimeout('CONSUMER_PENDING_MAX_AGE_MS', 10 * 60 * 1000, 60000, 3600000),
   stalePendingCleanupIntervalMs: parseEnvTimeout('CONSUMER_STALE_CLEANUP_INTERVAL_MS', 60000, 0, 300000),

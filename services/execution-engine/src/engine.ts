@@ -1394,6 +1394,14 @@ export class ExecutionEngineService {
   }
 
   /**
+   * OBS-08 FIX: Get trade logger write health for health check inclusion.
+   * Returns null if trade logger is not initialized.
+   */
+  getTradeLoggerHealth(): { writeSuccessCount: number; writeFailureCount: number; lastWriteError: string | null; lastSuccessfulWriteMs: number } | null {
+    return this.tradeLogger?.getWriteHealth() ?? null;
+  }
+
+  /**
    * Check if Redis is connected. Uses a fast ping with cached result
    * to avoid blocking health check responses.
    */

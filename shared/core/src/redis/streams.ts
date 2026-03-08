@@ -1333,6 +1333,9 @@ export class RedisStreamsClient {
       if (!result || result.length === 0) return [];
 
       // XCLAIM returns [[id, [field, value, ...]], ...] (same as XRANGE)
+      // DI-H-001 FIX: Verify HMAC signatures on claimed messages for consistency
+      // with parseStreamResult(). Without this, tampered messages in PEL could
+      // bypass signature verification when recovered via XCLAIM.
       const messages: StreamMessage[] = [];
       for (const entry of result) {
         if (!entry || !Array.isArray(entry) || entry.length < 2) continue;
@@ -1340,9 +1343,32 @@ export class RedisStreamsClient {
         const [id, fields] = entry;
         if (!id || !Array.isArray(fields)) continue;
 
+        // First pass: extract raw data and signature for HMAC verification
+        let rawData: string | undefined;
+        let sig: string | undefined;
+        for (let i = 0; i < fields.length; i += 2) {
+          const key = fields[i] as string;
+          if (key === 'data') rawData = fields[i + 1] as string;
+          if (key === 'sig') sig = fields[i + 1] as string;
+        }
+
+        // Verify HMAC signature (same logic as parseStreamResult)
+        if (this.signingKey && sig && rawData) {
+          if (!this.verifySignature(rawData, sig, streamName)) {
+            this.logger.warn('XCLAIM: Invalid message signature, skipping', { messageId: id });
+            continue;
+          }
+        } else if (this.signingKey && !sig) {
+          this.logger.warn('XCLAIM: Unsigned message with signing enabled, skipping', { messageId: id });
+          continue;
+        }
+
+        // Second pass: parse fields into object (skip 'sig' field from output)
         const data: Record<string, unknown> = {};
         for (let i = 0; i < fields.length; i += 2) {
-          data[fields[i] as string] = fields[i + 1];
+          const key = fields[i] as string;
+          if (key === 'sig') continue;
+          data[key] = fields[i + 1];
         }
         messages.push({ id: id as string, data });
       }

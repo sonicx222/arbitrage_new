@@ -53,8 +53,10 @@ const SLIPPAGE_CACHE = new Map<string, SlippageCacheEntry>();
 const SLIPPAGE_CACHE_MAX_SIZE = 500;
 const SLIPPAGE_CACHE_TTL_MS = 5000;
 
-/** Default time budget (ms) for liquidity enrichment in a single batch. */
-const ENRICHMENT_TIME_BUDGET_MS = 20;
+/** Default time budget (ms) for liquidity enrichment in a single batch.
+ * LP-002 FIX: Reduced from 20ms to 10ms. Enrichment runs synchronously on main thread
+ * and directly adds to the <50ms pipeline budget. 10ms keeps worst-case pipeline at ~35ms. */
+const ENRICHMENT_TIME_BUDGET_MS = 10;
 
 function getCachedSlippage(pair: string, tradeSizeUsd: number, side: string): number | undefined {
   const key = `${pair}:${tradeSizeUsd}:${side}`;
