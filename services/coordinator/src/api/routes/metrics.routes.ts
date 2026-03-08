@@ -172,7 +172,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           streamMetrics = await Promise.race([
             monitor.getPrometheusMetrics(),
             new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Stream health timeout')), 5000)
+              setTimeout(() => reject(new Error('Stream health timeout')), 3000)
             ),
           ]);
         } catch {

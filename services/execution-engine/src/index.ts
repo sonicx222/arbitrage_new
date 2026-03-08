@@ -357,7 +357,7 @@ async function main() {
       port: HEALTH_CHECK_PORT,
       // Phase 2: log chain group for operational visibility
       chainGroup: chainGroupConfig?.chainGroup ?? 'legacy-single-ee',
-      executionStream: chainGroupConfig?.executionStreamName ?? 'stream:execution-requests',
+      executionStream: chainGroupConfig?.executionStreamName ?? RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
     });
     logger.debug('Execution engine startup config', {
       simulationMode: simulationConfig?.enabled ?? false,

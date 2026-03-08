@@ -825,7 +825,7 @@ export class CommitRevealService {
           await this.redisClient.del(key);
         }
       } catch (error) {
-        // Ignore deletion errors
+        this.logger.debug('Failed to delete commit-reveal cache key', { key, error });
       }
     }
 

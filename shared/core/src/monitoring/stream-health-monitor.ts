@@ -305,42 +305,18 @@ export class StreamHealthMonitor {
       };
     }
 
-    for (const streamName of this.monitoredStreams) {
-      try {
-        const info = await this.getStreamInfo(streamName);
-        streams[streamName] = info;
+    // Fetch all stream info in parallel (was sequential — 27 Redis calls serialized)
+    const streamNames = Array.from(this.monitoredStreams);
+    const results = await Promise.allSettled(
+      streamNames.map(name => this.getStreamInfo(name))
+    );
 
-        // Only count initialized streams for health status
-        // 'unknown' means stream not initialized yet - not an error
-        if (info.status === 'critical') {
-          hasCritical = true;
-        } else if (info.status === 'warning') {
-          hasWarning = true;
-        }
-        // 'unknown' status is ignored for overall health - it's a startup condition
+    for (let i = 0; i < streamNames.length; i++) {
+      const streamName = streamNames[i];
+      const result = results[i];
 
-        // Only trigger lag alerts for initialized streams with actual lag
-        if (info.status !== 'unknown') {
-          if (info.pendingCount >= this.thresholds.lagCritical) {
-            this.triggerAlert({
-              type: 'high_lag',
-              severity: 'critical',
-              stream: streamName,
-              message: `Critical lag detected: ${info.pendingCount} pending messages`,
-              timestamp: Date.now()
-            });
-          } else if (info.pendingCount >= this.thresholds.lagWarning) {
-            this.triggerAlert({
-              type: 'high_lag',
-              severity: 'warning',
-              stream: streamName,
-              message: `Warning: ${info.pendingCount} pending messages`,
-              timestamp: Date.now()
-            });
-          }
-        }
-      } catch (error) {
-        this.logger.warn(`Failed to get health for stream: ${streamName}`, { error });
+      if (result.status === 'rejected') {
+        this.logger.warn(`Failed to get health for stream: ${streamName}`, { error: result.reason });
         streams[streamName] = {
           name: streamName,
           length: 0,
@@ -349,6 +325,40 @@ export class StreamHealthMonitor {
           lastGeneratedId: '',
           status: 'unknown'
         };
+        continue;
+      }
+
+      const info = result.value;
+      streams[streamName] = info;
+
+      // Only count initialized streams for health status
+      // 'unknown' means stream not initialized yet - not an error
+      if (info.status === 'critical') {
+        hasCritical = true;
+      } else if (info.status === 'warning') {
+        hasWarning = true;
+      }
+      // 'unknown' status is ignored for overall health - it's a startup condition
+
+      // Only trigger lag alerts for initialized streams with actual lag
+      if (info.status !== 'unknown') {
+        if (info.pendingCount >= this.thresholds.lagCritical) {
+          this.triggerAlert({
+            type: 'high_lag',
+            severity: 'critical',
+            stream: streamName,
+            message: `Critical lag detected: ${info.pendingCount} pending messages`,
+            timestamp: Date.now()
+          });
+        } else if (info.pendingCount >= this.thresholds.lagWarning) {
+          this.triggerAlert({
+            type: 'high_lag',
+            severity: 'warning',
+            stream: streamName,
+            message: `Warning: ${info.pendingCount} pending messages`,
+            timestamp: Date.now()
+          });
+        }
       }
     }
 
@@ -371,12 +381,12 @@ export class StreamHealthMonitor {
    * Handles streams that don't exist yet (common during startup).
    */
   private async getStreamInfo(streamName: string): Promise<MonitoredStreamInfo> {
-    const length = await this.streamsClient!.xlen(streamName);
-    const info = await this.streamsClient!.xinfo(streamName);
-
-    // Calculate pending count by checking consumer groups
-    // xpending now returns defaults if group doesn't exist (no throw)
-    const pendingInfo = await this.streamsClient!.xpending(streamName, this.defaultConsumerGroup);
+    // Parallelize the 3 independent Redis calls per stream
+    const [length, info, pendingInfo] = await Promise.all([
+      this.streamsClient!.xlen(streamName),
+      this.streamsClient!.xinfo(streamName),
+      this.streamsClient!.xpending(streamName, this.defaultConsumerGroup),
+    ]);
     const pendingCount = pendingInfo.total;
 
     // Determine status based on stream state
