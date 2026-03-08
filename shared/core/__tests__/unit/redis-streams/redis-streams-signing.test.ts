@@ -62,7 +62,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       mockRedis.xadd.mockResolvedValue(expectedId);
 
-      const messageId = await client.xadd(streamName, message);
+      const messageId = await (client as any).xadd(streamName, message);
 
       expect(messageId).toBe(expectedId);
       // Verify xadd was called with 'data', serialized, 'sig', signature
@@ -82,7 +82,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       mockRedis.xadd.mockResolvedValue('1234-0');
 
-      await client.xadd(streamName, message);
+      await (client as any).xadd(streamName, message);
 
       const callArgs = mockRedis.xadd.mock.calls[0];
       const dataIndex = callArgs.indexOf('data');
@@ -106,7 +106,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       mockRedis.xadd.mockResolvedValue('1234-0');
 
-      await client.xadd(streamName, message, '*', { maxLen: 1000 });
+      await (client as any).xadd(streamName, message, '*', { maxLen: 1000 });
 
       const callArgs = mockRedis.xadd.mock.calls[0];
       const sigIndex = callArgs.indexOf('sig');
@@ -120,7 +120,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       mockRedis.xadd.mockResolvedValue('1234-0');
 
-      await client.xadd(streamName, message, '*', { maxLen: 500, approximate: false });
+      await (client as any).xadd(streamName, message, '*', { maxLen: 500, approximate: false });
 
       const callArgs = mockRedis.xadd.mock.calls[0];
       const sigIndex = callArgs.indexOf('sig');
@@ -140,7 +140,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       mockRedis.xadd.mockResolvedValue('1234-0');
 
-      await client.xadd(streamName, message);
+      await (client as any).xadd(streamName, message);
 
       const callArgs = mockRedis.xadd.mock.calls[0];
       const sigIndex = callArgs.indexOf('sig');
@@ -153,7 +153,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       mockRedis.xadd.mockResolvedValue('5678-0');
 
-      await client.xadd(streamName, message);
+      await (client as any).xadd(streamName, message);
 
       expect(mockRedis.xadd).toHaveBeenCalledWith(
         streamName,
@@ -443,7 +443,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
         timestamp: Date.now()
       };
 
-      await client.xadd('stream:price-updates', batchEnvelope);
+      await (client as any).xadd('stream:price-updates', batchEnvelope);
 
       const callArgs = mockRedis.xadd.mock.calls[0];
       const sigIndex = callArgs.indexOf('sig');
@@ -497,7 +497,7 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
       // Mock xadd to capture the signature
       mockRedis.xadd.mockResolvedValue('9999-0');
-      await client.xadd(streamName, message);
+      await (client as any).xadd(streamName, message);
 
       // Now simulate reading back the same message from Redis
       // with the signature that was written

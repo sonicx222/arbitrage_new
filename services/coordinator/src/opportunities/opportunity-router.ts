@@ -64,7 +64,6 @@ export interface OpportunityRouterLogger {
  * FIX W2-8: Extended with options parameter to support MAXLEN trimming.
  */
 export interface OpportunityStreamsClient {
-  xadd(streamName: string, data: Record<string, unknown>, id?: string, options?: { maxLen?: number; approximate?: boolean }): Promise<string>;
   xaddWithLimit(streamName: string, data: Record<string, unknown>, options?: { approximate?: boolean }): Promise<string>;
 }
 

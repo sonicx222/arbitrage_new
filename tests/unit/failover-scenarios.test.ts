@@ -49,6 +49,7 @@ const createMockStreamsClient = () => ({
   createConsumerGroup: jest.fn<(group: string) => Promise<void>>(() => Promise.resolve()),
   readGroup: jest.fn<(group: string, consumer: string) => Promise<unknown[]>>(() => Promise.resolve([])),
   xadd: jest.fn<(stream: string, data: object) => Promise<string>>(() => Promise.resolve('1234-0')),
+  xaddWithLimit: jest.fn<(stream: string, data: object) => Promise<string>>(() => Promise.resolve('1234-0')),
   xack: jest.fn<(stream: string, group: string, id: string) => Promise<number>>(() => Promise.resolve(1))
 });
 
@@ -970,10 +971,10 @@ describe('S4.1.5.6: Failover Metrics', () => {
       timestamp: Date.now()
     };
 
-    streamsClient.xadd('stream:health', activationEvent);
+    streamsClient.xaddWithLimit('stream:health', activationEvent);
 
     // Then: Event should be published
-    expect(streamsClient.xadd).toHaveBeenCalledWith(
+    expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
       'stream:health',
       expect.objectContaining({
         event: 'standby_activated',

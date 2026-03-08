@@ -102,7 +102,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
     describe('XADD - Message Publishing', () => {
       it('should add messages to a stream with auto-generated ID', async () => {
         const message = { type: 'price-update', data: { price: 100 } };
-        const messageId = await streamsClient.xadd(
+        const messageId = await streamsClient.xaddWithLimit(
           RedisStreamsClient.STREAMS.PRICE_UPDATES,
           message
         );
@@ -128,7 +128,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
           }
         };
 
-        const messageId = await streamsClient.xadd(
+        const messageId = await streamsClient.xaddWithLimit(
           RedisStreamsClient.STREAMS.SWAP_EVENTS,
           complexMessage
         );
@@ -151,17 +151,16 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
 
       it('should validate stream names and reject unsafe characters', async () => {
         await expect(
-          streamsClient.xadd('invalid stream!@#', { data: 'test' })
+          streamsClient.xaddWithLimit('invalid stream!@#', { data: 'test' })
         ).rejects.toThrow('Invalid stream name');
       });
 
       it('should retry on transient failures when retry option is enabled', async () => {
         // With real Redis, we test the retry path by verifying successful writes
         // (Transient failures are hard to simulate with real Redis, but we verify the option works)
-        const messageId = await streamsClient.xadd(
+        const messageId = await streamsClient.xaddWithLimit(
           'stream:test',
           { data: 'test' },
-          '*',
           { retry: true }
         );
 
@@ -173,8 +172,8 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
     describe('XREAD - Message Consumption', () => {
       it('should read messages from a stream', async () => {
         // Add test messages
-        await streamsClient.xadd('stream:test', { value: 1 });
-        await streamsClient.xadd('stream:test', { value: 2 });
+        await streamsClient.xaddWithLimit('stream:test', { value: 1 });
+        await streamsClient.xaddWithLimit('stream:test', { value: 2 });
 
         const messages = await streamsClient.xread('stream:test', '0');
 
@@ -191,7 +190,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
       it('should support COUNT option for limiting results', async () => {
         // Add 5 messages
         for (let i = 0; i < 5; i++) {
-          await streamsClient.xadd('stream:test', { value: i });
+          await streamsClient.xaddWithLimit('stream:test', { value: i });
         }
 
         const messages = await streamsClient.xread('stream:test', '0', { count: 2 });
@@ -240,8 +239,8 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
           startId: '0'
         });
 
-        await streamsClient.xadd('stream:test', { data: 'msg1' });
-        await streamsClient.xadd('stream:test', { data: 'msg2' });
+        await streamsClient.xaddWithLimit('stream:test', { data: 'msg1' });
+        await streamsClient.xaddWithLimit('stream:test', { data: 'msg2' });
 
         const messages = await streamsClient.xreadgroup({
           streamName: 'stream:test',
@@ -261,7 +260,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
           startId: '0'
         });
 
-        const messageId = await streamsClient.xadd('stream:test', { data: 'test' });
+        const messageId = await streamsClient.xaddWithLimit('stream:test', { data: 'test' });
 
         await streamsClient.xreadgroup({
           streamName: 'stream:test',
@@ -645,7 +644,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
         confidence: 0.9
       };
 
-      await streamsClient.xadd(
+      await streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.OPPORTUNITIES,
         {
           type: 'arbitrage-opportunity',

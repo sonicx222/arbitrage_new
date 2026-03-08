@@ -53,7 +53,8 @@ describe('RedisStreamsClient - Basic Operations', () => {
 
       mockRedis.xadd.mockResolvedValue(expectedId);
 
-      const messageId = await client.xadd(streamName, message);
+      // SA-C1-005: xadd is private — use (as any) to test internal method
+      const messageId = await (client as any).xadd(streamName, message);
 
       expect(messageId).toBe(expectedId);
       expect(mockRedis.xadd).toHaveBeenCalledWith(
@@ -71,7 +72,7 @@ describe('RedisStreamsClient - Basic Operations', () => {
 
       mockRedis.xadd.mockResolvedValue(customId);
 
-      const messageId = await client.xadd(streamName, message, customId);
+      const messageId = await (client as any).xadd(streamName, message, customId);
 
       expect(messageId).toBe(customId);
     });
@@ -80,7 +81,7 @@ describe('RedisStreamsClient - Basic Operations', () => {
       const invalidStreamName = 'invalid stream name!@#';
       const message = { data: 'test' };
 
-      await expect(client.xadd(invalidStreamName, message))
+      await expect((client as any).xadd(invalidStreamName, message))
         .rejects
         .toThrow('Invalid stream name');
     });
@@ -100,7 +101,7 @@ describe('RedisStreamsClient - Basic Operations', () => {
 
       mockRedis.xadd.mockResolvedValue('1234-0');
 
-      await client.xadd(streamName, message);
+      await (client as any).xadd(streamName, message);
 
       expect(mockRedis.xadd).toHaveBeenCalled();
     });
@@ -228,7 +229,7 @@ describe('RedisStreamsClient - Basic Operations', () => {
     it('should handle connection errors gracefully', async () => {
       mockRedis.xadd.mockRejectedValue(new Error('Connection refused'));
 
-      await expect(client.xadd('stream:test', { data: 'test' }))
+      await expect((client as any).xadd('stream:test', { data: 'test' }))
         .rejects
         .toThrow('Connection refused');
     });
@@ -239,7 +240,7 @@ describe('RedisStreamsClient - Basic Operations', () => {
         .mockRejectedValueOnce(new Error('BUSY'))
         .mockResolvedValueOnce('1234-0');
 
-      const messageId = await client.xadd('stream:test', { data: 'test' }, undefined, { retry: true });
+      const messageId = await (client as any).xadd('stream:test', { data: 'test' }, undefined, { retry: true });
 
       expect(messageId).toBe('1234-0');
       expect(mockRedis.xadd).toHaveBeenCalledTimes(2);

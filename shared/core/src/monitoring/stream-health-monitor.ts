@@ -124,6 +124,10 @@ export class StreamHealthMonitor {
   private defaultConsumerGroup = 'coordinator-group'; // SA-003 FIX: Match real consumer group name
   private maxAlertAge = 3600000; // Remove alerts older than 1 hour
   private maxMetricsAge = 600000; // Remove metrics older than 10 minutes
+  /** DV-005 FIX: Cache checkStreamHealth() results to reduce Prometheus endpoint latency */
+  private cachedHealth: StreamHealth | null = null;
+  private cacheTimestamp = 0;
+  private cacheTtlMs = 5000; // 5s default — tunable via setCacheTtl()
 
   constructor(config: StreamHealthMonitorConfig = {}) {
     // Use injected dependencies or defaults
@@ -199,6 +203,15 @@ export class StreamHealthMonitor {
   }
 
   /**
+   * DV-005 FIX: Set cache TTL for checkStreamHealth() results.
+   * Reduces Redis round-trips when multiple callers (Prometheus, getSummary)
+   * request health data within a short window.
+   */
+  setCacheTtl(ttlMs: number): void {
+    this.cacheTtlMs = ttlMs;
+  }
+
+  /**
    * Start periodic health monitoring
    */
   async start(intervalMs: number = 30000): Promise<void> {
@@ -267,6 +280,10 @@ export class StreamHealthMonitor {
     this.lastAlerts.clear();
     this.lastMetrics.clear();
 
+    // DV-005: Clear cached health data
+    this.cachedHealth = null;
+    this.cacheTimestamp = 0;
+
     // P2 FIX #16: Clear alert handlers to prevent accumulation across stop/start cycles
     this.alertHandlers.length = 0;
 
@@ -278,9 +295,18 @@ export class StreamHealthMonitor {
   }
 
   /**
-   * Check health of all monitored streams
+   * Check health of all monitored streams.
+   * DV-005 FIX: Returns cached result if within TTL to reduce Redis round-trips.
+   * The periodic start() interval and on-demand callers (getPrometheusMetrics,
+   * getSummary) all benefit from caching.
    */
   async checkStreamHealth(): Promise<StreamHealth> {
+    // DV-005: Return cached result if still valid
+    const now = Date.now();
+    if (this.cachedHealth && (now - this.cacheTimestamp) < this.cacheTtlMs) {
+      return this.cachedHealth;
+    }
+
     await this.ensureInitialized();
 
     const streams: Record<string, MonitoredStreamInfo> = {};
@@ -369,11 +395,17 @@ export class StreamHealthMonitor {
       overall = 'warning';
     }
 
-    return {
+    const result: StreamHealth = {
       overall,
       streams,
       timestamp: Date.now()
     };
+
+    // DV-005: Cache the result
+    this.cachedHealth = result;
+    this.cacheTimestamp = result.timestamp;
+
+    return result;
   }
 
   /**

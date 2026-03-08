@@ -105,7 +105,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
 
       // Publish a signed message
       const payload = { type: 'price_update', pair: 'ETH/USDC', price: 3500.42 };
-      const messageId = await publisher.xadd(streamName, payload);
+      const messageId = await publisher.xaddWithLimit(streamName, payload);
       expect(messageId).toBeTruthy();
 
       // Consume via xread
@@ -124,7 +124,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       const payload = { action: 'swap', amount: 100 };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
       expect(messages).toHaveLength(1);
@@ -161,7 +161,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       ];
 
       for (const payload of payloads) {
-        await publisher.xadd(streamName, payload);
+        await publisher.xaddWithLimit(streamName, payload);
       }
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
@@ -192,7 +192,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
 
       // Publish an unsigned message
       const payload = { type: 'unsigned', value: 42 };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       // Verify message exists in Redis
       const rawLen = await redis.xlen(streamName);
@@ -212,7 +212,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       const payload = { type: 'unsigned-ok', value: 99 };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
       expect(messages).toHaveLength(1);
@@ -239,7 +239,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
 
       // Publish with key A
       const payload = { type: 'secret', data: 'sensitive-info' };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       // Verify message exists in Redis
       const rawLen = await redis.xlen(streamName);
@@ -260,7 +260,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       const payload = { type: 'verified', data: 'trusted-info' };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
       expect(messages).toHaveLength(1);
@@ -288,7 +288,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       const payload = { type: 'new-key-msg', seq: 1 };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
       expect(messages).toHaveLength(1);
@@ -308,7 +308,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       const payload = { type: 'old-key-msg', seq: 2 };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
       expect(messages).toHaveLength(1);
@@ -328,7 +328,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       const payload = { type: 'unrelated-key-msg', seq: 3 };
-      await publisher.xadd(streamName, payload);
+      await publisher.xaddWithLimit(streamName, payload);
 
       // Consumer should reject: neither new key nor old key matches
       const messages = await consumer.xread(streamName, '0', { count: 10 });
@@ -349,10 +349,10 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       expect(await consumer.ping()).toBe(true);
 
       // Interleave old-key and new-key messages
-      await oldPublisher.xadd(streamName, { src: 'old', seq: 1 });
-      await newPublisher.xadd(streamName, { src: 'new', seq: 2 });
-      await oldPublisher.xadd(streamName, { src: 'old', seq: 3 });
-      await newPublisher.xadd(streamName, { src: 'new', seq: 4 });
+      await oldPublisher.xaddWithLimit(streamName, { src: 'old', seq: 1 });
+      await newPublisher.xaddWithLimit(streamName, { src: 'new', seq: 2 });
+      await oldPublisher.xaddWithLimit(streamName, { src: 'old', seq: 3 });
+      await newPublisher.xaddWithLimit(streamName, { src: 'new', seq: 4 });
 
       const messages = await consumer.xread(streamName, '0', { count: 10 });
       // All 4 should be accepted (consumer knows both keys)
@@ -382,7 +382,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
 
       // Publish a signed message to stream A
       const payload = { type: 'replay-test', secret: 'sensitive-data' };
-      await publisher.xadd(streamA, payload);
+      await publisher.xaddWithLimit(streamA, payload);
 
       // Read the raw data and sig fields from stream A
       const rawResult = await redis.xread('COUNT', 1, 'STREAMS', streamA, '0') as
@@ -426,8 +426,8 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
 
       // Same payload, but published (and signed) correctly on each stream
       const payload = { type: 'multi-stream', value: 42 };
-      await publisher.xadd(streamA, payload);
-      await publisher.xadd(streamB, payload);
+      await publisher.xaddWithLimit(streamA, payload);
+      await publisher.xaddWithLimit(streamB, payload);
 
       const messagesA = await consumer.xread(streamA, '0', { count: 10 });
       const messagesB = await consumer.xread(streamB, '0', { count: 10 });
@@ -493,7 +493,7 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       ];
 
       for (const payload of payloads) {
-        await publisher.xadd(streamName, payload);
+        await publisher.xaddWithLimit(streamName, payload);
       }
 
       // Consume via xreadgroup
@@ -538,8 +538,8 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       });
 
       // Publish with wrong key
-      await publisher.xadd(streamName, { type: 'bad', seq: 1 });
-      await publisher.xadd(streamName, { type: 'bad', seq: 2 });
+      await publisher.xaddWithLimit(streamName, { type: 'bad', seq: 1 });
+      await publisher.xaddWithLimit(streamName, { type: 'bad', seq: 2 });
 
       // Verify messages exist in the stream
       const rawLen = await redis.xlen(streamName);
@@ -578,9 +578,9 @@ describe('[Integration] Redis Streams HMAC Signing E2E', () => {
       });
 
       // Publish a mix of valid and invalid messages
-      await validPublisher.xadd(streamName, { valid: true, seq: 1 });
-      await invalidPublisher.xadd(streamName, { valid: false, seq: 2 });
-      await validPublisher.xadd(streamName, { valid: true, seq: 3 });
+      await validPublisher.xaddWithLimit(streamName, { valid: true, seq: 1 });
+      await invalidPublisher.xaddWithLimit(streamName, { valid: false, seq: 2 });
+      await validPublisher.xaddWithLimit(streamName, { valid: true, seq: 3 });
 
       // Consumer should only return valid messages
       const messages = await consumer.xreadgroup(

@@ -48,7 +48,6 @@ export interface ConsumerGroupConfig {
  */
 export interface StreamsClient {
   xack(streamName: string, groupName: string, messageId: string): Promise<number>;
-  xadd(streamName: string, data: Record<string, unknown>): Promise<string>;
   xaddWithLimit(streamName: string, data: Record<string, unknown>): Promise<string>;
   xpending(streamName: string, groupName: string): Promise<{
     total: number;

@@ -208,7 +208,7 @@ export function createChildContext(parent: TraceContext, serviceName: string): T
  * ```typescript
  * const ctx = createTraceContext('unified-detector');
  * const enriched = propagateContext({ type: 'price_update', price: '1.23' }, ctx);
- * await streamsClient.xadd('prices', enriched);
+ * await streamsClient.xaddWithLimit('prices', enriched);
  * ```
  */
 export function propagateContext(

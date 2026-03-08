@@ -666,7 +666,11 @@ export class RedisStreamsClient {
   // XADD - Add message to stream
   // ===========================================================================
 
-  async xadd<T = Record<string, unknown>>(
+  /**
+   * SA-C1-005 FIX: Private to enforce MAXLEN — external callers must use xaddWithLimit().
+   * Direct xadd() bypasses MAXLEN, risking unbounded stream growth.
+   */
+  private async xadd<T = Record<string, unknown>>(
     streamName: string,
     message: T,
     id: string = '*',

@@ -411,7 +411,6 @@ export interface SolanaArbitrageConfig {
  * Redis Streams client interface for opportunity publishing.
  */
 export interface SolanaArbitrageStreamsClient {
-  xadd(stream: string, data: Record<string, string>): Promise<string | null>;
   xaddWithLimit(stream: string, data: Record<string, string>): Promise<string | null>;
 }
 
