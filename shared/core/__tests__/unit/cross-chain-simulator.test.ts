@@ -265,11 +265,11 @@ describe('CrossChainSimulator', () => {
       expect(opp.expectedProfit).toBeDefined();
 
       const grossProfit = opp.estimatedProfitUsd;
-      const bridgeFee = opp.bridgeFee || 0;
-      const gasCost = opp.expectedGasCost || 0;
+      const bridgeFee = opp.bridgeFee ?? 0;
+      const gasCost = opp.expectedGasCost ?? 0;
       const netProfit = grossProfit - bridgeFee - gasCost;
 
-      expect(Math.abs((opp.expectedProfit || 0) - netProfit)).toBeLessThan(25);
+      expect(Math.abs((opp.expectedProfit ?? 0) - netProfit)).toBeLessThan(25);
     });
   });
 

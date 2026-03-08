@@ -20,6 +20,9 @@
  */
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { TraceContext } from '@arbitrage/core/tracing';
+import { createLogger } from '@arbitrage/core';
+
+const logger = createLogger('stream-serialization');
 
 /**
  * Serialize an ArbitrageOpportunity into a flat Record<string, string>
@@ -53,10 +56,7 @@ export function serializeOpportunityForStream(
     const key = missing.join(',');
     if (!_warnedMissingFields.has(key)) {
       _warnedMissingFields.add(key);
-      // eslint-disable-next-line no-console -- module-level, no logger available
-      console.warn(`[serializeOpportunityForStream] Missing required fields: ${key}`, {
-        opportunityId: opportunity.id ?? 'unknown',
-      });
+      logger.warn('Missing required fields in opportunity', { opportunityId: opportunity.id ?? 'unknown', missingFields: key });
     }
   }
 

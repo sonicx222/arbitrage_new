@@ -142,7 +142,9 @@ export class StreamConsumer {
   private static readonly BASE_ERROR_DELAY_MS = 100;
   // P3 Fix DI-7: Track warned schema versions to avoid log spam (once per unknown version)
   // M-003 FIX: Bounded Set to prevent unbounded growth in long-running processes.
-  private static readonly warnedSchemaVersions = new Set<string>();
+  // DI-L-002 FIX: Per-instance instead of static — prevents one stream's warning from
+  // suppressing the same warning on a different stream.
+  private readonly warnedSchemaVersions = new Set<string>();
   private static readonly MAX_WARNED_SCHEMA_VERSIONS = 100;
   private static readonly KNOWN_SCHEMA_VERSION = '1';
   /** P0 Fix ES-003: Counter for periodic pending message cleanup */
@@ -393,10 +395,16 @@ export class StreamConsumer {
           }
         } catch (batchError) {
           this.stats.messagesFailed += messages.length;
-          this.config.logger?.error('Stream batch handler failed', {
+          // DI-M-001 FIX: Include message IDs in error log for redelivery forensics.
+          // When a batch of 200 messages fails, operators need to know which IDs will
+          // be redelivered to diagnose potential redelivery storms.
+          this.config.logger?.error('Stream batch handler failed — all messages unACKed for redelivery', {
             error: batchError,
             stream: this.config.config.streamName,
             batchSize: messages.length,
+            messageIds: messages.map(m => m.id),
+            firstId: messages[0]?.id,
+            lastId: messages[messages.length - 1]?.id,
           });
         }
       } else {
@@ -407,12 +415,12 @@ export class StreamConsumer {
           // P3 Fix DI-7: Warn once per unrecognized schema version
           const sv = (message.data as Record<string, unknown>)?.schemaVersion;
           if (typeof sv === 'string' && sv !== StreamConsumer.KNOWN_SCHEMA_VERSION
-              && !StreamConsumer.warnedSchemaVersions.has(sv)) {
+              && !this.warnedSchemaVersions.has(sv)) {
             // M-003 FIX: Prevent unbounded Set growth — clear when limit reached
-            if (StreamConsumer.warnedSchemaVersions.size >= StreamConsumer.MAX_WARNED_SCHEMA_VERSIONS) {
-              StreamConsumer.warnedSchemaVersions.clear();
+            if (this.warnedSchemaVersions.size >= StreamConsumer.MAX_WARNED_SCHEMA_VERSIONS) {
+              this.warnedSchemaVersions.clear();
             }
-            StreamConsumer.warnedSchemaVersions.add(sv);
+            this.warnedSchemaVersions.add(sv);
             this.config.logger?.warn?.('Unrecognized message schema version — processing anyway', {
               schemaVersion: sv,
               knownVersion: StreamConsumer.KNOWN_SCHEMA_VERSION,

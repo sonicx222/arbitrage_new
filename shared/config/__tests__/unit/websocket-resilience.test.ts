@@ -194,7 +194,7 @@ describe('WebSocket Resilience Configuration (S3.3)', () => {
     it('should have at least 2 total WebSocket URLs per chain (primary + fallback)', () => {
       for (const [chainId, chain] of Object.entries(CHAINS)) {
         const primaryCount = chain.wsUrl ? 1 : 0;
-        const fallbackCount = chain.wsFallbackUrls?.length || 0;
+        const fallbackCount = chain.wsFallbackUrls?.length ?? 0;
         const totalUrls = primaryCount + fallbackCount;
 
         if (totalUrls < 2) {
@@ -208,7 +208,7 @@ describe('WebSocket Resilience Configuration (S3.3)', () => {
       let totalUrls = 0;
       for (const chain of Object.values(CHAINS)) {
         totalUrls += chain.wsUrl ? 1 : 0;
-        totalUrls += chain.wsFallbackUrls?.length || 0;
+        totalUrls += chain.wsFallbackUrls?.length ?? 0;
       }
 
       // 11 chains × 2 minimum URLs = 22

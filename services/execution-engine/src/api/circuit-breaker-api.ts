@@ -20,7 +20,10 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { timingSafeEqual, createHash } from 'crypto';
+import { createLogger } from '@arbitrage/core';
 import type { CircuitBreakerStatus } from '../services/circuit-breaker';
+
+const logger = createLogger('circuit-breaker-api');
 
 // =============================================================================
 // Types
@@ -405,8 +408,7 @@ export function createCircuitBreakerApiHandler(
     } catch (error) {
       // L-03 FIX: Don't leak internal error details in HTTP response.
       // Log the full error server-side for debugging.
-      // eslint-disable-next-line no-console -- no logger available in this module
-      console.error('[circuit-breaker-api] Internal server error', error);
+      logger.error('Internal server error', error);
       sendJson(res, 500, {
         error: 'Internal server error',
         timestamp,

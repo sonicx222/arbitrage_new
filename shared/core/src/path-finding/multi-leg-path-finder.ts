@@ -490,7 +490,8 @@ export class MultiLegPathFinder {
     }
 
     // Sort by liquidity (prefer high-liquidity paths)
-    return Array.from(candidates).sort((a, b) => {
+    // LP-007 FIX: candidates is already string[] — Array.from() was a redundant copy
+    return candidates.sort((a, b) => {
       const liquidityA = this.getMaxLiquidity(currentToken, a, ctx);
       const liquidityB = this.getMaxLiquidity(currentToken, b, ctx);
       return liquidityB - liquidityA;

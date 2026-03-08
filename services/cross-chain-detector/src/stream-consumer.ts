@@ -430,7 +430,7 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
       for (const message of messages) {
         // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
         // For non-batched messages, returns single-element array (backward compatible)
-        const items = unwrapBatchMessages<T>(message.data);
+        const items = unwrapBatchMessages<T>(message.data, logger);
         for (const data of items) {
           if (!validator(data)) {
             const reason = diagnosticFn ? diagnosticFn(data) : undefined;

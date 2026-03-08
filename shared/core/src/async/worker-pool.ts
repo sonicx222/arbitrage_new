@@ -629,6 +629,10 @@ export class EventProcessingWorkerPool extends EventEmitter {
     }
 
     // Send task to worker
+    // LP-008: If taskData contains ArrayBuffer instances, passing them via
+    // postMessage's transferList (2nd arg) would transfer ownership instead of
+    // copying, saving 0.5-2ms per large payload. Not implemented yet because
+    // current task payloads are small JSON objects.
     worker.postMessage({
       type: 'process_task',
       taskId: task.id,

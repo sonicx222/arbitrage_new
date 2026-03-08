@@ -720,7 +720,7 @@ describe('P1-1 Coordinator: Unbounded Opportunities Map Fix', () => {
     // Enforce limit by removing oldest entries
     if (opportunities.size > MAX_OPPORTUNITIES) {
       const entries = Array.from(opportunities.entries())
-        .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+        .sort((a, b) => (a[1].timestamp ?? 0) - (b[1].timestamp ?? 0));
       const removeCount = opportunities.size - MAX_OPPORTUNITIES;
 
       for (let i = 0; i < removeCount; i++) {

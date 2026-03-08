@@ -62,7 +62,10 @@ export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
   const publicDir = path.join(__dirname, '..', '..', '..', 'public');
   const indexPath = path.join(publicDir, 'index.html');
 
-  if (fs.existsSync(indexPath)) {
+  // L-01 FIX: Cache sync I/O result — called once at route registration, not per-request.
+  const hasSpaAssets = fs.existsSync(indexPath);
+
+  if (hasSpaAssets) {
     // Serve static assets (JS, CSS, images)
     router.use(express.static(publicDir));
 

@@ -612,7 +612,7 @@ describe('S3.3.3.12: Summary Statistics', () => {
     const decimals: Record<number, number> = {};
 
     for (const token of solanaTokens) {
-      decimals[token.decimals] = (decimals[token.decimals] || 0) + 1;
+      decimals[token.decimals] = (decimals[token.decimals] ?? 0) + 1;
     }
 
      

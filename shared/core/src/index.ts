@@ -1831,6 +1831,7 @@ export type {
 export {
   parseEnvInt,
   parseEnvIntSafe,
+  parseEnvBigIntSafe,
   parseEnvBool,
   getCrossRegionEnvConfig,
 } from './utils/env-utils';

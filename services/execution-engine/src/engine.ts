@@ -77,6 +77,8 @@ import {
   createInitialStats,
   resolveSimulationConfig,
   DEFAULT_QUEUE_CONFIG,
+  BRIDGE_RECOVERY_KEY_PREFIX,
+  BRIDGE_RECOVERY_MAX_AGE_MS,
 } from './types';
 import { ProviderServiceImpl } from './services/provider.service';
 import { QueueServiceImpl } from './services/queue.service';
@@ -876,6 +878,37 @@ export class ExecutionEngineService {
         this.tradeLogger = null;
       }
 
+      // FM-006 FIX: Extend TTLs on bridge recovery keys before shutdown.
+      // Without this, keys set with short remaining TTL can expire during the restart
+      // window, permanently losing in-flight bridge transfers.
+      if (this.redis) {
+        try {
+          const ttlSeconds = Math.ceil(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
+          let cursor = '0';
+          let extended = 0;
+          do {
+            const [nextCursor, keys] = await this.redis.scan(
+              cursor, 'MATCH', `${BRIDGE_RECOVERY_KEY_PREFIX}*`, 'COUNT', 100
+            );
+            cursor = nextCursor;
+            for (const key of keys) {
+              await this.redis.expire(key, ttlSeconds);
+              extended++;
+            }
+          } while (cursor !== '0');
+          if (extended > 0) {
+            this.logger.info('Extended bridge recovery key TTLs for graceful shutdown', {
+              keysExtended: extended,
+              ttlSeconds,
+            });
+          }
+        } catch (err) {
+          this.logger.warn('Failed to extend bridge recovery TTLs during shutdown', {
+            error: getErrorMessage(err),
+          });
+        }
+      }
+
       // T-13: Stop bridge recovery manager
       this.bridgeRecoveryManager = await stopAndNullify(this.bridgeRecoveryManager);
 
@@ -906,9 +939,10 @@ export class ExecutionEngineService {
       }
 
       // Fix #51: Stop MEV-Share event listener
+      // H-01 FIX: Remove listeners before stop() so cleanup runs even if stop() throws
       if (this.mevShareListener) {
-        await this.mevShareListener.stop();
         this.mevShareListener.removeAllListeners();
+        await this.mevShareListener.stop();
         this.mevShareListener = null;
       }
 

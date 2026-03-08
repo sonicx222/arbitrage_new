@@ -752,6 +752,11 @@ export class OpportunityRouter {
       // P0 Fix DF-002: ACK messages with missing/invalid IDs instead of silently skipping.
       // Without ACK, these messages remain permanently pending in the PEL.
       if (!id || typeof id !== 'string') {
+        // DI-L-003 FIX: Log for forensic trail before discarding
+        this.logger.warn('ACKing opportunity with missing/invalid ID — no forensic trail', {
+          streamMessageId: entry.streamMessageId,
+          dataKeys: Object.keys(data),
+        });
         processedIds.push(entry.streamMessageId);
         continue;
       }

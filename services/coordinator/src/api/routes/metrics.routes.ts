@@ -23,6 +23,10 @@ import type { CoordinatorStateProvider } from '../types';
 export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
 
+  // CD-003 FIX: Configurable timeouts for Redis/stream health operations
+  const redisTimeoutMs = parseInt(process.env.METRICS_REDIS_TIMEOUT_MS ?? '5000', 10) || 5000;
+  const streamHealthTimeoutMs = parseInt(process.env.METRICS_STREAM_HEALTH_TIMEOUT_MS ?? '3000', 10) || 3000;
+
   // Authentication middleware for all metrics routes (required: true is the default)
   const readAuth = apiAuth();
 
@@ -137,7 +141,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         const redis = await Promise.race([
           getRedisClient(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
+            setTimeout(() => reject(new Error('Redis connection timeout')), redisTimeoutMs)
           ),
         ]);
         const stats = redis.getCommandStats();
@@ -172,7 +176,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           streamMetrics = await Promise.race([
             monitor.getPrometheusMetrics(),
             new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Stream health timeout')), 3000)
+              setTimeout(() => reject(new Error('Stream health timeout')), streamHealthTimeoutMs)
             ),
           ]);
         } catch {
@@ -233,7 +237,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         const redis = await Promise.race([
           getRedisClient(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
+            setTimeout(() => reject(new Error('Redis connection timeout')), redisTimeoutMs)
           ),
         ]);
         const dashboard = redis.getUsageDashboard();

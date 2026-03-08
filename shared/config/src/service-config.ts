@@ -569,7 +569,8 @@ export function supportsFlashLoan(chainId: string): boolean {
  */
 export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
   // Primary chains - deploy quoter for maximum performance
-  // TODO: Update these addresses after deploying MultiPathQuoter contract
+  // STATUS: Not yet deployed to mainnet. System falls back to sequential getAmountsOut() calls.
+  // This is safe and functional — MultiPathQuoter is a performance optimization only.
   //
   // Deployment command:
   //   npx hardhat run scripts/deploy-multi-path-quoter.ts --network <chain>
@@ -577,7 +578,7 @@ export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
   // After deployment, update the address below:
   //   ethereum: '0x<deployed_address>',
   //
-  // Or set via environment variables (recommended):
+  // Or set via environment variables (recommended for production):
   //   MULTI_PATH_QUOTER_ETHEREUM=0x...
   //   MULTI_PATH_QUOTER_ARBITRUM=0x...
   //   MULTI_PATH_QUOTER_BASE=0x...

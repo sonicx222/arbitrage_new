@@ -1060,10 +1060,14 @@ export class OpportunityConsumer {
         this.activeExecutions.delete(id); // Also clean up active tracking
         cleanedCount++;
 
-        this.logger.debug('Cleaned up stale pending message', {
+        // DI-L-005 FIX: Log at info level (not debug) with full context for forensic trail.
+        // These messages are being discarded — operators need to know what was lost.
+        this.logger.info('Cleaned up stale pending message — data lost', {
           id,
           messageId: info.messageId,
+          streamName: info.streamName,
           ageMs: now - info.queuedAt,
+          maxAgeMs,
         });
       } catch (error) {
         this.logger.error('Failed to ACK stale pending message', {

@@ -1055,7 +1055,12 @@ export class RedisStreamsClient {
       const result = await this.client.set(key, value, 'EX', ttlSec, 'NX');
       return result === 'OK';
     } catch (error) {
-      this.logger.warn('SET NX failed', { key, error: getErrorMessage(error) });
+      // DI-H-002 FIX: Explicit warn about fail-open consequence
+      this.logger.warn('SET NX failed — dedup fail-open, duplicate execution possible', {
+        key,
+        error: getErrorMessage(error),
+        consequence: 'in-memory dedup still active; flash loan atomicity prevents fund loss',
+      });
       // Fail open: allow execution if Redis is unavailable (in-memory dedup still active)
       return true;
     }
@@ -1704,14 +1709,20 @@ function isBatchEnvelope<T>(data: unknown): data is BatchEnvelope<T> {
  * @param data - Raw message data from Redis stream (may be batch or single)
  * @returns Array of individual messages
  */
-export function unwrapBatchMessages<T>(data: unknown): T[] {
+export function unwrapBatchMessages<T>(
+  data: unknown,
+  logger?: { warn: (msg: string, ctx?: Record<string, unknown>) => void },
+): T[] {
   if (isBatchEnvelope<T>(data)) {
     // FIX L8: Validate count matches actual messages length to detect truncation/corruption
     if (data.count !== data.messages.length) {
-      process.emitWarning(
-        `Batch envelope count mismatch: declared ${data.count}, actual ${data.messages.length}`,
-        'BatchIntegrityWarning'
-      );
+      // DI-M-003 FIX: Use structured logger when available, fall back to process.emitWarning
+      const msg = `Batch envelope count mismatch: declared ${data.count}, actual ${data.messages.length}`;
+      if (logger) {
+        logger.warn(msg, { declaredCount: data.count, actualCount: data.messages.length });
+      } else {
+        process.emitWarning(msg, 'BatchIntegrityWarning');
+      }
     }
     return data.messages;
   }
@@ -1788,8 +1799,8 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
       // P1 Fix: Flip default to OFF (explicit opt-in). All producers now include stream name
       // in signatures (OP-18), so legacy compat is no longer needed by default.
       // Set to 'true' only during migration from pre-OP-18 producers.
-      // TODO(breaking-change): Remove LEGACY_HMAC_COMPAT shim once all deployments
-      // use STREAM_LEGACY_HMAC_COMPAT (target: next major version). Tracked as SA-1E-002.
+      // TODO(breaking-change v3.0): Remove LEGACY_HMAC_COMPAT shim once all deployments
+      // use STREAM_LEGACY_HMAC_COMPAT. Tracked as SA-1E-002 / M-10.
       if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
         const factoryLogger = createLogger('redis-streams-factory');
         factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
@@ -1856,7 +1867,7 @@ export async function createRedisStreamsClient(url?: string, password?: string):
   }
   // NOTE: || (not ??) is intentional — empty string must become undefined, not a signing key.
   const previousSigningKey = process.env.STREAM_SIGNING_KEY_PREVIOUS?.trim() || undefined;
-  // TODO(breaking-change): Remove LEGACY_HMAC_COMPAT shim (SA-1E-002).
+  // TODO(breaking-change v3.0): Remove LEGACY_HMAC_COMPAT shim (SA-1E-002 / M-10).
   if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
     const factoryLogger = createLogger('redis-streams-factory');
     factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');

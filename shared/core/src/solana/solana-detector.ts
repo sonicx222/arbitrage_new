@@ -41,31 +41,12 @@ import { meetsThreshold } from '../components/price-calculator';
 import { bpsToDecimal } from '../utils/fee-utils';
 import {
   SOLANA_DEFAULT_GAS_ESTIMATE,
-  type SolanaDetectorLogger
+  type SolanaDetectorLogger,
+  type SolanaDetectorPerfLogger,
 } from './solana-types';
 
 // Re-export for backward compatibility (barrel exports reference solana-detector)
-export type { SolanaDetectorLogger };
-
-// =============================================================================
-// Type Definitions
-// =============================================================================
-
-/**
- * Performance logger interface for SolanaDetector.
- * Uses `any` for status/meta parameters to remain compatible with the
- * PerformanceLogger class (which uses LogMeta = Record<string, unknown>).
- * Parameter name `meta` (not `metadata`) matches IPerformanceLogger.logEventLatency.
- *
- * Note: `any` is required here for contravariant parameter compatibility.
- * LogMeta (Record<string, unknown>) is not assignable to unknown in function parameters.
- * TODO: Consolidate with SolanaDetectorPerfLogger in solana-types.ts.
- */
-export interface SolanaDetectorPerfLogger {
-  logHealthCheck: (service: string, status: Record<string, unknown>) => void;
-  logEventLatency?: (operation: string, latency: number, meta?: Record<string, unknown>) => void;
-  logArbitrageOpportunity?: (opportunity: Record<string, unknown>) => void;
-}
+export type { SolanaDetectorLogger, SolanaDetectorPerfLogger };
 
 /**
  * Redis client interface for dependency injection.
