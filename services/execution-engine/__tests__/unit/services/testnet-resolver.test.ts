@@ -309,5 +309,60 @@ describe('testnet-resolver', () => {
       expect(result._testnetBuyChain).toBe('arbitrumSepolia');
       expect(result._testnetChain).toBe('arbitrumSepolia');
     });
+
+    it('preserves undefined tokenIn/tokenOut without error', () => {
+      const noTokenOpp: ArbitrageOpportunity = {
+        ...baseOpportunity,
+        tokenIn: undefined as unknown as string,
+        tokenOut: undefined as unknown as string,
+        token0: undefined as unknown as string,
+        token1: undefined as unknown as string,
+      };
+      const result = transformOpportunityForTestnet(noTokenOpp);
+      expect(result).not.toBeNull();
+      expect(result!.tokenIn).toBeUndefined();
+      expect(result!.tokenOut).toBeUndefined();
+      expect(result!.token0).toBeUndefined();
+      expect(result!.token1).toBeUndefined();
+    });
+
+    it('transforms hops[] tokenOut addresses (M-03)', () => {
+      const mainnetWeth = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+      const mainnetUsdc = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+      const testnetWeth = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
+      const testnetUsdc = '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8';
+
+      const hopsOpp: ArbitrageOpportunity = {
+        ...baseOpportunity,
+        hops: [
+          { tokenOut: mainnetUsdc, dex: 'uniswap_v3' },
+          { tokenOut: mainnetWeth, dex: 'sushiswap' },
+        ],
+      };
+      const result = transformOpportunityForTestnet(hopsOpp);
+      expect(result).not.toBeNull();
+      expect(result!.hops).toHaveLength(2);
+      expect(result!.hops![0].tokenOut).toBe(testnetUsdc);
+      expect(result!.hops![1].tokenOut).toBe(testnetWeth);
+    });
+
+    it('preserves hops[] non-address fields', () => {
+      const hopsOpp: ArbitrageOpportunity = {
+        ...baseOpportunity,
+        hops: [
+          { tokenOut: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', dex: 'uniswap_v3', expectedOutput: '500' },
+        ],
+      };
+      const result = transformOpportunityForTestnet(hopsOpp);
+      expect(result).not.toBeNull();
+      expect(result!.hops![0].dex).toBe('uniswap_v3');
+      expect(result!.hops![0].expectedOutput).toBe('500');
+    });
+
+    it('handles opportunity with no hops (undefined)', () => {
+      const result = transformOpportunityForTestnet(baseOpportunity);
+      expect(result).not.toBeNull();
+      expect(result!.hops).toBeUndefined();
+    });
   });
 });

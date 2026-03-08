@@ -42,6 +42,7 @@ import {
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { extractContext, createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import type { TraceContext } from '@arbitrage/core/tracing';
+import { isTestnetExecutionMode, isExecutionSimulationMode } from '@arbitrage/core/simulation';
 import { disconnectWithTimeout, parseEnvIntSafe } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger, NonceManager, getNonceManager, TradeLogger, R2Uploader, type TradeLoggerConfig, type R2UploaderConfig } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
@@ -329,12 +330,30 @@ export class ExecutionEngineService {
     // H-01 FIX: Production safety guard for testnet execution mode.
     // Prevents accidental deployment with testnet mode enabled in production,
     // which bypasses profit/confidence thresholds and remaps token addresses.
-    if (isProduction && process.env.TESTNET_EXECUTION_MODE === 'true') {
+    if (isProduction && isTestnetExecutionMode()) {
       throw new Error(
         '[CRITICAL] TESTNET_EXECUTION_MODE is enabled in production environment. ' +
         'This bypasses profit verification thresholds and remaps token addresses to testnet. ' +
         'Set NODE_ENV to a non-production value for testnet testing.'
       );
+    }
+
+    // M-01 FIX: Validate mode flag requirements documented in .env.example.
+    // TESTNET_EXECUTION_MODE requires SIMULATION_MODE=true (for simulated prices)
+    // and EXECUTION_SIMULATION_MODE=false (for real testnet transactions).
+    if (isTestnetExecutionMode()) {
+      if (!this.isSimulationMode) {
+        this.logger.warn(
+          'TESTNET_EXECUTION_MODE=true requires SIMULATION_MODE=true for simulated prices. ' +
+          'Without simulated prices, the testnet engine will wait for live prices that may never arrive.'
+        );
+      }
+      if (isExecutionSimulationMode()) {
+        this.logger.warn(
+          'TESTNET_EXECUTION_MODE=true with EXECUTION_SIMULATION_MODE=true means SimulationStrategy ' +
+          'will intercept all executions — no real testnet transactions will be submitted.'
+        );
+      }
     }
 
     // Initialize queue config

@@ -89,7 +89,10 @@ export function getSimulationModeSummary(): {
   const testnetExecution = isTestnetExecutionMode();
 
   let effectiveMode: 'production' | 'simulation' | 'hybrid' | 'testnet-live' = 'production';
-  if (testnetExecution) {
+  // M-01 FIX: Only report 'testnet-live' when execution simulation is off.
+  // When EXECUTION_SIMULATION_MODE=true, SimulationStrategy intercepts all executions
+  // so no real testnet transactions occur despite the TESTNET_EXECUTION_MODE flag.
+  if (testnetExecution && !executionSimulation) {
     effectiveMode = 'testnet-live';
   } else if (hybridMode) {
     effectiveMode = 'hybrid';

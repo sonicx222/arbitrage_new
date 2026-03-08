@@ -27,6 +27,7 @@ import { ethers } from 'ethers';
 import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { isTestnetExecutionMode } from '@arbitrage/core/simulation';
 import { parseEnvIntSafe, parseEnvFloatSafe, parseEnvBigIntSafe } from '@arbitrage/core/utils';
 import { getGasPriceCache } from '@arbitrage/core/caching/gas-price-cache';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -952,7 +953,7 @@ export abstract class BaseExecutionStrategy {
     // Testnet execution mode: skip profit/confidence thresholds since simulated
     // prices don't reflect testnet token values (testnet tokens have no real value).
     // Staleness checks above are still enforced.
-    if (process.env.TESTNET_EXECUTION_MODE === 'true') {
+    if (isTestnetExecutionMode()) {
       this.logger.debug('Price verification passed (testnet mode - thresholds skipped)', {
         opportunityId: opportunity.id,
         age: opportunityAge,

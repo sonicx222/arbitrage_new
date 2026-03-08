@@ -17,6 +17,7 @@
 
 import type { DistributedLockManager } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { isTestnetExecutionMode } from '@arbitrage/core/simulation';
 import type { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 import { type PerformanceLogger } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -477,7 +478,7 @@ export class ExecutionPipeline {
 
     // Testnet execution mode: transform simulated opportunity addresses to testnet.
     // Must happen before chain resolution since it remaps buyChain/sellChain/tokens.
-    if (process.env.TESTNET_EXECUTION_MODE === 'true') {
+    if (isTestnetExecutionMode()) {
       const transformed = transformOpportunityForTestnet(opportunity);
       if (!transformed) {
         this.deps.logger.debug('Skipping opportunity - no testnet support for chain', {

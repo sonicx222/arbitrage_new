@@ -22,7 +22,7 @@
  * @see docs/reports/TESTNET_EXECUTION_ANALYSIS_2026-03-08.md
  */
 
-import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { ArbitrageOpportunity, SwapHop } from '@arbitrage/types';
 
 // =============================================================================
 // Chain Name Resolution (Step 4)
@@ -88,6 +88,11 @@ export function getMainnetEquivalent(testnetChain: string): string | undefined {
  *
  * Addresses sourced from contracts/deployments/addresses.ts TOKEN_ADDRESSES.
  * Keys are lowercase for case-insensitive lookup.
+ *
+ * M-06 NOTE: These addresses are duplicated from contracts/deployments/addresses.ts
+ * because execution-engine cannot import from the contracts package (no @arbitrage/contracts
+ * path alias). If addresses change, update both files. All 17 addresses verified matching.
+ * @see contracts/deployments/addresses.ts — canonical source of truth
  */
 const TOKEN_ADDRESS_MAP: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   ethereum: {
@@ -163,6 +168,11 @@ const TESTNET_ROUTERS: Readonly<Record<string, readonly string[]>> = {
 
 /**
  * Get the primary testnet router address for a testnet chain.
+ *
+ * NOTE: Currently unused by execution code — strategies resolve routers from
+ * CHAINS/DEX config rather than from the opportunity. Available for future use
+ * when strategies need testnet-specific router resolution at the transaction
+ * submission boundary.
  */
 export function getTestnetRouter(testnetChain: string): string | undefined {
   return TESTNET_ROUTERS[testnetChain]?.[0];
@@ -170,6 +180,8 @@ export function getTestnetRouter(testnetChain: string): string | undefined {
 
 /**
  * Get all testnet router addresses for a testnet chain.
+ *
+ * @see getTestnetRouter — returns only the primary router
  */
 export function getTestnetRouters(testnetChain: string): readonly string[] {
   return TESTNET_ROUTERS[testnetChain] ?? [];
@@ -191,6 +203,10 @@ const TESTNET_FLASH_LOAN_CONTRACTS: Readonly<Record<string, string>> = {
 
 /**
  * Get the flash loan contract address for a testnet chain.
+ *
+ * NOTE: Currently unused by execution code — flash loan strategies resolve
+ * contract addresses from FLASH_LOAN_CONTRACT_ADDRESSES config. Available for
+ * future use when testnet deployments need separate contract resolution.
  */
 export function getTestnetFlashLoanContract(testnetChain: string): string | undefined {
   return TESTNET_FLASH_LOAN_CONTRACTS[testnetChain];
@@ -226,6 +242,7 @@ export function getTestnetFlashLoanContract(testnetChain: string): string | unde
  * Fields transformed:
  * - tokenIn / token0 / token1 -> testnet token addresses (via buyChain map)
  * - tokenOut -> testnet token address (via sellChain map for cross-chain)
+ * - hops[].tokenOut -> testnet token addresses (via buyChain map)
  *
  * Fields added:
  * - _testnetBuyChain / _testnetSellChain / _testnetChain -> testnet chain names
@@ -279,5 +296,11 @@ export function transformOpportunityForTestnet(
     token1: opportunity.token1
       ? resolveTestnetTokenAddress(mainnetChain, opportunity.token1)
       : opportunity.token1,
+    // M-03 FIX: Transform hops[] addresses for N-hop flash loan strategies.
+    // Hops are sequential swaps within the buy chain (triangular/multi-leg paths).
+    hops: opportunity.hops?.map((hop: SwapHop) => ({
+      ...hop,
+      tokenOut: resolveTestnetTokenAddress(mainnetChain, hop.tokenOut),
+    })),
   } as ArbitrageOpportunity;
 }
