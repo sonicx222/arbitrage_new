@@ -196,12 +196,21 @@ describe('testnet-resolver', () => {
       timestamp: Date.now(),
     };
 
-    it('transforms chain names to testnet', () => {
+    it('preserves mainnet chain names for infrastructure lookups (C-01)', () => {
       const result = transformOpportunityForTestnet(baseOpportunity);
       expect(result).not.toBeNull();
-      expect(result!.buyChain).toBe('sepolia');
-      expect(result!.sellChain).toBe('sepolia');
-      expect(result!.chain).toBe('sepolia');
+      // Chain names stay as mainnet for provider/wallet/config lookups
+      expect(result!.buyChain).toBe('ethereum');
+      expect(result!.sellChain).toBe('ethereum');
+      expect(result!.chain).toBe('ethereum');
+    });
+
+    it('adds testnet chain metadata (C-01)', () => {
+      const result = transformOpportunityForTestnet(baseOpportunity) as any;
+      expect(result).not.toBeNull();
+      expect(result._testnetBuyChain).toBe('sepolia');
+      expect(result._testnetSellChain).toBe('sepolia');
+      expect(result._testnetChain).toBe('sepolia');
     });
 
     it('transforms token addresses to testnet', () => {
@@ -249,10 +258,30 @@ describe('testnet-resolver', () => {
         buyChain: 'ethereum',
         sellChain: 'arbitrum',
       };
+      const result = transformOpportunityForTestnet(crossChainOpp) as any;
+      expect(result).not.toBeNull();
+      // Mainnet chain names preserved for infrastructure
+      expect(result.buyChain).toBe('ethereum');
+      expect(result.sellChain).toBe('arbitrum');
+      // Testnet chain names in metadata
+      expect(result._testnetBuyChain).toBe('sepolia');
+      expect(result._testnetSellChain).toBe('arbitrumSepolia');
+    });
+
+    it('resolves tokenOut using sell chain map for cross-chain (H-02)', () => {
+      const crossChainOpp: ArbitrageOpportunity = {
+        ...baseOpportunity,
+        buyChain: 'ethereum',
+        sellChain: 'arbitrum',
+        tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',  // Ethereum WETH
+        tokenOut: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum WETH
+      };
       const result = transformOpportunityForTestnet(crossChainOpp);
       expect(result).not.toBeNull();
-      expect(result!.buyChain).toBe('sepolia');
-      expect(result!.sellChain).toBe('arbitrumSepolia');
+      // tokenIn resolved via ethereum map -> Sepolia WETH
+      expect(result!.tokenIn).toBe('0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14');
+      // tokenOut resolved via arbitrum map -> Arbitrum Sepolia WETH
+      expect(result!.tokenOut).toBe('0x980B62Da83eFf3D4576C647993b0c1D7faf17c73');
     });
 
     it('returns null when opportunity has no chain', () => {
@@ -271,10 +300,14 @@ describe('testnet-resolver', () => {
         chain: 'arbitrum',
         sellChain: undefined,
       };
-      const result = transformOpportunityForTestnet(sameChainOpp);
+      const result = transformOpportunityForTestnet(sameChainOpp) as any;
       expect(result).not.toBeNull();
-      expect(result!.buyChain).toBe('arbitrumSepolia');
-      expect(result!.chain).toBe('arbitrumSepolia');
+      // Mainnet chain names preserved (buyChain stays undefined)
+      expect(result.buyChain).toBeUndefined();
+      expect(result.chain).toBe('arbitrum');
+      // Testnet metadata derived from chain field
+      expect(result._testnetBuyChain).toBe('arbitrumSepolia');
+      expect(result._testnetChain).toBe('arbitrumSepolia');
     });
   });
 });

@@ -326,6 +326,17 @@ export class ExecutionEngineService {
       }
     }
 
+    // H-01 FIX: Production safety guard for testnet execution mode.
+    // Prevents accidental deployment with testnet mode enabled in production,
+    // which bypasses profit/confidence thresholds and remaps token addresses.
+    if (isProduction && process.env.TESTNET_EXECUTION_MODE === 'true') {
+      throw new Error(
+        '[CRITICAL] TESTNET_EXECUTION_MODE is enabled in production environment. ' +
+        'This bypasses profit verification thresholds and remaps token addresses to testnet. ' +
+        'Set NODE_ENV to a non-production value for testnet testing.'
+      );
+    }
+
     // Initialize queue config
     this.queueConfig = {
       ...DEFAULT_QUEUE_CONFIG,

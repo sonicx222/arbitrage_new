@@ -3,10 +3,18 @@
  *
  * When TESTNET_EXECUTION_MODE=true, maps mainnet identifiers used by the
  * price simulator to testnet equivalents used by the execution engine:
- * - Chain names (ethereum -> sepolia)
  * - Token addresses (mainnet WETH -> testnet WETH)
  * - Router addresses (mainnet Uniswap -> testnet Uniswap)
  * - Contract addresses (mainnet deployment -> testnet deployment)
+ * - Chain name metadata (testnet chain names added as _testnet* fields)
+ *
+ * ## Dual-Name Architecture (C-01 Fix)
+ *
+ * Chain names in the opportunity (`buyChain`, `sellChain`, `chain`) are preserved
+ * as mainnet names so all downstream infrastructure lookups work (providers, wallets,
+ * CHAINS config, DEX config). Testnet chain names are added as metadata fields
+ * (`_testnetBuyChain`, `_testnetSellChain`, `_testnetChain`) for strategies that
+ * need the actual testnet network name (e.g., contract lookups, logging).
  *
  * All mappings are derived from contracts/deployments/addresses.ts (single
  * source of truth for deployed addresses).
@@ -194,14 +202,33 @@ export function getTestnetFlashLoanContract(testnetChain: string): string | unde
 
 /**
  * Transform a simulated opportunity (mainnet addresses) into a testnet opportunity
- * with correct testnet chain names, token addresses, and contract references.
+ * with correct testnet token addresses and testnet chain metadata.
  *
  * This is the main entry point for testnet resolution. Called by the execution
  * pipeline when TESTNET_EXECUTION_MODE=true.
  *
+ * ## C-01 FIX: Dual-Name Approach
+ *
+ * Chain names (`buyChain`, `sellChain`, `chain`) are **preserved as mainnet names**
+ * so that all downstream infrastructure lookups (providers, wallets, CHAINS config,
+ * DEX config, flash loan providers) continue to work. Testnet chain names are added
+ * as metadata fields (`_testnetBuyChain`, `_testnetSellChain`, `_testnetChain`) for
+ * use at the transaction submission boundary.
+ *
+ * Token addresses are mapped to testnet equivalents since they appear directly in
+ * transaction calldata.
+ *
+ * ## H-02 FIX: Cross-Chain Token Resolution
+ *
+ * For cross-chain opportunities, `tokenOut` is resolved using the sell chain's
+ * token map (not the buy chain's), since the output token may live on a different chain.
+ *
  * Fields transformed:
- * - buyChain / sellChain / chain -> testnet chain names
- * - tokenIn / tokenOut / token0 / token1 -> testnet token addresses
+ * - tokenIn / token0 / token1 -> testnet token addresses (via buyChain map)
+ * - tokenOut -> testnet token address (via sellChain map for cross-chain)
+ *
+ * Fields added:
+ * - _testnetBuyChain / _testnetSellChain / _testnetChain -> testnet chain names
  *
  * Returns null if the opportunity's chain has no testnet support (should be skipped).
  */
@@ -227,18 +254,24 @@ export function transformOpportunityForTestnet(
     return null;
   }
 
+  // H-02 FIX: Use sell chain for tokenOut resolution in cross-chain opportunities.
+  // tokenIn/token0/token1 are on the buy chain; tokenOut may be on the sell chain.
+  const sellTokenChain = mainnetSellChain ?? mainnetChain;
+
   return {
     ...opportunity,
-    // Chain resolution
-    buyChain: testnetChain,
-    sellChain: testnetSellChain ?? opportunity.sellChain,
-    chain: testnetChain,
-    // Token address resolution (use mainnet chain name for lookup)
+    // C-01 FIX: Preserve mainnet chain names for infrastructure lookups (providers,
+    // wallets, CHAINS config, DEX config). Add testnet names as metadata.
+    _testnetBuyChain: testnetChain,
+    _testnetSellChain: testnetSellChain,
+    _testnetChain: testnetChain,
+    // Token address resolution
     tokenIn: opportunity.tokenIn
       ? resolveTestnetTokenAddress(mainnetChain, opportunity.tokenIn)
       : opportunity.tokenIn,
+    // H-02 FIX: tokenOut uses sell chain map for cross-chain resolution
     tokenOut: opportunity.tokenOut
-      ? resolveTestnetTokenAddress(mainnetChain, opportunity.tokenOut)
+      ? resolveTestnetTokenAddress(sellTokenChain, opportunity.tokenOut)
       : opportunity.tokenOut,
     token0: opportunity.token0
       ? resolveTestnetTokenAddress(mainnetChain, opportunity.token0)
@@ -246,5 +279,5 @@ export function transformOpportunityForTestnet(
     token1: opportunity.token1
       ? resolveTestnetTokenAddress(mainnetChain, opportunity.token1)
       : opportunity.token1,
-  };
+  } as ArbitrageOpportunity;
 }
