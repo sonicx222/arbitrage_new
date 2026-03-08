@@ -835,3 +835,258 @@ describe('Mathematical Correctness', () => {
     expect(result.kellyFraction).toBeCloseTo(0, 3);
   });
 });
+
+// =============================================================================
+// Gas-Budget Mode Tests (FIX P0-1 / Profitability Audit)
+// =============================================================================
+
+describe('Gas-Budget Mode', () => {
+  let gasSizer: KellyPositionSizer;
+
+  const createGasBudgetConfig = (overrides: Partial<PositionSizerConfig> = {}): PositionSizerConfig => ({
+    kellyMultiplier: 0.5,
+    maxSingleTradeFraction: 0.02,
+    minTradeFraction: 0.001,
+    totalCapital: 100n * ONE_ETH,
+    enabled: true,
+    useGasBudgetMode: true,
+    maxGasPerTrade: 50000000000000000n, // 0.05 ETH
+    dailyGasBudget: 1000000000000000000n, // 1 ETH
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    gasSizer = new KellyPositionSizer(createGasBudgetConfig());
+  });
+
+  afterEach(() => {
+    gasSizer.destroy();
+    resetKellyPositionSizer();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Approval Tests
+  // ---------------------------------------------------------------------------
+
+  describe('approval', () => {
+    it('should approve trade when gas cost is within budget and profit exceeds gas', () => {
+      const input = createMockInput({
+        winProbability: 0.7,
+        expectedProfit: ONE_ETH / 10n, // 0.1 ETH profit
+        expectedLoss: ONE_ETH / 100n, // 0.01 ETH gas (well within 0.05 cap)
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(true);
+      expect(result.recommendedSize).toBeGreaterThan(0n);
+    });
+
+    it('should return maxAllowed as recommended size (flash loan amount from pool)', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH / 10n,
+        expectedLoss: ONE_ETH / 100n,
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(true);
+      // In gas-budget mode, recommendedSize = maxAllowed (pool provides the capital)
+      expect(result.recommendedSize).toBe(result.maxAllowed);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rejection: Gas > Profit
+  // ---------------------------------------------------------------------------
+
+  describe('rejection: gas exceeds profit', () => {
+    it('should reject when gas cost exceeds expected profit (negative edge)', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH / 100n, // 0.01 ETH profit
+        expectedLoss: ONE_ETH / 10n, // 0.1 ETH gas — more than profit
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(false);
+      expect(result.reason).toContain('exceeds expected profit');
+      expect(result.recommendedSize).toBe(0n);
+    });
+
+    it('should reject when gas cost equals profit (no edge)', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH / 10n,
+        expectedLoss: ONE_ETH / 10n, // Equal to profit
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(false);
+      expect(result.reason).toContain('exceeds expected profit');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rejection: Per-Trade Gas Cap
+  // ---------------------------------------------------------------------------
+
+  describe('rejection: per-trade gas cap', () => {
+    it('should reject when gas exceeds maxGasPerTrade', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH, // 1 ETH profit (large)
+        expectedLoss: 60000000000000000n, // 0.06 ETH gas > 0.05 cap
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(false);
+      expect(result.reason).toContain('per-trade cap');
+    });
+
+    it('should approve when gas is at exactly maxGasPerTrade', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH, // 1 ETH profit
+        expectedLoss: 50000000000000000n, // 0.05 ETH gas = exactly at cap
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      // At exactly the cap, gasCost > maxGas is false, so it should pass
+      expect(result.shouldTrade).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rejection: Daily Gas Budget
+  // ---------------------------------------------------------------------------
+
+  describe('rejection: daily gas budget', () => {
+    it('should reject when rolling 24h gas spend would exceed daily budget', () => {
+      // Record gas spend close to the daily budget (1 ETH)
+      gasSizer.recordGasSpend(960000000000000000n); // 0.96 ETH already spent
+
+      // Now try to approve a trade with gas within per-trade cap but over daily budget
+      const input = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: 50000000000000000n, // 0.05 ETH gas (at per-trade cap) — 0.96 + 0.05 > 1.0 budget
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(false);
+      expect(result.reason).toContain('Daily gas budget exhausted');
+    });
+
+    it('should approve when within daily budget', () => {
+      // Record some gas spend
+      gasSizer.recordGasSpend(500000000000000000n); // 0.5 ETH spent
+
+      const input = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: ONE_ETH / 100n, // 0.01 ETH gas — 0.5 + 0.01 < 1.0 budget
+      });
+
+      const result = gasSizer.calculateSize(input);
+
+      expect(result.shouldTrade).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // recordGasSpend (FIX P1-7: Post-Execution Tracking)
+  // ---------------------------------------------------------------------------
+
+  describe('recordGasSpend', () => {
+    it('should record gas spend for rolling window calculation', () => {
+      // Record gas
+      gasSizer.recordGasSpend(ONE_ETH / 2n); // 0.5 ETH
+
+      // Approve a trade that would push within budget
+      const input = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: ONE_ETH / 100n, // 0.01 ETH gas — total 0.51 < 1.0
+      });
+
+      const result = gasSizer.calculateSize(input);
+      expect(result.shouldTrade).toBe(true);
+    });
+
+    it('should not track gas at approval time (FIX P1-7)', () => {
+      // Approve 20 trades with 0.05 ETH gas each = 1.0 ETH if tracked at approval
+      for (let i = 0; i < 20; i++) {
+        const input = createMockInput({
+          expectedProfit: ONE_ETH,
+          expectedLoss: 50000000000000000n, // 0.05 ETH gas
+        });
+
+        const result = gasSizer.calculateSize(input);
+        // All should be approved because gas isn't tracked pre-execution
+        expect(result.shouldTrade).toBe(true);
+      }
+
+      // No gas has actually been recorded yet
+      // The 21st trade should also be approved
+      const lastInput = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: ONE_ETH / 100n,
+      });
+      expect(gasSizer.calculateSize(lastInput).shouldTrade).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // clear() Resets Gas-Budget State (FIX P1-5)
+  // ---------------------------------------------------------------------------
+
+  describe('clear resets gas-budget state', () => {
+    it('should clear gasSpendHistory and rejectedGasBudget on clear()', () => {
+      // Record gas spend close to budget
+      gasSizer.recordGasSpend(960000000000000000n); // 0.96 ETH
+
+      // Verify budget is nearly exhausted — trade gas within per-trade cap but over daily budget
+      const input = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: 50000000000000000n, // 0.05 ETH — 0.96 + 0.05 > 1.0 budget
+      });
+      expect(gasSizer.calculateSize(input).shouldTrade).toBe(false);
+
+      // Clear
+      gasSizer.clear();
+
+      // After clear, budget should be fresh — same trade should now be approved
+      expect(gasSizer.calculateSize(input).shouldTrade).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Statistics
+  // ---------------------------------------------------------------------------
+
+  describe('statistics', () => {
+    it('should track approved trades in gas-budget mode', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH / 10n,
+        expectedLoss: ONE_ETH / 100n,
+      });
+
+      gasSizer.calculateSize(input);
+      gasSizer.calculateSize(input);
+
+      const stats = gasSizer.getStats();
+      expect(stats.tradesApproved).toBe(2);
+    });
+
+    it('should track negative-edge rejections', () => {
+      const input = createMockInput({
+        expectedProfit: ONE_ETH / 100n,
+        expectedLoss: ONE_ETH / 10n, // Gas > profit
+      });
+
+      gasSizer.calculateSize(input);
+
+      const stats = gasSizer.getStats();
+      expect(stats.rejectedNegativeKelly).toBe(1);
+    });
+  });
+});

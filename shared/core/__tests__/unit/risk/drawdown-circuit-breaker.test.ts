@@ -1169,3 +1169,232 @@ describe('State Persistence Scenarios', () => {
     resetDrawdownCircuitBreaker();
   });
 });
+
+// =============================================================================
+// Rolling 24h Window Tests (FIX P0-2 / Profitability Audit)
+// =============================================================================
+
+describe('Rolling 24h Window', () => {
+  let breaker: DrawdownCircuitBreaker;
+
+  beforeEach(() => {
+    breaker = new DrawdownCircuitBreaker(createMockConfig({
+      useRollingWindow: true,
+    }));
+  });
+
+  afterEach(() => {
+    resetDrawdownCircuitBreaker();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Basic PnL Computation
+  // ---------------------------------------------------------------------------
+
+  describe('basic PnL computation', () => {
+    it('should compute rolling PnL from individual trades', () => {
+      breaker.recordTradeResult(createLosingTrade(ONE_ETH));
+      expect(breaker.getState().dailyPnL).toBe(-ONE_ETH);
+
+      breaker.recordTradeResult(createWinningTrade(ONE_ETH / 2n));
+      // -1 ETH + 0.5 ETH = -0.5 ETH
+      expect(breaker.getState().dailyPnL).toBe(-ONE_ETH / 2n);
+    });
+
+    it('should accumulate multiple winning trades', () => {
+      recordWins(breaker, 5, ONE_ETH / 10n);
+      // 5 * 0.1 ETH = 0.5 ETH
+      expect(breaker.getState().dailyPnL).toBe(ONE_ETH / 2n);
+    });
+
+    it('should accumulate multiple losing trades', () => {
+      recordLosses(breaker, 3, ONE_ETH / 100n);
+      // 3 * -0.01 ETH = -0.03 ETH
+      expect(breaker.getState().dailyPnL).toBe(-3n * ONE_ETH / 100n);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 24h Window Pruning
+  // ---------------------------------------------------------------------------
+
+  describe('24h window pruning', () => {
+    it('should exclude trades older than 24h from rolling PnL', () => {
+      const now = Date.now();
+      const twentyFiveHoursAgo = now - 25 * 60 * 60 * 1000;
+
+      // Record an old trade (25h ago) — should be pruned
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -5n * ONE_ETH,
+        timestamp: twentyFiveHoursAgo,
+      });
+
+      // Record a recent trade
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -ONE_ETH / 10n,
+        timestamp: now,
+      });
+
+      // Rolling PnL should only include the recent trade
+      const state = breaker.getState();
+      expect(state.dailyPnL).toBe(-ONE_ETH / 10n);
+    });
+
+    it('should include trades within the 24h window', () => {
+      const now = Date.now();
+      const twentyThreeHoursAgo = now - 23 * 60 * 60 * 1000;
+
+      // Trade 23h ago — within window
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -ONE_ETH,
+        timestamp: twentyThreeHoursAgo,
+      });
+
+      // Recent trade
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -ONE_ETH / 2n,
+        timestamp: now,
+      });
+
+      // Both should be included: -1 + -0.5 = -1.5 ETH
+      const state = breaker.getState();
+      expect(state.dailyPnL).toBe(-ONE_ETH - ONE_ETH / 2n);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // State Transitions with Rolling PnL
+  // ---------------------------------------------------------------------------
+
+  describe('state transitions with rolling PnL', () => {
+    it('should transition to CAUTION when rolling PnL exceeds caution threshold', () => {
+      // 3.5% loss triggers CAUTION (threshold is 3%)
+      breaker.recordTradeResult(createLosingTrade(35n * ONE_ETH / 10n));
+
+      const result = breaker.isTradingAllowed();
+      expect(result.state).toBe('CAUTION');
+    });
+
+    it('should transition to HALT when rolling PnL exceeds max daily loss', () => {
+      // Push past caution then halt
+      breaker.recordTradeResult(createLosingTrade(35n * ONE_ETH / 10n)); // 3.5% → CAUTION
+      expect(breaker.getState().state).toBe('CAUTION');
+
+      breaker.recordTradeResult(createLosingTrade(2n * ONE_ETH)); // +2% = 5.5% → HALT
+      expect(breaker.getState().state).toBe('HALT');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Midnight Guard (FIX P0-2)
+  // ---------------------------------------------------------------------------
+
+  describe('midnight guard', () => {
+    it('should NOT reset PnL at midnight when useRollingWindow is true', () => {
+      // Record a loss
+      breaker.recordTradeResult(createLosingTrade(ONE_ETH));
+      expect(breaker.getState().dailyPnL).toBe(-ONE_ETH);
+
+      // Call isTradingAllowed multiple times (which calls checkDailyReset)
+      // In rolling window mode, checkDailyReset() should return early
+      breaker.isTradingAllowed();
+      breaker.isTradingAllowed();
+
+      // PnL should NOT be zeroed
+      expect(breaker.getState().dailyPnL).toBe(-ONE_ETH);
+    });
+
+    it('should NOT transition CAUTION to NORMAL at midnight in rolling window mode', () => {
+      // Trigger CAUTION
+      breaker.recordTradeResult(createLosingTrade(35n * ONE_ETH / 10n));
+      expect(breaker.getState().state).toBe('CAUTION');
+
+      // Multiple getState/isTradingAllowed calls should not cause midnight reset
+      for (let i = 0; i < 10; i++) {
+        breaker.isTradingAllowed();
+      }
+
+      // Should remain in CAUTION
+      expect(breaker.getState().state).toBe('CAUTION');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // forceReset Clears History (FIX P1-4)
+  // ---------------------------------------------------------------------------
+
+  describe('forceReset clears trade history', () => {
+    it('should clear rolling window trade history on forceReset', () => {
+      // Record several losses
+      recordLosses(breaker, 3, ONE_ETH);
+
+      expect(breaker.getState().dailyPnL).toBe(-3n * ONE_ETH);
+
+      // Force reset
+      breaker.forceReset();
+
+      // dailyPnL should be 0 (trade history cleared)
+      expect(breaker.getState().dailyPnL).toBe(0n);
+      expect(breaker.getState().state).toBe('NORMAL');
+    });
+
+    it('should start fresh PnL accumulation after forceReset', () => {
+      // Record losses to accumulate PnL
+      recordLosses(breaker, 3, ONE_ETH);
+      expect(breaker.getState().dailyPnL).toBe(-3n * ONE_ETH);
+
+      // Force reset
+      breaker.forceReset();
+
+      // New trade should only reflect new PnL
+      breaker.recordTradeResult(createLosingTrade(ONE_ETH / 10n));
+      expect(breaker.getState().dailyPnL).toBe(-ONE_ETH / 10n);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MAX_TRADE_HISTORY Cap
+  // ---------------------------------------------------------------------------
+
+  describe('MAX_TRADE_HISTORY cap', () => {
+    it('should bound trade history to prevent unbounded memory growth', () => {
+      // Record more than MAX_TRADE_HISTORY trades (50000)
+      // Use a smaller count to keep test fast, just verify no crash
+      for (let i = 0; i < 100; i++) {
+        breaker.recordTradeResult({
+          success: i % 2 === 0,
+          pnl: i % 2 === 0 ? ONE_ETH / 1000n : -ONE_ETH / 1000n,
+          timestamp: Date.now(),
+        });
+      }
+
+      // Should not throw and state should be valid
+      const state = breaker.getState();
+      expect(state).toBeDefined();
+      expect(state.dailyPnL).toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Legacy mode comparison
+  // ---------------------------------------------------------------------------
+
+  describe('legacy mode comparison', () => {
+    it('should use legacy UTC midnight reset when useRollingWindow is false', () => {
+      const legacyBreaker = new DrawdownCircuitBreaker(createMockConfig({
+        useRollingWindow: false,
+      }));
+
+      legacyBreaker.recordTradeResult(createLosingTrade(ONE_ETH));
+      expect(legacyBreaker.getState().dailyPnL).toBe(-ONE_ETH);
+
+      legacyBreaker.recordTradeResult(createWinningTrade(ONE_ETH / 2n));
+      // Legacy mode: simple accumulation
+      expect(legacyBreaker.getState().dailyPnL).toBe(-ONE_ETH / 2n);
+    });
+  });
+});

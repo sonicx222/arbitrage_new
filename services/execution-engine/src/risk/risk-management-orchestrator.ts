@@ -115,7 +115,7 @@ export class RiskManagementOrchestrator {
     this.probabilityTracker = deps.probabilityTracker;
     this.logger = deps.logger;
     this.stats = deps.stats;
-    this.maxInFlightTrades = deps.maxInFlightTrades ?? 3;
+    this.maxInFlightTrades = deps.maxInFlightTrades ?? RISK_CONFIG.execution.maxInFlightTrades;
   }
 
   /**
@@ -335,6 +335,14 @@ export class RiskManagementOrchestrator {
           gasCost: outcome.gasCost ? BigInt(Math.floor(outcome.gasCost * 1e18)) : 0n,
           timestamp: Date.now(),
         });
+      }
+
+      // FIX P1-7: Record actual gas spend post-execution (not pre-approval)
+      // Only record when gas was actually spent (gasCost > 0)
+      if (this.positionSizer && outcome.gasCost && outcome.gasCost > 0) {
+        this.positionSizer.recordGasSpend(
+          BigInt(Math.floor(outcome.gasCost * 1e18))
+        );
       }
 
       // Update drawdown breaker with trade result

@@ -7,7 +7,6 @@
  * - WhaleActivityTracker: T3.12 enhanced whale detection
  * - LiquidityDepthAnalyzer: T3.15 slippage estimation
  * - SwapEventFilter: Volume filtering and whale alerts
- * - PerformanceAnalytics: Strategy attribution analysis
  * - ProfessionalQualityMonitor: AD-PQS scoring system
  * - PriceOracle: Centralized price source with fallbacks
  * - PairActivityTracker: Volatility-based pair prioritization
@@ -96,21 +95,6 @@ export type {
   FilterStats,
   BatchResult
 } from './swap-event-filter';
-
-// Performance Analytics
-export {
-  PerformanceAnalyticsEngine
-} from './performance-analytics';
-export type {
-  TradeRecord,
-  PerformanceReport,
-  PerformanceMetrics,
-  StrategyPerformance,
-  AssetPerformance,
-  TimePerformance,
-  BenchmarkComparison,
-  AttributionAnalysis
-} from './performance-analytics';
 
 // Professional Quality Monitor (AD-PQS)
 export {

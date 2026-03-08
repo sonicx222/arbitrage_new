@@ -37,6 +37,22 @@ function parseEnvBigInt(envVar: string, defaultValue: string): bigint {
   return safeParseBigInt(process.env[envVar], defaultValue, envVar);
 }
 
+/** FIX P2-11: Parse JSON env var into per-chain EV threshold overrides. */
+function parseChainEVThresholds(raw: string | undefined): Record<string, bigint> | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    const result: Record<string, bigint> = {};
+    for (const [chain, value] of Object.entries(parsed)) {
+      result[chain.toLowerCase()] = BigInt(value);
+    }
+    return result;
+  } catch {
+    console.warn('RISK_CHAIN_EV_THRESHOLDS: invalid JSON, ignoring override');
+    return undefined;
+  }
+}
+
 // =============================================================================
 // CAPITAL RISK CONFIGURATION
 // =============================================================================
@@ -101,6 +117,12 @@ export const RISK_CONFIG = {
      * Default: 0.75 (75% of normal sizing)
      */
     cautionMultiplier: parseEnvFloat('RISK_CAUTION_MULTIPLIER', 0.75, 0.01, 1),
+
+    /**
+     * Use rolling 24h window instead of UTC midnight reset for daily PnL.
+     * Default: false (legacy midnight reset)
+     */
+    useRollingWindow: process.env.RISK_USE_ROLLING_DRAWDOWN === 'true',
   },
 
   // ===========================================================================
@@ -147,6 +169,15 @@ export const RISK_CONFIG = {
      * Default: 0.02 ETH (20000000000000000 wei)
      */
     defaultProfitEstimate: parseEnvBigInt('RISK_DEFAULT_PROFIT_ESTIMATE', '20000000000000000'),
+
+    /**
+     * FIX P2-11: Per-chain minimum EV threshold overrides (JSON).
+     * Allows operators to adjust per-chain thresholds without code changes.
+     * Format: JSON object mapping chain name to wei value (as string).
+     * Example: {"base":"100000000000000","arbitrum":"300000000000000"}
+     * Chains not listed fall back to built-in defaults in ev-calculator.ts.
+     */
+    chainMinEVThresholds: parseChainEVThresholds(process.env.RISK_CHAIN_EV_THRESHOLDS),
   },
 
   // ===========================================================================
@@ -178,6 +209,27 @@ export const RISK_CONFIG = {
      * Default: 0.1%
      */
     minTradeFraction: parseEnvFloat('RISK_MIN_TRADE_FRACTION', 0.001, 0, 1),
+
+    /**
+     * Gas-budget mode for flash loan arbitrage.
+     * In flash loans, only gas fees are at risk — not trade capital.
+     * When enabled, sizing is based on gas budget instead of Kelly Criterion.
+     * Default: false
+     */
+    useGasBudgetMode: process.env.RISK_GAS_BUDGET_MODE === 'true',
+
+    /**
+     * Maximum gas cost per trade in wei (gas-budget mode).
+     * Trades with estimated gas cost exceeding this are rejected.
+     * Default: 0.05 ETH (50000000000000000 wei)
+     */
+    maxGasPerTrade: parseEnvBigInt('RISK_MAX_GAS_PER_TRADE', '50000000000000000'),
+
+    /**
+     * Maximum cumulative gas spend per rolling 24h window in wei.
+     * Default: 1 ETH (1000000000000000000 wei)
+     */
+    dailyGasBudget: parseEnvBigInt('RISK_DAILY_GAS_BUDGET', '1000000000000000000'),
   },
 
   // ===========================================================================
@@ -227,6 +279,19 @@ export const RISK_CONFIG = {
      * Default: 'risk:probabilities:'
      */
     redisKeyPrefix: process.env.RISK_REDIS_KEY_PREFIX ?? 'risk:probabilities:',
+  },
+
+  // ===========================================================================
+  // Execution Risk Controls
+  // ===========================================================================
+
+  execution: {
+    /**
+     * Maximum concurrent in-flight trades.
+     * Limits TOCTOU gap between risk assessment and execution completion.
+     * Default: 3
+     */
+    maxInFlightTrades: parseEnvInt('RISK_MAX_IN_FLIGHT_TRADES', 3, 1),
   },
 
   // ===========================================================================
@@ -312,6 +377,27 @@ export function validateRiskConfig(): void {
   }
   if (positionSizing.minTradeFraction < 0 || positionSizing.minTradeFraction >= positionSizing.maxSingleTradeFraction) {
     errors.push('RISK_MIN_TRADE_FRACTION must be between 0 and maxSingleTradeFraction');
+  }
+
+  // FIX P2-8: Validate gas-budget fields when gas-budget mode is enabled
+  if (positionSizing.useGasBudgetMode) {
+    if (positionSizing.maxGasPerTrade <= 0n) {
+      errors.push('RISK_MAX_GAS_PER_TRADE must be > 0 when gas-budget mode is enabled');
+    }
+    if (positionSizing.dailyGasBudget <= 0n) {
+      errors.push('RISK_DAILY_GAS_BUDGET must be > 0 when gas-budget mode is enabled');
+    }
+    if (positionSizing.maxGasPerTrade > positionSizing.dailyGasBudget) {
+      errors.push(
+        `RISK_MAX_GAS_PER_TRADE (${positionSizing.maxGasPerTrade}) must be <= ` +
+        `RISK_DAILY_GAS_BUDGET (${positionSizing.dailyGasBudget})`
+      );
+    }
+  }
+
+  // FIX P3-19: Validate execution config upper bounds
+  if (RISK_CONFIG.execution.maxInFlightTrades > 50) {
+    errors.push('RISK_MAX_IN_FLIGHT_TRADES must be <= 50 (excessive concurrency increases TOCTOU risk)');
   }
 
   // Validate probability config

@@ -54,6 +54,9 @@ const CHAIN_DEFAULT_GAS_COSTS: Record<string, bigint> = {
   mantle: 1000000000000000000n, // 1.0 MNT (~$0.80) — MNT native token, not ETH
   mode: 100000000000000n, // 0.0001 ETH (~$0.25)
 
+  // Solana - Very low gas (~5000 lamports)
+  solana: 5000000n, // ~0.000005 SOL (~$0.001)
+
   // Fallback for unknown chains
   default: 1000000000000000n, // 0.001 ETH (~$2.50)
 };
@@ -67,15 +70,63 @@ function getChainDefaultGasCost(chain: string): bigint {
   return CHAIN_DEFAULT_GAS_COSTS[normalizedChain] ?? CHAIN_DEFAULT_GAS_COSTS.default;
 }
 
-// FIX P2-6: Aligned DEFAULT_CONFIG with RISK_CONFIG values to prevent
-// divergent behavior when EVCalculator is instantiated directly vs via config.
+/**
+ * Per-chain minimum EV thresholds in native token wei.
+ * L2s have much lower gas, so smaller EV trades are still profitable.
+ * Ethereum mainnet needs higher EV to cover ~$25+ gas costs.
+ */
+const CHAIN_MIN_EV_THRESHOLDS: Record<string, bigint> = {
+  // L1 - EV threshold is intentionally below raw gas cost (~$25+ at 50 gwei).
+  // EV = (winProb × profit) - (lossProb × gasCost). A positive EV of 0.005 ETH
+  // already factors in gas cost expectation, so the threshold gates on NET expected
+  // value, not gross profit. Raising this would reject profitable-in-expectation trades.
+  ethereum: 5000000000000000n, // 0.005 ETH (~$12.50) — minimum NET EV after gas
+
+  // L2s - Near-zero gas, much lower EV is profitable
+  arbitrum: 500000000000000n, // 0.0005 ETH (~$1.25)
+  optimism: 500000000000000n, // 0.0005 ETH (~$1.25)
+  base: 200000000000000n, // 0.0002 ETH (~$0.50)
+  zksync: 500000000000000n, // 0.0005 ETH (~$1.25)
+  linea: 500000000000000n, // 0.0005 ETH (~$1.25)
+  blast: 200000000000000n, // 0.0002 ETH (~$0.50)
+  scroll: 500000000000000n, // 0.0005 ETH (~$1.25)
+  mode: 200000000000000n, // 0.0002 ETH (~$0.50)
+
+  // Alt L1s - Moderate thresholds in native token (~2-3x gas cost safety margin)
+  polygon: 200000000000000000n, // 0.2 MATIC (~$0.20) — 2x gas cost
+  bsc: 2000000000000000n, // 0.002 BNB (~$1.20)
+  avalanche: 5000000000000000n, // 0.005 AVAX (~$0.20) — 5x gas cost
+  fantom: 500000000000000n, // 0.0005 FTM (~$0.25)
+  mantle: 5000000000000000000n, // 5.0 MNT (~$4.00)
+
+  // Solana - Very low gas, low threshold needed
+  solana: 50000000n, // 0.00005 SOL (~$0.01) — 10x gas cost
+};
+
+/**
+ * Get minimum EV threshold for a chain.
+ * Falls back to global minEVThreshold if chain not found.
+ */
+function getChainMinEVThreshold(chain: string, fallback: bigint, overrides?: Record<string, bigint>): bigint {
+  const normalizedChain = chain.toLowerCase();
+  // User-supplied overrides take priority
+  if (overrides?.[normalizedChain] !== undefined) {
+    return overrides[normalizedChain];
+  }
+  return CHAIN_MIN_EV_THRESHOLDS[normalizedChain] ?? fallback;
+}
+
+// FIX P2-6/P2-12: These defaults MUST match shared/config/src/risk-config.ts RISK_CONFIG.ev.
+// Source of truth is RISK_CONFIG — when updating defaults, update both files.
+// Components use DI: the initializer reads RISK_CONFIG and passes values to constructors.
+// These defaults are only used when the component is instantiated directly (e.g., tests).
 const DEFAULT_CONFIG: EVConfig = {
-  minEVThreshold: 5000000000000000n, // 0.005 ETH (~$10 at $2000/ETH)
-  minWinProbability: 0.3, // 30% minimum win probability
-  maxLossPerTrade: 100000000000000000n, // 0.1 ETH
-  useHistoricalGasCost: true,
-  defaultGasCost: 10000000000000000n, // 0.01 ETH — matches RISK_CONFIG.ev.defaultGasCost
-  defaultProfitEstimate: 20000000000000000n, // 0.02 ETH — matches RISK_CONFIG.ev.defaultProfitEstimate
+  minEVThreshold: 5000000000000000n, // 0.005 ETH — must match RISK_CONFIG.ev.minEVThreshold
+  minWinProbability: 0.3, // 30% — must match RISK_CONFIG.ev.minWinProbability
+  maxLossPerTrade: 100000000000000000n, // 0.1 ETH — must match RISK_CONFIG.ev.maxLossPerTrade
+  useHistoricalGasCost: true, // must match RISK_CONFIG.ev.useHistoricalGasCost
+  defaultGasCost: 10000000000000000n, // 0.01 ETH — must match RISK_CONFIG.ev.defaultGasCost
+  defaultProfitEstimate: 20000000000000000n, // 0.02 ETH — must match RISK_CONFIG.ev.defaultProfitEstimate
 };
 
 // =============================================================================
@@ -169,12 +220,13 @@ export class EVCalculator {
     const expectedGasCost = (gasCostEstimate * lossProbScaled) / scaleFactor;
     const expectedValue = expectedProfit - expectedGasCost;
 
-    // Determine if should execute
+    // Determine if should execute (chain-aware EV threshold)
     const { shouldExecute, reason, rejectionCode } = this.evaluateExecution(
       expectedValue,
       winProbability,
       probResult.isDefault,
-      gasCostEstimate
+      gasCostEstimate,
+      chain
     );
 
     // Update statistics (FIX P3-15: uses structured rejectionCode)
@@ -369,12 +421,14 @@ export class EVCalculator {
   /**
    * Evaluates whether an opportunity should be executed.
    * FIX P3-15: Returns structured rejectionCode alongside reason string.
+   * Uses per-chain EV thresholds to avoid rejecting profitable L2 trades.
    */
   private evaluateExecution(
     expectedValue: bigint,
     winProbability: number,
     isDefaultProbability: boolean,
-    potentialLoss: bigint
+    potentialLoss: bigint,
+    chain: string
   ): { shouldExecute: boolean; reason?: string; rejectionCode?: string } {
     // Check max loss per trade first (risk cap)
     if (potentialLoss > this.config.maxLossPerTrade) {
@@ -397,12 +451,17 @@ export class EVCalculator {
       };
     }
 
-    // Check EV threshold
-    if (expectedValue < this.config.minEVThreshold) {
+    // Check EV threshold — per-chain thresholds unlock L2 profitability
+    const chainThreshold = getChainMinEVThreshold(
+      chain,
+      this.config.minEVThreshold,
+      this.config.chainMinEVThresholds
+    );
+    if (expectedValue < chainThreshold) {
       return {
         shouldExecute: false,
         rejectionCode: EVCalculator.REJECTION_LOW_EV,
-        reason: `EV (${expectedValue.toString()}) below threshold (${this.config.minEVThreshold.toString()})`,
+        reason: `EV (${expectedValue.toString()}) below threshold for ${chain} (${chainThreshold.toString()})`,
       };
     }
 

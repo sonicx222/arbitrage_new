@@ -29,12 +29,19 @@ import type {
 // Default Configuration
 // =============================================================================
 
+// FIX P2-12: These defaults MUST match shared/config/src/risk-config.ts RISK_CONFIG.positionSizing.
+// Source of truth is RISK_CONFIG — when updating defaults, update both files.
+// Components use DI: the initializer reads RISK_CONFIG and passes values to constructors.
+// These defaults are only used when the component is instantiated directly (e.g., tests).
 const DEFAULT_CONFIG: PositionSizerConfig = {
-  kellyMultiplier: 0.5, // Half Kelly (safer)
-  maxSingleTradeFraction: 0.02, // 2% max per trade
-  minTradeFraction: 0.001, // 0.1% minimum
+  kellyMultiplier: 0.5, // must match RISK_CONFIG.positionSizing.kellyMultiplier
+  maxSingleTradeFraction: 0.02, // must match RISK_CONFIG.positionSizing.maxSingleTradeFraction
+  minTradeFraction: 0.001, // must match RISK_CONFIG.positionSizing.minTradeFraction
   totalCapital: 0n, // Must be set by caller
   enabled: true,
+  useGasBudgetMode: false, // must match RISK_CONFIG.positionSizing.useGasBudgetMode
+  maxGasPerTrade: 50000000000000000n, // must match RISK_CONFIG.positionSizing.maxGasPerTrade
+  dailyGasBudget: 1000000000000000000n, // must match RISK_CONFIG.positionSizing.dailyGasBudget
 };
 
 // =============================================================================
@@ -65,6 +72,10 @@ export class KellyPositionSizer {
   private rejectedBelowMinimum = 0;
   private cappedAtMaximum = 0;
   private totalFraction = 0; // Sum of approved fractions for averaging
+
+  // Gas-budget tracking (rolling 24h window)
+  private gasSpendHistory: Array<{ gas: bigint; timestamp: number }> = [];
+  private rejectedGasBudget = 0;
 
   constructor(config: Partial<PositionSizerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -130,6 +141,11 @@ export class KellyPositionSizer {
     // Handle disabled state (fallback to max size)
     if (!this.config.enabled) {
       return this.createDisabledResult();
+    }
+
+    // Gas-budget mode: flash loan arbitrage where only gas is at risk
+    if (this.config.useGasBudgetMode) {
+      return this.calculateGasBudgetSize(input);
     }
 
     // FIX 3.1: Reject trades when capital is not configured
@@ -221,6 +237,23 @@ export class KellyPositionSizer {
   }
 
   // ---------------------------------------------------------------------------
+  // Public API: Gas Spend Recording (FIX P1-7)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Record actual gas spend after trade execution.
+   *
+   * FIX P1-7: Gas spend is tracked post-execution instead of at approval time.
+   * This prevents phantom gas accounting when approved trades fail downstream.
+   * Call this from the execution engine after a trade is submitted on-chain.
+   *
+   * @param gas - Actual gas cost in wei
+   */
+  recordGasSpend(gas: bigint): void {
+    this.gasSpendHistory.push({ gas, timestamp: Date.now() });
+  }
+
+  // ---------------------------------------------------------------------------
   // Public API: Statistics
   // ---------------------------------------------------------------------------
 
@@ -257,6 +290,9 @@ export class KellyPositionSizer {
     this.rejectedBelowMinimum = 0;
     this.cappedAtMaximum = 0;
     this.totalFraction = 0;
+    // FIX P1-5: Clear gas-budget state so rolling spend starts fresh
+    this.gasSpendHistory = [];
+    this.rejectedGasBudget = 0;
 
     this.logger.info('KellyPositionSizer cleared');
   }
@@ -324,24 +360,149 @@ export class KellyPositionSizer {
 
   /**
    * Calculates maximum allowed position size in wei.
+   * Uses 1e8 precision for consistency with EV calculator and drawdown breaker.
    */
   private calculateMaxAllowed(): bigint {
-    // Use integer math: (capital * fraction * 10000) / 10000
-    const scaleFactor = 10000n;
-    const fractionScaled = BigInt(Math.floor(this.config.maxSingleTradeFraction * 10000));
+    const scaleFactor = 100000000n; // 1e8
+    const fractionScaled = BigInt(Math.floor(this.config.maxSingleTradeFraction * 100000000));
 
     return (this.config.totalCapital * fractionScaled) / scaleFactor;
   }
 
   /**
    * Calculates position size in wei from fraction.
+   * Uses 1e8 precision for consistency with EV calculator and drawdown breaker.
    */
   private calculateSizeFromFraction(fraction: number): bigint {
-    // Use integer math: (capital * fraction * 10000) / 10000
-    const scaleFactor = 10000n;
-    const fractionScaled = BigInt(Math.floor(fraction * 10000));
+    const scaleFactor = 100000000n; // 1e8
+    const fractionScaled = BigInt(Math.floor(fraction * 100000000));
 
     return (this.config.totalCapital * fractionScaled) / scaleFactor;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: Gas-Budget Mode
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Gas-budget position sizing for flash loan arbitrage.
+   *
+   * In flash loans, the trade amount comes from the lending pool — not from
+   * your capital. The only capital at risk is the gas cost. This mode sizes
+   * trades based on gas budget rather than Kelly Criterion.
+   *
+   * Checks:
+   * 1. Per-trade gas cap (maxGasPerTrade)
+   * 2. Rolling 24h gas budget (dailyGasBudget)
+   * 3. Positive expected value (expectedProfit > gasCost)
+   *
+   * NOTE (P2-13): This method intentionally does NOT factor in winProbability.
+   * The EVCalculator runs first in the risk pipeline and already gates on
+   * winProbability and per-chain EV thresholds. By the time a trade reaches
+   * the position sizer, it has passed the probability filter. Duplicating
+   * that check here would tighten the gate beyond what EVCalculator allows.
+   */
+  private calculateGasBudgetSize(input: PositionSizeInput): PositionSize {
+    const gasCost = input.expectedLoss; // In flash loans, expectedLoss = gas cost
+    const maxGas = this.config.maxGasPerTrade ?? 50000000000000000n;
+    const dailyBudget = this.config.dailyGasBudget ?? 1000000000000000000n;
+
+    // Check: is the expected value positive? (profit must exceed gas)
+    if (input.expectedProfit <= gasCost) {
+      this.rejectedNegativeKelly++;
+      return {
+        recommendedSize: 0n,
+        fractionOfCapital: 0,
+        kellyFraction: 0,
+        adjustedKelly: 0,
+        cappedFraction: 0,
+        maxAllowed: this.calculateMaxAllowed(),
+        shouldTrade: false,
+        reason: `Gas cost (${gasCost.toString()}) exceeds expected profit (${input.expectedProfit.toString()}) — negative edge`,
+      };
+    }
+
+    // Check: per-trade gas cap
+    if (gasCost > maxGas) {
+      this.rejectedGasBudget++;
+      return {
+        recommendedSize: 0n,
+        fractionOfCapital: 0,
+        kellyFraction: 0,
+        adjustedKelly: 0,
+        cappedFraction: 0,
+        maxAllowed: this.calculateMaxAllowed(),
+        shouldTrade: false,
+        reason: `Gas cost (${gasCost.toString()}) exceeds per-trade cap (${maxGas.toString()})`,
+      };
+    }
+
+    // Check: rolling 24h gas budget
+    const rollingGasSpend = this.computeRollingGasSpend();
+    if (rollingGasSpend + gasCost > dailyBudget) {
+      this.rejectedGasBudget++;
+      return {
+        recommendedSize: 0n,
+        fractionOfCapital: 0,
+        kellyFraction: 0,
+        adjustedKelly: 0,
+        cappedFraction: 0,
+        maxAllowed: this.calculateMaxAllowed(),
+        shouldTrade: false,
+        reason: `Daily gas budget exhausted: spent ${rollingGasSpend.toString()} + ${gasCost.toString()} > ${dailyBudget.toString()}`,
+      };
+    }
+
+    // FIX P1-7: Gas spend is now tracked post-execution via recordGasSpend()
+    // instead of pre-execution. This prevents phantom gas accounting when
+    // approved trades fail downstream (execution revert, timeout, frontrun).
+
+    // Approved: return max allowed size (flash loan amount comes from pool, not capital)
+    const maxAllowed = this.calculateMaxAllowed();
+    this.tradesApproved++;
+    this.totalFraction += this.config.maxSingleTradeFraction;
+
+    this.logger.debug('Gas-budget sizing approved', {
+      gasCost: gasCost.toString(),
+      rollingSpend: rollingGasSpend.toString(),
+      dailyBudget: dailyBudget.toString(),
+      expectedProfit: input.expectedProfit.toString(),
+    });
+
+    return {
+      recommendedSize: maxAllowed,
+      fractionOfCapital: this.config.maxSingleTradeFraction,
+      kellyFraction: 1, // Not applicable in gas-budget mode
+      adjustedKelly: 1,
+      cappedFraction: this.config.maxSingleTradeFraction,
+      maxAllowed,
+      shouldTrade: true,
+    };
+  }
+
+  /**
+   * Compute total gas spent in the last 24 hours.
+   * Prunes entries older than 24h for memory efficiency.
+   */
+  private computeRollingGasSpend(): bigint {
+    const cutoff = Date.now() - 86400000; // 24 hours in ms
+    let total = 0n;
+    let pruneIndex = 0;
+
+    for (let i = 0; i < this.gasSpendHistory.length; i++) {
+      if (this.gasSpendHistory[i].timestamp < cutoff) {
+        pruneIndex = i + 1;
+      } else {
+        total += this.gasSpendHistory[i].gas;
+      }
+    }
+
+    // Prune old entries (in-place splice, consistent with other risk modules)
+    if (pruneIndex > 0) {
+      this.gasSpendHistory.splice(0, pruneIndex);
+    }
+
+    return total;
   }
 
   // ---------------------------------------------------------------------------

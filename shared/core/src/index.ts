@@ -960,17 +960,6 @@ export type {
   QualityMonitorRedis
 } from './analytics/professional-quality-monitor';
 
-// Performance Analytics
-/** @deprecated Unused — no external consumers. Remove in next major version. */
-export {
-  PerformanceAnalyticsEngine,
-  StrategyPerformance,
-  AssetPerformance,
-  TimePerformance,
-  BenchmarkComparison,
-  AttributionAnalysis
-} from './analytics/performance-analytics';
-
 // Orderflow Pipeline Consumer (Phase 3)
 export {
   OrderflowPipelineConsumer,

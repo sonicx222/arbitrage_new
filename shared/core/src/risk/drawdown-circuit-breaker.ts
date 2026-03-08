@@ -17,7 +17,11 @@
  * - CAUTION -> HALT: Daily loss exceeds maxDailyLoss OR consecutive losses exceeded
  * - HALT -> RECOVERY: Manual reset after cooldown period
  * - RECOVERY -> NORMAL: Required consecutive wins achieved
- * - Any -> NORMAL: New trading day (daily reset at UTC midnight)
+ * - Any -> NORMAL: New trading day (UTC midnight reset in legacy mode)
+ *
+ * Daily PnL modes (config.useRollingWindow):
+ * - false (default): PnL resets at UTC midnight each day
+ * - true: PnL computed over a rolling 24h sliding window (no midnight reset)
  *
  * @see docs/reports/implementation_plan_v3.md Section 3.4.4
  */
@@ -38,17 +42,21 @@ const logger = createLogger('drawdown-circuit-breaker');
 // Default Configuration
 // =============================================================================
 
+// FIX P2-12: These defaults MUST match shared/config/src/risk-config.ts RISK_CONFIG.drawdown.
+// Source of truth is RISK_CONFIG — when updating defaults, update both files.
+// Components use DI: the initializer reads RISK_CONFIG and passes values to constructors.
+// These defaults are only used when the component is instantiated directly (e.g., tests).
 const DEFAULT_CONFIG: DrawdownConfig = {
-  maxDailyLoss: 0.05, // 5% of capital
-  cautionThreshold: 0.03, // 3% triggers caution
+  maxDailyLoss: 0.05, // must match RISK_CONFIG.drawdown.maxDailyLoss
+  cautionThreshold: 0.03, // must match RISK_CONFIG.drawdown.cautionThreshold
   // SM-002 FIX: Raised from 5 to 8. With 15% random failure rate, 5 consecutive
   // losses has ~44% probability per 100-trade window, causing false CAUTION triggers.
   // At 8, probability drops to ~2.6% per 100 trades — real loss clustering still detected.
-  maxConsecutiveLosses: 8,
-  recoveryMultiplier: 0.5, // 50% sizing in recovery
-  cautionMultiplier: 0.75, // FIX 2.1/4.1: 75% sizing in caution (was hardcoded)
-  recoveryWinsRequired: 3,
-  haltCooldownMs: 3600000, // 1 hour
+  maxConsecutiveLosses: 8, // must match RISK_CONFIG.drawdown.maxConsecutiveLosses
+  recoveryMultiplier: 0.5, // must match RISK_CONFIG.drawdown.recoveryMultiplier
+  cautionMultiplier: 0.75, // must match RISK_CONFIG.drawdown.cautionMultiplier
+  recoveryWinsRequired: 3, // must match RISK_CONFIG.drawdown.recoveryWinsRequired
+  haltCooldownMs: 3600000, // must match RISK_CONFIG.drawdown.haltCooldownMs
   totalCapital: 0n, // Must be set by caller
   enabled: true,
 };
@@ -113,6 +121,16 @@ export class DrawdownCircuitBreaker {
   private lastForceResetTime: number | null = null;
   // FIX P3-14: Pre-computed next midnight timestamp for O(1) daily reset check
   private nextMidnightMs = 0;
+  // Rolling 24h window trade history (profitability audit fix)
+  private tradeHistory: Array<{ pnl: bigint; timestamp: number }> = [];
+  // FIX P3-15/16: Running accumulator for O(1) rolling PnL computation.
+  // Updated incrementally on each trade/prune instead of recomputing from full history.
+  private rollingPnLAccumulator = 0n;
+  private static readonly ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+  // FIX P2-14: Raised from 10K to 50K. At high throughput (e.g. 1 trade/sec),
+  // 10K entries cover only ~2.8 hours — truncating valid 24h-window losses.
+  // 50K covers ~13.9 hours at max throughput, sufficient for rolling window.
+  private static readonly MAX_TRADE_HISTORY = 50000;
 
   constructor(config: Partial<DrawdownConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -268,8 +286,19 @@ export class DrawdownCircuitBreaker {
     }
 
     // Update state
-    this.state.dailyPnL += result.pnl;
     this.state.totalPnL += result.pnl;
+
+    if (this.config.useRollingWindow) {
+      // Rolling 24h window: track individual trades, maintain running accumulator
+      this.tradeHistory.push({ pnl: result.pnl, timestamp: result.timestamp });
+      this.rollingPnLAccumulator += result.pnl;
+      // Prune old entries beyond 24h (subtracts from accumulator)
+      this.pruneTradeHistory(result.timestamp);
+      this.state.dailyPnL = this.rollingPnLAccumulator;
+    } else {
+      // Legacy UTC midnight reset
+      this.state.dailyPnL += result.pnl;
+    }
 
     // Update consecutive counters
     if (result.success) {
@@ -359,6 +388,9 @@ export class DrawdownCircuitBreaker {
     this.state = createInitialState(this.config.totalCapital);
     // FIX P3-14: Reset midnight cache to ensure fresh check
     this.nextMidnightMs = 0;
+    // FIX P1-4: Clear rolling window trade history so post-reset PnL starts fresh
+    this.tradeHistory = [];
+    this.rollingPnLAccumulator = 0n;
   }
 
   /**
@@ -455,6 +487,12 @@ export class DrawdownCircuitBreaker {
    * 60-second stale window that could delay state transitions at midnight.
    */
   private checkDailyReset(): void {
+    // Rolling window mode: no midnight reset — PnL is continuously recomputed
+    // over a sliding 24h window in recordTradeResult().
+    if (this.config.useRollingWindow) {
+      return;
+    }
+
     const now = Date.now();
     // O(1) comparison against pre-computed midnight — no string allocation
     if (now < this.nextMidnightMs) {
@@ -587,6 +625,38 @@ export class DrawdownCircuitBreaker {
       consecutiveLosses: this.state.consecutiveLosses,
       currentDrawdown: `${(this.state.currentDrawdown * 100).toFixed(2)}%`,
     });
+  }
+
+  /**
+   * Prune trade history entries older than 24h to bound memory.
+   */
+  private pruneTradeHistory(now: number): void {
+    const cutoff = now - DrawdownCircuitBreaker.ROLLING_WINDOW_MS;
+    // Find first entry within window (history is append-ordered)
+    let pruneIndex = 0;
+    while (pruneIndex < this.tradeHistory.length && this.tradeHistory[pruneIndex].timestamp < cutoff) {
+      // FIX P3-15/16: Subtract pruned entries from running accumulator (O(1) amortized)
+      this.rollingPnLAccumulator -= this.tradeHistory[pruneIndex].pnl;
+      pruneIndex++;
+    }
+    if (pruneIndex > 0) {
+      this.tradeHistory.splice(0, pruneIndex);
+    }
+    // Hard cap to prevent unbounded growth
+    if (this.tradeHistory.length > DrawdownCircuitBreaker.MAX_TRADE_HISTORY) {
+      const dropped = this.tradeHistory.length - DrawdownCircuitBreaker.MAX_TRADE_HISTORY;
+      // Subtract dropped entries from accumulator before removing
+      for (let i = 0; i < dropped; i++) {
+        this.rollingPnLAccumulator -= this.tradeHistory[i].pnl;
+      }
+      this.tradeHistory.splice(0, dropped);
+      // FIX P2-14: Warn when truncation occurs — may understate daily losses
+      logger.warn('Trade history truncated at MAX_TRADE_HISTORY cap', {
+        dropped,
+        remaining: this.tradeHistory.length,
+        maxTradeHistory: DrawdownCircuitBreaker.MAX_TRADE_HISTORY,
+      });
+    }
   }
 
   /**

@@ -720,6 +720,9 @@ describe('Singleton Factory', () => {
       const customConfig: EVConfig = {
         ...MOCK_EV_CONFIG,
         minEVThreshold: 999999999999999999n,
+        // Per-chain threshold must also be high — built-in per-chain defaults
+        // take precedence over global minEVThreshold for known chains.
+        chainMinEVThresholds: { ethereum: 999999999999999999n },
       };
 
       const calc = getEVCalculator(tracker, customConfig);
@@ -998,5 +1001,263 @@ describe('Edge Cases', () => {
     expect(result).toBeDefined();
     // Should use defaults
     expect(result.rawProfitEstimate).toBe(MOCK_EV_CONFIG.defaultProfitEstimate);
+  });
+});
+
+// =============================================================================
+// Per-Chain EV Threshold Tests (FIX P0-3 / Profitability Audit)
+// =============================================================================
+
+describe('Per-Chain EV Thresholds', () => {
+  let tracker: ExecutionProbabilityTracker;
+  let calculator: EVCalculator;
+
+  beforeEach(() => {
+    tracker = new ExecutionProbabilityTracker(MOCK_TRACKER_CONFIG);
+    // Use a high global threshold so chain-specific thresholds are clearly different
+    calculator = new EVCalculator(tracker, {
+      ...MOCK_EV_CONFIG,
+      minEVThreshold: 5000000000000000n, // 0.005 ETH global fallback
+    });
+
+    // Set up 80% win rate for all tests
+    for (let i = 0; i < 8; i++) {
+      tracker.recordOutcome(createMockOutcome({ success: true }));
+    }
+    for (let i = 0; i < 2; i++) {
+      tracker.recordOutcome(createMockOutcome({ success: false, profit: undefined }));
+    }
+  });
+
+  afterEach(() => {
+    calculator.destroy();
+    tracker.destroy();
+    resetExecutionProbabilityTracker();
+    resetEVCalculator();
+  });
+
+  // ---------------------------------------------------------------------------
+  // L2 Chains Use Lower Thresholds
+  // ---------------------------------------------------------------------------
+
+  describe('L2 chains use lower thresholds', () => {
+    it('should approve low-EV trade on Base (L2) that would be rejected on Ethereum (L1)', () => {
+      // A trade with small profit — generates EV around 0.001 ETH
+      // This is below Ethereum's threshold (~0.005 ETH) but above Base's (~0.0002 ETH)
+      const input: EVInput = {
+        chain: 'base',
+        dex: 'uniswap_v2',
+        pathLength: 2,
+        estimatedProfit: 2000000000000000n, // 0.002 ETH
+        estimatedGas: 200000000000000n, // 0.0002 ETH (L2 gas is cheap)
+      };
+
+      // Need fresh data for base chain
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'base', dex: 'uniswap_v2', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'base', dex: 'uniswap_v2', success: false, profit: undefined }));
+      }
+
+      const result = calculator.calculate(input);
+
+      // EV = 0.8 * 0.002 - 0.2 * 0.0002 = 0.0016 - 0.00004 ≈ 0.00156 ETH
+      // Base threshold is 0.0002 ETH → should approve
+      expect(result.expectedValue).toBeGreaterThan(0n);
+      expect(result.shouldExecute).toBe(true);
+    });
+
+    it('should approve low-EV trade on Arbitrum (L2)', () => {
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'arbitrum', dex: 'sushiswap', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'arbitrum', dex: 'sushiswap', success: false, profit: undefined }));
+      }
+
+      const input: EVInput = {
+        chain: 'arbitrum',
+        dex: 'sushiswap',
+        pathLength: 2,
+        estimatedProfit: 2000000000000000n, // 0.002 ETH
+        estimatedGas: 500000000000000n, // 0.0005 ETH
+      };
+
+      const result = calculator.calculate(input);
+
+      // EV = 0.8 * 0.002 - 0.2 * 0.0005 = 0.0016 - 0.0001 = 0.0015 ETH
+      // Arbitrum threshold is 0.0005 ETH → should approve
+      expect(result.shouldExecute).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Unknown Chain Fallback
+  // ---------------------------------------------------------------------------
+
+  describe('unknown chain fallback', () => {
+    it('should fall back to global minEVThreshold for unknown chains', () => {
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'unknown_chain', dex: 'unknown_dex', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'unknown_chain', dex: 'unknown_dex', success: false, profit: undefined }));
+      }
+
+      // Small EV below global threshold
+      const input: EVInput = {
+        chain: 'unknown_chain',
+        dex: 'unknown_dex',
+        pathLength: 2,
+        estimatedProfit: 5000000000000000n, // 0.005 ETH
+        estimatedGas: 1000000000000000n, // 0.001 ETH — default gas for unknown
+      };
+
+      const result = calculator.calculate(input);
+
+      // EV = 0.8 * 0.005 - 0.2 * 0.001 = 0.004 - 0.0002 = 0.0038 ETH
+      // Global threshold is 0.005 ETH → should reject (0.0038 < 0.005)
+      expect(result.shouldExecute).toBe(false);
+      expect(result.reason).toContain('below threshold');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Config Override Priority
+  // ---------------------------------------------------------------------------
+
+  describe('config override priority', () => {
+    it('should use chainMinEVThresholds config override over built-in defaults', () => {
+      const overrideCalc = new EVCalculator(tracker, {
+        ...MOCK_EV_CONFIG,
+        minEVThreshold: 5000000000000000n,
+        // Override base threshold to be very high
+        chainMinEVThresholds: { base: 1000000000000000000n }, // 1 ETH — absurdly high
+      });
+
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'base', dex: 'uniswap_v2', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'base', dex: 'uniswap_v2', success: false, profit: undefined }));
+      }
+
+      const input: EVInput = {
+        chain: 'base',
+        dex: 'uniswap_v2',
+        estimatedProfit: 500000000000000000n, // 0.5 ETH profit
+        estimatedGas: 200000000000000n, // 0.0002 ETH gas
+      };
+
+      const result = overrideCalc.calculate(input);
+
+      // EV ≈ 0.8 * 0.5 - 0.2 * 0.0002 = 0.4 ETH — but threshold is 1 ETH
+      expect(result.shouldExecute).toBe(false);
+      expect(result.reason).toContain('below threshold');
+
+      overrideCalc.destroy();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Solana Entry (FIX P0-3)
+  // ---------------------------------------------------------------------------
+
+  describe('Solana chain support', () => {
+    it('should use Solana-specific default gas cost', () => {
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'solana', dex: 'raydium', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'solana', dex: 'raydium', success: false, profit: undefined }));
+      }
+
+      // No estimatedGas — should fall back to chain-specific default
+      const noHistoryCalc = new EVCalculator(tracker, {
+        ...MOCK_EV_CONFIG,
+        useHistoricalGasCost: false,
+      });
+
+      const input: EVInput = {
+        chain: 'solana',
+        dex: 'raydium',
+        estimatedProfit: 100000000n, // 0.0001 SOL
+        // No estimatedGas — uses default
+      };
+
+      const result = noHistoryCalc.calculate(input);
+
+      // Solana default gas is 5000000 (~5000 lamports)
+      // rawGasCost should be the Solana default
+      expect(result.rawGasCost).toBe(5000000n);
+
+      noHistoryCalc.destroy();
+    });
+
+    it('should use Solana-specific EV threshold', () => {
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'solana', dex: 'raydium', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'solana', dex: 'raydium', success: false, profit: undefined }));
+      }
+
+      const input: EVInput = {
+        chain: 'solana',
+        dex: 'raydium',
+        estimatedProfit: 100000000n, // 0.0001 SOL
+        estimatedGas: 5000000n, // ~5000 lamports
+      };
+
+      const result = calculator.calculate(input);
+
+      // EV = 0.8 * 100000000 - 0.2 * 5000000 = 80000000 - 1000000 = 79000000
+      // Solana threshold is 50000000 (0.00005 SOL) → should approve
+      expect(result.expectedValue).toBeGreaterThan(0n);
+      expect(result.shouldExecute).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Chain-Specific Default Gas Costs
+  // ---------------------------------------------------------------------------
+
+  describe('chain-specific default gas costs', () => {
+    it('should use chain-specific default gas when no estimate provided', () => {
+      // Disable historical gas cost to force default usage
+      const noHistoryCalc = new EVCalculator(tracker, {
+        ...MOCK_EV_CONFIG,
+        useHistoricalGasCost: false,
+      });
+
+      const ethInput: EVInput = {
+        chain: 'ethereum',
+        dex: 'uniswap_v2',
+        estimatedProfit: 100000000000000000n, // 0.1 ETH
+        // No gas estimate
+      };
+
+      const arbInput: EVInput = {
+        chain: 'arbitrum',
+        dex: 'sushiswap',
+        estimatedProfit: 100000000000000000n,
+        // No gas estimate
+      };
+
+      const ethResult = noHistoryCalc.calculate(ethInput);
+      const arbResult = noHistoryCalc.calculate(arbInput);
+
+      // Ethereum default gas (~0.01 ETH) should be much higher than Arbitrum (~0.0005 ETH)
+      expect(ethResult.rawGasCost).toBeGreaterThan(arbResult.rawGasCost);
+
+      noHistoryCalc.destroy();
+    });
   });
 });

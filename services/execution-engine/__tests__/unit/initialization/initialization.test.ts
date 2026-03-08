@@ -75,6 +75,7 @@ jest.mock('@arbitrage/config', () => ({
       recoveryWinsRequired: 3,
       haltCooldownMs: 3600000,
       cautionMultiplier: 0.75,
+      useRollingWindow: true,
     },
     ev: {
       enabled: true,
@@ -90,6 +91,9 @@ jest.mock('@arbitrage/config', () => ({
       kellyMultiplier: 0.5,
       maxSingleTradeFraction: 0.02,
       minTradeFraction: 0.001,
+      useGasBudgetMode: true,
+      maxGasPerTrade: BigInt('50000000000000000'),
+      dailyGasBudget: BigInt('1000000000000000000'),
     },
     probability: {
       minSamples: 10,
@@ -493,6 +497,75 @@ describe('Initialization Module', () => {
 
       process.env.NODE_ENV = originalEnv;
       config.validateRiskConfig.mockImplementation(() => {});
+    });
+
+    // -------------------------------------------------------------------------
+    // Config Forwarding Tests (FIX P0-1: New feature fields)
+    // -------------------------------------------------------------------------
+
+    test('should forward gas-budget fields to position sizer', () => {
+      const riskMocks = jest.requireMock('@arbitrage/core/risk') as any;
+      riskMocks.getKellyPositionSizer.mockClear();
+
+      initializeRiskManagement(mockLogger);
+
+      // getKellyPositionSizer should have been called with config containing gas-budget fields
+      expect(riskMocks.getKellyPositionSizer).toHaveBeenCalled();
+      const positionConfig = riskMocks.getKellyPositionSizer.mock.calls[0][0];
+      expect(positionConfig).toMatchObject({
+        useGasBudgetMode: true,
+        maxGasPerTrade: BigInt('50000000000000000'),
+        dailyGasBudget: BigInt('1000000000000000000'),
+      });
+    });
+
+    test('should forward useRollingWindow to drawdown breaker', () => {
+      const riskMocks = jest.requireMock('@arbitrage/core/risk') as any;
+      riskMocks.getDrawdownCircuitBreaker.mockClear();
+
+      initializeRiskManagement(mockLogger);
+
+      // getDrawdownCircuitBreaker should have been called with config containing useRollingWindow
+      expect(riskMocks.getDrawdownCircuitBreaker).toHaveBeenCalled();
+      const drawdownConfig = riskMocks.getDrawdownCircuitBreaker.mock.calls[0][0];
+      expect(drawdownConfig).toMatchObject({
+        useRollingWindow: true,
+      });
+    });
+
+    test('should forward cautionMultiplier to drawdown breaker', () => {
+      const riskMocks = jest.requireMock('@arbitrage/core/risk') as any;
+      riskMocks.getDrawdownCircuitBreaker.mockClear();
+
+      initializeRiskManagement(mockLogger);
+
+      const drawdownConfig = riskMocks.getDrawdownCircuitBreaker.mock.calls[0][0];
+      expect(drawdownConfig.cautionMultiplier).toBe(0.75);
+    });
+
+    test('should log useGasBudgetMode in position sizer init message', () => {
+      initializeRiskManagement(mockLogger);
+
+      // Check that one of the info calls includes useGasBudgetMode
+      const infoCalls = (mockLogger.info as jest.Mock).mock.calls;
+      const positionSizerLog = infoCalls.find(
+        (call: unknown[]) => call[0] === 'Kelly position sizer initialized'
+      );
+      if (positionSizerLog) {
+        expect(positionSizerLog[1]).toHaveProperty('useGasBudgetMode', true);
+      }
+    });
+
+    test('should log useRollingWindow in drawdown breaker init message', () => {
+      initializeRiskManagement(mockLogger);
+
+      const infoCalls = (mockLogger.info as jest.Mock).mock.calls;
+      const drawdownLog = infoCalls.find(
+        (call: unknown[]) => call[0] === 'Drawdown circuit breaker initialized'
+      );
+      if (drawdownLog) {
+        expect(drawdownLog[1]).toHaveProperty('useRollingWindow', true);
+      }
     });
   });
 

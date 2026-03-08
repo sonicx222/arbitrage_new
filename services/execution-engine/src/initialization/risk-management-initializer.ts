@@ -138,6 +138,8 @@ export function initializeRiskManagement(
         useHistoricalGasCost: RISK_CONFIG.ev.useHistoricalGasCost,
         defaultGasCost: RISK_CONFIG.ev.defaultGasCost,
         defaultProfitEstimate: RISK_CONFIG.ev.defaultProfitEstimate,
+        // FIX P2-11: Forward per-chain EV threshold overrides from RISK_CONFIG
+        chainMinEVThresholds: RISK_CONFIG.ev.chainMinEVThresholds,
       };
       evCalculator = getEVCalculator(probabilityTracker, evConfig);
       componentStatus.evCalculator = true;
@@ -165,6 +167,10 @@ export function initializeRiskManagement(
       minTradeFraction: RISK_CONFIG.positionSizing.minTradeFraction,
       totalCapital: RISK_CONFIG.totalCapital,
       enabled: RISK_CONFIG.positionSizing.enabled,
+      // FIX P0-1: Forward gas-budget config (previously omitted — gas-budget mode silently disabled)
+      useGasBudgetMode: RISK_CONFIG.positionSizing.useGasBudgetMode,
+      maxGasPerTrade: RISK_CONFIG.positionSizing.maxGasPerTrade,
+      dailyGasBudget: RISK_CONFIG.positionSizing.dailyGasBudget,
     };
     positionSizer = getKellyPositionSizer(positionConfig);
     componentStatus.positionSizer = true;
@@ -172,6 +178,7 @@ export function initializeRiskManagement(
     logger.info('Kelly position sizer initialized', {
       kellyMultiplier: RISK_CONFIG.positionSizing.kellyMultiplier,
       maxSingleTradeFraction: RISK_CONFIG.positionSizing.maxSingleTradeFraction,
+      useGasBudgetMode: RISK_CONFIG.positionSizing.useGasBudgetMode,
     });
   } catch (error) {
     const errorMsg = `risk:position_sizer:${getErrorMessage(error)}`;
@@ -191,6 +198,8 @@ export function initializeRiskManagement(
       totalCapital: RISK_CONFIG.totalCapital,
       enabled: RISK_CONFIG.drawdown.enabled,
       cautionMultiplier: RISK_CONFIG.drawdown.cautionMultiplier,
+      // FIX P0-1: Forward rolling window config (previously omitted — always UTC midnight reset)
+      useRollingWindow: RISK_CONFIG.drawdown.useRollingWindow,
     };
     drawdownBreaker = getDrawdownCircuitBreaker(drawdownConfig);
     componentStatus.drawdownBreaker = true;
@@ -199,6 +208,7 @@ export function initializeRiskManagement(
       maxDailyLoss: `${RISK_CONFIG.drawdown.maxDailyLoss * 100}%`,
       cautionThreshold: `${RISK_CONFIG.drawdown.cautionThreshold * 100}%`,
       cautionMultiplier: RISK_CONFIG.drawdown.cautionMultiplier,
+      useRollingWindow: RISK_CONFIG.drawdown.useRollingWindow,
     });
   } catch (error) {
     const errorMsg = `risk:drawdown_breaker:${getErrorMessage(error)}`;

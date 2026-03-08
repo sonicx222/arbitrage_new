@@ -207,8 +207,16 @@ export interface EVConfig {
    * Minimum expected value threshold in wei for execution.
    * Default: 5000000000000000 (0.005 ETH, ~$10 at $2000/ETH)
    * Adjust based on gas costs and desired profitability margin.
+   * Used as fallback when no chain-specific threshold exists.
    */
   minEVThreshold: bigint;
+
+  /**
+   * Per-chain minimum EV thresholds in native token wei.
+   * Overrides minEVThreshold for specific chains.
+   * L2s have much lower gas costs, so a smaller EV is still profitable.
+   */
+  chainMinEVThresholds?: Record<string, bigint>;
 
   /** Minimum win probability to consider (0-1, filters out highly uncertain trades) */
   minWinProbability: number;
@@ -361,6 +369,27 @@ export interface PositionSizerConfig {
    * When disabled, returns maxSingleTrade as recommended size.
    */
   enabled: boolean;
+
+  /**
+   * Gas-budget mode for flash loan arbitrage.
+   * In flash loans, only gas fees are at risk (not trade capital).
+   * When enabled, sizing is based on gas budget instead of Kelly Criterion.
+   * Default: false
+   */
+  useGasBudgetMode?: boolean;
+
+  /**
+   * Maximum gas cost per trade in wei (gas-budget mode).
+   * Trades with estimated gas exceeding this are rejected.
+   * Default: 0.05 ETH (50000000000000000 wei)
+   */
+  maxGasPerTrade?: bigint;
+
+  /**
+   * Maximum cumulative gas spend per rolling 24h window in wei.
+   * Default: 1 ETH (1000000000000000000 wei)
+   */
+  dailyGasBudget?: bigint;
 }
 
 /**
@@ -530,6 +559,14 @@ export interface DrawdownConfig {
    * Default: true
    */
   enabled: boolean;
+
+  /**
+   * Use rolling 24h window instead of UTC midnight reset for daily PnL.
+   * When true, daily PnL is computed over a sliding 24-hour window.
+   * When false, resets at UTC midnight (legacy behavior).
+   * Default: false
+   */
+  useRollingWindow?: boolean;
 }
 
 /**

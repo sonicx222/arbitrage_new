@@ -53,6 +53,61 @@ describe('Risk Configuration', () => {
 
             expect(() => validateRiskConfig()).not.toThrow();
         });
+
+        // FIX P2-8: Gas-budget validation tests
+        it('should throw when gas-budget mode has maxGasPerTrade > dailyGasBudget', () => {
+            process.env.RISK_GAS_BUDGET_MODE = 'true';
+            process.env.RISK_MAX_GAS_PER_TRADE = '2000000000000000000'; // 2 ETH
+            process.env.RISK_DAILY_GAS_BUDGET = '1000000000000000000'; // 1 ETH
+
+            jest.resetModules();
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { validateRiskConfig: validate } = require('../../src/risk-config');
+            expect(() => validate()).toThrow('RISK_MAX_GAS_PER_TRADE');
+        });
+
+        it('should NOT validate gas-budget fields when gas-budget mode is disabled', () => {
+            // Default: RISK_GAS_BUDGET_MODE is unset (false)
+            process.env.RISK_MAX_GAS_PER_TRADE = '2000000000000000000'; // 2 ETH > daily
+            process.env.RISK_DAILY_GAS_BUDGET = '1000000000000000000'; // 1 ETH
+
+            jest.resetModules();
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { validateRiskConfig: validate } = require('../../src/risk-config');
+            expect(() => validate()).not.toThrow();
+        });
+    });
+
+    describe('Per-Chain EV Threshold Overrides', () => {
+        it('should parse RISK_CHAIN_EV_THRESHOLDS JSON into chainMinEVThresholds', () => {
+            process.env.RISK_CHAIN_EV_THRESHOLDS = '{"base":"100000000000000","arbitrum":"300000000000000"}';
+
+            jest.resetModules();
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { RISK_CONFIG: config } = require('../../src/risk-config');
+            expect(config.ev.chainMinEVThresholds).toEqual({
+                base: 100000000000000n,
+                arbitrum: 300000000000000n,
+            });
+        });
+
+        it('should return undefined when RISK_CHAIN_EV_THRESHOLDS is not set', () => {
+            delete process.env.RISK_CHAIN_EV_THRESHOLDS;
+
+            jest.resetModules();
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { RISK_CONFIG: config } = require('../../src/risk-config');
+            expect(config.ev.chainMinEVThresholds).toBeUndefined();
+        });
+
+        it('should ignore invalid JSON in RISK_CHAIN_EV_THRESHOLDS', () => {
+            process.env.RISK_CHAIN_EV_THRESHOLDS = 'not-json';
+
+            jest.resetModules();
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { RISK_CONFIG: config } = require('../../src/risk-config');
+            expect(config.ev.chainMinEVThresholds).toBeUndefined();
+        });
     });
 
     describe('Configuration Getters', () => {
