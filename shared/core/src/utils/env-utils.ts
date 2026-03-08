@@ -145,6 +145,38 @@ export function parseEnvFloatSafe(
 }
 
 /**
+ * Parse and validate a BigInt environment variable (safe mode).
+ *
+ * Returns defaultValue if the env var is not set or not a valid integer string.
+ * Logs a warning for invalid values instead of throwing.
+ *
+ * @param name - Environment variable name
+ * @param defaultValue - Default BigInt value (as string) if env var is not set or invalid
+ * @returns Parsed BigInt value
+ *
+ * @example
+ * ```typescript
+ * const gasUsed = parseEnvBigIntSafe('EXECUTION_HYBRID_GAS_USED', '150000');
+ * const minProfit = parseEnvBigIntSafe('SOLANA_MIN_PROFIT_LAMPORTS', '100000');
+ * ```
+ */
+export function parseEnvBigIntSafe(
+  name: string,
+  defaultValue: string
+): bigint {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') {
+    return BigInt(defaultValue);
+  }
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    logger.warn(`[ENV] Invalid BigInt value for ${name}: "${raw}" - using default ${defaultValue}`);
+    return BigInt(defaultValue);
+  }
+  return BigInt(trimmed);
+}
+
+/**
  * Parse a boolean environment variable.
  *
  * @param name - Environment variable name

@@ -935,6 +935,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       if (this.server) {
         // P2 FIX: Capture server reference to satisfy TypeScript null check
         const serverRef = this.server;
+        // H-01 FIX: Remove event listeners before closing to prevent leak on restart
+        serverRef.removeAllListeners();
         await new Promise<void>((resolve) => {
           const timeout = setTimeout(() => {
             this.logger.warn('Force closing HTTP server after timeout');

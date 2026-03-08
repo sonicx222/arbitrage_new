@@ -40,11 +40,13 @@ const DAI_ADDRESS = '0x6B175474E89094C44Da98b954EedeAC495271d0F';
 /**
  * DssFlash ABI - only the functions needed for flash minting.
  * EIP-3156 compliant: flashLoan(receiver, token, amount, data)
+ * toll() returns the current fee in WAD (1e18 = 100%)
  */
 const DSS_FLASH_ABI = [
   'function flashLoan(address receiver, address token, uint256 amount, bytes calldata data) external returns (bool)',
   'function maxFlashLoan(address token) external view returns (uint256)',
   'function flashFee(address token, uint256 amount) external view returns (uint256)',
+  'function toll() external view returns (uint256)',
 ];
 
 /**
@@ -247,5 +249,41 @@ export class DaiFlashMintProvider implements IFlashLoanProvider {
    */
   getDssFlashAddress(): string {
     return this.poolAddress;
+  }
+
+  /**
+   * M-06 FIX: Validate on-chain toll() matches configured feeBps at startup.
+   *
+   * DssFlash.toll() returns the fee in WAD (1e18 = 100%). A toll of 0 means
+   * free flash mints; a toll of 1e14 means 1 bps (0.01%).
+   *
+   * If the on-chain toll differs from our configured fee, log a warning.
+   * This catches MakerDAO governance changes (e.g., Endgame fee reduction).
+   *
+   * @param provider - ethers provider for eth_call
+   */
+  async validateToll(provider: ethers.Provider): Promise<void> {
+    const logger = getProviderLogger();
+    try {
+      const contract = new ethers.Contract(this.poolAddress, DSS_FLASH_ABI, provider);
+      const tollWad: bigint = await contract.toll();
+      // Convert WAD to bps: toll / 1e14 = bps (since 1e18 WAD = 100% = 10000 bps)
+      const tollBps = Number(tollWad / 10n ** 14n);
+      const configuredBps = this.feeOverride ?? DAI_FLASH_MINT_FEE_BPS;
+      if (tollBps !== configuredBps) {
+        logger.warn(
+          `DssFlash toll() mismatch: on-chain ${tollBps} bps vs configured ${configuredBps} bps. ` +
+          `Profit calculations may be ${tollBps < configuredBps ? 'conservative' : 'optimistic'}.`,
+          { chain: this.chain, onChainBps: tollBps, configuredBps },
+        );
+      } else {
+        logger.info(`DssFlash toll() validated: ${tollBps} bps matches config`, { chain: this.chain });
+      }
+    } catch (error) {
+      logger.warn('Failed to validate DssFlash toll() — using configured fee as fallback', {
+        chain: this.chain,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }

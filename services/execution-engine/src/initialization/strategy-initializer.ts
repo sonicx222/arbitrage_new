@@ -15,6 +15,7 @@
  */
 
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { parseEnvBigIntSafe } from '@arbitrage/core/utils/env-utils';
 import { FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, BALANCER_V2_VAULTS } from '@arbitrage/config';
 import { IntraChainStrategy } from '../strategies/intra-chain.strategy';
 import { CrossChainStrategy } from '../strategies/cross-chain.strategy';
@@ -253,7 +254,7 @@ async function initializeSolanaStrategy(
         walletPublicKey: process.env.SOLANA_WALLET_PUBLIC_KEY ?? '',
         tipLamports: parseNumericEnv('JITO_TIP_LAMPORTS', logger) ?? 1_000_000,
         maxSlippageBps: parseNumericEnv('SOLANA_MAX_SLIPPAGE_BPS', logger) ?? 100,
-        minProfitLamports: BigInt(process.env.SOLANA_MIN_PROFIT_LAMPORTS ?? '100000'),
+        minProfitLamports: parseEnvBigIntSafe('SOLANA_MIN_PROFIT_LAMPORTS', '100000'),
         maxPriceDeviationPct: parseNumericEnv('SOLANA_MAX_PRICE_DEVIATION_PCT', logger) ?? 1.0,
         confirmationTimeoutMs: parseNumericEnv('SOLANA_CONFIRMATION_TIMEOUT_MS', logger) ?? undefined,
         confirmationPollIntervalMs: parseNumericEnv('SOLANA_CONFIRMATION_POLL_INTERVAL_MS', logger) ?? undefined,

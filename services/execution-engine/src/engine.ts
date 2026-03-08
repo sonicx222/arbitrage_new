@@ -906,9 +906,10 @@ export class ExecutionEngineService {
       }
 
       // Fix #51: Stop MEV-Share event listener
+      // H-01 FIX: Remove listeners before stop() so cleanup runs even if stop() throws
       if (this.mevShareListener) {
-        await this.mevShareListener.stop();
         this.mevShareListener.removeAllListeners();
+        await this.mevShareListener.stop();
         this.mevShareListener = null;
       }
 

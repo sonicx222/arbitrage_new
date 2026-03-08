@@ -27,7 +27,7 @@ import { ethers } from 'ethers';
 import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
 import { getErrorMessage } from '@arbitrage/core/resilience';
-import { parseEnvIntSafe, parseEnvFloatSafe } from '@arbitrage/core/utils';
+import { parseEnvIntSafe, parseEnvFloatSafe, parseEnvBigIntSafe } from '@arbitrage/core/utils';
 import { getGasPriceCache } from '@arbitrage/core/caching/gas-price-cache';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
@@ -106,7 +106,7 @@ interface HybridModeConfig {
 
 const DEFAULT_HYBRID_CONFIG: HybridModeConfig = {
   successRate: parseEnvFloatSafe('EXECUTION_HYBRID_SUCCESS_RATE', 0.95, 0),
-  mockGasUsed: BigInt(process.env.EXECUTION_HYBRID_GAS_USED ?? '150000'),
+  mockGasUsed: parseEnvBigIntSafe('EXECUTION_HYBRID_GAS_USED', '150000'),
   mockLatencyMs: parseEnvIntSafe('EXECUTION_HYBRID_LATENCY_MS', 100, 0),
 };
 
