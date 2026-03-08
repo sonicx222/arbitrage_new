@@ -100,8 +100,10 @@ const TOKEN_ADDRESS_MAP: Readonly<Record<string, Readonly<Record<string, string>
     '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
     // USDC
     '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8',
-    // USDT
-    '0xdac17f958d2ee523a2206206994597c13d831ec7': '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8', // Map to USDC (no testnet USDT)
+    // USDT → mapped to USDC testnet address (L-02: no dedicated testnet USDT exists).
+    // USDT-USDC arb opportunities will resolve to same-token swaps on testnet — these
+    // will revert or yield zero profit, which is the correct testnet behavior.
+    '0xdac17f958d2ee523a2206206994597c13d831ec7': '0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8',
     // DAI
     '0x6b175474e89094c44da98b954eedeac495271d0f': '0xFF34B3d4Aee8ddCd6F9AFFFB6Fe49bD371b8a357',
   },
@@ -110,8 +112,8 @@ const TOKEN_ADDRESS_MAP: Readonly<Record<string, Readonly<Record<string, string>
     '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73',
     // USDC
     '0xaf88d065e77c8cc2239327c5edb3a432268e5831': '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
-    // USDT
-    '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', // Map to USDC
+    // USDT → mapped to USDC (same rationale as ethereum USDT above)
+    '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
   },
   base: {
     // WETH (same canonical predeploy on testnet)

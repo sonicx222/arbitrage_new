@@ -55,6 +55,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-039](./ADR-039-async-pipeline-split.md) | Async Pipeline Split with SimulationWorker | Accepted | 2026-03-06 | 90% |
 | [ADR-040](./ADR-040-real-time-native-token-pricing.md) | Real-Time Native Token Pricing and Gas Cost Calibration | Accepted | 2026-03-06 | 90% |
 | [ADR-041](./ADR-041-blockchain-config-architecture-refactor.md) | Blockchain Configuration Architecture Refactor | Accepted | 2026-03-06 | 92% |
+| [ADR-042](./ADR-042-testnet-execution-mode.md) | Testnet Execution Mode | Accepted | 2026-03-08 | 90% |
 
 ## Decision Summary
 

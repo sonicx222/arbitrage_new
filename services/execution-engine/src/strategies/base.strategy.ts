@@ -926,7 +926,7 @@ export abstract class BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     chain: string
   ): Promise<{ valid: boolean; reason?: string; currentProfit?: number }> {
-    const maxAgeMs = ARBITRAGE_CONFIG.opportunityTimeoutMs || 30000;
+    const maxAgeMs = ARBITRAGE_CONFIG.opportunityTimeoutMs ?? 30000;
     const opportunityAge = Date.now() - opportunity.timestamp;
 
     if (opportunityAge > maxAgeMs) {

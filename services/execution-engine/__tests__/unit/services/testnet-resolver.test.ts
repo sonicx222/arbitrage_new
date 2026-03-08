@@ -17,63 +17,61 @@ describe('testnet-resolver', () => {
   // =========================================================================
 
   describe('resolveTestnetChain', () => {
-    it('maps ethereum to sepolia', () => {
-      expect(resolveTestnetChain('ethereum')).toBe('sepolia');
+    it.each([
+      ['ethereum', 'sepolia'],
+      ['arbitrum', 'arbitrumSepolia'],
+      ['base', 'baseSepolia'],
+      ['zksync', 'zksync-testnet'],
+    ])('maps %s to %s', (mainnet, testnet) => {
+      expect(resolveTestnetChain(mainnet)).toBe(testnet);
     });
 
-    it('maps arbitrum to arbitrumSepolia', () => {
-      expect(resolveTestnetChain('arbitrum')).toBe('arbitrumSepolia');
-    });
-
-    it('maps base to baseSepolia', () => {
-      expect(resolveTestnetChain('base')).toBe('baseSepolia');
-    });
-
-    it('maps zksync to zksync-testnet', () => {
-      expect(resolveTestnetChain('zksync')).toBe('zksync-testnet');
-    });
-
-    it('returns original chain if no mapping exists', () => {
-      expect(resolveTestnetChain('polygon')).toBe('polygon');
-      expect(resolveTestnetChain('bsc')).toBe('bsc');
-      expect(resolveTestnetChain('solana')).toBe('solana');
-    });
+    it.each(['polygon', 'bsc', 'solana'])(
+      'returns original chain for unsupported %s',
+      (chain) => {
+        expect(resolveTestnetChain(chain)).toBe(chain);
+      }
+    );
   });
 
   describe('hasTestnetSupport', () => {
-    it('returns true for supported chains', () => {
-      expect(hasTestnetSupport('ethereum')).toBe(true);
-      expect(hasTestnetSupport('arbitrum')).toBe(true);
-      expect(hasTestnetSupport('base')).toBe(true);
-      expect(hasTestnetSupport('zksync')).toBe(true);
-    });
+    it.each(['ethereum', 'arbitrum', 'base', 'zksync'])(
+      'returns true for %s',
+      (chain) => {
+        expect(hasTestnetSupport(chain)).toBe(true);
+      }
+    );
 
-    it('returns false for unsupported chains', () => {
-      expect(hasTestnetSupport('polygon')).toBe(false);
-      expect(hasTestnetSupport('bsc')).toBe(false);
-      expect(hasTestnetSupport('avalanche')).toBe(false);
-      expect(hasTestnetSupport('solana')).toBe(false);
-    });
+    it.each(['polygon', 'bsc', 'avalanche', 'solana'])(
+      'returns false for %s',
+      (chain) => {
+        expect(hasTestnetSupport(chain)).toBe(false);
+      }
+    );
   });
 
   describe('isKnownTestnet', () => {
-    it('identifies testnet chain names', () => {
-      expect(isKnownTestnet('sepolia')).toBe(true);
-      expect(isKnownTestnet('arbitrumSepolia')).toBe(true);
-      expect(isKnownTestnet('baseSepolia')).toBe(true);
-      expect(isKnownTestnet('zksync-testnet')).toBe(true);
-    });
+    it.each(['sepolia', 'arbitrumSepolia', 'baseSepolia', 'zksync-testnet'])(
+      'identifies %s as testnet',
+      (chain) => {
+        expect(isKnownTestnet(chain)).toBe(true);
+      }
+    );
 
-    it('rejects mainnet chain names', () => {
-      expect(isKnownTestnet('ethereum')).toBe(false);
-      expect(isKnownTestnet('arbitrum')).toBe(false);
-    });
+    it.each(['ethereum', 'arbitrum'])(
+      'rejects mainnet %s',
+      (chain) => {
+        expect(isKnownTestnet(chain)).toBe(false);
+      }
+    );
   });
 
   describe('getMainnetEquivalent', () => {
-    it('returns mainnet name for testnet', () => {
-      expect(getMainnetEquivalent('sepolia')).toBe('ethereum');
-      expect(getMainnetEquivalent('arbitrumSepolia')).toBe('arbitrum');
+    it.each([
+      ['sepolia', 'ethereum'],
+      ['arbitrumSepolia', 'arbitrum'],
+    ])('maps %s back to %s', (testnet, mainnet) => {
+      expect(getMainnetEquivalent(testnet)).toBe(mainnet);
     });
 
     it('returns undefined for unknown chains', () => {
