@@ -380,8 +380,10 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         if (block.number > commitBlock + maxCommitAgeBlocks) revert CommitmentExpired();
 
         // Validate deadline is not expired and not too far in future
-        if (block.timestamp > deadline) revert InvalidDeadline();
-        if (deadline > block.timestamp + MAX_SWAP_DEADLINE) revert InvalidDeadline();
+        // L-07: Cache block.timestamp to save ~3 gas per additional TIMESTAMP opcode
+        uint256 ts = block.timestamp;
+        if (ts > deadline) revert InvalidDeadline();
+        if (deadline > ts + MAX_SWAP_DEADLINE) revert InvalidDeadline();
     }
 
 
