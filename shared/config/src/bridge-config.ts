@@ -99,6 +99,15 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'blast', dst: 'arbitrum', feeBps: 3, minFeeUsd: 0.5, latency: 60, reliability: 0.96 },
     { src: 'zksync', dst: 'ethereum', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.96 },
     { src: 'linea', dst: 'ethereum', feeBps: 4, minFeeUsd: 2, latency: 120, reliability: 0.97 },
+    // M-001 FIX: Mantle and Mode routes via Across relayer
+    { src: 'ethereum', dst: 'mantle', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.95 },
+    { src: 'mantle', dst: 'ethereum', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.95 },
+    { src: 'arbitrum', dst: 'mantle', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
+    { src: 'mantle', dst: 'arbitrum', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
+    { src: 'ethereum', dst: 'mode', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.95 },
+    { src: 'mode', dst: 'ethereum', feeBps: 5, minFeeUsd: 2, latency: 180, reliability: 0.95 },
+    { src: 'arbitrum', dst: 'mode', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
+    { src: 'mode', dst: 'arbitrum', feeBps: 4, minFeeUsd: 1, latency: 120, reliability: 0.95 },
   ]},
   // Stargate V2 (LayerZero V2) - OFT model, lower fees than V1, Bus/Taxi modes
   { bridge: 'stargate-v2', routes: [
@@ -157,6 +166,12 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     // Blast native bridge (optimistic rollup, ~14 day withdrawal)
     { src: 'ethereum', dst: 'blast', feeBps: 0, minFeeUsd: 3, latency: 600, reliability: 0.99 },         // ~10 min deposit
     { src: 'blast', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 1209600, reliability: 0.99 },     // ~14 days withdrawal
+    // M-001 FIX: Mantle native bridge (optimistic rollup, ~7 day withdrawal)
+    { src: 'ethereum', dst: 'mantle', feeBps: 0, minFeeUsd: 3, latency: 900, reliability: 0.99 },        // ~15 min deposit
+    { src: 'mantle', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 604800, reliability: 0.99 },     // ~7 days withdrawal
+    // M-001 FIX: Mode native bridge (OP-stack, ~7 day withdrawal)
+    { src: 'ethereum', dst: 'mode', feeBps: 0, minFeeUsd: 3, latency: 900, reliability: 0.99 },          // ~15 min deposit
+    { src: 'mode', dst: 'ethereum', feeBps: 0, minFeeUsd: 5, latency: 604800, reliability: 0.99 },       // ~7 days withdrawal
   ]},
   // Wormhole - Primary Solana <-> EVM bridge
   { bridge: 'wormhole', routes: [

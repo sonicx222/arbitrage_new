@@ -110,9 +110,10 @@ export const SERVICE_CONFIGS = {
  * - RPC URL validation for at least one chain
  * - MEV provider key warnings
  *
+ * @param logger - Optional structured logger (M-010 FIX: use instead of console.warn for log aggregation)
  * @throws Error if required production configuration is missing
  */
-export function validateProductionConfig(): void {
+export function validateProductionConfig(logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void }): void {
   if (!isProduction) {
     return; // Skip validation in development
   }
@@ -204,10 +205,14 @@ export function validateProductionConfig(): void {
     warnings.push('EXECUTION_SIMULATION_MODE=true in production — no real trades will execute. Set SIMULATION_MODE_PRODUCTION_OVERRIDE=true if intentional.');
   }
 
-  // Log warnings
+  // M-010 FIX: Use structured logger when available for production log aggregation
   if (warnings.length > 0) {
-    console.warn('\n⚠️  Production configuration warnings:');
-    warnings.forEach(w => console.warn(`  - ${w}`));
+    if (logger) {
+      logger.warn('Production configuration warnings', { warnings, count: warnings.length });
+    } else {
+      console.warn('\n⚠️  Production configuration warnings:');
+      warnings.forEach(w => console.warn(`  - ${w}`));
+    }
   }
 
   // Throw if critical configs are missing

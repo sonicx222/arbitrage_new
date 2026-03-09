@@ -85,12 +85,15 @@ describe('Cross-Chain Token Normalization', () => {
       expect(normalizeTokenForCrossChain('wmatic')).toBe('MATIC');
     });
 
-    it('should normalize Solana LST tokens', () => {
-      expect(normalizeTokenForCrossChain('MSOL')).toBe('SOL');
-      expect(normalizeTokenForCrossChain('mSOL')).toBe('SOL');
-      expect(normalizeTokenForCrossChain('JITOSOL')).toBe('SOL');
-      expect(normalizeTokenForCrossChain('jitoSol')).toBe('SOL');
-      expect(normalizeTokenForCrossChain('BSOL')).toBe('SOL');
+    it('should preserve LST token identities (M-002 fix)', () => {
+      // LSTs have distinct market prices — aliasing them destroys the arbitrage signal
+      expect(normalizeTokenForCrossChain('MSOL')).toBe('MSOL');
+      expect(normalizeTokenForCrossChain('mSOL')).toBe('MSOL');
+      expect(normalizeTokenForCrossChain('JITOSOL')).toBe('JITOSOL');
+      expect(normalizeTokenForCrossChain('jitoSol')).toBe('JITOSOL');
+      expect(normalizeTokenForCrossChain('BSOL')).toBe('BSOL');
+      expect(normalizeTokenForCrossChain('SAVAX')).toBe('SAVAX');
+      expect(normalizeTokenForCrossChain('sAVAX')).toBe('SAVAX');
     });
 
     it('should pass through canonical tokens unchanged', () => {
@@ -184,13 +187,13 @@ describe('Cross-Chain Token Normalization', () => {
       expect(normalizeTokenForPricing('SOL')).toBe('SOL');
     });
 
-    it('should differ from normalizeTokenForCrossChain for LSTs', () => {
-      // This is the critical test: cross-chain maps LSTs to underlying,
-      // pricing normalization preserves them
-      expect(normalizeTokenForCrossChain('MSOL')).toBe('SOL');
+    it('should match normalizeTokenForCrossChain for LSTs (M-002 fix)', () => {
+      // M-002 FIX: Both functions now preserve LST identity — LST price deviations
+      // from underlying are real arbitrage signals, not aliasing errors
+      expect(normalizeTokenForCrossChain('MSOL')).toBe('MSOL');
       expect(normalizeTokenForPricing('MSOL')).toBe('MSOL');
 
-      expect(normalizeTokenForCrossChain('SAVAX')).toBe('AVAX');
+      expect(normalizeTokenForCrossChain('SAVAX')).toBe('SAVAX');
       expect(normalizeTokenForPricing('SAVAX')).toBe('SAVAX');
     });
 
@@ -349,7 +352,7 @@ describe('Cross-Chain Token Normalization', () => {
       }
 
       // Verify correct normalization
-      expect(firstResult).toEqual(['WETH', 'USDC', 'WBTC', 'MATIC', 'SOL', 'USDT', 'WETH']);
+      expect(firstResult).toEqual(['WETH', 'USDC', 'WBTC', 'MATIC', 'MSOL', 'USDT', 'WETH']);
     });
   });
 });

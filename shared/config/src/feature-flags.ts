@@ -508,6 +508,10 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
         `Flash Loan Aggregator weights do not sum to 1.0 (got ${weightSum.toFixed(4)}). ` +
         `Weights: fees=${fees}, liquidity=${liquidity}, reliability=${reliability}, latency=${latency}. ` +
         'Provider ranking may produce unexpected results.';
+      // M-007 FIX: Strict validation in production — skewed weights cause incorrect provider ranking
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`[ERR_INVALID_CONFIG] ${weightMsg}`);
+      }
       if (logger) {
         logger.warn(weightMsg, { weightSum, weights: FLASH_LOAN_AGGREGATOR_CONFIG.weights });
       } else {

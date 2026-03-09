@@ -496,6 +496,9 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
     DAI: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70',
   },
   fantom: {
+    // M-005 WARNING: This is multichain-bridged USDC, deprecated since July 2023 Multichain exploit.
+    // Liquidity is thin and may produce false arbitrage signals. Consider replacing with axlUSDC
+    // (0x1B6382DBDEa11d97f24495C9A90b7c88469134a4) when Axelar USDC liquidity is sufficient.
     USDC: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75',
     fUSDT: '0x049d68029688eAbF473097a2fC38ef61633A3C7A',
     DAI: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E',
@@ -573,7 +576,7 @@ export function getStablecoin(chain: string, symbol: string): string {
  * Get all stablecoins for a chain.
  */
 export function getChainStablecoins(chain: string): Record<string, string> {
-  return STABLECOINS[chain] || {};
+  return STABLECOINS[chain] ?? {};
 }
 
 // =============================================================================

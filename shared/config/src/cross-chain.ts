@@ -145,7 +145,12 @@ export function normalizeTokenForCrossChain(symbol: string): string {
 
   // Compute normalized value
   const upper = symbol.includes(' ') ? symbol.toUpperCase().trim() : symbol.toUpperCase();
-  const result = NORMALIZED_ALIASES.get(upper) ?? upper;
+  // M-002 FIX: Preserve LST identities — sAVAX/AVAX, mSOL/SOL price deviations
+  // are real arbitrage signals, not aliases. Without this check, cross-chain
+  // detection would treat sAVAX as AVAX and flag the LST premium as a false arb.
+  const result = LIQUID_STAKING_TOKENS.has(upper)
+    ? upper
+    : (NORMALIZED_ALIASES.get(upper) ?? upper);
 
   // FIFO eviction: Remove oldest entry (first in iteration order) when at capacity
   // This is safe because Map insertion order is guaranteed in JS

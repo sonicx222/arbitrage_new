@@ -187,6 +187,12 @@ abstract contract BaseFlashArbitrage is
     /// @notice Emitted when ETH is withdrawn
     event ETHWithdrawn(address indexed to, uint256 amount);
 
+    /// @notice Emitted when per-token profit is tracked (M-003: observability for on-chain indexers)
+    /// @param asset The token address
+    /// @param profit The profit from this trade (in token units)
+    /// @param cumulative The new cumulative profit for this token
+    event ProfitTracked(address indexed asset, uint256 profit, uint256 cumulative);
+
     /// @notice Emitted when swap deadline is updated
     event SwapDeadlineUpdated(uint256 oldValue, uint256 newValue);
 
@@ -443,6 +449,8 @@ abstract contract BaseFlashArbitrage is
         tokenProfits[asset] += profit;
         // Maintain legacy aggregate counter for backward compatibility
         totalProfits += profit;
+        // M-003 FIX: Emit per-token profit event for on-chain indexers
+        emit ProfitTracked(asset, profit, tokenProfits[asset]);
 
         // === INTERACTIONS: None in this function. Derived contracts must perform ===
         // === external calls (e.g., forceApprove) AFTER calling this function.    ===
