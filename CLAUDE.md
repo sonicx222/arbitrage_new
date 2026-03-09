@@ -4,8 +4,8 @@ Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading
 
 # System Overview
 
-**Chains:** 15 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Blast, Scroll, Mantle, Mode + Solana). Blast and Scroll are fully operational with real DEX addresses, flash loan support (Scroll), and bridge routes. Mantle and Mode remain stubs — config present but missing verified DEX factories.
-**DEXs:** 78 configured (71 EVM + 7 Solana). Mantle (3) and Mode (3) DEXes have unverified addresses — treat as stubs.
+**Chains:** 15 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Blast, Scroll, Mantle, Mode + Solana). Blast and Scroll are fully operational with real DEX addresses, flash loan support (Scroll), and bridge routes. Mantle and Mode DEX factories RPC-validated 2026-03-08 and added to SUPPORTED_EXECUTION_CHAINS + DEX_FACTORY_REGISTRY.
+**DEXs:** 78 configured (71 EVM + 7 Solana). All DEX addresses verified (Mantle/Mode RPC-validated 2026-03-08).
 **Architecture:** Partitioned detectors (4 partitions), Redis Streams (ADR-002), L1 Price Matrix with SharedArrayBuffer (ADR-005), Worker threads for path finding (ADR-012), Circuit breakers (ADR-018)
 **Stack:** TypeScript, Node.js, Solidity ^0.8.19, Hardhat, ethers v6, Jest, OpenZeppelin 4.9.6
 
@@ -190,7 +190,7 @@ await expect(tx).to.be.reverted; // Don't do this
 
 **Mock contracts:** Located in `contracts/src/mocks/`. When writing tests:
 - MockDexRouter uses `require("Insufficient output amount")` (string, not custom error)
-- MockAavePool premium is configurable (default 9 bps = 0.09%)
+- MockAavePool premium is 5 bps = 0.05% (matches post-AIP-382 mainnet value)
 - MockBalancerVault has zero flash loan fee
 - MockSyncSwapVault charges 0.3% fee
 - MockPancakeV3Pool fee is tier-based (typically 2500 bps = 0.25%)
