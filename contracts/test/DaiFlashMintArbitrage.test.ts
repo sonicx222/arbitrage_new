@@ -24,6 +24,7 @@ import {
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
+  createAdminTestConfig,
 } from './helpers';
 
 /**
@@ -68,21 +69,9 @@ describe('DaiFlashMintArbitrage', () => {
   }
 
   // Admin test config for shared harness
-  const adminConfig = {
-    contractName: 'DaiFlashMintArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      return {
-        contract: f.daiArbitrage,
-        owner: f.owner,
-        user: f.user,
-        attacker: f.attacker,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-      };
-    },
-  };
+  const adminConfig = createAdminTestConfig(
+    'DaiFlashMintArbitrage', deployContractsFixture, (f) => f.daiArbitrage,
+  );
 
   // ==========================================================================
   // 1. Deployment and Initialization Tests

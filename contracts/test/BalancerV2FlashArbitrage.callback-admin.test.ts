@@ -19,6 +19,7 @@ import {
   testProfitValidation,
   testCalculateExpectedProfit,
   testReentrancyProtection,
+  createAdminTestConfig,
 } from './helpers';
 
 /**
@@ -43,21 +44,9 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   const deployContractsFixture = deployBalancerV2Fixture;
 
   // Admin test config for shared harness
-  const adminConfig = {
-    contractName: 'BalancerV2FlashArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      return {
-        contract: f.arbitrage,
-        owner: f.owner,
-        user: f.user,
-        attacker: f.attacker,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-      };
-    },
-  };
+  const adminConfig = createAdminTestConfig(
+    'BalancerV2FlashArbitrage', deployContractsFixture, (f) => f.arbitrage,
+  );
 
   // ===========================================================================
   // 5. Flash Loan Callback Tests

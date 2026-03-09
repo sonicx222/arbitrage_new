@@ -26,7 +26,7 @@ import {
   testInputValidation,
   testCalculateExpectedProfit,
   testReentrancyProtection,
-  type AdminTestConfig,
+  createAdminTestConfig,
 } from './helpers';
 
 /**
@@ -96,21 +96,9 @@ describe('FlashLoanArbitrage', () => {
   // ===========================================================================
   // Admin Functions Tests (shared harness — eliminates ~200 LOC of duplication)
   // ===========================================================================
-  const adminConfig: AdminTestConfig = {
-    contractName: 'FlashLoanArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      return {
-        contract: f.flashLoanArbitrage,
-        owner: f.owner,
-        user: f.user,
-        attacker: f.attacker,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-      };
-    },
-  };
+  const adminConfig = createAdminTestConfig(
+    'FlashLoanArbitrage', deployContractsFixture, (f) => f.flashLoanArbitrage,
+  );
 
   testRouterManagement(adminConfig);
   testMinimumProfitConfig(adminConfig);

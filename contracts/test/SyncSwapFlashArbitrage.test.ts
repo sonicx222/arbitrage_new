@@ -28,6 +28,7 @@ import {
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
+  createAdminTestConfig,
 } from './helpers';
 
 /**
@@ -67,21 +68,9 @@ describe('SyncSwapFlashArbitrage', () => {
   }
 
   // Admin test fixture adapter for shared tests
-  const adminConfig = {
-    contractName: 'SyncSwapFlashArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      return {
-        contract: f.syncSwapArbitrage,
-        owner: f.owner,
-        user: f.user,
-        attacker: f.attacker,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-      };
-    },
-  };
+  const adminConfig = createAdminTestConfig(
+    'SyncSwapFlashArbitrage', deployContractsFixture, (f) => f.syncSwapArbitrage,
+  );
 
   // ===========================================================================
   // 1. Deployment Defaults (shared) + SyncSwap-Specific Deployment

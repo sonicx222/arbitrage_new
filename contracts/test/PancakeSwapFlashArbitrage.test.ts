@@ -28,7 +28,7 @@ import {
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
-  type AdminTestConfig,
+  createAdminTestConfig,
 } from './helpers';
 
 /**
@@ -123,21 +123,9 @@ describe('PancakeSwapFlashArbitrage', () => {
   // ===========================================================================
   // Admin Functions Tests (shared harness — eliminates ~200 LOC of duplication)
   // ===========================================================================
-  const adminConfig: AdminTestConfig = {
-    contractName: 'PancakeSwapFlashArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      return {
-        contract: f.flashArbitrage,
-        owner: f.owner,
-        user: f.user,
-        attacker: f.attacker,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-      };
-    },
-  };
+  const adminConfig = createAdminTestConfig(
+    'PancakeSwapFlashArbitrage', deployContractsFixture, (f) => f.flashArbitrage,
+  );
 
   testRouterManagement(adminConfig);
   testMinimumProfitConfig(adminConfig);
@@ -726,6 +714,57 @@ describe('PancakeSwapFlashArbitrage', () => {
       await expect(
         flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(100, 0, '0x')
       ).to.be.revertedWithoutReason();
+
+      await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
+    });
+
+    it('should execute callback with properly encoded data from whitelisted pool (M-07)', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc, owner } =
+        await loadFixture(deployContractsFixture);
+
+      const poolAddress = await wethUsdcPool.getAddress();
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+
+      // Setup: whitelist pool, approve routers, configure rates
+      await flashArbitrage.whitelistPool(poolAddress);
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await flashArbitrage.setMinimumProfit(1n);
+      await dexRouter1.setExchangeRate(wethAddr, usdcAddr, ethers.parseUnits('2000', 6));
+      await dexRouter2.setExchangeRate(usdcAddr, wethAddr, RATE_USDC_TO_WETH_2PCT_PROFIT);
+
+      const flashAmount = ethers.parseEther('10');
+
+      // Simulate flash loan deposit: mint tokens to contract as the pool would
+      await weth.mint(await flashArbitrage.getAddress(), flashAmount);
+
+      // Encode callback data matching contract's abi.decode expectation:
+      // abi.decode(data, (SwapStep[], address, uint256, uint256))
+      const swapPath = build2HopCrossRouterPath(
+        await dexRouter1.getAddress(), await dexRouter2.getAddress(),
+        wethAddr, usdcAddr, 1n, 1n
+      );
+      const data = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[]', 'address', 'uint256', 'uint256'],
+        [swapPath.map(s => [s.router, s.tokenIn, s.tokenOut, s.amountOutMin]), wethAddr, flashAmount, 0]
+      );
+
+      // Calculate 0.25% fee (2500 bps / 1e6): fee = 10 * 2500 / 1000000 = 0.025 WETH
+      const fee = flashAmount * 2500n / 1000000n;
+      const token0 = await wethUsdcPool.token0();
+      const [fee0, fee1] = token0.toLowerCase() === wethAddr.toLowerCase()
+        ? [fee, 0n] : [0n, fee];
+
+      // Impersonate the whitelisted pool to call callback directly
+      await ethers.provider.send('hardhat_impersonateAccount', [poolAddress]);
+      await owner.sendTransaction({ to: poolAddress, value: ethers.parseEther('1') });
+      const poolSigner = await ethers.getSigner(poolAddress);
+
+      // Valid data from whitelisted pool should execute the full arbitrage flow
+      await expect(
+        flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(fee0, fee1, data)
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
 
       await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
     });

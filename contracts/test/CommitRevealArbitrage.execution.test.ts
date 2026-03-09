@@ -20,6 +20,7 @@ import {
   testWithdrawGasLimitConfig,
   testOwnable2Step,
   testCalculateExpectedProfit,
+  createAdminTestConfig,
 } from './helpers';
 
 /**
@@ -41,21 +42,9 @@ describe('CommitRevealArbitrage Execution', () => {
   const deployContractsFixture = deployCommitRevealFixture;
 
   // Admin test config for shared harness
-  const adminConfig = {
-    contractName: 'CommitRevealArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      return {
-        contract: f.commitRevealArbitrage,
-        owner: f.owner,
-        user: f.user,
-        attacker: f.attacker,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-      };
-    },
-  };
+  const adminConfig = createAdminTestConfig(
+    'CommitRevealArbitrage', deployContractsFixture, (f) => f.commitRevealArbitrage,
+  );
 
   // ===========================================================================
   // 5. Reveal Phase - Swap Execution Tests

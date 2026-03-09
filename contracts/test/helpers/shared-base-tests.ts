@@ -616,6 +616,46 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
       ).to.emit(contract, 'ProfitTracked');
     });
 
+    it('should succeed with realistic router fees (M-01)', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1, usdc } = fixture;
+      const assetAddress = await getAsset(fixture);
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      await contract.connect(owner).setMinimumProfit(1n);
+      await setupSmallProfitRates(fixture);
+
+      // Enable realistic 30 bps (0.3%) fee on router — production DEXs charge this
+      await dexRouter1.setFeeBps(30);
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: assetAddress,
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: assetAddress,
+          amountOutMin: 1n,
+        },
+      ];
+      const deadline = await getDeadline();
+
+      // ~1% profit - ~0.6% fees (30bps × 2 swaps) = ~0.4% net profit > minimumProfit(1n)
+      await expect(
+        triggerArbitrage(contract, owner, {
+          asset: assetAddress,
+          amount: ethers.parseEther('1'),
+          swapPath,
+          minProfit: 0n,
+          deadline,
+        })
+      ).to.emit(contract, 'ProfitTracked');
+    });
+
     it('should enforce max of minProfit param and contract minimumProfit', async () => {
       const fixture = await getFixture();
       const { contract, owner, dexRouter1, usdc } = fixture;

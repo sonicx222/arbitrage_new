@@ -71,6 +71,7 @@ export {
   testOwnable2Step,
   testZeroAmountEdgeCases,
   testAllAdminFunctions,
+  createAdminTestConfig,
   type AdminTestFixture,
   type AdminTestConfig,
 } from './shared-admin-tests';

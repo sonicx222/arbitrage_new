@@ -31,6 +31,7 @@
 
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
+import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 
 // =============================================================================
 // Types
@@ -70,6 +71,40 @@ export interface AdminTestConfig {
   minWithdrawGasLimit?: number;
   /** Maximum withdraw gas limit (defaults to 500000) */
   maxWithdrawGasLimit?: number;
+}
+
+// =============================================================================
+// M-10: Admin Test Config Factory
+// =============================================================================
+
+/**
+ * Creates an AdminTestConfig from a deployment fixture, reducing boilerplate
+ * across the 6 protocol test files that all share the same admin test structure.
+ *
+ * @param contractName - Contract name for describe blocks
+ * @param deployFixture - The test file's deployContractsFixture function
+ * @param getContract - Extracts the contract under test from the fixture
+ */
+export function createAdminTestConfig(
+  contractName: string,
+  deployFixture: () => Promise<any>,
+  getContract: (fixture: any) => any,
+): AdminTestConfig {
+  return {
+    contractName,
+    getFixture: async () => {
+      const f = await loadFixture(deployFixture);
+      return {
+        contract: getContract(f),
+        owner: f.owner,
+        user: f.user,
+        attacker: f.attacker,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+      };
+    },
+  };
 }
 
 // =============================================================================
@@ -196,6 +231,13 @@ export function testMinimumProfitConfig(config: AdminTestConfig): void {
       ).to.be.revertedWithCustomError(contract, 'InvalidMinimumProfit');
     });
 
+    it('should accept type(uint256).max as minimum profit (M-05)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await contract.connect(owner).setMinimumProfit(ethers.MaxUint256);
+      expect(await contract.minimumProfit()).to.equal(ethers.MaxUint256);
+    });
+
     it('should revert if non-owner tries to update', async () => {
       const { contract, user } = await getFixture();
 
@@ -256,6 +298,14 @@ export function testSwapDeadlineConfig(config: AdminTestConfig): void {
 
       await expect(
         contract.connect(owner).setSwapDeadline(maxSwapDeadline + 1)
+      ).to.be.revertedWithCustomError(contract, 'InvalidSwapDeadline');
+    });
+
+    it('should revert on type(uint256).max deadline (M-05)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await expect(
+        contract.connect(owner).setSwapDeadline(ethers.MaxUint256)
       ).to.be.revertedWithCustomError(contract, 'InvalidSwapDeadline');
     });
 
@@ -550,6 +600,14 @@ export function testWithdrawGasLimitConfig(config: AdminTestConfig): void {
 
       await expect(
         contract.connect(owner).setWithdrawGasLimit(maxGasLimit + 1)
+      ).to.be.revertedWithCustomError(contract, 'InvalidGasLimit');
+    });
+
+    it('should reject type(uint256).max gas limit (M-05)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await expect(
+        contract.connect(owner).setWithdrawGasLimit(ethers.MaxUint256)
       ).to.be.revertedWithCustomError(contract, 'InvalidGasLimit');
     });
 
