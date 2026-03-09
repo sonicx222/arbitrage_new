@@ -367,6 +367,23 @@ export function testWithdrawToken(config: AdminTestConfig): void {
       ).to.be.revertedWithCustomError(contract, 'InvalidRecipient');
     });
 
+    it('should allow owner to withdraw tokens while paused (M-06 regression)', async () => {
+      const { contract, weth, owner } = await getFixture();
+
+      await weth.mint(await contract.getAddress(), ethers.parseEther('1'));
+      await contract.connect(owner).pause();
+
+      // Withdrawal must succeed while paused (emergency fund recovery)
+      await contract.connect(owner).withdrawToken(
+        await weth.getAddress(),
+        owner.address,
+        ethers.parseEther('1')
+      );
+
+      const contractBalance = await weth.balanceOf(await contract.getAddress());
+      expect(contractBalance).to.equal(0);
+    });
+
     it('should revert if non-owner tries to withdraw', async () => {
       const { contract, weth, user } = await getFixture();
 
@@ -441,6 +458,31 @@ export function testWithdrawETH(config: AdminTestConfig): void {
       await expect(
         contract.connect(owner).withdrawETH(ethers.ZeroAddress, ethers.parseEther('1'))
       ).to.be.revertedWithCustomError(contract, 'InvalidRecipient');
+    });
+
+    it('should allow owner to withdraw ETH while paused (M-06 regression)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await owner.sendTransaction({
+        to: await contract.getAddress(),
+        value: ethers.parseEther('1'),
+      });
+      await contract.connect(owner).pause();
+
+      const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
+
+      const tx = await contract.connect(owner).withdrawETH(
+        owner.address,
+        ethers.parseEther('1')
+      );
+      const receipt = await tx.wait();
+      const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
+
+      const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
+      expect(ownerBalanceAfter).to.be.closeTo(
+        ownerBalanceBefore + ethers.parseEther('1') - gasUsed,
+        ethers.parseEther('0.01')
+      );
     });
 
     it('should revert if non-owner tries to withdraw', async () => {

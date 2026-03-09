@@ -52,8 +52,15 @@ export const RATE_USDC_TO_WETH_2PCT_PROFIT = BigInt('510000000000000000000000000
 /** Standard forward rate: 1 WETH = 2000 USDC */
 export const RATE_WETH_TO_USDC = ethers.parseUnits('2000', 6);
 
-/** Standard forward rate: 1 USDC = 1.01 DAI */
-export const RATE_USDC_TO_DAI = ethers.parseEther('1.01');
+/**
+ * Standard forward rate: 1 USDC = 1.01 DAI (cross-decimal: 6d → 18d)
+ *
+ * MockDexRouter formula: amountOut = (amountIn * rate) / 1e18
+ * For 1 USDC (1e6 raw): amountOut = (1e6 * 1.01e30) / 1e18 = 1.01e18 = 1.01 DAI ✓
+ *
+ * @see UniswapV3Adapter.test.ts for matching local constant
+ */
+export const RATE_USDC_TO_DAI = BigInt('1010000000000000000000000000000'); // 1.01e30
 
 /** Standard forward rate: 1 DAI = 0.000505 WETH (profitable return leg) */
 export const RATE_DAI_TO_WETH_PROFIT = BigInt('505000000000000');
@@ -83,21 +90,3 @@ export async function setupProfitableWethUsdcRates(
   await router.setExchangeRate(usdcAddr, wethAddr, reverseRate);
 }
 
-/**
- * Set up triangular arbitrage rates: WETH -> USDC -> DAI -> WETH
- * on two routers, with a profitable return on the final leg.
- */
-export async function setupTriangularRates(
-  router1: MockDexRouter,
-  router2: MockDexRouter,
-  wethAddr: string,
-  usdcAddr: string,
-  daiAddr: string,
-): Promise<void> {
-  // Leg 1: WETH -> USDC on router1
-  await router1.setExchangeRate(wethAddr, usdcAddr, RATE_WETH_TO_USDC);
-  // Leg 2: USDC -> DAI on router1
-  await router1.setExchangeRate(usdcAddr, daiAddr, RATE_USDC_TO_DAI);
-  // Leg 3: DAI -> WETH on router2 (profitable)
-  await router2.setExchangeRate(daiAddr, wethAddr, RATE_DAI_TO_WETH_PROFIT);
-}

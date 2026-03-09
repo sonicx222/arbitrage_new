@@ -38,7 +38,6 @@ export {
   RATE_USDC_TO_DAI,
   RATE_DAI_TO_WETH_PROFIT,
   setupProfitableWethUsdcRates,
-  setupTriangularRates,
 } from './exchange-rates';
 
 export {

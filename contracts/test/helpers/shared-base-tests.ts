@@ -579,6 +579,43 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
       ).to.be.revertedWithCustomError(contract, 'InsufficientProfit');
     });
 
+    it('should emit ProfitTracked event on successful arbitrage (H-01)', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1, usdc } = fixture;
+      const assetAddress = await getAsset(fixture);
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      // Set minimum profit to lowest allowed value so small profit passes
+      await contract.connect(owner).setMinimumProfit(1n);
+      await setupSmallProfitRates(fixture);
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: assetAddress,
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: assetAddress,
+          amountOutMin: 1n,
+        },
+      ];
+      const deadline = await getDeadline();
+
+      await expect(
+        triggerArbitrage(contract, owner, {
+          asset: assetAddress,
+          amount: ethers.parseEther('1'),
+          swapPath,
+          minProfit: 0n,
+          deadline,
+        })
+      ).to.emit(contract, 'ProfitTracked');
+    });
+
     it('should enforce max of minProfit param and contract minimumProfit', async () => {
       const fixture = await getFixture();
       const { contract, owner, dexRouter1, usdc } = fixture;

@@ -6,7 +6,6 @@ import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
   deployBaseFixture,
   fundProvider,
-  setupProfitableWethUsdcRates,
   RATE_USDC_TO_WETH_1PCT_PROFIT,
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,

@@ -203,6 +203,18 @@ describe('CommitRevealArbitrage', () => {
           commitRevealArbitrage.connect(user).batchCommit(hashes)
         ).to.be.revertedWith('Pausable: paused');
       });
+
+      it('should revert when batch exceeds MAX_BATCH_COMMITS (M-02)', async () => {
+        const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
+
+        // MAX_BATCH_COMMITS = 50, create 51 hashes to exceed the limit
+        const hashes = Array.from({ length: 51 }, () => ethers.randomBytes(32));
+
+        await expect(
+          commitRevealArbitrage.connect(user).batchCommit(hashes)
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'BatchTooLarge')
+          .withArgs(51, 50);
+      });
     });
 
     describe('cancelCommit()', () => {
@@ -546,6 +558,14 @@ describe('CommitRevealArbitrage', () => {
         // The contract reverts with CommitmentTooRecent in _validateTimingAndDeadline().
         const revealReceipt = await ethers.provider.getTransactionReceipt(revealTx.hash);
         expect(revealReceipt!.status).to.equal(0);
+
+        // Verify the specific revert reason is CommitmentTooRecent (M-03 fix)
+        // Re-simulate the reveal at the same block via staticCall to get the typed error
+        await expect(
+          commitRevealArbitrage.connect(user).reveal.staticCall(revealParams, {
+            blockTag: commitReceipt!.blockNumber,
+          })
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentTooRecent');
       } finally {
         // Always re-enable automine to avoid affecting subsequent tests
         await ethers.provider.send('evm_setAutomine', [true]);
