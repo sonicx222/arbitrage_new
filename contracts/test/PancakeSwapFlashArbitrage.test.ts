@@ -843,4 +843,98 @@ describe('PancakeSwapFlashArbitrage', () => {
       expect(receipt!.gasUsed).to.be.lt(500_000);
     });
   });
+
+  // ===========================================================================
+  // H-02: MockPancakeV3Pool maxFlashAmount
+  // ===========================================================================
+  describe('H-02: MockPancakeV3Pool maxFlashAmount', () => {
+    it('should default to unlimited flash amount', async () => {
+      const { wethUsdcPool } = await loadFixture(deployContractsFixture);
+      const max = await wethUsdcPool.maxFlashAmount();
+      expect(max).to.equal(ethers.MaxUint256);
+    });
+
+    it('should enforce maxFlashAmount when set', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc } =
+        await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Set max flash amount to 5 WETH
+      await wethUsdcPool.setMaxFlashAmount(ethers.parseEther('5'));
+      expect(await wethUsdcPool.maxFlashAmount()).to.equal(ethers.parseEther('5'));
+
+      // Try to flash 10 WETH — should fail
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter2.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        RATE_USDC_TO_WETH_2PCT_PROFIT
+      );
+
+      const swapPath = build2HopCrossRouterPath(
+        await dexRouter1.getAddress(), await dexRouter2.getAddress(),
+        await weth.getAddress(), await usdc.getAddress(), 1n, 1n
+      );
+      const deadline = await getDeadline();
+
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await wethUsdcPool.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('10'), // Exceeds 5 WETH limit
+          swapPath,
+          0,
+          deadline
+        )
+      ).to.be.revertedWith('Flash amount exceeds pool capacity');
+    });
+
+    it('should allow flash loan within maxFlashAmount limit', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc } =
+        await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Set max flash amount to 100 WETH
+      await wethUsdcPool.setMaxFlashAmount(ethers.parseEther('100'));
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter2.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        RATE_USDC_TO_WETH_2PCT_PROFIT
+      );
+
+      const swapPath = build2HopCrossRouterPath(
+        await dexRouter1.getAddress(), await dexRouter2.getAddress(),
+        await weth.getAddress(), await usdc.getAddress(), 1n, 1n
+      );
+      const deadline = await getDeadline();
+
+      // 10 WETH flash loan within 100 WETH limit — should succeed
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await wethUsdcPool.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('10'),
+          swapPath,
+          0,
+          deadline
+        )
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+    });
+  });
 });

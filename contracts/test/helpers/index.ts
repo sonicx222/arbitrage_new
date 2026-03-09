@@ -49,6 +49,7 @@ export {
   testWithdrawETH,
   testWithdrawGasLimitConfig,
   testOwnable2Step,
+  testZeroAmountEdgeCases,
   testAllAdminFunctions,
   type AdminTestFixture,
   type AdminTestConfig,

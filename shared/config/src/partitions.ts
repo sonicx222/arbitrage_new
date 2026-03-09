@@ -244,18 +244,21 @@ export const PARTITIONS: PartitionConfig[] = [
     healthCheckIntervalMs: 15000,
     failoverTimeoutMs: 60000
   },
-  // P2: L2-Turbo - Fast Ethereum L2 rollups + emerging L2s
+  // P2: L2-Turbo - Fast Ethereum L2 rollups
+  // Note: mantle/mode removed — unverified DEX factory addresses (stubs per CLAUDE.md).
+  // Already excluded from SUPPORTED_EXECUTION_CHAINS (commit 923b88ff).
+  // Re-add when DEX factories are RPC-verified and downstream configs updated.
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode'],
+    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'heavy', // 7 chains
+    resourceProfile: 'heavy', // 5 chains
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 896, // 7 chains
+    maxMemoryMB: 768, // 5 chains (reduced from 896)
     enabled: true,
     healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000

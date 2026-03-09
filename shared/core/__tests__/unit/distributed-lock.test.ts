@@ -211,33 +211,61 @@ describe('DistributedLockManager', () => {
     it('should use exponential backoff when configured', async () => {
       mockRedisClient.setNx.mockResolvedValue(false);
 
-      const startTime = Date.now();
-      await lockManager.acquireLock('test-resource', {
-        retries: 3,
-        retryDelayMs: 50,
-        exponentialBackoff: true
-      });
-      const elapsed = Date.now() - startTime;
+      // Spy on setTimeout to capture delay values without replacing behavior
+      const delays: number[] = [];
+      const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout');
+      setTimeoutSpy.mockImplementation(((fn: (...args: unknown[]) => void, ms?: number) => {
+        if (ms !== undefined && ms >= 10) {
+          delays.push(ms);
+        }
+        // Execute callback immediately to avoid real waiting
+        Promise.resolve().then(() => fn());
+        return 0 as unknown as NodeJS.Timeout;
+      }) as typeof globalThis.setTimeout);
 
-      // With exponential backoff: 50 + 100 + 200 = 350ms minimum
-      expect(elapsed).toBeGreaterThanOrEqual(300); // Some tolerance
+      try {
+        await lockManager.acquireLock('test-resource', {
+          retries: 3,
+          retryDelayMs: 50,
+          exponentialBackoff: true
+        });
+
+        // With exponential backoff: 50*2^0=50, 50*2^1=100, 50*2^2=200
+        expect(delays).toEqual([50, 100, 200]);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
     });
 
     it('should respect maxRetryDelayMs with exponential backoff', async () => {
       mockRedisClient.setNx.mockResolvedValue(false);
 
-      const startTime = Date.now();
-      await lockManager.acquireLock('test-resource', {
-        retries: 5,
-        retryDelayMs: 100,
-        exponentialBackoff: true,
-        maxRetryDelayMs: 150
-      });
-      const elapsed = Date.now() - startTime;
+      // Spy on setTimeout to capture delay values without replacing behavior
+      const delays: number[] = [];
+      const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout');
+      setTimeoutSpy.mockImplementation(((fn: (...args: unknown[]) => void, ms?: number) => {
+        if (ms !== undefined && ms >= 10) {
+          delays.push(ms);
+        }
+        // Execute callback immediately to avoid real waiting
+        Promise.resolve().then(() => fn());
+        return 0 as unknown as NodeJS.Timeout;
+      }) as typeof globalThis.setTimeout);
 
-      // Delays should be: 100, 150, 150, 150, 150 = 700ms max
-      // Without cap would be: 100, 200, 400, 800, 1600 = 3100ms
-      expect(elapsed).toBeLessThan(1000);
+      try {
+        await lockManager.acquireLock('test-resource', {
+          retries: 5,
+          retryDelayMs: 100,
+          exponentialBackoff: true,
+          maxRetryDelayMs: 150
+        });
+
+        // Delays should be capped: min(100,150)=100, min(200,150)=150, min(400,150)=150, min(800,150)=150, min(1600,150)=150
+        // Without cap would be: 100, 200, 400, 800, 1600
+        expect(delays).toEqual([100, 150, 150, 150, 150]);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
     });
   });
 

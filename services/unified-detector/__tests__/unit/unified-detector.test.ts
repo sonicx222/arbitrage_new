@@ -70,23 +70,31 @@ jest.mock('@arbitrage/core/resilience', () => ({
     triggerDegradation: jest.fn(),
   })),
   GracefulDegradationManager: jest.fn(),
-  DegradationLevel: { NONE: 'none', PARTIAL: 'partial', FULL: 'full' },
+  DegradationLevel: { NONE: 'none', PARTIAL: 'partial', FULL: 'full', REDUCED_CHAINS: 'reduced_chains' },
   getErrorMessage: jest.fn().mockImplementation((e: unknown) => e instanceof Error ? e.message : String(e)),
 }));
 
-jest.mock('@arbitrage/core/redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue({
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-  getRedisStreamsClient: jest.fn().mockResolvedValue({
-    xadd: jest.fn().mockResolvedValue('stream-id'),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-  RedisClient: jest.fn(),
-  RedisStreamsClient: jest.fn(),
-  DistributedLockManager: jest.fn(),
-  StreamBatcher: jest.fn(),
-}));
+jest.mock('@arbitrage/core/redis', () => {
+  // FLAKY-FIX: RedisStreamsClient needs a STREAMS static property because
+  // health-reporter.ts references RedisStreamsClient.STREAMS.HEALTH at runtime.
+  // Without it, the fire-and-forget health publish IIFE throws a TypeError
+  // ("Cannot read properties of undefined") on every start() call.
+  const MockRedisStreamsClient = jest.fn();
+  MockRedisStreamsClient.STREAMS = { HEALTH: 'stream:health' };
+  return {
+    getRedisClient: jest.fn().mockResolvedValue({
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    }),
+    getRedisStreamsClient: jest.fn().mockResolvedValue({
+      xadd: jest.fn().mockResolvedValue('stream-id'),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    }),
+    RedisClient: jest.fn(),
+    RedisStreamsClient: MockRedisStreamsClient,
+    DistributedLockManager: jest.fn(),
+    StreamBatcher: jest.fn(),
+  };
+});
 
 jest.mock('@arbitrage/core/monitoring', () => ({
   CrossRegionHealthManager: jest.fn(),
@@ -223,11 +231,16 @@ jest.mock('@arbitrage/config', () => ({
 
 describe('UnifiedChainDetector', () => {
   let logger: RecordingLogger;
-  let mockStreamsClient: { xadd: jest.Mock; disconnect: jest.Mock };
+  let mockStreamsClient: { xadd: jest.Mock; xaddWithLimit: jest.Mock; disconnect: jest.Mock };
   let mockRedisClient: { disconnect: jest.Mock };
   let mockStateManager: ReturnType<typeof createMockStateManager>;
   let mockLogger: ReturnType<typeof createMockLogger>;
   let mockPerfLogger: ReturnType<typeof createMockPerfLogger>;
+  // FLAKY-FIX: Track detector instance for cleanup in afterEach.
+  // Tests that call start() without stop() leave dangling setInterval handles
+  // from health-reporter, metrics-collector, and opportunity cleanup. These
+  // leak across tests and can cause "worker process crashed" in the full suite.
+  let detector: UnifiedChainDetector | null = null;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -315,6 +328,11 @@ describe('UnifiedChainDetector', () => {
 
     mockStreamsClient = {
       xadd: jest.fn().mockResolvedValue('stream-id'),
+      // FLAKY-FIX: health-reporter calls streamsClient.xaddWithLimit() in a
+      // fire-and-forget IIFE during start(). Without this mock, the IIFE throws
+      // "xaddWithLimit is not a function" — caught by try/catch but the error
+      // path exercises stale mocks when resetMocks runs between tests.
+      xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
       disconnect: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -328,7 +346,23 @@ describe('UnifiedChainDetector', () => {
     mockPerfLogger = createMockPerfLogger();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // FLAKY-FIX: Stop the detector to clear all intervals (opportunity cleanup,
+    // health check, metrics collection) created during start(). Without this,
+    // dangling fake timers survive into the next test or — worse — fire after
+    // jest.useRealTimers() restores real timer behaviour, causing unhandled
+    // errors on destroyed mocks.
+    if (detector) {
+      try {
+        await detector.stop();
+      } catch {
+        // Ignore stop errors during cleanup
+      }
+      detector = null;
+    }
+    // Flush any remaining queued fake-timer callbacks before switching back to
+    // real timers. This prevents callbacks from firing in an undefined state.
+    jest.clearAllTimers();
     jest.useRealTimers();
   });
 
@@ -338,7 +372,7 @@ describe('UnifiedChainDetector', () => {
 
   describe('constructor', () => {
     it('should create detector with default config', () => {
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         stateManager: mockStateManager as any,
         logger: mockLogger as any,
         perfLogger: mockPerfLogger as any,
@@ -351,7 +385,7 @@ describe('UnifiedChainDetector', () => {
     });
 
     it('should create detector with custom config', () => {
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'custom-partition',
         chains: ['ethereum'],
         instanceId: 'custom-instance',
@@ -380,7 +414,7 @@ describe('UnifiedChainDetector', () => {
         return instance;
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum', 'polygon'],
         chainInstanceFactory: mockFactory,
@@ -405,7 +439,7 @@ describe('UnifiedChainDetector', () => {
         return createdInstance;
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum'],
         chainInstanceFactory: mockFactory,
@@ -444,7 +478,7 @@ describe('UnifiedChainDetector', () => {
         return createMockChainInstance(cfg.chainId, callCount === 1);
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum', 'polygon'],
         chainInstanceFactory: mockFactory,
@@ -480,7 +514,7 @@ describe('UnifiedChainDetector', () => {
         return instance;
       });
 
-      const detector = new UnifiedChainDetector({
+      const det = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum'],
         chainInstanceFactory: mockFactory,
@@ -492,10 +526,11 @@ describe('UnifiedChainDetector', () => {
         enableCrossRegionHealth: false,
       });
 
-      await detector.start();
-      await detector.stop();
+      await det.start();
+      await det.stop();
 
-      expect(detector.getChains()).toHaveLength(0);
+      expect(det.getChains()).toHaveLength(0);
+      expect(mockInstances[0].stop).toHaveBeenCalled();
       expect(mockStreamsClient.disconnect).toHaveBeenCalled();
       expect(mockRedisClient.disconnect).toHaveBeenCalled();
     });
@@ -511,7 +546,7 @@ describe('UnifiedChainDetector', () => {
         return createMockChainInstance(cfg.chainId);
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum', 'polygon'],
         chainInstanceFactory: mockFactory,
@@ -541,7 +576,7 @@ describe('UnifiedChainDetector', () => {
         return createMockChainInstance(cfg.chainId);
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum'],
         chainInstanceFactory: mockFactory,
@@ -593,7 +628,7 @@ describe('UnifiedChainDetector', () => {
         return instance;
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum', 'polygon'],
         chainInstanceFactory: mockFactory,
@@ -618,7 +653,7 @@ describe('UnifiedChainDetector', () => {
         return createMockChainInstance(cfg.chainId);
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum'],
         chainInstanceFactory: mockFactory,
@@ -659,7 +694,7 @@ describe('UnifiedChainDetector', () => {
         return instance;
       });
 
-      const detector = new UnifiedChainDetector({
+      detector = new UnifiedChainDetector({
         partitionId: 'test-partition',
         chains: ['ethereum', 'polygon'],
         chainInstanceFactory: mockFactory,

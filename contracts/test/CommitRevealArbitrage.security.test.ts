@@ -706,4 +706,86 @@ describe('CommitRevealArbitrage Security', () => {
       expect(await commitAttackRouter.attackSucceeded()).to.be.false;
     });
   });
+
+  // ===========================================================================
+  // M-03: CommitmentAlreadyRevealed is unreachable (documented behavior)
+  // ===========================================================================
+  describe('M-03: CommitmentAlreadyRevealed unreachability', () => {
+    it('should hit CommitmentNotFound (not CommitmentAlreadyRevealed) on double reveal', async () => {
+      // CommitmentAlreadyRevealed is defined in the contract but is unreachable because
+      // _executeAndVerifyProfit() sets both info.revealed=true AND info.blockNumber=0
+      // in the same transaction. Any subsequent reveal() for the same hash hits
+      // CommitmentNotFound (blockNumber==0) before reaching the revealed check.
+      //
+      // This test documents that behavior: after a successful reveal, the commitment
+      // storage is zeroed, so re-reveal gets CommitmentNotFound — not CommitmentAlreadyRevealed.
+      const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        RATE_USDC_TO_WETH_1PCT_PROFIT
+      );
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: ethers.parseUnits('1900', 6),
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: ethers.parseEther('0.99'),
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        user.address,
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+      await mineBlocks(1);
+      await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
+
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn: amountIn,
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: salt
+      };
+
+      // First reveal succeeds
+      await commitRevealArbitrage.connect(user).reveal(revealParams);
+
+      // Verify commitment state: revealed=true, blockNumber=0
+      expect(await commitRevealArbitrage.revealed(commitmentHash)).to.be.true;
+      expect(await commitRevealArbitrage.commitments(commitmentHash)).to.equal(0);
+
+      // Second reveal: CommitmentNotFound fires (blockNumber==0), NOT CommitmentAlreadyRevealed
+      await expect(
+        commitRevealArbitrage.connect(user).reveal(revealParams)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
+    });
+  });
 });

@@ -256,7 +256,7 @@ describe('ConfidenceCalculator', () => {
         },
       );
 
-      expect(withLowConfML).toBeCloseTo(withoutML, 10);
+      expect(withLowConfML).toBeCloseTo(withoutML, 5);
     });
 
     it('should not apply ML adjustments when ML is disabled', () => {

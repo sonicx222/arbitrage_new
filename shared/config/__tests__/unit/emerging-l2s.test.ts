@@ -51,6 +51,8 @@ interface EmergingL2TestData {
   mevStrategy: string;
   /** H-09 FIX: Stubs (mantle, mode) removed from SUPPORTED_EXECUTION_CHAINS */
   isExecutionStub?: boolean;
+  /** M-01: Expected partition (mantle/mode fall back to high-value after removal from P2) */
+  expectedPartition?: string;
 }
 
 const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
@@ -86,7 +88,7 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     minTokenCount: 2,
     requiredTokenSymbols: ['WMNT', 'USDC'],
     mevStrategy: 'sequencer',
-    isExecutionStub: true,
+    expectedPartition: 'high-value', // M-01: mantle removed from P2, falls back to high-value
   },
   {
     chainKey: 'mode',
@@ -98,7 +100,7 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     minTokenCount: 2,
     requiredTokenSymbols: ['WETH', 'USDC'],
     mevStrategy: 'sequencer',
-    isExecutionStub: true,
+    expectedPartition: 'high-value', // M-01: mode removed from P2, falls back to high-value
   },
 ];
 
@@ -270,11 +272,12 @@ describe('Emerging L2s Configuration', () => {
       // Partition Assignment
       // -----------------------------------------------------------------------
       describe('Partition assignment', () => {
-        it('is assigned to l2-turbo partition', () => {
+        it('is assigned to expected partition', () => {
           const partition = assignChainToPartition(chainData.chainKey);
           expect(partition).not.toBeNull();
-          // All 4 emerging L2s are now assigned to P2 (l2-turbo)
-          expect(partition!.partitionId).toBe(PARTITION_IDS.L2_TURBO);
+          // M-01: blast/scroll stay in l2-turbo; mantle/mode fall back to high-value (stubs)
+          const expected = chainData.expectedPartition ?? PARTITION_IDS.L2_TURBO;
+          expect(partition!.partitionId).toBe(expected);
         });
       });
 
@@ -335,17 +338,15 @@ describe('Emerging L2s Configuration', () => {
       expect(MAINNET_CHAIN_IDS.length).toBe(15);
     });
 
-    it('P2 partition has 7 chains (all emerging L2s now in l2-turbo)', () => {
+    it('P2 partition has 5 chains (mantle/mode excluded as stubs)', () => {
       const p2 = assignChainToPartition('arbitrum');
       expect(p2).not.toBeNull();
-      expect(p2!.chains.length).toBe(7);
+      expect(p2!.chains.length).toBe(5);
       expect(p2!.chains).toContain('arbitrum');
       expect(p2!.chains).toContain('optimism');
       expect(p2!.chains).toContain('base');
       expect(p2!.chains).toContain('scroll');
       expect(p2!.chains).toContain('blast');
-      expect(p2!.chains).toContain('mantle');
-      expect(p2!.chains).toContain('mode');
     });
 
     it('Scroll has SyncSwap and Aave V3 flash loan support', () => {
@@ -363,8 +364,9 @@ describe('Emerging L2s Configuration', () => {
       expect(FLASH_LOAN_AVAILABILITY['mantle']?.aave_v3).toBe(true);
     });
 
-    it('Mode has Balancer V2 flash loan support', () => {
-      expect(FLASH_LOAN_AVAILABILITY['mode']?.balancer_v2).toBe(true);
+    it('Mode has no usable flash loan providers (Balancer V2 contract not deployed)', () => {
+      // H-001: balancer_v2 exists on-chain but BalancerV2FlashArbitrage.sol not deployed
+      expect(FLASH_LOAN_AVAILABILITY['mode']?.balancer_v2).toBe(false);
     });
 
     it('Scroll has bridge routes configured', () => {

@@ -40,6 +40,9 @@ contract MockPancakeV3Pool is IPancakeV3Pool {
     /// @dev Configurable liquidity for testing (default: max = active pool)
     uint128 private _liquidity = type(uint128).max;
 
+    /// @dev Configurable max flash amount per token for testing finite reserve scenarios (H-02)
+    uint256 private _maxFlashAmount = type(uint256).max;
+
     event Flash(
         address indexed recipient,
         uint256 amount0,
@@ -87,6 +90,10 @@ contract MockPancakeV3Pool is IPancakeV3Pool {
         bytes calldata data
     ) external override {
         require(amount0 > 0 || amount1 > 0, "Both amounts cannot be zero");
+
+        // H-02: Enforce configurable max flash amount for testing finite reserve scenarios
+        if (amount0 > _maxFlashAmount) revert("Flash amount exceeds pool capacity");
+        if (amount1 > _maxFlashAmount) revert("Flash amount exceeds pool capacity");
 
         // Fee is in hundredths of a basis point (e.g., 2500 = 0.25%). Divide by 1e6 to get fraction.
         uint256 fee0 = (amount0 * fee) / 1e6;
@@ -169,6 +176,21 @@ contract MockPancakeV3Pool is IPancakeV3Pool {
      */
     function setLiquidity(uint128 newLiquidity) external {
         _liquidity = newLiquidity;
+    }
+
+    /**
+     * @notice Set max flash amount for testing finite reserve scenarios (H-02)
+     * @param newMaxFlashAmount Maximum amount per token that can be flash loaned (type(uint256).max = unlimited)
+     */
+    function setMaxFlashAmount(uint256 newMaxFlashAmount) external {
+        _maxFlashAmount = newMaxFlashAmount;
+    }
+
+    /**
+     * @notice Returns the current max flash amount
+     */
+    function maxFlashAmount() external view returns (uint256) {
+        return _maxFlashAmount;
     }
 
     /**

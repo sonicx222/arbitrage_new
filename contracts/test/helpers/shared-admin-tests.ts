@@ -566,6 +566,68 @@ export function testOwnable2Step(config: AdminTestConfig): void {
 }
 
 // =============================================================================
+// M-10: Zero-Amount Edge Case Tests (~3 tests)
+// =============================================================================
+
+export function testZeroAmountEdgeCases(config: AdminTestConfig): void {
+  const { contractName, getFixture } = config;
+
+  describe(`${contractName} — Zero-Amount Edge Cases (M-10)`, () => {
+    it('should allow withdrawToken with zero amount (no-op transfer)', async () => {
+      const { contract, weth, owner } = await getFixture();
+
+      // Fund the contract with some tokens
+      await weth.mint(await contract.getAddress(), ethers.parseEther('1'));
+
+      const ownerBalanceBefore = await weth.balanceOf(owner.address);
+
+      // Zero-amount withdraw should succeed (ERC20 safeTransfer allows 0)
+      await contract.connect(owner).withdrawToken(
+        await weth.getAddress(),
+        owner.address,
+        0
+      );
+
+      const ownerBalanceAfter = await weth.balanceOf(owner.address);
+      expect(ownerBalanceAfter).to.equal(ownerBalanceBefore); // No change
+    });
+
+    it('should allow withdrawETH with zero amount (no-op transfer)', async () => {
+      const { contract, owner } = await getFixture();
+
+      // Fund contract with ETH
+      await owner.sendTransaction({
+        to: await contract.getAddress(),
+        value: ethers.parseEther('1'),
+      });
+
+      const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
+
+      // Zero-amount ETH withdraw should succeed
+      const tx = await contract.connect(owner).withdrawETH(owner.address, 0);
+      const receipt = await tx.wait();
+      const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
+
+      const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
+      // Only change should be gas cost
+      expect(ownerBalanceAfter).to.be.closeTo(
+        ownerBalanceBefore - gasUsed,
+        ethers.parseEther('0.001')
+      );
+    });
+
+    it('should reject setWithdrawGasLimit(0) with InvalidGasLimit', async () => {
+      const { contract, owner } = await getFixture();
+
+      // 0 is below the minimum of 2300
+      await expect(
+        contract.connect(owner).setWithdrawGasLimit(0)
+      ).to.be.revertedWithCustomError(contract, 'InvalidGasLimit');
+    });
+  });
+}
+
+// =============================================================================
 // Convenience: Run All Admin Tests
 // =============================================================================
 
