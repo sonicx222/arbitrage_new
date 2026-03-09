@@ -17,12 +17,15 @@ import { safeParseFloat, safeParseInt } from './utils/env-parsing';
 /**
  * Check if running in production environment.
  * Production is detected by NODE_ENV=production or common production indicators.
+ * L-003 FIX: Excludes CI environments that may set platform env vars for deployment testing.
  */
-export const isProduction = process.env.NODE_ENV === 'production' ||
+export const isProduction = process.env.CI !== 'true' && (
+  process.env.NODE_ENV === 'production' ||
   process.env.FLY_APP_NAME !== undefined ||  // Fly.io
   process.env.RAILWAY_ENVIRONMENT !== undefined ||  // Railway
   process.env.RENDER_SERVICE_NAME !== undefined ||  // Render
-  process.env.KOYEB_SERVICE_NAME !== undefined;  // Koyeb
+  process.env.KOYEB_SERVICE_NAME !== undefined  // Koyeb
+);
 
 /**
  * Check if Redis is self-hosted (e.g., on same Oracle ARM instance).

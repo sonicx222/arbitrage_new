@@ -426,6 +426,7 @@ describe('validateProductionConfig', () => {
     it('should detect Fly.io as production', async () => {
       const { validateProductionConfig } = await importWithEnv({
         NODE_ENV: undefined,
+        CI: undefined, // L-003: Clear CI flag so platform detection is not suppressed
         FLY_APP_NAME: 'my-app',
         REDIS_URL: 'redis://prod-redis.example.com:6379',
         WALLET_PRIVATE_KEY: '0xdeadbeef',

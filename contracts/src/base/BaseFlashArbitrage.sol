@@ -119,10 +119,15 @@ abstract contract BaseFlashArbitrage is
     /// @notice Minimum profit required for arbitrage execution (in token units)
     /// @dev Defaults to 1e14 (0.0001 ETH for 18-decimal tokens) to prevent
     ///      zero-profit trades that waste gas. Override via setMinimumProfit().
+    ///      IMPORTANT: This value is token-denominator-dependent. For 6-decimal tokens
+    ///      (USDC/USDT), 1e14 = $100M — effectively blocks all trades. Deployers MUST
+    ///      call setMinimumProfit() with an appropriate value for the target token decimals.
     uint256 public minimumProfit;
 
     /// @notice Total profits accumulated (aggregate counter, may mix denominations)
     /// @dev Kept for backward compatibility. Use tokenProfits(asset) for accurate per-token tracking.
+    ///      Costs ~5K gas/tx (SSTORE). Will be removed in next major version (v3.0.0).
+    /// @custom:deprecated Use tokenProfits mapping for per-asset tracking instead.
     uint256 public totalProfits;
 
     /// @notice Per-token profit tracking (token address => accumulated profit in token units)
@@ -447,7 +452,7 @@ abstract contract BaseFlashArbitrage is
 
         // Track profits per-token (avoids mixing denominations)
         tokenProfits[asset] += profit;
-        // Maintain legacy aggregate counter for backward compatibility
+        // L-001: Legacy aggregate counter — deprecated, will be removed in v3.0.0
         totalProfits += profit;
         // M-003 FIX: Emit per-token profit event for on-chain indexers
         emit ProfitTracked(asset, profit, tokenProfits[asset]);

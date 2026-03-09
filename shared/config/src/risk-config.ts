@@ -425,7 +425,10 @@ export function validateRiskConfig(): void {
   }
 }
 
-// Validate at import time (skip in test environment)
+// Validate at import time (skip in test environment).
+// L-013: Test envs lack RISK_TOTAL_CAPITAL and other production env vars,
+// so auto-validation would always fail. Tests that need risk config validation
+// should call validateRiskConfig() explicitly after setting up env vars.
 if (process.env.NODE_ENV !== 'test') {
   try {
     validateRiskConfig();
