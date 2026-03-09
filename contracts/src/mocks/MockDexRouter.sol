@@ -23,7 +23,23 @@ import "../interfaces/IDexRouter.sol";
  * - Set rates that ensure non-zero output for your test amounts
  * - The contract now emits a warning event when output truncates to zero
  *
- * @custom:version 1.0.0
+ * ## Fee Simulation (M-05)
+ *
+ * When feeBps > 0, output is reduced by the fee percentage:
+ *   amountOut = (rawAmountOut * (10000 - feeBps)) / 10000
+ *
+ * Real DEXes charge 0.3% (V2, 30 bps) or variable (V3: 1-100 bps).
+ * Set via setFeeBps(). Default: 0 (no fee, backward compatible).
+ *
+ * ## AMM Curve Simulation (H-03)
+ *
+ * When ammMode is enabled, output follows constant-product curve:
+ *   amountOut = (reserveOut * amountIn) / (reserveIn + amountIn)
+ *
+ * This simulates price impact for large trades. Enable with setAmmMode()
+ * and configure reserves with setReserves(). Default: off (static rates).
+ *
+ * @custom:version 1.1.0
  */
 contract MockDexRouter is IDexRouter {
     using SafeERC20 for IERC20;
@@ -36,8 +52,43 @@ contract MockDexRouter is IDexRouter {
     /// @notice When true, allows zero-output swaps instead of reverting
     bool public allowZeroOutput = false;
 
+    /// @dev M-05: Fee in basis points deducted from output (0 = no fee, 30 = 0.3%)
+    uint256 public feeBps;
+
+    /// @dev H-03: AMM constant-product curve mode
+    bool public ammMode;
+
+    /// @dev H-03: AMM reserves for constant-product simulation
+    /// tokenA => tokenB => reserveIn (amount of tokenA in pool)
+    mapping(address => mapping(address => uint256)) public reserveIn;
+    /// tokenA => tokenB => reserveOut (amount of tokenB in pool)
+    mapping(address => mapping(address => uint256)) public reserveOut;
+
     function setAllowZeroOutput(bool _allow) external {
         allowZeroOutput = _allow;
+    }
+
+    /// @notice M-05: Set fee in basis points (e.g., 30 = 0.3%)
+    function setFeeBps(uint256 _feeBps) external {
+        require(_feeBps < 10000, "Fee must be < 100%");
+        feeBps = _feeBps;
+    }
+
+    /// @notice H-03: Enable/disable AMM constant-product curve mode
+    function setAmmMode(bool _enabled) external {
+        ammMode = _enabled;
+    }
+
+    /// @notice H-03: Set pool reserves for AMM curve simulation
+    function setReserves(
+        address tokenIn,
+        address tokenOut,
+        uint256 _reserveIn,
+        uint256 _reserveOut
+    ) external {
+        require(_reserveIn > 0 && _reserveOut > 0, "Reserves must be > 0");
+        reserveIn[tokenIn][tokenOut] = _reserveIn;
+        reserveOut[tokenIn][tokenOut] = _reserveOut;
     }
 
     event Swap(
@@ -102,16 +153,30 @@ contract MockDexRouter is IDexRouter {
             address tokenIn = path[i];
             address tokenOut = path[i + 1];
 
-            uint256 rate = exchangeRates[tokenIn][tokenOut];
-            require(rate > 0, "Exchange rate not set");
+            uint256 amountOut;
 
-            // Calculate output: amountIn * rate / 1e18
+            // H-03: AMM curve mode uses constant-product formula
+            if (ammMode && reserveIn[tokenIn][tokenOut] > 0) {
+                uint256 rIn = reserveIn[tokenIn][tokenOut];
+                uint256 rOut = reserveOut[tokenIn][tokenOut];
+                // x * y = k → amountOut = (rOut * amountIn) / (rIn + amountIn)
+                amountOut = (rOut * currentAmount) / (rIn + currentAmount);
+            } else {
+                uint256 rate = exchangeRates[tokenIn][tokenOut];
+                require(rate > 0, "Exchange rate not set");
+                // Calculate output: amountIn * rate / 1e18
+                amountOut = (currentAmount * rate) / 1e18;
+            }
+
+            // M-05: Apply fee deduction
+            if (feeBps > 0) {
+                amountOut = (amountOut * (10000 - feeBps)) / 10000;
+            }
+
             // Fix 4.2: Check for zero output due to truncation
-            uint256 amountOut = (currentAmount * rate) / 1e18;
-
-            // Emit warning if truncation results in zero (helps debug test issues)
             if (amountOut == 0 && currentAmount > 0) {
-                emit ZeroOutputWarning(tokenIn, tokenOut, currentAmount, rate);
+                emit ZeroOutputWarning(tokenIn, tokenOut, currentAmount,
+                    exchangeRates[tokenIn][tokenOut]);
                 require(allowZeroOutput, "Zero output from truncation");
             }
 
@@ -151,10 +216,26 @@ contract MockDexRouter is IDexRouter {
 
         uint256 currentAmount = amountIn;
         for (uint256 i = 0; i < path.length - 1; i++) {
-            uint256 rate = exchangeRates[path[i]][path[i + 1]];
-            require(rate > 0, "Exchange rate not set");
+            address tIn = path[i];
+            address tOut = path[i + 1];
+            uint256 amountOut;
 
-            uint256 amountOut = (currentAmount * rate) / 1e18;
+            // H-03: AMM curve mode
+            if (ammMode && reserveIn[tIn][tOut] > 0) {
+                uint256 rIn = reserveIn[tIn][tOut];
+                uint256 rOut = reserveOut[tIn][tOut];
+                amountOut = (rOut * currentAmount) / (rIn + currentAmount);
+            } else {
+                uint256 rate = exchangeRates[tIn][tOut];
+                require(rate > 0, "Exchange rate not set");
+                amountOut = (currentAmount * rate) / 1e18;
+            }
+
+            // M-05: Apply fee deduction
+            if (feeBps > 0) {
+                amountOut = (amountOut * (10000 - feeBps)) / 10000;
+            }
+
             if (amountOut == 0 && currentAmount > 0) {
                 require(allowZeroOutput, "Zero output from truncation");
             }

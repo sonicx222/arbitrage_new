@@ -1602,4 +1602,357 @@ describe('MultiPathQuoter', () => {
       expect(profitsWithExplicit[0]).to.equal(profitsWithFlash[0]);
     });
   });
+
+  // ===========================================================================
+  // 11. M-09: MAX_PATHS x MAX_HOPS Gas Stress Test
+  // ===========================================================================
+  describe('11. M-09: MAX_PATHS x MAX_HOPS gas stress test', () => {
+    it('should handle 20 paths of 5 hops each within block gas limit', async () => {
+      const { quoter, uniswapRouter, weth } = await loadFixture(
+        deployContractsFixture
+      );
+
+      // Deploy 4 additional 18-decimal tokens for 5-hop paths (avoids cross-decimal truncation)
+      const MockERC20Factory = await ethers.getContractFactory('MockERC20');
+      const tokenB = await MockERC20Factory.deploy('TokenB', 'TKB', 18);
+      const tokenC = await MockERC20Factory.deploy('TokenC', 'TKC', 18);
+      const tokenD = await MockERC20Factory.deploy('TokenD', 'TKD', 18);
+      const tokenE = await MockERC20Factory.deploy('TokenE', 'TKE', 18);
+
+      const routerAddr = await uniswapRouter.getAddress();
+      const wethAddr = await weth.getAddress();
+      const bAddr = await tokenB.getAddress();
+      const cAddr = await tokenC.getAddress();
+      const dAddr = await tokenD.getAddress();
+      const eAddr = await tokenE.getAddress();
+
+      // Set 1:1 rates (all 18-decimal tokens, no truncation risk)
+      await uniswapRouter.setExchangeRate(wethAddr, bAddr, ethers.parseEther('1.0'));
+      await uniswapRouter.setExchangeRate(bAddr, cAddr, ethers.parseEther('1.0'));
+      await uniswapRouter.setExchangeRate(cAddr, dAddr, ethers.parseEther('1.0'));
+      await uniswapRouter.setExchangeRate(dAddr, eAddr, ethers.parseEther('1.0'));
+      await uniswapRouter.setExchangeRate(eAddr, wethAddr, ethers.parseEther('1.0'));
+
+      // Build 20 identical 5-hop paths: WETH → B → C → D → E → WETH
+      const singlePath = [
+        { router: routerAddr, tokenIn: wethAddr, tokenOut: bAddr, amountIn: ethers.parseEther('1') },
+        { router: routerAddr, tokenIn: bAddr, tokenOut: cAddr, amountIn: 0 },
+        { router: routerAddr, tokenIn: cAddr, tokenOut: dAddr, amountIn: 0 },
+        { router: routerAddr, tokenIn: dAddr, tokenOut: eAddr, amountIn: 0 },
+        { router: routerAddr, tokenIn: eAddr, tokenOut: wethAddr, amountIn: 0 },
+      ];
+      const pathRequests = Array(20).fill(singlePath);
+      const flashLoanAmounts = Array(20).fill(ethers.parseEther('1'));
+
+      // Execute and measure gas
+      const gasUsed = await quoter.compareArbitragePaths.estimateGas(
+        pathRequests,
+        flashLoanAmounts,
+        5 // 5 bps fee
+      );
+
+      // 20 paths x 5 hops = 100 quotes. Must stay within 30M gas (mainnet block limit)
+      expect(gasUsed).to.be.lt(30_000_000n);
+
+      // Actually call to verify it returns valid results
+      const [profits, successFlags] = await quoter.compareArbitragePaths(
+        pathRequests,
+        flashLoanAmounts,
+        5
+      );
+      expect(profits.length).to.equal(20);
+      expect(successFlags.length).to.equal(20);
+
+      // All paths should succeed (rates are configured)
+      for (let i = 0; i < 20; i++) {
+        expect(successFlags[i]).to.be.true;
+      }
+    });
+
+    it('should report gas cost for maximum complexity scenario', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(
+        deployContractsFixture
+      );
+
+      // 20 single-hop paths (simpler, baseline comparison)
+      const routerAddr = await uniswapRouter.getAddress();
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+
+      const singleHopPaths = Array(20).fill([
+        { router: routerAddr, tokenIn: wethAddr, tokenOut: usdcAddr, amountIn: ethers.parseEther('1') },
+      ]);
+      const flashAmounts = Array(20).fill(ethers.parseEther('1'));
+
+      const gasSingleHop = await quoter.compareArbitragePaths.estimateGas(
+        singleHopPaths, flashAmounts, 5
+      );
+
+      // Gas per path should scale roughly linearly with hop count
+      // 20 single-hop paths as a baseline
+      expect(gasSingleHop).to.be.lt(5_000_000n);
+    });
+  });
+
+  // ===========================================================================
+  // 12. M-11: Adversarial All-Routers-Revert Test
+  // ===========================================================================
+  describe('12. M-11: Adversarial all-routers-revert test', () => {
+    it('should return gracefully when all router quotes revert', async () => {
+      const { quoter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      // Deploy a router with NO exchange rates set (quotes will revert)
+      const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
+      const brokenRouter = await MockDexRouterFactory.deploy('BrokenRouter');
+      const brokenAddr = await brokenRouter.getAddress();
+
+      const requests = [
+        {
+          router: brokenAddr,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: ethers.parseEther('1'),
+        },
+        {
+          router: brokenAddr,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: ethers.parseEther('2'),
+        },
+        {
+          router: brokenAddr,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: ethers.parseEther('5'),
+        },
+      ];
+
+      // getBatchedQuotes should NOT revert — it catches per-quote errors
+      const results = await quoter.getBatchedQuotes(requests);
+
+      expect(results.length).to.equal(3);
+      for (let i = 0; i < 3; i++) {
+        expect(results[i].success).to.be.false;
+        expect(results[i].amountOut).to.equal(0);
+      }
+    });
+
+    it('should return gracefully when all paths revert in compareArbitragePaths', async () => {
+      const { quoter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
+      const brokenRouter = await MockDexRouterFactory.deploy('BrokenRouter');
+      const brokenAddr = await brokenRouter.getAddress();
+
+      const brokenPath = [
+        {
+          router: brokenAddr,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: ethers.parseEther('1'),
+        },
+      ];
+
+      const pathRequests = Array(5).fill(brokenPath);
+      const flashLoanAmounts = Array(5).fill(ethers.parseEther('1'));
+
+      const [profits, successFlags] = await quoter.compareArbitragePaths(
+        pathRequests,
+        flashLoanAmounts,
+        5
+      );
+
+      expect(profits.length).to.equal(5);
+      expect(successFlags.length).to.equal(5);
+      for (let i = 0; i < 5; i++) {
+        expect(successFlags[i]).to.be.false;
+        expect(profits[i]).to.equal(0);
+      }
+    });
+
+    it('should bound gas usage when all quotes fail', async () => {
+      const { quoter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
+      const brokenRouter = await MockDexRouterFactory.deploy('BrokenRouter');
+      const brokenAddr = await brokenRouter.getAddress();
+
+      // 20 failing paths (MAX_PATHS)
+      const brokenPath = [
+        {
+          router: brokenAddr,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: ethers.parseEther('1'),
+        },
+      ];
+      const pathRequests = Array(20).fill(brokenPath);
+      const flashLoanAmounts = Array(20).fill(ethers.parseEther('1'));
+
+      const gasUsed = await quoter.compareArbitragePaths.estimateGas(
+        pathRequests, flashLoanAmounts, 5
+      );
+
+      // Even with all failures, gas should be bounded (< 2M for 20 failed quotes)
+      expect(gasUsed).to.be.lt(2_000_000n);
+    });
+  });
+
+  // ===========================================================================
+  // 13. M-05/H-03: MockDexRouter Fee and AMM Curve Tests
+  // ===========================================================================
+  describe('13. M-05/H-03: MockDexRouter fee and AMM curve', () => {
+    it('M-05: should deduct feeBps from swap output', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      // Get baseline quote (no fee)
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+      const routerAddr = await uniswapRouter.getAddress();
+      const amount = ethers.parseEther('1');
+
+      const requests = [{ router: routerAddr, tokenIn: wethAddr, tokenOut: usdcAddr, amountIn: amount }];
+      const [amountsNoFee] = await quoter.getIndependentQuotes(requests);
+      const baseOutput = amountsNoFee[0];
+
+      // Set 30 bps fee (0.3% like Uniswap V2)
+      await uniswapRouter.setFeeBps(30);
+
+      const [amountsWithFee] = await quoter.getIndependentQuotes(requests);
+      const feeOutput = amountsWithFee[0];
+
+      // Output should be reduced by 0.3%
+      const expectedOutput = (baseOutput * 9970n) / 10000n;
+      expect(feeOutput).to.equal(expectedOutput);
+
+      // Clean up
+      await uniswapRouter.setFeeBps(0);
+    });
+
+    it('M-05: should reject fee >= 100%', async () => {
+      const { uniswapRouter } = await loadFixture(deployContractsFixture);
+      await expect(uniswapRouter.setFeeBps(10000)).to.be.revertedWith('Fee must be < 100%');
+    });
+
+    it('H-03: should simulate price impact with AMM curve mode', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+      const routerAddr = await uniswapRouter.getAddress();
+
+      // Set up AMM reserves: 100 WETH + 200,000 USDC in pool
+      await uniswapRouter.setAmmMode(true);
+      await uniswapRouter.setReserves(
+        wethAddr, usdcAddr,
+        ethers.parseEther('100'),        // 100 WETH
+        ethers.parseUnits('200000', 6)   // 200,000 USDC
+      );
+
+      // Small trade: 1 WETH → should get ~1980 USDC (minimal price impact)
+      const smallRequests = [
+        { router: routerAddr, tokenIn: wethAddr, tokenOut: usdcAddr, amountIn: ethers.parseEther('1') },
+      ];
+      const [smallAmounts, smallSuccess] = await quoter.getIndependentQuotes(smallRequests);
+      expect(smallSuccess[0]).to.be.true;
+      // x*y=k: amountOut = (200000e6 * 1e18) / (100e18 + 1e18) = ~1980e6
+      expect(smallAmounts[0]).to.be.gt(ethers.parseUnits('1900', 6));
+      expect(smallAmounts[0]).to.be.lt(ethers.parseUnits('2000', 6));
+
+      // Large trade: 50 WETH → should get ~66,666 USDC (significant price impact)
+      const largeRequests = [
+        { router: routerAddr, tokenIn: wethAddr, tokenOut: usdcAddr, amountIn: ethers.parseEther('50') },
+      ];
+      const [largeAmounts, largeSuccess] = await quoter.getIndependentQuotes(largeRequests);
+      expect(largeSuccess[0]).to.be.true;
+      // x*y=k: amountOut = (200000e6 * 50e18) / (100e18 + 50e18) = ~66666e6
+      expect(largeAmounts[0]).to.be.gt(ethers.parseUnits('60000', 6));
+      expect(largeAmounts[0]).to.be.lt(ethers.parseUnits('70000', 6));
+
+      // Price impact: large trade gets much worse rate per WETH
+      // smallAmounts[0] is output for 1 WETH; largeAmounts[0] / 50 is output per WETH for 50 WETH trade
+      const smallPerWeth = smallAmounts[0]; // ~1980 USDC for 1 WETH
+      const largePerWeth = largeAmounts[0] / 50n; // ~1333 USDC per WETH for 50 WETH trade
+      expect(largePerWeth).to.be.lt(smallPerWeth); // Large trade has worse rate
+
+      // Clean up
+      await uniswapRouter.setAmmMode(false);
+    });
+
+    it('H-03: should reject zero reserves', async () => {
+      const { uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+      await expect(
+        uniswapRouter.setReserves(
+          await weth.getAddress(), await usdc.getAddress(), 0, ethers.parseUnits('200000', 6)
+        )
+      ).to.be.revertedWith('Reserves must be > 0');
+    });
+
+    it('H-03: should fall back to static rate when AMM reserves not set for pair', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+      const routerAddr = await uniswapRouter.getAddress();
+
+      // Enable AMM mode but DON'T set reserves for WETH/USDC
+      await uniswapRouter.setAmmMode(true);
+
+      // Should fall back to static exchange rate
+      const requests = [
+        { router: routerAddr, tokenIn: wethAddr, tokenOut: usdcAddr, amountIn: ethers.parseEther('1') },
+      ];
+      const [amounts, success] = await quoter.getIndependentQuotes(requests);
+      expect(success[0]).to.be.true;
+      // Should use static rate (2000 USDC per WETH)
+      expect(amounts[0]).to.equal(ethers.parseUnits('2000', 6));
+
+      await uniswapRouter.setAmmMode(false);
+    });
+  });
+
+  // ===========================================================================
+  // 14. M-06: MockSyncSwapVault Configurable Fee Tests
+  // ===========================================================================
+  describe('14. M-06: MockSyncSwapVault configurable fee', () => {
+    it('should allow changing flash loan fee percentage', async () => {
+      const MockSyncSwapVaultFactory = await ethers.getContractFactory('MockSyncSwapVault');
+      const { weth } = await loadFixture(deployContractsFixture);
+      const vault = await MockSyncSwapVaultFactory.deploy(await weth.getAddress());
+
+      // Default: 0.3%
+      expect(await vault.flashLoanFeePercentage()).to.equal(BigInt('3000000000000000'));
+
+      // Change to 0.5%
+      await vault.setFlashLoanFee(BigInt('5000000000000000'));
+      expect(await vault.flashLoanFeePercentage()).to.equal(BigInt('5000000000000000'));
+
+      // flashFee should reflect new rate
+      const fee = await vault.flashFee(await weth.getAddress(), ethers.parseEther('100'));
+      // 100 * 5e15 / 1e18 = 0.5 ETH
+      expect(fee).to.equal(ethers.parseEther('0.5'));
+    });
+
+    it('should allow setting fee to zero', async () => {
+      const MockSyncSwapVaultFactory = await ethers.getContractFactory('MockSyncSwapVault');
+      const { weth } = await loadFixture(deployContractsFixture);
+      const vault = await MockSyncSwapVaultFactory.deploy(await weth.getAddress());
+
+      await vault.setFlashLoanFee(0);
+      expect(await vault.flashLoanFeePercentage()).to.equal(0);
+
+      const fee = await vault.flashFee(await weth.getAddress(), ethers.parseEther('100'));
+      expect(fee).to.equal(0);
+    });
+
+    it('should reject fee > 100%', async () => {
+      const MockSyncSwapVaultFactory = await ethers.getContractFactory('MockSyncSwapVault');
+      const { weth } = await loadFixture(deployContractsFixture);
+      const vault = await MockSyncSwapVaultFactory.deploy(await weth.getAddress());
+
+      await expect(
+        vault.setFlashLoanFee(BigInt('1000000000000000001')) // > 1e18
+      ).to.be.revertedWith('Fee cannot exceed 100%');
+    });
+  });
 });

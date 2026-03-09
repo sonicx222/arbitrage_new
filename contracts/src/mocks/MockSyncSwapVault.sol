@@ -8,15 +8,21 @@ import "../interfaces/ISyncSwapVault.sol";
 /**
  * @title MockSyncSwapVault
  * @dev Mock SyncSwap Vault for testing EIP-3156 flash loans
- * @notice Simulates SyncSwap Vault behavior with 0.3% flash loan fee
+ * @notice Simulates SyncSwap Vault behavior with configurable flash loan fee
  *
- * @custom:version 1.0.0
+ * ## Fee Configuration (M-06)
+ *
+ * Default fee is 0.3% (3e15 in 18 decimals). Configurable via setFlashLoanFee()
+ * to test varying fee scenarios. Real SyncSwap uses dynamic fees via flashFee().
+ *
+ * @custom:version 1.1.0
  */
 contract MockSyncSwapVault is ISyncSwapVault {
     using SafeERC20 for IERC20;
 
-    /// @notice Flash loan fee percentage (0.3% = 3e15 in 18 decimals)
-    uint256 private constant FLASH_LOAN_FEE_PERCENTAGE = 3e15;
+    /// @notice Flash loan fee percentage in 18 decimals (default 0.3% = 3e15)
+    /// @dev M-06: Now configurable via setFlashLoanFee() for testing dynamic fee scenarios
+    uint256 private _flashLoanFeePercentage = 3e15;
 
     /// @notice EIP-3156 success return value
     bytes32 private constant ERC3156_CALLBACK_SUCCESS =
@@ -53,25 +59,27 @@ contract MockSyncSwapVault is ISyncSwapVault {
     }
 
     /**
-     * @notice Calculate flash loan fee (0.3% of amount)
+     * @notice Calculate flash loan fee
+     * @dev M-06: Uses configurable _flashLoanFeePercentage (default 0.3%)
      */
     function flashFee(address token, uint256 amount)
         external
-        pure
+        view
         override
         returns (uint256)
     {
         // Silence unused variable warning
         token;
 
-        return (amount * FLASH_LOAN_FEE_PERCENTAGE) / 1e18;
+        return (amount * _flashLoanFeePercentage) / 1e18;
     }
 
     /**
      * @notice Get the flash loan fee percentage
+     * @dev M-06: Returns configurable fee (default 3e15 = 0.3%)
      */
-    function flashLoanFeePercentage() external pure override returns (uint256) {
-        return FLASH_LOAN_FEE_PERCENTAGE;
+    function flashLoanFeePercentage() external view override returns (uint256) {
+        return _flashLoanFeePercentage;
     }
 
     /**
@@ -89,7 +97,7 @@ contract MockSyncSwapVault is ISyncSwapVault {
         }
 
         // Calculate fee (0.3%)
-        uint256 fee = (amount * FLASH_LOAN_FEE_PERCENTAGE) / 1e18;
+        uint256 fee = (amount * _flashLoanFeePercentage) / 1e18;
 
         // Check vault has sufficient balance
         require(
@@ -139,6 +147,15 @@ contract MockSyncSwapVault is ISyncSwapVault {
     // =========================================================================
     // Test Helpers
     // =========================================================================
+
+    /**
+     * @notice M-06: Set flash loan fee percentage (18-decimal format)
+     * @param newFeePercentage New fee (e.g., 3e15 = 0.3%, 5e15 = 0.5%)
+     */
+    function setFlashLoanFee(uint256 newFeePercentage) external {
+        require(newFeePercentage <= 1e18, "Fee cannot exceed 100%");
+        _flashLoanFeePercentage = newFeePercentage;
+    }
 
     /**
      * @notice Set flag to simulate flash loan failure

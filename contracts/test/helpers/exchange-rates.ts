@@ -5,6 +5,26 @@
  * scattered across test files. MockDexRouter calculates:
  *   amountOut = (amountIn * rate) / 1e18
  *
+ * ## Decimal Convention (H-04)
+ *
+ * Rate values encode the OUTPUT AMOUNT per 1e18 INPUT in raw token units:
+ *
+ * | Pair         | Rate Value          | Meaning                            |
+ * |-------------|--------------------|------------------------------------|
+ * | WETH→USDC   | 2000e6 (2000000000) | 1e18 WETH in → 2000e6 USDC out    |
+ * | USDC→WETH   | 5e14 (500000000000000) | 1e18 "USDC units" in → 0.0005 WETH out |
+ * | WETH→DAI    | 2000e18             | 1e18 WETH in → 2000e18 DAI out    |
+ *
+ * **Key insight**: The rate denominator is ALWAYS 1e18 regardless of token decimals.
+ * This means cross-decimal pairs (WETH 18d → USDC 6d) need rates scaled to the
+ * OUTPUT token's decimals. Use `ethers.parseUnits(value, outputDecimals)` for clarity.
+ *
+ * **When feeBps > 0** (M-05): Output is further reduced:
+ *   finalOutput = (amountOut * (10000 - feeBps)) / 10000
+ *
+ * **When ammMode is enabled** (H-03): Static rates are ignored in favor of
+ * constant-product formula using configured reserves.
+ *
  * @see contracts/src/mocks/MockDexRouter.sol
  * @see performance-refactor.md Refactoring #2: Extract Exchange Rate Helper
  */
