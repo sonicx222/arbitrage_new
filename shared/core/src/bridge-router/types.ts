@@ -21,7 +21,7 @@ import { ethers } from 'ethers';
  * Supported bridge protocols.
  * @see shared/config/src/bridge-config.ts for route configuration, costs, and latencies
  */
-export type BridgeProtocol = 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
+export type BridgeProtocol = 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane' | 'debridge';
 
 /**
  * Bridge transaction status

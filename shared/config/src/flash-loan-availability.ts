@@ -137,7 +137,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     balancer_v2: false, // Balancer V2 not on Linea
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
-    syncswap: false, // SyncSwap planned but not yet deployed
+    syncswap: false, // CC-H02: SyncSwap Vault planned but not yet deployed on Linea. Track deployment status.
     dai_flash_mint: false,
     morpho: false,
   },

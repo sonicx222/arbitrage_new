@@ -27,7 +27,7 @@
  * Mirrors BridgeProtocol from @arbitrage/core bridge-router types.
  * Defined locally to avoid circular dependency (config cannot import from core).
  */
-export type BridgeProtocolName = 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane';
+export type BridgeProtocolName = 'stargate' | 'stargate-v2' | 'native' | 'across' | 'wormhole' | 'connext' | 'hyperlane' | 'debridge';
 
 export interface BridgeCostConfig {
   bridge: BridgeProtocolName;
@@ -76,6 +76,13 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'avalanche', dst: 'arbitrum', feeBps: 4, minFeeUsd: 0.3, latency: 90, reliability: 0.95 },
     { src: 'fantom', dst: 'ethereum', feeBps: 6, minFeeUsd: 0.5, latency: 180, reliability: 0.95 },
     { src: 'fantom', dst: 'arbitrum', feeBps: 4, minFeeUsd: 0.3, latency: 90, reliability: 0.95 },
+    // CC-H01 FIX: Expanded Fantom routes (BSC, Polygon, Avalanche via Stargate V1)
+    { src: 'bsc', dst: 'fantom', feeBps: 6, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
+    { src: 'fantom', dst: 'bsc', feeBps: 6, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
+    { src: 'polygon', dst: 'fantom', feeBps: 6, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
+    { src: 'fantom', dst: 'polygon', feeBps: 6, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
+    { src: 'avalanche', dst: 'fantom', feeBps: 6, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
+    { src: 'fantom', dst: 'avalanche', feeBps: 6, minFeeUsd: 0.5, latency: 120, reliability: 0.94 },
   ]},
   // Across Protocol - Fast with relayer model
   { bridge: 'across', routes: [
@@ -179,6 +186,23 @@ const BRIDGE_ROUTE_DATA: BridgeRouteData[] = [
     { src: 'solana', dst: 'ethereum', feeBps: 10, minFeeUsd: 5, latency: 300, reliability: 0.92 },
     { src: 'arbitrum', dst: 'solana', feeBps: 8, minFeeUsd: 3, latency: 240, reliability: 0.92 },
     { src: 'solana', dst: 'arbitrum', feeBps: 8, minFeeUsd: 3, latency: 240, reliability: 0.92 },
+  ]},
+  // deBridge - Fast Solana <-> EVM bridge with intent-based settlement (CC-M03 FIX)
+  { bridge: 'debridge', routes: [
+    { src: 'solana', dst: 'ethereum', feeBps: 8, minFeeUsd: 3, latency: 120, reliability: 0.94 },
+    { src: 'ethereum', dst: 'solana', feeBps: 8, minFeeUsd: 3, latency: 120, reliability: 0.94 },
+    { src: 'solana', dst: 'arbitrum', feeBps: 6, minFeeUsd: 2, latency: 90, reliability: 0.94 },
+    { src: 'arbitrum', dst: 'solana', feeBps: 6, minFeeUsd: 2, latency: 90, reliability: 0.94 },
+    { src: 'solana', dst: 'polygon', feeBps: 8, minFeeUsd: 2.5, latency: 120, reliability: 0.93 },
+    { src: 'polygon', dst: 'solana', feeBps: 8, minFeeUsd: 2.5, latency: 120, reliability: 0.93 },
+    { src: 'solana', dst: 'bsc', feeBps: 8, minFeeUsd: 2.5, latency: 120, reliability: 0.93 },
+    { src: 'bsc', dst: 'solana', feeBps: 8, minFeeUsd: 2.5, latency: 120, reliability: 0.93 },
+    { src: 'solana', dst: 'base', feeBps: 6, minFeeUsd: 2, latency: 90, reliability: 0.94 },
+    { src: 'base', dst: 'solana', feeBps: 6, minFeeUsd: 2, latency: 90, reliability: 0.94 },
+    { src: 'solana', dst: 'optimism', feeBps: 6, minFeeUsd: 2, latency: 90, reliability: 0.94 },
+    { src: 'optimism', dst: 'solana', feeBps: 6, minFeeUsd: 2, latency: 90, reliability: 0.94 },
+    { src: 'solana', dst: 'avalanche', feeBps: 8, minFeeUsd: 2.5, latency: 120, reliability: 0.93 },
+    { src: 'avalanche', dst: 'solana', feeBps: 8, minFeeUsd: 2.5, latency: 120, reliability: 0.93 },
   ]},
   // Connext - Liquidity network + optimistic messaging
   { bridge: 'connext', routes: [
