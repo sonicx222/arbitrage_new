@@ -197,3 +197,45 @@ services/execution-engine/src/strategies/error-selectors.generated.ts
 services/coordinator/public/
 dashboard/dist/
 dashboard/node_modules/
+
+# =============================================================================
+# Monitor Session Runtime Data (keep tooling scripts, ignore state)
+# =============================================================================
+monitor-session/SERVICES_PID
+monitor-session/SESSION_ID
+monitor-session/current.sha
+monitor-session/last-run.sha
+monitor-session/changed-files.txt
+monitor-session/start-time.txt
+monitor-session/services.pid
+monitor-session/*.json
+monitor-session/history/
+monitor-session/streams/
+monitor-session/config/
+monitor-session/findings/
+monitor-session/logs/
+
+# =============================================================================
+# Claude Code local settings (machine-specific)
+# =============================================================================
+.claude/settings.local.json
+
+# =============================================================================
+# Legacy/one-off files (should not be tracked)
+# =============================================================================
+bundle.js
+austausch.txt
+stryker.conf.js
+jest-flaky-reporter.js
+
+# =============================================================================
+# Analysis reports (ephemeral, regenerated per session)
+# =============================================================================
+docs/reports/
+.agent-reports/
+
+# =============================================================================
+# Stryker mutation testing
+# =============================================================================
+.stryker-tmp/
+reports/mutation/
