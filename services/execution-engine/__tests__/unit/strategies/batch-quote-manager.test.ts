@@ -91,10 +91,10 @@ describe('BatchQuoteManager', () => {
       }),
     };
 
-    mockCalculateFlashLoanFee = jest.fn(() => 900000000000000n); // 0.0009 ETH
+    mockCalculateFlashLoanFee = jest.fn(() => 500000000000000n); // 0.0005 ETH
     mockCalculateExpectedProfitOnChain = jest.fn().mockResolvedValue({
       expectedProfit: 50000000000000000n, // 0.05 ETH
-      flashLoanFee: 900000000000000n,
+      flashLoanFee: 500000000000000n,
     });
 
     mockBatchedQuoters = new Map();
@@ -155,7 +155,7 @@ describe('BatchQuoteManager', () => {
       );
       expect(result).toEqual({
         expectedProfit: 50000000000000000n,
-        flashLoanFee: 900000000000000n,
+        flashLoanFee: 500000000000000n,
       });
     });
 
@@ -201,7 +201,7 @@ describe('BatchQuoteManager', () => {
       expect(mockCalculateExpectedProfitOnChain).not.toHaveBeenCalled();
       expect(result).toEqual({
         expectedProfit: 100000000000000000n,
-        flashLoanFee: 900000000000000n,
+        flashLoanFee: 500000000000000n,
       });
     });
 

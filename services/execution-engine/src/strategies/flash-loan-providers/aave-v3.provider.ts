@@ -109,7 +109,7 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
    * Calculate flash loan fee for an amount
    *
    * Fee format: Basis points (1 bps = 0.01%)
-   * - Aave V3: 9 bps = 0.09% (industry standard)
+   * - Aave V3: 5 bps = 0.05% (post-AIP-382)
    * - Config file: Must use integer basis points, NOT decimal percentages
    * - See @arbitrage/config AAVE_V3_FEE_BPS for centralized constant
    *

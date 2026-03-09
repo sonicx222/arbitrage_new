@@ -103,7 +103,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
         'calculateExpectedProfitOnChain'
       ).mockResolvedValue({
         expectedProfit: ethers.parseEther('0.01'),
-        flashLoanFee: ethers.parseEther('0.0009'),
+        flashLoanFee: ethers.parseEther('0.0005'),
       });
 
       // Execute
@@ -121,7 +121,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
       );
       expect(result).toEqual({
         expectedProfit: ethers.parseEther('0.01'),
-        flashLoanFee: ethers.parseEther('0.0009'),
+        flashLoanFee: ethers.parseEther('0.0005'),
       });
     });
 
@@ -137,7 +137,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
         'calculateExpectedProfitOnChain'
       ).mockResolvedValue({
         expectedProfit: ethers.parseEther('0.01'),
-        flashLoanFee: ethers.parseEther('0.0009'),
+        flashLoanFee: ethers.parseEther('0.0005'),
       });
 
       const getBatchQuoterSpy = jest.spyOn(
@@ -225,7 +225,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
         'calculateExpectedProfitOnChain'
       ).mockResolvedValue({
         expectedProfit: ethers.parseEther('0.01'),
-        flashLoanFee: ethers.parseEther('0.0009'),
+        flashLoanFee: ethers.parseEther('0.0005'),
       });
 
       // Execute
@@ -266,7 +266,7 @@ describe('FlashLoanStrategy - Batched Quoting Integration', () => {
         'calculateExpectedProfitOnChain'
       ).mockResolvedValue({
         expectedProfit: ethers.parseEther('0.01'),
-        flashLoanFee: ethers.parseEther('0.0009'),
+        flashLoanFee: ethers.parseEther('0.0005'),
       });
 
       // Execute

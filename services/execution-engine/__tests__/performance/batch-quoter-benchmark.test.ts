@@ -359,11 +359,11 @@ describe('Batched Quote Fetching - Performance Benchmark', () => {
           const startTime = Date.now();
 
           try {
-            // Flash loan: 10 ETH at 0.09% fee (9 bps, typical for Aave)
+            // Flash loan: 10 ETH at 0.05% fee (5 bps, Aave V3 post-AIP-382)
             const result = await batchQuoter.simulateArbitragePath(
               requests,
               ethers.parseEther('10'), // flashLoanAmount
-              9 // flashLoanFeeBps (0.09%)
+              5 // flashLoanFeeBps (0.05%)
             );
             const latency = Date.now() - startTime;
             latencies.push(latency);

@@ -13,12 +13,12 @@ import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_V
 // =============================================================================
 
 /**
- * Aave V3 flash loan fee in basis points (0.09% = 9 bps)
+ * Aave V3 flash loan fee in basis points (0.05% = 5 bps, post-AIP-382)
  * Used by both FlashLoanStrategy and AaveV3FlashLoanProvider
  *
  * @see https://docs.aave.com/developers/guides/flash-loans
  */
-export const AAVE_V3_FEE_BPS = 9;
+export const AAVE_V3_FEE_BPS = 5;
 
 /**
  * Basis points denominator (10000 = 100%)

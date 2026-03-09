@@ -221,7 +221,7 @@ describe('FlashLoanStrategy - Edge Cases', () => {
         'calculateExpectedProfitOnChain'
       ).mockResolvedValue({
         expectedProfit: ethers.parseEther('0.01'),
-        flashLoanFee: ethers.parseEther('0.0009'),
+        flashLoanFee: ethers.parseEther('0.0005'),
       });
 
       const mockOpportunity = {

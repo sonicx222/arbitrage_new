@@ -886,6 +886,52 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
       supportsFactoryEvents: false, // Single-contract DEX, no factory events
     },
   ],
+
+  // Mantle — 3 DEXes (RPC-validated 2026-03-08)
+  mantle: [
+    {
+      address: '0x5bef015ca9424a7c07b68490616a4c1f094bedec',
+      dexName: 'merchant_moe',
+      type: 'uniswap_v2',
+      chain: 'mantle',
+    },
+    {
+      address: '0xd7D3e1116277a0f8b6f23cc64D5Ea56982822Dde',
+      dexName: 'agni_finance',
+      type: 'uniswap_v3',
+      chain: 'mantle',
+      hasFeeTiers: true,
+    },
+    {
+      address: '0x530d2766D1988CC1c000C8b7d00334c14B69AD71',
+      dexName: 'fusionx',
+      type: 'uniswap_v3',
+      chain: 'mantle',
+      hasFeeTiers: true,
+    },
+  ],
+
+  // Mode — 3 DEXes (RPC-validated 2026-03-08)
+  mode: [
+    {
+      address: '0xc02155946dd8C89D3D3238A6c8A64D04E2CD4500',
+      dexName: 'kim_exchange',
+      type: 'uniswap_v2',
+      chain: 'mode',
+    },
+    {
+      address: '0xa0b018Fe0d00ed075fb9b0eEe26d25cf72e1F693',
+      dexName: 'supswap',
+      type: 'uniswap_v2',
+      chain: 'mode',
+    },
+    {
+      address: '0xfb926356BAf861c93C3557D7327Dbe8734A71891',
+      dexName: 'swapmode',
+      type: 'uniswap_v2',
+      chain: 'mode',
+    },
+  ],
 };
 
 // =============================================================================

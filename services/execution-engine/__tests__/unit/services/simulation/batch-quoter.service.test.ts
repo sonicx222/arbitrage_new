@@ -286,14 +286,14 @@ describe('BatchQuoterService', () => {
       const result = await service.simulateArbitragePath(
         [createQuoteRequest()],
         1000000000n,
-        9, // 0.09% fee
+        5, // 0.05% fee
       );
 
       expect(result.allSuccess).toBe(true);
-      // flashLoanFee = 1000000000 * 9 / 10000 = 900000
-      // amountOwed = 1000000000 + 900000 = 1000900000
-      // expectedProfit = 1001000000 - 1000900000 = 100000
-      expect(result.expectedProfit).toBe(100000n);
+      // flashLoanFee = 1000000000 * 5 / 10000 = 500000
+      // amountOwed = 1000000000 + 500000 = 1000500000
+      // expectedProfit = 1001000000 - 1000500000 = 500000
+      expect(result.expectedProfit).toBe(500000n);
 
       const metrics = service.getMetrics();
       expect(metrics.fallbackUsed).toBe(1);

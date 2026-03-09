@@ -104,9 +104,9 @@ describe('Mock Protocol Fidelity', () => {
   // ===========================================================================
 
   describe('Aave V3', () => {
-    it('should have premium constant of 9 basis points (0.09%)', async () => {
+    it('should have premium constant of 5 basis points (0.05%)', async () => {
       const { pool } = await loadFixture(deployAavePoolFixture);
-      expect(await pool.FLASHLOAN_PREMIUM_TOTAL()).to.equal(9);
+      expect(await pool.FLASHLOAN_PREMIUM_TOTAL()).to.equal(5);
     });
 
     describe('executeOperation Return Value', () => {

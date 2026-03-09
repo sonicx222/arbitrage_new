@@ -113,7 +113,7 @@ export class FlashLoanFeeCalculator {
    * Fee calculation priority:
    * 1. Custom fee override from config (if set for chain)
    * 2. Chain-specific fee from FLASH_LOAN_PROVIDERS config
-   * 3. Default Aave V3 fee (0.09% = 9 bps)
+   * 3. Default Aave V3 fee (0.05% = 5 bps)
    *
    * @param amount - Flash loan amount in wei
    * @param chain - Chain identifier
@@ -132,7 +132,7 @@ export class FlashLoanFeeCalculator {
       return (amount * BigInt(flashLoanConfig.fee)) / this.BPS_DENOMINATOR_BIGINT;
     }
 
-    // Default to Aave V3 fee (0.09%)
+    // Default to Aave V3 fee (0.05%)
     return (amount * this.AAVE_V3_FEE_BPS_BIGINT) / this.BPS_DENOMINATOR_BIGINT;
   }
 

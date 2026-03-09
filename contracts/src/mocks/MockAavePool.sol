@@ -31,8 +31,8 @@ import "../interfaces/IFlashLoanReceiver.sol";
 contract MockAavePool is IPool {
     using SafeERC20 for IERC20;
 
-    // Aave V3 flash loan premium: 0.09% = 9 basis points
-    uint256 public constant FLASH_LOAN_PREMIUM = 9;
+    // Aave V3 flash loan premium: 0.05% = 5 basis points (post-AIP-382 mainnet value)
+    uint256 public constant FLASH_LOAN_PREMIUM = 5;
     uint256 public constant PREMIUM_DENOMINATOR = 10000;
 
     event FlashLoan(

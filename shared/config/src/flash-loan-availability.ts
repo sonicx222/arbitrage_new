@@ -44,7 +44,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
 
   ethereum: {
     aave_v3: true, // Aave V3 Pool: 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2
-    balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+    balancer_v2: false, // Balancer V2 Vault exists but BalancerV2FlashArbitrage.sol not deployed (deferred)
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
@@ -54,7 +54,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
 
   polygon: {
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
-    balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+    balancer_v2: false, // Balancer V2 Vault exists but BalancerV2FlashArbitrage.sol not deployed (deferred)
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
@@ -64,7 +64,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
 
   arbitrum: {
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
-    balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+    balancer_v2: false, // Balancer V2 Vault exists but BalancerV2FlashArbitrage.sol not deployed (deferred)
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
@@ -74,7 +74,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
 
   base: {
     aave_v3: true, // Aave V3 Pool: 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
-    balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+    balancer_v2: false, // Balancer V2 Vault exists but BalancerV2FlashArbitrage.sol not deployed (deferred)
     pancakeswap_v3: true, // PancakeSwap V3 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
     spookyswap: false,
     syncswap: false,
@@ -84,7 +84,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
 
   optimism: {
     aave_v3: true, // Aave V3 Pool: 0x794a61358D6845594F94dc1DB02A252b5b4814aD
-    balancer_v2: true, // Balancer V2 Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+    balancer_v2: false, // Balancer V2 Vault exists but BalancerV2FlashArbitrage.sol not deployed (deferred)
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
@@ -146,6 +146,8 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
   // Emerging L2s
   // =========================================================================
 
+  // NOTE: Blast has zero flash loan providers. Arbitrage on Blast requires
+  // capital-at-risk (funded wallet) — no atomic flash loan protection.
   blast: {
     aave_v3: false,
     balancer_v2: false,
@@ -176,9 +178,11 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
     morpho: false,
   },
 
+  // NOTE: Mode has no usable flash loan providers (Balancer-style Vault exists but contract not deployed).
+  // Arbitrage on Mode requires capital-at-risk until BalancerV2FlashArbitrage.sol is deployed.
   mode: {
     aave_v3: false,
-    balancer_v2: true, // Balancer-style Vault at 0xBA12222222228d8Ba445958a75a0704d566BF2C8 (RPC-validated interface)
+    balancer_v2: false, // Balancer-style Vault exists but BalancerV2FlashArbitrage.sol not deployed (deferred)
     pancakeswap_v3: false,
     spookyswap: false,
     syncswap: false,
@@ -285,7 +289,7 @@ export const FLASH_LOAN_AVAILABILITY: Readonly<
  *
  * @example
  * ```typescript
- * getSupportedProtocols('ethereum') // ['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'dai_flash_mint']
+ * getSupportedProtocols('ethereum') // ['aave_v3', 'pancakeswap_v3', 'dai_flash_mint']
  * getSupportedProtocols('bsc')      // ['pancakeswap_v3']
  * getSupportedProtocols('solana')   // []
  * ```
@@ -376,7 +380,7 @@ export function validateFlashLoanSupport(
  *
  * @example
  * ```typescript
- * getPreferredProtocol('ethereum') // 'balancer_v2' (0% fee wins)
+ * getPreferredProtocol('ethereum') // 'dai_flash_mint' (Balancer V2 contract not deployed)
  * getPreferredProtocol('bsc')      // 'pancakeswap_v3' (only option)
  * getPreferredProtocol('solana')   // null (no EVM flash loans)
  * ```

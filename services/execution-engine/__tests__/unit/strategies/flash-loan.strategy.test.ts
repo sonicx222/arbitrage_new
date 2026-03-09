@@ -158,8 +158,8 @@ describe('FlashLoanStrategy', () => {
       const amount = ethers.parseEther('100');
       const fee = strategy.calculateFlashLoanFee(amount, 'unknown-chain');
 
-      // Default is Aave V3 fee (0.09%)
-      const expectedFee = amount * 9n / 10000n;
+      // Default is Aave V3 fee (0.05%)
+      const expectedFee = amount * 5n / 10000n;
       expectBigIntEq(fee, expectedFee);
     });
 
@@ -810,7 +810,7 @@ describe('FlashLoanStrategy', () => {
       // Mock the provider.call to return encoded result
       const provider = ctx.providers.get('ethereum')!;
       const expectedProfit = ethers.parseEther('0.5'); // 0.5 ETH profit
-      const flashLoanFee = ethers.parseEther('0.009'); // 0.009 ETH fee (0.09% of 10 ETH)
+      const flashLoanFee = ethers.parseEther('0.005'); // 0.005 ETH fee (0.05% of 10 ETH)
 
       // Encode the expected return value
       const iface = new ethers.Interface([
@@ -881,7 +881,7 @@ describe('FlashLoanStrategy', () => {
 
       const provider = ctx.providers.get('ethereum')!;
       const expectedProfit = 0n;
-      const flashLoanFee = ethers.parseEther('0.009');
+      const flashLoanFee = ethers.parseEther('0.005');
 
       const iface = new ethers.Interface([
         'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',

@@ -370,6 +370,12 @@ export const COMMIT_REVEAL_CONTRACTS: Readonly<Record<string, string>> = {
 
   // Phase 3 (Week 4) - Final Deployment
   linea: process.env.COMMIT_REVEAL_CONTRACT_LINEA ?? '',
+
+  // Phase 4 - Emerging L2s
+  blast: process.env.COMMIT_REVEAL_CONTRACT_BLAST ?? '',
+  scroll: process.env.COMMIT_REVEAL_CONTRACT_SCROLL ?? '',
+  mantle: process.env.COMMIT_REVEAL_CONTRACT_MANTLE ?? '',
+  mode: process.env.COMMIT_REVEAL_CONTRACT_MODE ?? '',
 } as const;
 
 /**

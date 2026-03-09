@@ -128,8 +128,8 @@ describe('FlashLoanArbitrage - Mainnet Fork Integration', function () {
 
       const premium = await pool.FLASHLOAN_PREMIUM_TOTAL();
 
-      // Aave V3 flash loan premium is 9 basis points (0.09%)
-      expect(premium).to.equal(9);
+      // Aave V3 flash loan premium is 5 basis points (0.05%) post-AIP-382
+      expect(premium).to.equal(5);
       console.log(`  Aave V3 Flash Loan Premium: ${premium} bps (${Number(premium) / 100}%)`);
     });
 
@@ -311,11 +311,11 @@ describe('FlashLoanArbitrage - Mainnet Fork Integration', function () {
       );
 
       console.log(`  Flash Loan Amount: ${ethers.formatEther(flashLoanAmount)} WETH`);
-      console.log(`  Flash Loan Fee:    ${ethers.formatEther(flashLoanFee)} WETH (0.09%)`);
+      console.log(`  Flash Loan Fee:    ${ethers.formatEther(flashLoanFee)} WETH (0.05%)`);
       console.log(`  Expected Profit:   ${ethers.formatEther(expectedProfit)} WETH`);
 
-      // Flash loan fee should be 0.09% of 10 WETH = 0.009 WETH
-      expect(flashLoanFee).to.equal(ethers.parseEther('0.009'));
+      // Flash loan fee should be 0.05% of 10 WETH = 0.005 WETH
+      expect(flashLoanFee).to.equal(ethers.parseEther('0.005'));
 
       // Expected profit is likely negative or zero (no real arbitrage at forked block)
       // This validates the contract correctly queries real DEX state

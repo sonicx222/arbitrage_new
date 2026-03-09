@@ -83,16 +83,16 @@ export interface SimulationWorkerStats {
 // =============================================================================
 
 /**
- * H-004 FIX: Default flash loan fee (Aave V3: 9 bps) for chains not in FLASH_LOAN_PROVIDERS.
+ * H-004 FIX: Default flash loan fee (Aave V3: 5 bps) for chains not in FLASH_LOAN_PROVIDERS.
  * Used as fallback when chain is unknown or has no configured flash loan provider.
  */
-const DEFAULT_FLASH_LOAN_FEE_BPS = 9;
+const DEFAULT_FLASH_LOAN_FEE_BPS = 5;
 
 /**
  * H-004 FIX: Look up flash loan fee in basis points for a given chain.
- * Uses FLASH_LOAN_PROVIDERS (single source of truth) instead of hardcoding Aave V3's 9 bps.
+ * Uses FLASH_LOAN_PROVIDERS (single source of truth) instead of hardcoding Aave V3's 5 bps.
  *
- * Actual fees by chain: Aave V3 (9 bps), Balancer V2 (0 bps), PancakeSwap V3 (25 bps),
+ * Actual fees by chain: Aave V3 (5 bps), Balancer V2 (0 bps), PancakeSwap V3 (25 bps),
  * SyncSwap (30 bps). Previously all chains used 9 bps, causing ~60% of paths to be
  * scored with incorrect fee assumptions.
  */

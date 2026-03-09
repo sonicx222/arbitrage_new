@@ -24,12 +24,12 @@ describe('FlashLoanFeeCalculator', () => {
   });
 
   describe('calculateFlashLoanFee', () => {
-    it('should calculate default Aave V3 fee (9 bps) for unknown chain', () => {
+    it('should calculate default Aave V3 fee (5 bps) for unknown chain', () => {
       const amount = ethers.parseEther('100');
       const fee = calculator.calculateFlashLoanFee(amount, 'unknown_chain');
 
-      // 9 bps = 0.09% of 100 ETH = 0.09 ETH
-      const expectedFee = ethers.parseEther('0.09');
+      // 5 bps = 0.05% of 100 ETH = 0.05 ETH
+      const expectedFee = ethers.parseEther('0.05');
       expect(fee).toBe(expectedFee);
     });
 

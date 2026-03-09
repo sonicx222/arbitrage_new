@@ -23,15 +23,15 @@ describe('flash-loan-availability', () => {
   // ===========================================================================
 
   describe('getSupportedProtocols', () => {
-    it('returns aave_v3, balancer_v2, pancakeswap_v3, dai_flash_mint for ethereum', () => {
+    it('returns aave_v3, pancakeswap_v3, dai_flash_mint for ethereum', () => {
       const protocols = getSupportedProtocols('ethereum');
       expect(protocols).toContain('aave_v3');
-      expect(protocols).toContain('balancer_v2');
+      expect(protocols).not.toContain('balancer_v2'); // Vault exists but BalancerV2FlashArbitrage.sol not deployed
       expect(protocols).toContain('pancakeswap_v3');
       expect(protocols).toContain('dai_flash_mint');
       expect(protocols).not.toContain('syncswap');
       expect(protocols).not.toContain('morpho'); // Morpho present but disabled (no contract yet)
-      expect(protocols).toHaveLength(4);
+      expect(protocols).toHaveLength(3);
     });
 
     it('returns only pancakeswap_v3 for bsc', () => {
@@ -126,8 +126,8 @@ describe('flash-loan-availability', () => {
   // ===========================================================================
 
   describe('getPreferredProtocol', () => {
-    it('returns balancer_v2 for ethereum (lowest fee)', () => {
-      expect(getPreferredProtocol('ethereum')).toBe('balancer_v2');
+    it('returns dai_flash_mint for ethereum (balancer_v2 contract not deployed)', () => {
+      expect(getPreferredProtocol('ethereum')).toBe('dai_flash_mint');
     });
 
     it('returns pancakeswap_v3 for bsc (only option)', () => {
@@ -184,10 +184,10 @@ describe('flash-loan-availability', () => {
   // ===========================================================================
 
   describe('FLASH_LOAN_AVAILABILITY', () => {
-    it('ethereum has aave_v3, balancer_v2, pancakeswap_v3, dai_flash_mint enabled', () => {
+    it('ethereum has aave_v3, pancakeswap_v3, dai_flash_mint enabled', () => {
       expect(FLASH_LOAN_AVAILABILITY['ethereum']).toEqual({
         aave_v3: true,
-        balancer_v2: true,
+        balancer_v2: false, // Vault exists but BalancerV2FlashArbitrage.sol not deployed
         pancakeswap_v3: true,
         spookyswap: false,
         syncswap: false,
@@ -236,8 +236,8 @@ describe('flash-loan-availability', () => {
 
       // Sanity: Aave V3 has broadest coverage
       expect(FLASH_LOAN_STATS.protocolCoverage.aave_v3).toBeGreaterThanOrEqual(8);
-      // Balancer on at least 6 chains
-      expect(FLASH_LOAN_STATS.protocolCoverage.balancer_v2).toBeGreaterThanOrEqual(6);
+      // Balancer on at least 1 chain (only fantom has deployed contract)
+      expect(FLASH_LOAN_STATS.protocolCoverage.balancer_v2).toBeGreaterThanOrEqual(1);
       // SyncSwap on at least 1 chain
       expect(FLASH_LOAN_STATS.protocolCoverage.syncswap).toBeGreaterThanOrEqual(1);
     });

@@ -973,8 +973,8 @@ describe('UniswapV3Adapter', () => {
       // Flash loan: 100 WETH
       // Hop 1: 100 WETH -> 105 DAI (1.05 rate)
       // Hop 2: 105 DAI -> 105 WETH (1.0 rate)
-      // Repay: 100 WETH + 0.09 WETH (0.09% Aave fee) = 100.09 WETH
-      // Profit: 105 - 100.09 = 4.91 WETH
+      // Repay: 100 WETH + 0.05 WETH (0.05% Aave fee) = 100.05 WETH
+      // Profit: 105 - 100.05 = 4.95 WETH
       await flashLoan.executeArbitrage(
         wethAddr,
         flashAmount,

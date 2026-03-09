@@ -346,18 +346,18 @@ describe('SimulationWorker — H-004: chain-specific flash loan fee', () => {
     );
   });
 
-  it('should fall back to default 9 bps for unknown chain', async () => {
+  it('should fall back to default 5 bps for unknown chain', async () => {
     await worker.start();
     await capturedHandler!(buildStreamMessage({ chain: 'unknown-chain' }));
 
     expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
       expect.any(Array),
       expect.any(BigInt),
-      9, // Default (Aave V3)
+      5, // Default (Aave V3 post-AIP-382)
     );
   });
 
-  it('should fall back to default 9 bps when chain field is missing', async () => {
+  it('should fall back to default 5 bps when chain field is missing', async () => {
     const msg = buildStreamMessage();
     delete (msg as Record<string, unknown>)['chain'];
 
@@ -367,7 +367,7 @@ describe('SimulationWorker — H-004: chain-specific flash loan fee', () => {
     expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
       expect.any(Array),
       expect.any(BigInt),
-      9, // Default
+      5, // Default
     );
   });
 });

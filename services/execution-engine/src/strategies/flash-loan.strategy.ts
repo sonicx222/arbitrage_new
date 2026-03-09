@@ -6,7 +6,7 @@
  *
  * Features:
  * - Integration with FlashLoanArbitrage.sol contract
- * - Flash loan fee calculation (Aave V3: 0.09%)
+ * - Flash loan fee calculation (Aave V3: 0.05%)
  * - Profitability analysis (flash loan vs direct execution)
  * - Multi-hop swap path building
  * - Pre-flight simulation support
@@ -98,16 +98,16 @@ const BPS_DENOMINATOR = getBpsDenominatorBigInt();
  * - Default: 0.09% (9 basis points) for regular flash loans
  * - 0% for flash loans taken from FlashLoanSimple with approved borrowers
  *
- * This validates at module load time that the imported constant is 9 bps.
+ * This validates at module load time that the imported constant is 5 bps (post-AIP-382).
  * If this fails, it indicates a configuration mismatch that needs investigation.
  *
  * @see https://docs.aave.com/developers/guides/flash-loans - Official Aave V3 documentation
  * @see ADR-020 - Flash Loan Integration architectural decision
  */
-const EXPECTED_AAVE_V3_FEE_BPS = 9n;
+const EXPECTED_AAVE_V3_FEE_BPS = 5n;
 if (AAVE_V3_FEE_BPS !== EXPECTED_AAVE_V3_FEE_BPS) {
   throw new Error(
-    `[ERR_CONFIG] Aave V3 fee mismatch: expected ${EXPECTED_AAVE_V3_FEE_BPS} bps (0.09%), ` +
+    `[ERR_CONFIG] Aave V3 fee mismatch: expected ${EXPECTED_AAVE_V3_FEE_BPS} bps (0.05%), ` +
     `got ${AAVE_V3_FEE_BPS} bps. Check @arbitrage/config getAaveV3FeeBpsBigInt() function.`
   );
 }

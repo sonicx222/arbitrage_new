@@ -125,6 +125,9 @@ contract MultiPathQuoter {
         for (uint256 i = 0; i < length;) {
             QuoteRequest calldata req = requests[i];
 
+            // M-03: Validate token addresses
+            if (req.tokenIn == address(0) || req.tokenOut == address(0)) revert InvalidTokenAddress();
+
             // Determine input amount (use previous output if amountIn is 0)
             uint256 inputAmount = req.amountIn;
             if (inputAmount == 0) {
@@ -269,7 +272,12 @@ contract MultiPathQuoter {
             }
             flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
         }
-        uint256 amountOwed = flashLoanAmount + flashLoanFee;
+        // M-02: Use actual first-step input as profit base when requests[0].amountIn > 0
+        // This handles cases where flashLoanAmount != actual swap input (e.g., partial use)
+        uint256 profitBase = (length > 0 && requests[0].amountIn > 0)
+            ? requests[0].amountIn
+            : flashLoanAmount;
+        uint256 amountOwed = profitBase + flashLoanFee;
 
         if (finalAmount > amountOwed) {
             expectedProfit = finalAmount - amountOwed;
@@ -319,12 +327,8 @@ contract MultiPathQuoter {
             QuoteRequest[] calldata requests = pathRequests[p];
             uint256 pathLength = requests.length;
 
-            // P3 Fix: Handle empty inner paths gracefully
-            if (pathLength == 0) {
-                successFlags[p] = false;
-                unchecked { ++p; }
-                continue;
-            }
+            // M-03: Revert on empty inner paths with specific error
+            if (pathLength == 0) revert EmptyPathInArray(p);
 
             // DOS Prevention: Limit individual path length
             if (pathLength > MAX_PATH_LENGTH) {
@@ -365,7 +369,11 @@ contract MultiPathQuoter {
                     }
                 }
                 if (pathSuccess) {
-                    uint256 amountOwed = flashLoanAmount + flashLoanFee;
+                    // M-02: Use actual first-step input as profit base when requests[0].amountIn > 0
+                    uint256 pathProfitBase = (pathLength > 0 && requests[0].amountIn > 0)
+                        ? requests[0].amountIn
+                        : flashLoanAmount;
+                    uint256 amountOwed = pathProfitBase + flashLoanFee;
                     if (currentAmount > amountOwed) {
                         profits[p] = currentAmount - amountOwed;
                     }

@@ -334,7 +334,7 @@ describe('FlashLoanProviderSchema', () => {
     const result = FlashLoanProviderSchema.safeParse({
       address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
       protocol: 'aave_v3',
-      fee: 9,
+      fee: 5,
     });
     expect(result.success).toBe(true);
   });

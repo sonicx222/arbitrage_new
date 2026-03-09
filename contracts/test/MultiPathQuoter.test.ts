@@ -378,7 +378,7 @@ describe('MultiPathQuoter', () => {
       expect(results[0].amountOut).to.equal(0);
     });
 
-    it('should handle zero address tokens gracefully', async () => {
+    it('should revert on zero address tokenIn (M-03)', async () => {
       const { quoter, uniswapRouter, weth } = await loadFixture(deployContractsFixture);
 
       const requests = [
@@ -390,11 +390,28 @@ describe('MultiPathQuoter', () => {
         },
       ];
 
-      const results = await quoter.getBatchedQuotes(requests);
+      await expect(quoter.getBatchedQuotes(requests)).to.be.revertedWithCustomError(
+        quoter,
+        'InvalidTokenAddress'
+      );
+    });
 
-      expect(results.length).to.equal(1);
-      expect(results[0].success).to.be.false;
-      expect(results[0].amountOut).to.equal(0);
+    it('should revert on zero address tokenOut (M-03)', async () => {
+      const { quoter, uniswapRouter, weth } = await loadFixture(deployContractsFixture);
+
+      const requests = [
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: ethers.ZeroAddress, // Invalid token
+          amountIn: ethers.parseEther('1'),
+        },
+      ];
+
+      await expect(quoter.getBatchedQuotes(requests)).to.be.revertedWithCustomError(
+        quoter,
+        'InvalidTokenAddress'
+      );
     });
   });
 
@@ -536,7 +553,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmount = ethers.parseEther('100'); // Use larger amount
-      const flashLoanFeeBps = 9; // Aave V3 = 0.09%
+      const flashLoanFeeBps = 5; // Aave V3 = 0.05%
 
       const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
         requests,
@@ -548,7 +565,7 @@ describe('MultiPathQuoter', () => {
       // With current rates, this may not be profitable, so just verify execution
       expect(finalAmount).to.be.gte(0);
       // Check that profit calculation is correct
-      const fee = (flashLoanAmount * 9n) / 10000n;
+      const fee = (flashLoanAmount * 5n) / 10000n;
       const amountOwed = flashLoanAmount + fee;
       if (finalAmount > amountOwed) {
         expect(expectedProfit).to.equal(finalAmount - amountOwed);
@@ -577,7 +594,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmount = ethers.parseEther('1');
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
         requests,
@@ -615,7 +632,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmount = ethers.parseEther('10');
-      const flashLoanFeeBps = 9; // 0.09%
+      const flashLoanFeeBps = 5; // 0.05%
 
       const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
         requests,
@@ -623,8 +640,8 @@ describe('MultiPathQuoter', () => {
         flashLoanFeeBps
       );
 
-      // Flash loan fee = 10 * 0.09% = 0.009 WETH
-      const expectedFee = (flashLoanAmount * 9n) / 10000n;
+      // Flash loan fee = 10 * 0.05% = 0.005 WETH
+      const expectedFee = (flashLoanAmount * 5n) / 10000n;
       const amountOwed = flashLoanAmount + expectedFee;
 
       expect(allSuccess).to.be.true;
@@ -660,7 +677,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmount = ethers.parseEther('1');
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
         requests,
@@ -692,7 +709,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmount = ethers.parseEther('1'); // Different from amountIn
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
         requests,
@@ -762,7 +779,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmounts = [ethers.parseEther('1'), ethers.parseEther('1')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [profits, successFlags] = await quoter.compareArbitragePaths(
         [path1, path2],
@@ -797,7 +814,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmounts = [ethers.parseEther('1'), ethers.parseEther('5')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [profits, successFlags] = await quoter.compareArbitragePaths(
         [path, path],
@@ -831,7 +848,7 @@ describe('MultiPathQuoter', () => {
       // Create 21 paths (exceeds MAX_PATHS = 20)
       const paths = Array(21).fill(singlePath);
       const flashLoanAmounts = Array(21).fill(ethers.parseEther('1'));
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       await expect(
         quoter.compareArbitragePaths(paths, flashLoanAmounts, flashLoanFeeBps)
@@ -850,14 +867,14 @@ describe('MultiPathQuoter', () => {
       });
 
       const flashLoanAmounts = [ethers.parseEther('1')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       await expect(
         quoter.compareArbitragePaths([longPath], flashLoanAmounts, flashLoanFeeBps)
       ).to.be.revertedWithCustomError(quoter, 'PathTooLong');
     });
 
-    it('should handle empty inner path gracefully', async () => {
+    it('should revert on empty inner path with EmptyPathInArray (M-03)', async () => {
       const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
 
       const validPath = [
@@ -872,18 +889,16 @@ describe('MultiPathQuoter', () => {
       const emptyPath: any[] = [];
 
       const flashLoanAmounts = [ethers.parseEther('1'), ethers.parseEther('1')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
-      const [profits, successFlags] = await quoter.compareArbitragePaths(
-        [validPath, emptyPath],
-        flashLoanAmounts,
-        flashLoanFeeBps
-      );
-
-      expect(profits.length).to.equal(2);
-      expect(successFlags[0]).to.be.true; // Valid path
-      expect(successFlags[1]).to.be.false; // Empty path
-      expect(profits[1]).to.equal(0);
+      await expect(
+        quoter.compareArbitragePaths(
+          [validPath, emptyPath],
+          flashLoanAmounts,
+          flashLoanFeeBps
+        )
+      ).to.be.revertedWithCustomError(quoter, 'EmptyPathInArray')
+        .withArgs(1); // Index 1 is the empty path
     });
 
     it('should revert when flashLoanAmounts length mismatches', async () => {
@@ -899,7 +914,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmounts = [ethers.parseEther('1')]; // Only 1
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       await expect(
         quoter.compareArbitragePaths([path, path], flashLoanAmounts, flashLoanFeeBps) // 2 paths
@@ -958,7 +973,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmounts = [ethers.parseEther('1'), ethers.parseEther('1')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [profits, successFlags] = await quoter.compareArbitragePaths(
         [validPath, invalidPath],
@@ -1245,7 +1260,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmounts = [ethers.parseEther('1'), ethers.parseEther('1')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [profits, successFlags] = await quoter.compareArbitragePaths(
         [path, path],
@@ -1384,7 +1399,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmount = ethers.parseEther('10');
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
         requests,
@@ -1395,7 +1410,7 @@ describe('MultiPathQuoter', () => {
       expect(allSuccess).to.be.true;
       expect(finalAmount).to.be.gt(0);
       // Check if profitable after fees
-      const fee = (flashLoanAmount * 9n) / 10000n;
+      const fee = (flashLoanAmount * 5n) / 10000n;
       const amountOwed = flashLoanAmount + fee;
       if (finalAmount > amountOwed) {
         expect(expectedProfit).to.be.gt(0);
@@ -1440,7 +1455,7 @@ describe('MultiPathQuoter', () => {
       ];
 
       const flashLoanAmounts = [ethers.parseEther('1'), ethers.parseEther('1')];
-      const flashLoanFeeBps = 9;
+      const flashLoanFeeBps = 5;
 
       const [profits, successFlags] = await quoter.compareArbitragePaths(
         [strategy1, strategy2],
@@ -1453,6 +1468,138 @@ describe('MultiPathQuoter', () => {
       expect(successFlags[1]).to.be.true;
       // Cross-DEX strategy should potentially be more profitable (Sushi has better sell rate)
       // But depends on rates - just verify both execute
+    });
+  });
+
+  // ===========================================================================
+  // 10. M-02: Profit Base Calculation Fix
+  // ===========================================================================
+  describe('10. M-02: Profit base when requests[0].amountIn > 0', () => {
+    it('should use requests[0].amountIn as profit base (not flashLoanAmount)', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      // Flash loan 10 WETH but first step only uses 5 WETH (explicit amountIn)
+      const flashLoanAmount = ethers.parseEther('10');
+      const firstStepAmount = ethers.parseEther('5');
+
+      const requests = [
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: firstStepAmount, // Explicit: only use 5 WETH
+        },
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountIn: 0, // Chain from previous output
+        },
+      ];
+
+      const flashLoanFeeBps = 5; // 0.05%
+
+      const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
+        requests,
+        flashLoanAmount,
+        flashLoanFeeBps
+      );
+
+      expect(allSuccess).to.be.true;
+      // The key assertion: profit is calculated against firstStepAmount (5 WETH) not flashLoanAmount (10 WETH).
+      // With M-02 fix: amountOwed = firstStepAmount + fee = 5e18 + (10e18 * 5 / 10000)
+      // Without fix: amountOwed = flashLoanAmount + fee = 10e18 + fee → profit would be 0 even if swap is profitable
+      const fee = (flashLoanAmount * 5n) / 10000n;
+      const amountOwed = firstStepAmount + fee;
+      if (finalAmount > amountOwed) {
+        expect(expectedProfit).to.equal(finalAmount - amountOwed);
+      } else {
+        expect(expectedProfit).to.equal(0);
+      }
+    });
+
+    it('should use flashLoanAmount as profit base when amountIn is 0', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      const flashLoanAmount = ethers.parseEther('1');
+
+      const requests = [
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: 0, // Use flashLoanAmount
+        },
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountIn: 0, // Chain
+        },
+      ];
+
+      const flashLoanFeeBps = 5;
+
+      const [expectedProfit, finalAmount, allSuccess] = await quoter.simulateArbitragePath(
+        requests,
+        flashLoanAmount,
+        flashLoanFeeBps
+      );
+
+      expect(allSuccess).to.be.true;
+      // amountIn=0 → profit base = flashLoanAmount
+      const fee = (flashLoanAmount * 5n) / 10000n;
+      const amountOwed = flashLoanAmount + fee;
+      if (finalAmount > amountOwed) {
+        expect(expectedProfit).to.equal(finalAmount - amountOwed);
+      } else {
+        expect(expectedProfit).to.equal(0);
+      }
+    });
+
+    it('should apply M-02 fix in compareArbitragePaths too', async () => {
+      const { quoter, uniswapRouter, weth, usdc } = await loadFixture(deployContractsFixture);
+
+      const flashLoanAmount = ethers.parseEther('10');
+      const firstStepAmount = ethers.parseEther('5');
+
+      const path = [
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountIn: firstStepAmount,
+        },
+        {
+          router: await uniswapRouter.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountIn: 0,
+        },
+      ];
+
+      // Run with amountIn > 0 on first step
+      const [profitsWithExplicit, successWithExplicit] = await quoter.compareArbitragePaths(
+        [path],
+        [flashLoanAmount],
+        5
+      );
+      expect(successWithExplicit[0]).to.be.true;
+
+      // Run same path but with amountIn=0 on first step (uses flashLoanAmount)
+      const pathWithZeroAmountIn = [
+        { ...path[0], amountIn: 0 },
+        path[1],
+      ];
+      const [profitsWithFlash, successWithFlash] = await quoter.compareArbitragePaths(
+        [pathWithZeroAmountIn],
+        [firstStepAmount], // flashLoanAmount = firstStepAmount, so profit base = same
+        5
+      );
+      expect(successWithFlash[0]).to.be.true;
+
+      // Both paths use the same effective input (5 WETH), so profits should match
+      expect(profitsWithExplicit[0]).to.equal(profitsWithFlash[0]);
     });
   });
 });

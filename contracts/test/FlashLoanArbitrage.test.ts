@@ -21,6 +21,7 @@ import {
   testWithdrawToken,
   testWithdrawETH,
   testWithdrawGasLimitConfig,
+  testZeroAmountEdgeCases,
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
@@ -119,6 +120,7 @@ describe('FlashLoanArbitrage', () => {
   testWithdrawToken(adminConfig);
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
+  testZeroAmountEdgeCases(adminConfig);
   testOwnable2Step(adminConfig);
 
   // ===========================================================================
@@ -227,7 +229,7 @@ describe('FlashLoanArbitrage', () => {
   });
 
   describe('Calculate Expected Profit — Aave-Specific', () => {
-    it('should calculate flash loan fee as 0.09% (Aave premium)', async () => {
+    it('should calculate flash loan fee as 0.05% (Aave premium)', async () => {
       const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } =
         await loadFixture(deployContractsFixture);
 
@@ -264,8 +266,8 @@ describe('FlashLoanArbitrage', () => {
         ]
       );
 
-      // Flash loan fee should be 0.09% of 10 WETH = 0.009 WETH
-      expect(flashLoanFee).to.equal(ethers.parseEther('0.009'));
+      // Flash loan fee should be 0.05% of 10 WETH = 0.005 WETH
+      expect(flashLoanFee).to.equal(ethers.parseEther('0.005'));
     });
 
     it('should still calculate fee for invalid path', async () => {
@@ -299,7 +301,7 @@ describe('FlashLoanArbitrage', () => {
       );
 
       expect(expectedProfit).to.equal(0);
-      expect(flashLoanFee).to.equal(ethers.parseEther('0.009'));
+      expect(flashLoanFee).to.equal(ethers.parseEther('0.005'));
     });
   });
 
@@ -599,9 +601,9 @@ describe('FlashLoanArbitrage', () => {
       await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
       await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
 
-      // Aave V3 flash loan fee is 0.09%
-      // For 10 WETH: fee = 0.009 WETH
-      // We need profit > 0.009 WETH + minProfit
+      // Aave V3 flash loan fee is 0.05%
+      // For 10 WETH: fee = 0.005 WETH
+      // We need profit > 0.005 WETH + minProfit
 
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
@@ -747,8 +749,8 @@ describe('FlashLoanArbitrage', () => {
 
       const poolBalanceAfter = await weth.balanceOf(await aavePool.getAddress());
 
-      // Pool should have received back the loan + premium (0.09%)
-      const premium = (flashLoanAmount * 9n) / 10000n;
+      // Pool should have received back the loan + premium (0.05%)
+      const premium = (flashLoanAmount * 5n) / 10000n;
       expect(poolBalanceAfter).to.be.gte(poolBalanceBefore + premium);
     });
 
@@ -815,7 +817,7 @@ describe('FlashLoanArbitrage', () => {
         flashLoanArbitrage.executeOperation(
           await weth.getAddress(),
           ethers.parseEther('10'),
-          ethers.parseEther('0.009'),
+          ethers.parseEther('0.005'),
           attacker.address,
           '0x'
         )
@@ -831,7 +833,7 @@ describe('FlashLoanArbitrage', () => {
         attackerContract.executeOperation(
           await weth.getAddress(),
           ethers.parseEther('10'),
-          ethers.parseEther('0.009'),
+          ethers.parseEther('0.005'),
           await flashLoanArbitrage.getAddress(),
           '0x'
         )
@@ -867,7 +869,7 @@ describe('FlashLoanArbitrage', () => {
         flashLoanArbitrage.connect(poolSigner).executeOperation(
           await weth.getAddress(),
           ethers.parseEther('10'),
-          ethers.parseEther('0.009'),
+          ethers.parseEther('0.005'),
           attacker.address, // Wrong initiator - should be the contract address
           params
         )

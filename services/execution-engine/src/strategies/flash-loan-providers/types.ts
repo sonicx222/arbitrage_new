@@ -87,12 +87,12 @@ export interface FlashLoanResult {
  * - 1 bps = 0.01% (one hundredth of a percent)
  * - 100 bps = 1%
  * - Examples:
- *   * Aave V3: 9 bps = 0.09%
+ *   * Aave V3: 5 bps = 0.05%
  *   * PancakeSwap V3 (1% tier): 100 bps = 1%
  *   * Uniswap V3 (0.3% tier): 30 bps = 0.3%
  *
  * Configuration Files:
- * - service-config.ts: Use integer basis points (9, not 0.09)
+ * - service-config.ts: Use integer basis points (5, not 0.05)
  * - Smart contracts: Use basis points with BPS_DENOMINATOR = 10000
  *
  * @see shared/config/src/service-config.ts Centralized fee constants
@@ -220,7 +220,7 @@ export interface FlashLoanProviderConfig {
   feeOverrides?: Record<string, number>;
   /**
    * Protocol overrides per chain (takes precedence over FLASH_LOAN_PROVIDERS).
-   * Used to prefer cheaper protocols (e.g., Balancer V2 at 0% over Aave V3 at 0.09%)
+   * Used to prefer cheaper protocols (e.g., Balancer V2 at 0% over Aave V3 at 0.05%)
    * when the corresponding contract is deployed.
    */
   providerOverrides?: Record<string, { address: string; protocol: string; fee: number }>;

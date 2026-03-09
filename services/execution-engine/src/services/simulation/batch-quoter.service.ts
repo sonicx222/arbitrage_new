@@ -147,7 +147,7 @@ const DEX_ROUTER_ABI = [
  *     { router: uniswap, tokenIn: DAI, tokenOut: WETH, amountIn: 0n },
  *   ],
  *   parseEther('10'),
- *   9 // Aave V3 fee = 0.09%
+ *   5 // Aave V3 fee = 0.05%
  * );
  * ```
  */
@@ -257,7 +257,7 @@ export class BatchQuoterService {
    *
    * @param requests - Array of quote requests representing the arbitrage path
    * @param flashLoanAmount - Amount to flash loan
-   * @param flashLoanFeeBps - Flash loan fee in basis points (9 for Aave V3)
+   * @param flashLoanFeeBps - Flash loan fee in basis points (5 for Aave V3)
    * @returns Simulation result with expected profit
    */
   async simulateArbitragePath(

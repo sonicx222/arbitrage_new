@@ -5,7 +5,7 @@
  * Uses BalancerV2FlashArbitrage.sol contract for on-chain execution.
  *
  * Key advantages over other protocols:
- * - 0% flash loan fee (vs Aave V3's 0.09%)
+ * - 0% flash loan fee (vs Aave V3's 0.05%)
  * - Single Vault per chain (no pool discovery needed)
  * - Massive liquidity across all Balancer pools
  *

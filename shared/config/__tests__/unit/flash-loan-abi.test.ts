@@ -31,8 +31,8 @@ describe('Flash Loan ABI Constants', () => {
   // ===========================================================================
 
   describe('fee constants', () => {
-    it('AAVE_V3_FEE_BPS should be 9 (0.09%)', () => {
-      expect(AAVE_V3_FEE_BPS).toBe(9);
+    it('AAVE_V3_FEE_BPS should be 5 (0.05%, post-AIP-382)', () => {
+      expect(AAVE_V3_FEE_BPS).toBe(5);
     });
 
     it('BALANCER_V2_FEE_BPS should be 0 (0%)', () => {
@@ -62,7 +62,7 @@ describe('Flash Loan ABI Constants', () => {
       expect(SYNCSWAP_FEE_BPS).toBeLessThan(BPS_DENOMINATOR);
     });
 
-    it('fee ordering should be Balancer (0) < Aave (9) < SyncSwap (30)', () => {
+    it('fee ordering should be Balancer (0) < Aave (5) < SyncSwap (30)', () => {
       expect(BALANCER_V2_FEE_BPS).toBeLessThan(AAVE_V3_FEE_BPS);
       expect(AAVE_V3_FEE_BPS).toBeLessThan(SYNCSWAP_FEE_BPS);
     });
@@ -73,11 +73,11 @@ describe('Flash Loan ABI Constants', () => {
   // ===========================================================================
 
   describe('BigInt getters', () => {
-    it('getAaveV3FeeBpsBigInt should return BigInt(9)', () => {
+    it('getAaveV3FeeBpsBigInt should return BigInt(5)', () => {
       const result = getAaveV3FeeBpsBigInt();
       expect(typeof result).toBe('bigint');
       expect(result).toBe(BigInt(AAVE_V3_FEE_BPS));
-      expect(result).toBe(9n);
+      expect(String(result)).toBe('5'); // String comparison to avoid BigInt serialization crash
     });
 
     it('getBpsDenominatorBigInt should return BigInt(10000)', () => {
@@ -95,10 +95,10 @@ describe('Flash Loan ABI Constants', () => {
     });
 
     it('BigInt fee calculation should produce correct results', () => {
-      // Verify: 1 ETH loan amount * 9 bps / 10000 = 0.0009 ETH fee
+      // Verify: 1 ETH loan amount * 5 bps / 10000 = 0.0005 ETH fee
       const loanAmount = BigInt('1000000000000000000'); // 1 ETH in wei
       const fee = (loanAmount * getAaveV3FeeBpsBigInt()) / getBpsDenominatorBigInt();
-      expect(fee).toBe(BigInt('900000000000000')); // 0.0009 ETH
+      expect(String(fee)).toBe('500000000000000'); // 0.0005 ETH — String to avoid BigInt serialization crash
     });
   });
 
