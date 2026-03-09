@@ -37,6 +37,7 @@ export {
   RATE_WETH_TO_USDC,
   RATE_USDC_TO_DAI,
   RATE_DAI_TO_WETH_PROFIT,
+  RATE_USDC_TO_WETH_20PCT_PROFIT,
   setupProfitableWethUsdcRates,
 } from './exchange-rates';
 

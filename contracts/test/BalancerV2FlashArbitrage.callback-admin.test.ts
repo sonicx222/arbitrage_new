@@ -6,6 +6,7 @@ import {
   RATE_USDC_TO_WETH_1PCT_PROFIT,
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,
+  RATE_USDC_TO_WETH_20PCT_PROFIT,
   getDeadline,
   deployBalancerV2Fixture,
   testRouterManagement,
@@ -603,7 +604,7 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('600000000000000000000000000') // 20% profit
+        RATE_USDC_TO_WETH_20PCT_PROFIT
       );
 
       const swapPath = [

@@ -13,6 +13,7 @@ import {
   RATE_USDC_TO_WETH_1PCT_PROFIT,
   RATE_USDC_TO_WETH_2PCT_PROFIT,
   RATE_WETH_TO_USDC,
+  RATE_USDC_TO_WETH_20PCT_PROFIT,
   getDeadline,
   testRouterManagement,
   testMinimumProfitConfig,
@@ -177,7 +178,7 @@ describe('SyncSwapFlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('600000000000000000000000000') // 0.0006 WETH per USDC adjusted for decimals
+          RATE_USDC_TO_WETH_20PCT_PROFIT // 0.0006 WETH per USDC adjusted for decimals
         );
 
         const amountIn = ethers.parseEther('10');
@@ -214,7 +215,7 @@ describe('SyncSwapFlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('600000000000000000000000000') // 0.0006 WETH per USDC adjusted for decimals
+          RATE_USDC_TO_WETH_20PCT_PROFIT // 0.0006 WETH per USDC adjusted for decimals
         );
 
         const amountIn = ethers.parseEther('10');
@@ -397,7 +398,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('600000000000000000000000000') // 0.0006 WETH per USDC adjusted for decimals
+        RATE_USDC_TO_WETH_20PCT_PROFIT // 0.0006 WETH per USDC adjusted for decimals
       );
 
       const amountIn = ethers.parseEther('10');
@@ -771,7 +772,7 @@ describe('SyncSwapFlashArbitrage', () => {
       );
       return { expectedProfit: result.expectedProfit, flashLoanFee: result.flashLoanFee };
     },
-    profitableReverseRate: BigInt('600000000000000000000000000'),
+    profitableReverseRate: RATE_USDC_TO_WETH_20PCT_PROFIT,
   });
 
   describe('7. View Functions — SyncSwap-Specific', () => {

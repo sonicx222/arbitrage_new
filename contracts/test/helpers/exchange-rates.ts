@@ -65,6 +65,16 @@ export const RATE_USDC_TO_DAI = BigInt('1010000000000000000000000000000'); // 1.
 /** Standard forward rate: 1 DAI = 0.000505 WETH (profitable return leg) */
 export const RATE_DAI_TO_WETH_PROFIT = BigInt('505000000000000');
 
+/**
+ * Rate constant for USDC -> WETH that yields ~20% profit on round trip.
+ * With forward rate 1 WETH = 2000 USDC:
+ *   2000 USDC -> (2000e6 * 6e26) / 1e18 = 1.2 WETH (~20% profit)
+ *
+ * Used by SyncSwap and Balancer tests where large profit margins are needed
+ * to cover flash loan fees and still produce a meaningful profit.
+ */
+export const RATE_USDC_TO_WETH_20PCT_PROFIT = BigInt('600000000000000000000000000');
+
 // =============================================================================
 // Rate Setup Functions
 // =============================================================================

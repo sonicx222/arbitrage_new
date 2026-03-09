@@ -86,9 +86,6 @@ describe('PancakeSwapFlashArbitrage', () => {
     return { flashArbitrage, pancakeFactory, wethUsdcPool, usdcDaiPool, ...base };
   }
 
-  // Module-level variable to share pool address with triggerArbitrage callback
-  let cachedPoolAddress: string;
-
   // ===========================================================================
   // Deployment Defaults (shared) + PancakeSwap-Specific Deployment
   // ===========================================================================
@@ -139,29 +136,33 @@ describe('PancakeSwapFlashArbitrage', () => {
   // ===========================================================================
   // Input Validation (shared — _validateArbitrageParams)
   // ===========================================================================
-  testInputValidation({
-    contractName: 'PancakeSwapFlashArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      cachedPoolAddress = await f.wethUsdcPool.getAddress();
-      // Pre-whitelist the pool so base validation tests can reach _validateArbitrageParams
-      await f.flashArbitrage.connect(f.owner).whitelistPool(cachedPoolAddress);
-      return {
-        contract: f.flashArbitrage,
-        owner: f.owner,
-        user: f.user,
-        dexRouter1: f.dexRouter1,
-        dexRouter2: f.dexRouter2,
-        weth: f.weth,
-        usdc: f.usdc,
-        dai: f.dai,
-      };
-    },
-    triggerArbitrage: (contract, signer, params) =>
-      contract.connect(signer).executeArbitrage(
-        cachedPoolAddress, params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
-      ),
-  });
+  // L-05: Scoped closure replaces module-level cachedPoolAddress
+  (() => {
+    let poolAddress: string;
+    testInputValidation({
+      contractName: 'PancakeSwapFlashArbitrage',
+      getFixture: async () => {
+        const f = await loadFixture(deployContractsFixture);
+        poolAddress = await f.wethUsdcPool.getAddress();
+        // Pre-whitelist the pool so base validation tests can reach _validateArbitrageParams
+        await f.flashArbitrage.connect(f.owner).whitelistPool(poolAddress);
+        return {
+          contract: f.flashArbitrage,
+          owner: f.owner,
+          user: f.user,
+          dexRouter1: f.dexRouter1,
+          dexRouter2: f.dexRouter2,
+          weth: f.weth,
+          usdc: f.usdc,
+          dai: f.dai,
+        };
+      },
+      triggerArbitrage: (contract, signer, params) =>
+        contract.connect(signer).executeArbitrage(
+          poolAddress, params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
+        ),
+    });
+  })();
 
   // ===========================================================================
   // Pool Management Tests (PancakeSwap-specific)
@@ -362,28 +363,31 @@ describe('PancakeSwapFlashArbitrage', () => {
   // Calculate Expected Profit (shared + PancakeSwap-specific)
   // ===========================================================================
 
-  // PancakeSwap requires pool address — reuse cachedPoolAddress from fixture closure
-  testCalculateExpectedProfit({
-    contractName: 'PancakeSwapFlashArbitrage',
-    getFixture: async () => {
-      const f = await loadFixture(deployContractsFixture);
-      cachedPoolAddress = await f.wethUsdcPool.getAddress();
-      return {
-        contract: f.flashArbitrage,
-        owner: f.owner,
-        dexRouter1: f.dexRouter1,
-        weth: f.weth,
-        usdc: f.usdc,
-      };
-    },
-    triggerCalculateProfit: async (contract, params) => {
-      const [expectedProfit, flashLoanFee] = await contract.calculateExpectedProfit(
-        cachedPoolAddress, params.asset, params.amount, params.swapPath
-      );
-      return { expectedProfit, flashLoanFee };
-    },
-    profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
-  });
+  // L-05: Scoped closure for PancakeSwap-specific pool address
+  (() => {
+    let poolAddress: string;
+    testCalculateExpectedProfit({
+      contractName: 'PancakeSwapFlashArbitrage',
+      getFixture: async () => {
+        const f = await loadFixture(deployContractsFixture);
+        poolAddress = await f.wethUsdcPool.getAddress();
+        return {
+          contract: f.flashArbitrage,
+          owner: f.owner,
+          dexRouter1: f.dexRouter1,
+          weth: f.weth,
+          usdc: f.usdc,
+        };
+      },
+      triggerCalculateProfit: async (contract, params) => {
+        const [expectedProfit, flashLoanFee] = await contract.calculateExpectedProfit(
+          poolAddress, params.asset, params.amount, params.swapPath
+        );
+        return { expectedProfit, flashLoanFee };
+      },
+      profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
+    });
+  })();
 
   describe('Calculate Expected Profit — PancakeSwap-Specific', () => {
     it('should calculate PancakeSwap V3 fee as 0.25%', async () => {
