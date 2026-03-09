@@ -1260,4 +1260,81 @@ describe('Per-Chain EV Thresholds', () => {
       noHistoryCalc.destroy();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // L2 vs L1 Threshold Comparison (Fix #5)
+  // ---------------------------------------------------------------------------
+
+  describe('L2 approved vs L1 rejected with same EV', () => {
+    it('should approve on Base (L2) but reject on Ethereum (L1) for same marginal EV', () => {
+      // A small opportunity: ~0.001 ETH EV
+      // Base threshold: 0.0002 ETH → approve
+      // Ethereum threshold: 0.005 ETH → reject
+
+      // Set up Base data
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'base', dex: 'uniswap_v2', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'base', dex: 'uniswap_v2', success: false, profit: undefined }));
+      }
+
+      const input: EVInput = {
+        chain: 'base',
+        dex: 'uniswap_v2',
+        pathLength: 2,
+        estimatedProfit: 2000000000000000n, // 0.002 ETH
+        estimatedGas: 500000000000000n, // 0.0005 ETH
+      };
+
+      const baseResult = calculator.calculate(input);
+      // EV = 0.8 * 0.002 - 0.2 * 0.0005 = 0.0015 ETH > 0.0002 threshold → approve
+      expect(baseResult.shouldExecute).toBe(true);
+
+      // Now same EV on Ethereum
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'ethereum', dex: 'uniswap_v2', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'ethereum', dex: 'uniswap_v2', success: false, profit: undefined }));
+      }
+
+      const ethInput: EVInput = {
+        ...input,
+        chain: 'ethereum',
+      };
+
+      const ethResult = calculator.calculate(ethInput);
+      // EV = 0.8 * 0.002 - 0.2 * 0.0005 = 0.0015 ETH < 0.005 threshold → reject
+      expect(ethResult.shouldExecute).toBe(false);
+      expect(ethResult.reason).toContain('below threshold');
+    });
+
+    it('should use Polygon-specific threshold (0.2 MATIC) for Polygon chain', () => {
+      tracker.clear();
+      for (let i = 0; i < 8; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'polygon', dex: 'quickswap', success: true }));
+      }
+      for (let i = 0; i < 2; i++) {
+        tracker.recordOutcome(createMockOutcome({ chain: 'polygon', dex: 'quickswap', success: false, profit: undefined }));
+      }
+
+      const input: EVInput = {
+        chain: 'polygon',
+        dex: 'quickswap',
+        pathLength: 2,
+        estimatedProfit: 500000000000000000n, // 0.5 MATIC
+        estimatedGas: 100000000000000000n, // 0.1 MATIC
+      };
+
+      const result = calculator.calculate(input);
+
+      // EV = 0.8 * 0.5 - 0.2 * 0.1 = 0.4 - 0.02 = 0.38 MATIC
+      // Polygon threshold is 0.2 MATIC → should approve
+      expect(result.shouldExecute).toBe(true);
+      expect(result.expectedValue).toBeGreaterThan(200000000000000000n); // > 0.2 MATIC
+    });
+  });
 });

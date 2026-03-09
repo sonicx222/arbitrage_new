@@ -6,6 +6,16 @@
  * @see risk-management-orchestrator.ts
  */
 
+// Mock getNativeTokenPrice BEFORE importing the module under test
+const mockGetNativeTokenPrice = jest.fn().mockReturnValue(2000); // $2000/ETH default
+jest.mock('@arbitrage/config', () => {
+  const actual = jest.requireActual('@arbitrage/config');
+  return {
+    ...actual,
+    getNativeTokenPrice: (...args: unknown[]) => mockGetNativeTokenPrice(...args),
+  };
+});
+
 import {
   RiskManagementOrchestrator,
   createRiskOrchestrator,
@@ -75,6 +85,7 @@ describe('RiskManagementOrchestrator', () => {
   beforeEach(() => {
     logger = createMockLogger();
     stats = createInitialStats();
+    mockGetNativeTokenPrice.mockReturnValue(2000); // $2000/ETH default
   });
 
   describe('factory function', () => {
@@ -444,7 +455,7 @@ describe('RiskManagementOrchestrator', () => {
       );
     });
 
-    it('should record failed trade with gas cost as loss', () => {
+    it('should record failed trade with gas cost as USD-normalized loss', () => {
       const mockBreaker = createMockDrawdownBreaker();
 
       const deps: RiskOrchestratorDeps = {
@@ -465,10 +476,11 @@ describe('RiskManagementOrchestrator', () => {
         gasCost: 0.001, // ETH units (fractional)
       });
 
+      // Fix #2: gasCost is now USD-normalized: 0.001 ETH * $2000/ETH = $2.0
       expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
         expect.objectContaining({
           success: false,
-          pnl: -1000000000000000n, // -0.001 ETH in wei
+          pnl: -2000000000000000000n, // -$2.0 * 1e18
         })
       );
     });
@@ -501,16 +513,109 @@ describe('RiskManagementOrchestrator', () => {
         });
       }).not.toThrow();
 
-      // Verify gasCost was converted to wei correctly
+      // Verify gasCost was converted to wei correctly (tracker gets raw wei)
       expect(mockTracker.recordOutcome).toHaveBeenCalledWith(
         expect.objectContaining({
           gasCost: 3000000000000000n, // 0.003 ETH = 3e15 wei
         })
       );
 
+      // Fix #2: drawdown breaker gets USD-normalized pnl: 0.003 ETH * $2000 = $6.0
       expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
         expect.objectContaining({
-          pnl: -3000000000000000n, // -0.003 ETH in wei
+          pnl: -6000000000000000000n, // -$6.0 * 1e18
+        })
+      );
+    });
+
+    it('should use per-chain native token price for USD normalization', () => {
+      // BSC: BNB = $600
+      mockGetNativeTokenPrice.mockReturnValue(600);
+      const mockBreaker = createMockDrawdownBreaker();
+
+      const deps: RiskOrchestratorDeps = {
+        drawdownBreaker: mockBreaker as any,
+        evCalculator: null,
+        positionSizer: null,
+        probabilityTracker: null,
+        logger,
+        stats,
+      };
+
+      const orchestrator = createRiskOrchestrator(deps);
+      orchestrator.recordOutcome({
+        chain: 'bsc',
+        dex: 'pancakeswap',
+        pathLength: 2,
+        success: false,
+        gasCost: 0.01, // 0.01 BNB
+      });
+
+      // 0.01 BNB * $600/BNB = $6.0
+      expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pnl: -6000000000000000000n, // -$6.0 * 1e18
+        })
+      );
+      expect(mockGetNativeTokenPrice).toHaveBeenCalledWith('bsc', { suppressWarning: true });
+    });
+
+    it('should not USD-normalize successful trade profit (already in USD)', () => {
+      const mockBreaker = createMockDrawdownBreaker();
+
+      const deps: RiskOrchestratorDeps = {
+        drawdownBreaker: mockBreaker as any,
+        evCalculator: null,
+        positionSizer: null,
+        probabilityTracker: null,
+        logger,
+        stats,
+      };
+
+      const orchestrator = createRiskOrchestrator(deps);
+      orchestrator.recordOutcome({
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pathLength: 2,
+        success: true,
+        actualProfit: 5.0, // $5.0 USD (already normalized by calculateActualProfit)
+        gasCost: 0.001,
+      });
+
+      // Successful trade uses actualProfit directly (already USD)
+      expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          pnl: 5000000000000000000n, // $5.0 * 1e18
+        })
+      );
+    });
+
+    it('should handle zero gasCost without USD normalization', () => {
+      const mockBreaker = createMockDrawdownBreaker();
+
+      const deps: RiskOrchestratorDeps = {
+        drawdownBreaker: mockBreaker as any,
+        evCalculator: null,
+        positionSizer: null,
+        probabilityTracker: null,
+        logger,
+        stats,
+      };
+
+      const orchestrator = createRiskOrchestrator(deps);
+      orchestrator.recordOutcome({
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pathLength: 2,
+        success: false,
+        gasCost: 0,
+      });
+
+      expect(mockBreaker.recordTradeResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          pnl: 0n,
         })
       );
     });

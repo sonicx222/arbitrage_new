@@ -55,12 +55,13 @@ describe('flash-loan-providers', () => {
       expect(AAVE_V3_PROVIDER.feeBps).toBe(5);
     });
 
-    it('should cover 7 mainnet chains', () => {
+    it('should cover 8 mainnet chains + 3 testnets (11 total)', () => {
       expect(AAVE_V3_PROVIDER.chains).toContain('ethereum');
       expect(AAVE_V3_PROVIDER.chains).toContain('polygon');
       expect(AAVE_V3_PROVIDER.chains).toContain('arbitrum');
       expect(AAVE_V3_PROVIDER.chains).toContain('scroll');
-      expect(AAVE_V3_PROVIDER.chains).toHaveLength(7);
+      expect(AAVE_V3_PROVIDER.chains).toContain('mantle');
+      expect(AAVE_V3_PROVIDER.chains).toHaveLength(11);
     });
 
     it('should be active', () => {

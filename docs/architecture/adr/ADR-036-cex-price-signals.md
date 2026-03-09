@@ -1,7 +1,7 @@
 # ADR-036: CEX Price Signal Integration
 
 ## Status
-**Accepted**
+**Deferred** — Feature (`FEATURE_CEX_PRICE_SIGNALS`) was never implemented. Architecture is sound but deprioritized in favor of on-chain price feeds (ADR-040). May be revisited when mainnet latency data is available.
 
 ## Date
 2026-02-24

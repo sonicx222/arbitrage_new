@@ -138,6 +138,8 @@ export interface RedisCommandStats {
   estimatedDailyUsage: number;
   /** Percentage of daily limit used (based on 10,000/day) */
   dailyLimitPercent: number;
+  /** Whether the Redis client is connected and ready */
+  connected: boolean;
 }
 
 /**
@@ -1287,6 +1289,7 @@ export class RedisClient {
       commandsPerMinute: Math.round(commandsPerMinute * 10) / 10,
       estimatedDailyUsage,
       dailyLimitPercent,
+      connected: this.client.status === 'ready',
     };
   }
 

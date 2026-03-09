@@ -270,16 +270,11 @@ describe('Emerging L2s Configuration', () => {
       // Partition Assignment
       // -----------------------------------------------------------------------
       describe('Partition assignment', () => {
-        it('is assigned to expected partition', () => {
+        it('is assigned to l2-turbo partition', () => {
           const partition = assignChainToPartition(chainData.chainKey);
           expect(partition).not.toBeNull();
-          // Scroll and Blast are fully supported in P2 (l2-turbo) with real DEX addresses
-          // Mantle and Mode remain stubs — they fall through to HIGH_VALUE default
-          if (chainData.chainKey === 'scroll' || chainData.chainKey === 'blast') {
-            expect(partition!.partitionId).toBe(PARTITION_IDS.L2_TURBO);
-          } else {
-            expect(partition!.partitionId).toBe(PARTITION_IDS.HIGH_VALUE);
-          }
+          // All 4 emerging L2s are now assigned to P2 (l2-turbo)
+          expect(partition!.partitionId).toBe(PARTITION_IDS.L2_TURBO);
         });
       });
 
@@ -340,18 +335,17 @@ describe('Emerging L2s Configuration', () => {
       expect(MAINNET_CHAIN_IDS.length).toBe(15);
     });
 
-    it('P2 partition has 5 chains (Scroll and Blast added with real DEX addresses)', () => {
+    it('P2 partition has 7 chains (all emerging L2s now in l2-turbo)', () => {
       const p2 = assignChainToPartition('arbitrum');
       expect(p2).not.toBeNull();
-      expect(p2!.chains.length).toBe(5);
+      expect(p2!.chains.length).toBe(7);
       expect(p2!.chains).toContain('arbitrum');
       expect(p2!.chains).toContain('optimism');
       expect(p2!.chains).toContain('base');
       expect(p2!.chains).toContain('scroll');
       expect(p2!.chains).toContain('blast');
-      // Mantle and Mode remain stubs — not in P2:
-      expect(p2!.chains).not.toContain('mantle');
-      expect(p2!.chains).not.toContain('mode');
+      expect(p2!.chains).toContain('mantle');
+      expect(p2!.chains).toContain('mode');
     });
 
     it('Scroll has SyncSwap and Aave V3 flash loan support', () => {
@@ -359,12 +353,18 @@ describe('Emerging L2s Configuration', () => {
       expect(FLASH_LOAN_AVAILABILITY['scroll']?.aave_v3).toBe(true);
     });
 
-    it('Blast, Mantle, Mode have no flash loan support', () => {
-      for (const chain of ['blast', 'mantle', 'mode']) {
-        const entry = FLASH_LOAN_AVAILABILITY[chain];
-        const hasAnySupport = Object.values(entry).some(v => v === true);
-        expect(hasAnySupport).toBe(false);
-      }
+    it('Blast has no flash loan support', () => {
+      const entry = FLASH_LOAN_AVAILABILITY['blast'];
+      const hasAnySupport = Object.values(entry).some(v => v === true);
+      expect(hasAnySupport).toBe(false);
+    });
+
+    it('Mantle has Aave V3 flash loan support', () => {
+      expect(FLASH_LOAN_AVAILABILITY['mantle']?.aave_v3).toBe(true);
+    });
+
+    it('Mode has Balancer V2 flash loan support', () => {
+      expect(FLASH_LOAN_AVAILABILITY['mode']?.balancer_v2).toBe(true);
     });
 
     it('Scroll has bridge routes configured', () => {

@@ -196,6 +196,8 @@ services:
       - INSTANCE_ID=execution-engine-testnet
       - HEALTH_CHECK_PORT=3005
       - SIMULATION_MODE=${SIMULATION_MODE:-true}
+      - EXECUTION_SIMULATION_MODE=${EXECUTION_SIMULATION_MODE:-true}
+      - TESTNET_EXECUTION_MODE=${TESTNET_EXECUTION_MODE:-false}
       # Testnet private keys (use dedicated testnet wallets ONLY)
       - ETHEREUM_PRIVATE_KEY=${TESTNET_PRIVATE_KEY}
       - ARBITRUM_PRIVATE_KEY=${TESTNET_PRIVATE_KEY}

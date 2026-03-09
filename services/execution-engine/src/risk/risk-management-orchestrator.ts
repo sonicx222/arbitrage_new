@@ -22,7 +22,7 @@ import type {
   EVCalculation,
   PositionSize,
 } from '@arbitrage/core/risk';
-import { RISK_CONFIG } from '@arbitrage/config';
+import { RISK_CONFIG, getNativeTokenPrice } from '@arbitrage/config';
 import type { Logger, ExecutionStats } from '../types';
 
 /**
@@ -347,13 +347,17 @@ export class RiskManagementOrchestrator {
 
       // Update drawdown breaker with trade result
       if (this.drawdownBreaker) {
-        // FIX P0-2: gasCost is in ETH units (fractional) — convert to wei before BigInt
-        // @see FIX P0-2 in docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md
+        // FIX P0-2: gasCost is in native token units (fractional).
+        // actualProfit is already in USD (from calculateActualProfit).
+        // USD normalization: convert gas cost from native token to USD so
+        // drawdown accumulator uses consistent denomination (USD * 1e18).
+        const nativeTokenPriceUsd = getNativeTokenPrice(outcome.chain, { suppressWarning: true });
+        const gasCostUsd = outcome.gasCost ? outcome.gasCost * nativeTokenPriceUsd : 0;
         const pnl =
           outcome.success && outcome.actualProfit
             ? BigInt(Math.floor(outcome.actualProfit * 1e18))
-            : outcome.gasCost
-              ? -BigInt(Math.floor(outcome.gasCost * 1e18))
+            : gasCostUsd > 0
+              ? -BigInt(Math.floor(gasCostUsd * 1e18))
               : 0n;
 
         this.drawdownBreaker.recordTradeResult({

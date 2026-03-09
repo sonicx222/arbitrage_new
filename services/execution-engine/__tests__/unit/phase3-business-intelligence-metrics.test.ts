@@ -59,7 +59,7 @@ const createMockOpportunity = (overrides = {}) => ({
   buyChain: 'bsc',
   buyDex: 'pancakeswap_v3',
   sellDex: 'biswap',
-  expectedProfit: 0.05, // 0.05 ETH expected
+  expectedProfit: 0.05, // $0.05 USD expected
   path: ['WETH', 'USDC'],
   pipelineTimestamps: {
     detectedAt: Date.now() - 200, // detected 200ms ago
@@ -117,8 +117,10 @@ const createMockDeps = (overrides = {}): PipelineDeps => ({
   strategyFactory: {
     execute: jest.fn().mockResolvedValue({
       success: true,
-      actualProfit: 50000000000000000, // 0.05 ETH in wei
-      gasCost: 2500000000000000, // 0.0025 ETH in wei
+      // H-001 FIX: actualProfit is in human-readable USD units (not wei).
+      // Strategies return USD via calculateActualProfit().
+      actualProfit: 0.05, // $0.05 USD
+      gasCost: 0.0025, // $0.0025 USD
     }),
   },
   cbManager: null,
@@ -213,14 +215,14 @@ describe('Phase 3 Business Intelligence Metrics', () => {
   describe('A3: Profit slippage (expected vs actual)', () => {
     it('should record profit slippage on successful execution with both values', async () => {
       const opp = createMockOpportunity({
-        expectedProfit: 0.05, // 0.05 ETH expected
+        expectedProfit: 0.05, // $0.05 USD expected
       });
 
-      // Strategy returns 0.05 ETH in wei = 50000000000000000
+      // H-001 FIX: actualProfit is in human-readable USD (not wei)
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000, // 0.05 ETH in wei
-        gasCost: 2500000000000000,
+        actualProfit: 0.05, // $0.05 USD
+        gasCost: 0.0025,
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
@@ -235,13 +237,14 @@ describe('Phase 3 Business Intelligence Metrics', () => {
 
     it('should record positive slippage when expected > actual (overestimate)', async () => {
       const opp = createMockOpportunity({
-        expectedProfit: 0.10, // 0.10 ETH expected
+        expectedProfit: 0.10, // $0.10 USD expected
       });
 
+      // H-001 FIX: actualProfit is in human-readable USD (not wei)
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000, // 0.05 ETH actual (only half)
-        gasCost: 2500000000000000,
+        actualProfit: 0.05, // $0.05 USD actual (only half)
+        gasCost: 0.0025,
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
@@ -254,13 +257,14 @@ describe('Phase 3 Business Intelligence Metrics', () => {
 
     it('should record negative slippage when actual > expected (underestimate)', async () => {
       const opp = createMockOpportunity({
-        expectedProfit: 0.05, // 0.05 ETH expected
+        expectedProfit: 0.05, // $0.05 USD expected
       });
 
+      // H-001 FIX: actualProfit is in human-readable USD (not wei)
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 100000000000000000, // 0.10 ETH actual (double)
-        gasCost: 2500000000000000,
+        actualProfit: 0.10, // $0.10 USD actual (double)
+        gasCost: 0.0025,
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
@@ -292,7 +296,7 @@ describe('Phase 3 Business Intelligence Metrics', () => {
     });
 
     it('should not record slippage on failed execution', async () => {
-      const opp = createMockOpportunity({ expectedProfit: 0.05 });
+      const opp = createMockOpportunity({ expectedProfit: 0.05 }); // $0.05 USD
       deps.strategyFactory.execute.mockResolvedValue({
         success: false,
         error: 'Reverted',
@@ -304,7 +308,7 @@ describe('Phase 3 Business Intelligence Metrics', () => {
     });
 
     it('should not record slippage when actualProfit is null', async () => {
-      const opp = createMockOpportunity({ expectedProfit: 0.05 });
+      const opp = createMockOpportunity({ expectedProfit: 0.05 }); // $0.05 USD
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
         actualProfit: undefined,
@@ -321,12 +325,13 @@ describe('Phase 3 Business Intelligence Metrics', () => {
   // ===========================================================================
 
   describe('F4: Profit per execution histogram', () => {
-    it('should record profit per execution in ETH (wei / 1e18)', async () => {
+    it('should record profit per execution in USD (human-readable)', async () => {
       const opp = createMockOpportunity();
+      // H-001 FIX: actualProfit is in human-readable USD (not wei)
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000, // 0.05 ETH in wei
-        gasCost: 2500000000000000,
+        actualProfit: 0.05, // $0.05 USD
+        gasCost: 0.0025,
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
@@ -367,7 +372,7 @@ describe('Phase 3 Business Intelligence Metrics', () => {
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
         actualProfit: 0,
-        gasCost: 500000000000000,
+        gasCost: 0.0005,
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
@@ -385,10 +390,11 @@ describe('Phase 3 Business Intelligence Metrics', () => {
   describe('F5: Gas cost per execution', () => {
     it('should record gas cost on successful execution', async () => {
       const opp = createMockOpportunity();
+      // H-001 FIX: All values in human-readable units
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000,
-        gasCost: 2500000000000000, // gas cost in native token units
+        actualProfit: 0.05,
+        gasCost: 0.0025, // gas cost in USD
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
@@ -396,7 +402,7 @@ describe('Phase 3 Business Intelligence Metrics', () => {
       expect(promMetrics.recordGasCostPerExecution).toHaveBeenCalledTimes(1);
       const [chain, gasCost] = promMetrics.recordGasCostPerExecution.mock.calls[0];
       expect(chain).toBe('bsc');
-      expect(gasCost).toBe(2500000000000000);
+      expect(gasCost).toBe(0.0025);
     });
 
     it('should record gas cost on failed execution', async () => {
@@ -404,21 +410,21 @@ describe('Phase 3 Business Intelligence Metrics', () => {
       deps.strategyFactory.execute.mockResolvedValue({
         success: false,
         error: 'Slippage exceeded',
-        gasCost: 1500000000000000,
+        gasCost: 0.0015, // gas cost in USD
       });
 
       await executeSingleOpportunity(pipeline, deps, opp);
 
       expect(promMetrics.recordGasCostPerExecution).toHaveBeenCalledTimes(1);
       const [, gasCost] = promMetrics.recordGasCostPerExecution.mock.calls[0];
-      expect(gasCost).toBe(1500000000000000);
+      expect(gasCost).toBe(0.0015);
     });
 
     it('should not record gas cost when gasCost is null/undefined', async () => {
       const opp = createMockOpportunity();
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000,
+        actualProfit: 0.05,
         gasCost: undefined,
       });
 
@@ -431,7 +437,7 @@ describe('Phase 3 Business Intelligence Metrics', () => {
       const opp = createMockOpportunity();
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000,
+        actualProfit: 0.05,
         gasCost: NaN,
       });
 
@@ -444,7 +450,7 @@ describe('Phase 3 Business Intelligence Metrics', () => {
       const opp = createMockOpportunity();
       deps.strategyFactory.execute.mockResolvedValue({
         success: true,
-        actualProfit: 50000000000000000,
+        actualProfit: 0.05,
         gasCost: 0,
       });
 

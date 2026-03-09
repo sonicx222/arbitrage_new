@@ -27,6 +27,21 @@ import {
 } from '@arbitrage/test-utils';
 
 // =============================================================================
+// BigInt-safe assertion helper
+// =============================================================================
+// Jest 29 crashes with "Do not know how to serialize a BigInt" when a .toBe()
+// assertion fails and both expected/received are BigInt values.  The diff
+// serializer calls JSON.stringify on the raw values, which throws because
+// JSON.stringify cannot handle BigInt even with a toJSON polyfill in the
+// jest-runner child-process (serialization: 'json') code-path.
+//
+// Converting to strings before the comparison avoids the crash while still
+// producing a clear expected-vs-received diff on failure.
+function expectBigIntEq(actual: bigint, expected: bigint): void {
+  expect(actual.toString()).toBe(expected.toString());
+}
+
+// =============================================================================
 // Mocks (using shared factories with local overrides)
 // =============================================================================
 
@@ -129,13 +144,14 @@ describe('FlashLoanStrategy', () => {
   // ===========================================================================
 
   describe('calculateFlashLoanFee', () => {
-    it('should calculate Aave V3 fee correctly (0.09%)', () => {
+    it('should calculate Aave V3 fee correctly (0.05%)', () => {
       const amount = ethers.parseEther('100');
       const fee = strategy.calculateFlashLoanFee(amount, 'ethereum');
 
-      // 100 ETH * 0.09% = 0.09 ETH = 9e16 wei
-      const expectedFee = amount * 9n / 10000n;
-      expect(fee).toBe(expectedFee);
+      // Ethereum uses FLASH_LOAN_PROVIDERS fee: 5 bps (0.05%) since March 2024 governance vote
+      // 100 ETH * 0.05% = 0.05 ETH = 5e16 wei
+      const expectedFee = amount * 5n / 10000n;
+      expectBigIntEq(fee, expectedFee);
     });
 
     it('should use default fee for unknown chains', () => {
@@ -144,25 +160,25 @@ describe('FlashLoanStrategy', () => {
 
       // Default is Aave V3 fee (0.09%)
       const expectedFee = amount * 9n / 10000n;
-      expect(fee).toBe(expectedFee);
+      expectBigIntEq(fee, expectedFee);
     });
 
     it('should handle small amounts correctly', () => {
       const amount = ethers.parseUnits('1', 6); // 1 USDC (6 decimals)
       const fee = strategy.calculateFlashLoanFee(amount, 'ethereum');
 
-      // 1 USDC * 0.09% = 0.0009 USDC = 900 units
-      const expectedFee = amount * 9n / 10000n;
-      expect(fee).toBe(expectedFee);
+      // 1 USDC * 0.05% = 0.0005 USDC = 500 units (Ethereum uses 5 bps)
+      const expectedFee = amount * 5n / 10000n;
+      expectBigIntEq(fee, expectedFee);
     });
 
     it('should handle large amounts without overflow', () => {
       const amount = ethers.parseEther('1000000'); // 1M ETH
       const fee = strategy.calculateFlashLoanFee(amount, 'ethereum');
 
-      // 1M ETH * 0.09% = 900 ETH
-      const expectedFee = amount * 9n / 10000n;
-      expect(fee).toBe(expectedFee);
+      // 1M ETH * 0.05% = 500 ETH (Ethereum uses 5 bps)
+      const expectedFee = amount * 5n / 10000n;
+      expectBigIntEq(fee, expectedFee);
     });
   });
 
@@ -211,8 +227,8 @@ describe('FlashLoanStrategy', () => {
         nativeTokenPriceUsd: 2000,
       });
 
-      // 10 ETH * 0.09% = 0.009 ETH = $18 at $2000/ETH
-      expect(analysis.flashLoanFeeUsd).toBeCloseTo(18, 1);
+      // 10 ETH * 0.05% = 0.005 ETH = $10 at $2000/ETH (Ethereum uses 5 bps)
+      expect(analysis.flashLoanFeeUsd).toBeCloseTo(10, 1);
     });
 
     it('should compare flash loan vs direct execution profitability', () => {
@@ -684,7 +700,7 @@ describe('FlashLoanStrategy', () => {
       const estimatedGas = await strategy.estimateGasFromTransaction(tx, 'ethereum', ctx);
 
       // Should return default estimate (500000n)
-      expect(estimatedGas).toBe(500000n);
+      expectBigIntEq(estimatedGas, 500000n);
     });
   });
 
@@ -810,8 +826,8 @@ describe('FlashLoanStrategy', () => {
       const result = await strategy.calculateExpectedProfitOnChain(opportunity, 'ethereum', ctx);
 
       expect(result).not.toBeNull();
-      expect(result!.expectedProfit).toBe(expectedProfit);
-      expect(result!.flashLoanFee).toBe(flashLoanFee);
+      expectBigIntEq(result!.expectedProfit, expectedProfit);
+      expectBigIntEq(result!.flashLoanFee, flashLoanFee);
     });
 
     it('should return null if opportunity missing required fields', async () => {
@@ -880,8 +896,8 @@ describe('FlashLoanStrategy', () => {
       const result = await strategy.calculateExpectedProfitOnChain(opportunity, 'ethereum', ctx);
 
       expect(result).not.toBeNull();
-      expect(result!.expectedProfit).toBe(0n);
-      expect(result!.flashLoanFee).toBe(flashLoanFee);
+      expectBigIntEq(result!.expectedProfit, 0n);
+      expectBigIntEq(result!.flashLoanFee, flashLoanFee);
     });
 
     // Fix 8.1: Test for malformed return data
@@ -1083,7 +1099,7 @@ describe('FlashLoanStrategy - buildNHopSwapSteps', () => {
 
     // 1% slippage on 10 ETH = 0.1 ETH reduction
     const expectedMin = expectedOutput - (expectedOutput * BigInt(slippageBps) / 10000n);
-    expect(steps[0].amountOutMin).toBe(expectedMin);
+    expectBigIntEq(steps[0].amountOutMin, expectedMin);
   });
 
   it('should throw if expectedOutput not provided (P0-2 FIX: no 1 wei fallback)', () => {

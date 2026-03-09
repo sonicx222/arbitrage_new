@@ -149,6 +149,17 @@ collector.defineMetric({
   labels: ['chain', 'strategy'],
 });
 
+// Phase 3 Business Intelligence (A3b): Estimation bias direction counter
+// Tracks systematic over/under-estimation to diagnose pricing model accuracy.
+// Note: Full decomposition into "estimation error" vs "execution slippage" requires
+// intermediate price snapshots at execution time, which is a future enhancement.
+collector.defineMetric({
+  name: 'profit_estimation_bias_total',
+  type: MetricType.COUNTER,
+  description: 'Count of profit estimations by bias direction (overestimated: expected > actual, underestimated: expected < actual)',
+  labels: ['chain', 'strategy', 'direction'],
+});
+
 // Phase 3 Business Intelligence (A4): Opportunity age at execution
 collector.defineMetric({
   name: 'opportunity_age_at_execution_ms',
@@ -280,6 +291,9 @@ export function recordOpportunityOutcome(chain: string, outcome: string): void {
  */
 export function recordProfitSlippage(chain: string, strategy: string, slippagePct: number): void {
   collector.recordHistogram('profit_slippage_pct', slippagePct, { chain, strategy });
+  // A3b: Track estimation bias direction for systematic accuracy analysis
+  const direction = slippagePct > 1 ? 'overestimated' : slippagePct < -1 ? 'underestimated' : 'accurate';
+  collector.incrementCounter('profit_estimation_bias_total', { chain, strategy, direction });
 }
 
 /**

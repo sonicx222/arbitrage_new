@@ -341,13 +341,17 @@ describe('Metrics Routes', () => {
       expect(res.text).toContain('stream_length{stream="health"} 42');
     });
 
-    it('should return 500 when monitor fails', async () => {
+    it('should return 200 with fallback text when stream monitor fails', async () => {
+      // DV-005 FIX: Stream health timeout is caught by inner try/catch and replaced
+      // with a fallback string. The outer handler continues to return 200 with the
+      // remaining metrics (runtime, coordinator, provider).
       mockStreamMonitor.getPrometheusMetrics.mockRejectedValue(new Error('Monitor unavailable'));
 
       const app = createTestApp(mockState);
       const res = await supertest(app).get('/api/metrics/prometheus');
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('# stream_health_monitor timed out');
     });
   });
 

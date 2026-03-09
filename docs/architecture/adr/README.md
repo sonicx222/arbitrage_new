@@ -49,7 +49,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-033](./ADR-033-stale-price-window.md) | Stale Price Window Protection | Accepted | 2026-02-22 | 95% |
 | [ADR-034](./ADR-034-solana-execution.md) | Solana Execution via Jupiter + Jito | Accepted | 2026-02-24 | 85% |
 | [ADR-035](./ADR-035-statistical-arbitrage.md) | Statistical Arbitrage Strategy | Accepted | 2026-02-24 | 80% |
-| [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Accepted | 2026-02-24 | 85% |
+| [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Deferred | 2026-02-24 | 85% |
 | [ADR-037](./ADR-037-coordinator-pipeline-optimization.md) | Coordinator Pipeline Optimization | Accepted | 2026-03-02 | 90% |
 | [ADR-038](./ADR-038-chain-grouped-execution.md) | Chain-Grouped Execution Engines | Accepted | 2026-03-06 | 92% |
 | [ADR-039](./ADR-039-async-pipeline-split.md) | Async Pipeline Split with SimulationWorker | Accepted | 2026-03-06 | 90% |

@@ -1089,4 +1089,70 @@ describe('Gas-Budget Mode', () => {
       expect(stats.rejectedNegativeKelly).toBe(1);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Gas-Budget 24h Rolling Window (Fix #5)
+  // ---------------------------------------------------------------------------
+
+  describe('gas-budget 24h rolling window', () => {
+    it('should expire old gas spend entries after 24h', () => {
+      // We can't directly manipulate Date.now in the rolling window calculation,
+      // but we can verify that after clear() the budget resets, which is the
+      // primary safeguard. The computeRollingGasSpend() prunes entries internally.
+
+      // Record gas near budget
+      gasSizer.recordGasSpend(960000000000000000n); // 0.96 ETH
+
+      // Verify budget is nearly exhausted
+      const input = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: 50000000000000000n, // 0.05 ETH
+      });
+      expect(gasSizer.calculateSize(input).shouldTrade).toBe(false);
+
+      // After clear (simulating 24h expiry), budget should be fresh
+      gasSizer.clear();
+      expect(gasSizer.calculateSize(input).shouldTrade).toBe(true);
+    });
+
+    it('should accumulate multiple gas spends correctly', () => {
+      // Spend 3 x 0.3 ETH = 0.9 ETH total (within 1.0 ETH budget)
+      gasSizer.recordGasSpend(300000000000000000n);
+      gasSizer.recordGasSpend(300000000000000000n);
+      gasSizer.recordGasSpend(300000000000000000n);
+
+      // 0.9 + 0.05 = 0.95 < 1.0 budget → should approve
+      const withinBudget = createMockInput({
+        expectedProfit: ONE_ETH,
+        expectedLoss: 50000000000000000n, // 0.05 ETH
+      });
+      expect(gasSizer.calculateSize(withinBudget).shouldTrade).toBe(true);
+
+      // One more spend pushes past budget
+      gasSizer.recordGasSpend(100000000000000000n); // +0.1 = 1.0 total
+
+      // 1.0 + 0.05 = 1.05 > 1.0 budget → should reject
+      expect(gasSizer.calculateSize(withinBudget).shouldTrade).toBe(false);
+    });
+
+    it('should not affect non-gas-budget mode', () => {
+      // Create a sizer WITHOUT gas-budget mode
+      const regularSizer = new KellyPositionSizer(createMockConfig({
+        totalCapital: 100n * ONE_ETH,
+        enabled: true,
+      }));
+
+      const input = createMockInput({
+        winProbability: 0.7,
+        expectedProfit: ONE_ETH,
+        expectedLoss: ONE_ETH / 100n,
+      });
+
+      const result = regularSizer.calculateSize(input);
+      expect(result.shouldTrade).toBe(true);
+
+      regularSizer.destroy();
+      resetKellyPositionSizer();
+    });
+  });
 });

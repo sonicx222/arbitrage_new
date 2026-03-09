@@ -152,8 +152,8 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.enabled).toBe(true);
   });
 
-  it('should contain Arbitrum, Optimism, Base, Scroll, Blast (emerging L2s with real addresses)', () => {
-    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast']);
+  it('should contain Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode', () => {
+    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']);
   });
 
   it('should be deployed to asia-southeast1 on Fly.io', () => {
@@ -161,9 +161,9 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.provider).toBe('fly');
   });
 
-  it('should have standard resource profile with 640MB memory (5 chains)', () => {
-    expect(partition!.resourceProfile).toBe('standard');
-    expect(partition!.maxMemoryMB).toBe(640);
+  it('should have heavy resource profile with 896MB memory (7 chains)', () => {
+    expect(partition!.resourceProfile).toBe('heavy');
+    expect(partition!.maxMemoryMB).toBe(896);
   });
 
   it('should have fastest health check interval (10s for fast L2s)', () => {
@@ -315,14 +315,14 @@ describe('assignChainToPartition', () => {
     }
   });
 
-  it('should have all chains assigned to exactly one partition (13 total)', () => {
+  it('should have all chains assigned to exactly one partition (15 total)', () => {
     const assignedChains = new Set<string>();
     for (const partition of PARTITIONS) {
       for (const chainId of partition.chains) {
         assignedChains.add(chainId);
       }
     }
-    expect(assignedChains.size).toBe(13); // 15 total - 2 stub L2s (mantle, mode without real DEX factories)
+    expect(assignedChains.size).toBe(15); // All 15 chains assigned (mantle, mode now in l2-turbo)
   });
 });
 
@@ -424,7 +424,7 @@ describe('getChainsForPartition', () => {
 
   it('should return chains for l2-turbo partition', () => {
     const chains = getChainsForPartition('l2-turbo');
-    expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast']);
+    expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']);
   });
 
   it('should have matching assignments for all partitions', () => {
@@ -484,7 +484,7 @@ describe('createChainInstance', () => {
 describe('createPartitionChainInstances', () => {
   it.each([
     ['asia-fast', 4, ['bsc', 'polygon', 'avalanche', 'fantom']],
-    ['l2-turbo', 5, ['arbitrum', 'optimism', 'base', 'scroll', 'blast']],
+    ['l2-turbo', 7, ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']],
     ['high-value', 3, ['ethereum', 'zksync', 'linea']],
     ['solana-native', 1, ['solana']],
   ])('should create %d instances for %s partition', (partitionId, expectedCount, expectedChains) => {

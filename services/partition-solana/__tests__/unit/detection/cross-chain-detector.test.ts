@@ -470,7 +470,9 @@ describe('getDefaultCrossChainCosts', () => {
     const costs = getDefaultCrossChainCosts();
 
     expect(costs.bridgeFeeDefault).toBe(0.001);
-    expect(costs.evmGasCostUsd).toBe(15);
+    // M-11 FIX: Lowered from $15 (Ethereum-level) to $2 as fallback for unknown chains.
+    // Per-chain costs are resolved via EVM_GAS_COSTS_USD lookup in getEvmGasCostUsd().
+    expect(costs.evmGasCostUsd).toBe(2);
     expect(costs.solanaTxCostUsd).toBe(0.01);
     expect(costs.latencyRiskPremium).toBe(0.002);
   });

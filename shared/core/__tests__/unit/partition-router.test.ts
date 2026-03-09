@@ -240,7 +240,7 @@ describe('PartitionRouter', () => {
 
     it('should return correct chains for l2-turbo', () => {
       const chains = PartitionRouter.getChainsForPartition(PARTITION_IDS.L2_TURBO);
-      expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast']);
+      expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']);
     });
 
     it('should return empty array for unknown partition', () => {

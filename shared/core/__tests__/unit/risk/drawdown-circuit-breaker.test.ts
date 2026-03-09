@@ -1397,4 +1397,90 @@ describe('Rolling 24h Window', () => {
       expect(legacyBreaker.getState().dailyPnL).toBe(-ONE_ETH / 2n);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Rolling Window Edge Cases (Fix #5)
+  // ---------------------------------------------------------------------------
+
+  describe('rolling window edge cases', () => {
+    it('should handle zero PnL trade without state change', () => {
+      breaker.recordTradeResult({
+        success: true,
+        pnl: 0n,
+        timestamp: Date.now(),
+      });
+
+      const state = breaker.getState();
+      expect(state.dailyPnL).toBe(0n);
+      expect(state.state).toBe('NORMAL');
+    });
+
+    it('should prune trades older than 24h from rolling PnL', () => {
+      const now = Date.now();
+      // 25h ago — well outside the 24h window
+      const twentyFiveHoursAgo = now - 25 * 60 * 60 * 1000;
+
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -ONE_ETH,
+        timestamp: twentyFiveHoursAgo,
+      });
+
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -ONE_ETH / 10n,
+        timestamp: now,
+      });
+
+      // Only the recent trade should be counted
+      const state = breaker.getState();
+      expect(state.dailyPnL).toBe(-ONE_ETH / 10n);
+    });
+
+    it('should recover from HALT when old losses expire from rolling window', () => {
+      const now = Date.now();
+
+      // Record a large loss 25 hours ago — pushes past halt threshold at record time
+      breaker.recordTradeResult({
+        success: false,
+        pnl: -6n * ONE_ETH, // 6% > 5% maxDailyLoss
+        timestamp: now - 25 * 60 * 60 * 1000,
+      });
+
+      // Record a small recent win to trigger re-evaluation with pruning
+      breaker.recordTradeResult({
+        success: true,
+        pnl: ONE_ETH / 100n,
+        timestamp: now,
+      });
+
+      // The old -6 ETH trade is >24h old, gets pruned during rolling PnL calc.
+      // Only the small win remains: PnL = +0.01 ETH → should no longer be HALT
+      const state = breaker.getState();
+      expect(state.dailyPnL).toBe(ONE_ETH / 100n);
+    });
+
+    it('should handle alternating wins and losses correctly in rolling window', () => {
+      const now = Date.now();
+
+      for (let i = 0; i < 10; i++) {
+        if (i % 2 === 0) {
+          breaker.recordTradeResult({
+            success: true,
+            pnl: ONE_ETH / 10n,
+            timestamp: now + i * 1000,
+          });
+        } else {
+          breaker.recordTradeResult({
+            success: false,
+            pnl: -ONE_ETH / 5n,
+            timestamp: now + i * 1000,
+          });
+        }
+      }
+
+      // 5 wins * 0.1 = 0.5, 5 losses * 0.2 = 1.0 → net = -0.5 ETH
+      expect(breaker.getState().dailyPnL).toBe(-ONE_ETH / 2n);
+    });
+  });
 });

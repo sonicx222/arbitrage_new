@@ -213,6 +213,11 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           '# HELP arbitrage_admission_avg_score_shed Average score of shed opportunities',
           '# TYPE arbitrage_admission_avg_score_shed gauge',
           `arbitrage_admission_avg_score_shed ${sys.admissionMetrics?.avgScoreShed ?? 0}`,
+          // DV-009 FIX: Standard pipeline_events_total metric for cross-service consistency
+          // (partitions expose this from LatencyTracker; coordinator exposes from SystemMetrics)
+          '# HELP pipeline_events_total Total pipeline events processed by coordinator',
+          '# TYPE pipeline_events_total counter',
+          `pipeline_events_total ${sys.totalOpportunities + sys.totalExecutions}`,
           '',
         ].join('\n');
         const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();

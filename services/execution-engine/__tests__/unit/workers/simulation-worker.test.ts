@@ -313,14 +313,14 @@ describe('SimulationWorker — H-004: chain-specific flash loan fee', () => {
     );
   });
 
-  it('should pass Aave V3 fee (9 bps) for Ethereum chain', async () => {
+  it('should pass Aave V3 fee (5 bps) for Ethereum chain', async () => {
     await worker.start();
     await capturedHandler!(buildStreamMessage({ chain: 'ethereum' }));
 
     expect(mockBatchQuoter.simulateArbitragePath).toHaveBeenCalledWith(
       expect.any(Array),
       expect.any(BigInt),
-      9, // Aave V3 fee: 9 bps
+      5, // Aave V3 fee: 5 bps (since March 2024 governance vote)
     );
   });
 

@@ -16,6 +16,15 @@ jest.mock('@arbitrage/core', () => ({
   findKSmallest: jest.fn((items: unknown[], k: number, compareFn: (a: unknown, b: unknown) => number) => {
     return [...items].sort(compareFn).slice(0, k);
   }),
+  createLogger: jest.fn(() => ({
+    fatal: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    info: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    child: jest.fn(),
+  })),
 }));
 
 import {
