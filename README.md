@@ -22,7 +22,7 @@ For detailed technical information, refer to the `docs/` folder:
 - [**System Architecture**](docs/architecture/ARCHITECTURE_V2.md): Comprehensive system design (v2.12)
 - [**Data Flow**](docs/architecture/DATA_FLOW.md): Visual diagrams of data flow and processing pipelines
 - [**Current State**](docs/architecture/CURRENT_STATE.md): Service inventory and partition mapping
-- [**Architecture Decision Records**](docs/architecture/adr/README.md): 41 ADRs with rationale and confidence levels
+- [**Architecture Decision Records**](docs/architecture/adr/README.md): 42 ADRs with rationale and confidence levels
 
 ### Developer Guides
 - [**Local Development**](docs/local-development.md): Setup guide for Windows, macOS, and Linux
@@ -47,7 +47,7 @@ For detailed technical information, refer to the `docs/` folder:
 - [**Redis Key Registry**](docs/redis-key-registry.md): All Redis key patterns and TTLs
 
 ### Reports & Research
-- [**Profitability Audit**](docs/reports/PROFITABILITY_AUDIT_2026-02-24.md): Strategy economics and trade analysis
+- [**Profitability Audit**](docs/reports/PROFITABILITY_AUDIT_CONSOLIDATED_2026-03-08.md): Strategy economics and trade analysis
 - [**Research Evaluation**](docs/research/CONSOLIDATED_RESEARCH_EVALUATION.md): Enhancement research findings
 - [**Security Review**](contracts/docs/SECURITY_REVIEW.md): Contract security audit findings
 
