@@ -59,7 +59,7 @@ export const CHAIN_COLORS: Record<string, string> = {
   linea: '#61DFFF',
   blast: '#FCFC03',
   scroll: '#FFEEDA',
-  mantle: '#000000',
+  mantle: '#2FC0A2',
   mode: '#DFFE00',
   solana: '#9945FF',
 };

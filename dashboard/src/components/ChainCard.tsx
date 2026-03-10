@@ -19,16 +19,23 @@ interface Props {
 }
 
 export const ChainCard = memo(function ChainCard({ chain, status = 'unknown', partitionName, stats }: Props) {
-  const color = CHAIN_COLORS[chain.toLowerCase()];
+  const color = CHAIN_COLORS[chain.toLowerCase()] ?? '#71717a';
   const successRate = stats && stats.total > 0 ? ((stats.successes / stats.total) * 100).toFixed(0) : null;
   const avgLatency = stats && stats.latencyCount > 0 ? (stats.totalLatency / stats.latencyCount).toFixed(0) : null;
 
   return (
-    <div className="card py-2 px-3" title={partitionName ? `Status from ${partitionName}` : undefined}>
-      <div className="flex items-center gap-2">
+    <div
+      className="card py-2.5 px-3 overflow-hidden"
+      style={{
+        borderLeftWidth: '3px',
+        borderLeftColor: color,
+        background: `linear-gradient(135deg, ${color}12 0%, transparent 60%), var(--card-bg)`,
+      }}
+      title={partitionName ? `Status from ${partitionName}` : undefined}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider">{chain}</span>
         <StatusBadge status={status} />
-        {color && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />}
-        <span className="text-xs font-medium uppercase">{chain}</span>
       </div>
       {stats && stats.total > 0 && (
         <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-gray-500">

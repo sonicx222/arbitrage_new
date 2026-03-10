@@ -62,7 +62,7 @@ export function ChainsTab() {
               <div className="flex items-center gap-3">
                 <StatusBadge status={partitionStatus} label={partition.name} />
                 <span className="text-[10px] text-gray-500">{partition.region}</span>
-                <span className="text-[10px] text-gray-500">{partition.chains.length} chains</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-400">{partition.chains.length} chains</span>
               </div>
               {svc && (
                 <div className="flex gap-3 text-[10px] text-gray-500">
@@ -74,8 +74,10 @@ export function ChainsTab() {
               )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-              {partition.chains.map((chain) => (
-                <ChainCard key={chain} chain={chain} status={partitionStatus} partitionName={partition.name} stats={chainStats[chain.toLowerCase()]} />
+              {partition.chains.map((chain, idx) => (
+                <div key={chain} style={{ animation: `slideUp 0.3s ease-out ${idx * 0.04}s both` }}>
+                  <ChainCard chain={chain} status={partitionStatus} partitionName={partition.name} stats={chainStats[chain.toLowerCase()]} />
+                </div>
               ))}
             </div>
           </div>
