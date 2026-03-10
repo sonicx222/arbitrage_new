@@ -108,6 +108,13 @@ export interface OpportunityRouterConfig {
    *
    * Note: Consumer group pending messages (un-ACKed, redelivered by Redis)
    * are handled separately by Redis Streams, not by this deduplication.
+   *
+   * M-14: Restart risk — This dedup state is in-memory only and is lost on
+   * coordinator restart. A brief window of duplicate forwarding may occur
+   * until the dedup map rebuilds from incoming messages. This is an accepted
+   * trade-off: the execution engine's Redis-based `setNx` lock provides a
+   * second dedup layer that survives restarts, so duplicates are caught
+   * before actual trade execution.
    */
   duplicateWindowMs?: number;
   /** Instance ID for forwarding metadata */

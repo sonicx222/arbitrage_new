@@ -23,6 +23,14 @@ import type { CoordinatorStateProvider } from '../types';
 // M-05 FIX: Configurable max SSE connections (default: 50, min: 1)
 const MAX_SSE_CONNECTIONS = parseEnvIntSafe('SSE_MAX_CONNECTIONS', 50, 1);
 
+// M-06 FIX: Configurable SSE push intervals (milliseconds)
+const SSE_INTERVAL_METRICS = parseEnvIntSafe('SSE_INTERVAL_METRICS_MS', 5000, 1000);
+const SSE_INTERVAL_SERVICES = parseEnvIntSafe('SSE_INTERVAL_SERVICES_MS', 5000, 1000);
+const SSE_INTERVAL_STREAMS = parseEnvIntSafe('SSE_INTERVAL_STREAMS_MS', 10000, 2000);
+const SSE_INTERVAL_CB = parseEnvIntSafe('SSE_INTERVAL_CB_MS', 5000, 1000);
+const SSE_INTERVAL_DIAGNOSTICS = parseEnvIntSafe('SSE_INTERVAL_DIAGNOSTICS_MS', 10000, 2000);
+const SSE_INTERVAL_KEEPALIVE = parseEnvIntSafe('SSE_INTERVAL_KEEPALIVE_MS', 15000, 5000);
+
 // =============================================================================
 // SSE Client Registry + Timer Pool
 // =============================================================================
@@ -66,17 +74,15 @@ function startTimerPool(state: CoordinatorStateProvider): void {
 
   const timers: NodeJS.Timeout[] = [];
 
-  // Metrics every 5s (RT-010 FIX: reduced from 2s)
+  // M-06 FIX: All intervals configurable via SSE_INTERVAL_*_MS env vars
   timers.push(setInterval(() => {
     broadcast('metrics', JSON.stringify(state.getSystemMetrics()));
-  }, 5000));
+  }, SSE_INTERVAL_METRICS));
 
-  // Services every 5s
   timers.push(setInterval(() => {
     broadcast('services', JSON.stringify(Object.fromEntries(state.getServiceHealthMap())));
-  }, 5000));
+  }, SSE_INTERVAL_SERVICES));
 
-  // Stream health every 10s
   timers.push(setInterval(async () => {
     try {
       const monitor = getStreamHealthMonitor();
@@ -94,14 +100,12 @@ function startTimerPool(state: CoordinatorStateProvider): void {
     } catch {
       // Stream monitor not available yet — skip
     }
-  }, 10000));
+  }, SSE_INTERVAL_STREAMS));
 
-  // Circuit breaker every 5s
   timers.push(setInterval(() => {
     broadcast('circuit-breaker', JSON.stringify(state.getCircuitBreakerSnapshot()));
-  }, 5000));
+  }, SSE_INTERVAL_CB));
 
-  // Diagnostics every 10s
   timers.push(setInterval(async () => {
     try {
       const collector = getDiagnosticsCollector();
@@ -110,14 +114,13 @@ function startTimerPool(state: CoordinatorStateProvider): void {
     } catch {
       // DiagnosticsCollector or underlying monitors not ready — skip
     }
-  }, 10000));
+  }, SSE_INTERVAL_DIAGNOSTICS));
 
-  // Keepalive every 15s
   timers.push(setInterval(() => {
     for (const client of clients) {
       client.res.write(': keepalive\n\n');
     }
-  }, 15000));
+  }, SSE_INTERVAL_KEEPALIVE));
 
   sharedTimers = timers;
 }

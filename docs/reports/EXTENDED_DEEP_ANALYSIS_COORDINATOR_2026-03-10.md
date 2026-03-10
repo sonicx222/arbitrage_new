@@ -349,16 +349,16 @@ No direct conflicts between agents. All overlapping findings were complementary 
 - [x] **M-05**: `MAX_SSE_CONNECTIONS` configurable via `SSE_MAX_CONNECTIONS` env var (default 50, min 1). (Team Lead + Config Drift, Score: 2.8)
 - [x] **M-15**: Documented `METRICS_REDIS_TIMEOUT_MS`, `METRICS_STREAM_HEALTH_TIMEOUT_MS`, `SSE_MAX_CONNECTIONS` in `.env.example`. (Config Drift, Score: 2.4)
 
-### Phase 3: Backlog (P3 -- hardening and optimization)
+### Phase 3: Backlog (P3 -- hardening and optimization) ✅ COMPLETE
 
-- [ ] **M-07**: Add drain period in shutdown for in-flight forwarding retries. Consider parallelizing Redis disconnects. (Team Lead + Failure Mode, Score: 2.6)
-- [ ] **M-08**: Batch-level trace context with indexed span IDs, or non-crypto PRNG for trace span generation. (Team Lead + Latency Profiler, Score: 2.6)
-- [ ] **M-06**: Make SSE push intervals configurable via env vars. (Team Lead, Score: 2.8)
-- [ ] **M-09**: Replace string-matching DLQ classification with structured error codes. Extract trace context from DLQ entries. (Team Lead + Observability, Score: 2.4)
-- [ ] **M-10**: Add `logger.debug` in CB state restore/persist catch blocks. (Team Lead + Failure Mode + Observability, Score: 2.4)
-- [ ] **M-11**: Add metric for "messages skipped on restart". Consider `startId: '0'` for EXECUTION_RESULTS. (Team Lead + Data Integrity, Score: 2.2)
-- [ ] **M-14**: Document in-memory dedup restart risk as accepted (EE has `setNx` backstop). (Data Integrity, Score: 2.2)
-- [ ] **L-11**: Replace spread operators with `if` guards in `serializeOpportunityForStream`. (Latency Profiler, Score: 1.4)
+- [x] **M-07**: Added 500ms drain period after `opportunityRouter.shutdown()`. Parallelized 3 Redis disconnects with `Promise.allSettled` + `disconnectWithTimeout` (5s each). (Team Lead + Failure Mode, Score: 2.6)
+- [x] **M-08**: Batch-level `createFastTraceContext` (counter-based, non-crypto) for batch traces. Per-message fallback uses fast trace when no parent context. (Team Lead + Latency Profiler, Score: 2.6)
+- [x] **M-06**: All 6 SSE timer intervals configurable via `SSE_INTERVAL_*_MS` env vars with minimums. Documented in `.env.example`. (Team Lead, Score: 2.8)
+- [x] **M-09**: Extracted `classifyDlqError()` function with structured categories (expired, validation, transient, unknown). `handleDlqMessage` uses classification for metric buckets. (Team Lead + Observability, Score: 2.4)
+- [x] **M-10**: Added `logger.debug` in CB state restore and persist catch blocks. (Team Lead + Failure Mode + Observability, Score: 2.4)
+- [x] **M-11**: Documented `startId: '$'` as intentional for EXECUTION_RESULTS (trades already complete, audit in JSONL). Added startup log listing all streams skipping downtime messages. (Team Lead + Data Integrity, Score: 2.2)
+- [x] **M-14**: Documented in-memory dedup restart risk in `OpportunityRouterConfig.duplicateWindowMs` JSDoc — accepted trade-off, EE `setNx` is the second dedup layer. (Data Integrity, Score: 2.2)
+- [x] **L-11**: Replaced 4 spread operators with `if` guards in `serializeOpportunityForStream`. (Latency Profiler, Score: 1.4)
 - [x] **L-12**: Exposed `getActiveSSEConnections()` from `sse.routes.ts` (done with H-04 timer pool). (Observability, Score: 1.2)
 - [x] Document remaining undocumented env vars in `.env.example` (done with M-15).
 

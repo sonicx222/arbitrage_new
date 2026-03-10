@@ -84,7 +84,7 @@ import { LeadershipElectionService } from './leadership';
 import { ActivePairsTracker } from './tracking';
 
 // OP-3 FIX: Import trace context utilities for cross-service correlation
-import { extractContext, createTraceContext, createChildContext } from '@arbitrage/core/tracing';
+import { extractContext, createTraceContext, createFastTraceContext, createChildContext } from '@arbitrage/core/tracing';
 import type { TraceContext } from '@arbitrage/core/tracing';
 // LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
 import { withLogContext } from '@arbitrage/core/logging';
@@ -238,6 +238,32 @@ interface StreamMessageData {
 
 // FIX: Alert type is now imported from ./api (consolidated single source of truth)
 // The imported Alert uses Record<string, unknown> for data field for flexibility
+
+// =============================================================================
+// DLQ Error Classification
+// =============================================================================
+
+/**
+ * M-09 FIX: Classify DLQ error codes into categories using structured matching.
+ * Extracted from handleDlqMessage to eliminate duplicate string-matching logic.
+ *
+ * Convention: [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable.
+ * Returns the category key that maps directly to dlqMetrics counters.
+ */
+type DlqClassification = 'expired' | 'validation' | 'transient' | 'unknown';
+
+function classifyDlqError(errorCode: string): DlqClassification {
+  if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
+    return 'expired';
+  }
+  if (errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')) {
+    return 'validation';
+  }
+  if (errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')) {
+    return 'transient';
+  }
+  return 'unknown';
+}
 
 // =============================================================================
 // Coordinator Service
@@ -552,6 +578,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
         resetToStartIdOnExistingGroup: true
       },
       // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
+      // M-11: startId '$' is intentional — execution results arriving during downtime
+      // represent already-completed trades. The coordinator only needs them for live
+      // dashboard metrics (successfulExecutions, totalProfit), not for correctness.
+      // Trade audit trail is preserved by TradeLogger JSONL files in the execution engine.
       {
         streamName: RedisStreamsClient.STREAMS.EXECUTION_RESULTS,
         groupName: this.config.consumerGroup,
@@ -634,8 +664,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
             isOpen: stored.isOpen,
           });
         }
-      } catch {
-        // Non-fatal — start with fresh CB state if restore fails
+      } catch (error) {
+        // M-10 FIX: Log restore failure for debugging (was silent catch)
+        this.logger.debug('Failed to restore CB state from Redis, starting fresh', {
+          error: (error as Error).message,
+        });
       }
 
       // Initialize Redis Streams client
@@ -940,6 +973,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // P1-8 FIX: Signal opportunity router shutdown to cancel in-flight retry delays
       this.opportunityRouter?.shutdown();
 
+      // M-07 FIX: Brief drain period (500ms) for in-flight forwarding operations.
+      // After shutdown() sets _shuttingDown=true, in-flight XADD calls from
+      // Promise.allSettled batch forwarding need time to complete before we
+      // disconnect Redis. 500ms is sufficient for network RTT + XADD.
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // OP-11 FIX: Stop consumers BEFORE releasing leadership to prevent
       // duplicate execution if a new coordinator acquires leadership while
       // old consumers are still running
@@ -972,16 +1011,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
         this.server = null;
       }
 
-      // ADR-037: Disconnect dedicated opportunities streams client
-      await disconnectWithTimeout(this.opportunityStreamsClient, 'Opportunity streams client', 5000, this.logger);
+      // M-07 FIX: Parallelize Redis disconnects (was sequential = 15s worst case).
+      // Each has its own 5s timeout, so parallel worst case = 5s total.
+      await Promise.allSettled([
+        disconnectWithTimeout(this.opportunityStreamsClient, 'Opportunity streams client', 5000, this.logger),
+        disconnectWithTimeout(this.streamsClient, 'Streams client', 5000, this.logger),
+        disconnectWithTimeout(this.redis, 'Redis', 5000, this.logger),
+      ]);
       this.opportunityStreamsClient = null;
-
-      // P0-NEW-6 FIX: Disconnect Redis Streams client with timeout
-      await disconnectWithTimeout(this.streamsClient, 'Streams client', 5000, this.logger);
       this.streamsClient = null;
-
-      // P0-NEW-6 FIX: Disconnect legacy Redis with timeout
-      await disconnectWithTimeout(this.redis, 'Redis', 5000, this.logger);
       this.redis = null;
 
       // Clear collections
@@ -1078,6 +1116,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
         this.logger.error('Failed to create consumer group', {
           error,
           stream: config.streamName
+        });
+      }
+    }
+
+    // M-11 FIX: Log that streams using startId '$' will skip messages from downtime
+    if (successCount > 0) {
+      const skippingStreams = this.consumerGroups
+        .filter(c => c.startId === '$' && c.resetToStartIdOnExistingGroup)
+        .map(c => c.streamName);
+      if (skippingStreams.length > 0) {
+        this.logger.info('Consumer groups using startId "$" — messages arriving during downtime will be skipped (by design)', {
+          streams: skippingStreams,
+          skippedStreamCount: skippingStreams.length,
         });
       }
     }
@@ -1577,8 +1628,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const router = this.opportunityRouter;
 
     // M-03 FIX: Wrap batch processing in withLogContext so all downstream logs
-    // include traceId/spanId. Uses a batch-level trace context for overall correlation.
-    const batchTraceCtx = createTraceContext('coordinator');
+    // include traceId/spanId. M-08 FIX: Use fast counter-based trace context for
+    // batch-level correlation — avoids crypto.randomBytes overhead at 200 msgs/batch.
+    const batchTraceCtx = createFastTraceContext('coordinator');
     return withLogContext(batchTraceCtx, async () => {
 
     // Build batch entries with trace contexts
@@ -1590,9 +1642,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     for (const msg of messages) {
       const data = msg.data as Record<string, unknown>;
       const parentCtx = extractContext(data);
+      // M-08 FIX: Use createFastTraceContext for fallback (no parent) to avoid
+      // crypto.randomBytes per message. createChildContext preserves parent traceId.
       const traceContext: TraceContext = parentCtx
         ? createChildContext(parentCtx, 'coordinator')
-        : createTraceContext('coordinator');
+        : createFastTraceContext('coordinator');
       batch.push({ streamMessageId: msg.id, data, traceContext });
     }
 
@@ -2152,6 +2206,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * RT-007 FIX: Handle dead-letter queue messages.
    * Classifies errors by type (expired, validation, transient) and maintains
    * counters exposed via systemMetrics for monitoring dashboards.
+   *
+   * M-09 FIX: Classification extracted to `classifyDlqError()` to avoid
+   * duplicate string-matching logic (was in both counter increment and log).
    */
   private async handleDlqMessage(message: StreamMessage): Promise<void> {
     const data = message.data as Record<string, unknown>;
@@ -2171,20 +2228,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const errorCode = getString(rawData, '_dlq_errorCode', 'unknown');
       const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
 
-      // Classify error type from error code prefix convention:
-      // [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable errors
+      // M-09 FIX: Structured DLQ classification (was duplicated string matching).
+      const classification = classifyDlqError(errorCode);
       const dlq = this.systemMetrics.dlqMetrics!;
       dlq.total++;
-
-      if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
-        dlq.expired++;
-      } else if (errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')) {
-        dlq.validation++;
-      } else if (errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')) {
-        dlq.transient++;
-      } else {
-        dlq.unknown++;
-      }
+      dlq[classification]++;
 
       this.logger.warn('DLQ entry classified', {
         messageId: message.id,
@@ -2193,13 +2241,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         opportunityId,
         type: getString(rawData, 'type', 'unknown'),
         chain: getString(rawData, 'chain', 'unknown'),
-        classification: errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')
-          ? 'expired'
-          : errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')
-            ? 'validation'
-            : errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')
-              ? 'transient'
-              : 'unknown',
+        classification,
         dlqTotals: { ...dlq },
       });
     });
@@ -2287,7 +2329,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       'coordinator:cb:execution',
       { failures: status.failures, isOpen: status.isOpen, lastFailure: status.lastFailure },
       300,
-    ).catch(() => { /* non-critical */ });
+    ).catch((error: Error) => {
+      // M-10 FIX: Log persist failure for debugging (was silent catch)
+      this.logger.debug('Failed to persist CB state to Redis', { error: error.message });
+    });
   }
 
   /**

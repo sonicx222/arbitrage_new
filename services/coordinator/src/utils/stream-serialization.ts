@@ -87,24 +87,24 @@ export function serializeOpportunityForStream(
     estimatedProfit: (opportunity.estimatedProfit != null && isFinite(opportunity.estimatedProfit))
       ? opportunity.estimatedProfit.toString() : '0',
     gasEstimate: opportunity.gasEstimate ?? '0',
-    // F1 FIX: Only serialize expiresAt when it has a numeric value.
-    // Previously used `?? ''` which produced an empty string that passes the
-    // `!== undefined && !== null` gate in validation.ts but fails NUMERIC_PATTERN,
-    // causing every opportunity with undefined expiresAt to be rejected as INVALID_EXPIRES_AT.
-    ...(opportunity.expiresAt != null
-      ? { expiresAt: opportunity.expiresAt.toString() }
-      : {}),
-    // F1 FIX: Serialize cross-chain fields when present.
-    // validateCrossChainFields() requires truthy buyChain/sellChain strings.
-    ...(opportunity.buyChain ? { buyChain: opportunity.buyChain } : {}),
-    ...(opportunity.sellChain ? { sellChain: opportunity.sellChain } : {}),
     forwardedBy: instanceId,
     forwardedAt: Date.now().toString(),
-    // Phase 0 instrumentation: serialize pipeline timestamps as JSON string
-    ...(opportunity.pipelineTimestamps
-      ? { pipelineTimestamps: JSON.stringify(opportunity.pipelineTimestamps) }
-      : {}),
   };
+
+  // L-11 FIX: Use if-guards instead of spread operators to avoid
+  // temporary object allocation per serialized opportunity (~300-400/s at peak).
+  if (opportunity.expiresAt != null) {
+    result.expiresAt = opportunity.expiresAt.toString();
+  }
+  if (opportunity.buyChain) {
+    result.buyChain = opportunity.buyChain;
+  }
+  if (opportunity.sellChain) {
+    result.sellChain = opportunity.sellChain;
+  }
+  if (opportunity.pipelineTimestamps) {
+    result.pipelineTimestamps = JSON.stringify(opportunity.pipelineTimestamps);
+  }
 
   // OP-3 FIX: Inject trace context fields for cross-service correlation.
   // Uses _trace_ prefix per shared/core/src/tracing/trace-context.ts convention.
