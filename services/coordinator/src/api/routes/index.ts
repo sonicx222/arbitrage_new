@@ -9,6 +9,7 @@
 import http from 'http';
 import { Application, Request, Response, RequestHandler } from 'express';
 import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import type { CoordinatorStateProvider } from '../types';
 import { createHealthRoutes } from './health.routes';
@@ -103,8 +104,10 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
   // EE proxy — dashboard needs direct access to execution engine endpoints.
   // In dev, Vite proxies /ee/* and /circuit-breaker to EE port 3005.
   // In production, coordinator proxies these for the SPA.
-  const eePort = parseInt(process.env.EXECUTION_ENGINE_PORT ?? '3005', 10);
-  if (Number.isNaN(eePort)) {
+  // Port parsing with fail-fast — misconfigured port must throw, not silently fallback
+  const eePort = parseEnvIntSafe('EXECUTION_ENGINE_PORT', 3005, 1);
+  // Validate that explicitly-set port is actually numeric
+  if (process.env.EXECUTION_ENGINE_PORT && Number.isNaN(parseInt(process.env.EXECUTION_ENGINE_PORT, 10))) {
     throw new Error(`Invalid EXECUTION_ENGINE_PORT: '${process.env.EXECUTION_ENGINE_PORT}'`);
   }
   const eeHost = process.env.EXECUTION_ENGINE_HOST ?? 'localhost';

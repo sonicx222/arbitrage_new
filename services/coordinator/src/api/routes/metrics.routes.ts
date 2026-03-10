@@ -12,6 +12,7 @@ import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import { findKLargest } from '@arbitrage/core/data-structures';
 import { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker } from '@arbitrage/core/monitoring';
 import { getRedisClient } from '@arbitrage/core/redis';
+import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -24,10 +25,9 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
 
   // CD-003 FIX: Configurable timeouts for Redis/stream health operations
-  const rawRedisTimeout = parseInt(process.env.METRICS_REDIS_TIMEOUT_MS ?? '5000', 10);
-  const redisTimeoutMs = Number.isNaN(rawRedisTimeout) || rawRedisTimeout <= 0 ? 5000 : rawRedisTimeout;
-  const rawStreamTimeout = parseInt(process.env.METRICS_STREAM_HEALTH_TIMEOUT_MS ?? '3000', 10);
-  const streamHealthTimeoutMs = Number.isNaN(rawStreamTimeout) || rawStreamTimeout <= 0 ? 3000 : rawStreamTimeout;
+  // FIX SA-010: Use parseEnvIntSafe instead of raw parseInt
+  const redisTimeoutMs = parseEnvIntSafe('METRICS_REDIS_TIMEOUT_MS', 5000, 1000);
+  const streamHealthTimeoutMs = parseEnvIntSafe('METRICS_STREAM_HEALTH_TIMEOUT_MS', 3000, 500);
 
   // Authentication middleware for all metrics routes (required: true is the default)
   const readAuth = apiAuth();

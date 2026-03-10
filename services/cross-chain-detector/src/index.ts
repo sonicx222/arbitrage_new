@@ -24,7 +24,14 @@ const logger = createLogger('cross-chain-detector');
 // SA-060 FIX: Use safeParseInt to prevent NaN port causing server bind to random OS port
 const HEALTH_CHECK_PORT = safeParseInt(process.env.HEALTH_CHECK_PORT || process.env.CROSS_CHAIN_DETECTOR_PORT, 3006);
 
+// FIX ST-007: Grace period for readiness when no price data is flowing.
+// After this many seconds, CC detector becomes "ready" even with 0 chains monitored,
+// allowing it to report as degraded instead of blocking startup forever.
+const READINESS_GRACE_PERIOD_S = safeParseInt(process.env.CC_READINESS_GRACE_PERIOD_S, 120);
+
 let healthServer: Server | null = null;
+let startedAt: number = 0;
+let readinessGraceWarningLogged = false;
 
 async function main() {
   try {
@@ -57,19 +64,33 @@ async function main() {
           mlPredictorActive: details.mlPredictorActive,
         };
       },
-      // ST-007 FIX: Require chainsMonitored > 0 in addition to isRunning + redisConnected.
-      // Without this, /ready returns 200 the instant the state transitions to RUNNING,
-      // but the event loop is saturated by the accumulated stream message burst (~500 msgs).
-      // Requiring at least one chain to have price data ensures the service has processed
-      // initial updates and the event loop has cleared the startup burst.
-      //
-      // P3 FIX: Startup time reduced from 60-147s to ~5-15s by using startId '0' for the
-      // price-updates consumer group, which bootstraps from existing stream data.
-      // Monitoring tools should still allow 30s readiness timeout as a safety margin.
+      // ST-007 FIX: Require chainsMonitored > 0 OR grace period elapsed.
+      // When partitions produce Sync events, chainsMonitored > 0 quickly.
+      // When no events flow (e.g., low market activity), the grace period prevents
+      // blocking readiness forever — the service becomes ready as degraded.
       readyCheck: () => {
         if (!detector.isRunning()) return false;
         const details = detector.getHealthDetails();
-        return details.redisConnected && details.chainsMonitored > 0;
+        if (!details.redisConnected) return false;
+
+        if (details.chainsMonitored > 0) return true;
+
+        // FIX ST-007: After grace period, become ready even with 0 chains
+        const uptimeS = process.uptime();
+        if (uptimeS >= READINESS_GRACE_PERIOD_S) {
+          if (!readinessGraceWarningLogged) {
+            readinessGraceWarningLogged = true;
+            logger.warn('CC detector ready via grace period — no price data received', {
+              uptimeS: Math.round(uptimeS),
+              gracePeriodS: READINESS_GRACE_PERIOD_S,
+              redisConnected: details.redisConnected,
+              chainsMonitored: details.chainsMonitored,
+            });
+          }
+          return true;
+        }
+
+        return false;
       },
       additionalRoutes: {
         '/metrics': async (_req: IncomingMessage, res: ServerResponse) => {

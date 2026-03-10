@@ -404,15 +404,12 @@ export class ExecutionEngineService {
     this.asyncPipelineSplit = config.asyncPipelineSplit ?? false;
 
     // Task 3: A/B testing config (enabled via environment variable)
-    // FIX P0-2: Validate env var parseFloat/parseInt to prevent NaN propagation
+    // FIX SA-010: Use parseEnvIntSafe for integer env vars; parseFloat with manual NaN guard for floats
     const rawTrafficSplit = parseFloat(process.env.AB_TESTING_TRAFFIC_SPLIT ?? '0.1');
-    const rawMinSampleSize = parseInt(process.env.AB_TESTING_MIN_SAMPLE_SIZE ?? '100', 10);
-    const rawSignificance = parseFloat(process.env.AB_TESTING_SIGNIFICANCE ?? '0.05');
-
     const validTrafficSplit = !Number.isNaN(rawTrafficSplit) && rawTrafficSplit > 0 && rawTrafficSplit < 1
       ? rawTrafficSplit : 0.1;
-    const validMinSampleSize = !Number.isNaN(rawMinSampleSize) && rawMinSampleSize > 0
-      ? rawMinSampleSize : 100;
+    const validMinSampleSize = parseEnvIntSafe('AB_TESTING_MIN_SAMPLE_SIZE', 100, 1);
+    const rawSignificance = parseFloat(process.env.AB_TESTING_SIGNIFICANCE ?? '0.05');
     const validSignificance = !Number.isNaN(rawSignificance) && rawSignificance > 0 && rawSignificance < 1
       ? rawSignificance : 0.05;
 
@@ -442,14 +439,14 @@ export class ExecutionEngineService {
     // RT-006 FIX: Simulation mode uses higher default (50) since there's no real
     // blockchain to saturate — prevents artificial consumer lag where detection
     // outpaces execution. RT-LAG FIX: Increased from 20 to 50 to match ~100 opps/s detection rate.
-    const envMaxConcurrent = parseInt(process.env.MAX_CONCURRENT_EXECUTIONS ?? '', 10);
+    // FIX SA-010: Use parseEnvIntSafe instead of raw parseInt
     const defaultConcurrency = this.isSimulationMode ? 50 : 5;
-    this.maxConcurrentExecutions = config.maxConcurrentExecutions
-      ?? (!Number.isNaN(envMaxConcurrent) && envMaxConcurrent > 0 ? envMaxConcurrent : defaultConcurrency);
+    const envMaxConcurrent = parseEnvIntSafe('MAX_CONCURRENT_EXECUTIONS', defaultConcurrency, 1);
+    this.maxConcurrentExecutions = config.maxConcurrentExecutions ?? envMaxConcurrent;
 
     // P2 OPT: Per-chain concurrent execution limit (0 = no per-chain limit)
-    const envPerChain = parseInt(process.env.MAX_CONCURRENT_PER_CHAIN ?? '', 10);
-    this.maxConcurrentPerChain = !Number.isNaN(envPerChain) && envPerChain > 0 ? envPerChain : 0;
+    // FIX SA-010: parseEnvIntSafe with min=0 to allow "no limit"
+    this.maxConcurrentPerChain = parseEnvIntSafe('MAX_CONCURRENT_PER_CHAIN', 0);
 
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
@@ -457,7 +454,7 @@ export class ExecutionEngineService {
     // State machine for lifecycle management
     this.stateManager = config.stateManager ?? createServiceState({
       serviceName: 'execution-engine',
-      transitionTimeoutMs: (() => { const v = parseInt(process.env.STATE_TRANSITION_TIMEOUT_MS ?? '', 10); return Number.isNaN(v) ? 30000 : v; })()
+      transitionTimeoutMs: parseEnvIntSafe('STATE_TRANSITION_TIMEOUT_MS', 30000, 1000)
     });
 
     // Initialize stats

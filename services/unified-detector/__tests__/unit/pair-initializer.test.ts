@@ -35,10 +35,18 @@ jest.mock('@arbitrage/core/utils', () => ({
   decimalToBps: jest.fn((decimal: number) => Math.round(decimal * 10000)),
 }));
 
+// FIX RT-012: Mock @arbitrage/config for getFactoriesForChain
+jest.mock('@arbitrage/config', () => ({
+  isVaultModelDex: jest.fn(() => false),
+  isEvmChain: jest.fn((chain: string) => chain !== 'solana'),
+  getFactoriesForChain: jest.fn(() => []),
+}));
+
 import { initializePairs, generatePairAddress } from '../../src/pair-initializer';
 import type { PairInitializerConfig } from '../../src/pair-initializer';
 import { bpsToDecimal } from '@arbitrage/core/components';
 import { validateFee } from '@arbitrage/core/utils';
+import { getFactoriesForChain, isEvmChain, isVaultModelDex } from '@arbitrage/config';
 import type { Dex, Token } from '@arbitrage/types';
 
 // =============================================================================
@@ -75,6 +83,10 @@ beforeEach(() => {
   // Re-establish mocks after jest.resetAllMocks() in global afterEach
   (bpsToDecimal as jest.Mock).mockImplementation((bps: number) => bps / 10000);
   (validateFee as jest.Mock).mockImplementation((fee: number) => fee);
+  // FIX RT-012: Re-establish config mocks after clearAllMocks
+  (isEvmChain as jest.Mock).mockImplementation((chain: string) => chain !== 'solana');
+  (isVaultModelDex as jest.Mock).mockReturnValue(false);
+  (getFactoriesForChain as jest.Mock).mockReturnValue([]);
 
   // Default: return a deterministic hash based on input
   mockSolidityPacked.mockImplementation((_types: string[], values: string[]) => {
@@ -97,7 +109,7 @@ beforeEach(() => {
 // =============================================================================
 
 describe('generatePairAddress', () => {
-  it('should generate a deterministic address from factory and token addresses', () => {
+  it('should use fallback hash when no initCodeHash is provided', () => {
     const factory = '0xFactory';
     const token0 = '0xToken0';
     const token1 = '0xToken1';
@@ -112,8 +124,40 @@ describe('generatePairAddress', () => {
     expect(address).toMatch(/^0x[a-f0-9]+$/);
   });
 
+  it('should use CREATE2 formula when initCodeHash is provided', () => {
+    const factory = '0xFactory';
+    const token0 = '0xToken0';
+    const token1 = '0xToken1';
+    const initCodeHash = '0x' + 'ab'.repeat(32);
+
+    const address = generatePairAddress(factory, token0, token1, initCodeHash);
+
+    // Should call solidityPacked twice: once for salt, once for packed
+    expect(mockSolidityPacked).toHaveBeenCalledTimes(2);
+    // First call: salt = keccak256(pack(sortedToken0, sortedToken1))
+    expect(mockSolidityPacked).toHaveBeenNthCalledWith(1,
+      ['address', 'address'],
+      expect.arrayContaining([token0, token1])
+    );
+    // Second call: packed = pack(0xff, factory, salt, initCodeHash)
+    expect(mockSolidityPacked).toHaveBeenNthCalledWith(2,
+      ['bytes1', 'address', 'bytes32', 'bytes32'],
+      expect.arrayContaining(['0xff', factory])
+    );
+    expect(address).toMatch(/^0x[a-f0-9]+$/);
+  });
+
+  it('should sort tokens for CREATE2 (deterministic regardless of order)', () => {
+    const factory = '0xFactory';
+    const initCodeHash = '0x' + 'ab'.repeat(32);
+
+    const addr1 = generatePairAddress(factory, '0xAAA', '0xBBB', initCodeHash);
+    const addr2 = generatePairAddress(factory, '0xBBB', '0xAAA', initCodeHash);
+
+    expect(addr1).toEqual(addr2);
+  });
+
   it('should return different addresses for different inputs', () => {
-    // Set up different return values for different inputs
     let callCount = 0;
     mockKeccak256.mockImplementation(() => {
       callCount++;
@@ -124,15 +168,6 @@ describe('generatePairAddress', () => {
     const addr2 = generatePairAddress('0xF2', '0xT0', '0xT1');
 
     expect(addr1).not.toEqual(addr2);
-  });
-
-  it('should use solidityPacked with address types', () => {
-    generatePairAddress('0xAAA', '0xBBB', '0xCCC');
-
-    expect(mockSolidityPacked).toHaveBeenCalledWith(
-      ['address', 'address', 'address'],
-      ['0xAAA', '0xBBB', '0xCCC']
-    );
   });
 });
 
