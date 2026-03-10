@@ -696,11 +696,13 @@ describe('Partition Service Utilities', () => {
   // ===========================================================================
 
   describe('SHUTDOWN_TIMEOUT_MS', () => {
-    it('should exceed Redis connectTimeout (3000ms) to satisfy SA-008 shutdown hierarchy', () => {
+    it('should exceed Redis connectTimeout and allow chain stop within K8s grace period', () => {
       // SA-008 FIX: shutdown > connectTimeout to avoid race on Redis reconnect.
-      // Redis clients use connectTimeout=3000ms; shutdown (8000ms) must outlast that.
-      expect(SHUTDOWN_TIMEOUT_MS).toBe(8000);
+      // F-02 FIX: 25s allows CHAIN_STOP_TIMEOUT_MS (30s) chains to drain StreamBatcher
+      // queues while leaving 5s headroom before K8s SIGKILL (30s terminationGracePeriod).
+      expect(SHUTDOWN_TIMEOUT_MS).toBe(25000);
       expect(SHUTDOWN_TIMEOUT_MS).toBeGreaterThan(3000);
+      expect(SHUTDOWN_TIMEOUT_MS).toBeLessThanOrEqual(30000);
     });
   });
 

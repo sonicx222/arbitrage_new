@@ -334,6 +334,18 @@ export interface ArbitrageOpportunity {
     /** Order hash for identification */
     orderHash: string;
   };
+  /**
+   * FIX O-01: Detection-phase trace context for end-to-end correlation.
+   * Created by checkArbitrageOpportunity() and propagated to OpportunityPublisher
+   * so the same traceId follows the opportunity from detection → publish → execution.
+   * Uses inline shape (not TraceContext from @arbitrage/core) to avoid cross-package dep.
+   */
+  _detectionTrace?: {
+    traceId: string;
+    spanId: string;
+    serviceName: string;
+    timestamp: number;
+  };
 }
 
 export interface SwapEvent {

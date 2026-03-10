@@ -263,9 +263,10 @@ export class SimpleArbitrageDetector {
     // FIX H-004: Calculate expectedProfit in USD using profitPercentage and default trade size.
     // Previous: Number(amountIn) * netProfitPct — amountIn is in wei (1e16-1e19),
     // producing nonsensical values like 1e13. Use USD estimate instead.
-    // Consistent with cross-chain publisher pattern (DEFAULT_TRADE_SIZE_USD).
-    const DEFAULT_TRADE_SIZE_USD = 1000;
-    const expectedProfitUsd = netProfitPct * DEFAULT_TRADE_SIZE_USD;
+    // FIX CD-R01: Use ARBITRAGE_CONFIG.defaultAmount ($10k) instead of local $1k constant.
+    // Flash loans need $10k+ to cover gas — $1k underestimates profit by 10x,
+    // causing fast-lane routing to miss high-confidence opportunities.
+    const expectedProfitUsd = netProfitPct * ARBITRAGE_CONFIG.defaultAmount;
 
     // FIX W2-35: Cache Date.now() once — avoids 3 syscalls per opportunity and ensures
     // consistent timestamps across id, timestamp, and expiresAt fields

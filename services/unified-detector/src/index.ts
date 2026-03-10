@@ -31,6 +31,7 @@ import {
   runServiceMain,
 } from '@arbitrage/core/service-lifecycle';
 import { createLogger } from '@arbitrage/core';
+import type { TraceContext } from '@arbitrage/core/tracing';
 import { getPartition } from '@arbitrage/config';
 import { DEFAULT_HEALTH_CHECK_PORT } from './constants';
 import { OpportunityPublisher } from './publishers';
@@ -248,12 +249,43 @@ function createHealthServer(port: number): Server {
           lines.push('# TYPE detector_memory_mb gauge');
           lines.push(`detector_memory_mb ${stats.memoryUsageMB}`);
 
-          // Per-chain event counts
+          // FIX O-03: Per-chain dimensional metrics for operational visibility.
+          // Previous: only exposed chain_events_total. Missing: opportunities, pairs,
+          // stale rejections, detection cycle time — all needed for per-chain alerting.
           lines.push('# HELP detector_chain_events_total Events per chain');
           lines.push('# TYPE detector_chain_events_total counter');
+          lines.push('# HELP detector_chain_opportunities_total Opportunities per chain');
+          lines.push('# TYPE detector_chain_opportunities_total counter');
+          lines.push('# HELP detector_chain_pairs_monitored Pairs monitored per chain');
+          lines.push('# TYPE detector_chain_pairs_monitored gauge');
+          lines.push('# HELP detector_chain_stale_rejections_total Stale price rejections per chain');
+          lines.push('# TYPE detector_chain_stale_rejections_total counter');
+          lines.push('# HELP detector_chain_detection_cycle_ms Average detection cycle duration per chain');
+          lines.push('# TYPE detector_chain_detection_cycle_ms gauge');
+          lines.push('# HELP detector_chain_ws_connected WebSocket connection status per chain');
+          lines.push('# TYPE detector_chain_ws_connected gauge');
           for (const [chain, chainStats] of stats.chainStats) {
             const safeChain = chain.replace(/[^a-zA-Z0-9_-]/g, '_');
             lines.push(`detector_chain_events_total{chain="${safeChain}"} ${chainStats.eventsProcessed}`);
+            lines.push(`detector_chain_opportunities_total{chain="${safeChain}"} ${chainStats.opportunitiesFound}`);
+            lines.push(`detector_chain_pairs_monitored{chain="${safeChain}"} ${chainStats.pairsMonitored}`);
+            if (chainStats.stalePriceRejections != null) {
+              lines.push(`detector_chain_stale_rejections_total{chain="${safeChain}"} ${chainStats.stalePriceRejections}`);
+            }
+            if (chainStats.avgDetectionCycleDurationMs != null) {
+              lines.push(`detector_chain_detection_cycle_ms{chain="${safeChain}"} ${chainStats.avgDetectionCycleDurationMs.toFixed(2)}`);
+            }
+            lines.push(`detector_chain_ws_connected{chain="${safeChain}"} ${chainStats.status === 'connected' ? 1 : 0}`);
+          }
+
+          // Opportunity outcome tracking
+          if (stats.opportunityOutcomes) {
+            lines.push('# HELP detector_opportunities_expired_total Expired opportunities');
+            lines.push('# TYPE detector_opportunities_expired_total counter');
+            lines.push(`detector_opportunities_expired_total ${stats.opportunityOutcomes.expired}`);
+            lines.push('# HELP detector_opportunities_active Current active opportunities');
+            lines.push('# TYPE detector_opportunities_active gauge');
+            lines.push(`detector_opportunities_active ${stats.opportunityOutcomes.active}`);
           }
 
           res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
@@ -329,7 +361,10 @@ detector.on('opportunity', (opp) => {
       return;
     }
     inFlightPublishes++;
-    opportunityPublisher.publish(opp)
+    // FIX O-01: Pass detection-phase trace context for end-to-end correlation.
+    // Without this, publish() creates a new root trace, breaking detection→execution correlation.
+    const parentTrace = opp._detectionTrace as TraceContext | undefined;
+    opportunityPublisher.publish(opp, parentTrace)
       .catch((error) => {
         logger.error('Failed to publish opportunity (fire-and-forget)', {
           opportunityId: opp.id,

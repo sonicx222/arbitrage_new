@@ -12,6 +12,8 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  */
 
+import * as fsp from 'fs/promises';
+import * as path from 'path';
 import { RedisStreamsClient } from '../redis';
 import { createTraceContext, propagateContext } from '../tracing';
 import type { TraceContext } from '../tracing';
@@ -201,9 +203,56 @@ export class OpportunityPublisher {
         });
       })
       .catch((dlqError) => {
-        this.logger.warn('DLQ write also failed (Redis degraded)', {
+        // FIX F-04: When both primary and DLQ XADD fail (full Redis outage),
+        // write to local JSONL file as last-resort fallback. Without this,
+        // opportunities are permanently lost during Redis outages.
+        this.logger.warn('DLQ write also failed, falling back to local JSONL', {
           opportunityId: opportunity.id,
           error: (dlqError as Error).message,
+        });
+        this.writeToLocalFallback(opportunity, lastError);
+      });
+  }
+
+  /**
+   * FIX F-04: Last-resort local JSONL file fallback when Redis is completely down.
+   * Follows the same async-append pattern as TradeLogger (services/execution-engine).
+   * File: ./data/lost-opportunities/lost-YYYY-MM-DD.jsonl
+   */
+  private writeToLocalFallback(opportunity: ArbitrageOpportunity, lastError: string): void {
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const dir = process.env.LOST_OPPORTUNITY_DIR ?? './data/lost-opportunities';
+    const filePath = path.join(dir, `lost-${dateStr}.jsonl`);
+
+    const record = {
+      opportunityId: opportunity.id,
+      type: opportunity.type,
+      chain: opportunity.chain,
+      profitPercentage: opportunity.profitPercentage,
+      expectedProfit: opportunity.expectedProfit,
+      confidence: opportunity.confidence,
+      lastError,
+      partition: this.partitionId,
+      timestamp: now.toISOString(),
+    };
+
+    const line = JSON.stringify(record) + '\n';
+
+    // Fire-and-forget: mkdir + append. If this also fails, log and move on —
+    // we've exhausted all fallback paths.
+    fsp.mkdir(dir, { recursive: true })
+      .then(() => fsp.appendFile(filePath, line, 'utf8'))
+      .then(() => {
+        this.logger.info('Lost opportunity written to local JSONL fallback', {
+          opportunityId: opportunity.id,
+          filePath,
+        });
+      })
+      .catch((fsError) => {
+        this.logger.error('All fallback paths exhausted — opportunity permanently lost', {
+          opportunityId: opportunity.id,
+          error: (fsError as Error).message,
         });
       });
   }

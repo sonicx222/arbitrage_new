@@ -2369,6 +2369,12 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private emitOpportunity(opportunity: ArbitrageOpportunity): void {
     try {
+      // FIX O-01: Attach detection-phase trace context for end-to-end correlation.
+      // createFastTraceContext is counter-based (zero-alloc, no crypto) — safe for hot path.
+      // The traceId propagates through EventEmitter → index.ts → OpportunityPublisher.publish()
+      // → Redis Streams, enabling detection→publish→execution correlation in logs/traces.
+      opportunity._detectionTrace = createFastTraceContext(this.tracingServiceName);
+
       // P0-FIX: Removed direct xaddWithLimit call to prevent duplicate publishing.
       // The EventEmitter path propagates through chain-instance-manager -> unified-detector -> index.ts
       // where OpportunityPublisher.publish() is the canonical publisher (adds _source, _publishedAt metadata).

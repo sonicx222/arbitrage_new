@@ -551,8 +551,14 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
  * SA-008 FIX: Must exceed Redis connectTimeout (3000ms) so the Redis client
  * has time to complete its connection attempt before shutdown forcibly exits.
  * Previously matched connectTimeout exactly — a race condition under reconnect.
+ *
+ * FIX F-02: Increased from 8s to 25s. Kubernetes sends SIGTERM with a 30s grace
+ * period (terminationGracePeriodSeconds default). CHAIN_STOP_TIMEOUT_MS is 30s for
+ * individual chain stops. At 8s the process exited before chains could drain their
+ * StreamBatcher queues, losing in-flight opportunities. 25s gives chains time to
+ * flush while leaving 5s headroom before K8s SIGKILL.
  */
-export const SHUTDOWN_TIMEOUT_MS = 8000;
+export const SHUTDOWN_TIMEOUT_MS = 25000;
 
 /** Default timeout for health server close during startup failure cleanup */
 export const HEALTH_SERVER_CLOSE_TIMEOUT_MS = 1000;
