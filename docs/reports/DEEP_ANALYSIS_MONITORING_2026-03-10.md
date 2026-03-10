@@ -291,22 +291,22 @@ Cross-verified by multiple agents:
 - [x] **M-09**: Add pre-flight check for `jq` dependency
 - [x] **M-10**: Add pre-flight check for `redis-cli` dependency
 
-### Phase 2: Next Sprint (documentation accuracy + coverage) — 14 items
+### Phase 2: Next Sprint (documentation accuracy + coverage) — 14 items ✅ COMPLETE (commit `44819d18`)
 
-- [ ] **H-07**: Add ADR-038 streams to smoke test baseline
-- [ ] **H-08**: Add cross-chain detector smoke test step
-- [ ] **M-01**: Remove stale Redis client parity "known issue" (lines 644-646)
-- [ ] **M-02**: Remove stale UD port "known issue" (lines 685-688)
-- [ ] **M-03**: Fix SSE event count /6→/7 (lines 3172, 4036)
-- [ ] **M-04**: Add 3AR to report template section 3.9 table
-- [ ] **M-05**: Fix Phase 3 header to "9 subsections, 44 checks" (line 1304)
-- [ ] **M-06**: Fix report template Phase 3 count from 43 to 44 (line 3936)
-- [ ] **M-13**: Fix Step 4G cross-reference from "Check 3I" to "Check 3E"
-- [ ] **M-17**: Fix testnet docs: change ".env" to ".env.local" for WALLET_PRIVATE_KEY (line 1117)
-- [ ] **M-18**: Add `--max-time 10` to all curl calls
-- [ ] **H-10**: Add HMAC legacy compat check to Check 1G
-- [ ] **H-11**: Document CB flapping detection requirement for Check 3F implementation
-- [ ] **L-01**: Fix report footer version v3.0→v3.1 (line 4121)
+- [x] **H-07**: Add ADR-038 streams to smoke test baseline
+- [x] **H-08**: Add cross-chain detector smoke test step (Step 4F-2)
+- [x] **M-01**: Update stale Redis client parity "known issue" (both clients now aligned)
+- [x] **M-02**: Update stale UD port "known issue" (now correctly 3007)
+- [x] **M-03**: Fix SSE event count /6→/7 (2 locations)
+- [x] **M-04**: Add 3AR to report template section 3.9 table
+- [x] **M-05**: Fix Phase 3 header to "9 subsections, 44 checks"
+- [x] **M-06**: Fix report template Phase 3 count from 43 to 44
+- [x] **M-13**: Fix Step 4G cross-reference from "Check 3I" to "Check 3E"
+- [x] **M-17**: Fix testnet docs: use `.env.local` for WALLET_PRIVATE_KEY
+- [x] **M-18**: Add `--max-time 10` to all ~90 curl calls
+- [x] **H-10**: Add HMAC legacy compat check to Check 1G
+- [x] **H-11**: Document CB flapping detection limitation + manual workaround in Check 3F
+- [x] **L-01**: Fix report footer version v3.0→v3.1
 
 ### Phase 3: Backlog (polish + new checks) — remaining items
 
