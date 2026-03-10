@@ -33,7 +33,7 @@ import {
 import { createLogger } from '@arbitrage/core';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { getPartition } from '@arbitrage/config';
-import { DEFAULT_HEALTH_CHECK_PORT } from './constants';
+import { DEFAULT_HEALTH_CHECK_PORT, SERVICE_SHUTDOWN_TIMEOUT_MS } from './constants';
 import { OpportunityPublisher } from './publishers';
 
 // =============================================================================
@@ -454,9 +454,12 @@ async function main(): Promise<void> {
     await detector.start();
 
     // Graceful shutdown with shared bootstrap utility
+    // FIX F-02: Shutdown timeout must exceed CHAIN_STOP_TIMEOUT_MS (30s) so chains
+    // get their full stop window. Default was 10s, causing premature process.exit(1).
     setupServiceShutdown({
       logger,
       serviceName: 'Unified Detector',
+      shutdownTimeoutMs: SERVICE_SHUTDOWN_TIMEOUT_MS,
       onShutdown: async () => {
         // BUG-FIX: Clear health cache to prevent stale data on restart scenarios
         healthCache = null;

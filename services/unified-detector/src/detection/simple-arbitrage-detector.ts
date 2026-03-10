@@ -112,6 +112,13 @@ export interface SimpleArbitrageConfig {
    * Low-liquidity chains (Mantle/Mode) may need higher values.
    */
   maxRealisticProfitPct?: number;
+  /**
+   * FIX CD-R03: Minimum trade amount in raw token units (dust filter).
+   * Default: 1000n. This is token-decimal agnostic — 1000 raw units is negligible
+   * for 18-decimal tokens ($0.000000000000001) and $0.001 for 6-decimal tokens.
+   * Chains with unusual token decimals may need adjustment.
+   */
+  minTradeAmountRaw?: bigint;
 }
 
 /**
@@ -127,6 +134,8 @@ export class SimpleArbitrageDetector {
   private readonly maxSafePrice: number;
   // FIX CD-R02: Configurable unrealistic profit filter
   private readonly maxRealisticProfitPct: number;
+  // FIX CD-R03: Configurable dust threshold
+  private readonly minTradeAmountRaw: bigint;
   // FIX #32: Counter-based ID generation avoids 2 string allocations per opportunity
   private idCounter: number = 0;
 
@@ -158,6 +167,8 @@ export class SimpleArbitrageDetector {
     this.maxSafePrice = config.maxSafePrice ?? MAX_SAFE_PRICE;
     // FIX CD-R02: Configurable unrealistic profit filter (default 20%)
     this.maxRealisticProfitPct = config.maxRealisticProfitPct ?? 0.20;
+    // FIX CD-R03: Configurable dust threshold (default 1000 raw units)
+    this.minTradeAmountRaw = config.minTradeAmountRaw ?? 1000n;
   }
 
   /**
@@ -264,8 +275,8 @@ export class SimpleArbitrageDetector {
     const smallerReserve = buyReserve1 < sellReserve1 ? buyReserve1 : sellReserve1;
     const amountIn = (smallerReserve * BigInt(Math.floor(maxTradePercent * 10000))) / 10000n;
 
-    // Skip if calculated amount is too small (dust)
-    if (amountIn < 1000n) {
+    // FIX CD-R03: Use configurable dust threshold instead of hardcoded 1000n
+    if (amountIn < this.minTradeAmountRaw) {
       this.rejectionStats.dustAmount++;
       this.trackRejection();
       return null;

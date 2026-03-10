@@ -178,6 +178,14 @@ Different services use different consumer group names to ensure message isolatio
 - Consumer groups within a service share load (multiple instances of same service)
 - Different services that read the same stream each get their own copy of messages
 
+### Opportunity Dedup: Fail-Open Design (DI-04)
+
+The execution engine uses `SET key NX EX ttl` (via `RedisStreamsClient.setNx()`) for cross-instance opportunity deduplication. **This is intentionally fail-open**: if Redis is unavailable, `setNx()` returns `true` (allowing execution) rather than blocking opportunities.
+
+**Rationale**: Flash loan atomicity guarantees that failed/duplicate executions cannot lose funds — the on-chain profit check reverts unprofitable transactions. The cost of a duplicate execution is wasted gas (~$0.50-5), while the cost of a false-negative dedup (blocking a valid opportunity) is missed profit (~$10-1000). In-memory dedup within each EE instance provides a secondary dedup layer.
+
+**Risk**: During Redis outage, the same opportunity could execute on multiple EE instances, consuming gas on all but one (the first to mine). Mitigated by: (1) flash loan atomicity, (2) in-memory dedup, (3) Redis outages are typically brief.
+
 ### Pending Message Handling
 
 All consumer groups use `startId: '$'` which means:

@@ -80,6 +80,14 @@ export const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 30_000;
 export const CHAIN_STOP_TIMEOUT_MS = 30_000;
 
 /**
+ * FIX F-02: Service shutdown timeout must exceed CHAIN_STOP_TIMEOUT_MS so chains
+ * get their full stop window. K8s gives 30s grace period — 25s allows 5s buffer
+ * for post-chain cleanup (health server close, stats logging).
+ * Previous default (10s) fired before chains finished, aborting batcher final flush.
+ */
+export const SERVICE_SHUTDOWN_TIMEOUT_MS = 25_000;
+
+/**
  * FIX #4: Per-chain start timeout (45 seconds).
  * Individual chains that fail to connect within this window are skipped
  * rather than blocking the entire partition. This prevents vault-model
