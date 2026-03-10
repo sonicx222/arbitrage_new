@@ -4,7 +4,7 @@
 //                    shared/types/src/index.ts
 //                    shared/types/src/execution.ts
 
-export type Tab = 'Overview' | 'Execution' | 'Opportunities' | 'Chains' | 'Risk' | 'Streams' | 'Admin';
+export type Tab = 'Overview' | 'Execution' | 'Opportunities' | 'Chains' | 'Risk' | 'Streams' | 'Diagnostics' | 'Admin';
 
 export interface SystemMetrics {
   totalOpportunities: number;
