@@ -864,6 +864,10 @@ export class PriceMatrix implements Resettable {
     let resolvedCount = 0;
     const maxPairs = this.config.maxPairs;
 
+    // H-005 FIX: Track new keys for SharedKeyRegistry registration
+    // (matches setPrice behavior at line 597-598)
+    const newKeys: Array<{ key: string; index: number }> = [];
+
     for (const update of updates) {
       if (!update.key) continue;
 
@@ -871,12 +875,17 @@ export class PriceMatrix implements Resettable {
       if (!Number.isFinite(update.price) || update.price < 0) continue;
 
       // Skip if at maxPairs limit for new keys
-      if (!this.mapper.hasKey(update.key) && this.writtenSlots.size >= maxPairs) {
+      const isNewKey = !this.mapper.hasKey(update.key);
+      if (isNewKey && this.writtenSlots.size >= maxPairs) {
         continue;
       }
 
       const index = this.getIndexForKey(update.key);
       if (index < 0) continue;
+
+      if (isNewKey) {
+        newKeys.push({ key: update.key, index });
+      }
 
       resolved[resolvedCount++] = {
         index,
@@ -894,6 +903,11 @@ export class PriceMatrix implements Resettable {
     const timestamps = this.getTimestampArray();
     const sequences = this.getSequenceArray();
 
+    // SC-M-009 FIX: Track actual writes separately from resolvedCount.
+    // The monotonic timestamp check can skip entries, so resolvedCount
+    // overcounts the real number of writes performed.
+    let actualWrites = 0;
+
     if (this.useSharedMemory && this.config.enableAtomics && this.dataView) {
       // Optimized SharedArrayBuffer path with Fix #7 sequence counter protocol
       for (let ri = 0; ri < resolvedCount; ri++) {
@@ -908,6 +922,7 @@ export class PriceMatrix implements Resettable {
         Atomics.store(timestamps, index, relativeTs);
         Atomics.store(sequences, index, seq + 1);
         this.writtenSlots.add(index);
+        actualWrites++;
       }
     } else {
       // Fallback path
@@ -921,10 +936,20 @@ export class PriceMatrix implements Resettable {
         timestamps[index] = relativeTs;
         sequences[index]++;
         this.writtenSlots.add(index);
+        actualWrites++;
       }
     }
 
-    this.stats.writes += resolvedCount;
+    // H-005 FIX: Register new keys in SharedKeyRegistry for worker access
+    // Registration happens AFTER price writes to prevent workers from reading
+    // uninitialized slots (same ordering as setPrice at line 597-598)
+    if (this.keyRegistry && !this.isWorkerMode && newKeys.length > 0) {
+      for (const { key, index } of newKeys) {
+        this.keyRegistry.register(key, index);
+      }
+    }
+
+    this.stats.writes += actualWrites;
     this.stats.batchWrites++;
   }
 

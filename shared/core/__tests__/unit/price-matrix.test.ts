@@ -424,6 +424,39 @@ describe('PriceMatrix', () => {
       expect(stats.reads).toBe(0);
       expect(stats.writes).toBe(0);
     });
+
+    it('should count only actual writes in setBatch stats (SC-M-009)', () => {
+      // SC-M-009: setBatch stats.writes should not count entries skipped by
+      // the monotonic timestamp check. Use >= 10 entries to trigger the
+      // optimized batch path (< 10 delegates to setPrice individually).
+      const baseTimestamp = Date.now();
+
+      // Phase 1: Set initial prices with timestamp=baseTimestamp for 12 keys
+      const initialUpdates = Array.from({ length: 12 }, (_, i) => ({
+        key: createTestPriceKey(i),
+        price: 100 + i,
+        timestamp: baseTimestamp,
+      }));
+      matrix.setBatch(initialUpdates);
+      matrix.resetStats();
+
+      // Phase 2: Send batch where some entries have older timestamps (will be
+      // skipped by the monotonic check) and some have newer timestamps (will
+      // be written). Use the same 12 keys so we stay on the optimized path.
+      const mixedUpdates = Array.from({ length: 12 }, (_, i) => ({
+        key: createTestPriceKey(i),
+        price: 200 + i,
+        // Even indices get an older timestamp (skipped), odd get newer (written)
+        timestamp: i % 2 === 0 ? baseTimestamp - 5000 : baseTimestamp + 5000,
+      }));
+      matrix.setBatch(mixedUpdates);
+
+      const stats = matrix.getStats();
+      // 6 entries had newer timestamps and were actually written
+      // 6 entries had older timestamps and were skipped
+      expect(stats.writes).toBe(6);
+      expect(stats.batchWrites).toBe(1);
+    });
   });
 
   // ===========================================================================
