@@ -98,7 +98,7 @@ export const SERVICE_CONFIGS = {
   monitoring: {
     enabled: process.env.MONITORING_ENABLED === 'true',
     interval: safeParseInt(process.env.MONITORING_INTERVAL, 30000),
-    endpoints: (process.env.MONITORING_ENDPOINTS || '').split(',').filter(Boolean),
+    endpoints: (process.env.MONITORING_ENDPOINTS ?? '').split(',').filter(Boolean),
   },
   /** Indicates if configuration is suitable for production use */
   isProductionConfig: isProduction && !isLocalhostUrl(redisUrl),

@@ -47,8 +47,8 @@ function parseChainEVThresholds(raw: string | undefined): Record<string, bigint>
       result[chain.toLowerCase()] = BigInt(value);
     }
     return result;
-  } catch {
-    console.warn('RISK_CHAIN_EV_THRESHOLDS: invalid JSON, ignoring override');
+  } catch (error) {
+    console.warn(`RISK_CHAIN_EV_THRESHOLDS: invalid JSON (${(error as Error).message}), input: "${raw}", ignoring override`);
     return undefined;
   }
 }
@@ -434,9 +434,7 @@ if (process.env.NODE_ENV !== 'test') {
     validateRiskConfig();
   } catch (error) {
     console.error('Risk configuration validation error:', error);
-    // Don't throw - allow startup with warnings in development
-    if (process.env.NODE_ENV === 'production') {
-      throw error;
-    }
+    // CFG-M-003 FIX: Fail fast in all non-test environments (production AND development)
+    throw error;
   }
 }
