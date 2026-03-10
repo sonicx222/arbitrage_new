@@ -308,10 +308,26 @@ Cross-verified by multiple agents:
 - [x] **H-11**: Document CB flapping detection limitation + manual workaround in Check 3F
 - [x] **L-01**: Fix report footer version v3.0→v3.1
 
-### Phase 3: Backlog (polish + new checks) — remaining items
+### Phase 3: Backlog (polish + new checks) — 21 items ✅ COMPLETE (commit `99f538a7`)
 
-- [ ] L-02 through L-18: Minor fixes and new check suggestions
-- [ ] O-01 through O-04: Performance optimizations
+- [x] L-02/L-03/L-11: Already fixed in Phases 1-2 (verified)
+- [x] L-04: Added coordinator-worker/mempool/monolith ports to inventory
+- [x] L-05/L-06: Fixed coordinator health schema (systemHealth added, version removed)
+- [x] L-07: ADR-022 spread grep: clarified rest-param exclusion, fixed price-matrix path
+- [x] L-08: Check 1M: improved catch regex patterns
+- [x] L-09: Per-chain staleness thresholds (block-time aware)
+- [x] L-10: MAXLEN ratio check expanded from 4 to 12 streams
+- [x] L-12: Documented finding ID prefix convention (PF/SA/RT/SM)
+- [x] L-13: New Check 1S — Build artifact staleness detection
+- [x] L-14: New Check 1T — Testnet/mainnet RPC URL safety
+- [x] L-15: New Check 1U — CORS configuration audit
+- [x] L-16: New Check 1V — Contract pause state check
+- [x] L-17: New Check 1W — Redis access control
+- [x] L-18: Trace search window COUNT 5→50
+- [x] O-01: Documented HTTP response caching strategy
+- [x] O-02: Documented future auto-generation of System Inventory
+- [x] O-03: Documented provider quality check consolidation
+- [x] O-04: Documented t1 metrics scrape reuse as cache
 
 ---
 
