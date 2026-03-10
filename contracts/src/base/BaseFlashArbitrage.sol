@@ -19,7 +19,7 @@ import "../interfaces/IFlashLoanErrors.sol";
  *
  * ## Refactoring Benefits (v2.0.0)
  *
- * This base contract eliminates 1,135 lines of duplicate code across 6 flash arbitrage contracts:
+ * This base contract consolidates shared logic for 6 flash arbitrage contracts:
  * - FlashLoanArbitrage (Aave V3)
  * - BalancerV2FlashArbitrage (Balancer V2 Vault)
  * - PancakeSwapFlashArbitrage (PancakeSwap V3)
@@ -169,6 +169,10 @@ abstract contract BaseFlashArbitrage is
     // ==========================================================================
 
     /// @notice Emitted when an arbitrage is executed successfully
+    /// @dev `executor` uses tx.origin (not msg.sender) because this event is emitted inside
+    ///      flash loan callbacks where msg.sender is the lending pool, not the transaction initiator.
+    ///      Trade-off: tx.origin returns the bundler address under ERC-4337 account abstraction.
+    ///      If AA support is needed, store msg.sender from executeArbitrage() in a transient variable.
     event ArbitrageExecuted(
         address indexed asset,
         uint256 amount,

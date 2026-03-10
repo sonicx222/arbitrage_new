@@ -137,6 +137,35 @@ describe('PancakeSwapFlashArbitrage', () => {
   testZeroAmountEdgeCases(adminConfig);
 
   // ===========================================================================
+  // ETH receive() and ETHTransferFailed (L-05, L-06)
+  // ===========================================================================
+  describe('PancakeSwapFlashArbitrage — ETH handling', () => {
+    it('should accept ETH via receive()', async () => {
+      const { flashArbitrage, owner } = await loadFixture(deployContractsFixture);
+      const addr = await flashArbitrage.getAddress();
+
+      await owner.sendTransaction({ to: addr, value: ethers.parseEther('1') });
+      expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
+    });
+
+    it('should revert ETH withdrawal to rejecting contract', async () => {
+      const { flashArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await owner.sendTransaction({
+        to: await flashArbitrage.getAddress(),
+        value: ethers.parseEther('1'),
+      });
+
+      const RejectEther = await ethers.getContractFactory('MockERC20');
+      const rejecter = await RejectEther.deploy('Rejector', 'REJ', 18);
+
+      await expect(
+        flashArbitrage.connect(owner).withdrawETH(await rejecter.getAddress(), ethers.parseEther('0.5'))
+      ).to.be.revertedWithCustomError(flashArbitrage, 'ETHTransferFailed');
+    });
+  });
+
+  // ===========================================================================
   // Profit Validation (shared — _verifyAndTrackProfit)
   // ===========================================================================
   (() => {

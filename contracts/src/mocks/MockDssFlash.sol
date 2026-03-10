@@ -28,8 +28,11 @@ contract MockDssFlash is IERC3156FlashLender {
     bytes32 private constant ERC3156_CALLBACK_SUCCESS =
         keccak256("ERC3156FlashBorrower.onFlashLoan");
 
-    /// @notice Flag to simulate flash loan failure
+    /// @notice Flag to simulate flash loan failure (returns false, EIP-3156 non-revert failure)
     bool public shouldFailFlashLoan;
+
+    /// @notice Flag to simulate flash loan revert (matches real DssFlash behavior on failure)
+    bool public shouldRevertFlashLoan;
 
     event FlashLoanExecuted(
         address indexed receiver,
@@ -81,7 +84,10 @@ contract MockDssFlash is IERC3156FlashLender {
         uint256 amount,
         bytes memory data
     ) external override returns (bool) {
-        // Simulate failure if flag is set
+        // Simulate revert failure (matches real DssFlash behavior)
+        require(!shouldRevertFlashLoan, "DssFlash/ceiling-exceeded");
+
+        // Simulate non-revert failure (returns false per EIP-3156)
         if (shouldFailFlashLoan) {
             return false;
         }
@@ -139,10 +145,17 @@ contract MockDssFlash is IERC3156FlashLender {
     // =========================================================================
 
     /**
-     * @notice Set flag to simulate flash loan failure
+     * @notice Set flag to simulate flash loan failure (returns false)
      */
     function setShouldFailFlashLoan(bool _shouldFail) external {
         shouldFailFlashLoan = _shouldFail;
+    }
+
+    /**
+     * @notice Set flag to simulate flash loan revert (matches real DssFlash behavior)
+     */
+    function setShouldRevertFlashLoan(bool _shouldRevert) external {
+        shouldRevertFlashLoan = _shouldRevert;
     }
 
     /**

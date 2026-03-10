@@ -752,6 +752,35 @@ describe('SyncSwapFlashArbitrage', () => {
   testZeroAmountEdgeCases(adminConfig);
 
   // ===========================================================================
+  // ETH receive() and ETHTransferFailed (L-05, L-06)
+  // ===========================================================================
+  describe('SyncSwapFlashArbitrage — ETH handling', () => {
+    it('should accept ETH via receive()', async () => {
+      const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
+      const addr = await syncSwapArbitrage.getAddress();
+
+      await owner.sendTransaction({ to: addr, value: ethers.parseEther('1') });
+      expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
+    });
+
+    it('should revert ETH withdrawal to rejecting contract', async () => {
+      const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await owner.sendTransaction({
+        to: await syncSwapArbitrage.getAddress(),
+        value: ethers.parseEther('1'),
+      });
+
+      const RejectEther = await ethers.getContractFactory('MockERC20');
+      const rejecter = await RejectEther.deploy('Rejector', 'REJ', 18);
+
+      await expect(
+        syncSwapArbitrage.connect(owner).withdrawETH(await rejecter.getAddress(), ethers.parseEther('0.5'))
+      ).to.be.revertedWithCustomError(syncSwapArbitrage, 'ETHTransferFailed');
+    });
+  });
+
+  // ===========================================================================
   // Profit Validation (shared — _verifyAndTrackProfit)
   // ===========================================================================
   testProfitValidation({

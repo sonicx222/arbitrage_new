@@ -318,7 +318,7 @@ Instead of one service per chain, chains are grouped into partitions based on:
 | Partition | Chains | Location | Provider | Resources |
 |-----------|--------|----------|----------|-----------|
 | P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | Singapore | Oracle ARM | 2 OCPU, 12GB |
-| P2: L2-Turbo | Arbitrum, Optimism, Base, Scroll, Blast | Singapore | Fly.io x2 | 640MB total |
+| P2: L2-Turbo | Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode | Singapore | Fly.io x2 | 640MB total |
 | P3: High-Value | Ethereum, zkSync, Linea | US-East | Oracle ARM | 2 OCPU, 12GB |
 | P4: Solana | Solana (non-EVM) | US-West | Fly.io | 256MB |
 
@@ -1167,7 +1167,7 @@ SimulationService now routes requests based on chain:
 
 **Supported Protocols**:
 1. **Aave V3** (0.05% fee, post-AIP-382)
-   - Chains: Ethereum, Polygon, Arbitrum, Optimism, Base, Avalanche
+   - Chains: Ethereum (deferred — deploy after L2 success), Polygon, Arbitrum, Optimism, Base, Avalanche
    - Contract: `FlashLoanArbitrage.sol`
    - Largest liquidity pools
 
@@ -1179,7 +1179,7 @@ SimulationService now routes requests based on chain:
 3. **PancakeSwap V3** (Pool-dependent: 0.01-1%)
    - Chains: BSC, Ethereum, Arbitrum, zkSync Era, Base, opBNB, Linea
    - Contract: `PancakeSwapFlashArbitrage.sol`
-   - Fee varies by pool tier (100/500/2500/10000 bps)
+   - Fee varies by pool tier (100/500/2500/10000 hundredths of a bip, i.e. ×10⁻⁶)
 
 4. **SyncSwap** (0.3% fee, EIP-3156)
    - Chains: zkSync Era

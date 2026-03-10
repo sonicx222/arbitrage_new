@@ -145,7 +145,7 @@ Rules for hot-path code (ADR-022):
 
 # Contract Architecture
 
-**Inheritance:** `BaseFlashArbitrage` (abstract, 1135 lines) -> 6 derived contracts:
+**Inheritance:** `BaseFlashArbitrage` (abstract, ~715 lines) -> 6 derived contracts:
 - `FlashLoanArbitrage` (Aave V3) - executeOperation callback
 - `BalancerV2FlashArbitrage` (Balancer V2) - receiveFlashLoan callback
 - `PancakeSwapFlashArbitrage` (PancakeSwap V3) - pancakeV3FlashCallback

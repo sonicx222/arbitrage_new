@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "../interfaces/IDexRouter.sol";
 
 /**
  * @title MockMaliciousRouter
@@ -28,7 +29,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *
  * @custom:version 1.0.0
  */
-contract MockMaliciousRouter {
+contract MockMaliciousRouter is IDexRouter {
     using SafeERC20 for IERC20;
 
     /// @dev Local struct matching BaseFlashArbitrage.SwapStep for proper ABI encoding

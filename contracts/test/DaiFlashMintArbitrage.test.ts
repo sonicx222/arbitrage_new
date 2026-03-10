@@ -406,6 +406,55 @@ describe('DaiFlashMintArbitrage', () => {
           daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
         ).to.be.revertedWithCustomError(daiArbitrage, 'FlashLoanFailed');
       });
+
+      it('should revert if DssFlash reverts (real DssFlash behavior, L-12)', async () => {
+        const {
+          daiArbitrage,
+          dssFlash,
+          dexRouter1,
+          dai,
+          weth,
+          owner,
+          user,
+        } = await loadFixture(deployContractsFixture);
+
+        await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+        // Set DssFlash to revert (matches real DssFlash ceiling-exceeded behavior)
+        await dssFlash.setShouldRevertFlashLoan(true);
+
+        await dexRouter1.setExchangeRate(
+          await dai.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('0.0005')
+        );
+        await dexRouter1.setExchangeRate(
+          await weth.getAddress(),
+          await dai.getAddress(),
+          ethers.parseEther('2100')
+        );
+
+        const amountIn = ethers.parseEther('1000');
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await dai.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await dai.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+        const deadline = await getDeadline();
+
+        await expect(
+          daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
+        ).to.be.revertedWith('DssFlash/ceiling-exceeded');
+      });
     });
 
     describe('onFlashLoan() callback', () => {
@@ -523,6 +572,35 @@ describe('DaiFlashMintArbitrage', () => {
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
   testZeroAmountEdgeCases(adminConfig);
+
+  // ==========================================================================
+  // ETH receive() and ETHTransferFailed (L-05, L-06)
+  // ==========================================================================
+  describe('DaiFlashMintArbitrage — ETH handling', () => {
+    it('should accept ETH via receive()', async () => {
+      const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
+      const addr = await daiArbitrage.getAddress();
+
+      await owner.sendTransaction({ to: addr, value: ethers.parseEther('1') });
+      expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
+    });
+
+    it('should revert ETH withdrawal to rejecting contract', async () => {
+      const { daiArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await owner.sendTransaction({
+        to: await daiArbitrage.getAddress(),
+        value: ethers.parseEther('1'),
+      });
+
+      const RejectEther = await ethers.getContractFactory('MockERC20');
+      const rejecter = await RejectEther.deploy('Rejector', 'REJ', 18);
+
+      await expect(
+        daiArbitrage.connect(owner).withdrawETH(await rejecter.getAddress(), ethers.parseEther('0.5'))
+      ).to.be.revertedWithCustomError(daiArbitrage, 'ETHTransferFailed');
+    });
+  });
 
   // ==========================================================================
   // 5b. Profit Validation (shared harness — _verifyAndTrackProfit)
