@@ -40,7 +40,7 @@ jest.mock('../../src/monitoring/latency-tracker', () => ({
 function request(
   port: number,
   path: string,
-  options: { method?: string; headers?: Record<string, string> } = {}
+  options: { method?: string; headers?: Record<string, string>; body?: string } = {}
 ): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
@@ -64,6 +64,9 @@ function request(
       }
     );
     req.on('error', reject);
+    if (options.body) {
+      req.write(options.body);
+    }
     req.end();
   });
 }
@@ -451,6 +454,54 @@ describe('createPartitionHealthServer', () => {
 
       // Verify getHealthyChains was only called once (first request)
       expect(detector.getHealthyChains).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // PUT /log-level — Body size limit (SC-M-010)
+  // ---------------------------------------------------------------------------
+
+  describe('PUT /log-level body size limit', () => {
+    it('should return 413 when body exceeds 1KB', async () => {
+      port = await startServer();
+
+      // Send a body that exceeds 1KB (1025 bytes)
+      const oversizedBody = 'x'.repeat(1025);
+      const res = await request(port, '/log-level', {
+        method: 'PUT',
+        body: oversizedBody,
+      });
+
+      expect(res.statusCode).toBe(413);
+      expect(JSON.parse(res.body).error).toBe('Request body too large');
+    });
+
+    it('should accept body within 1KB limit', async () => {
+      port = await startServer();
+
+      const validBody = JSON.stringify({ level: 'debug' });
+      const res = await request(port, '/log-level', {
+        method: 'PUT',
+        body: validBody,
+      });
+
+      // Should succeed (200) with level change, not 413
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).level).toBe('debug');
+    });
+
+    it('should return 413 when authenticated body exceeds 1KB', async () => {
+      port = await startServer({ authToken: 'secret-token' });
+
+      const oversizedBody = 'x'.repeat(2048);
+      const res = await request(port, '/log-level', {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer secret-token' },
+        body: oversizedBody,
+      });
+
+      expect(res.statusCode).toBe(413);
+      expect(JSON.parse(res.body).error).toBe('Request body too large');
     });
   });
 

@@ -9,6 +9,7 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
+import { timingSafeEqual } from 'crypto';
 import { createLogger } from '../logger';
 import { getStreamHealthMonitor } from '../monitoring/stream-health-monitor';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
@@ -158,6 +159,22 @@ function withResponseTimeout(
 }
 
 // =============================================================================
+// H-006 FIX: Timing-safe auth token comparison
+// =============================================================================
+
+/**
+ * Compares an auth header against the expected Bearer token using
+ * crypto.timingSafeEqual to prevent timing side-channel attacks.
+ * Returns true if the header matches `Bearer ${token}`.
+ */
+function isValidAuthHeader(authHeader: string | undefined, token: string): boolean {
+  if (!authHeader) return false;
+  const expected = `Bearer ${token}`;
+  if (authHeader.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
+}
+
+// =============================================================================
 // Health Server (P12-P14 Refactor)
 // =============================================================================
 
@@ -198,20 +215,40 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
     // endpoints are GET-only (SEC-02).
     if (req.method === 'PUT' && req.url === '/log-level') {
       // Require auth token for level changes (same policy as /stats)
+      // H-006 FIX: timing-safe comparison prevents side-channel attacks
       if (authToken) {
-        const authHeader = req.headers['authorization'];
-        if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+        if (!isValidAuthHeader(req.headers['authorization'], authToken)) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
         }
       }
-      const body = await new Promise<string>((resolve, reject) => {
-        let data = '';
-        req.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-        req.on('end', () => resolve(data));
-        req.on('error', reject);
-      });
+      let body: string;
+      try {
+        body = await new Promise<string>((resolve, reject) => {
+          let data = '';
+          let rejected = false;
+          req.on('data', (chunk: Buffer) => {
+            if (rejected) return;
+            data += chunk.toString();
+            if (data.length > 1024) {
+              rejected = true;
+              reject(new Error('Body too large'));
+            }
+          });
+          req.on('end', () => {
+            if (!rejected) resolve(data);
+          });
+          req.on('error', reject);
+        });
+      } catch (bodyError) {
+        if ((bodyError as Error).message === 'Body too large') {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Request body too large' }));
+          return;
+        }
+        throw bodyError;
+      }
       try {
         const parsed = JSON.parse(body) as { level?: string };
         const validLevels: string[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
@@ -276,9 +313,9 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
       }, logger);
     } else if (req.url === '/stats') {
       // SEC-01: Require auth token for /stats when HEALTH_AUTH_TOKEN is configured
+      // H-006 FIX: timing-safe comparison prevents side-channel attacks
       if (authToken) {
-        const authHeader = req.headers['authorization'];
-        if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+        if (!isValidAuthHeader(req.headers['authorization'], authToken)) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
