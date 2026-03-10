@@ -3,7 +3,7 @@ import { useSSE, type SSEStatus } from '../hooks/useSSE';
 import { formatTime, calcSuccessRate } from '../lib/format';
 import { getItem } from '../lib/storage';
 import { sendNotification, startTitleFlash, stopTitleFlash } from '../lib/notifications';
-import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint } from '../lib/types';
+import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint, DiagnosticsSnapshot } from '../lib/types';
 
 // ---------------------------------------------------------------------------
 // State & Reducer (unchanged — single reducer for centralized state management)
@@ -14,6 +14,7 @@ interface SSEState {
   services: Record<string, ServiceHealth>;
   circuitBreaker: CircuitBreakerStatus | null;
   streams: StreamHealth | null;
+  diagnostics: DiagnosticsSnapshot | null;
   feed: FeedItem[];
   chartData: ChartPoint[];
   lagData: LagPoint[];
@@ -29,6 +30,7 @@ type SSEAction =
   | { type: 'alert'; payload: Alert }
   | { type: 'circuit-breaker'; payload: CircuitBreakerStatus }
   | { type: 'streams'; payload: StreamHealth }
+  | { type: 'diagnostics'; payload: DiagnosticsSnapshot }
   | { type: 'reset'; payload?: undefined };
 
 const MAX_FEED = 50;
@@ -96,6 +98,8 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
       }
       return { ...state, streams: action.payload, lagData, lastEventTime };
     }
+    case 'diagnostics':
+      return { ...state, diagnostics: action.payload, lastEventTime };
     case 'execution-result': {
       const counter = state.nextFeedId + 1;
       const item: FeedItem = { kind: 'execution', data: action.payload, id: `e-${counter}` };
@@ -121,6 +125,7 @@ export const initialState: SSEState = {
   services: {},
   circuitBreaker: null,
   streams: null,
+  diagnostics: null,
   feed: [],
   chartData: loadSessionArray<ChartPoint>(CHART_STORAGE_KEY),
   lagData: loadSessionArray<LagPoint>(LAG_STORAGE_KEY),
@@ -139,12 +144,14 @@ interface MetricsCtxValue { metrics: SystemMetrics | null; chartData: ChartPoint
 interface ServicesCtxValue { services: Record<string, ServiceHealth>; circuitBreaker: CircuitBreakerStatus | null }
 interface FeedCtxValue { feed: FeedItem[] }
 interface StreamsCtxValue { streams: StreamHealth | null; lagData: LagPoint[] }
+interface DiagnosticsCtxValue { diagnostics: DiagnosticsSnapshot | null }
 interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null }
 
 const MetricsCtx = createContext<MetricsCtxValue>({ metrics: null, chartData: [] });
 const ServicesCtx = createContext<ServicesCtxValue>({ services: {}, circuitBreaker: null });
 const FeedCtx = createContext<FeedCtxValue>({ feed: [] });
 const StreamsCtx = createContext<StreamsCtxValue>({ streams: null, lagData: [] });
+const DiagnosticsCtx = createContext<DiagnosticsCtxValue>({ diagnostics: null });
 const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null });
 
 /** Metrics + chart data. Re-renders only on 'metrics' SSE events. */
@@ -155,6 +162,8 @@ export function useServices() { return useContext(ServicesCtx); }
 export function useFeed() { return useContext(FeedCtx); }
 /** Stream health + lag data. Re-renders only on 'streams' events. */
 export function useStreams() { return useContext(StreamsCtx); }
+/** Diagnostics snapshot (pipeline, runtime, providers). Re-renders only on 'diagnostics' events. */
+export function useDiagnostics() { return useContext(DiagnosticsCtx); }
 /** SSE connection status. Re-renders only on connect/disconnect/stale transitions. */
 export function useConnection() { return useContext(ConnectionCtx); }
 
@@ -165,8 +174,9 @@ export function useSSEData() {
   const { services, circuitBreaker } = useServices();
   const { feed } = useFeed();
   const { streams, lagData } = useStreams();
+  const { diagnostics } = useDiagnostics();
   const { status, lastEventTime } = useConnection();
-  return { metrics, chartData, services, circuitBreaker, feed, streams, lagData, status, lastEventTime, nextFeedId: 0 };
+  return { metrics, chartData, services, circuitBreaker, feed, streams, lagData, diagnostics, status, lastEventTime, nextFeedId: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +209,8 @@ export function validatePayload(event: string, data: unknown): boolean {
       return Object.values(data).every((v) => isObj(v) && typeof (v as Record<string, unknown>).length === 'number');
     case 'alert':
       return typeof data.type === 'string' && typeof data.timestamp === 'number';
+    case 'diagnostics':
+      return isObj(data.pipeline) && isObj(data.runtime) && isObj(data.providers) && typeof data.timestamp === 'number';
     default:
       return false;
   }
@@ -326,6 +338,10 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     () => ({ streams: state.streams, lagData: state.lagData }),
     [state.streams, state.lagData],
   );
+  const diagnosticsValue = useMemo<DiagnosticsCtxValue>(
+    () => ({ diagnostics: state.diagnostics }),
+    [state.diagnostics],
+  );
   const connectionValue = useMemo<ConnectionCtxValue>(
     () => ({ status, lastEventTime: state.lastEventTime }),
     [status, state.lastEventTime],
@@ -336,9 +352,11 @@ export function SSEProvider({ children }: { children: ReactNode }) {
       <MetricsCtx.Provider value={metricsValue}>
         <ServicesCtx.Provider value={servicesValue}>
           <StreamsCtx.Provider value={streamsValue}>
-            <FeedCtx.Provider value={feedValue}>
-              {children}
-            </FeedCtx.Provider>
+            <DiagnosticsCtx.Provider value={diagnosticsValue}>
+              <FeedCtx.Provider value={feedValue}>
+                {children}
+              </FeedCtx.Provider>
+            </DiagnosticsCtx.Provider>
           </StreamsCtx.Provider>
         </ServicesCtx.Provider>
       </MetricsCtx.Provider>

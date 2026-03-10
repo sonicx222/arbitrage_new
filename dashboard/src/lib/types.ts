@@ -125,6 +125,41 @@ export interface LagPoint {
   pending: number;
 }
 
+// Diagnostics snapshot (mirrors shared/core/src/monitoring/diagnostics-collector.ts)
+export interface CompactPercentiles {
+  p50: number;
+  p95: number;
+  p99: number;
+  count: number;
+}
+
+export interface DiagnosticsSnapshot {
+  pipeline: {
+    e2e: CompactPercentiles;
+    wsToDetector: CompactPercentiles;
+    detectorToPublish: CompactPercentiles;
+    stages: Record<string, CompactPercentiles>;
+  };
+  runtime: {
+    eventLoop: { min: number; max: number; mean: number; p99: number };
+    memory: { heapUsedMB: number; heapTotalMB: number; rssMB: number; externalMB: number };
+    gc: { totalPauseMs: number; count: number; majorCount: number };
+    uptimeSeconds: number;
+  };
+  providers: {
+    rpcByChain: Record<string, { p50: number; p95: number; errors: number; totalCalls: number }>;
+    rpcByMethod: Record<string, { p50: number; p95: number; totalCalls: number }>;
+    reconnections: Record<string, { count: number; p50: number }>;
+    wsMessages: Record<string, number>;
+    totalRpcErrors: number;
+  };
+  streams: {
+    overall: string;
+    streams: Record<string, { length: number; pending: number; consumerGroups: number; status: string }>;
+  } | null;
+  timestamp: number;
+}
+
 // Mirrors shared/types ArbitrageOpportunity (subset for dashboard display)
 export interface Opportunity {
   id: string;

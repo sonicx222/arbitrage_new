@@ -32,7 +32,7 @@ export function useSSE({ url, onEvent }: UseSSEOptions) {
       }
     };
 
-    const eventTypes = ['metrics', 'services', 'execution-result', 'alert', 'circuit-breaker', 'streams'];
+    const eventTypes = ['metrics', 'services', 'execution-result', 'alert', 'circuit-breaker', 'streams', 'diagnostics'];
     const debugSSE = typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function' && localStorage.getItem('debug_sse') === 'true';
 
     for (const type of eventTypes) {

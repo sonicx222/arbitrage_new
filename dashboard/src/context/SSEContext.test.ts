@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { reducer, validatePayload, initialState } from './SSEContext';
-import type { SystemMetrics, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, ServiceHealth } from '../lib/types';
+import type { SystemMetrics, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, ServiceHealth, DiagnosticsSnapshot } from '../lib/types';
 
 // Stable mock for Date.now — reducer uses it for lastEventTime
 const NOW = 1710000000000;
@@ -140,6 +140,37 @@ describe('validatePayload', () => {
 
     it('rejects non-numeric timestamp', () => {
       expect(validatePayload('alert', { type: 'x', timestamp: '2026-01-01' })).toBe(false);
+    });
+  });
+
+  describe('diagnostics', () => {
+    it('accepts valid diagnostics payload', () => {
+      expect(validatePayload('diagnostics', {
+        pipeline: { e2e: { p50: 1, p95: 2, p99: 3, count: 10 } },
+        runtime: { eventLoop: { min: 0, max: 1, mean: 0.5, p99: 1 } },
+        providers: { rpcByChain: {}, totalRpcErrors: 0 },
+        timestamp: 1710000000000,
+      })).toBe(true);
+    });
+
+    it('rejects missing pipeline', () => {
+      expect(validatePayload('diagnostics', {
+        runtime: { eventLoop: {} },
+        providers: { rpcByChain: {} },
+        timestamp: 1710000000000,
+      })).toBe(false);
+    });
+
+    it('rejects missing timestamp', () => {
+      expect(validatePayload('diagnostics', {
+        pipeline: {}, runtime: {}, providers: {},
+      })).toBe(false);
+    });
+
+    it('rejects non-object pipeline', () => {
+      expect(validatePayload('diagnostics', {
+        pipeline: 'not-object', runtime: {}, providers: {}, timestamp: 1,
+      })).toBe(false);
     });
   });
 
@@ -296,6 +327,35 @@ describe('reducer', () => {
     expect(reset.metrics).toBeNull();
     expect(reset.chartData).toHaveLength(1);
     expect(reset.lagData).toHaveLength(1);
+  });
+
+  it('sets diagnostics snapshot', () => {
+    const diag: DiagnosticsSnapshot = {
+      pipeline: {
+        e2e: { p50: 12, p95: 35, p99: 48, count: 500 },
+        wsToDetector: { p50: 5, p95: 15, p99: 20, count: 500 },
+        detectorToPublish: { p50: 3, p95: 10, p99: 15, count: 500 },
+        stages: { ws_receive: { p50: 2, p95: 5, p99: 8, count: 500 } },
+      },
+      runtime: {
+        eventLoop: { min: 0.01, max: 5.2, mean: 0.8, p99: 3.1 },
+        memory: { heapUsedMB: 120, heapTotalMB: 256, rssMB: 300, externalMB: 10 },
+        gc: { totalPauseMs: 150, count: 42, majorCount: 3 },
+        uptimeSeconds: 3600,
+      },
+      providers: {
+        rpcByChain: { bsc: { p50: 15, p95: 45, errors: 2, totalCalls: 1000 } },
+        rpcByMethod: { eth_call: { p50: 12, p95: 30, totalCalls: 800 } },
+        reconnections: {},
+        wsMessages: { 'bsc:sync': 5000 },
+        totalRpcErrors: 2,
+      },
+      streams: null,
+      timestamp: NOW,
+    };
+    const state = reducer(initialState, { type: 'diagnostics', payload: diag });
+    expect(state.diagnostics).toBe(diag);
+    expect(state.lastEventTime).toBe(NOW);
   });
 
   it('returns same state for unknown action type', () => {

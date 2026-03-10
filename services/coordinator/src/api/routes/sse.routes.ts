@@ -10,7 +10,7 @@
 
 import { Router, Request, Response, RequestHandler } from 'express';
 import crypto from 'crypto';
-import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, getDiagnosticsCollector } from '@arbitrage/core/monitoring';
 import type { CoordinatorStateProvider } from '../types';
 
 const MAX_SSE_CONNECTIONS = 50;
@@ -108,6 +108,17 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
       send('circuit-breaker', state.getCircuitBreakerSnapshot());
     }, 5000);
 
+    // Push diagnostics snapshot every 10s (pipeline latency, runtime health, provider quality)
+    const diagnosticsInterval = setInterval(async () => {
+      try {
+        const collector = getDiagnosticsCollector();
+        const snapshot = await collector.collect();
+        send('diagnostics', snapshot);
+      } catch {
+        // DiagnosticsCollector or underlying monitors not ready — skip
+      }
+    }, 10000);
+
     // Keepalive comment every 15s to prevent proxy timeouts
     const keepaliveInterval = setInterval(() => {
       res.write(': keepalive\n\n');
@@ -121,6 +132,7 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
       clearInterval(servicesInterval);
       clearInterval(streamsInterval);
       clearInterval(cbInterval);
+      clearInterval(diagnosticsInterval);
       clearInterval(keepaliveInterval);
     });
   }) as RequestHandler);

@@ -133,3 +133,18 @@ export type {
   ProviderLatencyMetrics,
   ProviderLatencyTrackerConfig,
 } from './provider-latency-tracker';
+
+// Diagnostics Collector (Phase 1 Enhanced Monitoring: SSE diagnostics)
+export {
+  DiagnosticsCollector,
+  getDiagnosticsCollector,
+  resetDiagnosticsCollector,
+} from './diagnostics-collector';
+export type {
+  DiagnosticsSnapshot,
+  PipelineDiagnostics,
+  RuntimeDiagnostics,
+  ProviderDiagnostics,
+  StreamDiagnostics,
+  CompactPercentiles,
+} from './diagnostics-collector';
