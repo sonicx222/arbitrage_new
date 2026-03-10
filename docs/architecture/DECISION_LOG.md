@@ -1858,7 +1858,7 @@ expect(logger.hasLogMatching('info', /processed/)).toBe(true);
 - **Observation**: Redis network RTT (5-20ms) accounts for 40-80% of the 50ms detection latency budget
 - **Decision**: Deploy Redis 7 as Docker sidecar on each Oracle ARM instance
 - **Confidence**: 95% (4/6 agents agreed in Deep Enhancement Analysis)
-- **Cross-reference**: [Deep Enhancement Analysis Item #1](../reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md)
+- **Cross-reference**: Deep Enhancement Analysis Item #1 (report archived)
 
 #### Finding 30: Docker Sidecar Pattern Preferred Over Dedicated Instance
 - **Observation**: Oracle free tier has limited instance slots; consuming one for Redis would reduce compute capacity

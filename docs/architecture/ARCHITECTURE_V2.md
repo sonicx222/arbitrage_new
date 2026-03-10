@@ -1312,7 +1312,7 @@ SimulationService now routes requests based on chain:
 
 ## 11. Feature Implementation Status (Historical, 2026-01-25)
 
-> **Full Evaluation Report**: [docs/reports/deepseek_evaluation_consolidated.md](../reports/deepseek_evaluation_consolidated.md)
+> **Full Evaluation Report**: Historical report (archived — see ADR index for current decisions)
 
 ### 11.1 Optimization Feature Status
 

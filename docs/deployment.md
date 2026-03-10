@@ -23,9 +23,9 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 | Partition ID | Chains | Optimal Region | Provider |
 |--------------|--------|----------------|----------|
 | `asia-fast` | BSC, Polygon, Avalanche, Fantom | Singapore | Fly.io |
-| `l2-turbo` | Arbitrum, Optimism, Base | Singapore | Fly.io |
+| `l2-turbo` | Arbitrum, Optimism, Base, Scroll, Blast | Singapore | Fly.io |
 | `high-value` | Ethereum, zkSync, Linea | US-East | Fly.io |
-| `solana` | Solana | US-West | Fly.io |
+| `solana-native` | Solana | US-West | Fly.io |
 
 ---
 
@@ -56,7 +56,7 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 - [Upstash](https://upstash.com/) (Redis — if not self-hosting)
 
 ### RPC Providers (Free Tiers)
-See [RPC Research Report](./reports/RPC_RESEARCH_REPORT.md) for detailed provider analysis.
+Use free-tier RPC providers (Alchemy, Infura, QuickNode, Chainstack) with multiple fallback URLs per chain. See [Configuration Guide](./CONFIGURATION.md) for all RPC URL environment variables.
 
 ---
 
@@ -66,7 +66,7 @@ See [RPC Research Report](./reports/RPC_RESEARCH_REPORT.md) for detailed provide
 
 **Option A: Self-Hosted Redis (Recommended)**
 
-Deploy Redis 7 as a sidecar on each Oracle ARM instance. This eliminates Upstash's 10K cmd/day limit and reduces Redis RTT from 5-20ms to <0.1ms. See [Deep Enhancement Analysis Item #1](./reports/DEEP_ENHANCEMENT_ANALYSIS_2026-02-22.md).
+Deploy Redis 7 as a sidecar on each Oracle ARM instance. This eliminates Upstash's 10K cmd/day limit and reduces Redis RTT from 5-20ms to <0.1ms.
 
 1. Set `redis_self_hosted = true` in your `terraform.tfvars`
 2. Set `redis_password` to a strong password in your `terraform.tfvars`
@@ -80,123 +80,99 @@ Deploy Redis 7 as a sidecar on each Oracle ARM instance. This eliminates Upstash
 2. Enable **Redis Streams** (required for ADR-002).
 3. Note your `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
-### 2. Detector Deployment (Partitioned Architecture)
+### 2. Deployment (TOML-Based)
 
-#### Asia-Fast Partition (Fly.io - Singapore)
+Each service has a pre-configured Fly.io TOML file in `infrastructure/fly/`. All Dockerfiles use multi-stage builds (builder stage with devDependencies, production stage with only `dist/` and runtime deps).
+
+#### Option A: Automated via CI (Recommended)
+
+Use the **Deployment Gate** workflow (`.github/workflows/deploy.yml`):
+
+1. Go to **Actions → Deployment Gate → Run workflow**
+2. Select **environment** (testnet/mainnet), **service** (or "all"), and **dry_run** (true for validation only)
+3. The workflow runs 4 phases:
+   - **Phase 1**: Pre-deploy validation (build, typecheck, unit tests, contract compilation)
+   - **Phase 2**: `fly deploy` with `--wait-timeout 300` per service
+   - **Phase 3**: Health check via `fly status --json` (10 retries, 15s interval)
+   - **Phase 4**: Automated rollback on failure (redeploys previous release image)
+
+**Required secret**: Add `FLY_API_TOKEN` to your GitHub repository secrets.
+
+**Deployment order for "all"**: Partitions → Cross-Chain → Execution Engine → Coordinator
+
+#### Option B: CLI Script
+
 ```bash
 # Authenticate
 fly auth login
 
-# Deploy unified-detector with asia-fast partition
-cd services/unified-detector
-fly launch --name detector-asia-fast --region sin
+# Deploy a single service
+./infrastructure/fly/deploy.sh coordinator
 
-# Set environment variables
-fly secrets set \
-  PARTITION_ID="asia-fast" \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true" \
-  BSC_RPC_URL="..." \
-  POLYGON_RPC_URL="..." \
-  AVALANCHE_RPC_URL="..." \
-  FANTOM_RPC_URL="..."
+# Deploy all services (partitions in parallel, then dependent services)
+./infrastructure/fly/deploy.sh all
 
-fly deploy
+# Dry run (show what would be deployed)
+./infrastructure/fly/deploy.sh all --dry-run
+
+# Set up secrets before deployment
+./infrastructure/fly/deploy.sh coordinator --secrets
 ```
 
-#### L2-Turbo Partition (Fly.io - Singapore)
-```bash
-fly launch --name detector-l2-turbo --region sin
+#### Option C: Manual flyctl
 
-fly secrets set \
-  PARTITION_ID="l2-turbo" \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true" \
-  ARBITRUM_RPC_URL="..." \
-  OPTIMISM_RPC_URL="..." \
-  BASE_RPC_URL="..."
-
-fly deploy
-```
-
-#### High-Value Partition (Fly.io - US-East)
-```bash
-fly launch --name detector-high-value --region iad
-
-fly secrets set \
-  PARTITION_ID="high-value" \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true" \
-  ETHEREUM_RPC_URL="..." \
-  ZKSYNC_RPC_URL="..." \
-  LINEA_RPC_URL="..."
-
-fly deploy
-```
-
-#### Solana Partition (Fly.io - US-West)
-```bash
-fly launch --name detector-solana --region sjc
-
-fly secrets set \
-  PARTITION_ID="solana-native" \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true" \
-  SOLANA_RPC_URL="..."
-
-fly deploy
-```
-
-### 3. Cross-Chain Detector (Fly.io - US-West)
+Deploy individual services using their TOML configs:
 
 ```bash
-cd services/cross-chain-detector
-fly launch --name cross-chain-detector --region sjc
-
-fly secrets set \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true"
-
-fly deploy
+# From the project root directory
+fly deploy -c infrastructure/fly/partition-asia-fast.toml
+fly deploy -c infrastructure/fly/partition-l2-turbo.toml
+fly deploy -c infrastructure/fly/partition-high-value.toml
+fly deploy -c infrastructure/fly/partition-solana.toml
+fly deploy -c infrastructure/fly/cross-chain-detector.toml
+fly deploy -c infrastructure/fly/execution-engine.toml
+fly deploy -c infrastructure/fly/coordinator.toml
 ```
 
-### 4. Execution Engine (Fly.io - US-West)
+### 3. Secrets Configuration
+
+All services require `REDIS_URL` and `STREAM_SIGNING_KEY`. Set secrets before first deployment:
 
 ```bash
-cd services/execution-engine
-fly launch --name execution-engine --region sjc
+# Common secrets (all services)
+fly secrets set REDIS_URL="redis://:password@host:6379" \
+  STREAM_SIGNING_KEY="your-hmac-key" \
+  -c infrastructure/fly/<service>.toml
 
-fly secrets set \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true" \
-  PRIVATE_KEY="..."
+# Partition-specific: chain RPC URLs
+fly secrets set BSC_WS_URL="..." BSC_RPC_URL="..." \
+  POLYGON_WS_URL="..." POLYGON_RPC_URL="..." \
+  AVALANCHE_WS_URL="..." AVALANCHE_RPC_URL="..." \
+  FANTOM_WS_URL="..." FANTOM_RPC_URL="..." \
+  -c infrastructure/fly/partition-asia-fast.toml
 
-# Optional: A/B Testing
-fly secrets set \
-  AB_TESTING_ENABLED="false" \
-  AB_TESTING_TRAFFIC_SPLIT="0.1" \
-  AB_TESTING_MIN_SAMPLE_SIZE="100"
-
-# Optional: Flash Loan
-fly secrets set \
-  FLASH_LOAN_CONTRACT_ADDRESS="..."
-
-fly deploy
+# Execution Engine: wallet + RPC URLs
+fly secrets set WALLET_PRIVATE_KEY="..." \
+  ETHEREUM_RPC_URL="..." BSC_RPC_URL="..." ARBITRUM_RPC_URL="..." \
+  -c infrastructure/fly/execution-engine.toml
 ```
 
-### 5. Coordinator (Fly.io - US-West)
+Or use the interactive secrets flow: `./infrastructure/fly/deploy.sh <service> --secrets`
 
-```bash
-cd services/coordinator
-fly launch --name coordinator --region sjc
+### 4. Fly.io App Names
 
-fly secrets set \
-  REDIS_URL="redis://:password@localhost:6379" \
-  REDIS_SELF_HOSTED="true"
+| Service | Fly App Name | TOML Config |
+|---------|-------------|-------------|
+| Coordinator | `arbitrage-coordinator` | `coordinator.toml` |
+| Coordinator Standby | `arbitrage-coordinator-standby` | `coordinator-standby.toml` |
+| Execution Engine | `arbitrage-execution-engine` | `execution-engine.toml` |
+| Asia-Fast Partition | `arbitrage-asia-fast` | `partition-asia-fast.toml` |
+| L2-Turbo Partition | `arbitrage-l2-fast` | `partition-l2-turbo.toml` |
+| High-Value Partition | `arbitrage-high-value` | `partition-high-value.toml` |
+| Solana Partition | `arbitrage-solana` | `partition-solana.toml` |
+| Cross-Chain Detector | `arbitrage-cross-chain` | `cross-chain-detector.toml` |
 
-fly deploy
-# Access your dashboard at the assigned URL
-```
+> **Note**: L2-Turbo uses the historical app name `arbitrage-l2-fast` — renaming requires Fly app migration.
 
 ---
 
@@ -390,7 +366,7 @@ LOG_LEVEL=debug npm start
 
 - [ADR-002: Redis Streams](./architecture/adr/ADR-002-redis-streams.md)
 - [ADR-003: Partitioned Detectors](./architecture/adr/ADR-003-partitioned-detectors.md)
-- [ADR-007: Cross-Region Failover](./architecture/adr/ADR-007-standby-activation.md)
+- [ADR-007: Cross-Region Failover](./architecture/adr/ADR-007-failover-strategy.md)
 - [ADR-014: Modular Detector Components](./architecture/adr/ADR-014-modular-detector-components.md)
 - [ADR-020: Flash Loan Integration](./architecture/adr/ADR-020-flash-loan.md)
 - [ADR-021: Capital Risk Management](./architecture/adr/ADR-021-capital-risk-management.md)

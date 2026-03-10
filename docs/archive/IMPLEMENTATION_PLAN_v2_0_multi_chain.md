@@ -1270,7 +1270,7 @@ npm run typecheck
 
 ## Appendix: Optimization Evaluation Results (2026-01-25)
 
-> **See Full Report**: [docs/reports/deepseek_evaluation_consolidated.md](reports/deepseek_evaluation_consolidated.md)
+> **See Full Report**: Historical report (archived)
 
 ### Summary: 13 of 15 Recommendations Already Implemented
 
