@@ -450,4 +450,71 @@ describe('DeadLetterQueue', () => {
       // Verify by trying to process - should fail without handler
     });
   });
+
+  describe('SC-L-006: processBatch with limit=0', () => {
+    it('should process zero operations when limit=0 is passed', async () => {
+      // If limit=0 is treated as falsy (via ||), it falls back to batchSize=5
+      // and would process operations. With ?? it should respect limit=0.
+      const op: FailedOperation = {
+        id: 'op_zero_limit',
+        operation: 'test_op',
+        payload: {},
+        error: { message: 'fail' },
+        timestamp: Date.now(),
+        retryCount: 0,
+        maxRetries: 3,
+        service: 'coordinator',
+        priority: 'critical',
+      };
+
+      mockRedis.zrange.mockResolvedValue(['op_zero_limit']);
+      mockRedis.get.mockResolvedValue(op);
+
+      DeadLetterQueue.registerOperationHandler('test_op', async () => {});
+
+      const result = await dlq.processBatch(0);
+
+      // limit=0 means "process nothing"
+      expect(result.processed).toBe(0);
+    });
+  });
+
+  describe('SC-M-007: retryInFlight capacity bound', () => {
+    it('should reject retry when retryInFlight is at capacity', async () => {
+      const op: FailedOperation = {
+        id: 'op_capacity',
+        operation: 'test_op',
+        payload: {},
+        error: { message: 'error' },
+        timestamp: Date.now(),
+        retryCount: 0,
+        maxRetries: 3,
+        service: 'coordinator',
+        priority: 'medium',
+      };
+
+      mockRedis.get.mockResolvedValue(op);
+      mockRedis.scan.mockResolvedValue(['0', ['dlq:priority:medium']]);
+      mockRedis.zscore.mockResolvedValue('12345');
+
+      DeadLetterQueue.registerOperationHandler('test_op', async () => {
+        // Slow handler — keeps retryInFlight entries alive
+        await new Promise(r => setTimeout(r, 500));
+      });
+
+      // Fill retryInFlight to MAX_RETRY_IN_FLIGHT (1000) by starting
+      // concurrent retries that block on the handler
+      const retryPromises: Promise<boolean>[] = [];
+      for (let i = 0; i < 1000; i++) {
+        retryPromises.push(dlq.retryOperation(`op_inflight_${i}`));
+      }
+
+      // Now attempt one more — should be rejected due to capacity
+      const result = await dlq.retryOperation('op_capacity');
+      expect(result).toBe(false);
+
+      // Clean up: resolve all pending retries
+      // (they'll complete via the slow handler timeout)
+    });
+  });
 });

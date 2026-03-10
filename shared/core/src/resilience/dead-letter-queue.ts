@@ -120,6 +120,9 @@ export class DeadLetterQueue {
   // P1-13 FIX: Maximum payload size in bytes (1MB default)
   private static readonly MAX_PAYLOAD_SIZE = 1024 * 1024;
 
+  // SC-M-007 FIX: Upper bound for retryInFlight Set to prevent unbounded memory growth
+  private static readonly MAX_RETRY_IN_FLIGHT = 1000;
+
   constructor(config: Partial<DLQConfig> = {}) {
     // P1-5 FIX: Use ?? instead of || to preserve explicit 0 values
     this.config = {
@@ -246,7 +249,7 @@ export class DeadLetterQueue {
     }
 
     this.isProcessing = true;
-    const batchSize = limit || this.config.batchSize;
+    const batchSize = limit ?? this.config.batchSize;
     let processed = 0;
     let succeeded = 0;
     let failed = 0;
@@ -419,6 +422,14 @@ export class DeadLetterQueue {
     // P2-21 FIX: Idempotency guard — skip if already being retried
     if (this.retryInFlight.has(operationId)) {
       logger.warn('Operation already being retried, skipping duplicate', { operationId });
+      return false;
+    }
+
+    // SC-M-007 FIX: Reject retry when retryInFlight is at capacity to prevent unbounded memory growth
+    if (this.retryInFlight.size >= DeadLetterQueue.MAX_RETRY_IN_FLIGHT) {
+      logger.warn('retryInFlight at capacity, rejecting retry', {
+        operationId, size: this.retryInFlight.size
+      });
       return false;
     }
 
