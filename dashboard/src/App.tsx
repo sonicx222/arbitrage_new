@@ -42,8 +42,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors"
-                style={{ background: 'var(--badge-bg)' }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors bg-[var(--badge-bg)]"
               >
                 Reload
               </button>
@@ -90,7 +89,7 @@ function ConnectionIndicator() {
   const label = status !== 'connected' ? status : isStale ? 'stale' : 'live';
 
   return (
-    <div className="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs" style={{ background: 'var(--badge-bg)' }}>
+    <div className="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs bg-[var(--badge-bg)]">
       <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === 'connected' && !isStale ? 'animate-pulse' : ''}`} />
       <span className="text-gray-500">{label}</span>
     </div>
@@ -103,7 +102,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-30 px-5 py-2.5 flex items-center justify-between border-b border-gray-800" style={{ background: 'var(--header-bg)' }}>
+      <header className="sticky top-0 z-30 px-5 py-2.5 flex items-center justify-between border-b border-gray-800 bg-[var(--header-bg)]">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-accent-green/10 flex items-center justify-center">
@@ -123,10 +122,13 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
           )}
         </div>
-        <nav className="flex items-center gap-0.5 p-1 rounded-xl" style={{ background: 'var(--badge-bg)' }}>
+        <nav className="flex items-center gap-0.5 p-1 rounded-xl bg-[var(--badge-bg)]" role="tablist" aria-label="Dashboard sections">
           {TABS.map((t) => (
             <button
               key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              aria-controls={`tabpanel-${t.id}`}
               onClick={() => setTab(t.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 tab === t.id ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300'
@@ -150,7 +152,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <span className="hidden sm:inline">Logout</span>
         </button>
       </header>
-      <main className="flex-1 p-5 overflow-auto">
+      <main className="flex-1 p-5 overflow-auto" role="tabpanel" id={`tabpanel-${tab}`} aria-label={tab}>
         {tab === 'Overview' && <OverviewTab />}
         {tab === 'Execution' && <ExecutionTab />}
         {tab === 'Chains' && <ChainsTab />}

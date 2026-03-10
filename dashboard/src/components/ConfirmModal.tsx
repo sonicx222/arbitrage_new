@@ -77,8 +77,7 @@ export function ConfirmModal({ open, title, children, onConfirm, onCancel, loadi
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-xs rounded-lg font-medium text-gray-400 hover:text-gray-300 transition-colors"
-            style={{ background: 'var(--badge-bg)' }}
+            className="px-4 py-2 text-xs rounded-lg font-medium text-gray-400 hover:text-gray-300 transition-colors bg-[var(--badge-bg)]"
           >
             Cancel
           </button>

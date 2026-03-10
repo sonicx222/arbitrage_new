@@ -114,11 +114,14 @@ export function validatePayload(event: string, data: unknown): boolean {
   if (!isObj(data)) return false;
   switch (event) {
     case 'metrics':
-      return typeof data.totalExecutions === 'number' && typeof data.systemHealth === 'number';
+      return typeof data.totalExecutions === 'number'
+        && typeof data.systemHealth === 'number'
+        && data.systemHealth >= 0 && data.systemHealth <= 100
+        && data.totalExecutions >= 0;
     case 'services':
       return Object.values(data).every((v) => isObj(v) && typeof (v as Record<string, unknown>).name === 'string');
     case 'execution-result':
-      return typeof data.success === 'boolean' && typeof data.chain === 'string';
+      return typeof data.success === 'boolean' && typeof data.chain === 'string' && (data.chain as string).length > 0;
     case 'circuit-breaker':
       return typeof data.state === 'string';
     case 'streams':
@@ -134,6 +137,12 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const token = getItem('dashboard_token') ?? '';
+  // H-03 ACCEPTED RISK: Token in query param is a known EventSource API limitation.
+  // EventSource does not support custom headers. The token may appear in server access
+  // logs and browser history. Mitigations: timingSafeEqual on backend, HTTPS in prod,
+  // token is dashboard-only (not a private key). Cookie-based auth was evaluated and
+  // declined — it adds CSRF complexity without meaningful security gain since the token
+  // is already stored in localStorage (same XSS exposure surface).
   const url = `/api/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 
   const onEvent = useCallback((event: string, data: unknown) => {
@@ -141,7 +150,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
       console.warn(`[SSE] Skipping malformed ${event} payload`, data);
       return;
     }
-    dispatch({ type: event as SSEAction['type'], payload: data as never });
+    dispatch({ type: event, payload: data } as SSEAction);
   }, []);
 
   const { status } = useSSE({ url, onEvent });
@@ -160,7 +169,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(alerts)) {
             for (const alert of alerts.slice(0, 20)) {
               if (validatePayload('alert', alert)) {
-                dispatch({ type: 'alert', payload: alert as never });
+                dispatch({ type: 'alert', payload: alert } as SSEAction);
               }
             }
           }

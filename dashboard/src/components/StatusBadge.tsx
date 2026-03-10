@@ -16,7 +16,9 @@ export const StatusBadge = memo(function StatusBadge({ status, label }: Props) {
         )}
         <span className={`relative inline-flex rounded-full h-2 w-2 ${statusDot(status)}`} />
       </span>
-      {label && <span className="text-xs font-medium">{label}</span>}
+      {label
+        ? <span className="text-xs font-medium">{label}</span>
+        : <span className="sr-only">{status}</span>}
     </span>
   );
 });

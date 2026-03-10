@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 
-export type SSEStatus = 'connecting' | 'connected';
+export type SSEStatus = 'connecting' | 'connected' | 'disconnected';
 
 interface UseSSEOptions {
   url: string;
@@ -23,8 +23,13 @@ export function useSSE({ url, onEvent }: UseSSEOptions) {
 
     es.onopen = () => setStatus('connected');
     es.onerror = () => {
-      // EventSource reconnects automatically — show 'connecting' not 'disconnected'
-      setStatus('connecting');
+      // EventSource.CLOSED means the browser gave up reconnecting (e.g., server
+      // returned a non-retryable response). CONNECTING means it will auto-retry.
+      if (es.readyState === EventSource.CLOSED) {
+        setStatus('disconnected');
+      } else {
+        setStatus('connecting');
+      }
     };
 
     const eventTypes = ['metrics', 'services', 'execution-result', 'alert', 'circuit-breaker', 'streams'];

@@ -3,7 +3,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { ChainCard } from '../components/ChainCard';
 import { formatDuration, formatMemory, formatCpu } from '../lib/format';
 // D-5 FIX: Import source of truth for compile-time service key verification
-import portConfig from '../../../shared/constants/service-ports.json';
+import portConfig from '@shared/constants/service-ports.json';
 
 // D-5 FIX: Service keys type-checked against service-ports.json.
 // If a service name is renamed in the JSON, TypeScript flags the mismatch here.

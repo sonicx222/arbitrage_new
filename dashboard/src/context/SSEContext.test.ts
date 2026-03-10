@@ -35,6 +35,20 @@ describe('validatePayload', () => {
     it('rejects arrays', () => {
       expect(validatePayload('metrics', [{ totalExecutions: 10, systemHealth: 95 }])).toBe(false);
     });
+
+    it('rejects systemHealth out of 0-100 range', () => {
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: -1 })).toBe(false);
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 101 })).toBe(false);
+    });
+
+    it('accepts systemHealth at boundary values', () => {
+      expect(validatePayload('metrics', { totalExecutions: 0, systemHealth: 0 })).toBe(true);
+      expect(validatePayload('metrics', { totalExecutions: 0, systemHealth: 100 })).toBe(true);
+    });
+
+    it('rejects negative totalExecutions', () => {
+      expect(validatePayload('metrics', { totalExecutions: -1, systemHealth: 50 })).toBe(false);
+    });
   });
 
   describe('services', () => {
@@ -66,6 +80,10 @@ describe('validatePayload', () => {
 
     it('rejects missing chain', () => {
       expect(validatePayload('execution-result', { success: true })).toBe(false);
+    });
+
+    it('rejects empty chain string', () => {
+      expect(validatePayload('execution-result', { success: true, chain: '' })).toBe(false);
     });
   });
 

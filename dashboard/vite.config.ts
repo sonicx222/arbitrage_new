@@ -10,6 +10,11 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
   },
+  resolve: {
+    alias: {
+      '@shared/constants': path.resolve(__dirname, '../shared/constants'),
+    },
+  },
   build: {
     outDir: path.resolve(__dirname, '../services/coordinator/public'),
     emptyOutDir: true,
@@ -19,6 +24,7 @@ export default defineConfig({
         manualChunks: {
           recharts: ['recharts'],
           react: ['react', 'react-dom'],
+          'react-query': ['@tanstack/react-query'],
         },
       },
     },

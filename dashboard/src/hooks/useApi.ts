@@ -1,4 +1,7 @@
 // dashboard/src/hooks/useApi.ts
+// L-08: Bearer token auth provides implicit CSRF protection — browsers do not
+// auto-attach Authorization headers on cross-origin requests (unlike cookies).
+// If cookie-based auth is ever adopted, add SameSite=Strict + CSRF token.
 import { useMutation } from '@tanstack/react-query';
 import { getItem } from '../lib/storage';
 
