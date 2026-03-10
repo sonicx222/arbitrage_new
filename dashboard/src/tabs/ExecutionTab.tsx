@@ -44,7 +44,7 @@ export function ExecutionTab() {
   return (
     <div className="space-y-4 overflow-auto">
       {/* KPI Row */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard label="Attempts" value={formatNumber(metrics.totalExecutions)} />
         <KpiCard label="Successful" value={formatNumber(metrics.successfulExecutions)} color="text-accent-green" />
         <KpiCard label="Failed" value={formatNumber(failedExecutions)} color={failedExecutions > 0 ? 'text-accent-red' : 'text-gray-100'} />
@@ -53,7 +53,7 @@ export function ExecutionTab() {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="card">
           <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Avg Latency (ms)</h4>
           <ResponsiveContainer width="100%" height={180}>

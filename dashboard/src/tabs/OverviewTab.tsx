@@ -23,11 +23,11 @@ export function OverviewTab() {
   const serviceList = useMemo(() => Object.values(services), [services]);
 
   return (
-    <div className="grid grid-cols-[1fr_320px] gap-4 h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 h-full">
       {/* Left: KPIs + Services + Pipeline */}
       <div className="space-y-4 overflow-auto">
         {/* KPI Row */}
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <KpiCard label="System Health" value={formatPct(metrics.systemHealth)} color={healthColor} />
           <KpiCard label="Active Services" value={String(metrics.activeServices)} />
           <KpiCard label="Opportunities" value={formatNumber(metrics.totalOpportunities)} sub={`${formatNumber(metrics.opportunitiesDropped)} dropped`} />
@@ -38,7 +38,7 @@ export function OverviewTab() {
         {/* Service Grid */}
         <div>
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Services ({serviceList.length})</h3>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {serviceList.map((svc) => (
               <ServiceCard key={svc.name} service={svc} />
             ))}
@@ -49,7 +49,7 @@ export function OverviewTab() {
         {/* Pipeline Health */}
         <div className="card">
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Pipeline Health</h3>
-          <div className="grid grid-cols-2 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             {/* Backpressure */}
             <div>
               <span className="text-gray-400">Backpressure</span>

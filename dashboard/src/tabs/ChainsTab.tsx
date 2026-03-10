@@ -58,7 +58,7 @@ export function ChainsTab() {
 
         return (
           <div key={partition.svcKey} className="card">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
               <div className="flex items-center gap-3">
                 <StatusBadge status={partitionStatus} label={partition.name} />
                 <span className="text-[10px] text-gray-500">{partition.region}</span>
@@ -73,7 +73,7 @@ export function ChainsTab() {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
               {partition.chains.map((chain) => (
                 <ChainCard key={chain} chain={chain} status={partitionStatus} partitionName={partition.name} stats={chainStats[chain.toLowerCase()]} />
               ))}
@@ -83,7 +83,7 @@ export function ChainsTab() {
       })}
 
       {/* Cross-chain detector and execution engine */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {(['cross-chain-detector', 'execution-engine'] satisfies KnownService[]).map((name) => {
           const svc = services[name];
           return (

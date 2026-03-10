@@ -34,7 +34,7 @@ export function AdminTab() {
       {/* System Info */}
       <div className="card">
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">System Info</h3>
-        <div className="grid grid-cols-4 gap-4 text-xs">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
           <div>
             <span className="text-gray-500">Instance</span>
             <div className="font-mono text-gray-300 truncate">{leaderInfo?.instanceId ?? '...'}</div>
@@ -56,7 +56,7 @@ export function AdminTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <CircuitBreakerGrid />
         <LogLevelControl />
       </div>

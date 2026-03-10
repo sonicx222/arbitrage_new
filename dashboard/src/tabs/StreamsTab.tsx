@@ -97,7 +97,7 @@ export function StreamsTab() {
         </ResponsiveContainer>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* DLQ Panel */}
         <div className="card">
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Dead Letter Queue</h3>

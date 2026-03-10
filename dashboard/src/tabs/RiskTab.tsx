@@ -53,7 +53,7 @@ export function RiskTab() {
             Execution Engine unreachable — check if the service is running
           </div>
         )}
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           {RISK_STATES.map((state, i) => (
             <div key={state} className="flex items-center gap-2">
               <div className={`px-4 py-2 rounded border-2 text-xs font-bold ${
@@ -78,7 +78,7 @@ export function RiskTab() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Admission Control */}
         <div className="card">
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Admission Control</h3>

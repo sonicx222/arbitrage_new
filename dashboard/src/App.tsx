@@ -1,8 +1,10 @@
-import { useState, useCallback, useEffect, Component, type ReactNode, type ErrorInfo } from 'react';
+import { useState, useCallback, useEffect, useMemo, Component, type ReactNode, type ErrorInfo } from 'react';
 import { SSEProvider, useConnection, useMetrics } from './context/SSEContext';
 import { getItem, removeItem } from './lib/storage';
 import { setOnUnauthorized } from './hooks/useApi';
+import { useHotkeys } from './hooks/useHotkeys';
 import { LoginScreen } from './components/LoginScreen';
+import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
 import { OpportunitiesTab } from './tabs/OpportunitiesTab';
@@ -167,6 +169,7 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
 
 function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnect: () => void }) {
   const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const { metrics } = useMetrics();
 
   // E-03: Sync tab state with URL hash
@@ -181,9 +184,19 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
+  // E-07: Keyboard shortcuts — 1-7 switch tabs, ? toggles help
+  const keyMap = useMemo(() => {
+    const map: Record<string, () => void> = {
+      '?': () => setShowShortcuts((v) => !v),
+    };
+    TABS.forEach((t, i) => { map[String(i + 1)] = () => changeTab(t.id); });
+    return map;
+  }, [changeTab]);
+  useHotkeys(keyMap);
+
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-30 px-5 py-2.5 flex items-center justify-between border-b border-gray-800 bg-[var(--header-bg)]">
+      <header className="sticky top-0 z-30 px-3 sm:px-5 py-2.5 flex items-center justify-between border-b border-gray-800 bg-[var(--header-bg)] gap-2">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-accent-green/10 flex items-center justify-center">
@@ -233,7 +246,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
           <span className="hidden sm:inline">Logout</span>
         </button>
       </header>
-      <main className="flex-1 p-5 overflow-auto" role="tabpanel" id={`tabpanel-${tab}`} aria-label={tab}>
+      <main className="flex-1 p-3 sm:p-5 overflow-auto" role="tabpanel" id={`tabpanel-${tab}`} aria-label={tab}>
         {tab === 'Overview' && <TabErrorBoundary tab="Overview"><OverviewTab /></TabErrorBoundary>}
         {tab === 'Execution' && <TabErrorBoundary tab="Execution"><ExecutionTab /></TabErrorBoundary>}
         {tab === 'Opportunities' && <TabErrorBoundary tab="Opportunities"><OpportunitiesTab /></TabErrorBoundary>}
@@ -242,6 +255,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
         {tab === 'Streams' && <TabErrorBoundary tab="Streams"><StreamsTab /></TabErrorBoundary>}
         {tab === 'Admin' && <TabErrorBoundary tab="Admin"><AdminTab /></TabErrorBoundary>}
       </main>
+      <ShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 }
