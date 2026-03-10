@@ -245,13 +245,13 @@ export class RateLimiter {
 
         // Store limit info for use in response
         req.rateLimit = limitInfo;
-        next();
+        return next();
       } catch (error) {
         logger.error('Rate limiter middleware error', { error, failOpen: this.config.failOpen });
         // S-4 FIX: Respect failOpen configuration
         if (this.config.failOpen) {
           logger.warn('Rate limiter middleware failing OPEN - allowing request');
-          next();
+          return next();
         } else {
           return res.status(503).json({
             error: 'Rate limiting unavailable',
