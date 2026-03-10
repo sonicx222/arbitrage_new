@@ -1,0 +1,68 @@
+{
+  "version": "4.0",
+  "thresholds": {
+    "eventLoopP99WarnMs": 20,
+    "eventLoopP99CritMs": 50,
+    "gcMajorWarn": 10,
+    "rssMbCrit": 500,
+    "heapRatioWarn": 0.85,
+    "consumerLagWarn": 50,
+    "consumerLagCrit": 100,
+    "stuckMsgAgeSec": 30,
+    "rpcP95WarnMs": 200,
+    "rpcP95CritMs": 500,
+    "transitP95WarnMs": 50,
+    "transitP95CritMs": 100,
+    "maxlenFillRatioWarn": 0.8,
+    "maxlenFillRatioCrit": 0.9,
+    "dlqGrowthRateHighPerSec": 1,
+    "cbFlappingThreshold": 5,
+    "smokeTestPollIntervalSec": 10,
+    "smokeTestTimeoutSec": 60,
+    "profitSlippageWarnPct": 25,
+    "profitSlippageCritPct": 50,
+    "revertRateCritPct": 30,
+    "timeoutRateWarnPct": 20,
+    "staleRateWarnPct": 20,
+    "gasTooHighRateWarnPct": 10,
+    "executionSuccessRateCritPct": 30,
+    "wsReconnectWarn": 5,
+    "wsReconnectCrit": 10,
+    "rpcErrorRateWarnPct": 5,
+    "rpcErrorRateCritPct": 10
+  },
+  "goNoGo": {
+    "anyCritical": "NO-GO",
+    "maxHighForGo": 3
+  },
+  "readinessTimeouts": {
+    "default": 30,
+    "partitionsLive": 60,
+    "crossChain": 120,
+    "crossChainLive": 180
+  },
+  "placeholderMetrics": [
+    "circuit_breaker_transitions_total",
+    "backpressure_episodes_total",
+    "stream_ack_delay_ms",
+    "stream_trimmed_messages_total",
+    "pair_cache_hit_total"
+  ],
+  "perChainStalenessThresholds": {
+    "bsc": 6,
+    "polygon": 4,
+    "avalanche": 4,
+    "fantom": 4,
+    "arbitrum": 2,
+    "optimism": 4,
+    "base": 4,
+    "scroll": 6,
+    "blast": 4,
+    "mantle": 4,
+    "mode": 4,
+    "ethereum": 24,
+    "zksync": 4,
+    "linea": 6,
+    "solana": 2
+  }
+}
