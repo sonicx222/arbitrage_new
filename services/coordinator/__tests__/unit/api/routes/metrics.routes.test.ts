@@ -141,6 +141,7 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
       debug: jest.fn(),
     })),
     getAlertHistory: jest.fn(() => [...defaultAlerts]),
+    checkRedisConnectivity: jest.fn(async () => true),
     ...overrides,
   };
 }

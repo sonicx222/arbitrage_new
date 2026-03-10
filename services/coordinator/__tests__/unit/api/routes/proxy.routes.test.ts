@@ -101,6 +101,7 @@ function createMockStateProvider(): CoordinatorStateProvider {
       debug: jest.fn(),
     })),
     getAlertHistory: jest.fn(() => []),
+    checkRedisConnectivity: jest.fn(async () => true),
     subscribeSSE: jest.fn(() => () => {}),
     getCircuitBreakerSnapshot: jest.fn(() => ({
       state: 'CLOSED' as const,

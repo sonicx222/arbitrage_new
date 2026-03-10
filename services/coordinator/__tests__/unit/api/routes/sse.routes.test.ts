@@ -77,6 +77,7 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
       debug: jest.fn(),
     })),
     getAlertHistory: jest.fn(() => []),
+    checkRedisConnectivity: jest.fn(async () => true),
     subscribeSSE: jest.fn((listener) => {
       return () => { /* unsubscribe */ };
     }),
