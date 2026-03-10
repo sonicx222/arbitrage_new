@@ -512,6 +512,19 @@ category: `HMAC_SIGNING`.
 **Info:** Key rotation support (`STREAM_PREVIOUS_SIGNING_KEY`) not documented →
 severity: **LOW**, category: `HMAC_SIGNING`.
 
+5. Check `STREAM_LEGACY_HMAC_COMPAT` status. When enabled, streams accept BOTH
+   signed and unsigned messages (2x HMAC computation per message for backwards
+   compatibility). This should be `false` in production after migration.
+```
+Grep for: STREAM_LEGACY_HMAC_COMPAT in shared/core/src/redis/
+Verify: the compat path does double-verify (current key + previous key)
+Check .env and .env.example for the flag's default value
+```
+**Flag:** `STREAM_LEGACY_HMAC_COMPAT=true` in production `.env` → severity: **HIGH**,
+category: `HMAC_SIGNING` (4x→1x HMAC overhead; also accepts unsigned messages).
+**Info:** `STREAM_LEGACY_HMAC_COMPAT` is `false` or absent → severity: **INFO**,
+category: `HMAC_SIGNING` (strict HMAC enforcement active).
+
 ---
 
 ### Check 1H — Feature Flag Validation
@@ -645,9 +658,10 @@ category: `REDIS_CLIENT_PARITY`.
 category: `REDIS_CLIENT_PARITY` (good — both clients will behave identically
 during outages).
 
-**Known issue (as of v2.3):** `RedisClient` returns `null` after 15 retries
-(permanently stops reconnecting), while `RedisStreamsClient` never returns `null`
-(retries forever with capped backoff). This is a confirmed split-brain risk.
+**Note:** Both Redis clients now use aligned `connectTimeout=3000` and
+`maxRetriesPerRequest=3` settings (verified in Phase 1 H-09 remediation).
+The legacy split-brain risk between RedisClient and RedisStreamsClient retry
+behavior has been resolved — both use capped backoff with matching thresholds.
 
 ---
 
@@ -686,10 +700,9 @@ category: `PORT_COLLISION` (binding collision at startup).
 **Flag:** Hardcoded port number not in registry → severity: **LOW**,
 category: `PORT_COLLISION` (undocumented port usage).
 
-**Known issue (as of v2.3):** `unified-detector/src/constants.ts` defines
-`DEFAULT_HEALTH_CHECK_PORT = 3001` which conflicts with `partition-asia-fast`.
-The unified-detector is a library (not standalone), so the collision only manifests
-if it's started standalone without `HEALTH_CHECK_PORT` override.
+**Note:** `unified-detector/src/constants.ts` now correctly defines
+`DEFAULT_HEALTH_CHECK_PORT = 3007` (verified by regression test). The legacy
+3001 conflict with `partition-asia-fast` was fixed in v2.5.
 
 ---
 
@@ -1125,9 +1138,10 @@ submits real transactions to testnet chains.
 npm run dev:monitor:testnet &
 ```
 
-**DANGER:** Testnet mode submits real transactions. Ensure `.env` has testnet
-RPC URLs (e.g., `SEPOLIA_RPC_URL`, `ARBITRUM_SEPOLIA_RPC_URL`) and a funded
-testnet wallet (`WALLET_PRIVATE_KEY` with testnet ETH).
+**DANGER:** Testnet mode submits real transactions. Ensure `.env.local` (not `.env`)
+has testnet RPC URLs (e.g., `SEPOLIA_RPC_URL`, `ARBITRUM_SEPOLIA_RPC_URL`) and a
+funded testnet wallet (`WALLET_PRIVATE_KEY` with testnet ETH). Never put private
+keys in `.env` — use `.env.local` which is gitignored.
 
 Capture PID for later cleanup.
 
@@ -1153,19 +1167,19 @@ timeouts prevent false CRITICAL findings from slow RPC endpoint negotiation.
 
 ```bash
 # Coordinator
-curl -sf http://localhost:3000/api/health/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3000/api/health/ready || echo "NOT READY"
 
 # Partitions
-curl -sf http://localhost:3001/ready || echo "NOT READY"
-curl -sf http://localhost:3002/ready || echo "NOT READY"
-curl -sf http://localhost:3003/ready || echo "NOT READY"
-curl -sf http://localhost:3004/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3001/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3002/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3003/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3004/ready || echo "NOT READY"
 
 # Execution Engine
-curl -sf http://localhost:3005/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3005/ready || echo "NOT READY"
 
 # Cross-Chain Detector (extended timeout — needs partition data first)
-curl -sf http://localhost:3006/ready || echo "NOT READY"
+curl -sf --max-time 10 http://localhost:3006/ready || echo "NOT READY"
 ```
 
 **For each service:**
@@ -1312,7 +1326,7 @@ PHASE 2 COMPLETE — Startup
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## PHASE 3 — RUNTIME VALIDATION (~120 seconds)
 ## All services should be running. Uses curl + redis-cli.
-## 8 subsections, 35 checks. Enhanced monitoring metrics integrated.
+## 9 subsections, 44 checks (3A-3AR). Enhanced monitoring metrics integrated.
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Record all findings to `./monitor-session/findings/runtime.jsonl`:
@@ -1342,19 +1356,19 @@ Hit every service's `/health` endpoint and collect status:
 
 ```bash
 # Coordinator (returns JSON with status field)
-curl -sf http://localhost:3000/api/health | jq .
+curl -sf --max-time 10 http://localhost:3000/api/health | jq .
 
 # Partitions (return JSON with status field)
-curl -sf http://localhost:3001/health | jq .
-curl -sf http://localhost:3002/health | jq .
-curl -sf http://localhost:3003/health | jq .
-curl -sf http://localhost:3004/health | jq .
+curl -sf --max-time 10 http://localhost:3001/health | jq .
+curl -sf --max-time 10 http://localhost:3002/health | jq .
+curl -sf --max-time 10 http://localhost:3003/health | jq .
+curl -sf --max-time 10 http://localhost:3004/health | jq .
 
 # Execution Engine
-curl -sf http://localhost:3005/health | jq .
+curl -sf --max-time 10 http://localhost:3005/health | jq .
 
 # Cross-Chain Detector
-curl -sf http://localhost:3006/health | jq .
+curl -sf --max-time 10 http://localhost:3006/health | jq .
 ```
 
 **Flag:** Any service with status `unhealthy` → **CRITICAL**.
@@ -1363,11 +1377,11 @@ curl -sf http://localhost:3006/health | jq .
 
 Also hit `/stats` on services that expose it:
 ```bash
-curl -sf http://localhost:3001/stats  # P1 detailed stats
-curl -sf http://localhost:3002/stats  # P2 detailed stats
-curl -sf http://localhost:3003/stats  # P3 detailed stats
-curl -sf http://localhost:3004/stats  # P4 detailed stats
-curl -sf http://localhost:3005/stats  # Execution engine stats
+curl -sf --max-time 10 http://localhost:3001/stats  # P1 detailed stats
+curl -sf --max-time 10 http://localhost:3002/stats  # P2 detailed stats
+curl -sf --max-time 10 http://localhost:3003/stats  # P3 detailed stats
+curl -sf --max-time 10 http://localhost:3004/stats  # P4 detailed stats
+curl -sf --max-time 10 http://localhost:3005/stats  # Execution engine stats
 ```
 
 Record the stats output for the report — no findings needed unless values are
@@ -1378,7 +1392,7 @@ anomalous (e.g., 0 chains active on a partition that should have chains).
 ### Check 3B — Leader Election
 
 ```bash
-curl -sf http://localhost:3000/api/leader | jq .
+curl -sf --max-time 10 http://localhost:3000/api/leader | jq .
 ```
 
 **Flag:** `isLeader` is `false` → **CRITICAL** (no leader = no opportunity routing).
@@ -1487,7 +1501,7 @@ category: `HEALTH_SCHEMA`.
 ### Check 3D — Circuit Breaker States
 
 ```bash
-curl -sf http://localhost:3005/circuit-breaker | jq .
+curl -sf --max-time 10 http://localhost:3005/circuit-breaker | jq .
 ```
 
 **Flag:** Any chain in `OPEN` state → **HIGH** (chain is blocked from execution).
@@ -1507,8 +1521,8 @@ States: NORMAL (100% sizing) → CAUTION (75%) → HALT (0% — trading stopped)
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/health | jq .
-curl -sf http://localhost:3005/stats | jq .
+curl -sf --max-time 10 http://localhost:3005/health | jq .
+curl -sf --max-time 10 http://localhost:3005/stats | jq .
 ```
 
 Parse the response for drawdown/risk state fields. Look for:
@@ -1536,7 +1550,7 @@ flapping is occurring. This check validates metrics from research GAP-7
 **Method:**
 ```bash
 # Check for circuit breaker transition metrics
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep -i circuit_breaker_transition
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep -i circuit_breaker_transition
 ```
 
 **If metric `circuit_breaker_transitions_total` exists:**
@@ -1551,6 +1565,19 @@ curl -sf http://localhost:3005/metrics 2>/dev/null | grep -i circuit_breaker_tra
   "Circuit breaker transition history not yet implemented (research E1-E2).
   Current state-only check in 3D is the fallback."
 
+**Flapping Detection Limitation:** Even when the transition metric exists, Check 3D
+(point-in-time state) cannot detect fast flapping that occurs between monitoring
+poll intervals. A circuit breaker that rapidly cycles CLOSED→OPEN→CLOSED between
+polls appears healthy in 3D. The transition counter here in 3F is the only way
+to detect this. If the metric doesn't exist yet, also manually inspect recent
+`stream:circuit-breaker` entries for rapid state changes:
+```bash
+redis-cli XREVRANGE stream:circuit-breaker + - COUNT 20
+```
+**Flag:** >5 entries with alternating states within 60s → **HIGH**,
+category: `CB_FLAPPING` (breaker is oscillating — likely threshold too close to
+ambient failure rate).
+
 ---
 
 ### Check 3G — Backpressure Episode Tracking (Placeholder: E4-E5)
@@ -1560,8 +1587,8 @@ with current backpressure state.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3000/api/health | jq '{backpressure}'
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep -i backpressure_episodes
+curl -sf --max-time 10 http://localhost:3000/api/health | jq '{backpressure}'
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep -i backpressure_episodes
 ```
 
 **If metric `backpressure_episodes_total` exists:**
@@ -1801,7 +1828,7 @@ fast, not just appearing fast.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep stream_message_transit
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep stream_message_transit
 ```
 
 Parse the `stream_message_transit_ms` histogram. Look for per-stream breakdowns.
@@ -1830,7 +1857,7 @@ a real bottleneck.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep stream_ack_delay
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep stream_ack_delay
 ```
 
 **If metric `stream_ack_delay_ms` exists:**
@@ -1853,8 +1880,8 @@ trimmed before any consumer reads them.
 **Method:**
 ```bash
 # Check for trim counter metric
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep stream_trimmed
-curl -sf http://localhost:3001/metrics 2>/dev/null | grep stream_trimmed
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep stream_trimmed
+curl -sf --max-time 10 http://localhost:3001/metrics 2>/dev/null | grep stream_trimmed
 ```
 
 **If metric `stream_trimmed_messages_total` exists:**
@@ -1901,10 +1928,10 @@ Scrape `runtime_eventloop_delay_*` metrics from all services:
 ```bash
 for port in 3001 3002 3003 3004 3005 3006; do
   echo "=== Port $port ==="
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay
 done
 # Coordinator uses /api/metrics/prometheus
-curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_eventloop_delay
+curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_eventloop_delay
 ```
 
 Parse: `runtime_eventloop_delay_p99_ms`, `runtime_eventloop_delay_p50_ms`,
@@ -1924,7 +1951,7 @@ category: `RUNTIME_PERFORMANCE` (severe event loop stall — likely GC or sync I
 event loop metrics in `runtime.eventLoop` (p50/p95/p99/min/mean/max) aggregated from
 the RuntimeMonitor. Use this for a single-call coordinator-level check:
 ```bash
-curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.eventLoop'
+curl -sf --max-time 10 http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.eventLoop'
 ```
 
 ---
@@ -1938,9 +1965,9 @@ events cause stop-the-world pauses that block the event loop.
 ```bash
 for port in 3001 3002 3003 3004 3005 3006; do
   echo "=== Port $port ==="
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_gc
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep runtime_gc
 done
-curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_gc
+curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_gc
 ```
 
 Parse: `runtime_gc_pause_total_ms`, `runtime_gc_count_total`, `runtime_gc_major_count_total`.
@@ -1957,7 +1984,7 @@ category: `RUNTIME_PERFORMANCE` (>10% of GCs are major — heap pressure).
 **Aggregated alternative (v3.1):** The coordinator's `/api/diagnostics` endpoint returns
 GC metrics in `runtime.gc` (totalPauseMs, count, majorCount):
 ```bash
-curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.gc'
+curl -sf --max-time 10 http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.gc'
 ```
 
 ---
@@ -1971,9 +1998,9 @@ from RuntimeMonitor, not just RSS.
 ```bash
 for port in 3001 3002 3003 3004 3005; do
   echo "=== Port $port ==="
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_memory
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep runtime_memory
 done
-curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_memory
+curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_memory
 ```
 
 Parse: `runtime_memory_heap_used_mb`, `runtime_memory_heap_total_mb`,
@@ -1991,7 +2018,7 @@ category: `MEMORY` (heap pressure — approaching OOM).
 **Aggregated alternative (v3.1):** The coordinator's `/api/diagnostics` endpoint returns
 memory metrics in `runtime.memory` (heapUsedMB, heapTotalMB, rssMB, externalMB):
 ```bash
-curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.memory'
+curl -sf --max-time 10 http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.memory'
 ```
 
 Also check Redis memory:
@@ -2014,10 +2041,10 @@ Goes beyond binary connected/disconnected to show actual response times.
 
 **Method — Part 1 (Connection status from /stats):**
 ```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: BSC, Polygon, AVAX, FTM
-curl -sf http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, Blast, Scroll
-curl -sf http://localhost:3003/stats | jq .  # P3: ETH, zkSync, Linea
-curl -sf http://localhost:3004/stats | jq .  # P4: Solana
+curl -sf --max-time 10 http://localhost:3001/stats | jq .  # P1: BSC, Polygon, AVAX, FTM
+curl -sf --max-time 10 http://localhost:3002/stats | jq .  # P2: Arb, OP, Base, Scroll, Blast, Mantle, Mode
+curl -sf --max-time 10 http://localhost:3003/stats | jq .  # P3: ETH, zkSync, Linea
+curl -sf --max-time 10 http://localhost:3004/stats | jq .  # P4: Solana
 ```
 
 For each chain, check connection status, messagesReceived, activeSubscriptions.
@@ -2026,7 +2053,7 @@ For each chain, check connection status, messagesReceived, activeSubscriptions.
 ```bash
 for port in 3001 3002 3003 3004; do
   echo "=== Port $port ==="
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_rpc_call_duration
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep provider_rpc_call_duration
 done
 ```
 
@@ -2065,7 +2092,7 @@ or chain down). Check `.env` for that chain's `*_RPC_URL` and `*_API_KEY` config
 **Method:**
 ```bash
 for port in 3001 3002 3003 3004; do
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_rpc_errors_total
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep provider_rpc_errors_total
 done
 ```
 
@@ -2094,7 +2121,7 @@ data gaps during the reconnection window.
 **Method:**
 ```bash
 for port in 3001 3002 3003 3004; do
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_ws_reconnection
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep provider_ws_reconnection
 done
 ```
 
@@ -2124,7 +2151,7 @@ A chain with zero messages means zero detection.
 **Method:**
 ```bash
 for port in 3001 3002 3003 3004; do
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep provider_ws_messages_total
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep provider_ws_messages_total
 done
 ```
 
@@ -2154,10 +2181,10 @@ Stale prices are the #1 cause of failed trades.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3001/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
-curl -sf http://localhost:3002/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
-curl -sf http://localhost:3003/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
-curl -sf http://localhost:3004/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf --max-time 10 http://localhost:3001/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf --max-time 10 http://localhost:3002/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf --max-time 10 http://localhost:3003/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
+curl -sf --max-time 10 http://localhost:3004/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
 ```
 
 `[SIM-ONLY]` In simulation mode, prices are generated at fixed intervals per chain
@@ -2192,10 +2219,10 @@ by the time they reach execution.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3001/stats | jq '{avgDetectionCycleDurationMs}'
-curl -sf http://localhost:3002/stats | jq '{avgDetectionCycleDurationMs}'
-curl -sf http://localhost:3003/stats | jq '{avgDetectionCycleDurationMs}'
-curl -sf http://localhost:3004/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf --max-time 10 http://localhost:3001/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf --max-time 10 http://localhost:3002/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf --max-time 10 http://localhost:3003/stats | jq '{avgDetectionCycleDurationMs}'
+curl -sf --max-time 10 http://localhost:3004/stats | jq '{avgDetectionCycleDurationMs}'
 ```
 
 **Flag:** `avgDetectionCycleDurationMs` > 50 on any partition → severity: **HIGH**,
@@ -2218,10 +2245,10 @@ all partitions after 60s of uptime indicates detection logic issues.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3001/stats | jq '{avgOpportunitiesPerCycle}'
-curl -sf http://localhost:3002/stats | jq '{avgOpportunitiesPerCycle}'
-curl -sf http://localhost:3003/stats | jq '{avgOpportunitiesPerCycle}'
-curl -sf http://localhost:3004/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf --max-time 10 http://localhost:3001/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf --max-time 10 http://localhost:3002/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf --max-time 10 http://localhost:3003/stats | jq '{avgOpportunitiesPerCycle}'
+curl -sf --max-time 10 http://localhost:3004/stats | jq '{avgOpportunitiesPerCycle}'
 ```
 
 **Mode-conditional severity:**
@@ -2255,7 +2282,7 @@ rates or low hit rates indicate cache thrashing.
 **Method:**
 ```bash
 for port in 3001 3002 3003 3004; do
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep pair_cache
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep pair_cache
 done
 ```
 
@@ -2280,9 +2307,9 @@ done
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/stats | jq .
-curl -sf http://localhost:3005/health | jq .
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep arbitrage_gas_price_gwei
+curl -sf --max-time 10 http://localhost:3005/stats | jq .
+curl -sf --max-time 10 http://localhost:3005/health | jq .
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep arbitrage_gas_price_gwei
 ```
 
 **Flag:** Any chain with gas price = 0 → **HIGH**, category: `GAS_SPIKE`
@@ -2299,7 +2326,7 @@ curl -sf http://localhost:3005/metrics 2>/dev/null | grep arbitrage_gas_price_gw
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/stats | jq .
+curl -sf --max-time 10 http://localhost:3005/stats | jq .
 ```
 
 Parse for simulation provider status fields. Check:
@@ -2320,7 +2347,7 @@ mean capital is being wasted on gas for failed transactions.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/probability-tracker | jq .
+curl -sf --max-time 10 http://localhost:3005/probability-tracker | jq .
 ```
 
 **Flag:** Overall success rate <30% → **HIGH**, category: `EXECUTION_PROBABILITY`.
@@ -2336,7 +2363,7 @@ category: `EXECUTION_PROBABILITY`.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/bridge-recovery | jq .
+curl -sf --max-time 10 http://localhost:3005/bridge-recovery | jq .
 ```
 
 **Flag:** Any bridge stuck >24 hours → **HIGH**, category: `BRIDGE_RECOVERY`.
@@ -2353,7 +2380,7 @@ from "84% success rate" to "8% revert, 5% timeout, 3% stale on BSC".
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep opportunity_outcome_total
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep opportunity_outcome_total
 ```
 
 Parse `opportunity_outcome_total{chain="...",outcome="..."}`. Expected outcomes:
@@ -2384,7 +2411,7 @@ overestimating opportunities.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep profit_slippage_pct
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep profit_slippage_pct
 ```
 
 Parse `profit_slippage_pct` histogram. Positive slippage = expected > actual
@@ -2408,7 +2435,7 @@ Stale opportunities have already moved in price — executing them wastes gas.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep opportunity_age_at_execution
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep opportunity_age_at_execution
 ```
 
 Parse `opportunity_age_at_execution_ms{chain="..."}` histogram.
@@ -2436,8 +2463,8 @@ This answers: "Are we making money, and how much is gas eating?"
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep profit_per_execution
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep gas_cost_per_execution
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep profit_per_execution
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep gas_cost_per_execution
 ```
 
 Parse `profit_per_execution{chain="...",strategy="..."}` and
@@ -2465,18 +2492,18 @@ Scrape metrics from all services twice, 15 seconds apart:
 ```bash
 # First scrape (partitions + execution + cross-chain)
 for port in 3001 3002 3003 3004 3005 3006; do
-  curl -sf http://localhost:$port/metrics >> ./monitor-session/metrics_t0.txt
+  curl -sf --max-time 10 http://localhost:$port/metrics >> ./monitor-session/metrics_t0.txt
 done
 # Coordinator (different endpoint)
-curl -sf http://localhost:3000/api/metrics/prometheus >> ./monitor-session/metrics_t0.txt
+curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus >> ./monitor-session/metrics_t0.txt
 
 sleep 15
 
 # Second scrape
 for port in 3001 3002 3003 3004 3005 3006; do
-  curl -sf http://localhost:$port/metrics >> ./monitor-session/metrics_t1.txt
+  curl -sf --max-time 10 http://localhost:$port/metrics >> ./monitor-session/metrics_t1.txt
 done
-curl -sf http://localhost:3000/api/metrics/prometheus >> ./monitor-session/metrics_t1.txt
+curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus >> ./monitor-session/metrics_t1.txt
 ```
 
 **Flag:** Counters NOT incrementing between scrapes → **MEDIUM** (metrics may be
@@ -2592,7 +2619,7 @@ If the file does NOT exist → the dashboard build was skipped.
 
 2. Verify the coordinator serves the SPA (not the legacy fallback):
 ```bash
-DASHBOARD_HTML=$(curl -sf http://localhost:3000/ 2>/dev/null | head -20)
+DASHBOARD_HTML=$(curl -sf --max-time 10 http://localhost:3000/ 2>/dev/null | head -20)
 echo "$DASHBOARD_HTML"
 ```
 
@@ -2845,28 +2872,28 @@ Test each dashboard REST dependency:
 
 1. **Leader endpoint** (AdminTab → `fetchJson('/api/leader')`):
 ```bash
-curl -sf http://localhost:3000/api/leader 2>/dev/null | jq .
+curl -sf --max-time 10 http://localhost:3000/api/leader 2>/dev/null | jq .
 ```
 Expected: `{ isLeader: boolean, instanceId: string, lockKey: string }`
 Dashboard accesses: `leaderInfo?.isLeader`, `leaderInfo?.instanceId`
 
 2. **Alerts endpoint** (AdminTab → `fetchJson('/api/alerts')`):
 ```bash
-curl -sf http://localhost:3000/api/alerts 2>/dev/null
+curl -sf --max-time 10 http://localhost:3000/api/alerts 2>/dev/null
 ```
 Expected: `Alert[]` (array). If returns 401, record as INFO (auth working).
 Dashboard: renders table from array; empty array = "No alerts".
 
 3. **Redis stats endpoint** (StreamsTab → `fetchJson('/api/redis/stats')`):
 ```bash
-curl -sf http://localhost:3000/api/redis/stats 2>/dev/null | jq .
+curl -sf --max-time 10 http://localhost:3000/api/redis/stats 2>/dev/null | jq .
 ```
 Expected shape: object with optional fields `totalCommands`, `commandsPerSecond`,
 `memoryUsed`, `connectedClients`.
 
 4. **Diagnostics endpoint** (v3.1 — DiagnosticsTab + monitoring scripts):
 ```bash
-curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '{timestamp, pipeline: .pipeline.e2e, runtime: {eventLoop: .runtime.eventLoop, memory: .runtime.memory}, providers: {totalRpcErrors: .providers.totalRpcErrors, chains: (.providers.rpcByChain | keys)}}'
+curl -sf --max-time 10 http://localhost:3000/api/diagnostics 2>/dev/null | jq '{timestamp, pipeline: .pipeline.e2e, runtime: {eventLoop: .runtime.eventLoop, memory: .runtime.memory}, providers: {totalRpcErrors: .providers.totalRpcErrors, chains: (.providers.rpcByChain | keys)}}'
 ```
 Expected: `DiagnosticsSnapshot` object with `timestamp`, `pipeline`, `runtime`, `providers`.
 Optional: `streams` (present when StreamHealthMonitor has data).
@@ -2876,7 +2903,7 @@ for monitoring scripts and health checks. Auth-protected (`metrics:read` permiss
 5. **EE health for drawdown** (RiskTab → `fetchJson('/ee/health')`):
 ```bash
 # Via coordinator proxy
-curl -sf http://localhost:3000/ee/health 2>/dev/null | jq '{riskState, simulationMode, healthyProviders, queueSize, activeExecutions, successRate}'
+curl -sf --max-time 10 http://localhost:3000/ee/health 2>/dev/null | jq '{riskState, simulationMode, healthyProviders, queueSize, activeExecutions, successRate}'
 ```
 The RiskTab needs drawdown/risk state data that only the Execution Engine has.
 The coordinator proxies `/ee/health` to EE port 3005.
@@ -2929,7 +2956,7 @@ and `execution-engine` by exact name.
 **Method:**
 1. Get the actual service names from the coordinator:
 ```bash
-curl -sf http://localhost:3000/stats 2>/dev/null | jq '.services | keys'
+curl -sf --max-time 10 http://localhost:3000/stats 2>/dev/null | jq '.services | keys'
 ```
 
 2. Read the dashboard's expected keys:
@@ -2995,10 +3022,10 @@ Grep for: circuit-breaker|ee/health  in services/coordinator/src/api/routes/inde
 4. Test the production proxy routes:
 ```bash
 # EE health proxy (should return EE health data)
-curl -sf http://localhost:3000/ee/health 2>/dev/null | jq '.riskState // "NOT_PRESENT"'
+curl -sf --max-time 10 http://localhost:3000/ee/health 2>/dev/null | jq '.riskState // "NOT_PRESENT"'
 
 # Circuit breaker (should proxy to EE)
-curl -sf http://localhost:3000/circuit-breaker 2>/dev/null | jq '.state // "NOT_PRESENT"'
+curl -sf --max-time 10 http://localhost:3000/circuit-breaker 2>/dev/null | jq '.state // "NOT_PRESENT"'
 ```
 
 **Flag:** `/circuit-breaker` exists in Vite dev proxy but NOT proxied by coordinator →
@@ -3086,7 +3113,7 @@ It powers both the SSE `diagnostics` event (10s periodic) and `GET /api/diagnost
 **Method:**
 1. Fetch the diagnostics snapshot via REST:
 ```bash
-curl -sf http://localhost:3000/api/diagnostics 2>/dev/null > ./monitor-session/findings/diagnostics-snapshot.json
+curl -sf --max-time 10 http://localhost:3000/api/diagnostics 2>/dev/null > ./monitor-session/findings/diagnostics-snapshot.json
 cat ./monitor-session/findings/diagnostics-snapshot.json | jq .
 ```
 
@@ -3103,7 +3130,7 @@ processed events.
 ```bash
 # Compare diagnostics runtime vs direct Prometheus metrics
 DIAG_P99=$(cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.runtime.eventLoop.p99')
-PROM_P99=$(curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_eventloop_delay_p99_ms | awk '{print $NF}')
+PROM_P99=$(curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_eventloop_delay_p99_ms | awk '{print $NF}')
 echo "Diagnostics p99: $DIAG_P99 | Prometheus p99: $PROM_P99"
 ```
 Values should be close (same source, but snapshot timing may differ slightly).
@@ -3179,7 +3206,7 @@ PHASE 3 COMPLETE — Runtime Validation (44 checks, 9 subsections)
   Bridge recoveries pending: <n>
   Health schemas: <n>/7 valid
   Metrics completeness: <n>/<total> required metrics present
-  Dashboard: SPA <AVAILABLE/MISSING> | SSE <CONNECTED/FAILED> | Events <n>/6 types | Types <IN_SYNC/DRIFT> | REST <n>/<total> OK | Keys <MATCH/MISMATCH> | Proxy <OK/GAPS>
+  Dashboard: SPA <AVAILABLE/MISSING> | SSE <CONNECTED/FAILED> | Events <n>/7 types | Types <IN_SYNC/DRIFT> | REST <n>/<total> OK | Keys <MATCH/MISMATCH> | Proxy <OK/GAPS>
   CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>  LOW: <n>
 ```
 
@@ -3213,12 +3240,20 @@ Record findings to `./monitor-session/findings/smoke-test.jsonl`:
 echo "=== SMOKE TEST BASELINE ===" > ./monitor-session/streams/smoke-baseline.txt
 for stream in stream:price-updates stream:opportunities \
   stream:execution-requests stream:execution-results \
+  stream:exec-requests-fast stream:exec-requests-l2 \
+  stream:exec-requests-premium stream:exec-requests-solana \
   stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq; do
   LEN=$(redis-cli XLEN $stream)
   echo "$stream: $LEN" >> ./monitor-session/streams/smoke-baseline.txt
   echo "$stream: $LEN"
 done
 ```
+
+**Note:** The 4 `exec-requests-*` streams are the ADR-038 chain-grouped routing
+streams. When `FEATURE_CHAIN_GROUPED_EXECUTION` is enabled, the coordinator routes
+execution requests to these instead of the legacy `stream:execution-requests`.
+In smoke testing, at least one of the 4 should show growth if chain-grouped
+routing is active; otherwise the legacy stream should grow.
 
 ---
 
@@ -3292,13 +3327,13 @@ the smoke window — this is normal. Real arb is rare).
 
 ```bash
 # Coordinator should show recent opportunities
-curl -sf http://localhost:3000/api/opportunities 2>/dev/null | jq '.length // 0'
+curl -sf --max-time 10 http://localhost:3000/api/opportunities 2>/dev/null | jq '.length // 0'
 
 # Execution engine should show execution attempts
-curl -sf http://localhost:3005/stats 2>/dev/null | jq .
+curl -sf --max-time 10 http://localhost:3005/stats 2>/dev/null | jq .
 
 # Execution engine health should show success metrics
-curl -sf http://localhost:3005/health 2>/dev/null | jq '{queueSize, activeExecutions, successRate}'
+curl -sf --max-time 10 http://localhost:3005/health 2>/dev/null | jq '{queueSize, activeExecutions, successRate}'
 ```
 
 **Flag:** Coordinator `/api/opportunities` returns empty but `stream:opportunities`
@@ -3373,10 +3408,10 @@ Re-check partition `/stats` endpoints (from Check 3H) and compare per-chain
 message counts against the beginning of the smoke test.
 
 ```bash
-curl -sf http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon + AVAX + FTM active
-curl -sf http://localhost:3002/stats | jq .  # P2: expect Arb + OP + Base + ... active
-curl -sf http://localhost:3003/stats | jq .  # P3: expect ETH + zkSync + Linea active
-curl -sf http://localhost:3004/stats | jq .  # P4: expect Solana active
+curl -sf --max-time 10 http://localhost:3001/stats | jq .  # P1: expect BSC + Polygon + AVAX + FTM active
+curl -sf --max-time 10 http://localhost:3002/stats | jq .  # P2: expect Arb + OP + Base + ... active
+curl -sf --max-time 10 http://localhost:3003/stats | jq .  # P3: expect ETH + zkSync + Linea active
+curl -sf --max-time 10 http://localhost:3004/stats | jq .  # P4: expect Solana active
 ```
 
 For each partition, verify every assigned chain shows:
@@ -3404,6 +3439,33 @@ category: `DETECTION_RATE`.
 
 ---
 
+### Step 4F-2 — Cross-Chain Detector Health Verification
+
+**Goal:** Verify the cross-chain detector (port 3006) is actively consuming
+price updates and producing cross-chain opportunities. A dead cross-chain
+detector is invisible to partitions since it operates independently.
+
+**Method:**
+```bash
+curl -sf --max-time 10 http://localhost:3006/health | jq .
+curl -sf --max-time 10 http://localhost:3006/stats 2>/dev/null | jq .
+```
+
+Check for:
+1. `status` is `"healthy"` or `"running"`
+2. `priceUpdatesConsumed` is > 0 (actively reading from `stream:price-updates`)
+3. `opportunitiesPublished` shows cross-chain opportunity count
+4. `maxPriceAgeMs` default is 30000 (ADR-033 compliance)
+
+**Flag:** Cross-chain detector health endpoint unreachable → **HIGH**,
+category: `CROSS_CHAIN_DETECTOR` (service may have crashed silently).
+**Flag:** `priceUpdatesConsumed` is 0 after 60s of smoke test → **HIGH**,
+category: `CROSS_CHAIN_DETECTOR` (not consuming price data — consumer group issue?).
+**Info:** Cross-chain detector healthy with active price consumption → **INFO**,
+category: `CROSS_CHAIN_DETECTOR`.
+
+---
+
 ### Step 4G — Risk State Verification Post-Smoke
 
 **Goal:** Verify the drawdown circuit breaker is still in NORMAL state
@@ -3412,11 +3474,11 @@ simulated executions should not trigger the drawdown breaker.
 
 **Method:**
 ```bash
-curl -sf http://localhost:3005/health | jq .
-curl -sf http://localhost:3005/stats | jq .
+curl -sf --max-time 10 http://localhost:3005/health | jq .
+curl -sf --max-time 10 http://localhost:3005/stats | jq .
 ```
 
-Re-check the risk management state fields (same as Check 3I).
+Re-check the risk management state fields (same as Check 3E).
 
 **Flag:** Drawdown state changed from NORMAL to CAUTION/HALT during smoke test →
 **HIGH**, category: `RISK_STATE` (simulated execution is triggering risk controls
@@ -3439,8 +3501,8 @@ will silently drop messages by XADD overwriting the oldest entries.
 1. Read the backpressure configuration:
 ```bash
 # Check coordinator health for backpressure state
-curl -sf http://localhost:3000/api/health | jq '{backpressure, executionQueueDepth}'
-curl -sf http://localhost:3000/api/health/ready | jq .
+curl -sf --max-time 10 http://localhost:3000/api/health | jq '{backpressure, executionQueueDepth}'
+curl -sf --max-time 10 http://localhost:3000/api/health/ready | jq .
 ```
 
 2. Check the execution-requests stream fill ratio:
@@ -3490,20 +3552,20 @@ silently disconnected.
 
 ```bash
 # Capture initial state (pair with Step 4A baseline)
-P1_START=$(curl -sf http://localhost:3001/health | jq '.eventsProcessed // 0')
-P2_START=$(curl -sf http://localhost:3002/health | jq '.eventsProcessed // 0')
-P3_START=$(curl -sf http://localhost:3003/health | jq '.eventsProcessed // 0')
-P4_START=$(curl -sf http://localhost:3004/health | jq '.eventsProcessed // 0')
+P1_START=$(curl -sf --max-time 10 http://localhost:3001/health | jq '.eventsProcessed // 0')
+P2_START=$(curl -sf --max-time 10 http://localhost:3002/health | jq '.eventsProcessed // 0')
+P3_START=$(curl -sf --max-time 10 http://localhost:3003/health | jq '.eventsProcessed // 0')
+P4_START=$(curl -sf --max-time 10 http://localhost:3004/health | jq '.eventsProcessed // 0')
 echo "Partition baselines: P1=$P1_START P2=$P2_START P3=$P3_START P4=$P4_START"
 ```
 
 2. After the 60-second smoke test window (Step 4B), capture final counts:
 
 ```bash
-P1_END=$(curl -sf http://localhost:3001/health | jq '.eventsProcessed // 0')
-P2_END=$(curl -sf http://localhost:3002/health | jq '.eventsProcessed // 0')
-P3_END=$(curl -sf http://localhost:3003/health | jq '.eventsProcessed // 0')
-P4_END=$(curl -sf http://localhost:3004/health | jq '.eventsProcessed // 0')
+P1_END=$(curl -sf --max-time 10 http://localhost:3001/health | jq '.eventsProcessed // 0')
+P2_END=$(curl -sf --max-time 10 http://localhost:3002/health | jq '.eventsProcessed // 0')
+P3_END=$(curl -sf --max-time 10 http://localhost:3003/health | jq '.eventsProcessed // 0')
+P4_END=$(curl -sf --max-time 10 http://localhost:3004/health | jq '.eventsProcessed // 0')
 echo "Partition finals: P1=$P1_END P2=$P2_END P3=$P3_END P4=$P4_END"
 ```
 
@@ -3565,7 +3627,7 @@ recently and may not be wired into all code paths.
 
 ```bash
 # Scrape execution engine metrics for BI counters
-curl -sf http://localhost:3005/metrics 2>/dev/null | grep -E "opportunity_outcome_total|profit_slippage_pct|opportunity_age_at_execution|profit_per_execution|gas_cost_per_execution"
+curl -sf --max-time 10 http://localhost:3005/metrics 2>/dev/null | grep -E "opportunity_outcome_total|profit_slippage_pct|opportunity_age_at_execution|profit_per_execution|gas_cost_per_execution"
 ```
 
 Compare against the metrics scraped at the beginning of the smoke test.
@@ -3597,10 +3659,10 @@ degradation under load.
 # Scrape event loop delay after smoke test
 for port in 3001 3002 3003 3004 3005 3006; do
   echo "=== Port $port ==="
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay_p99_ms
-  curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_memory_rss_mb
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay_p99_ms
+  curl -sf --max-time 10 http://localhost:$port/metrics 2>/dev/null | grep runtime_memory_rss_mb
 done
-curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep -E "runtime_eventloop_delay_p99_ms|runtime_memory_rss_mb"
+curl -sf --max-time 10 http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep -E "runtime_eventloop_delay_p99_ms|runtime_memory_rss_mb"
 ```
 
 Compare against Phase 3 values (Check 3O, 3Q).
@@ -3942,7 +4004,7 @@ Missing: <list>
 
 ---
 
-## Phase 3: Runtime Validation (43 checks, 9 subsections)
+## Phase 3: Runtime Validation (44 checks, 9 subsections)
 
 ### 3.1 Service Health & Schema
 | Check | Status | Findings |
@@ -4041,8 +4103,9 @@ _In LIVE/TESTNET mode: values reflect real RPC provider health._
 | 3AO Service Name Key Matching | PASS/FAIL | <count> |
 | 3AP Production Proxy Config | PASS/FAIL | <count> |
 | 3AQ Stream Health Display | PASS/FAIL | <count> |
+| 3AR Diagnostics Aggregated Snapshot | PASS/FAIL | <count> |
 
-Dashboard: SPA <AVAILABLE/MISSING> | SSE <CONNECTED/FAILED> | Events <n>/6 types | Types <IN_SYNC/DRIFT> | REST <n>/<total> OK | Keys <MATCH/MISMATCH> | Proxy <OK/GAPS>
+Dashboard: SPA <AVAILABLE/MISSING> | SSE <CONNECTED/FAILED> | Events <n>/7 types | Types <IN_SYNC/DRIFT> | REST <n>/<total> OK | Keys <MATCH/MISMATCH> | Proxy <OK/GAPS>
 
 _* = placeholder check for not-yet-implemented metrics_
 
@@ -4127,7 +4190,7 @@ _exists during the smoke window. Only "STALLED AT price-updates" is a true failu
 
 ---
 
-*Report generated by monitoring.md v3.0*
+*Report generated by monitoring.md v3.1*
 *Session: <SESSION_ID>*
 *Completed: <ISO8601>*
 ```
