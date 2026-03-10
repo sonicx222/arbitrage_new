@@ -218,7 +218,8 @@ await expect(tx).to.be.reverted; // Don't do this
 - `/docs/local-development.md` - Setup guide
 - `/docs/CONFIGURATION.md` - All config options
 - `/docs/architecture/API.md` - Service endpoints
-- `infrastructure/fly/` - Fly.io deployment configs (coordinator, execution-engine, partition-high-value)
+- `infrastructure/fly/` - Fly.io TOML configs (8 services), `deploy.sh` CLI, `generate-fly-configs.sh` generator
+- `.github/workflows/deploy.yml` - CI deployment gate (4-phase: validate → deploy → health check → rollback)
 - `infrastructure/docker/docker-compose.testnet.yml` - Testnet deployment (SIMULATION_MODE=true)
 
 ## Patterns
@@ -233,6 +234,8 @@ await expect(tx).to.be.reverted; // Don't do this
 # Documentation Maintenance
 
 When making changes:
+- ADR links use full-slug filenames: `ADR-007-failover-strategy.md` not `ADR-007.md`
+- Verify doc link targets exist before adding (many `docs/reports/` files have been deleted)
 - Update relevant ADRs if architectural impact
 - Add `@see` references in JSDoc/NatSpec for traceability
 - Update `CURRENT_STATE.md` if adding services
@@ -252,7 +255,10 @@ When making changes:
 
 **Dockerfile Issues:**
 - All Dockerfiles use `node:22-alpine` matching `engines: ">=22.0.0"` — keep aligned when adding new services
-- Service-local Dockerfiles (e.g., `services/partition-asia-fast/Dockerfile`) may differ from infrastructure Dockerfiles (`infrastructure/docker/docker-compose.partition.yml` uses `services/unified-detector/Dockerfile`)
+- Service Dockerfiles use multi-stage builds (builder + production). Template: `services/cross-chain-detector/Dockerfile`
+- Use `npm ci --omit=dev` (not deprecated `--only=production`) in production stages
+- Fly.io builds from monorepo root — use `npm ci --workspaces --include-workspace-root` for workspace resolution
+- The L2-Turbo partition uses historical Fly app name `arbitrage-l2-fast` (TOML: `partition-l2-turbo.toml`)
 
 **Redis Issues:**
 - Never use `KEYS` command (blocks Redis) -- use `SCAN` iterator
