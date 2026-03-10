@@ -40,6 +40,11 @@ export function formatCpu(cpuUsage: number): string {
   return Number.isFinite(cpuUsage) ? (cpuUsage * 100).toFixed(1) : '0.0';
 }
 
+/** Returns green/yellow/red text class based on value vs two thresholds (high = green, mid = yellow, below = red). */
+export function thresholdColor(value: number, high: number, mid: number): string {
+  return value >= high ? 'text-accent-green' : value >= mid ? 'text-accent-yellow' : 'text-accent-red';
+}
+
 export function statusColor(status: string): string {
   switch (status) {
     case 'healthy': case 'CLOSED': return 'text-accent-green';

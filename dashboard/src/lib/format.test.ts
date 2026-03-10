@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatUsd, formatPct, formatDuration, formatMemory, formatNumber, calcSuccessRate, formatCpu, statusColor, statusDot } from './format';
+import { formatUsd, formatPct, formatDuration, formatMemory, formatNumber, calcSuccessRate, formatCpu, statusColor, statusDot, thresholdColor } from './format';
 
 describe('formatUsd', () => {
   it('formats small values with 2 decimals', () => {
@@ -190,5 +190,28 @@ describe('statusDot', () => {
 
   it('returns gray for unknown', () => {
     expect(statusDot('whatever')).toBe('bg-gray-500');
+  });
+});
+
+describe('thresholdColor', () => {
+  it('returns green when value >= high threshold', () => {
+    expect(thresholdColor(80, 80, 50)).toBe('text-accent-green');
+    expect(thresholdColor(100, 80, 50)).toBe('text-accent-green');
+  });
+
+  it('returns yellow when value >= mid but < high', () => {
+    expect(thresholdColor(50, 80, 50)).toBe('text-accent-yellow');
+    expect(thresholdColor(79, 80, 50)).toBe('text-accent-yellow');
+  });
+
+  it('returns red when value < mid threshold', () => {
+    expect(thresholdColor(49, 80, 50)).toBe('text-accent-red');
+    expect(thresholdColor(0, 80, 50)).toBe('text-accent-red');
+  });
+
+  it('works with decimal thresholds', () => {
+    expect(thresholdColor(0.8, 0.8, 0.5)).toBe('text-accent-green');
+    expect(thresholdColor(0.5, 0.8, 0.5)).toBe('text-accent-yellow');
+    expect(thresholdColor(0.3, 0.8, 0.5)).toBe('text-accent-red');
   });
 });

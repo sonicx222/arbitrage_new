@@ -7,31 +7,13 @@ import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { DataTable } from '../components/DataTable';
 import { SectionHeader } from '../components/SectionHeader';
 import { ExportCsvButton } from '../components/ExportCsvButton';
-import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate } from '../lib/format';
-import { CHART, TOOLTIP_STYLE, AXIS_TICK, GRID_PROPS, MAX_ERROR_DISPLAY } from '../lib/theme';
+import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate, thresholdColor } from '../lib/format';
+import { CHART, TOOLTIP_STYLE, AXIS_TICK, GRID_PROPS, MAX_ERROR_DISPLAY, EXPLORER_URLS } from '../lib/theme';
 import type { FeedItem } from '../lib/types';
 
 type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
 
 const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'MEV Protected', 'Error'];
-
-const EXPLORER_URLS: Record<string, string> = {
-  ethereum: 'https://etherscan.io/tx/',
-  bsc: 'https://bscscan.com/tx/',
-  polygon: 'https://polygonscan.com/tx/',
-  arbitrum: 'https://arbiscan.io/tx/',
-  optimism: 'https://optimistic.etherscan.io/tx/',
-  base: 'https://basescan.org/tx/',
-  avalanche: 'https://snowtrace.io/tx/',
-  fantom: 'https://ftmscan.com/tx/',
-  zksync: 'https://explorer.zksync.io/tx/',
-  linea: 'https://lineascan.build/tx/',
-  blast: 'https://blastscan.io/tx/',
-  scroll: 'https://scrollscan.com/tx/',
-  mantle: 'https://mantlescan.xyz/tx/',
-  mode: 'https://modescan.io/tx/',
-  solana: 'https://solscan.io/tx/',
-};
 
 export function ExecutionTab() {
   const { metrics, chartData } = useMetrics();
@@ -75,7 +57,7 @@ export function ExecutionTab() {
         <KpiCard label="Attempts" value={formatNumber(metrics.totalExecutions)} />
         <KpiCard label="Successful" value={formatNumber(metrics.successfulExecutions)} color="text-accent-green" />
         <KpiCard label="Failed" value={formatNumber(failedExecutions)} color={failedExecutions > 0 ? 'text-accent-red' : 'text-gray-100'} />
-        <KpiCard label="Success Rate" value={formatPct(successRate)} color={successRate >= 80 ? 'text-accent-green' : successRate >= 50 ? 'text-accent-yellow' : 'text-accent-red'} />
+        <KpiCard label="Success Rate" value={formatPct(successRate)} color={thresholdColor(successRate, 80, 50)} />
         <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
       </KpiGrid>
 

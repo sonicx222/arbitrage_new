@@ -8,7 +8,7 @@ import { ExportCsvButton } from '../components/ExportCsvButton';
 import { SectionHeader } from '../components/SectionHeader';
 import { Spinner } from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
-import { formatTime, formatUsd, formatNumber, formatPct } from '../lib/format';
+import { formatTime, formatUsd, formatNumber, formatPct, thresholdColor } from '../lib/format';
 import { CHAIN_COLORS } from '../lib/theme';
 import type { Opportunity } from '../lib/types';
 
@@ -143,7 +143,7 @@ export function OpportunitiesTab() {
         <KpiCard
           label="Avg Confidence"
           value={formatPct(stats.avgConfidence * 100)}
-          color={stats.avgConfidence >= 0.7 ? 'text-accent-green' : stats.avgConfidence >= 0.4 ? 'text-accent-yellow' : 'text-accent-red'}
+          color={thresholdColor(stats.avgConfidence, 0.7, 0.4)}
         />
         <KpiCard
           label="Top Chain"
@@ -250,7 +250,7 @@ export function OpportunitiesTab() {
             { header: 'Conf.', align: 'right', onHeaderClick: () => handleSort('confidence'), headerSuffix: sortIcon('confidence'),
               render: (opp) => (
                 <span className={`tabular-nums ${
-                  opp.confidence >= 0.8 ? 'text-accent-green' : opp.confidence >= 0.5 ? 'text-accent-yellow' : 'text-accent-red'
+                  thresholdColor(opp.confidence, 0.8, 0.5)
                 }`}>
                   {formatPct(opp.confidence * 100)}
                 </span>

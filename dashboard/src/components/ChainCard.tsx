@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { StatusBadge } from './StatusBadge';
 import { CHAIN_COLORS } from '../lib/theme';
-import { formatTime } from '../lib/format';
+import { formatTime, thresholdColor } from '../lib/format';
 
 export interface ChainStats {
   total: number;
@@ -34,7 +34,7 @@ export const ChainCard = memo(function ChainCard({ chain, status = 'unknown', pa
         <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-gray-500">
           <div>
             <span className="block text-gray-600">Rate</span>
-            <span className={Number(successRate) >= 80 ? 'text-accent-green' : Number(successRate) >= 50 ? 'text-accent-yellow' : 'text-accent-red'}>
+            <span className={thresholdColor(Number(successRate), 80, 50)}>
               {successRate}%
             </span>
           </div>

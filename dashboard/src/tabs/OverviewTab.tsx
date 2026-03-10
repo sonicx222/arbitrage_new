@@ -7,7 +7,7 @@ import { ServiceCard } from '../components/ServiceCard';
 import { LiveFeed } from '../components/LiveFeed';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
-import { formatUsd, formatPct, formatNumber, calcSuccessRate } from '../lib/format';
+import { formatUsd, formatPct, formatNumber, calcSuccessRate, thresholdColor } from '../lib/format';
 
 export function OverviewTab() {
   const { metrics } = useMetrics();
@@ -20,10 +20,6 @@ export function OverviewTab() {
 
   const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
 
-  const healthColor = metrics.systemHealth >= 80 ? 'text-accent-green'
-    : metrics.systemHealth >= 50 ? 'text-accent-yellow'
-    : 'text-accent-red';
-
   const serviceList = useMemo(() => Object.values(services), [services]);
 
   return (
@@ -32,7 +28,7 @@ export function OverviewTab() {
       <div className="space-y-4 overflow-auto">
         {/* KPI Row */}
         <KpiGrid>
-          <KpiCard label="System Health" value={formatPct(metrics.systemHealth)} color={healthColor} />
+          <KpiCard label="System Health" value={formatPct(metrics.systemHealth)} color={thresholdColor(metrics.systemHealth, 80, 50)} />
           <KpiCard label="Active Services" value={String(metrics.activeServices)} />
           <KpiCard label="Opportunities" value={formatNumber(metrics.totalOpportunities)} sub={`${formatNumber(metrics.opportunitiesDropped)} dropped`} />
           <KpiCard label="Executions" value={formatNumber(metrics.totalExecutions)} sub={`${formatPct(successRate)} success`} />

@@ -26,6 +26,25 @@ export const GRID_PROPS = { strokeDasharray: '3 3' as const, stroke: CHART.grid 
 // L-12 FIX: Consistent error truncation length across dashboard.
 export const MAX_ERROR_DISPLAY = 30;
 
+// Block explorer base URLs per chain (used for transaction links).
+export const EXPLORER_URLS: Record<string, string> = {
+  ethereum: 'https://etherscan.io/tx/',
+  bsc: 'https://bscscan.com/tx/',
+  polygon: 'https://polygonscan.com/tx/',
+  arbitrum: 'https://arbiscan.io/tx/',
+  optimism: 'https://optimistic.etherscan.io/tx/',
+  base: 'https://basescan.org/tx/',
+  avalanche: 'https://snowtrace.io/tx/',
+  fantom: 'https://ftmscan.com/tx/',
+  zksync: 'https://explorer.zksync.io/tx/',
+  linea: 'https://lineascan.build/tx/',
+  blast: 'https://blastscan.io/tx/',
+  scroll: 'https://scrollscan.com/tx/',
+  mantle: 'https://mantlescan.xyz/tx/',
+  mode: 'https://modescan.io/tx/',
+  solana: 'https://solscan.io/tx/',
+};
+
 // L-10: Chain accent colors for visual differentiation.
 export const CHAIN_COLORS: Record<string, string> = {
   ethereum: '#627EEA',

@@ -3,6 +3,7 @@ import { SSEProvider, useConnection, useMetrics } from './context/SSEContext';
 import { getItem, removeItem } from './lib/storage';
 import { setOnUnauthorized } from './hooks/useApi';
 import { useHotkeys } from './hooks/useHotkeys';
+import { thresholdColor } from './lib/format';
 import { LoginScreen } from './components/LoginScreen';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { OverviewTab } from './tabs/OverviewTab';
@@ -210,7 +211,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
           {metrics && (
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-gray-500">Health</span>
-              <span className={`font-mono font-semibold ${metrics.systemHealth >= 80 ? 'text-accent-green' : metrics.systemHealth >= 50 ? 'text-accent-yellow' : 'text-accent-red'}`}>
+              <span className={`font-mono font-semibold ${thresholdColor(metrics.systemHealth, 80, 50)}`}>
                 {metrics.systemHealth.toFixed(0)}%
               </span>
             </div>
