@@ -137,6 +137,30 @@ export interface StreamGroupInfo {
   lastDeliveredId: string;
 }
 
+/**
+ * SC-H-001 FIX: Typed ioredis stream command declarations.
+ * ioredis doesn't export proper overload types for these stream commands
+ * when called with variadic args. This interface avoids `as any` casts
+ * while preserving type safety at each call site.
+ *
+ * Return types match actual Redis protocol responses as consumed by
+ * parseStreamResult(), xclaim(), xpendingRange(), and xtrim().
+ */
+interface TypedStreamCommands {
+  /** XREAD — returns [[streamName, [[id, [field, value, ...]], ...]], ...] or null (timeout) */
+  xread(...args: (string | number)[]): Promise<[string, [string, string[]][]][] | null>;
+  /** XREADGROUP — same return shape as XREAD */
+  xreadgroup(...args: (string | number)[]): Promise<[string, [string, string[]][]][] | null>;
+  /** XCLAIM — returns [[id, [field, value, ...]], ...] (same as XRANGE) */
+  xclaim(
+    key: string, group: string, consumer: string, minIdleTime: number, ...ids: string[]
+  ): Promise<[string, string[]][]>;
+  /** XPENDING (range form) — returns [[messageId, consumerName, idleMs, deliveryCount], ...] */
+  xpending(...args: (string | number)[]): Promise<[string, string, number, number][]>;
+  /** XTRIM — returns number of entries trimmed */
+  xtrim(...args: (string | number)[]): Promise<number>;
+}
+
 export interface BatcherConfig {
   maxBatchSize: number;    // Maximum messages before flush
   /**
@@ -836,8 +860,7 @@ export class RedisStreamsClient {
       }
       args.push('STREAMS', streamName, lastId);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await (this.client.xread as any)(...args);
+      const result = await (this.client as unknown as TypedStreamCommands).xread(...args);
 
       if (!result) {
         return [];
@@ -933,8 +956,7 @@ export class RedisStreamsClient {
       }
       args.push('STREAMS', config.streamName, options.startId ?? '>');
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await (this.client.xreadgroup as any)(...args);
+      const result = await (this.client as unknown as TypedStreamCommands).xreadgroup(...args);
 
       if (!result) {
         return [];
@@ -1394,8 +1416,7 @@ export class RedisStreamsClient {
     if (messageIds.length === 0) return [];
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await (this.client as any).xclaim(
+      const result = await (this.client as unknown as TypedStreamCommands).xclaim(
         streamName,
         groupName,
         consumerName,
@@ -1478,8 +1499,7 @@ export class RedisStreamsClient {
         args.push(consumerName);
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await (this.client.xpending as any)(...args);
+      const result = await (this.client as unknown as TypedStreamCommands).xpending(...args);
 
       if (!result || result.length === 0) return [];
 
@@ -1522,8 +1542,7 @@ export class RedisStreamsClient {
         args.push(options.minId);
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return await (this.client.xtrim as any)(...args);
+      return await (this.client as unknown as TypedStreamCommands).xtrim(...args);
     } catch (error) {
       this.logger.error('XTRIM error', { error, streamName });
       throw error;
