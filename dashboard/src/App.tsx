@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, Component, type ReactNode, type ErrorInfo } from 'react';
 import { SSEProvider, useSSEData } from './context/SSEContext';
 import { getItem, removeItem } from './lib/storage';
+import { setOnUnauthorized } from './hooks/useApi';
 import { LoginScreen } from './components/LoginScreen';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
@@ -66,7 +67,7 @@ const TABS: { id: Tab; icon: string }[] = [
 
 const STALE_THRESHOLD_MS = 10_000;
 
-function ConnectionIndicator() {
+function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
   const { status, lastEventTime } = useSSEData();
   const [isStale, setIsStale] = useState(false);
 
@@ -92,11 +93,20 @@ function ConnectionIndicator() {
     <div className="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs bg-[var(--badge-bg)]">
       <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === 'connected' && !isStale ? 'animate-pulse' : ''}`} />
       <span className="text-gray-500">{label}</span>
+      {/* M-03 FIX: Reconnect button for permanent SSE disconnection (CLOSED state). */}
+      {status === 'disconnected' && onReconnect && (
+        <button
+          onClick={onReconnect}
+          className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent-red/15 text-accent-red hover:bg-accent-red/25 transition-colors"
+        >
+          Reconnect
+        </button>
+      )}
     </div>
   );
 }
 
-function Dashboard({ onLogout }: { onLogout: () => void }) {
+function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnect: () => void }) {
   const [tab, setTab] = useState<Tab>('Overview');
   const { metrics } = useSSEData();
 
@@ -112,7 +122,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
             <span className="font-display font-bold text-sm tracking-tight">Arbitrage</span>
           </div>
-          <ConnectionIndicator />
+          <ConnectionIndicator onReconnect={onReconnect} />
           {metrics && (
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-gray-500">Health</span>
@@ -179,15 +189,32 @@ export default function App() {
     setAuthed(false);
   }, []);
 
+  // H-02 FIX: Register auto-logout handler for 401 responses from API calls.
+  useEffect(() => {
+    setOnUnauthorized(handleLogout);
+    return () => setOnUnauthorized(null);
+  }, [handleLogout]);
+
+  // M-03 FIX: Reconnect forces SSEProvider remount via key increment.
+  const handleReconnect = useCallback(() => {
+    setSSEKey((k) => k + 1);
+  }, []);
+
+  // H-03 FIX: ErrorBoundary wraps both LoginScreen and SSEProvider so render
+  // errors in either path are caught instead of producing a white screen.
   if (!authed) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return (
+      <ErrorBoundary>
+        <LoginScreen onLogin={handleLogin} />
+      </ErrorBoundary>
+    );
   }
 
   return (
-    <SSEProvider key={sseKey}>
-      <ErrorBoundary>
-        <Dashboard onLogout={handleLogout} />
-      </ErrorBoundary>
-    </SSEProvider>
+    <ErrorBoundary>
+      <SSEProvider key={sseKey}>
+        <Dashboard onLogout={handleLogout} onReconnect={handleReconnect} />
+      </SSEProvider>
+    </ErrorBoundary>
   );
 }

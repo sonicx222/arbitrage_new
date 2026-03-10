@@ -21,8 +21,8 @@ export function LoginScreen({ onLogin }: Props) {
         method: 'HEAD',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.status === 401 || res.status === 403) {
-        setError('Invalid token');
+      if (!res.ok) {
+        setError(res.status === 401 || res.status === 403 ? 'Invalid token' : `Server error (${res.status})`);
         setLoading(false);
         return;
       }

@@ -52,7 +52,7 @@ describe('LoginScreen', () => {
   });
 
   it('validates token via HEAD request and calls onLogin on success', async () => {
-    mockFetch.mockResolvedValueOnce({ status: 200 });
+    mockFetch.mockResolvedValueOnce({ status: 200, ok: true });
     render(<LoginScreen onLogin={onLogin} />);
 
     fireEvent.change(screen.getByPlaceholderText('Enter authentication token'), {
@@ -70,7 +70,7 @@ describe('LoginScreen', () => {
   });
 
   it('stores cb_api_key when provided', async () => {
-    mockFetch.mockResolvedValueOnce({ status: 200 });
+    mockFetch.mockResolvedValueOnce({ status: 200, ok: true });
     render(<LoginScreen onLogin={onLogin} />);
 
     fireEvent.change(screen.getByPlaceholderText('Enter authentication token'), {
@@ -86,7 +86,7 @@ describe('LoginScreen', () => {
   });
 
   it('does not store cb_api_key when empty', async () => {
-    mockFetch.mockResolvedValueOnce({ status: 200 });
+    mockFetch.mockResolvedValueOnce({ status: 200, ok: true });
     render(<LoginScreen onLogin={onLogin} />);
 
     fireEvent.change(screen.getByPlaceholderText('Enter authentication token'), {
@@ -99,7 +99,7 @@ describe('LoginScreen', () => {
   });
 
   it('shows "Invalid token" on 401 response', async () => {
-    mockFetch.mockResolvedValueOnce({ status: 401 });
+    mockFetch.mockResolvedValueOnce({ status: 401, ok: false });
     render(<LoginScreen onLogin={onLogin} />);
 
     fireEvent.change(screen.getByPlaceholderText('Enter authentication token'), {
@@ -112,7 +112,7 @@ describe('LoginScreen', () => {
   });
 
   it('shows "Invalid token" on 403 response', async () => {
-    mockFetch.mockResolvedValueOnce({ status: 403 });
+    mockFetch.mockResolvedValueOnce({ status: 403, ok: false });
     render(<LoginScreen onLogin={onLogin} />);
 
     fireEvent.change(screen.getByPlaceholderText('Enter authentication token'), {
@@ -138,8 +138,8 @@ describe('LoginScreen', () => {
   });
 
   it('shows loading state during validation', async () => {
-    let resolvePromise: (v: { status: number }) => void;
-    mockFetch.mockReturnValueOnce(new Promise<{ status: number }>((r) => { resolvePromise = r; }));
+    let resolvePromise: (v: { status: number; ok: boolean }) => void;
+    mockFetch.mockReturnValueOnce(new Promise<{ status: number; ok: boolean }>((r) => { resolvePromise = r; }));
     render(<LoginScreen onLogin={onLogin} />);
 
     fireEvent.change(screen.getByPlaceholderText('Enter authentication token'), {
@@ -150,7 +150,7 @@ describe('LoginScreen', () => {
     await waitFor(() => expect(screen.getByText('Validating...')).toBeInTheDocument());
     expect(screen.getByRole('button')).toBeDisabled();
 
-    await act(async () => { resolvePromise!({ status: 200 }); });
+    await act(async () => { resolvePromise!({ status: 200, ok: true }); });
     await waitFor(() => expect(onLogin).toHaveBeenCalled());
   });
 });

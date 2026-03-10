@@ -70,7 +70,7 @@ describe('App', () => {
   });
 
   it('transitions from LoginScreen to Dashboard on login', async () => {
-    mockFetch.mockResolvedValueOnce({ status: 200 });
+    mockFetch.mockResolvedValueOnce({ status: 200, ok: true });
     render(<App />);
 
     // Initially showing login
