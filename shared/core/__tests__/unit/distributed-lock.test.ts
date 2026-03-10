@@ -694,4 +694,143 @@ describe('DistributedLockManager', () => {
       })).rejects.toThrow('Connection refused');
     });
   });
+
+  // ===========================================================================
+  // SC-M-012: Queued Waiter Settled Flag (Race Condition Prevention)
+  // ===========================================================================
+
+  describe('SC-M-012: queued waiter settled flag prevents double-settle', () => {
+    it('should not leak lock handle when timeout fires after notifyNextWaiter settles the waiter', async () => {
+      // Setup: first acquireLock call succeeds (holder), second fails (goes to queue),
+      // then we release, which calls notifyNextWaiter -> acquireLock for the waiter.
+      // The waiter's timeout should be a no-op since notifyNextWaiter already settled it.
+
+      let acquireCallCount = 0;
+      mockRedisClient.setNx.mockImplementation(async () => {
+        acquireCallCount++;
+        // Call 1: holder acquires (acquireLockWithQueue immediate)
+        if (acquireCallCount === 1) return true;
+        // Call 2: queued waiter immediate attempt fails (goes to queue)
+        if (acquireCallCount === 2) return false;
+        // Call 3: notifyNextWaiter re-attempts for the queued waiter -> succeeds
+        return true;
+      });
+
+      // Mock eval to return 1 (lock released successfully)
+      mockRedisClient.eval.mockResolvedValue(1);
+
+      // 1. Holder acquires
+      const holderHandle = await lockManager.acquireLockWithQueue('race-resource', {
+        ttlMs: 5000,
+        waitTimeoutMs: 500 // short timeout for testing
+      });
+      expect(holderHandle.acquired).toBe(true);
+
+      // 2. Second caller goes to queue (immediate attempt fails)
+      const waiterPromise = lockManager.acquireLockWithQueue('race-resource', {
+        ttlMs: 5000,
+        waitTimeoutMs: 500
+      });
+
+      // Allow microtask for the queued waiter to be enqueued
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // 3. Release the holder — this triggers notifyNextWaiter, which settles the waiter
+      await holderHandle.release();
+
+      // 4. The waiter should get a valid handle from notifyNextWaiter
+      const waiterHandle = await waiterPromise;
+      expect(waiterHandle.acquired).toBe(true);
+
+      // 5. Wait past the original timeout to verify it doesn't cause issues
+      // (The timeout callback should see settled=true and return immediately)
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      // 6. The waiter's handle should still be valid (not replaced by timeout)
+      expect(waiterHandle.acquired).toBe(true);
+      expect(waiterHandle.key).toBe('lock:race-resource');
+    });
+
+    it('should skip already-settled waiters in notifyNextWaiter and try the next', async () => {
+      // This tests the path where notifyNextWaiter encounters a settled waiter
+      // and recursively tries the next one in the queue.
+
+      let acquireCallCount = 0;
+      mockRedisClient.setNx.mockImplementation(async () => {
+        acquireCallCount++;
+        // Call 1: holder acquires
+        if (acquireCallCount === 1) return true;
+        // Calls 2+3: immediate attempts by waiters fail (go to queue)
+        if (acquireCallCount <= 3) return false;
+        // Call 4+: notifyNextWaiter re-attempts succeed
+        return true;
+      });
+
+      mockRedisClient.eval.mockResolvedValue(1);
+
+      // 1. Holder acquires
+      const holderHandle = await lockManager.acquireLockWithQueue('skip-resource', {
+        ttlMs: 5000,
+        waitTimeoutMs: 50 // very short — first waiter will timeout
+      });
+      expect(holderHandle.acquired).toBe(true);
+
+      // 2. First waiter — will timeout before release
+      const waiter1Promise = lockManager.acquireLockWithQueue('skip-resource', {
+        ttlMs: 5000,
+        waitTimeoutMs: 50 // very short timeout
+      });
+
+      // 3. Second waiter — longer timeout, will still be waiting when release happens
+      const waiter2Promise = lockManager.acquireLockWithQueue('skip-resource', {
+        ttlMs: 5000,
+        waitTimeoutMs: 5000 // long timeout
+      });
+
+      // Allow microtask + let first waiter's timeout fire
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // First waiter should have timed out (settled=true, acquired=false)
+      const waiter1Handle = await waiter1Promise;
+      expect(waiter1Handle.acquired).toBe(false);
+
+      // 4. Release holder — notifyNextWaiter should skip waiter1 (settled) and wake waiter2
+      await holderHandle.release();
+
+      const waiter2Handle = await waiter2Promise;
+      expect(waiter2Handle.acquired).toBe(true);
+    });
+  });
+
+  // ===========================================================================
+  // SC-L-011: Cryptographically Random Lock Tokens
+  // ===========================================================================
+
+  describe('SC-L-011: lock tokens use crypto.randomBytes', () => {
+    it('should generate lock values with hex random suffix instead of base36', async () => {
+      mockRedisClient.setNx.mockResolvedValue(true);
+
+      await lockManager.acquireLock('token-test');
+
+      const lockValue = mockRedisClient.setNx.mock.calls[0][1] as string;
+      // Lock value format: instanceId:timestamp:12hexchars
+      const parts = lockValue.split(':');
+      const randomPart = parts[parts.length - 1];
+
+      // randomBytes(6).toString('hex') produces exactly 12 hex characters
+      expect(randomPart).toMatch(/^[0-9a-f]{12}$/);
+    });
+
+    it('should generate unique lock values across multiple acquisitions', async () => {
+      mockRedisClient.setNx.mockResolvedValue(true);
+
+      await lockManager.acquireLock('unique-test-1');
+      await lockManager.acquireLock('unique-test-2');
+      await lockManager.acquireLock('unique-test-3');
+
+      const values = mockRedisClient.setNx.mock.calls.map(call => call[1] as string);
+      const uniqueValues = new Set(values);
+      expect(uniqueValues.size).toBe(3);
+    });
+  });
 });

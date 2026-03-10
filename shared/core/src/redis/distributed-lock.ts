@@ -14,6 +14,7 @@
  * @see ADR-007: Failover Strategy (uses same pattern as leader election)
  */
 
+import { randomBytes } from 'node:crypto';
 import { RedisClient, getRedisClient } from './client';
 import { createLogger } from '../logger';
 import type { ILogger } from '@arbitrage/types';
@@ -94,6 +95,8 @@ interface QueuedWaiter {
   resolve: (handle: LockHandle) => void;
   reject: (error: Error) => void;
   timeoutId: NodeJS.Timeout;
+  /** SC-M-012: Guards against timeout + notify race. Once true, resolve/reject must not be called again. */
+  settled: boolean;
 }
 
 // =============================================================================
@@ -357,6 +360,11 @@ export class DistributedLockManager {
     // Enqueue the caller and wait for notification
     return new Promise<LockHandle>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
+        // SC-M-012: Mark settled before resolving to prevent double-settle race
+        if (waiter.settled) {
+          return; // Already settled by notifyNextWaiter
+        }
+        waiter.settled = true;
         // Remove this waiter from the queue on timeout
         this.removeWaiter(key, waiter);
         resolve({
@@ -366,7 +374,7 @@ export class DistributedLockManager {
         });
       }, waitTimeoutMs);
 
-      const waiter: QueuedWaiter = { resolve, reject, timeoutId };
+      const waiter: QueuedWaiter = { resolve, reject, timeoutId, settled: false };
 
       if (!this.waitQueues.has(key)) {
         this.waitQueues.set(key, []);
@@ -620,8 +628,8 @@ export class DistributedLockManager {
   }
 
   private generateLockValue(): string {
-    // Include instanceId and timestamp for debugging
-    return `${this.instanceId}:${Date.now()}:${Math.random().toString(36).substring(2, 10)}`;
+    // SC-L-011: Use crypto.randomBytes instead of Math.random() for unpredictable lock tokens
+    return `${this.instanceId}:${Date.now()}:${randomBytes(6).toString('hex')}`;
   }
 
   private validateResourceId(resourceId: string): void {
@@ -656,6 +664,23 @@ export class DistributedLockManager {
 
     const waiter = queue.shift()!;
     clearTimeout(waiter.timeoutId);
+
+    // SC-M-012: If the timeout callback already settled this waiter (race condition),
+    // skip to the next waiter to avoid leaking a lock handle.
+    if (waiter.settled) {
+      this.logger.debug('Skipping already-settled waiter', { key });
+      // Clean up empty queues before trying next
+      if (queue.length === 0) {
+        this.waitQueues.delete(key);
+      }
+      this.updateQueueStats();
+      // Try the next waiter in the queue
+      this.notifyNextWaiter(key);
+      return;
+    }
+
+    // Mark as settled before attempting acquisition
+    waiter.settled = true;
 
     // Clean up empty queues
     if (queue.length === 0) {
