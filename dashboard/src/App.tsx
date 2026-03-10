@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, Component, type ReactNode, type ErrorInfo } from 'react';
-import { SSEProvider, useSSEData } from './context/SSEContext';
+import { SSEProvider, useConnection, useMetrics } from './context/SSEContext';
 import { getItem, removeItem } from './lib/storage';
 import { setOnUnauthorized } from './hooks/useApi';
 import { LoginScreen } from './components/LoginScreen';
@@ -20,6 +20,17 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('Dashboard error boundary caught:', error, info.componentStack);
+    // M-08 FIX: Report errors externally so operators see production crashes
+    // without needing browser console access.
+    try {
+      navigator.sendBeacon('/api/client-error', JSON.stringify({
+        message: error.message,
+        stack: error.stack?.slice(0, 1000),
+        componentStack: info.componentStack?.slice(0, 500),
+        timestamp: Date.now(),
+        url: window.location.href,
+      }));
+    } catch { /* sendBeacon may not be available in all environments */ }
   }
 
   render() {
@@ -56,6 +67,37 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+// M-06 FIX: Per-tab error isolation so one tab crash doesn't take down the dashboard.
+class TabErrorBoundary extends Component<{ tab: string; children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[${this.props.tab}] tab error:`, error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="card text-center space-y-3 max-w-md mx-auto mt-12">
+          <h3 className="font-display font-bold text-sm text-accent-red">{this.props.tab} Error</h3>
+          <p className="text-xs text-gray-500">{this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="px-3 py-1.5 rounded-lg bg-accent-green/15 text-accent-green text-xs font-medium hover:bg-accent-green/25 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const TABS: { id: Tab; icon: string }[] = [
   { id: 'Overview', icon: 'M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z' },
   { id: 'Execution', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
@@ -68,7 +110,7 @@ const TABS: { id: Tab; icon: string }[] = [
 const STALE_THRESHOLD_MS = 10_000;
 
 function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
-  const { status, lastEventTime } = useSSEData();
+  const { status, lastEventTime } = useConnection();
   const [isStale, setIsStale] = useState(false);
 
   useEffect(() => {
@@ -108,7 +150,7 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
 
 function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnect: () => void }) {
   const [tab, setTab] = useState<Tab>('Overview');
-  const { metrics } = useSSEData();
+  const { metrics } = useMetrics();
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -163,12 +205,12 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
         </button>
       </header>
       <main className="flex-1 p-5 overflow-auto" role="tabpanel" id={`tabpanel-${tab}`} aria-label={tab}>
-        {tab === 'Overview' && <OverviewTab />}
-        {tab === 'Execution' && <ExecutionTab />}
-        {tab === 'Chains' && <ChainsTab />}
-        {tab === 'Risk' && <RiskTab />}
-        {tab === 'Streams' && <StreamsTab />}
-        {tab === 'Admin' && <AdminTab />}
+        {tab === 'Overview' && <TabErrorBoundary tab="Overview"><OverviewTab /></TabErrorBoundary>}
+        {tab === 'Execution' && <TabErrorBoundary tab="Execution"><ExecutionTab /></TabErrorBoundary>}
+        {tab === 'Chains' && <TabErrorBoundary tab="Chains"><ChainsTab /></TabErrorBoundary>}
+        {tab === 'Risk' && <TabErrorBoundary tab="Risk"><RiskTab /></TabErrorBoundary>}
+        {tab === 'Streams' && <TabErrorBoundary tab="Streams"><StreamsTab /></TabErrorBoundary>}
+        {tab === 'Admin' && <TabErrorBoundary tab="Admin"><AdminTab /></TabErrorBoundary>}
       </main>
     </div>
   );

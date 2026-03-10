@@ -15,15 +15,23 @@ beforeEach(() => {
 describe('validatePayload', () => {
   describe('metrics', () => {
     it('accepts valid metrics payload', () => {
-      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 95 })).toBe(true);
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 95, averageLatency: 45, successfulExecutions: 8 })).toBe(true);
     });
 
     it('rejects missing totalExecutions', () => {
-      expect(validatePayload('metrics', { systemHealth: 95 })).toBe(false);
+      expect(validatePayload('metrics', { systemHealth: 95, averageLatency: 45, successfulExecutions: 8 })).toBe(false);
     });
 
     it('rejects missing systemHealth', () => {
-      expect(validatePayload('metrics', { totalExecutions: 10 })).toBe(false);
+      expect(validatePayload('metrics', { totalExecutions: 10, averageLatency: 45, successfulExecutions: 8 })).toBe(false);
+    });
+
+    it('rejects missing averageLatency', () => {
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 95, successfulExecutions: 8 })).toBe(false);
+    });
+
+    it('rejects missing successfulExecutions', () => {
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 95, averageLatency: 45 })).toBe(false);
     });
 
     it('rejects non-object', () => {
@@ -37,17 +45,17 @@ describe('validatePayload', () => {
     });
 
     it('rejects systemHealth out of 0-100 range', () => {
-      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: -1 })).toBe(false);
-      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 101 })).toBe(false);
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: -1, averageLatency: 45, successfulExecutions: 8 })).toBe(false);
+      expect(validatePayload('metrics', { totalExecutions: 10, systemHealth: 101, averageLatency: 45, successfulExecutions: 8 })).toBe(false);
     });
 
     it('accepts systemHealth at boundary values', () => {
-      expect(validatePayload('metrics', { totalExecutions: 0, systemHealth: 0 })).toBe(true);
-      expect(validatePayload('metrics', { totalExecutions: 0, systemHealth: 100 })).toBe(true);
+      expect(validatePayload('metrics', { totalExecutions: 0, systemHealth: 0, averageLatency: 0, successfulExecutions: 0 })).toBe(true);
+      expect(validatePayload('metrics', { totalExecutions: 0, systemHealth: 100, averageLatency: 0, successfulExecutions: 0 })).toBe(true);
     });
 
     it('rejects negative totalExecutions', () => {
-      expect(validatePayload('metrics', { totalExecutions: -1, systemHealth: 50 })).toBe(false);
+      expect(validatePayload('metrics', { totalExecutions: -1, systemHealth: 50, averageLatency: 45, successfulExecutions: 0 })).toBe(false);
     });
   });
 

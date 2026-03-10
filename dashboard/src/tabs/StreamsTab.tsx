@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
-import { useSSEData } from '../context/SSEContext';
+import { useStreams, useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber } from '../lib/format';
@@ -19,7 +19,8 @@ interface RedisStats {
 }
 
 export function StreamsTab() {
-  const { streams, metrics, lagData } = useSSEData();
+  const { streams, lagData } = useStreams();
+  const { metrics } = useMetrics();
 
   // Redis stats (one-off fetch, refresh every 30s)
   const { data: redisStats } = useQuery<RedisStats>({

@@ -41,7 +41,7 @@ export function LogLevelControl() {
                   setLogLevelMsg(`Set to ${level}`);
                   setTimeout(() => setLogLevelMsg(''), 3000);
                 },
-                onError: (err) => { setLogLevelMsg(`Error: ${err.message}`); setTimeout(() => setLogLevelMsg(''), 5000); },
+                onError: (err) => { setLogLevelMsg(`Error: ${err.message}`); setTimeout(() => setLogLevelMsg(''), 10000); },
               });
             }}
             disabled={setLogLevel.isPending}

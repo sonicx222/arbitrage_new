@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { useSSEData } from '../context/SSEContext';
+import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate } from '../lib/format';
@@ -25,7 +25,8 @@ const EXPLORER_URLS: Record<string, string> = {
 };
 
 export function ExecutionTab() {
-  const { metrics, feed, chartData } = useSSEData();
+  const { metrics, chartData } = useMetrics();
+  const { feed } = useFeed();
 
   if (!metrics) {
     return <div className="text-gray-500 text-xs">Waiting for execution data...</div>;

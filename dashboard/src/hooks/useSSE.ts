@@ -33,13 +33,16 @@ export function useSSE({ url, onEvent }: UseSSEOptions) {
     };
 
     const eventTypes = ['metrics', 'services', 'execution-result', 'alert', 'circuit-breaker', 'streams'];
+    const debugSSE = typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function' && localStorage.getItem('debug_sse') === 'true';
+
     for (const type of eventTypes) {
       es.addEventListener(type, (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
+          if (debugSSE) console.debug('[SSE]', type, data);
           onEventRef.current(type, data);
-        } catch {
-          // Malformed JSON — skip
+        } catch (err) {
+          console.warn('[SSE] Failed to parse JSON for', type, ':', (e.data as string)?.slice?.(0, 200));
         }
       });
     }

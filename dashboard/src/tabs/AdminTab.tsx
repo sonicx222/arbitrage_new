@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useSSEData } from '../context/SSEContext';
+import { useServices, useMetrics } from '../context/SSEContext';
 import { useRestartService, fetchJson } from '../hooks/useApi';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
@@ -10,7 +10,8 @@ import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatDuration } from '../lib/format';
 
 export function AdminTab() {
-  const { services, metrics } = useSSEData();
+  const { services } = useServices();
+  const { metrics } = useMetrics();
   const restartService = useRestartService();
 
   const [restartTarget, setRestartTarget] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function AdminTab() {
       <div className="card">
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
           Service Management {!isLeader && <span className="text-accent-yellow">(read-only — not leader)</span>}
-          {actionMsg && <span className="text-accent-red ml-2">{actionMsg}</span>}
+          {actionMsg && <span className={`ml-2 ${actionMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{actionMsg}</span>}
         </h3>
         <div className="overflow-auto max-h-64">
           <table className="w-full text-xs">
@@ -116,8 +117,8 @@ export function AdminTab() {
         onConfirm={() => {
           if (restartTarget) {
             restartService.mutate(restartTarget, {
-              onSuccess: () => { setRestartTarget(null); setActionMsg(''); },
-              onError: (err) => { setRestartTarget(null); setActionMsg(`Restart failed: ${err.message}`); setTimeout(() => setActionMsg(''), 5000); },
+              onSuccess: () => { setRestartTarget(null); setActionMsg(`Done — ${restartTarget} restarting`); setTimeout(() => setActionMsg(''), 3000); },
+              onError: (err) => { setRestartTarget(null); setActionMsg(`Restart failed: ${err.message}`); setTimeout(() => setActionMsg(''), 10000); },
             });
           }
         }}

@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { useSSEData } from '../context/SSEContext';
+import { useServices } from '../context/SSEContext';
 import { useCircuitBreakerOpen, useCircuitBreakerClose } from '../hooks/useApi';
 import { ConfirmModal } from './ConfirmModal';
 import { statusColor, statusDot } from '../lib/format';
 
 export function CircuitBreakerGrid() {
-  const { circuitBreaker } = useSSEData();
+  const { circuitBreaker } = useServices();
   const openMutation = useCircuitBreakerOpen();
   const closeMutation = useCircuitBreakerClose();
   const [showOpen, setShowOpen] = useState(false);
@@ -44,7 +44,7 @@ export function CircuitBreakerGrid() {
         >
           Force Close
         </button>
-        {errorMsg && <span className="text-[10px] text-accent-red ml-2">{errorMsg}</span>}
+        {errorMsg && <span className={`text-[10px] ml-2 ${errorMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{errorMsg}</span>}
       </div>
 
       <ConfirmModal
@@ -55,8 +55,8 @@ export function CircuitBreakerGrid() {
         loading={openMutation.isPending}
         onConfirm={() => {
           openMutation.mutate(reason || 'Manual dashboard action', {
-            onSuccess: () => { setShowOpen(false); setReason(''); setErrorMsg(''); },
-            onError: (err) => { setShowOpen(false); setErrorMsg(`CB open failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 5000); },
+            onSuccess: () => { setShowOpen(false); setReason(''); setErrorMsg('Done — circuit breaker opened'); setTimeout(() => setErrorMsg(''), 3000); },
+            onError: (err) => { setShowOpen(false); setErrorMsg(`CB open failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 10000); },
           });
         }}
         onCancel={() => { setShowOpen(false); setReason(''); }}
@@ -80,8 +80,8 @@ export function CircuitBreakerGrid() {
         loading={closeMutation.isPending}
         onConfirm={() => {
           closeMutation.mutate(undefined, {
-            onSuccess: () => { setShowClose(false); setErrorMsg(''); },
-            onError: (err) => { setShowClose(false); setErrorMsg(`CB close failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 5000); },
+            onSuccess: () => { setShowClose(false); setErrorMsg('Done — circuit breaker closed'); setTimeout(() => setErrorMsg(''), 3000); },
+            onError: (err) => { setShowClose(false); setErrorMsg(`CB close failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 10000); },
           });
         }}
         onCancel={() => setShowClose(false)}

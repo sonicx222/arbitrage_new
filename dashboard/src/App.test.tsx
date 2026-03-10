@@ -17,6 +17,11 @@ vi.mock('./lib/storage', () => ({
 // ---------------------------------------------------------------------------
 vi.mock('./context/SSEContext', () => ({
   SSEProvider: ({ children }: { children: React.ReactNode }) => <div data-testid="sse-provider">{children}</div>,
+  useConnection: () => ({ status: 'connecting' as const, lastEventTime: null }),
+  useMetrics: () => ({ metrics: null, chartData: [] }),
+  useServices: () => ({ services: {}, circuitBreaker: null }),
+  useFeed: () => ({ feed: [] }),
+  useStreams: () => ({ streams: null, lagData: [] }),
   useSSEData: () => ({
     metrics: null,
     services: {},

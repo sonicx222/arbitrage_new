@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useSSEData } from '../context/SSEContext';
+import { useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { formatPct, formatNumber } from '../lib/format';
 
@@ -29,7 +29,7 @@ interface EEHealthResponse {
 }
 
 export function RiskTab() {
-  const { metrics } = useSSEData();
+  const { metrics } = useMetrics();
 
   // Fetch EE health on tab mount for risk state
   // In dev, Vite proxies /ee/* to EE port 3005. In prod, coordinator proxies.

@@ -1,4 +1,4 @@
-import { useSSEData } from '../context/SSEContext';
+import { useServices } from '../context/SSEContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { ChainCard } from '../components/ChainCard';
 import { formatDuration, formatMemory, formatCpu } from '../lib/format';
@@ -20,7 +20,7 @@ const PARTITIONS: { svcKey: KnownService; healthKey: string; name: string; regio
 ];
 
 export function ChainsTab() {
-  const { services } = useSSEData();
+  const { services } = useServices();
 
   return (
     <div className="space-y-6 overflow-auto">

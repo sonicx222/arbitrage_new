@@ -1,12 +1,14 @@
 import { useMemo } from 'react';
-import { useSSEData } from '../context/SSEContext';
+import { useMetrics, useServices, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { ServiceCard } from '../components/ServiceCard';
 import { LiveFeed } from '../components/LiveFeed';
 import { formatUsd, formatPct, formatNumber, calcSuccessRate } from '../lib/format';
 
 export function OverviewTab() {
-  const { metrics, services, feed } = useSSEData();
+  const { metrics } = useMetrics();
+  const { services } = useServices();
+  const { feed } = useFeed();
 
   if (!metrics) {
     return <div className="text-gray-500 text-xs">Waiting for data...</div>;
