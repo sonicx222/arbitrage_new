@@ -90,7 +90,11 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
     }
   });
 
-  app.get('/stats', (_req: Request, res: Response) => {
+  // M-03 FIX: /stats exposes full system state (service health, leader status, metrics).
+  // Add auth — leave /metrics unauthenticated per Prometheus convention.
+  const statsAuth = apiAuth();
+  const statsAuthAdapter: RequestHandler = (req, res, next) => { statsAuth(req, res, next); };
+  app.get('/stats', statsAuthAdapter, (_req: Request, res: Response) => {
     const metrics = state.getSystemMetrics();
     const serviceHealth = state.getServiceHealthMap();
     res.json({
@@ -176,20 +180,26 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
 
   // Circuit breaker proxy — AdminTab needs CB status + open/close controls (D-3)
   // GET is read-only (public). POST requires coordinator-level auth (H5 fix).
+  // H-03 FIX: Typed adapter wrappers instead of `as unknown as RequestHandler` double-casts.
+  // The security middleware uses `Request & { user?: ... }` which is structurally compatible
+  // with Express's `Request`. Adapters forward args without bypassing the type system.
   const writeAuth = apiAuth();
+  const writeAuthorize = apiAuthorize('services', 'write');
+  const authAdapter: RequestHandler = (req, res, next) => { writeAuth(req, res, next); };
+  const authorizeAdapter: RequestHandler = (req, res, next) => { writeAuthorize(req, res, next); };
   app.get('/circuit-breaker', (req: Request, res: Response) => {
     proxyToEE('/circuit-breaker', req, res);
   });
   app.post('/circuit-breaker/open',
-    writeAuth as unknown as RequestHandler,
-    apiAuthorize('services', 'write') as unknown as RequestHandler,
+    authAdapter,
+    authorizeAdapter,
     (req: Request, res: Response) => {
       proxyToEE('/circuit-breaker/open', req, res);
     },
   );
   app.post('/circuit-breaker/close',
-    writeAuth as unknown as RequestHandler,
-    apiAuthorize('services', 'write') as unknown as RequestHandler,
+    authAdapter,
+    authorizeAdapter,
     (req: Request, res: Response) => {
       proxyToEE('/circuit-breaker/close', req, res);
     },

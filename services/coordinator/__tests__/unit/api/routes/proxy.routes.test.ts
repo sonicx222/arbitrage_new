@@ -398,4 +398,92 @@ describe('Proxy Routes (proxyToEE)', () => {
       expect((res as any).capturedOptions.port).toBe(3005);
     });
   });
+
+  // ===========================================================================
+  // M-05: POST circuit-breaker auth tests
+  // ===========================================================================
+
+  describe('POST /circuit-breaker auth middleware', () => {
+    it('should return 401 when unauthenticated (apiAuth rejects)', async () => {
+      // Override apiAuth to return a middleware that sends 401
+      const security = require('@arbitrage/security');
+      (security.apiAuth as jest.Mock).mockReturnValue(
+        (_req: any, res: any, _next: any) => res.status(401).json({ error: 'Unauthorized' }),
+      );
+
+      const app = createApp();
+
+      const openRes = await supertest(app)
+        .post('/circuit-breaker/open')
+        .send({});
+      expect(openRes.status).toBe(401);
+      expect(openRes.body).toEqual({ error: 'Unauthorized' });
+
+      const closeRes = await supertest(app)
+        .post('/circuit-breaker/close')
+        .send({});
+      expect(closeRes.status).toBe(401);
+      expect(closeRes.body).toEqual({ error: 'Unauthorized' });
+    });
+
+    it('should return 403 when authenticated but unauthorized (apiAuthorize rejects)', async () => {
+      // apiAuth passes, but apiAuthorize rejects with 403
+      const security = require('@arbitrage/security');
+      const passthrough = (_req: any, _res: any, next: any) => next();
+      (security.apiAuth as jest.Mock).mockReturnValue(passthrough);
+      (security.apiAuthorize as jest.Mock).mockReturnValue(
+        (_req: any, res: any, _next: any) => res.status(403).json({ error: 'Forbidden' }),
+      );
+
+      const app = createApp();
+
+      const openRes = await supertest(app)
+        .post('/circuit-breaker/open')
+        .send({});
+      expect(openRes.status).toBe(403);
+      expect(openRes.body).toEqual({ error: 'Forbidden' });
+
+      const closeRes = await supertest(app)
+        .post('/circuit-breaker/close')
+        .send({});
+      expect(closeRes.status).toBe(403);
+      expect(closeRes.body).toEqual({ error: 'Forbidden' });
+    });
+
+    it('should proxy through when authenticated and authorized', async () => {
+      // Both auth middlewares pass through (default mock behavior)
+      const security = require('@arbitrage/security');
+      const passthrough = (_req: any, _res: any, next: any) => next();
+      (security.apiAuth as jest.Mock).mockReturnValue(passthrough);
+      (security.apiAuthorize as jest.Mock).mockReturnValue(passthrough);
+
+      const app = createApp();
+
+      const res = await proxyRequest(app, 'post', '/circuit-breaker/open', (_mockReq, mockRes) => {
+        mockRes.emit('data', Buffer.from(JSON.stringify({ state: 'OPEN' })));
+        mockRes.emit('end');
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ state: 'OPEN' });
+    });
+
+    it('should NOT require auth for GET /circuit-breaker (read-only)', async () => {
+      // Even with apiAuth returning 401, GET should still work (no auth middleware)
+      const security = require('@arbitrage/security');
+      (security.apiAuth as jest.Mock).mockReturnValue(
+        (_req: any, res: any, _next: any) => res.status(401).json({ error: 'Unauthorized' }),
+      );
+
+      const app = createApp();
+
+      const res = await proxyRequest(app, 'get', '/circuit-breaker', (_mockReq, mockRes) => {
+        mockRes.emit('data', Buffer.from(JSON.stringify({ state: 'CLOSED' })));
+        mockRes.emit('end');
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ state: 'CLOSED' });
+    });
+  });
 });

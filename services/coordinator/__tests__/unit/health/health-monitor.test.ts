@@ -1359,7 +1359,7 @@ describe('HealthMonitor', () => {
       Date.now = originalDateNow;
     });
 
-    it('should purge ancient heartbeat entries', () => {
+    it('should mark ancient heartbeat entries as unhealthy instead of deleting (M-01)', () => {
       const mon = new HealthMonitor(mockLogger, mockOnAlert, {
         consecutiveFailuresThreshold: 3,
         staleHeartbeatThresholdMs: 5000,
@@ -1384,18 +1384,12 @@ describe('HealthMonitor', () => {
 
       mon.evaluateDegradationLevel(serviceMap, 100);
 
-      // The ancient entry should have been purged from the map
-      expect(serviceMap.has('ancient-detector')).toBe(false);
-      // Fresh entry should remain
+      // M-01 FIX: Ancient entry preserved as unhealthy (not deleted) for dashboard visibility
+      expect(serviceMap.has('ancient-detector')).toBe(true);
+      const ancient = serviceMap.get('ancient-detector')!;
+      expect(ancient.status).toBe('unhealthy');
+      // Fresh entry should remain healthy
       expect(serviceMap.has('execution-engine')).toBe(true);
-
-      // Should have logged the purge
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Purged ancient heartbeat entry',
-        expect.objectContaining({
-          service: 'ancient-detector',
-        })
-      );
 
       Date.now = originalDateNow;
     });

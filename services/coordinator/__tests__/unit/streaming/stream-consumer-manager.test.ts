@@ -11,6 +11,7 @@
  * @see OP-1 in docs/reports/CONSOLIDATED_ANALYSIS_SUPPLEMENT.md
  */
 
+import fsPromises from 'fs/promises';
 import {
   StreamConsumerManager,
 } from '../../../src/streaming/stream-consumer-manager';
@@ -21,6 +22,12 @@ import type {
   StreamAlert,
   StreamConsumerManagerConfig,
 } from '../../../src/streaming/stream-consumer-manager';
+
+jest.mock('fs/promises', () => ({
+  mkdir: jest.fn().mockResolvedValue(undefined),
+  stat: jest.fn().mockRejectedValue(new Error('ENOENT')),
+  appendFile: jest.fn().mockResolvedValue(undefined),
+}));
 
 // =============================================================================
 // Mock Factories
@@ -579,6 +586,76 @@ describe('StreamConsumerManager', () => {
 
       // All three streams should be checked
       expect(streamsClient.xpending).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ===========================================================================
+  // M-10: DLQ local file fallback when Redis DLQ write fails
+  // ===========================================================================
+
+  describe('DLQ local file fallback (M-10)', () => {
+    it('should write JSONL fallback and still ACK when both handler and DLQ write fail', async () => {
+      const groupConfig = createGroupConfig();
+      const handler = jest.fn().mockRejectedValue(new Error('Handler exploded'));
+
+      // Make DLQ write (xaddWithLimit) also fail — triggers local file fallback
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis DLQ unavailable'));
+
+      const wrapped = manager.withDeferredAck(groupConfig, handler);
+      await wrapped({ id: '99-0', data: { chain: 'ethereum', type: 'opportunity' } });
+
+      // Verify local file fallback was invoked
+      const mockAppendFile = fsPromises.appendFile as jest.Mock;
+      expect(mockAppendFile).toHaveBeenCalledTimes(1);
+
+      // Verify JSONL line format
+      const [filePath, content] = mockAppendFile.mock.calls[0];
+      expect(filePath).toMatch(/dlq-fallback-\d{4}-\d{2}-\d{2}\.jsonl$/);
+      const parsed = JSON.parse(content.trim());
+      expect(parsed).toMatchObject({
+        _dlq_schema: 'coordinator_v1',
+        originalMessageId: '99-0',
+        _dlq_originalStream: 'stream:opportunities',
+        _dlq_errorCode: 'Handler exploded',
+        service: 'coordinator',
+      });
+      // originalData should be the full message data object
+      expect(parsed.originalData).toEqual({ chain: 'ethereum', type: 'opportunity' });
+
+      // Message should still be ACKed to prevent infinite retry
+      expect(streamsClient.xack).toHaveBeenCalledWith(
+        'stream:opportunities',
+        'coordinator-group',
+        '99-0',
+      );
+    });
+
+    it('should log error when local file fallback also fails', async () => {
+      const groupConfig = createGroupConfig();
+      const handler = jest.fn().mockRejectedValue(new Error('Handler failed'));
+
+      // Both DLQ and local file fail
+      streamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis DLQ down'));
+      (fsPromises.appendFile as jest.Mock).mockRejectedValueOnce(new Error('Disk full'));
+
+      const wrapped = manager.withDeferredAck(groupConfig, handler);
+      await wrapped({ id: '100-0', data: { id: 'opp-lost' } });
+
+      // Should log the double failure
+      expect(logger.error).toHaveBeenCalledWith(
+        'Local DLQ fallback write also failed',
+        expect.objectContaining({
+          originalMessageId: '100-0',
+          sourceStream: 'stream:opportunities',
+        }),
+      );
+
+      // Message should still be ACKed
+      expect(streamsClient.xack).toHaveBeenCalledWith(
+        'stream:opportunities',
+        'coordinator-group',
+        '100-0',
+      );
     });
   });
 });

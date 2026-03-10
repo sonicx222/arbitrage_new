@@ -787,9 +787,9 @@ Tracks which token pairs are currently generating opportunities across all parti
 - Pairs expire after TTL to prevent unbounded growth
 - Size-limited map with LRU eviction at max capacity
 
-**Stream Consumer Groups (5 Hardcoded Groups)**
+**Stream Consumer Groups (9 Groups)**
 
-The coordinator subscribes to 5 Redis Streams consumer groups, one per stream topic. The count is intentionally hardcoded to match the Redis stream topology:
+The coordinator subscribes to 9 Redis Streams consumer groups, one per stream topic:
 
 | Consumer Group | Stream | Purpose |
 |----------------|--------|---------|
@@ -798,6 +798,10 @@ The coordinator subscribes to 5 Redis Streams consumer groups, one per stream to
 | `coordinator-swap-events` | `stream:swap-events` | Swap event monitoring |
 | `coordinator-whale-alerts` | `stream:whale-alerts` | Large transaction alerts |
 | `coordinator-volume` | `stream:volume-aggregates` | Volume tracking |
+| `coordinator-prices` | `stream:price-updates` | Solana price feed integration (S3.3.5) |
+| `coordinator-exec-results` | `stream:execution-results` | Execution results for metrics (OP-10) |
+| `coordinator-dlq` | `stream:dead-letter-queue` | Dead-letter queue monitoring (ES-003) |
+| `coordinator-fwd-dlq` | `stream:forwarding-dlq` | Forwarding failure recovery (DF-004) |
 
 Each consumer group uses a single consumer (the coordinator instance ID). This design ensures:
 - No duplicate processing (one coordinator instance processes each message)

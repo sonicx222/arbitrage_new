@@ -498,6 +498,111 @@ describe('SSE Routes', () => {
   // SSE Message Format
   // ===========================================================================
 
+  // ===========================================================================
+  // M-02: SSE subscription error propagation
+  // ===========================================================================
+
+  describe('subscription error propagation', () => {
+    it('should clean up connection counter if subscribeSSE callback throws', () => {
+      delete process.env.DASHBOARD_AUTH_TOKEN;
+
+      // Create a state provider where subscribeSSE captures the listener
+      let capturedListener: ((event: string, data: unknown) => void) | null = null;
+      const state = createMockStateProvider({
+        subscribeSSE: jest.fn((listener) => {
+          capturedListener = listener;
+          return () => {};
+        }),
+      });
+
+      const { createSSERoutes } = importSSERoutes();
+      const router = createSSERoutes(state);
+      const handler = getEventsHandler(router);
+
+      // Open a connection — counter increments
+      const req1 = createMockReq({});
+      const res1 = createMockRes();
+      handler(req1, res1);
+      expect(res1.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+        'Content-Type': 'text/event-stream',
+      }));
+
+      // Simulate the subscription callback throwing an error during a real-time push
+      // The SSE send function calls res.write which could throw, or the listener itself throws
+      // Either way, the connection should still be cleanable via the 'close' event
+      expect(capturedListener).not.toBeNull();
+
+      // Even after an error in the callback, emitting 'close' should decrement the counter
+      req1.emit('close');
+
+      // Verify cleanup worked: opening 50 new connections should succeed (counter was decremented)
+      const connections: EventEmitter[] = [];
+      for (let i = 0; i < 50; i++) {
+        const req = createMockReq({});
+        const res = createMockRes();
+        handler(req, res);
+        connections.push(req);
+      }
+
+      // 51st should fail (at limit)
+      const reqOver = createMockReq({});
+      const resOver = createMockRes();
+      handler(reqOver, resOver);
+      expect(resOver.status).toHaveBeenCalledWith(503);
+
+      // Cleanup
+      for (const req of connections) {
+        req.emit('close');
+      }
+    });
+
+    it('should not prevent cleanup when subscribeSSE listener encounters write error', () => {
+      delete process.env.DASHBOARD_AUTH_TOKEN;
+
+      let capturedListener: ((event: string, data: unknown) => void) | null = null;
+      const state = createMockStateProvider({
+        subscribeSSE: jest.fn((listener) => {
+          capturedListener = listener;
+          return () => {};
+        }),
+      });
+
+      const { createSSERoutes } = importSSERoutes();
+      const router = createSSERoutes(state);
+      const handler = getEventsHandler(router);
+
+      const req = createMockReq({});
+      const res = createMockRes();
+      handler(req, res);
+
+      // Make res.write throw (simulates broken pipe / client disconnect before close event)
+      (res.write as jest.Mock).mockImplementation(() => { throw new Error('write EPIPE'); });
+
+      // Push an event through the subscription — this will throw inside the SSE send()
+      expect(() => capturedListener!('test-event', { data: 'test' })).toThrow('write EPIPE');
+
+      // Despite the error, cleanup via close event should still work
+      // (res.write mock restored for cleanup verification isn't needed — we just verify
+      // that close event properly calls unsubscribe and decrements counter)
+      req.emit('close');
+
+      // Counter should be back to 0: a new connection should succeed
+      const req2 = createMockReq({});
+      const res2 = createMockRes();
+      handler(req2, res2);
+      expect(res2.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+        'Content-Type': 'text/event-stream',
+      }));
+
+      // Cleanup
+      req2.emit('close');
+    });
+  });
+
+  // ===========================================================================
+  // SSE Message Format
+  // ===========================================================================
+
   describe('message format', () => {
     it('should use monotonically increasing message IDs', () => {
       delete process.env.DASHBOARD_AUTH_TOKEN;

@@ -192,17 +192,22 @@ export class HealthMonitor {
     serviceHealth: Map<string, ServiceHealth>,
     systemHealth: number
   ): void {
-    // Purge ancient heartbeat entries (>5 minutes) from previous runs
+    // OP-13 FIX: Detect stale heartbeats before evaluating degradation.
+    // detectStaleServices checks for `status === 'healthy'` entries with stale heartbeats,
+    // so it MUST run before the ancient entry cleanup below.
+    const staleCount = this.detectStaleServices(serviceHealth);
+
+    // M-01 FIX: Mark ancient heartbeat entries (>5 minutes) as unhealthy instead of deleting.
+    // Deleting from the live Map made stale services invisible to dashboard/API/SSE.
+    // Runs AFTER detectStaleServices so recently-stale entries get proper logging first.
     const now = Date.now();
     for (const [name, health] of serviceHealth) {
-      if (health.lastHeartbeat && (now - health.lastHeartbeat) > 300_000) {
-        serviceHealth.delete(name);
-        this.logger.info('Purged ancient heartbeat entry', { service: name, ageMs: now - health.lastHeartbeat });
+      if (health.lastHeartbeat && (now - health.lastHeartbeat) > 300_000 && health.status === 'healthy') {
+        health.status = 'unhealthy';
+        health.error = `No heartbeat for ${Math.round((now - health.lastHeartbeat) / 1000)}s`;
+        this.logger.info('Marked ancient service as unhealthy', { service: name, ageMs: now - health.lastHeartbeat });
       }
     }
-
-    // OP-13 FIX: Detect stale heartbeats before evaluating degradation
-    const staleCount = this.detectStaleServices(serviceHealth);
 
     // Hysteresis: require consecutive stale detections before downgrading
     if (staleCount > 0) {

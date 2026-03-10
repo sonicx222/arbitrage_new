@@ -117,10 +117,36 @@ jest.mock('@arbitrage/core', () => ({
     ERROR: 'error'
   },
   // Add missing exports
-  StreamConsumer: jest.fn().mockImplementation(() => ({
-    start: jest.fn(),
-    stop: jest.fn(() => Promise.resolve())
-  })),
+  // M-08 FIX: Stateful StreamConsumer mock — messagesProcessed increments when handler is invoked
+  StreamConsumer: jest.fn().mockImplementation((client: unknown, config: { handler?: (msg: unknown) => Promise<void> }) => {
+    const stats = {
+      messagesProcessed: 0,
+      messagesFailed: 0,
+      lastProcessedAt: null as number | null,
+      isRunning: false,
+      isPaused: false,
+    };
+    return {
+      start: jest.fn(() => { stats.isRunning = true; }),
+      stop: jest.fn(async () => { stats.isRunning = false; }),
+      getStats: jest.fn(() => ({ ...stats })),
+      pause: jest.fn(() => { stats.isPaused = true; }),
+      resume: jest.fn(() => { stats.isPaused = false; }),
+      // Simulate message processing: calling _simulateMessage invokes the handler
+      // and increments stats, matching real StreamConsumer behavior
+      _simulateMessage: async (msg: unknown) => {
+        if (config?.handler) {
+          try {
+            await config.handler(msg);
+            stats.messagesProcessed++;
+            stats.lastProcessedAt = Date.now();
+          } catch {
+            stats.messagesFailed++;
+          }
+        }
+      },
+    };
+  }),
   getStreamHealthMonitor: jest.fn(() => ({
     setConsumerGroup: jest.fn(),
     start: jest.fn(),

@@ -525,6 +525,94 @@ describe('OpportunityRouter - Admission Control', () => {
     });
   });
 
+  describe('circuit breaker OPEN + backpressure interaction', () => {
+    it('should shed all at full backpressure even when CB is also open (backpressure acts first)', async () => {
+      router = createRouter(logger, streamsClient, circuitBreaker, {
+        maxForwardPerBatch: 0,
+      });
+      // Both conditions active: CB open AND full backpressure
+      circuitBreaker.isCurrentlyOpen.mockReturnValue(true);
+      router.setExecutionStreamDepthRatio(0.95);
+
+      const batch = [
+        createBatchEntry({ id: 'opp-1', buyDex: 'dex-a', expectedProfit: 5.0 }),
+        createBatchEntry({ id: 'opp-2', buyDex: 'dex-b', expectedProfit: 3.0 }),
+      ];
+
+      const processedIds = await router.processOpportunityBatch(batch, true);
+
+      // All messages ACKed
+      expect(processedIds).toHaveLength(2);
+      // Nothing forwarded — backpressure shed everything before CB check
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
+      // Shed tracked in admission metrics
+      const metrics = router.getAdmissionMetrics();
+      expect(metrics.shed).toBe(2);
+      expect(metrics.admitted).toBe(0);
+      // CB was never consulted because backpressure blocked all admissions
+      expect(circuitBreaker.isCurrentlyOpen).not.toHaveBeenCalled();
+    });
+
+    it('should hit CB rejection for admitted opps when backpressure allows partial forwarding', async () => {
+      router = createRouter(logger, streamsClient, circuitBreaker, {
+        maxForwardPerBatch: 0,
+      });
+      // CB is open, backpressure at depth 0.4 → 75% tier: ceil(8 * 0.75) = 6 admitted
+      circuitBreaker.isCurrentlyOpen.mockReturnValue(true);
+      router.setExecutionStreamDepthRatio(0.4);
+
+      const batch = Array.from({ length: 8 }, (_, i) =>
+        createBatchEntry({
+          id: `opp-${i}`,
+          expectedProfit: (i + 1) * 1.0,
+          buyDex: `dex-${i}`,
+        }),
+      );
+
+      await router.processOpportunityBatch(batch, true);
+
+      // Backpressure admits ceil(8 * 0.75) = 6 opps, sheds 2.
+      // All 6 admitted opps reach forwardToExecutionEngine, where CB blocks them.
+      expect(circuitBreaker.isCurrentlyOpen).toHaveBeenCalled();
+      // xaddWithLimit IS called — but only for DLQ writes (CB moves blocked opps to DLQ).
+      // All DLQ writes target 'stream:forwarding-dlq', not the execution requests stream.
+      const dlqCalls = streamsClient.xaddWithLimit.mock.calls.filter(
+        ([stream]: [string]) => stream === 'stream:forwarding-dlq',
+      );
+      const execCalls = streamsClient.xaddWithLimit.mock.calls.filter(
+        ([stream]: [string]) => stream !== 'stream:forwarding-dlq',
+      );
+      expect(dlqCalls.length).toBe(6); // 6 admitted opps → 6 DLQ writes
+      expect(execCalls.length).toBe(0); // No execution stream writes
+      // CB rejection logged as debug with circuit open message
+      expect(logger.debug).toHaveBeenCalledWith(
+        'Execution circuit open, skipping opportunity forwarding',
+        expect.objectContaining({ id: expect.any(String) }),
+      );
+    });
+
+    it('should shed single-message batch at full backpressure regardless of CB state', async () => {
+      router = createRouter(logger, streamsClient, circuitBreaker, {
+        maxForwardPerBatch: 0,
+      });
+      circuitBreaker.isCurrentlyOpen.mockReturnValue(true);
+      router.setExecutionStreamDepthRatio(0.95);
+
+      const batch = [
+        createBatchEntry({ id: 'single-opp', buyDex: 'dex-a', expectedProfit: 100 }),
+      ];
+
+      const processedIds = await router.processOpportunityBatch(batch, true);
+
+      expect(processedIds).toHaveLength(1);
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
+      // Backpressure caught it — CB never checked
+      expect(circuitBreaker.isCurrentlyOpen).not.toHaveBeenCalled();
+      const metrics = router.getAdmissionMetrics();
+      expect(metrics.shed).toBe(1);
+    });
+  });
+
   describe('depth ratio edge cases', () => {
     beforeEach(() => {
       router = createRouter(logger, streamsClient, circuitBreaker, {

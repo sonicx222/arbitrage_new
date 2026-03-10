@@ -18,11 +18,18 @@ export function getString(data: Record<string, unknown>, key: string, defaultVal
 
 /**
  * Safely extract a number value from an object.
- * Returns the default value if the field is missing or not a number.
+ * Returns the default value if the field is missing or not a valid number.
+ * H-01 FIX: Also handles string-encoded numerics from Redis stream
+ * deserialization, where all values arrive as strings via .toString().
  */
 export function getNumber(data: Record<string, unknown>, key: string, defaultValue: number = 0): number {
   const value = data[key];
-  return typeof value === 'number' && !isNaN(value) ? value : defaultValue;
+  if (typeof value === 'number') return isNaN(value) ? defaultValue : value;
+  if (typeof value === 'string' && value !== '') {
+    const parsed = Number(value);
+    return isNaN(parsed) ? defaultValue : parsed;
+  }
+  return defaultValue;
 }
 
 /**

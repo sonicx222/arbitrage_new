@@ -127,13 +127,8 @@ interface LeaderElectionConfig {
   instanceId: string;
 }
 
-/**
- * FIX: Graceful degradation modes per ADR-007.
- * R2: Re-exported from health/ module for backward compatibility.
- * @deprecated Import directly from './health' instead
- * @see health/health-monitor.ts for implementation
- */
-export { DegradationLevel } from './health';
+// M-16 FIX: Removed deprecated DegradationLevel re-export.
+// All consumers import directly from './health'. No callers found using the re-export.
 
 // =============================================================================
 // Dependency Injection Interface
@@ -2541,12 +2536,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
       return;
     }
 
-    // Check if any detectors are healthy
-    const healthyDetectors = Array.from(this.serviceHealth.values()).filter(
-      s => s.status === 'healthy' && s.name !== 'coordinator' && s.name !== 'execution-engine'
-    );
+    // M-12 FIX: Single-pass loop collects names and count without intermediate array
+    const healthyDetectorNames: string[] = [];
+    for (const s of this.serviceHealth.values()) {
+      if (s.status === 'healthy' && s.name !== 'coordinator' && s.name !== 'execution-engine') {
+        healthyDetectorNames.push(s.name);
+      }
+    }
 
-    if (healthyDetectors.length === 0) {
+    if (healthyDetectorNames.length === 0) {
       // No healthy detectors — starvation is expected, not an alert condition
       return;
     }
@@ -2564,9 +2562,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
         type: 'PIPELINE_STARVATION',
         service: 'coordinator',
         severity: 'warning',
-        message: `Pipeline starved: ${healthyDetectors.length} healthy detector(s) but 0 execution requests for ${Math.round(starvationDuration / 1000)}s`,
+        message: `Pipeline starved: ${healthyDetectorNames.length} healthy detector(s) but 0 execution requests for ${Math.round(starvationDuration / 1000)}s`,
         data: {
-          healthyDetectors: healthyDetectors.map(s => s.name),
+          healthyDetectors: healthyDetectorNames,
           starvationDurationMs: starvationDuration,
           executionRequestStreamLen: executionRequestsLen,
         },
