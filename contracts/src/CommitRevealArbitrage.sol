@@ -469,8 +469,9 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         nonReentrant
         whenNotPaused
     {
-        // 1. Calculate commitment hash (includes msg.sender to prevent griefing)
-        bytes32 commitmentHash = keccak256(abi.encodePacked(msg.sender, abi.encode(params)));
+        // 1. Calculate commitment hash (includes chainid, contract address, and msg.sender
+        //    to prevent cross-chain replay and griefing attacks)
+        bytes32 commitmentHash = keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, abi.encode(params)));
         uint256 commitBlock = uint256(_commitments[commitmentHash].blockNumber);
 
         // 2. Validate commitment exists, not revealed, caller authorized

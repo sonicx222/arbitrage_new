@@ -25,7 +25,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  *
  * Balancer V2 flash loans are **permanently fee-free** (0%) per governance decision.
  * This is a competitive advantage over other flash loan providers:
- * - Aave V3: 0.09% (9 basis points)
+ * - Aave V3: 0.05% (5 basis points, post-AIP-382)
  * - PancakeSwap V3: 0.01-1% (pool-dependent)
  * - SyncSwap: ~0.3% (configurable)
  *
@@ -35,7 +35,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * Reference: https://docs.balancer.fi/reference/contracts/flash-loans.html
  *
  * Balancer V2 Flash Loan Advantages:
- * - Zero flash loan fees (unlike Aave V3's 0.09%)
+ * - Zero flash loan fees (unlike Aave V3's 0.05%)
  * - Single Vault contract per chain (no pool discovery needed)
  * - Massive liquidity across all Balancer pools
  * - Simple callback interface with array-based parameters

@@ -30,7 +30,7 @@ Integrate Aave V3 flash loans with a custom arbitrage contract:
 │                                                                                  │
 │  FlashLoanStrategy                                                               │
 │       │                                                                          │
-│       ├── 1. Analyze profitability (fee: 0.09%)                                 │
+│       ├── 1. Analyze profitability (fee: 0.05%)                                 │
 │       │                                                                          │
 │       ├── 2. Build swap path with slippage protection                           │
 │       │                                                                          │
@@ -51,7 +51,7 @@ Integrate Aave V3 flash loans with a custom arbitrage contract:
 │  │       │                                                                  │    │
 │  │       ├── Verify profit >= minProfit                                    │    │
 │  │       │                                                                  │    │
-│  │       └── Repay loan + 0.09% fee                                        │    │
+│  │       └── Repay loan + 0.05% fee                                        │    │
 │  │                                                                          │    │
 │  └─────────────────────────────────────────────────────────────────────────┘    │
 │                                                                                  │
@@ -61,30 +61,24 @@ Integrate Aave V3 flash loans with a custom arbitrage contract:
 ### Smart Contract
 
 ```solidity
-// contracts/src/FlashLoanArbitrage.sol
-contract FlashLoanArbitrage is
-    IFlashLoanSimpleReceiver,
-    ReentrancyGuard,
-    Ownable2Step,
-    Pausable
-{
-    // Execute multi-hop arbitrage with flash loan
-    // v1.2.0+: Added deadline parameter for staleness protection
-    function executeArbitrage(
-        address asset,
-        uint256 amount,
-        SwapStep[] calldata swapPath,
-        uint256 minProfit,
-        uint256 deadline  // Added in v1.2.0
-    ) external;
+// contracts/src/base/BaseFlashArbitrage.sol (abstract base, v2.1.0)
+// Shared logic: swap execution, profit verification, admin, config, fund recovery
+abstract contract BaseFlashArbitrage is
+    Ownable2Step, Pausable, ReentrancyGuard, IFlashLoanErrors { ... }
 
-    // Calculate expected profit before execution
-    function calculateExpectedProfit(
-        address asset,
-        uint256 amount,
-        SwapStep[] calldata swapPath
-    ) external view returns (uint256 expectedProfit, uint256 flashLoanFee);
+// contracts/src/FlashLoanArbitrage.sol (Aave V3, v2.1.0)
+contract FlashLoanArbitrage is BaseFlashArbitrage, IFlashLoanSimpleReceiver {
+    function executeArbitrage(address asset, uint256 amount,
+        SwapStep[] calldata swapPath, uint256 minProfit, uint256 deadline) external;
+    function executeOperation(...) external returns (bool); // Aave callback
 }
+
+// Other flash loan protocols (all inherit BaseFlashArbitrage):
+// - BalancerV2FlashArbitrage (0% fee, receiveFlashLoan callback)
+// - PancakeSwapFlashArbitrage (pool-dependent 0.01-1%, pancakeV3FlashCallback)
+// - SyncSwapFlashArbitrage (0.3% fee, EIP-3156 onFlashLoan)
+// - DaiFlashMintArbitrage (0.01% fee, EIP-3156 onFlashLoan, DAI only)
+// - CommitRevealArbitrage (MEV-protected commit-reveal, v3.1.0)
 ```
 
 ### Strategy Implementation
@@ -107,7 +101,7 @@ class FlashLoanStrategy extends BaseExecutionStrategy {
 
 ### Why Aave V3?
 
-1. **Lowest fee**: 0.09% (9 basis points) vs competitors
+1. **Lowest fee**: 0.05% (5 basis points, post-AIP-382) vs competitors
 2. **Most liquid**: Largest flash loan pool
 3. **Multi-chain**: Available on Ethereum, Polygon, Arbitrum, Optimism
 4. **Proven**: Battle-tested in production
@@ -125,7 +119,7 @@ Decision flow in FlashLoanStrategy:
 
 ```typescript
 function analyzeProfitability(opportunity): ProfitabilityAnalysis {
-  const flashLoanFee = amount * 0.0009; // 0.09%
+  const flashLoanFee = amount * 0.0005; // 0.05% (5 bps, post-AIP-382)
   const flashLoanProfit = expectedProfit - flashLoanFee - gasEstimate;
   const directProfit = expectedProfit - gasEstimate;
 
@@ -154,7 +148,7 @@ function analyzeProfitability(opportunity): ProfitabilityAnalysis {
 
 ### Negative
 
-- **Fee overhead**: 0.09% reduces profit margin
+- **Fee overhead**: 0.05% reduces profit margin
 - **Contract risk**: Smart contract vulnerabilities
 - **Gas overhead**: Contract calls cost more gas
 - **Chain limitations**: Only works on chains with Aave

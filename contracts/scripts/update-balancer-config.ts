@@ -56,7 +56,7 @@ function generateFlashLoanProvidersConfig(
   lines.push('// Balancer V2 Flash Loan Providers (Task 2.2)');
   lines.push('// =============================================================================');
   lines.push('// Copy these entries into FLASH_LOAN_PROVIDERS in service-config.ts');
-  lines.push('// REPLACE the corresponding Aave V3 entries to save 0.09% on flash loans');
+  lines.push('// REPLACE the corresponding Aave V3 entries to save 0.05% on flash loans');
   lines.push('// =============================================================================\n');
 
   for (const [network, deployment] of Object.entries(deployments).sort()) {
@@ -65,7 +65,7 @@ function generateFlashLoanProvidersConfig(
     lines.push(`  ${normalizedNetwork}: {`);
     lines.push(`    address: '${deployment.vaultAddress}',  // Balancer V2 Vault`);
     lines.push(`    protocol: 'balancer_v2',`);
-    lines.push(`    fee: 0  // 0% flash loan fee (saves 0.09% vs Aave V3)`);
+    lines.push(`    fee: 0  // 0% flash loan fee (saves 0.05% vs Aave V3)`);
     lines.push(`  },`);
     lines.push('');
   }
@@ -153,8 +153,8 @@ function generateDeploymentSummary(
 
   lines.push(`✅ Deployed:  ${totalDeployments}/6 chains`);
   lines.push(`✅ Verified:  ${verifiedDeployments}/${totalDeployments} contracts`);
-  lines.push(`💰 Fee:       0% (vs Aave V3's 0.09%)`);
-  lines.push(`💸 Savings:   $90 per $100K flash loan`);
+  lines.push(`💰 Fee:       0% (vs Aave V3's 0.05%)`);
+  lines.push(`💸 Savings:   $50 per $100K flash loan`);
 
   return lines.join('\n');
 }
@@ -319,7 +319,7 @@ function main(): void {
     console.log('6. Update implementation plan document (Task 2.2 → Complete)');
   }
 
-  console.log('\n🎉 You\'ll save 0.09% on every flash loan with Balancer V2!\n');
+  console.log('\n🎉 You\'ll save 0.05% on every flash loan with Balancer V2!\n');
 }
 
 // Run the script

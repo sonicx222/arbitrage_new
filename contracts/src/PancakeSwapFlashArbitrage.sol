@@ -53,7 +53,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * PancakeSwap V3 uses a different flash loan mechanism than Aave V3:
  * - Callback: pancakeV3FlashCallback(fee0, fee1, data) instead of executeOperation()
  * - Pool-specific fees: 100, 500, 2500, 10000 (hundredths of a bip, i.e., 1e-6)
- *   → 0.01%, 0.05%, 0.25%, 1.00% respectively (vs Aave's fixed 0.09%)
+ *   → 0.01%, 0.05%, 0.25%, 1.00% respectively (vs Aave's fixed 0.05%)
  * - Security: Must verify callback caller is a whitelisted PancakeSwap V3 pool
  * - Fees paid at end of transaction, not pulled by pool
  *
@@ -86,6 +86,10 @@ contract PancakeSwapFlashArbitrage is
     /// @dev Critical security: Only whitelisted pools can call pancakeV3FlashCallback
     EnumerableSet.AddressSet private _whitelistedPools;
 
+    /// @notice Guard flag to prevent direct callback invocation (defense in depth)
+    /// @dev Set in executeArbitrage(), checked in pancakeV3FlashCallback(), cleared after callback
+    bool private _flashLoanActive;
+
     // ==========================================================================
     // Events (Protocol-Specific)
     // ==========================================================================
@@ -106,6 +110,7 @@ contract PancakeSwapFlashArbitrage is
     error EmptyPoolsArray();
     error PoolNotFromFactory();
     error InsufficientPoolLiquidity();
+    error FlashLoanNotActive();
     error BatchTooLarge(uint256 requested, uint256 maximum);
 
     // ==========================================================================
@@ -192,8 +197,14 @@ contract PancakeSwapFlashArbitrage is
             revert InvalidSwapPath(); // Asset must be token0 or token1
         }
 
+        // Set flash loan active guard (defense in depth — prevents direct callback calls)
+        _flashLoanActive = true;
+
         // Initiate flash loan
         poolContract.flash(address(this), amount0, amount1, data);
+
+        // Clear flash loan guard after successful execution
+        _flashLoanActive = false;
     }
 
     /**
@@ -210,6 +221,9 @@ contract PancakeSwapFlashArbitrage is
     ) external override {
         // Security: Verify caller is a whitelisted PancakeSwap V3 pool
         if (!_whitelistedPools.contains(msg.sender)) revert InvalidFlashLoanCaller();
+
+        // Security: Verify flash loan was initiated by this contract (defense in depth)
+        if (!_flashLoanActive) revert FlashLoanNotActive();
 
         // Decode flash loan context from calldata (gas optimization over storage)
         (SwapStep[] memory swapPath, address asset, uint256 amount, uint256 minProfit) =

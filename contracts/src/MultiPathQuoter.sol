@@ -216,7 +216,7 @@ contract MultiPathQuoter {
      *
      * @param requests Array of quote requests for the arbitrage path
      * @param flashLoanAmount The amount to flash loan
-     * @param flashLoanFeeBps Flash loan fee in basis points (9 for Aave V3 = 0.09%)
+     * @param flashLoanFeeBps Flash loan fee in basis points (5 for Aave V3 = 0.05%, post-AIP-382)
      * @return expectedProfit Net profit after flash loan fee (0 if any quote fails)
      * @return finalAmount Final amount after all swaps
      * @return allSuccess Whether all quotes succeeded

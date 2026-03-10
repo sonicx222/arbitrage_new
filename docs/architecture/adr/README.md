@@ -178,7 +178,7 @@ An Architecture Decision Record captures an important architectural decision mad
 ### Capital Efficiency (Phase 3)
 
 19. **Flash Loan Integration** (ADR-020)
-    - Aave V3 flash loans (0.09% fee)
+    - Aave V3 flash loans (0.05% fee, post-AIP-382)
     - Zero-capital arbitrage
     - Custom FlashLoanArbitrage.sol contract
 

@@ -63,7 +63,7 @@ function printNextSteps(result: Record<string, any>, networkName: string): void 
   // Print cost comparison vs other protocols (preserved messaging)
   console.log('\nFlash Loan Fee Comparison:');
   console.log('   SyncSwap:   0.3% (30 bps) - This deployment');
-  console.log('   Aave V3:    0.09% (9 bps) - Cheaper but not on zkSync Era');
+  console.log('   Aave V3:    0.05% (5 bps) - Cheaper but not on zkSync Era');
   console.log('   Balancer:   0% - Cheapest but not on zkSync Era');
   console.log('   Note: SyncSwap is currently the best option for zkSync Era flash loans');
   console.log('========================================\n');

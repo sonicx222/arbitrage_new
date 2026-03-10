@@ -12,7 +12,7 @@ ADR-020 introduced Aave V3 flash loans, and ADR-030 expanded to PancakeSwap V3 a
 
 Problems with static protocol assignment:
 
-1. **Fee variation**: Balancer V2 charges 0% while Aave V3 charges 0.09% — choosing wrong costs profit
+1. **Fee variation**: Balancer V2 charges 0% while Aave V3 charges 0.05% — choosing wrong costs profit
 2. **Liquidity fragmentation**: A protocol may have deep liquidity on one chain but not another
 3. **Reliability drift**: Provider success rates change over time due to congestion, upgrades, or outages
 4. **No fallback**: If the assigned provider fails, the opportunity is lost without retry logic
@@ -141,7 +141,7 @@ All domain objects are frozen via `Object.freeze` (including nested objects) to 
 
 | Protocol | Fee | Chains | Latency Default |
 |----------|-----|--------|-----------------|
-| Aave V3 | 9 bps (0.09%) | Ethereum, Polygon, Arbitrum, Optimism, Base, Avalanche | 0.95 |
+| Aave V3 | 5 bps (0.05%) | Ethereum, Polygon, Arbitrum, Optimism, Base, Avalanche | 0.95 |
 | Balancer V2 | 0 bps (free) | Ethereum, Polygon, Arbitrum | 0.90 |
 | PancakeSwap V3 | Pool-dependent (1-100 bps) | BSC, Ethereum, Arbitrum, zkSync, Linea, Base, opBNB | 0.85 |
 | SyncSwap | 30 bps (0.30%) | zkSync, Linea | 0.80 |
@@ -205,7 +205,7 @@ Static protocol mapping (chain → protocol) was the initial design but failed b
 
 ### 2. Round-Robin Provider Selection
 **Rejected** because:
-- Ignores fee differences (0% vs 0.09% matters for profit margins)
+- Ignores fee differences (0% vs 0.05% matters for profit margins)
 - Doesn't account for liquidity sufficiency
 - No quality-based adaptation
 

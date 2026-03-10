@@ -33,9 +33,11 @@ export async function deployCommitRevealFixture() {
 
 /**
  * Create commitment hash matching the Solidity implementation.
- * keccak256(abi.encodePacked(msg.sender, abi.encode(params)))
+ * keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, abi.encode(params)))
  */
 export function createCommitmentHash(
+  chainId: bigint,
+  contractAddress: string,
   sender: string,
   asset: string,
   amountIn: bigint,
@@ -48,8 +50,11 @@ export function createCommitmentHash(
     ['tuple(address asset, uint256 amountIn, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline, bytes32 salt)'],
     [[asset, amountIn, swapPath, minProfit, deadline, salt]]
   );
-  // Match Solidity: keccak256(abi.encodePacked(msg.sender, abi.encode(params)))
-  const packed = ethers.solidityPacked(['address', 'bytes'], [sender, encoded]);
+  // Match Solidity: keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, abi.encode(params)))
+  const packed = ethers.solidityPacked(
+    ['uint256', 'address', 'address', 'bytes'],
+    [chainId, contractAddress, sender, encoded]
+  );
   return ethers.keccak256(packed);
 }
 

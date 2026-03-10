@@ -184,7 +184,7 @@ Or use the interactive secrets flow: `./infrastructure/fly/deploy.sh <service> -
 
 | Contract | Flash Loan Provider | Fee | Key Chains |
 |----------|-------------------|-----|------------|
-| **FlashLoanArbitrage** | Aave V3 | 0.09% | Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche |
+| **FlashLoanArbitrage** | Aave V3 | 0.05% | Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche |
 | **BalancerV2FlashArbitrage** | Balancer V2 | 0% | Ethereum, Polygon, Arbitrum, Optimism, Base, Fantom (Beethoven X) |
 | **PancakeSwapFlashArbitrage** | PancakeSwap V3 | Tier-based | BSC, Ethereum, Arbitrum, zkSync, Base, opBNB, Linea |
 | **SyncSwapFlashArbitrage** | SyncSwap (EIP-3156) | 0.3% | zkSync |

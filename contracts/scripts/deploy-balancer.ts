@@ -5,7 +5,7 @@
  * Task 2.2: Balancer V2 Flash Loan Provider deployment across 6 chains.
  *
  * Key Advantages over Aave V3:
- * - 0% flash loan fees (vs Aave V3's 0.09%)
+ * - 0% flash loan fees (vs Aave V3's 0.05%)
  * - Single Vault architecture (no pool discovery needed)
  * - Massive liquidity across all Balancer pools
  *
@@ -64,8 +64,8 @@ function buildConfig(vaultAddress: string): DeploymentPipelineConfig {
 function printNextSteps(result: Record<string, any>, networkName: string): void {
   // Print cost savings vs Aave V3 (preserved messaging)
   console.log('\nCost Savings vs Aave V3:');
-  console.log('   Flash Loan Fee: 0% (vs Aave V3\'s 0.09%)');
-  console.log('   Example: On a $100K flash loan, save $90 per trade!');
+  console.log('   Flash Loan Fee: 0% (vs Aave V3\'s 0.05%)');
+  console.log('   Example: On a $100K flash loan, save $50 per trade!');
   console.log('========================================\n');
 
   console.log('Deployment complete!');
@@ -95,7 +95,7 @@ function printNextSteps(result: Record<string, any>, networkName: string): void 
   console.log('   - Monitor gas costs\n');
 
   console.log('Tip: Uncomment the Balancer V2 entry in service-config.ts');
-  console.log('   to replace Aave V3 and start saving 0.09% on every flash loan!');
+  console.log('   to replace Aave V3 and start saving 0.05% on every flash loan!');
 }
 
 // =============================================================================

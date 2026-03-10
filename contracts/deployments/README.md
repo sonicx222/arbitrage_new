@@ -277,7 +277,7 @@ npm run validate:addresses  # TODO: Implement
 
 **File**: `contracts/src/FlashLoanArbitrage.sol`
 **Flash Loan Source**: Aave V3 Pool
-**Fee**: 0.09% (9 bps)
+**Fee**: 0.05% (5 bps, post-AIP-382)
 **Chains**: All EVM chains with Aave V3
 
 **Deployment**:

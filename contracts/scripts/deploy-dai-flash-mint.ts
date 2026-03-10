@@ -87,7 +87,7 @@ function buildConfig(dssFlashAddress: string, daiAddress: string): DeploymentPip
 function printNextSteps(result: Record<string, any>, networkName: string): void {
   console.log('\nCost Savings vs Other Flash Loan Sources:');
   console.log('   Flash Loan Fee: 0.01% (1 bps)');
-  console.log('   vs Aave V3: 0.09% (9 bps) — save 89% on fees!');
+  console.log('   vs Aave V3: 0.05% (5 bps) — save 80% on fees!');
   console.log('   vs Balancer V2: 0% — Balancer is free but limited by pool liquidity');
   console.log('   vs PancakeSwap V3: 0.01-1% — DAI flash mint is always cheaper');
   console.log('========================================\n');

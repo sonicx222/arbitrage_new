@@ -163,7 +163,7 @@ const VERIFICATION_DELAY_BY_NETWORK: Record<string, number> = {
  *
  * **Flash Loan Fee Impact**:
  * These thresholds assume worst-case flash loan fees:
- * - Aave V3: 0.09% fee
+ * - Aave V3: 0.05% fee (post-AIP-382)
  * - Balancer: 0% fee (can use slightly lower thresholds)
  * - PancakeSwap: pool-dependent fees
  * - SyncSwap: 0.3% fee
@@ -221,13 +221,13 @@ export function getMinimumProfitForProtocol(
     return ethers.parseEther('0.005');
   }
 
-  // Balancer has 0% flash loan fees (vs Aave's 0.09%)
+  // Balancer has 0% flash loan fees (vs Aave's 0.05%)
   // Can accept 30% lower profit threshold since we save on fees
   if (protocol === 'balancer') {
     return (baseThreshold * 70n) / 100n;
   }
 
-  // SyncSwap has higher fees (0.3% vs Aave's 0.09%)
+  // SyncSwap has higher fees (0.3% vs Aave's 0.05%)
   // Keep standard threshold (already conservative)
   if (protocol === 'syncswap') {
     return baseThreshold;

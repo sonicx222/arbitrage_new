@@ -43,7 +43,7 @@ class FlashLoanStrategy {
 **Problems**:
 1. **Protocol rigidity**: Cannot execute on non-Aave chains
 2. **No protocol selection**: Even chains with multiple protocols (BSC has both PancakeSwap V3 and native pools) cannot choose optimal provider
-3. **Fee optimization**: Cannot compare fees across protocols (Aave: 0.09%, PancakeSwap V3: 0.01-1% depending on pool tier)
+3. **Fee optimization**: Cannot compare fees across protocols (Aave: 0.05%, PancakeSwap V3: 0.01-1% depending on pool tier)
 
 ### Research Findings
 
@@ -51,7 +51,7 @@ Analysis from [FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md](../../research/FLASHLOAN_ME
 
 | Protocol | Chains | Fee Structure | Pros | Cons |
 |----------|--------|---------------|------|------|
-| **Aave V3** | ethereum, polygon, arbitrum, base, optimism, avalanche | Fixed 0.09% | Lowest fee, proven | Limited chain coverage |
+| **Aave V3** | ethereum, polygon, arbitrum, base, optimism, avalanche | Fixed 0.05% (post-AIP-382) | Lowest fee, proven | Limited chain coverage |
 | **PancakeSwap V3** | bsc, ethereum, arbitrum, zksync, base, linea, opbnb | Pool-dependent: 0.01%, 0.05%, 0.25%, 1% | Wide chain coverage, multiple fee tiers | Requires pool whitelist |
 | **SpookySwap** | fantom | Variable | Fantom native | Lower liquidity |
 | **SyncSwap** | zksync, linea | Variable | zkEVM optimized | Newer protocol |

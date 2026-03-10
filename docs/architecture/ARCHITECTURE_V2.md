@@ -1166,7 +1166,7 @@ SimulationService now routes requests based on chain:
 **Solution**: Dual-protocol flash loan support for optimal fee selection.
 
 **Supported Protocols**:
-1. **Aave V3** (0.09% fee)
+1. **Aave V3** (0.05% fee, post-AIP-382)
    - Chains: Ethereum, Polygon, Arbitrum, Optimism, Base, Avalanche
    - Contract: `FlashLoanArbitrage.sol`
    - Largest liquidity pools
@@ -1280,7 +1280,7 @@ SimulationService now routes requests based on chain:
 - Protection against price movement during bridge delay
 
 **Trade-offs**:
-- Flash loan fee: ~0.09% (Aave V3), ~0.25-0.30% (other protocols)
+- Flash loan fee: ~0.05% (Aave V3, post-AIP-382), ~0.25-0.30% (other protocols)
 - Requires FlashLoanArbitrage contract deployed on dest chain
 - Not truly atomic end-to-end (bridge completes before flash loan)
 

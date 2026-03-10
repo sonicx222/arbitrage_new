@@ -14,7 +14,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * @dev Implements IFlashLoanSimpleReceiver for Aave V3 integration
  *
  * Features:
- * - Aave V3 flash loan integration (0.09% fee)
+ * - Aave V3 flash loan integration (0.05% fee, post-AIP-382)
  * - Multi-hop swap execution across multiple DEX routers
  * - Profit verification with minimum profit threshold
  * - Reentrancy protection
@@ -196,7 +196,7 @@ contract FlashLoanArbitrage is
      * @param amount The amount to flash loan (caller should ensure > 0)
      * @param swapPath Array of swap steps
      * @return expectedProfit The expected profit after all fees
-     * @return flashLoanFee The Aave V3 flash loan fee (0.09%)
+     * @return flashLoanFee The Aave V3 flash loan fee (0.05%, post-AIP-382)
      */
     function calculateExpectedProfit(
         address asset,

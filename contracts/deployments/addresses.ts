@@ -234,7 +234,7 @@ export const PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
  * BalancerV2FlashArbitrage contract addresses by chain.
  *
  * Flash loans via Balancer V2 Vaults.
- * Key advantage: 0% flash loan fees (vs Aave V3's 0.09%), maximizing profit potential.
+ * Key advantage: 0% flash loan fees (vs Aave V3's 0.05%), maximizing profit potential.
  *
  * Deploy: `npx hardhat run scripts/deploy-balancer.ts --network ethereum`
  * @see contracts/src/BalancerV2FlashArbitrage.sol

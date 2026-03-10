@@ -288,7 +288,7 @@ describe('CommitRevealArbitrage', () => {
         const salt = ethers.randomBytes(32);
 
         const commitmentHash = createCommitmentHash(
-          user.address,
+          31337n, await commitRevealArbitrage.getAddress(), user.address,
           await weth.getAddress(),
           amountIn,
           swapPath,
@@ -398,7 +398,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
-        user.address,
+        31337n, await commitRevealArbitrage.getAddress(), user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -465,7 +465,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
-        user.address,
+        31337n, await commitRevealArbitrage.getAddress(), user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -514,7 +514,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
-        user.address,
+        31337n, await commitRevealArbitrage.getAddress(), user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -591,7 +591,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
-        user.address,
+        31337n, await commitRevealArbitrage.getAddress(), user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -655,7 +655,7 @@ describe('CommitRevealArbitrage', () => {
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
-        user.address,
+        31337n, await commitRevealArbitrage.getAddress(), user.address,
         await weth.getAddress(),
         amountIn,
         swapPath,
@@ -824,7 +824,7 @@ describe('CommitRevealArbitrage', () => {
         const salt = ethers.randomBytes(32);
 
         const commitmentHash = createCommitmentHash(
-          user.address,
+          31337n, await commitRevealArbitrage.getAddress(), user.address,
           await weth.getAddress(),
           amountIn,
           swapPath,

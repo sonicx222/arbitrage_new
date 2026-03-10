@@ -713,16 +713,16 @@ describe('PancakeSwapFlashArbitrage', () => {
       await owner.sendTransaction({ to: poolAddress, value: ethers.parseEther('1') });
       const poolSigner = await ethers.getSigner(poolAddress);
 
-      // Call callback directly with empty data — abi.decode fails
-      // Context is now passed via calldata, so invalid/empty data causes decode revert
+      // Call callback directly — blocked by _flashLoanActive guard (defense in depth)
+      // Even a whitelisted pool cannot call the callback outside of executeArbitrage()
       await expect(
         flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(100, 0, '0x')
-      ).to.be.revertedWithoutReason();
+      ).to.be.revertedWithCustomError(flashArbitrage, 'FlashLoanNotActive');
 
       await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
     });
 
-    it('should execute callback with properly encoded data from whitelisted pool (M-07)', async () => {
+    it('should block direct callback even with valid data from whitelisted pool (M-04)', async () => {
       const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc, owner } =
         await loadFixture(deployContractsFixture);
 
@@ -765,10 +765,11 @@ describe('PancakeSwapFlashArbitrage', () => {
       await owner.sendTransaction({ to: poolAddress, value: ethers.parseEther('1') });
       const poolSigner = await ethers.getSigner(poolAddress);
 
-      // Valid data from whitelisted pool should execute the full arbitrage flow
+      // Defense in depth: even whitelisted pool with valid data is blocked
+      // because _flashLoanActive is only set during executeArbitrage()
       await expect(
         flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(fee0, fee1, data)
-      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+      ).to.be.revertedWithCustomError(flashArbitrage, 'FlashLoanNotActive');
 
       await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
     });
