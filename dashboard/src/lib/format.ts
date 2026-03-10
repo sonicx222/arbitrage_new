@@ -32,6 +32,14 @@ export function formatNumber(n: number): string {
   return safe(n, '0') ?? (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 }
 
+export function calcSuccessRate(total: number, successful: number): number {
+  return total > 0 ? (successful / total) * 100 : 0;
+}
+
+export function formatCpu(cpuUsage: number): string {
+  return Number.isFinite(cpuUsage) ? (cpuUsage * 100).toFixed(1) : '0.0';
+}
+
 export function statusColor(status: string): string {
   switch (status) {
     case 'healthy': case 'CLOSED': return 'text-accent-green';

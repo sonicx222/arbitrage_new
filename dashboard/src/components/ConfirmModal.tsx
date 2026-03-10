@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 interface Props {
   open: boolean;
@@ -12,15 +12,67 @@ interface Props {
 }
 
 export function ConfirmModal({ open, title, children, onConfirm, onCancel, loading, confirmLabel = 'Confirm', danger }: Props) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    // Save current focus to restore on close
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+
+    // Focus the dialog on open
+    dialogRef.current?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+        return;
+      }
+      // Focus trap: cycle Tab within the dialog
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      // Restore focus on close
+      previousFocusRef.current?.focus();
+    };
+  }, [open, onCancel]);
+
   if (!open) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease-out' }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-modal-title"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div className="card w-96 shadow-2xl" style={{ animation: 'slideUp 0.2s ease-out' }}>
-        <h3 className="font-display font-bold text-sm mb-3">{title}</h3>
+      <div
+        ref={dialogRef}
+        className="card w-96 shadow-2xl"
+        style={{ animation: 'slideUp 0.2s ease-out' }}
+        tabIndex={-1}
+      >
+        <h3 id="confirm-modal-title" className="font-display font-bold text-sm mb-3">{title}</h3>
         {children && <div className="text-xs text-gray-400 mb-4">{children}</div>}
         <div className="flex justify-end gap-2">
           <button

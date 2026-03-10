@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { useSSEData } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
-import { formatUsd, formatPct, formatNumber, formatTime } from '../lib/format';
+import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate } from '../lib/format';
 import { CHART } from '../lib/theme';
 
 const EXPLORER_URLS: Record<string, string> = {
@@ -31,9 +31,7 @@ export function ExecutionTab() {
     return <div className="text-gray-500 text-xs">Waiting for execution data...</div>;
   }
 
-  const successRate = metrics.totalExecutions > 0
-    ? (metrics.successfulExecutions / metrics.totalExecutions) * 100
-    : 0;
+  const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
   const failedExecutions = metrics.totalExecutions - metrics.successfulExecutions;
 
   const executions = useMemo(

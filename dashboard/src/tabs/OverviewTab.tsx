@@ -3,7 +3,7 @@ import { useSSEData } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { ServiceCard } from '../components/ServiceCard';
 import { LiveFeed } from '../components/LiveFeed';
-import { formatUsd, formatPct, formatNumber } from '../lib/format';
+import { formatUsd, formatPct, formatNumber, calcSuccessRate } from '../lib/format';
 
 export function OverviewTab() {
   const { metrics, services, feed } = useSSEData();
@@ -12,9 +12,7 @@ export function OverviewTab() {
     return <div className="text-gray-500 text-xs">Waiting for data...</div>;
   }
 
-  const successRate = metrics.totalExecutions > 0
-    ? (metrics.successfulExecutions / metrics.totalExecutions) * 100
-    : 0;
+  const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
 
   const healthColor = metrics.systemHealth >= 80 ? 'text-accent-green'
     : metrics.systemHealth >= 50 ? 'text-accent-yellow'

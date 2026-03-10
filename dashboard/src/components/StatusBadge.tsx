@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { statusDot } from '../lib/format';
 
 interface Props {
@@ -5,7 +6,7 @@ interface Props {
   label?: string;
 }
 
-export function StatusBadge({ status, label }: Props) {
+export const StatusBadge = memo(function StatusBadge({ status, label }: Props) {
   const isActive = status === 'healthy' || status === 'CLOSED';
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -18,4 +19,4 @@ export function StatusBadge({ status, label }: Props) {
       {label && <span className="text-xs font-medium">{label}</span>}
     </span>
   );
-}
+});

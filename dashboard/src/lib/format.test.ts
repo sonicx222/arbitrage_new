@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatUsd, formatPct, formatDuration, formatMemory, formatNumber, statusColor, statusDot } from './format';
+import { formatUsd, formatPct, formatDuration, formatMemory, formatNumber, calcSuccessRate, formatCpu, statusColor, statusDot } from './format';
 
 describe('formatUsd', () => {
   it('formats small values with 2 decimals', () => {
@@ -96,6 +96,43 @@ describe('formatNumber', () => {
   });
 });
 
+describe('calcSuccessRate', () => {
+  it('calculates percentage', () => {
+    expect(calcSuccessRate(100, 80)).toBe(80);
+  });
+
+  it('returns 0 when total is 0', () => {
+    expect(calcSuccessRate(0, 0)).toBe(0);
+  });
+
+  it('handles 100% success', () => {
+    expect(calcSuccessRate(50, 50)).toBe(100);
+  });
+});
+
+describe('formatCpu', () => {
+  it('formats decimal ratio as percentage', () => {
+    expect(formatCpu(0.456)).toBe('45.6');
+  });
+
+  it('formats zero', () => {
+    expect(formatCpu(0)).toBe('0.0');
+  });
+
+  it('returns fallback for NaN', () => {
+    expect(formatCpu(NaN)).toBe('0.0');
+  });
+
+  it('returns fallback for Infinity', () => {
+    expect(formatCpu(Infinity)).toBe('0.0');
+  });
+
+  it('returns fallback for null/undefined', () => {
+    expect(formatCpu(null as unknown as number)).toBe('0.0');
+    expect(formatCpu(undefined as unknown as number)).toBe('0.0');
+  });
+});
+
 describe('statusColor', () => {
   it('returns green for healthy', () => {
     expect(statusColor('healthy')).toBe('text-accent-green');
@@ -107,6 +144,14 @@ describe('statusColor', () => {
 
   it('returns yellow for degraded', () => {
     expect(statusColor('degraded')).toBe('text-accent-yellow');
+  });
+
+  it('returns yellow for HALF_OPEN', () => {
+    expect(statusColor('HALF_OPEN')).toBe('text-accent-yellow');
+  });
+
+  it('returns red for unhealthy', () => {
+    expect(statusColor('unhealthy')).toBe('text-accent-red');
   });
 
   it('returns red for OPEN', () => {
@@ -121,6 +166,26 @@ describe('statusColor', () => {
 describe('statusDot', () => {
   it('returns green for healthy', () => {
     expect(statusDot('healthy')).toBe('bg-accent-green');
+  });
+
+  it('returns green for CLOSED', () => {
+    expect(statusDot('CLOSED')).toBe('bg-accent-green');
+  });
+
+  it('returns yellow for degraded', () => {
+    expect(statusDot('degraded')).toBe('bg-accent-yellow');
+  });
+
+  it('returns yellow for HALF_OPEN', () => {
+    expect(statusDot('HALF_OPEN')).toBe('bg-accent-yellow');
+  });
+
+  it('returns red for unhealthy', () => {
+    expect(statusDot('unhealthy')).toBe('bg-accent-red');
+  });
+
+  it('returns red for OPEN', () => {
+    expect(statusDot('OPEN')).toBe('bg-accent-red');
   });
 
   it('returns gray for unknown', () => {

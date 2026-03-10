@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { FeedItem } from '../lib/types';
 import { formatTime, formatUsd } from '../lib/format';
 
@@ -5,7 +6,7 @@ interface Props {
   items: FeedItem[];
 }
 
-export function LiveFeed({ items }: Props) {
+export const LiveFeed = memo(function LiveFeed({ items }: Props) {
   return (
     <div className="card flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
@@ -50,4 +51,4 @@ export function LiveFeed({ items }: Props) {
       </div>
     </div>
   );
-}
+});

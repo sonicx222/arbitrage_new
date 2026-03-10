@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { StatusBadge } from './StatusBadge';
 
 interface Props {
@@ -6,11 +7,11 @@ interface Props {
   partitionName?: string;
 }
 
-export function ChainCard({ chain, status = 'unknown', partitionName }: Props) {
+export const ChainCard = memo(function ChainCard({ chain, status = 'unknown', partitionName }: Props) {
   return (
     <div className="card flex items-center gap-2 py-2" title={partitionName ? `Status from ${partitionName}` : undefined}>
       <StatusBadge status={status} />
       <span className="text-xs font-medium uppercase">{chain}</span>
     </div>
   );
-}
+});

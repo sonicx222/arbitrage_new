@@ -1,7 +1,7 @@
 import { useSSEData } from '../context/SSEContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { ChainCard } from '../components/ChainCard';
-import { formatDuration, formatMemory } from '../lib/format';
+import { formatDuration, formatMemory, formatCpu } from '../lib/format';
 // D-5 FIX: Import source of truth for compile-time service key verification
 import portConfig from '../../../shared/constants/service-ports.json';
 
@@ -42,7 +42,7 @@ export function ChainsTab() {
                 <div className="flex gap-3 text-[10px] text-gray-500">
                   <span>Uptime: {formatDuration(svc.uptime)}</span>
                   <span>Mem: {formatMemory(svc.memoryUsage)}</span>
-                  <span>CPU: {Number.isFinite(svc.cpuUsage) ? (svc.cpuUsage * 100).toFixed(1) : '0.0'}%</span>
+                  <span>CPU: {formatCpu(svc.cpuUsage)}%</span>
                   {svc.latency != null && Number.isFinite(svc.latency) && <span>Latency: {svc.latency.toFixed(0)}ms</span>}
                 </div>
               )}

@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect, useMemo, type ReactNode } from 'react';
 import { useSSE, type SSEStatus } from '../hooks/useSSE';
-import { formatTime } from '../lib/format';
+import { formatTime, calcSuccessRate } from '../lib/format';
 import { getItem } from '../lib/storage';
 import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint } from '../lib/types';
 
@@ -29,7 +29,8 @@ type SSEAction =
 const MAX_FEED = 50;
 const MAX_CHART_POINTS = 90;
 
-function reducer(state: SSEState, action: SSEAction): SSEState {
+/** @internal exported for unit testing */
+export function reducer(state: SSEState, action: SSEAction): SSEState {
   const lastEventTime = Date.now();
   switch (action.type) {
     case 'metrics': {
@@ -39,9 +40,7 @@ function reducer(state: SSEState, action: SSEAction): SSEState {
       const last = state.chartData[state.chartData.length - 1];
       let chartData = state.chartData;
       if (!last || last.time !== now) {
-        const successRate = action.payload.totalExecutions > 0
-          ? (action.payload.successfulExecutions / action.payload.totalExecutions) * 100
-          : 0;
+        const successRate = calcSuccessRate(action.payload.totalExecutions, action.payload.successfulExecutions);
         chartData = [
           ...state.chartData.slice(-MAX_CHART_POINTS),
           { time: now, latency: action.payload.averageLatency, successRate },
@@ -85,7 +84,8 @@ function reducer(state: SSEState, action: SSEAction): SSEState {
   }
 }
 
-const initialState: SSEState = {
+/** @internal exported for unit testing */
+export const initialState: SSEState = {
   metrics: null,
   services: {},
   circuitBreaker: null,
@@ -104,11 +104,13 @@ export function useSSEData() {
   return useContext(SSEContext);
 }
 
-function isObj(v: unknown): v is Record<string, unknown> {
+/** @internal exported for unit testing */
+export function isObj(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v);
 }
 
-function validatePayload(event: string, data: unknown): boolean {
+/** @internal exported for unit testing */
+export function validatePayload(event: string, data: unknown): boolean {
   if (!isObj(data)) return false;
   switch (event) {
     case 'metrics':

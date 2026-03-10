@@ -228,6 +228,69 @@ Returns stream health metrics in Prometheus text exposition format (`text/plain;
 - `arbitrage_admission_avg_score_admitted` (gauge) — Average score of admitted opportunities
 - `arbitrage_admission_avg_score_shed` (gauge) — Average score of shed opportunities
 
+### SSE Events (Dashboard Real-Time Data)
+
+#### GET /api/events
+
+**Auth:** `DASHBOARD_AUTH_TOKEN` via query parameter (`?token=<token>`). Uses `crypto.timingSafeEqual` for timing-safe comparison.
+
+Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 6 event types at different intervals:
+
+| Event | Frequency | Payload |
+|-------|-----------|---------|
+| `metrics` | 2s | `SystemMetrics` — executions, profit, latency, health, pipeline stats |
+| `services` | 5s | `Record<string, ServiceHealth>` — all service health keyed by name |
+| `circuit-breaker` | 5s | `CircuitBreakerStatus` — state, failures, cooldown |
+| `streams` | 10s | `StreamHealth` — per-stream length, pending, consumer groups |
+| `execution-result` | On event | `ExecutionResult` — individual trade result (success, profit, chain, tx hash) |
+| `alert` | On event | `Alert` — system alert with type, severity, service, message |
+
+**Connection behavior:** EventSource auto-reconnects on failure. Dashboard resets state and backfills recent alerts via `GET /api/alerts` on reconnection.
+
+**Note:** EventSource API does not support custom headers, so the auth token is passed as a query parameter instead of `Authorization` header. This is a known limitation — ensure log scrubbing for this endpoint.
+
+### Log Level Routes
+
+#### GET /api/log-level
+
+**Auth:** None (read-only).
+
+Returns the current Pino log level.
+
+```json
+{ "level": "info" }
+```
+
+#### PUT /api/log-level
+
+**Auth:** Required. Rate-limited (admin rate limiter: 5 req / 15 min).
+
+Dynamically changes the Pino log level at runtime.
+
+**Request body:**
+
+```json
+{ "level": "debug" }
+```
+
+**Response:**
+
+```json
+{ "success": true, "level": "debug" }
+```
+
+### EE Proxy Routes
+
+The coordinator proxies certain routes to the Execution Engine (port 3005) so the dashboard only needs a single connection to the coordinator.
+
+| Coordinator Path | Target | Description |
+|------------------|--------|-------------|
+| `GET /ee/health` | `GET localhost:3005/health` | EE health status (path rewritten: `/ee` prefix stripped) |
+| `POST /circuit-breaker/open` | `POST localhost:3005/circuit-breaker/open` | Force open circuit breaker |
+| `POST /circuit-breaker/close` | `POST localhost:3005/circuit-breaker/close` | Force close circuit breaker |
+
+**Auth for circuit breaker:** Requires both `Authorization: Bearer <dashboard_token>` (coordinator auth) and `X-API-Key: <cb_api_key>` (EE-level auth forwarded by proxy).
+
 ### Admin Routes (Authenticated, Rate-Limited)
 
 Admin routes have a strict rate limiter: **5 requests per 15-minute window**.
