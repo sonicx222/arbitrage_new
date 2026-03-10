@@ -192,8 +192,7 @@ describe('PartitionRouter', () => {
   describe('getRoutableChains', () => {
     it('should return all 15 chains from CHAINS config', () => {
       const chains = PartitionRouter.getRoutableChains();
-      // 15 chains total in CHAINS config: 11 original (bsc, polygon, avalanche, fantom, arbitrum, optimism, base, ethereum, zksync, linea, solana) + 4 emerging L2s (blast, scroll, mantle, mode)
-      // Note: Mantle and Mode are stub chains (config present but not assigned to partitions yet)
+      // 15 chains total: 11 original + 4 emerging L2s (blast, scroll, mantle, mode)
       expect(chains).toHaveLength(15);
     });
 

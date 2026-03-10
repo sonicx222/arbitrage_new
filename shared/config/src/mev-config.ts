@@ -39,13 +39,13 @@ export const MEV_CONFIG = {
   bloxrouteAuthHeader: process.env.BLOXROUTE_AUTH_HEADER,
 
   /** Custom Flashbots relay URL (default: relay.flashbots.net) */
-  flashbotsRelayUrl: process.env.FLASHBOTS_RELAY_URL || 'https://relay.flashbots.net',
+  flashbotsRelayUrl: process.env.FLASHBOTS_RELAY_URL ?? 'https://relay.flashbots.net',
 
   /** BloXroute MEV API URL */
-  bloxrouteUrl: process.env.BLOXROUTE_URL || 'https://mev.api.blxrbdn.com',
+  bloxrouteUrl: process.env.BLOXROUTE_URL ?? 'https://mev.api.blxrbdn.com',
 
   /** Polygon Fastlane RPC URL */
-  fastlaneUrl: process.env.FASTLANE_URL || 'https://fastlane-rpc.polygon.technology',
+  fastlaneUrl: process.env.FASTLANE_URL ?? 'https://fastlane-rpc.polygon.technology',
 
   /** Submission timeout in milliseconds */
   submissionTimeoutMs: safeParseInt(process.env.MEV_SUBMISSION_TIMEOUT_MS, 30000),

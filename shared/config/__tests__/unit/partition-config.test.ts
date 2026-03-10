@@ -152,8 +152,8 @@ describe('P2: L2-Turbo Partition', () => {
     expect(partition!.enabled).toBe(true);
   });
 
-  it('should contain Arbitrum, Optimism, Base, Scroll, Blast (mantle/mode excluded as stubs)', () => {
-    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast']);
+  it('should contain Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode', () => {
+    expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']);
   });
 
   it('should be deployed to asia-southeast1 on Fly.io', () => {
@@ -322,7 +322,7 @@ describe('assignChainToPartition', () => {
         assignedChains.add(chainId);
       }
     }
-    expect(assignedChains.size).toBe(13); // 13 chains assigned (mantle, mode excluded as stubs)
+    expect(assignedChains.size).toBe(15); // 15 chains assigned (all chains including mantle, mode)
   });
 });
 
@@ -422,9 +422,9 @@ describe('getChainsForPartition', () => {
     expect(chains).toContain('polygon');
   });
 
-  it('should return chains for l2-turbo partition (mantle/mode excluded)', () => {
+  it('should return chains for l2-turbo partition (includes mantle/mode)', () => {
     const chains = getChainsForPartition('l2-turbo');
-    expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast']);
+    expect(chains).toEqual(['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']);
   });
 
   it('should have matching assignments for all partitions', () => {
@@ -484,7 +484,7 @@ describe('createChainInstance', () => {
 describe('createPartitionChainInstances', () => {
   it.each([
     ['asia-fast', 4, ['bsc', 'polygon', 'avalanche', 'fantom']],
-    ['l2-turbo', 5, ['arbitrum', 'optimism', 'base', 'scroll', 'blast']],
+    ['l2-turbo', 7, ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode']],
     ['high-value', 3, ['ethereum', 'zksync', 'linea']],
     ['solana-native', 1, ['solana']],
   ])('should create %d instances for %s partition', (partitionId, expectedCount, expectedChains) => {

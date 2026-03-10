@@ -283,12 +283,14 @@ describe('Service Config Module', () => {
       }
     });
 
-    it('should have Solana bridge routes (Wormhole)', () => {
+    it('should have Solana bridge routes (Wormhole + deBridge)', () => {
       const solanaBridges = BRIDGE_COSTS.filter(
         (b: { sourceChain: string; targetChain: string }) => b.sourceChain === 'solana' || b.targetChain === 'solana'
       );
       expect(solanaBridges.length).toBeGreaterThan(0);
-      expect(solanaBridges.every((b: { bridge: string }) => b.bridge === 'wormhole')).toBe(true);
+      // CC-M03 FIX added deBridge routes for Solana alongside Wormhole
+      const allowedBridges = new Set(['wormhole', 'debridge']);
+      expect(solanaBridges.every((b: { bridge: string }) => allowedBridges.has(b.bridge))).toBe(true);
     });
   });
 

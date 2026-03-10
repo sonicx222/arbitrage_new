@@ -74,8 +74,7 @@ export { resetDefaultEventBatcher } from '../async/event-batcher';
 // DEX adapters
 export { resetAdapterRegistry } from '../dex-adapters';
 
-// Solana
-export { resetSolanaSwapParser } from '../solana/solana-swap-parser';
+// Solana — extracted to @arbitrage/solana package
 
 // Simulation
 export { resetSimulatorInstance, stopChainSimulator, stopAllChainSimulators } from '../simulation-mode';
@@ -124,24 +123,8 @@ export {
   STARGATE_ROUTER_ADDRESSES,
 } from '../bridge-router';
 
-// =============================================================================
-// SOLANA LAYOUT CONSTANTS
-// Binary layouts for Solana account parsing
-// =============================================================================
-
-export {
-  RAYDIUM_AMM_LAYOUT,
-  RAYDIUM_CLMM_LAYOUT,
-  ORCA_WHIRLPOOL_LAYOUT,
-  SOLANA_DEX_PROGRAMS as SOLANA_PRICE_FEED_PROGRAMS,
-} from '../solana/solana-price-feed';
-
-export {
-  SOLANA_DEX_PROGRAM_IDS,
-  PROGRAM_ID_TO_DEX,
-  SWAP_DISCRIMINATORS,
-  DISABLED_DEXES,
-} from '../solana/solana-swap-parser';
+// SOLANA LAYOUT CONSTANTS — extracted to @arbitrage/solana package
+// Import from '@arbitrage/solana' directly for Solana-specific constants.
 
 // =============================================================================
 // FACTORY EVENT SIGNATURES

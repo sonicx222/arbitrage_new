@@ -112,6 +112,12 @@ describe('CoordinatorService Integration', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
 
+    // Prevent process.exit(1) from killing the Jest worker.
+    // The coordinator calls process.exit(1) when ALL consumer groups fail to create
+    // (M-04 FIX: crash instead of running as non-functional zombie). In tests, this
+    // kills the entire Jest worker process. Mock it as a no-op so tests can proceed.
+    jest.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+
     // Flush Redis for isolation
     await rawRedis.flushall();
 

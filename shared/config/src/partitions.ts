@@ -245,16 +245,15 @@ export const PARTITIONS: PartitionConfig[] = [
     failoverTimeoutMs: 60000
   },
   // P2: L2-Turbo - Fast Ethereum L2 rollups
-  // Note: mantle/mode removed — unverified DEX factory addresses (stubs per CLAUDE.md).
-  // Already excluded from SUPPORTED_EXECUTION_CHAINS (commit 923b88ff).
-  // Re-add when DEX factories are RPC-verified and downstream configs updated.
+  // mantle/mode: DEX factories RPC-validated 2026-03-08, added to SUPPORTED_EXECUTION_CHAINS
+  // + DEX_FACTORY_REGISTRY. Re-added to partition 2026-03-10.
   {
     partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
-    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'],
+    chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'heavy', // 5 chains
+    resourceProfile: 'heavy', // 7 chains
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,

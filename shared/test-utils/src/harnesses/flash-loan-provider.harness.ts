@@ -508,11 +508,17 @@ export function testFlashLoanProvider(config: FlashLoanProviderTestConfig): void
       });
 
       it('should use buildCalldata for transaction data', () => {
-        const request = createRequest();
-        const calldata = provider.buildCalldata(request);
-        const tx = provider.buildTransaction(request, FLASH_LOAN_TEST_ADDRESSES.INITIATOR);
+        // Freeze time to prevent deadline drift between sequential calls
+        jest.useFakeTimers({ now: new Date('2026-03-09T00:00:00Z') });
+        try {
+          const request = createRequest();
+          const calldata = provider.buildCalldata(request);
+          const tx = provider.buildTransaction(request, FLASH_LOAN_TEST_ADDRESSES.INITIATOR);
 
-        expect(tx.data).toBe(calldata);
+          expect(tx.data).toBe(calldata);
+        } finally {
+          jest.useRealTimers();
+        }
       });
     });
   });

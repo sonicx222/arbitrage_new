@@ -12,25 +12,34 @@ Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading
 # Monorepo Structure
 
 ```
-services/          8 core microservices (coordinator, 4 partitions, execution, cross-chain, unified-detector) + mempool-detector (optional, `npm run dev:mempool`)
-shared/            7 shared packages (types, config, core, ml, security, test-utils, constants)
+services/          8 core microservices (coordinator, 4 partitions, execution, cross-chain, unified-detector) + mempool-detector (optional), monolith (single-process mode)
+shared/            10 shared packages (types, config, flash-loan-aggregation, metrics, core, solana, ml, security, test-utils, constants)
 contracts/         Smart contracts (Hardhat project)
   src/             Source contracts (base/, interfaces/, mocks/)
   test/            Hardhat test suites (Chai + ethers v6)
   scripts/         Deployment and utility scripts
-infrastructure/    Docker, deployment configs
+infrastructure/    Docker (local + production compose files, Dockerfile.local), Fly.io, Grafana, monitoring configs
+dashboard/         React + Vite frontend (Tailwind, Recharts, React Query). Build: `npm run build:dashboard`
 docs/              Architecture, ADRs, strategies, conventions
 ```
 
-**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector — library/factory for P1-P3 partitions, not a standalone service), 3008 (Mempool Detector, optional)
+**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Unified Detector — library/factory for P1-P3 partitions, not a standalone service), 3008 (Mempool Detector, optional), 3009 (Coordinator Worker in monolith mode), 3100 (Monolith Health)
 
 **Path Aliases:**
 - `@arbitrage/types` - shared/types
-- `@arbitrage/core` - shared/core/src
 - `@arbitrage/config` - shared/config/src
+- `@arbitrage/flash-loan-aggregation` - shared/flash-loan-aggregation
+- `@arbitrage/metrics` - shared/metrics
+- `@arbitrage/core` - shared/core/src
+- `@arbitrage/solana` - shared/solana/src
 - `@arbitrage/security` - shared/security/src
 
-**Build Order:** types -> config -> core -> ml -> services
+**Build Order:** types -> config + flash-loan-aggregation + metrics (parallel) -> core -> solana + ml + test-utils (parallel) -> services
+
+**Additional Directories:**
+- `shared/constants/` — Static JSON configs (service-ports.json, deprecation-patterns.json). Not an npm package; imported via relative paths.
+- `services/monolith/` — Single-process mode using worker threads for Oracle Cloud ARM. Runs all 7 services in one process with SharedArrayBuffer PriceMatrix. Optional; not part of standard dev workflow.
+- `scripts/monitoring/` — Redis CLI replacements and env-drift checker for monitoring sessions.
 
 # Commands
 

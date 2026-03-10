@@ -88,7 +88,7 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     minTokenCount: 2,
     requiredTokenSymbols: ['WMNT', 'USDC'],
     mevStrategy: 'sequencer',
-    expectedPartition: 'high-value', // M-01: mantle removed from P2, falls back to high-value
+    expectedPartition: 'l2-turbo', // DEX factories RPC-validated 2026-03-08, added to P2
   },
   {
     chainKey: 'mode',
@@ -100,7 +100,7 @@ const EMERGING_L2_CHAINS: EmergingL2TestData[] = [
     minTokenCount: 2,
     requiredTokenSymbols: ['WETH', 'USDC'],
     mevStrategy: 'sequencer',
-    expectedPartition: 'high-value', // M-01: mode removed from P2, falls back to high-value
+    expectedPartition: 'l2-turbo', // DEX factories RPC-validated 2026-03-08, added to P2
   },
 ];
 
@@ -338,15 +338,17 @@ describe('Emerging L2s Configuration', () => {
       expect(MAINNET_CHAIN_IDS.length).toBe(15);
     });
 
-    it('P2 partition has 5 chains (mantle/mode excluded as stubs)', () => {
+    it('P2 partition has 7 chains (mantle/mode added after RPC validation)', () => {
       const p2 = assignChainToPartition('arbitrum');
       expect(p2).not.toBeNull();
-      expect(p2!.chains.length).toBe(5);
+      expect(p2!.chains.length).toBe(7);
       expect(p2!.chains).toContain('arbitrum');
       expect(p2!.chains).toContain('optimism');
       expect(p2!.chains).toContain('base');
       expect(p2!.chains).toContain('scroll');
       expect(p2!.chains).toContain('blast');
+      expect(p2!.chains).toContain('mantle');
+      expect(p2!.chains).toContain('mode');
     });
 
     it('Scroll has SyncSwap and Aave V3 flash loan support', () => {

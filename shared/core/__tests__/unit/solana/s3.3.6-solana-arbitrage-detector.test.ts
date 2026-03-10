@@ -519,9 +519,9 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
     });
 
     it('should normalize token symbols for cross-chain matching', async () => {
-      // Phase 0 Item 2: LST normalization requires normalizeLiquidStaking: true
-      // to collapse MSOL→SOL for cross-chain matching. Default is now false
-      // (preserves LST identities for intra-chain pricing).
+      // M-002 FIX: normalizeTokenForCrossChain preserves LST identities (MSOL stays MSOL)
+      // because LST price deviations from the underlying ARE real arbitrage signals.
+      // Instead, test with a non-LST alias that actually gets normalized: ETH → WETH.
       const crossChainDetector = new SolanaArbitrageDetector({
         rpcUrl: 'https://api.mainnet-beta.solana.com',
         minProfitThreshold: 0.5,
@@ -529,30 +529,30 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
         normalizeLiquidStaking: true,
       }, { logger: mockLogger });
 
-      // Solana uses MSOL (staked SOL)
+      // Solana pool uses 'ETH' symbol (BSC-style naming)
       await crossChainDetector.addPool(createMockPool({
-        address: 'msol-usdc-pool',
+        address: 'eth-usdc-pool',
         dex: 'raydium',
-        token0Symbol: 'MSOL',
+        token0Symbol: 'ETH',
         token1Symbol: 'USDC',
-        price: 105.0, // MSOL trades at premium
+        price: 2500.0,
       }));
 
-      // EVM uses SOL (canonical)
+      // EVM uses 'WETH' (canonical wrapped ETH)
       const evmPrices = [
         createMockEvmPriceUpdate({
           chain: 'ethereum',
-          token0: 'SOL',
+          token0: 'WETH',
           token1: 'USDC',
-          price: 100.0,
+          price: 2550.0,
         }),
       ];
 
-      // MSOL should be normalized to SOL for comparison
+      // ETH should be normalized to WETH for cross-chain comparison
       const comparisons = await crossChainDetector.compareCrossChainPrices(evmPrices);
 
       expect(comparisons.length).toBeGreaterThanOrEqual(1);
-      expect(comparisons[0].token).toBe('SOL'); // Normalized
+      expect(comparisons[0].token).toBe('WETH'); // Normalized from ETH
     });
 
     it('should not compare when cross-chain is disabled', async () => {

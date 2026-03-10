@@ -141,6 +141,103 @@ echo "Session $SESSION_ID initialized (git SHA: $CURRENT_SHA)"
 ---
 
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PRE-FLIGHT — Data Mode Selection
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The monitoring workflow supports three data modes controlling how services
+source price data and handle execution. Select the mode by setting
+`MONITOR_DATA_MODE` before invoking:
+
+| Mode | Prices | Execution | npm Script | Use Case |
+|------|--------|-----------|------------|----------|
+| `simulation` (default) | Synthetic (ChainSimulator) | Mock (SimulationStrategy) | `dev:monitor` | Code correctness & pipeline flow validation |
+| `live` | Real RPC (WebSocket) | Mock (SimulationStrategy) | `dev:monitor:live` | Real provider connectivity & price quality validation |
+| `testnet` | Real RPC (WebSocket) | Real (testnet chains) | `dev:monitor:testnet` | End-to-end testnet integration testing |
+
+```bash
+# Detect mode — default to 'simulation' if not set
+MONITOR_DATA_MODE="${MONITOR_DATA_MODE:-simulation}"
+echo "$MONITOR_DATA_MODE" > ./monitor-session/DATA_MODE
+echo "Data mode: $MONITOR_DATA_MODE"
+```
+
+### Mode-Specific Prerequisites
+
+**If mode is `live` or `testnet`:**
+
+1. **RPC URLs**: At least one chain-specific RPC URL must be set in `.env` or
+   `.env.local` (e.g., `ARBITRUM_RPC_URL`, `BSC_RPC_URL`), OR a provider API key
+   must be present (`DRPC_API_KEY`, `ANKR_API_KEY`, `INFURA_API_KEY`, `ALCHEMY_API_KEY`).
+
+```bash
+if [ "$MONITOR_DATA_MODE" != "simulation" ]; then
+  # Check for RPC URLs or provider keys
+  RPC_COUNT=$(grep -cE "^[A-Z_]+_RPC_URL=" .env .env.local 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}')
+  KEY_COUNT=$(grep -cE "^(DRPC|ANKR|INFURA|ALCHEMY)_API_KEY=" .env .env.local 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}')
+  echo "RPC URLs found: $RPC_COUNT | Provider keys found: $KEY_COUNT"
+  if [ "$RPC_COUNT" -eq 0 ] && [ "$KEY_COUNT" -eq 0 ]; then
+    echo "CRITICAL: No RPC URLs or provider API keys configured in .env or .env.local"
+    echo "Live/testnet mode requires real RPC endpoints. Set at least one *_RPC_URL or *_API_KEY."
+    # Record as CRITICAL finding
+    echo '{"phase":"PRE_FLIGHT","findingId":"PF-001","category":"RPC_CONFIG","severity":"CRITICAL","title":"No RPC URLs or provider keys for live mode","evidence":"grep found 0 RPC URLs and 0 provider keys","expected":"At least one RPC URL or provider API key","actual":"None configured","recommendation":"Set ARBITRUM_RPC_URL, BSC_RPC_URL, etc. in .env or .env.local, OR set DRPC_API_KEY/ANKR_API_KEY"}' >> ./monitor-session/findings/static-analysis.jsonl
+    echo "ABORTING: Cannot run $MONITOR_DATA_MODE mode without RPC configuration."
+    # Fall back to simulation mode
+    MONITOR_DATA_MODE="simulation"
+    echo "$MONITOR_DATA_MODE" > ./monitor-session/DATA_MODE
+    echo "Falling back to simulation mode."
+  fi
+fi
+```
+
+2. **Windows TLS** (applies to this machine): Corporate proxies and certificate
+   stores often cause `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` errors on WebSocket
+   connections. If live-mode WebSocket connections fail:
+
+```bash
+if [ "$MONITOR_DATA_MODE" != "simulation" ]; then
+  # Check if NODE_TLS_REJECT_UNAUTHORIZED is set for Windows dev
+  if [ "$(uname -o 2>/dev/null)" = "Msys" ] || [ "$OS" = "Windows_NT" ]; then
+    TLS_VAR=$(grep -c "NODE_TLS_REJECT_UNAUTHORIZED=0" .env .env.local 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}')
+    if [ "$TLS_VAR" -eq 0 ]; then
+      echo "WARNING: Windows detected but NODE_TLS_REJECT_UNAUTHORIZED=0 not set."
+      echo "  WebSocket connections to RPC providers may fail with TLS certificate errors."
+      echo "  Add NODE_TLS_REJECT_UNAUTHORIZED=0 to .env.local for local dev only."
+    fi
+  fi
+fi
+```
+
+3. **Testnet mode additional check**: Verify `TESTNET_EXECUTION_MODE=true` is
+   set and `EXECUTION_SIMULATION_MODE` is NOT true (they conflict).
+
+```bash
+if [ "$MONITOR_DATA_MODE" = "testnet" ]; then
+  TESTNET_FLAG=$(grep -c "TESTNET_EXECUTION_MODE=true" .env .env.local 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}')
+  if [ "$TESTNET_FLAG" -eq 0 ]; then
+    echo "WARNING: Testnet mode selected but TESTNET_EXECUTION_MODE=true not found in .env/.env.local."
+    echo "  The dev:monitor:testnet script sets it via cross-env, but .env may override."
+  fi
+fi
+```
+
+### Mode Reference for Downstream Phases
+
+Throughout this document, mode-conditional behavior is marked with:
+- **`[SIM-ONLY]`** — applies only in `simulation` mode
+- **`[LIVE-ONLY]`** — applies only in `live` or `testnet` modes
+- **`[ALL-MODES]`** — applies regardless of mode
+
+When the mode affects severity levels or thresholds, the alternatives are listed
+inline (e.g., "severity: **HIGH** `[SIM]` / **INFO** `[LIVE]`").
+
+Read the persisted mode for downstream phases:
+```bash
+MONITOR_DATA_MODE=$(cat ./monitor-session/DATA_MODE)
+```
+
+---
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## PHASE 1 — STATIC ANALYSIS (~60 seconds)
 ## No services need to be running. Uses Glob, Grep, Read only.
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -937,16 +1034,24 @@ If any stream command is unsupported → **CRITICAL**. Report Redis version mism
 
 ---
 
-### Step 2B — Start all services with simulation
+### Step 2B — Start all services (mode-conditional)
 
-Use the memory-optimized monitoring script. This uses `tsx` (no file watchers),
-sets `CONSTRAINED_MEMORY=true` (smaller worker pools), `WORKER_POOL_SIZE=1`
-(1 worker thread per service instead of 4), and `CACHE_L1_SIZE_MB=8` (8MB L1
-cache instead of 64MB). These reduce peak RAM from ~1.5GB to ~600MB.
+Use the memory-optimized monitoring scripts. All variants use `tsx` (no file
+watchers), `CONSTRAINED_MEMORY=true` (smaller worker pools), and
+`CACHE_L1_SIZE_MB=8` (8MB L1 cache instead of 64MB). These reduce peak RAM
+from ~1.5GB to ~600MB.
 
-Both scripts default to `SIMULATION_REALISM_LEVEL=high` (block-driven multi-swap
-engine with Markov regime model). Override with a `cross-env` prefix to use a
-different level:
+**Select the startup command based on the data mode:**
+
+```bash
+MONITOR_DATA_MODE=$(cat ./monitor-session/DATA_MODE)
+```
+
+**`[SIM-ONLY]` — Simulation mode (default):**
+
+The `dev:monitor` script sets `SIMULATION_MODE=true` and
+`SIMULATION_REALISM_LEVEL=high` (block-driven multi-swap engine with Markov
+regime model). Override with a `cross-env` prefix for a different level:
 
 | Level | Behavior | Use Case |
 |-------|----------|----------|
@@ -971,6 +1076,37 @@ use the minimal variant to save further (~350MB total):
 npm run dev:monitor:minimal &
 ```
 
+**`[LIVE-ONLY]` — Live mode (real RPC prices, mock execution):**
+
+The `dev:monitor:live` script sets `SIMULATION_MODE=false` and
+`EXECUTION_SIMULATION_MODE=true`. Partitions connect to real WebSocket RPC
+endpoints and receive real blockchain Sync events. Execution is still mocked.
+
+```bash
+npm run dev:monitor:live &
+```
+
+**Expected differences from simulation mode:**
+- Startup takes longer (real WebSocket connections: 5-15s per chain)
+- Price data depends on actual market activity (no guaranteed opportunity rate)
+- Provider quality metrics (3R-3V) become actionable real-world measurements
+- `source` field in health responses will be `'live'` instead of `'simulation'`
+
+**`[TESTNET-ONLY]` — Testnet mode (real RPC prices, real testnet execution):**
+
+The `dev:monitor:testnet` script sets `SIMULATION_MODE=false`,
+`EXECUTION_SIMULATION_MODE=false`, and `TESTNET_EXECUTION_MODE=true`.
+Partitions connect to real WebSocket endpoints and the execution engine
+submits real transactions to testnet chains.
+
+```bash
+npm run dev:monitor:testnet &
+```
+
+**DANGER:** Testnet mode submits real transactions. Ensure `.env` has testnet
+RPC URLs (e.g., `SEPOLIA_RPC_URL`, `ARBITRUM_SEPOLIA_RPC_URL`) and a funded
+testnet wallet (`WALLET_PRIVATE_KEY` with testnet ETH).
+
 Capture PID for later cleanup.
 
 ---
@@ -980,12 +1116,18 @@ Capture PID for later cleanup.
 Poll each service's `/ready` endpoint every 5 seconds. Use **service-specific
 timeouts** because different services have different startup characteristics.
 
-| Service | Timeout | Reason |
-|---------|---------|--------|
-| Coordinator | 30s | Standard — Redis + leader election |
-| P1-P4 Partitions | 30s | Standard — Redis + chain init |
-| Execution Engine | 30s | Standard — Redis + consumer groups |
-| Cross-Chain Detector | **120s** | Requires partition price data before ready (60-90s in simulation) |
+**`[ALL-MODES]` Timeout table — mode-conditional values:**
+
+| Service | Timeout `[SIM]` | Timeout `[LIVE/TESTNET]` | Reason |
+|---------|-----------------|--------------------------|--------|
+| Coordinator | 30s | 30s | Standard — Redis + leader election |
+| P1-P4 Partitions | 30s | **60s** | `[LIVE]`: Real WebSocket connections take 5-15s per chain |
+| Execution Engine | 30s | 30s | Standard — Redis + consumer groups |
+| Cross-Chain Detector | **120s** | **180s** | `[LIVE]`: Needs real partition price data (partitions take longer with real WS) |
+
+In `live`/`testnet` mode, partitions must establish real WebSocket connections to
+RPC providers. This takes 5-15s per chain (vs instant in simulation). The extended
+timeouts prevent false CRITICAL findings from slow RPC endpoint negotiation.
 
 ```bash
 # Coordinator
@@ -1016,7 +1158,16 @@ curl -sf http://localhost:3006/ready || echo "NOT READY"
 endpoint requires `chainsMonitored > 0`, which means it needs at least one price
 update from the partitions before reporting ready. In simulation mode this takes
 60-90s (partitions must start, generate simulated data, and publish to streams).
-Do NOT treat this expected delay as a failure — only flag if it exceeds 120s.
+In live mode this can take 90-150s (partitions must connect to real WebSocket
+endpoints, receive real Sync events, and publish real prices).
+Do NOT treat this expected delay as a failure — only flag if it exceeds the
+mode-specific timeout (`[SIM]` 120s / `[LIVE]` 180s).
+
+**`[LIVE-ONLY]` Note on partition readiness:** In live mode, partitions may fail
+to start if RPC URLs are missing or unreachable. A partition that times out in
+live mode should be flagged as **HIGH** (not CRITICAL) if the RPC URL for its
+chains is not configured — this is a configuration gap, not a code bug. Check
+the `.env`/`.env.local` for the relevant `*_RPC_URL` entries before escalating.
 
 Record findings to `./monitor-session/findings/startup.jsonl`:
 ```json
@@ -1840,6 +1991,16 @@ done
 
 Parse `provider_rpc_call_duration_ms{chain="...",quantile="0.95"}` for each chain.
 
+**Mode-conditional severity:**
+
+`[SIM-ONLY]` In simulation mode, WebSocket connections are synthetic (SimulationInitializer
+generates events internally). Provider metrics reflect simulated data, not real RPC health.
+All provider quality flags are reported as **INFO** with annotation `[SIM]` — they confirm
+the simulation harness is working but have no operational meaning.
+
+`[LIVE-ONLY] [TESTNET-ONLY]` In live/testnet mode, these metrics reflect real RPC provider
+health. Apply full severity rules:
+
 **Flag:** Any chain with 0 messages received → **CRITICAL**, category: `WEBSOCKET_HEALTH`
 (dead WebSocket = zero detection on that chain).
 **Flag:** Any chain with 0 active subscriptions → **CRITICAL**,
@@ -1849,6 +2010,10 @@ category: `WEBSOCKET_HEALTH`.
 **Flag:** Any chain with RPC p95 > 200ms → **MEDIUM**, category: `PROVIDER_QUALITY`.
 **Flag:** RPC latency metrics not present → **INFO** (provider latency tracker
 may not be wired into providers yet — connection status check is the fallback).
+
+`[LIVE-ONLY]` Additional live-mode note: If a chain shows 0 messages but other chains on
+the same partition are healthy, the issue is chain-specific (RPC URL invalid, rate-limited,
+or chain down). Check `.env` for that chain's `*_RPC_URL` and `*_API_KEY` configuration.
 
 ---
 
@@ -1864,6 +2029,11 @@ done
 ```
 
 Parse `provider_rpc_errors_total{chain="...",error_type="..."}`.
+
+`[SIM-ONLY]` Report all error counts as **INFO** with `[SIM]` annotation (simulation
+does not produce real RPC errors — any errors indicate harness issues, not provider issues).
+
+`[LIVE-ONLY] [TESTNET-ONLY]` Apply full severity:
 
 **Flag:** Any chain with total errors > 10 in session → severity: **MEDIUM**,
 category: `PROVIDER_QUALITY` (elevated error rate).
@@ -1888,6 +2058,11 @@ done
 ```
 
 Parse `provider_ws_reconnection_duration_ms{chain="...",quantile="0.95"}`.
+
+`[SIM-ONLY]` Report reconnection counts as **INFO** with `[SIM]` annotation (simulation
+uses synthetic WebSocket — reconnections are not meaningful).
+
+`[LIVE-ONLY] [TESTNET-ONLY]` Apply full severity:
 
 **Flag:** Any chain with > 5 reconnections in session → severity: **HIGH**,
 category: `PROVIDER_QUALITY` (unstable provider — frequent reconnections cause
@@ -1914,11 +2089,20 @@ done
 
 Parse `provider_ws_messages_total{chain="...",event_type="..."}`.
 
+`[SIM-ONLY]` Report message rates as **INFO** with `[SIM]` annotation (synthetic events
+have deterministic rates based on `ChainThroughputProfile` — not indicative of real WS health).
+
+`[LIVE-ONLY] [TESTNET-ONLY]` Apply full severity:
+
 **Flag:** Any active chain with 0 messages total → severity: **CRITICAL**,
 category: `WEBSOCKET_HEALTH` (dead WebSocket — no events being received).
 **Flag:** Any chain with message rate >10x lower than peer chains → severity: **MEDIUM**,
 category: `WEBSOCKET_HEALTH` (degraded — significantly fewer events than expected).
 **Info:** All chains receiving messages → severity: **INFO**, category: `WEBSOCKET_HEALTH`.
+
+`[LIVE-ONLY]` Note: Real WebSocket message rates vary significantly by chain. BSC/Polygon
+produce 100-1000x more Sync events than Fantom/Scroll. Use same-partition peer comparison,
+not cross-partition comparison, for the 10x threshold.
 
 ---
 
@@ -1935,6 +2119,13 @@ curl -sf http://localhost:3003/stats | jq '{maxPriceStalenessMs, stalePriceRejec
 curl -sf http://localhost:3004/stats | jq '{maxPriceStalenessMs, stalePriceRejections}'
 ```
 
+`[SIM-ONLY]` In simulation mode, prices are generated at fixed intervals per chain
+(`ChainThroughputProfile`). Staleness is deterministic and reflects simulation config,
+not real provider health. Report staleness values as **INFO** with `[SIM]` annotation.
+
+`[LIVE-ONLY] [TESTNET-ONLY]` Price staleness is the most actionable provider metric
+in live mode — stale prices are the #1 cause of failed trades. Apply full severity:
+
 **Flag:** `maxPriceStalenessMs` > 30000 (30s) on any partition → severity: **HIGH**,
 category: `PROVIDER_QUALITY` (ADR-033 stale price threshold violated — detection
 is working with outdated prices).
@@ -1943,6 +2134,10 @@ is working with outdated prices).
 is working correctly — report the count per partition).
 **Flag:** Fields not present in /stats → severity: **INFO** (enhanced detection
 metrics not yet exposed — upgrade chain-instance.ts).
+
+`[LIVE-ONLY]` Note: High staleness on a single chain often indicates a slow/dead RPC
+provider for that chain. Cross-reference with 3R (connectivity) and 3S (errors) for
+root cause. Common fix: add a backup RPC URL in `.env.local`.
 
 ---
 
@@ -1969,6 +2164,10 @@ category: `DETECTION_QUALITY` (approaching target).
 **Flag:** Field not present → severity: **INFO** (metric not yet exposed).
 **Info:** All partitions < 20ms → severity: **INFO**, category: `DETECTION_QUALITY`.
 
+`[ALL-MODES]` Detection cycle timing thresholds are the same in all modes — the <50ms
+hot-path target applies regardless of data source. If anything, live mode should be
+*faster* (fewer synthetic overhead callbacks) so a regression here is meaningful.
+
 ---
 
 ### Check 3X — Opportunities Per Cycle (D4)
@@ -1984,9 +2183,25 @@ curl -sf http://localhost:3003/stats | jq '{avgOpportunitiesPerCycle}'
 curl -sf http://localhost:3004/stats | jq '{avgOpportunitiesPerCycle}'
 ```
 
+**Mode-conditional severity:**
+
+`[SIM-ONLY]` Simulation generates synthetic arbitrage opportunities via the Markov regime
+model. Zero opportunities after 60s likely indicates a simulation config issue.
 **Flag:** `avgOpportunitiesPerCycle` is 0 across ALL partitions after > 60s uptime
 → severity: **MEDIUM**, category: `DETECTION_QUALITY` (no opportunities being
 detected — may be expected in low-realism simulation).
+
+`[LIVE-ONLY] [TESTNET-ONLY]` In live mode, real market conditions determine opportunity
+volume. Zero opportunities is **normal** — real arbitrage opportunities are rare and
+depend on market volatility, liquidity depth, and price feed quality.
+**Flag:** `avgOpportunitiesPerCycle` is 0 across ALL partitions after > 60s uptime
+→ severity: **INFO**, category: `DETECTION_QUALITY`, annotated `[LIVE-EXPECTED]`
+(zero opportunities from real market data is normal — confirms detection is running but
+no viable arb exists at current thresholds).
+**Flag:** `avgOpportunitiesPerCycle` > 0 on any partition → severity: **INFO**,
+category: `DETECTION_QUALITY`, annotated `[LIVE-SIGNAL]` (real arbitrage detected —
+examine profitability in 3AD/3AE/3AG).
+
 **Info:** Report per-partition breakdown for the report.
 
 ---
@@ -2837,10 +3052,17 @@ done
 
 ### Step 4B — Wait for pipeline flow (60s timeout, poll every 10s)
 
-In simulation mode, the partitions automatically generate simulated price data
-which feeds into the detection → execution pipeline. At `high` realism, the
+Read the data mode from `./monitor-session/DATA_MODE`.
+
+`[SIM-ONLY]` In simulation mode, the partitions automatically generate simulated price
+data which feeds into the detection → execution pipeline. At `high` realism, the
 Markov regime model produces bursty activity — expect uneven stream growth
 (quiet periods with few events, then bursts). At `medium`, growth is steadier.
+
+`[LIVE-ONLY] [TESTNET-ONLY]` In live/testnet mode, price data comes from real WebSocket
+RPC connections to blockchain nodes. Price update volume depends on actual on-chain
+activity. Expect slower initial growth as WebSocket subscriptions stabilize (5-15s per
+chain). Some chains (Fantom, Scroll) may have very low activity outside peak hours.
 
 Poll the 4 critical streams every 10 seconds for up to 60 seconds:
 
@@ -2862,11 +3084,31 @@ done
 3. `stream:execution-requests` length grows (coordinator forwarding)
 4. `stream:execution-results` length grows (execution engine completing)
 
+**Mode-conditional flow expectations:**
+
+`[SIM-ONLY]` All 4 streams MUST grow — simulation generates synthetic prices,
+which produce synthetic opportunities, which flow through the full pipeline.
+
 **Flag:** `stream:price-updates` not growing after 30s → **CRITICAL**
 (partitions not publishing — simulation mode may not be working).
 **Flag:** `stream:opportunities` not growing after 45s → **HIGH**
 (detectors not finding opportunities — may be expected if simulation
 doesn't produce viable arb, but worth flagging).
+
+`[LIVE-ONLY] [TESTNET-ONLY]` Only `stream:price-updates` MUST grow — this confirms
+real WebSocket data is flowing. Downstream streams depend on market conditions:
+
+**Flag:** `stream:price-updates` not growing after 30s → **CRITICAL**
+(no real price data flowing — WebSocket connections may have failed. Check 3R-3V
+for root cause. On Windows, verify `NODE_TLS_REJECT_UNAUTHORIZED=0` is set).
+**Flag:** `stream:opportunities` not growing after 60s → **INFO**, annotated
+`[LIVE-EXPECTED]` (no arbitrage opportunities found in real market data during
+the smoke window — this is normal. Real arb is rare).
+**Flag:** `stream:opportunities` growing → **INFO**, annotated `[LIVE-SIGNAL]`
+(real arbitrage detected — a significant validation milestone).
+
+`[ALL-MODES]` Infrastructure pipeline flags (mode-independent):
+
 **Flag:** `stream:execution-requests` not growing but `stream:opportunities` is →
 **CRITICAL** (coordinator is not forwarding — pipeline broken).
 **Flag:** `stream:execution-results` not growing but `stream:execution-requests` is →
@@ -3276,9 +3518,31 @@ Read ALL finding files:
 Count findings by severity across all phases.
 
 **GO/NO-GO DECISION RULES:**
+
+Read the data mode from `./monitor-session/DATA_MODE`.
+
+`[ALL-MODES]` Base rules (always apply):
 - Any **CRITICAL** finding → **NO-GO**
 - More than 3 **HIGH** findings → **NO-GO**
 - All else → **GO** (with warnings listed)
+
+`[SIM-ONLY]` No additional adjustments. Simulation mode validates infrastructure
+correctness — all checks apply at full severity.
+
+`[LIVE-ONLY]` Adjust decision context:
+- Exclude findings annotated `[LIVE-EXPECTED]` from the HIGH count (e.g., zero
+  opportunities is expected with real market data and should not block a GO decision)
+- Provider quality findings (3R-3V) have higher weight — these indicate real RPC
+  issues that would affect production
+- Include a "Live Mode Validation Summary" noting which chains had active WebSocket
+  data flow and which were silent
+
+`[TESTNET-ONLY]` Adjust decision context:
+- Same adjustments as `[LIVE-ONLY]` above
+- Additionally note any real testnet transactions that were executed (from
+  `stream:execution-results` entries with `simulatedExecution: false`)
+- Flag any unexpected gas expenditure as **HIGH** (testnet tokens have no value
+  but unexpected spending patterns indicate config issues)
 
 **Before writing the report**, run regression analysis (Step 5E) and persist
 the session data (Step 5F).
@@ -3345,6 +3609,7 @@ Write to `./monitor-session/history/<SESSION_ID>.json`:
   "sessionId": "<SESSION_ID>",
   "timestamp": "<ISO8601>",
   "gitSha": "<CURRENT_SHA>",
+  "dataMode": "simulation|live|testnet",
   "decision": "GO|NO-GO",
   "summary": {
     "critical": <n>,
@@ -3387,6 +3652,7 @@ this template:
 **Duration:** <total elapsed time>
 **Git SHA:** <CURRENT_SHA>
 **Mode:** FULL SCAN / INCREMENTAL (<n> files changed)
+**Data Mode:** SIMULATION / LIVE / TESTNET
 
 ---
 
@@ -3402,6 +3668,27 @@ this template:
 | **Total** | **<n>** |
 
 **Reason:** <if NO-GO, list the blocking findings>
+
+### Data Mode Summary
+
+<If SIMULATION:>
+**Data Mode: SIMULATION** — Synthetic prices from ChainSimulator (Markov regime model).
+All pipeline stages validated with deterministic data. Provider quality checks are
+informational only (marked `[SIM]`).
+
+<If LIVE:>
+**Data Mode: LIVE** — Real blockchain prices via WebSocket RPC. Execution is simulated.
+- Chains with active WebSocket data: <list>
+- Chains with no data (silent): <list>
+- Findings marked `[LIVE-EXPECTED]` excluded from HIGH count: <n>
+- Real arbitrage opportunities detected: YES (<n>) / NO (market conditions)
+
+<If TESTNET:>
+**Data Mode: TESTNET** — Real blockchain prices via WebSocket RPC. Real testnet execution.
+- Chains with active WebSocket data: <list>
+- Chains with no data (silent): <list>
+- Testnet transactions executed: <n>
+- Gas spent: <amount> (testnet tokens)
 
 ### Regression Analysis (vs previous session)
 
@@ -3455,6 +3742,8 @@ this template:
 ---
 
 ## Phase 2: Service Readiness
+
+**Startup command:** `npm run dev:monitor` / `dev:monitor:live` / `dev:monitor:testnet`
 
 | Service | Port | Status | Startup Time |
 |---------|------|--------|-------------|
@@ -3522,9 +3811,13 @@ Missing: <list>
 | 3Q Memory Breakdown | PASS/FAIL | <count> |
 
 ### 3.5 Provider Quality (Enhanced Monitoring)
+
+_In SIMULATION mode: all values reflect synthetic data — annotated `[SIM]`._
+_In LIVE/TESTNET mode: values reflect real RPC provider health._
+
 | Chain | RPC p95 | Errors | Reconnects | WS msgs | Status |
 |-------|---------|--------|------------|---------|--------|
-| ... | <ms> | <count> | <count> | <count> | OK / DEGRADED |
+| ... | <ms> | <count> | <count> | <count> | OK / DEGRADED / [SIM] |
 
 | Check | Status | Findings |
 |-------|--------|----------|
@@ -3597,7 +3890,10 @@ _* = placeholder check for not-yet-implemented metrics_
 | stream:execution-results | <n> | <n> | +<n> | FLOWING/STALLED |
 | stream:fast-lane | <n> | <n> | +<n> | FLOWING/STALLED/EMPTY |
 
-### Pipeline Verdict: FLOWING / STALLED AT <stage>
+### Pipeline Verdict: FLOWING / STALLED AT <stage> (Data Mode: SIMULATION/LIVE/TESTNET)
+
+_In LIVE/TESTNET mode: "STALLED AT opportunities" is expected if no real arbitrage_
+_exists during the smoke window. Only "STALLED AT price-updates" is a true failure._
 
 ### Message Trace
 <traced message details if available>

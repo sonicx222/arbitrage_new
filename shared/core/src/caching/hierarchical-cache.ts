@@ -253,7 +253,7 @@ export class HierarchicalCache {
   private l3Prefix = 'cache:l3:';
   // T2.10: L3 LRU eviction queue and max size
   private l3EvictionQueue: LRUQueue = new LRUQueue();
-  private l3MaxSize: number = 0; // 0 = unlimited
+  private l3MaxSize: number = 10000; // H-003 FIX: match constructor default (was 0 = unlimited)
 
   // Cache statistics
   private stats = {
