@@ -40,8 +40,11 @@ describe('AlertNotifier', () => {
       const notifierWithChannel = new AlertNotifier(mockLogger);
 
       expect(notifierWithChannel).toBeInstanceOf(AlertNotifier);
-      // Logger info may be called with optional chaining, check if called at all
-      expect(mockLogger.info).toHaveBeenCalled();
+      // L-04 FIX: Assert specific log message, not just "was called"
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('channels configured'),
+        expect.objectContaining({ channels: expect.arrayContaining(['discord']) })
+      );
     });
 
     it('should warn when no channels are configured', () => {

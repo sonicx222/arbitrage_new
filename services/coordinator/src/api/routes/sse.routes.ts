@@ -11,6 +11,13 @@
  *
  * M-05 FIX: MAX_SSE_CONNECTIONS configurable via SSE_MAX_CONNECTIONS env var.
  *
+ * M-04 KNOWN LIMITATION: SSE auth token is passed via URL query parameter
+ * (?token=<value>) because the EventSource API does not support custom headers.
+ * The token will appear in server access logs, browser history, and Referer headers.
+ * Mitigations: (1) tokens should be rotated frequently, (2) reverse proxy should
+ * strip query params from access logs, (3) future improvement: two-step flow where
+ * a POST with auth header returns a short-lived SSE-only token.
+ *
  * @see docs/plans/2026-03-06-react-dashboard-design.md
  */
 

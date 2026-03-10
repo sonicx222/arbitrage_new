@@ -817,6 +817,11 @@ describe('S4.1.5: Failover Scenarios', () => {
     });
   });
 
+  // M-13 NOTE: These tests validate process.env parsing logic inline (e.g., `=== 'true'`,
+  // `parseInt(...)`). They do NOT call actual coordinator config parsing functions.
+  // The shared config package's `parseEnvIntSafe` and coordinator's `index.ts` env
+  // parsing are the real code that should be tested. These tests are retained for
+  // specification documentation but should not be relied upon for coverage.
   describe('S4.1.5.5: Environment Variable Configuration', () => {
     describe('Coordinator Env Vars', () => {
       it('should read IS_STANDBY from environment', () => {

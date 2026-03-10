@@ -90,6 +90,17 @@ describe('StreamRateLimiter', () => {
       expect(limiter.checkRateLimit('stream-a')).toBe(false);
     });
 
+    // L-06 FIX: Edge case where a single message costs more than the total budget
+    it('should return false immediately when tokensPerMessage exceeds maxTokens', () => {
+      const config: Partial<RateLimiterConfig> = { maxTokens: 5, tokensPerMessage: 10, refillMs: 60000 };
+      limiter = new StreamRateLimiter(config);
+
+      // First call should fail — not enough tokens even at full capacity
+      expect(limiter.checkRateLimit('stream-a')).toBe(false);
+      // Should still be false on subsequent calls
+      expect(limiter.checkRateLimit('stream-a')).toBe(false);
+    });
+
     it('should use default config when no config is provided', () => {
       limiter = new StreamRateLimiter();
 

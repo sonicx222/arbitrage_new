@@ -250,9 +250,9 @@ interface StreamMessageData {
  * Convention: [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable.
  * Returns the category key that maps directly to dlqMetrics counters.
  */
-type DlqClassification = 'expired' | 'validation' | 'transient' | 'unknown';
+export type DlqClassification = 'expired' | 'validation' | 'transient' | 'unknown';
 
-function classifyDlqError(errorCode: string): DlqClassification {
+export function classifyDlqError(errorCode: string): DlqClassification {
   if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
     return 'expired';
   }

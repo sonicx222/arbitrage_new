@@ -345,7 +345,10 @@ export class StreamConsumerManager {
           consumers: pendingInfo.consumers,
         });
 
-        // OP-1 FIX: Claim orphaned messages from OTHER consumers
+        // OP-1 FIX: Claim orphaned messages from OTHER consumers.
+        // L-09: .filter() is acceptable here — consumer count per stream stays small (<20
+        // even with multiple coordinator replicas). This is not a hot path (called at startup
+        // and periodically for recovery, not per-message).
         const otherConsumers = pendingInfo.consumers.filter(
           c => c.name !== groupConfig.consumerName && c.pending > 0
         );

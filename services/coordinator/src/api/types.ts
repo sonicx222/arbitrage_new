@@ -102,13 +102,17 @@ export interface SystemMetrics {
 // =============================================================================
 
 /**
- * Interface for coordinator state that routes need to access.
- * Implemented by CoordinatorService to provide state to extracted routes.
+ * Read-only view of coordinator state exposed to API route handlers.
  *
- * This enables:
- * - Routes to be extracted to separate files
- * - Type-safe access to coordinator state
- * - Easy testing with mock state providers
+ * Implemented by CoordinatorService. All methods are getters — route handlers
+ * cannot mutate coordinator internals. This interface is the ONLY bridge between
+ * coordinator business logic and the HTTP/SSE layer.
+ *
+ * L-07: This enables:
+ * - Route extraction: each route file (`health.routes.ts`, `sse.routes.ts`, etc.)
+ *   depends on this interface, not on CoordinatorService directly
+ * - Testability: tests create mock state providers instead of full coordinators
+ * - Encapsulation: coordinator internals are hidden behind typed getters
  */
 export interface CoordinatorStateProvider {
   /** Whether this instance is the leader */
