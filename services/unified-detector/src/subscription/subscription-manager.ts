@@ -72,6 +72,12 @@ export interface SubscriptionManagerConfig {
 /**
  * Callbacks from SubscriptionManager back to chain-instance.
  * Chain-instance provides these to wire up its event handlers.
+ *
+ * NOTE (L-004): The per-event callbacks (onSyncEvent, onSwapEvent, etc.) are passed to
+ * WebSocketManager.subscribe() but WebSocketManager currently routes ALL messages through
+ * the generic `message` event, which chain-instance handles via handleWebSocketMessage().
+ * These callbacks are retained for forward-compatibility if WebSocketManager adds
+ * per-subscription dispatch, and as documentation of the expected event contract.
  */
 export interface SubscriptionCallbacks {
   /** Called for every raw WebSocket message (for routing in chain-instance) */
@@ -82,17 +88,17 @@ export interface SubscriptionCallbacks {
   onDisconnected: () => void;
   /** Called when WebSocket connects */
   onConnected: () => void;
-  /** Called for Sync log events */
+  /** Called for Sync log events (currently unused — see NOTE above) */
   onSyncEvent: (log: unknown) => void;
-  /** Called for Swap V2 log events */
+  /** Called for Swap V2 log events (currently unused — see NOTE above) */
   onSwapEvent: (log: unknown) => void;
-  /** Called for Swap V3 log events (P0-4: V3 Swap event support) */
+  /** Called for Swap V3 log events (currently unused — see NOTE above) */
   onSwapV3Event: (log: unknown) => void;
-  /** Called for Curve TokenExchange log events (P0-5: Non-standard event support) */
+  /** Called for Curve TokenExchange log events (currently unused — see NOTE above) */
   onCurveTokenExchangeEvent: (log: unknown) => void;
-  /** Called for Balancer V2 Swap log events (P0-5: Non-standard event support) */
+  /** Called for Balancer V2 Swap log events (currently unused — see NOTE above) */
   onBalancerSwapEvent: (log: unknown) => void;
-  /** Called for new block headers */
+  /** Called for new block headers (currently unused — see NOTE above) */
   onNewBlock: (block: unknown) => void;
   /** Called when factory discovers a new pair */
   onPairCreated: (event: PairCreatedEvent) => void;
@@ -198,6 +204,44 @@ export class SubscriptionManager {
   // ===========================================================================
   // Private Methods
   // ===========================================================================
+
+  /**
+   * M-014 FIX: Subscribe to all 6 event types (Sync, SwapV2, SwapV3, Curve, Balancer, newHeads).
+   * Extracted to eliminate duplication between factory and legacy modes.
+   */
+  private async subscribeToEventTypes(
+    wsManager: WebSocketManager,
+    pairAddresses: string[],
+    callbacks: SubscriptionCallbacks
+  ): Promise<void> {
+    if (pairAddresses.length > 0) {
+      const eventSubscriptions: Array<{ signature: string; callback: (log: unknown) => void }> = [
+        { signature: EVENT_SIGNATURES.SYNC, callback: (log) => callbacks.onSyncEvent(log) },
+        { signature: EVENT_SIGNATURES.SWAP_V2, callback: (log) => callbacks.onSwapEvent(log) },
+        { signature: EVENT_SIGNATURES.SWAP_V3, callback: (log) => callbacks.onSwapV3Event(log) },
+        { signature: EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE, callback: (log) => callbacks.onCurveTokenExchangeEvent(log) },
+        { signature: EVENT_SIGNATURES.BALANCER_SWAP, callback: (log) => callbacks.onBalancerSwapEvent(log) },
+      ];
+
+      for (const { signature, callback } of eventSubscriptions) {
+        await wsManager.subscribe({
+          method: 'eth_subscribe',
+          params: ['logs', { topics: [signature], address: pairAddresses }],
+          type: 'logs',
+          topics: [signature],
+          callback,
+        });
+      }
+    }
+
+    // Subscribe to new blocks for latency tracking
+    await wsManager.subscribe({
+      method: 'eth_subscribe',
+      params: ['newHeads'],
+      type: 'newHeads',
+      callback: (block) => callbacks.onNewBlock(block),
+    });
+  }
 
   private async initializeWebSocket(callbacks: SubscriptionCallbacks): Promise<WebSocketManager> {
     const { chainConfig, chainId, maxReconnectAttempts, logger } = this.config;
@@ -326,61 +370,8 @@ export class SubscriptionManager {
     // Subscribe to factories
     await factorySubscriptionService.subscribeToFactories();
 
-    // Still subscribe to Sync/Swap events for existing pairs
-    if (pairAddresses.length > 0) {
-      // Subscribe to Sync events for existing pairs
-      await wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.SYNC], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.SYNC],
-        callback: (log) => callbacks.onSyncEvent(log)
-      });
-
-      // Subscribe to Swap V2 events for existing pairs
-      await wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.SWAP_V2],
-        callback: (log) => callbacks.onSwapEvent(log)
-      });
-
-      // P0-4: Subscribe to V3 Swap events for V3 pair addresses
-      await wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V3], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.SWAP_V3],
-        callback: (log) => callbacks.onSwapV3Event(log)
-      });
-
-      // P0-5: Subscribe to Curve TokenExchange events
-      await wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE],
-        callback: (log) => callbacks.onCurveTokenExchangeEvent(log)
-      });
-
-      // P0-5: Subscribe to Balancer V2 Swap events
-      await wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.BALANCER_SWAP], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.BALANCER_SWAP],
-        callback: (log) => callbacks.onBalancerSwapEvent(log)
-      });
-    }
-
-    // Subscribe to new blocks for latency tracking
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['newHeads'],
-      type: 'newHeads',
-      callback: (block) => callbacks.onNewBlock(block)
-    });
+    // Subscribe to all event types (Sync, SwapV2, SwapV3, Curve, Balancer, newHeads)
+    await this.subscribeToEventTypes(wsManager, pairAddresses, callbacks);
 
     // Update subscription stats
     const subscriptionStats: SubscriptionStats = {
@@ -412,58 +403,8 @@ export class SubscriptionManager {
   ): Promise<{ factorySubscriptionService: FactorySubscriptionService | null; subscriptionStats: SubscriptionStats; useFactoryMode: boolean }> {
     const { chainId, logger } = this.config;
 
-    // Subscribe to Sync events
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.SYNC], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.SYNC],
-      callback: (log) => callbacks.onSyncEvent(log)
-    });
-
-    // Subscribe to Swap V2 events
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.SWAP_V2],
-      callback: (log) => callbacks.onSwapEvent(log)
-    });
-
-    // P0-4: Subscribe to V3 Swap events
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V3], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.SWAP_V3],
-      callback: (log) => callbacks.onSwapV3Event(log)
-    });
-
-    // P0-5: Subscribe to Curve TokenExchange events
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.CURVE_TOKEN_EXCHANGE],
-      callback: (log) => callbacks.onCurveTokenExchangeEvent(log)
-    });
-
-    // P0-5: Subscribe to Balancer V2 Swap events
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.BALANCER_SWAP], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.BALANCER_SWAP],
-      callback: (log) => callbacks.onBalancerSwapEvent(log)
-    });
-
-    // Subscribe to new blocks for latency tracking
-    await wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['newHeads'],
-      type: 'newHeads',
-      callback: (block) => callbacks.onNewBlock(block)
-    });
+    // Subscribe to all event types (Sync, SwapV2, SwapV3, Curve, Balancer, newHeads)
+    await this.subscribeToEventTypes(wsManager, pairAddresses, callbacks);
 
     // Update subscription stats
     const subscriptionStats: SubscriptionStats = {

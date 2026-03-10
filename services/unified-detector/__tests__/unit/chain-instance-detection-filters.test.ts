@@ -117,10 +117,18 @@ jest.mock('@arbitrage/core/path-finding', () => ({
   getMultiLegPathFinder: jest.fn(),
 }));
 
-jest.mock('@arbitrage/core/redis', () => ({
-  RedisStreamsClient: jest.fn(),
-  StreamBatcher: jest.fn(),
-}));
+jest.mock('@arbitrage/core/redis', () => {
+  const MockRedisStreamsClient = jest.fn();
+  Object.defineProperty(MockRedisStreamsClient, 'STREAMS', {
+    value: { PRICE_UPDATES: 'stream:price-updates', OPPORTUNITIES: 'stream:opportunities' },
+    configurable: true,
+    writable: true,
+  });
+  return {
+    RedisStreamsClient: MockRedisStreamsClient,
+    StreamBatcher: jest.fn(),
+  };
+});
 
 jest.mock('@arbitrage/core/tracing', () => ({
   createFastTraceContext: jest.fn(),
@@ -841,5 +849,187 @@ describe('M-002: Synthetic reserves deviation filter', () => {
 
     expect(pair.reserve0BigInt.toString()).toBe('1000');
     expect(pair.reserve1BigInt.toString()).toBe('2000');
+  });
+});
+
+// =============================================================================
+// M-010: getTokenPairKey LRU Eviction
+// =============================================================================
+
+describe('M-010: getTokenPairKey LRU eviction', () => {
+  let instance: ChainDetectorInstance;
+
+  beforeEach(() => {
+    applyMocks();
+    instance = createChainInstance();
+  });
+
+  afterEach(() => {
+    instance.removeAllListeners();
+  });
+
+  it('should return consistent key regardless of token order', () => {
+    const getKey = (instance as any).getTokenPairKey.bind(instance);
+
+    const key1 = getKey('0xAAA', '0xBBB');
+    const key2 = getKey('0xBBB', '0xAAA');
+
+    expect(key1).toBe(key2);
+  });
+
+  it('should cache both directions of a key', () => {
+    const getKey = (instance as any).getTokenPairKey.bind(instance);
+    const cache: Map<string, string> = (instance as any).tokenPairKeyCache;
+
+    getKey('0xAAA', '0xBBB');
+
+    expect(cache.has('0xAAA|0xBBB')).toBe(true);
+    expect(cache.has('0xBBB|0xAAA')).toBe(true);
+  });
+
+  it('should evict oldest 10% when cache reaches max size', () => {
+    const getKey = (instance as any).getTokenPairKey.bind(instance);
+    const cache: Map<string, string> = (instance as any).tokenPairKeyCache;
+    const maxSize = (instance as any).TOKEN_PAIR_KEY_CACHE_MAX;
+
+    // Fill cache to max (each call caches 2 entries: forward + reverse)
+    for (let i = 0; i < maxSize / 2 + 1; i++) {
+      getKey(`0xtoken${i}`, `0xtoken${i + 100000}`);
+    }
+
+    // Cache should have been evicted (size should be <= max + 2 per call)
+    expect(cache.size).toBeLessThanOrEqual(maxSize + 2);
+
+    // New key should still work after eviction
+    const result = getKey('0xNew1', '0xNew2');
+    expect(result).toBeTruthy();
+    expect(cache.has('0xNew1|0xNew2')).toBe(true);
+  });
+
+  it('should return from cache on repeated calls', () => {
+    const getKey = (instance as any).getTokenPairKey.bind(instance);
+
+    const first = getKey('0xAAA', '0xBBB');
+    const second = getKey('0xAAA', '0xBBB');
+
+    expect(first).toBe(second);
+  });
+});
+
+// =============================================================================
+// M-011: publishPriceUpdate Batcher Drop Logic
+// =============================================================================
+
+describe('M-011: publishPriceUpdate batcher drop logic', () => {
+  let instance: ChainDetectorInstance;
+
+  beforeEach(() => {
+    applyMocks();
+    instance = createChainInstance();
+    (instance as any).isRunning = true;
+  });
+
+  afterEach(() => {
+    instance.removeAllListeners();
+  });
+
+  it('should increment batcherDropCount when batcher rejects', () => {
+    const batcher = {
+      add: jest.fn().mockReturnValue(false),
+      flush: jest.fn(),
+      stop: jest.fn(),
+    };
+    (instance as any).priceUpdateBatcher = batcher;
+    (instance as any).batcherDropCount = 0;
+
+    const publish = (instance as any).publishPriceUpdate.bind(instance);
+    publish({
+      chain: 'ethereum', dex: 'uniswap', pairKey: 'test', pairAddress: '0x1',
+      token0: '0xt0', token1: '0xt1', price: 1.5, reserve0: '100', reserve1: '150',
+      timestamp: Date.now(), blockNumber: 100, latency: 0, source: 'live',
+    });
+
+    expect((instance as any).batcherDropCount).toBe(1);
+  });
+
+  it('should log warning on first drop', () => {
+    const batcher = {
+      add: jest.fn().mockReturnValue(false),
+      flush: jest.fn(),
+      stop: jest.fn(),
+    };
+    (instance as any).priceUpdateBatcher = batcher;
+    (instance as any).batcherDropCount = 0;
+
+    const publish = (instance as any).publishPriceUpdate.bind(instance);
+    publish({
+      chain: 'ethereum', dex: 'uniswap', pairKey: 'test', pairAddress: '0x1',
+      token0: '0xt0', token1: '0xt1', price: 1.5, reserve0: '100', reserve1: '150',
+      timestamp: Date.now(), blockNumber: 100, latency: 0, source: 'live',
+    });
+
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      'Price update dropped by batcher (queue full)',
+      expect.objectContaining({ totalDropped: 1 }),
+    );
+  });
+
+  it('should throttle warnings (log at 1 and every 1000)', () => {
+    const batcher = {
+      add: jest.fn().mockReturnValue(false),
+      flush: jest.fn(),
+      stop: jest.fn(),
+    };
+    (instance as any).priceUpdateBatcher = batcher;
+    (instance as any).batcherDropCount = 0;
+
+    const publish = (instance as any).publishPriceUpdate.bind(instance);
+    const priceUpdate = {
+      chain: 'ethereum', dex: 'uniswap', pairKey: 'test', pairAddress: '0x1',
+      token0: '0xt0', token1: '0xt1', price: 1.5, reserve0: '100', reserve1: '150',
+      timestamp: Date.now(), blockNumber: 100, latency: 0, source: 'live',
+    };
+
+    // Publish 5 times — should only warn on the 1st
+    for (let i = 0; i < 5; i++) {
+      publish(priceUpdate);
+    }
+
+    // 1 warning for count=1, no warnings for counts 2-5
+    expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not increment dropCount when batcher accepts', () => {
+    const batcher = {
+      add: jest.fn().mockReturnValue(true),
+      flush: jest.fn(),
+      stop: jest.fn(),
+    };
+    (instance as any).priceUpdateBatcher = batcher;
+    (instance as any).batcherDropCount = 0;
+
+    const publish = (instance as any).publishPriceUpdate.bind(instance);
+    publish({
+      chain: 'ethereum', dex: 'uniswap', pairKey: 'test', pairAddress: '0x1',
+      token0: '0xt0', token1: '0xt1', price: 1.5, reserve0: '100', reserve1: '150',
+      timestamp: Date.now(), blockNumber: 100, latency: 0, source: 'live',
+    });
+
+    expect((instance as any).batcherDropCount).toBe(0);
+  });
+
+  it('should fallback to direct publish when batcher is null', () => {
+    (instance as any).priceUpdateBatcher = null;
+    const mockXaddWithLimit = jest.fn().mockResolvedValue('ok');
+    (instance as any).streamsClient = { xaddWithLimit: mockXaddWithLimit };
+
+    const publish = (instance as any).publishPriceUpdate.bind(instance);
+    publish({
+      chain: 'ethereum', dex: 'uniswap', pairKey: 'test', pairAddress: '0x1',
+      token0: '0xt0', token1: '0xt1', price: 1.5, reserve0: '100', reserve1: '150',
+      timestamp: Date.now(), blockNumber: 100, latency: 0, source: 'live',
+    });
+
+    expect(mockXaddWithLimit).toHaveBeenCalled();
   });
 });

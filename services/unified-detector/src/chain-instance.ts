@@ -96,7 +96,7 @@ import { initializePairs as initializePairsFromModule, initializeAdapterPairs } 
 // FIX Config 3.1/3.2: Import utility functions and constants
 import { parseIntEnvVar } from './types';
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
-import { validateFee } from '@arbitrage/core/utils';
+import { validateFee, decimalToBps, FEE_CONSTANTS } from '@arbitrage/core/utils';
 import {
   // R8 Refactor: UNSTABLE_WEBSOCKET_CHAINS, DEFAULT_WS_CONNECTION_TIMEOUT_MS,
   // EXTENDED_WS_CONNECTION_TIMEOUT_MS moved to subscription-manager.ts
@@ -1602,8 +1602,6 @@ export class ChainDetectorInstance extends EventEmitter {
         // FIX Perf 10.2: Keep BigInt values to avoid re-parsing in emitPriceUpdate()
         const reserve0BigInt = BigInt('0x' + data.slice(2, 66));
         const reserve1BigInt = BigInt('0x' + data.slice(66, 130));
-        const reserve0 = reserve0BigInt.toString();
-        const reserve1 = reserve1BigInt.toString();
         // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
         const blockNumber = parseInt(log.blockNumber, 16);
         if (!Number.isFinite(blockNumber)) return;
@@ -1640,34 +1638,15 @@ export class ChainDetectorInstance extends EventEmitter {
             token1: pair.token1,
             reserve0: reserve0BigInt,
             reserve1: reserve1BigInt,
-            feeBps: Math.round((pair.fee ?? 0.003) * 10000),
+            feeBps: decimalToBps(pair.fee ?? FEE_CONSTANTS.DEFAULT),
             liquidityUsd: 0, // Estimated by analyzer from reserves
             price: syncPrice ?? 0,
             timestamp: now,
           });
         }
 
-        // HOT-PATH OPT (Perf-2): Direct property assignment instead of Object.assign.
-        // Object.assign creates a temporary object; in single-threaded JS there is
-        // no atomicity benefit. Direct writes avoid the allocation overhead.
-        pair.reserve0 = reserve0;
-        pair.reserve1 = reserve1;
-        pair.reserve0BigInt = reserve0BigInt;
-        pair.reserve1BigInt = reserve1BigInt;
-        pair.blockNumber = blockNumber;
-        pair.lastUpdate = now;
-
-        // R3 Refactor: Delegate cache invalidation to SnapshotManager
-        // SnapshotManager handles version-based cache coherency and TTL internally
-        this.snapshotManager.invalidateCache();
-
-        this.eventsProcessed++;
-
-        // Calculate and emit price update (pass cached timestamp)
-        this.emitPriceUpdate(pair, now);
-
-        // Check for arbitrage opportunities
-        this.checkArbitrageOpportunity(pair);
+        // M-005: Shared reserve update tail (assign, invalidate, emit, detect)
+        this.applyReserveUpdate(pair, reserve0BigInt, reserve1BigInt, blockNumber, now);
       }
     } catch (error) {
       this.logger.error('Error handling Sync event', { error });
@@ -1792,8 +1771,6 @@ export class ChainDetectorInstance extends EventEmitter {
       if (!reserves) return;
 
       const { reserve0: reserve0BigInt, reserve1: reserve1BigInt } = reserves;
-      const reserve0 = reserve0BigInt.toString();
-      const reserve1 = reserve1BigInt.toString();
       // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
       const blockNumber = parseInt(log.blockNumber, 16);
       if (!Number.isFinite(blockNumber)) return;
@@ -1823,7 +1800,7 @@ export class ChainDetectorInstance extends EventEmitter {
           token1: pair.token1,
           reserve0: reserve0BigInt,
           reserve1: reserve1BigInt,
-          feeBps: Math.round((pair.fee ?? 0.003) * 10000),
+          feeBps: decimalToBps(pair.fee ?? FEE_CONSTANTS.DEFAULT),
           liquidityUsd: 0,
           price: syncPrice ?? 0,
           timestamp: now,
@@ -1832,24 +1809,8 @@ export class ChainDetectorInstance extends EventEmitter {
         });
       }
 
-      // HOT-PATH OPT: Direct property assignment
-      pair.reserve0 = reserve0;
-      pair.reserve1 = reserve1;
-      pair.reserve0BigInt = reserve0BigInt;
-      pair.reserve1BigInt = reserve1BigInt;
-      pair.blockNumber = blockNumber;
-      pair.lastUpdate = now;
-
-      // Invalidate snapshot cache
-      this.snapshotManager.invalidateCache();
-
-      this.eventsProcessed++;
-
-      // Calculate and emit price update
-      this.emitPriceUpdate(pair, now);
-
-      // Check for arbitrage opportunities
-      this.checkArbitrageOpportunity(pair);
+      // M-005: Shared reserve update tail
+      this.applyReserveUpdate(pair, reserve0BigInt, reserve1BigInt, blockNumber, now);
     } catch (error) {
       this.logger.error('Error handling V3 Swap event', { error });
     }
@@ -1904,22 +1865,8 @@ export class ChainDetectorInstance extends EventEmitter {
         }
       }
 
-      // Update reserves with swap amounts as synthetic reserves.
-      // P0 Fix DET-001: Mark as synthetic so detection applies confidence discount.
-      // Swap amounts reflect marginal exchange rate, not actual pool liquidity.
-      pair.reserve0 = tokensSold.toString();
-      pair.reserve1 = tokensBought.toString();
-      pair.reserve0BigInt = tokensSold;
-      pair.reserve1BigInt = tokensBought;
-      pair.syntheticReserves = true;
-      pair.blockNumber = blockNumber;
-      pair.lastUpdate = now;
-
-      this.snapshotManager.invalidateCache();
-      this.eventsProcessed++;
-
-      this.emitPriceUpdate(pair, now);
-      this.checkArbitrageOpportunity(pair);
+      // M-005: Shared reserve update tail (synthetic = true for Curve swap amounts)
+      this.applyReserveUpdate(pair, tokensSold, tokensBought, blockNumber, now, true);
     } catch (error) {
       this.logger.error('Error handling Curve TokenExchange event', { error });
     }
@@ -1978,24 +1925,43 @@ export class ChainDetectorInstance extends EventEmitter {
         }
       }
 
-      // Use swap amounts as synthetic reserves (marginal exchange rate).
-      // P0 Fix DET-001: Mark as synthetic so detection applies confidence discount.
-      pair.reserve0 = amountIn.toString();
-      pair.reserve1 = amountOut.toString();
-      pair.reserve0BigInt = amountIn;
-      pair.reserve1BigInt = amountOut;
-      pair.syntheticReserves = true;
-      pair.blockNumber = blockNumber;
-      pair.lastUpdate = now;
-
-      this.snapshotManager.invalidateCache();
-      this.eventsProcessed++;
-
-      this.emitPriceUpdate(pair, now);
-      this.checkArbitrageOpportunity(pair);
+      // M-005: Shared reserve update tail (synthetic = true for Balancer swap amounts)
+      this.applyReserveUpdate(pair, amountIn, amountOut, blockNumber, now, true);
     } catch (error) {
       this.logger.error('Error handling Balancer Swap event', { error });
     }
+  }
+
+  /**
+   * M-005 FIX: Common tail for reserve-update event handlers.
+   * Assigns parsed reserves to the pair, invalidates snapshot cache,
+   * emits price update, and triggers arbitrage detection.
+   *
+   * HOT-PATH: Called by handleSyncEvent, handleSwapV3Event,
+   * handleCurveTokenExchangeEvent, handleBalancerSwapEvent.
+   * V8 inlines small methods, so no call overhead in practice.
+   */
+  private applyReserveUpdate(
+    pair: ExtendedPair,
+    reserve0BigInt: bigint,
+    reserve1BigInt: bigint,
+    blockNumber: number,
+    now: number,
+    synthetic: boolean = false,
+  ): void {
+    pair.reserve0 = reserve0BigInt.toString();
+    pair.reserve1 = reserve1BigInt.toString();
+    pair.reserve0BigInt = reserve0BigInt;
+    pair.reserve1BigInt = reserve1BigInt;
+    if (synthetic) pair.syntheticReserves = true;
+    pair.blockNumber = blockNumber;
+    pair.lastUpdate = now;
+
+    this.snapshotManager.invalidateCache();
+    this.eventsProcessed++;
+
+    this.emitPriceUpdate(pair, now);
+    this.checkArbitrageOpportunity(pair);
   }
 
   // P2 FIX: Use EthereumBlockHeader type instead of any

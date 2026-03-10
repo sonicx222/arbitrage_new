@@ -58,13 +58,13 @@ describe('SimpleArbitrageDetector', () => {
   describe('Constructor', () => {
     it('should create detector with default config', () => {
       const d = new SimpleArbitrageDetector(createMockConfig());
-      expect(d).toBeDefined();
+      expect(d).toBeInstanceOf(SimpleArbitrageDetector);
     });
 
     it('should respect chain-specific profit thresholds', () => {
       // Arbitrum has lower gas costs = lower profit threshold
       const arbDetector = new SimpleArbitrageDetector(createMockConfig({ chainId: 'arbitrum' }));
-      expect(arbDetector).toBeDefined();
+      expect(arbDetector).toBeInstanceOf(SimpleArbitrageDetector);
     });
 
     it('should use configurable price bounds', () => {
@@ -72,7 +72,7 @@ describe('SimpleArbitrageDetector', () => {
         minSafePrice: 1e-20,
         maxSafePrice: 1e20,
       }));
-      expect(d).toBeDefined();
+      expect(d).toBeInstanceOf(SimpleArbitrageDetector);
     });
   });
 
@@ -104,8 +104,11 @@ describe('SimpleArbitrageDetector', () => {
 
       expect(result).not.toBeNull();
       expect(result!.profitPercentage).toBeGreaterThan(0);
-      expect(result!.buyDex).toBeDefined();
-      expect(result!.sellDex).toBeDefined();
+      expect(typeof result!.buyDex).toBe('string');
+      expect(typeof result!.sellDex).toBe('string');
+      expect(['uniswap', 'sushiswap']).toContain(result!.buyDex);
+      expect(['uniswap', 'sushiswap']).toContain(result!.sellDex);
+      expect(result!.buyDex).not.toBe(result!.sellDex);
     });
 
     it('should return null when spread is too small', () => {
@@ -353,7 +356,7 @@ describe('SimpleArbitrageDetector', () => {
       const result = detector.calculateArbitrage(pair1, pair2);
 
       expect(result).not.toBeNull();
-      expect(result!.amountIn).toBeDefined();
+      expect(typeof result!.amountIn).toBe('string');
       // Amount should be reasonable (not 0 and not more than reserves)
       const amountInNum = Number(result!.amountIn);
       expect(amountInNum).toBeGreaterThan(0);

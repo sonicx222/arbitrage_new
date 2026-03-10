@@ -339,7 +339,10 @@ describe('SubscriptionManager', () => {
       const result = await manager.initialize(callbacks, ['0xpair1']);
 
       expect(result.wsManager).toBe(mockWsManagerInstance);
-      expect(result.subscriptionStats).toBeDefined();
+      expect(result.subscriptionStats).toEqual(expect.objectContaining({
+        mode: expect.stringMatching(/^(factory|legacy)$/),
+        monitoredPairs: expect.any(Number),
+      }));
       expect(typeof result.useFactoryMode).toBe('boolean');
     });
 
@@ -569,7 +572,8 @@ describe('SubscriptionManager', () => {
       const messageCall = mockWsManagerInstance.on.mock.calls.find(
         (call: unknown[]) => call[0] === 'message'
       );
-      expect(messageCall).toBeDefined();
+      expect(messageCall).not.toBeUndefined();
+      expect(typeof messageCall![1]).toBe('function');
 
       // Simulate a message
       const testMessage = { method: 'eth_subscription' };
@@ -588,7 +592,8 @@ describe('SubscriptionManager', () => {
       const errorCall = mockWsManagerInstance.on.mock.calls.find(
         (call: unknown[]) => call[0] === 'error'
       );
-      expect(errorCall).toBeDefined();
+      expect(errorCall).not.toBeUndefined();
+      expect(typeof errorCall![1]).toBe('function');
 
       const testError = new Error('test error');
       errorCall![1](testError);
@@ -606,7 +611,7 @@ describe('SubscriptionManager', () => {
       const disconnectedCall = mockWsManagerInstance.on.mock.calls.find(
         (call: unknown[]) => call[0] === 'disconnected'
       );
-      expect(disconnectedCall).toBeDefined();
+      expect(disconnectedCall).not.toBeUndefined();
 
       disconnectedCall![1]();
 
@@ -623,7 +628,7 @@ describe('SubscriptionManager', () => {
       const connectedCall = mockWsManagerInstance.on.mock.calls.find(
         (call: unknown[]) => call[0] === 'connected'
       );
-      expect(connectedCall).toBeDefined();
+      expect(connectedCall).not.toBeUndefined();
 
       connectedCall![1]();
 

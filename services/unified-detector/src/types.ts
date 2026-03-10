@@ -132,6 +132,11 @@ export function asLogger<T extends Logger>(logger: T): Logger {
  *
  * FIX Config 3.1: Validates simulation config to prevent unsafe values.
  *
+ * NOTE (L-009): Not a duplicate of `parseEnvIntSafe` from `@arbitrage/core/utils`.
+ * Core's version reads from `process.env` by key name and only enforces a min bound.
+ * This version takes a pre-read value string and enforces both min AND max bounds,
+ * which is required for simulation config clamping (e.g., volatility 0..1).
+ *
  * @param value - Raw environment variable value (or undefined)
  * @param defaultValue - Default value if env var is not set
  * @param min - Minimum allowed value (inclusive)

@@ -24,6 +24,7 @@ import { ServiceStateManager } from '@arbitrage/core/service-lifecycle';
 import { PartitionConfig, PartitionHealth } from '@arbitrage/config';
 
 import { Logger } from './types';
+import { DEFAULT_HEALTH_CHECK_INTERVAL_MS } from './constants';
 
 // =============================================================================
 // Types
@@ -97,9 +98,6 @@ export interface HealthReporter extends EventEmitter {
 // =============================================================================
 // Constants
 // =============================================================================
-
-/** Default health check interval */
-const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 30000;
 
 /** Default failover timeout */
 const DEFAULT_FAILOVER_TIMEOUT_MS = 60000;

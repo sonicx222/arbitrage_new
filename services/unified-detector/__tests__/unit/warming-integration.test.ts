@@ -242,7 +242,7 @@ describe('WarmingIntegration', () => {
 
     it('should accept null cache', () => {
       const integration = new WarmingIntegration(null, { enableWarming: false });
-      expect(integration).toBeDefined();
+      expect(integration).toBeInstanceOf(WarmingIntegration);
     });
   });
 
@@ -257,7 +257,7 @@ describe('WarmingIntegration', () => {
 
       const stats = integration.getStats();
       expect(stats.initialized).toBe(true);
-      expect(stats.metrics).toBeDefined();
+      expect(stats.metrics).not.toBeNull();
       expect(m.defineMetric).toHaveBeenCalled();
     });
 
@@ -270,8 +270,8 @@ describe('WarmingIntegration', () => {
 
       const stats = integration.getStats();
       expect(stats.initialized).toBe(true);
-      expect(stats.warming).toBeDefined();
-      expect(stats.correlation).toBeDefined();
+      expect(stats.warming).not.toBeNull();
+      expect(stats.correlation).not.toBeNull();
     });
 
     it('should throw when warming enabled but no cache provided', async () => {
@@ -620,7 +620,7 @@ describe('WarmingIntegration', () => {
       await integration.initialize();
 
       const stats = integration.getStats();
-      expect(stats.warming).toBeDefined();
+      expect(stats.warming).not.toBeNull();
       expect(stats.warming?.totalWarmingOps).toBe(5);
     });
 
@@ -629,7 +629,7 @@ describe('WarmingIntegration', () => {
       await integration.initialize();
 
       const stats = integration.getStats();
-      expect(stats.correlation).toBeDefined();
+      expect(stats.correlation).not.toBeNull();
       expect(stats.correlation?.totalPairs).toBe(10);
     });
 
@@ -638,7 +638,7 @@ describe('WarmingIntegration', () => {
       await integration.initialize();
 
       const stats = integration.getStats();
-      expect(stats.metrics).toBeDefined();
+      expect(stats.metrics).not.toBeNull();
       expect(stats.metrics?.metricsCount).toBe(5);
     });
   });

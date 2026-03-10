@@ -53,13 +53,13 @@ describe('SnapshotManager', () => {
   describe('Constructor and Factory', () => {
     it('should create manager with default config', () => {
       const m = new SnapshotManager();
-      expect(m).toBeDefined();
+      expect(m).toBeInstanceOf(SnapshotManager);
       m.clear();
     });
 
     it('should create manager with custom TTL', () => {
       const m = createSnapshotManager({ cacheTtlMs: 500 });
-      expect(m).toBeDefined();
+      expect(m).toBeInstanceOf(SnapshotManager);
       m.clear();
     });
   });
@@ -83,8 +83,8 @@ describe('SnapshotManager', () => {
       const pair = createMockPair();
       const snapshot = manager.createPairSnapshot(pair);
 
-      expect(snapshot!.reserve0BigInt).toBeDefined();
-      expect(snapshot!.reserve1BigInt).toBeDefined();
+      expect(snapshot!.reserve0BigInt).not.toBeUndefined();
+      expect(snapshot!.reserve1BigInt).not.toBeUndefined();
       expect(typeof snapshot!.reserve0BigInt).toBe('bigint');
       expect(typeof snapshot!.reserve1BigInt).toBe('bigint');
       expect(snapshot!.reserve0BigInt).toBe(BigInt(pair.reserve0));
