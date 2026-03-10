@@ -387,9 +387,13 @@ export class StreamBatcher<T = Record<string, unknown>> {
       try {
         await this.flush();
       } catch (error) {
+        // DI-01 FIX: Track lost messages in stats so shutdown loss is observable
+        // via getStats().totalMessagesDropped. Previously only logged.
+        this.stats.totalMessagesDropped += lostMessageCount;
         this.logger.warn('Failed to flush remaining messages on destroy', {
           error,
-          lostMessages: lostMessageCount
+          lostMessages: lostMessageCount,
+          totalDropped: this.stats.totalMessagesDropped,
         });
       }
     }

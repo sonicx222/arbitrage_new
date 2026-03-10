@@ -39,7 +39,10 @@ import {
   UNSTABLE_WEBSOCKET_CHAINS,
   DEFAULT_WS_CONNECTION_TIMEOUT_MS,
   EXTENDED_WS_CONNECTION_TIMEOUT_MS,
+  DEFAULT_WS_RECONNECT_INTERVAL_MS,
+  DEFAULT_WS_PING_INTERVAL_MS,
 } from '../constants';
+import { parseIntEnvVar } from '../types';
 
 // =============================================================================
 // Types
@@ -276,12 +279,16 @@ export class SubscriptionManager {
       ? EXTENDED_WS_CONNECTION_TIMEOUT_MS
       : DEFAULT_WS_CONNECTION_TIMEOUT_MS;
 
+    // FIX CD-R07: Make reconnect/ping intervals env-configurable instead of hardcoded
+    const reconnectInterval = parseIntEnvVar(process.env.WS_RECONNECT_INTERVAL_MS, DEFAULT_WS_RECONNECT_INTERVAL_MS, 1000, 60_000);
+    const pingInterval = parseIntEnvVar(process.env.WS_PING_INTERVAL_MS, DEFAULT_WS_PING_INTERVAL_MS, 5000, 120_000);
+
     const wsConfig: WebSocketConfig = {
       url: primaryWsUrl,
       fallbackUrls: chainConfig.wsFallbackUrls,
-      reconnectInterval: 5000,
+      reconnectInterval,
       maxReconnectAttempts,
-      pingInterval: 30000,
+      pingInterval,
       connectionTimeout,
       chainId  // FIX: Enable chain-specific staleness detection
     };

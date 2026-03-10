@@ -58,6 +58,12 @@ const MAX_CONCURRENT_PUBLISHES = parseEnvIntSafe('MAX_CONCURRENT_PUBLISHES', 100
 // FIX M11: Price update ingestion counter for monitoring
 let priceUpdatesIngested = 0;
 
+// FIX LP-05: Event loop lag monitoring for L2-turbo partition saturation detection.
+// monitorEventLoopDelay is built-in (perf_hooks), <1μs overhead per sample.
+import { monitorEventLoopDelay } from 'perf_hooks';
+const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
+eventLoopHistogram.enable();
+
 // FIX Inconsistency 6.2: Use parsePort for consistent port validation
 const healthCheckPort = parsePort(process.env.HEALTH_CHECK_PORT, DEFAULT_HEALTH_CHECK_PORT, logger);
 
@@ -164,8 +170,14 @@ function createHealthServer(port: number): Server {
                 lagRatio: Math.round(lag.lagRatio * 100) / 100,
               });
             }
-          } catch {
-            // Stream check failed despite ping — don't fail health check
+          } catch (lagError) {
+            // FIX O-05: Log at debug level instead of silently swallowing.
+            // Operators can enable debug logging to distinguish "no lag data"
+            // from "lag check failed" in health responses.
+            logger.debug('Stream lag check failed', {
+              streamName,
+              error: (lagError as Error).message,
+            });
           }
         }
       }
@@ -249,6 +261,15 @@ function createHealthServer(port: number): Server {
           lines.push('# TYPE detector_memory_mb gauge');
           lines.push(`detector_memory_mb ${stats.memoryUsageMB}`);
 
+          // FIX LP-05: Event loop lag for partition saturation detection.
+          // L2-turbo (7 chains, sub-second blocks) can approach 100% event loop.
+          // Alert when p99 > 50ms (our latency target).
+          lines.push('# HELP detector_event_loop_lag_ms Event loop delay percentiles');
+          lines.push('# TYPE detector_event_loop_lag_ms gauge');
+          lines.push(`detector_event_loop_lag_ms{quantile="0.5"} ${(eventLoopHistogram.percentile(50) / 1e6).toFixed(2)}`);
+          lines.push(`detector_event_loop_lag_ms{quantile="0.99"} ${(eventLoopHistogram.percentile(99) / 1e6).toFixed(2)}`);
+          lines.push(`detector_event_loop_lag_ms{quantile="1.0"} ${(eventLoopHistogram.max / 1e6).toFixed(2)}`);
+
           // FIX O-03: Per-chain dimensional metrics for operational visibility.
           // Previous: only exposed chain_events_total. Missing: opportunities, pairs,
           // stale rejections, detection cycle time — all needed for per-chain alerting.
@@ -264,6 +285,10 @@ function createHealthServer(port: number): Server {
           lines.push('# TYPE detector_chain_detection_cycle_ms gauge');
           lines.push('# HELP detector_chain_ws_connected WebSocket connection status per chain');
           lines.push('# TYPE detector_chain_ws_connected gauge');
+          lines.push('# HELP detector_chain_synthetic_rejections_total Synthetic deviation rejections per chain');
+          lines.push('# TYPE detector_chain_synthetic_rejections_total counter');
+          lines.push('# HELP detector_chain_batcher_drops_total Batcher queue-full drops per chain');
+          lines.push('# TYPE detector_chain_batcher_drops_total counter');
           for (const [chain, chainStats] of stats.chainStats) {
             const safeChain = chain.replace(/[^a-zA-Z0-9_-]/g, '_');
             lines.push(`detector_chain_events_total{chain="${safeChain}"} ${chainStats.eventsProcessed}`);
@@ -276,6 +301,13 @@ function createHealthServer(port: number): Server {
               lines.push(`detector_chain_detection_cycle_ms{chain="${safeChain}"} ${chainStats.avgDetectionCycleDurationMs.toFixed(2)}`);
             }
             lines.push(`detector_chain_ws_connected{chain="${safeChain}"} ${chainStats.status === 'connected' ? 1 : 0}`);
+            // FIX O-02: Expose synthetic deviation and batcher drop metrics
+            if (chainStats.syntheticDeviationRejections != null) {
+              lines.push(`detector_chain_synthetic_rejections_total{chain="${safeChain}"} ${chainStats.syntheticDeviationRejections}`);
+            }
+            if (chainStats.batcherDropCount != null) {
+              lines.push(`detector_chain_batcher_drops_total{chain="${safeChain}"} ${chainStats.batcherDropCount}`);
+            }
           }
 
           // Opportunity outcome tracking

@@ -47,6 +47,7 @@ import {
   createChainInstanceManager,
   ChainInstanceFactory,
 } from './chain-instance-manager';
+import { STATE_TRANSITION_TIMEOUT_MS } from './constants';
 import { HealthReporter, createHealthReporter } from './health-reporter';
 import { MetricsCollector, createMetricsCollector } from './metrics-collector';
 // REFACTOR: Import shared types to eliminate duplication
@@ -192,7 +193,9 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
 
     this.config = {
       partitionId: partition?.partitionId ?? 'asia-fast',
-      chains: config.chains || getChainsFromEnv(),
+      // FIX CD-R04: Use ?? instead of || — empty array [] is falsy and would be
+      // overridden by getChainsFromEnv(). Nullish coalescing preserves explicit empty arrays.
+      chains: config.chains ?? getChainsFromEnv(),
       instanceId: config.instanceId || `unified-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
       regionId: config.regionId || partition?.region || 'asia-southeast1',
       enableCrossRegionHealth: config.enableCrossRegionHealth ?? false,
@@ -206,9 +209,10 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
     this.perfLogger = config.perfLogger ?? getPerformanceLogger(`unified-detector:${this.config.partitionId}`);
 
     // Initialize state manager
+    // FIX CD-R05: Reference constant instead of hardcoded 60000
     this.stateManager = config.stateManager ?? createServiceState({
       serviceName: `unified-detector-${this.config.partitionId}`,
-      transitionTimeoutMs: 60000 // Longer timeout for multi-chain startup
+      transitionTimeoutMs: STATE_TRANSITION_TIMEOUT_MS // Longer timeout for multi-chain startup
     });
 
     // Save injected Redis clients for testing

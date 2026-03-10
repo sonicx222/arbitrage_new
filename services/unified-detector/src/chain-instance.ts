@@ -75,6 +75,7 @@ import {
   ArbitrageOpportunity,
   SwapEvent,
 } from '@arbitrage/types';
+import type { PipelineTimestamps } from '@arbitrage/types';
 
 import type { ChainStats, ExtendedPair } from './types';
 import { WhaleAlertPublisher, ExtendedPairInfo } from './publishers';
@@ -109,6 +110,8 @@ import {
   DEFAULT_USE_FACTORY_SUBSCRIPTIONS,
   FACTORY_SUBSCRIPTION_ENABLED_CHAINS,
   DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT,
+  // FIX CD-R06: Centralized whale threshold constant
+  DEFAULT_WHALE_THRESHOLD_USD,
 } from './constants';
 
 const MULTI_LEG_TIMEOUT_MS = parseIntEnvVar(
@@ -318,6 +321,8 @@ export class ChainDetectorInstance extends EventEmitter {
    *  Rejects swap-derived reserves that deviate >50% from last known price,
    *  preventing flash-loan manipulation of detection pipeline. */
   private static readonly MAX_SYNTHETIC_DEVIATION = 1.5;
+  // FIX O-02: Track synthetic deviation rejections for observability (Curve/Balancer)
+  private syntheticDeviationRejections = 0;
 
   // Phase 2 Enhanced Monitoring: WebSocket message rate counters (C2)
   private readonly wsMessageCounts = new Map<string, number>();
@@ -397,6 +402,10 @@ export class ChainDetectorInstance extends EventEmitter {
   private priceUpdateBatcher: StreamBatcher<PriceUpdate> | null = null;
   // FIX M2+M12: Track batcher drops for backpressure visibility
   private batcherDropCount: number = 0;
+  // LP-03 FIX: Mutable cached object to avoid per-event allocation in hot path.
+  // Fields updated in-place by getPipelineTimestamps(). Safe because emitPriceUpdate
+  // is synchronous and the object is consumed before the next call.
+  private readonly cachedPipelineTimestamps: PipelineTimestamps = { wsReceivedAt: 0, publishedAt: 0 };
 
   constructor(config: ChainInstanceConfig) {
     super();
@@ -708,9 +717,10 @@ export class ChainDetectorInstance extends EventEmitter {
       }
 
       // Initialize swap event filter for whale detection
+      // FIX CD-R06: Reference DEFAULT_WHALE_THRESHOLD_USD constant instead of literal 50000
       this.swapEventFilter = getSwapEventFilter({
         minUsdValue: 10,
-        whaleThreshold: 50000,
+        whaleThreshold: DEFAULT_WHALE_THRESHOLD_USD,
         dedupWindowMs: 5000,
         knownRouterAddresses: getKnownRouterAddresses()
       });
@@ -1861,7 +1871,11 @@ export class ChainDetectorInstance extends EventEmitter {
         const newPrice = calculatePriceFromBigIntReserves(tokensSold, tokensBought);
         if (oldPrice !== null && oldPrice > 0 && newPrice !== null && newPrice > 0) {
           const ratio = newPrice / oldPrice;
-          if (ratio > ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION || ratio < 1 / ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION) return;
+          if (ratio > ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION || ratio < 1 / ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION) {
+            // FIX O-02: Track synthetic deviation rejections for observability
+            this.syntheticDeviationRejections++;
+            return;
+          }
         }
       }
 
@@ -1921,7 +1935,11 @@ export class ChainDetectorInstance extends EventEmitter {
         const newPrice = calculatePriceFromBigIntReserves(amountIn, amountOut);
         if (oldPrice !== null && oldPrice > 0 && newPrice !== null && newPrice > 0) {
           const ratio = newPrice / oldPrice;
-          if (ratio > ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION || ratio < 1 / ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION) return;
+          if (ratio > ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION || ratio < 1 / ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION) {
+            // FIX O-02: Track synthetic deviation rejections for observability
+            this.syntheticDeviationRejections++;
+            return;
+          }
         }
       }
 
@@ -1949,6 +1967,11 @@ export class ChainDetectorInstance extends EventEmitter {
     now: number,
     synthetic: boolean = false,
   ): void {
+    // FIX DI-03: Monotonic guard — reject stale events during WS reconnection.
+    // Historical events replayed after reconnection could temporarily regress reserves.
+    // This is cheaper than MAX_STALENESS_MS (single integer comparison vs Date.now()).
+    if (blockNumber < pair.blockNumber) return;
+
     pair.reserve0 = reserve0BigInt.toString();
     pair.reserve1 = reserve1BigInt.toString();
     pair.reserve0BigInt = reserve0BigInt;
@@ -2011,6 +2034,13 @@ export class ChainDetectorInstance extends EventEmitter {
   // @see Hot-Path Analysis in refactoring analysis report
   // ===========================================================================
 
+  /** LP-03 FIX: Return mutable cached pipelineTimestamps, updated in-place to avoid allocation. */
+  private getPipelineTimestamps(now: number): PipelineTimestamps {
+    this.cachedPipelineTimestamps.wsReceivedAt = this.lastWsReceivedAt;
+    this.cachedPipelineTimestamps.publishedAt = now;
+    return this.cachedPipelineTimestamps;
+  }
+
   private emitPriceUpdate(pair: ExtendedPair, now: number = Date.now()): void {
     // FIX Perf 10.2: Use cached BigInt values to avoid re-parsing (~2000 parses/sec saved)
     // Falls back to parsing if BigInt cache is missing (e.g., pairs from older code paths)
@@ -2043,10 +2073,9 @@ export class ChainDetectorInstance extends EventEmitter {
       // Include DEX-specific fee for accurate arbitrage calculations (S2.2.2 fix)
       fee: pair.fee,
       // Phase 0 instrumentation: pipeline latency tracking
-      pipelineTimestamps: {
-        wsReceivedAt: this.lastWsReceivedAt,
-        publishedAt: now,
-      },
+      // LP-03 FIX: Reuse cached pipelineTimestamps object instead of allocating new one per event.
+      // At 1000 events/sec, eliminates 1000 object allocations/sec for GC.
+      pipelineTimestamps: this.getPipelineTimestamps(now),
       source: this.simulationMode ? 'simulation' as const : 'live' as const,
     };
 
@@ -2108,6 +2137,20 @@ export class ChainDetectorInstance extends EventEmitter {
     // batcher.add() is O(1) synchronous queue push — faster than async xaddWithLimit
     // Flush happens asynchronously in background (maxBatchSize: 50, maxWaitMs: 10ms)
     if (this.priceUpdateBatcher) {
+      // FIX DI-06 + F-03: Proactive backpressure — skip batcher.add() when stream lag
+      // is critical (>80% of MAXLEN). Without this, batcher queues 10K messages then
+      // drops all subsequent ones during Redis outage. isStreamCritical() is O(1) Map lookup.
+      if (this.streamsClient?.isStreamCritical(RedisStreamsClient.STREAMS.PRICE_UPDATES)) {
+        this.batcherDropCount++;
+        if (this.batcherDropCount % 5000 === 1) {
+          this.logger.warn('Price update skipped: stream lag critical (proactive backpressure)', {
+            chain: this.chainId,
+            totalDropped: this.batcherDropCount,
+          });
+        }
+        return;
+      }
+
       // FIX M2+M12: Check batcher.add() return value for backpressure visibility.
       // Returns false when queue is full (Redis outage, maxQueueSize reached).
       const accepted = this.priceUpdateBatcher.add(enrichedUpdate);
@@ -2706,6 +2749,10 @@ export class ChainDetectorInstance extends EventEmitter {
       pairsMonitored: this.pairs.size,
       hotPairsCount: activityStats.hotPairs,
       stalePriceRejections: this.stalePriceRejections,
+      // FIX O-02: Synthetic deviation rejections (Curve/Balancer) for observability
+      syntheticDeviationRejections: this.syntheticDeviationRejections,
+      // FIX O-02: Batcher drop count for backpressure observability
+      batcherDropCount: this.batcherDropCount,
       // Phase 2 Enhanced Monitoring metrics
       wsMessageCounts: wsMessageCountsObj,
       maxPriceStalenessMs: this.calculateMaxPriceStaleness(),

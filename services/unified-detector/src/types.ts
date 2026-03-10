@@ -75,6 +75,12 @@ export interface ChainStats {
 
   /** Phase 2 Enhanced Monitoring: Average opportunities found per detection cycle (D4) */
   avgOpportunitiesPerCycle?: number;
+
+  /** FIX O-02: Synthetic deviation rejections (Curve/Balancer swap amounts) */
+  syntheticDeviationRejections?: number;
+
+  /** FIX O-02: Price update batcher drops (queue full during Redis outage) */
+  batcherDropCount?: number;
 }
 
 // =============================================================================

@@ -34,7 +34,7 @@
 import { calculatePriceFromBigIntReserves, isReverseOrderPreNormalized } from '@arbitrage/core/components';
 import { MIN_SAFE_PRICE, MAX_SAFE_PRICE } from '@arbitrage/core/utils';
 
-import { ARBITRAGE_CONFIG, DETECTOR_CONFIG } from '@arbitrage/config';
+import { ARBITRAGE_CONFIG, DETECTOR_CONFIG, getOpportunityTimeoutMs } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 // NOTE: Fee validation is done at source (pair creation) and SnapshotManager.
@@ -106,6 +106,12 @@ export interface SimpleArbitrageConfig {
   maxSafePrice?: number;
   /** FIX 2.2: Optional logger for rejection stats (backward compatible) */
   logger?: DetectorLogger;
+  /**
+   * FIX CD-R02: Maximum realistic profit percentage (decimal). Opportunities above
+   * this are rejected as stale/unreliable. Default: 0.20 (20%).
+   * Low-liquidity chains (Mantle/Mode) may need higher values.
+   */
+  maxRealisticProfitPct?: number;
 }
 
 /**
@@ -119,6 +125,8 @@ export class SimpleArbitrageDetector {
   // FIX 4.1: Configurable price bounds for different token types
   private readonly minSafePrice: number;
   private readonly maxSafePrice: number;
+  // FIX CD-R02: Configurable unrealistic profit filter
+  private readonly maxRealisticProfitPct: number;
   // FIX #32: Counter-based ID generation avoids 2 string allocations per opportunity
   private idCounter: number = 0;
 
@@ -148,6 +156,8 @@ export class SimpleArbitrageDetector {
     // Ensures consistency with isValidPrice() and other validators
     this.minSafePrice = config.minSafePrice ?? MIN_SAFE_PRICE;
     this.maxSafePrice = config.maxSafePrice ?? MAX_SAFE_PRICE;
+    // FIX CD-R02: Configurable unrealistic profit filter (default 20%)
+    this.maxRealisticProfitPct = config.maxRealisticProfitPct ?? 0.20;
   }
 
   /**
@@ -226,10 +236,11 @@ export class SimpleArbitrageDetector {
     }
 
     // FIX #22c: Filter unrealistic profit percentages.
-    // Real-world arbitrage is typically 0.01-5%. Values above 20% indicate
+    // Real-world arbitrage is typically 0.01-5%. Values above threshold indicate
     // stale reserves or simulation drift. Lowered from 500% after terminal
     // analysis showed simulation generating 100-500% profits.
-    if (netProfitPct > 0.20) {
+    // FIX CD-R02: Now configurable via maxRealisticProfitPct (default 0.20 = 20%).
+    if (netProfitPct > this.maxRealisticProfitPct) {
       this.rejectionStats.unrealisticProfit++;
       this.trackRejection();
       return null;
@@ -294,7 +305,10 @@ export class SimpleArbitrageDetector {
       gasEstimate: String(this.config.gasEstimate),
       confidence: this.config.confidence,
       timestamp: now,
-      expiresAt: now + this.config.expiryMs,
+      // FIX CC-02: Use canonical chain-aware timeout from thresholds.ts instead of
+      // DETECTOR_CONFIG.expiryMs. Previous: Arbitrum got 5s here vs 2s in triangular —
+      // now both use getOpportunityTimeoutMs() for consistent chain-aware expiry.
+      expiresAt: now + getOpportunityTimeoutMs(this.config.chainId),
       blockNumber: pair1.blockNumber,
       status: 'pending'
     };

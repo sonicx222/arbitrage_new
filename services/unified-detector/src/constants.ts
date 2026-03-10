@@ -186,6 +186,20 @@ export const EXTENDED_WS_CONNECTION_TIMEOUT_MS = 15_000;
  */
 export const WS_DISCONNECT_TIMEOUT_MS = 5_000;
 
+/**
+ * FIX CD-R07: Default WebSocket reconnect interval (5 seconds).
+ * Configurable via WS_RECONNECT_INTERVAL_MS env var.
+ * Controls delay between reconnection attempts after a disconnect.
+ */
+export const DEFAULT_WS_RECONNECT_INTERVAL_MS = 5_000;
+
+/**
+ * FIX CD-R07: Default WebSocket ping interval (30 seconds).
+ * Configurable via WS_PING_INTERVAL_MS env var.
+ * Sends keepalive pings to detect dead connections.
+ */
+export const DEFAULT_WS_PING_INTERVAL_MS = 30_000;
+
 // =============================================================================
 // Whale Detection
 // =============================================================================

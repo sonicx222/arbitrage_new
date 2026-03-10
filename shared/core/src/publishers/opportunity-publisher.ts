@@ -18,7 +18,7 @@ import { RedisStreamsClient } from '../redis';
 import { createTraceContext, propagateContext } from '../tracing';
 import type { TraceContext } from '../tracing';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
-import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
+import { FEATURE_FLAGS, FAST_LANE_CONFIG, SYSTEM_CONSTANTS } from '@arbitrage/config';
 import type { ArbitrageOpportunity, ILogger } from '@arbitrage/types';
 
 // =============================================================================
@@ -97,10 +97,13 @@ export class OpportunityPublisher {
     const sourceName = `${this.sourcePrefix}-${this.partitionId}`;
     // P2 Fix ES-007: Use parent context if provided for end-to-end tracing
     const traceCtx = parentTraceContext ?? createTraceContext(sourceName);
+    // FIX DI-08: Include schemaVersion for forward-compatible message evolution
+    // (consistent with PublishingService.createMessage pattern)
     const enrichedOpportunity = propagateContext({
       ...opportunity,
       _source: sourceName,
       _publishedAt: Date.now(),
+      schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
     }, traceCtx);
 
     // Record pipeline latency (O(1), zero-allocation — same as PublishingService)

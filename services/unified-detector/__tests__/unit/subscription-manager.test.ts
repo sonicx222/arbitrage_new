@@ -62,12 +62,17 @@ jest.mock('../../src/types', () => ({
     throw new Error(`Cannot convert URL: ${url}`);
   }),
   isUnstableChain: jest.fn().mockReturnValue(false),
+  // FIX CD-R07: parseIntEnvVar now used by subscription-manager for WS interval config
+  parseIntEnvVar: jest.fn((_value: string | undefined, defaultValue: number) => defaultValue),
 }));
 
 jest.mock('../../src/constants', () => ({
   UNSTABLE_WEBSOCKET_CHAINS: ['bsc', 'fantom'],
   DEFAULT_WS_CONNECTION_TIMEOUT_MS: 10000,
   EXTENDED_WS_CONNECTION_TIMEOUT_MS: 15000,
+  // FIX CD-R07: New env-configurable WS interval constants
+  DEFAULT_WS_RECONNECT_INTERVAL_MS: 5000,
+  DEFAULT_WS_PING_INTERVAL_MS: 30000,
 }));
 
 import { SubscriptionManager, createSubscriptionManager } from '../../src/subscription/subscription-manager';
