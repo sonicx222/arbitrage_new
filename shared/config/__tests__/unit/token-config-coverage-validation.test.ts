@@ -309,6 +309,27 @@ describe('S2.2.4 Token Coverage Verification', () => {
         });
       });
     });
+
+    // CFG-M-001: Ethereum TOKEN_METADATA must include DAI
+    describe('CFG-M-001: Ethereum stablecoins include DAI', () => {
+      it('should include DAI in ethereum TOKEN_METADATA stablecoins', () => {
+        const ethMetadata = TOKEN_METADATA.ethereum;
+        expect(ethMetadata).toBeDefined();
+        const daiEntry = ethMetadata.stablecoins.find(
+          (s: any) => s.symbol === 'DAI'
+        );
+        expect(daiEntry).toBeDefined();
+        expect(daiEntry.address).toBe('0x6B175474E89094C44Da98b954EedeAC495271d0F');
+        expect(daiEntry.decimals).toBe(18);
+      });
+
+      it('should have at least 3 stablecoins for ethereum (USDT, USDC, DAI)', () => {
+        const symbols = TOKEN_METADATA.ethereum.stablecoins.map((s: any) => s.symbol);
+        expect(symbols).toContain('USDT');
+        expect(symbols).toContain('USDC');
+        expect(symbols).toContain('DAI');
+      });
+    });
   });
 
   // ===========================================================================

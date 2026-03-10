@@ -523,7 +523,6 @@ export const STABLECOINS: Readonly<Record<string, Record<string, string>>> = {
   mantle: {
     USDC: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', // Mantle Bridged USDC (RPC/explorer-validated)
     USDT: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', // Mantle USDT (aligned with CORE_TOKENS)
-    MNT: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
   },
   mode: {
     USDC: '0xd988097fb8612cc24eeC14542bC03424c656005f',

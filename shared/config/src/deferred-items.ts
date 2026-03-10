@@ -15,7 +15,7 @@
 // Types
 // =============================================================================
 
-export type DeferredItemStatus = 'deferred' | 'stub' | 'todo';
+export type DeferredItemStatus = 'deferred' | 'stub' | 'todo' | 'resolved';
 
 export interface DeferredItem {
   /** Unique identifier (e.g., D1-BALANCER-V2-MULTI-CHAIN) */
@@ -68,8 +68,8 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
   {
     id: 'D5-MODE-DEX-VERIFICATION',
     description: 'Verify Mode DEX addresses (supswap, iziswap) via RPC',
-    status: 'stub',
-    blocker: 'Addresses have sequential hex patterns',
+    status: 'resolved',
+    blocker: 'DEX factories RPC-validated 2026-03-08',
     files: ['dexes/chains/mode.ts'],
   },
   {
@@ -82,8 +82,8 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
   {
     id: 'D9-MANTLE-MODE-PARTITIONS',
     description: 'Finalize Mantle/Mode partition assignment',
-    status: 'stub',
-    blocker: 'Unverified factory addresses',
+    status: 'resolved',
+    blocker: 'Added to PARTITIONS 2026-03-10',
     files: ['partitions.ts', 'dexes/chains/mantle.ts', 'dexes/chains/mode.ts'],
   },
 ] as const;
@@ -93,11 +93,10 @@ export const DEFERRED_ITEMS: readonly DeferredItem[] = [
 // =============================================================================
 
 /**
- * Returns all unresolved deferred items.
- * Currently returns the full registry since no items are resolved yet.
+ * Returns all unresolved deferred items (excludes resolved).
  */
 export function getUnresolvedDeferredItems(): readonly DeferredItem[] {
-  return DEFERRED_ITEMS;
+  return DEFERRED_ITEMS.filter(item => item.status !== 'resolved');
 }
 
 /**

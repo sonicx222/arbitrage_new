@@ -93,6 +93,26 @@ describe('Address Constants', () => {
     });
   });
 
+  // CFG-L-005: MNT/WMNT is a native token, not a stablecoin
+    describe('STABLECOINS.mantle should not include MNT', () => {
+      it('should not list MNT as a stablecoin on mantle', () => {
+        const mantleStables = STABLECOINS.mantle;
+        expect(mantleStables).toBeDefined();
+        expect(mantleStables.MNT).toBeUndefined();
+      });
+
+      it('should not list WMNT as a stablecoin on mantle', () => {
+        const mantleStables = STABLECOINS.mantle;
+        expect(mantleStables.WMNT).toBeUndefined();
+      });
+
+      it('should still have USDC and USDT for mantle', () => {
+        const mantleStables = STABLECOINS.mantle;
+        expect(mantleStables.USDC).toBeDefined();
+        expect(mantleStables.USDT).toBeDefined();
+      });
+    });
+
   describe('SOLANA_PROGRAMS', () => {
     it('should have valid Solana addresses', () => {
       for (const [name, address] of Object.entries(SOLANA_PROGRAMS)) {

@@ -221,7 +221,7 @@ export function getSlippageTolerance(chainId: string): number {
  * - Arbitrum/Optimism/Base/zkSync/Linea 2x: L2s have more stable gas pricing
  * - Solana 1.5x: Uses priority fees (not EIP-1559 gas), less volatile than L1s
  *
- * NOTE: mantle/mode have thresholds defined but are currently stubs (no DEX factories).
+ * NOTE: mantle/mode DEX factories RPC-validated 2026-03-08, added to partitions 2026-03-10.
  *
  * @see gas-price-optimizer.ts — consumer of these thresholds
  */
@@ -238,8 +238,8 @@ export const chainGasSpikeMultiplier: Record<string, number> = {
   linea: 2.0,
   blast: 2.0,
   scroll: 2.0,
-  mantle: 2.0,  // stub chain — no DEX factories yet
-  mode: 2.0,    // stub chain — no DEX factories yet
+  mantle: 2.0,  // modular L2 (EigenDA), DEX factories RPC-validated 2026-03-08
+  mode: 2.0,    // OP-stack L2, DEX factories RPC-validated 2026-03-08
   // P3-28 FIX: Solana uses priority fees (lamports/CU), not EIP-1559 gas.
   // Lower multiplier since fee spikes are less extreme than L1 gas wars.
   solana: 1.5,

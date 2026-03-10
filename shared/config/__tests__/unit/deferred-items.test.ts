@@ -55,7 +55,7 @@ describe('deferred-items', () => {
     });
 
     it('each item should have a valid status', () => {
-      const validStatuses: DeferredItemStatus[] = ['deferred', 'stub', 'todo'];
+      const validStatuses: DeferredItemStatus[] = ['deferred', 'stub', 'todo', 'resolved'];
       for (const item of DEFERRED_ITEMS) {
         expect(validStatuses).toContain(item.status);
       }
@@ -72,15 +72,16 @@ describe('deferred-items', () => {
   // ==========================================================================
 
   describe('getUnresolvedDeferredItems', () => {
-    it('should return all items', () => {
+    it('should return only non-resolved items', () => {
       const items = getUnresolvedDeferredItems();
-      expect(items).toHaveLength(DEFERRED_ITEMS.length);
+      const resolvedCount = DEFERRED_ITEMS.filter(i => i.status === 'resolved').length;
+      expect(items).toHaveLength(DEFERRED_ITEMS.length - resolvedCount);
     });
 
-    it('should return the same items as DEFERRED_ITEMS', () => {
+    it('should not contain any resolved items', () => {
       const items = getUnresolvedDeferredItems();
-      for (const item of DEFERRED_ITEMS) {
-        expect(items).toContain(item);
+      for (const item of items) {
+        expect(item.status).not.toBe('resolved');
       }
     });
   });
@@ -90,14 +91,19 @@ describe('deferred-items', () => {
   // ==========================================================================
 
   describe('getDeferredItemsByStatus', () => {
-    it('should return only stub items for status=stub', () => {
+    it('should return zero stub items (D5, D9 resolved)', () => {
       const stubs = getDeferredItemsByStatus('stub');
-      expect(stubs).toHaveLength(2);
-      const stubIds = stubs.map(item => item.id);
-      expect(stubIds).toContain('D5-MODE-DEX-VERIFICATION');
-      expect(stubIds).toContain('D9-MANTLE-MODE-PARTITIONS');
-      for (const item of stubs) {
-        expect(item.status).toBe('stub');
+      expect(stubs).toHaveLength(0);
+    });
+
+    it('should return resolved items for status=resolved', () => {
+      const resolved = getDeferredItemsByStatus('resolved');
+      expect(resolved).toHaveLength(2);
+      const resolvedIds = resolved.map(item => item.id);
+      expect(resolvedIds).toContain('D5-MODE-DEX-VERIFICATION');
+      expect(resolvedIds).toContain('D9-MANTLE-MODE-PARTITIONS');
+      for (const item of resolved) {
+        expect(item.status).toBe('resolved');
       }
     });
 
@@ -114,18 +120,27 @@ describe('deferred-items', () => {
       expect(todos).toHaveLength(0);
     });
 
-    it('D5 should reference per-chain mode file', () => {
+    it('D5 should be resolved and reference per-chain mode file', () => {
       const d5 = DEFERRED_ITEMS.find(i => i.id === 'D5-MODE-DEX-VERIFICATION');
       expect(d5).toBeDefined();
-      expect(d5!.status).toBe('stub');
+      expect(d5!.status).toBe('resolved');
+      expect(d5!.blocker).toBe('DEX factories RPC-validated 2026-03-08');
       expect(d5!.files).toContain('dexes/chains/mode.ts');
     });
 
-    it('stub + deferred counts should equal total items', () => {
+    it('D9 should be resolved', () => {
+      const d9 = DEFERRED_ITEMS.find(i => i.id === 'D9-MANTLE-MODE-PARTITIONS');
+      expect(d9).toBeDefined();
+      expect(d9!.status).toBe('resolved');
+      expect(d9!.blocker).toBe('Added to PARTITIONS 2026-03-10');
+    });
+
+    it('all status counts should equal total items', () => {
       const stubs = getDeferredItemsByStatus('stub');
       const deferred = getDeferredItemsByStatus('deferred');
       const todos = getDeferredItemsByStatus('todo');
-      expect(stubs.length + deferred.length + todos.length).toBe(DEFERRED_ITEMS.length);
+      const resolved = getDeferredItemsByStatus('resolved');
+      expect(stubs.length + deferred.length + todos.length + resolved.length).toBe(DEFERRED_ITEMS.length);
     });
   });
 });
