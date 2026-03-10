@@ -23,7 +23,7 @@ The system uses a **partitioned detector architecture** (ADR-003) where multiple
 | Partition ID | Chains | Optimal Region | Provider |
 |--------------|--------|----------------|----------|
 | `asia-fast` | BSC, Polygon, Avalanche, Fantom | Singapore | Fly.io |
-| `l2-turbo` | Arbitrum, Optimism, Base, Scroll, Blast | Singapore | Fly.io |
+| `l2-turbo` | Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode | Singapore | Fly.io |
 | `high-value` | Ethereum, zkSync, Linea | US-East | Fly.io |
 | `solana-native` | Solana | US-West | Fly.io |
 

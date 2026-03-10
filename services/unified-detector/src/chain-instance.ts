@@ -1361,7 +1361,9 @@ export class ChainDetectorInstance extends EventEmitter {
     }
 
     // Skip if tokens are not available (e.g., Balancer pools awaiting token lookup)
-    if (!event.token0 || !event.token1 || event.token0 === '0x0000000000000000000000000000000000000000') {
+    // FIX L-006: Check zero address on BOTH tokens (previously only token0)
+    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+    if (!event.token0 || !event.token1 || event.token0 === ZERO_ADDRESS || event.token1 === ZERO_ADDRESS) {
       this.logger.debug('Skipping pair with incomplete token info', {
         pair: event.pairAddress,
         dex: event.dexName
@@ -1598,7 +1600,9 @@ export class ChainDetectorInstance extends EventEmitter {
         const reserve1BigInt = BigInt('0x' + data.slice(66, 130));
         const reserve0 = reserve0BigInt.toString();
         const reserve1 = reserve1BigInt.toString();
+        // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
         const blockNumber = parseInt(log.blockNumber, 16);
+        if (!Number.isFinite(blockNumber)) return;
 
         // Record activity AFTER successful parsing (race condition fix)
         // FIX Perf 10.2: Use cached chainPairKey to avoid string allocation on every Sync event
@@ -1716,7 +1720,8 @@ export class ChainDetectorInstance extends EventEmitter {
         chain: this.chainId,
         dex: pair.dex,
         pairAddress: pairAddress,
-        blockNumber: parseInt(log.blockNumber, 16),
+        // FIX H-001: Validate blockNumber to prevent NaN from malformed RPC data
+        blockNumber: Number.isFinite(parseInt(log.blockNumber, 16)) ? parseInt(log.blockNumber, 16) : 0,
         transactionHash: log.transactionHash || '',
         timestamp: now,
         sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '',
@@ -1785,7 +1790,9 @@ export class ChainDetectorInstance extends EventEmitter {
       const { reserve0: reserve0BigInt, reserve1: reserve1BigInt } = reserves;
       const reserve0 = reserve0BigInt.toString();
       const reserve1 = reserve1BigInt.toString();
+      // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
       const blockNumber = parseInt(log.blockNumber, 16);
+      if (!Number.isFinite(blockNumber)) return;
 
       // Record activity after successful parsing
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
@@ -1876,7 +1883,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
       // Use swap amounts as synthetic reserves for price derivation
       // This gives us the marginal exchange rate from this trade
+      // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
       const blockNumber = parseInt(log.blockNumber, 16);
+      if (!Number.isFinite(blockNumber)) return;
 
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
 
@@ -1938,7 +1947,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
       if (amountIn === 0n || amountOut === 0n) return;
 
+      // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
       const blockNumber = parseInt(log.blockNumber, 16);
+      if (!Number.isFinite(blockNumber)) return;
 
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${poolAddress}`);
 
@@ -1967,7 +1978,9 @@ export class ChainDetectorInstance extends EventEmitter {
     // FIX Race 4.2: Guard against processing during shutdown (consistent with handleSyncEvent/handleSwapEvent)
     if (this.isStopping || !this.isRunning) return;
 
+    // FIX H-001: Validate blockNumber to prevent NaN propagation from malformed RPC data
     const blockNumber = parseInt(block.number, 16);
+    if (!Number.isFinite(blockNumber)) return;
     const now = Date.now();
 
     if (this.lastBlockNumber > 0) {

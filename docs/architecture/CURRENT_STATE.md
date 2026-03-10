@@ -49,11 +49,11 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ### P2: L2-Turbo
 - **Partition ID:** `l2-turbo`
-- **Chains:** Arbitrum, Optimism, Base, Scroll, Blast
+- **Chains:** Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode
 - **Region:** Singapore (Fly.io)
-- **Resource Profile:** Standard (640MB)
+- **Resource Profile:** Heavy (768MB, 7 chains)
 - **Rationale:** Ethereum L2 rollups with sub-second confirmations
-- **Note:** Scroll and Blast re-added with verified factory addresses (2026-02-26). Mantle and Mode remain stubs — re-add when factory addresses verified.
+- **Note:** Scroll and Blast re-added with verified factory addresses (2026-02-26). Mantle and Mode DEX factories RPC-validated 2026-03-08, re-added to partition 2026-03-10.
 
 ### P3: High-Value
 - **Partition ID:** `high-value`

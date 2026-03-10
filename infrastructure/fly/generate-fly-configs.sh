@@ -273,8 +273,8 @@ main() {
 
     # L2-Turbo (historical app name: arbitrage-l2-fast)
     write_or_diff "partition-l2-turbo.toml" "$(generate_partition_toml \
-        "L2-Turbo partition" "l2-turbo" "arbitrum,optimism,base,scroll,blast" \
-        "sin" "asia-southeast1" "3002" "640" \
+        "L2-Turbo partition" "l2-turbo" "arbitrum,optimism,base,scroll,blast,mantle,mode" \
+        "sin" "asia-southeast1" "3002" "768" \
         "services/unified-detector/Dockerfile" "arbitrage-l2-fast" \
         "partition-l2-turbo.toml" \
         "#

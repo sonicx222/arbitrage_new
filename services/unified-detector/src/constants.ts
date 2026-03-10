@@ -15,7 +15,7 @@
  * | Partition ID  | Chains                              | Region    | Block Time |
  * |---------------|-------------------------------------|-----------|------------|
  * | asia-fast     | BSC, Polygon, Avalanche, Fantom     | Singapore | 2-3s       |
- * | l2-turbo      | Arbitrum, Optimism, Base            | Singapore | <1s        |
+ * | l2-turbo      | Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode | Singapore | <1s |
  * | high-value    | Ethereum, zkSync, Linea             | US-East   | >5s        |
  * | solana-native | Solana (non-EVM)                    | US-West   | 400ms      |
  *
@@ -255,6 +255,9 @@ export const FACTORY_SUBSCRIPTION_ENABLED_CHAINS: readonly string[] = [
   'fantom',
   'zksync',
   'linea',
+  // Emerging L2s (RPC-validated 2026-03-08, re-added to partition 2026-03-10)
+  'mantle',
+  'mode',
 ];
 
 /**
@@ -321,6 +324,9 @@ export const RESERVE_CACHE_ENABLED_CHAINS: readonly string[] = [
   'fantom',
   'zksync',
   'linea',
+  // Emerging L2s (RPC-validated 2026-03-08, re-added to partition 2026-03-10)
+  'mantle',
+  'mode',
 ];
 
 /**

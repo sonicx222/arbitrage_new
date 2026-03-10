@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **15 blockchains** operational (14 EVM + Solana), **2 stubs** (Mantle, Mode), with **78 DEXs** (71 EVM + 7 Solana) and **112+ tokens** (current)
+- Monitor **15 blockchains** operational (14 EVM + Solana) with **78 DEXs** (71 EVM + 7 Solana) and **112+ tokens** (current). Mantle and Mode operational (RPC-validated 2026-03-08)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -63,7 +63,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 | Metric | Current (Feb 2026) | Target (Q2 2026) | Status |
 |--------|-------------------|------------------|--------|
 | **Chains Supported** | **15** (14 EVM + Solana) | 15 | ✅ Complete (+4 L2s: Blast, Scroll, Mantle, Mode) |
-| **DEXs Monitored** | **78** (71 EVM + 7 Solana) | 80 | 🔄 Mantle/Mode stubs pending |
+| **DEXs Monitored** | **78** (71 EVM + 7 Solana) | 80 | ✅ Mantle/Mode operational (2026-03-08) |
 | **Tokens Tracked** | **112** | 143 | 🔄 +31 tokens planned |
 | **Detection Latency (EVM)** | <50ms | <50ms | ✅ Achieved |
 | **Detection Latency (Solana)** | <100ms | <100ms | ✅ Achieved |
@@ -842,8 +842,8 @@ Within each partition, scale by:
 |-------|--------|------|--------|-------|------------|-------|
 | Phase 1 (historical) | 5 | 10 | 23 | 50 | ~100 | Initial launch |
 | Phase 2 (historical) | 9 | 45 | 110 | 350 | ~500 | L2 expansion |
-| **Current (Mar 2026)** | **15** | **78** | **112** | **~500** | **~1000** | **14 EVM + Solana, 2 stubs** |
-| Target (Q2 2026) | 15 | 80 | 143 | ~600 | ~1200 | +Mantle/Mode verified, +31 tokens |
+| **Current (Mar 2026)** | **15** | **78** | **112** | **~500** | **~1000** | **14 EVM + Solana (all operational)** |
+| Target (Q2 2026) | 15 | 80 | 143 | ~600 | ~1200 | +31 tokens planned |
 
 With self-hosted Redis (Fly.io sidecar or Oracle ARM), there are no command limits.
 
@@ -969,7 +969,7 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 
 ## 9. Chain, DEX, and Token Selection
 
-### 9.1 Chain Coverage (15 Operational + 2 Stubs)
+### 9.1 Chain Coverage (15 Operational)
 
 | Tier | Chain | Arb Score | Partition | Status |
 |------|-------|-----------|-----------|--------|
@@ -986,8 +986,8 @@ See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed ration
 | T3 | **Scroll** | 56 | P2: L2-Turbo | Operational (RPC-verified 2026-02-26) |
 | T3 | **zkSync Era** | 55 | P3: High-Value | Operational |
 | T3 | **Linea** | 50 | P3: High-Value | Operational |
-| Stub | **Mantle** | — | Unassigned | Stub (unverified DEX factories) |
-| Stub | **Mode** | — | Unassigned | Stub (unverified DEX factories) |
+| T3 | **Mantle** | 48 | P2: L2-Turbo | Operational (RPC-validated 2026-03-08) |
+| T3 | **Mode** | 45 | P2: L2-Turbo | Operational (RPC-validated 2026-03-08) |
 
 **Why Solana is T1**:
 - $1-2B+ daily DEX volume (top 3 globally)
