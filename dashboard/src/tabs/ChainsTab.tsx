@@ -1,6 +1,8 @@
-import { useServices } from '../context/SSEContext';
+import { useMemo } from 'react';
+import { useServices, useFeed } from '../context/SSEContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { ChainCard } from '../components/ChainCard';
+import type { ChainStats } from '../components/ChainCard';
 import { formatDuration, formatMemory, formatCpu } from '../lib/format';
 // D-5 FIX: Import source of truth for compile-time service key verification
 import portConfig from '@shared/constants/service-ports.json';
@@ -21,6 +23,30 @@ const PARTITIONS: { svcKey: KnownService; healthKey: string; name: string; regio
 
 export function ChainsTab() {
   const { services } = useServices();
+  const { feed } = useFeed();
+
+  // E-06: Derive per-chain metrics from recent execution feed
+  const chainStats = useMemo(() => {
+    const stats: Record<string, ChainStats> = {};
+    for (const item of feed) {
+      if (item.kind !== 'execution') continue;
+      const { chain, success, latencyMs, timestamp } = item.data;
+      const key = chain.toLowerCase();
+      let entry = stats[key];
+      if (!entry) {
+        entry = { total: 0, successes: 0, lastExecTime: 0, totalLatency: 0, latencyCount: 0 };
+        stats[key] = entry;
+      }
+      entry.total++;
+      if (success) entry.successes++;
+      if (timestamp > entry.lastExecTime) entry.lastExecTime = timestamp;
+      if (latencyMs != null && Number.isFinite(latencyMs)) {
+        entry.totalLatency += latencyMs;
+        entry.latencyCount++;
+      }
+    }
+    return stats;
+  }, [feed]);
 
   return (
     <div className="space-y-6 overflow-auto">
@@ -49,7 +75,7 @@ export function ChainsTab() {
             </div>
             <div className="grid grid-cols-5 gap-2">
               {partition.chains.map((chain) => (
-                <ChainCard key={chain} chain={chain} status={partitionStatus} partitionName={partition.name} />
+                <ChainCard key={chain} chain={chain} status={partitionStatus} partitionName={partition.name} stats={chainStats[chain.toLowerCase()]} />
               ))}
             </div>
           </div>

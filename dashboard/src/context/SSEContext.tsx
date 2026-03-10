@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, useCallback, useRef, useEffect, 
 import { useSSE, type SSEStatus } from '../hooks/useSSE';
 import { formatTime, calcSuccessRate } from '../lib/format';
 import { getItem } from '../lib/storage';
+import { sendNotification, startTitleFlash, stopTitleFlash } from '../lib/notifications';
 import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint } from '../lib/types';
 
 // ---------------------------------------------------------------------------
@@ -219,15 +220,51 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   // is already stored in localStorage (same XSS exposure surface).
   const url = `/api/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 
+  // E-04: Track consecutive execution failures for streak notification
+  const failStreakRef = useRef(0);
+
   const onEvent = useCallback((event: string, data: unknown) => {
     if (!validatePayload(event, data)) {
       console.warn(`[SSE] Skipping malformed ${event} payload`, data);
       return;
     }
     dispatch({ type: event, payload: data } as SSEAction);
+
+    // E-04: Notification triggers for critical events
+    if (event === 'circuit-breaker') {
+      const cb = data as { state: string };
+      if (cb.state === 'OPEN') {
+        sendNotification('Circuit Breaker OPEN', 'All executions halted. Manual intervention may be required.');
+        startTitleFlash('\u26A0 CB OPEN \u2014 Arbitrage');
+      }
+    } else if (event === 'alert') {
+      const alert = data as { severity?: string; type: string; message?: string };
+      if (alert.severity === 'critical') {
+        sendNotification('Critical Alert', alert.message ?? alert.type);
+        startTitleFlash('\u26A0 Alert \u2014 Arbitrage');
+      }
+    } else if (event === 'execution-result') {
+      const exec = data as { success: boolean };
+      if (!exec.success) {
+        failStreakRef.current++;
+        if (failStreakRef.current >= 3) {
+          sendNotification('Execution Failures', `${failStreakRef.current} consecutive failures detected.`);
+          startTitleFlash('\u26A0 Failures \u2014 Arbitrage');
+        }
+      } else {
+        failStreakRef.current = 0;
+      }
+    }
   }, []);
 
   const { status } = useSSE({ url, onEvent });
+
+  // E-04: Stop title flash when user focuses the window
+  useEffect(() => {
+    const onFocus = () => stopTitleFlash();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
 
   // M-02: Reset chart/feed data on reconnection to avoid false continuity
   // H-04 FIX: Backfill recent alerts from REST after reconnect

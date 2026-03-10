@@ -6,6 +6,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { LogLevelControl } from '../components/LogLevelControl';
 import { AlertsTable } from '../components/AlertsTable';
+import { NotificationSettings } from '../components/NotificationSettings';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatDuration } from '../lib/format';
 
@@ -59,6 +60,8 @@ export function AdminTab() {
         <CircuitBreakerGrid />
         <LogLevelControl />
       </div>
+
+      <NotificationSettings />
 
       {/* Service Management */}
       <div className="card">
