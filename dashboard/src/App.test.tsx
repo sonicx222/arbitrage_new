@@ -41,6 +41,7 @@ vi.mock('./context/SSEContext', () => ({
 // ---------------------------------------------------------------------------
 vi.mock('./tabs/OverviewTab', () => ({ OverviewTab: () => <div data-testid="overview-tab">Overview</div> }));
 vi.mock('./tabs/ExecutionTab', () => ({ ExecutionTab: () => <div data-testid="execution-tab">Execution</div> }));
+vi.mock('./tabs/OpportunitiesTab', () => ({ OpportunitiesTab: () => <div data-testid="opportunities-tab">Opportunities</div> }));
 vi.mock('./tabs/ChainsTab', () => ({ ChainsTab: () => <div data-testid="chains-tab">Chains</div> }));
 vi.mock('./tabs/RiskTab', () => ({ RiskTab: () => <div data-testid="risk-tab">Risk</div> }));
 vi.mock('./tabs/StreamsTab', () => ({ StreamsTab: () => <div data-testid="streams-tab">Streams</div> }));

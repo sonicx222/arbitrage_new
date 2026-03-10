@@ -5,6 +5,7 @@ import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate } from '../lib/format';
 import { CHART, TOOLTIP_STYLE, MAX_ERROR_DISPLAY } from '../lib/theme';
+import { toCsv, downloadCsv } from '../lib/export';
 
 const EXPLORER_URLS: Record<string, string> = {
   ethereum: 'https://etherscan.io/tx/',
@@ -84,7 +85,41 @@ export function ExecutionTab() {
 
       {/* Recent Executions Table */}
       <div className="card">
-        <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Recent Executions ({executions.length})</h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider">Recent Executions ({executions.length})</h4>
+          <button
+            onClick={() => {
+              const headers = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'MEV Protected', 'Error'];
+              const rows = executions
+                .filter((item): item is typeof item & { kind: 'execution' } => item.kind === 'execution')
+                .map((item) => {
+                  const e = item.data;
+                  return [
+                    new Date(e.timestamp).toISOString(),
+                    e.success ? 'success' : 'failed',
+                    e.chain,
+                    e.dex,
+                    e.actualProfit ?? '',
+                    e.gasCost ?? '',
+                    e.latencyMs ?? '',
+                    e.transactionHash ?? '',
+                    e.usedMevProtection ? 'yes' : 'no',
+                    e.error ?? '',
+                  ];
+                });
+              const csv = toCsv(headers, rows);
+              const date = new Date().toISOString().slice(0, 10);
+              downloadCsv(`executions-${date}.csv`, csv);
+            }}
+            disabled={executions.length === 0}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium text-gray-400 hover:text-gray-200 bg-[var(--badge-bg)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export CSV
+          </button>
+        </div>
         <div className="overflow-auto max-h-64">
           <table className="w-full text-xs">
             <thead>

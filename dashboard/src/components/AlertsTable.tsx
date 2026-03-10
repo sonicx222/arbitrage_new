@@ -2,6 +2,7 @@ import { useState, memo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAckAlert, fetchJson } from '../hooks/useApi';
 import { formatTime } from '../lib/format';
+import { toCsv, downloadCsv } from '../lib/export';
 import type { Alert } from '../lib/types';
 
 export const AlertsTable = memo(function AlertsTable() {
@@ -19,10 +20,34 @@ export const AlertsTable = memo(function AlertsTable() {
 
   return (
     <div className="card">
-      <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
-        Alerts ({alerts.length})
-        {actionMsg && <span className="text-accent-red ml-2">{actionMsg}</span>}
-      </h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider">
+          Alerts ({alerts.length})
+          {actionMsg && <span className="text-accent-red ml-2">{actionMsg}</span>}
+        </h3>
+        <button
+          onClick={() => {
+            const headers = ['Time', 'Severity', 'Service', 'Type', 'Message'];
+            const rows = alerts.map((a) => [
+              new Date(a.timestamp).toISOString(),
+              a.severity ?? 'info',
+              a.service ?? '',
+              a.type,
+              a.message ?? '',
+            ]);
+            const csv = toCsv(headers, rows);
+            const date = new Date().toISOString().slice(0, 10);
+            downloadCsv(`alerts-${date}.csv`, csv);
+          }}
+          disabled={alerts.length === 0}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium text-gray-400 hover:text-gray-200 bg-[var(--badge-bg)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Export
+        </button>
+      </div>
       <div className="overflow-auto max-h-48">
         <table className="w-full text-xs">
           <thead>

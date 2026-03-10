@@ -4,7 +4,7 @@
 //                    shared/types/src/index.ts
 //                    shared/types/src/execution.ts
 
-export type Tab = 'Overview' | 'Execution' | 'Chains' | 'Risk' | 'Streams' | 'Admin';
+export type Tab = 'Overview' | 'Execution' | 'Opportunities' | 'Chains' | 'Risk' | 'Streams' | 'Admin';
 
 export interface SystemMetrics {
   totalOpportunities: number;
@@ -123,4 +123,27 @@ export interface ChartPoint {
 export interface LagPoint {
   time: string;
   pending: number;
+}
+
+// Mirrors shared/types ArbitrageOpportunity (subset for dashboard display)
+export interface Opportunity {
+  id: string;
+  type?: string;
+  chain?: string;
+  buyDex?: string;
+  sellDex?: string;
+  buyChain?: string;
+  sellChain?: string;
+  tokenIn?: string;
+  tokenOut?: string;
+  expectedProfit?: number;
+  estimatedProfit?: number;
+  profitPercentage?: number;
+  confidence: number;
+  timestamp: number;
+  expiresAt?: number;
+  status?: 'pending' | 'executing' | 'completed' | 'failed' | 'expired';
+  gasCost?: number;
+  netProfit?: number;
+  bridgeRequired?: boolean;
 }

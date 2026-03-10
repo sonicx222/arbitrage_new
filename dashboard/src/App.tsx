@@ -5,6 +5,7 @@ import { setOnUnauthorized } from './hooks/useApi';
 import { LoginScreen } from './components/LoginScreen';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ExecutionTab } from './tabs/ExecutionTab';
+import { OpportunitiesTab } from './tabs/OpportunitiesTab';
 import { ChainsTab } from './tabs/ChainsTab';
 import { RiskTab } from './tabs/RiskTab';
 import { StreamsTab } from './tabs/StreamsTab';
@@ -101,11 +102,24 @@ class TabErrorBoundary extends Component<{ tab: string; children: ReactNode }, {
 const TABS: { id: Tab; icon: string }[] = [
   { id: 'Overview', icon: 'M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z' },
   { id: 'Execution', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+  { id: 'Opportunities', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
   { id: 'Chains', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' },
   { id: 'Risk', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
   { id: 'Streams', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4' },
   { id: 'Admin', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z' },
 ];
+
+// E-03: Hash-based routing — read tab from URL hash, sync on change
+const VALID_TABS = new Set<string>(TABS.map((t) => t.id.toLowerCase()));
+
+function tabFromHash(): Tab {
+  const hash = window.location.hash.slice(1).toLowerCase();
+  if (VALID_TABS.has(hash)) {
+    // Capitalize first letter to match Tab type
+    return TABS.find((t) => t.id.toLowerCase() === hash)!.id;
+  }
+  return 'Overview';
+}
 
 const STALE_THRESHOLD_MS = 10_000;
 
@@ -152,8 +166,20 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
 }
 
 function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnect: () => void }) {
-  const [tab, setTab] = useState<Tab>('Overview');
+  const [tab, setTab] = useState<Tab>(tabFromHash);
   const { metrics } = useMetrics();
+
+  // E-03: Sync tab state with URL hash
+  const changeTab = useCallback((t: Tab) => {
+    setTab(t);
+    window.location.hash = t.toLowerCase();
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => setTab(tabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -184,7 +210,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
               role="tab"
               aria-selected={tab === t.id}
               aria-controls={`tabpanel-${t.id}`}
-              onClick={() => setTab(t.id)}
+              onClick={() => changeTab(t.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 tab === t.id ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300'
               }`}
@@ -210,6 +236,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
       <main className="flex-1 p-5 overflow-auto" role="tabpanel" id={`tabpanel-${tab}`} aria-label={tab}>
         {tab === 'Overview' && <TabErrorBoundary tab="Overview"><OverviewTab /></TabErrorBoundary>}
         {tab === 'Execution' && <TabErrorBoundary tab="Execution"><ExecutionTab /></TabErrorBoundary>}
+        {tab === 'Opportunities' && <TabErrorBoundary tab="Opportunities"><OpportunitiesTab /></TabErrorBoundary>}
         {tab === 'Chains' && <TabErrorBoundary tab="Chains"><ChainsTab /></TabErrorBoundary>}
         {tab === 'Risk' && <TabErrorBoundary tab="Risk"><RiskTab /></TabErrorBoundary>}
         {tab === 'Streams' && <TabErrorBoundary tab="Streams"><StreamsTab /></TabErrorBoundary>}

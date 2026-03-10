@@ -31,7 +31,29 @@ type SSEAction =
   | { type: 'reset'; payload?: undefined };
 
 const MAX_FEED = 50;
-const MAX_CHART_POINTS = 90;
+const MAX_CHART_POINTS = 360; // 12 min at 2s SSE interval
+
+const CHART_STORAGE_KEY = 'sse_chartData';
+const LAG_STORAGE_KEY = 'sse_lagData';
+
+function loadSessionArray<T>(key: string): T[] {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSessionArray(key: string, data: unknown[]): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(data));
+  } catch {
+    // QuotaExceededError — fall back to memory-only
+  }
+}
 
 /** @internal exported for unit testing */
 export function reducer(state: SSEState, action: SSEAction): SSEState {
@@ -49,6 +71,7 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
           ...state.chartData.slice(-MAX_CHART_POINTS),
           { time: now, latency: action.payload.averageLatency, successRate },
         ];
+        saveSessionArray(CHART_STORAGE_KEY, chartData);
       }
       return { ...state, metrics: action.payload, chartData, lastEventTime };
     }
@@ -68,6 +91,7 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
           ...state.lagData.slice(-MAX_CHART_POINTS),
           { time: now, pending: totalPending },
         ];
+        saveSessionArray(LAG_STORAGE_KEY, lagData);
       }
       return { ...state, streams: action.payload, lagData, lastEventTime };
     }
@@ -97,8 +121,8 @@ export const initialState: SSEState = {
   circuitBreaker: null,
   streams: null,
   feed: [],
-  chartData: [],
-  lagData: [],
+  chartData: loadSessionArray<ChartPoint>(CHART_STORAGE_KEY),
+  lagData: loadSessionArray<LagPoint>(LAG_STORAGE_KEY),
   status: 'connecting',
   lastEventTime: null,
   nextFeedId: 0,
