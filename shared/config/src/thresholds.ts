@@ -34,6 +34,7 @@ export const ARBITRAGE_CONFIG = {
   opportunityTimeoutMs: 30000, // 30 seconds
   minProfitThreshold: 2, // Minimum $2 net profit (per-chain % thresholds in chainMinProfits are primary filter)
   minConfidenceThreshold: 0.7, // Minimum 70% confidence
+  /** @deprecated Use FEE_CONSTANTS.DEFAULT from @arbitrage/core/utils/fee-utils instead */
   feePercentage: 0.003, // 0.3% DEX trading fee
   // P1-4 FIX: Configurable slippage tolerance (was hardcoded 0.9 = 10%)
   slippageTolerance: 0.01, // 1% slippage tolerance (minProfit = expectedProfit * (1 - slippageTolerance))

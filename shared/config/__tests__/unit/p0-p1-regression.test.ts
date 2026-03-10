@@ -234,7 +234,7 @@ describe.skip('Fix 6: Linea flash loan provider (blocked: SyncSwap Vault not dep
   });
 
   it('should have 25 bps fee for Linea (PancakeSwap V3 flash swap)', () => {
-    expect(FLASH_LOAN_PROVIDERS['linea'].fee).toBe(25);
+    expect(FLASH_LOAN_PROVIDERS['linea'].feeBps).toBe(25);
   });
 
   it('should have valid contract address for Linea', () => {

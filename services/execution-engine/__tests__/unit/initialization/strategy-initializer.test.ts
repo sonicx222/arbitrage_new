@@ -81,7 +81,7 @@ const mockFeatureFlags = {
 const mockFlashLoanProviders: Record<string, {
   address: string;
   protocol: string;
-  fee: number;
+  feeBps: number;
   approvedRouters?: string[];
 }> = {};
 
@@ -445,7 +445,7 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
         approvedRouters: ['0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'],
       };
       // Set the env var for the flash loan contract
@@ -524,7 +524,7 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       mockBalancerVaults['ethereum'] = '0xBA12222222228d8Ba445958a75a0704d566BF2C8';
     });
@@ -573,7 +573,7 @@ describe('initializeAllStrategies', () => {
             ethereum: {
               address: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
               protocol: 'balancer_v2',
-              fee: 0,
+              feeBps: 0,
             },
           },
         }),
@@ -604,7 +604,7 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       setEnv('FLASH_LOAN_CONTRACT_ETHEREUM', '0x1234567890abcdef1234567890abcdef12345678');
     });
@@ -680,7 +680,7 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       setEnv('FLASH_LOAN_CONTRACT_ETHEREUM', '0x1234567890abcdef1234567890abcdef12345678');
 
@@ -712,7 +712,7 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       setEnv('FLASH_LOAN_CONTRACT_ETHEREUM', '0x1234567890abcdef1234567890abcdef12345678');
 
@@ -882,7 +882,7 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       setEnv('FLASH_LOAN_CONTRACT_ETHEREUM', '0x1234567890abcdef1234567890abcdef12345678');
 
@@ -1043,12 +1043,12 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       mockFlashLoanProviders['polygon'] = {
         address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       setEnv('FLASH_LOAN_CONTRACT_ETHEREUM', '0xEthContract1234567890abcdef1234567890abcdef');
       setEnv('FLASH_LOAN_CONTRACT_POLYGON', '0xPolyContract234567890abcdef1234567890abcdef');
@@ -1071,12 +1071,12 @@ describe('initializeAllStrategies', () => {
       mockFlashLoanProviders['ethereum'] = {
         address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       mockFlashLoanProviders['polygon'] = {
         address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
         protocol: 'aave_v3',
-        fee: 9,
+        feeBps: 9,
       };
       // Only ethereum has an env var
       setEnv('FLASH_LOAN_CONTRACT_ETHEREUM', '0xEthContract1234567890abcdef1234567890abcdef');

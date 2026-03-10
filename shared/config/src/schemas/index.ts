@@ -292,7 +292,7 @@ export const FlashLoanProtocolSchema = z.enum([
 export const FlashLoanProviderSchema = z.object({
   address: z.string().describe('Provider contract address (empty for non-EVM)'),
   protocol: FlashLoanProtocolSchema,
-  fee: BasisPointsSchema.describe('Flash loan fee in basis points'),
+  feeBps: BasisPointsSchema.describe('Flash loan fee in basis points'),
 });
 
 /**

@@ -23,6 +23,7 @@ import { PairActivityTracker } from '@arbitrage/core/analytics';
 import { getWhaleActivityTracker } from '@arbitrage/core/analytics';
 import type { TrackedWhaleTransaction } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
+import { validateFee } from '@arbitrage/core/utils';
 
 import type {
   Dex,
@@ -233,7 +234,7 @@ export class SimulationInitializer {
         token1Symbol,
         token0Decimals: token0?.decimals ?? 18,
         token1Decimals: token1?.decimals ?? 18,
-        fee: pair.fee ?? 0.003,  // Default 0.3% fee
+        fee: validateFee(pair.fee),
         // SM-009 FIX: Pass real token addresses for execution validation
         token0Address: pair.token0,
         token1Address: pair.token1,

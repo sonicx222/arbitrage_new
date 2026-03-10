@@ -164,7 +164,7 @@ const FALLBACK_GAS_PRICE_METADATA = {
 // FIX P1-8: Aligned with gas-price-optimizer.ts DEFAULT_GAS_PRICES_GWEI and .env.example.
 // Previously polygon=50 and fantom=50, while optimizer and .env use 35 for both.
 // @see docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md P1 #8
-const FALLBACK_GAS_PRICES: Record<string, number> = {
+export const FALLBACK_GAS_PRICES: Record<string, number> = {
   ethereum: 30,    // ~30 gwei average
   arbitrum: 0.1,   // Very low L2 fees
   optimism: 0.01,  // Low L2 fees

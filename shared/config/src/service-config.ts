@@ -346,7 +346,7 @@ export function getSupportedExecutionChains(): string[] {
 export const FLASH_LOAN_PROVIDERS: Record<string, {
   address: string;
   protocol: string;
-  fee: number;  // Basis points (bps): 100 bps = 1%
+  feeBps: number;  // Basis points (bps): 100 bps = 1%
   approvedRouters?: string[];  // FIX M7: Optional list of approved router addresses per chain
 }> = {
   // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
@@ -355,27 +355,27 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   ethereum: {
     address: AAVE_V3_POOLS.ethereum,
     protocol: 'aave_v3',
-    fee: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
+    feeBps: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
   },
   polygon: {
     address: AAVE_V3_POOLS.polygon,
     protocol: 'aave_v3',
-    fee: 5
+    feeBps: 5
   },
   arbitrum: {
     address: AAVE_V3_POOLS.arbitrum,
     protocol: 'aave_v3',
-    fee: 5
+    feeBps: 5
   },
   base: {
     address: AAVE_V3_POOLS.base,
     protocol: 'aave_v3',
-    fee: 5
+    feeBps: 5
   },
   optimism: {
     address: AAVE_V3_POOLS.optimism,
     protocol: 'aave_v3',
-    fee: 5
+    feeBps: 5
   },
   // BSC uses PancakeSwap V3 flash loans (no Aave V3)
   bsc: {
@@ -388,20 +388,20 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
      * - Conversion: feeTier = feeBps * 100 (e.g., 25 bps → 2500)
      * - PancakeSwapV3FlashLoanProvider handles conversion internally
      */
-    fee: 25  // 0.25% flash swap fee (in basis points)
+    feeBps: 25  // 0.25% flash swap fee (in basis points)
   },
   // S3.2.1-FIX: Added Avalanche Aave V3 flash loan provider
   avalanche: {
     address: AAVE_V3_POOLS.avalanche,  // Aave V3 Pool on Avalanche
     protocol: 'aave_v3',
-    fee: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
+    feeBps: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
   },
   // Task 2.2: Fantom uses Beethoven X (Balancer V2 fork) for flash loans
   // Beethoven X provides 0% flash loan fees, much better than SpookySwap's 0.3%
   fantom: {
     address: BALANCER_V2_VAULTS.fantom,  // Beethoven X Vault (Balancer V2 fork)
     protocol: 'balancer_v2',
-    fee: 0  // 0% flash loan fee (Balancer V2 advantage)
+    feeBps: 0  // 0% flash loan fee (Balancer V2 advantage)
   },
 
   // ============================================================================
@@ -428,27 +428,27 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   // ethereum: {
   //   address: BALANCER_V2_VAULTS.ethereum,  // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
   //   protocol: 'balancer_v2',
-  //   fee: 0  // 0% flash loan fee (saves 0.05% vs Aave V3)
+  //   feeBps: 0  // 0% flash loan fee (saves 0.05% vs Aave V3)
   // },
   // polygon: {
   //   address: BALANCER_V2_VAULTS.polygon,   // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
   //   protocol: 'balancer_v2',
-  //   fee: 0
+  //   feeBps: 0
   // },
   // arbitrum: {
   //   address: BALANCER_V2_VAULTS.arbitrum,  // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
   //   protocol: 'balancer_v2',
-  //   fee: 0
+  //   feeBps: 0
   // },
   // optimism: {
   //   address: BALANCER_V2_VAULTS.optimism,  // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
   //   protocol: 'balancer_v2',
-  //   fee: 0
+  //   feeBps: 0
   // },
   // base: {
   //   address: BALANCER_V2_VAULTS.base,      // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
   //   protocol: 'balancer_v2',
-  //   fee: 0
+  //   feeBps: 0
   // },
   // */
   //
@@ -459,26 +459,26 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   zksync: {
     address: SYNCSWAP_VAULTS.zksync,  // SyncSwap Vault: 0x621425a1Ef6abE91058E9712575dcc4258F8d091
     protocol: 'syncswap',
-    fee: 30  // 0.3% flash loan fee (30 bps)
+    feeBps: 30  // 0.3% flash loan fee (30 bps)
   },
   // Scroll: Aave V3 preferred (0.05% fee) over SyncSwap (0.3% fee)
   // Both protocols available; SyncSwap Vault at SYNCSWAP_VAULTS.scroll as fallback
   scroll: {
     address: AAVE_V3_POOLS.scroll,  // Aave V3 Pool: 0x11fCfe756c05AD438e312a7fd934381537D3cFfe (RPC-verified)
     protocol: 'aave_v3',
-    fee: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
+    feeBps: 5  // 0.05% flash loan fee (5 bps since March 2024 governance vote)
   },
   mantle: {
     address: AAVE_V3_POOLS.mantle,  // Aave V3 Pool: 0x458F293454fE0d67EC0655f3672301301DD51422
     protocol: 'aave_v3',
-    fee: 5
+    feeBps: 5
   },
   // Mode: Balancer-style Vault detected at canonical BA1222... address
   // (getAuthorizer/getProtocolFeesCollector/WETH methods RPC-validated)
   mode: {
     address: BALANCER_V2_VAULTS.mode,
     protocol: 'balancer_v2',
-    fee: 0
+    feeBps: 0
   },
   // T-NEW-6 DEFERRED: Linea - SyncSwap flash loans via Vault (EIP-3156)
   // Blocked on: SyncSwap Vault deployment to Linea mainnet (no contract address available).
@@ -487,7 +487,7 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   // linea: {
   //   address: SYNCSWAP_VAULTS.linea,  // SyncSwap Vault (TBD)
   //   protocol: 'syncswap',
-  //   fee: 30  // 0.3% flash loan fee (30 bps)
+  //   feeBps: 30  // 0.3% flash loan fee (30 bps)
   // },
   // P2-006: Blast — no flash loan provider available. Aave V3 is not deployed on Blast.
   // Opportunities on Blast are limited to direct execution only until a Blast-native
@@ -528,17 +528,17 @@ if (process.env.NODE_ENV !== 'test' &&
 export const MORPHO_FLASH_LOAN_PROVIDERS: Record<string, {
   address: string;
   protocol: 'morpho';
-  fee: number;
+  feeBps: number;
 }> = {
   ethereum: {
     address: MORPHO_BLUE_POOLS.ethereum, // 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb
     protocol: 'morpho',
-    fee: 0  // Zero-fee flash loans
+    feeBps: 0  // Zero-fee flash loans
   },
   base: {
     address: MORPHO_BLUE_POOLS.base, // 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb
     protocol: 'morpho',
-    fee: 0  // Zero-fee flash loans
+    feeBps: 0  // Zero-fee flash loans
   },
 };
 

@@ -193,7 +193,7 @@ export class FlashLoanProviderFactory {
    */
   private createProvider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): IFlashLoanProvider | undefined {
     const protocol = flashLoanConfig.protocol as FlashLoanProtocol;
 
@@ -232,7 +232,7 @@ export class FlashLoanProviderFactory {
       protocol,
       chain,
       poolAddress: flashLoanConfig.address,
-      feeBps: flashLoanConfig.fee,
+      feeBps: flashLoanConfig.feeBps,
     });
   }
 
@@ -254,7 +254,7 @@ export class FlashLoanProviderFactory {
    */
   private validateProviderConfig(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number },
+    flashLoanConfig: { address: string; protocol: string; feeBps: number },
     contractName: string,
     addressLabel: string,
     extraLogMeta?: Record<string, string>,
@@ -290,7 +290,7 @@ export class FlashLoanProviderFactory {
    */
   private createAaveV3Provider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): AaveV3FlashLoanProvider | undefined {
     const validated = this.validateProviderConfig(
       chain, flashLoanConfig, 'FlashLoanArbitrage', 'poolAddress'
@@ -311,7 +311,7 @@ export class FlashLoanProviderFactory {
    */
   private createPancakeSwapV3Provider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): PancakeSwapV3FlashLoanProvider | undefined {
     const validated = this.validateProviderConfig(
       chain, flashLoanConfig, 'PancakeSwapFlashArbitrage', 'factoryAddress'
@@ -335,7 +335,7 @@ export class FlashLoanProviderFactory {
    */
   private createBalancerV2Provider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): BalancerV2FlashLoanProvider | undefined {
     const validated = this.validateProviderConfig(
       chain, flashLoanConfig, 'BalancerV2FlashArbitrage', 'vaultAddress'
@@ -359,7 +359,7 @@ export class FlashLoanProviderFactory {
    */
   private createSyncSwapProvider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): SyncSwapFlashLoanProvider | undefined {
     const validated = this.validateProviderConfig(
       chain, flashLoanConfig, 'SyncSwapFlashArbitrage', 'vaultAddress',
@@ -383,7 +383,7 @@ export class FlashLoanProviderFactory {
    */
   private createDaiFlashMintProvider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): DaiFlashMintProvider | undefined {
     const validated = this.validateProviderConfig(
       chain, flashLoanConfig, 'DaiFlashMintArbitrage', 'dssFlashAddress',
@@ -407,7 +407,7 @@ export class FlashLoanProviderFactory {
    */
   private createMorphoProvider(
     chain: string,
-    flashLoanConfig: { address: string; protocol: string; fee: number }
+    flashLoanConfig: { address: string; protocol: string; feeBps: number }
   ): MorphoFlashLoanProvider | undefined {
     const validated = this.validateProviderConfig(
       chain, flashLoanConfig, 'MorphoFlashArbitrage', 'morphoBlueAddress',

@@ -86,11 +86,11 @@ function parseNumericEnv(key: string, logger: Logger): number | undefined {
 function buildFlashLoanConfig(logger: Logger): {
   contractAddresses: Record<string, string>;
   approvedRouters: Record<string, string[]>;
-  providerOverrides: Record<string, { address: string; protocol: string; fee: number }>;
+  providerOverrides: Record<string, { address: string; protocol: string; feeBps: number }>;
 } {
   const contractAddresses: Record<string, string> = {};
   const approvedRouters: Record<string, string[]> = {};
-  const providerOverrides: Record<string, { address: string; protocol: string; fee: number }> = {};
+  const providerOverrides: Record<string, { address: string; protocol: string; feeBps: number }> = {};
 
   for (const chain of Object.keys(FLASH_LOAN_PROVIDERS)) {
     // Phase 5: Prefer Balancer V2 (0% fee) over default provider when deployed
@@ -103,12 +103,12 @@ function buildFlashLoanConfig(logger: Logger): {
       providerOverrides[chain] = {
         address: vaultAddress,
         protocol: 'balancer_v2',
-        fee: 0,
+        feeBps: 0,
       };
       logger.info('Preferring Balancer V2 (0% fee) over default provider', {
         chain,
         defaultProtocol: FLASH_LOAN_PROVIDERS[chain].protocol,
-        defaultFee: FLASH_LOAN_PROVIDERS[chain].fee,
+        defaultFee: FLASH_LOAN_PROVIDERS[chain].feeBps,
         contract: balancerAddress,
       });
     } else {
@@ -335,7 +335,7 @@ export async function initializeAllStrategies(deps: StrategyInitDeps): Promise<S
       // Build fee overrides from provider overrides (e.g., Balancer V2 at 0%)
       const feeOverrides: Record<string, number> = {};
       for (const [chain, override] of Object.entries(providerOverrides)) {
-        feeOverrides[chain] = override.fee;
+        feeOverrides[chain] = override.feeBps;
       }
 
       flashLoanStrategy = new FlashLoanStrategy(logger, {

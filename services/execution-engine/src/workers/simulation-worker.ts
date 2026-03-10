@@ -98,7 +98,7 @@ const DEFAULT_FLASH_LOAN_FEE_BPS = 5;
  */
 function getFlashLoanFeeBps(chain: string): number {
   const provider = FLASH_LOAN_PROVIDERS[chain.toLowerCase()];
-  return provider?.fee ?? DEFAULT_FLASH_LOAN_FEE_BPS;
+  return provider?.feeBps ?? DEFAULT_FLASH_LOAN_FEE_BPS;
 }
 
 // =============================================================================

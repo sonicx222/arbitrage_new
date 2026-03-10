@@ -180,7 +180,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
 
       const opp = triangular[0];
       expect(opp.flashLoanFee).toBeDefined();
-      expect(opp.flashLoanFee).toBe(0.0009); // Aave V3: 0.09%
+      expect(opp.flashLoanFee).toBe(0.0005); // Aave V3: 5 bps = 0.05%
       expect(opp.expectedProfit).toBeDefined();
     });
   });

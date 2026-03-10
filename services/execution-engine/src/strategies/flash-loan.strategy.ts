@@ -512,7 +512,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           protocol: providerConfig.protocol as FlashLoanProtocol,
           chain,
           poolAddress: providerConfig.address,
-          feeBps: providerConfig.fee,
+          feeBps: providerConfig.feeBps,
           isAvailable: true,
         }];
         availableProviders.set(chain, providers);
@@ -1047,7 +1047,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         protocol: selectedProtocol,
         chain,
         poolAddress: flashLoanConfig.address,
-        feeBps: flashLoanConfig.fee,
+        feeBps: flashLoanConfig.feeBps,
         isAvailable: true,
       };
 

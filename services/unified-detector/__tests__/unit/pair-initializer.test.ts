@@ -31,6 +31,8 @@ jest.mock('@arbitrage/core/components', () => ({
 
 jest.mock('@arbitrage/core/utils', () => ({
   validateFee: jest.fn((fee: number) => fee),
+  FEE_CONSTANTS: { DEFAULT: 0.003 },
+  decimalToBps: jest.fn((decimal: number) => Math.round(decimal * 10000)),
 }));
 
 import { initializePairs, generatePairAddress } from '../../src/pair-initializer';

@@ -129,7 +129,7 @@ export class FlashLoanFeeCalculator {
     // Use chain-specific fee from FLASH_LOAN_PROVIDERS config
     const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
     if (flashLoanConfig) {
-      return (amount * BigInt(flashLoanConfig.fee)) / this.BPS_DENOMINATOR_BIGINT;
+      return (amount * BigInt(flashLoanConfig.feeBps)) / this.BPS_DENOMINATOR_BIGINT;
     }
 
     // Default to Aave V3 fee (0.05%)

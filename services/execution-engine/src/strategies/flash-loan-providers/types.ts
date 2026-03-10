@@ -223,5 +223,5 @@ export interface FlashLoanProviderConfig {
    * Used to prefer cheaper protocols (e.g., Balancer V2 at 0% over Aave V3 at 0.05%)
    * when the corresponding contract is deployed.
    */
-  providerOverrides?: Record<string, { address: string; protocol: string; fee: number }>;
+  providerOverrides?: Record<string, { address: string; protocol: string; feeBps: number }>;
 }

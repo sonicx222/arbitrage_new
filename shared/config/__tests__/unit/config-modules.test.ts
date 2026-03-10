@@ -225,13 +225,13 @@ describe('Service Config Module', () => {
         expect(FLASH_LOAN_PROVIDERS[chain]).toBeDefined();
         expect(FLASH_LOAN_PROVIDERS[chain].address).toMatch(/^0x[a-fA-F0-9]{40}$/);
         expect(FLASH_LOAN_PROVIDERS[chain].protocol).toBeDefined();
-        expect(typeof FLASH_LOAN_PROVIDERS[chain].fee).toBe('number');
+        expect(typeof FLASH_LOAN_PROVIDERS[chain].feeBps).toBe('number');
       }
     });
 
     it('should have valid Aave V3 fee (5 basis points, updated March 2024)', () => {
-      expect(FLASH_LOAN_PROVIDERS['ethereum'].fee).toBe(5);
-      expect(FLASH_LOAN_PROVIDERS['arbitrum'].fee).toBe(5);
+      expect(FLASH_LOAN_PROVIDERS['ethereum'].feeBps).toBe(5);
+      expect(FLASH_LOAN_PROVIDERS['arbitrum'].feeBps).toBe(5);
     });
 
     it('should have provider for new chains', () => {

@@ -1015,13 +1015,13 @@ describe('Event Listener Cleanup', () => {
 
 describe('P1-4: Flash Loan Configuration', () => {
   it('should have flash loan providers for all supported chains', () => {
-    const FLASH_LOAN_PROVIDERS: Record<string, { address: string; protocol: string; fee: number }> = {
-      ethereum: { address: '0x87870Bcd2C4c2e84A8c3C3a3FcACC94666c0d6Cf', protocol: 'aave_v3', fee: 9 },
-      polygon: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', fee: 9 },
-      arbitrum: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', fee: 9 },
-      base: { address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5', protocol: 'aave_v3', fee: 9 },
-      optimism: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', fee: 9 },
-      bsc: { address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4', protocol: 'pancakeswap_v3', fee: 25 }
+    const FLASH_LOAN_PROVIDERS: Record<string, { address: string; protocol: string; feeBps: number }> = {
+      ethereum: { address: '0x87870Bcd2C4c2e84A8c3C3a3FcACC94666c0d6Cf', protocol: 'aave_v3', feeBps: 9 },
+      polygon: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', feeBps: 9 },
+      arbitrum: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', feeBps: 9 },
+      base: { address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5', protocol: 'aave_v3', feeBps: 9 },
+      optimism: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3', feeBps: 9 },
+      bsc: { address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4', protocol: 'pancakeswap_v3', feeBps: 25 }
     };
 
     // All chains should have providers
@@ -1035,7 +1035,7 @@ describe('P1-4: Flash Loan Configuration', () => {
     // All addresses should be valid checksummed addresses
     for (const [chain, config] of Object.entries(FLASH_LOAN_PROVIDERS)) {
       expect(config.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
-      expect(config.fee).toBeGreaterThan(0);
+      expect(config.feeBps).toBeGreaterThanOrEqual(0);
       expect(config.protocol).toBeTruthy();
     }
   });

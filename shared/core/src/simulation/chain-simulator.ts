@@ -21,7 +21,8 @@ import { createLogger } from '../logger';
 import type { SwapEvent } from '@arbitrage/types';
 import type { WhaleAlert } from '../analytics/swap-event-filter';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
-import { getBlockTimeMs, getOpportunityTimeoutMs } from '@arbitrage/config';
+import { getBlockTimeMs, getOpportunityTimeoutMs, FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
+import { FEE_CONSTANTS, bpsToDecimal } from '../utils/fee-utils';
 import type {
   ChainSimulatorConfig,
   SimulatedPairConfig,
@@ -866,7 +867,7 @@ export class ChainSimulator extends EventEmitter {
       if (Math.random() < 0.70) {
         return { ...baseOpportunity, type: 'cross-dex', useFlashLoan: false };
       }
-      const flashLoanFee = 0.0009;
+      const flashLoanFee = bpsToDecimal(FLASH_LOAN_PROVIDERS[this.config.chainId]?.feeBps ?? 5);
       return {
         ...baseOpportunity,
         type: 'flash-loan',
@@ -898,7 +899,7 @@ export class ChainSimulator extends EventEmitter {
     estimatedProfitUsd: number,
     estimatedGasCost: number,
   ): SimulatedOpportunity {
-    const flashLoanFee = 0.0009;
+    const flashLoanFee = bpsToDecimal(FLASH_LOAN_PROVIDERS[this.config.chainId]?.feeBps ?? 5);
 
     switch (type) {
       // --- No-flash-loan types ---
@@ -1074,7 +1075,7 @@ export class ChainSimulator extends EventEmitter {
     // Per-chain multi-hop base profit from config (set by factory from profitProfile)
     const [mhMin, mhMax] = this.config.multiHopBaseProfit ?? [0.008, 0.020];
     const baseProfit = mhMin + Math.random() * (mhMax - mhMin);
-    const feePerHop = 0.003;
+    const feePerHop = FEE_CONSTANTS.DEFAULT;
     const totalFees = feePerHop * hops;
     const netProfit = baseProfit - totalFees;
 
@@ -1087,7 +1088,7 @@ export class ChainSimulator extends EventEmitter {
       ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4)
       : 5 + Math.random() * 15;
     const estimatedGasCost = singleHopGas * hops;
-    const flashLoanFee = 0.0009;
+    const flashLoanFee = bpsToDecimal(FLASH_LOAN_PROVIDERS[this.config.chainId]?.feeBps ?? 5);
 
     const uniqueDexes = Array.from(new Set(this.config.pairs.map(p => p.dex)));
     if (uniqueDexes.length < 2) {
@@ -1203,7 +1204,7 @@ export class ChainSimulator extends EventEmitter {
     const sellPair = this.config.pairs[sellIdx];
 
     const selectedType = selectFastLaneStrategyType();
-    const flashLoanFee = 0.0009;
+    const flashLoanFee = bpsToDecimal(FLASH_LOAN_PROVIDERS[this.config.chainId]?.feeBps ?? 5);
 
     // Confidence: uniform in [minConfidence, 0.99] — always above fast-lane threshold
     const minConf = FAST_LANE_CONFIG.minConfidence;
