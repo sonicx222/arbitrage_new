@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
+import { SectionHeader } from '../components/SectionHeader';
+import { StatRow } from '../components/StatRow';
 import { formatPct, formatNumber } from '../lib/format';
 
 const RISK_STATES = ['NORMAL', 'CAUTION', 'HALT', 'RECOVERY'] as const;
@@ -47,7 +49,7 @@ export function RiskTab() {
     <div className="space-y-4 overflow-auto">
       {/* Risk State Machine */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Risk Circuit Breaker</h3>
+        <SectionHeader mb="mb-3">Risk Circuit Breaker</SectionHeader>
         {eeUnreachable && (
           <div className="mb-2 px-2 py-1 bg-accent-red/10 border border-accent-red/30 rounded text-[10px] text-accent-red">
             Execution Engine unreachable — check if the service is running
@@ -81,7 +83,7 @@ export function RiskTab() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Admission Control */}
         <div className="card">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Admission Control</h3>
+          <SectionHeader mb="mb-3">Admission Control</SectionHeader>
           {metrics?.admissionMetrics ? (
             <div className="space-y-3">
               <div className="flex gap-4">
@@ -110,14 +112,8 @@ export function RiskTab() {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Avg Score (admitted)</span>
-                  <span>{Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(3) : '-'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Avg Score (shed)</span>
-                  <span>{Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(3) : '-'}</span>
-                </div>
+                <StatRow label="Avg Score (admitted)" value={Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(3) : '-'} />
+                <StatRow label="Avg Score (shed)" value={Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(3) : '-'} />
               </div>
             </div>
           ) : (
@@ -127,7 +123,7 @@ export function RiskTab() {
 
         {/* Forwarding Rejections */}
         <div className="card">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Forwarding Rejections</h3>
+          <SectionHeader mb="mb-3">Forwarding Rejections</SectionHeader>
           {metrics?.forwardingMetrics ? (
             <div className="space-y-1.5 text-xs">
               {Object.entries(metrics.forwardingMetrics).map(([key, val]) => (
@@ -145,7 +141,7 @@ export function RiskTab() {
 
       {/* Backpressure */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Backpressure</h3>
+        <SectionHeader mb="mb-3">Backpressure</SectionHeader>
         {metrics?.backpressure ? (
           <div>
             <div className="flex items-center justify-between mb-2">

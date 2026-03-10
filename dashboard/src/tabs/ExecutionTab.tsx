@@ -4,9 +4,10 @@ import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { DataTable } from '../components/DataTable';
+import { SectionHeader } from '../components/SectionHeader';
 import { ExportCsvButton } from '../components/ExportCsvButton';
 import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate } from '../lib/format';
-import { CHART, TOOLTIP_STYLE, MAX_ERROR_DISPLAY } from '../lib/theme';
+import { CHART, TOOLTIP_STYLE, AXIS_TICK, GRID_PROPS, MAX_ERROR_DISPLAY } from '../lib/theme';
 import type { FeedItem } from '../lib/types';
 
 type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
@@ -80,24 +81,24 @@ export function ExecutionTab() {
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="card">
-          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Avg Latency (ms)</h4>
+          <SectionHeader>Avg Latency (ms)</SectionHeader>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
-              <YAxis tick={{ fontSize: 9, fill: CHART.tick }} />
+              <CartesianGrid {...GRID_PROPS} />
+              <XAxis dataKey="time" tick={AXIS_TICK} />
+              <YAxis tick={AXIS_TICK} />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Line type="monotone" dataKey="latency" stroke={CHART.line1} dot={false} strokeWidth={1.5} />
             </LineChart>
           </ResponsiveContainer>
         </div>
         <div className="card">
-          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Success Rate (%)</h4>
+          <SectionHeader>Success Rate (%)</SectionHeader>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
-              <YAxis tick={{ fontSize: 9, fill: CHART.tick }} domain={[0, 100]} />
+              <CartesianGrid {...GRID_PROPS} />
+              <XAxis dataKey="time" tick={AXIS_TICK} />
+              <YAxis tick={AXIS_TICK} domain={[0, 100]} />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Line type="monotone" dataKey="successRate" stroke={CHART.line2} dot={false} strokeWidth={1.5} />
             </LineChart>

@@ -4,9 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useStreams, useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { DataTable, type Column } from '../components/DataTable';
+import { SectionHeader } from '../components/SectionHeader';
+import { StatRow } from '../components/StatRow';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber } from '../lib/format';
-import { CHART, TOOLTIP_STYLE } from '../lib/theme';
+import { CHART, TOOLTIP_STYLE, AXIS_TICK, GRID_PROPS } from '../lib/theme';
 import type { StreamHealth } from '../lib/types';
 
 interface RedisStats {
@@ -45,9 +47,7 @@ export function StreamsTab() {
     <div className="space-y-4 overflow-auto">
       {/* Stream Table */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
-          Redis Streams ({streamEntries.length})
-        </h3>
+        <SectionHeader>Redis Streams ({streamEntries.length})</SectionHeader>
         <DataTable<[string, StreamHealth[string]]>
           columns={[
             { header: 'Stream', render: ([name]) => <span className="font-mono text-gray-300">{name.replace('stream:', '')}</span> },
@@ -69,12 +69,12 @@ export function StreamsTab() {
 
       {/* Consumer Lag Chart */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Total Pending Messages</h3>
+        <SectionHeader>Total Pending Messages</SectionHeader>
         <ResponsiveContainer width="100%" height={200}>
           <AreaChart data={lagData}>
-            <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
-            <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
-            <YAxis tick={{ fontSize: 9, fill: CHART.tick }} />
+            <CartesianGrid {...GRID_PROPS} />
+            <XAxis dataKey="time" tick={AXIS_TICK} />
+            <YAxis tick={AXIS_TICK} />
             <Tooltip contentStyle={TOOLTIP_STYLE} />
             <Area type="monotone" dataKey="pending" stroke={CHART.area1} fill={CHART.area1} fillOpacity={0.1} />
           </AreaChart>
@@ -84,7 +84,7 @@ export function StreamsTab() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* DLQ Panel */}
         <div className="card">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Dead Letter Queue</h3>
+          <SectionHeader mb="mb-3">Dead Letter Queue</SectionHeader>
           {metrics?.dlqMetrics ? (
             <div className="grid grid-cols-5 gap-2 text-center">
               {Object.entries(metrics.dlqMetrics).map(([key, val]) => (
@@ -101,34 +101,24 @@ export function StreamsTab() {
 
         {/* Redis Stats */}
         <div className="card">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Redis Stats</h3>
+          <SectionHeader mb="mb-3">Redis Stats</SectionHeader>
           {redisStats ? (
             <div className="space-y-1.5 text-xs">
               {redisStats.commandsPerMinute != null && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Commands/min</span>
-                  <span>{redisStats.commandsPerMinute.toFixed(1)}</span>
-                </div>
+                <StatRow label="Commands/min" value={redisStats.commandsPerMinute.toFixed(1)} />
               )}
               {redisStats.totalCommands != null && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Total Commands</span>
-                  <span>{formatNumber(redisStats.totalCommands)}</span>
-                </div>
+                <StatRow label="Total Commands" value={formatNumber(redisStats.totalCommands)} />
               )}
               {redisStats.estimatedDailyUsage != null && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Est. Daily</span>
-                  <span>{formatNumber(redisStats.estimatedDailyUsage)}</span>
-                </div>
+                <StatRow label="Est. Daily" value={formatNumber(redisStats.estimatedDailyUsage)} />
               )}
               {redisStats.dailyLimitPercent != null && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Daily Limit %</span>
-                  <span className={redisStats.dailyLimitPercent > 80 ? 'text-accent-red' : redisStats.dailyLimitPercent > 50 ? 'text-accent-yellow' : ''}>
-                    {redisStats.dailyLimitPercent.toFixed(1)}%
-                  </span>
-                </div>
+                <StatRow
+                  label="Daily Limit %"
+                  value={`${redisStats.dailyLimitPercent.toFixed(1)}%`}
+                  color={redisStats.dailyLimitPercent > 80 ? 'text-accent-red' : redisStats.dailyLimitPercent > 50 ? 'text-accent-yellow' : undefined}
+                />
               )}
             </div>
           ) : (

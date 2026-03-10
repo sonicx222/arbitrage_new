@@ -3,6 +3,8 @@ import { useMetrics, useServices, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { ServiceCard } from '../components/ServiceCard';
 import { LiveFeed } from '../components/LiveFeed';
+import { SectionHeader } from '../components/SectionHeader';
+import { StatRow } from '../components/StatRow';
 import { formatUsd, formatPct, formatNumber, calcSuccessRate } from '../lib/format';
 
 export function OverviewTab() {
@@ -37,7 +39,7 @@ export function OverviewTab() {
 
         {/* Service Grid */}
         <div>
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Services ({serviceList.length})</h3>
+          <SectionHeader>Services ({serviceList.length})</SectionHeader>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {serviceList.map((svc) => (
               <ServiceCard key={svc.name} service={svc} />
@@ -48,7 +50,7 @@ export function OverviewTab() {
 
         {/* Pipeline Health */}
         <div className="card">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Pipeline Health</h3>
+          <SectionHeader mb="mb-3">Pipeline Health</SectionHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             {/* Backpressure */}
             <div>
@@ -76,10 +78,10 @@ export function OverviewTab() {
               <span className="text-gray-400">Admission Control</span>
               {metrics.admissionMetrics ? (
                 <div className="mt-1 space-y-0.5">
-                  <div className="flex justify-between"><span className="text-gray-500">Admitted</span><span className="text-accent-green">{formatNumber(metrics.admissionMetrics.admitted)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Shed</span><span className="text-accent-red">{formatNumber(metrics.admissionMetrics.shed)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Avg Score (admitted)</span><span>{Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(2) : '-'}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Avg Score (shed)</span><span>{Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(2) : '-'}</span></div>
+                  <StatRow label="Admitted" value={formatNumber(metrics.admissionMetrics.admitted)} color="text-accent-green" />
+                  <StatRow label="Shed" value={formatNumber(metrics.admissionMetrics.shed)} color="text-accent-red" />
+                  <StatRow label="Avg Score (admitted)" value={Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(2) : '-'} />
+                  <StatRow label="Avg Score (shed)" value={Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(2) : '-'} />
                 </div>
               ) : <div className="text-gray-600 mt-1">No data</div>}
             </div>
@@ -89,11 +91,11 @@ export function OverviewTab() {
               <span className="text-gray-400">Dead Letter Queue</span>
               {metrics.dlqMetrics ? (
                 <div className="mt-1 space-y-0.5">
-                  <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{metrics.dlqMetrics.total}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Expired</span><span>{metrics.dlqMetrics.expired}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Validation</span><span>{metrics.dlqMetrics.validation}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Transient</span><span>{metrics.dlqMetrics.transient}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Unknown</span><span>{metrics.dlqMetrics.unknown}</span></div>
+                  <StatRow label="Total" value={metrics.dlqMetrics.total} />
+                  <StatRow label="Expired" value={metrics.dlqMetrics.expired} />
+                  <StatRow label="Validation" value={metrics.dlqMetrics.validation} />
+                  <StatRow label="Transient" value={metrics.dlqMetrics.transient} />
+                  <StatRow label="Unknown" value={metrics.dlqMetrics.unknown} />
                 </div>
               ) : <div className="text-gray-600 mt-1">No data</div>}
             </div>
@@ -103,12 +105,12 @@ export function OverviewTab() {
               <span className="text-gray-400">Forwarding Rejections</span>
               {metrics.forwardingMetrics ? (
                 <div className="mt-1 space-y-0.5">
-                  <div className="flex justify-between"><span className="text-gray-500">Expired</span><span>{metrics.forwardingMetrics.expired}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Duplicate</span><span>{metrics.forwardingMetrics.duplicate}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Profit Rejected</span><span>{metrics.forwardingMetrics.profitRejected}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Chain Rejected</span><span>{metrics.forwardingMetrics.chainRejected}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Circuit Open</span><span>{metrics.forwardingMetrics.circuitOpen}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Not Leader</span><span>{metrics.forwardingMetrics.notLeader}</span></div>
+                  <StatRow label="Expired" value={metrics.forwardingMetrics.expired} />
+                  <StatRow label="Duplicate" value={metrics.forwardingMetrics.duplicate} />
+                  <StatRow label="Profit Rejected" value={metrics.forwardingMetrics.profitRejected} />
+                  <StatRow label="Chain Rejected" value={metrics.forwardingMetrics.chainRejected} />
+                  <StatRow label="Circuit Open" value={metrics.forwardingMetrics.circuitOpen} />
+                  <StatRow label="Not Leader" value={metrics.forwardingMetrics.notLeader} />
                 </div>
               ) : <div className="text-gray-600 mt-1">No data</div>}
             </div>

@@ -6,6 +6,7 @@ import {
   getPermission,
   requestPermission,
 } from '../lib/notifications';
+import { SectionHeader } from './SectionHeader';
 
 export const NotificationSettings = memo(function NotificationSettings() {
   const [enabled, setEnabled] = useState(getNotificationPref);
@@ -35,7 +36,7 @@ export const NotificationSettings = memo(function NotificationSettings() {
 
   return (
     <div className="card">
-      <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Notifications</h3>
+      <SectionHeader mb="mb-3">Notifications</SectionHeader>
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs text-gray-300">Browser Notifications</div>

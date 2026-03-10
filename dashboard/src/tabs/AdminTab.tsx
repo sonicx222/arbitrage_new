@@ -9,6 +9,7 @@ import { DataTable, type Column } from '../components/DataTable';
 import { LogLevelControl } from '../components/LogLevelControl';
 import { AlertsTable } from '../components/AlertsTable';
 import { NotificationSettings } from '../components/NotificationSettings';
+import { SectionHeader } from '../components/SectionHeader';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatDuration } from '../lib/format';
 import type { ServiceHealth } from '../lib/types';
@@ -36,7 +37,7 @@ export function AdminTab() {
     <div className="space-y-4 overflow-auto">
       {/* System Info */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">System Info</h3>
+        <SectionHeader>System Info</SectionHeader>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
           <div>
             <span className="text-gray-500">Instance</span>
@@ -68,10 +69,10 @@ export function AdminTab() {
 
       {/* Service Management */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+        <SectionHeader>
           Service Management {!isLeader && <span className="text-accent-yellow">(read-only — not leader)</span>}
           {actionMsg && <span className={`ml-2 ${actionMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{actionMsg}</span>}
-        </h3>
+        </SectionHeader>
         <DataTable<ServiceHealth>
           columns={[
             { header: 'Service', render: (svc) => <span className="font-mono text-gray-300">{svc.name}</span> },

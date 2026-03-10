@@ -18,6 +18,11 @@ export const TOOLTIP_STYLE: React.CSSProperties = {
   color: CHART.tooltipText,
 };
 
+// Pre-allocated Recharts axis/grid props — avoids recreating inline objects
+// on every render (same rationale as TOOLTIP_STYLE above).
+export const AXIS_TICK = { fontSize: 9, fill: CHART.tick } as const;
+export const GRID_PROPS = { strokeDasharray: '3 3' as const, stroke: CHART.grid };
+
 // L-12 FIX: Consistent error truncation length across dashboard.
 export const MAX_ERROR_DISPLAY = 30;
 

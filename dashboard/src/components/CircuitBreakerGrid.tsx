@@ -3,6 +3,7 @@ import { useServices } from '../context/SSEContext';
 import { useCircuitBreakerOpen, useCircuitBreakerClose } from '../hooks/useApi';
 import { useMutationFeedback } from '../hooks/useMutationFeedback';
 import { ConfirmModal } from './ConfirmModal';
+import { SectionHeader } from './SectionHeader';
 import { statusColor, statusDot } from '../lib/format';
 
 export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
@@ -19,7 +20,7 @@ export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
 
   return (
     <div className="card">
-      <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Circuit Breaker</h3>
+      <SectionHeader mb="mb-3">Circuit Breaker</SectionHeader>
       <div className="flex items-center gap-4 mb-3">
         <div className="flex items-center gap-2">
           <span className={`w-3 h-3 rounded-full ${statusDot(state)}`} />

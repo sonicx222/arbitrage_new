@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSetLogLevel, fetchJson } from '../hooks/useApi';
 import { useMutationFeedback } from '../hooks/useMutationFeedback';
+import { SectionHeader } from './SectionHeader';
 
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 
@@ -29,7 +30,7 @@ export const LogLevelControl = memo(function LogLevelControl() {
 
   return (
     <div className="card">
-      <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Log Level</h3>
+      <SectionHeader>Log Level</SectionHeader>
       <div className="flex gap-1 mb-2">
         {LOG_LEVELS.map((level) => (
           <button

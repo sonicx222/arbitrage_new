@@ -4,6 +4,7 @@ import { fetchJson } from '../hooks/useApi';
 import { KpiCard } from '../components/KpiCard';
 import { DataTable } from '../components/DataTable';
 import { ExportCsvButton } from '../components/ExportCsvButton';
+import { SectionHeader } from '../components/SectionHeader';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatUsd, formatNumber, formatPct } from '../lib/format';
 import { CHAIN_COLORS } from '../lib/theme';
@@ -159,7 +160,7 @@ export function OpportunitiesTab() {
 
       {/* Chain Distribution */}
       <div className="card">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Chain Distribution</h3>
+        <SectionHeader mb="mb-3">Chain Distribution</SectionHeader>
         <div className="flex gap-1.5 flex-wrap">
           {Object.entries(stats.byChain)
             .sort(([, a], [, b]) => b - a)
