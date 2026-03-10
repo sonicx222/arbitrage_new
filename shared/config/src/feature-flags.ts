@@ -825,14 +825,14 @@ if (!configValidationDisabled && !process.env.JEST_WORKER_ID) {
       try {
         validateFeatureFlags(); // Will use console.log/warn
       } catch (error) {
-        // Log critical validation errors
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('❌ CRITICAL CONFIGURATION ERROR:', errorMessage);
+        // CFG-L-007 FIX: Log full error object (preserves stack trace) instead of just message string
+        console.error('CRITICAL CONFIGURATION ERROR:', error);
 
-        // In production, fail fast to prevent running with invalid config
+        // CFG-M-005 FIX: Throw instead of process.exit(1) to allow graceful shutdown
+        // via the global unhandled exception handler (preserves open Redis/WS connections)
         if (process.env.NODE_ENV === 'production') {
-          console.error('Exiting process due to configuration error in production mode');
-          process.exit(1);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          throw new Error(`Configuration validation failed in production: ${errorMessage}`);
         }
       }
     }

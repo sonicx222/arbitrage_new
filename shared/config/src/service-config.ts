@@ -500,13 +500,18 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
 };
 
 // M2 FIX: Load-time Zod validation for FLASH_LOAN_PROVIDERS (production only)
+// CFG-M-002 FIX: Throw in production to fail-fast on misconfigured flash loan providers
 if (process.env.NODE_ENV !== 'test' &&
     !process.env.JEST_WORKER_ID &&
     process.env.SKIP_CONFIG_VALIDATION !== 'true') {
   const result = FlashLoanProvidersSchema.safeParse(FLASH_LOAN_PROVIDERS);
   if (!result.success) {
     const errors = result.error.errors.map(e => `  - ${e.path.join('.')}: ${e.message}`).join('\n');
-    console.warn(`[FLASH_LOAN_VALIDATION] Schema validation warnings:\n${errors}`);
+    const msg = `[FLASH_LOAN_VALIDATION] Schema validation warnings:\n${errors}`;
+    console.warn(msg);
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(msg);
+    }
   }
 }
 
