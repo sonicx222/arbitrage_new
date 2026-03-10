@@ -75,9 +75,13 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     });
 
     // Periodic pushes
+    // RT-010 FIX: Reduced from 2s to 5s. At 2s, metrics serialization
+    // (JSON.stringify on ~20-field object) runs 30 times/min per SSE client,
+    // creating allocation pressure that contributes to GC pauses. 5s is
+    // sufficient for dashboard refresh and halves the serialization overhead.
     const metricsInterval = setInterval(() => {
       send('metrics', state.getSystemMetrics());
-    }, 2000);
+    }, 5000);
 
     const servicesInterval = setInterval(() => {
       send('services', Object.fromEntries(state.getServiceHealthMap()));

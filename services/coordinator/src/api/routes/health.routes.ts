@@ -95,23 +95,30 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
   /**
    * GET /api/health/ready
    * Readiness probe - returns 200 only if the service is fully operational.
-   * Checks that the coordinator is running and system health is above zero.
+   * Checks that the coordinator is running, system health is above zero,
+   * and Redis is reachable.
+   *
+   * H-01 FIX: Added Redis connectivity check. Previously, a Redis outage
+   * left the coordinator reporting "ready" for up to 90s (stale heartbeat
+   * threshold) while being unable to process any streams.
    *
    * @see OP-12: Readiness vs liveness probe distinction
    */
-  router.get('/health/ready', (_req: Request, res: Response) => {
+  router.get('/health/ready', (async (_req: Request, res: Response) => {
     const isRunning = state.getIsRunning();
     const systemHealth = state.getSystemMetrics().systemHealth;
-    const isReady = isRunning && systemHealth > 0;
+    const redisOk = await state.checkRedisConnectivity();
+    const isReady = isRunning && systemHealth > 0 && redisOk;
 
     const statusCode = isReady ? 200 : 503;
     res.status(statusCode).json({
       status: isReady ? 'ready' : 'not_ready',
       isRunning,
       systemHealth,
+      redisConnected: redisOk,
       timestamp: Date.now(),
     });
-  });
+  }) as RequestHandler);
 
   return router;
 }

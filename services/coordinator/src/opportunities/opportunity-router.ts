@@ -180,6 +180,11 @@ const DEFAULT_CHAIN_TTL_OVERRIDES: Record<string, number> = {
   zksync: 15000,     // ~15 blocks at 1s
   linea: 15000,      // Similar L2 characteristics
   solana: 10000,     // ~25 slots at 400ms
+  // H-02 FIX: Added Mantle, Mode, Blast, Scroll — all L2s with fast block times
+  mantle: 15000,     // ~7 blocks at 2s
+  mode: 15000,       // ~7 blocks at 2s
+  blast: 15000,      // ~7 blocks at 2s (Optimism-based)
+  scroll: 15000,     // ~5 blocks at 3s
 };
 
 /**
@@ -875,11 +880,22 @@ export class OpportunityRouter {
     // ADR-037: Step 4: Process admitted opportunities in parallel for throughput.
     // Validation (dedup, profit, chain, expiry) is CPU-only with no shared mutable state
     // between opportunities. Forwarding (XADD) calls are independent Redis writes.
-    // Promise.all executes all forwards concurrently instead of sequentially,
-    // reducing batch forwarding time from N*RTT to ~1*RTT.
-    const results = await Promise.all(
+    // H-05 FIX: Use Promise.allSettled instead of Promise.all to prevent a single
+    // XADD failure from leaving the entire batch (up to 200 messages) unACKed.
+    // With Promise.all, one rejection causes all messages to be redelivered,
+    // creating a redelivery storm. allSettled ensures partial successes are ACKed.
+    const results = await Promise.allSettled(
       admitted.map(opp => this.processOpportunity(opp.data, isLeader, opp.traceContext))
     );
+    // Log any rejected forwards (they are already DLQ'd by processOpportunity's retry logic)
+    const rejected = results.filter(r => r.status === 'rejected');
+    if (rejected.length > 0) {
+      this.logger.warn('Batch forwarding had partial failures', {
+        total: admitted.length,
+        rejected: rejected.length,
+        succeeded: admitted.length - rejected.length,
+      });
+    }
 
     // P2-001+P2-002 FIX: Shed opportunities are NOT processed through processOpportunity.
     // Previously, shed opps were processed with isLeader=false, which caused:

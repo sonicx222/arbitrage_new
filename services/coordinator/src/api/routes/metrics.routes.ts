@@ -122,6 +122,8 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         const snapshot = await collector.collect();
         res.json(snapshot);
       } catch (error) {
+        // M-13 FIX: Log the actual error — previously swallowed silently
+        state.getLogger().error('Failed to collect diagnostics', { error: (error as Error).message });
         res.status(500).json({ error: 'Failed to collect diagnostics' });
       }
     }) as RequestHandler
@@ -242,7 +244,9 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         ].join('\n');
         const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
         res.type('text/plain; version=0.0.4; charset=utf-8').send(streamMetrics + runtimeMetrics + providerMetrics + coordinatorMetrics);
-      } catch (_error) {
+      } catch (error) {
+        // M-13 FIX: Log the actual error — previously swallowed silently
+        state.getLogger().error('Failed to get Prometheus metrics', { error: (error as Error).message });
         res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
       }
     }) as RequestHandler

@@ -404,7 +404,7 @@ describe('SSE Routes', () => {
   // ===========================================================================
 
   describe('periodic pushes', () => {
-    it('should push metrics every 2s', () => {
+    it('should push metrics every 5s', () => {
       delete process.env.DASHBOARD_AUTH_TOKEN;
       const { createSSERoutes } = importSSERoutes();
       const router = createSSERoutes(mockState);
@@ -416,12 +416,18 @@ describe('SSE Routes', () => {
       handler(req, res);
       const initialWrites = res.write.mock.calls.length; // 3 initial
 
-      jest.advanceTimersByTime(2000);
-      expect(res.write.mock.calls.length).toBe(initialWrites + 1);
-      expect(res.writtenData[initialWrites]).toContain('event: metrics');
+      // At 5s, metrics + services + circuit-breaker intervals all fire
+      jest.advanceTimersByTime(5000);
+      const firstBatch = res.writtenData.slice(initialWrites);
+      expect(firstBatch.length).toBe(3);
+      expect(firstBatch.some((d: string) => d.includes('event: metrics'))).toBe(true);
+      expect(firstBatch.some((d: string) => d.includes('event: services'))).toBe(true);
+      expect(firstBatch.some((d: string) => d.includes('event: circuit-breaker'))).toBe(true);
 
-      jest.advanceTimersByTime(2000);
-      expect(res.write.mock.calls.length).toBe(initialWrites + 2);
+      // At 10s, another round of all three fires
+      jest.advanceTimersByTime(5000);
+      const secondBatch = res.writtenData.slice(initialWrites + 3);
+      expect(secondBatch.some((d: string) => d.includes('event: metrics'))).toBe(true);
 
       // Cleanup
       req.emit('close');

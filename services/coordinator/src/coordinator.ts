@@ -1235,7 +1235,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const isHighThroughput = groupConfig.streamName === RedisStreams.OPPORTUNITIES
         || groupConfig.streamName === RedisStreams.PRICE_UPDATES
         || groupConfig.streamName === RedisStreams.EXECUTION_RESULTS;
-      const batchSize = isHighThroughput ? 200 : 10;
+      // RT-007 FIX: Increased from 200 to 500 for high-throughput streams.
+      // Larger batches drain consumer backlog faster after GC-induced stalls,
+      // reducing pending message count. At 43 opps/s, a batch of 500 can
+      // recover ~12s of backlog in a single XREADGROUP call.
+      const batchSize = isHighThroughput ? 500 : 10;
       // H-07 FIX: Opportunities stream uses 10ms blocking read (was 20ms).
       // With EE also at 20ms, worst-case dual XREADGROUP was 40ms — exceeding <50ms target.
       // Reducing coordinator to 10ms halves its contribution (worst case now 30ms total).
@@ -1940,31 +1944,37 @@ export class CoordinatorService implements CoordinatorStateProvider {
    */
   private async handlePriceUpdateBatch(messages: StreamMessage[]): Promise<string[]> {
     const processedIds: string[] = [];
+    // H-03 FIX: Add trace context for price-update pipeline correlation.
+    // Price updates feed into detection — tracing from price update through
+    // to opportunity detection helps debug stale price issues.
+    const batchTrace = createTraceContext('coordinator');
 
-    for (const msg of messages) {
-      const data = msg.data as Record<string, unknown>;
-      if (!data) {
+    await withLogContext({ traceId: batchTrace.traceId, spanId: batchTrace.spanId }, async () => {
+      for (const msg of messages) {
+        const data = msg.data as Record<string, unknown>;
+        if (!data) {
+          processedIds.push(msg.id);
+          continue;
+        }
+
+        // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
+        const items = unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
+
+        for (const item of items) {
+          const rawUpdate = unwrapMessageData(item);
+          const chain = getString(rawUpdate, 'chain', 'unknown');
+          const dex = getString(rawUpdate, 'dex', 'unknown');
+          const pairKey = getString(rawUpdate, 'pairKey', '');
+
+          if (!pairKey) continue;
+
+          this.systemMetrics.priceUpdatesReceived++;
+          this.trackActivePair(pairKey, chain, dex);
+        }
+
         processedIds.push(msg.id);
-        continue;
       }
-
-      // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
-      const items = unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
-
-      for (const item of items) {
-        const rawUpdate = unwrapMessageData(item);
-        const chain = getString(rawUpdate, 'chain', 'unknown');
-        const dex = getString(rawUpdate, 'dex', 'unknown');
-        const pairKey = getString(rawUpdate, 'pairKey', '');
-
-        if (!pairKey) continue;
-
-        this.systemMetrics.priceUpdatesReceived++;
-        this.trackActivePair(pairKey, chain, dex);
-      }
-
-      processedIds.push(msg.id);
-    }
+    });
 
     return processedIds;
   }
@@ -2148,40 +2158,50 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (!data) return;
 
     const rawData = unwrapMessageData(data);
-    const originalStream = getString(rawData, '_dlq_originalStream', 'unknown');
-    const errorCode = getString(rawData, '_dlq_errorCode', 'unknown');
-    const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
 
-    // Classify error type from error code prefix convention:
-    // [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable errors
-    const dlq = this.systemMetrics.dlqMetrics!;
-    dlq.total++;
+    // H-03 FIX: Extract trace context from DLQ entries for correlation.
+    // DLQ messages carry _trace_* fields from the original message.
+    const parentTrace = extractContext(rawData);
+    const trace = parentTrace
+      ? createChildContext(parentTrace, 'coordinator')
+      : createTraceContext('coordinator');
 
-    if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
-      dlq.expired++;
-    } else if (errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')) {
-      dlq.validation++;
-    } else if (errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')) {
-      dlq.transient++;
-    } else {
-      dlq.unknown++;
-    }
+    await withLogContext({ traceId: trace.traceId, spanId: trace.spanId }, async () => {
+      const originalStream = getString(rawData, '_dlq_originalStream', 'unknown');
+      const errorCode = getString(rawData, '_dlq_errorCode', 'unknown');
+      const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
 
-    this.logger.warn('DLQ entry classified', {
-      messageId: message.id,
-      originalStream,
-      errorCode,
-      opportunityId,
-      type: getString(rawData, 'type', 'unknown'),
-      chain: getString(rawData, 'chain', 'unknown'),
-      classification: errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')
-        ? 'expired'
-        : errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')
-          ? 'validation'
-          : errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')
-            ? 'transient'
-            : 'unknown',
-      dlqTotals: { ...dlq },
+      // Classify error type from error code prefix convention:
+      // [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable errors
+      const dlq = this.systemMetrics.dlqMetrics!;
+      dlq.total++;
+
+      if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
+        dlq.expired++;
+      } else if (errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')) {
+        dlq.validation++;
+      } else if (errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')) {
+        dlq.transient++;
+      } else {
+        dlq.unknown++;
+      }
+
+      this.logger.warn('DLQ entry classified', {
+        messageId: message.id,
+        originalStream,
+        errorCode,
+        opportunityId,
+        type: getString(rawData, 'type', 'unknown'),
+        chain: getString(rawData, 'chain', 'unknown'),
+        classification: errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')
+          ? 'expired'
+          : errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')
+            ? 'validation'
+            : errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')
+              ? 'transient'
+              : 'unknown',
+        dlqTotals: { ...dlq },
+      });
     });
   }
 
@@ -2927,6 +2947,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
       cooldownRemainingMs: cooldownRemaining,
       timestamp: Date.now(),
     };
+  }
+
+  /**
+   * H-01 FIX: Check Redis connectivity for readiness probe.
+   * RedisClient.ping() already has a 2s internal timeout and returns boolean.
+   */
+  async checkRedisConnectivity(): Promise<boolean> {
+    if (!this.redis) return false;
+    return this.redis.ping();
   }
 
   // ===========================================================================

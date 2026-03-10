@@ -8,7 +8,7 @@
 
 import http from 'http';
 import { Application, Request, Response, RequestHandler } from 'express';
-import { getStreamHealthMonitor } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker } from '@arbitrage/core/monitoring';
 import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import type { CoordinatorStateProvider } from '../types';
@@ -45,29 +45,35 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
 
   // FIX: GCP probes /ready (not /health/ready). Add explicit /ready alias at root
   // so coordinator-standby.yaml readinessProbe gets 200 instead of 404.
-  app.get('/ready', (_req: Request, res: Response) => {
+  // H-01 FIX: Aligned with health.routes.ts — includes Redis connectivity check.
+  app.get('/ready', (async (_req: Request, res: Response) => {
     const isRunning = state.getIsRunning();
     const systemHealth = state.getSystemMetrics().systemHealth;
-    const isReady = isRunning && systemHealth > 0;
+    const redisOk = await state.checkRedisConnectivity();
+    const isReady = isRunning && systemHealth > 0 && redisOk;
 
     const statusCode = isReady ? 200 : 503;
     res.status(statusCode).json({
       status: isReady ? 'ready' : 'not_ready',
       isRunning,
       systemHealth,
+      redisConnected: redisOk,
       timestamp: Date.now(),
     });
-  });
+  }) as RequestHandler);
 
   // RT-004 FIX: Unauthenticated /metrics and /stats at root for uniform monitoring.
   // Partitions and execution engine expose these without auth; coordinator only had
   // them under /api/ with auth, making monitoring scripts fail silently.
+  // H-06 FIX: Aligned with /api/metrics/prometheus — now includes runtime, provider,
+  // admission, and pipeline metrics. Previously this was a subset, causing scrapers
+  // using the root endpoint to miss half the metrics.
   app.get('/metrics', async (_req: Request, res: Response) => {
     try {
       const monitor = getStreamHealthMonitor();
-      const metrics = await monitor.getPrometheusMetrics();
-      // P2-004 FIX: Add coordinator system metrics to Prometheus output.
-      // opportunitiesDropped was only available via /stats JSON — not scrapable by Prometheus.
+      const streamMetrics = await monitor.getPrometheusMetrics();
+      const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
+      const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
       const sys = state.getSystemMetrics();
       const coordinatorMetrics = [
         '# HELP arbitrage_opportunities_dropped_total Total opportunities dropped (all reasons)',
@@ -82,10 +88,26 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
         '# HELP arbitrage_executions_successful_total Total successful executions',
         '# TYPE arbitrage_executions_successful_total counter',
         `arbitrage_executions_successful_total ${sys.successfulExecutions}`,
+        '# HELP arbitrage_opportunities_admitted_total Opportunities admitted through admission gate',
+        '# TYPE arbitrage_opportunities_admitted_total counter',
+        `arbitrage_opportunities_admitted_total ${sys.admissionMetrics?.admitted ?? 0}`,
+        '# HELP arbitrage_opportunities_shed_total Opportunities shed by admission gate',
+        '# TYPE arbitrage_opportunities_shed_total counter',
+        `arbitrage_opportunities_shed_total ${sys.admissionMetrics?.shed ?? 0}`,
+        '# HELP arbitrage_admission_avg_score_admitted Average score of admitted opportunities',
+        '# TYPE arbitrage_admission_avg_score_admitted gauge',
+        `arbitrage_admission_avg_score_admitted ${sys.admissionMetrics?.avgScoreAdmitted ?? 0}`,
+        '# HELP arbitrage_admission_avg_score_shed Average score of shed opportunities',
+        '# TYPE arbitrage_admission_avg_score_shed gauge',
+        `arbitrage_admission_avg_score_shed ${sys.admissionMetrics?.avgScoreShed ?? 0}`,
+        '# HELP pipeline_events_total Total pipeline events processed by coordinator',
+        '# TYPE pipeline_events_total counter',
+        `pipeline_events_total ${sys.totalOpportunities + sys.totalExecutions}`,
         '',
       ].join('\n');
-      res.type('text/plain; version=0.0.4; charset=utf-8').send(metrics + coordinatorMetrics);
-    } catch (_error) {
+      res.type('text/plain; version=0.0.4; charset=utf-8').send(streamMetrics + runtimeMetrics + providerMetrics + coordinatorMetrics);
+    } catch (error) {
+      state.getLogger().error('Failed to get Prometheus metrics', { error: (error as Error).message });
       res.status(500).type('text/plain').send('Failed to get Prometheus metrics');
     }
   });

@@ -150,6 +150,12 @@ export interface CoordinatorStateProvider {
    */
   subscribeSSE(listener: (event: string, data: unknown) => void): () => void;
 
+  /**
+   * H-01 FIX: Check Redis connectivity for readiness probe.
+   * Returns true if Redis responds to PING within timeout.
+   */
+  checkRedisConnectivity(): Promise<boolean>;
+
   /** Get execution circuit breaker status for SSE push */
   getCircuitBreakerSnapshot(): {
     state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
