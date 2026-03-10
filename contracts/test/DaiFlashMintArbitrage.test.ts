@@ -10,6 +10,7 @@ import {
 import {
   deployBaseFixture,
   fundProvider,
+  RATE_USDC_TO_WETH_1PCT_PROFIT,
   getDeadline,
   testRouterManagement,
   testMinimumProfitConfig,
@@ -18,9 +19,12 @@ import {
   testWithdrawToken,
   testWithdrawETH,
   testWithdrawGasLimitConfig,
+  testZeroAmountEdgeCases,
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
+  testProfitValidation,
+  testCalculateExpectedProfit,
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
@@ -518,78 +522,92 @@ describe('DaiFlashMintArbitrage', () => {
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
+  testZeroAmountEdgeCases(adminConfig);
 
   // ==========================================================================
-  // 6. Calculate Expected Profit Tests
+  // 5b. Profit Validation (shared harness — _verifyAndTrackProfit)
   // ==========================================================================
-  describe('6. Calculate Expected Profit', () => {
-    it('should calculate expected profit correctly', async () => {
-      const {
-        daiArbitrage,
-        dssFlash,
-        dexRouter1,
-        dai,
-        weth,
-        owner,
-      } = await loadFixture(deployContractsFixture);
+  testProfitValidation({
+    contractName: 'DaiFlashMintArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.daiArbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerArbitrage: (contract, signer, params) =>
+      contract.connect(signer).executeArbitrage(
+        params.amount, params.swapPath, params.minProfit, params.deadline
+      ),
+    setupSmallProfitRates: async (fixture) => {
+      const { dexRouter1, dai, usdc } = fixture;
+      // DAI -> USDC at 2000 USDC per DAI (mock rate)
+      await dexRouter1.setExchangeRate(
+        await dai.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6)
+      );
+      // USDC -> DAI at ~1% profit
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(), await dai.getAddress(), RATE_USDC_TO_WETH_1PCT_PROFIT
+      );
+    },
+    getAssetAddress: async (f) => f.dai.getAddress(),
+  });
+
+  // ==========================================================================
+  // 6. Calculate Expected Profit (shared + DaiFlashMint-specific)
+  // ==========================================================================
+  testCalculateExpectedProfit({
+    contractName: 'DaiFlashMintArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.daiArbitrage,
+        owner: f.owner,
+        dexRouter1: f.dexRouter1,
+        weth: f.dai,  // DAI mapped to "weth" slot (primary asset)
+        usdc: f.usdc,
+      };
+    },
+    triggerCalculateProfit: async (contract, params) => {
+      // DaiFlashMint: calculateExpectedProfit(amount, swapPath) — no asset param
+      const [expectedProfit, flashLoanFee] = await contract.calculateExpectedProfit(
+        params.amount, params.swapPath
+      );
+      return { expectedProfit, flashLoanFee };
+    },
+    profitableReverseRate: RATE_USDC_TO_WETH_1PCT_PROFIT,
+  });
+
+  describe('6. Calculate Expected Profit — DaiFlashMint-Specific', () => {
+    it('should calculate DssFlash fee as 1 bps (0.01%)', async () => {
+      const { daiArbitrage, dexRouter1, dai, weth, owner } =
+        await loadFixture(deployContractsFixture);
 
       await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
-      // Configure profitable rates
       await dexRouter1.setExchangeRate(
-        await dai.getAddress(),
-        await weth.getAddress(),
-        ethers.parseEther('0.0005')
+        await dai.getAddress(), await weth.getAddress(), ethers.parseEther('0.0005')
       );
       await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await dai.getAddress(),
-        ethers.parseEther('2100')
+        await weth.getAddress(), await dai.getAddress(), ethers.parseEther('2100')
       );
 
       const amount = ethers.parseEther('10000');
-      const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
-
-      const [expectedProfit, flashLoanFee] = await daiArbitrage.calculateExpectedProfit(
-        amount,
-        swapPath
+      const swapPath = build2HopPath(
+        await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n
       );
 
-      // Flash loan fee: 10000 * 1 / 10000 = 1 DAI
+      const [, flashLoanFee] = await daiArbitrage.calculateExpectedProfit(amount, swapPath);
+
+      // DssFlash fee: 10000 * 1 / 10000 = 1 DAI
       expect(flashLoanFee).to.equal(ethers.parseEther('1'));
-      // Expected profit should be positive
-      expect(expectedProfit).to.be.gt(0);
-    });
-
-    it('should return zero profit for unprofitable path', async () => {
-      const {
-        daiArbitrage,
-        dexRouter1,
-        dai,
-        weth,
-        owner,
-      } = await loadFixture(deployContractsFixture);
-
-      await daiArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-
-      // Configure unprofitable rates (round-trip loses money)
-      await dexRouter1.setExchangeRate(
-        await dai.getAddress(),
-        await weth.getAddress(),
-        ethers.parseEther('0.0005')
-      );
-      await dexRouter1.setExchangeRate(
-        await weth.getAddress(),
-        await dai.getAddress(),
-        ethers.parseEther('1900') // Only 1900 DAI back instead of 2000+
-      );
-
-      const amount = ethers.parseEther('10000');
-      const swapPath = build2HopPath(await dexRouter1.getAddress(), await dai.getAddress(), await weth.getAddress(), 1n, 1n);
-
-      const [expectedProfit] = await daiArbitrage.calculateExpectedProfit(amount, swapPath);
-
-      expect(expectedProfit).to.equal(0);
     });
   });
 

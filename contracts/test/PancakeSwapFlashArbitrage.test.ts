@@ -24,7 +24,9 @@ import {
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
+  testProfitValidation,
   testCalculateExpectedProfit,
+  testZeroAmountEdgeCases,
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
@@ -132,6 +134,45 @@ describe('PancakeSwapFlashArbitrage', () => {
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
+  testZeroAmountEdgeCases(adminConfig);
+
+  // ===========================================================================
+  // Profit Validation (shared — _verifyAndTrackProfit)
+  // ===========================================================================
+  (() => {
+    let poolAddress: string;
+    testProfitValidation({
+      contractName: 'PancakeSwapFlashArbitrage',
+      getFixture: async () => {
+        const f = await loadFixture(deployContractsFixture);
+        poolAddress = await f.wethUsdcPool.getAddress();
+        await f.flashArbitrage.connect(f.owner).whitelistPool(poolAddress);
+        return {
+          contract: f.flashArbitrage,
+          owner: f.owner,
+          user: f.user,
+          dexRouter1: f.dexRouter1,
+          dexRouter2: f.dexRouter2,
+          weth: f.weth,
+          usdc: f.usdc,
+          dai: f.dai,
+        };
+      },
+      triggerArbitrage: (contract, signer, params) =>
+        contract.connect(signer).executeArbitrage(
+          poolAddress, params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
+        ),
+      setupSmallProfitRates: async (fixture) => {
+        const { dexRouter1, weth, usdc } = fixture;
+        await dexRouter1.setExchangeRate(
+          await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6)
+        );
+        await dexRouter1.setExchangeRate(
+          await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_1PCT_PROFIT
+        );
+      },
+    });
+  })();
 
   // ===========================================================================
   // Input Validation (shared — _validateArbitrageParams)

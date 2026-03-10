@@ -265,6 +265,25 @@ export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
 };
 
 // =============================================================================
+// DAI Flash Mint Arbitrage Contract Addresses
+// =============================================================================
+
+/**
+ * DaiFlashMintArbitrage contract addresses by chain.
+ *
+ * Flash loans via MakerDAO's DssFlash module (EIP-3156 compliant, DAI only).
+ * Key advantage: Extremely low fee (1 bps / 0.01%) compared to other protocols.
+ *
+ * Deploy: `npx hardhat run scripts/deploy-dai-flash-mint.ts --network ethereum`
+ * @see contracts/src/DaiFlashMintArbitrage.sol
+ */
+// P0-2 DEPLOYMENT REQUIRED:
+// Ethereum: Deploy DaiFlashMintArbitrage.sol → set DAI_FLASH_MINT_ARBITRAGE_ADDRESSES.ethereum
+export const DAI_FLASH_MINT_ARBITRAGE_ADDRESSES: Record<string, string> = {
+  // Populated after deployment. See registry.json for deployment status.
+};
+
+// =============================================================================
 // Commit-Reveal MEV Protection Contract Addresses
 // =============================================================================
 
@@ -927,6 +946,7 @@ if (process.env.NODE_ENV !== 'test') {
     validateAddressRecord(PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES, 'PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES');
     validateAddressRecord(BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES, 'BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES');
     validateAddressRecord(SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES, 'SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES');
+    validateAddressRecord(DAI_FLASH_MINT_ARBITRAGE_ADDRESSES, 'DAI_FLASH_MINT_ARBITRAGE_ADDRESSES');
     validateAddressRecord(COMMIT_REVEAL_ARBITRAGE_ADDRESSES, 'COMMIT_REVEAL_ARBITRAGE_ADDRESSES');
 
     // Validate router addresses

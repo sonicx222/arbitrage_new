@@ -25,7 +25,9 @@ import {
   testOwnable2Step,
   testDeploymentDefaults,
   testInputValidation,
+  testProfitValidation,
   testCalculateExpectedProfit,
+  testZeroAmountEdgeCases,
   testReentrancyProtection,
   build2HopPath,
   build2HopCrossRouterPath,
@@ -747,10 +749,41 @@ describe('SyncSwapFlashArbitrage', () => {
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
+  testZeroAmountEdgeCases(adminConfig);
 
   // ===========================================================================
-  // 7. View Functions Tests
+  // Profit Validation (shared — _verifyAndTrackProfit)
   // ===========================================================================
+  testProfitValidation({
+    contractName: 'SyncSwapFlashArbitrage',
+    getFixture: async () => {
+      const f = await loadFixture(deployContractsFixture);
+      return {
+        contract: f.syncSwapArbitrage,
+        owner: f.owner,
+        user: f.user,
+        dexRouter1: f.dexRouter1,
+        dexRouter2: f.dexRouter2,
+        weth: f.weth,
+        usdc: f.usdc,
+        dai: f.dai,
+      };
+    },
+    triggerArbitrage: (contract, signer, params) =>
+      contract.connect(signer).executeArbitrage(
+        params.asset, params.amount, params.swapPath, params.minProfit, params.deadline
+      ),
+    setupSmallProfitRates: async (fixture) => {
+      const { dexRouter1, weth, usdc } = fixture;
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_1PCT_PROFIT
+      );
+    },
+  });
+
   // ===========================================================================
   // 7. View Functions (shared + SyncSwap-specific)
   // ===========================================================================

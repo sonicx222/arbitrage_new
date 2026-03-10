@@ -19,6 +19,7 @@ import {
   testOwnable2Step,
   testProfitValidation,
   testCalculateExpectedProfit,
+  testZeroAmountEdgeCases,
   testReentrancyProtection,
   createAdminTestConfig,
 } from './helpers';
@@ -354,6 +355,7 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
+  testZeroAmountEdgeCases(adminConfig);
 
   describe('BalancerV2FlashArbitrage — ETH withdrawal edge case', () => {
     it('should revert ETH withdrawal to rejecting contract (Fix 8f)', async () => {

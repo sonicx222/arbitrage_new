@@ -391,6 +391,7 @@ jobs:
         run: cd contracts && npx hardhat test test/FlashLoanArbitrage.fork.test.ts
         env:
           FORK_ENABLED: 'true'
+          REPORT_GAS: 'true'
           ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL != '' && secrets.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com' }}
 
   # ===========================================================================

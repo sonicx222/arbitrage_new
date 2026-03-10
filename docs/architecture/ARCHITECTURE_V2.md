@@ -1177,7 +1177,7 @@ SimulationService now routes requests based on chain:
    - Zero-fee flash loans via vault
 
 3. **PancakeSwap V3** (Pool-dependent: 0.01-1%)
-   - Chains: BSC, Ethereum (limited liquidity)
+   - Chains: BSC, Ethereum, Arbitrum, zkSync Era, Base, opBNB, Linea
    - Contract: `PancakeSwapFlashArbitrage.sol`
    - Fee varies by pool tier (100/500/2500/10000 bps)
 
@@ -1206,12 +1206,15 @@ SimulationService now routes requests based on chain:
 **Status**: Fully implemented, testnet deployment pending.
 
 **Key Files**:
-- `contracts/src/FlashLoanArbitrage.sol`
-- `contracts/src/BalancerV2FlashArbitrage.sol`
-- `contracts/src/PancakeSwapFlashArbitrage.sol`
-- `contracts/src/SyncSwapFlashArbitrage.sol`
-- `contracts/src/DaiFlashMintArbitrage.sol`
-- `contracts/src/CommitRevealArbitrage.sol`
+- `contracts/src/base/BaseFlashArbitrage.sol` (abstract base — shared logic for all 6 protocols)
+- `contracts/src/libraries/SwapHelpers.sol` (multi-hop swap execution library)
+- `contracts/src/adapters/UniswapV3Adapter.sol` (V3-style router adapter)
+- `contracts/src/FlashLoanArbitrage.sol` (Aave V3)
+- `contracts/src/BalancerV2FlashArbitrage.sol` (Balancer V2)
+- `contracts/src/PancakeSwapFlashArbitrage.sol` (PancakeSwap V3)
+- `contracts/src/SyncSwapFlashArbitrage.sol` (SyncSwap/zkSync)
+- `contracts/src/DaiFlashMintArbitrage.sol` (MakerDAO DssFlash)
+- `contracts/src/CommitRevealArbitrage.sol` (MEV-protected)
 - `services/execution-engine/src/strategies/flash-loan.strategy.ts`
 - `services/execution-engine/src/strategies/flash-loan-providers/`
 

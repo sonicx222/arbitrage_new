@@ -205,4 +205,54 @@ describe('SwapHelpers', () => {
       )
     ).to.be.revertedWith('Exchange rate not set');
   });
+
+  describe('MockDexRouter AMM Mode (M-08)', () => {
+    it('should use constant-product formula when AMM mode enabled', async () => {
+      const { wrapper, router, wethAddr, usdcAddr, routerAddr, deadline } =
+        await loadFixture(deployFixture);
+
+      // Enable AMM mode with reserves: 100 WETH / 200,000 USDC
+      await router.setAmmMode(true);
+      await router.setReserves(
+        wethAddr, usdcAddr,
+        ethers.parseEther('100'),       // 100 WETH reserve in
+        ethers.parseUnits('200000', 6)  // 200,000 USDC reserve out
+      );
+
+      // Swap 1 WETH → USDC via constant-product: (200000e6 * 1e18) / (100e18 + 1e18) ≈ 1980.19 USDC
+      const amountOut = await wrapper.executeSingleSwap.staticCall(
+        wethAddr, ethers.parseEther('1'), routerAddr, wethAddr, usdcAddr, 1n, deadline
+      );
+
+      // Constant-product: ~1980 USDC (not exactly 2000 due to price impact)
+      expect(amountOut).to.be.gt(ethers.parseUnits('1900', 6));
+      expect(amountOut).to.be.lt(ethers.parseUnits('2000', 6));
+    });
+
+    it('should show price impact increasing with trade size', async () => {
+      const { router, wethAddr, usdcAddr } =
+        await loadFixture(deployFixture);
+
+      await router.setAmmMode(true);
+      await router.setReserves(
+        wethAddr, usdcAddr,
+        ethers.parseEther('100'),
+        ethers.parseUnits('200000', 6)
+      );
+
+      // Small trade: 1 WETH → ~1980 USDC (0.99% impact)
+      const [, smallOut] = await router.getAmountsOut(
+        ethers.parseEther('1'), [wethAddr, usdcAddr]
+      );
+      // Large trade: 10 WETH → ~18182 USDC (9.09% impact)
+      const [, largeOut] = await router.getAmountsOut(
+        ethers.parseEther('10'), [wethAddr, usdcAddr]
+      );
+
+      // Price per WETH should be lower for the larger trade (more impact)
+      const smallPricePerWeth = smallOut;
+      const largePricePerWeth = largeOut / 10n;
+      expect(smallPricePerWeth).to.be.gt(largePricePerWeth);
+    });
+  });
 });

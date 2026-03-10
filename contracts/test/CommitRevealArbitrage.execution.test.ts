@@ -20,6 +20,7 @@ import {
   testWithdrawGasLimitConfig,
   testOwnable2Step,
   testCalculateExpectedProfit,
+  testZeroAmountEdgeCases,
   createAdminTestConfig,
 } from './helpers';
 
@@ -850,6 +851,7 @@ describe('CommitRevealArbitrage Execution', () => {
   testWithdrawETH(adminConfig);
   testWithdrawGasLimitConfig(adminConfig);
   testOwnable2Step(adminConfig);
+  testZeroAmountEdgeCases(adminConfig);
 
   // ===========================================================================
   // 8. View Functions (shared + CommitReveal-specific)
