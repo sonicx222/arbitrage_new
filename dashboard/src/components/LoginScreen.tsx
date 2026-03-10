@@ -27,7 +27,9 @@ export function LoginScreen({ onLogin }: Props) {
         return;
       }
     } catch {
-      // Network error — allow login attempt anyway (SSE will retry)
+      setError('Cannot reach server');
+      setLoading(false);
+      return;
     }
     setItem('dashboard_token', token);
     if (cbKey) setItem('cb_api_key', cbKey);

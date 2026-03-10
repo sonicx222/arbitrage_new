@@ -120,7 +120,7 @@ function validatePayload(event: string, data: unknown): boolean {
     case 'circuit-breaker':
       return typeof data.state === 'string';
     case 'streams':
-      return true; // Per-stream objects already validated by structure
+      return Object.values(data).every((v) => isObj(v) && typeof (v as Record<string, unknown>).length === 'number');
     case 'alert':
       return typeof data.type === 'string' && typeof data.timestamp === 'number';
     default:
@@ -148,10 +148,11 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   // H-04 FIX: Backfill recent alerts from REST after reconnect
   const prevStatusRef = useRef<SSEStatus>(status);
   useEffect(() => {
+    const controller = new AbortController();
     if (prevStatusRef.current !== 'connected' && status === 'connected') {
       dispatch({ type: 'reset' });
       // Backfill recent alerts that were missed during disconnect
-      fetch(`/api/alerts${token ? `?token=${encodeURIComponent(token)}` : ''}`)
+      fetch(`/api/alerts${token ? `?token=${encodeURIComponent(token)}` : ''}`, { signal: controller.signal })
         .then(res => res.ok ? res.json() : [])
         .then((alerts: unknown[]) => {
           if (Array.isArray(alerts)) {
@@ -162,9 +163,10 @@ export function SSEProvider({ children }: { children: ReactNode }) {
             }
           }
         })
-        .catch(() => { /* Network error — alerts will arrive via SSE when available */ });
+        .catch(() => { /* Aborted or network error — alerts will arrive via SSE */ });
     }
     prevStatusRef.current = status;
+    return () => controller.abort();
   }, [status, token]);
 
   // H-01 FIX: Memoize provider value to prevent re-renders from parent renders.

@@ -14,7 +14,7 @@ type KnownService = keyof typeof portConfig.services;
 // in the coordinator's serviceHealth map (sent via SSE 'services' event).
 const PARTITIONS: { svcKey: KnownService; healthKey: string; name: string; region: string; chains: string[] }[] = [
   { svcKey: 'partition-asia-fast', healthKey: 'unified-detector-asia-fast', name: 'P1: Asia-Fast', region: 'Singapore', chains: ['bsc', 'polygon', 'avalanche', 'fantom'] },
-  { svcKey: 'partition-l2-turbo', healthKey: 'unified-detector-l2-turbo', name: 'P2: L2-Turbo', region: 'Singapore', chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast'] },
+  { svcKey: 'partition-l2-turbo', healthKey: 'unified-detector-l2-turbo', name: 'P2: L2-Turbo', region: 'Singapore', chains: ['arbitrum', 'optimism', 'base', 'scroll', 'blast', 'mantle', 'mode'] },
   { svcKey: 'partition-high-value', healthKey: 'unified-detector-high-value', name: 'P3: High-Value', region: 'US-East', chains: ['ethereum', 'zksync', 'linea'] },
   { svcKey: 'partition-solana', healthKey: 'unified-detector-solana-native', name: 'P4: Solana', region: 'US-West', chains: ['solana'] },
 ];

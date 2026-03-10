@@ -19,6 +19,8 @@ const EXPLORER_URLS: Record<string, string> = {
   linea: 'https://lineascan.build/tx/',
   blast: 'https://blastscan.io/tx/',
   scroll: 'https://scrollscan.com/tx/',
+  mantle: 'https://mantlescan.xyz/tx/',
+  mode: 'https://modescan.io/tx/',
   solana: 'https://solscan.io/tx/',
 };
 

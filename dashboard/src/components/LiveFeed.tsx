@@ -23,7 +23,7 @@ export function LiveFeed({ items }: Props) {
             style={i === 0 ? { animation: 'slideUp 0.3s ease-out' } : undefined}
           >
             <span className="text-gray-600 shrink-0">
-              {formatTime(item.kind === 'execution' ? item.data.timestamp : item.data.timestamp)}
+              {formatTime(item.data.timestamp)}
             </span>
             {item.kind === 'execution' ? (
               <>
