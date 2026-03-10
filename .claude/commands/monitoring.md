@@ -1,6 +1,19 @@
 # Pre-Deploy Validation
 # Single-Orchestrator Pipeline — Redis Streams + 7 Services
-# Version: 3.1
+# Version: 3.2
+#
+# Changelog v3.2 (2026-03-10):
+#   - Phase 1: expanded from 18 to 23 checks (added 1S Build Staleness,
+#     1T Testnet URL Safety, 1U CORS Config, 1V Contract Pause, 1W Redis Security)
+#   - Added coordinator-worker/mempool/monolith ports to System Inventory
+#   - Fixed coordinator health schema: added systemHealth, removed stale version field
+#   - ADR-022 spread grep: clarified rest-param exclusion and fixed price-matrix path
+#   - Check 1M: improved catch regex patterns (comment-only, return-value)
+#   - Check 3V: per-chain staleness thresholds (block-time aware)
+#   - Check 3N: expanded MAXLEN ratio check from 4 to 12 streams
+#   - Trace search window: COUNT 5 → COUNT 50 for busy streams
+#   - O-01/O-03/O-04: documented performance optimization strategies
+#   - Finding ID prefix convention documented (PF/SA/RT/SM)
 #
 # Changelog v3.1 (2026-03-10):
 #   - Added DiagnosticsCollector support: SSE 'diagnostics' event (10s periodic),
@@ -78,6 +91,12 @@ sequentially — correctness is more important than speed.
 | P4 Solana | 3004 | `/ready` | Chain detector: Solana |
 | Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
 | Cross-Chain | 3006 | `/ready` | Cross-chain arbitrage detection |
+
+**Additional ports (not started by `dev:all`):**
+- `3007` — Unified Detector (library/factory, not standalone)
+- `3008` — Mempool Detector (optional, `dev:mempool`)
+- `3009` — Coordinator Worker (monolith mode only)
+- `3100` — Monolith Health (single-process mode)
 
 ### Redis Streams (29 declared in `shared/types/src/events.ts`)
 
@@ -311,6 +330,12 @@ Run ALL of these checks. Record each finding as a JSON object appended to
 `./monitor-session/findings/static-analysis.jsonl`.
 
 ### Finding format:
+
+**Finding ID prefixes by phase:**
+- `PF-NNN` — Pre-flight checks (dependency validation, workspace setup)
+- `SA-NNN` — Static analysis (Phase 1: code-level checks without running services)
+- `RT-NNN` — Runtime validation (Phase 3: checks against running services)
+- `SM-NNN` — Smoke test (Phase 4: pipeline flow verification)
 ```json
 {
   "phase": "STATIC",
@@ -719,8 +744,10 @@ mask system failures for hours or days.
    Search for these patterns:
    - `catch\s*\{\s*\}` — completely empty catch block
    - `catch\s*\([^)]*\)\s*\{\s*\}` — catch with parameter but empty body
-   - `catch\s*\{[^}]*return\s+(undefined|null|false)\s*;?\s*\}` — catch that silently
-     returns a falsy value without logging
+   - `catch\s*(\([^)]*\))?\s*\{[^}]*return\s+(undefined|null|false|0)\s*;?\s*\}` — catch
+     that silently returns a falsy value without logging
+   - `catch\s*(\([^)]*\))?\s*\{\s*//[^\n]*\n\s*\}` — catch with ONLY a comment (no actual
+     handling code). These are acceptable if the comment explains why, but still worth auditing
 2. For each match, read the surrounding context to determine:
    - **File location**: Is this in a hot-path file? (`price-matrix.ts`, `partitioned-detector.ts`,
      `execution-engine/`, `unified-detector/`)
@@ -860,14 +887,17 @@ audits — they target the rules most likely to drift silently.
 **ADR-022 (Hot-Path Memory):** No spread operators in tight loops on hot-path files.
 ```
 Grep for: \.\.\.\w+ in these files only:
-  shared/core/src/price-matrix.ts
+  shared/core/src/caching/price-matrix.ts
   shared/core/src/partitioned-detector.ts
   shared/core/src/monitoring/provider-latency-tracker.ts  (ring buffer, zero-alloc recording)
   shared/core/src/monitoring/runtime-monitor.ts           (perf_hooks, GC observer)
   services/execution-engine/src/
   services/unified-detector/src/
-Exclude: test files, comments, function signatures (rest params)
+Exclude: test files, comments
+Exclude rest params: function signatures like `(...args)`, `(...items: T[])`
+  — rest params use `...` syntax but are NOT object/array spread allocations
 Only flag spread inside loops (for/while/forEach/map/reduce/filter)
+  e.g., `{ ...obj }` or `[...arr]` inside a for/while/map/reduce block
 ```
 **Flag:** Spread operator in loop on hot-path file → severity: **HIGH**,
 category: `ADR_COMPLIANCE` (ADR-022 violation — allocation in hot path).
@@ -1025,19 +1055,126 @@ category: `TIMEOUT_HIERARCHY`.
 
 ---
 
+### Check 1S — Build Artifact Staleness Detection
+
+**Goal:** Detect stale `.js` build artifacts from partial builds. After changing
+shared packages, a partial rebuild can leave outdated `.js` files that silently
+use old logic (no runtime error).
+
+**Method:**
+```bash
+# Check that .js files in dist/ aren't older than their .ts sources
+for pkg in shared/types shared/config shared/core; do
+  NEWEST_TS=$(find $pkg/src -name '*.ts' -newer $pkg/dist/index.js 2>/dev/null | head -5)
+  if [ -n "$NEWEST_TS" ]; then
+    echo "STALE BUILD: $pkg has .ts files newer than dist/"
+    echo "$NEWEST_TS"
+  fi
+done
+```
+
+**Flag:** Any package with source newer than build output → severity: **MEDIUM**,
+category: `BUILD_STALENESS` (run `npm run build:deps` before proceeding).
+**Info:** All packages up to date → severity: **INFO**, category: `BUILD_STALENESS`.
+
+---
+
+### Check 1T — Testnet/Mainnet RPC URL Safety
+
+**Goal:** `[TESTNET-ONLY]` Ensure testnet mode uses testnet RPC URLs, not mainnet.
+Submitting testnet transactions to mainnet RPCs won't succeed but wastes real gas
+if a mainnet private key is accidentally configured.
+
+**Method:**
+```bash
+# Only run in testnet mode
+DATA_MODE=$(cat ./monitor-session/DATA_MODE 2>/dev/null || echo "simulation")
+if [ "$DATA_MODE" = "testnet" ]; then
+  # Check for common mainnet RPC URL patterns when in testnet mode
+  grep -E "^(ETHEREUM_RPC_URL|BSC_RPC_URL|ARBITRUM_RPC_URL)=" .env .env.local 2>/dev/null | \
+    grep -iv "sepolia\|goerli\|testnet\|mumbai" && \
+    echo "WARNING: Mainnet RPC URLs found in testnet mode"
+fi
+```
+
+**Flag:** Mainnet RPC URLs configured in testnet mode → severity: **HIGH**,
+category: `TESTNET_SAFETY`.
+
+---
+
+### Check 1U — CORS Configuration Audit
+
+**Goal:** Verify CORS configuration allows dashboard access while restricting
+unauthorized origins. Misconfigured CORS can block the dashboard or expose
+APIs to cross-origin attacks.
+
+**Method:**
+```
+Grep for: cors|CORS|Access-Control in services/coordinator/src/
+Verify: origin whitelist includes dashboard URL (localhost:5173 for dev)
+Verify: credentials mode is appropriate
+```
+
+**Flag:** No CORS configuration found → severity: **LOW**,
+category: `CORS_CONFIG` (may block dashboard in production).
+**Flag:** CORS allows wildcard `*` origin with credentials → severity: **MEDIUM**,
+category: `CORS_CONFIG` (security risk in production).
+
+---
+
+### Check 1V — Contract Pause State Check
+
+**Goal:** `[LIVE-ONLY] [TESTNET-ONLY]` Verify deployed arbitrage contracts are NOT
+paused. A paused contract silently rejects all execution attempts.
+
+**Method:**
+```
+Check contract deployment addresses from contracts/deployments/addresses.ts.
+For each deployed contract, call the `paused()` view function.
+If using simulation mode, skip this check (no on-chain contracts).
+```
+
+**Flag:** Any contract returns `paused() = true` → severity: **CRITICAL**,
+category: `CONTRACT_STATE` (all executions will revert).
+**Info:** Contracts not paused → severity: **INFO**, category: `CONTRACT_STATE`.
+**Skip:** In simulation mode, record as **INFO**: "Contract pause check skipped (simulation)".
+
+---
+
+### Check 1W — Redis Access Control
+
+**Goal:** Verify Redis requires authentication when accessible outside localhost.
+An unauthenticated Redis exposed on a network interface is a critical security risk.
+
+**Method:**
+```bash
+# Check if Redis requires a password
+redis-cli CONFIG GET requirepass 2>/dev/null
+redis-cli CONFIG GET bind 2>/dev/null
+```
+
+**Flag:** `requirepass` is empty AND `bind` is not `127.0.0.1` → severity: **HIGH**,
+category: `REDIS_SECURITY` (unauthenticated Redis on network interface).
+**Info:** `requirepass` is set or `bind` is localhost → severity: **INFO**,
+category: `REDIS_SECURITY`.
+
+---
+
 ### Phase 1 Summary
 
-After all 18 checks, read `./monitor-session/findings/static-analysis.jsonl` and
+After all 23 checks, read `./monitor-session/findings/static-analysis.jsonl` and
 output a summary:
 ```
-PHASE 1 COMPLETE — Static Analysis (18 checks)
+PHASE 1 COMPLETE — Static Analysis (23 checks)
   CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>  LOW: <n>  INFO: <n>
   Total findings: <n>
   Checks: 1A Stream Names, 1B Consumer Groups, 1C MAXLEN, 1D XACK,
           1E Env Var Drift, 1F Nullish Coalescing, 1G HMAC, 1H Feature Flags,
           1I Risk Config, 1J Unsafe Parse, 1K Redis Parity, 1L Port Collision,
           1M Silent Errors, 1N Type Fidelity, 1O Redis Key Registry,
-          1P ADR Compliance, 1Q Infra Config, 1R Timeout Hierarchy
+          1P ADR Compliance, 1Q Infra Config, 1R Timeout Hierarchy,
+          1S Build Staleness, 1T Testnet URL Safety, 1U CORS Config,
+          1V Contract Pause, 1W Redis Security
 ```
 
 If any CRITICAL findings exist, note them but **continue to Phase 2** (we want
@@ -1329,6 +1466,16 @@ PHASE 2 COMPLETE — Startup
 ## 9 subsections, 44 checks (3A-3AR). Enhanced monitoring metrics integrated.
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+**Performance optimization (O-01):** At Phase 3 start, cache all `/health`,
+`/stats`, and `/metrics` responses to `./monitor-session/config/` once. Subsequent
+checks can read from cache instead of re-curling (~120 redundant curl calls saved).
+Cache is stale after 30s — re-fetch only for post-action comparisons.
+
+**Future optimization (O-02):** Auto-generate the System Inventory (port table,
+stream list, consumer groups) from `shared/types/src/events.ts`,
+`shared/constants/service-ports.json`, and `shared/core/src/redis/streams.ts` at
+session start. This eliminates all inventory drift issues (H-01, H-02 class).
+
 Record all findings to `./monitor-session/findings/runtime.jsonl`:
 ```json
 {
@@ -1425,11 +1572,11 @@ Required fields:
   status: string ("healthy" | "degraded" | "unhealthy")
   uptime: number (seconds)
   isLeader: boolean
+  systemHealth: number (0-100, aggregate health score)
 Optional fields:
   services: object (partition health summaries)
   streams: object (stream health summaries)
   backpressure: object | boolean
-  version: string
 ```
 
 **Partitions P1-P4** (`/health`):
@@ -1897,7 +2044,11 @@ curl -sf --max-time 10 http://localhost:3001/metrics 2>/dev/null | grep stream_t
 ```bash
 # Check streams at risk of MAXLEN trimming
 for stream_info in "stream:price-updates:100000" "stream:opportunities:200000" \
-  "stream:execution-requests:100000" "stream:fast-lane:5000"; do
+  "stream:execution-requests:100000" "stream:execution-results:100000" \
+  "stream:exec-requests-fast:50000" "stream:exec-requests-l2:50000" \
+  "stream:exec-requests-premium:50000" "stream:exec-requests-solana:50000" \
+  "stream:fast-lane:5000" "stream:dead-letter-queue:10000" \
+  "stream:swap-events:50000" "stream:whale-alerts:5000"; do
   STREAM=$(echo $stream_info | cut -d: -f1-2)
   MAXLEN=$(echo $stream_info | cut -d: -f3)
   XLEN=$(redis-cli XLEN $STREAM)
@@ -2033,6 +2184,11 @@ redis-cli INFO memory
 ---
 
 ## ── Section 3.5: Provider Quality ──
+
+**Optimization note (O-03):** Checks 3R-3V all curl the same `/stats` and `/metrics`
+endpoints per partition. If O-01 caching is implemented, these 5 checks collapse from
+~20 curl calls to reading cached data. Even without caching, run all `/stats` reads
+once and reuse the JSON output across 3R, 3V, and 3W.
 
 ### Check 3R — Provider Latency & Connectivity (Enhanced, C1)
 
@@ -2194,10 +2350,18 @@ not real provider health. Report staleness values as **INFO** with `[SIM]` annot
 `[LIVE-ONLY] [TESTNET-ONLY]` Price staleness is the most actionable provider metric
 in live mode — stale prices are the #1 cause of failed trades. Apply full severity:
 
-**Flag:** `maxPriceStalenessMs` > 30000 (30s) on any partition → severity: **HIGH**,
+**Per-chain staleness thresholds (block time aware):**
+- BSC (3s blocks), Arbitrum (250ms blocks): staleness > 10s is **HIGH**
+- Polygon (2s), Optimism (2s), Base (2s): staleness > 15s is **HIGH**
+- Ethereum (12s), zkSync, Linea: staleness > 30s is **HIGH**
+- Fantom, Avalanche: staleness > 20s is **HIGH**
+- Scroll, Blast, Mantle, Mode: staleness > 30s is **HIGH** (lower activity)
+
+**Flag:** `maxPriceStalenessMs` > chain-specific threshold on any partition → severity: **HIGH**,
 category: `PROVIDER_QUALITY` (ADR-033 stale price threshold violated — detection
 is working with outdated prices).
-**Flag:** `maxPriceStalenessMs` > 15000 → severity: **MEDIUM**, category: `PROVIDER_QUALITY`.
+**Flag:** `maxPriceStalenessMs` > 15000 on fast chains (BSC/Arbitrum/Polygon) → severity: **MEDIUM**,
+category: `PROVIDER_QUALITY`.
 **Flag:** `stalePriceRejections` > 0 → severity: **INFO** (stale price filtering
 is working correctly — report the count per partition).
 **Flag:** Fields not present in /stats → severity: **INFO** (enhanced detection
@@ -2487,7 +2651,12 @@ ratio < 1.5 → MEDIUM (thin margins), ratio < 1.0 → HIGH (unprofitable after 
 
 ### Check 3AH — Prometheus Metrics Validation
 
-Scrape metrics from all services twice, 15 seconds apart:
+Scrape metrics from all services twice, 15 seconds apart.
+
+**Optimization:** The t1 scrape doubles as a cached snapshot. Subsequent checks in
+Phase 3 that need metrics data (3AI, 3O-3Q, 3R-3V, 3Z) can read from
+`metrics_t1.txt` instead of re-curling each endpoint. Only re-curl if the check
+needs fresher data (e.g., post-smoke-test comparisons in Phase 4).
 
 ```bash
 # First scrape (partitions + execution + cross-chain)
@@ -3362,12 +3531,12 @@ trace context propagation system in `shared/core/src/tracing/`).
 
 If a traceId is found:
 ```bash
-# Search for the same traceId in upstream streams (COUNT 5 is sufficient —
-# we only need one matching message per stream for trace verification)
-redis-cli XREVRANGE stream:opportunities + - COUNT 5
+# Search for the same traceId in upstream streams (COUNT 50 covers busy streams —
+# at high throughput, COUNT 5 may miss the matching message if many newer entries exist)
+redis-cli XREVRANGE stream:opportunities + - COUNT 50
 # (Search the output for matching _trace_traceId)
 
-redis-cli XREVRANGE stream:execution-requests + - COUNT 5
+redis-cli XREVRANGE stream:execution-requests + - COUNT 50
 # (Search the output for matching _trace_traceId)
 ```
 
@@ -4190,7 +4359,7 @@ _exists during the smoke window. Only "STALLED AT price-updates" is a true failu
 
 ---
 
-*Report generated by monitoring.md v3.1*
+*Report generated by monitoring.md v3.2*
 *Session: <SESSION_ID>*
 *Completed: <ISO8601>*
 ```
