@@ -13,7 +13,10 @@
  * @see contracts/src/interfaces/* - Interface definitions
  * @see services/execution-engine/src/strategies/flash-loan-providers/types.ts - Provider types
  * @see docs/architecture/adr/ADR-020-flash-loan.md - Flash loan integration decision
+ * @see CFG-M-008: Runtime chain ID validation at module load time
  */
+
+import { CHAINS } from './chains';
 
 /**
  * Supported flash loan protocols (versioned names)
@@ -422,6 +425,23 @@ export class FlashLoanNotSupportedError extends Error {
  * Testnet chain identifiers used for statistics computation.
  */
 const TESTNET_CHAINS = new Set(['sepolia', 'arbitrumSepolia', 'baseSepolia', 'zksync-sepolia', 'zksync-testnet', 'bscTestnet', 'solana-devnet']);
+
+// =============================================================================
+// CFG-M-008: RUNTIME CHAIN ID VALIDATION
+// Validates all FLASH_LOAN_AVAILABILITY keys against canonical CHAINS config
+// (mainnet) and known TESTNET_CHAINS set. Catches typos like 'ethreum' that
+// would silently compile with plain string keys.
+// =============================================================================
+const VALID_FL_CHAINS = new Set(Object.keys(CHAINS));
+for (const chain of Object.keys(FLASH_LOAN_AVAILABILITY)) {
+  if (!VALID_FL_CHAINS.has(chain) && !TESTNET_CHAINS.has(chain)) {
+    throw new Error(
+      `[CFG-M-008] Invalid flash loan availability chain: '${chain}'. ` +
+      `Valid mainnet chains: ${[...VALID_FL_CHAINS].join(', ')}. ` +
+      `Valid testnet chains: ${[...TESTNET_CHAINS].join(', ')}`
+    );
+  }
+}
 
 /**
  * Flash loan protocol statistics (for monitoring and planning)

@@ -5,7 +5,10 @@
  *
  * @see P1-5: Bridge cost configuration
  * @see shared/core/src/bridge-router/types.ts for BridgeProtocol type and Stargate constants
+ * @see CFG-M-007: Runtime chain ID validation at module load time
  */
+
+import { CHAINS } from './chains';
 
 // =============================================================================
 // BRIDGE COST CONFIGURATION (P1-5 FIX)
@@ -268,6 +271,23 @@ export const BRIDGE_COSTS: BridgeCostConfig[] = BRIDGE_ROUTE_DATA.flatMap(group 
     reliability: route.reliability,
   }))
 );
+
+// =============================================================================
+// CFG-M-007: RUNTIME CHAIN ID VALIDATION
+// Validates all bridge route src/dst against canonical CHAINS config at module load.
+// Catches typos like 'ethreum' that would silently compile with plain string keys.
+// =============================================================================
+const VALID_BRIDGE_CHAINS = new Set(Object.keys(CHAINS));
+for (const group of BRIDGE_ROUTE_DATA) {
+  for (const route of group.routes) {
+    if (!VALID_BRIDGE_CHAINS.has(route.src)) {
+      throw new Error(`[CFG-M-007] Invalid bridge route source chain: '${route.src}' in ${group.bridge} routes. Valid chains: ${[...VALID_BRIDGE_CHAINS].join(', ')}`);
+    }
+    if (!VALID_BRIDGE_CHAINS.has(route.dst)) {
+      throw new Error(`[CFG-M-007] Invalid bridge route destination chain: '${route.dst}' in ${group.bridge} routes. Valid chains: ${[...VALID_BRIDGE_CHAINS].join(', ')}`);
+    }
+  }
+}
 
 // =============================================================================
 // BRIDGE COST LOOKUP CACHE (Performance Optimization)
