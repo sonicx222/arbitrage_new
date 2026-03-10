@@ -18,7 +18,7 @@
 #   - New checks: runtime performance (B1-B6), provider quality (C1-C5),
 #     detection quality (D2-D4), business intelligence (A2-A4, F4-F5),
 #     stream transit time (F1), placeholder checks for E1-E5/F2-F3/D1/D5
-#   - Fixed MAXLEN drift: opportunities=500K, execution-requests=100K, execution-results=100K
+#   - Fixed MAXLEN drift: opportunities reduced from 500K to 200K, execution-requests=100K, execution-results=100K
 #   - Added self-healing-manager consumer group to inventory
 #   - Fixed coordinator-group streams (9, was 8 — added forwarding-dlq)
 #   - Added all 29 streams to topology check (was 19, then 24)
@@ -73,7 +73,7 @@ sequentially — correctness is more important than speed.
 |---------|------|----------------|------|
 | Coordinator | 3000 | `/api/health/ready` | Orchestration, leader election, opportunity routing |
 | P1 Asia-Fast | 3001 | `/ready` | Chain detector: BSC, Polygon, Avalanche, Fantom |
-| P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, Blast, Scroll |
+| P2 L2-Turbo | 3002 | `/ready` | Chain detector: Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode |
 | P3 High-Value | 3003 | `/ready` | Chain detector: Ethereum, zkSync, Linea |
 | P4 Solana | 3004 | `/ready` | Chain detector: Solana |
 | Execution Engine | 3005 | `/ready` | Trade execution, flash loans, MEV protection |
@@ -85,7 +85,7 @@ sequentially — correctness is more important than speed.
 |--------|--------|-------------|-------------------|
 | `stream:price-updates` | 100,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:swap-events` | 50,000 | P1-P4 partitions | coordinator-group |
-| `stream:opportunities` | 500,000 | P1-P4, cross-chain detector | coordinator-group |
+| `stream:opportunities` | 200,000 | P1-P4, cross-chain detector | coordinator-group |
 | `stream:whale-alerts` | 5,000 | P1-P4 partitions | coordinator-group, cross-chain-detector-group |
 | `stream:service-health` | 1,000 | All services | — |
 | `stream:service-events` | 5,000 | All services | — |
@@ -141,6 +141,10 @@ P1-P4 Partitions → stream:price-updates → Detectors → stream:opportunities
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ```bash
+# M-09/M-10: Pre-flight dependency checks — fail fast if required tools are missing
+command -v jq >/dev/null 2>&1 || { echo "CRITICAL: jq is required but not installed. Install: https://stedolan.github.io/jq/download/"; exit 1; }
+command -v redis-cli >/dev/null 2>&1 || { echo "CRITICAL: redis-cli is required but not found on PATH. Ensure Redis tools are installed."; exit 1; }
+
 mkdir -p ./monitor-session/{logs,findings,streams,config,history}
 SESSION_ID=$(date +%Y%m%d_%H%M%S)
 echo $SESSION_ID > ./monitor-session/SESSION_ID
@@ -864,15 +868,22 @@ Confirm: record() method is O(1) (no sort, no push, index wrapping only)
 **Flag:** Ring buffer uses Array instead of Float64Array → severity: **MEDIUM**,
 category: `ADR_COMPLIANCE` (ADR-022 violation — typed arrays required for zero-alloc).
 
-**ADR-033 (Stale Price Window):** The stale price rejection threshold must be 30s.
+**ADR-033 (Stale Price Window):** The cross-chain detector hard rejection gate must be 30s.
 ```
-Read shared/core/src/price-matrix.ts
-Search for: STALE_PRICE_THRESHOLD or stalePriceThreshold or 30000 or 30_000
-Verify the value is 30000 (30 seconds)
+Read services/cross-chain-detector/src/detector.ts (or cross-chain-detector source files)
+Search for: maxPriceAgeMs
+Verify the default value is 30000 (30 seconds): maxPriceAgeMs ?? 30000
+
+Also verify the L1 price matrix freshness check:
+Read shared/core/src/caching/price-matrix.ts
+Search for: getPriceWithFreshnessCheck
+Verify the default maxAgeMs parameter is 5000 (5 seconds — separate from ADR-033's 30s gate)
 ```
-**Flag:** Stale price threshold ≠ 30000ms → severity: **HIGH**,
-category: `ADR_COMPLIANCE` (ADR-033 violation — stale price window changed).
-**Info:** Threshold confirmed at 30000ms → severity: **INFO**,
+**Flag:** Cross-chain detector `maxPriceAgeMs` default ≠ 30000ms → severity: **HIGH**,
+category: `ADR_COMPLIANCE` (ADR-033 violation — stale price rejection window changed).
+**Flag:** `getPriceWithFreshnessCheck` default `maxAgeMs` ≠ 5000ms → severity: **MEDIUM**,
+category: `ADR_COMPLIANCE` (L1 cache freshness default changed).
+**Info:** Both thresholds confirmed at expected values → severity: **INFO**,
 category: `ADR_COMPLIANCE`.
 
 **ADR-002 (Redis Streams Only):** No direct HTTP calls between services.
@@ -992,12 +1003,12 @@ category: `TIMEOUT_HIERARCHY` (not configurable for different environments).
 **Info:** Timeout hierarchy consistent for service → severity: **INFO**,
 category: `TIMEOUT_HIERARCHY`.
 
-**Known timeout values (as of v2.5):**
-- Coordinator: `SHUTDOWN_TIMEOUT=10000` (may be insufficient for multi-client cleanup)
+**Known timeout values (as of v3.1):**
+- Coordinator: `shutdownTimeoutMs=15000` (15s for multi-client cleanup)
 - Execution engine: `SHUTDOWN_DRAIN_TIMEOUT_MS=30000` + 15s buffer = 45s total
-- Partition services: 5000ms per shutdown step
-- Redis client: `connectTimeout=10000`, `commandTimeout=5000` (defaults in redis client)
-- `closeServerWithTimeout`: 5000ms default
+- Partition services: `SHUTDOWN_TIMEOUT_MS=25000` (25s per shutdown step)
+- Redis client: `connectTimeout=3000`, `maxRetriesPerRequest=3` (both clients aligned)
+- `closeServerWithTimeout`: 1000ms default (callers typically pass service-specific timeout)
 
 ---
 
@@ -1858,12 +1869,12 @@ curl -sf http://localhost:3001/metrics 2>/dev/null | grep stream_trimmed
 
 ```bash
 # Check streams at risk of MAXLEN trimming
-for stream_info in "stream:price-updates:100000" "stream:opportunities:500000" \
+for stream_info in "stream:price-updates:100000" "stream:opportunities:200000" \
   "stream:execution-requests:100000" "stream:fast-lane:5000"; do
   STREAM=$(echo $stream_info | cut -d: -f1-2)
   MAXLEN=$(echo $stream_info | cut -d: -f3)
   XLEN=$(redis-cli XLEN $STREAM)
-  RATIO=$(echo "scale=2; $XLEN * 100 / $MAXLEN" | bc 2>/dev/null || echo "N/A")
+  RATIO=$(awk "BEGIN {printf \"%.2f\", $XLEN * 100 / $MAXLEN}" 2>/dev/null || echo "N/A")
   echo "$STREAM: $XLEN / $MAXLEN ($RATIO%)"
 done
 ```
@@ -1888,7 +1899,7 @@ I/O, or CPU saturation all manifest as event loop delay.
 Scrape `runtime_eventloop_delay_*` metrics from all services:
 
 ```bash
-for port in 3001 3002 3003 3004 3005; do
+for port in 3001 3002 3003 3004 3005 3006; do
   echo "=== Port $port ==="
   curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_eventloop_delay
 done
@@ -1925,7 +1936,7 @@ events cause stop-the-world pauses that block the event loop.
 
 **Method:**
 ```bash
-for port in 3001 3002 3003 3004 3005; do
+for port in 3001 3002 3003 3004 3005 3006; do
   echo "=== Port $port ==="
   curl -sf http://localhost:$port/metrics 2>/dev/null | grep runtime_gc
 done
@@ -2490,11 +2501,10 @@ likely to have all metrics).
 **Partitions P1-P4** (port 3001-3004 `/metrics`):
 ```
 Required metrics:
-  pipeline_latency_p50
-  pipeline_latency_p95
-  pipeline_latency_p99
+  pipeline_latency_p50_ms
+  pipeline_latency_p95_ms
+  pipeline_latency_p99_ms
   price_updates_total (counter)
-  opportunities_detected_total (counter)
   events_processed_total (counter)
 Required (v3.0 — runtime monitor):
   runtime_eventloop_delay_p50_ms
@@ -2616,7 +2626,7 @@ data — if SSE is broken, all 8 tabs show "Waiting for data...".
 TOKEN="${DASHBOARD_AUTH_TOKEN:-}"
 URL="http://localhost:3000/api/events"
 if [ -n "$TOKEN" ]; then URL="$URL?token=$TOKEN"; fi
-timeout 15 curl -sf -N "$URL" 2>/dev/null | head -60 > ./monitor-session/findings/sse-capture.txt
+curl -sf -N --max-time 15 "$URL" 2>/dev/null | head -60 > ./monitor-session/findings/sse-capture.txt
 cat ./monitor-session/findings/sse-capture.txt
 ```
 
@@ -3017,7 +3027,7 @@ from Check 3AK already has a `streams` event, use that. Otherwise wait:
 TOKEN="${DASHBOARD_AUTH_TOKEN:-}"
 URL="http://localhost:3000/api/events"
 if [ -n "$TOKEN" ]; then URL="$URL?token=$TOKEN"; fi
-timeout 15 curl -sf -N "$URL" 2>/dev/null | grep -A1 "event: streams" | head -5
+curl -sf -N --max-time 15 "$URL" 2>/dev/null | grep -A1 "event: streams" | head -5
 ```
 
 2. Parse the `streams` data and validate against `StreamHealth` interface:
@@ -3375,8 +3385,7 @@ For each partition, verify every assigned chain shows:
 
 **Expected chain coverage:**
 - P1: BSC, Polygon, Avalanche, Fantom (4 chains)
-- P2: Arbitrum, Optimism, Base, zkSync, Linea, Blast, Scroll (7 active chains;
-  Mantle and Mode are stubs — acceptable if missing)
+- P2: Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode (7 chains)
 - P3: Ethereum, zkSync, Linea (3 chains)
 - P4: Solana (1 chain)
 
@@ -4072,10 +4081,10 @@ _exists during the smoke window. Only "STALLED AT price-updates" is a true failu
 | P2 | Arbitrum | <n> | ACTIVE / SILENT |
 | P2 | Optimism | <n> | ACTIVE / SILENT |
 | P2 | Base | <n> | ACTIVE / SILENT |
-| P2 | zkSync | <n> | ACTIVE / SILENT |
-| P2 | Linea | <n> | ACTIVE / SILENT |
-| P2 | Blast | <n> | ACTIVE / SILENT |
 | P2 | Scroll | <n> | ACTIVE / SILENT |
+| P2 | Blast | <n> | ACTIVE / SILENT |
+| P2 | Mantle | <n> | ACTIVE / SILENT |
+| P2 | Mode | <n> | ACTIVE / SILENT |
 | P3 | Ethereum | <n> | ACTIVE / SILENT |
 | P3 | zkSync | <n> | ACTIVE / SILENT |
 | P3 | Linea | <n> | ACTIVE / SILENT |
