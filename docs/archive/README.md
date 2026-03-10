@@ -62,7 +62,7 @@ All major implementation plans have been completed. The system now uses:
 
 1. **Architecture Decision Records (ADRs)** for architectural changes
    - Location: [`docs/architecture/adr/`](../architecture/adr/)
-   - 27 ADRs tracking decisions with confidence levels
+   - 42 ADRs tracking decisions with confidence levels
    - New features require new ADRs
 
 2. **GitHub Issues** for bug fixes and minor enhancements

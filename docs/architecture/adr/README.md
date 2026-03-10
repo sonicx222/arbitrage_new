@@ -396,3 +396,4 @@ XX% - Explanation of confidence factors
 | 2026-03-06 | ADR-039 | Added Async Pipeline Split with SimulationWorker decision |
 | 2026-03-06 | ADR-040 | Added Real-Time Native Token Pricing decision |
 | 2026-03-06 | ADR-041 | Added Blockchain Configuration Architecture Refactor decision |
+| 2026-03-08 | ADR-042 | Added Testnet Execution Mode decision |

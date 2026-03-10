@@ -1,7 +1,7 @@
 # Arbitrage Strategies & Token Selection
 
 > **Last Updated:** 2026-02-25
-> **Related ADRs:** [ADR-008](architecture/adr/ADR-008.md) (Chain/DEX/Token Selection), [ADR-021](architecture/adr/ADR-021.md) (Capital Risk Management)
+> **Related ADRs:** [ADR-008](architecture/adr/ADR-008-chain-dex-token-selection.md) (Chain/DEX/Token Selection), [ADR-021](architecture/adr/ADR-021-capital-risk-management.md) (Capital Risk Management)
 
 This document outlines the trading strategies and selection methodologies used to maximize profitability while minimizing risk.
 
@@ -50,7 +50,7 @@ Four-token cyclic paths exploiting price imbalances across DEXs (e.g., WETH → 
 
 - **Benefit**: Captures 20-40% more opportunities than triangular alone
 - **Complexity**: O(n⁴) search space, optimized with token pair indexing
-- **Related**: [ADR-011](architecture/adr/ADR-011.md) (O(1) token pair indexing)
+- **Related**: [ADR-011](architecture/adr/ADR-011-tier1-optimizations.md) (O(1) token pair indexing)
 
 ### 5. Multi-Leg Path Finding
 
@@ -62,7 +62,7 @@ Discovery of 5-7 token arbitrage cycles using depth-first search with pruning.
   - ExecutionContext for concurrent safety
   - Configurable timeout and profit thresholds
 - **Module**: `shared/core/src/path-finding/multi-leg-path-finder.ts`
-- **Related**: [ADR-012](architecture/adr/ADR-012.md) (Worker Thread Path Finding)
+- **Related**: [ADR-012](architecture/adr/ADR-012-worker-thread-path-finding.md) (Worker Thread Path Finding)
 
 ---
 
@@ -158,7 +158,7 @@ The system focuses on high-liquidity pairings to ensure minimal slippage.
 - **Aggregators**: 1inch integration for best execution
 - **Emerging L2 DEXs**: Thruster/Ambient (Blast), SyncSwap/SpaceFi (Scroll), Merchant Moe/Agni (Mantle), Kim/SwapMode (Mode) — addresses pending verification
 
-**Related**: [ADR-008](architecture/adr/ADR-008.md) (Chain/DEX/Token Selection Strategy)
+**Related**: [ADR-008](architecture/adr/ADR-008-chain-dex-token-selection.md) (Chain/DEX/Token Selection Strategy)
 
 ---
 
@@ -180,7 +180,7 @@ Beyond reactive monitoring, the system employs ML models to predict price moveme
 - **Lazy Loading**: Models loaded on-demand with caching
 - **Retraining**: Automated pipeline triggered by performance degradation
 
-**Related**: [ADR-025](architecture/adr/ADR-025.md) (ML Model Lifecycle Management)
+**Related**: [ADR-025](architecture/adr/ADR-025-ml-model-lifecycle.md) (ML Model Lifecycle Management)
 
 ---
 
@@ -213,7 +213,7 @@ Only execute opportunities where:
 Expected Value = (P(success) × Profit) - (P(failure) × Loss) - Gas Cost > Minimum Threshold
 ```
 
-**Related**: [ADR-021](architecture/adr/ADR-021.md) (Capital Risk Management)
+**Related**: [ADR-021](architecture/adr/ADR-021-capital-risk-management.md) (Capital Risk Management)
 
 ---
 
@@ -221,5 +221,5 @@ Expected Value = (P(success) × Profit) - (P(failure) × Loss) - Gas Cost > Mini
 
 - [Architecture Overview](architecture/ARCHITECTURE_V2.md)
 - [Current System State](architecture/CURRENT_STATE.md)
-- [Flash Loan Integration](architecture/adr/ADR-020.md)
-- [MEV Protection](architecture/adr/ADR-017.md)
+- [Flash Loan Integration](architecture/adr/ADR-020-flash-loan.md)
+- [MEV Protection](architecture/adr/ADR-017-mev-protection.md)

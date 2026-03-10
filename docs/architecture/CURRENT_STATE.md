@@ -232,34 +232,34 @@ ETHEREUM_WS_URL=wss://...
 ## Related ADRs
 
 ### Core Infrastructure
-- [ADR-002: Redis Streams](adr/ADR-002.md) - Message transport
-- [ADR-003: Partitioned Detectors](adr/ADR-003.md) - Partition architecture
-- [ADR-007: Failover Strategy](adr/ADR-007.md) - Leader election & failover
+- [ADR-002: Redis Streams](adr/ADR-002-redis-streams.md) - Message transport
+- [ADR-003: Partitioned Detectors](adr/ADR-003-partitioned-detectors.md) - Partition architecture
+- [ADR-007: Failover Strategy](adr/ADR-007-failover-strategy.md) - Leader election & failover
 
 ### Performance & Optimization
-- [ADR-011: Tier 1 Performance](adr/ADR-011.md) - O(1) indexing, event batching
-- [ADR-012: Worker Threads](adr/ADR-012.md) - Multi-leg path finding
-- [ADR-013: Dynamic Gas Pricing](adr/ADR-013.md) - Gas price cache
-- [ADR-022: Hot-Path Memory](adr/ADR-022.md) - Ring buffers, LRU cache
-- [ADR-023: Detector Pre-validation](adr/ADR-023.md) - Sample-based validation
-- [ADR-024: RPC Rate Limiting](adr/ADR-024.md) - Token bucket algorithm
-- [ADR-027: Nonce Pre-allocation](adr/ADR-027.md) - Nonce pool for latency
+- [ADR-011: Tier 1 Performance](adr/ADR-011-tier1-optimizations.md) - O(1) indexing, event batching
+- [ADR-012: Worker Threads](adr/ADR-012-worker-thread-path-finding.md) - Multi-leg path finding
+- [ADR-013: Dynamic Gas Pricing](adr/ADR-013-dynamic-gas-pricing.md) - Gas price cache
+- [ADR-022: Hot-Path Memory](adr/ADR-022-hot-path-memory-optimization.md) - Ring buffers, LRU cache
+- [ADR-023: Detector Pre-validation](adr/ADR-023-detector-prevalidation.md) - Sample-based validation
+- [ADR-024: RPC Rate Limiting](adr/ADR-024-rpc-rate-limiting.md) - Token bucket algorithm
+- [ADR-027: Nonce Pre-allocation](adr/ADR-027-nonce-preallocation-pool.md) - Nonce pool for latency
 
 ### Code Architecture
-- [ADR-009: Test Architecture](adr/ADR-009.md) - Testing patterns
-- [ADR-014: Modular Detector](adr/ADR-014.md) - Component extraction
-- [ADR-015: Pino Logger](adr/ADR-015.md) - Logger with DI pattern
-- [ADR-026: Integration Tests](adr/ADR-026.md) - Test consolidation
+- [ADR-009: Test Architecture](adr/ADR-009-test-architecture.md) - Testing patterns
+- [ADR-014: Modular Detector](adr/ADR-014-modular-detector-components.md) - Component extraction
+- [ADR-015: Pino Logger](adr/ADR-015-pino-logger-migration.md) - Logger with DI pattern
+- [ADR-026: Integration Tests](adr/ADR-026-integration-test-consolidation.md) - Test consolidation
 
 ### Execution & Risk
-- [ADR-016: Transaction Simulation](adr/ADR-016.md) - Pre-flight simulation
-- [ADR-017: MEV Protection](adr/ADR-017.md) - Flashbots, Jito integration
-- [ADR-018: Circuit Breaker](adr/ADR-018.md) - Failure protection
-- [ADR-020: Flash Loan](adr/ADR-020.md) - Aave V3 integration
-- [ADR-021: Capital Risk](adr/ADR-021.md) - Kelly criterion, EV filtering
+- [ADR-016: Transaction Simulation](adr/ADR-016-transaction-simulation.md) - Pre-flight simulation
+- [ADR-017: MEV Protection](adr/ADR-017-mev-protection.md) - Flashbots, Jito integration
+- [ADR-018: Circuit Breaker](adr/ADR-018-circuit-breaker.md) - Failure protection
+- [ADR-020: Flash Loan](adr/ADR-020-flash-loan.md) - Aave V3 integration
+- [ADR-021: Capital Risk](adr/ADR-021-capital-risk-management.md) - Kelly criterion, EV filtering
 
 ### ML & Advanced
-- [ADR-025: ML Model Lifecycle](adr/ADR-025.md) - Model persistence and retraining
+- [ADR-025: ML Model Lifecycle](adr/ADR-025-ml-model-lifecycle.md) - Model persistence and retraining
 
 ### Solana Execution & New Strategies
 - [ADR-034: Solana Execution](adr/ADR-034-solana-execution.md) - Jupiter V6 + Jito bundles

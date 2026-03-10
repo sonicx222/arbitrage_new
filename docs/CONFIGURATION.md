@@ -71,6 +71,10 @@ Each chain requires HTTP and WebSocket endpoints:
 | `BLAST_WS_URL` | Blast WebSocket | `wss://blast.drpc.org` |
 | `SCROLL_RPC_URL` | Scroll | `https://rpc.scroll.io` |
 | `SCROLL_WS_URL` | Scroll WebSocket | `wss://scroll.drpc.org` |
+| `MANTLE_RPC_URL` | Mantle | `https://rpc.mantle.xyz` |
+| `MANTLE_WS_URL` | Mantle WebSocket | `wss://rpc.mantle.xyz` |
+| `MODE_RPC_URL` | Mode | `https://mainnet.mode.network` |
+| `MODE_WS_URL` | Mode WebSocket | `wss://mainnet.mode.network` |
 | `SOLANA_RPC_URL` | Solana | `https://api.mainnet-beta.solana.com` |
 | `SOLANA_WS_URL` | Solana WebSocket | `wss://api.mainnet-beta.solana.com` |
 
@@ -234,7 +238,7 @@ Deploy with: `npx hardhat run scripts/deploy-commit-reveal.ts --network <chain>`
 
 **Important:** Verify that zero addresses (`0x0000...0000`) are not used in production. The system will detect and reject zero addresses at configuration time (Issue 1.2 fix).
 
-See [docs/TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md](TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md) for implementation details.
+See `contracts/src/CommitRevealArbitrage.sol` and `contracts/scripts/deploy-commit-reveal.ts` for implementation details.
 
 **Flash Loan Provider Aggregation** (ADR-032):
 - Dynamically selects optimal flash loan provider via weighted ranking (fees, liquidity, reliability, latency)
@@ -268,7 +272,7 @@ Deploy with chain-specific scripts:
 | `FLASH_LOAN_CONTRACT_BSC` | BNB Smart Chain | `0x...` |
 | `FLASH_LOAN_CONTRACT_AVALANCHE` | Avalanche C-Chain | `0x...` |
 
-See [docs/research/FUTURE_ENHANCEMENTS.md](research/FUTURE_ENHANCEMENTS.md#FE-001) for FE-001 implementation details.
+See `services/execution-engine/` for FE-001 (destination chain flash loan) implementation details.
 
 ### External Services
 

@@ -219,7 +219,7 @@ When fixing bugs, add JSDoc references for traceability:
 ```typescript
 /**
  * @module detection/arbitrage-detector
- * @see FIX 4.1 in docs/reports/BUG_FIX_LOG_2026-02.md
+ * @see FIX 4.1: Configurable price bounds for memecoin support
  */
 
 // In-line comments for specific fixes:

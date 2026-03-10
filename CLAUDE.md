@@ -130,7 +130,7 @@ Key rules:
 **Hot-path latency target: <50ms** (price-update -> detection -> execution)
 
 Hot-path files:
-- `shared/core/src/price-matrix.ts` - L1 cache, SharedArrayBuffer
+- `shared/core/src/caching/price-matrix.ts` - L1 cache, SharedArrayBuffer
 - `shared/core/src/partitioned-detector.ts` - Opportunity detection
 - `services/execution-engine/` - Trade execution
 - `services/unified-detector/` - Event processing
@@ -212,7 +212,7 @@ await expect(tx).to.be.reverted; // Don't do this
 ## Architecture
 - `/docs/architecture/ARCHITECTURE_V2.md` - System design (v2.8)
 - `/docs/architecture/CURRENT_STATE.md` - Service inventory
-- `/docs/architecture/adr/README.md` - 32 ADRs with decisions
+- `/docs/architecture/adr/README.md` - 42 ADRs with decisions
 
 ## Development & Deployment
 - `/docs/local-development.md` - Setup guide
@@ -226,11 +226,9 @@ await expect(tx).to.be.reverted; // Don't do this
 - `/docs/agent/code_conventions.md` - Code patterns
 
 ## Analysis Reports
-- `docs/reports/CRITICAL_PROJECT_ASSESSMENT_2026-02-18.md` - Full-system assessment (65 findings, 47/47 remediated)
-- `docs/reports/IMPLEMENTATION_PLAN_2026-02-18.md` - Remediation plan (47 items, all complete)
-- `.agent-reports/FINAL_UNIFIED_REPORT.md` - Earlier deep analysis (28 findings, grade B+)
-- `.agent-reports/partition-asia-fast-deep-analysis.md` - partition-asia-fast deep analysis (26 findings, grade B+)
-- `.agent-reports/partition-high-value-deep-analysis.md` - partition-high-value deep analysis (22 findings, grade B+)
+- `docs/reports/DEEP_ANALYSIS_DASHBOARD_2026-03-10.md` - Dashboard deep analysis (28 findings, grade B-)
+- `docs/reports/DEPLOYMENT_STATUS_AND_REMAINING_TODOS_2026-03-07.md` - Deployment status and remaining TODOs
+- `docs/reports/PROFITABILITY_AUDIT_CONSOLIDATED_2026-03-08.md` - Profitability audit
 
 # Documentation Maintenance
 
