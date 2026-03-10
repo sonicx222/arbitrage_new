@@ -270,14 +270,16 @@ No direct conflicts between agents. The closest was LP and DI both analyzing Str
 - [x] **DI-03**: Monotonic `blockNumber` guard in `applyReserveUpdate()` rejects stale events
 - [ ] **LP-02**: Deferred — operational config change (`STREAM_LEGACY_HMAC_COMPAT=false`), already tracked as tech debt
 
-### Phase 3: Backlog (P3 — hardening and optimization)
+### Phase 3: Backlog (P3 — hardening and optimization) ✅
 
-- [ ] **CC-03/CC-04**: Monitor Aave V3 / SyncSwap Vault deployment for Blast/Linea flash loans
-- [ ] **DI-08**: Add `schemaVersion: '1'` to published opportunities
-- [x] **CD-R04**: Already uses `??` pattern (verified — `config.chains || getChainsFromEnv()` is non-nullable string[])
+- [ ] **CC-03/CC-04**: Deferred — monitoring item, no code change (Blast/Linea flash loan providers)
+- [x] **DI-08**: Already done — `schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion` in opportunity-publisher.ts:106
+- [x] **CD-R04**: Already uses `??` pattern — `config.chains ?? getChainsFromEnv()` at unified-detector.ts:198
 - [x] **CD-R05**: References `STATE_TRANSITION_TIMEOUT_MS` constant
 - [x] **CD-R06**: References `DEFAULT_WHALE_THRESHOLD_USD` constant
 - [x] **CD-R07**: WS reconnect/ping intervals use named constants, env-configurable
+
+**All 36 findings addressed.** 32 remediated, 4 deferred (CC-01 low TVL pools, LP-02 config change, CC-03/CC-04 FL provider monitoring).
 
 ---
 
