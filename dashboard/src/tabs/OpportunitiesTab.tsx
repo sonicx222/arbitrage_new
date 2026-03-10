@@ -2,13 +2,16 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from '../hooks/useApi';
 import { KpiCard } from '../components/KpiCard';
+import { DataTable } from '../components/DataTable';
+import { ExportCsvButton } from '../components/ExportCsvButton';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatUsd, formatNumber, formatPct } from '../lib/format';
 import { CHAIN_COLORS } from '../lib/theme';
-import { toCsv, downloadCsv } from '../lib/export';
 import type { Opportunity } from '../lib/types';
 
 type SortField = 'timestamp' | 'chain' | 'profit' | 'confidence';
+
+const OPP_CSV_HEADERS = ['Time', 'Chain', 'Type', 'Buy DEX', 'Sell DEX', 'Est. Profit', 'Confidence', 'Status', 'Gas Cost', 'Net Profit'];
 
 export function OpportunitiesTab() {
   const [sortField, setSortField] = useState<SortField>('timestamp');
@@ -88,9 +91,8 @@ export function OpportunitiesTab() {
     return sortAsc ? ' \u25B2' : ' \u25BC';
   };
 
-  const handleExport = () => {
-    const headers = ['Time', 'Chain', 'Type', 'Buy DEX', 'Sell DEX', 'Est. Profit', 'Confidence', 'Status', 'Gas Cost', 'Net Profit'];
-    const rows = filtered.map((o) => [
+  const exportRows = useMemo(
+    () => filtered.map((o) => [
       new Date(o.timestamp).toISOString(),
       o.chain ?? '',
       o.type ?? '',
@@ -101,11 +103,9 @@ export function OpportunitiesTab() {
       o.status ?? '',
       o.gasCost ?? '',
       o.netProfit ?? '',
-    ]);
-    const csv = toCsv(headers, rows);
-    const date = new Date().toISOString().slice(0, 10);
-    downloadCsv(`opportunities-${date}.csv`, csv);
-  };
+    ]),
+    [filtered],
+  );
 
   if (isLoading) {
     return (
@@ -200,108 +200,67 @@ export function OpportunitiesTab() {
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider">
             Opportunities ({filtered.length}{chainFilter !== 'all' ? ` on ${chainFilter}` : ''})
           </h3>
-          <button
-            onClick={handleExport}
+          <ExportCsvButton
+            headers={OPP_CSV_HEADERS}
+            rows={exportRows}
+            filenamePrefix="opportunities"
             disabled={filtered.length === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium text-gray-400 hover:text-gray-200 bg-[var(--badge-bg)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export CSV
-          </button>
+            label="Export CSV"
+          />
         </div>
-        <div className="overflow-auto max-h-[480px]">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-gray-500 border-b border-gray-800">
-                <th className="text-left py-1 px-2 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort('timestamp')}>
-                  Time{sortIcon('timestamp')}
-                </th>
-                <th className="text-left py-1 px-2">Status</th>
-                <th className="text-left py-1 px-2 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort('chain')}>
-                  Chain{sortIcon('chain')}
-                </th>
-                <th className="text-left py-1 px-2">Type</th>
-                <th className="text-left py-1 px-2">Route</th>
-                <th className="text-right py-1 px-2 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort('profit')}>
-                  Est. Profit{sortIcon('profit')}
-                </th>
-                <th className="text-right py-1 px-2">Gas</th>
-                <th className="text-right py-1 px-2">Net</th>
-                <th className="text-right py-1 px-2 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort('confidence')}>
-                  Conf.{sortIcon('confidence')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((opp) => {
-                const profit = opp.estimatedProfit ?? opp.expectedProfit;
-                const statusMap: Record<string, string> = {
-                  pending: 'healthy',
-                  executing: 'degraded',
-                  completed: 'healthy',
-                  failed: 'unhealthy',
-                  expired: 'unknown',
-                };
+        <DataTable<Opportunity>
+          columns={[
+            { header: 'Time', onHeaderClick: () => handleSort('timestamp'), headerSuffix: sortIcon('timestamp'),
+              render: (opp) => <span className="text-gray-500">{formatTime(opp.timestamp)}</span> },
+            { header: 'Status', render: (opp) => {
+              const statusMap: Record<string, string> = { pending: 'healthy', executing: 'degraded', completed: 'healthy', failed: 'unhealthy', expired: 'unknown' };
+              return <StatusBadge status={statusMap[opp.status ?? 'pending'] ?? 'unknown'} label={opp.status ?? 'pending'} />;
+            } },
+            { header: 'Chain', onHeaderClick: () => handleSort('chain'), headerSuffix: sortIcon('chain'),
+              render: (opp) => {
                 const chainColor = CHAIN_COLORS[(opp.chain ?? '').toLowerCase()];
                 return (
-                  <tr key={opp.id} className="border-b border-gray-800/50 hover:bg-surface-lighter/30">
-                    <td className="py-1 px-2 text-gray-500">{formatTime(opp.timestamp)}</td>
-                    <td className="py-1 px-2">
-                      <StatusBadge status={statusMap[opp.status ?? 'pending'] ?? 'unknown'} label={opp.status ?? 'pending'} />
-                    </td>
-                    <td className="py-1 px-2">
-                      <span className="flex items-center gap-1.5">
-                        {chainColor && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: chainColor }} />}
-                        <span className="text-gray-300 uppercase">{opp.chain ?? '-'}</span>
-                      </span>
-                    </td>
-                    <td className="py-1 px-2">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--badge-bg)] text-gray-400">
-                        {opp.type ?? 'simple'}
-                      </span>
-                    </td>
-                    <td className="py-1 px-2 text-gray-400">
-                      {opp.buyDex && opp.sellDex ? (
-                        <span>{opp.buyDex} <span className="text-gray-600">&rarr;</span> {opp.sellDex}</span>
-                      ) : '-'}
-                    </td>
-                    <td className="py-1 px-2 text-right">
-                      {profit != null ? (
-                        <span className="text-accent-green">{formatUsd(profit)}</span>
-                      ) : '-'}
-                    </td>
-                    <td className="py-1 px-2 text-right text-gray-500">
-                      {opp.gasCost != null ? formatUsd(opp.gasCost) : '-'}
-                    </td>
-                    <td className="py-1 px-2 text-right">
-                      {opp.netProfit != null ? (
-                        <span className={opp.netProfit > 0 ? 'text-accent-green' : 'text-accent-red'}>
-                          {formatUsd(opp.netProfit)}
-                        </span>
-                      ) : '-'}
-                    </td>
-                    <td className="py-1 px-2 text-right">
-                      <span className={`tabular-nums ${
-                        opp.confidence >= 0.8 ? 'text-accent-green' : opp.confidence >= 0.5 ? 'text-accent-yellow' : 'text-accent-red'
-                      }`}>
-                        {formatPct(opp.confidence * 100)}
-                      </span>
-                    </td>
-                  </tr>
+                  <span className="flex items-center gap-1.5">
+                    {chainColor && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: chainColor }} />}
+                    <span className="text-gray-300 uppercase">{opp.chain ?? '-'}</span>
+                  </span>
                 );
-              })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="text-center py-8 text-gray-600">
-                    {opportunities.length === 0 ? 'No opportunities detected yet' : `No opportunities on ${chainFilter}`}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              } },
+            { header: 'Type', render: (opp) => (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--badge-bg)] text-gray-400">{opp.type ?? 'simple'}</span>
+            ) },
+            { header: 'Route', render: (opp) => (
+              <span className="text-gray-400">
+                {opp.buyDex && opp.sellDex ? <>{opp.buyDex} <span className="text-gray-600">&rarr;</span> {opp.sellDex}</> : '-'}
+              </span>
+            ) },
+            { header: 'Est. Profit', align: 'right', onHeaderClick: () => handleSort('profit'), headerSuffix: sortIcon('profit'),
+              render: (opp) => {
+                const profit = opp.estimatedProfit ?? opp.expectedProfit;
+                return profit != null ? <span className="text-accent-green">{formatUsd(profit)}</span> : <>-</>;
+              } },
+            { header: 'Gas', align: 'right', render: (opp) => (
+              <span className="text-gray-500">{opp.gasCost != null ? formatUsd(opp.gasCost) : '-'}</span>
+            ) },
+            { header: 'Net', align: 'right', render: (opp) => (
+              opp.netProfit != null
+                ? <span className={opp.netProfit > 0 ? 'text-accent-green' : 'text-accent-red'}>{formatUsd(opp.netProfit)}</span>
+                : <>-</>
+            ) },
+            { header: 'Conf.', align: 'right', onHeaderClick: () => handleSort('confidence'), headerSuffix: sortIcon('confidence'),
+              render: (opp) => (
+                <span className={`tabular-nums ${
+                  opp.confidence >= 0.8 ? 'text-accent-green' : opp.confidence >= 0.5 ? 'text-accent-yellow' : 'text-accent-red'
+                }`}>
+                  {formatPct(opp.confidence * 100)}
+                </span>
+              ) },
+          ]}
+          data={filtered}
+          keyExtractor={(opp) => opp.id}
+          maxHeight="480px"
+          emptyMessage={opportunities.length === 0 ? 'No opportunities detected yet' : `No opportunities on ${chainFilter}`}
+        />
       </div>
     </div>
   );

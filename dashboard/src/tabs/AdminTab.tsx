@@ -2,13 +2,16 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServices, useMetrics } from '../context/SSEContext';
 import { useRestartService, fetchJson } from '../hooks/useApi';
+import { useMutationFeedback } from '../hooks/useMutationFeedback';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
+import { DataTable, type Column } from '../components/DataTable';
 import { LogLevelControl } from '../components/LogLevelControl';
 import { AlertsTable } from '../components/AlertsTable';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatDuration } from '../lib/format';
+import type { ServiceHealth } from '../lib/types';
 
 export function AdminTab() {
   const { services } = useServices();
@@ -16,7 +19,7 @@ export function AdminTab() {
   const restartService = useRestartService();
 
   const [restartTarget, setRestartTarget] = useState<string | null>(null);
-  const [actionMsg, setActionMsg] = useState('');
+  const { actionMsg, showSuccess, showError } = useMutationFeedback();
 
   const { data: leaderInfo } = useQuery<{ isLeader: boolean; instanceId: string; lockKey: string }>({
     queryKey: ['leader'],
@@ -69,43 +72,27 @@ export function AdminTab() {
           Service Management {!isLeader && <span className="text-accent-yellow">(read-only — not leader)</span>}
           {actionMsg && <span className={`ml-2 ${actionMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{actionMsg}</span>}
         </h3>
-        <div className="overflow-auto max-h-64">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-gray-500 border-b border-gray-800">
-                <th className="text-left py-1 px-2">Service</th>
-                <th className="text-left py-1 px-2">Status</th>
-                <th className="text-right py-1 px-2">Uptime</th>
-                <th className="text-right py-1 px-2">Failures</th>
-                <th className="text-right py-1 px-2">Restarts</th>
-                <th className="text-center py-1 px-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {serviceList.map((svc) => (
-                <tr key={svc.name} className="border-b border-gray-800/50 hover:bg-surface-lighter/30">
-                  <td className="py-1 px-2 font-mono text-gray-300">{svc.name}</td>
-                  <td className="py-1 px-2"><StatusBadge status={svc.status} label={svc.status} /></td>
-                  <td className="py-1 px-2 text-right text-gray-500">{formatDuration(svc.uptime)}</td>
-                  <td className="py-1 px-2 text-right">{svc.consecutiveFailures ?? 0}</td>
-                  <td className="py-1 px-2 text-right">{svc.restartCount ?? 0}</td>
-                  <td className="py-1 px-2 text-center">
-                    <button
-                      onClick={() => setRestartTarget(svc.name)}
-                      disabled={!isLeader}
-                      className="px-2 py-0.5 text-[10px] rounded bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      Restart
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {serviceList.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-4 text-gray-600">No services</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<ServiceHealth>
+          columns={[
+            { header: 'Service', render: (svc) => <span className="font-mono text-gray-300">{svc.name}</span> },
+            { header: 'Status', render: (svc) => <StatusBadge status={svc.status} label={svc.status} /> },
+            { header: 'Uptime', align: 'right', render: (svc) => <span className="text-gray-500">{formatDuration(svc.uptime)}</span> },
+            { header: 'Failures', align: 'right', render: (svc) => <>{svc.consecutiveFailures ?? 0}</> },
+            { header: 'Restarts', align: 'right', render: (svc) => <>{svc.restartCount ?? 0}</> },
+            { header: 'Action', align: 'center', render: (svc) => (
+              <button
+                onClick={() => setRestartTarget(svc.name)}
+                disabled={!isLeader}
+                className="px-2 py-0.5 text-[10px] rounded bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Restart
+              </button>
+            ) },
+          ]}
+          data={serviceList}
+          keyExtractor={(svc) => svc.name}
+          emptyMessage="No services"
+        />
       </div>
 
       <AlertsTable />
@@ -120,8 +107,8 @@ export function AdminTab() {
         onConfirm={() => {
           if (restartTarget) {
             restartService.mutate(restartTarget, {
-              onSuccess: () => { setRestartTarget(null); setActionMsg(`Done — ${restartTarget} restarting`); setTimeout(() => setActionMsg(''), 3000); },
-              onError: (err) => { setRestartTarget(null); setActionMsg(`Restart failed: ${err.message}`); setTimeout(() => setActionMsg(''), 10000); },
+              onSuccess: () => { setRestartTarget(null); showSuccess(`Done — ${restartTarget} restarting`); },
+              onError: (err) => { setRestartTarget(null); showError(`Restart failed: ${err.message}`); },
             });
           }
         }}

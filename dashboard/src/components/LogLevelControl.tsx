@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSetLogLevel, fetchJson } from '../hooks/useApi';
+import { useMutationFeedback } from '../hooks/useMutationFeedback';
 
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 
 export const LogLevelControl = memo(function LogLevelControl() {
   const setLogLevel = useSetLogLevel();
   const [activeLogLevel, setActiveLogLevel] = useState<string>('info');
-  const [logLevelMsg, setLogLevelMsg] = useState('');
+  const { actionMsg, showSuccess, showError } = useMutationFeedback();
 
   const { data: logLevelData } = useQuery<{ level: string }>({
     queryKey: ['log-level'],
@@ -38,10 +39,9 @@ export const LogLevelControl = memo(function LogLevelControl() {
                 onSuccess: () => {
                   setActiveLogLevel(level);
                   lastSyncedLevel.current = level;
-                  setLogLevelMsg(`Set to ${level}`);
-                  setTimeout(() => setLogLevelMsg(''), 3000);
+                  showSuccess(`Set to ${level}`);
                 },
-                onError: (err) => { setLogLevelMsg(`Error: ${err.message}`); setTimeout(() => setLogLevelMsg(''), 10000); },
+                onError: (err) => { showError(`Error: ${err.message}`); },
               });
             }}
             disabled={setLogLevel.isPending}
@@ -55,7 +55,7 @@ export const LogLevelControl = memo(function LogLevelControl() {
           </button>
         ))}
       </div>
-      {logLevelMsg && <div className="text-[10px] text-accent-blue">{logLevelMsg}</div>}
+      {actionMsg && <div className="text-[10px] text-accent-blue">{actionMsg}</div>}
     </div>
   );
 });

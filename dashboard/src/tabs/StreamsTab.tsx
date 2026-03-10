@@ -3,9 +3,11 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { useQuery } from '@tanstack/react-query';
 import { useStreams, useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
+import { DataTable, type Column } from '../components/DataTable';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber } from '../lib/format';
 import { CHART, TOOLTIP_STYLE } from '../lib/theme';
+import type { StreamHealth } from '../lib/types';
 
 interface RedisStats {
   byCategory?: Record<string, number>;
@@ -46,41 +48,23 @@ export function StreamsTab() {
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
           Redis Streams ({streamEntries.length})
         </h3>
-        <div className="overflow-auto max-h-72">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-gray-500 border-b border-gray-800">
-                <th className="text-left py-1 px-2">Stream</th>
-                <th className="text-right py-1 px-2">Length</th>
-                <th className="text-right py-1 px-2">Pending</th>
-                <th className="text-right py-1 px-2">Groups</th>
-                <th className="text-center py-1 px-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {streamEntries.map(([name, info]) => (
-                <tr key={name} className="border-b border-gray-800/50 hover:bg-surface-lighter/30">
-                  <td className="py-1 px-2 font-mono text-gray-300">
-                    {name.replace('stream:', '')}
-                  </td>
-                  <td className="py-1 px-2 text-right">{formatNumber(info.length)}</td>
-                  <td className="py-1 px-2 text-right">
-                    <span className={info.pending > 1000 ? 'text-accent-red' : info.pending > 100 ? 'text-accent-yellow' : ''}>
-                      {formatNumber(info.pending)}
-                    </span>
-                  </td>
-                  <td className="py-1 px-2 text-right">{info.consumerGroups}</td>
-                  <td className="py-1 px-2 text-center">
-                    <StatusBadge status={info.status} />
-                  </td>
-                </tr>
-              ))}
-              {streamEntries.length === 0 && (
-                <tr><td colSpan={5} className="text-center py-4 text-gray-600">No stream data yet</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<[string, StreamHealth[string]]>
+          columns={[
+            { header: 'Stream', render: ([name]) => <span className="font-mono text-gray-300">{name.replace('stream:', '')}</span> },
+            { header: 'Length', align: 'right', render: ([, info]) => <>{formatNumber(info.length)}</> },
+            { header: 'Pending', align: 'right', render: ([, info]) => (
+              <span className={info.pending > 1000 ? 'text-accent-red' : info.pending > 100 ? 'text-accent-yellow' : ''}>
+                {formatNumber(info.pending)}
+              </span>
+            ) },
+            { header: 'Groups', align: 'right', render: ([, info]) => <>{info.consumerGroups}</> },
+            { header: 'Status', align: 'center', render: ([, info]) => <StatusBadge status={info.status} /> },
+          ]}
+          data={streamEntries}
+          keyExtractor={([name]) => name}
+          maxHeight="18rem"
+          emptyMessage="No stream data yet"
+        />
       </div>
 
       {/* Consumer Lag Chart */}

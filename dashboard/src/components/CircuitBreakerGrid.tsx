@@ -1,6 +1,7 @@
 import { useState, memo } from 'react';
 import { useServices } from '../context/SSEContext';
 import { useCircuitBreakerOpen, useCircuitBreakerClose } from '../hooks/useApi';
+import { useMutationFeedback } from '../hooks/useMutationFeedback';
 import { ConfirmModal } from './ConfirmModal';
 import { statusColor, statusDot } from '../lib/format';
 
@@ -12,7 +13,7 @@ export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
   const [showClose, setShowClose] = useState(false);
   const [reason, setReason] = useState('');
 
-  const [errorMsg, setErrorMsg] = useState('');
+  const { actionMsg, showSuccess, showError } = useMutationFeedback();
   const state = circuitBreaker?.state ?? 'UNKNOWN';
   const failures = circuitBreaker?.consecutiveFailures ?? 0;
 
@@ -44,7 +45,7 @@ export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
         >
           Force Close
         </button>
-        {errorMsg && <span className={`text-[10px] ml-2 ${errorMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{errorMsg}</span>}
+        {actionMsg && <span className={`text-[10px] ml-2 ${actionMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{actionMsg}</span>}
       </div>
 
       <ConfirmModal
@@ -55,8 +56,8 @@ export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
         loading={openMutation.isPending}
         onConfirm={() => {
           openMutation.mutate(reason || 'Manual dashboard action', {
-            onSuccess: () => { setShowOpen(false); setReason(''); setErrorMsg('Done — circuit breaker opened'); setTimeout(() => setErrorMsg(''), 3000); },
-            onError: (err) => { setShowOpen(false); setErrorMsg(`CB open failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 10000); },
+            onSuccess: () => { setShowOpen(false); setReason(''); showSuccess('Done — circuit breaker opened'); },
+            onError: (err) => { setShowOpen(false); showError(`CB open failed: ${err.message}`); },
           });
         }}
         onCancel={() => { setShowOpen(false); setReason(''); }}
@@ -80,8 +81,8 @@ export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
         loading={closeMutation.isPending}
         onConfirm={() => {
           closeMutation.mutate(undefined, {
-            onSuccess: () => { setShowClose(false); setErrorMsg('Done — circuit breaker closed'); setTimeout(() => setErrorMsg(''), 3000); },
-            onError: (err) => { setShowClose(false); setErrorMsg(`CB close failed: ${err.message}`); setTimeout(() => setErrorMsg(''), 10000); },
+            onSuccess: () => { setShowClose(false); showSuccess('Done — circuit breaker closed'); },
+            onError: (err) => { setShowClose(false); showError(`CB close failed: ${err.message}`); },
           });
         }}
         onCancel={() => setShowClose(false)}
