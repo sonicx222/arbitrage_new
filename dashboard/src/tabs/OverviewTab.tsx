@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useMetrics, useServices, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
+import { KpiGrid } from '../components/KpiGrid';
+import { EmptyState } from '../components/EmptyState';
 import { ServiceCard } from '../components/ServiceCard';
 import { LiveFeed } from '../components/LiveFeed';
 import { SectionHeader } from '../components/SectionHeader';
@@ -29,13 +31,13 @@ export function OverviewTab() {
       {/* Left: KPIs + Services + Pipeline */}
       <div className="space-y-4 overflow-auto">
         {/* KPI Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <KpiGrid>
           <KpiCard label="System Health" value={formatPct(metrics.systemHealth)} color={healthColor} />
           <KpiCard label="Active Services" value={String(metrics.activeServices)} />
           <KpiCard label="Opportunities" value={formatNumber(metrics.totalOpportunities)} sub={`${formatNumber(metrics.opportunitiesDropped)} dropped`} />
           <KpiCard label="Executions" value={formatNumber(metrics.totalExecutions)} sub={`${formatPct(successRate)} success`} />
           <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
-        </div>
+        </KpiGrid>
 
         {/* Service Grid */}
         <div>
@@ -45,7 +47,7 @@ export function OverviewTab() {
               <ServiceCard key={svc.name} service={svc} />
             ))}
           </div>
-          {serviceList.length === 0 && <div className="text-gray-600 text-xs">No services reporting yet</div>}
+          {serviceList.length === 0 && <EmptyState message="No services reporting yet" />}
         </div>
 
         {/* Pipeline Health */}
@@ -70,7 +72,7 @@ export function OverviewTab() {
                     {metrics.backpressure.active ? 'ACTIVE' : 'INACTIVE'}
                   </span>
                 </div>
-              ) : <div className="text-gray-600 mt-1">No data</div>}
+              ) : <EmptyState message="No data" className="mt-1" />}
             </div>
 
             {/* Admission */}
@@ -83,7 +85,7 @@ export function OverviewTab() {
                   <StatRow label="Avg Score (admitted)" value={Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(2) : '-'} />
                   <StatRow label="Avg Score (shed)" value={Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(2) : '-'} />
                 </div>
-              ) : <div className="text-gray-600 mt-1">No data</div>}
+              ) : <EmptyState message="No data" className="mt-1" />}
             </div>
 
             {/* DLQ */}
@@ -97,7 +99,7 @@ export function OverviewTab() {
                   <StatRow label="Transient" value={metrics.dlqMetrics.transient} />
                   <StatRow label="Unknown" value={metrics.dlqMetrics.unknown} />
                 </div>
-              ) : <div className="text-gray-600 mt-1">No data</div>}
+              ) : <EmptyState message="No data" className="mt-1" />}
             </div>
 
             {/* Forwarding */}
@@ -112,7 +114,7 @@ export function OverviewTab() {
                   <StatRow label="Circuit Open" value={metrics.forwardingMetrics.circuitOpen} />
                   <StatRow label="Not Leader" value={metrics.forwardingMetrics.notLeader} />
                 </div>
-              ) : <div className="text-gray-600 mt-1">No data</div>}
+              ) : <EmptyState message="No data" className="mt-1" />}
             </div>
           </div>
         </div>

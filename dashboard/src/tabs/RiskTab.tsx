@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
+import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { formatPct, formatNumber } from '../lib/format';
@@ -117,7 +118,7 @@ export function RiskTab() {
               </div>
             </div>
           ) : (
-            <div className="text-gray-600 text-xs">Admission control not active</div>
+            <EmptyState message="Admission control not active" />
           )}
         </div>
 
@@ -134,7 +135,7 @@ export function RiskTab() {
               ))}
             </div>
           ) : (
-            <div className="text-gray-600 text-xs">No forwarding data</div>
+            <EmptyState message="No forwarding data" />
           )}
         </div>
       </div>
@@ -169,7 +170,7 @@ export function RiskTab() {
             </div>
           </div>
         ) : (
-          <div className="text-gray-600 text-xs">No backpressure data</div>
+          <EmptyState message="No backpressure data" />
         )}
       </div>
     </div>

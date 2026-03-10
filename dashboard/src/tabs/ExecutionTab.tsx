@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
+import { KpiGrid } from '../components/KpiGrid';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { DataTable } from '../components/DataTable';
 import { SectionHeader } from '../components/SectionHeader';
@@ -70,13 +71,13 @@ export function ExecutionTab() {
   return (
     <div className="space-y-4 overflow-auto">
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <KpiGrid>
         <KpiCard label="Attempts" value={formatNumber(metrics.totalExecutions)} />
         <KpiCard label="Successful" value={formatNumber(metrics.successfulExecutions)} color="text-accent-green" />
         <KpiCard label="Failed" value={formatNumber(failedExecutions)} color={failedExecutions > 0 ? 'text-accent-red' : 'text-gray-100'} />
         <KpiCard label="Success Rate" value={formatPct(successRate)} color={successRate >= 80 ? 'text-accent-green' : successRate >= 50 ? 'text-accent-yellow' : 'text-accent-red'} />
         <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
-      </div>
+      </KpiGrid>
 
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

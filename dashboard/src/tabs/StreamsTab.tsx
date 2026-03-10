@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useStreams, useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { DataTable, type Column } from '../components/DataTable';
+import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { StatusBadge } from '../components/StatusBadge';
@@ -95,7 +96,7 @@ export function StreamsTab() {
               ))}
             </div>
           ) : (
-            <div className="text-gray-600 text-xs">No DLQ data</div>
+            <EmptyState message="No DLQ data" />
           )}
         </div>
 
@@ -122,7 +123,7 @@ export function StreamsTab() {
               )}
             </div>
           ) : (
-            <div className="text-gray-600 text-xs">Loading Redis stats...</div>
+            <EmptyState message="Loading Redis stats..." />
           )}
         </div>
       </div>

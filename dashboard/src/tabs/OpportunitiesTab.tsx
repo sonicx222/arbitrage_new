@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from '../hooks/useApi';
 import { KpiCard } from '../components/KpiCard';
+import { KpiGrid } from '../components/KpiGrid';
 import { DataTable } from '../components/DataTable';
 import { ExportCsvButton } from '../components/ExportCsvButton';
 import { SectionHeader } from '../components/SectionHeader';
+import { Spinner } from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatUsd, formatNumber, formatPct } from '../lib/format';
 import { CHAIN_COLORS } from '../lib/theme';
@@ -112,10 +114,7 @@ export function OpportunitiesTab() {
     return (
       <div className="flex items-center justify-center h-40">
         <div className="flex items-center gap-3 text-gray-500 text-xs">
-          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Spinner />
           Loading opportunities...
         </div>
       </div>
@@ -134,7 +133,7 @@ export function OpportunitiesTab() {
   return (
     <div className="space-y-4 overflow-auto">
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <KpiGrid>
         <KpiCard label="Total" value={formatNumber(opportunities.length)} sub="last 100" />
         <KpiCard
           label="Est. Profit"
@@ -156,7 +155,7 @@ export function OpportunitiesTab() {
           value={stats.topType ? stats.topType[0] : '-'}
           sub={stats.topType ? `${stats.topType[1]} opps` : undefined}
         />
-      </div>
+      </KpiGrid>
 
       {/* Chain Distribution */}
       <div className="card">
