@@ -61,6 +61,7 @@ import {
   isReverseOrder,
   getMinProfitThreshold,
 } from '@arbitrage/core/components';
+import { SimpleArbitrageDetector } from '../../src/detection/simple-arbitrage-detector';
 
 // =============================================================================
 // Test Types (matching chain-instance.ts internal types)
@@ -73,8 +74,11 @@ interface PairSnapshot {
   token1: string;
   reserve0: string;
   reserve1: string;
+  reserve0BigInt?: bigint;
+  reserve1BigInt?: bigint;
   fee: number;
   blockNumber: number;
+  syntheticReserves?: boolean;
 }
 
 // =============================================================================
@@ -128,17 +132,23 @@ function calculateArbitrage(
 // Test Data
 // =============================================================================
 
-const createPairSnapshot = (overrides: Partial<PairSnapshot> = {}): PairSnapshot => ({
-  address: '0x1234567890123456789012345678901234567890',
-  dex: 'uniswap_v3',
-  token0: '0xTokenA',
-  token1: '0xTokenB',
-  reserve0: '1000000000000000000000', // 1000 tokens
-  reserve1: '2000000000000000000000', // 2000 tokens (price = 2)
-  fee: 0.003, // 0.3%
-  blockNumber: 12345678,
-  ...overrides
-});
+const createPairSnapshot = (overrides: Partial<PairSnapshot> = {}): PairSnapshot => {
+  const reserve0 = overrides.reserve0 ?? '1000000000000000000000';
+  const reserve1 = overrides.reserve1 ?? '2000000000000000000000';
+  return {
+    address: '0x1234567890123456789012345678901234567890',
+    dex: 'uniswap_v3',
+    token0: '0xTokenA',
+    token1: '0xTokenB',
+    reserve0,
+    reserve1,
+    reserve0BigInt: BigInt(reserve0),
+    reserve1BigInt: BigInt(reserve1),
+    fee: 0.003, // 0.3%
+    blockNumber: 12345678,
+    ...overrides,
+  };
+};
 
 // =============================================================================
 // Tests
@@ -452,44 +462,77 @@ describe('ChainDetectorInstance Bug Fixes', () => {
 });
 
 describe('ArbitrageOpportunity Schema Consistency', () => {
-  it('should include all required fields for downstream consumers', () => {
-    // This test documents the expected schema
-    const expectedFields = [
-      'id',
-      'type',
-      'chain',
-      'buyDex',
-      'sellDex',
-      'buyPair',
-      'sellPair',
-      'token0',
-      'token1',
-      'buyPrice',
-      'sellPrice',
-      'profitPercentage',
-      'expectedProfit',
-      'estimatedProfit',
-      'gasEstimate',
-      'confidence',
-      'timestamp',
-      'expiresAt',
-      'blockNumber',
-      'status'
-    ];
-
-    // Verify that ARBITRAGE_CONFIG exists
-    expect(ARBITRAGE_CONFIG).toBeDefined();
-    expect(ARBITRAGE_CONFIG.chainMinProfits).toBeDefined();
-
-    // These fields should match between base-detector.ts and chain-instance.ts
-    expectedFields.forEach(field => {
-      expect(typeof field).toBe('string');
+  it('should produce opportunities with all required downstream fields', () => {
+    // M-006 FIX: Test actual SimpleArbitrageDetector output shape instead of literal arrays.
+    // Creates a real detector and verifies the output contains fields expected by
+    // the coordinator and execution engine.
+    const detector = new SimpleArbitrageDetector({
+      chainId: 'ethereum',
+      confidence: 0.75,
+      gasEstimate: 250000,
+      expiryMs: 15000,
     });
+
+    const pair1 = createPairSnapshot({
+      reserve0: '1000000000000000000000',
+      reserve1: '2000000000000000000000',
+    });
+
+    const pair2 = createPairSnapshot({
+      reserve0: '1000000000000000000000',
+      reserve1: '2100000000000000000000', // 5% higher
+      dex: 'sushiswap',
+      address: '0x0000000000000000000000000000000000000002',
+    });
+
+    const result = detector.calculateArbitrage(pair1, pair2);
+    expect(result).not.toBeNull();
+
+    // Verify all required downstream consumer fields
+    expect(result!.id).toEqual(expect.any(String));
+    expect(result!.type).toBe('simple');
+    expect(result!.chain).toBe('ethereum');
+    expect(result!.buyDex).toEqual(expect.any(String));
+    expect(result!.sellDex).toEqual(expect.any(String));
+    expect(result!.buyPair).toEqual(expect.any(String));
+    expect(result!.sellPair).toEqual(expect.any(String));
+    expect(result!.token0).toEqual(expect.any(String));
+    expect(result!.token1).toEqual(expect.any(String));
+    expect(result!.buyPrice).toEqual(expect.any(Number));
+    expect(result!.sellPrice).toEqual(expect.any(Number));
+    expect(result!.profitPercentage).toEqual(expect.any(Number));
+    expect(result!.expectedProfit).toEqual(expect.any(Number));
+    expect(result!.gasEstimate).toEqual(expect.any(String));
+    expect(result!.confidence).toEqual(expect.any(Number));
+    expect(result!.timestamp).toEqual(expect.any(Number));
+    expect(result!.expiresAt).toEqual(expect.any(Number));
+    expect(result!.blockNumber).toEqual(expect.any(Number));
+    expect(result!.status).toBe('pending');
   });
 
-  it('should use type: simple for consistency with base-detector.ts', () => {
-    const validTypes = ['simple', 'triangular', 'cross-chain'];
-    expect(validTypes).toContain('simple');
+  it('should produce type: simple for two-pair arbitrage', () => {
+    const detector = new SimpleArbitrageDetector({
+      chainId: 'ethereum',
+      confidence: 0.75,
+      gasEstimate: 250000,
+      expiryMs: 15000,
+    });
+
+    const pair1 = createPairSnapshot({
+      reserve0: '1000000000000000000000',
+      reserve1: '2000000000000000000000',
+    });
+    const pair2 = createPairSnapshot({
+      reserve0: '1000000000000000000000',
+      reserve1: '2100000000000000000000',
+      dex: 'sushiswap',
+      address: '0x0000000000000000000000000000000000000002',
+    });
+
+    const result = detector.calculateArbitrage(pair1, pair2);
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('simple');
+    expect(result!.profitPercentage).toBeGreaterThan(0);
   });
 });
 
@@ -498,6 +541,14 @@ describe('ArbitrageOpportunity Schema Consistency', () => {
 // =============================================================================
 
 describe('P0 Regression Tests: ChainDetectorInstance Lifecycle', () => {
+  /**
+   * M-007 NOTE: These tests validate the lifecycle race condition PATTERN using mock
+   * objects rather than a real ChainDetectorInstance. The pattern is identical to the
+   * real implementation (start/stop promise deduplication). Rewriting with real class
+   * requires full mock infrastructure — deferred to Phase 3 (see M-005/M-014).
+   * The real class's start/stop are exercised in chain-instance-websocket.test.ts.
+   */
+
   /**
    * P0-NEW-3: Race Condition in Lifecycle - Concurrent Start
    * Tests that concurrent start() calls return the same promise

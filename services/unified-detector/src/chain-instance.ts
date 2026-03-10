@@ -314,6 +314,10 @@ export class ChainDetectorInstance extends EventEmitter {
   private readonly MAX_STALENESS_MS: number;
   /** Phase 1 Enhanced Monitoring: Count stale price rejections for observability */
   private stalePriceRejections = 0;
+  /** M-002 FIX: Max allowed price deviation for synthetic reserves (Curve/Balancer).
+   *  Rejects swap-derived reserves that deviate >50% from last known price,
+   *  preventing flash-loan manipulation of detection pipeline. */
+  private static readonly MAX_SYNTHETIC_DEVIATION = 1.5;
 
   // Phase 2 Enhanced Monitoring: WebSocket message rate counters (C2)
   private readonly wsMessageCounts = new Map<string, number>();
@@ -1889,6 +1893,17 @@ export class ChainDetectorInstance extends EventEmitter {
 
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
 
+      // M-002 FIX: Reject synthetic reserves that deviate >50% from last known price.
+      // Prevents flash-loan manipulation from injecting false arbitrage signals.
+      if (pair.reserve0BigInt && pair.reserve0BigInt > 0n && pair.reserve1BigInt && pair.reserve1BigInt > 0n) {
+        const oldPrice = calculatePriceFromBigIntReserves(pair.reserve0BigInt, pair.reserve1BigInt);
+        const newPrice = calculatePriceFromBigIntReserves(tokensSold, tokensBought);
+        if (oldPrice !== null && oldPrice > 0 && newPrice !== null && newPrice > 0) {
+          const ratio = newPrice / oldPrice;
+          if (ratio > ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION || ratio < 1 / ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION) return;
+        }
+      }
+
       // Update reserves with swap amounts as synthetic reserves.
       // P0 Fix DET-001: Mark as synthetic so detection applies confidence discount.
       // Swap amounts reflect marginal exchange rate, not actual pool liquidity.
@@ -1952,6 +1967,16 @@ export class ChainDetectorInstance extends EventEmitter {
       if (!Number.isFinite(blockNumber)) return;
 
       this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${poolAddress}`);
+
+      // M-002 FIX: Reject synthetic reserves that deviate >50% from last known price.
+      if (pair.reserve0BigInt && pair.reserve0BigInt > 0n && pair.reserve1BigInt && pair.reserve1BigInt > 0n) {
+        const oldPrice = calculatePriceFromBigIntReserves(pair.reserve0BigInt, pair.reserve1BigInt);
+        const newPrice = calculatePriceFromBigIntReserves(amountIn, amountOut);
+        if (oldPrice !== null && oldPrice > 0 && newPrice !== null && newPrice > 0) {
+          const ratio = newPrice / oldPrice;
+          if (ratio > ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION || ratio < 1 / ChainDetectorInstance.MAX_SYNTHETIC_DEVIATION) return;
+        }
+      }
 
       // Use swap amounts as synthetic reserves (marginal exchange rate).
       // P0 Fix DET-001: Mark as synthetic so detection applies confidence discount.

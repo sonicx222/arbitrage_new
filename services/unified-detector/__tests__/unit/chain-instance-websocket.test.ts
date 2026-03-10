@@ -168,9 +168,9 @@ jest.mock('@arbitrage/config', () => ({
   },
   isVaultModelDex: jest.fn().mockReturnValue(false),
   DETECTOR_CONFIG: {
-    ethereum: { minProfitPercentage: 0.003 },
-    bsc: { minProfitPercentage: 0.005 },
-    polygon: { minProfitPercentage: 0.003 },
+    ethereum: { batchSize: 15, batchTimeout: 50, healthCheckInterval: 30000, confidence: 0.75, expiryMs: 15000, gasEstimate: 250000, whaleThreshold: 100000, nativeTokenKey: 'weth' },
+    bsc: { batchSize: 20, batchTimeout: 30, healthCheckInterval: 30000, confidence: 0.85, expiryMs: 5000, gasEstimate: 150000, whaleThreshold: 50000, nativeTokenKey: 'nativeWrapper' },
+    polygon: { batchSize: 20, batchTimeout: 30, healthCheckInterval: 30000, confidence: 0.8, expiryMs: 5000, gasEstimate: 150000, whaleThreshold: 50000, nativeTokenKey: 'nativeWrapper' },
   },
   TOKEN_METADATA: {
     ethereum: {

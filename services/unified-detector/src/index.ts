@@ -252,7 +252,8 @@ function createHealthServer(port: number): Server {
           lines.push('# HELP detector_chain_events_total Events per chain');
           lines.push('# TYPE detector_chain_events_total counter');
           for (const [chain, chainStats] of stats.chainStats) {
-            lines.push(`detector_chain_events_total{chain="${chain}"} ${chainStats.eventsProcessed}`);
+            const safeChain = chain.replace(/[^a-zA-Z0-9_-]/g, '_');
+            lines.push(`detector_chain_events_total{chain="${safeChain}"} ${chainStats.eventsProcessed}`);
           }
 
           res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
@@ -336,7 +337,7 @@ detector.on('opportunity', (opp) => {
         });
       })
       .finally(() => {
-        inFlightPublishes--;
+        inFlightPublishes = Math.max(0, inFlightPublishes - 1);
       });
   }
 });
