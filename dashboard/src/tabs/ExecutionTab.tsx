@@ -4,7 +4,7 @@ import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate } from '../lib/format';
-import { CHART } from '../lib/theme';
+import { CHART, TOOLTIP_STYLE, MAX_ERROR_DISPLAY } from '../lib/theme';
 
 const EXPLORER_URLS: Record<string, string> = {
   ethereum: 'https://etherscan.io/tx/',
@@ -60,7 +60,7 @@ export function ExecutionTab() {
               <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
               <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
               <YAxis tick={{ fontSize: 9, fill: CHART.tick }} />
-              <Tooltip contentStyle={{ background: CHART.tooltipBg, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 11, color: CHART.tooltipText }} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Line type="monotone" dataKey="latency" stroke={CHART.line1} dot={false} strokeWidth={1.5} />
             </LineChart>
           </ResponsiveContainer>
@@ -72,7 +72,7 @@ export function ExecutionTab() {
               <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
               <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
               <YAxis tick={{ fontSize: 9, fill: CHART.tick }} domain={[0, 100]} />
-              <Tooltip contentStyle={{ background: CHART.tooltipBg, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 11, color: CHART.tooltipText }} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Line type="monotone" dataKey="successRate" stroke={CHART.line2} dot={false} strokeWidth={1.5} />
             </LineChart>
           </ResponsiveContainer>
@@ -93,7 +93,8 @@ export function ExecutionTab() {
                 <th className="text-left py-1 px-2">Status</th>
                 <th className="text-left py-1 px-2">Chain</th>
                 <th className="text-left py-1 px-2">DEX</th>
-                <th className="text-right py-1 px-2">Profit</th>
+                <th className="text-right py-1 px-2">Profit (USD)</th>
+                <th className="text-right py-1 px-2">Gas</th>
                 <th className="text-right py-1 px-2">Latency</th>
                 <th className="text-left py-1 px-2">Tx</th>
               </tr>
@@ -113,8 +114,9 @@ export function ExecutionTab() {
                     <td className="py-1 px-2 text-gray-300 uppercase">{exec.chain}</td>
                     <td className="py-1 px-2 text-gray-400">{exec.dex}</td>
                     <td className="py-1 px-2 text-right">
-                      {exec.success && exec.actualProfit != null ? formatUsd(exec.actualProfit) : exec.error?.slice(0, 20) ?? '-'}
+                      {exec.success && exec.actualProfit != null ? formatUsd(exec.actualProfit) : exec.error?.slice(0, MAX_ERROR_DISPLAY) ?? '-'}
                     </td>
+                    <td className="py-1 px-2 text-right text-gray-500">{exec.gasCost != null ? formatUsd(exec.gasCost) : '-'}</td>
                     <td className="py-1 px-2 text-right text-gray-500">{exec.latencyMs != null ? `${exec.latencyMs}ms` : '-'}</td>
                     <td className="py-1 px-2">
                       {exec.transactionHash ? (
@@ -133,7 +135,7 @@ export function ExecutionTab() {
                 );
               })}
               {executions.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-4 text-gray-600">No executions yet</td></tr>
+                <tr><td colSpan={8} className="text-center py-4 text-gray-600">No executions yet</td></tr>
               )}
             </tbody>
           </table>

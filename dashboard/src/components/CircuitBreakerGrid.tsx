@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { useServices } from '../context/SSEContext';
 import { useCircuitBreakerOpen, useCircuitBreakerClose } from '../hooks/useApi';
 import { ConfirmModal } from './ConfirmModal';
 import { statusColor, statusDot } from '../lib/format';
 
-export function CircuitBreakerGrid() {
+export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
   const { circuitBreaker } = useServices();
   const openMutation = useCircuitBreakerOpen();
   const closeMutation = useCircuitBreakerClose();
@@ -90,4 +90,4 @@ export function CircuitBreakerGrid() {
       </ConfirmModal>
     </div>
   );
-}
+});

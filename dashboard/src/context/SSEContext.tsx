@@ -82,7 +82,9 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
       return { ...state, feed: [item, ...state.feed.slice(0, MAX_FEED - 1)], nextFeedId: counter, lastEventTime };
     }
     case 'reset':
-      return { ...initialState, lastEventTime: Date.now() };
+      // L-01 FIX: Preserve chartData/lagData for visual continuity on reconnect.
+      // Only reset feed/nextFeedId so charts don't empty on intermittent connectivity.
+      return { ...initialState, chartData: state.chartData, lagData: state.lagData, lastEventTime: Date.now() };
     default:
       return state;
   }
@@ -212,17 +214,33 @@ export function SSEProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'reset' });
       // Backfill recent alerts that were missed during disconnect
       fetch(`/api/alerts${token ? `?token=${encodeURIComponent(token)}` : ''}`, { signal: controller.signal })
-        .then(res => res.ok ? res.json() : [])
+        .then(res => {
+          if (!res.ok) {
+            // M-11 FIX: Log backfill failures instead of silently discarding.
+            console.warn(`[SSE] Alert backfill failed: ${res.status}`);
+            return [];
+          }
+          return res.json();
+        })
         .then((alerts: unknown[]) => {
           if (Array.isArray(alerts)) {
+            // M-11 FIX: Dedup by timestamp+type to prevent duplicates from
+            // alerts arriving via SSE between reset and backfill completion.
+            const seen = new Set<string>();
             for (const alert of alerts.slice(0, 20)) {
-              if (validatePayload('alert', alert)) {
-                dispatch({ type: 'alert', payload: alert } as SSEAction);
-              }
+              if (!validatePayload('alert', alert)) continue;
+              const a = alert as Record<string, unknown>;
+              const key = `${a.type}-${a.timestamp}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              dispatch({ type: 'alert', payload: alert } as SSEAction);
             }
           }
         })
-        .catch(() => { /* Aborted or network error — alerts will arrive via SSE */ });
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          console.warn('[SSE] Alert backfill error:', err.message);
+        });
     }
     prevStatusRef.current = status;
     return () => controller.abort();

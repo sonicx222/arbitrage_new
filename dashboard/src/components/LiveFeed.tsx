@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { FeedItem } from '../lib/types';
 import { formatTime, formatUsd } from '../lib/format';
+import { MAX_ERROR_DISPLAY } from '../lib/theme';
 
 interface Props {
   items: FeedItem[];
@@ -36,7 +37,7 @@ export const LiveFeed = memo(function LiveFeed({ items }: Props) {
                 <span className="ml-auto">
                   {item.data.success && item.data.actualProfit != null
                     ? formatUsd(item.data.actualProfit)
-                    : item.data.error?.slice(0, 30)}
+                    : item.data.error?.slice(0, MAX_ERROR_DISPLAY)}
                 </span>
               </>
             ) : (

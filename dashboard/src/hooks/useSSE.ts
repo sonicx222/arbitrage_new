@@ -47,6 +47,11 @@ export function useSSE({ url, onEvent }: UseSSEOptions) {
       });
     }
 
+    // L-02 FIX: Log unknown SSE event types so new backend events aren't silently dropped.
+    es.addEventListener('message', (e: MessageEvent) => {
+      console.warn('[SSE] Unknown event type (generic message):', (e.data as string)?.slice?.(0, 200));
+    });
+
     return es;
   }, [url]);
 

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAckAlert, fetchJson } from '../hooks/useApi';
 import { formatTime } from '../lib/format';
 import type { Alert } from '../lib/types';
 
-export function AlertsTable() {
+export const AlertsTable = memo(function AlertsTable() {
   const ackAlert = useAckAlert();
   const queryClient = useQueryClient();
   const [actionMsg, setActionMsg] = useState('');
@@ -54,7 +54,7 @@ export function AlertsTable() {
                       const cooldownKey = `${alert.type}_${alert.service ?? 'system'}`;
                       ackAlert.mutate(cooldownKey, {
                         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alerts'] }),
-                        onError: (err) => { setActionMsg(`Ack failed: ${err.message}`); setTimeout(() => setActionMsg(''), 5000); },
+                        onError: (err) => { setActionMsg(`Ack failed: ${err.message}`); setTimeout(() => setActionMsg(''), 10000); },
                       });
                     }}
                     className="px-2 py-0.5 text-[10px] rounded bg-gray-700 text-gray-400 hover:text-gray-200"
@@ -72,4 +72,4 @@ export function AlertsTable() {
       </div>
     </div>
   );
-}
+});

@@ -279,6 +279,25 @@ describe('reducer', () => {
     expect(reset.lastEventTime).toBe(NOW);
   });
 
+  it('preserves chartData and lagData on reset (L-01)', () => {
+    // Build state with chart data and lag data
+    let state = reducer(initialState, { type: 'metrics', payload: metricsPayload });
+    expect(state.chartData).toHaveLength(1);
+
+    const streams: StreamHealth = {
+      'stream:opps': { length: 100, pending: 10, consumerGroups: 1, status: 'healthy' },
+    };
+    state = reducer(state, { type: 'streams', payload: streams });
+    expect(state.lagData).toHaveLength(1);
+
+    // Reset should clear feed but keep chart/lag data
+    const reset = reducer(state, { type: 'reset' });
+    expect(reset.feed).toHaveLength(0);
+    expect(reset.metrics).toBeNull();
+    expect(reset.chartData).toHaveLength(1);
+    expect(reset.lagData).toHaveLength(1);
+  });
+
   it('returns same state for unknown action type', () => {
     const state = reducer(initialState, { type: 'bogus' } as never);
     expect(state).toBe(initialState);

@@ -5,7 +5,7 @@ import { useStreams, useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber } from '../lib/format';
-import { CHART } from '../lib/theme';
+import { CHART, TOOLTIP_STYLE } from '../lib/theme';
 
 interface RedisStats {
   byCategory?: Record<string, number>;
@@ -91,7 +91,7 @@ export function StreamsTab() {
             <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
             <XAxis dataKey="time" tick={{ fontSize: 9, fill: CHART.tick }} />
             <YAxis tick={{ fontSize: 9, fill: CHART.tick }} />
-            <Tooltip contentStyle={{ background: CHART.tooltipBg, border: `1px solid ${CHART.tooltipBorder}`, fontSize: 11, color: CHART.tooltipText }} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
             <Area type="monotone" dataKey="pending" stroke={CHART.area1} fill={CHART.area1} fillOpacity={0.1} />
           </AreaChart>
         </ResponsiveContainer>

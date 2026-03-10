@@ -132,7 +132,10 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
   const label = status !== 'connected' ? status : isStale ? 'stale' : 'live';
 
   return (
-    <div className="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs bg-[var(--badge-bg)]">
+    <div
+      className="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs bg-[var(--badge-bg)]"
+      title={lastEventTime ? `Last event: ${new Date(lastEventTime).toLocaleTimeString()}` : 'No events received'}
+    >
       <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === 'connected' && !isStale ? 'animate-pulse' : ''}`} />
       <span className="text-gray-500">{label}</span>
       {/* M-03 FIX: Reconnect button for permanent SSE disconnection (CLOSED state). */}
@@ -240,6 +243,18 @@ export default function App() {
   // M-03 FIX: Reconnect forces SSEProvider remount via key increment.
   const handleReconnect = useCallback(() => {
     setSSEKey((k) => k + 1);
+  }, []);
+
+  // L-07 FIX: Cross-tab auth sync. When another tab removes the token from
+  // localStorage, this tab detects it via the storage event and logs out.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'dashboard_token' && !e.newValue) {
+        setAuthed(false);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // H-03 FIX: ErrorBoundary wraps both LoginScreen and SSEProvider so render

@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSetLogLevel, fetchJson } from '../hooks/useApi';
 
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 
-export function LogLevelControl() {
+export const LogLevelControl = memo(function LogLevelControl() {
   const setLogLevel = useSetLogLevel();
   const [activeLogLevel, setActiveLogLevel] = useState<string>('info');
   const [logLevelMsg, setLogLevelMsg] = useState('');
@@ -58,4 +58,4 @@ export function LogLevelControl() {
       {logLevelMsg && <div className="text-[10px] text-accent-blue">{logLevelMsg}</div>}
     </div>
   );
-}
+});
