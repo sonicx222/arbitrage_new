@@ -499,7 +499,11 @@ export class StreamHealthMonitor {
   }
 
   /**
-   * Get stream metrics including throughput
+   * Get stream metrics including throughput.
+   *
+   * SC-M-004 FIX: consumerCount now fetched from XINFO GROUPS (was hardcoded 0).
+   * SC-L-003 FIX: oldestMessageAge now calculated from first entry's message ID
+   *               timestamp (Redis stream IDs are {timestamp}-{seq}).
    */
   async getStreamMetrics(streamName: string): Promise<StreamMetrics> {
     await this.ensureInitialized();
@@ -530,13 +534,39 @@ export class StreamHealthMonitor {
       this.logger.debug(`Failed to get pending count for ${streamName}:${this.defaultConsumerGroup}`, { error });
     }
 
+    // SC-M-004 FIX: Get real consumer count from XINFO GROUPS
+    let consumerCount = 0;
+    try {
+      const groups = await this.streamsClient!.xinfoGroups(streamName);
+      for (const group of groups) {
+        consumerCount += group.consumers;
+      }
+    } catch {
+      // Stream may not have groups yet — leave consumerCount as 0
+    }
+
+    // SC-L-003 FIX: Calculate oldest message age from first entry's ID
+    // Redis stream IDs are {timestamp_ms}-{seq}, so we parse the timestamp portion
+    let oldestMessageAge = 0;
+    try {
+      const info = await this.streamsClient!.xinfo(streamName);
+      if (info.firstEntry) {
+        const tsMs = parseInt(info.firstEntry.id.split('-')[0], 10);
+        if (!isNaN(tsMs)) {
+          oldestMessageAge = Math.max(0, now - tsMs);
+        }
+      }
+    } catch {
+      // Stream may not exist yet — leave oldestMessageAge as 0
+    }
+
     return {
       streamName,
       length,
       messagesPerSecond,
       pendingCount,
-      consumerCount: 0, // Would need XINFO GROUPS for this
-      oldestMessageAge: 0 // Would need to parse message IDs
+      consumerCount,
+      oldestMessageAge
     };
   }
 

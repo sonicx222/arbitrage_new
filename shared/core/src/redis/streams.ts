@@ -129,6 +129,14 @@ export interface PendingInfo {
   consumers: Array<{ name: string; pending: number }>;
 }
 
+/** SC-M-004 FIX: Consumer group info from XINFO GROUPS */
+export interface StreamGroupInfo {
+  name: string;
+  consumers: number;
+  pending: number;
+  lastDeliveredId: string;
+}
+
 export interface BatcherConfig {
   maxBatchSize: number;    // Maximum messages before flush
   /**
@@ -1252,6 +1260,66 @@ export class RedisStreamsClient {
   }
 
   /**
+   * SC-M-004 FIX: Get consumer group info via XINFO GROUPS.
+   * Returns all groups with their consumer counts. Used by StreamHealthMonitor
+   * to report real consumer counts instead of hardcoded 0.
+   *
+   * @param streamName - Stream to query
+   * @returns Array of group info, or empty array if stream has no groups
+   */
+  async xinfoGroups(streamName: string): Promise<StreamGroupInfo[]> {
+    try {
+      const result = await this.client.xinfo('GROUPS', streamName) as unknown[];
+      const groups: StreamGroupInfo[] = [];
+
+      if (Array.isArray(result)) {
+        for (const groupData of result) {
+          if (!Array.isArray(groupData)) continue;
+
+          const group: StreamGroupInfo = {
+            name: '',
+            consumers: 0,
+            pending: 0,
+            lastDeliveredId: '',
+          };
+
+          // ioredis returns flat key-value pairs: ['name', 'g1', 'consumers', 3, ...]
+          const arr = groupData as unknown[];
+          for (let i = 0; i < arr.length; i += 2) {
+            const key = arr[i];
+            const value = arr[i + 1];
+            switch (key) {
+              case 'name':
+                group.name = value as string;
+                break;
+              case 'consumers':
+                group.consumers = Number(value) ?? 0;
+                break;
+              case 'pending':
+                group.pending = Number(value) ?? 0;
+                break;
+              case 'last-delivered-id':
+                group.lastDeliveredId = value as string;
+                break;
+            }
+          }
+
+          groups.push(group);
+        }
+      }
+
+      return groups;
+    } catch (error: unknown) {
+      const errMsg = getErrorMessage(error);
+      if (errMsg.includes('no such key') || errMsg.includes('ERR')) {
+        return [];
+      }
+      this.logger.error('XINFO GROUPS error', { error, streamName });
+      throw error;
+    }
+  }
+
+  /**
    * Get pending messages info for a consumer group.
    * Returns default values if stream or consumer group doesn't exist.
    * This is resilient to startup conditions where groups may not be created yet.
@@ -1368,14 +1436,9 @@ export class RedisStreamsClient {
           continue;
         }
 
-        // Second pass: parse fields into object (skip 'sig' field from output)
-        const data: Record<string, unknown> = {};
-        for (let i = 0; i < fields.length; i += 2) {
-          const key = fields[i] as string;
-          if (key === 'sig') continue;
-          data[key] = fields[i + 1];
-        }
-        messages.push({ id: id as string, data });
+        // H-004 FIX: Use shared parseFieldsToMessage for consistent parsing
+        // with parseStreamResult() (JSON.parse + data.data unwrap)
+        messages.push(this.parseFieldsToMessage(id as string, fields));
       }
 
       return messages;
@@ -1554,6 +1617,29 @@ export class RedisStreamsClient {
     }
   }
 
+  /**
+   * H-004 FIX: Shared field parsing for consistent message structure.
+   * Used by both parseStreamResult() (xread/xreadgroup) and xclaim().
+   *
+   * 1. JSON.parse each field value (with fallback to raw string)
+   * 2. Skip 'sig' field from output
+   * 3. Unwrap nested data.data (xadd wraps payload in a 'data' field)
+   */
+  private parseFieldsToMessage(id: string, fields: string[]): StreamMessage {
+    const data: Record<string, unknown> = {};
+    for (let i = 0; i < fields.length; i += 2) {
+      const key = fields[i] as string;
+      if (key === 'sig') continue;
+      const value = fields[i + 1];
+      try {
+        data[key] = JSON.parse(value);
+      } catch {
+        data[key] = value;
+      }
+    }
+    return { id, data: (data.data ?? data) as Record<string, unknown> };
+  }
+
   private parseStreamResult(result: unknown[], rejectedIds?: string[]): StreamMessage[] {
     const messages: StreamMessage[] = [];
 
@@ -1596,20 +1682,8 @@ export class RedisStreamsClient {
           continue;
         }
 
-        // Second pass: parse fields into object (skip 'sig' field from output)
-        const data: Record<string, unknown> = {};
-        for (let i = 0; i < fields.length; i += 2) {
-          const key = fields[i] as string;
-          if (key === 'sig') continue; // Don't include signature in parsed data
-          const value = fields[i + 1];
-          try {
-            data[key] = JSON.parse(value);
-          } catch {
-            data[key] = value;
-          }
-        }
-
-        messages.push({ id, data: (data.data ?? data) as Record<string, unknown> });
+        // H-004 FIX: Use shared parseFieldsToMessage for consistent parsing
+        messages.push(this.parseFieldsToMessage(id, fields));
       }
     }
 
@@ -1646,6 +1720,21 @@ export class RedisStreamsClient {
         case 'groups':
           info.groups = value as number;
           break;
+        // SC-L-003 FIX: Parse first-entry/last-entry for oldest message age calculation
+        case 'first-entry': {
+          const entry = value as [string, string[]] | null;
+          if (entry && Array.isArray(entry) && entry.length >= 2) {
+            info.firstEntry = { id: entry[0], data: {} };
+          }
+          break;
+        }
+        case 'last-entry': {
+          const entry = value as [string, string[]] | null;
+          if (entry && Array.isArray(entry) && entry.length >= 2) {
+            info.lastEntry = { id: entry[0], data: {} };
+          }
+          break;
+        }
       }
     }
 

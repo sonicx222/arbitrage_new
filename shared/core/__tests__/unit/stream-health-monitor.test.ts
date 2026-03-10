@@ -42,8 +42,13 @@ const createMockStreamsClient = () => ({
     radixTreeKeys: 1,
     radixTreeNodes: 2,
     lastGeneratedId: '1234567890-0',
-    groups: 2
+    groups: 2,
+    firstEntry: { id: '1234567890-0', data: {} }
   }),
+  xinfoGroups: jest.fn<() => Promise<any>>().mockResolvedValue([
+    { name: 'coordinator-group', consumers: 3, pending: 5, lastDeliveredId: '1234567890-0' },
+    { name: 'execution-group', consumers: 2, pending: 0, lastDeliveredId: '1234567889-0' }
+  ]),
   xpending: jest.fn<() => Promise<any>>().mockResolvedValue({
     total: 5,
     smallestId: '1234-0',
@@ -162,6 +167,103 @@ describe('StreamHealthMonitor', () => {
 
       expect(typeof groupHealth).toBe('object');
       expect(groupHealth.consumers).toBeGreaterThanOrEqual(0);
+    });
+
+    // SC-M-004: consumerCount from XINFO GROUPS
+    it('should report real consumer count from XINFO GROUPS (SC-M-004)', async () => {
+      mockStreamsClient.xinfoGroups.mockResolvedValueOnce([
+        { name: 'coordinator-group', consumers: 3, pending: 5, lastDeliveredId: '1234567890-0' },
+        { name: 'execution-group', consumers: 2, pending: 0, lastDeliveredId: '1234567889-0' }
+      ]);
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+
+      expect(mockStreamsClient.xinfoGroups).toHaveBeenCalledWith('stream:price-updates');
+      // Total consumers across all groups: 3 + 2 = 5
+      expect(metrics.consumerCount).toBe(5);
+    });
+
+    it('should sum consumers across all groups (SC-M-004)', async () => {
+      mockStreamsClient.xinfoGroups.mockResolvedValueOnce([
+        { name: 'group-a', consumers: 10, pending: 0, lastDeliveredId: '0-0' },
+        { name: 'group-b', consumers: 7, pending: 0, lastDeliveredId: '0-0' },
+        { name: 'group-c', consumers: 1, pending: 0, lastDeliveredId: '0-0' }
+      ]);
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+      expect(metrics.consumerCount).toBe(18);
+    });
+
+    it('should return consumerCount 0 when no groups exist (SC-M-004)', async () => {
+      mockStreamsClient.xinfoGroups.mockResolvedValueOnce([]);
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+      expect(metrics.consumerCount).toBe(0);
+    });
+
+    it('should return consumerCount 0 when xinfoGroups throws (SC-M-004)', async () => {
+      mockStreamsClient.xinfoGroups.mockRejectedValueOnce(new Error('ERR no such key'));
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+      expect(metrics.consumerCount).toBe(0);
+    });
+
+    // SC-L-003: oldestMessageAge from first entry ID
+    it('should calculate oldest message age from first entry ID (SC-L-003)', async () => {
+      const fiveSecondsAgo = Date.now() - 5000;
+      mockStreamsClient.xinfo.mockResolvedValueOnce({
+        length: 100,
+        radixTreeKeys: 1,
+        radixTreeNodes: 2,
+        lastGeneratedId: `${Date.now()}-0`,
+        groups: 1,
+        firstEntry: { id: `${fiveSecondsAgo}-0`, data: {} }
+      });
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+
+      // Should be approximately 5000ms (allow 500ms tolerance for test execution time)
+      expect(metrics.oldestMessageAge).toBeGreaterThanOrEqual(4500);
+      expect(metrics.oldestMessageAge).toBeLessThanOrEqual(6000);
+    });
+
+    it('should return oldestMessageAge 0 when stream has no first entry (SC-L-003)', async () => {
+      mockStreamsClient.xinfo.mockResolvedValueOnce({
+        length: 0,
+        radixTreeKeys: 0,
+        radixTreeNodes: 0,
+        lastGeneratedId: '0-0',
+        groups: 0
+        // no firstEntry
+      });
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+      expect(metrics.oldestMessageAge).toBe(0);
+    });
+
+    it('should return oldestMessageAge 0 when xinfo throws (SC-L-003)', async () => {
+      // First xinfo call is for oldestMessageAge calculation
+      // The mock is set up globally but we override for this specific scenario
+      mockStreamsClient.xinfo.mockRejectedValueOnce(new Error('ERR no such key'));
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+      expect(metrics.oldestMessageAge).toBe(0);
+    });
+
+    it('should never return negative oldestMessageAge (SC-L-003)', async () => {
+      // Future timestamp (clock skew scenario)
+      const futureTimestamp = Date.now() + 60000;
+      mockStreamsClient.xinfo.mockResolvedValueOnce({
+        length: 100,
+        radixTreeKeys: 1,
+        radixTreeNodes: 2,
+        lastGeneratedId: `${futureTimestamp}-0`,
+        groups: 1,
+        firstEntry: { id: `${futureTimestamp}-0`, data: {} }
+      });
+
+      const metrics = await monitor.getStreamMetrics('stream:price-updates');
+      expect(metrics.oldestMessageAge).toBe(0);
     });
   });
 
