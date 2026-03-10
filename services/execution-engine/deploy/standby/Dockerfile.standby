@@ -5,53 +5,62 @@
 # On primary failure, it disables simulation mode and takes over execution.
 #
 # @see ADR-007: Cross-Region Failover Strategy
-# @see IMPLEMENTATION_PLAN.md Sprint 4, Task S4.1.4
-#
-# Multi-stage build for optimized image size
 
+# Stage 1: Build (needs devDependencies for TypeScript)
 FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy workspace files
+# Copy root package files for workspace setup
 COPY package*.json ./
-COPY tsconfig*.json ./
+COPY tsconfig.json ./
 
-# Copy shared packages
-COPY shared/ ./shared/
+# Copy shared packages that this service depends on
+COPY shared/types/ ./shared/types/
+COPY shared/config/ ./shared/config/
+COPY shared/core/ ./shared/core/
+COPY shared/metrics/ ./shared/metrics/
 
 # Copy execution engine service files
 COPY services/execution-engine/ ./services/execution-engine/
 
-# Install dependencies
-RUN npm install
+# Install all dependencies including devDependencies for build
+RUN npm ci --workspaces --include-workspace-root
 
-# Build shared packages first
-WORKDIR /app/shared/types
-RUN npm run build || true
-
-WORKDIR /app/shared/config
-RUN npm run build || true
-
-WORKDIR /app/shared/core
-RUN npm run build || true
+# Build shared packages in dependency order
+RUN npm run build --workspace=shared/types
+RUN npm run build --workspace=shared/config
+RUN npm run build --workspace=shared/metrics
+RUN npm run build --workspace=shared/core
 
 # Build execution engine service
-WORKDIR /app/services/execution-engine
-RUN npm run build
+RUN npm run build --workspace=services/execution-engine
 
-# Production image
+# Stage 2: Production image (only runtime dependencies)
 FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Copy built files
-COPY --from=builder /app/services/execution-engine/dist ./dist
-COPY --from=builder /app/services/execution-engine/package*.json ./
-COPY --from=builder /app/shared ./shared
+# Copy root package files for workspace setup
+COPY package*.json ./
+COPY --from=builder /app/tsconfig.json ./
+
+# Copy built shared packages (dist only)
+COPY --from=builder /app/shared/types/dist/ ./shared/types/dist/
+COPY --from=builder /app/shared/types/package.json ./shared/types/
+COPY --from=builder /app/shared/config/dist/ ./shared/config/dist/
+COPY --from=builder /app/shared/config/package.json ./shared/config/
+COPY --from=builder /app/shared/core/dist/ ./shared/core/dist/
+COPY --from=builder /app/shared/core/package.json ./shared/core/
+COPY --from=builder /app/shared/metrics/dist/ ./shared/metrics/dist/
+COPY --from=builder /app/shared/metrics/package.json ./shared/metrics/
+
+# Copy built service (dist only)
+COPY --from=builder /app/services/execution-engine/dist/ ./services/execution-engine/dist/
+COPY --from=builder /app/services/execution-engine/package.json ./services/execution-engine/
 
 # Install production dependencies only
-RUN npm install --production
+RUN npm ci --workspaces --include-workspace-root --omit=dev
 
 # ============================================================================
 # Standby Configuration (ADR-007)
@@ -72,10 +81,7 @@ ENV PROVIDER=render
 
 # CRITICAL: Start in simulation mode for safety
 # Real transactions only occur after activation
-# NOTE: Code reads EXECUTION_SIMULATION_MODE (prefixed)
 ENV EXECUTION_SIMULATION_MODE=true
-# COMPLETED S4.1.5: Activation logic implemented in engine.ts:activate()
-# activationDisablesSimulation is set to true by default in standbyConfig
 
 # Failover configuration (ADR-007: <60s total)
 ENV FAILOVER_ACTIVATION_ENDPOINT=https://coordinator.example.com/api/health
@@ -87,13 +93,18 @@ ENV QUEUE_PAUSED_ON_START=true
 # Health check port (internal)
 ENV HEALTH_CHECK_PORT=10000
 
+# Run as non-root user for security
+RUN addgroup -g 1001 -S nodejs && adduser -S executor -u 1001 -G nodejs
+USER executor
+
+EXPOSE 3005
+
+# Set working directory to the service
+WORKDIR /app/services/execution-engine
+
 # Health check
 HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
   CMD node -e "const h=require('http');h.get('http://localhost:10000/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
-
-# Run as non-root user for security
-RUN addgroup -g 1001 -S nodejs && adduser -S executor -u 1001
-USER executor
 
 # Labels for deployment tracking
 LABEL maintainer="arbitrage-team"

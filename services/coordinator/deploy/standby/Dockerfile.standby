@@ -5,68 +5,66 @@
 # leadership via Redis distributed lock on primary failure.
 #
 # @see ADR-007: Cross-Region Failover Strategy
-# @see IMPLEMENTATION_PLAN.md Sprint 4, Task S4.1.4
-#
-# Multi-stage build for optimized image size
 
+# Stage 1: Build (needs devDependencies for TypeScript)
 FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy workspace files
+# Copy root package files for workspace setup
 COPY package*.json ./
-COPY tsconfig*.json ./
+COPY tsconfig.json ./
 
-# Copy shared packages
-COPY shared/ ./shared/
+# Copy shared packages that this service depends on
+COPY shared/types/ ./shared/types/
+COPY shared/config/ ./shared/config/
+COPY shared/core/ ./shared/core/
+COPY shared/security/ ./shared/security/
 
 # Copy coordinator service files
 COPY services/coordinator/ ./services/coordinator/
 
-# Install dependencies
-RUN npm install
+# Install all dependencies including devDependencies for build
+RUN npm ci --workspaces --include-workspace-root
 
-# Build shared packages first
-WORKDIR /app/shared/types
-RUN npm run build || true
-
-WORKDIR /app/shared/config
-RUN npm run build || true
-
-WORKDIR /app/shared/core
-RUN npm run build || true
+# Build shared packages in dependency order
+RUN npm run build --workspace=shared/types
+RUN npm run build --workspace=shared/config
+RUN npm run build --workspace=shared/core
+RUN npm run build --workspace=shared/security
 
 # Build coordinator service
-WORKDIR /app/services/coordinator
-RUN npm run build
+RUN npm run build --workspace=services/coordinator
 
-# Production image
+# Stage 2: Production image (only runtime dependencies)
 FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Copy built files
-COPY --from=builder /app/services/coordinator/dist ./dist
-COPY --from=builder /app/services/coordinator/package*.json ./
-COPY --from=builder /app/shared ./shared
+# Copy root package files for workspace setup
+COPY package*.json ./
+COPY --from=builder /app/tsconfig.json ./
+
+# Copy built shared packages (dist only)
+COPY --from=builder /app/shared/types/dist/ ./shared/types/dist/
+COPY --from=builder /app/shared/types/package.json ./shared/types/
+COPY --from=builder /app/shared/config/dist/ ./shared/config/dist/
+COPY --from=builder /app/shared/config/package.json ./shared/config/
+COPY --from=builder /app/shared/core/dist/ ./shared/core/dist/
+COPY --from=builder /app/shared/core/package.json ./shared/core/
+COPY --from=builder /app/shared/security/dist/ ./shared/security/dist/
+COPY --from=builder /app/shared/security/package.json ./shared/security/
+
+# Copy built service (dist only)
+COPY --from=builder /app/services/coordinator/dist/ ./services/coordinator/dist/
+COPY --from=builder /app/services/coordinator/package.json ./services/coordinator/
 
 # Install production dependencies only
-RUN npm install --production
+RUN npm ci --workspaces --include-workspace-root --omit=dev
 
 # ============================================================================
 # Standby Configuration (ADR-007)
 # ============================================================================
-#
-# COMPLETED S4.1.5: CrossRegionHealthManager integration implemented.
-# The coordinator service now reads these env vars via getStandbyConfigFromEnv():
-# - IS_STANDBY: Marks this instance as standby (won't proactively acquire leadership)
-# - CAN_BECOME_LEADER: Controls whether this instance can acquire leadership
-# - REGION_ID: Region identifier for cross-region health monitoring
-# - LEADER_LOCK_*: Leader election settings passed to Redis distributed lock
-#
-# See: services/coordinator/src/index.ts for the integration
-# See: shared/core/src/monitoring/cross-region-health.ts for the CrossRegionHealthManager
-#
 
 # Core standby settings
 ENV NODE_ENV=production
@@ -99,17 +97,18 @@ ENV FAILOVER_TIMEOUT_MS=60000
 # HTTP port
 ENV PORT=3000
 
-# Health check
-# Check /api/health endpoint (returns 200 for healthy/degraded)
-HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
-
 # Run as non-root user for security
-RUN addgroup -g 1001 -S nodejs && adduser -S coordinator -u 1001
+RUN addgroup -g 1001 -S nodejs && adduser -S coordinator -u 1001 -G nodejs
 USER coordinator
 
-# Expose HTTP API port
 EXPOSE 3000
+
+# Set working directory to the service
+WORKDIR /app/services/coordinator
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
 # Labels for deployment tracking
 LABEL maintainer="arbitrage-team"

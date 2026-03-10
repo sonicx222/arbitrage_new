@@ -103,9 +103,8 @@ primary_region = "${region_code}"
   cpus = 1
   memory_mb = ${memory}
 
-[metrics]
-  port = 9091
-  path = "/metrics"
+# P3-007: [metrics] port=9091 removed — no process listens on 9091.
+# Prometheus metrics are served on the health check port at /metrics.
 
 [checks]
   [checks.health]
@@ -192,9 +191,8 @@ ${extra_env}
   cpus = 1
   memory_mb = ${memory}
 
-[metrics]
-  port = 9091
-  path = "/metrics"
+# P3-007: [metrics] port=9091 removed — no process listens on 9091.
+# Prometheus metrics are served on the health check port at /metrics.
 
 [checks]
   [checks.health]

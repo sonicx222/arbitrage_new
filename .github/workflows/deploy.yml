@@ -101,7 +101,7 @@ jobs:
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
-  # Phase 2: Deploy (skipped on dry run)
+  # Phase 2: Deploy to Fly.io (skipped on dry run)
   # ===========================================================================
   deploy:
     name: Deploy ${{ github.event.inputs.service }} to ${{ github.event.inputs.environment }}
@@ -115,42 +115,64 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build all packages
-        run: npm run build
-
-      # Pause execution engine before deploy to prevent bad trades during deploy window
-      - name: Pause execution engine (drain phase)
-        if: github.event.inputs.service == 'all' || github.event.inputs.service == 'execution-engine'
-        run: |
-          echo "Pausing execution engine for safe deployment..."
-          # In production, this would call the execution engine's pause endpoint
-          # curl -X POST http://$EXECUTION_ENGINE_HOST:3005/admin/pause
-          echo "Execution engine paused (simulated)"
-        continue-on-error: true
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy service(s)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          echo "Deploying ${{ github.event.inputs.service }} to ${{ github.event.inputs.environment }}..."
-          # Deployment commands would go here based on the target provider:
-          # - Oracle ARM: ssh + docker compose up
-          # - Fly.io: flyctl deploy
-          # - Koyeb: koyeb deploy
-          # - Railway: railway up
-          echo "Deployment initiated"
+          set -euo pipefail
 
-      - name: Wait for service startup
+          SERVICE="${{ github.event.inputs.service }}"
+          CONFIG_DIR="infrastructure/fly"
+
+          # Map workflow service name to Fly.io TOML config file
+          config_for_service() {
+            case "$1" in
+              coordinator)          echo "$CONFIG_DIR/coordinator.toml" ;;
+              partition-asia-fast)  echo "$CONFIG_DIR/partition-asia-fast.toml" ;;
+              partition-high-value) echo "$CONFIG_DIR/partition-high-value.toml" ;;
+              partition-l2-fast)    echo "$CONFIG_DIR/partition-l2-turbo.toml" ;;
+              partition-solana)     echo "$CONFIG_DIR/partition-solana.toml" ;;
+              execution-engine)     echo "$CONFIG_DIR/execution-engine.toml" ;;
+              cross-chain-detector) echo "$CONFIG_DIR/cross-chain-detector.toml" ;;
+              *) echo "::error::Unknown service: $1"; exit 1 ;;
+            esac
+          }
+
+          deploy_one() {
+            local svc="$1"
+            local config
+            config="$(config_for_service "$svc")"
+            echo "::group::Deploy $svc ($config)"
+            fly deploy -c "$config" --wait-timeout 300
+            echo "::endgroup::"
+          }
+
+          if [ "$SERVICE" = "all" ]; then
+            echo "Deploying all services in dependency order..."
+            # Phase A: Partitions (independent services)
+            deploy_one partition-asia-fast
+            deploy_one partition-high-value
+            deploy_one partition-l2-fast
+            deploy_one partition-solana
+            # Phase B: Dependent services
+            deploy_one cross-chain-detector
+            deploy_one execution-engine
+            deploy_one coordinator
+          else
+            deploy_one "$SERVICE"
+          fi
+
+      - name: Deployment summary
+        if: success()
         run: |
-          echo "Waiting 30s for service(s) to start..."
-          sleep 30
+          echo "## Deployment Initiated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service:** ${{ github.event.inputs.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
   # Phase 3: Post-Deploy Health Check
@@ -165,44 +187,69 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run smoke tests against deployed environment
+      - name: Verify deployed services are healthy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          echo "Running post-deploy smoke tests..."
-          # In production, these would hit the actual deployed service health endpoints:
-          # - Coordinator: GET /health (port 3000)
-          # - Partitions: GET /health (ports 3001-3004)
-          # - Execution Engine: GET /health (port 3005)
-          # - Cross-Chain: GET /health (port 3006)
-          echo "All health checks passed (simulated)"
+          set -euo pipefail
 
-      - name: Verify critical metrics
-        run: |
-          echo "Verifying critical operational metrics..."
-          # In production, this would verify:
-          # - WebSocket connections are active
-          # - Redis Streams consumers are connected
-          # - Price matrix is receiving updates
-          # - No error spikes in the last 5 minutes
-          echo "Metrics verification passed (simulated)"
+          SERVICE="${{ github.event.inputs.service }}"
+          CONFIG_DIR="infrastructure/fly"
 
-      - name: Resume execution engine
-        if: github.event.inputs.service == 'all' || github.event.inputs.service == 'execution-engine'
-        run: |
-          echo "Resuming execution engine..."
-          # curl -X POST http://$EXECUTION_ENGINE_HOST:3005/admin/resume
-          echo "Execution engine resumed (simulated)"
-        continue-on-error: true
+          config_for_service() {
+            case "$1" in
+              coordinator)          echo "$CONFIG_DIR/coordinator.toml" ;;
+              partition-asia-fast)  echo "$CONFIG_DIR/partition-asia-fast.toml" ;;
+              partition-high-value) echo "$CONFIG_DIR/partition-high-value.toml" ;;
+              partition-l2-fast)    echo "$CONFIG_DIR/partition-l2-turbo.toml" ;;
+              partition-solana)     echo "$CONFIG_DIR/partition-solana.toml" ;;
+              execution-engine)     echo "$CONFIG_DIR/execution-engine.toml" ;;
+              cross-chain-detector) echo "$CONFIG_DIR/cross-chain-detector.toml" ;;
+              *) echo "::error::Unknown service: $1"; exit 1 ;;
+            esac
+          }
+
+          check_health() {
+            local svc="$1"
+            local config
+            config="$(config_for_service "$svc")"
+            local app_name
+            app_name="$(grep '^app = ' "$config" | sed 's/app = "//;s/"//')"
+            echo "Checking health for $svc ($app_name)..."
+
+            local attempts=0
+            local max_attempts=10
+            while [ "$attempts" -lt "$max_attempts" ]; do
+              attempts=$((attempts + 1))
+              echo "  Attempt $attempts/$max_attempts..."
+              if fly status -c "$config" --json 2>/dev/null \
+                | jq -e '.Machines[] | select(.state == "started")' > /dev/null 2>&1; then
+                echo "  $svc is healthy"
+                return 0
+              fi
+              if [ "$attempts" -lt "$max_attempts" ]; then
+                sleep 15
+              fi
+            done
+
+            echo "::error::$svc failed health check after $max_attempts attempts"
+            return 1
+          }
+
+          if [ "$SERVICE" = "all" ]; then
+            for svc in partition-asia-fast partition-high-value partition-l2-fast partition-solana \
+                       cross-chain-detector execution-engine coordinator; do
+              check_health "$svc"
+            done
+          else
+            check_health "$SERVICE"
+          fi
 
       - name: Deployment summary
+        if: success()
         run: |
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -212,7 +259,7 @@ jobs:
           echo "- **Deployed at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
-  # Phase 4: Rollback (manual trigger on failure)
+  # Phase 4: Automated Rollback on Health Check Failure
   # ===========================================================================
   rollback:
     name: Rollback on Failure
@@ -221,20 +268,75 @@ jobs:
     needs: [post-deploy-health]
     if: failure()
     steps:
-      - name: Trigger rollback
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Rollback deployed services
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
+          set -uo pipefail  # no -e: continue rolling back even if one fails
+
+          SERVICE="${{ github.event.inputs.service }}"
+          CONFIG_DIR="infrastructure/fly"
+
+          config_for_service() {
+            case "$1" in
+              coordinator)          echo "$CONFIG_DIR/coordinator.toml" ;;
+              partition-asia-fast)  echo "$CONFIG_DIR/partition-asia-fast.toml" ;;
+              partition-high-value) echo "$CONFIG_DIR/partition-high-value.toml" ;;
+              partition-l2-fast)    echo "$CONFIG_DIR/partition-l2-turbo.toml" ;;
+              partition-solana)     echo "$CONFIG_DIR/partition-solana.toml" ;;
+              execution-engine)     echo "$CONFIG_DIR/execution-engine.toml" ;;
+              cross-chain-detector) echo "$CONFIG_DIR/cross-chain-detector.toml" ;;
+              *) echo "::error::Unknown service: $1"; return 1 ;;
+            esac
+          }
+
+          rollback_one() {
+            local svc="$1"
+            local config
+            config="$(config_for_service "$svc")"
+            echo "::group::Rollback $svc"
+            # Get previous release image and redeploy it
+            local prev_image
+            prev_image=$(fly releases list -c "$config" --json 2>/dev/null \
+              | jq -r '.[1].ImageRef // empty' 2>/dev/null || true)
+            if [ -n "$prev_image" ]; then
+              echo "Redeploying previous image: $prev_image"
+              fly deploy -c "$config" --image "$prev_image" --wait-timeout 300 \
+                || echo "::warning::Automated rollback failed for $svc"
+            else
+              echo "::warning::No previous release found for $svc — manual rollback required"
+            fi
+            echo "::endgroup::"
+          }
+
           echo "::error::Post-deploy health check failed! Initiating rollback..."
+
+          if [ "$SERVICE" = "all" ]; then
+            # Rollback in reverse deploy order
+            for svc in coordinator execution-engine cross-chain-detector \
+                       partition-solana partition-l2-fast partition-high-value partition-asia-fast; do
+              rollback_one "$svc"
+            done
+          else
+            rollback_one "$SERVICE"
+          fi
+
+      - name: Rollback summary
+        if: always()
+        run: |
           echo "## ROLLBACK TRIGGERED" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Post-deploy health checks failed for ${{ github.event.inputs.service }}." >> $GITHUB_STEP_SUMMARY
-          echo "Manual intervention required to rollback to previous version." >> $GITHUB_STEP_SUMMARY
+          echo "Post-deploy health checks failed for **${{ github.event.inputs.service }}**." >> $GITHUB_STEP_SUMMARY
+          echo "Automated rollback attempted — check logs above for results." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Rollback Steps:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Check the failed health check logs above" >> $GITHUB_STEP_SUMMARY
-          echo "2. SSH to the target host and roll back the container/service" >> $GITHUB_STEP_SUMMARY
-          echo "3. Verify health endpoint returns 200" >> $GITHUB_STEP_SUMMARY
-          echo "4. Resume execution engine if it was paused" >> $GITHUB_STEP_SUMMARY
-          # In production, automatic rollback would:
-          # - Redeploy the previous Docker image tag
-          # - Or: flyctl deploy --image <previous-image>
-          # - Or: railway rollback
+          echo "### If automated rollback failed:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check the failed health check and rollback logs above" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run \`fly releases list -c infrastructure/fly/<service>.toml\` to find previous release" >> $GITHUB_STEP_SUMMARY
+          echo "3. Redeploy: \`fly deploy -c infrastructure/fly/<service>.toml --image <previous-image>\`" >> $GITHUB_STEP_SUMMARY
+          echo "4. Verify: \`fly status -c infrastructure/fly/<service>.toml\`" >> $GITHUB_STEP_SUMMARY
