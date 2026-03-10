@@ -451,8 +451,16 @@ export class OpportunityRouter {
     const timestamp = parseNumericField(data.timestamp) ?? Date.now();
 
     // Duplicate detection
+    // M-03 FIX: Use chain-aware dedup window. Fast chains (Solana 400ms, Arbitrum 250ms)
+    // produce distinct opportunities faster than the default 5s window, which was filtering
+    // legitimate opportunities. Use 1/4 of the chain's TTL override, floored at 500ms.
+    const chain = (data.chain as string | undefined) ?? '';
+    const chainTtl = this.config.chainTtlOverrides[chain];
+    const dedupWindow = chainTtl
+      ? Math.max(Math.floor(chainTtl / 4), 500)
+      : this.config.duplicateWindowMs;
     const existing = this.opportunities.get(id);
-    if (existing && Math.abs((existing.timestamp ?? 0) - timestamp) < this.config.duplicateWindowMs) {
+    if (existing && Math.abs((existing.timestamp ?? 0) - timestamp) < dedupWindow) {
       this._rejectedDuplicate++;
       this.logger.debug('Duplicate opportunity detected, skipping', {
         id,
@@ -831,6 +839,8 @@ export class OpportunityRouter {
         expectedProfit: parseNumericField(opp.data.expectedProfit),
         confidence: parseNumericField(opp.data.confidence),
         expiresAt: opp.expiresAt,
+        // M-01 FIX: Pass gas cost for chain-aware scoring
+        estimatedGasCostUsd: parseNumericField(opp.data.gasCost),
       }, now);
     }
     // Safe cast: all candidates now have _score set by the loop above

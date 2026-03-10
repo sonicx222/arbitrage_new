@@ -24,6 +24,9 @@ export interface ScorableOpportunity {
   confidence?: number;
   expiresAt?: number;
   timestamp?: number;
+  /** M-01 FIX: Estimated gas cost in USD. Subtracted from profit before scoring
+   * so L1 opportunities (high gas) score lower than L2 (low gas) at equal profit. */
+  estimatedGasCostUsd?: number;
 }
 
 /** Default TTL when expiresAt is not available (60 seconds) */
@@ -40,11 +43,19 @@ const MIN_TTL_FLOOR_MS = 100;
  * @returns Non-negative score. Higher = more valuable. 0 = should not execute.
  */
 export function scoreOpportunity(opp: ScorableOpportunity, now: number): number {
-  const profit = opp.expectedProfit;
+  let profit = opp.expectedProfit;
 
   // Guard: no profit, negative profit, NaN, or Infinity → score 0
   if (profit === undefined || profit === null || profit <= 0 || !Number.isFinite(profit)) {
     return 0;
+  }
+
+  // M-01 FIX: Subtract estimated gas cost so chain-aware scoring works.
+  // L1 opportunities (gas $20+) score lower than L2 (gas $0.10) at equal profit.
+  const gasCost = opp.estimatedGasCostUsd;
+  if (gasCost !== undefined && gasCost !== null && Number.isFinite(gasCost) && gasCost > 0) {
+    profit = profit - gasCost;
+    if (profit <= 0) return 0;
   }
 
   // Confidence: default to 0.5 if missing or invalid

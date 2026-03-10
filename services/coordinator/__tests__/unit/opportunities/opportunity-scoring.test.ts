@@ -175,6 +175,107 @@ describe('scoreOpportunity', () => {
     });
   });
 
+  describe('gas cost deduction (M-01)', () => {
+    it('should subtract estimatedGasCostUsd from profit before scoring', () => {
+      const opp = createScorableOpp({
+        expectedProfit: 5.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 2.0,
+      });
+
+      // (5.0 - 2.0) × 0.8 × (1 / 5000) = 0.00048
+      expect(scoreOpportunity(opp, NOW)).toBeCloseTo(0.00048, 8);
+    });
+
+    it('should return 0 when gas cost exceeds profit', () => {
+      const opp = createScorableOpp({
+        expectedProfit: 5.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 6.0,
+      });
+
+      expect(scoreOpportunity(opp, NOW)).toBe(0);
+    });
+
+    it('should return 0 when gas cost equals profit', () => {
+      const opp = createScorableOpp({
+        expectedProfit: 5.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 5.0,
+      });
+
+      expect(scoreOpportunity(opp, NOW)).toBe(0);
+    });
+
+    it('should rank L2 opportunity higher than L1 at same raw profit', () => {
+      const l1Opp = createScorableOpp({
+        expectedProfit: 10.0,
+        confidence: 0.9,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 8.0, // High L1 gas
+      });
+      const l2Opp = createScorableOpp({
+        expectedProfit: 10.0,
+        confidence: 0.9,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 0.1, // Low L2 gas
+      });
+
+      expect(scoreOpportunity(l2Opp, NOW)).toBeGreaterThan(scoreOpportunity(l1Opp, NOW));
+    });
+
+    it('should ignore gas cost when undefined', () => {
+      const withGas = createScorableOpp({
+        expectedProfit: 1.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: undefined,
+      });
+      const withoutGas = createScorableOpp({
+        expectedProfit: 1.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+      });
+
+      expect(scoreOpportunity(withGas, NOW)).toBe(scoreOpportunity(withoutGas, NOW));
+    });
+
+    it('should ignore gas cost when zero', () => {
+      const opp = createScorableOpp({
+        expectedProfit: 1.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 0,
+      });
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+      });
+
+      expect(scoreOpportunity(opp, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+
+    it('should ignore gas cost when NaN', () => {
+      const opp = createScorableOpp({
+        expectedProfit: 1.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: NaN,
+      });
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+      });
+
+      expect(scoreOpportunity(opp, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+  });
+
   describe('scoring order for sorting', () => {
     it('should rank high-profit urgent opportunity above low-profit non-urgent', () => {
       const highProfitUrgent = createScorableOpp({

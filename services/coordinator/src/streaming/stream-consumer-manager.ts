@@ -134,6 +134,8 @@ export class StreamConsumerManager {
   private streamConsumerErrors = 0;
   private alertSentForCurrentErrorBurst = false;
   private sendingStreamErrorAlert = false;
+  // M-04 FIX: Counter for DLQ fallback file drops (100MB limit reached)
+  private _dlqFileDrops = 0;
 
   constructor(
     streamsClient: StreamsClient,
@@ -539,12 +541,14 @@ export class StreamConsumerManager {
       try {
         const stat = await fsPromises.stat(filePath);
         if (stat.size >= StreamConsumerManager.MAX_DLQ_FILE_BYTES) {
+          this._dlqFileDrops++;
           this.logger.warn('DLQ fallback file size limit reached, dropping message', {
             filePath,
             sizeBytes: stat.size,
             limitBytes: StreamConsumerManager.MAX_DLQ_FILE_BYTES,
             originalMessageId: message.id,
             sourceStream,
+            dlqFileDropsTotal: this._dlqFileDrops,
           });
           return;
         }
@@ -577,10 +581,16 @@ export class StreamConsumerManager {
   /**
    * Reset all internal state (for testing)
    */
+  /** M-04 FIX: Number of DLQ fallback messages dropped due to 100MB file size limit. */
+  get dlqFileDrops(): number {
+    return this._dlqFileDrops;
+  }
+
   reset(): void {
     this.streamConsumerErrors = 0;
     this.alertSentForCurrentErrorBurst = false;
     this.sendingStreamErrorAlert = false;
+    this._dlqFileDrops = 0;
     this.rateLimiter.reset();
   }
 }
