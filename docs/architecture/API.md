@@ -66,7 +66,7 @@ If neither `JWT_SECRET` nor `API_KEYS` is set **and** `NODE_ENV` is `test` or `d
 
 ### Middleware
 
-- `apiAuth(options?)` -- Unified middleware that tries API key first, then JWT. Used on coordinator `/api/metrics`, `/api/services`, `/api/opportunities`, `/api/alerts`, `/api/leader`, `/api/redis/*`, and admin routes.
+- `apiAuth(options?)` -- Unified middleware that tries API key first, then JWT. Used on coordinator `/api/metrics`, `/api/services`, `/api/opportunities`, `/api/alerts`, `/api/leader`, `/api/diagnostics`, `/api/redis/*`, and admin routes.
 - `apiAuthorize(resource, action)` -- Permission check middleware. Checks `action:resource` against user permissions (supports wildcards like `read:*` or `*:*`).
 
 ---
@@ -208,6 +208,41 @@ Returns Redis command usage statistics. Has a 5-second timeout for Redis connect
 
 Returns a text/plain formatted Redis usage dashboard. Has a 5-second timeout. Returns 504 on timeout, 500 on other errors.
 
+#### GET /api/diagnostics
+
+**Auth:** Required. Permission: `read:metrics`.
+
+Returns a full `DiagnosticsSnapshot` aggregated from all 4 runtime monitors (LatencyTracker, RuntimeMonitor, ProviderLatencyTracker, StreamHealthMonitor). Same data as the SSE `diagnostics` event but available as a one-shot REST call for monitoring scripts.
+
+**Response shape:**
+```json
+{
+  "timestamp": 1741622400000,
+  "pipeline": {
+    "e2e": { "p50": 12.3, "p95": 25.1, "p99": 45.2, "count": 1000 },
+    "wsToDetector": { "p50": 5.1, "p95": 10.2, "p99": 18.0, "count": 1000 },
+    "detectorToPublish": { "p50": 7.2, "p95": 14.9, "p99": 27.2, "count": 1000 },
+    "stages": { "ws_ingest": { "p50": 2.0, "p95": 5.0, "p99": 8.0, "count": 500 } }
+  },
+  "runtime": {
+    "eventLoop": { "p50": 1.2, "p95": 3.5, "p99": 8.0, "min": 0.5, "mean": 1.8, "max": 15.0 },
+    "memory": { "heapUsedMB": 85, "heapTotalMB": 120, "rssMB": 150, "externalMB": 10 },
+    "gc": { "totalPauseMs": 45, "count": 120, "majorCount": 3 },
+    "uptimeSeconds": 3600
+  },
+  "providers": {
+    "rpcByChain": { "bsc": { "p50": 50, "p95": 120, "errors": 0, "totalCalls": 500 } },
+    "rpcByMethod": { "eth_call": { "p50": 45, "p95": 100, "totalCalls": 300 } },
+    "wsMessages": { "bsc:swap": 1500, "ethereum:sync": 800 },
+    "totalRpcErrors": 0,
+    "reconnections": {}
+  },
+  "streams": { "overall": "healthy", "streams": {} }
+}
+```
+
+Returns 500 if DiagnosticsCollector.collect() fails.
+
 #### GET /api/metrics/prometheus
 
 **Auth:** Required. Permission: `read:metrics`.
@@ -234,7 +269,7 @@ Returns stream health metrics in Prometheus text exposition format (`text/plain;
 
 **Auth:** `DASHBOARD_AUTH_TOKEN` via query parameter (`?token=<token>`). Uses `crypto.timingSafeEqual` for timing-safe comparison.
 
-Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 6 event types at different intervals:
+Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 7 event types at different intervals:
 
 | Event | Frequency | Payload |
 |-------|-----------|---------|
@@ -242,6 +277,7 @@ Server-Sent Events endpoint that streams real-time system data to the dashboard.
 | `services` | 5s | `Record<string, ServiceHealth>` — all service health keyed by name |
 | `circuit-breaker` | 5s | `CircuitBreakerStatus` — state, failures, cooldown |
 | `streams` | 10s | `StreamHealth` — per-stream length, pending, consumer groups |
+| `diagnostics` | 10s | `DiagnosticsSnapshot` — pipeline latency, runtime health, provider quality, stream health |
 | `execution-result` | On event | `ExecutionResult` — individual trade result (success, profit, chain, tx hash) |
 | `alert` | On event | `Alert` — system alert with type, severity, service, message |
 

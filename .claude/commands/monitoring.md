@@ -1,6 +1,17 @@
 # Pre-Deploy Validation
 # Single-Orchestrator Pipeline — Redis Streams + 7 Services
-# Version: 3.0
+# Version: 3.1
+#
+# Changelog v3.1 (2026-03-10):
+#   - Added DiagnosticsCollector support: SSE 'diagnostics' event (10s periodic),
+#     GET /api/diagnostics REST endpoint, DiagnosticsSnapshot type sync audit
+#   - Updated Check 3AK: SSE now emits 4 events on connect + 3 periodic (was 3+3)
+#   - Updated Check 3AL: Client listens for 7 event types (was 6), server emits 7 (was 6)
+#   - Updated Check 3AM: Added DiagnosticsSnapshot + CompactPercentiles to type sync audit
+#   - Updated Check 3AN: Added /api/diagnostics REST endpoint validation
+#   - Added Check 3AR: Diagnostics aggregated snapshot validation (pipeline, runtime, providers)
+#   - Updated Checks 3O/3P/3Q: Added /api/diagnostics as aggregated one-shot alternative
+#   - Updated Phase 3 summary: 44 checks (was 43), 9 subsections
 #
 # Changelog v3.0 (2026-03-06):
 #   - Phase 3 restructured into 8 subsections (35 checks, was 18)
@@ -1898,6 +1909,13 @@ category: `RUNTIME_PERFORMANCE` (severe event loop stall — likely GC or sync I
 (RuntimeMonitor may not be started — check service index.ts for `getRuntimeMonitor().start()`).
 **Info:** All services p99 < 20ms → severity: **INFO**, category: `RUNTIME_PERFORMANCE`.
 
+**Aggregated alternative (v3.1):** The coordinator's `/api/diagnostics` endpoint returns
+event loop metrics in `runtime.eventLoop` (p50/p95/p99/min/mean/max) aggregated from
+the RuntimeMonitor. Use this for a single-call coordinator-level check:
+```bash
+curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.eventLoop'
+```
+
 ---
 
 ### Check 3P — GC Pressure (B2)
@@ -1924,6 +1942,12 @@ category: `RUNTIME_PERFORMANCE` (significant time spent in GC).
 **Flag:** Major GC count > total GC count * 0.1 → severity: **HIGH**,
 category: `RUNTIME_PERFORMANCE` (>10% of GCs are major — heap pressure).
 **Info:** Report GC metrics per service for the report.
+
+**Aggregated alternative (v3.1):** The coordinator's `/api/diagnostics` endpoint returns
+GC metrics in `runtime.gc` (totalPauseMs, count, majorCount):
+```bash
+curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.gc'
+```
 
 ---
 
@@ -1952,6 +1976,12 @@ category: `MEMORY` (heap pressure — approaching OOM).
 (SharedArrayBuffer/external memory growth — check L1 price matrix).
 **Flag:** Memory metrics not present → severity: **LOW**, category: `MEMORY`
 (fall back to /health memoryUsage field).
+
+**Aggregated alternative (v3.1):** The coordinator's `/api/diagnostics` endpoint returns
+memory metrics in `runtime.memory` (heapUsedMB, heapTotalMB, rssMB, externalMB):
+```bash
+curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '.runtime.memory'
+```
 
 Also check Redis memory:
 ```bash
@@ -2578,7 +2608,7 @@ category: `DASHBOARD_AVAILABILITY`.
 
 **Goal:** Verify the SSE endpoint is accessible and emitting data with correct
 event types and data shapes. The dashboard depends entirely on SSE for real-time
-data — if SSE is broken, all 6 tabs show "Waiting for data...".
+data — if SSE is broken, all 8 tabs show "Waiting for data...".
 
 **Method:**
 1. Connect to the SSE endpoint and capture the first events (sent immediately on connect):
@@ -2586,12 +2616,14 @@ data — if SSE is broken, all 6 tabs show "Waiting for data...".
 TOKEN="${DASHBOARD_AUTH_TOKEN:-}"
 URL="http://localhost:3000/api/events"
 if [ -n "$TOKEN" ]; then URL="$URL?token=$TOKEN"; fi
-timeout 10 curl -sf -N "$URL" 2>/dev/null | head -40 > ./monitor-session/findings/sse-capture.txt
+timeout 15 curl -sf -N "$URL" 2>/dev/null | head -60 > ./monitor-session/findings/sse-capture.txt
 cat ./monitor-session/findings/sse-capture.txt
 ```
 
 The SSE route sends `metrics`, `services`, and `circuit-breaker` events
 immediately on connect, so the first 3 events should appear within 1 second.
+The `diagnostics` event is emitted every 10s (pipeline latency, runtime health,
+provider quality, stream health in a single aggregated snapshot).
 
 2. Parse the SSE output for event types. Look for lines starting with `event: `:
 ```
@@ -2603,6 +2635,9 @@ data: {"partition-asia-fast":...}
 
 event: circuit-breaker
 data: {"state":"CLOSED",...}
+
+event: diagnostics
+data: {"timestamp":...,"pipeline":...,"runtime":...,"providers":...}
 ```
 
 3. Validate the `metrics` data shape. Parse the JSON from the first `metrics`
@@ -2629,6 +2664,35 @@ service entry contains: `name`, `status`, `uptime`, `memoryUsage`, `cpuUsage`.
 contains: `state` (one of CLOSED|OPEN|HALF_OPEN), `consecutiveFailures`,
 `totalFailures`, `totalSuccesses`, `timestamp`.
 
+6. Validate the `diagnostics` data shape (v3.1). Parse the JSON from the first
+`diagnostics` event (emitted every 10s — may require waiting up to 12s) and
+verify these required fields exist:
+
+```
+Required (DiagnosticsTab crashes if missing):
+  timestamp: number
+  pipeline: object
+    pipeline.e2e: object { p50, p95, p99, count }
+    pipeline.wsToDetector: object { p50, p95, p99, count }
+    pipeline.detectorToPublish: object { p50, p95, p99, count }
+    pipeline.stages: object (keyed by stage name)
+  runtime: object
+    runtime.eventLoop: object { p50, p95, p99, min, mean, max }
+    runtime.memory: object { heapUsedMB, heapTotalMB, rssMB, externalMB }
+    runtime.gc: object { totalPauseMs, count, majorCount }
+    runtime.uptimeSeconds: number
+  providers: object
+    providers.rpcByChain: object (keyed by chain name)
+    providers.rpcByMethod: object (keyed by method name)
+    providers.wsMessages: object (keyed by chain:event)
+    providers.totalRpcErrors: number
+    providers.reconnections: object
+```
+
+The OverviewTab also consumes diagnostics data in a mini-panel (E2E p95, Event
+Loop p99, Heap Used, RPC Errors) — missing `pipeline.e2e` or `runtime.eventLoop`
+will cause `undefined.toFixed()` crashes.
+
 **Flag:** SSE endpoint returns non-200 or times out → severity: **CRITICAL**,
 category: `DASHBOARD_SSE` (dashboard will show "Waiting for data..." on all tabs).
 **Flag:** SSE endpoint returns 401 → severity: **HIGH**, category: `DASHBOARD_SSE`
@@ -2642,7 +2706,13 @@ category: `DASHBOARD_SSE` (ServiceCard and ChainsTab will render broken).
 category: `DASHBOARD_SSE` (CircuitBreakerGrid shows "UNKNOWN" permanently).
 **Flag:** No `metrics` event received within 10s → severity: **HIGH**,
 category: `DASHBOARD_SSE` (SSE connected but not emitting — send logic broken).
-**Info:** SSE emitting correct metrics, services, and circuit-breaker events →
+**Flag:** `diagnostics` event missing `pipeline` or `runtime` or `providers` →
+severity: **HIGH**, category: `DASHBOARD_SSE` (DiagnosticsTab and OverviewTab
+mini-panel will crash on `.p95.toFixed()` or `.heapUsedMB.toFixed()`).
+**Flag:** No `diagnostics` event received within 15s → severity: **MEDIUM**,
+category: `DASHBOARD_SSE` (DiagnosticsCollector may not be started —
+DiagnosticsTab and OverviewTab mini-panel show "Waiting for diagnostics data...").
+**Info:** SSE emitting correct metrics, services, circuit-breaker, and diagnostics events →
 severity: **INFO**, category: `DASHBOARD_SSE`.
 
 ---
@@ -2650,7 +2720,7 @@ severity: **INFO**, category: `DASHBOARD_SSE`.
 ### Check 3AL — SSE Event Coverage
 
 **Goal:** Verify ALL event types the dashboard listens for are emitted by the
-server. The dashboard client registers listeners for 6 event types. If the
+server. The dashboard client registers listeners for 7 event types. If the
 server doesn't emit one, the corresponding UI component stays empty forever.
 
 **Method:**
@@ -2658,10 +2728,10 @@ server doesn't emit one, the corresponding UI component stays empty forever.
 ```
 Read: dashboard/src/hooks/useSSE.ts
 ```
-Extract the `eventTypes` array (line ~30).
+Extract the `eventTypes` array (line ~35).
 
-**Expected client event types:**
-`metrics`, `services`, `execution-result`, `alert`, `circuit-breaker`, `streams`
+**Expected client event types (v3.1):**
+`metrics`, `services`, `execution-result`, `alert`, `circuit-breaker`, `streams`, `diagnostics`
 
 2. Read the SSE server route:
 ```
@@ -2673,10 +2743,11 @@ Extract all event type strings from `send('<type>', ...)` calls and
 3. Compare the two lists. Any event type expected by the client but not
 emitted by the server → dashboard component is non-functional.
 
-**Expected server emitted events (v3.1 — after SSE event broadcasting fix):**
+**Expected server emitted events (v3.1):**
 - `metrics` (periodic, 2s)
 - `services` (periodic, 5s)
 - `streams` (periodic, 10s)
+- `diagnostics` (periodic, 10s — DiagnosticsCollector aggregated snapshot)
 - `circuit-breaker` (initial + periodic 5s)
 - `execution-result` (via `subscribeSSE` callback)
 - `alert` (via `subscribeSSE` callback)
@@ -2699,7 +2770,7 @@ has no visibility for that data).
 **Flag:** `subscribeSSE` method exists in interface but not implemented in
 coordinator → severity: **HIGH**, category: `DASHBOARD_SSE_COVERAGE`
 (LiveFeed and real-time alerts will never appear).
-**Info:** All 6 client event types have matching server emitters → severity: **INFO**,
+**Info:** All 7 client event types have matching server emitters → severity: **INFO**,
 category: `DASHBOARD_SSE_COVERAGE`.
 
 ---
@@ -2730,6 +2801,14 @@ backend sends a field the dashboard ignores (→ data invisible to operators).
 4. Compare `CircuitBreakerStatus` (dashboard) against `getCircuitBreakerSnapshot`
 return type (backend `CoordinatorStateProvider` interface):
    - Verify field names and types match
+
+5. Compare `DiagnosticsSnapshot` and `CompactPercentiles` types (v3.1):
+   - Dashboard: `dashboard/src/lib/types.ts` (DiagnosticsSnapshot, CompactPercentiles)
+   - Backend: `shared/core/src/monitoring/diagnostics-collector.ts` (same names)
+   - Verify nested shapes: `pipeline.e2e`, `runtime.eventLoop`, `runtime.memory`,
+     `runtime.gc`, `providers.rpcByChain`, `providers.rpcByMethod`, `providers.wsMessages`
+   - The DiagnosticsTab accesses deeply nested fields (`pipeline.stages`, `providers.reconnections`)
+     — any structural mismatch causes runtime `cannot read property of undefined` crashes
 
 **Flag:** Backend `SystemMetrics` has field that dashboard type lacks → severity: **LOW**,
 category: `DASHBOARD_TYPE_SYNC` (backend data not displayed — functionality gap).
@@ -2775,7 +2854,16 @@ curl -sf http://localhost:3000/api/redis/stats 2>/dev/null | jq .
 Expected shape: object with optional fields `totalCommands`, `commandsPerSecond`,
 `memoryUsed`, `connectedClients`.
 
-4. **EE health for drawdown** (RiskTab → `fetchJson('/ee/health')`):
+4. **Diagnostics endpoint** (v3.1 — DiagnosticsTab + monitoring scripts):
+```bash
+curl -sf http://localhost:3000/api/diagnostics 2>/dev/null | jq '{timestamp, pipeline: .pipeline.e2e, runtime: {eventLoop: .runtime.eventLoop, memory: .runtime.memory}, providers: {totalRpcErrors: .providers.totalRpcErrors, chains: (.providers.rpcByChain | keys)}}'
+```
+Expected: `DiagnosticsSnapshot` object with `timestamp`, `pipeline`, `runtime`, `providers`.
+Optional: `streams` (present when StreamHealthMonitor has data).
+This is the same data as the SSE `diagnostics` event but available as a one-shot REST call
+for monitoring scripts and health checks. Auth-protected (`metrics:read` permission).
+
+5. **EE health for drawdown** (RiskTab → `fetchJson('/ee/health')`):
 ```bash
 # Via coordinator proxy
 curl -sf http://localhost:3000/ee/health 2>/dev/null | jq '{riskState, simulationMode, healthyProviders, queueSize, activeExecutions, successRate}'
@@ -2808,6 +2896,12 @@ see if trading is halted).
 mismatch — drawdown display always "UNKNOWN" even when data is proxied correctly).
 **Flag:** RiskTab fetches `/health` instead of `/ee/health` → severity: **HIGH**,
 category: `DASHBOARD_REST` (routing error — hits coordinator health, not EE).
+**Flag:** `/api/diagnostics` returns non-200 or error → severity: **MEDIUM**,
+category: `DASHBOARD_REST` (DiagnosticsCollector may not be initialized —
+DiagnosticsTab depends on this for REST fallback and monitoring scripts use it
+for one-shot health checks).
+**Flag:** `/api/diagnostics` response missing `pipeline` or `runtime` → severity: **HIGH**,
+category: `DASHBOARD_REST` (incomplete diagnostics snapshot — collector integration broken).
 **Flag:** `/api/alerts` returns 401 with no `DASHBOARD_AUTH_TOKEN` set →
 severity: **MEDIUM**, category: `DASHBOARD_REST` (expected with auth enabled).
 **Info:** All dashboard REST endpoints responding correctly → severity: **INFO**,
@@ -2967,12 +3061,80 @@ severity: **INFO**, category: `DASHBOARD_STREAMS`.
 
 ---
 
+### Check 3AR — Diagnostics Aggregated Snapshot Validation (v3.1)
+
+**Goal:** Verify the DiagnosticsCollector aggregates data correctly from all 4
+underlying monitors (LatencyTracker, RuntimeMonitor, ProviderLatencyTracker,
+StreamHealthMonitor) and that the REST endpoint and SSE event return consistent data.
+
+The DiagnosticsCollector (`shared/core/src/monitoring/diagnostics-collector.ts`)
+is a singleton that aggregates pipeline latency percentiles, runtime health (event
+loop, memory, GC, uptime), provider quality (per-chain RPC latency, per-method
+breakdown, WebSocket throughput), and stream health into a single `DiagnosticsSnapshot`.
+It powers both the SSE `diagnostics` event (10s periodic) and `GET /api/diagnostics`.
+
+**Method:**
+1. Fetch the diagnostics snapshot via REST:
+```bash
+curl -sf http://localhost:3000/api/diagnostics 2>/dev/null > ./monitor-session/findings/diagnostics-snapshot.json
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq .
+```
+
+2. Validate pipeline latency data is populated:
+```bash
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.pipeline.e2e'
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.pipeline.stages | keys'
+```
+Pipeline stages should include at least some of: `ws_ingest`, `price_update`,
+`detection`, `publish`. E2E p50/p95/p99 should be non-zero if the pipeline has
+processed events.
+
+3. Cross-reference runtime metrics against Prometheus scrape:
+```bash
+# Compare diagnostics runtime vs direct Prometheus metrics
+DIAG_P99=$(cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.runtime.eventLoop.p99')
+PROM_P99=$(curl -sf http://localhost:3000/api/metrics/prometheus 2>/dev/null | grep runtime_eventloop_delay_p99_ms | awk '{print $NF}')
+echo "Diagnostics p99: $DIAG_P99 | Prometheus p99: $PROM_P99"
+```
+Values should be close (same source, but snapshot timing may differ slightly).
+
+4. Validate provider quality data:
+```bash
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.providers.rpcByChain | keys'
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.providers.totalRpcErrors'
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.providers.wsMessages | keys'
+```
+Per-chain RPC data should include chains that have active WebSocket connections.
+WS messages should show chain:event pairs (e.g., `bsc:swap`, `ethereum:sync`).
+
+5. Validate stream health (optional — only present if StreamHealthMonitor has data):
+```bash
+cat ./monitor-session/findings/diagnostics-snapshot.json | jq '.streams // "not_present"'
+```
+
+**Flag:** `/api/diagnostics` returns 500 → severity: **HIGH**, category: `DIAGNOSTICS`
+(DiagnosticsCollector.collect() failed — check if monitors are started).
+**Flag:** `pipeline.e2e` all zeros after pipeline has been running 30s+ → severity: **MEDIUM**,
+category: `DIAGNOSTICS` (LatencyTracker not receiving timing data — pipeline instrumentation
+may be disconnected).
+**Flag:** `providers.rpcByChain` empty but partitions report active WebSocket connections →
+severity: **MEDIUM**, category: `DIAGNOSTICS` (ProviderLatencyTracker not wired to providers).
+**Flag:** `runtime.eventLoop.p99` differs from Prometheus `runtime_eventloop_delay_p99_ms`
+by >50% → severity: **LOW**, category: `DIAGNOSTICS` (snapshot timing difference is
+expected, but large divergence suggests stale data in one source).
+**Flag:** `runtime.uptimeSeconds` is 0 or negative → severity: **LOW**, category: `DIAGNOSTICS`
+(RuntimeMonitor uptime tracking issue).
+**Info:** Diagnostics snapshot populated with pipeline, runtime, and provider data →
+severity: **INFO**, category: `DIAGNOSTICS`.
+
+---
+
 ### Phase 3 Summary
 
-After all 43 checks across 9 subsections, read `./monitor-session/findings/runtime.jsonl`
+After all 44 checks across 9 subsections, read `./monitor-session/findings/runtime.jsonl`
 and output a summary:
 ```
-PHASE 3 COMPLETE — Runtime Validation (43 checks, 9 subsections)
+PHASE 3 COMPLETE — Runtime Validation (44 checks, 9 subsections)
   3.1 Service Health & Schema: 3A health, 3B leader, 3C schema
   3.2 Risk & Circuit Breakers: 3D CB states, 3E drawdown, 3F CB history*, 3G backpressure*
   3.3 Data Flow & DLQ: 3H DLQ, 3I topology, 3J lag, 3K root cause, 3L transit, 3M ack*, 3N trim*
@@ -2981,7 +3143,7 @@ PHASE 3 COMPLETE — Runtime Validation (43 checks, 9 subsections)
   3.6 Detection Quality: 3W cycle timing, 3X opps/cycle, 3Y cache*
   3.7 Execution & BI: 3Z gas, 3AA sim, 3AB probability, 3AC bridge, 3AD outcomes, 3AE slippage, 3AF age, 3AG profit
   3.8 Observability: 3AH prometheus, 3AI completeness
-  3.9 Dashboard: 3AJ availability, 3AK SSE connectivity, 3AL SSE coverage, 3AM type sync, 3AN REST endpoints, 3AO service keys, 3AP proxy config, 3AQ stream display
+  3.9 Dashboard: 3AJ availability, 3AK SSE connectivity, 3AL SSE coverage, 3AM type sync, 3AN REST endpoints, 3AO service keys, 3AP proxy config, 3AQ stream display, 3AR diagnostics snapshot
   (* = placeholder for not-yet-implemented metrics)
   Services healthy: <n>/7
   Leader elected: YES/NO
