@@ -10,7 +10,7 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import { findKLargest } from '@arbitrage/core/data-structures';
-import { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker, getDiagnosticsCollector } from '@arbitrage/core/monitoring';
 import { getRedisClient } from '@arbitrage/core/redis';
 import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import type { CoordinatorStateProvider } from '../types';
@@ -104,6 +104,26 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
     apiAuthorize('alerts', 'read') as unknown as RequestHandler,
     ((_req: Request, res: Response) => {
       res.json(state.getAlertHistory(100));
+    }) as RequestHandler
+  );
+
+  /**
+   * GET /api/diagnostics
+   * Returns a full DiagnosticsSnapshot (pipeline latency, runtime, providers, streams).
+   * Same data as the SSE 'diagnostics' event but available as REST for monitoring scripts.
+   */
+  router.get(
+    '/diagnostics',
+    readAuth as unknown as RequestHandler,
+    apiAuthorize('metrics', 'read') as unknown as RequestHandler,
+    (async (_req: Request, res: Response) => {
+      try {
+        const collector = getDiagnosticsCollector();
+        const snapshot = await collector.collect();
+        res.json(snapshot);
+      } catch (error) {
+        res.status(500).json({ error: 'Failed to collect diagnostics' });
+      }
     }) as RequestHandler
   );
 

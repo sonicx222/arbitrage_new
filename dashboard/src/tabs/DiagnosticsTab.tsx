@@ -148,6 +148,11 @@ function ProvidersSection({ providers }: { providers: DiagnosticsSnapshot['provi
       .sort(([, a], [, b]) => b.totalCalls - a.totalCalls);
   }, [providers.rpcByMethod]);
 
+  const wsEntries = useMemo(() => {
+    return Object.entries(providers.wsMessages)
+      .sort(([, a], [, b]) => b - a);
+  }, [providers.wsMessages]);
+
   return (
     <div className="card">
       <SectionHeader mb="mb-3">RPC Provider Quality</SectionHeader>
@@ -201,6 +206,22 @@ function ProvidersSection({ providers }: { providers: DiagnosticsSnapshot['provi
             keyExtractor={([name]) => name}
             maxHeight="10rem"
             emptyMessage="No method data"
+          />
+        </div>
+      )}
+      {/* WebSocket message throughput */}
+      {wsEntries.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] text-gray-500 mb-1">WebSocket Messages (cumulative)</div>
+          <DataTable<[string, number]>
+            columns={[
+              { header: 'Chain:Event', render: ([key]) => <span className="font-mono text-gray-300">{key}</span> },
+              { header: 'Count', align: 'right', render: ([, count]) => <span className="font-mono">{formatNumber(count)}</span> },
+            ]}
+            data={wsEntries}
+            keyExtractor={([key]) => key}
+            maxHeight="10rem"
+            emptyMessage="No WS data"
           />
         </div>
       )}

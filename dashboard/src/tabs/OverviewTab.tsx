@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useMetrics, useServices, useFeed } from '../context/SSEContext';
+import { useMetrics, useServices, useFeed, useDiagnostics } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { KpiGrid } from '../components/KpiGrid';
 import { EmptyState } from '../components/EmptyState';
@@ -9,10 +9,16 @@ import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { formatUsd, formatPct, formatNumber, calcSuccessRate, thresholdColor } from '../lib/format';
 
+function fmtMs(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return '-';
+  return n < 1000 ? `${n.toFixed(1)}ms` : `${(n / 1000).toFixed(2)}s`;
+}
+
 export function OverviewTab() {
   const { metrics } = useMetrics();
   const { services } = useServices();
   const { feed } = useFeed();
+  const { diagnostics } = useDiagnostics();
 
   if (!metrics) {
     return <div className="text-gray-500 text-xs">Waiting for data...</div>;
@@ -34,6 +40,36 @@ export function OverviewTab() {
           <KpiCard label="Executions" value={formatNumber(metrics.totalExecutions)} sub={`${formatPct(successRate)} success`} />
           <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
         </KpiGrid>
+
+        {/* Diagnostics Mini-Panel */}
+        {diagnostics && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="card flex flex-col gap-0.5 py-2">
+              <span className="text-[10px] text-gray-500">E2E Latency p95</span>
+              <span className={`text-sm font-bold font-mono ${diagnostics.pipeline.e2e.p95 >= 50 ? 'text-accent-red' : diagnostics.pipeline.e2e.p95 >= 30 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                {fmtMs(diagnostics.pipeline.e2e.p95)}
+              </span>
+            </div>
+            <div className="card flex flex-col gap-0.5 py-2">
+              <span className="text-[10px] text-gray-500">Event Loop p99</span>
+              <span className={`text-sm font-bold font-mono ${diagnostics.runtime.eventLoop.p99 >= 100 ? 'text-accent-red' : diagnostics.runtime.eventLoop.p99 >= 20 ? 'text-accent-yellow' : ''}`}>
+                {fmtMs(diagnostics.runtime.eventLoop.p99)}
+              </span>
+            </div>
+            <div className="card flex flex-col gap-0.5 py-2">
+              <span className="text-[10px] text-gray-500">Heap Used</span>
+              <span className="text-sm font-bold font-mono">
+                {diagnostics.runtime.memory.heapUsedMB.toFixed(0)}MB
+              </span>
+            </div>
+            <div className="card flex flex-col gap-0.5 py-2">
+              <span className="text-[10px] text-gray-500">RPC Errors</span>
+              <span className={`text-sm font-bold font-mono ${diagnostics.providers.totalRpcErrors > 0 ? 'text-accent-red' : ''}`}>
+                {formatNumber(diagnostics.providers.totalRpcErrors)}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Service Grid */}
         <div>
