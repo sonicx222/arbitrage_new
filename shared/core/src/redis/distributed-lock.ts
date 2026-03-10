@@ -590,6 +590,7 @@ export class DistributedLockManager {
     for (const [key, queue] of this.waitQueues) {
       for (const waiter of queue) {
         clearTimeout(waiter.timeoutId);
+        waiter.settled = true;
         waiter.reject(new Error('DistributedLockManager is shutting down'));
       }
       this.logger.debug('Rejected queued waiters on shutdown', {
