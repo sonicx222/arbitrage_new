@@ -242,4 +242,130 @@ describe('SharedKeyRegistry: Concurrent Registration (P0 Fix)', () => {
       expect(registry.lookup('')).toBe(-1);
     });
   });
+
+  describe('FNV-1a hash table (OPT-004)', () => {
+    it('should handle hash collisions correctly', () => {
+      // Use small hash table (maxKeys=4 → hashTableSize=8) to force collisions
+      const registry = new SharedKeyRegistry({ maxKeys: 4 });
+
+      // Register 4 keys — with 8 buckets, collisions are very likely
+      const testData = [
+        ['key_alpha', 10],
+        ['key_beta', 20],
+        ['key_gamma', 30],
+        ['key_delta', 40],
+      ] as const;
+
+      for (const [key, index] of testData) {
+        expect(registry.register(key, index)).toBe(true);
+      }
+
+      // All lookups must return correct indices despite collisions
+      for (const [key, expectedIndex] of testData) {
+        expect(registry.lookup(key)).toBe(expectedIndex);
+      }
+
+      // Non-existent key must return -1, not a collision victim
+      expect(registry.lookup('key_epsilon')).toBe(-1);
+    });
+
+    it('should expose hashTableSize in stats', () => {
+      const registry = new SharedKeyRegistry({ maxKeys: 100 });
+      const stats = registry.getStats();
+
+      // hashTableSize = nextPowerOf2(100 * 2) = 256
+      expect(stats.hashTableSize).toBe(256);
+      expect(stats.entryCount).toBe(0);
+    });
+
+    it('should maintain O(1) lookup across worker boundary with collisions', () => {
+      const registry = new SharedKeyRegistry({ maxKeys: 8 });
+
+      // Register keys that are likely to have hash collisions
+      for (let i = 0; i < 8; i++) {
+        registry.register(`price:chain${i}:pair`, i * 100);
+      }
+
+      // Create worker registry from same buffer
+      const buffer = registry.getBuffer();
+      const workerRegistry = new SharedKeyRegistry({ maxKeys: 8 }, buffer);
+
+      // Worker lookups should find all keys via hash table probing
+      for (let i = 0; i < 8; i++) {
+        expect(workerRegistry.lookup(`price:chain${i}:pair`)).toBe(i * 100);
+      }
+
+      // Non-existent key on worker
+      expect(workerRegistry.lookup('price:chain9:pair')).toBe(-1);
+    });
+
+    it('should handle clear and re-register with hash table reset', () => {
+      const registry = new SharedKeyRegistry({ maxKeys: 10 });
+
+      // Register keys
+      registry.register('old_key_1', 1);
+      registry.register('old_key_2', 2);
+      expect(registry.lookup('old_key_1')).toBe(1);
+
+      // Clear and re-register different keys
+      registry.clear();
+      registry.register('new_key_1', 100);
+      registry.register('new_key_2', 200);
+
+      // New keys should be found
+      expect(registry.lookup('new_key_1')).toBe(100);
+      expect(registry.lookup('new_key_2')).toBe(200);
+
+      // Old keys must NOT be found (hash buckets were reset)
+      expect(registry.lookup('old_key_1')).toBe(-1);
+      expect(registry.lookup('old_key_2')).toBe(-1);
+    });
+
+    it('should be faster than linear scan for cold lookups at scale', () => {
+      const keyCount = 5000;
+      const registry = new SharedKeyRegistry({ maxKeys: keyCount });
+
+      // Register 5000 keys
+      for (let i = 0; i < keyCount; i++) {
+        registry.register(`price:bsc:0x${i.toString(16).padStart(40, '0')}`, i);
+      }
+
+      // Create worker registry (no local cache)
+      const buffer = registry.getBuffer();
+      const workerRegistry = new SharedKeyRegistry({ maxKeys: keyCount }, buffer);
+
+      // Time cold lookups (worst-case: no local cache)
+      const start = process.hrtime.bigint();
+      for (let i = 0; i < keyCount; i++) {
+        const idx = workerRegistry.lookup(`price:bsc:0x${i.toString(16).padStart(40, '0')}`);
+        expect(idx).toBe(i);
+      }
+      const elapsed = Number(process.hrtime.bigint() - start);
+      const avgUs = (elapsed / keyCount) / 1000;
+
+      console.log(`Hash table cold lookup: ${avgUs.toFixed(3)}μs average (${keyCount} keys)`);
+
+      // With hash table, cold lookup should be <100μs even at 5000 keys
+      // (linear scan would be ~1-5ms per lookup at this scale)
+      expect(avgUs).toBeLessThan(1000); // 1ms generous CI threshold
+    });
+  });
+
+  describe('Writer enforcement (H-02)', () => {
+    it('should throw when register() is called on a worker (read-only) instance', () => {
+      const writer = new SharedKeyRegistry({ maxKeys: 10 });
+      writer.register('key1', 1);
+
+      const buffer = writer.getBuffer();
+      const reader = new SharedKeyRegistry({ maxKeys: 10 }, buffer);
+
+      // Worker instance must throw on register()
+      expect(() => reader.register('key2', 2)).toThrow(
+        'SharedKeyRegistry.register() called on worker (read-only) instance'
+      );
+
+      // Lookup still works on worker instance
+      expect(reader.lookup('key1')).toBe(1);
+    });
+  });
 });

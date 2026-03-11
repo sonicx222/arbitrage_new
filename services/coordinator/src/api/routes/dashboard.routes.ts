@@ -6,7 +6,6 @@
  *
  * C4 FIX: DASHBOARD_AUTH_TOKEN is required in production.
  *
- * @see docs/plans/2026-03-06-react-dashboard-design.md
  * @see coordinator.ts (parent service)
  * @throws Error if NODE_ENV=production and DASHBOARD_AUTH_TOKEN is not set
  */

@@ -17,8 +17,6 @@
  * Mitigations: (1) tokens should be rotated frequently, (2) reverse proxy should
  * strip query params from access logs, (3) future improvement: two-step flow where
  * a POST with auth header returns a short-lived SSE-only token.
- *
- * @see docs/plans/2026-03-06-react-dashboard-design.md
  */
 
 import { Router, Request, Response, RequestHandler } from 'express';
