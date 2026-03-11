@@ -627,6 +627,18 @@ export class PairCacheService extends EventEmitter implements Resettable {
     // Don't reset config - configuration should be constant
     // Don't reset EventEmitter listeners - tests should manage their own subscriptions
   }
+
+  /**
+   * H-05 FIX: Destroy the service and release all resources.
+   * Unlike resetState(), this nullifies the Redis connection and listeners.
+   */
+  destroy(): void {
+    this.removeAllListeners();
+    this.redis = null;
+    this.initialized = false;
+    this.resetState();
+    this.logger.info('PairCacheService destroyed');
+  }
 }
 
 // =============================================================================
@@ -673,6 +685,9 @@ export async function getPairCacheService(
 }
 
 export function resetPairCacheService(): void {
+  if (pairCacheInstance) {
+    pairCacheInstance.destroy();
+  }
   pairCacheInstance = null;
   pairCacheInitPromise = null;
 }

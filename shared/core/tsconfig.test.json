@@ -4,7 +4,21 @@
     "rootDir": ".",
     "types": ["node", "jest"],
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "paths": {
+      "@arbitrage/core": ["./src"],
+      "@arbitrage/core/*": ["./src/*"],
+      "@arbitrage/types": ["../types/src"],
+      "@arbitrage/types/*": ["../types/src/*"],
+      "@arbitrage/config": ["../config/src"],
+      "@arbitrage/config/*": ["../config/src/*"],
+      "@arbitrage/flash-loan-aggregation": ["../flash-loan-aggregation/src"],
+      "@arbitrage/flash-loan-aggregation/*": ["../flash-loan-aggregation/src/*"],
+      "@arbitrage/metrics": ["../metrics/src"],
+      "@arbitrage/metrics/*": ["../metrics/src/*"],
+      "@arbitrage/test-utils": ["../test-utils/src"],
+      "@arbitrage/test-utils/*": ["../test-utils/src/*"]
+    }
   },
   "include": [
     "./src/**/*",

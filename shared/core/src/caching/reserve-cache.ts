@@ -53,6 +53,8 @@ export interface ReserveCacheConfig {
   maxEntries: number;
   /** TTL in milliseconds for cache entries (default: 5000ms = 5s) */
   ttlMs: number;
+  /** H-03 FIX: Per-chain TTL overrides (milliseconds). Falls back to ttlMs if chain not listed. */
+  chainTtlMs?: Record<string, number>;
   /** Enable metrics collection (default: true) */
   enableMetrics: boolean;
   /** Interval for metrics logging in ms (default: 60000ms = 1 min) */
@@ -100,6 +102,28 @@ interface LRUNode {
  * The cache is designed for the unified-detector hot path.
  */
 export class ReserveCache implements Resettable {
+  /**
+   * H-03 FIX: Per-chain TTL defaults aligned with block production rates.
+   * Fast chains (Arbitrum 250ms blocks) get shorter TTL to avoid stale reserves.
+   * Applied in the singleton factory, NOT the constructor, so test-specified TTLs aren't overridden.
+   */
+  static readonly DEFAULT_CHAIN_TTL_MS: Record<string, number> = {
+    arbitrum: 1000,    // 250ms blocks — reserves change rapidly
+    fantom: 4000,      // 1s blocks
+    zksync: 4000,      // 1s blocks
+    bsc: 5000,         // 3s blocks
+    polygon: 5000,     // 2s blocks
+    base: 5000,        // 2s blocks (OP-stack)
+    optimism: 5000,    // 2s blocks (OP-stack)
+    linea: 5000,       // ~3s blocks
+    blast: 5000,       // 2s blocks (OP-stack)
+    scroll: 5000,      // ~3s blocks
+    mantle: 5000,      // 2s blocks (OP-stack)
+    mode: 5000,        // 2s blocks (OP-stack)
+    avalanche: 5000,   // 2s blocks
+    ethereum: 5000,    // 12s blocks
+  };
+
   private readonly config: ReserveCacheConfig;
 
   // Main cache storage: key → reserve data
@@ -164,9 +188,10 @@ export class ReserveCache implements Resettable {
       return undefined;
     }
 
-    // Check TTL
+    // H-03 FIX: Use per-chain TTL if configured, otherwise fall back to global TTL.
+    const ttl = this.config.chainTtlMs?.[chainId] ?? this.config.ttlMs;
     const age = Date.now() - entry.timestamp;
-    if (age > this.config.ttlMs) {
+    if (age > ttl) {
       // Entry is stale - remove it and return miss
       this.stats.staleRejects++;
       this.removeEntry(key);
@@ -498,7 +523,13 @@ let reserveCacheInstance: ReserveCache | null = null;
  */
 export function getReserveCache(config?: Partial<ReserveCacheConfig>): ReserveCache {
   if (!reserveCacheInstance) {
-    reserveCacheInstance = new ReserveCache(config);
+    // H-03 FIX: Inject default chain TTLs in the singleton factory (not constructor)
+    // so that test-specified TTLs via config.ttlMs aren't overridden.
+    const singletonConfig: Partial<ReserveCacheConfig> = {
+      chainTtlMs: ReserveCache.DEFAULT_CHAIN_TTL_MS,
+      ...config,
+    };
+    reserveCacheInstance = new ReserveCache(singletonConfig);
     logger.info('ReserveCache singleton created', {
       maxEntries: reserveCacheInstance['config'].maxEntries,
       ttlMs: reserveCacheInstance['config'].ttlMs,

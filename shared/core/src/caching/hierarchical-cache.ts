@@ -6,6 +6,7 @@
 
 import { getRedisClient } from '../redis/client';
 import { createLogger } from '../logger';
+import { withCircuitBreaker } from '../resilience/circuit-breaker';
 import { getCorrelationAnalyzer } from './correlation-analyzer';
 import type { CorrelationAnalyzer } from './correlation-analyzer';
 import { PriceMatrix } from './price-matrix';
@@ -713,6 +714,9 @@ export class HierarchicalCache {
    * Supports both Map-based and PriceMatrix-based implementations.
    */
   private getFromL1(key: string): unknown {
+    // H-07 FIX: Single Date.now() call to avoid clock skew between TTL check and lastAccess update.
+    const now = Date.now();
+
     // PHASE1-TASK31: Use PriceMatrix if enabled
     if (this.usePriceMatrix && this.priceMatrix) {
       const priceEntry = this.priceMatrix.getPrice(key);
@@ -720,7 +724,7 @@ export class HierarchicalCache {
 
       // Check TTL (PriceMatrix doesn't store TTL, so check against entry metadata)
       const metadata = this.l1Metadata.get(key);
-      if (metadata?.ttl && Date.now() - priceEntry.timestamp > metadata.ttl * 1000) {
+      if (metadata?.ttl && now - priceEntry.timestamp > metadata.ttl * 1000) {
         this.invalidateL1(key);
         return null;
       }
@@ -728,13 +732,10 @@ export class HierarchicalCache {
       // Update access statistics in metadata
       if (metadata) {
         metadata.accessCount++;
-        metadata.lastAccess = Date.now();
+        metadata.lastAccess = now;
         this.l1EvictionQueue.touch(key);
       }
 
-      // Return the value from PriceMatrix
-      // Note: PriceMatrix stores price directly, but we need the full value
-      // For now, we'll need to keep metadata in Map for non-price data
       return metadata?.value ?? null;
     }
 
@@ -743,18 +744,16 @@ export class HierarchicalCache {
     if (!entry) return null;
 
     // Check TTL
-    if (entry.ttl && Date.now() - entry.timestamp > entry.ttl * 1000) {
+    if (entry.ttl && now - entry.timestamp > entry.ttl * 1000) {
       this.invalidateL1(key);
       return null;
     }
 
     // Update access statistics
     entry.accessCount++;
-    entry.lastAccess = Date.now();
+    entry.lastAccess = now;
 
     // T1.4: Move to end of LRU queue using O(1) touch operation
-    // Previous: O(n) indexOf + O(n) splice + O(1) push
-    // New: O(1) touch
     this.l1EvictionQueue.touch(key);
 
     return entry.value;
@@ -885,8 +884,6 @@ export class HierarchicalCache {
 
   private evictL1(): void {
     // T1.4: O(1) eviction using evictOldest()
-    // Previous: O(1) shift but required array reindexing
-    // New: O(1) doubly-linked list removal
     const key = this.l1EvictionQueue.evictOldest();
     if (key) {
       // Fix #11: Read size BEFORE delete for incremental tracking
@@ -895,6 +892,12 @@ export class HierarchicalCache {
         this.l1CurrentSize -= entry.size;
       }
       this.l1Metadata.delete(key);
+      // H-01 FIX: Clear from PriceMatrix to prevent slot leak.
+      // Without this, evicted keys remain in PriceMatrix, consuming slots
+      // that can never be reclaimed until process restart.
+      if (this.usePriceMatrix && this.priceMatrix) {
+        this.priceMatrix.deletePrice(key);
+      }
       this.stats.l1.evictions++;
     }
   }
@@ -908,18 +911,29 @@ export class HierarchicalCache {
   }
 
   // L2 Cache Implementation (Redis)
-  // P0-FIX-3: All L2 methods now use explicit redisPromise with null check
-  // P0-FIX (Double Serialization): Use redis.getRaw()/setex() to avoid double JSON serialization.
-  // RedisClient.get()/set() already do JSON.parse/stringify internally, so we use raw methods
-  // and handle serialization explicitly here for clarity and correctness.
+  // H-02 FIX: Circuit breaker config for L2 Redis operations.
+  // Prevents cascade failures when Redis is degraded — after 5 failures in 60s,
+  // L2 ops are short-circuited for 30s, falling back to L1/L3 gracefully.
+  private static readonly L2_CB_NAME = 'hierarchical-cache-l2';
+  private static readonly L2_CB_CONFIG = {
+    failureThreshold: 5,
+    recoveryTimeout: 30000,
+    monitoringPeriod: 60000,
+    successThreshold: 3
+  };
+
   private async getFromL2(key: string): Promise<unknown> {
     if (!this.redisPromise) return null;
     try {
-      const redis = await this.redisPromise;
-      // P0-FIX: Use getRaw() to get the raw string, then parse ourselves.
-      // This avoids double-parsing since redis.get() already does JSON.parse().
-      const data = await redis.getRaw(`${this.l2Prefix}${key}`);
-      return data ? JSON.parse(data) : null;
+      return await withCircuitBreaker(
+        async () => {
+          const redis = await this.redisPromise!;
+          const data = await redis.getRaw(`${this.l2Prefix}${key}`);
+          return data ? JSON.parse(data) : null;
+        },
+        HierarchicalCache.L2_CB_NAME,
+        HierarchicalCache.L2_CB_CONFIG
+      );
     } catch (error) {
       logger.error('L2 cache get error', { error, key });
       return null;
@@ -929,14 +943,17 @@ export class HierarchicalCache {
   private async setInL2(key: string, value: unknown, ttl?: number): Promise<void> {
     if (!this.redisPromise) return;
     try {
-      const redis = await this.redisPromise;
-      const redisKey = `${this.l2Prefix}${key}`;
-      // P0-FIX: Use setex() with explicit serialization to match getRaw() usage.
-      // This avoids the double-serialization bug where redis.set() would stringify
-      // and then getFromL2() would try to parse the already-parsed object.
-      const serialized = JSON.stringify(value);
-      const ttlSeconds = ttl ?? this.config.l2Ttl;
-      await redis.setex(redisKey, ttlSeconds, serialized);
+      await withCircuitBreaker(
+        async () => {
+          const redis = await this.redisPromise!;
+          const redisKey = `${this.l2Prefix}${key}`;
+          const serialized = JSON.stringify(value);
+          const ttlSeconds = ttl ?? this.config.l2Ttl;
+          await redis.setex(redisKey, ttlSeconds, serialized);
+        },
+        HierarchicalCache.L2_CB_NAME,
+        HierarchicalCache.L2_CB_CONFIG
+      );
     } catch (error) {
       logger.error('L2 cache set error', { error, key });
     }
@@ -945,8 +962,14 @@ export class HierarchicalCache {
   private async invalidateL2(key: string): Promise<void> {
     if (!this.redisPromise) return;
     try {
-      const redis = await this.redisPromise;
-      await redis.del(`${this.l2Prefix}${key}`);
+      await withCircuitBreaker(
+        async () => {
+          const redis = await this.redisPromise!;
+          await redis.del(`${this.l2Prefix}${key}`);
+        },
+        HierarchicalCache.L2_CB_NAME,
+        HierarchicalCache.L2_CB_CONFIG
+      );
     } catch (error) {
       logger.error('L2 cache invalidate error', { error, key });
     }
@@ -1420,6 +1443,31 @@ export class HierarchicalCache {
       }
     }
   }
+
+  /**
+   * H-05 FIX: Destroy the cache instance and release all resources.
+   * Unlike clear(), this nullifies internal structures to allow GC.
+   * Call this when the cache instance will no longer be used.
+   */
+  async destroy(): Promise<void> {
+    logger.info('Destroying hierarchical cache');
+    this.isClearing = true;
+    this.l1Metadata.clear();
+    this.l1EvictionQueue.clear();
+    this.l1CurrentSize = 0;
+    this.patternCache.clear();
+    this.pendingWarmingPairs.clear();
+    if (this.correlationAnalyzer) {
+      this.correlationAnalyzer.destroy();
+      this.correlationAnalyzer = null;
+    }
+    this.priceMatrix = null;
+    this.l3Storage.clear();
+    this.l3EvictionQueue.clear();
+    this.redisPromise = null;
+    this.isClearing = false;
+    logger.info('Hierarchical cache destroyed');
+  }
 }
 
 // Factory function
@@ -1480,7 +1528,7 @@ export function getHierarchicalCache(config?: Partial<CacheConfig>): Hierarchica
  */
 export async function resetHierarchicalCache(): Promise<void> {
   if (defaultCache) {
-    await defaultCache.clear();
+    await defaultCache.destroy();
   }
   defaultCache = null;
   defaultCacheConfig = undefined;

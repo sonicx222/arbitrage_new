@@ -83,6 +83,11 @@ export class SharedKeyRegistry {
   // Local cache for faster lookups (works on both main thread and workers)
   private keyToIndexCache: Map<string, number> = new Map();
 
+  // H-06 FIX: Pre-allocated buffer for lookup() to avoid Buffer.from() allocation per call.
+  // TextEncoder.encodeInto() writes directly into this Uint8Array with zero allocation.
+  private readonly lookupKeyBuf = new Uint8Array(64);
+  private readonly lookupEncoder = new TextEncoder();
+
   constructor(config: KeyRegistryConfig, existingBuffer?: SharedArrayBuffer) {
     this.config = {
       maxKeys: config.maxKeys,
@@ -249,10 +254,12 @@ export class SharedKeyRegistry {
       }
     }
 
-    // Convert key to bytes for hashing and comparison
-    const keyBuffer = Buffer.from(key, 'utf8');
-    const keyLen = Math.min(keyBuffer.length, this.keySize);
-    const hash = this.fnv1a32(keyBuffer, keyLen);
+    // H-06 FIX: Use pre-allocated buffer + TextEncoder.encodeInto() instead of Buffer.from().
+    // Avoids a heap allocation per cold lookup (~64 bytes + GC pressure).
+    this.lookupKeyBuf.fill(0);
+    const { written } = this.lookupEncoder.encodeInto(key, this.lookupKeyBuf);
+    const keyLen = Math.min(written, this.keySize);
+    const hash = this.fnv1a32(this.lookupKeyBuf, keyLen);
     const mask = this.hashTableSize - 1;
 
     // Probe hash table with linear probing
@@ -266,7 +273,7 @@ export class SharedKeyRegistry {
 
       // Compare key bytes at the referenced slot
       const slotOffset = this.slotsOffset + (slotIdx * this.slotSize);
-      if (this.compareKeyAtSlot(slotOffset, keyBuffer, keyLen)) {
+      if (this.compareKeyAtSlot(slotOffset, this.lookupKeyBuf, keyLen)) {
         // Found — read index from last 4 bytes of slot
         const index = this.dataView.getInt32(slotOffset + this.keySize, true);
         this.keyToIndexCache.set(key, index);
@@ -346,7 +353,7 @@ export class SharedKeyRegistry {
   }
 
   /** FNV-1a 32-bit hash of key bytes */
-  private fnv1a32(keyBuffer: Buffer, keyLen: number): number {
+  private fnv1a32(keyBuffer: Uint8Array | Buffer, keyLen: number): number {
     let hash = FNV_OFFSET_BASIS;
     for (let i = 0; i < keyLen; i++) {
       hash ^= keyBuffer[i];
@@ -356,7 +363,7 @@ export class SharedKeyRegistry {
   }
 
   /** Compare key bytes at a slot offset against a key buffer */
-  private compareKeyAtSlot(slotOffset: number, keyBuffer: Buffer, keyLen: number): boolean {
+  private compareKeyAtSlot(slotOffset: number, keyBuffer: Uint8Array | Buffer, keyLen: number): boolean {
     for (let j = 0; j < keyLen; j++) {
       if (this.dataView.getUint8(slotOffset + j) !== keyBuffer[j]) {
         return false;
