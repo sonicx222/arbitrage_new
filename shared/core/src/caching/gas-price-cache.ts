@@ -467,8 +467,10 @@ export class GasPriceCache {
           this.staleWarnLastLogged.set(chain, now);
           this.logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
         }
-        // Return stale data but mark as potentially unreliable
-        return { ...cached, isFallback: true };
+        // OPT-007: Mutate in place instead of spread copy on every stale read.
+        // Refreshes create a new object with isFallback:false, so this is safe.
+        cached.isFallback = true;
+        return cached;
       }
       return cached;
     }
@@ -484,19 +486,43 @@ export class GasPriceCache {
    * @returns Native token price data
    */
   getNativeTokenPrice(chain: string): NativeTokenPrice {
-    const cached = this.nativePrices.get(chain.toLowerCase());
+    const chainLower = chain.toLowerCase();
+    const cached = this.nativePrices.get(chainLower);
 
     if (cached) {
       const age = Date.now() - cached.lastUpdated;
       if (age > this.config.staleThresholdMs) {
-        return { ...cached, isFallback: true };
+        // H-04 FIX: Rate-limited warning for stale native token prices.
+        // Without this, stale prices are silently returned, masking refresh failures.
+        const now = Date.now();
+        const warnKey = `native:${chainLower}`;
+        const lastLogged = this.staleWarnLastLogged.get(warnKey) ?? 0;
+        if (now - lastLogged >= GasPriceCache.STALE_WARN_INTERVAL_MS) {
+          this.staleWarnLastLogged.set(warnKey, now);
+          this.logger.warn(`Native token price for ${chainLower} is stale (${age}ms old)`);
+        }
+        // OPT-007: Mutate in place instead of spread copy on every stale read
+        cached.isFallback = true;
+        return cached;
       }
       return cached;
     }
 
-    // Return fallback
+    // H-04 FIX: Rate-limited warning when falling back to magic $1000 price for
+    // unknown chains. The $1000 fallback can cause 10-100x gas estimation errors.
+    const fallbackPrice = FALLBACK_NATIVE_PRICES[chainLower];
+    if (!fallbackPrice) {
+      const now = Date.now();
+      const warnKey = `unknown:${chainLower}`;
+      const lastLogged = this.staleWarnLastLogged.get(warnKey) ?? 0;
+      if (now - lastLogged >= GasPriceCache.STALE_WARN_INTERVAL_MS) {
+        this.staleWarnLastLogged.set(warnKey, now);
+        this.logger.warn(`No native token price for ${chainLower}, using $1000 fallback`);
+      }
+    }
+
     return {
-      priceUsd: FALLBACK_NATIVE_PRICES[chain.toLowerCase()] ?? 1000,
+      priceUsd: fallbackPrice ?? 1000,
       lastUpdated: Date.now(),
       isFallback: true
     };

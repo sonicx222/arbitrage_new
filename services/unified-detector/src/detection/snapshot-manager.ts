@@ -65,6 +65,10 @@ export interface ExtendedPair {
   name?: string;
   // P0 Fix DET-001: Flag pairs with synthetic reserves (Curve/Balancer swap amounts)
   syntheticReserves?: boolean;
+  // OPT-007: Cached BigInt reserves from chain-instance applyReserveUpdate().
+  // When present, avoids redundant BigInt(string) re-parse in createPairSnapshot().
+  reserve0BigInt?: bigint;
+  reserve1BigInt?: bigint;
 }
 
 /**
@@ -112,13 +116,13 @@ export class SnapshotManager {
     }
 
     // PERF 10.1: Pre-compute BigInt values for hot-path calculations
-    // This avoids repeated string-to-BigInt conversion during arbitrage detection
+    // OPT-007: Prefer cached BigInt from chain-instance (avoids redundant string→BigInt parse)
     let reserve0BigInt: bigint;
     let reserve1BigInt: bigint;
 
     try {
-      reserve0BigInt = BigInt(pair.reserve0);
-      reserve1BigInt = BigInt(pair.reserve1);
+      reserve0BigInt = pair.reserve0BigInt ?? BigInt(pair.reserve0);
+      reserve1BigInt = pair.reserve1BigInt ?? BigInt(pair.reserve1);
     } catch {
       // Invalid reserve format
       return null;

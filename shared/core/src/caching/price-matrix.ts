@@ -243,8 +243,11 @@ export class PriceMatrix implements Resettable {
   // Epoch for relative timestamps (reduce timestamp storage size)
   private readonly timestampEpoch: number;
 
-  // Track which slots have been written to
-  private writtenSlots: Set<number> = new Set();
+  // OPT-007: Track which slots have been written to.
+  // Uint8Array bitmap replaces Set<number> for O(1) array access without hash overhead.
+  // At 10K slots: 10KB bitmap vs ~200KB+ Set. Checked on every getPrice()/getPriceOnly().
+  private writtenSlots!: Uint8Array;
+  private writtenSlotCount = 0;
 
   // Statistics
   private stats: PriceMatrixStats = {
@@ -281,6 +284,7 @@ export class PriceMatrix implements Resettable {
     // Use epoch from 2024-01-01 to keep timestamps small
     this.timestampEpoch = TIMESTAMP_EPOCH;
 
+    this.writtenSlots = new Uint8Array(totalSlots);
     this.initializeArrays(totalSlots);
 
     // PHASE3-TASK43: Initialize SharedKeyRegistry for worker access
@@ -361,7 +365,8 @@ export class PriceMatrix implements Resettable {
       configurable: false
     });
     instance.destroyed = false;
-    instance.writtenSlots = new Set();
+    instance.writtenSlots = new Uint8Array(totalSlots);
+    instance.writtenSlotCount = 0;
     instance.stats = {
       reads: 0,
       writes: 0,
@@ -543,7 +548,7 @@ export class PriceMatrix implements Resettable {
 
     // Check if we've reached maxPairs limit for new keys
     const isNewKey = !this.mapper.hasKey(key);
-    if (isNewKey && this.writtenSlots.size >= this.config.maxPairs) {
+    if (isNewKey && this.writtenSlotCount >= this.config.maxPairs) {
       logger.warn('PriceMatrix maxPairs limit reached, ignoring new key', { key });
       return false;
     }
@@ -594,7 +599,10 @@ export class PriceMatrix implements Resettable {
     }
 
     // Track that this slot has been written
-    this.writtenSlots.add(index);
+    if (!this.writtenSlots[index]) {
+      this.writtenSlots[index] = 1;
+      this.writtenSlotCount++;
+    }
 
     // PHASE3-TASK43: Register key in SharedKeyRegistry for worker access
     // P1-FIX: Key registration happens AFTER price write to prevent workers
@@ -641,7 +649,7 @@ export class PriceMatrix implements Resettable {
 
     // Check if this slot has been written to
     // PHASE3-TASK43: Skip check for workers since writtenSlots isn't shared
-    if (!this.isWorkerMode && !this.writtenSlots.has(index)) {
+    if (!this.isWorkerMode && !this.writtenSlots[index]) {
       this.stats.misses++;
       return null;
     }
@@ -767,7 +775,7 @@ export class PriceMatrix implements Resettable {
     // PHASE3-TASK43: Use getIndexForKey() which supports SharedKeyRegistry
     const index = this.getIndexForKey(key);
     // PHASE3-TASK43: Skip writtenSlots check for workers since writtenSlots isn't shared
-    if (index < 0 || (!this.isWorkerMode && !this.writtenSlots.has(index))) {
+    if (index < 0 || (!this.isWorkerMode && !this.writtenSlots[index])) {
       this.stats.misses++;
       return null;
     }
@@ -834,7 +842,10 @@ export class PriceMatrix implements Resettable {
     }
 
     // Remove from written slots
-    this.writtenSlots.delete(index);
+    if (this.writtenSlots[index]) {
+      this.writtenSlots[index] = 0;
+      this.writtenSlotCount--;
+    }
   }
 
   /**
@@ -881,7 +892,7 @@ export class PriceMatrix implements Resettable {
 
       // Skip if at maxPairs limit for new keys
       const isNewKey = !this.mapper.hasKey(update.key);
-      if (isNewKey && this.writtenSlots.size >= maxPairs) {
+      if (isNewKey && this.writtenSlotCount >= maxPairs) {
         continue;
       }
 
@@ -926,7 +937,7 @@ export class PriceMatrix implements Resettable {
         this.dataView.setFloat64(index * 8, price, true);
         Atomics.store(timestamps, index, relativeTs);
         Atomics.store(sequences, index, seq + 1);
-        this.writtenSlots.add(index);
+        if (!this.writtenSlots[index]) { this.writtenSlots[index] = 1; this.writtenSlotCount++; }
         actualWrites++;
       }
     } else {
@@ -940,7 +951,7 @@ export class PriceMatrix implements Resettable {
         prices[index] = price;
         timestamps[index] = relativeTs;
         sequences[index]++;
-        this.writtenSlots.add(index);
+        if (!this.writtenSlots[index]) { this.writtenSlots[index] = 1; this.writtenSlotCount++; }
         actualWrites++;
       }
     }
@@ -987,7 +998,8 @@ export class PriceMatrix implements Resettable {
 
     this.clearArrays();
     this.mapper.clear();
-    this.writtenSlots.clear();
+    this.writtenSlots.fill(0);
+    this.writtenSlotCount = 0;
   }
 
   // ===========================================================================
@@ -1076,7 +1088,7 @@ export class PriceMatrix implements Resettable {
     // Fix #7: Include sequence counter bytes in total
     const sequenceArrayBytes = totalSlots * 4;
     const totalBytes = priceArrayBytes + timestampArrayBytes + sequenceArrayBytes;
-    const usedSlots = this.writtenSlots.size;
+    const usedSlots = this.writtenSlotCount;
 
     return {
       totalBytes,
@@ -1132,7 +1144,8 @@ export class PriceMatrix implements Resettable {
     };
 
     // Clear written slots tracking
-    this.writtenSlots.clear();
+    this.writtenSlots.fill(0);
+    this.writtenSlotCount = 0;
 
     // Clear prices in arrays (set to 0)
     if (this.priceArray) {
@@ -1231,7 +1244,8 @@ export class PriceMatrix implements Resettable {
     this.dataView = null;
 
     this.mapper.clear();
-    this.writtenSlots.clear();
+    this.writtenSlots.fill(0);
+    this.writtenSlotCount = 0;
 
     logger.info('PriceMatrix destroyed');
   }
