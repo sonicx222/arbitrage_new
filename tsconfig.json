@@ -18,6 +18,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
     "moduleResolution": "node",
     "noImplicitAny": true,
     "strictNullChecks": true,
