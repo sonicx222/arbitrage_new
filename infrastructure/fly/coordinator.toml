@@ -71,6 +71,15 @@ primary_region = "sjc"
     timeout = "5s"
     type = "http"
 
+  [checks.ready]
+    grace_period = "60s"
+    interval = "15s"
+    method = "GET"
+    path = "/api/health/ready"
+    port = 3000
+    timeout = "5s"
+    type = "http"
+
 [processes]
   # RT-3P-001: --max-old-space-size=192 reduces major GC pressure on 256MB VM.
   # Without this, V8 defaults to ~128MB heap, triggering frequent major GCs (15.8% ratio observed).

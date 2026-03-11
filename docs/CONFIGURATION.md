@@ -235,6 +235,10 @@ Deploy with: `npx hardhat run scripts/deploy-commit-reveal.ts --network <chain>`
 | `COMMIT_REVEAL_CONTRACT_POLYGON` | Polygon | `0x...` |
 | `COMMIT_REVEAL_CONTRACT_AVALANCHE` | Avalanche C-Chain | `0x...` |
 | `COMMIT_REVEAL_CONTRACT_FANTOM` | Fantom | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_BLAST` | Blast | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_SCROLL` | Scroll | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_MANTLE` | Mantle | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_MODE` | Mode | `0x...` |
 
 **Important:** Verify that zero addresses (`0x0000...0000`) are not used in production. The system will detect and reject zero addresses at configuration time (Issue 1.2 fix).
 

@@ -167,10 +167,10 @@ services:
       - "com.arbitrage.region=asia-southeast1"
       - "com.arbitrage.profile=heavy"
 
-  # Partition: l2-turbo (Arbitrum + Optimism + Base + Scroll + Blast)
+  # Partition: l2-turbo (Arbitrum + Optimism + Base + Scroll + Blast + Mantle + Mode)
   # Region: asia-southeast1, Provider: fly, Profile: standard
   # Scroll and Blast are fully operational with real DEX addresses (per CLAUDE.md).
-  # Mantle and Mode remain stubs — config present but missing verified DEX factories.
+  # Mantle and Mode DEX factories RPC-validated 2026-03-08.
   partition-l2-turbo:
     build:
       context: ../..
@@ -178,7 +178,7 @@ services:
     environment:
       - NODE_ENV=production
       - PARTITION_ID=l2-turbo
-      - PARTITION_CHAINS=arbitrum,optimism,base,scroll,blast
+      - PARTITION_CHAINS=arbitrum,optimism,base,scroll,blast,mantle,mode
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-l2-turbo-${HOSTNAME:-local}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379

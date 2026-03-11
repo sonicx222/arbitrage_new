@@ -40,7 +40,7 @@ import {
   type PositionSize,
 } from '@arbitrage/core/risk';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
-import { extractContext, createTraceContext, propagateContext } from '@arbitrage/core/tracing';
+import { extractContext, createTraceContext, createChildContext, propagateContext } from '@arbitrage/core/tracing';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { isTestnetExecutionMode, isExecutionSimulationMode } from '@arbitrage/core/simulation';
 import { disconnectWithTimeout, parseEnvIntSafe } from '@arbitrage/core/utils';
@@ -1334,21 +1334,23 @@ export class ExecutionEngineService {
       // 1. _trace_ prefixed fields (from Redis Streams message propagation)
       // 2. _traceId/_spanId (stamped by opportunity.consumer.ts for deferred execution)
       // Try extractContext first (format 1), then fall back to format 2.
+      // SM-003 FIX: Create a proper child span so execution-results carry a unique
+      // spanId with parentSpanId linking back to the opportunity's span.
       let traceCtx: TraceContext | null = null;
       if (opportunity) {
         const oppRecord = opportunity as unknown as Record<string, unknown>;
-        traceCtx = extractContext(oppRecord);
-        if (!traceCtx) {
+        const parentCtx = extractContext(oppRecord);
+        if (parentCtx) {
+          traceCtx = createChildContext(parentCtx, 'execution-engine');
+        } else {
           // Fall back to _traceId/_spanId stamped by opportunity consumer
           const traceId = oppRecord._traceId as string | undefined;
           const spanId = oppRecord._spanId as string | undefined;
           if (traceId && spanId) {
-            traceCtx = {
-              traceId,
-              spanId,
-              serviceName: 'execution-engine',
-              timestamp: Date.now(),
-            };
+            traceCtx = createChildContext(
+              { traceId, spanId, serviceName: 'unknown', timestamp: Date.now() },
+              'execution-engine',
+            );
           }
         }
       }
