@@ -1,10 +1,10 @@
 # Phase 4 — Pipeline Smoke Test
-# 12 steps, ~90 seconds. Validates full data flow end-to-end.
+# 14 steps, ~90 seconds. Validates full data flow end-to-end.
 # Reads inventory from `./monitor-session/config/inventory.json`
 # Reads thresholds from `.claude/commands/monitoring/config.json`
 
 ```
-[PHASE 4/5] Pipeline Smoke Test — starting (12 steps)
+[PHASE 4/5] Pipeline Smoke Test — starting (14 steps)
 ```
 
 **Retry:** curl and redis-cli commands use the retry wrapper (O-03).
@@ -13,7 +13,7 @@ Phase 3 findings (e.g., DLQ growth → link to RT-NNN DLQ root cause finding).
 
 Record findings to `./monitor-session/findings/smoke-test.jsonl`:
 ```json
-{"phase":"SMOKE_TEST","findingId":"SM-NNN","category":"PIPELINE_FLOW|PIPELINE_STALL|TRACE_INCOMPLETE|DLQ_GROWTH|DETECTION_RATE|RISK_STATE|BACKPRESSURE|PARTITION_FLOW|CROSS_CHAIN_DETECTOR|BUSINESS_INTELLIGENCE|RUNTIME_DEGRADATION","severity":"...","stream":"...","evidence":"..."}
+{"phase":"SMOKE_TEST","findingId":"SM-NNN","category":"PIPELINE_FLOW|PIPELINE_STALL|TRACE_INCOMPLETE|DLQ_GROWTH|DETECTION_RATE|RISK_STATE|BACKPRESSURE|PARTITION_FLOW|CROSS_CHAIN_DETECTOR|BUSINESS_INTELLIGENCE|RUNTIME_DEGRADATION|CEX_FEED","severity":"...","stream":"...","evidence":"..."}
 ```
 
 ---
@@ -26,7 +26,8 @@ for stream in stream:price-updates stream:opportunities \
   stream:execution-requests stream:execution-results \
   stream:exec-requests-fast stream:exec-requests-l2 \
   stream:exec-requests-premium stream:exec-requests-solana \
-  stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq; do
+  stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq \
+  stream:volume-aggregates stream:swap-events; do
   LEN=$(redis-cli XLEN $stream)
   echo "$stream: $LEN" >> ./monitor-session/streams/smoke-baseline.txt
   echo "$stream: $LEN"
@@ -87,6 +88,15 @@ done
 `[ALL]` Infrastructure flags:
 - execution-requests not growing but opportunities is → C:PIPELINE_STALL (coordinator not forwarding)
 - execution-results not growing but execution-requests is → C:PIPELINE_STALL (EE not processing)
+
+`[SIM]` Secondary pipeline streams (added by simulation Batch 3):
+```bash
+redis-cli XLEN stream:volume-aggregates
+redis-cli XLEN stream:swap-events
+```
+- `stream:volume-aggregates` not growing after 30s in SIM → M:PIPELINE_FLOW (SwapEventFilter not wired)
+- `stream:swap-events` not growing after 30s in SIM → M:PIPELINE_FLOW (simulation swap publishing broken)
+- Both growing → I:PIPELINE_FLOW (volume aggregation pipeline active)
 
 ---
 
@@ -282,11 +292,77 @@ Compare against Phase 3 values (Checks 3O, 3Q).
 
 ---
 
+## Step 4M — Volume aggregation pipeline (simulation Batch 3)
+
+Compare `stream:volume-aggregates` and `stream:swap-events` against Step 4A baseline.
+
+```bash
+VOL_LEN=$(redis-cli XLEN stream:volume-aggregates 2>/dev/null || echo "0")
+SWAP_LEN=$(redis-cli XLEN stream:swap-events 2>/dev/null || echo "0")
+echo "stream:volume-aggregates: $VOL_LEN (baseline: $(grep volume-aggregates ./monitor-session/streams/smoke-baseline.txt | awk '{print $2}'))"
+echo "stream:swap-events: $SWAP_LEN (baseline: $(grep swap-events ./monitor-session/streams/smoke-baseline.txt | awk '{print $2}'))"
+```
+
+`[SIM]` SwapEventFilter aggregation must produce volume aggregates from swap events:
+- `stream:swap-events` grew but `stream:volume-aggregates` did not → M:PIPELINE_FLOW (SwapEventFilter not publishing aggregates)
+- Neither grew during 60s smoke window → M:PIPELINE_FLOW (simulation swap generation not wired)
+- Both grew → I:PIPELINE_FLOW (volume aggregation pipeline healthy)
+
+`[LIVE/TESTNET]` Volume aggregates depend on real swap events:
+- Both empty → I:PIPELINE_FLOW (expected — low activity)
+
+---
+
+## Step 4N — CEX price feed validation (ADR-036)
+
+Only applies when `FEATURE_CEX_PRICE_SIGNALS=true` in `.env`.
+
+```bash
+CEX_ENABLED=$(grep -c 'FEATURE_CEX_PRICE_SIGNALS=true' .env 2>/dev/null || echo 0)
+echo "CEX price signals enabled: $CEX_ENABLED"
+```
+
+If `CEX_ENABLED=0` → I:CEX_FEED (feature disabled, skip remaining checks).
+
+If enabled:
+
+1. Check coordinator logs for CEX feed startup and mode:
+```bash
+grep -i 'CexPriceFeedService' ./monitor-session/logs/coordinator.log 2>/dev/null | tail -5
+```
+
+2. In simulation mode, verify synthetic CEX prices are generating spreads:
+```bash
+# Check if spread calculator has data (coordinator /api/diagnostics or logs)
+grep -c 'spread_alert\|updateDexPrice\|simulateCexPrices' \
+  ./monitor-session/logs/coordinator.log 2>/dev/null || echo 0
+```
+
+3. Verify opportunity scoring applies `cexAlignmentFactor`:
+```bash
+# Check recent opportunities for CEX alignment
+redis-cli XREVRANGE stream:opportunities + - COUNT 5 2>/dev/null | \
+  grep -c 'cexAlignment' || echo 0
+```
+
+Flags:
+- `FEATURE_CEX_PRICE_SIGNALS=true` but no CexPriceFeedService startup log → H:CEX_FEED (service failed to init)
+  `"relatedFindings": ["RT-NNN"]` (link to runtime 3AS if present)
+- Simulation mode with no synthetic spread activity after 30s → M:CEX_FEED (simulation synthetic prices not wired)
+  `[SIM-OVERRIDE: CEX_FEED:sim_no_spreads → I]`
+- Live mode with Binance WS not connected after 30s → M:CEX_FEED
+  `[SIM-OVERRIDE: CEX_FEED:ws_not_connected → I]`
+- Opportunities missing `cexAlignmentFactor` when CEX data is available → L:CEX_FEED (scoring not enriched)
+- Feature disabled → I:CEX_FEED
+- All healthy → I:CEX_FEED
+
+---
+
 ## Phase 4 Summary
 
 ```
 [PHASE 4/5] Pipeline Smoke Test — complete (C:<n> H:<n> M:<n>)
-PHASE 4 COMPLETE — Pipeline Smoke Test (12 steps)
+PHASE 4 COMPLETE — Pipeline Smoke Test (14 steps)
   Price updates published: <n>
   Opportunities detected: <n>
   Execution requests forwarded: <n>
@@ -299,6 +375,8 @@ PHASE 4 COMPLETE — Pipeline Smoke Test (12 steps)
   Risk state post-smoke: NORMAL / CAUTION / HALT / RECOVERY
   Backpressure: INACTIVE / ACTIVE (ratio: <n>%)
   Partition flow: <n>/4 partitions actively processing
+  Volume aggregation: ACTIVE / INACTIVE / N/A
+  CEX price feed: ACTIVE / DISABLED / DEGRADED
   BI metrics recording: YES / NO / N/A
   Runtime stability: STABLE / DEGRADED
   CRITICAL: <n>  HIGH: <n>  MEDIUM: <n>

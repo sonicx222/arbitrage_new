@@ -44,7 +44,8 @@ import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrag
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
-import { safeParseInt, safeParseFloat, getStreamForChain, validateRouteSymmetry } from '@arbitrage/config';
+import { safeParseInt, safeParseFloat, getStreamForChain, validateRouteSymmetry, FEATURE_FLAGS } from '@arbitrage/config';
+import { getCexPriceFeedService, resetCexPriceFeedService } from '@arbitrage/core/feeds';
 import { serializeOpportunityForStream } from './utils/stream-serialization';
 
 // Import extracted API modules
@@ -740,6 +741,22 @@ export class CoordinatorService implements CoordinatorStateProvider {
         })
       );
 
+      // ADR-036: Start CEX price feed if feature flag is enabled
+      if (FEATURE_FLAGS.useCexPriceSignals) {
+        const isSimMode = process.env.SIMULATION_MODE === 'true';
+        const cexFeed = getCexPriceFeedService({
+          alertThresholdPct: safeParseFloat(process.env.CEX_PRICE_ALERT_THRESHOLD_PCT, 0.3),
+          maxCexPriceAgeMs: safeParseInt(process.env.CEX_PRICE_MAX_AGE_MS, 10000),
+          skipExternalConnection: isSimMode,
+          simulateCexPrices: isSimMode,
+        });
+        await cexFeed.start();
+        this.logger.info('CEX price feed started', {
+          mode: isSimMode ? 'simulation (synthetic CEX prices)' : 'live (Binance WS)',
+          connected: cexFeed.isConnected(),
+        });
+      }
+
       // P0-4 FIX: Seed the coordinator's own serviceHealth entry at startup
       // before the health monitor starts. This prevents detectStaleServices()
       // from seeing an absent/ancient coordinator entry during the startup phase.
@@ -1010,6 +1027,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
         });
         this.server = null;
       }
+
+      // ADR-036: Stop CEX price feed
+      await resetCexPriceFeedService();
 
       // M-07 FIX: Parallelize Redis disconnects (was sequential = 15s worst case).
       // Each has its own 5s timeout, so parallel worst case = 5s total.

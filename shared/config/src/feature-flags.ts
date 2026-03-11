@@ -363,6 +363,25 @@ export const FEATURE_FLAGS = {
 
   /** Enable CoW Protocol backrun strategy. @default false */
   useCowBackrun: process.env.FEATURE_COW_BACKRUN === 'true',
+
+  /**
+   * Enable CEX price signal feed (Binance) for opportunity scoring.
+   *
+   * When enabled:
+   * - Connects to Binance public trade stream (no API key needed)
+   * - Provides CEX-DEX spread analysis for 9 tokens (WETH, WBTC, WBNB, SOL, AVAX, MATIC, ARB, OP, FTM)
+   * - Opportunity scoring applies CEX alignment factor (boost aligned, penalize contradicted)
+   * - In SIMULATION_MODE, uses synthetic CEX prices from DEX data (no external connection)
+   *
+   * When disabled (default):
+   * - No CEX price data — scoring uses DEX-only signals
+   * - Set FEATURE_CEX_PRICE_SIGNALS=true to enable
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see ADR-036: CEX Price Signals
+   * @see shared/core/src/feeds/cex-price-feed-service.ts
+   */
+  useCexPriceSignals: process.env.FEATURE_CEX_PRICE_SIGNALS === 'true',
 };
 
 /**
@@ -786,6 +805,17 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
   if (FEATURE_FLAGS.useMevShareBackrun) {
     const msg = 'MEV-Share Backrun event processing enabled - SSE event stream will be consumed';
     if (logger) { logger.info(msg); } else { console.info(msg); }
+  }
+
+  // Validate CEX price signals feature (ADR-036)
+  if (FEATURE_FLAGS.useCexPriceSignals) {
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'AVAXUSDT', 'MATICUSDT', 'ARBUSDT', 'OPUSDT', 'FTMUSDT'];
+    const msg = `CEX Price Signals enabled - Binance trade stream will provide fair-value reference for ${symbols.length} tokens`;
+    if (logger) { logger.info(msg); } else { console.info(msg); }
+    if (process.env.SIMULATION_MODE === 'true') {
+      const warnMsg = 'CEX Price Signals + SIMULATION_MODE: Binance WS connection will be skipped; synthetic CEX prices generated from DEX data';
+      if (logger) { logger.warn(warnMsg); } else { console.warn(`WARNING: ${warnMsg}`); }
+    }
   }
 }
 

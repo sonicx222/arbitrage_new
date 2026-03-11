@@ -77,7 +77,7 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 ### Phase 3 — Runtime Validation (~120 seconds)
 
 5. Read and execute `monitoring/04-runtime.md`
-   - 42 checks across 9 subsections (3A-3AR)
+   - 43 checks across 9 subsections (3A-3AS)
    - Uses endpoint cache (O-01, TTL from config.json.cacheTtlSec) and Redis batching (O-02)
    - Retry wrapper (O-03) for transient curl/redis-cli failures
    - Placeholder metrics get fast-path INFO (no curl needed)
@@ -86,7 +86,7 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 ### Phase 4 — Pipeline Smoke Test (~90 seconds)
 
 6. Read and execute `monitoring/05-smoke-test.md`
-   - 12 steps (4A-4L): stream flow, trace propagation, DLQ, detection, risk
+   - 14 steps (4A-4N): stream flow, trace propagation, DLQ, detection, risk, volume aggregation, CEX feed
    - Mode-conditional expectations (SIM: all streams must grow; LIVE: price-updates only)
    - Findings → `./monitor-session/findings/smoke-test.jsonl`
 
@@ -106,8 +106,8 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 | 1. Static | 02 | 24 | 60s | static-analysis.jsonl |
 | *Quick exit* | — | — | — | *If MONITOR_QUICK_MODE=true, skip to Phase 5* |
 | 2. Startup | 03 | 5 steps | 60s | startup.jsonl |
-| 3. Runtime | 04 | 42 | 120s | runtime.jsonl |
-| 4. Smoke | 05 | 12 steps | 90s | smoke-test.jsonl |
+| 3. Runtime | 04 | 43 | 120s | runtime.jsonl |
+| 4. Smoke | 05 | 14 steps | 90s | smoke-test.jsonl |
 | 5. Report | 06 | 6 steps | 30s | REPORT_<id>.md |
 
 ## Dependencies

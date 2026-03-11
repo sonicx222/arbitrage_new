@@ -1,10 +1,10 @@
-# Phase 3 -- Runtime Validation (42 checks)
+# Phase 3 -- Runtime Validation (43 checks)
 
 All services must be running. Uses curl, redis-cli, jq.
-9 subsections, 42 checks (3A-3AR, excluding 3AL and 3AM -- reclassified to Phase 1).
+9 subsections, 43 checks (3A-3AS, excluding 3AL and 3AM -- reclassified to Phase 1).
 
 ```
-[PHASE 3/5] Runtime Validation — starting (42 checks)
+[PHASE 3/5] Runtime Validation — starting (43 checks)
 ```
 
 ## References
@@ -250,9 +250,24 @@ Flags:
 cat ./monitor-session/config/cache/cb_3005.json | jq .
 ```
 
+Also check the `hierarchical-cache-l2` circuit breaker (added by caching deep analysis H-02).
+This CB wraps all L2 (Redis) operations in `HierarchicalCache` to prevent cascade failures
+when Redis is degraded. Config: failureThreshold=5, recoveryTimeout=30s, monitoringPeriod=60s.
+
+```bash
+# Check if hierarchical-cache-l2 CB state is exposed in coordinator diagnostics
+cat ./monitor-session/config/cache/diagnostics.json 2>/dev/null | \
+  node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    const cbs=d?.circuitBreakers??{}; const hcl2=cbs['hierarchical-cache-l2'];
+    if(hcl2) console.log('hierarchical-cache-l2 CB:', JSON.stringify(hcl2));
+    else console.log('hierarchical-cache-l2 CB: not exposed in diagnostics')" 2>/dev/null
+```
+
 Flags:
 - Any chain `OPEN` -> H:CIRCUIT_BREAKER
 - Any chain `HALF_OPEN` -> M:CIRCUIT_BREAKER
+- `hierarchical-cache-l2` CB `OPEN` -> H:CIRCUIT_BREAKER (L2 Redis cache fully bypassed — L1/L3 only)
+- `hierarchical-cache-l2` CB `HALF_OPEN` -> M:CIRCUIT_BREAKER (L2 recovery in progress)
 - Unreachable -> H:CIRCUIT_BREAKER
 
 ---
@@ -1143,6 +1158,46 @@ Flags:
 
 ---
 
+### 3AS -- CEX Price Feed Health (ADR-036)
+
+Only applies when `FEATURE_CEX_PRICE_SIGNALS=true` in `.env`.
+
+1. Check feature flag status:
+```bash
+grep -c 'FEATURE_CEX_PRICE_SIGNALS=true' .env 2>/dev/null || echo 0
+```
+If `0` → `I:CEX_FEED` (feature disabled, skip remaining checks).
+
+2. If enabled, check coordinator logs for CEX feed startup:
+```bash
+grep -i 'CEX price feed started' ./monitor-session/logs/coordinator.log 2>/dev/null | tail -1
+```
+
+3. Determine mode from startup log:
+```bash
+CEX_MODE=$(grep 'CEX price feed started' ./monitor-session/logs/coordinator.log 2>/dev/null | grep -o 'mode: [^,]*' | tail -1)
+echo "CEX mode: $CEX_MODE"
+```
+
+4. In live/testnet mode, verify Binance WS connected:
+```bash
+grep 'connected: true' ./monitor-session/logs/coordinator.log 2>/dev/null | grep -c 'CEX'
+```
+
+5. In simulation mode, verify synthetic price generation:
+```bash
+grep -c 'simulation' ./monitor-session/logs/coordinator.log 2>/dev/null | head -1
+```
+
+Flags:
+- `FEATURE_CEX_PRICE_SIGNALS=true` but no startup log → H:CEX_FEED (service failed to init)
+- Live mode but `connected: false` after 30s uptime → M:CEX_FEED (Binance WS down)
+  `[SIM-OVERRIDE: CEX_FEED:ws_not_connected → I]`
+- Simulation mode with synthetic prices confirmed → I:CEX_FEED (working as expected)
+- Feature flag not set → I:CEX_FEED (disabled, skip remaining checks)
+
+---
+
 ## Finding Aggregation
 
 Before writing the Phase 3 summary, aggregate per-service findings that share the same
@@ -1199,11 +1254,11 @@ For session 101042, this would reduce ~18 per-service findings to ~4 aggregates.
 
 ## Phase 3 Summary
 
-After all 42 checks across 9 subsections, read `./monitor-session/findings/runtime.jsonl`:
+After all 43 checks across 9 subsections, read `./monitor-session/findings/runtime.jsonl`:
 
 ```
 [PHASE 3/5] Runtime Validation — complete (C:<n> H:<n> M:<n>)
-PHASE 3 COMPLETE -- Runtime Validation (42 checks, 9 subsections)
+PHASE 3 COMPLETE -- Runtime Validation (43 checks, 9 subsections)
   3.1 Service Health & Schema: 3A health, 3B leader, 3C schema
   3.2 Risk & CB: 3D CB states, 3E drawdown, 3F CB history*, 3G backpressure*
   3.3 Data Flow & DLQ: 3H DLQ, 3I topology, 3J lag, 3K root cause, 3L transit, 3M ack*, 3N trim*
@@ -1212,7 +1267,7 @@ PHASE 3 COMPLETE -- Runtime Validation (42 checks, 9 subsections)
   3.6 Detection Quality: 3W cycle timing, 3X opps/cycle, 3Y cache*
   3.7 Execution & BI: 3Z gas, 3AA sim, 3AB probability, 3AC bridge, 3AD outcomes, 3AE slippage, 3AF age, 3AG profit
   3.8 Observability: 3AH prometheus, 3AI completeness
-  3.9 Dashboard: 3AJ availability, 3AK SSE, 3AN REST, 3AO keys, 3AP proxy, 3AQ streams, 3AR diagnostics
+  3.9 Dashboard: 3AJ availability, 3AK SSE, 3AN REST, 3AO keys, 3AP proxy, 3AQ streams, 3AR diagnostics, 3AS CEX feed
   (* = placeholder for not-yet-implemented metrics)
   Services healthy: <n>/7
   Leader elected: YES/NO

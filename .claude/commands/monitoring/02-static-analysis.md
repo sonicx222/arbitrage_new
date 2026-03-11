@@ -207,14 +207,18 @@ Redis Streams signing must be configured for production.
 2. Grep `STREAM_SIGNING_KEY` in code. Verify signing implementation in `shared/core/src/redis/streams.ts`.
 3. Check `STREAM_PREVIOUS_SIGNING_KEY` (key rotation) documented.
 4. Verify fail-closed behavior: missing HMAC rejects messages in production.
-5. Check `STREAM_LEGACY_HMAC_COMPAT` status -- when enabled, accepts both signed and unsigned (2x HMAC per message).
+5. **Dead env var check** (OPT-005): `STREAM_LEGACY_HMAC_COMPAT` and `LEGACY_HMAC_COMPAT` were
+   removed in commit `e80758a1`. Grep `.env`, `.env.local`, `.env.example` for these vars.
+   If found → stale config that misleads operators.
+6. Verify `maxHmacOpsPerMessage` is 1 (single key) or 2 (rotation window with previous key).
+   Legacy 4-op paths no longer exist after OPT-005.
 
 Flags:
 - `STREAM_SIGNING_KEY` not in `.env.example` -> H:HMAC_SIGNING
 - No HMAC enforcement in production path -> C:HMAC_SIGNING
 - Key rotation support undocumented -> L:HMAC_SIGNING
-- `STREAM_LEGACY_HMAC_COMPAT=true` in `.env` -> H:HMAC_SIGNING (4x->1x overhead; accepts unsigned)
-- Legacy compat is `false` or absent -> I:HMAC_SIGNING (strict enforcement active)
+- `STREAM_LEGACY_HMAC_COMPAT` or `LEGACY_HMAC_COMPAT` in any `.env*` file -> M:HMAC_SIGNING (dead env var from pre-OPT-005; remove to avoid confusion)
+- All clean (no dead vars, signing active) -> I:HMAC_SIGNING (strict enforcement active)
 
 ---
 
@@ -222,15 +226,17 @@ Flags:
 
 Feature flags must be consistent -- no cross-dependency violations.
 
-1. Read `shared/config/src/feature-flags.ts`, extract all 23 `FEATURE_*` flags.
+1. Read `shared/config/src/feature-flags.ts`, extract all 24 `FEATURE_*` flags.
 2. List each flag with pattern (`=== 'true'` opt-in or `!== 'false'` opt-out).
 3. Verify cross-dependencies:
    - `FEATURE_SIGNAL_CACHE_READ` requires `FEATURE_ML_SIGNAL_SCORING`
    - `FEATURE_COMMIT_REVEAL_REDIS` requires `REDIS_URL`
    - `FEATURE_SOLANA_EXECUTION` requires `SOLANA_RPC_URL`
+   - `FEATURE_CEX_PRICE_SIGNALS` + `SIMULATION_MODE=true` → should log simulation warning
 4. Check `.env.example` documents all flags.
+5. If `FEATURE_CEX_PRICE_SIGNALS=true`, verify `CEX_PRICE_ALERT_THRESHOLD_PCT` and `CEX_PRICE_MAX_AGE_MS` are documented in `.env.example`.
 
-Cross-check against `inventory.json` `.featureFlags[]` for the expected 23 flags.
+Cross-check against `inventory.json` `.featureFlags[]` for the expected 24 flags.
 
 Flags:
 - Cross-dependency violation in code -> H:FEATURE_FLAG

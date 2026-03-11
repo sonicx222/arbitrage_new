@@ -27,6 +27,15 @@ export interface ScorableOpportunity {
   /** M-01 FIX: Estimated gas cost in USD. Subtracted from profit before scoring
    * so L1 opportunities (high gas) score lower than L2 (low gas) at equal profit. */
   estimatedGasCostUsd?: number;
+  /**
+   * CEX-DEX spread alignment factor. Multiplied into score after base computation.
+   * - >1.0: DEX arb direction aligns with CEX-DEX spread (boost)
+   * - <1.0: DEX arb direction contradicts CEX-DEX spread (penalize)
+   * - 1.0: Neutral (no effect)
+   * - undefined: No CEX data available (no effect)
+   * @see ADR-036: CEX Price Signals
+   */
+  cexAlignmentFactor?: number;
 }
 
 /** Default TTL when expiresAt is not available (60 seconds) */
@@ -78,5 +87,13 @@ export function scoreOpportunity(opp: ScorableOpportunity, now: number): number 
     ttlRemainingMs = MIN_TTL_FLOOR_MS;
   }
 
-  return profit * confidence * (1 / ttlRemainingMs);
+  let score = profit * confidence * (1 / ttlRemainingMs);
+
+  // CEX alignment: boost/penalize based on CEX-DEX spread direction (ADR-036)
+  const cexFactor = opp.cexAlignmentFactor;
+  if (cexFactor !== undefined && cexFactor !== null && Number.isFinite(cexFactor) && cexFactor > 0) {
+    score = score * cexFactor;
+  }
+
+  return score;
 }

@@ -15,8 +15,11 @@ import pathModule from 'path';
 import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity, type PipelineTimestamps } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
+import { getCexPriceFeedService } from '@arbitrage/core/feeds';
+import { FEATURE_FLAGS, CORE_TOKENS } from '@arbitrage/config';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 import { scoreOpportunity } from './opportunity-scoring';
+import { computeCexAlignment } from './cex-alignment';
 
 /**
  * Parse a numeric field that may arrive as a string from Redis Streams.
@@ -46,6 +49,29 @@ function parseBooleanField(value: unknown): boolean | undefined {
     if (value === 'false') return false;
   }
   return undefined;
+}
+
+// =============================================================================
+// CEX Token Address Resolution (ADR-036)
+// =============================================================================
+
+/** Tokens tracked by CEX feed (Binance trade stream) */
+const CEX_TOKEN_IDS = new Set(['WETH', 'WBTC', 'WBNB', 'SOL', 'AVAX', 'MATIC', 'ARB', 'OP', 'FTM']);
+
+/** Lazy reverse map: token address (lowercase) -> token ID for CEX lookup */
+let _addressToTokenId: Map<string, string> | null = null;
+
+function getAddressToTokenIdMap(): Map<string, string> {
+  if (_addressToTokenId) return _addressToTokenId;
+  _addressToTokenId = new Map();
+  for (const tokens of Object.values(CORE_TOKENS)) {
+    for (const token of tokens) {
+      if (CEX_TOKEN_IDS.has(token.symbol)) {
+        _addressToTokenId.set(token.address.toLowerCase(), token.symbol);
+      }
+    }
+  }
+  return _addressToTokenId;
 }
 
 /**
@@ -838,16 +864,43 @@ export class OpportunityRouter {
 
     // Step 3: Score and sort by admission priority (descending score).
     // Phase 1 Admission Control: Replaces pure TTL sort with profit-weighted scoring.
-    // Score = expectedProfit × confidence × (1 / max(ttlRemainingMs, 100)).
-    // This naturally prioritizes urgent high-profit opportunities.
+    // Score = expectedProfit × confidence × (1 / max(ttlRemainingMs, 100)) × cexAlignmentFactor.
+    // This naturally prioritizes urgent high-profit opportunities aligned with CEX prices.
     const candidates = Array.from(freshest.values());
+
+    // ADR-036: CEX alignment scoring — resolve CEX feed + address map once per batch
+    const cexEnabled = FEATURE_FLAGS.useCexPriceSignals;
+    const cexFeed = cexEnabled ? getCexPriceFeedService() : null;
+    const addrMap = cexEnabled ? getAddressToTokenIdMap() : null;
+
     for (const opp of candidates) {
+      let cexAlignmentFactor: number | undefined;
+
+      if (cexFeed && addrMap) {
+        // Resolve token address to CEX-tracked token ID
+        const tokenInAddr = typeof opp.data.tokenIn === 'string' ? opp.data.tokenIn.toLowerCase() : '';
+        const tokenId = addrMap.get(tokenInAddr);
+        if (tokenId) {
+          // Feed DEX price to spread calculator for CEX-DEX spread computation
+          const buyPrice = parseNumericField(opp.data.buyPrice);
+          if (buyPrice !== undefined && buyPrice > 0) {
+            cexFeed.updateDexPrice(tokenId, opp.chain, buyPrice);
+          }
+          // Compute alignment: boost if arb aligns with CEX, penalize if contradicted
+          const buyChain = opp.chain;
+          const sellChain = typeof opp.data.sellChain === 'string' ? opp.data.sellChain : opp.chain;
+          cexAlignmentFactor = computeCexAlignment(tokenId, buyChain, sellChain, cexFeed);
+        }
+      }
+
       (opp as ScoredOpp)._score = scoreOpportunity({
         expectedProfit: parseNumericField(opp.data.expectedProfit),
         confidence: parseNumericField(opp.data.confidence),
         expiresAt: opp.expiresAt,
         // M-01 FIX: Pass gas cost for chain-aware scoring
         estimatedGasCostUsd: parseNumericField(opp.data.gasCost),
+        // ADR-036: CEX alignment factor (1.15=aligned, 0.8=contradicted, 1.0=neutral/no data)
+        cexAlignmentFactor,
       }, now);
     }
     // Safe cast: all candidates now have _score set by the loop above

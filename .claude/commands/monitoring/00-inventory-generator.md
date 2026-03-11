@@ -124,7 +124,7 @@ Write `./monitor-session/config/inventory.json`:
     "devAllServices": 7,
     "partitions": 4,
     "consumerGroups": 7,
-    "featureFlags": 23
+    "featureFlags": 24
   }
 }
 ```

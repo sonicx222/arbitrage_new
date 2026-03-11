@@ -40,6 +40,16 @@ export type {
   CexNormalizerConfig,
 } from './cex-price-normalizer';
 
+// CEX Price Feed Service (ADR-036)
+export {
+  CexPriceFeedService,
+  getCexPriceFeedService,
+  resetCexPriceFeedService,
+} from './cex-price-feed-service';
+export type {
+  CexPriceFeedConfig,
+} from './cex-price-feed-service';
+
 // Data Gap Backfiller (C3 fix)
 export {
   DataGapBackfiller,

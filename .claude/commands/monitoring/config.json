@@ -41,7 +41,9 @@
       "RUNTIME_PERFORMANCE:gc_major_ratio": "LOW",
       "RUNTIME_PERFORMANCE:gc_pause_elevated": "LOW",
       "DIAGNOSTICS:pipeline_latency_zeros": "INFO",
-      "DIAGNOSTICS:providers_empty": "INFO"
+      "DIAGNOSTICS:providers_empty": "INFO",
+      "CEX_FEED:ws_not_connected": "INFO",
+      "CEX_FEED:sim_no_spreads": "INFO"
     },
     "live": {},
     "testnet": {}

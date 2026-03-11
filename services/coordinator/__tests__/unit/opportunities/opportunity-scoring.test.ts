@@ -276,6 +276,128 @@ describe('scoreOpportunity', () => {
     });
   });
 
+  describe('CEX alignment factor (ADR-036)', () => {
+    it('should boost score when cexAlignmentFactor > 1.0 (aligned)', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const aligned = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: 1.15,
+      });
+
+      const baseScore = scoreOpportunity(baseline, NOW);
+      const alignedScore = scoreOpportunity(aligned, NOW);
+
+      expect(alignedScore).toBeGreaterThan(baseScore);
+      // 1.0 * 0.8 * (1/5000) * 1.15 = 0.000184
+      expect(alignedScore).toBeCloseTo(0.000184, 8);
+    });
+
+    it('should penalize score when cexAlignmentFactor < 1.0 (contradicted)', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const contradicted = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: 0.8,
+      });
+
+      const baseScore = scoreOpportunity(baseline, NOW);
+      const contradictedScore = scoreOpportunity(contradicted, NOW);
+
+      expect(contradictedScore).toBeLessThan(baseScore);
+      // 1.0 * 0.8 * (1/5000) * 0.8 = 0.000128
+      expect(contradictedScore).toBeCloseTo(0.000128, 8);
+    });
+
+    it('should not change score when cexAlignmentFactor = 1.0 (neutral)', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const neutral = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: 1.0,
+      });
+
+      expect(scoreOpportunity(neutral, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+
+    it('should not change score when cexAlignmentFactor is undefined', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const noData = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: undefined,
+      });
+
+      expect(scoreOpportunity(noData, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+
+    it('should ignore zero cexAlignmentFactor', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const zeroFactor = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: 0,
+      });
+
+      expect(scoreOpportunity(zeroFactor, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+
+    it('should ignore negative cexAlignmentFactor', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const negative = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: -0.5,
+      });
+
+      expect(scoreOpportunity(negative, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+
+    it('should ignore NaN cexAlignmentFactor', () => {
+      const baseline = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+      });
+      const nanFactor = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: NaN,
+      });
+
+      expect(scoreOpportunity(nanFactor, NOW)).toBe(scoreOpportunity(baseline, NOW));
+    });
+
+    it('should combine with gas cost deduction', () => {
+      const opp = createScorableOpp({
+        expectedProfit: 5.0,
+        confidence: 0.8,
+        expiresAt: NOW + 5000,
+        estimatedGasCostUsd: 2.0,
+        cexAlignmentFactor: 1.15,
+      });
+
+      // (5.0 - 2.0) * 0.8 * (1/5000) * 1.15 = 0.000552
+      expect(scoreOpportunity(opp, NOW)).toBeCloseTo(0.000552, 8);
+    });
+
+    it('should rank aligned opportunities above contradicted', () => {
+      const aligned = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: 1.15,
+      });
+      const contradicted = createScorableOpp({
+        expectedProfit: 1.0, confidence: 0.8, expiresAt: NOW + 5000,
+        cexAlignmentFactor: 0.8,
+      });
+
+      expect(scoreOpportunity(aligned, NOW)).toBeGreaterThan(scoreOpportunity(contradicted, NOW));
+    });
+  });
+
   describe('scoring order for sorting', () => {
     it('should rank high-profit urgent opportunity above low-profit non-urgent', () => {
       const highProfitUrgent = createScorableOpp({
