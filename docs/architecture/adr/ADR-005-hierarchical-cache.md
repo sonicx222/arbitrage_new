@@ -300,7 +300,7 @@ Updated: 2026-02-07 | Post-PriceMatrix Integration Testing
 | L2 fallback (Redis) | 800-1200 | 150-250ms | 15-25ms | Redis RTT + serialization |
 
 **Key Findings** (from flame graphs):
-- **L1 hot-path** dominated by SharedKeyRegistry CAS loop (40-50% CPU time)
+- **L1 hot-path** dominated by SharedKeyRegistry key lookup (pre-OPT-004: CAS loop 40-50% CPU; resolved by OPT-004 FNV-1a hash table — see `shared-key-registry.ts`)
 - **L2 fallback** adds 2000-4000x latency overhead vs L1 (as expected)
 - **Atomics operations** well-optimized, minimal overhead
 - **Memory allocation** minimal during steady-state (zero-copy working)

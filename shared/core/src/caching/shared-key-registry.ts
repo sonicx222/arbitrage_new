@@ -98,7 +98,7 @@ export class SharedKeyRegistry {
       this.buffer = existingBuffer;
       this.dataView = new DataView(this.buffer);
       this.entryCount = new Int32Array(this.buffer, 0, 1);
-      this.hashTableSize = new Int32Array(this.buffer, 4, 1)[0];
+      this.hashTableSize = Atomics.load(new Int32Array(this.buffer, 4, 1), 0);
       this.slotsOffset = this.headerSize + this.hashTableSize * 4;
       this.hashTable = new Int32Array(this.buffer, this.headerSize, this.hashTableSize);
       logger.debug('SharedKeyRegistry attached to existing buffer', {
@@ -118,7 +118,7 @@ export class SharedKeyRegistry {
 
       // Initialize header
       Atomics.store(this.entryCount, 0, 0);
-      new Int32Array(this.buffer, 4, 1)[0] = this.hashTableSize;
+      Atomics.store(new Int32Array(this.buffer, 4, 1), 0, this.hashTableSize);
 
       // Initialize all hash buckets to empty (-1)
       this.hashTable.fill(EMPTY_BUCKET);
@@ -333,6 +333,11 @@ export class SharedKeyRegistry {
   /**
    * Clear all entries (main thread only).
    * Resets entry count, hash table buckets, and local cache.
+   *
+   * IMPORTANT: Worker instances cache lookup results in `keyToIndexCache`.
+   * After clearing, existing worker instances will return stale cached values.
+   * Workers must be recreated (new SharedKeyRegistry with the same buffer)
+   * to see the cleared state.
    */
   clear(): void {
     Atomics.store(this.entryCount, 0, 0);

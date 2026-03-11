@@ -351,6 +351,59 @@ describe('SharedKeyRegistry: Concurrent Registration (P0 Fix)', () => {
     });
   });
 
+  describe('nextPowerOf2 edge cases (L-01)', () => {
+    it('should handle edge cases via hashTableSize in stats', () => {
+      // maxKeys=1 → hashTableSize = nextPowerOf2(1*2) = nextPowerOf2(2) = 2
+      const r1 = new SharedKeyRegistry({ maxKeys: 1 });
+      expect(r1.getStats().hashTableSize).toBe(2);
+
+      // maxKeys=2 → nextPowerOf2(4) = 4
+      const r2 = new SharedKeyRegistry({ maxKeys: 2 });
+      expect(r2.getStats().hashTableSize).toBe(4);
+
+      // maxKeys=3 → nextPowerOf2(6) = 8
+      const r3 = new SharedKeyRegistry({ maxKeys: 3 });
+      expect(r3.getStats().hashTableSize).toBe(8);
+
+      // Power-of-2 input: maxKeys=8 → nextPowerOf2(16) = 16
+      const r4 = new SharedKeyRegistry({ maxKeys: 8 });
+      expect(r4.getStats().hashTableSize).toBe(16);
+
+      // Non-power-of-2: maxKeys=5 → nextPowerOf2(10) = 16
+      const r5 = new SharedKeyRegistry({ maxKeys: 5 });
+      expect(r5.getStats().hashTableSize).toBe(16);
+    });
+  });
+
+  describe('Prefix collision (L-02)', () => {
+    it('should not match a key that is a prefix of a stored key', () => {
+      const registry = new SharedKeyRegistry({ maxKeys: 10 });
+
+      registry.register('price:eth:usd:spot', 42);
+
+      // Prefix of stored key — must NOT match
+      expect(registry.lookup('price:eth:usd')).toBe(-1);
+      expect(registry.lookup('price:eth')).toBe(-1);
+      expect(registry.lookup('price')).toBe(-1);
+
+      // Exact match — must match
+      expect(registry.lookup('price:eth:usd:spot')).toBe(42);
+    });
+
+    it('should not match a stored key that is a prefix of the lookup key', () => {
+      const registry = new SharedKeyRegistry({ maxKeys: 10 });
+
+      registry.register('price:eth', 10);
+
+      // Lookup with longer key — must NOT match the shorter stored key
+      expect(registry.lookup('price:eth:usd')).toBe(-1);
+      expect(registry.lookup('price:eth:usd:spot')).toBe(-1);
+
+      // Exact match
+      expect(registry.lookup('price:eth')).toBe(10);
+    });
+  });
+
   describe('Writer enforcement (H-02)', () => {
     it('should throw when register() is called on a worker (read-only) instance', () => {
       const writer = new SharedKeyRegistry({ maxKeys: 10 });
