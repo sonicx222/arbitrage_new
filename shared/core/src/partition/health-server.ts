@@ -363,10 +363,12 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
       }, logger);
     } else if (req.url === '/metrics') {
       // W2-H7: Prometheus metrics endpoint for scraping
-      try {
-        const streamMonitor = getStreamHealthMonitor();
-        const streamMetrics = await streamMonitor.getPrometheusMetrics();
-
+      // RT-042 FIX: Wrap with response timeout to prevent indefinite hang on P1/P2
+      // where event loop saturation from high WebSocket throughput causes async
+      // Redis calls in getPrometheusMetrics() to starve. Previously /metrics was
+      // the only endpoint without withResponseTimeout, causing 0-byte responses.
+      withResponseTimeout(res, config.serviceName, async () => {
+        // Collect sync metrics first (no Redis dependency) — these always succeed
         const latencyMetrics = getLatencyTracker().getMetrics();
         const latencyLines: string[] = [];
         latencyLines.push('# HELP pipeline_latency_p50_ms Pipeline latency 50th percentile in ms');
@@ -439,15 +441,27 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         }
         const otelBlock = otelLines.length > 0 ? otelLines.join('\n') + '\n' : '';
 
+        // RT-042 FIX: Stream metrics are async (Redis-dependent). On high-throughput
+        // partitions (P1/P2), Redis calls can starve under event loop saturation.
+        // Race with a 2s timeout so sync metrics still get returned.
+        let streamMetrics = '';
+        try {
+          const streamMonitor = getStreamHealthMonitor();
+          streamMetrics = await Promise.race([
+            streamMonitor.getPrometheusMetrics(),
+            new Promise<string>((resolve) =>
+              setTimeout(() => resolve('# stream metrics unavailable (timeout)\n'), 2000)
+            ),
+          ]);
+        } catch (_streamErr) {
+          streamMetrics = '# stream metrics unavailable (error)\n';
+        }
+
         const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
         const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics + otelBlock;
         res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
         res.end(body);
-      } catch (error) {
-        logger.error('Metrics endpoint failed', { error: (error as Error).message });
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('# Error generating metrics\n');
-      }
+      }, logger);
     } else if (req.url === '/') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
