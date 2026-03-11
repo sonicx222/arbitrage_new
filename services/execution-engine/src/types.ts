@@ -160,19 +160,12 @@ function getTypesLogger(): ICoreLogger {
  * ```
  */
 /**
- * Refactor 9.4: const enum for hot-path optimization.
+ * Error codes for execution pipeline failures.
  *
- * Using `const enum` instead of regular `enum` provides:
- * 1. Zero runtime overhead - values are inlined at compile time
- * 2. Smaller bundle size - no enum object generated
- * 3. Better minification - strings are inlined directly
- *
- * Trade-off: Cannot iterate over enum values at runtime (e.g., Object.values()).
- * This is acceptable because error codes are only used for comparison, not iteration.
- *
- * Performance impact: Eliminates property lookup on every error creation.
+ * Regular enum (not const enum) for isolatedModules compatibility.
+ * V8 optimizes string property access, so runtime overhead is negligible.
  */
-export const enum ExecutionErrorCode {
+export enum ExecutionErrorCode {
   // Chain/Provider errors
   NO_CHAIN = '[ERR_NO_CHAIN] No chain specified for opportunity',
   NO_WALLET = '[ERR_NO_WALLET] No wallet available for chain',

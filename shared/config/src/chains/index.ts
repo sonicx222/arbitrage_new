@@ -581,9 +581,9 @@ export {
   createAnkrConfig,
   createOnFinalityConfig,
   STANDARD_FALLBACK_PROVIDERS,
-  ChainUrlConfig,
-  ApiKeyUrlConfig,
-  ChainUrls,
+  type ChainUrlConfig,
+  type ApiKeyUrlConfig,
+  type ChainUrls,
 } from './chain-url-builder';
 
 // =============================================================================

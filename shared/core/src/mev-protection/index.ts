@@ -71,8 +71,8 @@
 // Factory (primary entry point)
 export {
   MevProviderFactory,
-  MevGlobalConfig,
-  ChainWalletConfig,
+  type MevGlobalConfig,
+  type ChainWalletConfig,
   createMevProvider,
   hasMevProtection,
   getRecommendedPriorityFee,
@@ -179,20 +179,20 @@ export type {
 // Types
 export {
   // EVM types
-  IMevProvider,
-  MevStrategy,
-  MevSubmissionResult,
-  MevProviderConfig,
-  FlashbotsBundle,
-  BundleSimulationResult,
-  MevMetrics,
+  type IMevProvider,
+  type MevStrategy,
+  type MevSubmissionResult,
+  type MevProviderConfig,
+  type FlashbotsBundle,
+  type BundleSimulationResult,
+  type MevMetrics,
   CHAIN_MEV_STRATEGIES,
   MEV_DEFAULTS,
   // MEV-Share types
-  MevShareHints,
-  MevShareOptions,
-  MevShareSubmissionResult,
+  type MevShareHints,
+  type MevShareOptions,
+  type MevShareSubmissionResult,
   // Solana types (for type-safe Jito usage)
-  ISolanaMevProvider,
-  SolanaTransactionLike,
+  type ISolanaMevProvider,
+  type SolanaTransactionLike,
 } from './types';

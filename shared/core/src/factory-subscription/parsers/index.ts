@@ -11,7 +11,7 @@
 // Types
 // =============================================================================
 
-export { PairCreatedEvent, RawEventLog } from './types';
+export type { PairCreatedEvent, RawEventLog } from './types';
 
 // =============================================================================
 // Utilities
@@ -84,5 +84,5 @@ export {
   BALANCER_TOKENS_REGISTERED_SIGNATURE,
   parseBalancerPoolRegisteredEvent,
   parseBalancerTokensRegisteredEvent,
-  BalancerTokensRegisteredResult,
+  type BalancerTokensRegisteredResult,
 } from './balancer-v2-parser';

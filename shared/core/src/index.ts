@@ -107,7 +107,7 @@ export type {
 // =============================================================================
 
 // Legacy logger (for backward compatibility)
-export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
+export { createLogger, PerformanceLogger, getPerformanceLogger, type Logger } from './logger';
 
 // Pino-based production logging
 export {
@@ -317,8 +317,8 @@ export {
 export {
   CircuitBreaker,
   CircuitBreakerError,
-  CircuitBreakerConfig,
-  CircuitBreakerStats,
+  type CircuitBreakerConfig,
+  type CircuitBreakerStats,
   CircuitState,
   CircuitBreakerRegistry,
   createCircuitBreaker,
@@ -849,9 +849,9 @@ export type {
 // T2.7: Price Momentum Detection
 export {
   PriceMomentumTracker,
-  MomentumSignal,
-  MomentumConfig,
-  PairStats,
+  type MomentumSignal,
+  type MomentumConfig,
+  type PairStats,
   getPriceMomentumTracker,
   resetPriceMomentumTracker
 } from './analytics/price-momentum';
@@ -1047,12 +1047,12 @@ export type {
 
 export {
   CrossDexTriangularArbitrage,
-  DexPool,
-  TriangularOpportunity,
-  TriangularStep,
-  ArbitragePath,
+  type DexPool,
+  type TriangularOpportunity,
+  type TriangularStep,
+  type ArbitragePath,
   // T2.6: Quadrilateral arbitrage
-  QuadrilateralOpportunity
+  type QuadrilateralOpportunity
 } from './path-finding/cross-dex-triangular-arbitrage';
 
 // T3.11: Multi-Leg Path Finding (5+ tokens)
@@ -1472,17 +1472,17 @@ export type {
 // =============================================================================
 
 /** @deprecated Unused — no external consumers. Remove in next major version. */
-export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './async/event-batcher';
+export { EventBatcher, type BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './async/event-batcher';
 
 export {
   WebSocketManager,
-  WebSocketConfig,
-  WebSocketSubscription,
-  WebSocketMessage,
-  WebSocketEventHandler,
-  ConnectionStateHandler,
-  ErrorEventHandler,
-  GenericEventHandler
+  type WebSocketConfig,
+  type WebSocketSubscription,
+  type WebSocketMessage,
+  type WebSocketEventHandler,
+  type ConnectionStateHandler,
+  type ErrorEventHandler,
+  type GenericEventHandler
 } from './websocket-manager';
 
 // CQ8-ALT: Extracted cold-path classes from websocket-manager

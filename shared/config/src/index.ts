@@ -144,7 +144,7 @@ if (process.env.NODE_ENV !== 'test') {
 export {
   CHAINS,
   MAINNET_CHAIN_IDS,
-  MainnetChainId,
+  type MainnetChainId,
   TESTNET_CHAINS,
   getAllChains,
   // 7-Provider Shield exports
@@ -173,8 +173,8 @@ export { DEXES, getEnabledDexes, getVerifiedDexes } from './dexes';
 export {
   DEX_FACTORY_REGISTRY,
   FACTORY_ABIS,
-  FactoryType,
-  FactoryConfig,
+  type FactoryType,
+  type FactoryConfig,
   getFactoriesForChain,
   getFactoriesWithEventSupport,
   getFactoryByAddress,
@@ -239,7 +239,7 @@ export { EVENT_CONFIG, EVENT_SIGNATURES } from './event-config';
 // =============================================================================
 // DETECTOR CONFIGURATION
 // =============================================================================
-export { DETECTOR_CONFIG, DetectorChainConfig } from './detector-config';
+export { DETECTOR_CONFIG, type DetectorChainConfig } from './detector-config';
 
 // =============================================================================
 // SERVICE CONFIGURATION (core service configs, flash loan providers, quoter)
@@ -302,8 +302,8 @@ export {
 // =============================================================================
 export {
   BRIDGE_COSTS,
-  BridgeCostConfig,
-  BridgeProtocolName,
+  type BridgeCostConfig,
+  type BridgeProtocolName,
   getBridgeCost,
   getAllBridgeOptions,
   calculateBridgeCostUsd,
@@ -314,8 +314,8 @@ export {
   selectOptimalBridge,
   selectOptimalBridgeFast,
   validateRouteSymmetry,
-  BridgeUrgency,
-  OptimalBridgeResult,
+  type BridgeUrgency,
+  type OptimalBridgeResult,
 } from './bridge-config';
 
 // =============================================================================
@@ -407,8 +407,8 @@ export {
   ConfigManager,
   configManager,
   resetConfigManager,
-  ValidationRule,
-  ValidationResult
+  type ValidationRule,
+  type ValidationResult
 } from './config-manager';
 
 // =============================================================================
@@ -491,9 +491,9 @@ export {
   getCommitRevealContract,
   hasCommitRevealContract,
   // Type exports
-  EVMChainId,
-  ChainId,
-  TestnetChainId,
+  type EVMChainId,
+  type ChainId,
+  type TestnetChainId,
 } from './addresses';
 
 // =============================================================================

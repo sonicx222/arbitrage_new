@@ -116,7 +116,7 @@ export type {
 // Event Batching Infrastructure
 export {
   EventBatcher,
-  BatchedEvent,
+  type BatchedEvent,
   createEventBatcher,
   getDefaultEventBatcher,
   resetDefaultEventBatcher

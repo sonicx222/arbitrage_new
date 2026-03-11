@@ -35,7 +35,7 @@ import { AsyncMutex } from './async/async-mutex';
 // =============================================================================
 
 // Re-export types
-export { PairCreatedEvent, type RawEventLog } from './factory-subscription/parsers/types';
+export type { PairCreatedEvent, RawEventLog } from './factory-subscription/parsers/types';
 
 // Re-export all parsers for backward compatibility
 export {

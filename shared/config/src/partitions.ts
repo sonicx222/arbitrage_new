@@ -16,7 +16,7 @@
 // Import partition IDs from standalone file FIRST to avoid circular dependency
 // This file has no dependencies, so it can be safely imported before index.ts
 import { PARTITION_IDS, PartitionId } from './partition-ids';
-export { PARTITION_IDS, PartitionId } from './partition-ids';
+export { PARTITION_IDS, type PartitionId } from './partition-ids';
 
 // Import from split modules to avoid circular dependency with index.ts
 import { CHAINS } from './chains';
