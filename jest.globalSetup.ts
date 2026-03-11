@@ -2,10 +2,9 @@
  * Jest Global Setup
  *
  * Runs once before all test suites.
- * Starts the Redis test server.
+ * Starts the Redis test server (skipped when SKIP_REDIS_SETUP=true).
  */
 
-import { RedisMemoryServer } from 'redis-memory-server';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,8 +23,15 @@ if (typeof (BigInt.prototype as any).toJSON === 'undefined') {
 }
 
 export default async function globalSetup(): Promise<void> {
+  if (process.env.SKIP_REDIS_SETUP === 'true') {
+    console.log('\n[Jest Global Setup] Skipping Redis (SKIP_REDIS_SETUP=true)\n');
+    return;
+  }
+
   console.log('\n[Jest Global Setup] Starting Redis test server...');
 
+  // Dynamic import to avoid loading redis-memory-server when skipped
+  const { RedisMemoryServer } = await import('redis-memory-server');
   const redisServer = new RedisMemoryServer();
   await redisServer.start();
 

@@ -21,22 +21,15 @@
 
 const { spawnSync } = require('child_process');
 
-function runPhase(name, args) {
-  console.log(`\n${'='.repeat(68)}`);
-  console.log(`  ${name.toUpperCase()} TESTS`);
-  console.log('='.repeat(68));
-  const result = spawnSync('npx', ['jest', ...args], {
-    stdio: 'inherit',
-    shell: true,
-  });
-  const code = result.status ?? 1;
-  console.log(`\n--- ${name} tests finished (exit code: ${code}) ---`);
-  return code;
-}
-
-const unitCode = runPhase('unit', ['--selectProjects', 'unit']);
-const intCode  = runPhase('integration', ['--selectProjects', 'integration', '--maxWorkers=1']);
-
-// Exit non-zero if either phase failed
-const combined = (unitCode !== 0 || intCode !== 0) ? 1 : 0;
-process.exit(combined);
+// Single Jest invocation for both unit + integration projects.
+// Jest runs them in the same process, sharing the global setup (Redis server)
+// and avoiding the ~6s overhead of a second process + Redis startup.
+const result = spawnSync('npx', [
+  'jest',
+  '--selectProjects', 'unit', 'integration',
+  '--maxWorkers=50%',
+], {
+  stdio: 'inherit',
+  shell: true,
+});
+process.exit(result.status ?? 1);

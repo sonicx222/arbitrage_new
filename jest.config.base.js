@@ -11,9 +11,11 @@
  * Project-level configuration options
  * These options are valid inside project configurations
  *
- * Note: SWC transformer was considered for 10-20x faster compilation but
- * is incompatible with ts-jest's TypeScript-aware mocking features
- * (jest.mocked, mockImplementation on typed mocks). Keeping ts-jest.
+ * Note: @swc/jest was evaluated (2026-03-11) for 10-20x faster compilation.
+ * Blocked by: (1) SWC doesn't hoist jest.mock() when jest is imported from
+ * @jest/globals (216 files), (2) TDZ errors in ~29 files where hoisted mock
+ * factories reference let/const variables. Requires removing jest from
+ * @jest/globals imports + converting var in factory-referenced declarations.
  */
 const projectConfig = {
   preset: 'ts-jest',
