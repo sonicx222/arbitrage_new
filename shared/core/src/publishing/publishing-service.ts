@@ -31,7 +31,7 @@ import { retryWithLogging } from '../resilience/retry-mechanism';
 // P-NEW-1: LatencyTracker integration for pipeline latency recording
 import { getLatencyTracker } from '../monitoring/latency-tracker';
 // W2-23 FIX: Trace context injection for cross-service correlation
-import { createTraceContext, propagateContext } from '../tracing/trace-context';
+import { createTraceContext, propagateContext, TRACE_FIELDS } from '../tracing/trace-context';
 // P2-13: Schema version for forward-compatible message evolution
 import { SYSTEM_CONSTANTS } from '@arbitrage/config';
 
@@ -219,13 +219,22 @@ export class PublishingService {
    */
   async publishPriceUpdate(update: PriceUpdate): Promise<void> {
     this.assertBatcherInitialized('priceUpdate', 'Price update');
-    const message = this.createMessage('price-update', update);
-    // W2-H3: Inject trace context for upstream pipeline correlation
+    // OPT-006: Inline message creation + trace context in single pass (was: createMessage + propagateContext = 2 object copies)
     const traceCtx = createTraceContext(this.source);
-    const tracedMessage = propagateContext(
-      message as unknown as Record<string, unknown>,
-      traceCtx,
-    );
+    const tracedMessage: Record<string, unknown> = {
+      type: 'price-update',
+      data: update,
+      timestamp: Date.now(),
+      source: this.source,
+      schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
+      [TRACE_FIELDS.traceId]: traceCtx.traceId,
+      [TRACE_FIELDS.spanId]: traceCtx.spanId,
+      [TRACE_FIELDS.serviceName]: traceCtx.serviceName,
+      [TRACE_FIELDS.timestamp]: String(traceCtx.timestamp),
+    };
+    if (traceCtx.parentSpanId) {
+      tracedMessage[TRACE_FIELDS.parentSpanId] = traceCtx.parentSpanId;
+    }
     this.batchers.priceUpdate!.add(tracedMessage as unknown as MessageEvent);
   }
 
@@ -247,13 +256,22 @@ export class PublishingService {
     }
 
     this.assertBatcherInitialized('swapEvent', 'Swap event');
-    const message = this.createMessage('swap-event', swapEvent);
-    // W2-H3: Inject trace context for upstream pipeline correlation
+    // OPT-006: Inline message creation + trace context in single pass
     const traceCtx = createTraceContext(this.source);
-    const tracedMessage = propagateContext(
-      message as unknown as Record<string, unknown>,
-      traceCtx,
-    );
+    const tracedMessage: Record<string, unknown> = {
+      type: 'swap-event',
+      data: swapEvent,
+      timestamp: Date.now(),
+      source: this.source,
+      schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
+      [TRACE_FIELDS.traceId]: traceCtx.traceId,
+      [TRACE_FIELDS.spanId]: traceCtx.spanId,
+      [TRACE_FIELDS.serviceName]: traceCtx.serviceName,
+      [TRACE_FIELDS.timestamp]: String(traceCtx.timestamp),
+    };
+    if (traceCtx.parentSpanId) {
+      tracedMessage[TRACE_FIELDS.parentSpanId] = traceCtx.parentSpanId;
+    }
     this.batchers.swapEvent!.add(tracedMessage as unknown as MessageEvent);
   }
 
@@ -301,16 +319,22 @@ export class PublishingService {
     timestamps.detectedAt = Date.now();
     opportunity.pipelineTimestamps = timestamps;
 
-    const message = this.createMessage('arbitrage-opportunity', opportunity);
-
-    // W2-23 FIX: Inject trace context for cross-service correlation.
-    // The execution engine extracts _trace_* fields from the message
-    // for end-to-end tracing from detection through execution.
+    // OPT-006: Inline message creation + trace context in single pass
     const traceCtx = createTraceContext(this.source);
-    const tracedMessage = propagateContext(
-      message as unknown as Record<string, unknown>,
-      traceCtx,
-    );
+    const tracedMessage: Record<string, unknown> = {
+      type: 'arbitrage-opportunity',
+      data: opportunity,
+      timestamp: Date.now(),
+      source: this.source,
+      schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
+      [TRACE_FIELDS.traceId]: traceCtx.traceId,
+      [TRACE_FIELDS.spanId]: traceCtx.spanId,
+      [TRACE_FIELDS.serviceName]: traceCtx.serviceName,
+      [TRACE_FIELDS.timestamp]: String(traceCtx.timestamp),
+    };
+    if (traceCtx.parentSpanId) {
+      tracedMessage[TRACE_FIELDS.parentSpanId] = traceCtx.parentSpanId;
+    }
 
     // P-NEW-1: Record pipeline latency from timestamps (O(1), zero-allocation)
     if (opportunity.pipelineTimestamps) {

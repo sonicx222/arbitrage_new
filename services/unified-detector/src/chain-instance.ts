@@ -575,11 +575,15 @@ export class ChainDetectorInstance extends EventEmitter {
           });
         }
 
-        // Evict stale entries (older than 5 seconds)
+        // OPT-006: Evict stale entries (older than 5 seconds).
+        // Map iteration order reflects insertion/update order. Once we hit a
+        // non-stale entry, all subsequent entries are also non-stale → break early.
         const staleThreshold = Date.now() - 5000;
         for (const [key, value] of this.signalCache) {
           if (value.updatedAt < staleThreshold) {
             this.signalCache.delete(key);
+          } else {
+            break;
           }
         }
       } catch (error) {

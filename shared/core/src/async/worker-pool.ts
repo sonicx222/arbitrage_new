@@ -262,6 +262,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
   private workerPath: string;
 
   // P1-FIX: Track cancelled/timed-out task IDs to skip during dispatch (O(1) lookup)
+  // OPT-006: Capped at maxQueueSize to prevent unbounded growth under sustained failures
   private cancelledTaskIds: Set<string> = new Set();
 
   // P1-FIX: Track restart attempts per worker for bounded retry with exponential backoff
@@ -451,6 +452,11 @@ export class EventProcessingWorkerPool extends EventEmitter {
       const timeout = setTimeout(() => {
         this.activeTasks.delete(task.id);
         // P1-FIX: Mark task as cancelled so dispatch loop skips it in the priority queue
+        // OPT-006: Cap Set size to prevent unbounded growth under sustained worker failures.
+        // When cap is reached, clear all entries (stale IDs for already-dequeued tasks are harmless).
+        if (this.cancelledTaskIds.size >= this.maxQueueSize) {
+          this.cancelledTaskIds.clear();
+        }
         this.cancelledTaskIds.add(task.id);
         reject(new Error(`Task ${task.id} timed out after ${this.taskTimeout}ms`));
       }, this.taskTimeout);
