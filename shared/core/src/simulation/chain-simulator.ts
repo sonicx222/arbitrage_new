@@ -117,6 +117,87 @@ export const HOURLY_GAS_MULTIPLIER: readonly number[] = [
   1.2, 1.1, 1.0, 0.9, 0.8, 0.7,
 ];
 
+// =============================================================================
+// Batch 4: Trading Session Multipliers (Task 4.4)
+// =============================================================================
+
+/**
+ * Per-chain trading session multipliers by UTC hour.
+ *
+ * Each chain has a primary trading session based on its user base geography:
+ * - Asia chains (BSC, Polygon): Peak during 0-8 UTC (Asia business hours)
+ * - US/EU chains (Ethereum, Arbitrum, Base, Optimism): Peak during 13-20 UTC
+ * - Solana: US-heavy, peak 14-22 UTC
+ * - Global chains (Avalanche, Fantom): Flatter profile
+ *
+ * Returns multiplier in [0.4, 1.5] range.
+ *
+ * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Task 4.4
+ */
+const SESSION_PROFILES: Record<string, readonly number[]> = {
+  // Asia-primary: BSC, Polygon — peak 0-8 UTC (8am-4pm SGT)
+  asia: [
+    // 0-5 UTC: peak (morning/afternoon in Asia)
+    1.3, 1.4, 1.5, 1.5, 1.4, 1.3,
+    // 6-11 UTC: winding down
+    1.1, 0.9, 0.7, 0.6, 0.5, 0.5,
+    // 12-17 UTC: off-peak (night in Asia)
+    0.4, 0.4, 0.5, 0.5, 0.6, 0.7,
+    // 18-23 UTC: ramping up (evening/night)
+    0.8, 0.9, 1.0, 1.1, 1.2, 1.3,
+  ],
+  // US/EU-primary: Ethereum, Arbitrum, Base, Optimism, zkSync, Linea
+  useu: [
+    // 0-5 UTC: off-peak
+    0.5, 0.45, 0.4, 0.4, 0.4, 0.5,
+    // 6-11 UTC: Europe morning ramp
+    0.7, 0.8, 0.9, 1.0, 1.1, 1.2,
+    // 12-17 UTC: peak (EU/US overlap)
+    1.3, 1.4, 1.5, 1.5, 1.4, 1.3,
+    // 18-23 UTC: US afternoon/evening
+    1.2, 1.1, 1.0, 0.8, 0.7, 0.6,
+  ],
+  // Solana: US-heavy, slightly later peak
+  solana: [
+    // 0-5 UTC: off-peak
+    0.5, 0.45, 0.4, 0.4, 0.45, 0.5,
+    // 6-11 UTC: ramp
+    0.6, 0.7, 0.8, 0.9, 1.0, 1.0,
+    // 12-17 UTC: growing
+    1.1, 1.2, 1.3, 1.4, 1.5, 1.5,
+    // 18-23 UTC: US peak then wind-down
+    1.4, 1.3, 1.2, 1.0, 0.8, 0.6,
+  ],
+  // Global/flat: Avalanche, Fantom, emerging L2s
+  global: [
+    0.8, 0.75, 0.7, 0.7, 0.7, 0.75,
+    0.8, 0.9, 0.95, 1.0, 1.05, 1.1,
+    1.15, 1.2, 1.2, 1.15, 1.1, 1.05,
+    1.0, 0.95, 0.9, 0.85, 0.8, 0.8,
+  ],
+};
+
+const CHAIN_SESSION_MAP: Record<string, string> = {
+  bsc: 'asia', polygon: 'asia',
+  ethereum: 'useu', arbitrum: 'useu', base: 'useu', optimism: 'useu',
+  zksync: 'useu', linea: 'useu', blast: 'useu', scroll: 'useu',
+  solana: 'solana',
+  avalanche: 'global', fantom: 'global', mantle: 'global', mode: 'global',
+};
+
+/**
+ * Get the trading session activity multiplier for a chain at a given UTC hour.
+ *
+ * @param chainId - Chain identifier
+ * @param hour - UTC hour (0-23)
+ * @returns Activity multiplier (0.4-1.5)
+ */
+export function getSessionMultiplier(chainId: string, hour: number): number {
+  const sessionType = CHAIN_SESSION_MAP[chainId] ?? 'global';
+  const profile = SESSION_PROFILES[sessionType] ?? SESSION_PROFILES['global'];
+  return profile[Math.max(0, Math.min(23, Math.floor(hour)))];
+}
+
 /**
  * Get the realistic DEX fee for a given DEX and token pair.
  * V3 DEXes: fee tier depends on pair type (stablecoin pairs → 0.01%, blue-chip → 0.05%, others → 0.3%).
@@ -269,6 +350,10 @@ export class ChainSimulator extends EventEmitter {
   private eip1559BaseFee: number = 0;
   /** Swap count of the previous block, used for EIP-1559 utilization calculation. */
   private lastBlockSwapCount: number = 0;
+
+  // --- Batch 4: Statistical z-score tracking (Task 4.3) ---
+  /** Rolling price history per pair key for mean-reversion z-score calculation. Window: 50 samples. */
+  private priceHistory: Map<string, number[]> = new Map();
 
   constructor(config: ChainSimulatorConfig) {
     super();
@@ -509,8 +594,11 @@ export class ChainSimulator extends EventEmitter {
     // Sample gas price for this block (uses EIP-1559 tracked baseFee)
     this.currentGasPrice = this.sampleGasPrice(profile);
 
+    // Task 4.4: Apply trading session multiplier to swap count
+    const sessionMult = getSessionMultiplier(this.config.chainId, new Date().getUTCHours());
+
     // Poisson-distributed swap count
-    const avgSwaps = profile.dexSwapsPerBlock * regimeConfig.pairActivityMultiplier;
+    const avgSwaps = profile.dexSwapsPerBlock * regimeConfig.pairActivityMultiplier * sessionMult;
     const swapCount = poissonRandom(avgSwaps);
 
     // Generate individual swap events
@@ -736,6 +824,9 @@ export class ChainSimulator extends EventEmitter {
       : (Number(y) || 1) / Number(x);
     const priceAfter = Number(reserves.reserve1) / (Number(reserves.reserve0) || 1);
     const priceChange = priceBefore > 0 ? (priceAfter - priceBefore) / priceBefore : 0;
+
+    // Task 4.3: Track price for z-score calculation (statistical mean-reversion)
+    this.trackPriceAndGetZScore(pairKey, priceAfter);
 
     // Emit SwapEvent
     const wallet = this.selectWallet(isWhale);
@@ -1184,8 +1275,9 @@ export class ChainSimulator extends EventEmitter {
           expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
         };
 
-      // --- Backrun (MEV-Share): populate backrunTarget so BackrunStrategy can process ---
-      case 'backrun':
+      // --- Backrun (MEV-Share): populate backrunTarget + mevShareHint (Task 4.1) ---
+      case 'backrun': {
+        const backrunTxHash = `0x${createHash('sha256').update(`sim-backrun-${Date.now()}-${Math.random()}`).digest('hex')}`;
         return {
           ...base,
           id: `sim-${base.chain}-backrun-${base.id.split('-').pop()}`,
@@ -1194,15 +1286,23 @@ export class ChainSimulator extends EventEmitter {
           confidence: 0.65 + Math.random() * 0.2,
           expiresAt: getSimulationExpiresAt(base.chain, 2000),
           backrunTarget: {
-            txHash: `0x${createHash('sha256').update(`sim-backrun-${Date.now()}-${Math.random()}`).digest('hex')}`,
+            txHash: backrunTxHash,
             routerAddress: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
             swapDirection: (Math.random() > 0.5 ? 'buy' : 'sell') as 'buy' | 'sell',
             source: 'mev-share',
             estimatedSwapSize: String(Math.floor(Math.random() * 100000 + 1000)),
           },
+          // Task 4.1: MEV-Share hint for realistic backrun simulation
+          mevShareHint: {
+            txHash: backrunTxHash,
+            logsHint: [`0x${createHash('sha256').update(`sim-log-${Date.now()}`).digest('hex').slice(0, 8)}`],
+            gasPrice: String(Math.floor(20e9 + Math.random() * 80e9)), // 20-100 gwei
+            bundleId: `sim-bundle-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          },
         };
+      }
 
-      // --- UniswapX Dutch auction: populate uniswapxOrder so UniswapXFillerStrategy can process ---
+      // --- UniswapX Dutch auction: populate uniswapxOrder + decay fields (Task 4.2) ---
       case 'uniswapx': {
         const nowSec = Math.floor(Date.now() / 1000);
         return {
@@ -1212,6 +1312,9 @@ export class ChainSimulator extends EventEmitter {
           useFlashLoan: false,
           confidence: 0.70 + Math.random() * 0.15,
           expiresAt: getSimulationExpiresAt(base.chain, 10000),
+          // Task 4.2: Dutch auction decay fields
+          auctionStartBlock: this.blockNumber,
+          decayRate: 0.001 + Math.random() * 0.004, // 0.1%-0.5% per block
           uniswapxOrder: {
             encodedOrder: `0x${'ab'.repeat(32)}`,
             signature: `0x${'cd'.repeat(65)}`,
@@ -1232,8 +1335,12 @@ export class ChainSimulator extends EventEmitter {
         };
       }
 
-      // --- Statistical (mean-reversion) ---
-      case 'statistical':
+      // --- Statistical (mean-reversion): z-score enrichment (Task 4.3) ---
+      case 'statistical': {
+        // Compute z-score from tracked price history for the token pair
+        const statPairKey = base.tokenPair;
+        const currentPrice = base.buyPrice > 0 ? base.buyPrice : 1;
+        const zScore = this.trackPriceAndGetZScore(`stat:${statPairKey}`, currentPrice);
         return {
           ...base,
           id: `sim-${base.chain}-stat-${base.id.split('-').pop()}`,
@@ -1242,18 +1349,27 @@ export class ChainSimulator extends EventEmitter {
           flashLoanFee,
           confidence: 0.60 + Math.random() * 0.2,
           expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
+          // Task 4.3: z-score (use tracked value or synthetic 2-3σ)
+          zScore: zScore !== null ? zScore : (2.0 + Math.random() * 1.0) * (Math.random() > 0.5 ? 1 : -1),
         };
+      }
 
-      // --- Predictive (ML-based): routes to intra-chain strategy in factory ---
-      case 'predictive':
+      // --- Predictive (ML-based): confidence decay fields (Task 4.5) ---
+      case 'predictive': {
+        const predConfidence = 0.55 + Math.random() * 0.15;
         return {
           ...base,
           id: `sim-${base.chain}-pred-${base.id.split('-').pop()}`,
           type: 'predictive',
           useFlashLoan: false,
-          confidence: 0.55 + Math.random() * 0.15,
+          confidence: predConfidence,
           expiresAt: getSimulationExpiresAt(base.chain, 15000),
+          // Task 4.5: Predictive confidence decay — confidence halves every ~30 blocks
+          initialConfidence: predConfidence,
+          decayHalfLifeBlocks: 25 + Math.floor(Math.random() * 10), // 25-34 blocks
+          createdAtBlock: this.blockNumber,
         };
+      }
 
       // --- Solana-specific ---
       case 'solana':
@@ -1447,6 +1563,46 @@ export class ChainSimulator extends EventEmitter {
       path: opportunity.path,
       profit: `${opportunity.profitPercentage.toFixed(2)}%`,
     });
+  }
+
+  // =============================================================================
+  // Batch 4: Statistical Z-Score Tracking (Task 4.3)
+  // =============================================================================
+
+  /**
+   * Track price and compute z-score for mean-reversion opportunities.
+   * Maintains a rolling window of 50 prices per pair. Returns z-score
+   * (standard deviations from rolling mean) when enough samples exist.
+   *
+   * @returns z-score if >= 10 samples collected, otherwise null
+   */
+  private trackPriceAndGetZScore(pairKey: string, price: number): number | null {
+    let history = this.priceHistory.get(pairKey);
+    if (!history) {
+      history = [];
+      this.priceHistory.set(pairKey, history);
+    }
+
+    history.push(price);
+    // Rolling window of 50 samples
+    if (history.length > 50) history.shift();
+
+    // Need at least 10 samples for meaningful z-score
+    if (history.length < 10) return null;
+
+    let sum = 0;
+    for (let i = 0; i < history.length; i++) sum += history[i];
+    const mean = sum / history.length;
+
+    let sqDiffSum = 0;
+    for (let i = 0; i < history.length; i++) {
+      const diff = history[i] - mean;
+      sqDiffSum += diff * diff;
+    }
+    const stdDev = Math.sqrt(sqDiffSum / history.length);
+
+    if (stdDev < 1e-12) return null; // no variance
+    return (price - mean) / stdDev;
   }
 
   private getAvailableTokens(): string[] {

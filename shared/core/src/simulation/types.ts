@@ -203,6 +203,30 @@ export interface SimulatedOpportunity {
   /** Whether bridge is required (cross-chain type) */
   bridgeRequired?: boolean;
 
+  // =========================================================================
+  // Batch 4: Strategy & Temporal Enrichment Fields
+  // =========================================================================
+
+  /** MEV-Share hint for backrun opportunities (Task 4.1) */
+  mevShareHint?: {
+    txHash: string;
+    logsHint: string[];
+    gasPrice: string;
+    bundleId: string;
+  };
+
+  /** UniswapX Dutch auction decay fields (Task 4.2) */
+  auctionStartBlock?: number;
+  decayRate?: number;
+
+  /** Statistical z-score that triggered this opportunity (Task 4.3) */
+  zScore?: number;
+
+  /** Predictive confidence decay fields (Task 4.5) */
+  initialConfidence?: number;
+  decayHalfLifeBlocks?: number;
+  createdAtBlock?: number;
+
   /** Backrun target info (backrun/MEV-Share type) */
   backrunTarget?: {
     txHash: string;

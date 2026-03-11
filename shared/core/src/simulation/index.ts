@@ -89,6 +89,7 @@ export {
   stopChainSimulator,
   stopAllChainSimulators,
   HOURLY_GAS_MULTIPLIER,
+  getSessionMultiplier,
 } from './chain-simulator';
 
 // Cross-chain simulator
