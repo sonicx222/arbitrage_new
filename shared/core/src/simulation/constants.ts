@@ -469,3 +469,153 @@ export function transitionRegime(current: MarketRegime): MarketRegime {
   }
   return current;
 }
+
+// =============================================================================
+// Token Correlation Matrix (Batch 1, Task 1.2)
+// =============================================================================
+
+/**
+ * Pairwise correlation coefficients between tokens.
+ * When token A's price changes, correlated tokens B receive a proportional move:
+ *   B_change = correlation * A_change + noise
+ *
+ * Key format: 'TOKEN_A:TOKEN_B' (uppercase, order matters — define both directions).
+ * Correlation is symmetric so both A:B and B:A should have the same value.
+ *
+ * Groups:
+ * - ETH derivatives: WETH, stETH, wstETH, rETH, cbETH (0.995-0.999)
+ * - Stablecoins: USDC, USDT, DAI, BUSD, FRAX (0.999)
+ * - ETH-BTC: ~0.85
+ * - SOL LSTs: SOL, mSOL, jitoSOL, BSOL (0.995-0.998)
+ * - Native wrapped: BNB/WBNB, FTM/WFTM etc. (1.0)
+ *
+ * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Task 1.2
+ */
+export const TOKEN_CORRELATIONS: Record<string, number> = {
+  // ETH derivatives — near-perfect correlation
+  'WETH:STETH': 0.998, 'STETH:WETH': 0.998,
+  'WETH:WSTETH': 0.997, 'WSTETH:WETH': 0.997,
+  'WETH:RETH': 0.996, 'RETH:WETH': 0.996,
+  'WETH:CBETH': 0.995, 'CBETH:WETH': 0.995,
+  'STETH:WSTETH': 0.999, 'WSTETH:STETH': 0.999,
+  'STETH:RETH': 0.996, 'RETH:STETH': 0.996,
+  'STETH:CBETH': 0.995, 'CBETH:STETH': 0.995,
+  'WSTETH:RETH': 0.996, 'RETH:WSTETH': 0.996,
+  'WSTETH:CBETH': 0.995, 'CBETH:WSTETH': 0.995,
+  'RETH:CBETH': 0.994, 'CBETH:RETH': 0.994,
+
+  // ETH ↔ ETH alias (identical asset)
+  'WETH:ETH': 1.0, 'ETH:WETH': 1.0,
+
+  // Native token ↔ wrapped (identical asset)
+  'BNB:WBNB': 1.0, 'WBNB:BNB': 1.0,
+  'FTM:WFTM': 1.0, 'WFTM:FTM': 1.0,
+  'AVAX:WAVAX': 1.0, 'WAVAX:AVAX': 1.0,
+  'MATIC:WMATIC': 1.0, 'WMATIC:MATIC': 1.0,
+  'MNT:WMNT': 1.0, 'WMNT:MNT': 1.0,
+  'WBTC:BTCB': 1.0, 'BTCB:WBTC': 1.0,
+
+  // Stablecoins — near-perfect peg
+  'USDC:USDT': 0.999, 'USDT:USDC': 0.999,
+  'USDC:DAI': 0.999, 'DAI:USDC': 0.999,
+  'USDC:BUSD': 0.999, 'BUSD:USDC': 0.999,
+  'USDC:FRAX': 0.998, 'FRAX:USDC': 0.998,
+  'USDT:DAI': 0.999, 'DAI:USDT': 0.999,
+  'USDT:BUSD': 0.999, 'BUSD:USDT': 0.999,
+  'USDT:FRAX': 0.998, 'FRAX:USDT': 0.998,
+  'DAI:BUSD': 0.999, 'BUSD:DAI': 0.999,
+  'DAI:FRAX': 0.998, 'FRAX:DAI': 0.998,
+  'BUSD:FRAX': 0.998, 'FRAX:BUSD': 0.998,
+
+  // ETH ↔ BTC — strong but not pegged
+  'WETH:WBTC': 0.85, 'WBTC:WETH': 0.85,
+  'ETH:WBTC': 0.85, 'WBTC:ETH': 0.85,
+
+  // SOL LST derivatives — near-perfect correlation
+  'SOL:MSOL': 0.997, 'MSOL:SOL': 0.997,
+  'SOL:JITOSOL': 0.996, 'JITOSOL:SOL': 0.996,
+  'SOL:BSOL': 0.995, 'BSOL:SOL': 0.995,
+  'MSOL:JITOSOL': 0.998, 'JITOSOL:MSOL': 0.998,
+  'MSOL:BSOL': 0.996, 'BSOL:MSOL': 0.996,
+  'JITOSOL:BSOL': 0.996, 'BSOL:JITOSOL': 0.996,
+
+  // MATIC LST
+  'WMATIC:STMATIC': 0.996, 'STMATIC:WMATIC': 0.996,
+  'MATIC:STMATIC': 0.996, 'STMATIC:MATIC': 0.996,
+};
+
+/**
+ * Get correlated tokens for a given symbol.
+ * Returns array of [symbol, correlation] pairs sorted by correlation descending.
+ * Results are cached for performance.
+ */
+const correlationCache = new Map<string, [string, number][]>();
+
+export function getCorrelatedTokens(symbol: string): [string, number][] {
+  const upper = symbol.toUpperCase();
+  const cached = correlationCache.get(upper);
+  if (cached) return cached;
+
+  const result: [string, number][] = [];
+  const prefix = upper + ':';
+  for (const [key, corr] of Object.entries(TOKEN_CORRELATIONS)) {
+    if (key.startsWith(prefix)) {
+      result.push([key.slice(prefix.length), corr]);
+    }
+  }
+  result.sort((a, b) => b[1] - a[1]);
+  correlationCache.set(upper, result);
+  return result;
+}
+
+// =============================================================================
+// Pegged Pair Definitions (Batch 1, Task 1.4)
+// =============================================================================
+
+/**
+ * Pairs that mean-revert to a target ratio via Ornstein-Uhlenbeck process.
+ *
+ * The OU process: dX = theta * (mu - X) * dt + sigma * dW
+ * - theta: mean-reversion speed (higher = faster reversion)
+ * - mu: target ratio (1.0 for same-denomination pairs)
+ * - sigma: volatility of deviations from peg
+ *
+ * Key format: 'TOKEN0/TOKEN1' (matches pair key format).
+ *
+ * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Task 1.4
+ */
+export interface PeggedPairConfig {
+  /** Target price ratio (token1/token0 in price terms) */
+  targetRatio: number;
+  /** Mean-reversion speed (Ornstein-Uhlenbeck theta). Higher = faster reversion. */
+  meanReversionSpeed: number;
+  /** Volatility of deviations from peg (Ornstein-Uhlenbeck sigma) */
+  pegVolatility: number;
+}
+
+export const PEGGED_PAIRS: Record<string, PeggedPairConfig> = {
+  // Stablecoin pairs — tight peg, fast reversion
+  'USDC/USDT': { targetRatio: 1.0, meanReversionSpeed: 0.5, pegVolatility: 0.0002 },
+  'USDT/USDC': { targetRatio: 1.0, meanReversionSpeed: 0.5, pegVolatility: 0.0002 },
+  'USDC/DAI': { targetRatio: 1.0, meanReversionSpeed: 0.4, pegVolatility: 0.0003 },
+  'DAI/USDC': { targetRatio: 1.0, meanReversionSpeed: 0.4, pegVolatility: 0.0003 },
+  'USDC/BUSD': { targetRatio: 1.0, meanReversionSpeed: 0.5, pegVolatility: 0.0002 },
+  'BUSD/USDC': { targetRatio: 1.0, meanReversionSpeed: 0.5, pegVolatility: 0.0002 },
+  'USDT/DAI': { targetRatio: 1.0, meanReversionSpeed: 0.4, pegVolatility: 0.0003 },
+  'DAI/USDT': { targetRatio: 1.0, meanReversionSpeed: 0.4, pegVolatility: 0.0003 },
+  'sUSD/USDC': { targetRatio: 1.0, meanReversionSpeed: 0.3, pegVolatility: 0.0005 },
+
+  // ETH LST pairs — slight premium for liquid staking, moderate reversion
+  'stETH/WETH': { targetRatio: 1.0, meanReversionSpeed: 0.3, pegVolatility: 0.001 },
+  'wstETH/WETH': { targetRatio: 1.0625, meanReversionSpeed: 0.3, pegVolatility: 0.001 },
+  'rETH/WETH': { targetRatio: 1.047, meanReversionSpeed: 0.25, pegVolatility: 0.0012 },
+  'cbETH/WETH': { targetRatio: 1.016, meanReversionSpeed: 0.25, pegVolatility: 0.0012 },
+
+  // SOL LST pairs
+  'mSOL/SOL': { targetRatio: 1.057, meanReversionSpeed: 0.25, pegVolatility: 0.001 },
+  'jitoSOL/SOL': { targetRatio: 1.086, meanReversionSpeed: 0.25, pegVolatility: 0.001 },
+  'BSOL/SOL': { targetRatio: 1.03, meanReversionSpeed: 0.25, pegVolatility: 0.0012 },
+
+  // MATIC LST
+  'stMATIC/WMATIC': { targetRatio: 1.06, meanReversionSpeed: 0.25, pegVolatility: 0.001 },
+};

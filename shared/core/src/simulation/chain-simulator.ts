@@ -44,7 +44,10 @@ import {
   selectWeightedStrategyType,
   DEFAULT_FAST_LANE_RATE,
   selectFastLaneStrategyType,
+  getCorrelatedTokens,
+  PEGGED_PAIRS,
 } from './constants';
+import type { PeggedPairConfig } from './constants';
 import { FAST_LANE_CONFIG } from '@arbitrage/config';
 import { gaussianRandom, poissonRandom, weightedRandomSelect } from './math-utils';
 import { CHAIN_THROUGHPUT_PROFILES, getNativeTokenPrice, selectWeightedDex } from './throughput-profiles';
@@ -284,12 +287,18 @@ export class ChainSimulator extends EventEmitter {
   }
 
   private initializeReserves(): void {
+    // Target ~$10M per side of pool (20M total TVL).
+    // This produces realistic price impact: a $50K trade moves price ~0.5%,
+    // while a $500K whale trade moves price ~5%.
+    const TARGET_SIDE_USD = 10_000_000;
+
     for (const pair of this.config.pairs) {
       const basePrice0 = getTokenPrice(pair.token0Symbol);
       const basePrice1 = getTokenPrice(pair.token1Symbol);
 
-      const reserve0Base = 1_000_000;
-      const reserve1Base = Math.floor(reserve0Base * (basePrice0 / basePrice1));
+      // Scale reserves so each side holds ~$10M of value
+      const reserve0Base = Math.floor(TARGET_SIDE_USD / basePrice0);
+      const reserve1Base = Math.floor(TARGET_SIDE_USD / basePrice1);
 
       const reserve0 = BigInt(reserve0Base) * BigInt(10 ** pair.token0Decimals);
       const reserve1 = BigInt(reserve1Base) * BigInt(10 ** pair.token1Decimals);
@@ -533,11 +542,17 @@ export class ChainSimulator extends EventEmitter {
   }
 
   /**
-   * Execute a single simulated swap: apply random-walk price change
-   * to pair reserves, emit a syncEvent, and (new in Phase 1) emit a
-   * 'swapEvent' with full SwapEvent data plus a 'whaleAlert' for large trades.
+   * Execute a single simulated swap on a pair.
+   * Updates reserves using constant-product AMM formula, applies correlation
+   * propagation and mean-reversion for pegged pairs, emits SwapEvent and
+   * optionally WhaleAlert for large trades.
    *
-   * @see docs/reports/SIMULATED_WHALE_SWAP_EVENTS_RESEARCH_2026-03-06.md — Task 1 & 3
+   * Batch 1 enhancements:
+   * - Task 1.3: Constant-product AMM (x+dx)(y-dy)=xy for price impact
+   * - Task 1.2: Correlation propagation to related tokens
+   * - Task 1.4: Ornstein-Uhlenbeck mean-reversion for pegged pairs
+   *
+   * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Tasks 1.2-1.4
    */
   private executeSwap(pair: SimulatedPairConfig): void {
     const reserves = this.reserves.get(pair.address.toLowerCase());
@@ -545,31 +560,96 @@ export class ChainSimulator extends EventEmitter {
 
     const regimeConfig = REGIME_CONFIGS[this.currentRegime];
 
+    // --- Task 1.3: Constant-product AMM price impact ---
+    // Sample trade size first — it determines the price impact
+    const isWhale = Math.random() < this.whaleRate;
+    const profile = CHAIN_THROUGHPUT_PROFILES[this.config.chainId];
+    const tradeSize = this.sampleTradeSize(profile, isWhale);
+
+    // Determine swap direction: 50/50 buy vs sell token0
+    const buyToken0 = Math.random() < 0.5;
+
+    // Convert trade size (USD) to token amount in smallest units
+    const inSymbol = buyToken0 ? pair.token1Symbol : pair.token0Symbol;
+    const inDecimals = buyToken0 ? pair.token1Decimals : pair.token0Decimals;
+    const inPrice = getTokenPrice(inSymbol);
+    const inTokenAmount = tradeSize / inPrice;
+    const dxRaw = BigInt(Math.floor(inTokenAmount * (10 ** inDecimals)));
+
+    // Constant-product: (x + dx)(y - dy) = x * y
+    // dy = y * dx / (x + dx)
+    const x = buyToken0 ? reserves.reserve1 : reserves.reserve0;
+    const y = buyToken0 ? reserves.reserve0 : reserves.reserve1;
+
     const effectiveVolatility = this.config.volatility * regimeConfig.volatilityMultiplier;
-    const priceChange = (Math.random() - 0.5) * 2 * effectiveVolatility;
 
-    const newReserve1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - priceChange)));
-    reserves.reserve1 = newReserve1 > 0n ? newReserve1 : 1n;
+    // Pegged pairs simulate concentrated liquidity — attenuate AMM impact + noise
+    const pairKey = `${pair.token0Symbol}/${pair.token1Symbol}`;
+    const isPegged = PEGGED_PAIRS[pairKey] !== undefined;
+    const ammScale = isPegged ? 0.1 : 1.0;
 
-    // Clamp reserve ratio (from existing code)
+    if (x > 0n && y > 0n && dxRaw > 0n) {
+      // For pegged pairs, scale down the input to simulate concentrated liquidity depth
+      const scaledDx = isPegged ? (dxRaw / 10n || 1n) : dxRaw;
+      const dy = (y * scaledDx) / (x + scaledDx);
+      if (dy > 0n && dy < y) {
+        if (buyToken0) {
+          reserves.reserve1 = reserves.reserve1 + scaledDx;
+          reserves.reserve0 = reserves.reserve0 - dy;
+        } else {
+          reserves.reserve0 = reserves.reserve0 + scaledDx;
+          reserves.reserve1 = reserves.reserve1 - dy;
+        }
+      } else {
+        const fallbackChange = (Math.random() - 0.5) * 2 * effectiveVolatility * ammScale;
+        const newR1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - fallbackChange)));
+        reserves.reserve1 = newR1 > 0n ? newR1 : 1n;
+      }
+    } else {
+      const fallbackChange = (Math.random() - 0.5) * 2 * effectiveVolatility * ammScale;
+      const newR1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - fallbackChange)));
+      reserves.reserve1 = newR1 > 0n ? newR1 : 1n;
+    }
+
+    // Add regime-dependent noise (attenuated for pegged pairs)
+    const noiseScale = isPegged ? 0.05 : 0.3;
+    const noise = (Math.random() - 0.5) * 2 * effectiveVolatility * noiseScale;
+    if (noise !== 0) {
+      const adjustedReserve1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - noise)));
+      reserves.reserve1 = adjustedReserve1 > 0n ? adjustedReserve1 : 1n;
+    }
+
+    // --- Task 1.4: Ornstein-Uhlenbeck mean-reversion for pegged pairs ---
+    this.applyMeanReversion(pair, reserves);
+
+    // Safety: ensure both reserves are always positive
+    if (reserves.reserve0 <= 0n) reserves.reserve0 = 1n;
+    if (reserves.reserve1 <= 0n) reserves.reserve1 = 1n;
+
+    // Clamp reserve ratio to prevent unbounded drift
     const decimalDiff = pair.token0Decimals - pair.token1Decimals;
     const decimalFactor = 10 ** decimalDiff;
     const rawRatio = Number(reserves.reserve0) / Number(reserves.reserve1);
     const normalizedRatio = rawRatio / decimalFactor;
     const MAX_RATIO = 2;
     if (normalizedRatio > MAX_RATIO || normalizedRatio < 1 / MAX_RATIO) {
-      reserves.reserve1 = BigInt(Math.floor(Number(reserves.reserve0) / decimalFactor));
+      const clamped = BigInt(Math.floor(Number(reserves.reserve0) / decimalFactor));
+      reserves.reserve1 = clamped > 0n ? clamped : 1n;
     }
 
-    // [Phase 1 - Task 1] Emit SwapEvent for this simulated swap
-    const isWhale = Math.random() < this.whaleRate;
-    const profile = CHAIN_THROUGHPUT_PROFILES[this.config.chainId];
-    const tradeSize = this.sampleTradeSize(profile, isWhale);
+    // Calculate actual price change for SwapEvent direction inference
+    const priceBefore = buyToken0
+      ? Number(x) / (Number(y) || 1)
+      : (Number(y) || 1) / Number(x);
+    const priceAfter = Number(reserves.reserve1) / (Number(reserves.reserve0) || 1);
+    const priceChange = priceBefore > 0 ? (priceAfter - priceBefore) / priceBefore : 0;
+
+    // Emit SwapEvent
     const wallet = this.selectWallet(isWhale);
     const swapEvent = this.buildSwapEvent(pair, priceChange, tradeSize, wallet);
     this.emit('swapEvent', swapEvent);
 
-    // [Phase 1 - Task 3] Emit WhaleAlert for large trades
+    // Emit WhaleAlert for large trades
     if (tradeSize >= this.whaleThresholdUsd) {
       const whaleAlert: WhaleAlert = {
         event: swapEvent,
@@ -582,7 +662,88 @@ export class ChainSimulator extends EventEmitter {
       this.emit('whaleAlert', whaleAlert);
     }
 
+    // --- Task 1.2: Propagate correlated price move to related pairs ---
+    this.propagateCorrelation(pair, priceChange);
+
     this.emitSyncEvent(pair, reserves.reserve0, reserves.reserve1);
+  }
+
+  // ===========================================================================
+  // Batch 1: Mean-Reversion (Task 1.4)
+  // ===========================================================================
+
+  /**
+   * Apply Ornstein-Uhlenbeck mean-reversion for pegged pairs.
+   *
+   * The OU process: dX = theta * (mu - X) * dt + sigma * dW
+   * where X is the current price ratio, mu is the target ratio,
+   * theta is the reversion speed, sigma is the peg volatility.
+   */
+  private applyMeanReversion(
+    pair: SimulatedPairConfig,
+    reserves: { reserve0: bigint; reserve1: bigint },
+  ): void {
+    const pairKey = `${pair.token0Symbol}/${pair.token1Symbol}`;
+    const pegConfig = PEGGED_PAIRS[pairKey];
+    if (!pegConfig) return;
+
+    const decimalFactor = 10 ** (pair.token0Decimals - pair.token1Decimals);
+    const currentRatio = (Number(reserves.reserve1) / Number(reserves.reserve0)) * decimalFactor;
+    if (!Number.isFinite(currentRatio) || currentRatio <= 0) return;
+
+    // OU step: theta * (mu - X) + sigma * dW
+    const drift = pegConfig.meanReversionSpeed * (pegConfig.targetRatio - currentRatio);
+    const diffusion = pegConfig.pegVolatility * gaussianRandom();
+    const adjustment = drift + diffusion;
+
+    // Apply adjustment to reserve1
+    const factor = 1 + adjustment / currentRatio;
+    const clampedFactor = Math.max(0.5, Math.min(2.0, factor));
+    const newReserve1 = BigInt(Math.floor(Number(reserves.reserve1) * clampedFactor));
+    reserves.reserve1 = newReserve1 > 0n ? newReserve1 : 1n;
+  }
+
+  // ===========================================================================
+  // Batch 1: Correlation Propagation (Task 1.2)
+  // ===========================================================================
+
+  /**
+   * Propagate a price change to all correlated pairs.
+   *
+   * When WETH/USDC moves, stETH/USDC, rETH/USDC, etc. co-move
+   * proportionally based on the correlation coefficient.
+   *
+   * Propagated change: correlation * priceChange + (1-correlation) * noise
+   */
+  private propagateCorrelation(sourcePair: SimulatedPairConfig, priceChange: number): void {
+    if (Math.abs(priceChange) < 0.0001) return;
+
+    const token0Correlated = getCorrelatedTokens(sourcePair.token0Symbol);
+    const token1Correlated = getCorrelatedTokens(sourcePair.token1Symbol);
+
+    if (token0Correlated.length === 0 && token1Correlated.length === 0) return;
+
+    const correlatedSymbols = new Map<string, number>();
+    for (const [sym, corr] of token0Correlated) correlatedSymbols.set(sym, corr);
+    for (const [sym, corr] of token1Correlated) correlatedSymbols.set(sym, corr);
+
+    for (const pair of this.config.pairs) {
+      if (pair.address === sourcePair.address) continue;
+
+      const corr0 = correlatedSymbols.get(pair.token0Symbol.toUpperCase());
+      const corr1 = correlatedSymbols.get(pair.token1Symbol.toUpperCase());
+      const correlation = corr0 ?? corr1;
+      if (correlation === undefined) continue;
+
+      const reserves = this.reserves.get(pair.address.toLowerCase());
+      if (!reserves) continue;
+
+      const noise = (1 - correlation) * (Math.random() - 0.5) * 0.002;
+      const propagatedChange = correlation * priceChange + noise;
+
+      const newReserve1 = BigInt(Math.floor(Number(reserves.reserve1) * (1 - propagatedChange)));
+      reserves.reserve1 = newReserve1 > 0n ? newReserve1 : 1n;
+    }
   }
 
   // ===========================================================================

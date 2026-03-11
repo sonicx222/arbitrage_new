@@ -54,7 +54,15 @@ export {
   REGIME_CONFIGS,
   REGIME_TRANSITIONS,
   transitionRegime,
+  TOKEN_CORRELATIONS,
+  getCorrelatedTokens,
+  PEGGED_PAIRS,
 } from './constants';
+export type { PeggedPairConfig } from './constants';
+
+// Price bootstrapper
+export { bootstrapLivePrices, SYMBOL_TO_COINGECKO_ID } from './price-bootstrapper';
+export type { PriceBootstrapResult } from './price-bootstrapper';
 
 // Mode utilities
 export {
