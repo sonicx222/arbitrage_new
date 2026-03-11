@@ -57,10 +57,11 @@ import {
   // F9: Configurable cache TTLs for flash loan aggregator
   FLASH_LOAN_AGGREGATOR_CONFIG,
   getV3AdapterAddress,
+  FLASH_LOAN_PROVIDER_REGISTRY,
 } from '@arbitrage/config';
 import { isValidPrice } from '@arbitrage/core/components';
 import { getErrorMessage } from '@arbitrage/core/resilience';
-import { FlashLoanAggregatorImpl, WeightedRankingStrategy, OnChainLiquidityValidator, InMemoryAggregatorMetrics, type IFlashLoanAggregator, type IAggregatorMetrics, type IProviderInfo } from '@arbitrage/core';
+import { FlashLoanAggregatorImpl, WeightedRankingStrategy, OnChainLiquidityValidator, InMemoryAggregatorMetrics, ProviderScore, type IFlashLoanAggregator, type IAggregatorMetrics, type IProviderInfo } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { FlashLoanProtocol } from './flash-loan-providers/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
@@ -507,16 +508,16 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           })
         : null;
 
-      // Build available providers map from FLASH_LOAN_PROVIDERS config
+      // Build available providers map from multi-provider registry
       const availableProviders = new Map<string, IProviderInfo[]>();
-      for (const [chain, providerConfig] of Object.entries(FLASH_LOAN_PROVIDERS)) {
-        const providers: IProviderInfo[] = [{
-          protocol: providerConfig.protocol as FlashLoanProtocol,
+      for (const [chain, entries] of Object.entries(FLASH_LOAN_PROVIDER_REGISTRY)) {
+        const providers: IProviderInfo[] = entries.map(e => ({
+          protocol: e.protocol as FlashLoanProtocol,
           chain,
-          poolAddress: providerConfig.address,
-          feeBps: providerConfig.feeBps,
+          poolAddress: e.address,
+          feeBps: e.feeBps,
           isAvailable: true,
-        }];
+        }));
         availableProviders.set(chain, providers);
       }
 
@@ -620,6 +621,14 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         return providerResult.errorResult;
       }
       selectedProvider = providerResult.selectedProvider;
+
+      // Aggregator fallback path: use executeWithFallback for retry capability
+      if (this.aggregator && selectedProvider && providerResult.rankedAlternatives) {
+        return await this.executeWithFallback(
+          opportunity, ctx, chain, selectedProvider,
+          providerResult.rankedAlternatives, gasPrice,
+        );
+      }
 
       // Fix 10.3: Parallelize independent operations for latency reduction
       // prepareFlashLoanContractTransaction and calculateExpectedProfitOnChain are independent
@@ -989,6 +998,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   ): Promise<{
     selectedProvider: IProviderInfo | null;
     errorResult?: ExecutionResult;
+    rankedAlternatives?: ReadonlyArray<{ protocol: FlashLoanProtocol; score: ProviderScore }>;
   }> {
     if (!this.aggregator || !opportunity.tokenIn) {
       this.logger.debug('Using hardcoded Aave V3 provider (aggregator disabled)', {
@@ -1025,20 +1035,42 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
       const selectedProtocol = providerSelection.protocol!;
 
-      // Validate provider config exists (fail fast if misconfigured)
-      const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
-      if (!flashLoanConfig) {
-        this.logger.error('[ERR_CONFIG] Flash loan provider not configured for chain', {
-          chain,
-          selectedProtocol,
+      // Look up selected protocol's address from multi-provider registry
+      const registryEntries = FLASH_LOAN_PROVIDER_REGISTRY[chain];
+      const registryEntry = registryEntries?.find(e => e.protocol === selectedProtocol);
+
+      if (!registryEntry) {
+        // Selected protocol not in registry for this chain — try next alternative
+        this.logger.warn('Aggregator selected protocol not in registry, checking alternatives', {
+          chain, selectedProtocol,
+          alternatives: providerSelection.rankedAlternatives.map(a => a.protocol),
         });
+
+        // Selection-time fallback: try ranked alternatives
+        for (const alt of providerSelection.rankedAlternatives) {
+          const altEntry = registryEntries?.find(e => e.protocol === alt.protocol);
+          if (altEntry) {
+            const fallbackProvider: IProviderInfo = {
+              protocol: alt.protocol,
+              chain,
+              poolAddress: altEntry.address,
+              feeBps: altEntry.feeBps,
+              isAvailable: true,
+            };
+            this.logger.info('Using alternative provider from registry', {
+              chain, protocol: alt.protocol, feeBps: altEntry.feeBps,
+            });
+            return { selectedProvider: fallbackProvider, rankedAlternatives: providerSelection.rankedAlternatives };
+          }
+        }
+
         return {
           selectedProvider: null,
           errorResult: BaseExecutionStrategy.createOpportunityError(
             opportunity,
             formatExecutionError(
               ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
-              `Flash loan provider not configured for chain: ${chain}`
+              `No flash loan provider in registry for chain: ${chain}`
             ),
             chain
           ),
@@ -1048,8 +1080,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       const selectedProvider: IProviderInfo = {
         protocol: selectedProtocol,
         chain,
-        poolAddress: flashLoanConfig.address,
-        feeBps: flashLoanConfig.feeBps,
+        poolAddress: registryEntry.address,
+        feeBps: registryEntry.feeBps,
         isAvailable: true,
       };
 
@@ -1082,7 +1114,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         };
       }
 
-      return { selectedProvider };
+      return { selectedProvider, rankedAlternatives: providerSelection.rankedAlternatives };
     } catch (error) {
       this.logger.error('Flash loan provider selection failed', {
         opportunityId: opportunity.id,
@@ -1101,6 +1133,167 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         ),
       };
     }
+  }
+
+  /**
+   * Execute flash loan with fallback to alternative provider on failure.
+   *
+   * Wraps the core execution flow (prepare -> simulate -> submit) with a
+   * retry loop: if the first provider fails with a retryable error,
+   * decideFallback() selects the next-ranked provider for one retry.
+   *
+   * Max 1 fallback attempt (2 total) to avoid exceeding opportunity TTL.
+   *
+   * @see docs/superpowers/specs/2026-03-11-flash-loan-aggregator-activation-design.md
+   */
+  private async executeWithFallback(
+    opportunity: ArbitrageOpportunity,
+    ctx: StrategyContext,
+    chain: string,
+    initialProvider: IProviderInfo,
+    rankedAlternatives: ReadonlyArray<{ protocol: FlashLoanProtocol; score: ProviderScore }>,
+    gasPrice: bigint,
+  ): Promise<ExecutionResult> {
+    let currentProvider = initialProvider;
+    const MAX_ATTEMPTS = 2;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // Core execution flow (same as non-fallback path)
+        const [flashLoanTx, onChainProfit] = await Promise.all([
+          this.prepareFlashLoanContractTransaction(opportunity, chain, ctx),
+          this.batchQuoteManager.calculateExpectedProfitWithBatching(opportunity, chain, ctx),
+        ]);
+
+        const estimatedGas = await this.estimateGasFromTransaction(flashLoanTx, chain, ctx);
+        const nativeTokenPriceUsd = getNativeTokenPrice(chain, { suppressWarning: true });
+
+        this.verifyOnChainProfitDivergence(opportunity, onChainProfit, nativeTokenPriceUsd);
+
+        const profitAnalysis = this.analyzeProfitability({
+          expectedProfitUsd: opportunity.expectedProfit ?? 0,
+          flashLoanAmountWei: BigInt(opportunity.amountIn ?? '0'),
+          estimatedGasUnits: estimatedGas,
+          gasPriceWei: gasPrice,
+          chain,
+          nativeTokenPriceUsd,
+        });
+
+        if (!profitAnalysis.isProfitable) {
+          this.logger.warn('Opportunity unprofitable after fee calculation', {
+            opportunityId: opportunity.id,
+            provider: currentProvider.protocol,
+            attempt,
+            netProfitUsd: profitAnalysis.netProfitUsd,
+          });
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
+            formatExecutionError(
+              ExecutionErrorCode.HIGH_FEES,
+              `Opportunity unprofitable after fees: net ${profitAnalysis.netProfitUsd.toFixed(2)} USD`
+            ),
+            chain
+          );
+        }
+
+        const simError = await this.simulateAndRevalidateProfitability(
+          opportunity, flashLoanTx, chain, ctx,
+          BigInt(opportunity.amountIn ?? '0'), estimatedGas, gasPrice, nativeTokenPriceUsd
+        );
+        if (simError) return simError;
+
+        const protectedTx = await this.applyMEVProtection(flashLoanTx, chain, ctx);
+
+        return await this.submitAndProcessFlashLoanResult(
+          opportunity, protectedTx, chain, ctx, gasPrice, currentProvider
+        );
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+
+        // Record failed attempt
+        if (this.aggregatorMetrics) {
+          this.aggregatorMetrics.recordOutcome({
+            protocol: currentProvider.protocol,
+            success: false,
+            executionLatencyMs: 0,
+            error: errorMessage,
+          });
+        }
+
+        // On last attempt, don't try fallback
+        if (attempt >= MAX_ATTEMPTS || !this.aggregator) {
+          this.logger.error('Flash loan execution failed (no more fallback attempts)', {
+            opportunityId: opportunity.id, chain, attempt,
+            provider: currentProvider.protocol, error: errorMessage,
+          });
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
+            formatExecutionError(ExecutionErrorCode.FLASH_LOAN_ERROR, errorMessage),
+            chain
+          );
+        }
+
+        // Ask aggregator whether to retry
+        const fallbackDecision = await this.aggregator.decideFallback(
+          currentProvider.protocol,
+          error instanceof Error ? error : new Error(errorMessage),
+          rankedAlternatives
+            .filter(a => a.protocol !== currentProvider.protocol)
+            .map(a => ({ protocol: a.protocol, score: a.score.totalScore })),
+        );
+
+        if (!fallbackDecision.shouldRetry || !fallbackDecision.nextProtocol) {
+          this.logger.warn('Fallback declined — aborting', {
+            opportunityId: opportunity.id, chain,
+            reason: fallbackDecision.reason,
+            errorType: fallbackDecision.errorType,
+          });
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
+            formatExecutionError(ExecutionErrorCode.FLASH_LOAN_ERROR,
+              `Primary provider failed (${errorMessage}), fallback declined: ${fallbackDecision.reason}`),
+            chain
+          );
+        }
+
+        // Resolve fallback provider from registry
+        const fallbackEntries = FLASH_LOAN_PROVIDER_REGISTRY[chain];
+        const fallbackEntry = fallbackEntries?.find(e => e.protocol === fallbackDecision.nextProtocol);
+        if (!fallbackEntry) {
+          this.logger.warn('Fallback provider not in registry', {
+            chain, protocol: fallbackDecision.nextProtocol,
+          });
+          return BaseExecutionStrategy.createOpportunityError(
+            opportunity,
+            formatExecutionError(ExecutionErrorCode.FLASH_LOAN_ERROR,
+              `Fallback provider ${fallbackDecision.nextProtocol} not in registry for ${chain}`),
+            chain
+          );
+        }
+
+        this.logger.info('Falling back to alternative provider', {
+          opportunityId: opportunity.id, chain, attempt,
+          failedProvider: currentProvider.protocol,
+          nextProvider: fallbackDecision.nextProtocol,
+          reason: fallbackDecision.reason,
+        });
+
+        currentProvider = {
+          protocol: fallbackDecision.nextProtocol,
+          chain,
+          poolAddress: fallbackEntry.address,
+          feeBps: fallbackEntry.feeBps,
+          isAvailable: true,
+        };
+      }
+    }
+
+    // Should never reach here (loop always returns), but TypeScript needs it
+    return BaseExecutionStrategy.createOpportunityError(
+      opportunity,
+      formatExecutionError(ExecutionErrorCode.FLASH_LOAN_ERROR, 'Max fallback attempts exceeded'),
+      chain
+    );
   }
 
   /**
