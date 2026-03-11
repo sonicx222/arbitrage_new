@@ -352,6 +352,12 @@ export {
   type FlashLoanProviderStatus,
 } from './flash-loan-providers';
 
+export {
+  FLASH_LOAN_PROVIDER_REGISTRY,
+  getProvidersForChain,
+  type FlashLoanProviderEntry,
+} from './flash-loan-providers/multi-provider-registry';
+
 // =============================================================================
 // CROSS-CHAIN NORMALIZATION
 // =============================================================================

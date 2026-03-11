@@ -158,3 +158,10 @@ function crossValidateProviders(): void {
 }
 
 crossValidateProviders();
+
+// Multi-provider registry for aggregator
+export {
+  FLASH_LOAN_PROVIDER_REGISTRY,
+  getProvidersForChain,
+  type FlashLoanProviderEntry,
+} from './multi-provider-registry';
