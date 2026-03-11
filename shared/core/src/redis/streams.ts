@@ -417,6 +417,9 @@ export class RedisStreamsClient {
   private warnedUnknownStreams = new Set<string>();
   /** OPT-006: Cache validated stream names to skip regex on repeated calls */
   private validatedStreamNames = new Set<string>();
+  /** OPT-006: Pre-allocated Buffers for HMAC verification (SHA-256 hex = 64 bytes) */
+  private readonly hmacBufA = Buffer.alloc(64);
+  private readonly hmacBufB = Buffer.alloc(64);
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -469,6 +472,11 @@ export class RedisStreamsClient {
     // P2 Fix CA-002: Service degradation/recovery events
     [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: 5000,      // Degradation + recovery events
   };
+
+  /** OPT-006: Pre-cached MAXLEN string representations to avoid .toString() on every xadd */
+  private static readonly STREAM_MAX_LENGTH_STRINGS: Record<string, string> = Object.fromEntries(
+    Object.entries(RedisStreamsClient.STREAM_MAX_LENGTHS).map(([k, v]) => [k, String(v)])
+  );
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
     this.logger = createLogger('redis-streams');
@@ -651,18 +659,31 @@ export class RedisStreamsClient {
     if (!this.signingKey) return true;
 
     // Try current key
+    // OPT-006: Reuse pre-allocated Buffers instead of Buffer.from() per verification
     const expected = this.signMessage(data, streamName);
-    if (expected.length === signature.length &&
-        crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
-      return true;
+    if (expected.length === signature.length && expected.length <= 64) {
+      this.hmacBufA.write(expected, 0, expected.length, 'ascii');
+      this.hmacBufB.write(signature, 0, signature.length, 'ascii');
+      if (crypto.timingSafeEqual(
+        this.hmacBufA.subarray(0, expected.length),
+        this.hmacBufB.subarray(0, signature.length)
+      )) {
+        return true;
+      }
     }
 
     // OP-17: Try previous key during rotation window
     if (this.cachedPreviousKeyObj) {
       const previousExpected = this.signMessageWithKey(data, this.cachedPreviousKeyObj, streamName);
-      if (previousExpected.length === signature.length &&
-          crypto.timingSafeEqual(Buffer.from(previousExpected), Buffer.from(signature))) {
-        return true;
+      if (previousExpected.length === signature.length && previousExpected.length <= 64) {
+        this.hmacBufA.write(previousExpected, 0, previousExpected.length, 'ascii');
+        this.hmacBufB.write(signature, 0, signature.length, 'ascii');
+        if (crypto.timingSafeEqual(
+          this.hmacBufA.subarray(0, previousExpected.length),
+          this.hmacBufB.subarray(0, signature.length)
+        )) {
+          return true;
+        }
       }
     }
 
@@ -714,7 +735,6 @@ export class RedisStreamsClient {
     // S-5: Compute HMAC signature for message authentication
     // OP-18 FIX: Include stream name in HMAC to prevent cross-stream replay
     const signature = this.signMessage(serialized, streamName);
-    const sigFields = signature ? ['sig', signature] : [];
     const maxRetries = options.maxRetries ?? 3;
     let lastError: Error | null = null;
 
@@ -723,29 +743,25 @@ export class RedisStreamsClient {
         let messageId: string;
 
         // P1-3 fix: Support MAXLEN to prevent unbounded stream growth
+        // OPT-006: Inline sig fields directly to avoid array alloc + spread per call.
+        // Use pre-cached string for known MAXLEN values to avoid .toString() per call.
         if (options.maxLen !== undefined) {
+          const maxLenStr = RedisStreamsClient.STREAM_MAX_LENGTH_STRINGS[streamName]
+            ?? options.maxLen.toString();
           const approximate = options.approximate !== false; // Default to approximate
           if (approximate) {
-            // Use approximate (~) trimming for better performance
-            messageId = await this.client.xadd(
-              streamName,
-              'MAXLEN', '~', options.maxLen.toString(),
-              id,
-              'data', serialized,
-              ...sigFields
-            ) as string;
+            messageId = signature
+              ? await this.client.xadd(streamName, 'MAXLEN', '~', maxLenStr, id, 'data', serialized, 'sig', signature) as string
+              : await this.client.xadd(streamName, 'MAXLEN', '~', maxLenStr, id, 'data', serialized) as string;
           } else {
-            // Exact trimming (slower but precise)
-            messageId = await this.client.xadd(
-              streamName,
-              'MAXLEN', options.maxLen.toString(),
-              id,
-              'data', serialized,
-              ...sigFields
-            ) as string;
+            messageId = signature
+              ? await this.client.xadd(streamName, 'MAXLEN', maxLenStr, id, 'data', serialized, 'sig', signature) as string
+              : await this.client.xadd(streamName, 'MAXLEN', maxLenStr, id, 'data', serialized) as string;
           }
         } else {
-          messageId = await this.client.xadd(streamName, id, 'data', serialized, ...sigFields) as string;
+          messageId = signature
+            ? await this.client.xadd(streamName, id, 'data', serialized, 'sig', signature) as string
+            : await this.client.xadd(streamName, id, 'data', serialized) as string;
         }
 
         // P0 Fix ES-002: Record success to close circuit breaker after recovery

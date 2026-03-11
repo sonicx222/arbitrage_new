@@ -60,6 +60,8 @@ function sendRaw(client: SSEClient, event: string, serialized: string): void {
 
 /** Broadcast a pre-serialized SSE frame to all connected clients */
 function broadcast(event: string, serialized: string): void {
+  // OPT-006: Skip iteration when no clients connected
+  if (clients.size === 0) return;
   for (const client of clients) {
     sendRaw(client, event, serialized);
   }
@@ -80,15 +82,19 @@ function startTimerPool(state: CoordinatorStateProvider): void {
   const timers: NodeJS.Timeout[] = [];
 
   // M-06 FIX: All intervals configurable via SSE_INTERVAL_*_MS env vars
+  // OPT-006: Each timer skips serialization + broadcast when no SSE clients are connected
   timers.push(setInterval(() => {
+    if (clients.size === 0) return;
     broadcast('metrics', JSON.stringify(state.getSystemMetrics()));
   }, SSE_INTERVAL_METRICS));
 
   timers.push(setInterval(() => {
+    if (clients.size === 0) return;
     broadcast('services', JSON.stringify(Object.fromEntries(state.getServiceHealthMap())));
   }, SSE_INTERVAL_SERVICES));
 
   timers.push(setInterval(async () => {
+    if (clients.size === 0) return;
     try {
       const monitor = getStreamHealthMonitor();
       const health = await monitor.checkStreamHealth();
@@ -108,10 +114,12 @@ function startTimerPool(state: CoordinatorStateProvider): void {
   }, SSE_INTERVAL_STREAMS));
 
   timers.push(setInterval(() => {
+    if (clients.size === 0) return;
     broadcast('circuit-breaker', JSON.stringify(state.getCircuitBreakerSnapshot()));
   }, SSE_INTERVAL_CB));
 
   timers.push(setInterval(async () => {
+    if (clients.size === 0) return;
     try {
       const collector = getDiagnosticsCollector();
       const snapshot = await collector.collect();
