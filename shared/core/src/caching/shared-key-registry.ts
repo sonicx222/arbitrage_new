@@ -8,7 +8,7 @@
  * - FNV-1a hash table for O(1) lookups (was O(n) linear scan)
  * - Open addressing with linear probing for collision resolution
  * - Load factor ≤ 0.5 (hash table size = next power of 2 ≥ maxKeys × 2)
- * - Fixed-size slots (64 bytes each): key string (60 bytes) + index (4 bytes)
+ * - Fixed-size slots (84 bytes each): key string (80 bytes) + index (4 bytes)
  * - Atomics for thread-safe publish/subscribe between main thread and workers
  *
  * Buffer Layout:
@@ -20,8 +20,8 @@
  * ...
  *
  * Memory overhead per configuration:
- * - 1,000 keys:  64KB slots + 8KB hash = 72KB total
- * - 10,000 keys: 640KB slots + 128KB hash = 768KB total
+ * - 1,000 keys:  84KB slots + 8KB hash = 92KB total
+ * - 10,000 keys: 840KB slots + 128KB hash = 968KB total
  *
  * @see ADR-005 L1 Cache
  */
@@ -53,7 +53,7 @@ function nextPowerOf2(n: number): number {
 export interface KeyRegistryConfig {
   /** Maximum number of keys that can be stored */
   maxKeys: number;
-  /** Size of each key slot in bytes (default: 64) */
+  /** Size of each key slot in bytes (default: 84) */
   slotSize?: number;
 }
 
@@ -73,7 +73,10 @@ export class SharedKeyRegistry {
   private dataView: DataView;
   private entryCount: Int32Array;
   private hashTable: Int32Array;
-  private readonly keySize = 60;
+  // M-09 FIX: Increased from 60 to 80 bytes. Production keys like
+  // "price:avalanche:0x<40hex>" are 59 bytes — only 1 byte of margin at 60.
+  // 80 bytes accommodates longer chain names or key format changes.
+  private readonly keySize = 80;
   private readonly slotSize: number;
   private readonly headerSize = 8; // 4 bytes entry count + 4 bytes hash table size
   private hashTableSize: number;
@@ -85,13 +88,13 @@ export class SharedKeyRegistry {
 
   // H-06 FIX: Pre-allocated buffer for lookup() to avoid Buffer.from() allocation per call.
   // TextEncoder.encodeInto() writes directly into this Uint8Array with zero allocation.
-  private readonly lookupKeyBuf = new Uint8Array(64);
+  private readonly lookupKeyBuf = new Uint8Array(80);
   private readonly lookupEncoder = new TextEncoder();
 
   constructor(config: KeyRegistryConfig, existingBuffer?: SharedArrayBuffer) {
     this.config = {
       maxKeys: config.maxKeys,
-      slotSize: config.slotSize ?? 64
+      slotSize: config.slotSize ?? 84
     };
 
     this.slotSize = this.config.slotSize;

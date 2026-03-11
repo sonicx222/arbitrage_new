@@ -167,16 +167,16 @@ describe('SharedKeyRegistry: Concurrent Registration (P0 Fix)', () => {
   });
 
   describe('Key size validation', () => {
-    it('should reject keys larger than 60 bytes', () => {
+    it('should reject keys larger than 80 bytes', () => {
       const registry = new SharedKeyRegistry({ maxKeys: 10 });
 
-      // 61 byte key (UTF-8)
-      const tooLong = 'x'.repeat(61);
+      // 81 byte key (UTF-8)
+      const tooLong = 'x'.repeat(81);
       const success = registry.register(tooLong, 0);
       expect(success).toBe(false);
 
-      // 60 byte key should work
-      const justRight = 'x'.repeat(60);
+      // 80 byte key should work
+      const justRight = 'x'.repeat(80);
       const success2 = registry.register(justRight, 0);
       expect(success2).toBe(true);
     });
@@ -184,17 +184,17 @@ describe('SharedKeyRegistry: Concurrent Registration (P0 Fix)', () => {
     it('should handle multi-byte UTF-8 characters correctly', () => {
       const registry = new SharedKeyRegistry({ maxKeys: 10 });
 
-      // 20 characters × 3 bytes each = 60 bytes (UTF-8)
-      const emoji = '😀'.repeat(20);
+      // 21 emojis × 4 bytes each = 84 bytes (UTF-8) — exceeds 80-byte limit
+      const emoji = '😀'.repeat(21);
       const byteLength = Buffer.byteLength(emoji, 'utf8');
-      expect(byteLength).toBe(80); // 20 * 4 bytes per emoji
+      expect(byteLength).toBe(84); // 21 * 4 bytes per emoji
 
-      // Should be rejected (>60 bytes)
+      // Should be rejected (>80 bytes)
       const success = registry.register(emoji, 0);
       expect(success).toBe(false);
 
-      // 15 emojis = 60 bytes, should work
-      const shorter = '😀'.repeat(15);
+      // 20 emojis = 80 bytes, should work
+      const shorter = '😀'.repeat(20);
       const success2 = registry.register(shorter, 0);
       expect(success2).toBe(true);
 

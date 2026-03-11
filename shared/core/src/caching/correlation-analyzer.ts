@@ -838,8 +838,18 @@ export class CorrelationAnalyzer {
       }
     }
 
-    // Remove stale pairs
+    // Remove stale pairs and their back-references in co-occurrence maps
+    // M-12 FIX: Previously, deleting a pair from coOccurrenceMatrix left dangling
+    // references in OTHER pairs' co-occurrence entries, causing getCorrelatedPairs()
+    // to return deleted pair addresses.
     for (const pair of pairsToRemove) {
+      // Clean up back-references: remove this pair from all other pairs' co-occurrence maps
+      const coOccurrences = this.coOccurrenceMatrix.get(pair);
+      if (coOccurrences) {
+        for (const [otherPair] of coOccurrences) {
+          this.coOccurrenceMatrix.get(otherPair)?.delete(pair);
+        }
+      }
       this.pairUpdates.delete(pair);
       this.coOccurrenceMatrix.delete(pair);
     }

@@ -21,6 +21,7 @@
 
 import { createLogger } from '../logger';
 import { clearIntervalSafe } from '../async/lifecycle-utils';
+import { LRUQueue } from './lru-queue';
 import type { Resettable } from '@arbitrage/types';
 
 const logger = createLogger('reserve-cache');
@@ -82,16 +83,6 @@ export interface ReserveCacheStats {
 }
 
 // =============================================================================
-// LRU Node for Doubly-Linked List
-// =============================================================================
-
-interface LRUNode {
-  key: string;
-  prev: LRUNode | null;
-  next: LRUNode | null;
-}
-
-// =============================================================================
 // Reserve Cache Implementation
 // =============================================================================
 
@@ -129,12 +120,10 @@ export class ReserveCache implements Resettable {
   // Main cache storage: key → reserve data
   private cache: Map<string, CachedReserve> = new Map();
 
-  // LRU tracking: key → node (for O(1) removal)
-  private nodeMap: Map<string, LRUNode> = new Map();
-
-  // LRU doubly-linked list head/tail
-  private head: LRUNode | null = null;
-  private tail: LRUNode | null = null;
+  // H-002 FIX: Reuse shared LRUQueue instead of hand-rolled doubly-linked list.
+  // Eliminates ~75 lines of duplicate LRU logic (addToFront, moveToFront,
+  // removeFromList, evictLRU) that diverged from the tested LRUQueue sentinel pattern.
+  private lruQueue: LRUQueue = new LRUQueue();
 
   // Statistics
   private stats: ReserveCacheStats = {
@@ -198,9 +187,9 @@ export class ReserveCache implements Resettable {
       return undefined;
     }
 
-    // Cache hit - move to front of LRU list
+    // Cache hit - move to most-recently-used position
     this.stats.hits++;
-    this.moveToFront(key);
+    this.lruQueue.touch(key);
     return entry;
   }
 
@@ -333,9 +322,7 @@ export class ReserveCache implements Resettable {
    */
   clear(): void {
     this.cache.clear();
-    this.nodeMap.clear();
-    this.head = null;
-    this.tail = null;
+    this.lruQueue.clear();
     logger.info('Reserve cache cleared');
   }
 
@@ -370,9 +357,11 @@ export class ReserveCache implements Resettable {
   /**
    * Generate cache key from chain and pair address.
    * Format: "chainId:pairAddress"
+   * L-07 FIX: Normalize pairAddress to lowercase to prevent cache misses
+   * from mixed-case addresses (e.g., EIP-55 checksummed vs lowercase).
    */
   private makeKey(chainId: string, pairAddress: string): string {
-    return `${chainId}:${pairAddress}`;
+    return `${chainId}:${pairAddress.toLowerCase()}`;
   }
 
   /**
@@ -385,15 +374,16 @@ export class ReserveCache implements Resettable {
     this.cache.set(key, entry);
 
     if (existing) {
-      // Move existing entry to front
-      this.moveToFront(key);
+      this.lruQueue.touch(key);
     } else {
-      // Add new entry to front
-      this.addToFront(key);
+      this.lruQueue.add(key);
 
       // Evict if over capacity
       while (this.cache.size > this.config.maxEntries) {
-        this.evictLRU();
+        const evicted = this.lruQueue.evictOldest();
+        if (!evicted) break;
+        this.cache.delete(evicted);
+        this.stats.evictions++;
       }
     }
   }
@@ -403,86 +393,9 @@ export class ReserveCache implements Resettable {
    */
   private removeEntry(key: string): void {
     this.cache.delete(key);
-    this.removeFromList(key);
+    this.lruQueue.remove(key);
   }
 
-  /**
-   * Add new node to front of LRU list.
-   */
-  private addToFront(key: string): void {
-    const node: LRUNode = { key, prev: null, next: this.head };
-
-    if (this.head) {
-      this.head.prev = node;
-    }
-    this.head = node;
-
-    if (!this.tail) {
-      this.tail = node;
-    }
-
-    this.nodeMap.set(key, node);
-  }
-
-  /**
-   * Move existing node to front of LRU list.
-   */
-  private moveToFront(key: string): void {
-    const node = this.nodeMap.get(key);
-    if (!node || node === this.head) return;
-
-    // Remove from current position
-    if (node.prev) {
-      node.prev.next = node.next;
-    }
-    if (node.next) {
-      node.next.prev = node.prev;
-    }
-    if (node === this.tail) {
-      this.tail = node.prev;
-    }
-
-    // Move to front
-    node.prev = null;
-    node.next = this.head;
-    if (this.head) {
-      this.head.prev = node;
-    }
-    this.head = node;
-  }
-
-  /**
-   * Remove node from LRU list.
-   */
-  private removeFromList(key: string): void {
-    const node = this.nodeMap.get(key);
-    if (!node) return;
-
-    if (node.prev) {
-      node.prev.next = node.next;
-    } else {
-      this.head = node.next;
-    }
-
-    if (node.next) {
-      node.next.prev = node.prev;
-    } else {
-      this.tail = node.prev;
-    }
-
-    this.nodeMap.delete(key);
-  }
-
-  /**
-   * Evict least recently used entry.
-   */
-  private evictLRU(): void {
-    if (!this.tail) return;
-
-    const key = this.tail.key;
-    this.removeEntry(key);
-    this.stats.evictions++;
-  }
 
   /**
    * Start periodic metrics logging.
