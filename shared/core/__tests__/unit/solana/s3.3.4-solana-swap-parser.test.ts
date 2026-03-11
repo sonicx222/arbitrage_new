@@ -948,49 +948,8 @@ describe('S3.3.4.5: Orca Whirlpool Swap Parsing', () => {
   });
 });
 
-// =============================================================================
-// S3.3.4.6: Raydium CLMM Parsing Tests
-// =============================================================================
-
-describe('S3.3.4.6: Raydium CLMM Swap Parsing', () => {
-  it.todo('should detect Raydium CLMM swap instructions');
-  it.todo('should parse CLMM swap amounts');
-  it.todo('should handle tick-based price calculations');
-  it.todo('should extract pool state from accounts');
-});
-
-// =============================================================================
-// S3.3.4.7: Meteora DLMM Parsing Tests
-// =============================================================================
-
-describe('S3.3.4.7: Meteora DLMM Swap Parsing', () => {
-  it.todo('should detect Meteora DLMM swap instructions');
-  it.todo('should parse bin-based swap amounts');
-  it.todo('should handle dynamic liquidity pricing');
-  it.todo('should extract active bin information');
-});
-
-// =============================================================================
-// S3.3.4.8: Phoenix Order Book Parsing Tests
-// =============================================================================
-
-describe('S3.3.4.8: Phoenix Order Book Parsing', () => {
-  it.todo('should detect Phoenix new_order instructions');
-  it.todo('should parse limit order fills');
-  it.todo('should parse market order executions');
-  it.todo('should handle partial fills');
-  it.todo('should extract order book state');
-});
-
-// =============================================================================
-// S3.3.4.9: Lifinity PMM Parsing Tests
-// =============================================================================
-
-describe('S3.3.4.9: Lifinity PMM Swap Parsing', () => {
-  it.todo('should detect Lifinity swap instructions');
-  it.todo('should parse oracle-based swap amounts');
-  it.todo('should handle concentrated liquidity');
-});
+// S3.3.4.6-9: Raydium CLMM, Meteora DLMM, Phoenix, Lifinity parsing tests
+// removed — were it.todo() stubs only. Implement when DEX parsers are built.
 
 // =============================================================================
 // S3.3.4.10: Jupiter Aggregator Parsing Tests
@@ -1001,24 +960,10 @@ describe('S3.3.4.10: Jupiter Aggregator Parsing', () => {
     expect(EXPECTED_PROGRAM_IDS.JUPITER).toBeDefined();
   });
 
-  it.todo('should identify Jupiter as aggregator (disabled)');
-  it.todo('should optionally parse Jupiter routes for analytics');
-  it.todo('should extract underlying DEX hops from routes');
-  it.todo('should not double-count Jupiter swaps in detection');
 });
 
-// =============================================================================
-// S3.3.4.11: Transaction Parsing Tests
-// =============================================================================
-
-describe('S3.3.4.11: Full Transaction Parsing', () => {
-  it.todo('should parse transaction with single swap');
-  it.todo('should parse transaction with multiple swaps');
-  it.todo('should handle transactions with non-swap instructions');
-  it.todo('should skip failed transactions');
-  it.todo('should return empty array for non-DEX transactions');
-  it.todo('should preserve instruction order');
-});
+// S3.3.4.11: Full Transaction Parsing — todo stubs removed.
+// Implement when full transaction parsing is built.
 
 // =============================================================================
 // S3.3.4.12: SwapEvent Conversion Tests
@@ -1049,12 +994,6 @@ describe('S3.3.4.12: SwapEvent Conversion', () => {
     expect(mockEvent.programId).toBeDefined();
   });
 
-  it.todo('should convert parsed swap to SwapEvent format');
-  it.todo('should set chain to "solana"');
-  it.todo('should use slot as blockNumber');
-  it.todo('should use signature as transactionHash');
-  it.todo('should include programId in event');
-  it.todo('should include instructionIndex in event');
 });
 
 // =============================================================================
@@ -1223,28 +1162,7 @@ describe('S3.3.4.13: Parser Statistics', () => {
   });
 });
 
-// =============================================================================
-// S3.3.4.14: Error Handling Tests
-// =============================================================================
-
-describe('S3.3.4.14: Error Handling', () => {
-  it.todo('should handle malformed instruction data');
-  it.todo('should handle missing account keys');
-  it.todo('should handle unknown instruction discriminators');
-  it.todo('should log parse errors without throwing');
-  it.todo('should continue parsing after errors');
-});
-
-// =============================================================================
-// S3.3.4.15: Integration with SolanaDetector Tests
-// =============================================================================
-
-describe('S3.3.4.15: Integration with SolanaDetector', () => {
-  it.todo('should receive account updates from detector');
-  it.todo('should emit parsed swap events');
-  it.todo('should work with SwapEventFilter');
-  it.todo('should integrate with price update flow');
-});
+// S3.3.4.14-15: Error handling and SolanaDetector integration — todo stubs removed.
 
 // =============================================================================
 // S3.3.4.16: Regression Tests
@@ -1270,20 +1188,9 @@ describe('S3.3.4.16: Regression Tests', () => {
     expect(EXPECTED_PROGRAM_IDS.JUPITER).toBeDefined();
   });
 
-  it.todo('should not break on DEX protocol upgrades');
-  it.todo('should handle new instruction versions');
-  it.todo('should maintain backwards compatibility');
 });
 
-// =============================================================================
-// S3.3.4.17: Performance Tests
-// =============================================================================
-
-describe('S3.3.4.17: Performance', () => {
-  it.todo('should parse instructions within 1ms');
-  it.todo('should handle high-volume transaction streams');
-  it.todo('should not leak memory on continuous parsing');
-});
+// S3.3.4.17: Performance — todo stubs removed.
 
 // =============================================================================
 // S3.3.4.18: Summary Statistics

@@ -881,142 +881,9 @@ describe('S3.3.5 Solana Price Feed Integration', () => {
     });
   });
 
-  // ===========================================================================
-  // S3.3.5.5: Pool Subscription Tests
-  // ===========================================================================
-
-  describe('S3.3.5.5: Pool Subscriptions', () => {
-    beforeEach(async () => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
-      await priceFeed.start();
-    });
-
-    it.todo('should subscribe to Raydium AMM pool');
-
-    it.todo('should subscribe to Raydium CLMM pool');
-
-    it.todo('should subscribe to Orca Whirlpool');
-
-    it.todo('should track subscription count');
-
-    it.todo('should return subscribed pool addresses');
-
-    it.todo('should not duplicate subscriptions');
-
-    it.todo('should unsubscribe from pool');
-
-    it.todo('should respect maxPoolSubscriptions limit');
-
-    it.todo('should emit error for invalid pool address');
-  });
-
-  // ===========================================================================
-  // S3.3.5.6: Real-time Price Update Tests
-  // ===========================================================================
-
-  describe('S3.3.5.6: Real-time Price Updates', () => {
-    beforeEach(async () => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
-      await priceFeed.start();
-    });
-
-    it.todo('should emit priceUpdate event on pool account change');
-
-    it.todo('should include all required fields in price update');
-
-    it.todo('should include slot number in price update');
-
-    it.todo('should include CLMM-specific fields for CLMM pools');
-
-    it.todo('should not emit update if price unchanged (by default)');
-
-    it.todo('should emit update even if price unchanged when configured');
-
-    it.todo('should track price staleness');
-
-    it.todo('should emit stalePrice event when price becomes stale');
-  });
-
-  // ===========================================================================
-  // S3.3.5.7: Error Handling Tests
-  // ===========================================================================
-
-  describe('S3.3.5.7: Error Handling', () => {
-    beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
-    });
-
-    it.todo('should handle RPC connection errors gracefully');
-
-    it.todo('should handle WebSocket disconnection');
-
-    it.todo('should attempt reconnection on WebSocket failure');
-
-    it.todo('should emit error event for parse failures');
-
-    it.todo('should continue processing other pools on single pool error');
-
-    it.todo('should handle rate limiting gracefully');
-  });
-
-  // ===========================================================================
-  // S3.3.5.8: Integration with SolanaDetector Tests
-  // ===========================================================================
-
-  describe('S3.3.5.8: SolanaDetector Integration', () => {
-    it.todo('should integrate with SolanaDetector pool management');
-
-    it.todo('should update SolanaDetector pool prices');
-
-    it.todo('should trigger arbitrage check on price update');
-
-    it.todo('should publish price updates to Redis stream');
-  });
-
-  // ===========================================================================
-  // S3.3.5.9: Price Accuracy Tests
-  // ===========================================================================
-
-  describe('S3.3.5.9: Price Accuracy', () => {
-    beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
-    });
-
-    it.todo('should calculate AMM price with <0.01% error');
-
-    it.todo('should calculate CLMM price with <0.001% error');
-
-    it.todo('should calculate Whirlpool price with <0.001% error');
-
-    it.todo('should match reference implementation prices');
-
-    // Cross-validation
-    describe('Cross-validation', () => {
-      it.todo('should produce similar prices across DEXs for same pair');
-
-      it.todo('should detect price discrepancies >1%');
-    });
-  });
-
-  // ===========================================================================
-  // S3.3.5.10: Performance Tests
-  // ===========================================================================
-
-  describe('S3.3.5.10: Performance', () => {
-    beforeEach(() => {
-      priceFeed = new SolanaPriceFeed(createTestConfig(), { logger: mockLogger, connection: mockConnection });
-    });
-
-    it.todo('should parse AMM state in <1ms');
-
-    it.todo('should parse CLMM state in <1ms');
-
-    it.todo('should parse Whirlpool state in <1ms');
-
-    it.todo('should handle 100+ concurrent pool subscriptions');
-
-    it.todo('should process price updates with <10ms latency');
-  });
+  // S3.3.5.5-10: Pool subscriptions, real-time updates, error handling,
+  // SolanaDetector integration, price accuracy, performance — todo stubs removed.
+  // Implement when features are built.
 });
 
 // =============================================================================
@@ -1114,7 +981,6 @@ describe('S3.3.5 Account Data Layouts', () => {
       expect(encoded.length).toBe(expectedSize);
     });
 
-    it.todo('should have correct field offsets');
   });
 
   describe('Raydium CLMM Layout', () => {
@@ -1127,11 +993,6 @@ describe('S3.3.5 Account Data Layouts', () => {
       expect(encoded.length).toBe(expectedSize);
     });
 
-    it.todo('should have correct field offsets for sqrtPriceX64');
-
-    it.todo('should have correct field offsets for tickCurrent');
-
-    it.todo('should have correct field offsets for liquidity');
   });
 
   describe('Orca Whirlpool Layout', () => {
@@ -1144,11 +1005,6 @@ describe('S3.3.5 Account Data Layouts', () => {
       expect(encoded.length).toBe(expectedSize);
     });
 
-    it.todo('should have correct field offsets for sqrtPrice');
-
-    it.todo('should have correct field offsets for tickCurrentIndex');
-
-    it.todo('should have correct field offsets for liquidity');
   });
 });
 
