@@ -415,6 +415,8 @@ export class RedisStreamsClient {
   /** SA-1C-004: Track warned streams to avoid log spam for unknown MAXLEN lookups */
   private static readonly MAX_WARNED_UNKNOWN_STREAMS = 100;
   private warnedUnknownStreams = new Set<string>();
+  /** OPT-006: Cache validated stream names to skip regex on repeated calls */
+  private validatedStreamNames = new Set<string>();
 
   // Standard stream names — single source of truth from @arbitrage/types (ADR-002)
   static readonly STREAMS = RedisStreams;
@@ -1604,6 +1606,9 @@ export class RedisStreamsClient {
   // ===========================================================================
 
   private validateStreamName(streamName: string): void {
+    // OPT-006: Skip regex for previously validated names (O(1) Set lookup)
+    if (this.validatedStreamNames.has(streamName)) return;
+
     if (!streamName || typeof streamName !== 'string') {
       throw new Error('Invalid stream name: must be non-empty string');
     }
@@ -1616,6 +1621,8 @@ export class RedisStreamsClient {
     if (!/^[a-zA-Z0-9\-_:]+$/.test(streamName)) {
       throw new Error('Invalid stream name: contains unsafe characters');
     }
+
+    this.validatedStreamNames.add(streamName);
   }
 
   /**

@@ -381,6 +381,9 @@ export class GasPriceOptimizer {
    * 0.3 = 30% weight on latest price, 70% on historical average.
    */
   private readonly EMA_SMOOTHING_FACTOR: number;
+  /** OPT-006: Pre-cached BigInt scaled alpha constants to avoid per-update BigInt(Math.floor()) */
+  private readonly EMA_ALPHA_SCALED: bigint;
+  private readonly EMA_ONE_MINUS_ALPHA_SCALED: bigint;
 
   private lastMedianCacheCleanup = 0;
 
@@ -409,6 +412,10 @@ export class GasPriceOptimizer {
     } else {
       this.EMA_SMOOTHING_FACTOR = rawAlpha;
     }
+
+    // OPT-006: Pre-cache BigInt alpha constants (avoids BigInt(Math.floor()) on every gas update)
+    this.EMA_ALPHA_SCALED = BigInt(Math.floor(this.EMA_SMOOTHING_FACTOR * 1000));
+    this.EMA_ONE_MINUS_ALPHA_SCALED = 1000n - this.EMA_ALPHA_SCALED;
   }
 
   /**
@@ -614,11 +621,9 @@ export class GasPriceOptimizer {
         // First price: initialize EMA directly
         this.emaBaselines.set(chain, price);
       } else {
-        // EMA update using scaled integer arithmetic (avoid floating point)
-        // α = 0.3 → α_scaled = 300, (1-α) = 700
-        const alphaScaled = BigInt(Math.floor(this.EMA_SMOOTHING_FACTOR * 1000));
-        const oneMinusAlphaScaled = 1000n - alphaScaled;
-        const newEma = (price * alphaScaled + existingEma * oneMinusAlphaScaled) / 1000n;
+        // EMA update using pre-cached scaled integer arithmetic (avoid floating point)
+        // α = 0.3 → α_scaled = 300, (1-α) = 700. Constants pre-computed in constructor (OPT-006).
+        const newEma = (price * this.EMA_ALPHA_SCALED + existingEma * this.EMA_ONE_MINUS_ALPHA_SCALED) / 1000n;
         this.emaBaselines.set(chain, newEma);
       }
     }

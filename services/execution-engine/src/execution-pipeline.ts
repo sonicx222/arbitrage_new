@@ -493,7 +493,9 @@ export class ExecutionPipeline {
 
     // Phase 1 Enhanced Monitoring: Stamp execution start.
     // L-006 FIX: Use a local copy instead of mutating the opportunity object.
-    const ts = { ...(opportunity.pipelineTimestamps ?? {}), executionStartedAt: Date.now() };
+    // OPT-006: Direct property assignment instead of spread copy.
+    const base = opportunity.pipelineTimestamps ?? {};
+    const ts = Object.assign({}, base, { executionStartedAt: Date.now() });
 
     // Same-chain arbitrage opportunities set 'chain' but not 'buyChain'.
     // Fall back to 'chain' for same-chain arbs; only cross-chain arbs need buyChain explicitly.
@@ -773,10 +775,10 @@ export class ExecutionPipeline {
     } finally {
       // Phase 1 Enhanced Monitoring: Stamp execution completion.
       // L-006 FIX: Single assignment instead of mutate-then-assign.
-      opportunity.pipelineTimestamps = {
-        ...(opportunity.pipelineTimestamps ?? {}),
-        executionCompletedAt: Date.now(),
-      };
+      // OPT-006: Direct property assignment instead of spread copy.
+      opportunity.pipelineTimestamps = Object.assign(
+        {}, opportunity.pipelineTimestamps ?? {}, { executionCompletedAt: Date.now() }
+      );
 
       this.deps.opportunityConsumer.markComplete(opportunity.id);
     }
