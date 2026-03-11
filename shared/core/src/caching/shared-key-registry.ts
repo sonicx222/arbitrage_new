@@ -165,12 +165,14 @@ export class SharedKeyRegistry {
       return false;
     }
 
-    // Validate key size before attempting registration
-    const keyBytes = Buffer.byteLength(key, 'utf8');
-    if (keyBytes > this.keySize) {
+    // L-03: Single Buffer.from() for both validation and slot write
+    const keyBuffer = Buffer.from(key, 'utf8');
+    const keyLen = keyBuffer.length;
+
+    if (keyLen > this.keySize) {
       logger.warn('Key too large for registry', {
         key,
-        keyBytes,
+        keyBytes: keyLen,
         maxBytes: this.keySize
       });
       return false;
@@ -186,9 +188,6 @@ export class SharedKeyRegistry {
       });
       return false;
     }
-
-    const keyBuffer = Buffer.from(key, 'utf8');
-    const keyLen = keyBuffer.length;
 
     // 1. Write key bytes to slot
     const slotOffset = this.slotsOffset + (currentCount * this.slotSize);

@@ -390,6 +390,11 @@ export class PriceMatrix implements Resettable {
     // PHASE3-TASK43: Attach to SharedKeyRegistry if provided
     if (keyRegistryBuffer) {
       try {
+        // M-06: Worker passes totalSlots as maxKeys, which may differ from the
+        // main thread's capped value (min(maxPairs+reserve, 10000)). This is safe:
+        // the worker reads hashTableSize and buffer layout from the SAB header,
+        // independent of the maxKeys config. Only getStats() is affected (reports
+        // the worker's maxKeys, not the writer's). Functional behavior is identical.
         instance.keyRegistry = new SharedKeyRegistry(
           { maxKeys: totalSlots },
           keyRegistryBuffer

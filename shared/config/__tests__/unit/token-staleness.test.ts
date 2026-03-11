@@ -167,14 +167,14 @@ describe('Token Staleness Detection', () => {
     it('should return correct lastUpdated value', () => {
       const result = checkNativeTokenPriceStaleness();
 
-      expect(result.lastUpdated).toBe('2026-03-03');
+      expect(result.lastUpdated).toBe('2026-03-11');
     });
 
     it('should return isStale=false when prices are fresh', () => {
       const result = checkNativeTokenPriceStaleness();
 
-      // Since NATIVE_TOKEN_PRICE_METADATA.lastUpdated is '2026-03-03' and today is 2026-03-03,
-      // that's 0 days, which is well within the 7-day threshold
+      // NATIVE_TOKEN_PRICE_METADATA.lastUpdated matches the current date constant,
+      // so age is 0 days, well within the 7-day threshold
       expect(result.isStale).toBe(false);
       expect(result.recommendation).toContain('Prices are current');
     });
