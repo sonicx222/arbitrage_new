@@ -259,6 +259,59 @@ export class ChainSimulationHandler {
             callbacks.onEventProcessed();
           }
 
+          // Task 3.4: Generate SwapEvent for non-EVM pairs
+          if (callbacks.onSwapEvent) {
+            // ~30% chance per pair-tick to generate a swap event (realistic activity)
+            if (Math.random() < 0.30) {
+              const swapDex = effectiveDexes[Math.floor(Math.random() * effectiveDexes.length)];
+              const token0Price = this.getBaseTokenPrice(token0);
+              const token1Price = this.getBaseTokenPrice(token1);
+              // Trade size: $50 - $10,000 for Solana-like chains
+              const tradeUsd = 50 + Math.random() * 9950;
+              const inAmount = tradeUsd / token0Price;
+              const outAmount = tradeUsd / token1Price;
+              // Use lamport-scale for Solana (9 decimals), or 18 for generic
+              const decimals = this.chainId === 'solana' ? 9 : 18;
+              const rawIn = Math.floor(inAmount * 10 ** decimals).toString();
+              const rawOut = Math.floor(outAmount * 10 ** decimals).toString();
+              const txHash = `0x${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
+              const wallet = `0x${Math.random().toString(16).slice(2, 42).padEnd(40, '0')}`;
+              const pairAddr = `0x${(token0 + token1 + swapDex).split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0).toString(16).padStart(40, '0')}`;
+
+              const swapEvent: SwapEvent = {
+                pairAddress: pairAddr,
+                sender: wallet,
+                recipient: wallet,
+                to: wallet,
+                amount0In: rawIn,
+                amount1In: '0',
+                amount0Out: '0',
+                amount1Out: rawOut,
+                blockNumber: slotNumber,
+                transactionHash: txHash,
+                timestamp: Date.now(),
+                dex: swapDex,
+                chain: this.chainId,
+                usdValue: tradeUsd,
+              };
+
+              callbacks.onSwapEvent(swapEvent);
+
+              // Task 3.4: Whale alert for large trades (> $50K)
+              if (callbacks.onWhaleAlert && tradeUsd >= 50_000) {
+                const whaleAlert: WhaleAlert = {
+                  event: swapEvent,
+                  usdValue: tradeUsd,
+                  timestamp: swapEvent.timestamp,
+                  chain: this.chainId,
+                  dex: swapDex,
+                  pairAddress: pairAddr,
+                };
+                callbacks.onWhaleAlert(whaleAlert);
+              }
+            }
+          }
+
           // Occasionally detect arbitrage opportunity
           if (effectiveDexes.length >= 2 && Math.random() < 0.03) { // 3% chance
             const dex1 = effectiveDexes[0];

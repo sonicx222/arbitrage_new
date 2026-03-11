@@ -416,9 +416,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
     slotMissRate: 0,
     dexSwapsPerBlock: 4,
     dexMarketShare: {
-      aerodrome: 0.50,
-      uniswap_v3: 0.30,
-      baseswap: 0.20,
+      thruster: 0.55,
+      bladeswap: 0.25,
+      ring: 0.20,
     },
     tradeSizeRange: [200, 15000],
     gasModel: {
@@ -449,9 +449,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
     slotMissRate: 0.005,
     dexSwapsPerBlock: 3,
     dexMarketShare: {
-      aerodrome: 0.55,
+      ambient: 0.45,
+      nuri: 0.30,
       uniswap_v3: 0.25,
-      baseswap: 0.20,
     },
     tradeSizeRange: [100, 10000],
     gasModel: {
@@ -482,9 +482,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
     slotMissRate: 0,
     dexSwapsPerBlock: 1,
     dexMarketShare: {
-      aerodrome: 0.50,
-      uniswap_v3: 0.30,
-      baseswap: 0.20,
+      agni: 0.50,
+      fusionx: 0.30,
+      uniswap_v3: 0.20,
     },
     tradeSizeRange: [100, 5000],
     gasModel: {
@@ -515,9 +515,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
     slotMissRate: 0,
     dexSwapsPerBlock: 1,
     dexMarketShare: {
-      aerodrome: 0.50,
-      uniswap_v3: 0.30,
-      baseswap: 0.20,
+      kim: 0.55,
+      supswap: 0.25,
+      uniswap_v3: 0.20,
     },
     tradeSizeRange: [50, 3000],
     gasModel: {

@@ -20,7 +20,7 @@
  */
 
 import { PairActivityTracker } from '@arbitrage/core/analytics';
-import { getWhaleActivityTracker } from '@arbitrage/core/analytics';
+import { getWhaleActivityTracker, SwapEventFilter } from '@arbitrage/core/analytics';
 import type { TrackedWhaleTransaction } from '@arbitrage/core/analytics';
 import { stopAndNullify } from '@arbitrage/core/async';
 import { validateFee } from '@arbitrage/core/utils';
@@ -105,6 +105,7 @@ export interface SimulationInitializerDeps {
  */
 export class SimulationInitializer {
   private simulationHandler: ChainSimulationHandler | null = null;
+  private swapEventFilter: SwapEventFilter | null = null;
   private readonly deps: SimulationInitializerDeps;
 
   constructor(deps: SimulationInitializerDeps) {
@@ -125,6 +126,10 @@ export class SimulationInitializer {
    */
   async stop(): Promise<void> {
     this.simulationHandler = await stopAndNullify(this.simulationHandler);
+    if (this.swapEventFilter) {
+      this.swapEventFilter.destroy();
+      this.swapEventFilter = null;
+    }
   }
 
   // ===========================================================================
@@ -284,7 +289,29 @@ export class SimulationInitializer {
 
     // Phase 2 (Whale/Swap Events): Wire swap event publishing when publisher is available
     if (publisher) {
+      // Task 3.1: Create SwapEventFilter for volume aggregation pipeline
+      this.swapEventFilter = new SwapEventFilter({
+        minUsdValue: 1, // Low threshold for simulation — keep most events
+        whaleThreshold: 50_000,
+        aggregationWindowMs: 5000,
+      });
+
+      // Task 3.1: Register volume aggregate handler to publish to Redis
+      this.swapEventFilter.onVolumeAggregate((aggregate) => {
+        publisher.publishVolumeAggregate(aggregate).catch(error => {
+          deps.logger.warn('Volume aggregate publish failed', {
+            error: (error as Error).message,
+            chain: aggregate.chain,
+          });
+        });
+      });
+
+      const filter = this.swapEventFilter;
       callbacks.onSwapEvent = (event: SwapEvent) => {
+        // Task 3.1: Route through SwapEventFilter for volume aggregation
+        filter.processEvent(event);
+
+        // Also publish raw swap event to stream:swap-events
         publisher.publishSwapEvent(event).catch(error => {
           deps.logger.warn('Simulated swap event publish failed', {
             error: (error as Error).message,

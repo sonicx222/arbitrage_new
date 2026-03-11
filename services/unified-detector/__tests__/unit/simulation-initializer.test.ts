@@ -25,9 +25,18 @@ const mockGetWhaleActivityTracker = jest.fn().mockReturnValue({
   recordTransaction: mockRecordTransaction,
   getStats: jest.fn().mockReturnValue({ totalTransactionsTracked: 0 }),
 });
+const mockProcessEvent = jest.fn().mockReturnValue({ passed: true, isWhale: false, event: {}, processingTimeMs: 0 });
+const mockOnVolumeAggregate = jest.fn().mockReturnValue(() => {});
+const mockFilterDestroy = jest.fn();
+const MockSwapEventFilter = jest.fn().mockImplementation(() => ({
+  processEvent: mockProcessEvent,
+  onVolumeAggregate: mockOnVolumeAggregate,
+  destroy: mockFilterDestroy,
+}));
 jest.mock('@arbitrage/core/analytics', () => ({
   PairActivityTracker: jest.fn(),
   getWhaleActivityTracker: mockGetWhaleActivityTracker,
+  SwapEventFilter: MockSwapEventFilter,
 }));
 
 const mockInitializeEvmSimulation = jest.fn().mockResolvedValue(undefined);
@@ -141,6 +150,11 @@ beforeEach(() => {
     recordTransaction: mockRecordTransaction,
     getStats: jest.fn().mockReturnValue({ totalTransactionsTracked: 0 }),
   });
+  MockSwapEventFilter.mockImplementation(() => ({
+    processEvent: mockProcessEvent,
+    onVolumeAggregate: mockOnVolumeAggregate,
+    destroy: mockFilterDestroy,
+  }));
 });
 
 afterEach(() => {

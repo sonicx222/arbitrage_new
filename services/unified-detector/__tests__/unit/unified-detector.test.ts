@@ -206,6 +206,7 @@ jest.mock('@arbitrage/core', () => {
 // Mock @arbitrage/config
 // FIX: Use mockImplementation instead of mockReturnValue to persist through clearAllMocks
 jest.mock('@arbitrage/config', () => ({
+  BRIDGE_COSTS: [],
   getPartitionFromEnv: jest.fn().mockImplementation(() => ({
     partitionId: 'test-partition',
     chains: ['ethereum', 'polygon'],

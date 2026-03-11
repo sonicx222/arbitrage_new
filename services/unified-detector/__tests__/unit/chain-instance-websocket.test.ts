@@ -127,6 +127,7 @@ jest.mock('@arbitrage/core', () => {
 
 // Mock @arbitrage/config
 jest.mock('@arbitrage/config', () => ({
+  BRIDGE_COSTS: [],
   CHAINS: {
     ethereum: {
       name: 'Ethereum',
@@ -193,6 +194,15 @@ jest.mock('@arbitrage/config', () => ({
   ]),
   getConfidenceMaxAgeMs: jest.fn().mockReturnValue(30000),
   isEvmChain: jest.fn().mockReturnValue(true),
+  getFactoriesForChain: jest.fn().mockReturnValue([
+    {
+      address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+      dexName: 'uniswap_v2',
+      type: 'uniswap_v2',
+      chain: 'ethereum',
+      initCodeHash: '0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f',
+    },
+  ]),
   getAllFactoryAddresses: jest.fn().mockReturnValue([
     '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
   ]),
@@ -384,6 +394,15 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
     config.isEvmChain.mockReturnValue(true);
     config.getAllFactoryAddresses.mockReturnValue([
       '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+    ]);
+    config.getFactoriesForChain.mockReturnValue([
+      {
+        address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+        dexName: 'uniswap_v2',
+        type: 'uniswap_v2',
+        chain: 'ethereum',
+        initCodeHash: '0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f',
+      },
     ]);
 
     // Re-establish ../../detection mock implementations

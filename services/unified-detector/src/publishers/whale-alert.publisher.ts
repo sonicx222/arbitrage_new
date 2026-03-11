@@ -14,6 +14,7 @@
  */
 
 import { WhaleAlert } from '@arbitrage/core/analytics';
+import type { VolumeAggregate } from '@arbitrage/core/analytics';
 import { RedisStreamsClient } from '@arbitrage/core/redis';
 import { safeBigIntToDecimal } from '@arbitrage/core/utils';
 import { SwapEvent, Token } from '@arbitrage/types';
@@ -123,6 +124,21 @@ export class WhaleAlertPublisher {
     } catch (error) {
       // FIX L7: Log error.message consistently
       this.logger.error('Failed to publish swap event', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Publish volume aggregate to Redis Streams (Task 3.1).
+   * Routes SwapEventFilter aggregates to stream:volume-aggregates.
+   */
+  async publishVolumeAggregate(aggregate: VolumeAggregate): Promise<void> {
+    try {
+      await this.streamsClient.xaddWithLimit(
+        RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
+        aggregate
+      );
+    } catch (error) {
+      this.logger.error('Failed to publish volume aggregate', { error: (error as Error).message });
     }
   }
 

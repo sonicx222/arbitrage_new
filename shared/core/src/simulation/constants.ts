@@ -144,6 +144,12 @@ export const BASE_PRICES: Record<string, number> = {
   // Mantle native token
   'MNT': 0.40,
   'WMNT': 0.40,
+
+  // Emerging L2 tokens (Task 3.3)
+  'BLAST': 0.025,     // Blast governance token
+  'USDB': 1.0,        // Blast native stablecoin
+  'SCR': 0.80,        // Scroll governance token
+  'MODE': 0.035,      // Mode governance token
 };
 
 /**
@@ -201,6 +207,19 @@ export const CHAIN_SPECIFIC_PAIRS: Record<string, string[][]> = {
   linea: [
     ['WETH', 'USDC'],
   ],
+  // Emerging L2s (Task 3.3)
+  blast: [
+    ['WETH', 'USDB'], ['BLAST', 'WETH'], ['WETH', 'USDC'],
+  ],
+  scroll: [
+    ['WETH', 'USDC'], ['SCR', 'WETH'], ['WETH', 'USDT'],
+  ],
+  mantle: [
+    ['WMNT', 'USDC'], ['WMNT', 'WETH'], ['WETH', 'USDC'],
+  ],
+  mode: [
+    ['MODE', 'WETH'], ['WETH', 'USDC'],
+  ],
   solana: [
     ['SOL', 'USDC'], ['JUP', 'SOL'], ['RAY', 'SOL'],
     ['ORCA', 'SOL'], ['BONK', 'SOL'], ['WIF', 'SOL'],
@@ -232,11 +251,11 @@ export const DEXES: Record<string, string[]> = {
   zksync: ['syncswap', 'mute'],
   linea: ['syncswap', 'velocore'],
 
-  // Emerging L2s (config present, limited DEX coverage)
-  blast: ['aerodrome', 'uniswap_v3', 'baseswap'],
-  scroll: ['aerodrome', 'uniswap_v3', 'baseswap'],
-  mantle: ['aerodrome', 'uniswap_v3', 'baseswap'],
-  mode: ['aerodrome', 'uniswap_v3', 'baseswap'],
+  // Emerging L2s (Task 3.2: Real DEX names per chain)
+  blast: ['thruster', 'bladeswap', 'ring'],
+  scroll: ['ambient', 'nuri', 'uniswap_v3'],
+  mantle: ['agni', 'fusionx', 'uniswap_v3'],
+  mode: ['kim', 'supswap', 'uniswap_v3'],
 
   // P4 Solana-Native
   solana: ['raydium', 'orca', 'meteora']
