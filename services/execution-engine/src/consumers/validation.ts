@@ -189,6 +189,42 @@ export const NUMERIC_PATTERN = /^\d+$/;
 export const ALL_ZEROS_PATTERN = /^0+$/;
 
 // =============================================================================
+// Numeric Field Restoration Helpers (OPT-006)
+// =============================================================================
+
+/**
+ * Restore a string-typed numeric field to a number via parseFloat.
+ * Returns the parsed value if finite, otherwise the fallback.
+ * Only converts when the field is actually a string (Redis serialization artifact).
+ */
+function restoreFloat(data: Record<string, unknown>, key: string, fallback: number): void {
+  if (typeof data[key] === 'string') {
+    const parsed = parseFloat(data[key] as string);
+    data[key] = Number.isFinite(parsed) ? parsed : fallback;
+  }
+}
+
+/**
+ * Restore a string-typed integer field to a number via parseInt.
+ */
+function restoreInt(data: Record<string, unknown>, key: string, fallback: number): void {
+  if (typeof data[key] === 'string') {
+    const parsed = parseInt(data[key] as string, 10);
+    data[key] = Number.isFinite(parsed) ? parsed : fallback;
+  }
+}
+
+/**
+ * Restore a string-typed timestamp field to a number via Number().
+ */
+function restoreTimestamp(data: Record<string, unknown>, key: string, fallback: number): void {
+  if (typeof data[key] === 'string') {
+    const parsed = Number(data[key]);
+    data[key] = Number.isFinite(parsed) ? parsed : fallback;
+  }
+}
+
+// =============================================================================
 // Validation Functions
 // =============================================================================
 
@@ -329,48 +365,18 @@ export function validateMessageStructure(
   // FIX: Deserialize numeric fields that were converted to strings by serializeOpportunityForStream().
   // Redis Streams store all values as strings, so numeric fields arrive as strings despite
   // being typed as numbers. SA-3N-004 FIX: Restore ALL numeric fields, not just 4 of 8.
-  // M-004 FIX: Added Number.isFinite() guards to prevent NaN propagation from corrupted data.
-  if (typeof data.profitPercentage === 'string') {
-    const parsed = parseFloat(data.profitPercentage as string);
-    data.profitPercentage = Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof data.confidence === 'string') {
-    const parsed = parseFloat(data.confidence as string);
-    data.confidence = Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof data.expectedProfit === 'string') {
-    const parsed = parseFloat(data.expectedProfit as string);
-    data.expectedProfit = Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof data.estimatedProfit === 'string') {
-    const parsed = parseFloat(data.estimatedProfit as string);
-    data.estimatedProfit = Number.isFinite(parsed) ? parsed : 0;
-  }
-  // SA-3N-004: buyPrice, sellPrice, blockNumber remain strings without explicit restoration.
-  // Downstream code using buyPrice + sellPrice would concatenate instead of adding.
-  if (typeof data.buyPrice === 'string') {
-    const parsed = parseFloat(data.buyPrice as string);
-    data.buyPrice = Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof data.sellPrice === 'string') {
-    const parsed = parseFloat(data.sellPrice as string);
-    data.sellPrice = Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof data.blockNumber === 'string') {
-    const parsed = parseInt(data.blockNumber as string, 10);
-    data.blockNumber = Number.isFinite(parsed) ? parsed : 0;
-  }
-  // SA-3N-001: timestamp remains a string after deserialization. JS minus-operator coerces
-  // strings to numbers so Date.now() - timestamp works, but typeof check would fail.
-  if (typeof data.timestamp === 'string') {
-    const parsed = Number(data.timestamp);
-    data.timestamp = Number.isFinite(parsed) ? parsed : Date.now();
-  }
-  // SA-3N-001: expiresAt is validated above but not written back to the data object.
-  if (typeof data.expiresAt === 'string') {
-    const parsed = Number(data.expiresAt);
-    data.expiresAt = Number.isFinite(parsed) ? parsed : 0;
-  }
+  // M-004 FIX: Number.isFinite() guards prevent NaN propagation from corrupted data.
+  // OPT-006: Extracted to helper functions to reduce code duplication.
+  restoreFloat(data, 'profitPercentage', 0);
+  restoreFloat(data, 'confidence', 0);
+  restoreFloat(data, 'expectedProfit', 0);
+  restoreFloat(data, 'estimatedProfit', 0);
+  restoreFloat(data, 'buyPrice', 0);
+  restoreFloat(data, 'sellPrice', 0);
+  restoreInt(data, 'blockNumber', 0);
+  // SA-3N-001: timestamp/expiresAt remain strings after deserialization
+  restoreTimestamp(data, 'timestamp', Date.now());
+  restoreTimestamp(data, 'expiresAt', 0);
 
   return {
     valid: true,

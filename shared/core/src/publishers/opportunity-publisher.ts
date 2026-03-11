@@ -15,7 +15,7 @@
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { RedisStreamsClient } from '../redis';
-import { createTraceContext, propagateContext } from '../tracing';
+import { createTraceContext, TRACE_FIELDS } from '../tracing';
 import type { TraceContext } from '../tracing';
 import { getLatencyTracker } from '../monitoring/latency-tracker';
 import { FEATURE_FLAGS, FAST_LANE_CONFIG, SYSTEM_CONSTANTS } from '@arbitrage/config';
@@ -98,13 +98,22 @@ export class OpportunityPublisher {
     // P2 Fix ES-007: Use parent context if provided for end-to-end tracing
     const traceCtx = parentTraceContext ?? createTraceContext(sourceName);
     // FIX DI-08: Include schemaVersion for forward-compatible message evolution
-    // (consistent with PublishingService.createMessage pattern)
-    const enrichedOpportunity = propagateContext({
-      ...opportunity,
-      _source: sourceName,
-      _publishedAt: Date.now(),
-      schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
-    }, traceCtx);
+    // OPT-006: Single Object.assign + inline trace fields instead of double-spread
+    // (was: spread opportunity → propagateContext spreads again = 2 full copies)
+    const enrichedOpportunity: Record<string, unknown> = Object.assign(
+      {} as Record<string, unknown>, opportunity, {
+        _source: sourceName,
+        _publishedAt: Date.now(),
+        schemaVersion: SYSTEM_CONSTANTS.stream.schemaVersion,
+      }
+    );
+    enrichedOpportunity[TRACE_FIELDS.traceId] = traceCtx.traceId;
+    enrichedOpportunity[TRACE_FIELDS.spanId] = traceCtx.spanId;
+    enrichedOpportunity[TRACE_FIELDS.serviceName] = traceCtx.serviceName;
+    enrichedOpportunity[TRACE_FIELDS.timestamp] = String(traceCtx.timestamp);
+    if (traceCtx.parentSpanId) {
+      enrichedOpportunity[TRACE_FIELDS.parentSpanId] = traceCtx.parentSpanId;
+    }
 
     // Record pipeline latency (O(1), zero-allocation — same as PublishingService)
     if (opportunity.pipelineTimestamps) {
@@ -169,8 +178,9 @@ export class OpportunityPublisher {
   // Stats & Lifecycle
   // ===========================================================================
 
-  getStats(): OpportunityPublisherStats {
-    return { ...this.stats };
+  getStats(): Readonly<OpportunityPublisherStats> {
+    // OPT-006: Return live reference instead of spread copy (callers are read-only consumers)
+    return this.stats;
   }
 
   resetStats(): void {

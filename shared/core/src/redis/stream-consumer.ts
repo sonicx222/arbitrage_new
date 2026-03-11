@@ -198,8 +198,9 @@ export class StreamConsumer {
   /**
    * Get consumer statistics.
    */
-  getStats(): StreamConsumerStats {
-    return { ...this.stats };
+  getStats(): Readonly<StreamConsumerStats> {
+    // OPT-006: Return live reference instead of spread copy (callers are read-only consumers)
+    return this.stats;
   }
 
   /**

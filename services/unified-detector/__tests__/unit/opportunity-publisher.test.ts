@@ -293,11 +293,12 @@ describe('OpportunityPublisher', () => {
       expect(stats.failed).toBe(1);
     });
 
-    it('should return a copy of stats (not reference)', () => {
+    it('should return consistent stats reference (OPT-006: Readonly live object)', () => {
       const stats1 = publisher.getStats();
       const stats2 = publisher.getStats();
 
-      expect(stats1).not.toBe(stats2);
+      // OPT-006: getStats() returns a Readonly reference to avoid spread copy per call
+      expect(stats1).toBe(stats2);
       expect(stats1).toEqual(stats2);
     });
   });
