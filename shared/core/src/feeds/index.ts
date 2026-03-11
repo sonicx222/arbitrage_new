@@ -48,6 +48,7 @@ export {
 } from './cex-price-feed-service';
 export type {
   CexPriceFeedConfig,
+  CexFeedStats,
 } from './cex-price-feed-service';
 
 // Data Gap Backfiller (C3 fix)

@@ -160,6 +160,28 @@ export interface DiagnosticsSnapshot {
   timestamp: number;
 }
 
+/** CEX-DEX spread data from CexPriceFeedService (ADR-036) */
+export interface CexSpreadData {
+  stats: {
+    cexPriceUpdatesTotal: number;
+    dexPriceUpdatesTotal: number;
+    spreadAlertsTotal: number;
+    wsReconnectionsTotal: number;
+    wsConnected: boolean;
+    running: boolean;
+    simulationMode: boolean;
+    activeAlertCount: number;
+  };
+  alerts: Array<{
+    tokenId: string;
+    chain: string;
+    cexPrice: number;
+    dexPrice: number;
+    spreadPct: number;
+    timestamp: number;
+  }>;
+}
+
 // Mirrors shared/types ArbitrageOpportunity (subset for dashboard display)
 export interface Opportunity {
   id: string;

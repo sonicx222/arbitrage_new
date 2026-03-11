@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
-import { useDiagnostics } from '../context/SSEContext';
+import { useDiagnostics, useCexSpread } from '../context/SSEContext';
 import { DataTable } from '../components/DataTable';
 import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber, formatDuration } from '../lib/format';
-import type { CompactPercentiles, DiagnosticsSnapshot } from '../lib/types';
+import type { CompactPercentiles, DiagnosticsSnapshot, CexSpreadData } from '../lib/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -262,12 +262,71 @@ function StreamDiagSection({ streams }: { streams: NonNullable<DiagnosticsSnapsh
   );
 }
 
+function CexSpreadSection({ data }: { data: CexSpreadData }) {
+  const alerts = useMemo(() => {
+    return [...data.alerts].sort((a, b) => Math.abs(b.spreadPct) - Math.abs(a.spreadPct));
+  }, [data.alerts]);
+
+  return (
+    <div className="card">
+      <SectionHeader mb="mb-3">CEX-DEX Spread (ADR-036)</SectionHeader>
+      {/* Stats summary */}
+      <div className="grid grid-cols-4 gap-3 mb-3 text-xs">
+        <StatRow label="Status" value={
+          <StatusBadge status={data.stats.running ? (data.stats.wsConnected ? 'healthy' : 'warning') : 'unknown'}
+            label={data.stats.running ? (data.stats.simulationMode ? 'Simulation' : data.stats.wsConnected ? 'Connected' : 'Disconnected') : 'Stopped'} />
+        } />
+        <StatRow label="CEX Updates" value={<span className="font-mono">{formatNumber(data.stats.cexPriceUpdatesTotal)}</span>} />
+        <StatRow label="DEX Updates" value={<span className="font-mono">{formatNumber(data.stats.dexPriceUpdatesTotal)}</span>} />
+        <StatRow label="Spread Alerts" value={
+          <span className={`font-mono ${data.stats.spreadAlertsTotal > 0 ? 'text-accent-yellow' : ''}`}>
+            {formatNumber(data.stats.spreadAlertsTotal)}
+          </span>
+        } />
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-3 text-xs">
+        <StatRow label="WS Reconnections" value={
+          <span className={`font-mono ${data.stats.wsReconnectionsTotal > 5 ? 'text-accent-yellow' : ''}`}>
+            {data.stats.wsReconnectionsTotal}
+          </span>
+        } />
+        <StatRow label="Active Alerts" value={
+          <span className={`font-mono ${data.stats.activeAlertCount > 0 ? 'text-accent-green font-bold' : ''}`}>
+            {data.stats.activeAlertCount}
+          </span>
+        } />
+      </div>
+      {/* Active spread alerts table */}
+      {alerts.length > 0 && (
+        <DataTable<CexSpreadData['alerts'][number]>
+          columns={[
+            { header: 'Token', render: (a) => <span className="font-mono text-gray-300">{a.tokenId}</span> },
+            { header: 'Chain', render: (a) => <span className="text-gray-400">{a.chain}</span> },
+            { header: 'CEX $', align: 'right', render: (a) => <span className="font-mono">{a.cexPrice.toFixed(2)}</span> },
+            { header: 'DEX $', align: 'right', render: (a) => <span className="font-mono">{a.dexPrice.toFixed(2)}</span> },
+            { header: 'Spread', align: 'right', render: (a) => (
+              <span className={`font-mono font-bold ${a.spreadPct > 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                {a.spreadPct > 0 ? '+' : ''}{a.spreadPct.toFixed(3)}%
+              </span>
+            ) },
+          ]}
+          data={alerts}
+          keyExtractor={(a) => `${a.tokenId}-${a.chain}`}
+          maxHeight="14rem"
+          emptyMessage="No active spread alerts"
+        />
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main Tab
 // ---------------------------------------------------------------------------
 
 export function DiagnosticsTab() {
   const { diagnostics } = useDiagnostics();
+  const { cexSpread } = useCexSpread();
 
   if (!diagnostics) {
     return (
@@ -293,6 +352,9 @@ export function DiagnosticsTab() {
 
       {/* Providers full width */}
       <ProvidersSection providers={diagnostics.providers} />
+
+      {/* CEX-DEX Spread (only shown when data available) */}
+      {cexSpread && <CexSpreadSection data={cexSpread} />}
 
       {/* Stream diagnostics */}
       {diagnostics.streams && <StreamDiagSection streams={diagnostics.streams} />}

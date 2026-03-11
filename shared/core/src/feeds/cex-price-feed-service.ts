@@ -53,6 +53,30 @@ export interface CexPriceFeedConfig {
 }
 
 // =============================================================================
+// Stats (Batch 5 — Task 5.1: Observability)
+// =============================================================================
+
+/** Internal counters for observability. Exposed via getStats(). */
+export interface CexFeedStats {
+  /** Total CEX price updates received from Binance trade stream */
+  cexPriceUpdatesTotal: number;
+  /** Total DEX price updates fed into the spread calculator */
+  dexPriceUpdatesTotal: number;
+  /** Total spread alerts emitted (|spread| > threshold) */
+  spreadAlertsTotal: number;
+  /** Total Binance WS reconnections */
+  wsReconnectionsTotal: number;
+  /** Whether Binance WS is currently connected */
+  wsConnected: boolean;
+  /** Whether the service is running */
+  running: boolean;
+  /** Whether simulation mode is active */
+  simulationMode: boolean;
+  /** Number of active spread alerts exceeding threshold */
+  activeAlertCount: number;
+}
+
+// =============================================================================
 // CexPriceFeedService
 // =============================================================================
 
@@ -72,6 +96,12 @@ export class CexPriceFeedService extends EventEmitter {
   private config: CexPriceFeedConfig;
   private running = false;
 
+  // Task 5.1: Internal counters
+  private _cexPriceUpdates = 0;
+  private _dexPriceUpdates = 0;
+  private _spreadAlerts = 0;
+  private _wsReconnections = 0;
+
   constructor(config?: CexPriceFeedConfig) {
     super();
     this.setMaxListeners(20);
@@ -88,8 +118,9 @@ export class CexPriceFeedService extends EventEmitter {
     }
     this.spreadCalculator = new CexDexSpreadCalculator(spreadConfig);
 
-    // Forward spread alerts
+    // Forward spread alerts + count
     this.spreadCalculator.on('spread_alert', (alert: SpreadAlert) => {
+      this._spreadAlerts++;
       this.emit('spread_alert', alert);
     });
 
@@ -125,6 +156,7 @@ export class CexPriceFeedService extends EventEmitter {
 
     // Wire trade events through normalizer into spread calculator
     this.wsClient.on('trade', (trade: BinanceTradeEvent) => {
+      this._cexPriceUpdates++;
       this.emit('trade', trade);
       const normalized = this.normalizer.normalize(trade);
       if (normalized) {
@@ -136,9 +168,19 @@ export class CexPriceFeedService extends EventEmitter {
       }
     });
 
-    // Forward connection events
-    this.wsClient.on('connected', () => this.emit('connected'));
-    this.wsClient.on('disconnected', () => this.emit('disconnected'));
+    // Forward connection events + track reconnections
+    this.wsClient.on('connected', () => {
+      logger.info('Binance WS connected');
+      this.emit('connected');
+    });
+    this.wsClient.on('disconnected', () => {
+      logger.warn('Binance WS disconnected');
+      this.emit('disconnected');
+    });
+    this.wsClient.on('reconnecting', () => {
+      this._wsReconnections++;
+      logger.info('Binance WS reconnecting', { reconnections: this._wsReconnections });
+    });
 
     try {
       await this.wsClient.connect();
@@ -201,6 +243,7 @@ export class CexPriceFeedService extends EventEmitter {
    * @param price - DEX price in USD
    */
   updateDexPrice(tokenId: string, chain: string, price: number): void {
+    this._dexPriceUpdates++;
     const now = Date.now();
     this.spreadCalculator.updateDexPrice(tokenId, chain, price, now);
 
@@ -235,6 +278,20 @@ export class CexPriceFeedService extends EventEmitter {
   /** Get the underlying spread calculator (for advanced queries like history). */
   getSpreadCalculator(): CexDexSpreadCalculator {
     return this.spreadCalculator;
+  }
+
+  /** Get observability stats for monitoring and dashboard (Task 5.1). */
+  getStats(): CexFeedStats {
+    return {
+      cexPriceUpdatesTotal: this._cexPriceUpdates,
+      dexPriceUpdatesTotal: this._dexPriceUpdates,
+      spreadAlertsTotal: this._spreadAlerts,
+      wsReconnectionsTotal: this._wsReconnections,
+      wsConnected: this.isConnected(),
+      running: this.running,
+      simulationMode: this.config.simulateCexPrices ?? false,
+      activeAlertCount: this.spreadCalculator.getActiveAlerts().length,
+    };
   }
 }
 

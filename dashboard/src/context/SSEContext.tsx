@@ -3,7 +3,7 @@ import { useSSE, type SSEStatus } from '../hooks/useSSE';
 import { formatTime, calcSuccessRate } from '../lib/format';
 import { getItem } from '../lib/storage';
 import { sendNotification, startTitleFlash, stopTitleFlash } from '../lib/notifications';
-import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint, DiagnosticsSnapshot } from '../lib/types';
+import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint, DiagnosticsSnapshot, CexSpreadData } from '../lib/types';
 
 // ---------------------------------------------------------------------------
 // State & Reducer (unchanged — single reducer for centralized state management)
@@ -15,6 +15,7 @@ interface SSEState {
   circuitBreaker: CircuitBreakerStatus | null;
   streams: StreamHealth | null;
   diagnostics: DiagnosticsSnapshot | null;
+  cexSpread: CexSpreadData | null;
   feed: FeedItem[];
   chartData: ChartPoint[];
   lagData: LagPoint[];
@@ -31,6 +32,7 @@ type SSEAction =
   | { type: 'circuit-breaker'; payload: CircuitBreakerStatus }
   | { type: 'streams'; payload: StreamHealth }
   | { type: 'diagnostics'; payload: DiagnosticsSnapshot }
+  | { type: 'cex-spread'; payload: CexSpreadData }
   | { type: 'reset'; payload?: undefined };
 
 const MAX_FEED = 50;
@@ -100,6 +102,8 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
     }
     case 'diagnostics':
       return { ...state, diagnostics: action.payload, lastEventTime };
+    case 'cex-spread':
+      return { ...state, cexSpread: action.payload, lastEventTime };
     case 'execution-result': {
       const counter = state.nextFeedId + 1;
       const item: FeedItem = { kind: 'execution', data: action.payload, id: `e-${counter}` };
@@ -126,6 +130,7 @@ export const initialState: SSEState = {
   circuitBreaker: null,
   streams: null,
   diagnostics: null,
+  cexSpread: null,
   feed: [],
   chartData: loadSessionArray<ChartPoint>(CHART_STORAGE_KEY),
   lagData: loadSessionArray<LagPoint>(LAG_STORAGE_KEY),
@@ -145,6 +150,7 @@ interface ServicesCtxValue { services: Record<string, ServiceHealth>; circuitBre
 interface FeedCtxValue { feed: FeedItem[] }
 interface StreamsCtxValue { streams: StreamHealth | null; lagData: LagPoint[] }
 interface DiagnosticsCtxValue { diagnostics: DiagnosticsSnapshot | null }
+interface CexSpreadCtxValue { cexSpread: CexSpreadData | null }
 interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null }
 
 const MetricsCtx = createContext<MetricsCtxValue>({ metrics: null, chartData: [] });
@@ -152,6 +158,7 @@ const ServicesCtx = createContext<ServicesCtxValue>({ services: {}, circuitBreak
 const FeedCtx = createContext<FeedCtxValue>({ feed: [] });
 const StreamsCtx = createContext<StreamsCtxValue>({ streams: null, lagData: [] });
 const DiagnosticsCtx = createContext<DiagnosticsCtxValue>({ diagnostics: null });
+const CexSpreadCtx = createContext<CexSpreadCtxValue>({ cexSpread: null });
 const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null });
 
 /** Metrics + chart data. Re-renders only on 'metrics' SSE events. */
@@ -164,6 +171,8 @@ export function useFeed() { return useContext(FeedCtx); }
 export function useStreams() { return useContext(StreamsCtx); }
 /** Diagnostics snapshot (pipeline, runtime, providers). Re-renders only on 'diagnostics' events. */
 export function useDiagnostics() { return useContext(DiagnosticsCtx); }
+/** CEX-DEX spread data (ADR-036). Re-renders only on 'cex-spread' events. */
+export function useCexSpread() { return useContext(CexSpreadCtx); }
 /** SSE connection status. Re-renders only on connect/disconnect/stale transitions. */
 export function useConnection() { return useContext(ConnectionCtx); }
 
@@ -175,8 +184,9 @@ export function useSSEData() {
   const { feed } = useFeed();
   const { streams, lagData } = useStreams();
   const { diagnostics } = useDiagnostics();
+  const { cexSpread } = useCexSpread();
   const { status, lastEventTime } = useConnection();
-  return { metrics, chartData, services, circuitBreaker, feed, streams, lagData, diagnostics, status, lastEventTime, nextFeedId: 0 };
+  return { metrics, chartData, services, circuitBreaker, feed, streams, lagData, diagnostics, cexSpread, status, lastEventTime, nextFeedId: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +221,9 @@ export function validatePayload(event: string, data: unknown): boolean {
       return typeof data.type === 'string' && typeof data.timestamp === 'number';
     case 'diagnostics':
       return isObj(data.pipeline) && isObj(data.runtime) && isObj(data.providers) && typeof data.timestamp === 'number';
+    case 'cex-spread':
+      return isObj(data.stats) && Array.isArray(data.alerts)
+        && typeof (data.stats as Record<string, unknown>).running === 'boolean';
     default:
       return false;
   }
@@ -342,6 +355,10 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     () => ({ diagnostics: state.diagnostics }),
     [state.diagnostics],
   );
+  const cexSpreadValue = useMemo<CexSpreadCtxValue>(
+    () => ({ cexSpread: state.cexSpread }),
+    [state.cexSpread],
+  );
   const connectionValue = useMemo<ConnectionCtxValue>(
     () => ({ status, lastEventTime: state.lastEventTime }),
     [status, state.lastEventTime],
@@ -353,9 +370,11 @@ export function SSEProvider({ children }: { children: ReactNode }) {
         <ServicesCtx.Provider value={servicesValue}>
           <StreamsCtx.Provider value={streamsValue}>
             <DiagnosticsCtx.Provider value={diagnosticsValue}>
-              <FeedCtx.Provider value={feedValue}>
-                {children}
-              </FeedCtx.Provider>
+              <CexSpreadCtx.Provider value={cexSpreadValue}>
+                <FeedCtx.Provider value={feedValue}>
+                  {children}
+                </FeedCtx.Provider>
+              </CexSpreadCtx.Provider>
             </DiagnosticsCtx.Provider>
           </StreamsCtx.Provider>
         </ServicesCtx.Provider>

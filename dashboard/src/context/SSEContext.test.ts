@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { reducer, validatePayload, initialState } from './SSEContext';
-import type { SystemMetrics, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, ServiceHealth, DiagnosticsSnapshot } from '../lib/types';
+import type { SystemMetrics, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, ServiceHealth, DiagnosticsSnapshot, CexSpreadData } from '../lib/types';
 
 // Stable mock for Date.now — reducer uses it for lastEventTime
 const NOW = 1710000000000;
@@ -171,6 +171,38 @@ describe('validatePayload', () => {
       expect(validatePayload('diagnostics', {
         pipeline: 'not-object', runtime: {}, providers: {}, timestamp: 1,
       })).toBe(false);
+    });
+  });
+
+  describe('cex-spread', () => {
+    it('accepts valid cex-spread payload', () => {
+      expect(validatePayload('cex-spread', {
+        stats: { running: true, wsConnected: true, simulationMode: false },
+        alerts: [{ tokenId: 'WETH', chain: 'ethereum', cexPrice: 3000, dexPrice: 3010, spreadPct: 0.33, timestamp: NOW }],
+      })).toBe(true);
+    });
+
+    it('accepts empty alerts array', () => {
+      expect(validatePayload('cex-spread', {
+        stats: { running: false },
+        alerts: [],
+      })).toBe(true);
+    });
+
+    it('rejects missing stats', () => {
+      expect(validatePayload('cex-spread', { alerts: [] })).toBe(false);
+    });
+
+    it('rejects non-object stats', () => {
+      expect(validatePayload('cex-spread', { stats: 'bad', alerts: [] })).toBe(false);
+    });
+
+    it('rejects non-array alerts', () => {
+      expect(validatePayload('cex-spread', { stats: { running: true }, alerts: 'bad' })).toBe(false);
+    });
+
+    it('rejects stats without running boolean', () => {
+      expect(validatePayload('cex-spread', { stats: { wsConnected: true }, alerts: [] })).toBe(false);
     });
   });
 
@@ -355,6 +387,27 @@ describe('reducer', () => {
     };
     const state = reducer(initialState, { type: 'diagnostics', payload: diag });
     expect(state.diagnostics).toBe(diag);
+    expect(state.lastEventTime).toBe(NOW);
+  });
+
+  it('sets cex-spread data', () => {
+    const cexSpread: CexSpreadData = {
+      stats: {
+        cexPriceUpdatesTotal: 500,
+        dexPriceUpdatesTotal: 300,
+        spreadAlertsTotal: 5,
+        wsReconnectionsTotal: 1,
+        wsConnected: true,
+        running: true,
+        simulationMode: false,
+        activeAlertCount: 2,
+      },
+      alerts: [
+        { tokenId: 'WETH', chain: 'ethereum', cexPrice: 3000, dexPrice: 3010, spreadPct: 0.33, timestamp: NOW },
+      ],
+    };
+    const state = reducer(initialState, { type: 'cex-spread', payload: cexSpread });
+    expect(state.cexSpread).toBe(cexSpread);
     expect(state.lastEventTime).toBe(NOW);
   });
 

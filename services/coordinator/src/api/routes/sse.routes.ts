@@ -23,6 +23,8 @@ import { Router, Request, Response, RequestHandler } from 'express';
 import crypto from 'crypto';
 import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import { getStreamHealthMonitor, getDiagnosticsCollector } from '@arbitrage/core/monitoring';
+import { getCexPriceFeedService } from '@arbitrage/core/feeds';
+import { FEATURE_FLAGS } from '@arbitrage/config';
 import type { CoordinatorStateProvider } from '../types';
 
 // M-05 FIX: Configurable max SSE connections (default: 50, min: 1)
@@ -34,6 +36,7 @@ const SSE_INTERVAL_SERVICES = parseEnvIntSafe('SSE_INTERVAL_SERVICES_MS', 5000, 
 const SSE_INTERVAL_STREAMS = parseEnvIntSafe('SSE_INTERVAL_STREAMS_MS', 10000, 2000);
 const SSE_INTERVAL_CB = parseEnvIntSafe('SSE_INTERVAL_CB_MS', 5000, 1000);
 const SSE_INTERVAL_DIAGNOSTICS = parseEnvIntSafe('SSE_INTERVAL_DIAGNOSTICS_MS', 10000, 2000);
+const SSE_INTERVAL_CEX_SPREAD = parseEnvIntSafe('SSE_INTERVAL_CEX_SPREAD_MS', 10000, 2000);
 const SSE_INTERVAL_KEEPALIVE = parseEnvIntSafe('SSE_INTERVAL_KEEPALIVE_MS', 15000, 5000);
 
 // =============================================================================
@@ -129,6 +132,22 @@ function startTimerPool(state: CoordinatorStateProvider): void {
     }
   }, SSE_INTERVAL_DIAGNOSTICS));
 
+  // ADR-036: CEX-DEX spread data (only when feature is enabled)
+  if (FEATURE_FLAGS.useCexPriceSignals) {
+    timers.push(setInterval(() => {
+      if (clients.size === 0) return;
+      try {
+        const cexFeed = getCexPriceFeedService();
+        broadcast('cex-spread', JSON.stringify({
+          stats: cexFeed.getStats(),
+          alerts: cexFeed.getActiveAlerts(),
+        }));
+      } catch {
+        // CEX feed not initialized — skip
+      }
+    }, SSE_INTERVAL_CEX_SPREAD));
+  }
+
   timers.push(setInterval(() => {
     for (const client of clients) {
       client.res.write(': keepalive\n\n');
@@ -210,6 +229,19 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     sendToClient(client, 'metrics', state.getSystemMetrics());
     sendToClient(client, 'services', Object.fromEntries(state.getServiceHealthMap()));
     sendToClient(client, 'circuit-breaker', state.getCircuitBreakerSnapshot());
+
+    // ADR-036: Send initial CEX spread data if enabled
+    if (FEATURE_FLAGS.useCexPriceSignals) {
+      try {
+        const cexFeed = getCexPriceFeedService();
+        sendToClient(client, 'cex-spread', {
+          stats: cexFeed.getStats(),
+          alerts: cexFeed.getActiveAlerts(),
+        });
+      } catch {
+        // CEX feed not initialized — skip
+      }
+    }
 
     // Subscribe to real-time events (execution results, alerts)
     client.unsubscribe = state.subscribeSSE((event, data) => {
