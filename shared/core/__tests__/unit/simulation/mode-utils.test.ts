@@ -4,7 +4,6 @@ import {
   isExecutionSimulationMode,
   isHybridExecutionMode,
   getSimulationModeSummary,
-  getSimulationRealismLevel,
 } from '../../../src/simulation/mode-utils';
 
 describe('mode-utils', () => {
@@ -73,18 +72,6 @@ describe('mode-utils', () => {
 
     it('returns false when not set', () => {
       expect(isHybridExecutionMode()).toBe(false);
-    });
-  });
-
-  describe('getSimulationRealismLevel (deprecated)', () => {
-    it('always returns high regardless of env var', () => {
-      expect(getSimulationRealismLevel()).toBe('high');
-      process.env.SIMULATION_REALISM_LEVEL = 'low';
-      expect(getSimulationRealismLevel()).toBe('high');
-      process.env.SIMULATION_REALISM_LEVEL = 'medium';
-      expect(getSimulationRealismLevel()).toBe('high');
-      process.env.SIMULATION_REALISM_LEVEL = 'invalid';
-      expect(getSimulationRealismLevel()).toBe('high');
     });
   });
 

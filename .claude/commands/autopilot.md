@@ -326,8 +326,7 @@ echo $! > ./autopilot-session/services.pid
 ```
 
 This starts all 7 services in simulation mode with memory-optimized settings:
-`CONSTRAINED_MEMORY=true`, `WORKER_POOL_SIZE=1`, `CACHE_L1_SIZE_MB=8`,
-`SIMULATION_REALISM_LEVEL=high`.
+`CONSTRAINED_MEMORY=true`, `WORKER_POOL_SIZE=1`, `CACHE_L1_SIZE_MB=8`.
 
 ---
 

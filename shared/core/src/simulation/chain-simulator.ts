@@ -51,7 +51,7 @@ import type { PeggedPairConfig } from './constants';
 import { FAST_LANE_CONFIG } from '@arbitrage/config';
 import { gaussianRandom, poissonRandom, weightedRandomSelect } from './math-utils';
 import { CHAIN_THROUGHPUT_PROFILES, getNativeTokenPrice, selectWeightedDex } from './throughput-profiles';
-import { getSimulationRealismLevel } from './mode-utils';
+
 
 // =============================================================================
 // Simulation TTL

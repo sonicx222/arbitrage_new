@@ -76,7 +76,7 @@ import type {
 // P0 Fix #1: Added 'backrun' and 'uniswapx' strategy types
 // Phase 3 #29: Added 'solana' for Solana-native execution via Jupiter/Jito
 // Phase 3 #31: Added 'statistical' for statistical arbitrage strategies
-export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral' | 'backrun' | 'uniswapx' | 'solana' | 'statistical';
+export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'backrun' | 'uniswapx' | 'solana' | 'statistical' | 'predictive';
 
 /**
  * Strategy resolution result
@@ -382,6 +382,9 @@ export class ExecutionStrategyFactory {
       } else if (opportunity.type === 'quadrilateral') {
         resolvedType = 'quadrilateral';
         reason = 'Quadrilateral arbitrage (4-hop) via flash loan';
+      } else if (opportunity.type === 'multi-leg') {
+        resolvedType = 'multi-leg';
+        reason = 'Multi-leg arbitrage via flash loan';
       }
 
       return {
@@ -442,6 +445,18 @@ export class ExecutionStrategyFactory {
         type: 'statistical',
         strategy: this.strategies.statistical,
         reason: 'Statistical arbitrage opportunity',
+      };
+    }
+
+    // Predictive (ML-based) — routes to intra-chain strategy
+    if (opportunity.type === 'predictive') {
+      if (!this.strategies.intraChain) {
+        throw new Error('[ERR_NO_STRATEGY] Predictive opportunity but no intra-chain strategy registered');
+      }
+      return {
+        type: 'predictive',
+        strategy: this.strategies.intraChain,
+        reason: 'ML-based predictive opportunity via intra-chain execution',
       };
     }
 
@@ -522,8 +537,11 @@ export class ExecutionStrategyFactory {
       case 'flash-loan':
       case 'triangular':
       case 'quadrilateral':
+      case 'multi-leg':
         // Fix 2.1 & 2.2: Multi-hop strategies use flash-loan strategy
         return !!this.strategies.flashLoan;
+      case 'predictive':
+        return !!this.strategies.intraChain;
       // P0 Fix #1: New strategy types
       case 'backrun':
         return !!this.strategies.backrun;

@@ -61,20 +61,10 @@ MONITOR_DATA_MODE=$(cat ./monitor-session/DATA_MODE)
 
 | Mode | Command | Notes |
 |------|---------|-------|
-| `simulation` | `npm run dev:monitor &` | SIMULATION_REALISM_LEVEL=high (Markov regime) |
+| `simulation` | `npm run dev:monitor &` | Block-driven, Markov regime |
 | `simulation` (minimal) | `npm run dev:monitor:minimal &` | Coordinator + P1 + EE only (~350MB) |
 | `live` | `npm run dev:monitor:live &` | Real WS RPC, mock execution |
 | `testnet` | `npm run dev:monitor:testnet &` | Real WS RPC, real testnet execution |
-
-**Simulation realism levels:**
-
-| Level | Behavior |
-|-------|----------|
-| `low` | Legacy setInterval, flat rate |
-| `medium` | Block-driven, Poisson swaps, gas model |
-| `high` | Medium + Markov regime (quiet/normal/burst) |
-
-Override: `cross-env SIMULATION_REALISM_LEVEL=medium npm run dev:monitor &`
 
 `[TESTNET]` DANGER: Submits real transactions. Use `.env.local` (gitignored) for testnet
 RPC URLs and funded wallet key. Never put private keys in `.env`.

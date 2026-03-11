@@ -57,21 +57,6 @@ export function isTestnetExecutionMode(): boolean {
 }
 
 /**
- * @deprecated Simulation always runs at maximum realism. This type is kept
- * for backwards compatibility but only 'high' is used.
- */
-export type SimulationRealismLevel = 'high';
-
-/**
- * @deprecated Simulation always runs at maximum realism (block-driven model
- * with Markov regime transitions, activity tiers, and full strategy coverage).
- * Low/medium modes have been removed. Always returns 'high'.
- */
-export function getSimulationRealismLevel(): SimulationRealismLevel {
-  return 'high';
-}
-
-/**
  * Get simulation mode summary for logging/debugging.
  */
 export function getSimulationModeSummary(): {

@@ -579,6 +579,58 @@ describe('ExecutionStrategyFactory - Triangular/Quadrilateral (Fix 2.1 & 2.2)', 
     });
   });
 
+  describe('multi-leg opportunities', () => {
+    it('should resolve multi-leg type to flash-loan strategy', () => {
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({
+        type: 'multi-leg' as any,
+        useFlashLoan: true,
+      });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('multi-leg');
+      expect(resolution.strategy).toBe(flashLoanStrategy);
+      expect(resolution.reason).toBe('Multi-leg arbitrage via flash loan');
+    });
+
+    it('should report hasStrategy("multi-leg") based on flash-loan registration', () => {
+      expect(factory.hasStrategy('multi-leg')).toBe(false);
+      factory.registerFlashLoanStrategy(createMockStrategy('flash-loan'));
+      expect(factory.hasStrategy('multi-leg')).toBe(true);
+    });
+  });
+
+  describe('predictive opportunities', () => {
+    it('should resolve predictive type to intra-chain strategy', () => {
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'predictive' as any });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('predictive');
+      expect(resolution.strategy).toBe(intraChainStrategy);
+      expect(resolution.reason).toBe('ML-based predictive opportunity via intra-chain execution');
+    });
+
+    it('should throw when no intra-chain strategy for predictive', () => {
+      const opportunity = createMockOpportunity({ type: 'predictive' as any });
+      expect(() => factory.resolve(opportunity)).toThrow(
+        'Predictive opportunity but no intra-chain strategy registered'
+      );
+    });
+
+    it('should report hasStrategy("predictive") based on intra-chain registration', () => {
+      expect(factory.hasStrategy('predictive')).toBe(false);
+      factory.registerIntraChainStrategy(createMockStrategy('intra-chain'));
+      expect(factory.hasStrategy('predictive')).toBe(true);
+    });
+  });
+
   describe('flash-loan opportunities', () => {
     it('should resolve explicit flash-loan type', () => {
       const flashLoanStrategy = createMockStrategy('flash-loan');

@@ -71,9 +71,7 @@ export {
   isHybridExecutionMode,
   isTestnetExecutionMode,
   getSimulationModeSummary,
-  getSimulationRealismLevel,
 } from './mode-utils';
-export type { SimulationRealismLevel } from './mode-utils';
 
 // Price simulator
 export {
