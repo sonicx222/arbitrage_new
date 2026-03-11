@@ -676,6 +676,20 @@ export const FAST_LANE_CONFIG = {
   minConfidence: safeParseFloat(process.env.FAST_LANE_MIN_CONFIDENCE, 0.90),
   /** Minimum expected profit in USD to qualify for fast lane */
   minProfitUsd: safeParseFloat(process.env.FAST_LANE_MIN_PROFIT_USD, 100),
+  /**
+   * OPT-005: Alternative profit qualifier — minimum profit percentage.
+   * Opportunities with profitPercentage >= this threshold qualify for fast lane
+   * even if absolute profit < minProfitUsd. High-percentage opportunities on
+   * smaller trades are time-sensitive and benefit from bypassing the coordinator.
+   */
+  minProfitPercentage: safeParseFloat(process.env.FAST_LANE_MIN_PROFIT_PCT, 3.0),
+  /**
+   * OPT-005: Confidence discount for same-chain arbitrage.
+   * Same-chain arbs have lower execution risk (no bridge, no cross-chain latency),
+   * so the confidence threshold is reduced by this amount.
+   * Effective threshold = minConfidence - sameChainConfidenceDiscount
+   */
+  sameChainConfidenceDiscount: safeParseFloat(process.env.FAST_LANE_SAME_CHAIN_DISCOUNT, 0.05),
 };
 
 /**

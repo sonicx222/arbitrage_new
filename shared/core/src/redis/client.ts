@@ -538,6 +538,97 @@ export class RedisClient {
   }
 
   /**
+   * OPT-005: Batch get multiple keys in a single MGET round-trip.
+   * Returns parsed JSON values (same as get<T>), preserving null for missing keys.
+   * Order of results matches order of input keys.
+   *
+   * @param keys - Array of cache keys to retrieve
+   * @returns Array of parsed values or null for each key
+   */
+  async mget<T = unknown>(keys: string[]): Promise<(T | null)[]> {
+    if (keys.length === 0) return [];
+
+    try {
+      this.trackCommand('mget');
+      const values = await this.client.mget(...keys);
+      return values.map(v => {
+        if (v === null) return null;
+        try { return JSON.parse(v) as T; }
+        catch { return null; }
+      });
+    } catch (error) {
+      this.logger.error('Error in mget', { error, keyCount: keys.length });
+      return keys.map(() => null);
+    }
+  }
+
+  /**
+   * OPT-005: Batch set multiple keys with TTL in a single pipeline round-trip.
+   * Each entry is SETEX'd with JSON serialization. Pipeline reduces N round-trips to 1.
+   *
+   * @param entries - Array of {key, value, ttlSec} to set
+   * @returns Number of successful SET operations
+   */
+  async pipelineSet(entries: Array<{ key: string; value: unknown; ttlSec: number }>): Promise<number> {
+    if (entries.length === 0) return 0;
+
+    try {
+      this.trackCommand('pipeline-set');
+      const pipeline = this.client.pipeline();
+      for (const { key, value, ttlSec } of entries) {
+        const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+        pipeline.setex(key, ttlSec, serialized);
+      }
+      const results = await pipeline.exec();
+      if (!results) return 0;
+
+      let success = 0;
+      for (const [err] of results) {
+        if (!err) success++;
+      }
+      return success;
+    } catch (error) {
+      this.logger.error('Error in pipelineSet', { error, count: entries.length });
+      throw new RedisOperationError('pipelineSet', error as Error);
+    }
+  }
+
+  /**
+   * OPT-005: Batch delete multiple keys in a single pipeline round-trip.
+   * More efficient than Promise.all of individual del() calls for large batches.
+   *
+   * @param keys - Array of keys to delete
+   * @returns Total number of keys deleted
+   */
+  async pipelineDel(keys: string[]): Promise<number> {
+    if (keys.length === 0) return 0;
+
+    // For small batches, single DEL with variadic args is more efficient
+    if (keys.length <= 100) {
+      return this.del(...keys);
+    }
+
+    try {
+      this.trackCommand('pipeline-del');
+      const pipeline = this.client.pipeline();
+      for (const key of keys) {
+        pipeline.del(key);
+      }
+      const results = await pipeline.exec();
+      if (!results) return 0;
+
+      let total = 0;
+      for (const [err, result] of results) {
+        if (!err) total += (result as number) ?? 0;
+      }
+      return total;
+    } catch (error) {
+      this.logger.error('Error in pipelineDel', { error, count: keys.length });
+      throw new RedisOperationError('pipelineDel', error as Error);
+    }
+  }
+
+  /**
    * P2-FIX-1: Delete throws on error - callers must know if deletion failed
    */
   async del(...keys: string[]): Promise<number> {

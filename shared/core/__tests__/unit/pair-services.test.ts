@@ -32,7 +32,10 @@ const mockRedisClient = {
   del: jest.fn(),
   keys: jest.fn(),
   scan: jest.fn().mockResolvedValue(['0', []]),
-  isConnected: jest.fn().mockReturnValue(true)
+  isConnected: jest.fn().mockReturnValue(true),
+  mget: jest.fn().mockResolvedValue([]),
+  pipelineSet: jest.fn().mockResolvedValue(0),
+  pipelineDel: jest.fn().mockResolvedValue(0),
 };
 
 // Mock Redis module (kept for backwards compatibility, but DI is preferred)
@@ -370,6 +373,9 @@ describe('S2.2.5 PairCacheService', () => {
     mockRedisClient.del.mockReset();
     mockRedisClient.keys.mockReset();
     mockRedisClient.scan.mockReset().mockResolvedValue(['0', []]);
+    mockRedisClient.mget.mockReset().mockResolvedValue([]);
+    mockRedisClient.pipelineSet.mockReset().mockResolvedValue(0);
+    mockRedisClient.pipelineDel.mockReset().mockResolvedValue(0);
 
     service.resetState(); // Fast: just clears statistics
   });
@@ -552,11 +558,8 @@ describe('S2.2.5 PairCacheService', () => {
 
   describe('Batch Operations', () => {
     describe('getMany()', () => {
-      it('should get multiple pairs in parallel', async () => {
-        mockRedisClient.get
-          .mockResolvedValueOnce(testCachedPairData)
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce('NULL_PAIR');
+      it('should get multiple pairs via mget', async () => {
+        mockRedisClient.mget.mockResolvedValueOnce([testCachedPairData, null, 'NULL_PAIR']);
 
         const requests = [
           { chain: 'ethereum', dex: 'uniswap_v2', token0: '0xaaa', token1: '0xbbb' },
@@ -567,6 +570,7 @@ describe('S2.2.5 PairCacheService', () => {
         const results = await service.getMany(requests);
 
         expect(results.size).toBe(3);
+        expect(mockRedisClient.mget).toHaveBeenCalledTimes(1);
         expect(service.getStats().batchOperations).toBeGreaterThan(0);
       });
 
@@ -578,8 +582,8 @@ describe('S2.2.5 PairCacheService', () => {
     });
 
     describe('setMany()', () => {
-      it('should set multiple pairs in batches', async () => {
-        mockRedisClient.set.mockResolvedValue('OK');
+      it('should set multiple pairs via pipelineSet', async () => {
+        mockRedisClient.pipelineSet.mockResolvedValue(10);
 
         const entries = Array.from({ length: 10 }, (_, i) => ({
           chain: 'ethereum',
@@ -592,30 +596,32 @@ describe('S2.2.5 PairCacheService', () => {
         const successCount = await service.setMany(entries);
 
         expect(successCount).toBe(10);
+        expect(mockRedisClient.pipelineSet).toHaveBeenCalledTimes(1);
       });
     });
   });
 
   describe('Cache Invalidation', () => {
-    it('should invalidate all pairs for a chain', async () => {
+    it('should invalidate all pairs for a chain via pipelineDel', async () => {
       mockRedisClient.scan.mockResolvedValue(['0', ['key1', 'key2', 'key3']]);
-      mockRedisClient.del.mockResolvedValue(1);
+      mockRedisClient.pipelineDel.mockResolvedValue(3);
 
       const count = await service.invalidateChain('ethereum');
 
       expect(count).toBe(3);
       expect(mockRedisClient.scan).toHaveBeenCalled();
-      expect(mockRedisClient.del).toHaveBeenCalledTimes(3);
+      expect(mockRedisClient.pipelineDel).toHaveBeenCalledWith(['key1', 'key2', 'key3']);
     });
 
-    it('should invalidate all pairs for a DEX on a chain', async () => {
+    it('should invalidate all pairs for a DEX on a chain via pipelineDel', async () => {
       mockRedisClient.scan.mockResolvedValue(['0', ['key1', 'key2']]);
-      mockRedisClient.del.mockResolvedValue(1);
+      mockRedisClient.pipelineDel.mockResolvedValue(2);
 
       const count = await service.invalidateDex('ethereum', 'uniswap_v2');
 
       expect(count).toBe(2);
       expect(mockRedisClient.scan).toHaveBeenCalled();
+      expect(mockRedisClient.pipelineDel).toHaveBeenCalledWith(['key1', 'key2']);
     });
 
     it('should return 0 when no keys match', async () => {
@@ -626,18 +632,19 @@ describe('S2.2.5 PairCacheService', () => {
       expect(count).toBe(0);
     });
 
-    it('should use parallel batch deletes (S2.2.5 fix)', async () => {
-      // Create 150 keys to test batching
+    it('should use pipelineDel for large key sets', async () => {
+      // Create 150 keys to test pipeline batch deletion
       const keys = Array.from({ length: 150 }, (_, i) => `key${i}`);
       mockRedisClient.scan.mockResolvedValue(['0', keys]);
-      mockRedisClient.del.mockResolvedValue(1);
+      mockRedisClient.pipelineDel.mockResolvedValue(150);
 
       const count = await service.invalidateChain('ethereum');
 
       expect(count).toBe(150);
-      // Should batch deletes (150 keys / 50 batch size = 3 batches)
       expect(mockRedisClient.scan).toHaveBeenCalled();
-      expect(mockRedisClient.del).toHaveBeenCalledTimes(150);
+      // Single pipelineDel call with all keys
+      expect(mockRedisClient.pipelineDel).toHaveBeenCalledTimes(1);
+      expect(mockRedisClient.pipelineDel).toHaveBeenCalledWith(keys);
     });
   });
 
@@ -876,8 +883,8 @@ describe('S2.2.5 Regression Tests', () => {
     });
   });
 
-  describe('REGRESSION: Parallel Batch Deletes', () => {
-    it('should delete in parallel batches not sequentially', async () => {
+  describe('REGRESSION: Pipelined Batch Deletes', () => {
+    it('should use pipelineDel for batch deletion', async () => {
       resetPairCacheService();
 
       // Use DI to inject mock Redis
@@ -886,18 +893,13 @@ describe('S2.2.5 Regression Tests', () => {
 
       const keys = Array.from({ length: 25 }, (_, i) => `key${i}`);
       mockRedisClient.scan.mockResolvedValue(['0', keys]);
-
-      const deleteTimings: number[] = [];
-      mockRedisClient.del.mockImplementation(async () => {
-        deleteTimings.push(Date.now());
-        await new Promise(r => setTimeout(r, 5));
-        return 1;
-      });
+      mockRedisClient.pipelineDel.mockResolvedValue(25);
 
       await service.invalidateChain('ethereum');
 
-      // Verify all deletes completed
-      expect(mockRedisClient.del).toHaveBeenCalledTimes(25);
+      // Single pipelineDel call replaces N individual del() calls
+      expect(mockRedisClient.pipelineDel).toHaveBeenCalledTimes(1);
+      expect(mockRedisClient.pipelineDel).toHaveBeenCalledWith(keys);
     });
   });
 

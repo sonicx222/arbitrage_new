@@ -272,9 +272,20 @@ export class OpportunityPublisher {
 
     const confidence = opportunity.confidence ?? 0;
     const profit = opportunity.expectedProfit ?? opportunity.estimatedProfit ?? 0;
+    const profitPct = opportunity.profitPercentage ?? 0;
 
-    if (confidence < FAST_LANE_CONFIG.minConfidence) return;
-    if (profit < FAST_LANE_CONFIG.minProfitUsd) return;
+    // OPT-005: Same-chain arbs have lower execution risk → reduced confidence threshold
+    const isSameChain = opportunity.type !== 'cross-chain';
+    const effectiveMinConfidence = isSameChain
+      ? FAST_LANE_CONFIG.minConfidence - FAST_LANE_CONFIG.sameChainConfidenceDiscount
+      : FAST_LANE_CONFIG.minConfidence;
+
+    if (confidence < effectiveMinConfidence) return;
+
+    // OPT-005: Qualify if absolute profit OR profit percentage meets threshold
+    const meetsAbsoluteProfit = profit >= FAST_LANE_CONFIG.minProfitUsd;
+    const meetsPercentageProfit = profitPct >= FAST_LANE_CONFIG.minProfitPercentage;
+    if (!meetsAbsoluteProfit && !meetsPercentageProfit) return;
 
     this.streamsClient
       .xaddWithLimit(RedisStreamsClient.STREAMS.FAST_LANE, enrichedData)

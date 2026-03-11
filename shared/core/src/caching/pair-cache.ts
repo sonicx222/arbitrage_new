@@ -37,9 +37,8 @@ export interface PairCacheConfig {
   /** Maximum batch size for Redis operations */
   maxBatchSize: number;
   /**
-   * Use Redis pipeline for batch operations
-   * @reserved Reserved for future use - pipeline optimization not yet implemented.
-   * Current implementation uses Promise.all for parallelism.
+   * Use Redis pipeline for batch operations.
+   * OPT-005: Now implemented — uses MGET for reads and pipelined SETEX/DEL for writes.
    */
   usePipeline: boolean;
   /** Key prefix for pair cache */
@@ -349,8 +348,8 @@ export class PairCacheService extends EventEmitter implements Resettable {
   // ===========================================================================
 
   /**
-   * Get multiple pairs from cache
-   * Uses parallel get calls since RedisClient doesn't expose mget
+   * Get multiple pairs from cache.
+   * OPT-005: Uses MGET for single round-trip instead of N individual GET calls.
    */
   async getMany(
     requests: Array<{ chain: string; dex: string; token0: string; token1: string }>
@@ -365,16 +364,18 @@ export class PairCacheService extends EventEmitter implements Resettable {
     this.stats.batchOperations++;
 
     try {
-      // Parallel get calls
-      const getPromises = requests.map(async r => {
-        const key = this.generateCacheKey(r.chain, r.dex, r.token0, r.token1);
-        const value = await this.redis!.get<CachedPairData | string>(key);
-        return { key, value };
-      });
+      // Build keys array in request order
+      const keys = requests.map(r =>
+        this.generateCacheKey(r.chain, r.dex, r.token0, r.token1)
+      );
 
-      const fetchResults = await Promise.all(getPromises);
+      // Single MGET round-trip for all keys
+      const values = await this.redis.mget<CachedPairData | string>(keys);
 
-      fetchResults.forEach(({ key, value }) => {
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const value = values[i];
+
         if (value === null) {
           this.stats.cacheMisses++;
           results.set(key, { status: 'miss' });
@@ -382,14 +383,13 @@ export class PairCacheService extends EventEmitter implements Resettable {
           this.stats.nullHits++;
           results.set(key, { status: 'null', reason: 'pair_not_exists' });
         } else if (typeof value === 'object') {
-          // RedisClient.get() already parses JSON
           this.stats.cacheHits++;
           results.set(key, { status: 'hit', data: value as CachedPairData });
         } else {
           this.stats.cacheMisses++;
           results.set(key, { status: 'miss' });
         }
-      });
+      }
 
     } catch (error) {
       this.stats.errors++;
@@ -406,7 +406,9 @@ export class PairCacheService extends EventEmitter implements Resettable {
   }
 
   /**
-   * Set multiple pairs in cache
+   * Set multiple pairs in cache.
+   * OPT-005: Uses pipelined SETEX for single round-trip per batch instead of
+   * N individual SET calls via Promise.all.
    */
   async setMany(
     entries: Array<{
@@ -424,21 +426,20 @@ export class PairCacheService extends EventEmitter implements Resettable {
     this.stats.batchOperations++;
     let successCount = 0;
 
-    // Process in batches
+    // Process in batches via pipeline
     for (let i = 0; i < entries.length; i += this.config.maxBatchSize) {
       const batch = entries.slice(i, i + this.config.maxBatchSize);
 
       try {
-        // Use parallel set calls
-        const promises = batch.map(entry => {
-          const key = this.generateCacheKey(entry.chain, entry.dex, entry.token0, entry.token1);
-          // RedisClient.set() handles JSON serialization internally
-          return this.redis!.set(key, entry.data, this.config.pairAddressTtlSec);
-        });
+        const pipelineEntries = batch.map(entry => ({
+          key: this.generateCacheKey(entry.chain, entry.dex, entry.token0, entry.token1),
+          value: entry.data,
+          ttlSec: this.config.pairAddressTtlSec,
+        }));
 
-        await Promise.all(promises);
-        successCount += batch.length;
-        this.stats.setOperations += batch.length;
+        const count = await this.redis!.pipelineSet(pipelineEntries);
+        successCount += count;
+        this.stats.setOperations += count;
       } catch (error) {
         this.stats.errors++;
         this.logger.error('Batch set error', { error, batchIndex: i });
@@ -474,17 +475,13 @@ export class PairCacheService extends EventEmitter implements Resettable {
 
       if (keys.length === 0) return 0;
 
-      // Delete in parallel batches for better performance
-      const batchSize = this.config.maxBatchSize;
-      for (let i = 0; i < keys.length; i += batchSize) {
-        const batch = keys.slice(i, i + batchSize);
-        await Promise.all(batch.map(key => this.redis!.del(key)));
-      }
+      // OPT-005: Use pipelined DEL for single round-trip batch deletion
+      const deleted = await this.redis.pipelineDel(keys);
 
-      this.stats.deleteOperations += keys.length;
-      this.logger.info(`Invalidated ${keys.length} cached pairs for chain: ${chain}`);
-      this.emit('cache:invalidate_chain', { chain, count: keys.length });
-      return keys.length;
+      this.stats.deleteOperations += deleted;
+      this.logger.info(`Invalidated ${deleted} cached pairs for chain: ${chain}`);
+      this.emit('cache:invalidate_chain', { chain, count: deleted });
+      return deleted;
     } catch (error) {
       this.stats.errors++;
       this.logger.error('Chain invalidation error', { chain, error });
@@ -514,17 +511,13 @@ export class PairCacheService extends EventEmitter implements Resettable {
 
       if (keys.length === 0) return 0;
 
-      // Delete in parallel batches for better performance
-      const batchSize = this.config.maxBatchSize;
-      for (let i = 0; i < keys.length; i += batchSize) {
-        const batch = keys.slice(i, i + batchSize);
-        await Promise.all(batch.map(key => this.redis!.del(key)));
-      }
+      // OPT-005: Use pipelined DEL for single round-trip batch deletion
+      const deleted = await this.redis.pipelineDel(keys);
 
-      this.stats.deleteOperations += keys.length;
-      this.logger.info(`Invalidated ${keys.length} cached pairs for ${dex} on ${chain}`);
-      this.emit('cache:invalidate_dex', { chain, dex, count: keys.length });
-      return keys.length;
+      this.stats.deleteOperations += deleted;
+      this.logger.info(`Invalidated ${deleted} cached pairs for ${dex} on ${chain}`);
+      this.emit('cache:invalidate_dex', { chain, dex, count: deleted });
+      return deleted;
     } catch (error) {
       this.stats.errors++;
       this.logger.error('DEX invalidation error', { chain, dex, error });

@@ -377,9 +377,15 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
 
     const confidence = arbitrageOpp.confidence ?? 0;
     const profit = arbitrageOpp.expectedProfit ?? 0;
+    const profitPct = arbitrageOpp.profitPercentage ?? 0;
 
+    // OPT-005: Cross-chain arbs use full confidence threshold (no discount)
     if (confidence < FAST_LANE_CONFIG.minConfidence) return;
-    if (profit < FAST_LANE_CONFIG.minProfitUsd) return;
+
+    // OPT-005: Qualify if absolute profit OR profit percentage meets threshold
+    const meetsAbsoluteProfit = profit >= FAST_LANE_CONFIG.minProfitUsd;
+    const meetsPercentageProfit = profitPct >= FAST_LANE_CONFIG.minProfitPercentage;
+    if (!meetsAbsoluteProfit && !meetsPercentageProfit) return;
 
     // Fire-and-forget publish to fast lane stream
     streamsClient

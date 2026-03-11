@@ -29,19 +29,27 @@ export async function dualPublish(
   pubsubChannel: string,
   message: Record<string, unknown>
 ): Promise<void> {
+  // OPT-005: Concurrent publish — Streams and Pub/Sub use different connections,
+  // so running them in parallel saves one round-trip (~0.5-2ms per call).
+  const promises: Promise<void>[] = [];
+
   // Primary: Redis Streams (ADR-002 compliant)
   if (streamsClient) {
-    try {
-      await streamsClient.xaddWithLimit(streamName, message);
-    } catch (error) {
-      logger.error('Failed to publish to Redis Stream', { error, streamName });
-    }
+    promises.push(
+      (async () => {
+        try { await streamsClient.xaddWithLimit(streamName, message); }
+        catch (error) { logger.error('Failed to publish to Redis Stream', { error, streamName }); }
+      })()
+    );
   }
 
   // Secondary: Pub/Sub (backwards compatibility)
-  try {
-    await redis.publish(pubsubChannel, message as unknown as import('@arbitrage/types').MessageEvent);
-  } catch (error) {
-    logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
-  }
+  promises.push(
+    (async () => {
+      try { await redis.publish(pubsubChannel, message as unknown as import('@arbitrage/types').MessageEvent); }
+      catch (error) { logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel }); }
+    })()
+  );
+
+  await Promise.all(promises);
 }

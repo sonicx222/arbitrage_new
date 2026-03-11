@@ -25,6 +25,9 @@ interface MockRedis {
   set: Mock<(...args: any[]) => Promise<void>>;
   del: Mock<(...args: any[]) => Promise<number>>;
   scan: Mock<(...args: any[]) => Promise<[string, string[]]>>;
+  mget: Mock<(...args: any[]) => Promise<any[]>>;
+  pipelineSet: Mock<(...args: any[]) => Promise<number>>;
+  pipelineDel: Mock<(...args: any[]) => Promise<number>>;
 }
 
 function createMockRedis(): MockRedis {
@@ -33,6 +36,9 @@ function createMockRedis(): MockRedis {
     set: jest.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     del: jest.fn<(...args: any[]) => Promise<number>>().mockResolvedValue(1),
     scan: jest.fn<(...args: any[]) => Promise<[string, string[]]>>().mockResolvedValue(['0', []]),
+    mget: jest.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
+    pipelineSet: jest.fn<(...args: any[]) => Promise<number>>().mockResolvedValue(0),
+    pipelineDel: jest.fn<(...args: any[]) => Promise<number>>().mockResolvedValue(0),
   };
 }
 
@@ -382,12 +388,10 @@ describe('PairCacheService', () => {
       await service.initialize();
     });
 
-    it('should return results for multiple pairs', async () => {
+    it('should return results for multiple pairs via mget', async () => {
       const pairData = createSamplePairData();
-      // First call returns data, second returns null
-      mockRedis.get
-        .mockResolvedValueOnce(pairData)
-        .mockResolvedValueOnce(null);
+      // mget returns array: first hit, second miss
+      mockRedis.mget.mockResolvedValueOnce([pairData, null]);
 
       const results = await service.getMany([
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt0', token1: '0xt1' },
@@ -395,6 +399,7 @@ describe('PairCacheService', () => {
       ]);
 
       expect(results.size).toBe(2);
+      expect(mockRedis.mget).toHaveBeenCalledTimes(1);
       // One hit, one miss
       const values = Array.from(results.values());
       const hits = values.filter(v => v.status === 'hit');
@@ -417,7 +422,7 @@ describe('PairCacheService', () => {
     });
 
     it('should return all misses on Redis error', async () => {
-      mockRedis.get.mockRejectedValueOnce(new Error('Batch get failed'));
+      mockRedis.mget.mockRejectedValueOnce(new Error('Batch get failed'));
 
       const results = await service.getMany([
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt0', token1: '0xt1' },
@@ -429,7 +434,7 @@ describe('PairCacheService', () => {
     });
 
     it('should increment batchOperations', async () => {
-      mockRedis.get.mockResolvedValue(null);
+      mockRedis.mget.mockResolvedValueOnce([null]);
       await service.getMany([
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt0', token1: '0xt1' },
       ]);
@@ -437,7 +442,7 @@ describe('PairCacheService', () => {
     });
 
     it('should recognize NULL_PAIR markers in batch results', async () => {
-      mockRedis.get.mockResolvedValueOnce('NULL_PAIR');
+      mockRedis.mget.mockResolvedValueOnce(['NULL_PAIR']);
 
       const results = await service.getMany([
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt0', token1: '0xt1' },
@@ -457,7 +462,9 @@ describe('PairCacheService', () => {
       await service.initialize();
     });
 
-    it('should set multiple entries and return success count', async () => {
+    it('should set multiple entries via pipelineSet and return success count', async () => {
+      mockRedis.pipelineSet.mockResolvedValueOnce(2);
+
       const entries = [
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt0', token1: '0xt1', data: createSamplePairData() },
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt2', token1: '0xt3', data: createSamplePairData() },
@@ -465,7 +472,7 @@ describe('PairCacheService', () => {
 
       const count = await service.setMany(entries);
       expect(count).toBe(2);
-      expect(mockRedis.set).toHaveBeenCalledTimes(2);
+      expect(mockRedis.pipelineSet).toHaveBeenCalledTimes(1);
     });
 
     it('should return 0 for empty entries', async () => {
@@ -483,6 +490,10 @@ describe('PairCacheService', () => {
 
     it('should process in batches respecting maxBatchSize', async () => {
       // maxBatchSize is 10 in our config. Create 15 entries to force 2 batches.
+      mockRedis.pipelineSet
+        .mockResolvedValueOnce(10)  // first batch
+        .mockResolvedValueOnce(5);  // second batch
+
       const entries = Array.from({ length: 15 }, (_, i) => ({
         chain: 'bsc',
         dex: 'pancakeswap',
@@ -493,10 +504,11 @@ describe('PairCacheService', () => {
 
       const count = await service.setMany(entries);
       expect(count).toBe(15);
-      expect(mockRedis.set).toHaveBeenCalledTimes(15);
+      expect(mockRedis.pipelineSet).toHaveBeenCalledTimes(2);
     });
 
     it('should increment batchOperations', async () => {
+      mockRedis.pipelineSet.mockResolvedValueOnce(1);
       await service.setMany([
         { chain: 'bsc', dex: 'pancakeswap', token0: '0xt0', token1: '0xt1', data: createSamplePairData() },
       ]);
@@ -513,16 +525,20 @@ describe('PairCacheService', () => {
       await service.initialize();
     });
 
-    it('should delete all keys matching chain pattern via SCAN', async () => {
+    it('should delete all keys matching chain pattern via SCAN + pipelineDel', async () => {
       // Mock SCAN returning keys then done
       mockRedis.scan
         .mockResolvedValueOnce(['42', ['pair:bsc:pancakeswap:0xt0:0xt1']])
         .mockResolvedValueOnce(['0', ['pair:bsc:uniswap:0xt2:0xt3']]);
+      mockRedis.pipelineDel.mockResolvedValueOnce(2);
 
       const count = await service.invalidateChain('bsc');
 
       expect(count).toBe(2);
-      expect(mockRedis.del).toHaveBeenCalledTimes(2);
+      expect(mockRedis.pipelineDel).toHaveBeenCalledWith([
+        'pair:bsc:pancakeswap:0xt0:0xt1',
+        'pair:bsc:uniswap:0xt2:0xt3',
+      ]);
     });
 
     it('should return 0 when no keys found', async () => {
@@ -547,6 +563,7 @@ describe('PairCacheService', () => {
 
     it('should increment deleteOperations by key count', async () => {
       mockRedis.scan.mockResolvedValueOnce(['0', ['key1', 'key2', 'key3']]);
+      mockRedis.pipelineDel.mockResolvedValueOnce(3);
 
       await service.invalidateChain('bsc');
       expect(service.getStats().deleteOperations).toBe(3);
@@ -562,13 +579,16 @@ describe('PairCacheService', () => {
       await service.initialize();
     });
 
-    it('should delete all keys matching chain+dex pattern via SCAN', async () => {
+    it('should delete all keys matching chain+dex pattern via SCAN + pipelineDel', async () => {
       mockRedis.scan.mockResolvedValueOnce(['0', ['pair:bsc:pancakeswap:0xt0:0xt1']]);
+      mockRedis.pipelineDel.mockResolvedValueOnce(1);
 
       const count = await service.invalidateDex('bsc', 'pancakeswap');
 
       expect(count).toBe(1);
-      expect(mockRedis.del).toHaveBeenCalledTimes(1);
+      expect(mockRedis.pipelineDel).toHaveBeenCalledWith([
+        'pair:bsc:pancakeswap:0xt0:0xt1',
+      ]);
     });
 
     it('should return 0 when not initialized', async () => {
