@@ -397,9 +397,9 @@ export class SimulationInitializer {
       pair.blockNumber = blockNumber;
       pair.lastUpdate = Date.now();
 
-      // R3 Refactor: Delegate cache invalidation to SnapshotManager
-      // SnapshotManager handles version tracking and cache management internally
-      snapshotManager.invalidateCache();
+      // OPT-007: Per-pair invalidation — only marks this pair dirty, not entire cache.
+      // SnapshotManager handles version tracking and incremental rebuild internally.
+      snapshotManager.invalidatePair(pair);
 
       // Note: eventsProcessed is incremented by onEventProcessed callback
       // (called from ChainSimulationHandler.handleSimulatedSyncEvent before onSyncEvent)

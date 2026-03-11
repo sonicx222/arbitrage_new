@@ -1495,9 +1495,9 @@ export class ChainDetectorInstance extends EventEmitter {
   //    - Prevents race conditions from concurrent access
   //    - Faster than spread operator in tight loops
   //
-  // 4. VERSION-BASED CACHE INVALIDATION: snapshotManager.invalidateCache()
-  //    - SnapshotManager handles version tracking internally (single method call)
-  //    - Prevents stale cache reads without locks
+  // 4. PER-PAIR CACHE INVALIDATION: snapshotManager.invalidatePair(pair)
+  //    - OPT-007: Only marks updated pair dirty, not entire cache
+  //    - Batch snapshot rebuild (triangular/multi-leg) rebuilds O(D) dirty pairs, not O(N)
   //
   // Performance Budget: <10ms per event (to handle 100+ events/second)
   // Current measured: ~0.5-2ms per Sync event (well within budget)
@@ -1984,7 +1984,10 @@ export class ChainDetectorInstance extends EventEmitter {
     pair.blockNumber = blockNumber;
     pair.lastUpdate = now;
 
-    this.snapshotManager.invalidateCache();
+    // OPT-007 Phase 2B: Per-pair invalidation instead of global cache clear.
+    // Only this pair's snapshot is rebuilt on next createPairsSnapshot() call,
+    // reducing snapshot creations from O(N) to O(D) where D = dirty pairs.
+    this.snapshotManager.invalidatePair(pair);
     this.eventsProcessed++;
 
     this.emitPriceUpdate(pair, now);

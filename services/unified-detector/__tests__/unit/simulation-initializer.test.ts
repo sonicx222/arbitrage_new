@@ -97,7 +97,7 @@ const createMockDeps = (overrides: Partial<SimulationInitializerDeps> = {}): Sim
   tokensByAddress: new Map(),
   pairsByAddress: new Map(),
   activityTracker: { recordUpdate: jest.fn(), trackPairActivity: jest.fn(), getActivePairs: jest.fn().mockReturnValue([]) },
-  snapshotManager: { takeSnapshot: jest.fn(), getLatestSnapshot: jest.fn(), invalidateCache: jest.fn() },
+  snapshotManager: { takeSnapshot: jest.fn(), getLatestSnapshot: jest.fn(), invalidateCache: jest.fn(), invalidatePair: jest.fn() },
   emit: jest.fn(),
   emitPriceUpdate: jest.fn(),
   checkArbitrageOpportunity: jest.fn(),
@@ -526,7 +526,7 @@ describe('SimulationInitializer', () => {
       expect(deps.emitPriceUpdate).toHaveBeenCalledWith(pair);
       expect(deps.checkArbitrageOpportunity).toHaveBeenCalledWith(pair);
       expect(deps.activityTracker.recordUpdate).toHaveBeenCalled();
-      expect(deps.snapshotManager.invalidateCache).toHaveBeenCalled();
+      expect(deps.snapshotManager.invalidatePair).toHaveBeenCalledWith(pair);
     });
 
     it('should skip unknown pair addresses silently', async () => {

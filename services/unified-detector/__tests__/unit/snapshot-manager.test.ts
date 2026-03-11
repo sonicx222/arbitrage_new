@@ -226,7 +226,7 @@ describe('SnapshotManager', () => {
   // ===========================================================================
 
   describe('Cache Invalidation', () => {
-    it('should invalidate cache', () => {
+    it('should invalidate cache fully with invalidateCache()', () => {
       const pairs = new Map<string, ExtendedPair>();
       pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
@@ -237,7 +237,7 @@ describe('SnapshotManager', () => {
       expect(first).not.toBe(second);
     });
 
-    it('should increment version on invalidation', () => {
+    it('should increment version on full invalidation', () => {
       const version1 = manager.getSnapshotVersion();
       manager.invalidateCache();
       const version2 = manager.getSnapshotVersion();
@@ -254,6 +254,135 @@ describe('SnapshotManager', () => {
 
       // After clear, version should reset
       expect(manager.getSnapshotVersion()).toBe(0);
+    });
+  });
+
+  // ===========================================================================
+  // OPT-007 Phase 2B: Per-Pair Invalidation
+  // ===========================================================================
+
+  describe('Per-Pair Invalidation (OPT-007)', () => {
+    it('should incrementally rebuild only dirty pairs', () => {
+      const pair1 = createMockPair({ address: '0xpair1', reserve0: '1000' });
+      const pair2 = createMockPair({ address: '0xpair2', reserve0: '2000' });
+      const pair3 = createMockPair({ address: '0xpair3', reserve0: '3000' });
+      const pairs = new Map<string, ExtendedPair>();
+      pairs.set('p1', pair1);
+      pairs.set('p2', pair2);
+      pairs.set('p3', pair3);
+
+      // Initial full build
+      const first = manager.createPairsSnapshot(pairs);
+      expect(first.size).toBe(3);
+      const versionAfterBuild = manager.getSnapshotVersion();
+
+      // Mutate pair2 reserves and mark dirty
+      pair2.reserve0 = '9999';
+      pair2.reserve0BigInt = 9999n;
+      manager.invalidatePair(pair2);
+
+      // Incremental rebuild — only pair2 should be updated
+      const second = manager.createPairsSnapshot(pairs);
+      expect(second.size).toBe(3);
+      expect(second.get('0xpair2')!.reserve0).toBe('9999');
+      // Pair1 and pair3 should retain original snapshot values
+      expect(second.get('0xpair1')!.reserve0).toBe('1000');
+      expect(second.get('0xpair3')!.reserve0).toBe('3000');
+      // Version should increment
+      expect(manager.getSnapshotVersion()).toBeGreaterThan(versionAfterBuild);
+    });
+
+    it('should handle multiple dirty pairs in one rebuild', () => {
+      const pair1 = createMockPair({ address: '0xpair1', reserve0: '1000' });
+      const pair2 = createMockPair({ address: '0xpair2', reserve0: '2000' });
+      const pairs = new Map<string, ExtendedPair>();
+      pairs.set('p1', pair1);
+      pairs.set('p2', pair2);
+
+      manager.createPairsSnapshot(pairs);
+
+      // Mark both dirty with new reserves
+      pair1.reserve0 = '5555';
+      pair1.reserve0BigInt = 5555n;
+      pair2.reserve0 = '6666';
+      pair2.reserve0BigInt = 6666n;
+      manager.invalidatePair(pair1);
+      manager.invalidatePair(pair2);
+
+      const result = manager.createPairsSnapshot(pairs);
+      expect(result.get('0xpair1')!.reserve0).toBe('5555');
+      expect(result.get('0xpair2')!.reserve0).toBe('6666');
+    });
+
+    it('should deduplicate multiple invalidations for same pair', () => {
+      const pair1 = createMockPair({ address: '0xpair1', reserve0: '1000' });
+      const pairs = new Map<string, ExtendedPair>();
+      pairs.set('p1', pair1);
+
+      manager.createPairsSnapshot(pairs);
+
+      // Multiple updates to same pair before snapshot rebuild
+      pair1.reserve0 = '2000';
+      pair1.reserve0BigInt = 2000n;
+      manager.invalidatePair(pair1);
+      pair1.reserve0 = '3000';
+      pair1.reserve0BigInt = 3000n;
+      manager.invalidatePair(pair1);
+
+      const result = manager.createPairsSnapshot(pairs);
+      // Should have latest value (3000), not intermediate (2000)
+      expect(result.get('0xpair1')!.reserve0).toBe('3000');
+    });
+
+    it('should return cache hit when no dirty pairs within TTL', () => {
+      const pairs = new Map<string, ExtendedPair>();
+      pairs.set('p1', createMockPair({ address: '0xpair1' }));
+
+      const first = manager.createPairsSnapshot(pairs);
+      // No invalidatePair call — cache should be fresh
+      const second = manager.createPairsSnapshot(pairs);
+
+      expect(first).toBe(second); // Same reference
+    });
+
+    it('should remove pair from snapshot when reserves become invalid after invalidation', () => {
+      const pair1 = createMockPair({ address: '0xpair1', reserve0: '1000' });
+      const pair2 = createMockPair({ address: '0xpair2', reserve0: '2000' });
+      const pairs = new Map<string, ExtendedPair>();
+      pairs.set('p1', pair1);
+      pairs.set('p2', pair2);
+
+      manager.createPairsSnapshot(pairs);
+      expect(manager.createPairsSnapshot(pairs).size).toBe(2);
+
+      // Make pair1 reserves invalid (zero)
+      pair1.reserve0 = '0';
+      pair1.reserve0BigInt = 0n;
+      manager.invalidatePair(pair1);
+
+      const result = manager.createPairsSnapshot(pairs);
+      expect(result.size).toBe(1);
+      expect(result.has('0xpair1')).toBe(false);
+      expect(result.has('0xpair2')).toBe(true);
+    });
+
+    it('should do full rebuild after invalidateCache even with dirty pairs', () => {
+      const pair1 = createMockPair({ address: '0xpair1', reserve0: '1000' });
+      const pairs = new Map<string, ExtendedPair>();
+      pairs.set('p1', pair1);
+
+      manager.createPairsSnapshot(pairs);
+
+      // Mark dirty then do full invalidation
+      pair1.reserve0 = '9999';
+      pair1.reserve0BigInt = 9999n;
+      manager.invalidatePair(pair1);
+      manager.invalidateCache();
+
+      // Should do full rebuild (cache is null), not incremental
+      const result = manager.createPairsSnapshot(pairs);
+      expect(result.size).toBe(1);
+      expect(result.get('0xpair1')!.reserve0).toBe('9999');
     });
   });
 

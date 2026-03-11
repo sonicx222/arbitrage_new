@@ -230,6 +230,7 @@ jest.mock('../../src/detection', () => ({
   SnapshotManager: jest.fn(),
   createSnapshotManager: jest.fn().mockReturnValue({
     invalidateCache: jest.fn(),
+    invalidatePair: jest.fn(),
     clear: jest.fn(),
     createPairsSnapshot: jest.fn().mockReturnValue([]),
     getDexPoolsForPair: jest.fn().mockReturnValue([]),
@@ -412,6 +413,7 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
     });
     detection.createSnapshotManager.mockReturnValue({
       invalidateCache: jest.fn(),
+    invalidatePair: jest.fn(),
       clear: jest.fn(),
       createPairsSnapshot: jest.fn().mockReturnValue([]),
       getDexPoolsForPair: jest.fn().mockReturnValue([]),

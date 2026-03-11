@@ -15,8 +15,11 @@
  *
  * ## Cache Coherency
  *
- * Uses two-level caching:
- * 1. **Snapshot Cache**: Time-based TTL, stores Map<address, PairSnapshot>
+ * Uses two-level caching with per-pair incremental updates (OPT-007):
+ * 1. **Snapshot Cache**: Per-pair dirty tracking + time-based TTL fallback
+ *    - invalidatePair() marks individual pairs dirty (O(1))
+ *    - createPairsSnapshot() rebuilds only dirty pairs (O(D) vs O(N))
+ *    - Full cache hit when no dirty pairs exist within TTL
  * 2. **DexPool Cache**: Version-based, invalidates on any snapshot mutation
  *
  * FIX Race 5.1: Captures version ONCE before checking to avoid TOCTOU race.
@@ -99,6 +102,12 @@ export class SnapshotManager {
   private dexPoolCache: DexPool[] | null = null;
   private dexPoolCacheVersion: number = -1;
 
+  // OPT-007 Phase 2B: Per-pair dirty tracking for incremental snapshot updates.
+  // Stores pair address → ExtendedPair reference. When createPairsSnapshot() is called,
+  // only dirty pairs are rebuilt instead of all N pairs. During high-activity periods
+  // with 500 pairs and 1-2 updating per Sync event, this is ~250x fewer snapshot creations.
+  private dirtyPairs: Map<string, ExtendedPair> = new Map();
+
   constructor(config?: SnapshotManagerConfig) {
     this.cacheTtlMs = config?.cacheTtlMs ?? 100;
   }
@@ -165,18 +174,40 @@ export class SnapshotManager {
   ): Map<string, PairSnapshot> {
     const now = Date.now();
 
-    // Use cache if available and fresh
+    // Full cache hit: no dirty pairs AND within TTL
     if (
       !forceRefresh &&
       this.snapshotCache &&
+      this.dirtyPairs.size === 0 &&
       now - this.snapshotCacheTimestamp < this.cacheTtlMs
     ) {
       return this.snapshotCache;
     }
 
+    // OPT-007 Phase 2B: Incremental update — rebuild only dirty pairs.
+    // During high-activity periods with ~500 pairs and 1-2 updating per Sync event,
+    // this reduces snapshot creations from O(N) to O(D) where D = dirty pair count.
+    if (
+      !forceRefresh &&
+      this.snapshotCache &&
+      this.dirtyPairs.size > 0
+    ) {
+      for (const [address, pair] of this.dirtyPairs) {
+        const snapshot = this.createPairSnapshot(pair);
+        if (snapshot) {
+          this.snapshotCache.set(address, snapshot);
+        } else {
+          this.snapshotCache.delete(address);
+        }
+      }
+      this.dirtyPairs.clear();
+      this.snapshotCacheTimestamp = now;
+      this.snapshotVersion++;
+      return this.snapshotCache;
+    }
+
+    // Full rebuild: no cache exists, forceRefresh, or first call.
     // P2 Fix OPT-002: Reuse existing Map instead of allocating a new one every refresh.
-    // At 100ms TTL with ~500 pairs, this eliminates ~10 Map allocations/sec and the
-    // corresponding GC pressure from abandoned Maps.
     let snapshots: Map<string, PairSnapshot>;
     if (this.snapshotCache) {
       snapshots = this.snapshotCache;
@@ -196,6 +227,7 @@ export class SnapshotManager {
     this.snapshotCache = snapshots;
     this.snapshotCacheTimestamp = now;
     this.snapshotVersion++;
+    this.dirtyPairs.clear();
 
     return snapshots;
   }
@@ -265,11 +297,23 @@ export class SnapshotManager {
   // P0-2 FIX: Removed private validateFee() - now uses centralized version from ../types
 
   /**
-   * Invalidate cache when pairs are updated.
-   * Should be called when Sync events are processed.
+   * OPT-007 Phase 2B: Mark a single pair as dirty for incremental snapshot updates.
+   * Called from applyReserveUpdate() on every Sync event instead of invalidateCache().
+   * Stores a reference to the mutable pair — createPairsSnapshot() reads current state.
+   *
+   * @param pair - The pair whose reserves were just updated
+   */
+  invalidatePair(pair: ExtendedPair): void {
+    this.dirtyPairs.set(pair.address, pair);
+  }
+
+  /**
+   * Invalidate entire cache. Used for full resets (initialization, testing).
+   * For hot-path Sync events, prefer invalidatePair() for incremental updates.
    */
   invalidateCache(): void {
     this.snapshotCache = null;
+    this.dirtyPairs.clear();
     this.snapshotVersion++;
   }
 
@@ -289,6 +333,7 @@ export class SnapshotManager {
     this.snapshotCacheTimestamp = 0;
     this.snapshotVersion = 0;
     this.dexPoolCacheVersion = -1;
+    this.dirtyPairs.clear();
   }
 }
 
