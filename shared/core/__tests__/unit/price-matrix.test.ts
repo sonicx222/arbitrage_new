@@ -587,6 +587,91 @@ describe('PriceMatrix', () => {
       expect(price).toBe(0);
     });
   });
+
+  // ===========================================================================
+  // getPriceInto (OPT-007 Phase 3A)
+  // ===========================================================================
+  describe('getPriceInto (OPT-007)', () => {
+    it('should write price and timestamp into provided object', () => {
+      const key = createTestPriceKey(0);
+      const timestamp = Date.now();
+      matrix.setPrice(key, 1850.50, timestamp);
+
+      const out: PriceEntry = { price: 0, timestamp: 0 };
+      const found = matrix.getPriceInto(key, out);
+
+      expect(found).toBe(true);
+      expect(out.price).toBe(1850.50);
+      expect(out.timestamp).toBeGreaterThan(0);
+    });
+
+    it('should return false for non-existent key', () => {
+      const out: PriceEntry = { price: 0, timestamp: 0 };
+      const found = matrix.getPriceInto('nonexistent:key:here', out);
+
+      expect(found).toBe(false);
+      expect(out.price).toBe(0); // Unchanged
+      expect(out.timestamp).toBe(0); // Unchanged
+    });
+
+    it('should return false for empty key', () => {
+      const out: PriceEntry = { price: 0, timestamp: 0 };
+      expect(matrix.getPriceInto('', out)).toBe(false);
+    });
+
+    it('should return false on destroyed matrix', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 1850.50, Date.now());
+      matrix.destroy();
+
+      const out: PriceEntry = { price: 0, timestamp: 0 };
+      expect(matrix.getPriceInto(key, out)).toBe(false);
+    });
+
+    it('should reuse the same object across multiple calls', () => {
+      const key1 = createTestPriceKey(0);
+      const key2 = createTestPriceKey(1);
+      const now = Date.now();
+      matrix.setPrice(key1, 1000, now);
+      matrix.setPrice(key2, 2000, now);
+
+      const reusable: PriceEntry = { price: 0, timestamp: 0 };
+
+      matrix.getPriceInto(key1, reusable);
+      expect(reusable.price).toBe(1000);
+
+      matrix.getPriceInto(key2, reusable);
+      expect(reusable.price).toBe(2000);
+    });
+
+    it('should produce same results as getPrice', () => {
+      const key = createTestPriceKey(0);
+      const now = Date.now();
+      matrix.setPrice(key, 42.5, now);
+
+      const fromGetPrice = matrix.getPrice(key);
+      const out: PriceEntry = { price: 0, timestamp: 0 };
+      matrix.getPriceInto(key, out);
+
+      expect(out.price).toBe(fromGetPrice!.price);
+      expect(out.timestamp).toBe(fromGetPrice!.timestamp);
+    });
+
+    it('should track read/hit/miss stats correctly', () => {
+      const key = createTestPriceKey(0);
+      matrix.setPrice(key, 100, Date.now());
+      matrix.resetStats();
+
+      const out: PriceEntry = { price: 0, timestamp: 0 };
+      matrix.getPriceInto(key, out); // hit
+      matrix.getPriceInto('missing:key', out); // miss
+
+      const stats = matrix.getStats();
+      expect(stats.reads).toBe(2);
+      expect(stats.hits).toBe(1);
+      expect(stats.misses).toBe(1);
+    });
+  });
 });
 
 // =============================================================================

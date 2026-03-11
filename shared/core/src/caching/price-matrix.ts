@@ -628,30 +628,39 @@ export class PriceMatrix implements Resettable {
    * retry overhead. In this mode, concurrent writes from other threads can cause
    * torn reads, but this is acceptable for single-threaded callers.
    */
-  getPrice(key: string): PriceEntry | null {
+  /**
+   * OPT-007 Phase 3A: Zero-allocation price read for hot-path callers.
+   * Writes price and timestamp into the provided `out` object instead of allocating.
+   * Callers that process synchronously can reuse a single PriceEntry across calls.
+   *
+   * @param key - Price key
+   * @param out - Mutable PriceEntry to write into (price and timestamp fields updated)
+   * @returns true if price was found and written, false if not found
+   */
+  getPriceInto(key: string, out: PriceEntry): boolean {
     if (this.destroyed) {
-      return null;
+      return false;
     }
 
     this.stats.reads++;
 
     if (!key) {
       this.stats.misses++;
-      return null;
+      return false;
     }
 
     // PHASE3-TASK43: Use getIndexForKey() which supports SharedKeyRegistry
     const index = this.getIndexForKey(key);
     if (index < 0) {
       this.stats.misses++;
-      return null;
+      return false;
     }
 
     // Check if this slot has been written to
     // PHASE3-TASK43: Skip check for workers since writtenSlots isn't shared
     if (!this.isWorkerMode && !this.writtenSlots[index]) {
       this.stats.misses++;
-      return null;
+      return false;
     }
 
     const prices = this.getPriceArray();
@@ -683,9 +692,9 @@ export class PriceMatrix implements Resettable {
         retries++;
       }
       if (retries >= MAX_SEQ_RETRIES) {
-        // Contention too high — return null rather than torn data
+        // Contention too high — return false rather than torn data
         this.stats.misses++;
-        return null;
+        return false;
       }
     } else {
       price = prices[index];
@@ -693,22 +702,22 @@ export class PriceMatrix implements Resettable {
     }
 
     // P1-FIX: Worker safety check - ensure slot has been initialized
-    // With reordered writes (price before key registration), this should never
-    // happen in normal operation, but provides defense-in-depth
     if (this.isWorkerMode && relativeTimestamp === 0) {
       this.stats.misses++;
-      return null;
+      return false;
     }
 
     this.stats.hits++;
 
-    // Convert back to absolute timestamp
-    const absoluteTimestamp = this.timestampEpoch + relativeTimestamp * 1000;
+    // Write into caller's object — zero allocation
+    out.price = price;
+    out.timestamp = this.timestampEpoch + relativeTimestamp * 1000;
+    return true;
+  }
 
-    return {
-      price,
-      timestamp: absoluteTimestamp
-    };
+  getPrice(key: string): PriceEntry | null {
+    const out: PriceEntry = { price: 0, timestamp: 0 };
+    return this.getPriceInto(key, out) ? out : null;
   }
 
   /**
@@ -727,16 +736,19 @@ export class PriceMatrix implements Resettable {
    * @param maxAgeMs - Maximum acceptable age in milliseconds (default: 5000ms)
    * @returns PriceEntry if fresh and valid, null if stale or not found
    */
+  // OPT-007: Reusable object for getPriceWithFreshnessCheck — avoids intermediate
+  // allocation when the freshness check rejects the entry (stale/torn reads).
+  private readonly _freshnessCheckResult: PriceEntry = { price: 0, timestamp: 0 };
+
   getPriceWithFreshnessCheck(key: string, maxAgeMs: number = 5000): PriceEntry | null {
-    const entry = this.getPrice(key);
-    if (!entry) {
+    if (!this.getPriceInto(key, this._freshnessCheckResult)) {
       return null;
     }
 
-    const age = Date.now() - entry.timestamp;
+    const age = Date.now() - this._freshnessCheckResult.timestamp;
 
     // If data is too old, treat it as stale (could be torn read or legitimately old)
-    // Note: Do NOT increment misses here — getPrice() already counted this as a hit.
+    // Note: Do NOT increment misses here — getPriceInto() already counted this as a hit.
     // Staleness is a separate concern from cache hit/miss.
     if (age > maxAgeMs) {
       return null;
@@ -748,12 +760,16 @@ export class PriceMatrix implements Resettable {
       logger.warn('PriceMatrix: Detected likely torn read (future timestamp)', {
         key,
         age,
-        timestamp: entry.timestamp
+        timestamp: this._freshnessCheckResult.timestamp
       });
       return null;
     }
 
-    return entry;
+    // Return new object — callers may store the result
+    return {
+      price: this._freshnessCheckResult.price,
+      timestamp: this._freshnessCheckResult.timestamp
+    };
   }
 
   /**
