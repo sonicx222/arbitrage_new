@@ -56,6 +56,7 @@ import {
   hasPancakeSwapV3,
   // F9: Configurable cache TTLs for flash loan aggregator
   FLASH_LOAN_AGGREGATOR_CONFIG,
+  getV3AdapterAddress,
 } from '@arbitrage/config';
 import { isValidPrice } from '@arbitrage/core/components';
 import { getErrorMessage } from '@arbitrage/core/resilience';
@@ -268,6 +269,8 @@ export interface ExecuteArbitrageParams {
   minProfit: bigint;
   /** Task 2.1: PancakeSwap V3 pool address (required for PancakeSwap V3, unused for Aave V3) */
   pool?: string;
+  /** Chain identifier for V3 adapter resolution */
+  chain?: string;
 }
 
 // P2-8: Import from extracted FlashLoanFeeCalculator
@@ -337,8 +340,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly aggregatorMetrics?: IAggregatorMetrics;
   // Finding #7: Batch quoting delegated to BatchQuoteManager
   private readonly batchQuoteManager: BatchQuoteManager;
-  // Step 3: V3 swap adapter for exactInputSingle encoding
-  // H-002: v3SwapAdapter removed — on-chain contract only supports V2 routing
+  // V3 steps routed through on-chain UniswapV3Adapter (resolves H-002)
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -1345,7 +1347,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
    * @returns Encoded calldata
    */
   buildExecuteArbitrageCalldata(params: ExecuteArbitrageParams): string {
-    const { asset, amount, swapPath, minProfit, pool } = params;
+    const { asset, amount, swapPath, minProfit, pool, chain } = params;
 
     // Step 3: Check for V3 swap steps and log for observability
     const v3Steps = swapPath.filter(step => step.isV3);
@@ -1359,23 +1361,36 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
     // Issue 10.2 Fix: Use cached interface instead of creating new one
     // Convert SwapStep[] to tuple array format for ABI encoding.
-    // H-002 FIX: On-chain SwapStep struct is V2-only (address router, address tokenIn,
-    // address tokenOut, uint256 amountOutMin). SwapHelpers.executeSingleSwap() always
-    // calls IDexRouter.swapExactTokensForTokens(). V3 calldata cannot be passed through
-    // the current contract architecture. V3 steps are logged as warnings and routed
-    // through their V3-compatible router address (which will attempt V2-style call).
+    // On-chain SwapStep struct is V2-only. V3 steps are routed through UniswapV3Adapter
+    // contract which wraps V3 exactInputSingle() behind the V2 IDexRouter interface.
+    // When no adapter is deployed for a chain, the original router is used (will likely
+    // fail on-chain but allows graceful degradation with logging).
     const swapPathTuples = swapPath.map(step => {
-      if (step.isV3 && step.feeTier != null) {
-        this.logger.warn('V3 swap step in flash loan path — on-chain contract only supports V2 routing', {
-          tokenIn: step.tokenIn,
-          tokenOut: step.tokenOut,
-          feeTier: step.feeTier,
-          router: step.router,
-        });
+      let router = step.router;
+
+      if (step.isV3) {
+        const adapterAddress = getV3AdapterAddress(chain ?? '');
+        if (adapterAddress) {
+          router = adapterAddress;
+          this.logger.info('V3 step routed through UniswapV3Adapter', {
+            tokenIn: step.tokenIn,
+            tokenOut: step.tokenOut,
+            feeTier: step.feeTier,
+            originalRouter: step.router,
+            adapterAddress,
+          });
+        } else {
+          this.logger.warn('V3 step detected but no UniswapV3Adapter deployed for chain — using original router (may fail on-chain)', {
+            tokenIn: step.tokenIn,
+            tokenOut: step.tokenOut,
+            feeTier: step.feeTier,
+            router: step.router,
+          });
+        }
       }
 
       return [
-        step.router,
+        router,
         step.tokenIn,
         step.tokenOut,
         step.amountOutMin,
@@ -1554,6 +1569,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       swapPath: swapSteps,
       minProfit: minProfitWei,
       pool: poolAddress, // Task 2.1: Include pool for PancakeSwap V3
+      chain, // V3 adapter resolution
     });
 
     // Prepare transaction

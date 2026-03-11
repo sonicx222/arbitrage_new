@@ -16,7 +16,7 @@
 
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { parseEnvBigIntSafe } from '@arbitrage/core/utils/env-utils';
-import { FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, BALANCER_V2_VAULTS } from '@arbitrage/config';
+import { FEATURE_FLAGS, FLASH_LOAN_PROVIDERS, DEXES, BALANCER_V2_VAULTS, getV3AdapterAddress } from '@arbitrage/config';
 import { IntraChainStrategy } from '../strategies/intra-chain.strategy';
 import { CrossChainStrategy } from '../strategies/cross-chain.strategy';
 import { SimulationStrategy } from '../strategies/simulation.strategy';
@@ -129,6 +129,19 @@ function buildFlashLoanConfig(logger: Logger): {
         approvedRouters[chain] = DEXES[chain]
           .map(dex => dex.routerAddress)
           .filter(Boolean);
+      }
+
+      // Include UniswapV3Adapter in approved routers for chains that have it deployed.
+      // The adapter must also be approved on-chain (addApprovedRouter) for execution to succeed.
+      const v3Adapter = getV3AdapterAddress(chain);
+      if (v3Adapter) {
+        if (!approvedRouters[chain]) {
+          approvedRouters[chain] = [];
+        }
+        if (!approvedRouters[chain].includes(v3Adapter)) {
+          approvedRouters[chain].push(v3Adapter);
+          logger.info('Added UniswapV3Adapter to approved routers', { chain, adapter: v3Adapter });
+        }
       }
     }
   }

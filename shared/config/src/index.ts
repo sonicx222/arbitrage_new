@@ -580,3 +580,8 @@ export {
 // ENVIRONMENT VARIABLE PARSING UTILITIES
 // =============================================================================
 export { safeParseInt, safeParseFloat, safeParseFloatBounded, safeParseIntBounded, safeParseBigInt } from './utils/env-parsing';
+
+// =============================================================================
+// V3 ADAPTER ADDRESSES
+// =============================================================================
+export { V3_ADAPTER_ADDRESSES, getV3AdapterAddress, hasV3Adapter } from './v3-adapter-addresses';
