@@ -9,8 +9,8 @@
 
 export {
   LeadershipElectionService,
-  LeadershipElectionConfig,
-  LeadershipElectionOptions,
-  LeadershipRedisClient,
-  LeadershipAlert,
+  type LeadershipElectionConfig,
+  type LeadershipElectionOptions,
+  type LeadershipRedisClient,
+  type LeadershipAlert,
 } from './leadership-election-service';

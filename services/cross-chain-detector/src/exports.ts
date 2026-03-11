@@ -47,15 +47,15 @@ export { CrossChainDetectorService } from './detector';
 
 /** @internal */
 export {
-  ModuleLogger,
-  Logger,
-  PriceData,
-  CrossChainOpportunity,
-  IndexedSnapshot,
-  PricePoint,
-  DetectorConfig,
-  WhaleAnalysisConfig,
-  MLPredictionConfig,
+  type ModuleLogger,
+  type Logger,
+  type PriceData,
+  type CrossChainOpportunity,
+  type IndexedSnapshot,
+  type PricePoint,
+  type DetectorConfig,
+  type WhaleAnalysisConfig,
+  type MLPredictionConfig,
   // Token pair format utilities (INC-2 FIX: Standardized format handling)
   TOKEN_PAIR_INTERNAL_SEPARATOR,
   TOKEN_PAIR_DISPLAY_SEPARATOR,
@@ -63,10 +63,10 @@ export {
   toInternalTokenPair,
   normalizeToInternalFormat,
   // Phase 3: Pre-validation types
-  PreValidationConfig,
-  PreValidationSimulationCallback,
-  PreValidationSimulationRequest,
-  PreValidationSimulationResult,
+  type PreValidationConfig,
+  type PreValidationSimulationCallback,
+  type PreValidationSimulationRequest,
+  type PreValidationSimulationResult,
 } from './types';
 
 // =============================================================================
@@ -84,9 +84,9 @@ export {
 /** @internal */
 export {
   createStreamConsumer,
-  StreamConsumer,
-  StreamConsumerConfig,
-  StreamConsumerEvents,
+  type StreamConsumer,
+  type StreamConsumerConfig,
+  type StreamConsumerEvents,
 } from './stream-consumer';
 
 // =============================================================================
@@ -103,8 +103,8 @@ export {
 /** @internal */
 export {
   createPriceDataManager,
-  PriceDataManager,
-  PriceDataManagerConfig,
+  type PriceDataManager,
+  type PriceDataManagerConfig,
 } from './price-data-manager';
 
 // =============================================================================
@@ -122,8 +122,8 @@ export {
 /** @internal */
 export {
   createOpportunityPublisher,
-  OpportunityPublisher,
-  OpportunityPublisherConfig,
+  type OpportunityPublisher,
+  type OpportunityPublisherConfig,
 } from './opportunity-publisher';
 
 // =============================================================================
@@ -141,14 +141,14 @@ export {
 // =============================================================================
 
 /** @internal */
-export { BridgeLatencyPredictor, BridgePrediction, BridgeMetrics } from './bridge-predictor';
+export { BridgeLatencyPredictor, type BridgePrediction, type BridgeMetrics } from './bridge-predictor';
 
 /** @internal */
 export {
   createBridgeCostEstimator,
-  BridgeCostEstimator,
-  BridgeCostEstimatorConfig,
-  BridgeCostEstimate,
+  type BridgeCostEstimator,
+  type BridgeCostEstimatorConfig,
+  type BridgeCostEstimate,
 } from './bridge-cost-estimator';
 
 // =============================================================================
@@ -165,8 +165,8 @@ export {
 /** @internal */
 export {
   createMLPredictionManager,
-  MLPredictionManager,
-  MLPredictionManagerConfig,
+  type MLPredictionManager,
+  type MLPredictionManagerConfig,
 } from './ml-prediction-manager';
 
 // =============================================================================

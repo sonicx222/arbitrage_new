@@ -80,7 +80,7 @@ interface BaseDetectorConfig {
 }
 
 // Re-export ChainInstanceFactory for backward compatibility
-export { ChainInstanceFactory };
+export type { ChainInstanceFactory };
 
 export interface UnifiedDetectorConfig extends BaseDetectorConfig {
   /** Optional logger for testing (defaults to createLogger) */

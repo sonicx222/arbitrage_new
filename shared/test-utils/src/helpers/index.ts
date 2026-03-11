@@ -27,12 +27,12 @@ export {
   waitForCondition,
 
   // Types
-  FakeTimerConfig,
+  type FakeTimerConfig,
 } from './timer-helpers';
 
 export {
   // Test state management
-  Resettable,
+  type Resettable,
   verifyResettable,
   createResetHook,
   resetStateHelper,
