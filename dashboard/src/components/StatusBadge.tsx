@@ -7,7 +7,7 @@ interface Props {
 }
 
 export const StatusBadge = memo(function StatusBadge({ status, label }: Props) {
-  const isActive = status === 'healthy' || status === 'CLOSED';
+  const isActive = status === 'healthy' || status === 'warning' || status === 'CLOSED';
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className="relative flex h-2 w-2">

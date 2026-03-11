@@ -48,8 +48,8 @@ export function thresholdColor(value: number, high: number, mid: number): string
 export function statusColor(status: string): string {
   switch (status) {
     case 'healthy': case 'CLOSED': return 'text-accent-green';
-    case 'degraded': case 'HALF_OPEN': return 'text-accent-yellow';
-    case 'unhealthy': case 'OPEN': return 'text-accent-red';
+    case 'degraded': case 'warning': case 'HALF_OPEN': return 'text-accent-yellow';
+    case 'unhealthy': case 'critical': case 'OPEN': return 'text-accent-red';
     default: return 'text-gray-400';
   }
 }
@@ -57,8 +57,8 @@ export function statusColor(status: string): string {
 export function statusDot(status: string): string {
   switch (status) {
     case 'healthy': case 'CLOSED': return 'bg-accent-green';
-    case 'degraded': case 'HALF_OPEN': return 'bg-accent-yellow';
-    case 'unhealthy': case 'OPEN': return 'bg-accent-red';
+    case 'degraded': case 'warning': case 'HALF_OPEN': return 'bg-accent-yellow';
+    case 'unhealthy': case 'critical': case 'OPEN': return 'bg-accent-red';
     default: return 'bg-gray-500';
   }
 }

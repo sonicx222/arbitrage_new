@@ -146,12 +146,20 @@ describe('statusColor', () => {
     expect(statusColor('degraded')).toBe('text-accent-yellow');
   });
 
+  it('returns yellow for warning (stream health)', () => {
+    expect(statusColor('warning')).toBe('text-accent-yellow');
+  });
+
   it('returns yellow for HALF_OPEN', () => {
     expect(statusColor('HALF_OPEN')).toBe('text-accent-yellow');
   });
 
   it('returns red for unhealthy', () => {
     expect(statusColor('unhealthy')).toBe('text-accent-red');
+  });
+
+  it('returns red for critical (stream health)', () => {
+    expect(statusColor('critical')).toBe('text-accent-red');
   });
 
   it('returns red for OPEN', () => {
@@ -176,12 +184,20 @@ describe('statusDot', () => {
     expect(statusDot('degraded')).toBe('bg-accent-yellow');
   });
 
+  it('returns yellow for warning (stream health)', () => {
+    expect(statusDot('warning')).toBe('bg-accent-yellow');
+  });
+
   it('returns yellow for HALF_OPEN', () => {
     expect(statusDot('HALF_OPEN')).toBe('bg-accent-yellow');
   });
 
   it('returns red for unhealthy', () => {
     expect(statusDot('unhealthy')).toBe('bg-accent-red');
+  });
+
+  it('returns red for critical (stream health)', () => {
+    expect(statusDot('critical')).toBe('bg-accent-red');
   });
 
   it('returns red for OPEN', () => {

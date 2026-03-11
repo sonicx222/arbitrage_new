@@ -137,11 +137,13 @@ export class StreamHealthMonitor {
       this.defaultConsumerGroup = config.consumerGroup;
     }
     // Default thresholds
+    // lengthWarning/Critical aligned with MAXLEN caps (100K-200K for active streams):
+    // 50K = ~25-50% capacity (warning), 150K = ~75-150% capacity (critical)
     this.thresholds = {
       lagWarning: 100,
       lagCritical: 1000,
-      lengthWarning: 10000,
-      lengthCritical: 80000
+      lengthWarning: 50000,
+      lengthCritical: 150000
     };
 
     // Initialize default streams to monitor
