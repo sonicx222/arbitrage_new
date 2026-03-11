@@ -6,10 +6,39 @@ All services must be running. Uses curl, redis-cli, jq.
 ## References
 
 - **Inventory**: `./monitor-session/config/inventory.json`
-- **Config**: `.claude/commands/monitoring/config.json` (thresholds, perChainStalenessThresholds)
+- **Config**: `.claude/commands/monitoring/config.json` (thresholds, perChainStalenessThresholds, severityOverrides)
 - **Findings file**: `./monitor-session/findings/runtime.jsonl`
 - **Finding ID prefix**: `RT-NNN`
 - **Cache dir**: `./monitor-session/config/cache/`
+
+## Severity Override System
+
+Read `DATA_MODE` and `config.json`.severityOverrides to apply mode-conditional severity adjustments.
+This prevents known structural limitations (e.g., gas=0 in simulation) from permanently blocking GO.
+
+```bash
+MONITOR_DATA_MODE=$(cat ./monitor-session/DATA_MODE)
+```
+
+Lookup: before emitting a finding, check if `severityOverrides.$MONITOR_DATA_MODE` has a matching
+key in the format `CATEGORY:qualifier`. If matched, use the override severity instead of the
+default. The original severity is preserved in an `"originalSeverity"` field for audit.
+
+**Active overrides for `simulation` mode:**
+
+| Override Key | Default → Override | Rationale |
+|-------------|-------------------|-----------|
+| `GAS_SPIKE:gas_price_zero` | H → I | Gas oracle not wired in sim |
+| `SIMULATION:providers_unhealthy` | M → I | No sim backend in dev |
+| `MEMORY:rss_above_threshold` | H → M | SAB structural, not a regression |
+| `RUNTIME_PERFORMANCE:eventloop_p99_elevated` | H → M | Sim load profile differs from prod |
+| `RUNTIME_PERFORMANCE:eventloop_max_elevated` | H → M | Single spikes expected under sim GC |
+| `RUNTIME_PERFORMANCE:gc_major_ratio` | H → L | Higher GC pressure expected in sim |
+| `RUNTIME_PERFORMANCE:gc_pause_elevated` | M → L | Cumulative GC less critical in sim |
+| `DIAGNOSTICS:pipeline_latency_zeros` | M → I | LatencyTracker not wired for synthetic events |
+| `DIAGNOSTICS:providers_empty` | M → I | No real RPC/WS in simulation |
+
+When overrides are applied, annotate the finding with `[SIM-OVERRIDE]` in the title.
 
 ## Finding Format
 
@@ -427,8 +456,10 @@ cat ./monitor-session/config/cache/diagnostics.json | jq '.runtime.eventLoop'
 
 Flags:
 - p99 > `eventLoopP99CritMs` (50ms) -> H:RUNTIME_PERFORMANCE (violates ADR-022)
+  `[SIM-OVERRIDE: RUNTIME_PERFORMANCE:eventloop_p99_elevated → M]`
 - p99 > `eventLoopP99WarnMs` (20ms) -> M:RUNTIME_PERFORMANCE
 - max > 200ms -> H:RUNTIME_PERFORMANCE (severe stall)
+  `[SIM-OVERRIDE: RUNTIME_PERFORMANCE:eventloop_max_elevated → M]`
 - Metrics not present -> M:RUNTIME_PERFORMANCE
 - All p99 < 20ms -> I:RUNTIME_PERFORMANCE
 
@@ -453,7 +484,9 @@ cat ./monitor-session/config/cache/diagnostics.json | jq '.runtime.gc'
 Flags:
 - `major_count` > `gcMajorWarn` (10) -> M:RUNTIME_PERFORMANCE
 - `pause_total_ms` > 500ms cumulative -> M:RUNTIME_PERFORMANCE
+  `[SIM-OVERRIDE: RUNTIME_PERFORMANCE:gc_pause_elevated → L]`
 - Major GC > 10% of total GC -> H:RUNTIME_PERFORMANCE (heap pressure)
+  `[SIM-OVERRIDE: RUNTIME_PERFORMANCE:gc_major_ratio → L]`
 
 ---
 
@@ -482,6 +515,7 @@ redis-cli INFO memory
 Flags (from `config.json`):
 - `heap_used/heap_total` > `heapRatioWarn` (0.85) -> H:MEMORY
 - `rss_mb` > `rssMbCrit` (500) -> H:MEMORY
+  `[SIM-OVERRIDE: MEMORY:rss_above_threshold → M]`
 - `external_mb` > 200 -> M:MEMORY (SharedArrayBuffer growth)
 - Memory metrics not present -> L:MEMORY (fallback: /health memoryUsage)
 - Redis memory >75% of maxmemory -> H:MEMORY
@@ -643,6 +677,7 @@ grep arbitrage_gas_price_gwei ./monitor-session/config/cache/metrics_3005.txt
 
 Flags:
 - Any chain gas price = 0 -> H:GAS_SPIKE (not being fetched)
+  `[SIM-OVERRIDE: GAS_SPIKE:gas_price_zero → I]`
 - Active gas spike detected -> M:GAS_SPIKE
 - Gas price above chain max (Ethereum max 500 gwei, Arbitrum max 10 gwei) -> H:GAS_SPIKE
 
@@ -654,6 +689,7 @@ Parse cached `stats_3005.json` for simulation provider status, success rate.
 
 Flags:
 - All simulation providers unhealthy -> H:SIMULATION
+  `[SIM-OVERRIDE: SIMULATION:providers_unhealthy → I]`
 - Success rate <50% -> M:SIMULATION
 - No providers configured -> M:SIMULATION
 
@@ -1035,10 +1071,66 @@ cat ./monitor-session/config/cache/diagnostics.json | jq '.streams // "not_prese
 Flags:
 - `/api/diagnostics` returns 500 -> H:DIAGNOSTICS (collect() failed)
 - `pipeline.e2e` all zeros after 30s+ uptime -> M:DIAGNOSTICS (LatencyTracker disconnected)
+  `[SIM-OVERRIDE: DIAGNOSTICS:pipeline_latency_zeros → I]`
 - `providers.rpcByChain` empty but partitions have active WS -> M:DIAGNOSTICS
+  `[SIM-OVERRIDE: DIAGNOSTICS:providers_empty → I]`
 - `runtime.eventLoop.p99` differs from Prometheus by >50% -> L:DIAGNOSTICS (stale data)
 - `runtime.uptimeSeconds` is 0 or negative -> L:DIAGNOSTICS
 - All populated -> I:DIAGNOSTICS
+
+---
+
+## Finding Aggregation
+
+Before writing the Phase 3 summary, aggregate per-service findings that share the same
+category and severity into single consolidated findings. This reduces noise while preserving
+all diagnostic detail.
+
+**Aggregation rules:**
+1. Group findings by `{category}:{severity}` within each subsection.
+2. If a group has 3+ findings for different services in the same check, create one aggregate
+   finding with `findingId: "RT-A<nn>"` that summarizes all services.
+3. The aggregate takes the **maximum severity** across its members.
+4. Each member finding gets an `"aggregatedInto": "RT-A<nn>"` field in the JSONL.
+5. The aggregate finding includes a `"details"` array with per-service evidence.
+
+**Aggregation targets** (categories that commonly produce per-service breakdowns):
+
+| Category | Typical Per-Service Count | Aggregate Title Template |
+|----------|--------------------------|--------------------------|
+| `RUNTIME_PERFORMANCE` (event loop) | 5-7 | "Event loop p99 elevated on N/7 services" |
+| `RUNTIME_PERFORMANCE` (GC) | 4-5 | "GC pressure elevated on N services" |
+| `MEMORY` (RSS) | 5-7 | "RSS exceeds threshold on N/7 services" |
+| `DETECTION_QUALITY` (publish drops) | 3-4 | "Opportunity publish drops on N partitions" |
+| `METRICS_COMPLETENESS` | 2-4 | "Metrics gaps on N services" |
+
+**Example aggregate finding:**
+```json
+{
+  "phase": "RUNTIME",
+  "findingId": "RT-A01",
+  "category": "RUNTIME_PERFORMANCE",
+  "severity": "H",
+  "title": "Event loop p99 elevated on 5/7 services [SIM-OVERRIDE → M]",
+  "aggregate": true,
+  "memberCount": 5,
+  "details": [
+    {"service": "P1 (3001)", "p99": 3097, "max": 14068},
+    {"service": "P2 (3002)", "p99": 763, "max": 14680},
+    {"service": "P3 (3003)", "p99": 124, "max": 8649},
+    {"service": "Coord (3000)", "p99": 40, "max": 1285},
+    {"service": "P4 (3004)", "p99": 48, "max": 1422}
+  ],
+  "originalSeverity": "H",
+  "recommendation": "Profile event loop blocking on partitions. SAB contention and GC pressure are likely contributors."
+}
+```
+
+Individual per-service findings (RT-050 through RT-054 etc.) are still written to JSONL for audit,
+but the Phase 3 summary counts only the aggregate finding toward the severity totals.
+
+**GO/NO-GO impact:** Aggregated findings count as 1 finding per aggregate for severity thresholds.
+For session 101042, this would reduce ~18 per-service findings to ~4 aggregates.
 
 ---
 

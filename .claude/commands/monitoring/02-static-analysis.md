@@ -390,7 +390,8 @@ Known prefixes: `coordinator:leader:lock`, `lock:execution:`, `lock:`, `bridge:r
 `bridge:recovery:corrupt:`, `commit-reveal:`, `region:health:`, `pair:`,
 `risk:probabilities:`, `ratelimit:`, `api:`, `arbitrage:`, `auth:`, `critical:`, `dlq:`,
 `price:`, `health:`, `health:system:snapshot`, `health_state:`, `metrics:system:recent`,
-`quality:score:current`, `quality:detection:`, `opp:dedup:`, `service-degradation:`
+`quality:score:current`, `quality:detection:`, `opp:dedup:`, `service-degradation:`,
+`adaptive:sandwich_attacks`, `adaptive:threshold_adjustments:`
 
 Flags:
 - Two services using same prefix -> H:REDIS_KEY_REGISTRY
@@ -408,7 +409,8 @@ Verify code complies with key architectural decisions. Spot-checks, not exhausti
 ```
 Grep for: \.\.\.\w+ in:
   shared/core/src/caching/price-matrix.ts
-  shared/core/src/partitioned-detector.ts
+  shared/core/src/partition/runner.ts
+  shared/core/src/partition/handlers.ts
   shared/core/src/monitoring/provider-latency-tracker.ts
   shared/core/src/monitoring/runtime-monitor.ts
   services/execution-engine/src/

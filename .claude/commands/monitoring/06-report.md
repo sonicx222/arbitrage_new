@@ -45,15 +45,31 @@ redis-cli SHUTDOWN NOSAVE 2>/dev/null || echo "Redis already stopped"
 Read ALL finding files:
 - `./monitor-session/findings/static-analysis.jsonl`
 - `./monitor-session/findings/startup.jsonl`
-- `./monitor-session/findings/runtime.jsonl`
-- `./monitor-session/findings/smoke-test.jsonl`
+- `./monitor-session/findings/runtime.jsonl` (if not quick mode)
+- `./monitor-session/findings/smoke-test.jsonl` (if not quick mode)
 
-Count findings by severity. Apply rules from `config.json`.goNoGo:
+### Severity counting rules
+
+**Aggregation-aware counting:** When a finding has `"aggregatedInto": "RT-A<nn>"`, do NOT count
+it individually — count only the aggregate finding. This prevents per-service breakdowns from
+inflating the severity totals. Raw JSONL preserves all individual findings for audit.
+
+**Severity override accounting:** Findings with `"originalSeverity"` have been downgraded by
+the mode-conditional severity override system. Count them at their **overridden** (lower) severity,
+not the original. Include an "Overrides Applied" count in the report.
+
+### GO/NO-GO rules
+
+Apply rules from `config.json`.goNoGo:
 
 `[ALL]` Base rules:
 - Any CRITICAL → **NO-GO**
 - More than `config.json`.goNoGo.maxHighForGo HIGH findings → **NO-GO**
 - All else → **GO** (with warnings)
+
+`[QUICK]` Quick mode rules:
+- Only Phase 1 findings are present — annotate decision as `[QUICK-STATIC-ONLY]`
+- Same severity thresholds apply but result is advisory (no runtime validation)
 
 `[LIVE/TESTNET]` Adjustments:
 - Exclude `[LIVE-EXPECTED]` annotations from HIGH count
@@ -116,17 +132,20 @@ Write to `./monitor-session/REPORT_<SESSION_ID>.md`:
 # Pre-Deploy Validation Report
 
 **Session:** <SESSION_ID> | **Date:** <ISO8601> | **Duration:** <elapsed>
-**Git SHA:** <CURRENT_SHA> | **Mode:** FULL / INCREMENTAL | **Data Mode:** SIM / LIVE / TESTNET
+**Git SHA:** <CURRENT_SHA> | **Mode:** FULL / INCREMENTAL / QUICK | **Data Mode:** SIM / LIVE / TESTNET
+**Config:** v4.1 | **Overrides applied:** <n> findings downgraded | **Aggregates:** <n> groups
 
-## Decision: GO / NO-GO
+## Decision: GO / NO-GO <[QUICK-STATIC-ONLY] if quick mode>
 
-| Severity | Count |
-|----------|-------|
-| CRITICAL | <n> |
-| HIGH     | <n> |
-| MEDIUM   | <n> |
-| LOW      | <n> |
-| INFO     | <n> |
+| Severity | Raw Count | After Aggregation | After Overrides |
+|----------|-----------|-------------------|-----------------|
+| CRITICAL | <n> | <n> | <n> |
+| HIGH     | <n> | <n> | <n> |
+| MEDIUM   | <n> | <n> | <n> |
+| LOW      | <n> | <n> | <n> |
+| INFO     | <n> | <n> | <n> |
+
+**GO/NO-GO uses "After Overrides" column** for severity threshold evaluation.
 
 **Reason:** <if NO-GO, list blocking findings>
 

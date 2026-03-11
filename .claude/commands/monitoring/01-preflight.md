@@ -17,6 +17,33 @@ echo $CURRENT_SHA > ./monitor-session/current.sha
 echo "Session $SESSION_ID initialized (git SHA: $CURRENT_SHA)"
 ```
 
+### Clear findings from previous session
+
+Truncate all finding files to prevent stale data accumulation and duplicate entries.
+
+```bash
+> ./monitor-session/findings/static-analysis.jsonl
+> ./monitor-session/findings/startup.jsonl
+> ./monitor-session/findings/runtime.jsonl
+> ./monitor-session/findings/smoke-test.jsonl
+> ./monitor-session/findings/report.jsonl
+echo "Findings files cleared for session $SESSION_ID"
+```
+
+### Session history rotation
+
+Keep the 30 most recent session history files and reports to prevent disk growth.
+
+```bash
+HISTORY_COUNT=$(ls ./monitor-session/history/*.json 2>/dev/null | wc -l)
+if [ "$HISTORY_COUNT" -gt 30 ]; then
+  REMOVED=$(( HISTORY_COUNT - 30 ))
+  ls -t ./monitor-session/history/*.json | tail -n +31 | xargs rm -f
+  ls -t ./monitor-session/REPORT_*.md 2>/dev/null | tail -n +31 | xargs rm -f
+  echo "Rotated session history: kept 30, removed $REMOVED old sessions"
+fi
+```
+
 ## Data Mode Selection
 
 Three modes control how services source price data and handle execution:

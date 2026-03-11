@@ -1,7 +1,10 @@
 # Pre-Deploy Validation — Orchestrator Hub
-# Version: 4.0
+# Version: 4.1
 # Modular pipeline: this hub dispatches 5 phases via on-demand module loading.
 # Total checks: 24 static + 42 runtime + 12 smoke test steps = 78 validation points.
+#
+# Quick mode: set MONITOR_QUICK_MODE=true to run only Pre-Flight + Phase 1.
+# No services needed. ~60 seconds. Useful for pre-commit validation.
 
 ## Architecture
 
@@ -47,6 +50,19 @@ Compact notation: `condition → SEV:CATEGORY` (e.g., `→ H:STREAM_DECLARATION`
    - Supports incremental mode: skip checks on unchanged files
    - Findings → `./monitor-session/findings/static-analysis.jsonl`
 
+### Quick Mode Exit Point
+
+```bash
+MONITOR_QUICK_MODE="${MONITOR_QUICK_MODE:-false}"
+if [ "$MONITOR_QUICK_MODE" = "true" ]; then
+  echo "QUICK MODE: Skipping Phases 2-4. Generating static-only report."
+  # Jump directly to Phase 5 (report) with static-analysis data only
+fi
+```
+
+If `MONITOR_QUICK_MODE=true`, skip steps 4-6 and jump to step 7 (Phase 5 — Report).
+The report will contain only Phase 1 findings with a `[QUICK]` annotation.
+
 ### Phase 2 — Startup & Readiness (~60 seconds)
 
 4. Read and execute `monitoring/03-startup.md`
@@ -84,6 +100,7 @@ Compact notation: `condition → SEV:CATEGORY` (e.g., `→ H:STREAM_DECLARATION`
 |-------|--------|--------|------|------------|
 | Pre-flight | 00 + 01 | — | 10s | inventory.json, DATA_MODE |
 | 1. Static | 02 | 24 | 60s | static-analysis.jsonl |
+| *Quick exit* | — | — | — | *If MONITOR_QUICK_MODE=true, skip to Phase 5* |
 | 2. Startup | 03 | 5 steps | 60s | startup.jsonl |
 | 3. Runtime | 04 | 42 | 120s | runtime.jsonl |
 | 4. Smoke | 05 | 12 steps | 90s | smoke-test.jsonl |
@@ -97,9 +114,10 @@ Compact notation: `condition → SEV:CATEGORY` (e.g., `→ H:STREAM_DECLARATION`
 
 ## Configuration
 
-All thresholds in `monitoring/config.json`. Key settings:
+All thresholds in `monitoring/config.json` (v4.1). Key settings:
 - `goNoGo.anyCritical: "NO-GO"` — any CRITICAL finding blocks deployment
 - `goNoGo.maxHighForGo: 3` — more than 3 HIGH findings blocks deployment
+- `severityOverrides` — per-mode severity downgrades for known structural findings
 - `readinessTimeouts` — mode-specific service startup timeouts
 - `perChainStalenessThresholds` — per-chain price update freshness (seconds)
 - `placeholderMetrics` — metrics not yet implemented (skip curl, emit INFO)

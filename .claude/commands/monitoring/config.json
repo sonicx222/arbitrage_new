@@ -1,5 +1,5 @@
 {
-  "version": "4.0",
+  "version": "4.1",
   "thresholds": {
     "eventLoopP99WarnMs": 20,
     "eventLoopP99CritMs": 50,
@@ -30,6 +30,21 @@
     "wsReconnectCrit": 10,
     "rpcErrorRateWarnPct": 5,
     "rpcErrorRateCritPct": 10
+  },
+  "severityOverrides": {
+    "simulation": {
+      "GAS_SPIKE:gas_price_zero": "INFO",
+      "SIMULATION:providers_unhealthy": "INFO",
+      "MEMORY:rss_above_threshold": "MEDIUM",
+      "RUNTIME_PERFORMANCE:eventloop_p99_elevated": "MEDIUM",
+      "RUNTIME_PERFORMANCE:eventloop_max_elevated": "MEDIUM",
+      "RUNTIME_PERFORMANCE:gc_major_ratio": "LOW",
+      "RUNTIME_PERFORMANCE:gc_pause_elevated": "LOW",
+      "DIAGNOSTICS:pipeline_latency_zeros": "INFO",
+      "DIAGNOSTICS:providers_empty": "INFO"
+    },
+    "live": {},
+    "testnet": {}
   },
   "goNoGo": {
     "anyCritical": "NO-GO",
