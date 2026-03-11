@@ -392,6 +392,27 @@ describeIfSAB('SharedMemoryCache', () => {
       expect(s.utilization).toBeLessThanOrEqual(1);
     });
 
+    it('B-003 Regression: utilization should start near 0 for empty cache', () => {
+      // Previously getUtilization() always returned ~100% because it read
+      // static DATA_START_OFFSET instead of nextWriteOffset
+      const s = cache.stats();
+      expect(s.utilization).toBeLessThan(0.01); // Empty cache should be near 0%
+    });
+
+    it('B-003 Regression: utilization should increase as entries are added', () => {
+      const emptyUtil = cache.stats().utilization;
+
+      // Add several entries to consume buffer space
+      for (let i = 0; i < 100; i++) {
+        cache.set(`util-key-${i}`, { data: 'x'.repeat(100), index: i });
+      }
+
+      const filledUtil = cache.stats().utilization;
+      expect(filledUtil).toBeGreaterThan(emptyUtil);
+      expect(filledUtil).toBeGreaterThan(0); // Must reflect actual data written
+      expect(filledUtil).toBeLessThan(1); // Should not be fully utilized with 100 small entries in 1MB
+    });
+
     it('should return 0 entries after clear', () => {
       cache.set('a', 1);
       cache.clear();

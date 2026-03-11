@@ -393,6 +393,10 @@ export class PairCacheService extends EventEmitter implements Resettable {
 
     } catch (error) {
       this.stats.errors++;
+      // B-006 FIX: Increment per-item miss counters on batch error.
+      // Previously only totalLookups was pre-incremented but cacheMisses
+      // was not updated, causing stats drift and inaccurate hit ratios.
+      this.stats.cacheMisses += requests.length;
       this.logger.error('Batch get error', { error });
 
       // Return all misses on error

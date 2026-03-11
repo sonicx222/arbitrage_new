@@ -863,9 +863,12 @@ export class HierarchicalCache {
     // T1.4: O(1) remove instead of O(n) indexOf + O(n) splice
     this.l1EvictionQueue.remove(key);
 
-    // PHASE1-TASK33: Clear from PriceMatrix if enabled
-    // Note: PriceMatrix doesn't have a delete method, but we don't need to
-    // explicitly clear it since we use l1Metadata.has() to check validity
+    // B-001 FIX: Clear from PriceMatrix to prevent slot leak.
+    // PriceMatrix.deletePrice() zeros the slot so it can be reused.
+    // Without this, invalidated slots permanently occupy PriceMatrix capacity.
+    if (this.usePriceMatrix && this.priceMatrix) {
+      this.priceMatrix.deletePrice(key);
+    }
   }
 
   /**
@@ -1451,7 +1454,7 @@ export function getHierarchicalCache(config?: Partial<CacheConfig>): Hierarchica
       l1Enabled: true,
       l1Size: CACHE_DEFAULTS.defaultL1SizeMb,
       l2Enabled: true,
-      l2Ttl: 600, // 10 minutes
+      l2Ttl: CACHE_DEFAULTS.defaultL2TtlSeconds, // H-001 FIX: Use single source of truth (was hardcoded 600)
       l3Enabled: true,
       enablePromotion: true,
       enableDemotion: true

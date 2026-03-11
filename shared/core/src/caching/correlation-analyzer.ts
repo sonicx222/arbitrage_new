@@ -503,17 +503,19 @@ export class CorrelationAnalyzer {
     const batchPairs = new Set(updates.map(u => u.pairAddress));
     const batchTime = Math.max(...updates.map(u => u.timestamp));
 
-    // Track co-occurrences between all pairs in the batch
-    // All pairs that updated together in the same batch are considered co-occurring
-    for (const pairA of batchPairs) {
-      for (const pairB of batchPairs) {
-        if (pairA !== pairB) {
-          // Record bidirectional co-occurrence using existing private method
-          this.recordCoOccurrence(pairA, pairB, batchTime);
-        }
+    // B-002 FIX: Track co-occurrences between all pairs in the batch.
+    // Convert to array for index-based iteration to avoid double-counting.
+    // Previously: nested loop over Set recorded (A,B) and (B,A) on EACH outer
+    // iteration, inflating co-occurrence counts 2x vs non-batch mode.
+    // Now: inner loop starts at i+1, records bidirectional once per pair.
+    const batchPairsArray = Array.from(batchPairs);
+    for (let i = 0; i < batchPairsArray.length; i++) {
+      for (let j = i + 1; j < batchPairsArray.length; j++) {
+        this.recordCoOccurrence(batchPairsArray[i], batchPairsArray[j], batchTime);
+        this.recordCoOccurrence(batchPairsArray[j], batchPairsArray[i], batchTime);
       }
       // Add to recently updated for future correlation tracking
-      this.recentlyUpdatedPairs.set(pairA, batchTime);
+      this.recentlyUpdatedPairs.set(batchPairsArray[i], batchTime);
     }
 
     logger.debug('Batch processing completed', {

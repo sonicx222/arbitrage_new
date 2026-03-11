@@ -441,6 +441,24 @@ describe('PairCacheService', () => {
       expect(service.getStats().batchOperations).toBe(1);
     });
 
+    it('B-006 Regression: should increment cacheMisses on batch error', async () => {
+      mockRedis.mget.mockRejectedValueOnce(new Error('Batch fail'));
+
+      const requests = [
+        { chain: 'bsc', dex: 'pancakeswap', token0: '0xa', token1: '0xb' },
+        { chain: 'bsc', dex: 'pancakeswap', token0: '0xc', token1: '0xd' },
+        { chain: 'bsc', dex: 'pancakeswap', token0: '0xe', token1: '0xf' },
+      ];
+
+      await service.getMany(requests);
+
+      const stats = service.getStats();
+      // totalLookups was pre-incremented by requests.length (3)
+      // cacheMisses should also be incremented by 3 on error
+      expect(stats.cacheMisses).toBe(3);
+      expect(stats.errors).toBe(1);
+    });
+
     it('should recognize NULL_PAIR markers in batch results', async () => {
       mockRedis.mget.mockResolvedValueOnce(['NULL_PAIR']);
 

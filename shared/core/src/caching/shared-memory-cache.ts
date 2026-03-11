@@ -170,7 +170,16 @@ export class SharedMemoryCache {
     };
   }
 
-  // Atomic operations for thread safety
+  /**
+   * Increment a numeric value by delta.
+   *
+   * **WARNING**: This is NOT truly atomic even when `enableAtomicOperations=true`.
+   * Both paths use non-atomic get/set on JSON-serialized values in SharedArrayBuffer.
+   * Safe ONLY in single-writer scenarios (one thread writes, others read).
+   * For multi-writer atomic increments, use Atomics.add on fixed-layout buffers.
+   *
+   * @see compareAndSet for the same caveat
+   */
   increment(key: string, delta: number = 1): number {
     // Values are JSON-serialized, so raw Atomics.add on the buffer is not
     // feasible. Use get/set for both atomic and non-atomic paths.
@@ -466,9 +475,13 @@ export class SharedMemoryCache {
   }
 
   private getUtilization(): number {
-    const dataStart = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
-    const used = this.view.length - dataStart;
-    return used / this.view.length;
+    // B-003 FIX: Use nextWriteOffset to track actual data usage.
+    // Previously read static DATA_START_OFFSET (always METADATA_SIZE=16),
+    // making utilization always ~100% regardless of actual fill level.
+    const dataCapacity = this.view.length - SharedMemoryCache.METADATA_SIZE;
+    if (dataCapacity <= 0) return 0;
+    const dataUsed = this.nextWriteOffset - SharedMemoryCache.METADATA_SIZE;
+    return dataUsed / dataCapacity;
   }
 
   // Cleanup expired entries — single-pass over keyOffsetMap

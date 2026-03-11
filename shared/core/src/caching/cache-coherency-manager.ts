@@ -66,8 +66,6 @@ export class CacheCoherencyManager {
   // P2-FIX: Maximum pending operations to prevent unbounded memory growth
   private readonly MAX_PENDING_OPERATIONS = 1000;
   private readonly PRUNE_TARGET = 500;
-  // P1-12 FIX: Lock for atomic vector clock operations
-  private vectorClockLock: boolean = false;
   // P1-13 FIX: Dead node cleanup timeout (remove nodes dead longer than this)
   private readonly DEAD_NODE_CLEANUP_MS = 300000; // 5 minutes
   // P1-13 FIX: Maximum number of nodes to track
@@ -380,12 +378,10 @@ export class CacheCoherencyManager {
   }
 
   private findMissingOperations(remoteOps: Array<{ nodeId: string; version: number; key: string }>): string[] {
-    const localOpKeys = new Set(
-      this.pendingOperations.map(op => `${op.nodeId}:${op.version}:${op.key}`)
-    );
-
+    // PR-001 FIX: Reuse this.operationKeys (same key format as getOperationKey())
+    // instead of building a temporary Set on every digest receipt.
     return remoteOps
-      .filter(op => !localOpKeys.has(`${op.nodeId}:${op.version}:${op.key}`))
+      .filter(op => !this.operationKeys.has(`${op.nodeId}:${op.version}:${op.key}`))
       .map(op => op.key);
   }
 
@@ -456,34 +452,22 @@ export class CacheCoherencyManager {
 
   // Vector clock management
   /**
-   * P1-12 FIX: Atomic vector clock increment with lock.
+   * Increment vector clock for a node.
    *
-   * Previous implementation had a TOCTOU vulnerability where concurrent calls
-   * could read the same value and both increment to the same new value,
-   * resulting in skipped or duplicated versions breaking causal ordering.
-   *
-   * This fix uses a simple spin-lock pattern. While JavaScript is single-threaded,
-   * async operations can interleave, so we guard against concurrent access.
+   * L-001 FIX: Removed dead spin-lock. incrementVectorClock() is synchronous
+   * (no await, no callback) so it cannot interleave in Node.js single-threaded
+   * event loop. The lock provided zero protection and could only throw on
+   * impossible reentrant calls.
    */
   private incrementVectorClock(nodeId: string): number {
-    // P1-12 FIX: Simple spin-lock to prevent concurrent increments
-    if (this.vectorClockLock) {
-      throw new Error('Vector clock operation in progress - concurrent access detected');
-    }
-    this.vectorClockLock = true;
+    const current = this.vectorClock.get(nodeId) ?? 0;
+    const newValue = current + 1;
+    this.vectorClock.set(nodeId, newValue);
 
-    try {
-      const current = this.vectorClock.get(nodeId) ?? 0;
-      const newValue = current + 1;
-      this.vectorClock.set(nodeId, newValue);
+    // P1-14 FIX: Track when this entry was last updated for cleanup
+    this.vectorClockLastUpdated.set(nodeId, Date.now());
 
-      // P1-14 FIX: Track when this entry was last updated for cleanup
-      this.vectorClockLastUpdated.set(nodeId, Date.now());
-
-      return newValue;
-    } finally {
-      this.vectorClockLock = false;
-    }
+    return newValue;
   }
 
   private mergeVectorClock(remoteClock: Map<string, number>): void {
@@ -548,10 +532,17 @@ export class CacheCoherencyManager {
     }
   }
 
-  // Local operation application
+  /**
+   * Apply a received cache operation locally.
+   *
+   * TODO(L-002): This is a STUB — logs only, does not actually modify the cache.
+   * The gossip protocol infrastructure (heartbeats, digests, conflict resolution)
+   * is functional, but cache integration was never completed. To activate:
+   * 1. Accept a HierarchicalCache instance via constructor DI
+   * 2. Call cache.set/delete/invalidate based on operation.type
+   * 3. Add HMAC signing to gossip messages (SEC-H-005) before enabling
+   */
   private async applyOperationLocally(operation: CacheOperation): Promise<void> {
-    // This would integrate with the actual cache system
-    // For now, just log the operation
     logger.debug('Applying operation locally', {
       type: operation.type,
       key: operation.key,
