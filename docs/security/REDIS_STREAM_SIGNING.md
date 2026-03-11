@@ -13,7 +13,6 @@ All Redis Streams messages can be signed with HMAC-SHA256 to prevent tampering. 
 |----------|-------------|---------|
 | `STREAM_SIGNING_KEY` | Current HMAC signing key (any UTF-8 string, 32+ bytes recommended) | unset (disabled) |
 | `STREAM_SIGNING_KEY_PREVIOUS` | Previous key for zero-downtime rotation (OP-17) | unset |
-| `STREAM_LEGACY_HMAC_COMPAT` | Accept pre-OP-18 signatures (without stream name in HMAC input) | `false` |
 
 **Production requirement:** If `NODE_ENV=production` and `STREAM_SIGNING_KEY` is not set, the service throws on startup. Signing is mandatory in production.
 
@@ -117,9 +116,9 @@ In consumer groups, rejected messages are auto-ACKed to prevent PEL (pending ent
 
 ## Legacy Compatibility
 
-Set `STREAM_LEGACY_HMAC_COMPAT=true` only during migration from pre-OP-18 format (signatures computed without stream name in HMAC input). Once all services use OP-18 format, set to `false` to reduce HMAC operations per message.
-
-The deprecated `LEGACY_HMAC_COMPAT` env var is still accepted but logs a warning. Use `STREAM_LEGACY_HMAC_COMPAT` instead.
+**Removed in OPT-005.** The `STREAM_LEGACY_HMAC_COMPAT` and `LEGACY_HMAC_COMPAT` env vars
+are no longer recognized. All producers now include stream name in HMAC signatures (OP-18 format).
+Legacy (pre-OP-18) messages without stream name in the signature will fail verification.
 
 ---
 
@@ -128,7 +127,6 @@ The deprecated `LEGACY_HMAC_COMPAT` env var is still accepted but logs a warning
 **Messages rejected with "Invalid message signature":**
 1. Check all services use the same `STREAM_SIGNING_KEY`
 2. During rotation, verify `STREAM_SIGNING_KEY_PREVIOUS` is set on consumers
-3. Check for `LEGACY_HMAC_COMPAT` mismatch between producer and consumer
 
 **Messages rejected with "Unsigned message received":**
 1. Producer is not signing (missing `STREAM_SIGNING_KEY`)

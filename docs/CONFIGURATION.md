@@ -173,7 +173,7 @@ When configured, Pino logs are exported via OTLP/HTTP alongside console output. 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `STREAM_SIGNING_KEY` | HMAC-SHA256 signing key for Redis Streams messages. When set, all messages are signed on write and verified on read using `crypto.timingSafeEqual`. Unsigned or invalid messages are rejected. | unset (signing disabled) |
-| `LEGACY_HMAC_COMPAT` | Enable backward-compatible HMAC verification during key rotation. Accepts both old and new signing keys. | `false` |
+| `STREAM_SIGNING_KEY_PREVIOUS` | Previous signing key for zero-downtime rotation (OP-17). Both keys are tried during verification. | unset |
 
 **Key files:** `shared/core/src/redis-streams.ts`
 

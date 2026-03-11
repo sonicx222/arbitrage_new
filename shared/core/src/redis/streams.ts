@@ -39,13 +39,6 @@ export interface RedisStreamsClientDeps {
   /** OP-17 FIX: Previous signing key accepted during rotation window. */
   previousSigningKey?: string;
   /**
-   * P2-17 FIX: When false, skips legacy (pre-OP-18) signature checks that omit stream name.
-   * Reduces HMAC computations from up to 4 per message to 1-2. Set to false once all
-   * producers have been updated to include stream name in signatures.
-   * Default: true (backward compatible).
-   */
-  legacySignatureCompatEnabled?: boolean;
-  /**
    * P0 Fix ES-002: Circuit breaker threshold for xadd operations.
    * After this many consecutive failures, xadd will fail fast instead of retrying.
    * Default: 5.
@@ -417,8 +410,6 @@ export class RedisStreamsClient {
   /** OP-32 FIX: Cached KeyObject instances to avoid per-message crypto.createHmac() overhead */
   private cachedSigningKeyObj: crypto.KeyObject | null = null;
   private cachedPreviousKeyObj: crypto.KeyObject | null = null;
-  /** P2-17 FIX: Skip legacy (no-stream-name) HMAC checks when false. */
-  private legacySignatureCompatEnabled: boolean;
   /** P0 Fix ES-002: Circuit breaker to prevent thundering herd on Redis failures during xadd. */
   private xaddCircuitBreaker: SimpleCircuitBreaker;
   /** SA-1C-004: Track warned streams to avoid log spam for unknown MAXLEN lookups */
@@ -482,8 +473,6 @@ export class RedisStreamsClient {
     this.signingKey = deps?.signingKey ?? null;
     // OP-17 FIX: Accept previous key for dual-key verification during rotation
     this.previousSigningKey = deps?.previousSigningKey ?? null;
-    // P2-17 FIX: Legacy compat flag for pre-OP-18 messages without stream name in signature
-    this.legacySignatureCompatEnabled = deps?.legacySignatureCompatEnabled ?? true;
     // OP-32 FIX: Pre-cache KeyObject instances to avoid per-message crypto.createHmac() allocation
     if (this.signingKey) {
       this.cachedSigningKeyObj = crypto.createSecretKey(Buffer.from(this.signingKey, 'utf8'));
@@ -510,17 +499,10 @@ export class RedisStreamsClient {
       );
     }
 
-    // P2-008 FIX: Log legacy HMAC compat status at startup. When enabled, HMAC verification
-    // computes up to 4 digests per message (current key + previous key × with/without stream name).
-    // Set STREAM_LEGACY_HMAC_COMPAT=false once all services use OP-18 format to reduce to 1-2 attempts.
     if (this.signingKey) {
       this.logger.info('HMAC signing initialized', {
-        legacySignatureCompat: this.legacySignatureCompatEnabled,
         hasPreviousKey: !!this.previousSigningKey,
-        maxHmacOpsPerMessage: this.legacySignatureCompatEnabled && this.previousSigningKey ? 4
-          : this.previousSigningKey ? 2
-          : this.legacySignatureCompatEnabled ? 2
-          : 1,
+        maxHmacOpsPerMessage: this.previousSigningKey ? 2 : 1,
       });
     }
 
@@ -652,45 +634,32 @@ export class RedisStreamsClient {
    * Verify HMAC-SHA256 signature using constant-time comparison.
    * Returns true if signing is disabled (dev mode passthrough).
    *
-   * OP-17 FIX: Tries current key first, then previous key for rotation window.
-   * OP-18 FIX: Includes stream name in verification for replay protection.
+   * OP-17: Tries current key first, then previous key for rotation window.
+   * OP-18: Always includes stream name in HMAC for replay protection.
+   *
+   * OPT-005: Removed legacy (no-stream-name) fallback paths. All producers
+   * now include stream name in signatures (OP-18). This reduces HMAC
+   * operations from up to 4 per message to 1-2.
    *
    * @param data - Serialized message data
    * @param signature - Signature to verify
-   * @param streamName - Stream name for replay protection (optional for backward compat)
+   * @param streamName - Stream name for replay protection
    */
   private verifySignature(data: string, signature: string, streamName?: string): boolean {
     if (!this.signingKey) return true;
 
-    // Try current key first
+    // Try current key
     const expected = this.signMessage(data, streamName);
     if (expected.length === signature.length &&
         crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
       return true;
     }
 
-    // OP-17 FIX: Try previous key during rotation window
+    // OP-17: Try previous key during rotation window
     if (this.cachedPreviousKeyObj) {
       const previousExpected = this.signMessageWithKey(data, this.cachedPreviousKeyObj, streamName);
       if (previousExpected.length === signature.length &&
           crypto.timingSafeEqual(Buffer.from(previousExpected), Buffer.from(signature))) {
-        return true;
-      }
-      // P2-17 FIX: Only try legacy (no-stream-name) checks when compat enabled
-      if (this.legacySignatureCompatEnabled && streamName) {
-        const legacyExpected = this.signMessageWithKey(data, this.cachedPreviousKeyObj);
-        if (legacyExpected.length === signature.length &&
-            crypto.timingSafeEqual(Buffer.from(legacyExpected), Buffer.from(signature))) {
-          return true;
-        }
-      }
-    }
-
-    // P2-17 FIX: Only try legacy (no-stream-name) checks when compat enabled
-    if (this.legacySignatureCompatEnabled && streamName) {
-      const legacyExpected = this.signMessageWithKey(data, this.cachedSigningKeyObj!);
-      if (legacyExpected.length === signature.length &&
-          crypto.timingSafeEqual(Buffer.from(legacyExpected), Buffer.from(signature))) {
         return true;
       }
     }
@@ -1915,23 +1884,9 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
 
   initializingPromise = (async () => {
     try {
-      // P2 Fix L-1: Wire STREAM_LEGACY_HMAC_COMPAT env var to disable legacy HMAC fallback paths.
-      // When false, reduces HMAC computations from up to 4 per message to 1-2.
-      // P1 Fix: Flip default to OFF (explicit opt-in). All producers now include stream name
-      // in signatures (OP-18), so legacy compat is no longer needed by default.
-      // Set to 'true' only during migration from pre-OP-18 producers.
-      // TODO(breaking-change v3.0): Remove LEGACY_HMAC_COMPAT shim once all deployments
-      // use STREAM_LEGACY_HMAC_COMPAT. Tracked as SA-1E-002 / M-10.
-      if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
-        const factoryLogger = createLogger('redis-streams-factory');
-        factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
-      }
-      const legacyHmacCompat = process.env.STREAM_LEGACY_HMAC_COMPAT === 'true';
-
       const instance = new RedisStreamsClient(redisUrl, redisPassword, {
         signingKey,
         previousSigningKey,
-        legacySignatureCompatEnabled: legacyHmacCompat,
       });
 
       // Verify connection
@@ -1988,17 +1943,10 @@ export async function createRedisStreamsClient(url?: string, password?: string):
   }
   // NOTE: || (not ??) is intentional — empty string must become undefined, not a signing key.
   const previousSigningKey = process.env.STREAM_SIGNING_KEY_PREVIOUS?.trim() || undefined;
-  // TODO(breaking-change v3.0): Remove LEGACY_HMAC_COMPAT shim (SA-1E-002 / M-10).
-  if (process.env.LEGACY_HMAC_COMPAT !== undefined) {
-    const factoryLogger = createLogger('redis-streams-factory');
-    factoryLogger.warn('LEGACY_HMAC_COMPAT is deprecated — rename to STREAM_LEGACY_HMAC_COMPAT');
-  }
-  const legacyHmacCompat = process.env.STREAM_LEGACY_HMAC_COMPAT === 'true';
 
   const instance = new RedisStreamsClient(redisUrl, redisPassword, {
     signingKey,
     previousSigningKey,
-    legacySignatureCompatEnabled: legacyHmacCompat,
   });
 
   const isHealthy = await instance.ping();

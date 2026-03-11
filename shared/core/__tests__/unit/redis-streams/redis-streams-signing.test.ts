@@ -172,9 +172,10 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
     it('should accept messages with valid signatures', async () => {
       const streamName = 'stream:test';
       const rawData = JSON.stringify({ type: 'test', value: 1 });
+      // OP-18: HMAC input includes stream name for cross-stream replay protection
       const validSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(rawData)
+        .update(`${streamName}:${rawData}`)
         .digest('hex');
 
       mockRedis.xread.mockResolvedValue([
@@ -248,9 +249,10 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
       const streamName = 'stream:test';
       const validData = JSON.stringify({ type: 'test', value: 'good' });
       const invalidData = JSON.stringify({ type: 'test', value: 'bad' });
+      // OP-18: HMAC input includes stream name
       const validSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(validData)
+        .update(`${streamName}:${validData}`)
         .digest('hex');
       const invalidSig = 'b'.repeat(64);
 
@@ -271,9 +273,10 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
     it('should not include sig field in parsed message data', async () => {
       const streamName = 'stream:test';
       const rawData = JSON.stringify({ type: 'test', secret: 'hidden' });
+      // OP-18: HMAC input includes stream name
       const validSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(rawData)
+        .update(`${streamName}:${rawData}`)
         .digest('hex');
 
       mockRedis.xread.mockResolvedValue([
@@ -370,9 +373,10 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
 
     it('should verify signatures in consumer group reads', async () => {
       const rawData = JSON.stringify({ type: 'opportunity', profit: 500 });
+      // OP-18: HMAC input includes stream name
       const validSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(rawData)
+        .update(`stream:opportunities:${rawData}`)
         .digest('hex');
 
       mockRedis.xgroup.mockResolvedValue('OK');
@@ -490,9 +494,10 @@ describe('RedisStreamsClient - HMAC Message Signing (S-5)', () => {
       const streamName = 'stream:test';
       const message = { type: 'price', chain: 'arbitrum', price: 42.5 };
       const serialized = JSON.stringify(message);
+      // OP-18: HMAC input includes stream name
       const expectedSig = crypto
         .createHmac('sha256', SIGNING_KEY)
-        .update(serialized)
+        .update(`${streamName}:${serialized}`)
         .digest('hex');
 
       // Mock xadd to capture the signature
