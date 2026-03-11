@@ -654,8 +654,8 @@ describe('SimulationInitializer', () => {
     });
 
     beforeEach(() => {
-      mockPublishSwapEvent.mockClear();
-      mockPublishWhaleAlert.mockClear();
+      mockPublishSwapEvent.mockClear().mockResolvedValue(undefined);
+      mockPublishWhaleAlert.mockClear().mockResolvedValue(undefined);
       mockRecordTransaction.mockClear();
     });
 

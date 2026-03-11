@@ -285,17 +285,22 @@ export class SimulationInitializer {
     // Phase 2 (Whale/Swap Events): Wire swap event publishing when publisher is available
     if (publisher) {
       callbacks.onSwapEvent = (event: SwapEvent) => {
-        publisher.publishSwapEvent(event);
-        deps.logger.debug('Simulated swap event published', {
-          pairAddress: event.pairAddress,
-          dex: event.dex,
-          chain: event.chain,
+        publisher.publishSwapEvent(event).catch(error => {
+          deps.logger.warn('Simulated swap event publish failed', {
+            error: (error as Error).message,
+            chain: event.chain,
+          });
         });
       };
 
       callbacks.onWhaleAlert = (alert) => {
         // Publish to stream:whale-alerts
-        publisher.publishWhaleAlert(alert);
+        publisher.publishWhaleAlert(alert).catch(error => {
+          deps.logger.warn('Simulated whale alert publish failed', {
+            error: (error as Error).message,
+            chain: alert.chain,
+          });
+        });
 
         // Feed to WhaleActivityTracker for pattern analysis
         const trackedTx: TrackedWhaleTransaction = {
@@ -318,7 +323,7 @@ export class SimulationInitializer {
           whaleTracker.recordTransaction(trackedTx);
         }
 
-        deps.logger.debug('Simulated whale alert published', {
+        deps.logger.debug('Simulated whale alert dispatched', {
           usdValue: alert.usdValue,
           dex: alert.dex,
           chain: alert.chain,

@@ -53,6 +53,8 @@ interface MevShareResponse {
  */
 export class MevShareProvider extends FlashbotsProvider {
   private readonly mevShareRelayUrl: string;
+  /** SA-013b: Last MEV-Share error for diagnostics (exposed via getHealth). */
+  private lastMevShareError: string | null = null;
 
   constructor(config: MevProviderConfig) {
     super(config);
@@ -232,7 +234,10 @@ export class MevShareProvider extends FlashbotsProvider {
 
         // MEV-Share didn't get included, fall through to standard Flashbots
       } catch (mevShareError) {
-        // MEV-Share failed, fall through to standard Flashbots
+        // MEV-Share failed, fall through to standard Flashbots.
+        // SA-013b FIX: Record failure instead of swallowing silently.
+        await this.incrementMetric('failedSubmissions');
+        this.lastMevShareError = getErrorMessage(mevShareError);
       }
 
       // Fallback to standard Flashbots bundle submission.
