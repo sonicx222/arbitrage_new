@@ -7,16 +7,13 @@
  * - Block count and average block time
  * - Gas cost ranges
  *
- * Usage: SIMULATION_REALISM_LEVEL=medium npx tsx scripts/measure-simulation-throughput.ts
+ * Usage: npx tsx scripts/measure-simulation-throughput.ts
  */
 
 import { ChainSimulator } from '../shared/core/src/simulation/chain-simulator';
 import { DEXES, CHAIN_SPECIFIC_PAIRS, getTokenPrice } from '../shared/core/src/simulation/constants';
 import { CHAIN_THROUGHPUT_PROFILES } from '../shared/core/src/simulation/throughput-profiles';
 import type { SimulatedPairConfig, SimulatedSyncEvent, SimulatedOpportunity } from '../shared/core/src/simulation/types';
-
-// Set realism level
-process.env.SIMULATION_REALISM_LEVEL = process.env.SIMULATION_REALISM_LEVEL ?? 'medium';
 
 const MEASUREMENT_DURATION_MS = 30_000; // 30 seconds
 
@@ -134,9 +131,8 @@ async function measureChain(chainId: string): Promise<ChainMetrics> {
 }
 
 async function main(): Promise<void> {
-  const realismLevel = process.env.SIMULATION_REALISM_LEVEL ?? 'medium';
   console.log(`\n=== Simulation Throughput Measurement ===`);
-  console.log(`Realism level: ${realismLevel}`);
+  console.log(`Mode: block-driven (realistic)`);
   console.log(`Duration: ${MEASUREMENT_DURATION_MS / 1000}s per chain`);
   console.log(`Measuring all 15 chains in parallel...\n`);
 
@@ -177,7 +173,7 @@ async function main(): Promise<void> {
   console.log(`│ TOTAL       │        │ ${totalEventsPerSec.toFixed(1).padStart(8)} │ ${String(totalOppsPerMin).padStart(6)} │              │              │                     │`);
   console.log('└─────────────┴────────┴──────────┴────────┴──────────────┴──────────────┴─────────────────────┘');
 
-  console.log(`\nRealism: ${realismLevel} | Total throughput: ${totalEventsPerSec.toFixed(0)} events/s | ${totalOppsPerMin} opportunities/min`);
+  console.log(`\nMode: block-driven | Total throughput: ${totalEventsPerSec.toFixed(0)} events/s | ${totalOppsPerMin} opportunities/min`);
 }
 
 main().catch(console.error);

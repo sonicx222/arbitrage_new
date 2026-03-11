@@ -123,8 +123,8 @@ describe('ChainSimulationHandler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers({ legacyFakeTimers: false });
-    // Use low realism for predictable test behavior
-    process.env.SIMULATION_REALISM_LEVEL = 'low';
+    // Use explicit interval override for predictable test behavior
+    process.env.SIMULATION_UPDATE_INTERVAL_MS = '1000';
 
     // FIX: Create fresh mock simulator for each test and reset the mock implementation
     mockChainSimulatorEmitter = createMockSimulator();
@@ -138,7 +138,7 @@ describe('ChainSimulationHandler', () => {
   afterEach(async () => {
     await handler.stop();
     jest.useRealTimers();
-    delete process.env.SIMULATION_REALISM_LEVEL;
+    delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
   });
 
   // ===========================================================================

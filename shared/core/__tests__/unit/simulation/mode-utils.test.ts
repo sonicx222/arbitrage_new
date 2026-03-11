@@ -16,7 +16,6 @@ describe('mode-utils', () => {
     delete process.env.SIMULATION_MODE;
     delete process.env.EXECUTION_SIMULATION_MODE;
     delete process.env.EXECUTION_HYBRID_MODE;
-    delete process.env.SIMULATION_REALISM_LEVEL;
   });
 
   afterAll(() => {
@@ -77,29 +76,15 @@ describe('mode-utils', () => {
     });
   });
 
-  describe('getSimulationRealismLevel', () => {
-    it('defaults to medium when not set', () => {
-      expect(getSimulationRealismLevel()).toBe('medium');
-    });
-
-    it('returns low when set', () => {
+  describe('getSimulationRealismLevel (deprecated)', () => {
+    it('always returns high regardless of env var', () => {
+      expect(getSimulationRealismLevel()).toBe('high');
       process.env.SIMULATION_REALISM_LEVEL = 'low';
-      expect(getSimulationRealismLevel()).toBe('low');
-    });
-
-    it('returns high when set', () => {
-      process.env.SIMULATION_REALISM_LEVEL = 'high';
       expect(getSimulationRealismLevel()).toBe('high');
-    });
-
-    it('is case-insensitive', () => {
-      process.env.SIMULATION_REALISM_LEVEL = 'HIGH';
+      process.env.SIMULATION_REALISM_LEVEL = 'medium';
       expect(getSimulationRealismLevel()).toBe('high');
-    });
-
-    it('defaults to medium for invalid values', () => {
       process.env.SIMULATION_REALISM_LEVEL = 'invalid';
-      expect(getSimulationRealismLevel()).toBe('medium');
+      expect(getSimulationRealismLevel()).toBe('high');
     });
   });
 

@@ -199,6 +199,37 @@ export interface SimulatedOpportunity {
     consumedAt?: number;
     detectedAt?: number;
   };
+
+  /** Whether bridge is required (cross-chain type) */
+  bridgeRequired?: boolean;
+
+  /** Backrun target info (backrun/MEV-Share type) */
+  backrunTarget?: {
+    txHash: string;
+    routerAddress: string;
+    swapDirection: 'buy' | 'sell';
+    source: string;
+    estimatedSwapSize: string;
+  };
+
+  /** UniswapX Dutch auction order (uniswapx type) */
+  uniswapxOrder?: {
+    encodedOrder: string;
+    signature: string;
+    reactorAddress: string;
+    chainId: number;
+    decayStartTime: number;
+    decayEndTime: number;
+    inputToken: string;
+    inputAmount: string;
+    outputToken: string;
+    outputStartAmount: string;
+    outputEndAmount: string;
+    nonce: string;
+    deadline: number;
+    swapper: string;
+    orderHash: string;
+  };
 }
 
 /**
@@ -264,14 +295,6 @@ export interface RegimeConfig {
   /** Multiplier for arbitrage chance */
   arbChanceMultiplier: number;
 }
-
-/**
- * Simulation realism levels:
- * - 'low': Legacy behavior (flat 1000ms, all pairs every tick, 5 types)
- * - 'medium': Block-time aligned + activity tiers + all 13 types (default)
- * - 'high': Full regime model on top of medium
- */
-export type SimulationRealismLevel = 'low' | 'medium' | 'high';
 
 // =============================================================================
 // Cross-Chain Simulator Types

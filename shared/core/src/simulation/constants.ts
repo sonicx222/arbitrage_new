@@ -139,6 +139,10 @@ export const BASE_PRICES: Record<string, number> = {
   'MNDE': 0.12,     // Marinade governance
   'W': 0.35,        // Wormhole
   'BSOL': 180,      // BlazeStake SOL
+
+  // Mantle native token
+  'MNT': 0.40,
+  'WMNT': 0.40,
 };
 
 /**

@@ -11,7 +11,6 @@ import { createLogger } from '../logger';
 import { getBlockTimeMs } from '@arbitrage/config';
 import type { SimulationConfig, SimulatedPriceUpdate } from './types';
 import { DEFAULT_CONFIG, DEXES, getTokenPrice } from './constants';
-import { getSimulationRealismLevel } from './mode-utils';
 import { gaussianRandom } from './math-utils';
 import { CHAIN_THROUGHPUT_PROFILES } from './throughput-profiles';
 
@@ -66,25 +65,17 @@ export class PriceSimulator extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
-    const realismLevel = getSimulationRealismLevel();
     const hasExplicitInterval = !!process.env.SIMULATION_UPDATE_INTERVAL_MS;
 
     logger.info('Starting price simulation', {
-      realismLevel,
       volatility: this.config.volatility,
     });
 
     for (const chain of this.config.chains) {
-      if (hasExplicitInterval || realismLevel === 'low') {
-        let intervalMs: number;
-        if (hasExplicitInterval) {
-          intervalMs = this.config.updateIntervalMs;
-        } else {
-          intervalMs = this.config.updateIntervalMs;
-        }
+      if (hasExplicitInterval) {
         const interval = setInterval(() => {
           this.updateChainPrices(chain);
-        }, intervalMs);
+        }, this.config.updateIntervalMs);
         this.intervals.push(interval);
       } else {
         this.scheduleNextChainUpdate(chain);

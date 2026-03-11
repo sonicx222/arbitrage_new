@@ -71,14 +71,13 @@ describe('ChainSimulator - Fast Lane Opportunity Generation', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    // Use low realism for predictable interval-based ticks
-    process.env.SIMULATION_REALISM_LEVEL = 'low';
+    // Use explicit interval override for predictable interval-based ticks
+    process.env.SIMULATION_UPDATE_INTERVAL_MS = '1000';
   });
 
   afterEach(() => {
     simulator?.stop();
     jest.useRealTimers();
-    delete process.env.SIMULATION_REALISM_LEVEL;
     delete process.env.SIMULATION_FAST_LANE_RATE;
     delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
   });
@@ -369,9 +368,9 @@ describe('ChainSimulator - Fast Lane Opportunity Generation', () => {
     });
   });
 
-  describe('Fast lane with medium/high realism', () => {
+  describe('Fast lane with block-driven mode', () => {
     it('should generate fast-lane opportunities in block-driven mode', async () => {
-      process.env.SIMULATION_REALISM_LEVEL = 'medium';
+      delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
       process.env.SIMULATION_FAST_LANE_RATE = '1.0';
       simulator = new ChainSimulator(BASE_CONFIG);
 
@@ -396,7 +395,6 @@ describe('ChainSimulator - Fast Lane Opportunity Generation', () => {
   describe('Fast lane opportunities also emitted as regular opportunities', () => {
     it('should emit fast-lane opportunities on both events', async () => {
       process.env.SIMULATION_FAST_LANE_RATE = '1.0';
-      process.env.SIMULATION_REALISM_LEVEL = 'low';
       simulator = new ChainSimulator(BASE_CONFIG);
 
       const fastLaneOpps: SimulatedOpportunity[] = [];

@@ -6,7 +6,7 @@
  * - Poisson-distributed swap count per block
  * - DEX market share selection
  * - Dynamic gas pricing
- * - Backward compatibility with low realism
+ * - Backward compatibility with SIMULATION_UPDATE_INTERVAL_MS override
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -69,15 +69,10 @@ describe('ChainSimulator - Block-Driven Throughput Model', () => {
   afterEach(() => {
     simulator?.stop();
     jest.useRealTimers();
-    delete process.env.SIMULATION_REALISM_LEVEL;
     delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
   });
 
-  describe('Medium realism (block-driven)', () => {
-    beforeEach(() => {
-      process.env.SIMULATION_REALISM_LEVEL = 'medium';
-    });
-
+  describe('Block-driven (default)', () => {
     it('should emit sync events using setTimeout chain', async () => {
       simulator = new ChainSimulator(TEST_CONFIG);
       const events: SimulatedSyncEvent[] = [];
@@ -142,12 +137,9 @@ describe('ChainSimulator - Block-Driven Throughput Model', () => {
     });
   });
 
-  describe('Low realism (legacy setInterval)', () => {
-    beforeEach(() => {
-      process.env.SIMULATION_REALISM_LEVEL = 'low';
-    });
-
+  describe('Explicit interval override (SIMULATION_UPDATE_INTERVAL_MS)', () => {
     it('should use fixed interval (setInterval behavior)', () => {
+      process.env.SIMULATION_UPDATE_INTERVAL_MS = '1000';
       simulator = new ChainSimulator(TEST_CONFIG);
       const events: SimulatedSyncEvent[] = [];
       simulator.on('syncEvent', (e: SimulatedSyncEvent) => events.push(e));
@@ -156,7 +148,7 @@ describe('ChainSimulator - Block-Driven Throughput Model', () => {
       const initialCount = events.length;
       expect(initialCount).toBeGreaterThan(0);
 
-      // Low realism uses configured 1000ms interval
+      // Explicit interval override uses configured 1000ms interval
       jest.advanceTimersByTime(TEST_CONFIG.updateIntervalMs);
       expect(events.length).toBeGreaterThan(initialCount);
     });
@@ -164,7 +156,6 @@ describe('ChainSimulator - Block-Driven Throughput Model', () => {
 
   describe('Env override', () => {
     it('should use fixed interval when SIMULATION_UPDATE_INTERVAL_MS is set', () => {
-      process.env.SIMULATION_REALISM_LEVEL = 'medium';
       process.env.SIMULATION_UPDATE_INTERVAL_MS = '500';
       simulator = new ChainSimulator({ ...TEST_CONFIG, updateIntervalMs: 500 });
       const events: SimulatedSyncEvent[] = [];
@@ -179,7 +170,6 @@ describe('ChainSimulator - Block-Driven Throughput Model', () => {
 
   describe('Gas pricing', () => {
     it('should emit opportunities with dynamic gas cost', async () => {
-      process.env.SIMULATION_REALISM_LEVEL = 'medium';
       simulator = new ChainSimulator({
         ...TEST_CONFIG,
         arbitrageChance: 0.5,

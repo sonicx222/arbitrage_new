@@ -122,13 +122,13 @@ async function collectOpportunities(
 describe('ChainSimulator - Multi-Hop Opportunities', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    // Use low realism for predictable test behavior (flat interval, legacy type split)
-    process.env.SIMULATION_REALISM_LEVEL = 'low';
+    // Use explicit interval override for predictable test behavior (flat interval)
+    process.env.SIMULATION_UPDATE_INTERVAL_MS = '50';
   });
 
   afterEach(() => {
     jest.useRealTimers();
-    delete process.env.SIMULATION_REALISM_LEVEL;
+    delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
   });
 
   describe('Triangular Opportunities (3-hop)', () => {

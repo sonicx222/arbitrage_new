@@ -5,8 +5,8 @@
  * - Task 2: Deterministic wallet address pool (selectWallet + buildWalletPool)
  * - Task 3: WhaleAlert threshold detection
  *
- * executeSwap is only called from simulateBlock (medium/high realism),
- * so all tests set SIMULATION_REALISM_LEVEL='medium'.
+ * executeSwap is only called from simulateBlock (block-driven mode, the default).
+ * Tests rely on block-driven mode which is now always active.
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -58,13 +58,11 @@ describe('ChainSimulator - Whale Simulation (Phase 1)', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    process.env.SIMULATION_REALISM_LEVEL = 'medium';
   });
 
   afterEach(() => {
     simulator?.stop();
     jest.useRealTimers();
-    delete process.env.SIMULATION_REALISM_LEVEL;
     delete process.env.SIMULATION_WHALE_RATE;
     delete process.env.SIMULATION_WHALE_THRESHOLD_USD;
   });
@@ -166,18 +164,18 @@ describe('ChainSimulator - Whale Simulation (Phase 1)', () => {
       }
     });
 
-    it('should NOT emit swapEvent in low realism mode (simulateTick does not call executeSwap)', async () => {
-      delete process.env.SIMULATION_REALISM_LEVEL;
-      process.env.SIMULATION_REALISM_LEVEL = 'low';
+    it('should NOT emit swapEvent when using explicit interval override (simulateTick path)', async () => {
+      process.env.SIMULATION_UPDATE_INTERVAL_MS = '1000';
       simulator = new ChainSimulator(TEST_CONFIG);
       const events: SwapEvent[] = [];
       simulator.on('swapEvent', (e: SwapEvent) => events.push(e));
       simulator.start();
 
-      // Advance through several low-realism ticks (1s each)
+      // Advance through several flat-interval ticks (1s each)
       await jest.advanceTimersByTimeAsync(5000);
 
       expect(events.length).toBe(0);
+      delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
     });
 
     it('should emit swapEvent with a valid timestamp', async () => {

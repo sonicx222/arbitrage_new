@@ -40,8 +40,8 @@ describe('PriceSimulator', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    // Use low realism for predictable test behavior (flat configured interval)
-    process.env.SIMULATION_REALISM_LEVEL = 'low';
+    // Use explicit interval override for predictable test behavior (flat configured interval)
+    process.env.SIMULATION_UPDATE_INTERVAL_MS = '500';
     simulator = new PriceSimulator(TEST_CONFIG);
   });
 
@@ -49,7 +49,7 @@ describe('PriceSimulator', () => {
     simulator.stop();
     resetSimulatorInstance();
     jest.useRealTimers();
-    delete process.env.SIMULATION_REALISM_LEVEL;
+    delete process.env.SIMULATION_UPDATE_INTERVAL_MS;
   });
 
   // ===========================================================================

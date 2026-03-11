@@ -32,7 +32,7 @@ export const NATIVE_TOKENS: Record<string, string> = {
   linea: 'WETH',
   blast: 'WETH',
   scroll: 'WETH',
-  mantle: 'WETH',
+  mantle: 'WMNT',
   mode: 'WETH',
   solana: 'SOL',
 };

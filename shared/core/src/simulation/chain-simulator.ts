@@ -9,7 +9,7 @@
  * - Activity-weighted pair selection (not all pairs every tick)
  * - Market regime model (quiet/normal/burst) with Markov transitions
  * - Full strategy coverage (all 13 ArbitrageOpportunity.type values)
- * - SIMULATION_REALISM_LEVEL env var (low/medium/high)
+ * - Always uses block-driven model with regime transitions
  *
  * @module simulation
  * @see docs/reports/SIMULATION_REWORK_RESEARCH_2026-03-01.md
@@ -46,9 +46,9 @@ import {
   selectFastLaneStrategyType,
 } from './constants';
 import { FAST_LANE_CONFIG } from '@arbitrage/config';
-import { getSimulationRealismLevel } from './mode-utils';
 import { gaussianRandom, poissonRandom, weightedRandomSelect } from './math-utils';
 import { CHAIN_THROUGHPUT_PROFILES, getNativeTokenPrice, selectWeightedDex } from './throughput-profiles';
+import { getSimulationRealismLevel } from './mode-utils';
 
 // =============================================================================
 // Simulation TTL
@@ -69,6 +69,44 @@ const DEFAULT_WHALE_RATE = 0.05;
  * Matches EVENT_CONFIG.swapEvents.whaleThreshold. Overridden by SIMULATION_WHALE_THRESHOLD_USD.
  */
 const DEFAULT_WHALE_THRESHOLD_USD = 50_000;
+
+// =============================================================================
+// Per-DEX Fee Tiers (Task 0.4)
+// =============================================================================
+
+/**
+ * V3 DEX fee tier weights for pair-type-based selection.
+ * Blue-chip/stablecoin pairs mostly use 0.05% (500), others 0.3% (3000).
+ */
+const V3_FEE_TIERS = [0.0001, 0.0005, 0.003, 0.01]; // 0.01%, 0.05%, 0.3%, 1%
+
+/** Stablecoin symbols for fee tier selection */
+const STABLECOINS = new Set(['USDC', 'USDT', 'BUSD', 'DAI', 'FRAX', 'SUSD', 'USDB']);
+
+/** Blue-chip token symbols that typically trade at low fee tiers */
+const BLUE_CHIPS = new Set(['WETH', 'ETH', 'WBTC', 'BTCB', 'SOL', 'WBNB', 'BNB']);
+
+/**
+ * Get the realistic DEX fee for a given DEX and token pair.
+ * V3 DEXes: fee tier depends on pair type (stablecoin pairs → 0.01%, blue-chip → 0.05%, others → 0.3%).
+ * V2 DEXes: fixed 0.3%.
+ */
+function getDexFee(dexName: string, token0Symbol: string, token1Symbol: string): number {
+  const isV3 = dexName.includes('_v3') || dexName === 'syncswap' || dexName === 'aerodrome';
+
+  if (!isV3) {
+    return FEE_CONSTANTS.DEFAULT; // 0.3% for V2 DEXes
+  }
+
+  const isStableStable = STABLECOINS.has(token0Symbol.toUpperCase()) && STABLECOINS.has(token1Symbol.toUpperCase());
+  const hasBluechip = BLUE_CHIPS.has(token0Symbol.toUpperCase()) || BLUE_CHIPS.has(token1Symbol.toUpperCase());
+  const hasStable = STABLECOINS.has(token0Symbol.toUpperCase()) || STABLECOINS.has(token1Symbol.toUpperCase());
+
+  if (isStableStable) return V3_FEE_TIERS[0]; // 0.01%
+  if (hasBluechip && hasStable) return V3_FEE_TIERS[1]; // 0.05%
+  if (hasBluechip) return V3_FEE_TIERS[2]; // 0.3%
+  return V3_FEE_TIERS[2]; // 0.3% default for V3
+}
 
 /**
  * Compute expiresAt for a simulated opportunity.
@@ -269,26 +307,22 @@ export class ChainSimulator extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
-    const realismLevel = getSimulationRealismLevel();
     const hasExplicitInterval = !!process.env.SIMULATION_UPDATE_INTERVAL_MS;
 
-    // Low realism or explicit interval: keep legacy setInterval behavior
-    if (realismLevel === 'low' || hasExplicitInterval) {
-      const effectiveInterval = this.getEffectiveInterval(realismLevel);
-      this.logger.info('Starting chain simulator (legacy interval)', {
+    if (hasExplicitInterval) {
+      // Explicit interval override: use flat setInterval (for benchmarking/testing)
+      this.logger.info('Starting chain simulator (explicit interval override)', {
         chainId: this.config.chainId,
-        updateInterval: effectiveInterval,
-        realismLevel,
+        updateInterval: this.config.updateIntervalMs,
         pairs: this.config.pairs.length,
       });
       this.interval = setInterval(() => {
         this.simulateTick();
-      }, effectiveInterval);
+      }, this.config.updateIntervalMs);
     } else {
-      // Medium/high: block-driven multi-swap model
+      // Block-driven multi-swap model (default)
       this.logger.info('Starting chain simulator (block-driven)', {
         chainId: this.config.chainId,
-        realismLevel,
         pairs: this.config.pairs.length,
         profile: CHAIN_THROUGHPUT_PROFILES[this.config.chainId] ? 'found' : 'fallback',
       });
@@ -296,29 +330,6 @@ export class ChainSimulator extends EventEmitter {
     }
 
     this.emitAllSyncEvents();
-  }
-
-  /**
-   * Determine effective update interval based on realism level.
-   * - low: Use configured interval (flat 1000ms default)
-   * - medium/high: Use real block time from chain config
-   *
-   * SIMULATION_UPDATE_INTERVAL_MS env var overrides everything.
-   */
-  private getEffectiveInterval(realismLevel: string): number {
-    // Explicit env var override always wins
-    if (process.env.SIMULATION_UPDATE_INTERVAL_MS) {
-      return this.config.updateIntervalMs;
-    }
-
-    if (realismLevel === 'low') {
-      return this.config.updateIntervalMs;
-    }
-
-    // medium/high: use real block time
-    const blockTimeMs = getBlockTimeMs(this.config.chainId);
-    // Clamp: min 100ms (prevent CPU overload), max 15000ms (don't freeze)
-    return Math.max(100, Math.min(blockTimeMs, 15000));
   }
 
   stop(): void {
@@ -336,16 +347,9 @@ export class ChainSimulator extends EventEmitter {
     this.blockNumber++;
     this.emit('blockUpdate', { blockNumber: this.blockNumber });
 
-    const realismLevel = getSimulationRealismLevel();
-
-    // Transition market regime (high realism only)
-    if (realismLevel === 'high') {
-      this.currentRegime = transitionRegime(this.currentRegime);
-    }
-
-    const regimeConfig = realismLevel === 'high'
-      ? REGIME_CONFIGS[this.currentRegime]
-      : REGIME_CONFIGS['normal']; // medium uses normal multipliers
+    // Transition market regime
+    this.currentRegime = transitionRegime(this.currentRegime);
+    const regimeConfig = REGIME_CONFIGS[this.currentRegime];
 
     const effectiveArbChance = this.config.arbitrageChance * regimeConfig.arbChanceMultiplier;
     const effectiveVolatility = this.config.volatility * regimeConfig.volatilityMultiplier;
@@ -359,23 +363,19 @@ export class ChainSimulator extends EventEmitter {
       arbitrageDirection = Math.random() > 0.5 ? 1 : -1;
     }
 
-    const useActivityTiers = realismLevel !== 'low';
-
     for (let i = 0; i < this.config.pairs.length; i++) {
       const pair = this.config.pairs[i];
       const reserves = this.reserves.get(pair.address.toLowerCase());
       if (!reserves) continue;
 
       // Activity-tier filtering: skip pairs that don't trade this block
-      if (useActivityTiers) {
-        const pairKey = `${pair.token0Symbol}/${pair.token1Symbol}`;
-        const baseActivity = PAIR_ACTIVITY_TIERS[pairKey] ?? DEFAULT_PAIR_ACTIVITY;
-        const effectiveActivity = Math.min(baseActivity * regimeConfig.pairActivityMultiplier, 1.0);
+      const pairKey = `${pair.token0Symbol}/${pair.token1Symbol}`;
+      const baseActivity = PAIR_ACTIVITY_TIERS[pairKey] ?? DEFAULT_PAIR_ACTIVITY;
+      const effectiveActivity = Math.min(baseActivity * regimeConfig.pairActivityMultiplier, 1.0);
 
-        // Always allow the arbitrage pair through
-        if (i !== arbitragePairIndex && Math.random() > effectiveActivity) {
-          continue;
-        }
+      // Always allow the arbitrage pair through
+      if (i !== arbitragePairIndex && Math.random() > effectiveActivity) {
+        continue;
       }
 
       let priceChange = (Math.random() - 0.5) * 2 * effectiveVolatility;
@@ -412,12 +412,12 @@ export class ChainSimulator extends EventEmitter {
   }
 
   // =============================================================================
-  // Block-Driven Multi-Swap Model (medium/high realism)
+  // Block-Driven Multi-Swap Model
   // =============================================================================
 
   /**
    * Schedule the next block using setTimeout with Gaussian jitter.
-   * Replaces setInterval for medium/high realism to simulate
+   * Uses setTimeout with jitter to simulate
    * real block time variance and occasional missed slots.
    */
   private scheduleNextBlock(): void {
@@ -456,16 +456,9 @@ export class ChainSimulator extends EventEmitter {
     this.blockNumber++;
     this.emit('blockUpdate', { blockNumber: this.blockNumber });
 
-    const realismLevel = getSimulationRealismLevel();
-
-    // Regime transition (high realism only)
-    if (realismLevel === 'high') {
-      this.currentRegime = transitionRegime(this.currentRegime);
-    }
-
-    const regimeConfig = realismLevel === 'high'
-      ? REGIME_CONFIGS[this.currentRegime]
-      : REGIME_CONFIGS['normal'];
+    // Transition market regime
+    this.currentRegime = transitionRegime(this.currentRegime);
+    const regimeConfig = REGIME_CONFIGS[this.currentRegime];
 
     // Sample gas price for this block
     this.currentGasPrice = this.sampleGasPrice(profile);
@@ -550,10 +543,7 @@ export class ChainSimulator extends EventEmitter {
     const reserves = this.reserves.get(pair.address.toLowerCase());
     if (!reserves) return;
 
-    const realismLevel = getSimulationRealismLevel();
-    const regimeConfig = realismLevel === 'high'
-      ? REGIME_CONFIGS[this.currentRegime]
-      : REGIME_CONFIGS['normal'];
+    const regimeConfig = REGIME_CONFIGS[this.currentRegime];
 
     const effectiveVolatility = this.config.volatility * regimeConfig.volatilityMultiplier;
     const priceChange = (Math.random() - 0.5) * 2 * effectiveVolatility;
@@ -808,7 +798,7 @@ export class ChainSimulator extends EventEmitter {
    * Create an opportunity with type selected via weighted distribution.
    * Covers all 13 strategy types defined in ArbitrageOpportunity.type.
    *
-   * In 'low' realism mode, falls back to legacy 70/30 cross-dex/flash-loan split.
+   * Uses weighted strategy selection across all 13 types.
    */
   private createOpportunityWithType(
     tokenPair: string,
@@ -822,7 +812,7 @@ export class ChainSimulator extends EventEmitter {
     const estimatedProfitUsd = netProfit * positionSize;
     const estimatedGasCost = this.currentGasPrice.gasCostUsd > 0
       ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4) // +-20% variance
-      : 5 + Math.random() * 15; // fallback for low realism
+      : 5 + Math.random() * 15; // fallback when gas price not sampled
 
     const now = Date.now();
     const baseOpportunity = {
@@ -860,24 +850,7 @@ export class ChainSimulator extends EventEmitter {
       },
     };
 
-    const realismLevel = getSimulationRealismLevel();
-
-    // Low realism: legacy 70/30 split (cross-dex / flash-loan)
-    if (realismLevel === 'low') {
-      if (Math.random() < 0.70) {
-        return { ...baseOpportunity, type: 'cross-dex', useFlashLoan: false };
-      }
-      const flashLoanFee = bpsToDecimal(FLASH_LOAN_PROVIDERS[this.config.chainId]?.feeBps ?? 5);
-      return {
-        ...baseOpportunity,
-        type: 'flash-loan',
-        useFlashLoan: true,
-        flashLoanFee,
-        expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
-      };
-    }
-
-    // Medium/high: weighted strategy selection
+    // Weighted strategy selection across all 13 types
     const selectedType = selectWeightedStrategyType();
     return this.buildTypedOpportunity(selectedType, baseOpportunity, estimatedProfitUsd, estimatedGasCost);
   }
@@ -918,41 +891,86 @@ export class ChainSimulator extends EventEmitter {
           expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
         };
 
-      // --- Multi-hop types (handled via generateMultiHopOpportunity, emit basic here) ---
+      // --- Multi-hop types: generate path/hops/intermediateTokens for factory routing ---
       case 'triangular':
-      case 'quadrilateral':
-      case 'multi-leg':
-        // These get generated with paths in generateMultiHopOpportunity().
-        // When selected here, emit as flash-loan since multi-hop requires capital.
+      case 'quadrilateral': {
+        const hops = type === 'triangular' ? 3 : 4;
+        const tokens = this.getAvailableTokens();
+        const shuffled = [...tokens].sort(() => Math.random() - 0.5);
+        const pathTokens = shuffled.slice(0, Math.min(hops, tokens.length));
+        // Pad if not enough unique tokens (fallback to simpler path)
+        while (pathTokens.length < hops) pathTokens.push(pathTokens[pathTokens.length - 1]);
+        pathTokens.push(pathTokens[0]); // circular return
         return {
           ...base,
-          type: 'flash-loan',
+          type,
+          useFlashLoan: true,
+          flashLoanFee,
+          hops,
+          path: pathTokens,
+          intermediateTokens: pathTokens.slice(1, -1),
+          expiresAt: getSimulationExpiresAt(this.config.chainId, 3000),
+          expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
+        };
+      }
+
+      // --- Multi-leg: useFlashLoan=true routes to flash-loan strategy in factory ---
+      case 'multi-leg':
+        return {
+          ...base,
+          type: 'multi-leg',
           useFlashLoan: true,
           flashLoanFee,
           expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
         };
 
-      // --- Backrun (MEV-Share) ---
+      // --- Backrun (MEV-Share): populate backrunTarget so BackrunStrategy can process ---
       case 'backrun':
         return {
           ...base,
           id: `sim-${base.chain}-backrun-${base.id.split('-').pop()}`,
           type: 'backrun',
           useFlashLoan: false,
-          confidence: 0.65 + Math.random() * 0.2, // Lower confidence for MEV
-          expiresAt: getSimulationExpiresAt(base.chain, 2000), // Fast expiry
+          confidence: 0.65 + Math.random() * 0.2,
+          expiresAt: getSimulationExpiresAt(base.chain, 2000),
+          backrunTarget: {
+            txHash: `0x${createHash('sha256').update(`sim-backrun-${Date.now()}-${Math.random()}`).digest('hex')}`,
+            routerAddress: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
+            swapDirection: (Math.random() > 0.5 ? 'buy' : 'sell') as 'buy' | 'sell',
+            source: 'mev-share',
+            estimatedSwapSize: String(Math.floor(Math.random() * 100000 + 1000)),
+          },
         };
 
-      // --- UniswapX Dutch auction fill ---
-      case 'uniswapx':
+      // --- UniswapX Dutch auction: populate uniswapxOrder so UniswapXFillerStrategy can process ---
+      case 'uniswapx': {
+        const nowSec = Math.floor(Date.now() / 1000);
         return {
           ...base,
           id: `sim-${base.chain}-uniswapx-${base.id.split('-').pop()}`,
           type: 'uniswapx',
           useFlashLoan: false,
           confidence: 0.70 + Math.random() * 0.15,
-          expiresAt: getSimulationExpiresAt(base.chain, 10000), // Dutch auctions have longer windows
+          expiresAt: getSimulationExpiresAt(base.chain, 10000),
+          uniswapxOrder: {
+            encodedOrder: `0x${'ab'.repeat(32)}`,
+            signature: `0x${'cd'.repeat(65)}`,
+            reactorAddress: '0x6000da47483062A0D734Ba3dc7576Ce6A0B645C4',
+            chainId: 1,
+            decayStartTime: nowSec,
+            decayEndTime: nowSec + 60,
+            inputToken: base.tokenIn ?? `0x${'00'.repeat(20)}`,
+            inputAmount: base.amountIn ?? '1000000000000000000',
+            outputToken: base.tokenOut ?? `0x${'00'.repeat(20)}`,
+            outputStartAmount: String(Math.floor(estimatedProfitUsd * 1.1 * 1e6)),
+            outputEndAmount: String(Math.floor(estimatedProfitUsd * 0.95 * 1e6)),
+            nonce: String(Math.floor(Math.random() * 1e12)),
+            deadline: nowSec + 120,
+            swapper: `0x${'ef'.repeat(20)}`,
+            orderHash: `0x${createHash('sha256').update(`sim-uniswapx-${Date.now()}`).digest('hex')}`,
+          },
         };
+      }
 
       // --- Statistical (mean-reversion) ---
       case 'statistical':
@@ -962,19 +980,19 @@ export class ChainSimulator extends EventEmitter {
           type: 'statistical',
           useFlashLoan: true,
           flashLoanFee,
-          confidence: 0.60 + Math.random() * 0.2, // Statistical models have varying confidence
+          confidence: 0.60 + Math.random() * 0.2,
           expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
         };
 
-      // --- Predictive (ML-based) ---
+      // --- Predictive (ML-based): routes to intra-chain strategy in factory ---
       case 'predictive':
         return {
           ...base,
           id: `sim-${base.chain}-pred-${base.id.split('-').pop()}`,
           type: 'predictive',
           useFlashLoan: false,
-          confidence: 0.55 + Math.random() * 0.15, // ML predictions are lower confidence
-          expiresAt: getSimulationExpiresAt(base.chain, 15000), // Predictions have longer time horizon
+          confidence: 0.55 + Math.random() * 0.15,
+          expiresAt: getSimulationExpiresAt(base.chain, 15000),
         };
 
       // --- Solana-specific ---
@@ -983,12 +1001,23 @@ export class ChainSimulator extends EventEmitter {
           ...base,
           type: 'solana',
           useFlashLoan: false,
-          expiresAt: getSimulationExpiresAt(base.chain, 1000), // Fast Solana block times
+          expiresAt: getSimulationExpiresAt(base.chain, 1000),
         };
 
-      // --- Cross-chain (shouldn't hit here often, mostly from CrossChainSimulator) ---
-      case 'cross-chain':
-        return { ...base, type: 'cross-dex', useFlashLoan: false };
+      // --- Cross-chain: set different sellChain so factory routes to CrossChainStrategy ---
+      case 'cross-chain': {
+        const partnerChains = DEFAULT_CONFIG.chains.filter(c => c !== this.config.chainId);
+        const sellChain = partnerChains[Math.floor(Math.random() * partnerChains.length)] ?? 'arbitrum';
+        const sellDex = (DEXES[sellChain] ?? DEXES['ethereum'])[0];
+        return {
+          ...base,
+          type: 'cross-chain',
+          sellChain,
+          sellDex,
+          useFlashLoan: false,
+          bridgeRequired: true,
+        };
+      }
 
       default:
         return { ...base, type: 'cross-dex', useFlashLoan: false };
@@ -1075,7 +1104,11 @@ export class ChainSimulator extends EventEmitter {
     // Per-chain multi-hop base profit from config (set by factory from profitProfile)
     const [mhMin, mhMax] = this.config.multiHopBaseProfit ?? [0.008, 0.020];
     const baseProfit = mhMin + Math.random() * (mhMax - mhMin);
-    const feePerHop = FEE_CONSTANTS.DEFAULT;
+    // Use per-DEX fee tiers for realistic fee estimation
+    const representativePair = this.config.pairs[0];
+    const feePerHop = representativePair
+      ? getDexFee(representativePair.dex, representativePair.token0Symbol, representativePair.token1Symbol)
+      : FEE_CONSTANTS.DEFAULT;
     const totalFees = feePerHop * hops;
     const netProfit = baseProfit - totalFees;
 

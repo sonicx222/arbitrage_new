@@ -31,7 +31,6 @@ export type {
   CrossChainSimulatorConfig,
   MarketRegime,
   RegimeConfig,
-  SimulationRealismLevel,
   ChainThroughputProfile,
   GasModel,
   SampledGasPrice,
@@ -66,6 +65,7 @@ export {
   getSimulationModeSummary,
   getSimulationRealismLevel,
 } from './mode-utils';
+export type { SimulationRealismLevel } from './mode-utils';
 
 // Price simulator
 export {

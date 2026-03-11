@@ -160,10 +160,9 @@ describe('[Integration] Whale Pipeline: Simulation → Redis Streams', () => {
     await redis.flushall();
 
     // Set simulation env vars:
-    // - medium realism → simulateBlock() called → executeSwap() → swapEvent + whaleAlert
+    // - block-driven mode (default) → simulateBlock() called → executeSwap() → swapEvent + whaleAlert
     // - whale rate = 1.0 → every swap is whale-sized
     // - threshold = $1 → all whale swaps emit whaleAlert (guaranteed)
-    process.env.SIMULATION_REALISM_LEVEL = 'medium';
     process.env.SIMULATION_WHALE_RATE = '1';
     process.env.SIMULATION_WHALE_THRESHOLD_USD = '1';
     // Do NOT set SIMULATION_UPDATE_INTERVAL_MS — would force legacy mode (no executeSwap)
@@ -196,7 +195,6 @@ describe('[Integration] Whale Pipeline: Simulation → Redis Streams', () => {
     }
 
     // Clean up env vars
-    delete process.env.SIMULATION_REALISM_LEVEL;
     delete process.env.SIMULATION_WHALE_RATE;
     delete process.env.SIMULATION_WHALE_THRESHOLD_USD;
   });
