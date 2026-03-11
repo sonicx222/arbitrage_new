@@ -89,6 +89,34 @@ const STABLECOINS = new Set(['USDC', 'USDT', 'BUSD', 'DAI', 'FRAX', 'SUSD', 'USD
 /** Blue-chip token symbols that typically trade at low fee tiers */
 const BLUE_CHIPS = new Set(['WETH', 'ETH', 'WBTC', 'BTCB', 'SOL', 'WBNB', 'BNB']);
 
+// =============================================================================
+// Batch 2: Gas & Fee Constants (Tasks 2.1, 2.3, 2.5)
+// =============================================================================
+
+/**
+ * Pool TVL per side in USD for slippage calculation (Task 2.5).
+ * Matches the TARGET_SIDE_USD used in initializeReserves().
+ */
+const POOL_SIDE_USD = 10_000_000;
+
+/**
+ * Task 2.3: Hourly gas multiplier (UTC).
+ * Peak: 1.5x during 14-17 UTC (EU/US overlap).
+ * Trough: 0.5x during 3-5 UTC (global off-peak).
+ *
+ * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Task 2.3
+ */
+export const HOURLY_GAS_MULTIPLIER: readonly number[] = [
+  // 0-5 UTC: off-peak
+  0.6, 0.55, 0.5, 0.5, 0.5, 0.55,
+  // 6-11 UTC: Asia evening / Europe morning ramp-up
+  0.7, 0.8, 0.9, 1.0, 1.1, 1.2,
+  // 12-17 UTC: Europe/US overlap — peak
+  1.3, 1.4, 1.5, 1.5, 1.4, 1.3,
+  // 18-23 UTC: US afternoon / evening wind-down
+  1.2, 1.1, 1.0, 0.9, 0.8, 0.7,
+];
+
 /**
  * Get the realistic DEX fee for a given DEX and token pair.
  * V3 DEXes: fee tier depends on pair type (stablecoin pairs → 0.01%, blue-chip → 0.05%, others → 0.3%).
@@ -235,6 +263,12 @@ export class ChainSimulator extends EventEmitter {
    * Transitions via Markov chain each tick.
    */
   private currentRegime: MarketRegime = 'normal';
+
+  // --- Batch 2: EIP-1559 base fee tracking (Task 2.1) ---
+  /** Running EIP-1559 base fee, adjusted per block. 0 = not yet initialized. */
+  private eip1559BaseFee: number = 0;
+  /** Swap count of the previous block, used for EIP-1559 utilization calculation. */
+  private lastBlockSwapCount: number = 0;
 
   constructor(config: ChainSimulatorConfig) {
     super();
@@ -469,7 +503,10 @@ export class ChainSimulator extends EventEmitter {
     this.currentRegime = transitionRegime(this.currentRegime);
     const regimeConfig = REGIME_CONFIGS[this.currentRegime];
 
-    // Sample gas price for this block
+    // Task 2.1: Adjust EIP-1559 baseFee based on previous block's utilization
+    this.adjustEip1559BaseFee(profile, this.lastBlockSwapCount);
+
+    // Sample gas price for this block (uses EIP-1559 tracked baseFee)
     this.currentGasPrice = this.sampleGasPrice(profile);
 
     // Poisson-distributed swap count
@@ -484,6 +521,9 @@ export class ChainSimulator extends EventEmitter {
         this.executeSwap(pair);
       }
     }
+
+    // Task 2.1: Save swap count for next block's EIP-1559 adjustment
+    this.lastBlockSwapCount = swapCount;
 
     // Opportunity detection
     const effectiveArbChance = this.config.arbitrageChance * regimeConfig.arbChanceMultiplier;
@@ -502,24 +542,77 @@ export class ChainSimulator extends EventEmitter {
 
   /**
    * Sample gas price for a block using the chain's gas model.
-   * Base fee spikes during burst regime via burstMultiplier.
+   *
+   * Batch 2 enhancements:
+   * - Task 2.1: EIP-1559 tracked baseFee replaces static baseFeeAvg
+   * - Task 2.2: L1 data fee added for rollup chains
+   * - Task 2.3: Time-of-day hourly multiplier applied to baseFee
+   *
+   * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Tasks 2.1-2.3
    */
   private sampleGasPrice(profile: ChainThroughputProfile): SampledGasPrice {
     const gas = profile.gasModel;
     const burstMult = this.currentRegime === 'burst' ? gas.burstMultiplier : 1.0;
 
-    const baseFee = Math.max(0, gaussianRandom(gas.baseFeeAvg * burstMult, gas.baseFeeStdDev));
+    // Task 2.1: Use EIP-1559 tracked baseFee instead of static average
+    const eip1559Base = this.eip1559BaseFee > 0 ? this.eip1559BaseFee : gas.baseFeeAvg;
+
+    // Task 2.3: Time-of-day multiplier (UTC hour index)
+    const hourlyMult = HOURLY_GAS_MULTIPLIER[new Date().getUTCHours()];
+
+    const baseFee = Math.max(0, gaussianRandom(eip1559Base * burstMult * hourlyMult, gas.baseFeeStdDev));
     const priorityFee = Math.max(0, gaussianRandom(gas.priorityFeeAvg, gas.priorityFeeStdDev));
 
     const nativePrice = getNativeTokenPrice(this.config.chainId);
     const isSolana = this.config.chainId === 'solana';
     // Solana: lamports/CU * CU * SOL_price / 1e12 (lamports to SOL)
     // EVM: gwei * gas * ETH_price / 1e9 (gwei to ETH)
-    const gasCostUsd = isSolana
+    let gasCostUsd = isSolana
       ? ((baseFee + priorityFee) * gas.swapGasUnits * nativePrice) / 1e12
       : ((baseFee + priorityFee) * gas.swapGasUnits * nativePrice) / 1e9;
 
+    // Task 2.2: L1 data fee for rollup chains
+    // L1 data posting cost is always priced in ETH regardless of native token
+    if (gas.l1BaseFeeGwei && gas.l1FeeScalar && gas.txDataBytes) {
+      const ethPrice = getTokenPrice('WETH');
+      const l1DataFeeGwei = gas.txDataBytes * gas.l1BaseFeeGwei * gas.l1FeeScalar;
+      const l1DataFeeUsd = (l1DataFeeGwei * ethPrice) / 1e9;
+      gasCostUsd += l1DataFeeUsd;
+    }
+
     return { baseFee, priorityFee, gasCostUsd };
+  }
+
+  /**
+   * Task 2.1: Adjust EIP-1559 base fee based on block utilization.
+   *
+   * Real EIP-1559 adjusts baseFee by up to ±12.5% per block:
+   * - If block is >100% utilized: baseFee increases (up to +12.5% at 200% full)
+   * - If block is <100% utilized: baseFee decreases (up to -12.5% at 0% full)
+   *
+   * baseFee_next = baseFee * (1 + (utilization - 1) / 8)
+   * Clamped to [baseFeeAvg * 0.1, baseFeeAvg * 20].
+   *
+   * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Task 2.1
+   */
+  private adjustEip1559BaseFee(profile: ChainThroughputProfile, previousBlockSwaps: number): void {
+    const gas = profile.gasModel;
+    if (this.eip1559BaseFee === 0) {
+      this.eip1559BaseFee = gas.baseFeeAvg;
+    }
+    const targetSwaps = profile.dexSwapsPerBlock;
+    if (targetSwaps <= 0) return;
+
+    const utilization = previousBlockSwaps / targetSwaps;
+    // EIP-1559: ±12.5% max adjustment per block
+    const change = (utilization - 1) / 8;
+    this.eip1559BaseFee *= (1 + change);
+
+    // Clamp to reasonable range
+    this.eip1559BaseFee = Math.max(
+      gas.baseFeeAvg * 0.1,
+      Math.min(this.eip1559BaseFee, gas.baseFeeAvg * 20),
+    );
   }
 
   /**
@@ -970,7 +1063,13 @@ export class ChainSimulator extends EventEmitter {
     netProfit: number
   ): SimulatedOpportunity {
     const positionSize = this.calculatePositionSize();
-    const estimatedProfitUsd = netProfit * positionSize;
+
+    // Task 2.5: Slippage deduction — effective slippage ≈ P / (2 * L)
+    const poolTvlUsd = 2 * POOL_SIDE_USD;
+    const slippageFraction = positionSize / poolTvlUsd;
+    const slippageCostUsd = positionSize * slippageFraction;
+    const estimatedProfitUsd = netProfit * positionSize - slippageCostUsd;
+
     const estimatedGasCost = this.currentGasPrice.gasCostUsd > 0
       ? this.currentGasPrice.gasCostUsd * (0.8 + Math.random() * 0.4) // +-20% variance
       : 5 + Math.random() * 15; // fallback when gas price not sampled

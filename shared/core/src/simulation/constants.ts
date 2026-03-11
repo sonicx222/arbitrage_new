@@ -14,6 +14,7 @@ import type {
   RegimeConfig,
 } from './types';
 import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
+import { BRIDGE_COSTS as PRODUCTION_BRIDGE_COSTS } from '@arbitrage/config';
 
 // =============================================================================
 // Default Configuration
@@ -242,52 +243,40 @@ export const DEXES: Record<string, string[]> = {
 };
 
 // =============================================================================
-// Default Bridge Costs
+// Default Bridge Costs (Task 2.4: Aligned with production bridge-config.ts)
 // =============================================================================
 
 /**
- * Default bridge costs per route.
- * Format: 'sourceChain-destChain' -> costs
+ * Default bridge costs per route, derived from production BRIDGE_COSTS.
+ *
+ * Task 2.4: Replaces hardcoded simulation bridge costs with data from
+ * shared/config/src/bridge-config.ts. For each src-dst pair, selects the
+ * lowest-fee bridge option and converts feeBps → decimal fraction.
+ *
+ * Format: 'sourceChain-destChain' -> { fixedCost (USD), percentageFee (decimal), estimatedTimeSeconds }
+ *
+ * @see shared/config/src/bridge-config.ts — Production bridge route data
+ * @see docs/plans/2026-03-11-simulation-realism-enhancement.md — Task 2.4
  */
-export const DEFAULT_BRIDGE_COSTS: Record<string, BridgeCostConfig> = {
-  // Stargate routes (L1 <-> L2)
-  'ethereum-arbitrum': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-optimism': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-base': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-polygon': { fixedCost: 20, percentageFee: 0.0006, estimatedTimeSeconds: 1200 },
-  'ethereum-avalanche': { fixedCost: 25, percentageFee: 0.0008, estimatedTimeSeconds: 900 },
-  'ethereum-bsc': { fixedCost: 20, percentageFee: 0.0006, estimatedTimeSeconds: 900 },
+function buildBridgeCostsFromProduction(): Record<string, BridgeCostConfig> {
+  const result: Record<string, BridgeCostConfig> = {};
+  for (const route of PRODUCTION_BRIDGE_COSTS) {
+    const key = `${route.sourceChain}-${route.targetChain}`;
+    const percentageFee = route.feeBps / 10000;
+    const existing = result[key];
+    // Keep the lowest-fee bridge option per route
+    if (!existing || percentageFee < existing.percentageFee) {
+      result[key] = {
+        fixedCost: route.minFeeUsd,
+        percentageFee,
+        estimatedTimeSeconds: route.estimatedLatencySeconds,
+      };
+    }
+  }
+  return result;
+}
 
-  // L2 <-> L2 routes (faster, cheaper)
-  'arbitrum-optimism': { fixedCost: 5, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-  'arbitrum-base': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-  'optimism-base': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
-  'optimism-arbitrum': { fixedCost: 5, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-  'base-arbitrum': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-  'base-optimism': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
-
-  // Asia chains
-  'bsc-polygon': { fixedCost: 8, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
-  'polygon-bsc': { fixedCost: 8, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
-  'avalanche-bsc': { fixedCost: 10, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
-  'avalanche-polygon': { fixedCost: 10, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
-
-  // P2-22 FIX: Emerging L2s — L1 <-> L2 routes
-  'ethereum-zksync': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-linea': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-blast': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-scroll': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-mantle': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-mode': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
-  'ethereum-fantom': { fixedCost: 20, percentageFee: 0.0006, estimatedTimeSeconds: 900 },
-
-  // Emerging L2 <-> L2 routes (via shared bridge protocols)
-  'arbitrum-blast': { fixedCost: 3, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-  'arbitrum-scroll': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-  'optimism-blast': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
-  'base-blast': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
-  'base-scroll': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
-};
+export const DEFAULT_BRIDGE_COSTS: Record<string, BridgeCostConfig> = buildBridgeCostsFromProduction();
 
 // =============================================================================
 // Pair Activity Tiers

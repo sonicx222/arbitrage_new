@@ -132,6 +132,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0,
       swapGasUnits: 500000,
       burstMultiplier: 3,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.8,
+      txDataBytes: 64,
     },
     // zkSync: Low liquidity, wider spreads but smaller positions
     profitProfile: {
@@ -161,6 +164,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.05,
       swapGasUnits: 150000,
       burstMultiplier: 2,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.5,
+      txDataBytes: 128,
     },
     // Linea: Low liquidity, wider spreads, tiny positions
     profitProfile: {
@@ -319,6 +325,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.01,
       swapGasUnits: 800000,
       burstMultiplier: 3,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 1.0,
+      txDataBytes: 128,
     },
     // Arbitrum: Growing MEV competition, moderate spreads, decent liquidity
     profitProfile: {
@@ -349,6 +358,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.001,
       swapGasUnits: 150000,
       burstMultiplier: 3,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.684,
+      txDataBytes: 128,
     },
     // Optimism: OP Stack L2, low gas, moderate liquidity (Velodrome dominated)
     profitProfile: {
@@ -379,6 +391,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.001,
       swapGasUnits: 150000,
       burstMultiplier: 3,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.684,
+      txDataBytes: 128,
     },
     // Base: OP Stack L2, near-zero gas, Aerodrome dominated, growing searcher competition
     profitProfile: {
@@ -413,6 +428,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.001,
       swapGasUnits: 150000,
       burstMultiplier: 3,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.684,
+      txDataBytes: 128,
     },
     // Blast: Emerging L2, low liquidity, wider spreads
     profitProfile: {
@@ -443,6 +461,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0.01,
       swapGasUnits: 400000,
       burstMultiplier: 3,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.6,
+      txDataBytes: 80,
     },
     // Scroll: Emerging L2, low liquidity, higher gas than other L2s
     profitProfile: {
@@ -473,6 +494,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0,
       swapGasUnits: 150000,
       burstMultiplier: 2,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.02,
+      txDataBytes: 128,
     },
     // Mantle: Stub chain, minimal liquidity
     profitProfile: {
@@ -503,6 +527,9 @@ export const CHAIN_THROUGHPUT_PROFILES: Readonly<Record<string, ChainThroughputP
       priorityFeeStdDev: 0,
       swapGasUnits: 150000,
       burstMultiplier: 2,
+      l1BaseFeeGwei: 25,
+      l1FeeScalar: 0.684,
+      txDataBytes: 128,
     },
     // Mode: Stub chain, minimal liquidity
     profitProfile: {

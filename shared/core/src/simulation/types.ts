@@ -354,6 +354,15 @@ export interface GasModel {
   swapGasUnits: number;
   /** Base fee multiplier during burst regime */
   burstMultiplier: number;
+
+  // --- Batch 2: L1 data fee fields for rollup chains (Task 2.2) ---
+
+  /** Ethereum L1 base fee in gwei for L1 data posting cost. Only for L2/rollup chains. */
+  l1BaseFeeGwei?: number;
+  /** Chain-specific L1 fee scalar (incorporates compression ratio). */
+  l1FeeScalar?: number;
+  /** Typical calldata bytes per swap transaction for L1 data posting. */
+  txDataBytes?: number;
 }
 
 /**
