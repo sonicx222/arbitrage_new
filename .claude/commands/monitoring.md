@@ -1,10 +1,13 @@
 # Pre-Deploy Validation — Orchestrator Hub
-# Version: 4.1
+# Version: 4.2
 # Modular pipeline: this hub dispatches 5 phases via on-demand module loading.
 # Total checks: 24 static + 42 runtime + 12 smoke test steps = 78 validation points.
 #
 # Quick mode: set MONITOR_QUICK_MODE=true to run only Pre-Flight + Phase 1.
 # No services needed. ~60 seconds. Useful for pre-commit validation.
+#
+# CI mode: set MONITOR_CI_MODE=true for machine-readable output + exit codes.
+# Writes summary.json, exits 0 (GO) or 1 (NO-GO).
 
 ## Architecture
 
@@ -75,7 +78,8 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 
 5. Read and execute `monitoring/04-runtime.md`
    - 42 checks across 9 subsections (3A-3AR)
-   - Uses endpoint cache (O-01) and Redis batching (O-02) for performance
+   - Uses endpoint cache (O-01, TTL from config.json.cacheTtlSec) and Redis batching (O-02)
+   - Retry wrapper (O-03) for transient curl/redis-cli failures
    - Placeholder metrics get fast-path INFO (no curl needed)
    - Findings → `./monitor-session/findings/runtime.jsonl`
 
@@ -112,12 +116,34 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 - `node` for JSON parsing (replaces `jq` — not available on all platforms)
 - No `bc` or GNU `timeout` required (Windows Git Bash compatible)
 
+## Progress Reporting
+
+Each phase emits progress markers for observability:
+```
+[PHASE N/5] <Phase Name> — starting (<check_count> checks)
+[CHECK <id>] <name> — <PASS|FAIL|SKIP> (<duration>ms)
+[PHASE N/5] <Phase Name> — complete (C:<n> H:<n> M:<n>)
+```
+
 ## Configuration
 
-All thresholds in `monitoring/config.json` (v4.1). Key settings:
+All thresholds in `monitoring/config.json` (v4.2). Key settings:
 - `goNoGo.anyCritical: "NO-GO"` — any CRITICAL finding blocks deployment
 - `goNoGo.maxHighForGo: 3` — more than 3 HIGH findings blocks deployment
 - `severityOverrides` — per-mode severity downgrades for known structural findings
+- `retry` — transient failure retry (3 attempts, 1s delay, pattern-matched)
+- `cacheTtlSec: 30` — endpoint cache validity window
 - `readinessTimeouts` — mode-specific service startup timeouts
 - `perChainStalenessThresholds` — per-chain price update freshness (seconds)
 - `placeholderMetrics` — metrics not yet implemented (skip curl, emit INFO)
+- `ci` — CI mode exit codes and summary file path
+
+## CI Integration
+
+When `MONITOR_CI_MODE=true`:
+1. Suppress verbose output (findings only, no intermediate curl/redis output)
+2. Write `./monitor-session/summary.json` after GO/NO-GO decision:
+   ```json
+   {"decision":"GO|NO-GO","critical":0,"high":0,"medium":0,"low":0,"info":0,"total":0,"overridesApplied":0,"aggregates":0,"duration":"<seconds>","mode":"FULL|QUICK"}
+   ```
+3. Exit with code from `config.json`.ci.exitCodeGo (0) or exitCodeNoGo (1)

@@ -3,6 +3,14 @@
 # Reads inventory from `./monitor-session/config/inventory.json`
 # Reads thresholds from `.claude/commands/monitoring/config.json`
 
+```
+[PHASE 4/5] Pipeline Smoke Test — starting (12 steps)
+```
+
+**Retry:** curl and redis-cli commands use the retry wrapper (O-03).
+**Error context:** Include `"relatedFindings"` when smoke test failures correlate with
+Phase 3 findings (e.g., DLQ growth → link to RT-NNN DLQ root cause finding).
+
 Record findings to `./monitor-session/findings/smoke-test.jsonl`:
 ```json
 {"phase":"SMOKE_TEST","findingId":"SM-NNN","category":"PIPELINE_FLOW|PIPELINE_STALL|TRACE_INCOMPLETE|DLQ_GROWTH|DETECTION_RATE|RISK_STATE|BACKPRESSURE|PARTITION_FLOW|CROSS_CHAIN_DETECTOR|BUSINESS_INTELLIGENCE|RUNTIME_DEGRADATION","severity":"...","stream":"...","evidence":"..."}
@@ -68,6 +76,7 @@ done
 
 `[SIM]` All 4 streams MUST grow:
 - price-updates not growing after 30s → C:PIPELINE_STALL (partitions not publishing)
+  `"quickFix": "npm run dev:status"`, `"relatedFindings": ["ST-NNN"]`
 - opportunities not growing after 45s → H:PIPELINE_STALL (detectors not finding — may be expected)
 
 `[LIVE/TESTNET]` Only price-updates MUST grow:
@@ -276,6 +285,7 @@ Compare against Phase 3 values (Checks 3O, 3Q).
 ## Phase 4 Summary
 
 ```
+[PHASE 4/5] Pipeline Smoke Test — complete (C:<n> H:<n> M:<n>)
 PHASE 4 COMPLETE — Pipeline Smoke Test (12 steps)
   Price updates published: <n>
   Opportunities detected: <n>

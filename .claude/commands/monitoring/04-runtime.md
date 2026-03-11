@@ -3,6 +3,10 @@
 All services must be running. Uses curl, redis-cli, jq.
 9 subsections, 42 checks (3A-3AR, excluding 3AL and 3AM -- reclassified to Phase 1).
 
+```
+[PHASE 3/5] Runtime Validation — starting (42 checks)
+```
+
 ## References
 
 - **Inventory**: `./monitor-session/config/inventory.json`
@@ -40,10 +44,29 @@ default. The original severity is preserved in an `"originalSeverity"` field for
 
 When overrides are applied, annotate the finding with `[SIM-OVERRIDE]` in the title.
 
+## Error Context Enrichment
+
+Findings must include actionable context to reduce mean-time-to-diagnosis. Beyond the base
+finding fields, include these when applicable:
+
+| Field | When | Purpose |
+|-------|------|---------|
+| `"retryExhausted": true` | After retry wrapper exhausts attempts | Distinguish transient vs persistent |
+| `"cacheAge": <seconds>` | Reading stale cache | Indicate data freshness |
+| `"quickFix": "<command>"` | Known remediation exists | One-liner to resolve |
+| `"relatedFindings": ["RT-NNN"]` | Causal relationship detected | Link root cause to symptoms |
+| `"dataMode": "<mode>"` | Finding is mode-sensitive | Indicate if behavior changes per mode |
+
+**quickFix examples:**
+- Service unreachable: `"quickFix": "npm run dev:status && npm run dev:all"`
+- Redis not connected: `"quickFix": "npm run dev:redis:memory"`
+- DLQ growing: `"quickFix": "redis-cli DEL stream:dead-letter-queue"`
+- High RSS: `"quickFix": "Restart services: npm run dev:stop && npm run dev:all"`
+
 ## Finding Format
 
 ```json
-{"phase":"RUNTIME","findingId":"RT-NNN","category":"<CATEGORY>","severity":"CRITICAL|HIGH|MEDIUM|LOW|INFO","service":"<name>","stream":"<optional>","consumerGroup":"<optional>","evidence":"<output>","expected":"<what>","actual":"<what>","recommendation":"<fix>"}
+{"phase":"RUNTIME","findingId":"RT-NNN","category":"<CATEGORY>","severity":"CRITICAL|HIGH|MEDIUM|LOW|INFO","service":"<name>","stream":"<optional>","consumerGroup":"<optional>","evidence":"<output>","expected":"<what>","actual":"<what>","recommendation":"<fix>","quickFix":"<optional_command>","relatedFindings":["<optional>"]}
 ```
 
 Category values: `SERVICE_HEALTH`, `LEADER_ELECTION`, `HEALTH_SCHEMA`, `CIRCUIT_BREAKER`,
@@ -57,13 +80,32 @@ Category values: `SERVICE_HEALTH`, `LEADER_ELECTION`, `HEALTH_SCHEMA`, `CIRCUIT_
 
 ---
 
+## Preamble: Retry Wrapper (O-03)
+
+Transient failures (Redis LOADING, connection refused on slow startup) should not produce
+false findings. Use a retry wrapper per `config.json`.retry settings.
+
+**Retry logic** (apply to all curl and redis-cli commands in this phase):
+- Up to `retry.maxAttempts` (3) attempts per command
+- Wait `retry.delayMs` (1000ms) between attempts
+- Only retry if stderr matches any pattern in `retry.retryablePatterns`:
+  `"Connection refused"`, `"Could not connect"`, `"LOADING"`, `"BUSY"`
+- On final failure, record the finding with `"retryExhausted": true` and include
+  the attempt count in evidence: `"evidence": "Failed after 3 attempts: <error>"`
+
+Non-retryable errors (4xx status, invalid JSON, unexpected response) fail immediately.
+
+---
+
 ## Preamble: Endpoint Caching (O-01)
 
 Fetch ALL HTTP endpoints once into cache files. All subsequent checks read from cache.
-Cache is stale after 30s -- re-fetch only for post-action comparisons.
+Cache TTL is `config.json`.cacheTtlSec (30s) — re-fetch if a check runs after TTL expires.
 
 ```bash
 mkdir -p ./monitor-session/config/cache
+CACHE_TS=$(date +%s)
+echo "$CACHE_TS" > ./monitor-session/config/cache/.timestamp
 for port in 3000 3001 3002 3003 3004 3005 3006; do
   curl -sf --max-time 10 http://localhost:$port/health > ./monitor-session/config/cache/health_$port.json 2>/dev/null &
   curl -sf --max-time 10 http://localhost:$port/stats > ./monitor-session/config/cache/stats_$port.json 2>/dev/null &
@@ -79,21 +121,42 @@ curl -sf --max-time 10 http://localhost:3005/bridge-recovery > ./monitor-session
 wait
 ```
 
+**Cache staleness guard:** Before reading a cache file, check if `$(date +%s) - CACHE_TS > cacheTtlSec`.
+If stale, re-fetch that specific endpoint before proceeding. This matters for checks that run
+late in Phase 3 (dashboard checks 3AJ-3AR can execute 60-90s after initial cache fill).
+
 Note: Coordinator health is at `/api/health` (cache as `api_health_3000.json`).
 Partitions/EE/CC health is at `/health` (cache as `health_$port.json`).
 
 ## Preamble: Redis Command Batching (O-02)
 
-Batch all stream XINFO/XLEN commands using discovered streams from Phase 2:
+Batch all stream XINFO/XLEN commands into a single Redis pipeline to minimize round-trips.
+A sequential loop of N streams × 3 commands = 3N round-trips; pipelining reduces this to 1.
 
 ```bash
 STREAMS=$(cat ./monitor-session/streams/discovered.txt)
+# Build pipeline commands
+PIPE_CMDS=""
 for stream in $STREAMS; do
-  echo "=== $stream ==="
-  redis-cli XINFO STREAM $stream 2>&1
-  redis-cli XINFO GROUPS $stream 2>&1
-  redis-cli XLEN $stream 2>&1
-done > ./monitor-session/config/cache/stream-inventory.txt
+  PIPE_CMDS="${PIPE_CMDS}XINFO STREAM ${stream}\nXINFO GROUPS ${stream}\nXLEN ${stream}\n"
+done
+# Execute as single pipeline (stdin mode)
+echo -e "$PIPE_CMDS" | redis-cli --pipe-mode 2>/dev/null || {
+  # Fallback to sequential if pipeline fails (older redis-cli)
+  for stream in $STREAMS; do
+    echo "=== $stream ==="
+    redis-cli XINFO STREAM $stream 2>&1
+    redis-cli XINFO GROUPS $stream 2>&1
+    redis-cli XLEN $stream 2>&1
+  done
+} > ./monitor-session/config/cache/stream-inventory.txt
+```
+
+Also batch-fetch all XPENDING in one pass (used by checks 3J, 3L):
+```bash
+for stream in $STREAMS; do
+  redis-cli XPENDING $stream $(redis-cli XINFO GROUPS $stream 2>/dev/null | grep -oP '(?<=name\s)\S+' | head -1) - + 10 2>/dev/null
+done > ./monitor-session/config/cache/stream-pending.txt
 ```
 
 ## Preamble: Placeholder Metrics Fast-Path
@@ -1139,6 +1202,7 @@ For session 101042, this would reduce ~18 per-service findings to ~4 aggregates.
 After all 42 checks across 9 subsections, read `./monitor-session/findings/runtime.jsonl`:
 
 ```
+[PHASE 3/5] Runtime Validation — complete (C:<n> H:<n> M:<n>)
 PHASE 3 COMPLETE -- Runtime Validation (42 checks, 9 subsections)
   3.1 Service Health & Schema: 3A health, 3B leader, 3C schema
   3.2 Risk & CB: 3D CB states, 3E drawdown, 3F CB history*, 3G backpressure*

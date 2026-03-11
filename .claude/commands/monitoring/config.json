@@ -1,5 +1,5 @@
 {
-  "version": "4.1",
+  "version": "4.2",
   "thresholds": {
     "eventLoopP99WarnMs": 20,
     "eventLoopP99CritMs": 50,
@@ -50,6 +50,12 @@
     "anyCritical": "NO-GO",
     "maxHighForGo": 3
   },
+  "retry": {
+    "maxAttempts": 3,
+    "delayMs": 1000,
+    "retryablePatterns": ["Connection refused", "Could not connect", "LOADING", "BUSY"]
+  },
+  "cacheTtlSec": 30,
   "readinessTimeouts": {
     "default": 30,
     "partitionsLive": 60,
@@ -63,6 +69,11 @@
     "stream_trimmed_messages_total",
     "pair_cache_hit_total"
   ],
+  "ci": {
+    "exitCodeNoGo": 1,
+    "exitCodeGo": 0,
+    "summaryFile": "./monitor-session/summary.json"
+  },
   "perChainStalenessThresholds": {
     "bsc": 6,
     "polygon": 4,

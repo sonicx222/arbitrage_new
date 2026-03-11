@@ -3,6 +3,13 @@
 # Reads inventory from `./monitor-session/config/inventory.json`
 # Reads timeouts from `.claude/commands/monitoring/config.json`
 
+```
+[PHASE 2/5] Startup & Readiness — starting (5 steps)
+```
+
+**Retry:** Redis commands in this phase use the retry wrapper (O-03 from config.json.retry).
+Redis LOADING during startup is expected — retry handles it transparently.
+
 Record findings to `./monitor-session/findings/startup.jsonl`:
 ```json
 {"phase":"STARTUP","findingId":"ST-NNN","category":"SERVICE_READY|SERVICE_FAILED|REDIS_FAILED|REDIS_SECURITY|STREAM_TOPOLOGY|METRICS_ENDPOINT|CONFIG_DRIFT","severity":"...","service":"...","port":0,"startupTimeMs":0,"evidence":"..."}
@@ -19,6 +26,7 @@ redis-cli PING
 ```
 
 - PING fails → C:REDIS_FAILED — skip to Phase 5 (nothing works without Redis)
+  `"quickFix": "npm run dev:redis:memory"`
 
 Verify stream command support:
 ```bash
@@ -97,6 +105,7 @@ Flags:
 - Ready within timeout → I:SERVICE_READY (record startup time)
 - Cross-chain not ready after timeout → H:SERVICE_FAILED (extended timeout exceeded)
 - Any other service not ready after timeout → C:SERVICE_FAILED
+  `"quickFix": "npm run dev:stop && npm run dev:all"`
 - `[LIVE]` Partition timeout + missing RPC URL → H:SERVICE_FAILED (config gap, not code bug)
 
 **Cross-Chain Detector note:** Its `/ready` requires `chainsMonitored > 0` — needs
@@ -163,6 +172,7 @@ Flags:
 ## Phase 2 Summary
 
 ```
+[PHASE 2/5] Startup & Readiness — complete (C:<n> H:<n> M:<n>)
 PHASE 2 COMPLETE — Startup
   Services ready: <n>/7 (list names)
   Services failed: <n> (list names)
