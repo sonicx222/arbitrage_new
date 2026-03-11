@@ -49,7 +49,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-033](./ADR-033-stale-price-window.md) | Stale Price Window Protection | Accepted | 2026-02-22 | 95% |
 | [ADR-034](./ADR-034-solana-execution.md) | Solana Execution via Jupiter + Jito | Accepted | 2026-02-24 | 85% |
 | [ADR-035](./ADR-035-statistical-arbitrage.md) | Statistical Arbitrage Strategy | Accepted | 2026-02-24 | 80% |
-| [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Deferred | 2026-02-24 | 85% |
+| [ADR-036](./ADR-036-cex-price-signals.md) | CEX Price Signal Integration | Accepted | 2026-02-24 | 85% |
 | [ADR-037](./ADR-037-coordinator-pipeline-optimization.md) | Coordinator Pipeline Optimization | Accepted | 2026-03-02 | 90% |
 | [ADR-038](./ADR-038-chain-grouped-execution.md) | Chain-Grouped Execution Engines | Accepted | 2026-03-06 | 92% |
 | [ADR-039](./ADR-039-async-pipeline-split.md) | Async Pipeline Split with SimulationWorker | Accepted | 2026-03-06 | 90% |
@@ -272,10 +272,13 @@ An Architecture Decision Record captures an important architectural decision mad
     - Feature flag controlled (`FEATURE_STATISTICAL_ARB=true`)
 
 32. **CEX Price Signal Integration** (ADR-036)
-    - Binance public WebSocket trade stream (no API key required)
+    - Binance public WebSocket trade stream (9 symbols, no API key required)
     - Symbol normalization layer maps CEX symbols to internal token IDs
-    - CEX-DEX spread calculator for spread-based opportunity detection
-    - Feature flag controlled (`FEATURE_CEX_PRICE_SIGNALS=true`) — **NOTE: flag not yet implemented in code**
+    - CEX-DEX spread calculator with O(1) lookup for hot-path scoring
+    - CEX alignment factor in opportunity scoring (1.15 aligned / 0.8 contradicted / 1.0 neutral)
+    - Simulation mode: synthetic CEX prices from DEX with ±0.15% noise
+    - Dashboard: `cex-spread` SSE event + CexSpreadSection in DiagnosticsTab
+    - Feature flag controlled (`FEATURE_CEX_PRICE_SIGNALS=true`)
 
 ### Coordinator Optimization (Phase 7)
 
@@ -397,3 +400,4 @@ XX% - Explanation of confidence factors
 | 2026-03-06 | ADR-040 | Added Real-Time Native Token Pricing decision |
 | 2026-03-06 | ADR-041 | Added Blockchain Configuration Architecture Refactor decision |
 | 2026-03-08 | ADR-042 | Added Testnet Execution Mode decision |
+| 2026-03-11 | ADR-036 | Implemented: Deferred → Accepted (6 batches, full pipeline wiring) |

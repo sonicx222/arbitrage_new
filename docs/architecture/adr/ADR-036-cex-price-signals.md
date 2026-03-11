@@ -1,7 +1,7 @@
 # ADR-036: CEX Price Signal Integration
 
 ## Status
-**Deferred** — Feature (`FEATURE_CEX_PRICE_SIGNALS`) was never implemented. Architecture is sound but deprioritized in favor of on-chain price feeds (ADR-040). May be revisited when mainnet latency data is available.
+**Accepted** — Fully implemented 2026-03-11. See `docs/plans/2026-03-11-cex-price-signal-integration.md`.
 
 ## Date
 2026-02-24
@@ -39,7 +39,7 @@ Components communicate via EventEmitter events, consistent with the existing det
 
 - CEX-DEX spread calculator enables new class of spread-based opportunity detection
 - Public WebSocket stream requires no API key or authentication
-- 8 initial Binance pairs covering native tokens of all supported chains
+- 9 Binance pairs covering native tokens of all supported chains
 - Low bandwidth overhead (trade events only, not full order book)
 
 ### Negative
@@ -74,11 +74,30 @@ Components communicate via EventEmitter events, consistent with the existing det
 **Cons**: 10-100x bandwidth, requires order book reconstruction, complex state management
 **Rejected**: Trade stream provides sufficient price signal for spread detection
 
+## Implementation Notes (2026-03-11)
+
+Implemented across 6 batches in 2 commits (`327bcb4e`, `ef895562`):
+
+1. **Feature flag**: `FEATURE_CEX_PRICE_SIGNALS=true` opt-in (`shared/config/src/feature-flags.ts`)
+2. **CexPriceFeedService**: Singleton orchestrator composing BinanceWebSocketClient → CexPriceNormalizer → CexDexSpreadCalculator (`shared/core/src/feeds/cex-price-feed-service.ts`)
+3. **Coordinator wiring**: Started/stopped with coordinator lifecycle, DEX prices fed from opportunity router's token resolution (`services/coordinator/src/coordinator.ts`)
+4. **CEX alignment scoring**: `computeCexAlignment()` returns 1.15 (aligned), 0.8 (contradicted), or 1.0 (neutral) based on buy-side CEX-DEX spread with ±0.1% noise band (`services/coordinator/src/opportunities/cex-alignment.ts`)
+5. **Simulation mode**: `simulateCexPrices` config option generates synthetic CEX prices from DEX with ±0.15% noise — no external connection needed
+6. **Dashboard**: `cex-spread` SSE event (10s, feature-gated), `CexSpreadCtx` context with selective re-rendering, CexSpreadSection in DiagnosticsTab
+
+Hot-path impact: <0.1ms — `getSpread()` is O(1) Map.get, CEX feed runs asynchronously in background.
+
 ## References
 
-- `shared/core/src/feeds/binance-ws-client.ts`
-- `shared/core/src/feeds/cex-price-normalizer.ts`
-- `shared/core/src/analytics/cex-dex-spread.ts`
+- `shared/core/src/feeds/cex-price-feed-service.ts` — Orchestrator singleton
+- `shared/core/src/feeds/binance-ws-client.ts` — WebSocket client with auto-reconnect
+- `shared/core/src/feeds/cex-price-normalizer.ts` — Binance symbol → token ID mapping (9 symbols)
+- `shared/core/src/analytics/cex-dex-spread.ts` — Spread calculator with O(1) index
+- `services/coordinator/src/opportunities/cex-alignment.ts` — Alignment computation
+- `services/coordinator/src/opportunities/opportunity-scoring.ts` — Score × cexAlignmentFactor
+- `services/coordinator/src/api/routes/sse.routes.ts` — `cex-spread` SSE event
+- `dashboard/src/tabs/DiagnosticsTab.tsx` — CexSpreadSection UI
+- `docs/plans/2026-03-11-cex-price-signal-integration.md` — Implementation plan
 - [Binance WebSocket API](https://binance-docs.github.io/apidocs/spot/en/#websocket-market-streams)
 - [ADR-005: Hierarchical Caching Strategy](./ADR-005-hierarchical-cache.md) — Price data caching
 - [ADR-033: Stale Price Window Protection](./ADR-033-stale-price-window.md) — Staleness handling
