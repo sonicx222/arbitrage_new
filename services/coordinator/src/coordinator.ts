@@ -749,11 +749,43 @@ export class CoordinatorService implements CoordinatorStateProvider {
           maxCexPriceAgeMs: safeParseInt(process.env.CEX_PRICE_MAX_AGE_MS, 10000),
           skipExternalConnection: isSimMode,
           simulateCexPrices: isSimMode,
+          maxReconnectAttempts: safeParseInt(process.env.CEX_WS_MAX_RECONNECT_ATTEMPTS, 10),
         });
         await cexFeed.start();
+
+        // CEX resilience: alert on degradation and recovery.
+        let wasDegraded = false;
+        cexFeed.on('maxReconnectFailed', () => {
+          wasDegraded = true;
+          this.sendAlert({
+            type: 'CEX_FEED_DEGRADED',
+            message: 'CEX price feed (Binance WS) exhausted all reconnect attempts. ' +
+              'Opportunity scoring running without CEX validation — alignment factor is neutral (1.0). ' +
+              'Adaptive profit threshold active if CEX_DEGRADED_PROFIT_MULTIPLIER is set.',
+            severity: 'high',
+            data: { healthSnapshot: cexFeed.getHealthSnapshot() },
+            timestamp: Date.now(),
+          });
+        });
+
+        cexFeed.on('connected', () => {
+          if (wasDegraded) {
+            wasDegraded = false;
+            this.sendAlert({
+              type: 'CEX_FEED_RECOVERED',
+              message: 'CEX price feed (Binance WS) reconnected after degradation. ' +
+                'Opportunity scoring restored to full CEX-DEX validation.',
+              severity: 'low',
+              data: { healthSnapshot: cexFeed.getHealthSnapshot() },
+              timestamp: Date.now(),
+            });
+          }
+        });
+
         this.logger.info('CEX price feed started', {
           mode: isSimMode ? 'simulation (synthetic CEX prices)' : 'live (Binance WS)',
           connected: cexFeed.isConnected(),
+          healthStatus: cexFeed.getHealthSnapshot().status,
         });
       }
 
