@@ -118,7 +118,6 @@ export const PANCAKESWAP_V3_FACTORIES: Readonly<Record<string, string>> = {
   arbitrumSepolia: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   zksync: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
   base: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-  opbnb: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
   linea: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
 } as const;
 
@@ -798,8 +797,8 @@ export function isValidSolanaAddress(address: string): boolean {
 }
 
 /**
- * Normalize Ethereum address to checksum format.
- * Simple lowercase normalization (full checksum would require keccak256).
+ * Normalize Ethereum address to lowercase for consistent comparison.
+ * Note: This is NOT EIP-55 checksum encoding (which requires keccak256).
  */
 export function normalizeAddress(address: string): string {
   if (!isValidEthereumAddress(address)) {

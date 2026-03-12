@@ -468,6 +468,10 @@ export {
   SYNCSWAP_VAULTS,
   getSyncSwapVault,
   hasSyncSwap,
+  // DAI Flash Mint (DssFlash)
+  DSS_FLASH_ADDRESSES,
+  getDssFlash,
+  hasDssFlash,
   // Native tokens
   NATIVE_TOKENS,
   getNativeToken,

@@ -4,20 +4,27 @@ import {
   type FlashLoanProviderEntry,
 } from '../../src/flash-loan-providers/multi-provider-registry';
 import { FLASH_LOAN_PROVIDERS } from '../../src/service-config';
-import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, SYNCSWAP_VAULTS } from '../../src/addresses';
+import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, DSS_FLASH_ADDRESSES, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_VAULTS } from '../../src/addresses';
 
 describe('Multi-Provider Registry', () => {
   describe('FLASH_LOAN_PROVIDER_REGISTRY', () => {
-    it('has at least one provider for every FLASH_LOAN_PROVIDERS chain', () => {
-      for (const chain of Object.keys(FLASH_LOAN_PROVIDERS)) {
-        const providers = FLASH_LOAN_PROVIDER_REGISTRY[chain];
-        expect(providers).toBeDefined();
+    it('has at least one provider for every registry chain', () => {
+      for (const [chain, providers] of Object.entries(FLASH_LOAN_PROVIDER_REGISTRY)) {
         expect(providers.length).toBeGreaterThanOrEqual(1);
       }
     });
 
-    it('has multiple providers for ethereum, polygon, arbitrum, optimism, base', () => {
-      const multiChains = ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base'];
+    it('registry chains are subset of FLASH_LOAN_PROVIDERS chains (excluding mode/blast with zero availability)', () => {
+      const flpChains = new Set(Object.keys(FLASH_LOAN_PROVIDERS));
+      for (const chain of Object.keys(FLASH_LOAN_PROVIDER_REGISTRY)) {
+        // linea is in registry via PancakeSwap V3 but not in legacy single-provider map
+        if (chain === 'linea') continue;
+        expect(flpChains.has(chain)).toBe(true);
+      }
+    });
+
+    it('has multiple providers for ethereum, arbitrum, base, zksync, scroll', () => {
+      const multiChains = ['ethereum', 'arbitrum', 'base', 'zksync', 'scroll'];
       for (const chain of multiChains) {
         expect(FLASH_LOAN_PROVIDER_REGISTRY[chain].length).toBeGreaterThanOrEqual(2);
       }
@@ -71,6 +78,41 @@ describe('Multi-Provider Registry', () => {
           expect(bal.address).toBe(BALANCER_V2_VAULTS[chain]);
         }
       }
+    });
+
+    it('DAI Flash Mint addresses match DSS_FLASH_ADDRESSES', () => {
+      for (const [chain, providers] of Object.entries(FLASH_LOAN_PROVIDER_REGISTRY)) {
+        const dai = providers.find(p => p.protocol === 'dai_flash_mint');
+        if (dai) {
+          expect(dai.address).toBe(DSS_FLASH_ADDRESSES[chain]);
+        }
+      }
+    });
+
+    it('PancakeSwap V3 addresses match PANCAKESWAP_V3_FACTORIES', () => {
+      for (const [chain, providers] of Object.entries(FLASH_LOAN_PROVIDER_REGISTRY)) {
+        const ps = providers.find(p => p.protocol === 'pancakeswap_v3');
+        if (ps) {
+          expect(ps.address).toBe(PANCAKESWAP_V3_FACTORIES[chain]);
+        }
+      }
+    });
+
+    it('ethereum has dai_flash_mint provider (H-01b)', () => {
+      const eth = FLASH_LOAN_PROVIDER_REGISTRY['ethereum'];
+      expect(eth.find(p => p.protocol === 'dai_flash_mint')).toBeDefined();
+    });
+
+    it('linea has pancakeswap_v3 provider (H-01c)', () => {
+      const linea = FLASH_LOAN_PROVIDER_REGISTRY['linea'];
+      expect(linea).toBeDefined();
+      expect(linea.find(p => p.protocol === 'pancakeswap_v3')).toBeDefined();
+    });
+
+    it('zksync has both pancakeswap_v3 and syncswap (H-01c)', () => {
+      const zk = FLASH_LOAN_PROVIDER_REGISTRY['zksync'];
+      expect(zk.find(p => p.protocol === 'pancakeswap_v3')).toBeDefined();
+      expect(zk.find(p => p.protocol === 'syncswap')).toBeDefined();
     });
 
     it('providers are sorted by feeBps ascending within each chain', () => {

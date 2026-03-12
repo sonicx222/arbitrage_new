@@ -257,7 +257,7 @@ export const PARTITIONS: PartitionConfig[] = [
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 768, // 5 chains (reduced from 896)
+    maxMemoryMB: 768, // 7 chains (reduced from 896)
     enabled: true,
     healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000

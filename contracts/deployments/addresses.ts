@@ -71,6 +71,8 @@ export const MAINNET_CHAINS: readonly EVMMainnetChain[] = [
   'zksync',
   'zksync-mainnet',  // Alias for zksync (zkSync Era Mainnet)
   'linea',
+  'blast',
+  'scroll',
   'mantle',
   'mode',
 ] as const;

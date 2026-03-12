@@ -533,7 +533,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
     },
   ],
 
-  // Base: 7 factories
+  // Base: 8 factories
   base: [
     {
       address: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
@@ -619,7 +619,7 @@ export const DEX_FACTORY_REGISTRY: Record<string, FactoryConfig[]> = {
     },
   ],
 
-  // Optimism: 3 factories
+  // Optimism: 4 factories
   optimism: [
     {
       address: '0x1F98431c8aD98523631AE4a59f267346ea31F984',

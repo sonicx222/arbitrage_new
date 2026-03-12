@@ -7,6 +7,7 @@
  */
 
 import { COMMIT_REVEAL_CONTRACTS, hasCommitRevealContract } from './addresses';
+import { CHAINS } from './chains';
 import { MULTI_PATH_QUOTER_ADDRESSES, hasMultiPathQuoter, isProduction } from './service-config';
 import { safeParseFloat, safeParseFloatBounded, safeParseInt } from './utils/env-parsing';
 
@@ -643,7 +644,8 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
   if (FEATURE_FLAGS.useDestChainFlashLoan) {
     // Check if any flash loan contract addresses are configured
     const configuredChains: string[] = [];
-    for (const chain of ['ethereum', 'arbitrum', 'base', 'polygon', 'optimism', 'avalanche', 'bsc', 'fantom', 'zksync', 'linea']) {
+    // H-05: Use dynamic chain list instead of hardcoded array (was missing blast, scroll, mantle, mode)
+    for (const chain of Object.keys(CHAINS).filter(c => c !== 'solana')) {
       if (process.env[`FLASH_LOAN_CONTRACT_${chain.toUpperCase()}`]) {
         configuredChains.push(chain);
       }

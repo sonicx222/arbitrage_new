@@ -821,6 +821,46 @@ describe('UniswapV3Adapter', () => {
   });
 
   // ==========================================================================
+  // withdrawToken (H-04: TokenWithdrawn event)
+  // ==========================================================================
+
+  describe('withdrawToken', () => {
+    it('should rescue ERC20 tokens and emit TokenWithdrawn event', async () => {
+      const { adapter, weth, wethAddr, owner } = await loadFixture(deployAdapterFixture);
+      const adapterAddr = await adapter.getAddress();
+      const amount = ethers.parseEther('5');
+
+      // Send tokens to adapter (simulating accidental transfer)
+      await weth.mint(adapterAddr, amount);
+      expect(await weth.balanceOf(adapterAddr)).to.equal(amount);
+
+      const ownerBalBefore = await weth.balanceOf(owner.address);
+
+      // Owner rescues tokens
+      await expect(adapter.connect(owner).withdrawToken(wethAddr, owner.address, amount))
+        .to.emit(adapter, 'TokenWithdrawn')
+        .withArgs(wethAddr, owner.address, amount);
+
+      expect(await weth.balanceOf(adapterAddr)).to.equal(0n);
+      expect(await weth.balanceOf(owner.address)).to.equal(ownerBalBefore + amount);
+    });
+
+    it('should revert withdrawToken for non-owner', async () => {
+      const { adapter, wethAddr, user } = await loadFixture(deployAdapterFixture);
+      await expect(
+        adapter.connect(user).withdrawToken(wethAddr, user.address, 1n),
+      ).to.be.revertedWith('Ownable: caller is not the owner');
+    });
+
+    it('should revert withdrawToken to zero address', async () => {
+      const { adapter, wethAddr, owner } = await loadFixture(deployAdapterFixture);
+      await expect(
+        adapter.connect(owner).withdrawToken(wethAddr, ethers.ZeroAddress, 1n),
+      ).to.be.revertedWithCustomError(adapter, 'ZeroAddress');
+    });
+  });
+
+  // ==========================================================================
   // Edge Cases
   // ==========================================================================
 

@@ -85,6 +85,9 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
     /// @notice Emitted when the quoter address is updated
     event QuoterSet(address indexed quoter);
 
+    /// @notice Emitted when ERC20 tokens are rescued from the contract
+    event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
+
     // ==========================================================================
     // State Variables
     // ==========================================================================
@@ -188,6 +191,7 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
     function withdrawToken(address token, address to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         IERC20(token).safeTransfer(to, amount);
+        emit TokenWithdrawn(token, to, amount);
     }
 
     /**
