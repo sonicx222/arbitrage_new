@@ -33,15 +33,15 @@ jest.mock('ethers', () => ({
 
 // Mock @arbitrage/config — the factory reads FLASH_LOAN_PROVIDERS at module level
 // Protocol/address/fee values mirror the real service-config.ts FLASH_LOAN_PROVIDERS.
-// Fee uses AAVE_V3_FEE_BPS (9) for aave_v3 chains to match the exported constant.
+// Fee uses AAVE_V3_FEE_BPS (5, post-AIP-382) for aave_v3 chains to match the exported constant.
 const MOCK_FLASH_LOAN_PROVIDERS: Record<string, { address: string; protocol: string; fee: number }> = {
-  ethereum:  { address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', protocol: 'aave_v3',        fee: 9  },
-  arbitrum:  { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
-  polygon:   { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
-  base:      { address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5', protocol: 'aave_v3',        fee: 9  },
-  optimism:  { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
-  avalanche: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 9  },
-  scroll:    { address: '0x11fCfe756c05AD438e312a7fd934381537D3cFfe', protocol: 'aave_v3',        fee: 9  },
+  ethereum:  { address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', protocol: 'aave_v3',        fee: 5  },
+  arbitrum:  { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 5  },
+  polygon:   { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 5  },
+  base:      { address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5', protocol: 'aave_v3',        fee: 5  },
+  optimism:  { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 5  },
+  avalanche: { address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', protocol: 'aave_v3',        fee: 5  },
+  scroll:    { address: '0x11fCfe756c05AD438e312a7fd934381537D3cFfe', protocol: 'aave_v3',        fee: 5  },
   bsc:       { address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4', protocol: 'pancakeswap_v3', fee: 25 },
   zksync:    { address: '0x621425a1Ef6abE91058E9712575dcc4258F8d091', protocol: 'syncswap',       fee: 30 },
   fantom:    { address: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', protocol: 'balancer_v2',    fee: 0  },
@@ -62,11 +62,11 @@ jest.mock('@arbitrage/config', () => {
     BALANCER_V2_FLASH_ARBITRAGE_ABI: ['function receiveFlashLoan(address[],uint256[]) external'],
     PANCAKESWAP_V3_FLASH_ARBITRAGE_ABI: ['function pancakeV3FlashCallback(uint256,uint256,bytes) external'],
     SYNCSWAP_FLASH_ARBITRAGE_ABI: ['function onFlashLoan(address,address,uint256,uint256,bytes) external'],
-    AAVE_V3_FEE_BPS: 9,
+    AAVE_V3_FEE_BPS: 5,
     BALANCER_V2_FEE_BPS: 0,
     SYNCSWAP_FEE_BPS: 30,
     getBpsDenominatorBigInt: () => BPS_DENOMINATOR,
-    getAaveV3FeeBpsBigInt: () => BigInt(9),
+    getAaveV3FeeBpsBigInt: () => BigInt(5),
     ARBITRAGE_CONFIG: {
       gasPriceSpikeMultiplier: 2,
       maxGasPrice: 50000000000,

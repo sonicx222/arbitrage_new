@@ -408,7 +408,11 @@ describe('BridgeLatencyPredictor', () => {
         'high' // High urgency should prefer faster bridge
       );
 
-      expect(prediction).toBeDefined();
+      expect(prediction).not.toBeNull();
+      expect(prediction!.bridgeName).toBe('fast-bridge');
+      expect(prediction!.estimatedLatency).toBeLessThan(200); // Should reflect fast bridge's ~60s latency
+      expect(prediction!.confidence).toBeGreaterThan(0);
+      expect(prediction!.confidence).toBeLessThanOrEqual(1);
     });
   });
 
@@ -948,7 +952,14 @@ describe('BridgeLatencyPredictor', () => {
         'low' // Low urgency - should prefer cheaper
       );
 
-      expect(prediction).toBeDefined();
+      expect(prediction).not.toBeNull();
+      // With low urgency, latency weight is only 0.2 — cost and confidence matter more.
+      // Both bridges are valid candidates; verify structural properties.
+      expect(prediction!.bridgeName).toMatch(/cheap-bridge|expensive-bridge/);
+      expect(prediction!.estimatedLatency).toBeGreaterThan(0);
+      expect(prediction!.estimatedCost).toBeGreaterThanOrEqual(0);
+      expect(prediction!.confidence).toBeGreaterThan(0);
+      expect(prediction!.confidence).toBeLessThanOrEqual(1);
     });
 
     it('should handle default medium urgency', () => {
@@ -977,7 +988,11 @@ describe('BridgeLatencyPredictor', () => {
         1.0
       );
 
-      expect(prediction).toBeDefined();
+      expect(prediction).not.toBeNull();
+      expect(prediction!.bridgeName).toBe('balanced-bridge');
+      expect(prediction!.estimatedLatency).toBeGreaterThan(0);
+      expect(prediction!.confidence).toBeGreaterThan(0);
+      expect(prediction!.confidence).toBeLessThanOrEqual(1);
     });
   });
 });

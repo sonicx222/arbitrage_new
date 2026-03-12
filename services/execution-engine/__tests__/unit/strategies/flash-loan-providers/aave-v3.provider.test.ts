@@ -18,7 +18,7 @@ import {
 // Mock @arbitrage/config — must be inline literal (hoisted above const)
 jest.mock('@arbitrage/config', () => ({
   __esModule: true,
-  AAVE_V3_FEE_BPS: 9,
+  AAVE_V3_FEE_BPS: 5,
   getBpsDenominatorBigInt: () => BigInt(10000),
   FLASH_LOAN_ARBITRAGE_ABI: [
     'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
@@ -54,7 +54,7 @@ testFlashLoanProvider({
   name: 'AaveV3FlashLoanProvider',
   protocol: 'aave_v3',
   ProviderClass: AaveV3FlashLoanProvider,
-  defaultFeeBps: 9,
+  defaultFeeBps: 5,
   defaultGasEstimate: 500000n,
   poolAddress: AAVE_POOL,
   createConfig,
@@ -67,19 +67,19 @@ testFlashLoanProvider({
 describe('AaveV3FlashLoanProvider — fee precision edge cases', () => {
   it('should calculate correct fee using integer division (rounds down)', () => {
     const provider = new AaveV3FlashLoanProvider(createConfig());
-    // 9999 * 9 / 10000 = 89991 / 10000 = 8 (integer division)
-    expect(provider.calculateFee(9999n).feeAmount).toBe(8n);
+    // 9999 * 5 / 10000 = 49995 / 10000 = 4 (integer division)
+    expect(provider.calculateFee(9999n).feeAmount).toBe(4n);
   });
 
-  it('should lose fee to rounding for amounts below ~1112 wei', () => {
+  it('should lose fee to rounding for amounts below ~2000 wei', () => {
     const provider = new AaveV3FlashLoanProvider(createConfig());
-    // 1111 * 9 / 10000 = 9999 / 10000 = 0
-    expect(provider.calculateFee(1111n).feeAmount).toBe(0n);
+    // 1999 * 5 / 10000 = 9995 / 10000 = 0
+    expect(provider.calculateFee(1999n).feeAmount).toBe(0n);
   });
 
-  it('should return exactly 9 for 10000 wei', () => {
+  it('should return exactly 5 for 10000 wei', () => {
     const provider = new AaveV3FlashLoanProvider(createConfig());
-    expect(provider.calculateFee(10000n).feeAmount).toBe(9n);
+    expect(provider.calculateFee(10000n).feeAmount).toBe(5n);
   });
 });
 

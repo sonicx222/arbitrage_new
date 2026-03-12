@@ -347,6 +347,10 @@ export function getCexPriceFeedService(config?: CexPriceFeedConfig): CexPriceFee
  */
 export async function resetCexPriceFeedService(): Promise<void> {
   if (instance) {
+    // BUG-P1-3 FIX: Remove all event listeners before stopping to prevent
+    // stale callbacks (e.g., coordinator's degradation/recovery handlers)
+    // from firing during or after shutdown.
+    instance.removeAllListeners();
     await instance.stop();
     instance = null;
   }
