@@ -9,6 +9,7 @@ import "./ISyncSwapVault.sol";
  * @dev Used by DaiFlashMintArbitrage to interact with MakerDAO's DssFlash module.
  *      IERC3156FlashBorrower is imported from ISyncSwapVault.sol (shared definition).
  *      Reference: https://eips.ethereum.org/EIPS/eip-3156
+ * @custom:version 1.0.0
  */
 interface IERC3156FlashLender {
     /**

@@ -6,6 +6,7 @@ pragma solidity ^0.8.19;
  * @dev Interface for PancakeSwap V3 flash loan callback
  * @notice Based on PancakeSwap V3's IPancakeV3FlashCallback interface
  * @custom:see https://docs.pancakeswap.finance/developers/smart-contracts/pancakeswap-exchange/v3-contracts
+ * @custom:version 1.0.0
  */
 interface IPancakeV3FlashCallback {
     /**
@@ -26,6 +27,7 @@ interface IPancakeV3FlashCallback {
 /**
  * @title IPancakeV3Pool
  * @dev Minimal interface for PancakeSwap V3 Pool flash loan functions
+ * @custom:version 1.0.0
  */
 interface IPancakeV3Pool {
     /**
@@ -108,6 +110,7 @@ interface IPancakeV3Pool {
 /**
  * @title IPancakeV3Factory
  * @dev Minimal interface for PancakeSwap V3 Factory
+ * @custom:version 1.0.0
  */
 interface IPancakeV3Factory {
     /**

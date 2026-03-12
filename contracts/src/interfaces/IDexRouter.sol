@@ -30,6 +30,7 @@ pragma solidity ^0.8.19;
  *
  * @custom:security This interface assumes trusted router implementations.
  *                   All routers must be whitelisted before use.
+ * @custom:version 1.0.0
  */
 interface IDexRouter {
     /**

@@ -141,7 +141,10 @@ library SwapHelpers {
 
         // W1-15 FIX: Reset residual token approval after swap.
         // If the router is compromised, any leftover allowance could be drained.
-        // Cost: ~5k gas per swap — acceptable for the security guarantee.
+        // Cost: ~5-7k gas per swap — acceptable for the security guarantee.
+        // Design decision: within an atomic flash loan, residual approvals cannot
+        // be exploited (the tx reverts entirely on failure), but we clear them as
+        // defense-in-depth against future non-atomic usage patterns.
         IERC20(currentToken).forceApprove(router, 0);
 
         // Defense-in-depth: Verify output matches minimum

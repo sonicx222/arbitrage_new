@@ -24,6 +24,8 @@ pragma solidity ^0.8.19;
  * ```
  *
  * Standardization rationale: contracts/src/interfaces/FLASH_LOAN_ERRORS.md
+ *
+ * @custom:version 1.0.0
  */
 interface IFlashLoanErrors {
     /// @notice Protocol contract address is invalid (zero address or not a contract)

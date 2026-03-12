@@ -167,6 +167,8 @@ abstract contract BaseFlashArbitrage is
     ///      flash loan callbacks where msg.sender is the lending pool, not the transaction initiator.
     ///      Trade-off: tx.origin returns the bundler address under ERC-4337 account abstraction.
     ///      If AA support is needed, store msg.sender from executeArbitrage() in a transient variable.
+    ///      Note: hop count is not included as a parameter — it is reconstructible from calldata
+    ///      (swapPath.length) and would consume an additional ~200 gas per emission for marginal benefit.
     event ArbitrageExecuted(
         address indexed asset,
         uint256 amount,
@@ -189,6 +191,9 @@ abstract contract BaseFlashArbitrage is
 
     /// @notice Emitted when ETH is withdrawn
     event ETHWithdrawn(address indexed to, uint256 amount);
+
+    /// @notice Emitted when the contract receives ETH via receive()
+    event ETHReceived(address indexed from, uint256 amount);
 
     /// @notice Emitted when per-token profit is tracked (M-003: observability for on-chain indexers)
     /// @param asset The token address
@@ -324,7 +329,14 @@ abstract contract BaseFlashArbitrage is
      * @param asset The starting/ending asset (must form a cycle)
      * @param amount The starting amount
      * @param swapPath Array of swap steps defining the path
-     * @return finalAmount The simulated output amount, or 0 if path is invalid
+     * @return finalAmount The simulated output amount, or 0 if path is invalid.
+     *         Returns 0 for 5 distinct reasons (view function — off-chain callers
+     *         can distinguish via step-by-step simulation):
+     *         1. Empty path or first step tokenIn != asset
+     *         2. Token continuity break (step.tokenIn != previous tokenOut)
+     *         3. Cycle detected (intermediate token visited twice)
+     *         4. Router getAmountsOut returned invalid/short array
+     *         5. Path does not end with start asset (non-circular)
      */
     function _simulateSwapPath(
         address asset,
@@ -606,8 +618,11 @@ abstract contract BaseFlashArbitrage is
 
     /**
      * @notice Allows the contract to receive ETH
+     * @dev Emits ETHReceived for on-chain tracking of inflows. Outflows tracked via ETHWithdrawn.
      */
-    receive() external payable {}
+    receive() external payable {
+        emit ETHReceived(msg.sender, msg.value);
+    }
 
     // ==========================================================================
     // Internal Utility Functions

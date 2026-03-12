@@ -178,6 +178,19 @@ contract UniswapV3Adapter is IDexRouter, Ownable2Step, ReentrancyGuard, Pausable
     }
 
     /**
+     * @notice Rescue ERC20 tokens accidentally sent to this contract
+     * @dev Only callable by contract owner. Tokens can only get stuck if directly
+     *      transferred (not via normal operation, which transfers to the recipient).
+     * @param token The ERC20 token to rescue
+     * @param to The recipient address
+     * @param amount The amount to rescue
+     */
+    function withdrawToken(address token, address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        IERC20(token).safeTransfer(to, amount);
+    }
+
+    /**
      * @notice Pause the adapter, preventing all swaps
      * @dev Only callable by the contract owner
      */

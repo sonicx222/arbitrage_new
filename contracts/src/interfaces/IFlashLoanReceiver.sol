@@ -5,6 +5,7 @@ pragma solidity ^0.8.19;
  * @title IFlashLoanSimpleReceiver
  * @dev Interface for Aave V3 flash loan simple receiver
  * @notice Based on Aave V3's IFlashLoanSimpleReceiver interface
+ * @custom:version 1.0.0
  */
 interface IFlashLoanSimpleReceiver {
     /**
@@ -30,6 +31,7 @@ interface IFlashLoanSimpleReceiver {
 /**
  * @title IPool
  * @dev Minimal interface for Aave V3 Pool flash loan functions
+ * @custom:version 1.0.0
  */
 interface IPool {
     /**

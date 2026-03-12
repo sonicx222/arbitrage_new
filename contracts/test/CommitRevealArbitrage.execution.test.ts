@@ -861,11 +861,13 @@ describe('CommitRevealArbitrage Execution', () => {
   // ETH receive() and ETHTransferFailed (L-05, L-06)
   // ===========================================================================
   describe('CommitRevealArbitrage — ETH handling', () => {
-    it('should accept ETH via receive()', async () => {
+    it('should accept ETH via receive() and emit ETHReceived', async () => {
       const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
       const addr = await commitRevealArbitrage.getAddress();
 
-      await owner.sendTransaction({ to: addr, value: ethers.parseEther('1') });
+      await expect(owner.sendTransaction({ to: addr, value: ethers.parseEther('1') }))
+        .to.emit(commitRevealArbitrage, 'ETHReceived')
+        .withArgs(owner.address, ethers.parseEther('1'));
       expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
     });
 

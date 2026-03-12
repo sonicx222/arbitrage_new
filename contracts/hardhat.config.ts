@@ -243,6 +243,10 @@ const config: HardhatUserConfig = {
       mode: process.env.MODESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
       'zksync-testnet':
         process.env.ZKSYNC_ETHERSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || 'verify',
+      // L-07: zkSync mainnet uses hardhat-zksync-verify plugin; this entry enables
+      // the etherscan fallback for block explorer links.
+      zksync:
+        process.env.ZKSYNC_ETHERSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || 'verify',
     },
     customChains: [
       {

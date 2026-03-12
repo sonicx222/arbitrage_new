@@ -141,11 +141,13 @@ describe('PancakeSwapFlashArbitrage', () => {
   // ETH receive() and ETHTransferFailed (L-05, L-06)
   // ===========================================================================
   describe('PancakeSwapFlashArbitrage — ETH handling', () => {
-    it('should accept ETH via receive()', async () => {
+    it('should accept ETH via receive() and emit ETHReceived', async () => {
       const { flashArbitrage, owner } = await loadFixture(deployContractsFixture);
       const addr = await flashArbitrage.getAddress();
 
-      await owner.sendTransaction({ to: addr, value: ethers.parseEther('1') });
+      await expect(owner.sendTransaction({ to: addr, value: ethers.parseEther('1') }))
+        .to.emit(flashArbitrage, 'ETHReceived')
+        .withArgs(owner.address, ethers.parseEther('1'));
       expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
     });
 

@@ -5,6 +5,7 @@ pragma solidity ^0.8.19;
  * @title IBalancerV2Vault
  * @notice Interface for Balancer V2 Vault flash loan functionality
  * @dev See https://docs.balancer.fi/reference/contracts/flash-loans.html
+ * @custom:version 1.0.0
  */
 interface IBalancerV2Vault {
     /**
@@ -62,6 +63,7 @@ interface IBalancerV2Vault {
  * @title IFlashLoanRecipient
  * @notice Interface that flash loan recipients must implement
  * @dev Called by the Vault during flash loan execution
+ * @custom:version 1.0.0
  */
 interface IFlashLoanRecipient {
     /**

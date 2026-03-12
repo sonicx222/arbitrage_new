@@ -757,11 +757,13 @@ describe('SyncSwapFlashArbitrage', () => {
   // ETH receive() and ETHTransferFailed (L-05, L-06)
   // ===========================================================================
   describe('SyncSwapFlashArbitrage — ETH handling', () => {
-    it('should accept ETH via receive()', async () => {
+    it('should accept ETH via receive() and emit ETHReceived', async () => {
       const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
       const addr = await syncSwapArbitrage.getAddress();
 
-      await owner.sendTransaction({ to: addr, value: ethers.parseEther('1') });
+      await expect(owner.sendTransaction({ to: addr, value: ethers.parseEther('1') }))
+        .to.emit(syncSwapArbitrage, 'ETHReceived')
+        .withArgs(owner.address, ethers.parseEther('1'));
       expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
     });
 

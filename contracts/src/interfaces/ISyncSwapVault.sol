@@ -47,6 +47,7 @@ pragma solidity ^0.8.19;
  * @title IERC3156FlashBorrower
  * @notice Interface for flash loan borrower callback (EIP-3156 standard)
  * @dev Borrower must implement this interface to receive flash loans
+ * @custom:version 1.0.0
  */
 interface IERC3156FlashBorrower {
     /**
@@ -71,6 +72,7 @@ interface IERC3156FlashBorrower {
  * @title ISyncSwapVault
  * @notice SyncSwap Vault interface for flash loans
  * @dev Implements EIP-3156 FlashLender interface
+ * @custom:version 1.0.0
  */
 interface ISyncSwapVault {
     // =========================================================================
