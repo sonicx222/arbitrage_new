@@ -353,6 +353,29 @@ export function initializeGasPriceGauges(chains: string[]): void {
 }
 
 /**
+ * RT-031 FIX: Seed v3.0 BI histograms so they appear in /metrics output.
+ *
+ * Histograms with zero observations are omitted from Prometheus text format.
+ * The monitoring pipeline's metrics completeness check (3AI) greps for these
+ * metric names and flags them as missing if absent. Seeding with one observation
+ * per metric ensures they're always present in scrape output.
+ *
+ * Called once at engine startup alongside initializeGasPriceGauges().
+ *
+ * @param chains - List of chain identifiers to seed
+ */
+export function initializeBIHistograms(chains: string[]): void {
+  // Seed each histogram with the first configured chain so at least one
+  // label combination exists. The 0-value observations are harmless — real
+  // execution data will quickly dominate the distribution.
+  const seedChain = chains[0] ?? 'unknown';
+  collector.recordHistogram('opportunity_age_at_execution_ms', 0, { chain: seedChain });
+  collector.recordHistogram('profit_per_execution', 0, { chain: seedChain, strategy: 'seed' });
+  collector.recordHistogram('gas_cost_per_execution', 0, { chain: seedChain });
+  collector.recordHistogram('stream_message_transit_ms', 0, { stream: 'stream:execution-requests' });
+}
+
+/**
  * P2 Fix O-9: Update health endpoint gauges for Prometheus scraping.
  * Called periodically from the health check to keep gauges fresh.
  */

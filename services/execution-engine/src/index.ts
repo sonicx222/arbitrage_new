@@ -37,7 +37,7 @@ import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
 } from './api';
-import { getMetricsText, updateHealthGauges, initializeGasPriceGauges } from './services/prometheus-metrics';
+import { getMetricsText, updateHealthGauges, initializeGasPriceGauges, initializeBIHistograms } from './services/prometheus-metrics';
 import { getRuntimeMonitor } from '@arbitrage/core/monitoring';
 import { getSupportedExecutionChains } from '@arbitrage/config';
 // P2 Fix DI-6: Import for stream lag monitoring
@@ -355,7 +355,12 @@ async function main() {
 
     // RT-008 FIX: Initialize gas_price_gwei gauge to 0 for all configured chains
     // so the metric appears in /metrics output even before any gas fetches occur.
-    initializeGasPriceGauges(getSupportedExecutionChains());
+    const execChains = getSupportedExecutionChains();
+    initializeGasPriceGauges(execChains);
+
+    // RT-031 FIX: Seed v3.0 BI histograms so they appear in /metrics output
+    // before any executions complete (monitoring 3AI checks for these names).
+    initializeBIHistograms(execChains);
 
     logger.info('Starting Execution Engine Service', {
       port: HEALTH_CHECK_PORT,

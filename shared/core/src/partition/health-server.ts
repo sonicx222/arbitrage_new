@@ -456,7 +456,10 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
               setTimeout(() => resolve('# stream metrics unavailable (timeout)\n'), 2000)
             ),
           ]);
-        } catch (_streamErr) {
+        } catch (streamErr) {
+          logger.warn('Stream metrics collection failed in /metrics handler', {
+            error: (streamErr as Error).message,
+          });
           streamMetrics = '# stream metrics unavailable (error)\n';
         }
 
