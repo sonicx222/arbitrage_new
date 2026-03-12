@@ -205,6 +205,10 @@ services:
       - SCROLL_RPC_URL=${SCROLL_RPC_URL:?SCROLL_RPC_URL is required}
       - BLAST_WS_URL=${BLAST_WS_URL:?BLAST_WS_URL is required}
       - BLAST_RPC_URL=${BLAST_RPC_URL:?BLAST_RPC_URL is required}
+      - MANTLE_WS_URL=${MANTLE_WS_URL:?MANTLE_WS_URL is required}
+      - MANTLE_RPC_URL=${MANTLE_RPC_URL:?MANTLE_RPC_URL is required}
+      - MODE_WS_URL=${MODE_WS_URL:?MODE_WS_URL is required}
+      - MODE_RPC_URL=${MODE_RPC_URL:?MODE_RPC_URL is required}
     ports:
       - "3012:3001"
     depends_on:
@@ -230,7 +234,7 @@ services:
     restart: unless-stopped
     labels:
       - "com.arbitrage.partition=l2-turbo"
-      - "com.arbitrage.chains=arbitrum,optimism,base,scroll,blast"
+      - "com.arbitrage.chains=arbitrum,optimism,base,scroll,blast,mantle,mode"
       - "com.arbitrage.region=asia-southeast1"
       - "com.arbitrage.profile=standard"
 

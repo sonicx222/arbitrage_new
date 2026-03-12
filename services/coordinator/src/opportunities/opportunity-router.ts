@@ -341,6 +341,26 @@ export class OpportunityRouter {
   }
 
   /**
+   * Update the status of an opportunity (e.g., on execution result).
+   * Extends the opportunity's TTL so completed/failed results stay visible
+   * in the dashboard longer than pending opportunities.
+   */
+  updateOpportunityStatus(
+    opportunityId: string,
+    status: 'executing' | 'completed' | 'failed',
+    update?: { actualProfit?: number; gasCost?: number; netProfit?: number },
+  ): void {
+    const opp = this.opportunities.get(opportunityId);
+    if (!opp) return;
+    opp.status = status;
+    if (update?.actualProfit !== undefined) opp.estimatedProfit = update.actualProfit;
+    if (update?.gasCost !== undefined) opp.gasCost = update.gasCost;
+    if (update?.netProfit !== undefined) opp.netProfit = update.netProfit;
+    // Extend TTL: push expiresAt 5 minutes into the future so dashboard can display results
+    opp.expiresAt = Date.now() + 5 * 60 * 1000;
+  }
+
+  /**
    * Get pending opportunities count
    */
   getPendingCount(): number {

@@ -88,6 +88,7 @@ export const ConsumerGroups = {
   MEMPOOL_DETECTOR: 'mempool-detector-group',
   ORDERFLOW_PIPELINE: 'orderflow-pipeline',
   SELF_HEALING: 'self-healing-manager',
+  SIMULATION_WORKER: 'simulation-worker-group',
 } as const;
 
 // ============================================================================

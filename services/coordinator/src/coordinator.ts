@@ -2111,6 +2111,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
         batchFailures++;
       }
 
+      // Update opportunity status so dashboard shows completed/failed results
+      const gasCost = getNumber(rawResult, 'gasCost', 0);
+      const actualProfitForUpdate = getNumber(rawResult, 'actualProfit', 0);
+      this.opportunityRouter?.updateOpportunityStatus(
+        opportunityId,
+        success ? 'completed' : 'failed',
+        {
+          actualProfit: actualProfitForUpdate,
+          gasCost,
+          netProfit: actualProfitForUpdate - gasCost,
+        },
+      );
+
       // Preserve per-result SSE for dashboard feed
       this.emitSSE('execution-result', {
         opportunityId,
@@ -2200,6 +2213,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
         error,
       });
     }
+
+    // Update opportunity status so dashboard shows completed/failed results
+    const gasCost = getNumber(rawResult, 'gasCost', 0);
+    const actualProfitForUpdate = getNumber(rawResult, 'actualProfit', 0);
+    this.opportunityRouter?.updateOpportunityStatus(
+      opportunityId,
+      success ? 'completed' : 'failed',
+      {
+        actualProfit: actualProfitForUpdate,
+        gasCost,
+        netProfit: actualProfitForUpdate - gasCost,
+      },
+    );
 
     // Push execution result to SSE dashboard clients
     this.emitSSE('execution-result', {

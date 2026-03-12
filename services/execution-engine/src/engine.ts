@@ -55,7 +55,7 @@ import {
   initializeBridgeRouter,
   resetInitializationState,
 } from './initialization';
-import { RedisStreams, type ArbitrageOpportunity, type ServiceHealth } from '@arbitrage/types';
+import { RedisStreams, ConsumerGroups, type ArbitrageOpportunity, type ServiceHealth } from '@arbitrage/types';
 
 // Internal modules
 import {
@@ -795,7 +795,7 @@ export class ExecutionEngineService {
           {
             sourceStream,
             targetStream: RedisStreams.PRE_SIMULATED,
-            consumerGroupName: 'simulation-worker-group',
+            consumerGroupName: ConsumerGroups.SIMULATION_WORKER,
             consumerName: `sim-worker-${this.instanceId}`,
           },
         );

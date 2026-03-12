@@ -639,7 +639,9 @@ export class OpportunityConsumer {
       // Permanent rejection (business rules, duplicate) - ACK immediately
       await this.ackMessage(message.id);
       // H-03 FIX: Release Redis dedup key on rejection so opportunity can be retried
-      this.streamsClient.deleteKey(redisKey).catch(() => {});
+      this.streamsClient.deleteKey(redisKey).catch((err) => {
+        this.logger.debug('Failed to delete dedup key on rejection', { redisKey, error: getErrorMessage(err) });
+      });
     } else {
       // SM-003 FIX: ACK backpressure-rejected messages to prevent zombie PEL entries.
       // When Redis MAXLEN trims the stream, un-ACKed PEL entries become orphans that
@@ -647,7 +649,9 @@ export class OpportunityConsumer {
       // message is being discarded anyway (queue is full).
       await this.ackMessage(message.id);
       // H-03 FIX: Release Redis dedup key on backpressure so opportunity can be retried
-      this.streamsClient.deleteKey(redisKey).catch(() => {});
+      this.streamsClient.deleteKey(redisKey).catch((err) => {
+        this.logger.debug('Failed to delete dedup key on backpressure', { redisKey, error: getErrorMessage(err) });
+      });
       this.logger.debug('Backpressure: message ACKed and discarded', {
         messageId: message.id,
         opportunityId: opportunity.id,
@@ -824,7 +828,9 @@ export class OpportunityConsumer {
         // Rollback: remove from activeExecutions since enqueue failed
         this.activeExecutions.delete(opportunity.id);
         // H-03 FIX: Also rollback Redis dedup key on enqueue failure
-        this.streamsClient.deleteKey(OpportunityConsumer.REDIS_DEDUP_PREFIX + opportunity.id).catch(() => {});
+        this.streamsClient.deleteKey(OpportunityConsumer.REDIS_DEDUP_PREFIX + opportunity.id).catch((err) => {
+          this.logger.debug('Failed to delete dedup key on enqueue failure', { opportunityId: opportunity.id, error: getErrorMessage(err) });
+        });
         this.stats.queueRejects++;
         this.logger.warn('Opportunity rejected due to queue backpressure', {
           id: opportunity.id,
@@ -1002,8 +1008,9 @@ export class OpportunityConsumer {
     this.activeExecutions.delete(opportunityId);
     // H-03 FIX: Clean up Redis dedup key (fire-and-forget, TTL is safety net)
     const redisKey = OpportunityConsumer.REDIS_DEDUP_PREFIX + opportunityId;
-    this.streamsClient.deleteKey(redisKey).catch(() => {
+    this.streamsClient.deleteKey(redisKey).catch((err) => {
       // Non-fatal: TTL will auto-expire the key
+      this.logger.debug('Failed to delete dedup key in markComplete', { redisKey, error: getErrorMessage(err) });
     });
   }
 

@@ -83,7 +83,7 @@ export function configureMiddleware(app: Application, logger: MinimalLogger): vo
 function configureCors(req: Request, res: Response, next: NextFunction): void {
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim().toLowerCase())
-    : ['http://localhost:3000', 'http://localhost:3001'];
+    : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
 
   const origin = req.headers.origin;
   // FIX: Compare origins case-insensitively (RFC 3986 - scheme and host are case-insensitive)
