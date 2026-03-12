@@ -23,7 +23,7 @@ const {
   ROOT_DIR
 } = require('./lib/utils');
 
-const DOCKER_COMPOSE_FILE = path.join(ROOT_DIR, 'docker-compose.local.yml');
+const DOCKER_COMPOSE_FILE = path.join(ROOT_DIR, 'infrastructure', 'docker', 'docker-compose.local.yml');
 
 /**
  * Stop redis-memory-server instance when tracked via config file.

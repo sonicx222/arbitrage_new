@@ -440,7 +440,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 200000,    // RT-007→ST-002 FIX: Reduced from 500K to 200K — at 130 opps/s, 200K gives ~25 min buffer; 500K consumed 348MB (68% of 512MB Redis)
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
-    [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
+    [RedisStreamsClient.STREAMS.HEALTH]: 5000,             // C-03 FIX: Increased from 1000 — 9 concurrent consumers cause ~2.5 msg/min lag growth; 5000 gives ~33 min buffer before trim overtakes consumers
     [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 100000, // RT-MAXLEN FIX: Increased from 25K — at 100 opps/s, 25K fills in ~4 min causing active trimming; 100K gives ~17 min buffer
     // Phase 2: Per-chain-group streams (ADR-038). 25K each ≈ 100K total equivalent.
     // Each group processes a subset of chains, so individual volumes are lower.

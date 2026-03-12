@@ -608,6 +608,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
         consumerName: this.config.consumerId,
         startId: '0',
         resetToStartIdOnExistingGroup: false
+      },
+      // C-02 FIX: Consume service degradation events — previously orphaned (0 consumer groups).
+      // Producers: graceful-degradation-manager, self-healing-manager. Without a consumer,
+      // degradation/recovery events were written but never read or acted upon.
+      {
+        streamName: RedisStreamsClient.STREAMS.SERVICE_DEGRADATION,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '$',
+        resetToStartIdOnExistingGroup: true
       }
     ];
 
@@ -1312,6 +1322,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: (msg) => this.handleDlqMessage(msg),
       // P1 Fix DF-004: Reuse DLQ handler for forwarding DLQ — same logging/monitoring.
       [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: (msg) => this.handleDlqMessage(msg),
+      // C-02 FIX: Handle service degradation/recovery events from graceful-degradation-manager.
+      [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: (msg) => this.handleServiceDegradationMessage(msg),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -2278,6 +2290,44 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Only the opportunity handler (primary data path) should reset errors.
 
     }); // end withLogContext
+  }
+
+  /**
+   * C-02 FIX: Handle service degradation/recovery events from graceful-degradation-manager.
+   * Previously this stream had producers but zero consumer groups — events were lost.
+   */
+  private async handleServiceDegradationMessage(message: StreamMessage): Promise<void> {
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
+
+    const rawData = unwrapMessageData(data);
+    const service = getString(rawData, 'service', 'unknown');
+    const event = getString(rawData, 'event', 'unknown');
+    const reason = getString(rawData, 'reason', '');
+
+    if (event === 'degraded') {
+      this.logger.warn('Service degradation reported', { service, reason, messageId: message.id });
+      this.sendAlert({
+        type: 'SERVICE_DEGRADED',
+        message: `Service ${service} entered degraded state: ${reason}`,
+        severity: 'high',
+        service,
+        data: rawData,
+        timestamp: Date.now(),
+      });
+    } else if (event === 'recovered') {
+      this.logger.info('Service recovery reported', { service, messageId: message.id });
+      this.sendAlert({
+        type: 'SERVICE_RECOVERED',
+        message: `Service ${service} recovered from degraded state`,
+        severity: 'low',
+        service,
+        data: rawData,
+        timestamp: Date.now(),
+      });
+    } else {
+      this.logger.debug('Service degradation event', { service, event, messageId: message.id });
+    }
   }
 
   /**
