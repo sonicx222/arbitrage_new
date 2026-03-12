@@ -28,6 +28,7 @@ const result = spawnSync('npx', [
   'jest',
   '--selectProjects', 'unit', 'integration',
   '--maxWorkers=50%',
+  '--workerThreads',
 ], {
   stdio: 'inherit',
   shell: true,
