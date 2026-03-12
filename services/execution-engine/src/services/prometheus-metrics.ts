@@ -374,6 +374,17 @@ export function initializeBIHistograms(chains: string[]): void {
   collector.recordHistogram('profit_per_execution', 0, { chain: seedChain, strategy: 'seed' });
   collector.recordHistogram('gas_cost_per_execution', 0, { chain: seedChain });
   collector.recordHistogram('stream_message_transit_ms', 0, { stream: RedisStreams.EXECUTION_REQUESTS });
+
+  // RT-027 FIX: Seed BI counters so they appear in /metrics output with value 0.
+  // Prometheus counters only appear in getSnapshot() after at least one increment.
+  // Without seeding, monitoring's metrics completeness check (3AI) flags
+  // arbitrage_executions_total and related counters as missing.
+  collector.incrementCounter('executions_total', { chain: seedChain, strategy: 'seed' }, 0);
+  collector.incrementCounter('execution_attempts_total', { chain: seedChain, strategy: 'seed' }, 0);
+  collector.incrementCounter('execution_success_total', { chain: seedChain, strategy: 'seed' }, 0);
+  collector.incrementCounter('execution_failure_total', { chain: seedChain, strategy: 'seed', reason: 'seed' }, 0);
+  collector.incrementCounter('opportunity_outcome_total', { chain: seedChain, outcome: 'seed' }, 0);
+  collector.incrementCounter('profit_estimation_bias_total', { chain: seedChain, strategy: 'seed', direction: 'accurate' }, 0);
 }
 
 /**

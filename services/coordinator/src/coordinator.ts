@@ -26,7 +26,7 @@ import http from 'http';
 import express from 'express';
 import { SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
 import { findKSmallest } from '@arbitrage/core/data-structures';
-import { getStreamHealthMonitor, CpuUsageTracker } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, CpuUsageTracker, getLatencyTracker } from '@arbitrage/core/monitoring';
 import {
   RedisClient,
   getRedisClient,
@@ -41,7 +41,7 @@ import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ServiceStateManager, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
-import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
+import type { ServiceHealth, ArbitrageOpportunity, PipelineTimestamps } from '@arbitrage/types';
 import { RedisStreams, ConsumerGroups } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
 import { safeParseInt, safeParseFloat, getStreamForChain, validateRouteSymmetry, FEATURE_FLAGS } from '@arbitrage/config';
@@ -2433,6 +2433,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const timestamps = opportunity.pipelineTimestamps ?? {};
       timestamps.coordinatorAt = Date.now();
       opportunity.pipelineTimestamps = timestamps;
+
+      // RT-035 FIX: Feed pipeline timestamps to coordinator's LatencyTracker
+      getLatencyTracker().recordFromTimestamps(timestamps as PipelineTimestamps);
 
       // Publish to execution-requests stream for the execution engine to consume
       // FIX #12: Use shared serialization utility (single source of truth)

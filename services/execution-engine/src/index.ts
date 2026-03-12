@@ -37,11 +37,13 @@ import type { CrossRegionHealthConfig } from '@arbitrage/core/monitoring';
 import {
   createCircuitBreakerApiHandler,
 } from './api';
-import { getMetricsText, updateHealthGauges, initializeGasPriceGauges, initializeBIHistograms } from './services/prometheus-metrics';
+import { getMetricsText, updateHealthGauges, initializeGasPriceGauges, initializeBIHistograms, updateGasPrice } from './services/prometheus-metrics';
 import { getRuntimeMonitor } from '@arbitrage/core/monitoring';
 import { getSupportedExecutionChains } from '@arbitrage/config';
 // P2 Fix DI-6: Import for stream lag monitoring
 import { getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core/redis';
+// RT-016 FIX: Import GasPriceCache for periodic metric updates
+import { getGasPriceCache } from '@arbitrage/core/caching/gas-price-cache';
 
 const logger = createLogger('execution-engine');
 
@@ -232,6 +234,22 @@ function startRedisHealthMonitor(
     } catch (error) {
       // OBS-01 FIX: Stream lag check is non-critical, but silent failure hides MAXLEN trimming risk
       logger.debug('Stream lag check failed', { error: getErrorMessage(error) });
+    }
+    // RT-016 FIX: Push GasPriceCache values to Prometheus gas_price_gwei metric.
+    // In simulation mode, the gas-price-optimizer never runs (no real executions),
+    // so gas metrics stay at 0. The GasPriceCache fetches real gas prices from RPC
+    // every 60s — push those values to Prometheus for monitoring visibility.
+    try {
+      const cache = getGasPriceCache();
+      const execChains = getSupportedExecutionChains();
+      for (const chain of execChains) {
+        const data = cache.getGasPrice(chain);
+        if (data.gasPriceGwei > 0 && !data.isFallback) {
+          updateGasPrice(chain, data.gasPriceGwei);
+        }
+      }
+    } catch {
+      // Non-critical — gas cache may not be started yet
     }
   }, 10_000);
   // Initial check

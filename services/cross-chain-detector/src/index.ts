@@ -14,7 +14,7 @@ import {
 } from '@arbitrage/core/service-lifecycle';
 import { createLogger } from '@arbitrage/core';
 import { safeParseInt } from '@arbitrage/config';
-import { getMetricsText } from './prometheus-metrics';
+import { getMetricsText, initializeCounters } from './prometheus-metrics';
 
 const logger = createLogger('cross-chain-detector');
 
@@ -36,6 +36,9 @@ let readinessGraceWarningLogged = false;
 async function main() {
   try {
     logger.info('Starting Cross-Chain Detector Service', { port: HEALTH_CHECK_PORT });
+
+    // RT-028 FIX: Seed Prometheus counters so they appear in /metrics at startup
+    initializeCounters();
 
     const detector = new CrossChainDetectorService();
 

@@ -16,6 +16,7 @@ import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOppor
 import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { getCexPriceFeedService } from '@arbitrage/core/feeds';
+import { getLatencyTracker } from '@arbitrage/core/monitoring';
 import { FEATURE_FLAGS, CORE_TOKENS } from '@arbitrage/config';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 import { scoreOpportunity } from './opportunity-scoring';
@@ -1067,6 +1068,12 @@ export class OpportunityRouter {
     const timestamps = opportunity.pipelineTimestamps ?? {};
     timestamps.coordinatorAt = Date.now();
     opportunity.pipelineTimestamps = timestamps;
+
+    // RT-035 FIX: Feed pipeline timestamps to LatencyTracker so the coordinator's
+    // DiagnosticsCollector reports real e2e latency instead of zeros. Previously,
+    // recordFromTimestamps() was only called in partition processes (publishing-service),
+    // but the DiagnosticsCollector runs in the coordinator process.
+    getLatencyTracker().recordFromTimestamps(timestamps as PipelineTimestamps);
 
     // FIX #12: Use shared serialization utility (single source of truth)
     // OP-3 FIX: Pass trace context for cross-service correlation

@@ -87,6 +87,28 @@ export function recordDetectionCycle(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
+
+/**
+ * RT-028 FIX: Seed counters so they appear in /metrics output with value 0.
+ *
+ * Prometheus counters only appear in getSnapshot() after at least one increment.
+ * Without seeding, monitoring's metrics completeness check (3AI) reports
+ * "only 1 metric" because detection_cycles_total is the only counter incremented
+ * early, while opportunity counters only appear after actual detections.
+ *
+ * Called once at service startup.
+ */
+export function initializeCounters(): void {
+  collector.incrementCounter('opportunities_total', { source_chain: 'seed', target_chain: 'seed' }, 0);
+  collector.incrementCounter('opportunities_published_total', { source_chain: 'seed', target_chain: 'seed' }, 0);
+  collector.incrementCounter('opportunities_deduplicated_total', {}, 0);
+  collector.incrementCounter('publish_errors_total', {}, 0);
+  collector.incrementCounter('detection_cycles_total', {}, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Export helper
 // ---------------------------------------------------------------------------
 

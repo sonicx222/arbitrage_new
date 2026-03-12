@@ -27,6 +27,7 @@ import {
   getDistributedLockManager,
 } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { getGasPriceCache, resetGasPriceCache } from '@arbitrage/core/caching/gas-price-cache';
 import {
   DrawdownCircuitBreaker,
   resetDrawdownCircuitBreaker,
@@ -549,7 +550,7 @@ export class ExecutionEngineService {
         });
       }
 
-      // Initialize blockchain providers (skip in simulation mode)
+      // Initialize blockchain providers
       if (!this.isSimulationMode) {
         await this.providerService.initialize();
         this.providerService.initializeWallets();
@@ -578,7 +579,32 @@ export class ExecutionEngineService {
         await this.providerService.validateConnectivity();
         this.providerService.startHealthChecks();
       } else {
-        this.logger.info('Skipping blockchain initialization in simulation mode');
+        // RT-017 FIX: Initialize providers in simulation mode for gas price
+        // fetching and health reporting. Skip wallets, nonce management, MEV,
+        // and bridge infrastructure (not needed for mock execution).
+        await this.providerService.initialize();
+        // Non-blocking connectivity validation — updates provider health in background
+        this.providerService.validateConnectivity().catch(error => {
+          this.logger.debug('Provider connectivity check had issues in simulation mode', {
+            error: getErrorMessage(error),
+          });
+        });
+        this.providerService.startHealthChecks();
+        this.logger.info('Lightweight provider initialization in simulation mode (gas+health only)');
+      }
+
+      // RT-016 FIX: Start GasPriceCache for real-time gas price tracking.
+      // The cache creates its own RPC connections and refreshes every 60s.
+      // Works regardless of simulation mode — provides accurate gas cost
+      // estimates for opportunity scoring and Prometheus metrics.
+      try {
+        const gasPriceCache = getGasPriceCache();
+        await gasPriceCache.start();
+        this.logger.info('GasPriceCache started for real-time gas prices');
+      } catch (error) {
+        this.logger.warn('GasPriceCache start failed (using static fallback estimates)', {
+          error: getErrorMessage(error),
+        });
       }
 
       // Initialize execution strategies (async for dynamic imports)
@@ -1047,6 +1073,14 @@ export class ExecutionEngineService {
       this.probabilityTracker = null;
       this.riskManagementEnabled = false;
       this.riskOrchestrator = null;
+
+      // RT-016 FIX: Stop GasPriceCache refresh timers
+      try {
+        await getGasPriceCache().stop();
+      } catch {
+        // Non-critical — cache may not have been started
+      }
+      resetGasPriceCache();
 
       // FIX 1.1: Reset initialization module state to allow re-initialization
       resetInitializationState();
