@@ -119,15 +119,14 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
       // Slot 1: Ownable2Step._pendingOwner (address) + Pausable._paused (bool, packed)
       // Slot 2: ReentrancyGuard._status (uint256, initialized to 1)
       // Slot 3: BaseFlashArbitrage.minimumProfit
-      // Slot 4: BaseFlashArbitrage.totalProfits
-      // Slot 5: BaseFlashArbitrage.tokenProfits (mapping)
-      // Slot 6: BaseFlashArbitrage.swapDeadline (= 60)
-      // Slot 7: BaseFlashArbitrage.withdrawGasLimit (= 50000)
-      // Slot 8: BaseFlashArbitrage._approvedRouters._inner._values (array length)
-      // Slot 9: BaseFlashArbitrage._approvedRouters._inner._indexes (mapping)
-      // Slot 10: BalancerV2FlashArbitrage._flashLoanActive (bool)
+      // Slot 4: BaseFlashArbitrage.tokenProfits (mapping)
+      // Slot 5: BaseFlashArbitrage.swapDeadline (= 60)
+      // Slot 6: BaseFlashArbitrage.withdrawGasLimit (= 50000)
+      // Slot 7: BaseFlashArbitrage._approvedRouters._inner._values (array length)
+      // Slot 8: BaseFlashArbitrage._approvedRouters._inner._indexes (mapping)
+      // Slot 9: BalancerV2FlashArbitrage._flashLoanActive (bool)
       const arbitrageAddress = await arbitrage.getAddress();
-      const flashLoanActiveSlot = 10;
+      const flashLoanActiveSlot = 9;
 
       // Set _flashLoanActive = true
       await ethers.provider.send('hardhat_setStorageAt', [
@@ -736,12 +735,13 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
         deadline
       );
 
+      const wethAddress = await weth.getAddress();
       const profitAfterFirst = await weth.balanceOf(await arbitrage.getAddress());
-      const totalProfitsAfterFirst = await arbitrage.totalProfits();
+      const tokenProfitsAfterFirst = await arbitrage.tokenProfits(wethAddress);
 
       // Execute second arbitrage
       await arbitrage.connect(user).executeArbitrage(
-        await weth.getAddress(),
+        wethAddress,
         ethers.parseEther('10'),
         swapPath,
         0,
@@ -749,11 +749,11 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
       );
 
       const profitAfterSecond = await weth.balanceOf(await arbitrage.getAddress());
-      const totalProfitsAfterSecond = await arbitrage.totalProfits();
+      const tokenProfitsAfterSecond = await arbitrage.tokenProfits(wethAddress);
 
       // Verify profits accumulated
       expect(profitAfterSecond).to.be.gt(profitAfterFirst);
-      expect(totalProfitsAfterSecond).to.be.gt(totalProfitsAfterFirst);
+      expect(tokenProfitsAfterSecond).to.be.gt(tokenProfitsAfterFirst);
     });
   });
 

@@ -34,28 +34,20 @@ import {
   deployContractPipeline,
   type DeploymentPipelineConfig,
 } from './lib/deployment-utils';
+import { DSS_FLASH_ADDRESSES, STABLECOINS } from '@arbitrage/config';
 
 // =============================================================================
 // Protocol Addresses (Ethereum-only)
 // =============================================================================
 
 /**
- * MakerDAO DssFlash addresses per network.
- * DssFlash is the EIP-3156 flash lending facility for DAI.
- *
- * @see https://docs.makerdao.com/smart-contract-modules/flash-mint-module
- */
-const DSS_FLASH_ADDRESSES: Record<string, string> = {
-  ethereum: '0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853',
-  // No testnet DssFlash deployment — use mock for testing
-};
-
-/**
  * DAI token addresses per network.
+ * M-01: DSS_FLASH_ADDRESSES imported from @arbitrage/config (single source of truth).
+ * DAI addresses combine shared config stablecoins with testnet-specific entries.
  */
 const DAI_ADDRESSES: Record<string, string> = {
-  ethereum: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-  sepolia: '0x68194a729C2450ad26072b3D33ADaCbcef39D574', // Aave testnet DAI
+  ethereum: STABLECOINS.ethereum.DAI,
+  sepolia: '0x68194a729C2450ad26072b3D33ADaCbcef39D574', // Aave testnet DAI (not in shared config)
 };
 
 // =============================================================================

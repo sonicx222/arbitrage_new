@@ -50,7 +50,7 @@ export const getBpsDenominatorBigInt = (): bigint => BigInt(BPS_DENOMINATOR);
  * ### calculateExpectedProfit (Fix 2.1: Enhanced documentation)
  * Returns `(uint256 expectedProfit, uint256 flashLoanFee)`:
  * - `expectedProfit`: Expected profit in asset units (0 if unprofitable or invalid path)
- * - `flashLoanFee`: Flash loan fee (0.09% of loan amount)
+ * - `flashLoanFee`: Flash loan fee (0.05% of loan amount, post-AIP-382)
  *
  * **When `expectedProfit` returns 0, check these common causes:**
  * 1. Invalid swap path (tokenIn/tokenOut mismatch between steps)
@@ -104,7 +104,7 @@ export const BALANCER_V2_FLASH_ARBITRAGE_ABI: string[] = [
 
 /**
  * Balancer V2 flash loan fee (0 basis points = 0%)
- * Balancer V2 charges no fees for flash loans, unlike Aave V3's 0.09%.
+ * Balancer V2 charges no fees for flash loans, unlike Aave V3's 0.05% (post-AIP-382).
  */
 export const BALANCER_V2_FEE_BPS = 0;
 
@@ -112,7 +112,7 @@ export const BALANCER_V2_FEE_BPS = 0;
  * SyncSwap flash loan fee in basis points (0.3% = 30 bps)
  * Used by SyncSwapFlashLoanProvider for fee calculations.
  *
- * SyncSwap charges 0.3% flash loan fee (higher than Balancer's 0%, lower than Aave's 0.09%).
+ * SyncSwap charges 0.3% flash loan fee (higher than Aave V3's 0.05%, much higher than Balancer's 0%).
  * Fee is applied to surplus balance after flash loan repayment.
  *
  * @see https://syncswap.xyz/

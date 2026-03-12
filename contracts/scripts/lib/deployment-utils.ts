@@ -116,6 +116,18 @@ export const DEFAULT_VERIFICATION_RETRIES = 3;
 export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds (L1 default)
 
 /**
+ * Native token name per chain for gas cost display.
+ * Chains not listed default to 'ETH'.
+ */
+const NATIVE_TOKEN_BY_NETWORK: Record<string, string> = {
+  bsc: 'BNB',
+  polygon: 'MATIC',
+  avalanche: 'AVAX',
+  fantom: 'FTM',
+  mantle: 'MNT',
+};
+
+/**
  * Network-adaptive verification delays.
  *
  * L2 block explorers index transactions faster than Ethereum mainnet.
@@ -129,6 +141,10 @@ const VERIFICATION_DELAY_BY_NETWORK: Record<string, number> = {
   base: 10000,
   baseSepolia: 10000,
   optimism: 10000,
+  blast: 10000,
+  scroll: 10000,
+  mantle: 10000,
+  mode: 10000,
   // zkSync - moderate indexing (~15s)
   zksync: 15000,
   'zksync-testnet': 15000,
@@ -194,6 +210,10 @@ export const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
   zksync: ethers.parseEther('0.002'),     // 0.002 ETH (~$6 @ $3000/ETH)
   'zksync-mainnet': ethers.parseEther('0.002'), // Alias
   linea: ethers.parseEther('0.002'),      // 0.002 ETH (~$6 @ $3000/ETH)
+  blast: ethers.parseEther('0.002'),      // 0.002 ETH (~$6 @ $3000/ETH)
+  scroll: ethers.parseEther('0.002'),     // 0.002 ETH (~$6 @ $3000/ETH)
+  mantle: ethers.parseEther('5'),         // 5 MNT (~$5 @ $1/MNT)
+  mode: ethers.parseEther('0.002'),       // 0.002 ETH (~$6 @ $3000/ETH)
 };
 
 /**
@@ -461,7 +481,7 @@ export async function checkExistingDeployment(
     return;
   }
 
-  // Existing deployment found -- warn and prompt
+  // Existing deployment found
   const deployedAt = networkEntry[`${contractType}_deployedAt`];
   const deployedAtStr = deployedAt
     ? new Date(deployedAt * 1000).toISOString()
@@ -475,6 +495,18 @@ export async function checkExistingDeployment(
   console.log(`  Address:   ${existingAddress}`);
   console.log(`  Deployed:  ${deployedAtStr}`);
   console.log('========================================');
+
+  // M-11: Hard block on mainnet to prevent orphaning funded contracts.
+  // Testnet re-deployments are allowed with confirmation prompt.
+  if (isMainnet(networkName)) {
+    throw new Error(
+      `[ERR_MAINNET_REDEPLOY_BLOCKED] Cannot re-deploy ${contractType} on mainnet ${networkName}.\n` +
+      `Existing address: ${existingAddress} (deployed ${deployedAtStr})\n` +
+      `Re-deploying would orphan the existing contract (may have funds/approvals).\n` +
+      `To force re-deployment, remove the entry from registry.json first.`
+    );
+  }
+
   console.log(`\n  Re-deploying will create a NEW contract instance.`);
   console.log(`  The old contract at ${existingAddress} will remain on-chain`);
   console.log(`  but the registry will point to the new address.`);
@@ -555,10 +587,11 @@ export async function estimateDeploymentCost(
     const gasPrice = feeData.gasPrice ?? 0n;
     const estimatedCost = estimatedGas * gasPrice;
 
+    const nativeToken = NATIVE_TOKEN_BY_NETWORK[normalizeNetworkName(network.name)] ?? 'ETH';
     console.log(`\nEstimated Deployment Cost:`);
     console.log(`  Gas: ${estimatedGas.toString()}`);
     console.log(`  Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} gwei`);
-    console.log(`  Total Cost: ${ethers.formatEther(estimatedCost)} ETH`);
+    console.log(`  Total Cost: ${ethers.formatEther(estimatedCost)} ${nativeToken}`);
 
     return { gas: estimatedGas, cost: estimatedCost };
   } catch (error) {

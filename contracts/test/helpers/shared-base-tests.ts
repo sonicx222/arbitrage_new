@@ -147,7 +147,7 @@ async function getDeadline(offsetSeconds = 3600): Promise<number> {
 
 /**
  * Tests deployment defaults inherited from BaseFlashArbitrage.
- * Verifies: owner, totalProfits, minimumProfit, swapDeadline, constants, router list, paused state.
+ * Verifies: owner, minimumProfit, swapDeadline, constants, router list, paused state.
  *
  * Protocol-specific deployment tests (POOL, VAULT, FACTORY, DSS_FLASH, constructor rejections)
  * should remain in individual test files.
@@ -159,11 +159,6 @@ export function testDeploymentDefaults(config: DeploymentTestConfig): void {
     it('should deploy with correct owner', async () => {
       const { contract, owner } = await getFixture();
       expect(await contract.owner()).to.equal(owner.address);
-    });
-
-    it('should initialize totalProfits to zero', async () => {
-      const { contract } = await getFixture();
-      expect(await contract.totalProfits()).to.equal(0);
     });
 
     it('should initialize minimumProfit to default (1e14)', async () => {

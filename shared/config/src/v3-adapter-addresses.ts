@@ -56,3 +56,51 @@ export function getV3AdapterAddress(chain: string): string | null {
 export function hasV3Adapter(chain: string): boolean {
   return V3_ADAPTER_ADDRESSES[chain] != null;
 }
+
+// =============================================================================
+// V3 SwapRouter & Quoter Addresses (for UniswapV3Adapter deployment)
+// =============================================================================
+
+/**
+ * Uniswap V3 SwapRouter addresses per chain (well-known, deployed via CREATE2).
+ * These are the underlying V3 routers that the UniswapV3Adapter delegates to.
+ *
+ * M-17: Moved from contracts/scripts/deploy-v3-adapter.ts to shared config.
+ *
+ * @see https://docs.uniswap.org/contracts/v3/reference/deployments
+ */
+export const V3_SWAP_ROUTERS: Readonly<Record<string, string>> = {
+  // Uniswap V3 SwapRouter (same address on most EVM chains via CREATE2)
+  ethereum: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  arbitrum: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  optimism: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  polygon: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  base: '0x2626664c2603336E57B271c5C0b26F421741e481',
+  // PancakeSwap V3 SmartRouter (compatible exactInputSingle interface)
+  bsc: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',
+  linea: '0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86',
+  // Testnets
+  arbitrumSepolia: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  sepolia: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  // Scroll uses SyncSwap — V3 adapter uses Uniswap-compatible interface
+  scroll: '0x80e38291e06339d10AAB483C65695D004dBD5C69',
+};
+
+/**
+ * Uniswap V3 QuoterV2 addresses per chain.
+ * Used by the adapter for getAmountsOut/In simulation.
+ * address(0) disables quoting on that chain until verified.
+ */
+export const V3_QUOTERS: Readonly<Record<string, string>> = {
+  ethereum: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  arbitrum: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  optimism: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  polygon: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  base: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',
+  // PancakeSwap V3 QuoterV2 — address(0) disables until verified
+  bsc: '0x0000000000000000000000000000000000000000',
+  linea: '0x0000000000000000000000000000000000000000',
+  // Testnets — QuoterV2 may not be deployed
+  arbitrumSepolia: '0x0000000000000000000000000000000000000000',
+  sepolia: '0x0000000000000000000000000000000000000000',
+};

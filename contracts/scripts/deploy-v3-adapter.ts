@@ -23,40 +23,8 @@ import {
   confirmMainnetDeployment,
 } from './lib/deployment-utils';
 import { FLASH_LOAN_CONTRACT_ADDRESSES } from '../deployments/addresses';
-
-// =============================================================================
-// V3 SwapRouter Addresses (well-known, deployed via CREATE2)
-// =============================================================================
-
-const V3_SWAP_ROUTERS: Record<string, string> = {
-  // Uniswap V3 SwapRouter (same address on most EVM chains via CREATE2)
-  ethereum: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  arbitrum: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  optimism: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  polygon: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  base: '0x2626664c2603336E57B271c5C0b26F421741e481',
-  // PancakeSwap V3 SmartRouter (compatible exactInputSingle interface)
-  bsc: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',
-  linea: '0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86',
-  // N/A: avalanche, fantom (no V3-compatible DEXs on these chains)
-  // Testnets
-  arbitrumSepolia: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  sepolia: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-};
-
-const V3_QUOTERS: Record<string, string> = {
-  ethereum: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  arbitrum: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  optimism: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  polygon: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  base: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',
-  // PancakeSwap V3 QuoterV2 — address(0) disables getAmountsOut/In until verified
-  bsc: '0x0000000000000000000000000000000000000000',
-  linea: '0x0000000000000000000000000000000000000000',
-  // Testnets — QuoterV2 may not be deployed on all testnets
-  arbitrumSepolia: '0x0000000000000000000000000000000000000000',
-  sepolia: '0x0000000000000000000000000000000000000000',
-};
+// M-17: Import V3 addresses from shared config (single source of truth)
+import { V3_SWAP_ROUTERS, V3_QUOTERS } from '@arbitrage/config';
 
 // Common fee tier configurations per pair
 const PAIR_FEES: Record<string, { tokenA: string; tokenB: string; fee: number }[]> = {

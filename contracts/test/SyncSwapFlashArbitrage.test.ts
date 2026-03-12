@@ -194,7 +194,7 @@ describe('SyncSwapFlashArbitrage', () => {
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
 
         // Verify profit was recorded
-        expect(await syncSwapArbitrage.totalProfits()).to.be.gt(0);
+        expect(await syncSwapArbitrage.tokenProfits(await weth.getAddress())).to.be.gt(0);
       });
 
       it('should emit ArbitrageExecuted event', async () => {
@@ -701,7 +701,7 @@ describe('SyncSwapFlashArbitrage', () => {
       ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
     });
 
-    it('should track totalProfits correctly', async () => {
+    it('should track tokenProfits correctly', async () => {
       const {
         syncSwapArbitrage,
         dexRouter1,
@@ -724,19 +724,20 @@ describe('SyncSwapFlashArbitrage', () => {
         RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
-      const initialTotalProfits = await syncSwapArbitrage.totalProfits();
+      const wethAddress = await weth.getAddress();
+      const initialProfits = await syncSwapArbitrage.tokenProfits(wethAddress);
 
       const amountIn = ethers.parseEther('10');
-      const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
+      const swapPath = build2HopPath(await dexRouter1.getAddress(), wethAddress, await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
       await syncSwapArbitrage
         .connect(user)
-        .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
+        .executeArbitrage(wethAddress, amountIn, swapPath, 0n, deadline);
 
-      const finalTotalProfits = await syncSwapArbitrage.totalProfits();
+      const finalProfits = await syncSwapArbitrage.tokenProfits(wethAddress);
 
-      expect(finalTotalProfits).to.be.gt(initialTotalProfits);
+      expect(finalProfits).to.be.gt(initialProfits);
     });
   });
 
@@ -979,7 +980,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await expect(tx).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
 
       // Verify profit was recorded
-      expect(await syncSwapArbitrage.totalProfits()).to.be.gt(0);
+      expect(await syncSwapArbitrage.tokenProfits(await weth.getAddress())).to.be.gt(0);
 
       // Verify vault received fee
       // (Implicitly verified by successful execution)
@@ -1012,19 +1013,21 @@ describe('SyncSwapFlashArbitrage', () => {
       const swapPath = build2HopPath(await dexRouter1.getAddress(), await weth.getAddress(), await usdc.getAddress(), 1n, 1n);
       const deadline = await getDeadline();
 
+      const wethAddress = await weth.getAddress();
+
       // Execute first arbitrage
       await syncSwapArbitrage
         .connect(user)
-        .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
+        .executeArbitrage(wethAddress, amountIn, swapPath, 0n, deadline);
 
-      const profitsAfterFirst = await syncSwapArbitrage.totalProfits();
+      const profitsAfterFirst = await syncSwapArbitrage.tokenProfits(wethAddress);
 
       // Execute second arbitrage
       await syncSwapArbitrage
         .connect(user)
-        .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
+        .executeArbitrage(wethAddress, amountIn, swapPath, 0n, deadline);
 
-      const profitsAfterSecond = await syncSwapArbitrage.totalProfits();
+      const profitsAfterSecond = await syncSwapArbitrage.tokenProfits(wethAddress);
 
       // Verify profits accumulated
       expect(profitsAfterSecond).to.be.gt(profitsAfterFirst);

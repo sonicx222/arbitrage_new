@@ -124,12 +124,6 @@ abstract contract BaseFlashArbitrage is
     ///      call setMinimumProfit() with an appropriate value for the target token decimals.
     uint256 public minimumProfit;
 
-    /// @notice Total profits accumulated (aggregate counter, may mix denominations)
-    /// @dev Kept for backward compatibility. Use tokenProfits(asset) for accurate per-token tracking.
-    ///      Costs ~5K gas/tx (SSTORE). Will be removed in next major version (v3.0.0).
-    /// @custom:deprecated Use tokenProfits mapping for per-asset tracking instead.
-    uint256 public totalProfits;
-
     /// @notice Per-token profit tracking (token address => accumulated profit in token units)
     /// @dev Provides accurate per-token profit tracking without mixing denominations
     mapping(address => uint256) public tokenProfits;
@@ -456,9 +450,7 @@ abstract contract BaseFlashArbitrage is
 
         // Track profits per-token (avoids mixing denominations)
         tokenProfits[asset] += profit;
-        // L-001: Legacy aggregate counter — deprecated, will be removed in v3.0.0
-        totalProfits += profit;
-        // M-003 FIX: Emit per-token profit event for on-chain indexers
+        // Emit per-token profit event for on-chain indexers
         emit ProfitTracked(asset, profit, tokenProfits[asset]);
 
         // === INTERACTIONS: None in this function. Derived contracts must perform ===

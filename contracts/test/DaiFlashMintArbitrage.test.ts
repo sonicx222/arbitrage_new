@@ -254,7 +254,7 @@ describe('DaiFlashMintArbitrage', () => {
           .executeArbitrage(amountIn, swapPath, 0n, deadline);
 
         // Verify profit was recorded
-        expect(await daiArbitrage.totalProfits()).to.be.gt(0);
+        expect(await daiArbitrage.tokenProfits(await dai.getAddress())).to.be.gt(0);
       });
 
       it('should emit ArbitrageExecuted event', async () => {
@@ -758,7 +758,7 @@ describe('DaiFlashMintArbitrage', () => {
       ).to.emit(daiArbitrage, 'ArbitrageExecuted').withArgs(await dai.getAddress(), amountIn, anyValue, anyValue, anyValue);
 
       // Verify profit was recorded
-      expect(await daiArbitrage.totalProfits()).to.be.gt(0);
+      expect(await daiArbitrage.tokenProfits(await dai.getAddress())).to.be.gt(0);
     });
   });
 

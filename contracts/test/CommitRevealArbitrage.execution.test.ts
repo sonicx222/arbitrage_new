@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import { CommitRevealArbitrage, MockDexRouter, MockERC20 } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
@@ -193,7 +194,8 @@ describe('CommitRevealArbitrage Execution', () => {
       };
 
       await expect(commitRevealArbitrage.connect(user).reveal(revealParams))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, await weth.getAddress(), await weth.getAddress(), anyValue, amountIn, user.address);
     });
 
     it('should execute max-hop swap (5 hops)', async () => {
@@ -253,7 +255,8 @@ describe('CommitRevealArbitrage Execution', () => {
       };
 
       await expect(commitRevealArbitrage.connect(user).reveal(revealParams))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, await weth.getAddress(), await weth.getAddress(), anyValue, amountIn, user.address);
     });
 
     it('should revert on path too long (> 5 hops)', async () => {
@@ -685,7 +688,8 @@ describe('CommitRevealArbitrage Execution', () => {
 
       // Should succeed because profit (~0.1) > max(0.05, 0.01)
       await expect(commitRevealArbitrage.connect(user).reveal(revealParams))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, await weth.getAddress(), await weth.getAddress(), anyValue, amountIn, user.address);
     });
 
     it('should emit Revealed event with correct profit', async () => {
@@ -1001,10 +1005,11 @@ describe('CommitRevealArbitrage Execution', () => {
         deadline: deadline,
         salt: salt1,
       };
+      const wethAddress = await weth.getAddress();
       await expect(commitRevealArbitrage.connect(user).reveal(reveal1Params))
-        .to.emit(commitRevealArbitrage, 'Revealed');
-
-      const profitsAfterFirst = await commitRevealArbitrage.totalProfits();
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, wethAddress, wethAddress, anyValue, amountIn, user.address);
+      const profitsAfterFirst = await commitRevealArbitrage.tokenProfits(wethAddress);
       expect(profitsAfterFirst).to.be.gt(0);
 
       // Reveal 2: Invalid — try to reveal with WRONG salt (reveals commitment hash mismatch)
@@ -1022,7 +1027,7 @@ describe('CommitRevealArbitrage Execution', () => {
       ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
 
       // Verify state unchanged after failed reveal
-      expect(await commitRevealArbitrage.totalProfits()).to.equal(profitsAfterFirst);
+      expect(await commitRevealArbitrage.tokenProfits(wethAddress)).to.equal(profitsAfterFirst);
 
       // Reveal 3: Valid — fund again and reveal should succeed
       await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
@@ -1036,10 +1041,11 @@ describe('CommitRevealArbitrage Execution', () => {
         salt: salt3,
       };
       await expect(commitRevealArbitrage.connect(user).reveal(reveal3Params))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, wethAddress, wethAddress, anyValue, amountIn, user.address);
 
       // Verify profits accumulated from both valid reveals
-      const profitsAfterThird = await commitRevealArbitrage.totalProfits();
+      const profitsAfterThird = await commitRevealArbitrage.tokenProfits(wethAddress);
       expect(profitsAfterThird).to.be.gt(profitsAfterFirst);
     });
 

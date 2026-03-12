@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import { CommitRevealArbitrage, MockDexRouter, MockERC20 } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
@@ -427,7 +428,8 @@ describe('CommitRevealArbitrage', () => {
 
       // Should succeed - 1 block has passed (commit block + 1 = reveal block)
       await expect(commitRevealArbitrage.connect(user).reveal(revealParams))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, await weth.getAddress(), await weth.getAddress(), anyValue, amountIn, user.address);
     });
 
     it('should succeed at exactly MIN_DELAY_BLOCKS', async () => {
@@ -492,7 +494,8 @@ describe('CommitRevealArbitrage', () => {
 
       // Should succeed
       await expect(commitRevealArbitrage.connect(user).reveal(revealParams))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, await weth.getAddress(), await weth.getAddress(), anyValue, amountIn, user.address);
     });
 
     it('should revert with CommitmentTooRecent when commit and reveal are in the same block', async () => {
@@ -683,7 +686,8 @@ describe('CommitRevealArbitrage', () => {
 
       // Should succeed - reveal before expiry
       await expect(commitRevealArbitrage.connect(user).reveal(revealParams))
-        .to.emit(commitRevealArbitrage, 'Revealed');
+        .to.emit(commitRevealArbitrage, 'Revealed')
+        .withArgs(anyValue, await weth.getAddress(), await weth.getAddress(), anyValue, amountIn, user.address);
     });
   });
 

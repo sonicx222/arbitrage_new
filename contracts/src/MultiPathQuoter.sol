@@ -214,6 +214,11 @@ contract MultiPathQuoter {
      * @dev Convenience function for flash loan arbitrage profitability checks.
      *      Chains all quotes sequentially and calculates net profit.
      *
+     * @dev Note on profitBase: When `requests[0].amountIn > 0`, profitBase uses that value
+     *      instead of `flashLoanAmount`. This means `expectedProfit` reflects profit relative
+     *      to the first step's input, not the flash loan amount. Callers should ensure
+     *      `requests[0].amountIn == 0` (chained mode) for profitBase to equal flashLoanAmount.
+     *
      * @param requests Array of quote requests for the arbitrage path
      * @param flashLoanAmount The amount to flash loan
      * @param flashLoanFeeBps Flash loan fee in basis points (5 for Aave V3 = 0.05%, post-AIP-382)

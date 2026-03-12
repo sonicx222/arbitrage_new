@@ -198,7 +198,7 @@ describe('BalancerV2FlashArbitrage', () => {
       ).to.emit(arbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amount, anyValue, anyValue, anyValue);
     });
 
-    it('should update totalProfits after execution', async () => {
+    it('should update tokenProfits after execution', async () => {
       const { arbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
       await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
@@ -232,7 +232,7 @@ describe('BalancerV2FlashArbitrage', () => {
 
       const deadline = await getDeadline();
 
-      const totalProfitsBefore = await arbitrage.totalProfits();
+      const profitsBefore = await arbitrage.tokenProfits(await weth.getAddress());
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -242,8 +242,8 @@ describe('BalancerV2FlashArbitrage', () => {
         deadline
       );
 
-      const totalProfitsAfter = await arbitrage.totalProfits();
-      expect(totalProfitsAfter).to.be.gt(totalProfitsBefore);
+      const profitsAfter = await arbitrage.tokenProfits(await weth.getAddress());
+      expect(profitsAfter).to.be.gt(profitsBefore);
     });
 
     it('should update tokenProfits per-asset after execution', async () => {

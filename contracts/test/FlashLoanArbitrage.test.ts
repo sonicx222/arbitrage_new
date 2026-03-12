@@ -665,9 +665,9 @@ describe('FlashLoanArbitrage', () => {
         deadline
       );
 
-      // Verify profit tracking
-      const totalProfits = await flashLoanArbitrage.totalProfits();
-      expect(totalProfits).to.be.gt(0);
+      // Verify profit tracking (per-token)
+      const tokenProfit = await flashLoanArbitrage.tokenProfits(await weth.getAddress());
+      expect(tokenProfit).to.be.gt(0);
     });
 
     it('should emit correct profit in ArbitrageExecuted event', async () => {

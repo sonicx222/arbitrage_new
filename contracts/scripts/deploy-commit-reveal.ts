@@ -34,6 +34,31 @@ import {
 // =============================================================================
 
 /**
+ * M-05: Per-chain maxCommitAgeBlocks values.
+ * Fast L2s need more blocks to allow commit-wait-reveal round trip.
+ *
+ * Default is 10 blocks. On Arbitrum (0.25s/block) that's only 2.5s — too short.
+ * On Ethereum (12s/block) that's 120s — plenty of time.
+ */
+const MAX_COMMIT_AGE_BY_CHAIN: Record<string, number> = {
+  // Fast L2s (~0.25s block time) — need 50 blocks (~12.5s)
+  arbitrum: 50,
+  arbitrumSepolia: 50,
+  // OP Stack (~2s block time) — need 20 blocks (~40s)
+  base: 20,
+  baseSepolia: 20,
+  optimism: 20,
+  mode: 20,
+  blast: 20,
+  // zkSync (~1s block time) — need 30 blocks (~30s)
+  zksync: 30,
+  // Scroll/Mantle (~3s block time) — need 15 blocks (~45s)
+  scroll: 15,
+  mantle: 15,
+  // Ethereum/BSC/Polygon/Avalanche/Fantom/Linea — default 10 is fine (12s+ blocks)
+};
+
+/**
  * NOTE: CommitRevealArbitrage does NOT configure minimumProfit or routers during
  * deployment. Profit validation is off-chain in the execution-engine service.
  * Routers are configured manually post-deployment.
@@ -52,9 +77,21 @@ function buildConfig(): DeploymentPipelineConfig {
     configureMinProfit: false,
     configureRouters: false,
     smokeTest: 'commitReveal',
+    postDeploy: async (contract, networkName) => {
+      const targetAge = MAX_COMMIT_AGE_BY_CHAIN[networkName];
+      if (targetAge) {
+        console.log(`  Setting maxCommitAgeBlocks to ${targetAge} for ${networkName}...`);
+        const tx = await contract.setMaxCommitAgeBlocks(targetAge);
+        await tx.wait();
+        console.log(`  maxCommitAgeBlocks set to ${targetAge}`);
+        return { maxCommitAgeBlocks: targetAge };
+      }
+      return {};
+    },
     supportedNetworks: [
       'ethereum', 'arbitrum', 'bsc', 'polygon', 'optimism', 'base',
       'avalanche', 'fantom', 'zksync', 'linea',
+      'blast', 'scroll', 'mantle', 'mode',
       'sepolia', 'arbitrumSepolia', 'baseSepolia', 'localhost', 'hardhat',
     ],
   };

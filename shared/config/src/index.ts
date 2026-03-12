@@ -590,4 +590,4 @@ export { safeParseInt, safeParseFloat, safeParseFloatBounded, safeParseIntBounde
 // =============================================================================
 // V3 ADAPTER ADDRESSES
 // =============================================================================
-export { V3_ADAPTER_ADDRESSES, getV3AdapterAddress, hasV3Adapter } from './v3-adapter-addresses';
+export { V3_ADAPTER_ADDRESSES, getV3AdapterAddress, hasV3Adapter, V3_SWAP_ROUTERS, V3_QUOTERS } from './v3-adapter-addresses';

@@ -220,25 +220,27 @@ const config: HardhatUserConfig = {
   etherscan: {
     // Use per-network keys map so custom explorers (e.g. zkSync Sepolia)
     // can use their own API URLs instead of forcing Etherscan v2 endpoint.
+    // M-07: Per-chain API keys with fallback to ETHERSCAN_API_KEY.
+    // Arbiscan, BSCScan, Polygonscan etc. require separate registration.
     apiKey: {
       mainnet: process.env.ETHERSCAN_API_KEY || '',
       sepolia: process.env.ETHERSCAN_API_KEY || '',
-      arbitrum: process.env.ETHERSCAN_API_KEY || '',
-      arbitrumSepolia: process.env.ETHERSCAN_API_KEY || '',
-      base: process.env.ETHERSCAN_API_KEY || '',
-      baseSepolia: process.env.ETHERSCAN_API_KEY || '',
-      optimism: process.env.ETHERSCAN_API_KEY || '',
-      polygon: process.env.ETHERSCAN_API_KEY || '',
-      polygonAmoy: process.env.ETHERSCAN_API_KEY || '',
-      bsc: process.env.ETHERSCAN_API_KEY || '',
-      bscTestnet: process.env.ETHERSCAN_API_KEY || '',
-      avalanche: process.env.ETHERSCAN_API_KEY || '',
-      fantom: process.env.ETHERSCAN_API_KEY || '',
-      linea: process.env.ETHERSCAN_API_KEY || '',
-      blast: process.env.ETHERSCAN_API_KEY || '',
-      scroll: process.env.ETHERSCAN_API_KEY || '',
-      mantle: process.env.ETHERSCAN_API_KEY || '',
-      mode: process.env.ETHERSCAN_API_KEY || '',
+      arbitrum: process.env.ARBISCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      arbitrumSepolia: process.env.ARBISCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      base: process.env.BASESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      baseSepolia: process.env.BASESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      optimism: process.env.OPTIMISM_ETHERSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      polygon: process.env.POLYGONSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      polygonAmoy: process.env.POLYGONSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      bsc: process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      bscTestnet: process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      avalanche: process.env.SNOWTRACE_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      fantom: process.env.FTMSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      linea: process.env.LINEASCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      blast: process.env.BLASTSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      scroll: process.env.SCROLLSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      mantle: process.env.MANTLESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
+      mode: process.env.MODESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || '',
       'zksync-testnet':
         process.env.ZKSYNC_ETHERSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || 'verify',
     },

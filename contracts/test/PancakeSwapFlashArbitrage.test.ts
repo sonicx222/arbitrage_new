@@ -360,9 +360,9 @@ describe('PancakeSwapFlashArbitrage', () => {
       const poolBalanceAfter = await weth.balanceOf(await wethUsdcPool.getAddress());
       expect(poolBalanceAfter).to.be.gte(poolBalanceBefore);
 
-      // Verify profit was tracked
-      const totalProfits = await flashArbitrage.totalProfits();
-      expect(totalProfits).to.be.gt(0);
+      // Verify profit was tracked (per-token)
+      const tokenProfit = await flashArbitrage.tokenProfits(await weth.getAddress());
+      expect(tokenProfit).to.be.gt(0);
 
       // Verify contract received the profit
       const contractBalance = await weth.balanceOf(await flashArbitrage.getAddress());

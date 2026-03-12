@@ -205,7 +205,9 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         bytes32 indexed commitmentHash,
         address indexed tokenIn,
         address indexed tokenOut,
-        uint256 profit
+        uint256 profit,
+        uint256 amount,
+        address executor
     );
 
     /// @notice Emitted when a commitment is cancelled (gas refund)
@@ -487,14 +489,19 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         // 5. Execute arbitrage and verify profit meets thresholds
         uint256 profit = _executeAndVerifyProfit(commitmentHash, params);
 
-        // 6. Emit success event
+        // 6. Emit success events
         uint256 pathLength = params.swapPath.length;
         emit Revealed(
             commitmentHash,
             params.swapPath[0].tokenIn,  // First token in path
             params.swapPath[pathLength - 1].tokenOut, // Last token in path
-            profit
+            profit,
+            params.amountIn,
+            tx.origin
         );
+
+        // M-02: Emit ArbitrageExecuted for indexer consistency with flash loan contracts
+        emit ArbitrageExecuted(params.asset, params.amountIn, profit, block.timestamp, tx.origin);
     }
 
     // Note: _executeArbitrageSwap removed in v3.1.0 — now uses base contract's _executeSwaps (DRY)
