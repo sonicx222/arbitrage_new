@@ -659,7 +659,9 @@ export async function shutdownPartitionService(
   try {
     // Close health server first with timeout (P8-FIX, safeResolve pattern)
     // FIX #13: Reuse closeServerWithTimeout to eliminate duplicated shutdown logic
-    await closeServerWithTimeout(healthServer, SHUTDOWN_TIMEOUT_MS, logger);
+    // SA-003 FIX: Use HEALTH_SERVER_CLOSE_TIMEOUT_MS (1s), not SHUTDOWN_TIMEOUT_MS (25s).
+    // Sequential 25s+25s=50s would exceed K8s 30s grace period.
+    await closeServerWithTimeout(healthServer, HEALTH_SERVER_CLOSE_TIMEOUT_MS, logger);
 
     // H6: Wrap detector.stop() with timeout to prevent hanging on stuck WebSocket/RPC calls
     // W2-M3: Track whether shutdown timed out — exit(1) signals unclean shutdown to orchestrator
