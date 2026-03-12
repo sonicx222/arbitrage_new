@@ -131,6 +131,19 @@ export interface ReentrancyTestConfig {
     fixture: ReentrancyTestFixture,
     maliciousRouterAddress: string
   ) => Promise<any>;
+  /**
+   * Optional: Configure the malicious router's attack calldata before triggering.
+   * Used for contracts with non-standard entry points (H-02):
+   * - PancakeSwap: 6-param executeArbitrage(address pool, address asset, ...)
+   * - CommitReveal: reveal(RevealParams)
+   *
+   * @param maliciousRouter - The MockMaliciousRouter contract instance
+   * @param fixture - The full fixture (for accessing addresses)
+   */
+  configureAttack?: (
+    maliciousRouter: any,
+    fixture: ReentrancyTestFixture
+  ) => Promise<void>;
 }
 
 // =============================================================================
@@ -994,7 +1007,7 @@ export function testCalculateExpectedProfit(config: CalculateProfitTestConfig): 
  * the attack was attempted but blocked by ReentrancyGuard.
  */
 export function testReentrancyProtection(config: ReentrancyTestConfig): void {
-  const { contractName, getFixture, triggerWithMaliciousRouter } = config;
+  const { contractName, getFixture, triggerWithMaliciousRouter, configureAttack } = config;
 
   describe(`${contractName} — Reentrancy Protection`, () => {
     it('should prevent reentrancy attacks via malicious router', async () => {
@@ -1013,6 +1026,11 @@ export function testReentrancyProtection(config: ReentrancyTestConfig): void {
       // Fund the malicious router
       await weth.mint(maliciousRouterAddress, ethers.parseEther('100'));
       await usdc.mint(maliciousRouterAddress, ethers.parseEther('100'));
+
+      // H-02: Configure protocol-specific attack calldata if provided
+      if (configureAttack) {
+        await configureAttack(maliciousRouter, fixture);
+      }
 
       await triggerWithMaliciousRouter(fixture, maliciousRouterAddress);
 

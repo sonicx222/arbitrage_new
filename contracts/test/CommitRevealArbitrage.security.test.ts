@@ -575,27 +575,39 @@ describe('CommitRevealArbitrage Security', () => {
 
       // Path: WETH→DAI (malicious, 1:1 + reentrancy) → DAI→WETH (normal, 1% profit)
       const amountIn = ethers.parseEther('10');
+      const maliciousAddr = await maliciousRouter.getAddress();
+      const wethAddr = await weth.getAddress();
+      const daiAddr = await dai.getAddress();
       const swapPath = [
-        {
-          router: await maliciousRouter.getAddress(),
-          tokenIn: await weth.getAddress(),
-          tokenOut: await dai.getAddress(),
-          amountOutMin: 1n,
-        },
-        {
-          router: await dexRouter1.getAddress(),
-          tokenIn: await dai.getAddress(),
-          tokenOut: await weth.getAddress(),
-          amountOutMin: 1n,
-        },
+        { router: maliciousAddr, tokenIn: wethAddr, tokenOut: daiAddr, amountOutMin: 1n },
+        { router: await dexRouter1.getAddress(), tokenIn: daiAddr, tokenOut: wethAddr, amountOutMin: 1n },
       ];
 
       const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
+      // H-02: Configure attack to use reveal() selector instead of default executeArbitrage().
+      // CommitRevealArbitrage doesn't have executeArbitrage() — it uses reveal().
+      // Without this, the attack would fail due to selector mismatch, not ReentrancyGuard.
+      const revealIface = new ethers.Interface([
+        'function reveal(tuple(address asset, uint256 amountIn, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline, bytes32 salt) params)',
+      ]);
+      const attackCalldata = revealIface.encodeFunctionData('reveal', [{
+        asset: wethAddr,
+        amountIn: amountIn,
+        swapPath: [
+          { router: maliciousAddr, tokenIn: wethAddr, tokenOut: daiAddr, amountOutMin: 0 },
+          { router: maliciousAddr, tokenIn: daiAddr, tokenOut: wethAddr, amountOutMin: 0 },
+        ],
+        minProfit: 0,
+        deadline: Math.floor(Date.now() / 1000) + 3600,
+        salt: ethers.randomBytes(32),
+      }]);
+      await maliciousRouter.setCustomAttackCalldata(attackCalldata);
+
       const commitmentHash = createCommitmentHash(
         31337n, await commitRevealArbitrage.getAddress(), user.address,
-        await weth.getAddress(),
+        wethAddr,
         amountIn,
         swapPath,
         0n,
@@ -613,7 +625,7 @@ describe('CommitRevealArbitrage Security', () => {
       await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
 
       const revealParams = {
-        asset: await weth.getAddress(),
+        asset: wethAddr,
         amountIn: amountIn,
         swapPath: swapPath,
         minProfit: 0n,
@@ -622,8 +634,8 @@ describe('CommitRevealArbitrage Security', () => {
       };
 
       // The reentrancy attack in the first swap triggers a re-entrant call.
-      // The malicious router tries to call executeArbitrage() which is blocked
-      // by the nonReentrant lock held by reveal().
+      // The malicious router tries to call reveal() which is blocked by the
+      // nonReentrant lock held by the original reveal() call (H-02).
       await commitRevealArbitrage.connect(user).reveal(revealParams);
 
       // Verify the attack was actually attempted but failed

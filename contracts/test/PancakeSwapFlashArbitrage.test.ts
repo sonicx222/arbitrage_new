@@ -559,6 +559,31 @@ describe('PancakeSwapFlashArbitrage', () => {
         wethUsdcPool: f.wethUsdcPool,
       };
     },
+    // H-02: PancakeSwap has 6-param executeArbitrage(address pool, address asset, ...)
+    // Default MockMaliciousRouter uses 5-param selector which doesn't exist on PancakeSwap.
+    // Configure the attack to use the correct 6-param selector so ReentrancyGuard
+    // (not selector mismatch) blocks the re-entry.
+    configureAttack: async (maliciousRouter, fixture) => {
+      const { weth, usdc, wethUsdcPool } = fixture as any;
+      const maliciousAddr = await maliciousRouter.getAddress();
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+      const poolAddr = await wethUsdcPool.getAddress();
+
+      // Build well-formed calldata for PancakeSwap's 6-param executeArbitrage
+      const iface = new ethers.Interface([
+        'function executeArbitrage(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline)',
+      ]);
+      const attackCalldata = iface.encodeFunctionData('executeArbitrage', [
+        poolAddr, wethAddr, ethers.parseEther('1'),
+        [
+          { router: maliciousAddr, tokenIn: wethAddr, tokenOut: usdcAddr, amountOutMin: 0 },
+          { router: maliciousAddr, tokenIn: usdcAddr, tokenOut: wethAddr, amountOutMin: 0 },
+        ],
+        0, Math.floor(Date.now() / 1000) + 3600,
+      ]);
+      await maliciousRouter.setCustomAttackCalldata(attackCalldata);
+    },
     triggerWithMaliciousRouter: async (fixture, maliciousRouterAddress) => {
       const { contract, owner, dexRouter1, weth, usdc, wethUsdcPool } = fixture as any;
 

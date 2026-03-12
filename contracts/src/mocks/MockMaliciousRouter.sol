@@ -27,7 +27,16 @@ import "../interfaces/IDexRouter.sol";
  * A well-formed call ensures the revert comes from ReentrancyGuard, not from ABI
  * decoding failure.
  *
- * @custom:version 1.0.0
+ * ## Custom Attack Calldata (H-02)
+ *
+ * By default, the attack uses the 5-param executeArbitrage selector matching
+ * FlashLoanArbitrage/BalancerV2/SyncSwap/DaiFlashMint. For contracts with
+ * different entry points (PancakeSwap's 6-param executeArbitrage or
+ * CommitReveal's reveal()), use setCustomAttackCalldata() to provide
+ * protocol-specific calldata. This ensures the revert is caused by
+ * ReentrancyGuard — not by a selector mismatch.
+ *
+ * @custom:version 1.1.0
  */
 contract MockMaliciousRouter is IDexRouter {
     using SafeERC20 for IERC20;
@@ -51,9 +60,20 @@ contract MockMaliciousRouter is IDexRouter {
     /// @dev Records whether the reentrancy call succeeded (should always be false)
     bool public attackSucceeded;
 
+    /// @dev Custom attack calldata for protocol-specific reentrancy testing (H-02)
+    bytes private _customAttackCalldata;
+
     constructor(address _attackTarget) {
         attackTarget = _attackTarget;
         attackEnabled = true;
+    }
+
+    /// @notice Set custom attack calldata for protocol-specific reentrancy testing
+    /// @dev When set (non-empty), this calldata is used instead of the default
+    /// executeArbitrage(address,uint256,...) call. This allows testing reentrancy
+    /// against PancakeSwap (6-param executeArbitrage) and CommitReveal (reveal()).
+    function setCustomAttackCalldata(bytes calldata data) external {
+        _customAttackCalldata = data;
     }
 
     /// @notice Enable reentrancy attack (enabled by default)
@@ -96,37 +116,45 @@ contract MockMaliciousRouter is IDexRouter {
             attackCount++;
             attackAttempted = true;
 
-            // Build a properly ABI-encoded call to executeArbitrage().
-            // selector: executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)
-            // We use abi.encodeWithSelector to guarantee well-formed calldata.
-            bytes4 selector = bytes4(keccak256("executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)"));
+            bytes memory attackData;
 
-            // Non-empty swap path that passes validation: uses this router (approved)
-            // with valid token continuity (asset→path[1]→asset). If ReentrancyGuard
-            // were removed, this would reach _executeSwaps — proving the guard is the
-            // only defense, not EmptySwapPath or other validation.
-            SwapStep[] memory attackPath = new SwapStep[](2);
-            attackPath[0] = SwapStep({
-                router: address(this),
-                tokenIn: path[0],
-                tokenOut: path[1],
-                amountOutMin: 0
-            });
-            attackPath[1] = SwapStep({
-                router: address(this),
-                tokenIn: path[1],
-                tokenOut: path[0],
-                amountOutMin: 0
-            });
+            if (_customAttackCalldata.length > 0) {
+                // H-02: Use protocol-specific calldata set by the test.
+                // This ensures the attack targets the correct function selector
+                // (e.g., PancakeSwap's 6-param executeArbitrage or CommitReveal's reveal).
+                attackData = _customAttackCalldata;
+            } else {
+                // Default: 5-param executeArbitrage used by FlashLoanArbitrage,
+                // BalancerV2, SyncSwap, and DaiFlashMint.
+                bytes4 selector = bytes4(keccak256("executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)"));
 
-            bytes memory attackData = abi.encodeWithSelector(
-                selector,
-                path[0],                    // asset
-                amountIn,                   // amount
-                attackPath,                 // non-empty valid swap path (M-05)
-                uint256(0),                 // minProfit
-                block.timestamp + 300       // deadline
-            );
+                // Non-empty swap path that passes validation: uses this router (approved)
+                // with valid token continuity (asset→path[1]→asset). If ReentrancyGuard
+                // were removed, this would reach _executeSwaps — proving the guard is the
+                // only defense, not EmptySwapPath or other validation.
+                SwapStep[] memory attackPath = new SwapStep[](2);
+                attackPath[0] = SwapStep({
+                    router: address(this),
+                    tokenIn: path[0],
+                    tokenOut: path[1],
+                    amountOutMin: 0
+                });
+                attackPath[1] = SwapStep({
+                    router: address(this),
+                    tokenIn: path[1],
+                    tokenOut: path[0],
+                    amountOutMin: 0
+                });
+
+                attackData = abi.encodeWithSelector(
+                    selector,
+                    path[0],                    // asset
+                    amountIn,                   // amount
+                    attackPath,                 // non-empty valid swap path (M-05)
+                    uint256(0),                 // minProfit
+                    block.timestamp + 300       // deadline
+                );
+            }
 
             // Attempt reentrancy — this MUST fail due to ReentrancyGuard
             (bool success, ) = attackTarget.call(attackData);
