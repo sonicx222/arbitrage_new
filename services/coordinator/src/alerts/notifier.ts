@@ -422,8 +422,11 @@ export class AlertNotifier {
    * FIX: Updated to work with circular buffer
    *
    * @param limit Maximum number of alerts to return (default: 100)
+   * @param deduplicate When true, keeps only the most recent alert per type+service
+   *   combo. H-06 FIX: Prevents alert fatigue from duplicate alerts that fired
+   *   after cooldown windows expired (e.g., repeated SYSTEM_HEALTH_LOW, SERVICE_UNHEALTHY).
    */
-  getAlertHistory(limit: number = 100): Alert[] {
+  getAlertHistory(limit: number = 100, deduplicate: boolean = false): Alert[] {
     // Extract alerts from circular buffer
     const alerts: Alert[] = [];
     const count = Math.min(limit, this.alertHistoryCount);
@@ -447,7 +450,19 @@ export class AlertNotifier {
 
     // P2-003 FIX: Return as-is - already in descending order by construction
     // Tests verify this invariant (notifier.test.ts:240-256)
-    return alerts;
+    if (!deduplicate) {
+      return alerts;
+    }
+
+    // H-06 FIX: Deduplicate by type+service — keep the most recent (first seen
+    // in descending-sorted array) for each unique key.
+    const seen = new Set<string>();
+    return alerts.filter(alert => {
+      const key = `${alert.type}:${alert.service ?? 'system'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   /**

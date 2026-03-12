@@ -3062,9 +3062,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * FIX: Get alert history from the notifier for /api/alerts endpoint.
    * @param limit Maximum number of alerts to return (default: 100)
+   * @param deduplicate When true, keeps only the most recent per type+service (H-06)
    */
-  getAlertHistory(limit: number = 100): Alert[] {
-    return this.alertNotifier?.getAlertHistory(limit) ?? [];
+  getAlertHistory(limit: number = 100, deduplicate: boolean = false): Alert[] {
+    return this.alertNotifier?.getAlertHistory(limit, deduplicate) ?? [];
   }
 
   /**

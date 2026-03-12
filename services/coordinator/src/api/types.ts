@@ -146,7 +146,7 @@ export interface CoordinatorStateProvider {
   getLogger(): MinimalLogger;
 
   /** Get alert history for /api/alerts endpoint */
-  getAlertHistory(limit?: number): Alert[];
+  getAlertHistory(limit?: number, deduplicate?: boolean): Alert[];
 
   /**
    * Subscribe to real-time SSE events (execution results, alerts, circuit breaker state).

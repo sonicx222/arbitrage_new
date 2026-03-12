@@ -791,11 +791,11 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
   // Fix #51: Validate backrun/UniswapX/MEV-Share feature flags
   if (FEATURE_FLAGS.useBackrunStrategy) {
     const msg = 'Backrun Strategy enabled - MEV-Share backrun opportunities will be executed';
-    if (logger) { logger.info(msg); } else { console.info(msg); }
+    if (logger) { logger.info(msg); } else { console.info(`✅ ${msg}`); }
   }
   if (FEATURE_FLAGS.useUniswapxFiller) {
     const msg = 'UniswapX Filler Strategy enabled - Dutch auction orders will be filled';
-    if (logger) { logger.info(msg); } else { console.info(msg); }
+    if (logger) { logger.info(msg); } else { console.info(`✅ ${msg}`); }
   }
   // SA-060 FIX: Cross-dependency check — backrun requires MEV-Share base feature
   if (FEATURE_FLAGS.useMevShareBackrun && !FEATURE_FLAGS.useMevShare) {
@@ -806,14 +806,14 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
   }
   if (FEATURE_FLAGS.useMevShareBackrun) {
     const msg = 'MEV-Share Backrun event processing enabled - SSE event stream will be consumed';
-    if (logger) { logger.info(msg); } else { console.info(msg); }
+    if (logger) { logger.info(msg); } else { console.info(`✅ ${msg}`); }
   }
 
   // Validate CEX price signals feature (ADR-036)
   if (FEATURE_FLAGS.useCexPriceSignals) {
     const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'AVAXUSDT', 'MATICUSDT', 'ARBUSDT', 'OPUSDT', 'FTMUSDT'];
     const msg = `CEX Price Signals enabled - Binance trade stream will provide fair-value reference for ${symbols.length} tokens`;
-    if (logger) { logger.info(msg); } else { console.info(msg); }
+    if (logger) { logger.info(msg); } else { console.info(`✅ ${msg}`); }
     if (process.env.SIMULATION_MODE === 'true') {
       const warnMsg = 'CEX Price Signals + SIMULATION_MODE: Binance WS connection will be skipped; synthetic CEX prices generated from DEX data';
       if (logger) { logger.warn(warnMsg); } else { console.warn(`WARNING: ${warnMsg}`); }

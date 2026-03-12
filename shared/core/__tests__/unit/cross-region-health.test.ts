@@ -327,7 +327,7 @@ describe('CrossRegionHealthManager', () => {
         lastHealthCheck: Date.now(),
         consecutiveFailures: 0,
         avgLatencyMs: 0,
-        memoryUsagePercent: 0,
+        heapUsagePercent: 0,
         cpuUsagePercent: 0
       });
     };
@@ -445,7 +445,7 @@ describe('CrossRegionHealthManager', () => {
         lastHealthCheck: Date.now(),
         consecutiveFailures: 0,
         avgLatencyMs: 0,
-        memoryUsagePercent: 0,
+        heapUsagePercent: 0,
         cpuUsagePercent: 0
       });
 
@@ -476,7 +476,7 @@ describe('RegionHealth interface', () => {
       lastHealthCheck: Date.now(),
       consecutiveFailures: 0,
       avgLatencyMs: 10,
-      memoryUsagePercent: 50,
+      heapUsagePercent: 50,
       cpuUsagePercent: 30
     };
 

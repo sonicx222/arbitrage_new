@@ -128,6 +128,8 @@ export class StreamHealthMonitor {
   private cachedHealth: StreamHealth | null = null;
   private cacheTimestamp = 0;
   private cacheTtlMs = 5000; // 5s default — tunable via setCacheTtl()
+  /** H-07 FIX: Track previous connection state for recovery alerts */
+  private lastConnectionDown = false;
 
   constructor(config: StreamHealthMonitorConfig = {}) {
     // Use injected dependencies or defaults
@@ -292,6 +294,7 @@ export class StreamHealthMonitor {
     // P2 FIX #16: Reset init state so re-initialization happens on next use
     this.initialized = false;
     this.initializingPromise = null;
+    this.lastConnectionDown = false;
 
     this.logger.info('Stream health monitoring stopped');
   }
@@ -318,6 +321,7 @@ export class StreamHealthMonitor {
     // Check Redis connectivity first
     const isConnected = await this.streamsClient!.ping();
     if (!isConnected) {
+      this.lastConnectionDown = true;
       this.triggerAlert({
         type: 'stream_unavailable',
         severity: 'critical',
@@ -331,6 +335,20 @@ export class StreamHealthMonitor {
         streams: {},
         timestamp: Date.now()
       };
+    }
+
+    // H-07 FIX: Emit recovery alert when transitioning from unavailable to available.
+    // Without this, the stream_unavailable CRITICAL alert persists indefinitely even
+    // after Redis reconnects, causing alert fatigue and masking real failures.
+    if (this.lastConnectionDown) {
+      this.lastConnectionDown = false;
+      this.triggerAlert({
+        type: 'stream_recovered',
+        severity: 'info',
+        stream: 'all',
+        message: 'Redis Streams connection recovered',
+        timestamp: Date.now()
+      });
     }
 
     // Fetch all stream info in parallel (was sequential — 27 Redis calls serialized)

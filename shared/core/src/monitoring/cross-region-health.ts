@@ -56,8 +56,8 @@ export interface RegionHealth {
   /** Average latency to this region in ms */
   avgLatencyMs: number;
 
-  /** Memory usage percentage */
-  memoryUsagePercent: number;
+  /** V8 heap usage percentage (heapUsed / heapTotal). H-08 FIX: renamed from memoryUsagePercent for clarity. */
+  heapUsagePercent: number;
 
   /** CPU usage percentage */
   cpuUsagePercent: number;
@@ -481,7 +481,7 @@ export class CrossRegionHealthManager extends EventEmitter {
       lastHealthCheck: Date.now(),
       consecutiveFailures: 0,
       avgLatencyMs: 0,
-      memoryUsagePercent: 0,
+      heapUsagePercent: 0,
       cpuUsagePercent: 0
     };
 
@@ -532,7 +532,7 @@ export class CrossRegionHealthManager extends EventEmitter {
 
     // Update metrics
     const memUsage = process.memoryUsage();
-    region.memoryUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+    region.heapUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
     region.lastHealthCheck = Date.now();
 
     // Update service health
