@@ -247,11 +247,15 @@ export class OpportunityConsumer {
       }
 
       // Filter for entries idle longer than threshold AND not owned by current consumer
+      const staleConsumers = new Set<string>();
       const orphanedIds = pendingEntries
-        .filter(entry =>
-          entry.idleMs >= idleThreshold &&
-          entry.consumer !== this.consumerGroup.consumerName
-        )
+        .filter(entry => {
+          if (entry.idleMs >= idleThreshold && entry.consumer !== this.consumerGroup.consumerName) {
+            staleConsumers.add(entry.consumer);
+            return true;
+          }
+          return false;
+        })
         .map(entry => entry.id);
 
       if (orphanedIds.length === 0) {
@@ -260,6 +264,7 @@ export class OpportunityConsumer {
 
       this.logger.info('Recovering orphaned PEL messages via XCLAIM', {
         count: orphanedIds.length,
+        staleConsumers: [...staleConsumers],
         minIdleMs: idleThreshold,
         stream: this.consumerGroup.streamName,
       });
@@ -289,9 +294,20 @@ export class OpportunityConsumer {
         }
       }
 
+      // Remove stale consumers from the group to prevent monitoring from
+      // seeing orphaned PEL entries from previous sessions
+      for (const consumer of staleConsumers) {
+        await this.streamsClient.xgroupDelConsumer(
+          this.consumerGroup.streamName,
+          this.consumerGroup.groupName,
+          consumer,
+        );
+      }
+
       this.logger.info('XCLAIM recovery complete', {
         claimed: claimed.length,
         reprocessed: recovered,
+        staleConsumersRemoved: staleConsumers.size,
       });
 
       return recovered;

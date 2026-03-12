@@ -50,6 +50,7 @@ function createMockStreamsClient(): jest.Mocked<StreamsClient> {
     xpending: jest.fn().mockResolvedValue(null),
     xclaim: jest.fn().mockResolvedValue([]),
     xpendingRange: jest.fn().mockResolvedValue([]),
+    xgroupDelConsumer: jest.fn().mockResolvedValue(0),
   };
 }
 
@@ -161,19 +162,19 @@ describe('StreamConsumerManager', () => {
         ['100-0', '101-0'],
       );
 
-      // Should move claimed messages to DLQ
-      expect(streamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
-      expect(streamsClient.xaddWithLimit).toHaveBeenCalledWith(
-        'stream:dead-letter-queue',
-        expect.objectContaining({
-          _dlq_originalStream: 'stream:opportunities',
-          _dlq_errorCode: 'Orphaned PEL message recovered via XCLAIM',
-        }),
-      );
+      // Should NOT write to DLQ — XCLAIM recovery is routine cleanup, not an error
+      expect(streamsClient.xaddWithLimit).not.toHaveBeenCalled();
 
-      // Should ACK claimed messages
+      // Should ACK claimed messages directly
       expect(streamsClient.xack).toHaveBeenCalledWith('stream:opportunities', 'coordinator-group', '100-0');
       expect(streamsClient.xack).toHaveBeenCalledWith('stream:opportunities', 'coordinator-group', '101-0');
+
+      // Should remove stale consumer from group
+      expect(streamsClient.xgroupDelConsumer).toHaveBeenCalledWith(
+        'stream:opportunities',
+        'coordinator-group',
+        'coordinator-old-crashed',
+      );
 
       // Should log recovery
       expect(logger.info).toHaveBeenCalledWith(
@@ -181,6 +182,7 @@ describe('StreamConsumerManager', () => {
         expect.objectContaining({
           claimedCount: 2,
           staleConsumer: 'coordinator-old-crashed',
+          freedByDelConsumer: 0,
         }),
       );
     });
@@ -541,7 +543,7 @@ describe('StreamConsumerManager', () => {
       );
     });
 
-    it('should handle DLQ write failure during orphan recovery without losing ACK', async () => {
+    it('should handle xgroupDelConsumer failure gracefully without affecting recovery', async () => {
       const groupConfig = createGroupConfig({ consumerName: 'coordinator-new' });
 
       streamsClient.xpending.mockResolvedValue({
@@ -557,15 +559,16 @@ describe('StreamConsumerManager', () => {
         { id: '400-0', data: { id: 'opp-orphan' } },
       ]);
 
-      // DLQ write fails
-      streamsClient.xaddWithLimit.mockRejectedValue(new Error('DLQ write failed'));
+      // DELCONSUMER fails — should not affect recovery
+      streamsClient.xgroupDelConsumer.mockRejectedValue(new Error('DELCONSUMER failed'));
 
       await manager.recoverPendingMessages([groupConfig]);
 
-      // Should still attempt to claim (xclaim succeeded)
+      // Should still have claimed and ACK'd
       expect(streamsClient.xclaim).toHaveBeenCalled();
+      expect(streamsClient.xack).toHaveBeenCalled();
 
-      // Error should be logged
+      // Error should be logged (from the catch in claimOrphanedMessages)
       expect(logger.error).toHaveBeenCalled();
     });
 

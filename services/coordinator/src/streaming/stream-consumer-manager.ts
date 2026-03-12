@@ -72,6 +72,8 @@ export interface StreamsClient {
     count: number,
     consumerName?: string,
   ): Promise<Array<{ id: string; consumer: string; idleMs: number; deliveryCount: number }>>;
+  /** Remove a stale consumer from a consumer group after XCLAIM recovery */
+  xgroupDelConsumer(streamName: string, groupName: string, consumerName: string): Promise<number>;
 }
 
 /**
@@ -315,12 +317,13 @@ export class StreamConsumerManager {
    * 2. For OTHER consumers (not us), get detailed pending entries via XPENDING RANGE
    * 3. XCLAIM messages that have been idle longer than orphanClaimMinIdleMs
    * 4. ACK claimed messages immediately (stale data in a trading system is dangerous)
-   * 5. Move claimed messages to DLQ for audit trail (optional reprocessing)
+   * 5. XGROUP DELCONSUMER to remove the stale consumer entry
    *
    * Design notes:
-   * - We ACK + DLQ rather than reprocess because stale trading data can cause bad trades
+   * - We ACK rather than reprocess because stale trading data can cause bad trades
    * - The idle threshold (default 60s) prevents claiming messages from a healthy peer
    * - Batch size limits prevent recovery from blocking startup
+   * - Stale consumers are deleted to prevent false monitoring alerts from orphaned PEL
    *
    * @param groupConfigs - Array of consumer group configurations to check
    */
@@ -378,12 +381,13 @@ export class StreamConsumerManager {
   }
 
   /**
-   * OP-1 FIX: Claim orphaned messages from a stale consumer and move them to DLQ.
+   * OP-1 FIX: Claim orphaned messages from a stale consumer and clean up.
    *
    * Messages are ACKed immediately after claiming rather than reprocessed because:
    * - Stale price/opportunity data in a trading system can cause financial loss
-   * - The DLQ provides an audit trail for manual review if needed
    * - The idle threshold ensures we only claim truly abandoned messages
+   * After ACK, the stale consumer is removed via XGROUP DELCONSUMER to prevent
+   * monitoring from flagging orphaned PEL entries.
    */
   private async claimOrphanedMessages(
     groupConfig: ConsumerGroupConfig,
@@ -418,17 +422,28 @@ export class StreamConsumerManager {
         orphanedIds,
       );
 
-      // ACK + DLQ each claimed message (stale data is unsafe to reprocess)
+      // ACK claimed messages directly — stale trading data is unsafe to reprocess,
+      // and startup XCLAIM recovery is routine cleanup, not an error condition.
+      // Previous behavior sent these to DLQ, but that caused false HIGH findings
+      // in monitoring (DLQ > 0) for expected startup behavior.
       for (const message of claimed) {
-        await this.moveToDeadLetterQueue(message, new Error('Orphaned PEL message recovered via XCLAIM'), groupConfig.streamName);
         await this.ackMessage(groupConfig, message.id);
       }
+
+      // Remove the stale consumer from the group to prevent monitoring from
+      // seeing orphaned PEL entries from previous sessions
+      const freed = await this.streamsClient.xgroupDelConsumer(
+        groupConfig.streamName,
+        groupConfig.groupName,
+        staleConsumerName,
+      );
 
       this.logger.info('Recovered orphaned pending messages', {
         stream: groupConfig.streamName,
         staleConsumer: staleConsumerName,
         claimedCount: claimed.length,
         totalOrphaned: orphanedIds.length,
+        freedByDelConsumer: freed,
       });
     } catch (error) {
       this.logger.error('Failed to claim orphaned messages', {

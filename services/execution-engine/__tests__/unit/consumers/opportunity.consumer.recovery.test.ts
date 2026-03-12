@@ -32,6 +32,7 @@ function createMockStreamsClientWithRecovery() {
     xadd: jest.fn().mockResolvedValue('stream-id'),
     xpendingRange: jest.fn().mockResolvedValue([]),
     xclaim: jest.fn().mockResolvedValue([]),
+    xgroupDelConsumer: jest.fn().mockResolvedValue(0),
   };
 }
 
@@ -130,7 +131,7 @@ describe('OpportunityConsumer - recoverOrphanedMessages', () => {
     );
     expect(mockLogger.info).toHaveBeenCalledWith(
       'XCLAIM recovery complete',
-      expect.objectContaining({ claimed: 1, reprocessed: 1 }),
+      expect.objectContaining({ claimed: 1, reprocessed: 1, staleConsumersRemoved: 1 }),
     );
   });
 

@@ -921,6 +921,37 @@ export class RedisStreamsClient {
     }
   }
 
+  /**
+   * Remove a consumer from a consumer group.
+   * Pending messages owned by the consumer are freed (become unowned).
+   * Use after XCLAIM recovery to clean up stale consumers from previous sessions.
+   *
+   * @returns Number of pending messages that were freed
+   */
+  async xgroupDelConsumer(
+    streamName: string,
+    groupName: string,
+    consumerName: string,
+  ): Promise<number> {
+    try {
+      const result = await this.client.xgroup(
+        'DELCONSUMER',
+        streamName,
+        groupName,
+        consumerName,
+      ) as number;
+      return result ?? 0;
+    } catch (error) {
+      this.logger.warn('Failed to delete consumer from group', {
+        stream: streamName,
+        group: groupName,
+        consumer: consumerName,
+        error: (error as Error).message,
+      });
+      return 0;
+    }
+  }
+
   async xreadgroup(
     config: ConsumerGroupConfig,
     options: XReadGroupOptions = {}
