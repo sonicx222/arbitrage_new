@@ -1176,7 +1176,8 @@ SimulationService now routes requests based on chain:
    - Largest liquidity pools
 
 2. **Balancer V2** (0% fee)
-   - Chains: Ethereum, Polygon, Arbitrum, Base, Optimism, Fantom
+   - Supported chains: Ethereum, Polygon, Arbitrum, Base, Optimism, Fantom (Vault exists on all 6)
+   - Operationally available: **None** — `BalancerV2FlashArbitrage.sol` not yet deployed (all marked `false` in `flash-loan-availability.ts`)
    - Contract: `BalancerV2FlashArbitrage.sol`
    - Zero-fee flash loans via vault
 

@@ -26,16 +26,18 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
+import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import type { MockDexRouter, MockERC20 } from '../../typechain-types';
 
 // =============================================================================
-// Types
+// Types (M-02: typed fixtures replacing `any`)
 // =============================================================================
 
 export interface DeploymentTestFixture {
   /** The contract under test (any contract extending BaseFlashArbitrage) */
-  contract: any;
+  contract: any; // Protocol-specific — kept generic for 7-contract reuse
   /** Owner signer (deployer) */
-  owner: any;
+  owner: SignerWithAddress;
 }
 
 export interface DeploymentTestConfig {
@@ -47,21 +49,21 @@ export interface DeploymentTestConfig {
 
 export interface ValidationTestFixture {
   /** The contract under test */
-  contract: any;
+  contract: any; // Protocol-specific — kept generic for 7-contract reuse
   /** Owner signer */
-  owner: any;
+  owner: SignerWithAddress;
   /** Non-owner signer */
-  user: any;
+  user: SignerWithAddress;
   /** First mock DEX router */
-  dexRouter1: any;
+  dexRouter1: MockDexRouter;
   /** Second mock DEX router (for cross-router tests) */
-  dexRouter2: any;
+  dexRouter2: MockDexRouter;
   /** WETH mock token */
-  weth: any;
+  weth: MockERC20;
   /** USDC mock token */
-  usdc: any;
+  usdc: MockERC20;
   /** DAI mock token (for 3-hop tests) */
-  dai: any;
+  dai: MockERC20;
 }
 
 export interface ValidationTestConfig {
@@ -704,6 +706,41 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
         })
       ).to.be.revertedWithCustomError(contract, 'InsufficientProfit');
     });
+
+    it('should accumulate profits across multiple trades (L-11)', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1 } = fixture;
+      const assetAddress = await getAsset(fixture);
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      await contract.connect(owner).setMinimumProfit(1n);
+      await setupSmallProfitRates(fixture);
+
+      const routerAddr = await dexRouter1.getAddress();
+      const usdcAddr = await fixture.usdc.getAddress();
+      const swapPath = [
+        { router: routerAddr, tokenIn: assetAddress, tokenOut: usdcAddr, amountOutMin: 1n },
+        { router: routerAddr, tokenIn: usdcAddr, tokenOut: assetAddress, amountOutMin: 1n },
+      ];
+      const deadline = await getDeadline();
+
+      // Trade 1
+      await triggerArbitrage(contract, owner, {
+        asset: assetAddress, amount: ethers.parseEther('1'), swapPath, minProfit: 0n, deadline,
+      });
+      const profitAfterTrade1 = await contract.tokenProfits(assetAddress);
+      expect(profitAfterTrade1).to.be.gt(0);
+
+      // Trade 2 — same asset, profits should accumulate
+      await triggerArbitrage(contract, owner, {
+        asset: assetAddress, amount: ethers.parseEther('1'), swapPath, minProfit: 0n, deadline,
+      });
+      const profitAfterTrade2 = await contract.tokenProfits(assetAddress);
+      expect(profitAfterTrade2).to.be.gt(profitAfterTrade1);
+
+      // Cumulative should be approximately 2x the per-trade profit
+      expect(profitAfterTrade2).to.equal(profitAfterTrade1 * 2n);
+    });
   });
 }
 
@@ -713,15 +750,15 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
 
 export interface CalculateProfitTestFixture {
   /** The contract under test */
-  contract: any;
+  contract: any; // Protocol-specific — kept generic
   /** Owner signer */
-  owner: any;
+  owner: SignerWithAddress;
   /** First mock DEX router */
-  dexRouter1: any;
+  dexRouter1: MockDexRouter;
   /** WETH mock token */
-  weth: any;
+  weth: MockERC20;
   /** USDC mock token */
-  usdc: any;
+  usdc: MockERC20;
 }
 
 export interface CalculateProfitResult {

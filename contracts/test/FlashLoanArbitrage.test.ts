@@ -917,10 +917,10 @@ describe('FlashLoanArbitrage', () => {
   });
 
   // ===========================================================================
-  // Gas Optimization Tests
+  // Gas Benchmarks (L-08/R-02: aligned with other protocol test files)
   // ===========================================================================
-  describe('Gas Optimization', () => {
-    it('should execute arbitrage within gas budget', async () => {
+  describe('Gas Benchmarks', () => {
+    it('should execute 2-hop arbitrage within gas budget', async () => {
       const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } =
         await loadFixture(deployContractsFixture);
 

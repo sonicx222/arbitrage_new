@@ -1,7 +1,7 @@
 # ADR-020: Flash Loan Integration
 
 ## Status
-**Accepted** (Partial Implementation)
+**Accepted** (Multi-Provider — 7 contracts deployed locally, 2 on testnets)
 
 ## Date
 2026-01-24
@@ -215,10 +215,10 @@ function analyzeProfitability(opportunity): ProfitabilityAnalysis {
 
 | Network | Status |
 |---------|--------|
-| Local/Hardhat | ✅ Tested |
+| Local/Hardhat | ✅ Tested (all 7 contracts) |
 | Mainnet Fork | ✅ Tested |
-| Sepolia Testnet | ⏳ Ready to deploy |
-| Arbitrum Sepolia | ⏳ Ready to deploy |
+| Sepolia Testnet | ✅ Deployed (FlashLoanArbitrage, CommitRevealArbitrage) |
+| Arbitrum Sepolia | ✅ Deployed (FlashLoanArbitrage + UniswapV3Adapter) |
 | Mainnet | ⏳ After audit |
 
 ## Success Criteria

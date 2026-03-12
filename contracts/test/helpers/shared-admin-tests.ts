@@ -32,26 +32,28 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import type { MockDexRouter, MockERC20 } from '../../typechain-types';
 
 // =============================================================================
-// Types
+// Types (M-02: typed fixtures replacing `any`)
 // =============================================================================
 
 export interface AdminTestFixture {
   /** The contract under test (any contract extending BaseFlashArbitrage) */
-  contract: any;
+  contract: any; // Protocol-specific — kept generic for 7-contract reuse
   /** Owner signer (deployer) */
-  owner: any;
+  owner: SignerWithAddress;
   /** Non-owner signer (unauthorized user) */
-  user: any;
+  user: SignerWithAddress;
   /** First mock DEX router */
-  dexRouter1: any;
+  dexRouter1: MockDexRouter;
   /** Second mock DEX router */
-  dexRouter2: any;
+  dexRouter2: MockDexRouter;
   /** WETH mock token (or primary ERC20 for withdrawal tests) */
-  weth: any;
+  weth: MockERC20;
   /** Third signer for Ownable2Step tests (optional, falls back to ethers.getSigners()[3]) */
-  attacker?: any;
+  attacker?: SignerWithAddress;
 }
 
 export interface AdminTestConfig {
@@ -334,12 +336,29 @@ export function testPauseUnpause(config: AdminTestConfig): void {
       expect(await contract.paused()).to.be.true;
     });
 
+    it('should emit Paused event with owner address (L-10)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await expect(contract.connect(owner).pause())
+        .to.emit(contract, 'Paused')
+        .withArgs(owner.address);
+    });
+
     it('should allow owner to unpause', async () => {
       const { contract, owner } = await getFixture();
 
       await contract.connect(owner).pause();
       await contract.connect(owner).unpause();
       expect(await contract.paused()).to.be.false;
+    });
+
+    it('should emit Unpaused event with owner address (L-10)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await contract.connect(owner).pause();
+      await expect(contract.connect(owner).unpause())
+        .to.emit(contract, 'Unpaused')
+        .withArgs(owner.address);
     });
 
     it('should revert if non-owner tries to pause', async () => {

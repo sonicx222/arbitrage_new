@@ -17,7 +17,7 @@ import "../interfaces/IFlashLoanErrors.sol";
  * @notice Abstract base contract for flash loan arbitrage implementations
  * @dev Provides common functionality for all flash arbitrage contracts
  *
- * ## Refactoring Benefits (v2.0.0)
+ * ## Refactoring Benefits (v2.0.0 → v2.1.0)
  *
  * This base contract consolidates shared logic for 6 flash arbitrage contracts:
  * - FlashLoanArbitrage (Aave V3)

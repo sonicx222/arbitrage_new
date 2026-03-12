@@ -564,7 +564,7 @@ describe('PancakeSwapFlashArbitrage', () => {
     // Configure the attack to use the correct 6-param selector so ReentrancyGuard
     // (not selector mismatch) blocks the re-entry.
     configureAttack: async (maliciousRouter, fixture) => {
-      const { weth, usdc, wethUsdcPool } = fixture as any;
+      const { weth, usdc, wethUsdcPool } = fixture;
       const maliciousAddr = await maliciousRouter.getAddress();
       const wethAddr = await weth.getAddress();
       const usdcAddr = await usdc.getAddress();
@@ -585,7 +585,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       await maliciousRouter.setCustomAttackCalldata(attackCalldata);
     },
     triggerWithMaliciousRouter: async (fixture, maliciousRouterAddress) => {
-      const { contract, owner, dexRouter1, weth, usdc, wethUsdcPool } = fixture as any;
+      const { contract, owner, dexRouter1, weth, usdc, wethUsdcPool } = fixture;
 
       // PancakeSwap requires pool whitelisting
       const poolAddress = await wethUsdcPool.getAddress();

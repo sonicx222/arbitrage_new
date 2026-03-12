@@ -12,6 +12,10 @@ export type FeeDecimal = number & { readonly __brand: 'FeeDecimal' };
  *
  * Canonical definition used across shared/core, shared/config, and execution-engine.
  *
+ * Note: CommitRevealArbitrage is NOT included here because it uses upfront capital
+ * (not flash loans). It shares BaseFlashArbitrage's swap infrastructure but has its
+ * own deployment pipeline. See contracts/src/CommitRevealArbitrage.sol.
+ *
  * @see shared/config/src/flash-loan-availability.ts - Availability matrix per chain
  * @see services/execution-engine/src/strategies/flash-loan-providers/types.ts - Provider interfaces
  * @see shared/core/src/flash-loan-aggregation/domain/models.ts - Aggregation domain
