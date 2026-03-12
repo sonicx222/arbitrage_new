@@ -96,7 +96,7 @@ const DEFAULT_CONFIG: BinanceWsConfig = {
  * - 'trade' (BinanceTradeEvent) - Parsed trade event
  * - 'connected' () - WebSocket connected
  * - 'disconnected' () - WebSocket disconnected
- * - 'error' (Error) - Connection or parse error
+ * - 'maxReconnectFailed' (attempts: number) - All reconnect attempts exhausted
  */
 export class BinanceWebSocketClient extends EventEmitter {
   private config: BinanceWsConfig;
@@ -191,12 +191,14 @@ export class BinanceWebSocketClient extends EventEmitter {
 
         this.ws.on('error', (error: Error) => {
           logger.error('Binance WebSocket error', { error: error.message });
-          this.emit('error', error);
 
           // If we haven't connected yet, reject the promise
           if (!this.connected) {
             reject(error);
           }
+          // Note: 'close' event always fires after 'error', which triggers reconnect.
+          // We do NOT re-emit 'error' here — Node.js crashes the process if no
+          // 'error' listener is attached to the EventEmitter (ST-002 fix).
         });
 
         this.ws.on('pong', () => {
@@ -364,9 +366,7 @@ export class BinanceWebSocketClient extends EventEmitter {
         maxAttempts: this.config.maxReconnectAttempts,
         disconnectedSince: this.disconnectedSince,
       });
-      this.emit('error', new Error(
-        `Failed to reconnect after ${this.config.maxReconnectAttempts} attempts`
-      ));
+      this.emit('maxReconnectFailed', this.reconnectAttempts);
       // Start periodic last-resort reconnect (every 5 minutes)
       this.startLastResortReconnect();
       return;

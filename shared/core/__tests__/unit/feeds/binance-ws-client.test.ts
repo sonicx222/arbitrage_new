@@ -407,8 +407,8 @@ describe('BinanceWebSocketClient', () => {
       try {
         const ws = await connectClient(client);
 
-        const errorHandler = jest.fn();
-        client.on('error', errorHandler);
+        const maxReconnectHandler = jest.fn();
+        client.on('maxReconnectFailed', maxReconnectHandler);
 
         // Simulate close
         ws.simulateClose(1006);
@@ -427,12 +427,8 @@ describe('BinanceWebSocketClient', () => {
         jest.advanceTimersByTime(60000);
         expect(mockWsInstances.length).toBe(instanceCountBefore);
 
-        // Should have emitted an error about max attempts
-        expect(errorHandler).toHaveBeenCalledWith(
-          expect.objectContaining({
-            message: expect.stringContaining('Failed to reconnect after 3 attempts'),
-          })
-        );
+        // Should have emitted maxReconnectFailed with attempt count
+        expect(maxReconnectHandler).toHaveBeenCalledWith(3);
       } finally {
         jest.useRealTimers();
       }

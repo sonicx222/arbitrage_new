@@ -181,6 +181,9 @@ export class CexPriceFeedService extends EventEmitter {
       this._wsReconnections++;
       logger.info('Binance WS reconnecting', { reconnections: this._wsReconnections });
     });
+    this.wsClient.on('maxReconnectFailed', (attempts: number) => {
+      logger.error('Binance WS exhausted all reconnect attempts, running degraded', { attempts });
+    });
 
     try {
       await this.wsClient.connect();
