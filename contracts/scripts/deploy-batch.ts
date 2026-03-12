@@ -159,6 +159,7 @@ function isAlreadyDeployed(contract: string, network: string): boolean {
 const MAINNET_NETWORKS = new Set([
   'ethereum', 'arbitrum', 'base', 'optimism', 'polygon',
   'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+  'blast', 'scroll', 'mantle', 'mode',
 ]);
 
 async function main(): Promise<void> {

@@ -69,10 +69,10 @@ contract MockMaliciousRouter is IDexRouter {
     /**
      * @dev Malicious swap that attempts reentrancy via executeArbitrage()
      *
-     * The attack constructs a valid executeArbitrage() call with an empty SwapStep[]
-     * array. This ensures the revert is caused by ReentrancyGuard (not by calldata
-     * decoding errors). The empty swap path would fail validation anyway, but the
-     * ReentrancyGuard check runs first.
+     * The attack constructs a valid executeArbitrage() call with a non-empty SwapStep[]
+     * array that passes all input validation (token continuity, approved router, etc.).
+     * This proves the revert is caused ONLY by ReentrancyGuard — not by EmptySwapPath
+     * or other validation checks.
      */
     function swapExactTokensForTokens(
         uint256 amountIn,
@@ -99,18 +99,31 @@ contract MockMaliciousRouter is IDexRouter {
             // Build a properly ABI-encoded call to executeArbitrage().
             // selector: executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)
             // We use abi.encodeWithSelector to guarantee well-formed calldata.
-            // The empty SwapStep[] is valid ABI encoding — the revert MUST come from ReentrancyGuard.
             bytes4 selector = bytes4(keccak256("executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)"));
 
-            // Properly typed empty SwapStep array for correct ABI encoding.
-            // This would fail EmptySwapPath validation if ReentrancyGuard didn't catch it first.
-            SwapStep[] memory emptyPath = new SwapStep[](0);
+            // Non-empty swap path that passes validation: uses this router (approved)
+            // with valid token continuity (asset→path[1]→asset). If ReentrancyGuard
+            // were removed, this would reach _executeSwaps — proving the guard is the
+            // only defense, not EmptySwapPath or other validation.
+            SwapStep[] memory attackPath = new SwapStep[](2);
+            attackPath[0] = SwapStep({
+                router: address(this),
+                tokenIn: path[0],
+                tokenOut: path[1],
+                amountOutMin: 0
+            });
+            attackPath[1] = SwapStep({
+                router: address(this),
+                tokenIn: path[1],
+                tokenOut: path[0],
+                amountOutMin: 0
+            });
 
             bytes memory attackData = abi.encodeWithSelector(
                 selector,
                 path[0],                    // asset
                 amountIn,                   // amount
-                emptyPath,                  // empty swap path (properly typed)
+                attackPath,                 // non-empty valid swap path (M-05)
                 uint256(0),                 // minProfit
                 block.timestamp + 300       // deadline
             );

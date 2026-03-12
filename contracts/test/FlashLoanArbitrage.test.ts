@@ -902,6 +902,21 @@ describe('FlashLoanArbitrage', () => {
   });
 
   // ===========================================================================
+  // ETH Receive (M-10)
+  // ===========================================================================
+  describe('ETH receive()', () => {
+    it('should accept ETH via receive() and emit ETHReceived', async () => {
+      const { flashLoanArbitrage, owner } = await loadFixture(deployContractsFixture);
+      const addr = await flashLoanArbitrage.getAddress();
+
+      await expect(owner.sendTransaction({ to: addr, value: ethers.parseEther('1') }))
+        .to.emit(flashLoanArbitrage, 'ETHReceived')
+        .withArgs(owner.address, ethers.parseEther('1'));
+      expect(await ethers.provider.getBalance(addr)).to.equal(ethers.parseEther('1'));
+    });
+  });
+
+  // ===========================================================================
   // Gas Optimization Tests
   // ===========================================================================
   describe('Gas Optimization', () => {

@@ -340,6 +340,21 @@ describe('CommitRevealArbitrage', () => {
         expect(await commitRevealArbitrage.commitments(commitmentHash)).to.be.gt(0);
       });
 
+      it('should revert when contract is paused (M-09)', async () => {
+        const { commitRevealArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        // Pause the contract
+        await commitRevealArbitrage.connect(owner).pause();
+
+        // cancelCommit should respect pause state
+        await expect(
+          commitRevealArbitrage.connect(user).cancelCommit(commitmentHash)
+        ).to.be.revertedWith('Pausable: paused');
+      });
+
       it('should clean up committers mapping on cancel', async () => {
         const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
 
@@ -1005,6 +1020,14 @@ describe('CommitRevealArbitrage', () => {
 
       await expect(
         commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([fakeHash])
+      ).to.not.emit(commitRevealArbitrage, 'CommitmentsCleanedUp');
+    });
+
+    it('should handle empty array without reverting (M-07)', async () => {
+      const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        commitRevealArbitrage.connect(owner).cleanupExpiredCommitments([])
       ).to.not.emit(commitRevealArbitrage, 'CommitmentsCleanedUp');
     });
 

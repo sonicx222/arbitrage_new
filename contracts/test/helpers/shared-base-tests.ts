@@ -25,6 +25,7 @@
 
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 
 // =============================================================================
 // Types
@@ -608,7 +609,8 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
           minProfit: 0n,
           deadline,
         })
-      ).to.emit(contract, 'ProfitTracked');
+      ).to.emit(contract, 'ProfitTracked')
+        .withArgs(assetAddress, anyValue, anyValue);
     });
 
     it('should succeed with realistic router fees (M-01)', async () => {
@@ -648,7 +650,8 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
           minProfit: 0n,
           deadline,
         })
-      ).to.emit(contract, 'ProfitTracked');
+      ).to.emit(contract, 'ProfitTracked')
+        .withArgs(assetAddress, anyValue, anyValue);
     });
 
     it('should enforce max of minProfit param and contract minimumProfit', async () => {
@@ -904,6 +907,78 @@ export function testCalculateExpectedProfit(config: CalculateProfitTestConfig): 
         swapPath,
       });
 
+      expect(result.expectedProfit).to.equal(0);
+    });
+
+    it('should return 0 profit for path with intermediate cycle (M-08)', async () => {
+      const fixture = await getFixture();
+      const { contract, owner, dexRouter1, weth, usdc } = fixture;
+
+      await contract.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Deploy a third token (DAI) for the 4-hop cycle test
+      const MockERC20Factory = await ethers.getContractFactory('MockERC20');
+      const dai = await MockERC20Factory.deploy('Dai Stablecoin', 'DAI', 18);
+
+      // Set up rates for: WETH→USDC→DAI→USDC→WETH
+      // The intermediate cycle is USDC appearing twice as output (steps 1 and 3)
+      const routerAddr = await dexRouter1.getAddress();
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await dai.getAddress(),
+        ethers.parseEther('1')
+      );
+      await dexRouter1.setExchangeRate(
+        await dai.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('1.01', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('510000000000000000000000000000')
+      );
+
+      // 4-hop path with intermediate cycle: USDC is visited in step 1 output AND step 3 output
+      const swapPath = [
+        {
+          router: routerAddr,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 0n,
+        },
+        {
+          router: routerAddr,
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await dai.getAddress(),
+          amountOutMin: 0n,
+        },
+        {
+          router: routerAddr,
+          tokenIn: await dai.getAddress(),
+          tokenOut: await usdc.getAddress(), // USDC again — intermediate cycle
+          amountOutMin: 0n,
+        },
+        {
+          router: routerAddr,
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 0n,
+        },
+      ];
+
+      const result = await triggerCalculateProfit(contract, {
+        asset: await weth.getAddress(),
+        amount: ethers.parseEther('10'),
+        swapPath,
+      });
+
+      // Cycle detection should reject the path (USDC visited twice as intermediate)
       expect(result.expectedProfit).to.equal(0);
     });
   });

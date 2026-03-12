@@ -335,7 +335,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      *
      * @param commitmentHash Hash to cancel
      */
-    function cancelCommit(bytes32 commitmentHash) external {
+    function cancelCommit(bytes32 commitmentHash) external whenNotPaused {
         CommitmentInfo storage info = _commitments[commitmentHash];
         if (info.blockNumber == 0) revert CommitmentNotFound();
         if (info.revealed) revert CommitmentAlreadyRevealed();

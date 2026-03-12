@@ -681,15 +681,15 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
       expect(await weth.balanceOf(await arbitrage.getAddress())).to.be.gt(0);
     });
 
-    it('should receive ETH via receive function', async () => {
+    it('should receive ETH via receive function and emit ETHReceived', async () => {
       const { arbitrage, owner } = await loadFixture(deployContractsFixture);
+      const addr = await arbitrage.getAddress();
 
-      await owner.sendTransaction({
-        to: await arbitrage.getAddress(),
-        value: ethers.parseEther('1'),
-      });
+      await expect(owner.sendTransaction({ to: addr, value: ethers.parseEther('1') }))
+        .to.emit(arbitrage, 'ETHReceived')
+        .withArgs(owner.address, ethers.parseEther('1'));
 
-      const balance = await ethers.provider.getBalance(await arbitrage.getAddress());
+      const balance = await ethers.provider.getBalance(addr);
       expect(balance).to.equal(ethers.parseEther('1'));
     });
 

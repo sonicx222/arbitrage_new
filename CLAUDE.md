@@ -269,7 +269,7 @@ When making changes:
 - OZ4 ERC20 uses string reverts (`require`), NOT custom errors -- this affects test assertions
 - `forceApprove` handles non-zero to non-zero approvals safely (USDT pattern)
 - Flash loan callbacks are implicitly protected by calling function's `nonReentrant`
-- `totalProfits` accumulator mixes denominations (legacy) -- use `tokenProfits` per-asset mapping instead
+- `tokenProfits` per-asset mapping tracks profit per token (`totalProfits` was removed in v2.1.0)
 - Token address configs vary by chain -- check `contracts/deployments/addresses.ts` for coverage gaps
 - `minimumProfit` is enforced non-zero (setter rejects 0) -- prevents grief attacks via break-even paths
 - Router validation is per-step (no caching) -- each step independently checks `approvedRouters.contains()`
