@@ -35,6 +35,9 @@ primary_region = "sjc"
   # SA-1Q-001 FIX: Aligned with service-ports.json (3005) and Docker Compose.
   # Was 8080, diverging from all other services which use their canonical ports.
   HEALTH_CHECK_PORT = "3005"
+  # SEC-S-002: EE defaults to 127.0.0.1 for security. Override to 0.0.0.0
+  # in Fly.io so coordinator proxy and internal DNS can reach it.
+  HEALTH_SERVER_HOST = "0.0.0.0"
   ENABLE_CROSS_REGION_HEALTH = "true"
   # SM-002/ADR-038: Chain-group routing. Set to the group this EE instance handles.
   # Options: fast (BSC,Polygon,AVAX,FTM), l2 (Arb,OP,Base,Scroll,Blast),

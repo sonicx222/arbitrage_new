@@ -261,6 +261,10 @@ function createHealthServer(engine: ExecutionEngineService): Server {
 
   return createSimpleHealthServer({
     port: HEALTH_CHECK_PORT,
+    // SEC-S-002 FIX: Bind to localhost — EE health server exposes sensitive endpoints
+    // (circuit breaker control, trading stats) that must not be network-accessible.
+    // In production (Fly.io), the internal proxy handles external health checks.
+    host: process.env.HEALTH_SERVER_HOST ?? '127.0.0.1',
     serviceName: 'execution-engine',
     logger,
     description: 'Arbitrage Execution Engine Service',
@@ -308,6 +312,10 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         // RT-015 FIX: Risk/drawdown state — the #1 profitability observability blind spot
         riskState: drawdownStats?.currentState ?? null,
         tradingAllowed: tradingAllowed?.allowed ?? null,
+        // H-04 FIX: Combined execution readiness — tradingAllowed only reflects risk
+        // circuit breaker (drawdown). canExecute also requires healthy providers
+        // (or simulation mode), so operators see a single "can this service trade?" signal.
+        canExecute: (tradingAllowed?.allowed ?? false) && (healthyProviders > 0 || isSimulation),
         positionSizeMultiplier: tradingAllowed?.sizeMultiplier ?? null,
         currentDrawdown: drawdownStats?.currentDrawdown ?? null,
         dailyPnLFraction: drawdownStats?.dailyPnLFraction ?? null,

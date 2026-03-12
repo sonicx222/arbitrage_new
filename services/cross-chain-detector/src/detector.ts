@@ -54,6 +54,8 @@ import {
   getDefaultQuoteToken,
   // FIX 9.1: Use centralized chain ID mapping
   getChainName,
+  // BUG-P1-2 FIX: Per-chain gas cost in USD for dimensionally correct profit calculation
+  getEstimatedGasCostUsd,
 } from '@arbitrage/config';
 import {
   PriceUpdate,
@@ -115,9 +117,6 @@ import {
 
 // PriceData, CrossChainOpportunity, DetectorConfig, WhaleAnalysisConfig, MLPredictionConfig
 // are now imported from ./types.ts - See ADR-014: Type Consolidation
-
-// FIX #7: Module-scoped constant to avoid per-call BigInt construction
-const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 // =============================================================================
 // Default Configuration (Config C1: Configurable Values)
@@ -1089,29 +1088,16 @@ export class CrossChainDetectorService {
         return;
       }
 
-      // Estimate net profit (simplified - assumes same trade size as pending)
-      // P1-FIX 2.3: Use configurable gas estimate instead of hardcoded value
-      const estimatedGasCost = BigInt(intent.gasPrice) * BigInt(this.config.estimatedSwapGas ?? 200000);
-      const amountInBigInt = BigInt(intent.amountIn);
-      const grossProfit = (amountInBigInt * BigInt(Math.floor(priceDiffPercent * 10000))) / BigInt(10000);
+      // BUG-P1-2 FIX: Compute net profit in USD to avoid dimensional mismatch.
+      // Previously, grossProfit was in token wei and estimatedGasCost was in native
+      // chain wei (e.g., USDC wei vs ETH wei) — subtraction was nonsensical and
+      // caused ALL non-native-token pending opportunities to appear unprofitable.
+      const tradeSizeUsd = this.config.defaultTradeSizeUsd ?? 1000;
+      const grossProfitUsd = priceDiffPercent * tradeSizeUsd;
+      const gasCostUsd = getEstimatedGasCostUsd(chainName);
+      const netProfitUsd = grossProfitUsd - gasCostUsd;
 
-      // FIX #7: BigInt precision handling for grossProfit > 2^53
-      // Number() loses precision for BigInt values beyond MAX_SAFE_INTEGER.
-      // Use BigInt comparison when values are large, Number conversion otherwise.
-      let netProfit: number;
-      if (grossProfit > MAX_SAFE_BIGINT || estimatedGasCost > MAX_SAFE_BIGINT) {
-        // Stay in BigInt domain for the comparison
-        const netProfitBigInt = grossProfit - estimatedGasCost;
-        if (netProfitBigInt <= 0n) {
-          return;
-        }
-        // Safe to convert result since we only need an approximate numeric value for the opportunity
-        netProfit = Number(netProfitBigInt);
-      } else {
-        netProfit = Number(grossProfit) - Number(estimatedGasCost);
-      }
-
-      if (netProfit <= 0) {
+      if (netProfitUsd <= 0) {
         return;
       }
 
@@ -1129,11 +1115,11 @@ export class CrossChainDetectorService {
         // P0 FIX: Convert decimal ratio to percentage to match cross-chain path convention
         // (publisher divides by 100, so store as percentage e.g. 2.0 for 2%)
         percentageDiff: priceDiffPercent * 100,
-        tradeSizeUsd: this.config.defaultTradeSizeUsd ?? 1000,
-        // FIX #1: Use priceDiff (gross profit) to match cross-chain path and JSDoc semantics
-        estimatedProfit: priceDiff,
+        tradeSizeUsd,
+        // BUG-P0-3 FIX: estimatedProfit is total USD gross profit (not per-unit priceDiff)
+        estimatedProfit: grossProfitUsd,
         bridgeCost: 0, // Same-chain opportunity
-        netProfit: netProfit,
+        netProfit: netProfitUsd,
         createdAt: now,
         timestamp: now,
         confidence,
@@ -1174,7 +1160,12 @@ export class CrossChainDetectorService {
     try {
       // If we have reserve data, calculate impact
       if (priceUpdate.reserve0 && priceUpdate.reserve1) {
-        const reserve = BigInt(priceUpdate.reserve0);
+        // BUG-P0-2 FIX: Select the correct reserve based on token direction.
+        // reserve0 corresponds to token0, reserve1 corresponds to token1.
+        // The AMM formula uses the INPUT token's reserve: impact ≈ amountIn / (reserveIn + amountIn)
+        const tokenInLower = intent.tokenIn.toLowerCase();
+        const isToken1 = priceUpdate.token1 && tokenInLower === priceUpdate.token1.toLowerCase();
+        const reserve = isToken1 ? BigInt(priceUpdate.reserve1) : BigInt(priceUpdate.reserve0);
         const amountIn = BigInt(intent.amountIn);
 
         // Price impact ≈ amountIn / (reserve + amountIn) for constant product
@@ -1519,6 +1510,11 @@ export class CrossChainDetectorService {
       return opportunities;
     }
 
+    // BUG-P0-3 FIX: Compute trade size for total profit calculation.
+    // All profit/cost values are scaled to total USD for the configured trade size.
+    const tradeSizeUsd = this.config.defaultTradeSizeUsd ?? 1000;
+    const tradeSizeInTokens = lowestPrice.price > 0 ? tradeSizeUsd / lowestPrice.price : 0;
+
     // P0 FIX: Include gas costs and swap fees in net profit calculation
     // Gas costs: source chain swap + dest chain swap, converted to per-token units
     const tradeTokens = this.bridgeCostEstimator!.extractTokenAmount(lowestPrice.update);
@@ -1528,9 +1524,12 @@ export class CrossChainDetectorService {
     // Swap fees: buy on source + sell on dest (per-token cost from price * fee rate)
     const swapFeePerToken = ARBITRAGE_CONFIG.feePercentage * (lowestPrice.price + highestPrice.price);
 
-    const netProfit = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
+    // netProfitPerToken is the per-unit net profit, used for the threshold check
+    const netProfitPerToken = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
+    // Scale to total USD profit for the opportunity object
+    const netProfit = netProfitPerToken * tradeSizeInTokens;
 
-    if (netProfit > ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
+    if (netProfitPerToken > ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
       // Build ML prediction object if predictions available
       let mlPredictionData: { source?: PredictionResult | null; target?: PredictionResult | null } | undefined;
       if (mlPredictions) {
@@ -1590,6 +1589,9 @@ export class CrossChainDetectorService {
         }
       }
 
+      // BUG-P0-3 FIX: estimatedProfit = total gross profit (priceDiff * tradeSizeInTokens)
+      const estimatedProfit = priceDiff * tradeSizeInTokens;
+
       const opportunity: CrossChainOpportunity = {
         token: this.extractTokenFromPair(lowestPrice.pairKey),
         sourceChain: lowestPrice.chain,
@@ -1600,7 +1602,8 @@ export class CrossChainDetectorService {
         targetPrice: highestPrice.price,
         priceDiff,
         percentageDiff,
-        estimatedProfit: priceDiff,
+        tradeSizeUsd,
+        estimatedProfit,
         bridgeCost,
         netProfit,
         confidence,
@@ -1907,7 +1910,12 @@ export class CrossChainDetectorService {
         const now = Date.now();
         const health = {
           name: 'cross-chain-detector',
-          status: (this.stateManager.isRunning() ? 'healthy' : 'unhealthy') as 'healthy' | 'degraded' | 'unhealthy',
+          // H-03 FIX: Align with HTTP health endpoint — report 'degraded' when
+          // running but no chains monitored (e.g., no price data flowing).
+          // Previously always reported 'healthy' when running, causing coordinator
+          // to see a healthy service while HTTP endpoint showed 'degraded'.
+          status: (!this.stateManager.isRunning() ? 'unhealthy' :
+            (this.priceDataManager?.getChains().length ?? 0) === 0 ? 'degraded' : 'healthy') as 'healthy' | 'degraded' | 'unhealthy',
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage().heapUsed,
           cpuUsage: this.cpuTracker.getUsagePercent(),

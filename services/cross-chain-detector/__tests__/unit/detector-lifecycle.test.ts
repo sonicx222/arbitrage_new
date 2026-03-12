@@ -591,7 +591,9 @@ describe('CrossChainDetectorService', () => {
       expect(opp.sourcePrice).toBe(2500);
       expect(opp.targetPrice).toBe(2750);
       expect(opp.priceDiff).toBe(250);
-      expect(opp.estimatedProfit).toBe(250); // priceDiff (gross)
+      // BUG-P0-3 FIX: estimatedProfit = priceDiff * (tradeSizeUsd / sourcePrice)
+      // = 250 * (1000 / 2500) = 100 (total USD gross profit)
+      expect(opp.estimatedProfit).toBe(100);
       expect(opp.confidence).toBeGreaterThan(0);
       expect(opp.confidence).toBeLessThanOrEqual(0.95);
     });

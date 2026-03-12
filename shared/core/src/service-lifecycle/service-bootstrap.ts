@@ -49,6 +49,9 @@ export interface SimpleHealthServerConfig {
   /** Port to listen on */
   port: number;
 
+  /** Host/IP to bind to (default: '0.0.0.0'). Use '127.0.0.1' to restrict to localhost. */
+  host?: string;
+
   /** Service name for JSON responses */
   serviceName: string;
 
@@ -299,7 +302,7 @@ function withResponseTimeout(
  * @returns HTTP Server instance
  */
 export function createSimpleHealthServer(config: SimpleHealthServerConfig): Server {
-  const { port, serviceName, logger, description, healthCheck, readyCheck, additionalRoutes } = config;
+  const { port, host, serviceName, logger, description, healthCheck, readyCheck, additionalRoutes } = config;
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '';
@@ -370,9 +373,14 @@ export function createSimpleHealthServer(config: SimpleHealthServerConfig): Serv
     }
   });
 
-  server.listen(port, () => {
-    logger.debug(`${serviceName} health server listening on port ${port}`);
-  });
+  const listenCallback = () => {
+    logger.debug(`${serviceName} health server listening on ${host ?? '0.0.0.0'}:${port}`);
+  };
+  if (host) {
+    server.listen(port, host, listenCallback);
+  } else {
+    server.listen(port, listenCallback);
+  }
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     const errorCode = error.code;
