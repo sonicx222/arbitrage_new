@@ -20,7 +20,7 @@ import { getLatencyTracker } from '@arbitrage/core/monitoring';
 import { FEATURE_FLAGS, CORE_TOKENS } from '@arbitrage/config';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 import { scoreOpportunity } from './opportunity-scoring';
-import { computeCexAlignment } from './cex-alignment';
+import { computeCexAlignment, getCexDegradedProfitMultiplier } from './cex-alignment';
 
 /**
  * Parse a numeric field that may arrive as a string from Redis Streams.
@@ -307,6 +307,8 @@ export class OpportunityRouter {
   private _shedScoreSum = 0;
   // Execution stream depth ratio (set externally by coordinator for dynamic admission budget)
   private _executionStreamDepthRatio = 0;
+  // CEX resilience: effective min profit (adjusted when CEX feed is degraded)
+  private effectiveMinProfitPercentage: number = 0;
   // RT-003 FIX: Startup grace period — defer forwarding until execution engine consumer is ready
   private readonly _createdAt = Date.now();
   // Consumer lag detection: tracks consecutive expired opportunities.
@@ -330,6 +332,7 @@ export class OpportunityRouter {
     this.circuitBreaker = circuitBreaker;
     this.streamsClient = streamsClient ?? null;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.effectiveMinProfitPercentage = this.config.minProfitPercentage;
     this.onAlert = onAlert;
   }
 
@@ -527,12 +530,12 @@ export class OpportunityRouter {
     // Input validation for profit percentage
     const profitPercentage = parseNumericField(data.profitPercentage);
     if (profitPercentage !== undefined) {
-      if (profitPercentage < this.config.minProfitPercentage || profitPercentage > this.config.maxProfitPercentage) {
+      if (profitPercentage < this.effectiveMinProfitPercentage || profitPercentage > this.config.maxProfitPercentage) {
         this._rejectedProfit++;
         this.logger.warn('Invalid profit percentage, rejecting opportunity', {
           id,
           profitPercentage,
-          reason: profitPercentage < this.config.minProfitPercentage ? 'below_minimum' : 'above_maximum',
+          reason: profitPercentage < this.effectiveMinProfitPercentage ? 'below_minimum' : 'above_maximum',
         });
         return false;
       }
@@ -778,6 +781,12 @@ export class OpportunityRouter {
   ): Promise<string[]> {
     if (batch.length === 0) return [];
 
+    // CEX resilience: recalculate effective min profit at batch entry.
+    const cexEnabled = FEATURE_FLAGS.useCexPriceSignals;
+    const cexFeedForHealth = cexEnabled ? getCexPriceFeedService() : null;
+    const cexDegraded = cexFeedForHealth?.getHealthSnapshot().isDegraded ?? false;
+    this.effectiveMinProfitPercentage = this.config.minProfitPercentage * getCexDegradedProfitMultiplier(cexDegraded);
+
     // If batch is just 1 message, skip grouping/scoring overhead.
     // P3-A FIX: Still respect admission backpressure — if budget is 0 (full
     // backpressure at depth > 0.7), shed the opportunity instead of forwarding.
@@ -890,7 +899,7 @@ export class OpportunityRouter {
     const candidates = Array.from(freshest.values());
 
     // ADR-036: CEX alignment scoring — resolve CEX feed + address map once per batch
-    const cexEnabled = FEATURE_FLAGS.useCexPriceSignals;
+    // (cexEnabled already resolved at batch entry for health check)
     const cexFeed = cexEnabled ? getCexPriceFeedService() : null;
     const addrMap = cexEnabled ? getAddressToTokenIdMap() : null;
 
