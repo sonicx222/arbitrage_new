@@ -16,13 +16,26 @@ import { EventEmitter } from 'events';
 import type { CoordinatorStateProvider, SystemMetrics } from '../../../../src/api/types';
 
 // =============================================================================
-// Mock: @arbitrage/core/monitoring (stream health monitor)
+// Mocks: prevent module-level config validation when NODE_ENV='production'
 // =============================================================================
 
 jest.mock('@arbitrage/core/monitoring', () => ({
   getStreamHealthMonitor: jest.fn(() => ({
     checkStreamHealth: jest.fn(() => Promise.resolve({ streams: {} })),
   })),
+  getDiagnosticsCollector: jest.fn(() => null),
+}));
+
+jest.mock('@arbitrage/core/feeds', () => ({
+  getCexPriceFeedService: jest.fn(() => null),
+}));
+
+jest.mock('@arbitrage/config', () => ({
+  FEATURE_FLAGS: { FEATURE_CEX_PRICE_FEED: false },
+}));
+
+jest.mock('@arbitrage/core/utils/env-utils', () => ({
+  parseEnvIntSafe: jest.fn((_key: string, defaultVal: number) => defaultVal),
 }));
 
 // =============================================================================

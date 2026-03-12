@@ -167,7 +167,7 @@ describe('Token Staleness Detection', () => {
     it('should return correct lastUpdated value', () => {
       const result = checkNativeTokenPriceStaleness();
 
-      expect(result.lastUpdated).toBe('2026-03-11');
+      expect(result.lastUpdated).toBe('2026-03-12');
     });
 
     it('should return isStale=false when prices are fresh', () => {

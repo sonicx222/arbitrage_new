@@ -274,7 +274,7 @@ export const CORE_TOKENS: Record<string, Token[]> = {
  * Used to detect when prices may be stale and need refreshing.
  * Format: ISO 8601 date string
  */
-export const FALLBACK_PRICES_LAST_UPDATED = '2026-03-03T00:00:00Z';
+export const FALLBACK_PRICES_LAST_UPDATED = '2026-03-12T00:00:00Z';
 
 /**
  * Number of days after which fallback prices are considered stale.
@@ -377,7 +377,7 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
  */
 export const NATIVE_TOKEN_PRICE_METADATA = Object.freeze({
   /** ISO date string of last price update */
-  lastUpdated: '2026-03-03',
+  lastUpdated: '2026-03-12',
   /** Maximum age in days before prices are considered stale */
   maxAgeDays: 7,
   /** Update frequency recommendation */

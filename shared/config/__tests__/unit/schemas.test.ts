@@ -334,7 +334,7 @@ describe('FlashLoanProviderSchema', () => {
     const result = FlashLoanProviderSchema.safeParse({
       address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
       protocol: 'aave_v3',
-      fee: 5,
+      feeBps: 5,
     });
     expect(result.success).toBe(true);
   });
@@ -343,7 +343,7 @@ describe('FlashLoanProviderSchema', () => {
     const result = FlashLoanProviderSchema.safeParse({
       address: '0x1EB4CF3A948E7D72A198fe073cCb8C7a948cD853',
       protocol: 'dai_flash_mint',
-      fee: 0,
+      feeBps: 0,
     });
     expect(result.success).toBe(true);
   });
@@ -352,7 +352,7 @@ describe('FlashLoanProviderSchema', () => {
     const result = FlashLoanProviderSchema.safeParse({
       address: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
       protocol: 'morpho',
-      fee: 0,
+      feeBps: 0,
     });
     expect(result.success).toBe(true);
   });

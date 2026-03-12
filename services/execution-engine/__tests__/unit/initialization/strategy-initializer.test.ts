@@ -111,6 +111,7 @@ jest.mock('@arbitrage/config', () => ({
   isExecutionSupported: jest.fn().mockReturnValue(true),
   getSupportedExecutionChains: jest.fn().mockReturnValue(['ethereum', 'polygon']),
   getNativeTokenPrice: jest.fn().mockReturnValue(2000),
+  getV3AdapterAddress: jest.fn().mockReturnValue(null),
 }));
 
 jest.mock('@arbitrage/core/resilience', () => ({

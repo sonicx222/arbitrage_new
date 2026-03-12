@@ -22,6 +22,7 @@ jest.mock('@arbitrage/config', () => ({
   getSupportedExecutionChains: jest.fn().mockReturnValue(['ethereum']),
   getNativeTokenPrice: jest.fn().mockReturnValue(2000),
   CHAINS: {},
+  BRIDGE_COSTS: [],
 }));
 
 jest.mock('@arbitrage/core', () => ({
