@@ -141,6 +141,7 @@ function startTimerPool(state: CoordinatorStateProvider): void {
         broadcast('cex-spread', JSON.stringify({
           stats: cexFeed.getStats(),
           alerts: cexFeed.getActiveAlerts(),
+          healthSnapshot: cexFeed.getHealthSnapshot(),
         }));
       } catch {
         // CEX feed not initialized — skip
@@ -237,6 +238,7 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
         sendToClient(client, 'cex-spread', {
           stats: cexFeed.getStats(),
           alerts: cexFeed.getActiveAlerts(),
+          healthSnapshot: cexFeed.getHealthSnapshot(),
         });
       } catch {
         // CEX feed not initialized — skip
