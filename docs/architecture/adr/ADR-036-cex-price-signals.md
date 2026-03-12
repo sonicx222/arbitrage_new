@@ -87,6 +87,27 @@ Implemented across 6 batches in 2 commits (`327bcb4e`, `ef895562`):
 
 Hot-path impact: <0.1ms — `getSpread()` is O(1) Map.get, CEX feed runs asynchronously in background.
 
+## Resilience Enhancements (2026-03-12)
+
+### Health State Machine
+`CexFeedHealthTracker` tracks connection status through 5 states: `DISCONNECTED` → `CONNECTED` → `RECONNECTING` → `DEGRADED` → `PASSIVE`. Integrated into `CexPriceFeedService.getHealthSnapshot()`.
+
+### Operator Visibility
+- Health status included in coordinator alerts (degradation + recovery)
+- Dashboard shows degradation duration and actionable guidance
+- `CexFeedStats.healthStatus` exposed via SSE `cex-spread` events
+
+### Adaptive Scoring
+When CEX feed is DEGRADED, `getCexDegradedProfitMultiplier()` raises the minimum profit threshold by `CEX_DEGRADED_PROFIT_MULTIPLIER` (default 1.2x). This compensates for the lost ability to penalize opportunities that contradict CEX-DEX spread (the 0.8x factor is inoperative when no CEX data is available).
+
+### Configuration
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `CEX_WS_MAX_RECONNECT_ATTEMPTS` | 10 | Reconnect attempts before DEGRADED state |
+| `CEX_DEGRADED_PROFIT_MULTIPLIER` | 1.2 | Min profit multiplier during degradation |
+| `CEX_PRICE_ALERT_THRESHOLD_PCT` | 0.3 | Spread alert threshold (%) |
+| `CEX_PRICE_MAX_AGE_MS` | 10000 | Stale CEX price rejection window (ms) |
+
 ## References
 
 - `shared/core/src/feeds/cex-price-feed-service.ts` — Orchestrator singleton
