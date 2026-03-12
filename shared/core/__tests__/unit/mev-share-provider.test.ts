@@ -42,7 +42,10 @@ const createMockProvider = (overrides: Partial<{
     ...overrides,
   };
 
-  // Block number progresses over time to simulate mining
+  // Block number progresses immediately after first call to avoid
+  // real setTimeout delays in waitForInclusion polling loop.
+  // Call 1: base block (for targetBlock calculation in sendProtectedTransaction)
+  // Call 2+: target block reached (waitForInclusion finds receipt immediately)
   let currentBlock = config.blockNumber;
   let blockCallCount = 0;
 
@@ -50,17 +53,12 @@ const createMockProvider = (overrides: Partial<{
     getBlockNumber: jest.fn().mockImplementation(async () => {
       blockCallCount++;
 
-      // First few calls return current block, then progress to simulate mining
       if (blockCallCount <= 1) {
         return currentBlock;
-      } else if (blockCallCount === 2) {
-        // Second call: still at current block (target block calculation)
-        return currentBlock;
-      } else {
-        // Subsequent calls: block has been mined, progress to target + 1
-        currentBlock = config.blockNumber + 1;
-        return currentBlock;
       }
+      // Subsequent calls: block has been mined, at target block
+      currentBlock = config.blockNumber + 1;
+      return currentBlock;
     }),
     getNetwork: jest.fn().mockResolvedValue({ chainId: config.chainId }),
     getTransactionCount: jest.fn().mockResolvedValue(config.nonce),
@@ -682,34 +680,23 @@ describe('MevShareProvider', () => {
 
       mockMevShareSuccess('0xbundlehash', undefined, 3); // Limit to 3 calls before falling through
 
-      const signedTx = '0x' + '12'.repeat(64);
-      const expectedTxHash = ethers.keccak256(signedTx);
-      let receiptCallCount = 0;
-
-      // Mock receipt to return null during MEV-Share polling (first 5 calls),
-      // then return a receipt for Flashbots fallback
-      (config.provider.getTransactionReceipt as jest.Mock).mockImplementation(async (hash: string) => {
-        receiptCallCount++;
-
-        if (receiptCallCount <= 5) {
-          // MEV-Share waitForInclusion polling - no receipt yet
-          return null;
-        } else if (hash === expectedTxHash) {
-          // Flashbots fallback - receipt available
-          return {
-            hash: expectedTxHash,
-            blockNumber: 12345679,
-            status: 1,
-          };
-        }
-        return null;
+      // Override getBlockNumber: jump past targetBlock+1 on call 2
+      // so waitForInclusion exits immediately via early-exit path
+      let blockCallCount2 = 0;
+      (config.provider.getBlockNumber as jest.Mock).mockImplementation(async () => {
+        blockCallCount2++;
+        if (blockCallCount2 === 1) return 12345678; // targetBlock = 12345679
+        return 12345682; // Past targetBlock + 1, triggers early exit
       });
+
+      // Receipt always null — bundle was never included on-chain
+      (config.provider.getTransactionReceipt as jest.Mock).mockImplementation(async () => null);
 
       const result = await provider.sendProtectedTransaction(tx, {
         simulate: false,
       });
 
-      // Should fallback to standard Flashbots after MEV-Share inclusion timeout
+      // Should fallback after MEV-Share bundle not included
       expect(result.usedMevShare).toBe(false);
     });
   });

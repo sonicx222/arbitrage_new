@@ -106,15 +106,25 @@ export function setupTestEnv(overrides: Partial<TestEnvironment> = {}): void {
 
 /**
  * Restore original environment (call in afterAll)
+ *
+ * With workerThreads: true, all workers share the same process.env.
+ * Deleting keys here would remove env vars that concurrent workers need.
+ * Instead, we only restore keys that were CHANGED from the default test env
+ * (i.e., per-test overrides set via withEnv or direct mutation).
+ * The default test env keys are left in place since all workers use the same defaults.
  */
 export function restoreEnv(): void {
-  // Clear test env vars
-  for (const key of Object.keys(defaultTestEnv)) {
-    delete process.env[key];
+  // Only restore keys that differ from the default test env.
+  // Don't delete default keys — other worker threads may still need them.
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (process.env[key] !== value) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   }
-
-  // Restore original values
-  Object.assign(process.env, originalEnv);
 }
 
 /**

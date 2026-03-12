@@ -182,9 +182,8 @@ describe('handleDlqMessage', () => {
     mockWarn.mockClear();
   });
 
-  afterEach(async () => {
-    try { await coordinator.stop(); } catch { /* ignore */ }
-  });
+  // No afterEach stop() needed — coordinator is never started,
+  // and stop() has a 500ms drain delay that wastes time in unit tests.
 
   it('should increment dlqMetrics.total on DLQ message', async () => {
     expect(coordinator.getSystemMetrics().dlqMetrics!.total).toBe(0);

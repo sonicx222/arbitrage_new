@@ -166,6 +166,17 @@ describe('JupiterSwapClient', () => {
   // ===========================================================================
 
   describe('retry behavior', () => {
+    let sleepSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      // Mock sleep to eliminate real retry backoff delays (1s, 2s, 3s...)
+      sleepSpy = jest.spyOn(JupiterSwapClient.prototype as any, 'sleep').mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      sleepSpy.mockRestore();
+    });
+
     it('should retry on failure and succeed on subsequent attempt', async () => {
       const mockQuote = createMockQuote();
 
@@ -210,6 +221,9 @@ describe('JupiterSwapClient', () => {
 
   describe('error handling', () => {
     it('should throw on non-ok HTTP status', async () => {
+      // Mock sleep to eliminate retry backoff delays
+      const sleepSpy = jest.spyOn(JupiterSwapClient.prototype as any, 'sleep').mockResolvedValue(undefined);
+
       mockFetch.mockResolvedValue({
         ok: false,
         status: 429,
@@ -224,6 +238,8 @@ describe('JupiterSwapClient', () => {
           '1000000000',
         ),
       ).rejects.toThrow('Jupiter API error: 429 Too Many Requests - Rate limited');
+
+      sleepSpy.mockRestore();
     });
 
     it('should handle abort signal timeout', async () => {

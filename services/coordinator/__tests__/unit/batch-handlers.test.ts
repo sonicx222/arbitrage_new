@@ -175,9 +175,8 @@ describe('handlePriceUpdateBatch', () => {
     });
   });
 
-  afterEach(async () => {
-    try { await coordinator.stop(); } catch { /* ignore */ }
-  });
+  // No afterEach stop() needed — coordinator is never started,
+  // and stop() has a 500ms drain delay that wastes time in unit tests.
 
   it('should return empty array for empty messages', async () => {
     const result = await (coordinator as any).handlePriceUpdateBatch([]);
@@ -237,9 +236,7 @@ describe('handleExecutionResultBatch', () => {
     });
   });
 
-  afterEach(async () => {
-    try { await coordinator.stop(); } catch { /* ignore */ }
-  });
+  // No afterEach stop() needed — coordinator is never started.
 
   it('should return empty array for empty messages', async () => {
     const result = await (coordinator as any).handleExecutionResultBatch([]);
