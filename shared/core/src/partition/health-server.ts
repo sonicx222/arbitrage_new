@@ -418,8 +418,11 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
               wsLines.push(`websocket_chain_status{chain="${chainId}"} ${statusCode}`);
             }
           }
-        } catch (_wsErr) {
-          // Non-critical — don't fail /metrics if WS stats unavailable
+        } catch (wsErr) {
+          // SA-013 FIX: Log at debug instead of silently swallowing
+          logger.debug('WebSocket stats unavailable for /metrics', {
+            error: (wsErr as Error).message,
+          });
         }
 
         // Phase 1 Enhanced Monitoring: Runtime health metrics (event loop, GC, memory)

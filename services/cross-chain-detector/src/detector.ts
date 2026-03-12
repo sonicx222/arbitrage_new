@@ -257,6 +257,9 @@ export class CrossChainDetectorService {
   // FIX #23: Cycle counter for structured logging
   private detectionCycleCounter = 0;
 
+  // SM-008 FIX: Track total price updates consumed for health endpoint
+  private priceUpdatesConsumed = 0;
+
   // Task 1.3.3: Counter for pending opportunities received from mempool
   private pendingOpportunitiesReceived = 0;
 
@@ -675,6 +678,8 @@ export class CrossChainDetectorService {
 
   private handlePriceUpdate(update: PriceUpdate): void {
     if (!this.priceDataManager) return;
+
+    this.priceUpdatesConsumed++;
 
     try {
       // ADR-014: Delegate to PriceDataManager
@@ -1965,12 +1970,14 @@ export class CrossChainDetectorService {
     chainsMonitored: number;
     opportunitiesCache: number;
     mlPredictorActive: boolean;
+    priceUpdatesConsumed: number;
   } {
     return {
       redisConnected: this.redis !== null && this.streamsClient !== null,
       chainsMonitored: this.priceDataManager?.getChains().length ?? 0,
       opportunitiesCache: this.opportunityPublisher?.getCacheSize() ?? 0,
       mlPredictorActive: this.mlPredictorInitialized,
+      priceUpdatesConsumed: this.priceUpdatesConsumed,
     };
   }
 }

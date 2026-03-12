@@ -62,6 +62,7 @@ async function main() {
           chainsMonitored: details.chainsMonitored,
           opportunitiesCache: details.opportunitiesCache,
           mlPredictorActive: details.mlPredictorActive,
+          priceUpdatesConsumed: details.priceUpdatesConsumed,
         };
       },
       // ST-007 FIX: Require chainsMonitored > 0 OR grace period elapsed.
