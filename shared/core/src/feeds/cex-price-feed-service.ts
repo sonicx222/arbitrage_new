@@ -52,6 +52,10 @@ export interface CexPriceFeedConfig {
    * @default false
    */
   simulateCexPrices?: boolean;
+  /** Override max reconnect attempts (default: 10) */
+  maxReconnectAttempts?: number;
+  /** Override last-resort reconnect interval in ms (default: 300000 = 5min, 0 = disable) */
+  lastResortIntervalMs?: number;
 }
 
 // =============================================================================
@@ -159,7 +163,10 @@ export class CexPriceFeedService extends EventEmitter {
     const symbols = this.normalizer.getSupportedSymbols();
     const streams = symbols.map(s => `${s.toLowerCase()}@trade`);
 
-    this.wsClient = new BinanceWebSocketClient({ streams });
+    this.wsClient = new BinanceWebSocketClient({
+      streams,
+      ...(this.config.maxReconnectAttempts !== undefined && { maxReconnectAttempts: this.config.maxReconnectAttempts }),
+    });
 
     // Wire trade events through normalizer into spread calculator
     this.wsClient.on('trade', (trade: BinanceTradeEvent) => {
