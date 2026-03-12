@@ -212,7 +212,7 @@ export const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
  */
 export function getMinimumProfitForProtocol(
   network: string,
-  protocol: 'aave' | 'balancer' | 'pancakeswap' | 'syncswap'
+  protocol: 'aave' | 'balancer' | 'pancakeswap' | 'syncswap' | 'dai_flash_mint'
 ): bigint {
   const baseThreshold = DEFAULT_MINIMUM_PROFIT[network];
 
@@ -224,6 +224,12 @@ export function getMinimumProfitForProtocol(
   // Balancer has 0% flash loan fees (vs Aave's 0.05%)
   // Can accept 30% lower profit threshold since we save on fees
   if (protocol === 'balancer') {
+    return (baseThreshold * 70n) / 100n;
+  }
+
+  // DaiFlashMint has ~1 bps fee (0.01%), similar to Balancer's 0%
+  // Can accept 30% lower profit threshold since we save on fees
+  if (protocol === 'dai_flash_mint') {
     return (baseThreshold * 70n) / 100n;
   }
 
@@ -1430,7 +1436,7 @@ export interface DeploymentPipelineConfig {
   configureRouters?: boolean;
 
   /** Flash loan protocol for profit threshold adjustment */
-  protocol?: 'aave' | 'balancer' | 'pancakeswap' | 'syncswap';
+  protocol?: 'aave' | 'balancer' | 'pancakeswap' | 'syncswap' | 'dai_flash_mint';
 
   /** Which smoke test to run after deployment */
   smokeTest?: 'flashLoan' | 'commitReveal' | 'multiPathQuoter';

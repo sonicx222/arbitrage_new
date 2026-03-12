@@ -415,7 +415,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         uint256 amountReceived = _executeSwaps(params.asset, params.amountIn, params.swapPath, params.deadline);
 
         // Calculate profit: final amount must exceed initial investment
-        if (amountReceived <= params.amountIn) revert InsufficientProfit();
+        if (amountReceived <= params.amountIn) revert InsufficientProfit(amountReceived, params.amountIn);
         profit = amountReceived - params.amountIn;
 
         // Verify profit meets thresholds and update tracking (base contract)

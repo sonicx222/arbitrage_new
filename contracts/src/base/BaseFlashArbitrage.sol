@@ -220,7 +220,7 @@ abstract contract BaseFlashArbitrage is
     error PathTooLong(uint256 provided, uint256 max);
     error InvalidSwapPath();
     error SwapPathAssetMismatch();
-    error InsufficientProfit();
+    error InsufficientProfit(uint256 actual, uint256 required);
     error InsufficientSlippageProtection();
     error InvalidRecipient();
     error ETHTransferFailed();
@@ -445,12 +445,12 @@ abstract contract BaseFlashArbitrage is
         // === CHECKS ===
 
         // Zero-profit flash loans are never desirable — always revert
-        if (profit == 0) revert InsufficientProfit();
+        if (profit == 0) revert InsufficientProfit(0, 1);
 
         // Cache storage read to save ~100 gas on SLOAD
         uint256 _minimumProfit = minimumProfit;
         uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
-        if (profit < effectiveMinProfit) revert InsufficientProfit();
+        if (profit < effectiveMinProfit) revert InsufficientProfit(profit, effectiveMinProfit);
 
         // === EFFECTS (state updates before any subsequent external interactions) ===
 

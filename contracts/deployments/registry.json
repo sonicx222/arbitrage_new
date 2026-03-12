@@ -275,5 +275,57 @@
     "deployedAt": null,
     "deployedBy": null,
     "verified": false
+  },
+  "blast": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "DaiFlashMintArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "scroll": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "DaiFlashMintArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "mantle": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "DaiFlashMintArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "mode": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "DaiFlashMintArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "UniswapV3Adapter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
   }
 }

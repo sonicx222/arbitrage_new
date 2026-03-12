@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import {
   DaiFlashMintArbitrage,
   MockDexRouter,
@@ -286,7 +287,7 @@ describe('DaiFlashMintArbitrage', () => {
 
         await expect(
           daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-        ).to.emit(daiArbitrage, 'ArbitrageExecuted');
+        ).to.emit(daiArbitrage, 'ArbitrageExecuted').withArgs(await dai.getAddress(), amountIn, anyValue, anyValue, anyValue);
       });
 
       it('should track per-token profit correctly', async () => {
@@ -754,7 +755,7 @@ describe('DaiFlashMintArbitrage', () => {
 
       await expect(
         daiArbitrage.connect(user).executeArbitrage(amountIn, swapPath, 0n, deadline)
-      ).to.emit(daiArbitrage, 'ArbitrageExecuted');
+      ).to.emit(daiArbitrage, 'ArbitrageExecuted').withArgs(await dai.getAddress(), amountIn, anyValue, anyValue, anyValue);
 
       // Verify profit was recorded
       expect(await daiArbitrage.totalProfits()).to.be.gt(0);

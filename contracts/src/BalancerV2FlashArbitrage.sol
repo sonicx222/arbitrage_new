@@ -192,7 +192,7 @@ contract BalancerV2FlashArbitrage is
 
         // Calculate required repayment and profit
         uint256 amountOwed = amount + feeAmount; // feeAmount is 0, but kept for clarity
-        if (amountReceived < amountOwed) revert InsufficientProfit();
+        if (amountReceived < amountOwed) revert InsufficientProfit(amountReceived, amountOwed);
 
         uint256 profit = amountReceived - amountOwed;
 

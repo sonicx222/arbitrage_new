@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import { BalancerV2FlashArbitrage, MockDexRouter, MockERC20, MockBalancerVault } from '../typechain-types';
 import {
   RATE_USDC_TO_WETH_1PCT_PROFIT,
@@ -194,7 +195,7 @@ describe('BalancerV2FlashArbitrage', () => {
           0,
           deadline
         )
-      ).to.emit(arbitrage, 'ArbitrageExecuted');
+      ).to.emit(arbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amount, anyValue, anyValue, anyValue);
     });
 
     it('should update totalProfits after execution', async () => {

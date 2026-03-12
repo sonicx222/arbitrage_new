@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import { FlashLoanArbitrage, MockAavePool, MockDexRouter, MockERC20 } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
@@ -384,7 +385,7 @@ describe('FlashLoanArbitrage', () => {
           minProfit,
           deadline
         )
-      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), flashLoanAmount, anyValue, anyValue, anyValue);
     });
 
     it('should revert when profit is below minimum', async () => {
@@ -492,7 +493,7 @@ describe('FlashLoanArbitrage', () => {
           ethers.parseEther('0.01'),
           deadline
         )
-      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), flashLoanAmount, anyValue, anyValue, anyValue);
     });
 
     it('should execute 3-hop swap (triangular arbitrage)', async () => {
@@ -558,7 +559,7 @@ describe('FlashLoanArbitrage', () => {
           ethers.parseEther('0.01'),
           deadline
         )
-      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), flashLoanAmount, anyValue, anyValue, anyValue);
     });
 
     it('should revert when swap output is below minimum', async () => {
@@ -715,7 +716,7 @@ describe('FlashLoanArbitrage', () => {
           0,
           deadline
         )
-      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), flashLoanAmount, anyValue, anyValue, anyValue);
     });
   });
 

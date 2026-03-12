@@ -162,7 +162,7 @@ contract FlashLoanArbitrage is
 
         // Calculate required repayment and profit
         uint256 amountOwed = amount + premium;
-        if (amountReceived < amountOwed) revert InsufficientProfit();
+        if (amountReceived < amountOwed) revert InsufficientProfit(amountReceived, amountOwed);
 
         uint256 profit = amountReceived - amountOwed;
 

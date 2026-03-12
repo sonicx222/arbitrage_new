@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import {
   PancakeSwapFlashArbitrage,
   MockPancakeV3Factory,
@@ -353,7 +354,7 @@ describe('PancakeSwapFlashArbitrage', () => {
           0, // minProfit
           deadline
         )
-      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), ethers.parseEther('10'), anyValue, anyValue, anyValue);
 
       // Verify pool was repaid (balance >= before, since pool gets back amount + fee)
       const poolBalanceAfter = await weth.balanceOf(await wethUsdcPool.getAddress());
@@ -906,7 +907,7 @@ describe('PancakeSwapFlashArbitrage', () => {
           0,
           deadline
         )
-      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), ethers.parseEther('10'), anyValue, anyValue, anyValue);
 
       // Verify profit
       const contractBalance = await weth.balanceOf(await flashArbitrage.getAddress());
@@ -1048,7 +1049,7 @@ describe('PancakeSwapFlashArbitrage', () => {
           0,
           deadline
         )
-      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), ethers.parseEther('10'), anyValue, anyValue, anyValue);
     });
   });
 });

@@ -62,6 +62,8 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
       'arbitrum', 'base', 'optimism',
       // Extended (Phase 8)
       'polygon', 'avalanche',
+      // Newer chains with Aave V3 pools
+      'scroll', 'mantle',
     ],
   },
   {
@@ -71,6 +73,8 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
       'arbitrumSepolia',
       'arbitrum', 'base', 'optimism',
       'polygon',
+      // Balancer V2 / Beethoven X vaults
+      'fantom', 'mode',
     ],
   },
   {
@@ -90,7 +94,7 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
   {
     contract: 'SyncSwapFlashArbitrage',
     script: 'scripts/deploy-syncswap.ts',
-    networks: ['zksync-testnet', 'zksync'],
+    networks: ['zksync-testnet', 'zksync', 'scroll'],
     env: { DISABLE_VIA_IR: 'true' },
   },
   {
@@ -100,6 +104,7 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
       'arbitrumSepolia',
       'arbitrum', 'base', 'optimism',
       'polygon', 'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+      'blast', 'scroll', 'mantle', 'mode',
     ],
   },
   {
@@ -109,6 +114,7 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
       'arbitrumSepolia',
       'arbitrum', 'base', 'optimism',
       'polygon', 'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+      'blast', 'scroll', 'mantle', 'mode',
     ],
   },
   {
@@ -118,6 +124,7 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
       'arbitrumSepolia',
       'arbitrum', 'base', 'optimism',
       'polygon', 'bsc', 'linea',
+      'scroll',
     ],
   },
 ];

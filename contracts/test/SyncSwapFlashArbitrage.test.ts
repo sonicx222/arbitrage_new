@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
+import { anyValue } from '@nomicfoundation/hardhat-chai-matchers/withArgs';
 import {
   SyncSwapFlashArbitrage,
   MockDexRouter,
@@ -228,7 +229,7 @@ describe('SyncSwapFlashArbitrage', () => {
           syncSwapArbitrage
             .connect(user)
             .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-        ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+        ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
       });
 
       it('should revert if flash loan fails', async () => {
@@ -411,7 +412,7 @@ describe('SyncSwapFlashArbitrage', () => {
         .connect(user)
         .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
 
-      await expect(tx).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+      await expect(tx).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
     });
 
     it('should execute multi-hop swap (3 hops)', async () => {
@@ -474,7 +475,7 @@ describe('SyncSwapFlashArbitrage', () => {
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
     });
 
     it('should execute max-hop swap (5 hops)', async () => {
@@ -559,7 +560,7 @@ describe('SyncSwapFlashArbitrage', () => {
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
     });
 
     it('should handle repeated router in path (triangular arb optimization)', async () => {
@@ -619,7 +620,7 @@ describe('SyncSwapFlashArbitrage', () => {
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
     });
   });
 
@@ -697,7 +698,7 @@ describe('SyncSwapFlashArbitrage', () => {
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+      ).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
     });
 
     it('should track totalProfits correctly', async () => {
@@ -975,7 +976,7 @@ describe('SyncSwapFlashArbitrage', () => {
         .connect(user)
         .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
 
-      await expect(tx).to.emit(syncSwapArbitrage, 'ArbitrageExecuted');
+      await expect(tx).to.emit(syncSwapArbitrage, 'ArbitrageExecuted').withArgs(await weth.getAddress(), amountIn, anyValue, anyValue, anyValue);
 
       // Verify profit was recorded
       expect(await syncSwapArbitrage.totalProfits()).to.be.gt(0);

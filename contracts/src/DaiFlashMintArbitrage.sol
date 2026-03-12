@@ -180,7 +180,7 @@ contract DaiFlashMintArbitrage is
         uint256 amountOwed = amount + fee;
 
         // Verify we received enough to repay loan + fee
-        if (amountReceived < amountOwed) revert InsufficientProfit();
+        if (amountReceived < amountOwed) revert InsufficientProfit(amountReceived, amountOwed);
 
         // Calculate actual profit
         uint256 profit = amountReceived - amountOwed;
