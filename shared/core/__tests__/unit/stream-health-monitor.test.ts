@@ -530,8 +530,8 @@ describe('StreamHealthMonitor Alert Deduplication', () => {
 
 describe('StreamHealthStatus Types', () => {
   it('should have correct status types', () => {
-    const statuses: StreamHealthStatus[] = ['healthy', 'warning', 'critical', 'unknown'];
-    expect(statuses).toHaveLength(4);
+    const statuses: StreamHealthStatus[] = ['healthy', 'warning', 'critical', 'idle', 'unknown'];
+    expect(statuses).toHaveLength(5);
   });
 });
 

@@ -482,12 +482,14 @@ export function createPartitionEntry(
   validatePartitionEnvironmentConfig(envConfig, partitionId, chains, logger);
 
   // Service Configuration
+  // M-02 FIX: Use REGION_ID env var when set, so health reports show actual
+  // region (e.g. 'local') instead of hardcoded production regions in dev mode.
   const serviceConfig: PartitionServiceConfig = {
     partitionId,
     serviceName,
     defaultChains: chains,
     defaultPort,
-    region,
+    region: envConfig?.regionId ?? region,
     provider: partitionConfig?.provider ?? 'oracle'
   };
 

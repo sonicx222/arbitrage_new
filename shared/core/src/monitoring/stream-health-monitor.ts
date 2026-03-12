@@ -25,7 +25,8 @@ export interface StreamHealthMonitorConfig {
 const defaultLogger = createLogger('stream-health-monitor');
 
 // Types
-export type StreamHealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
+// M-06 FIX: Added 'idle' for empty/uninitialized streams (previously 'unknown')
+export type StreamHealthStatus = 'healthy' | 'warning' | 'critical' | 'idle' | 'unknown';
 
 export interface StreamLagInfo {
   streamName: string;
@@ -378,16 +379,16 @@ export class StreamHealthMonitor {
       streams[streamName] = info;
 
       // Only count initialized streams for health status
-      // 'unknown' means stream not initialized yet - not an error
+      // 'idle' means stream not initialized yet - not an error
       if (info.status === 'critical') {
         hasCritical = true;
       } else if (info.status === 'warning') {
         hasWarning = true;
       }
-      // 'unknown' status is ignored for overall health - it's a startup condition
+      // 'idle'/'unknown' statuses are ignored for overall health - startup condition
 
       // Only trigger lag alerts for initialized streams with actual lag
-      if (info.status !== 'unknown') {
+      if (info.status !== 'idle' && info.status !== 'unknown') {
         if (info.pendingCount >= this.thresholds.lagCritical) {
           this.triggerAlert({
             type: 'high_lag',
@@ -447,8 +448,8 @@ export class StreamHealthMonitor {
     // Stream doesn't exist yet (length=0 and no lastGeneratedId)
     const streamNotInitialized = info.length === 0 && info.lastGeneratedId === '0-0';
     if (streamNotInitialized) {
-      // Not an error - stream just hasn't received data yet
-      status = 'unknown';
+      // M-06 FIX: 'idle' instead of 'unknown' — stream just hasn't received data yet
+      status = 'idle';
     } else if (pendingCount >= this.thresholds.lagCritical || length >= this.thresholds.lengthCritical) {
       status = 'critical';
     } else if (pendingCount >= this.thresholds.lagWarning || length >= this.thresholds.lengthWarning) {
@@ -686,15 +687,15 @@ export class StreamHealthMonitor {
       lines.push(`stream_consumer_groups{stream="${name}"} ${info.consumerGroups}`);
     }
 
-    // RT-009 FIX: Map 'unknown' to -1 (not 0) so idle/uninitialized streams are
+    // RT-009 FIX: Map 'idle'/'unknown' to -1 (not 0) so idle/uninitialized streams are
     // distinguishable from 'critical'. Streams with no data yet (length=0,
-    // lastGeneratedId='0-0') are 'unknown', not broken.
-    lines.push('# HELP stream_health_status Stream health status (1=healthy, 0.5=warning, 0=critical, -1=unknown/idle)');
+    // lastGeneratedId='0-0') are 'idle', not broken. 'unknown' = query failed.
+    lines.push('# HELP stream_health_status Stream health status (1=healthy, 0.5=warning, 0=critical, -1=idle/unknown)');
     lines.push('# TYPE stream_health_status gauge');
     for (const [name, info] of Object.entries(health.streams)) {
       const statusValue = info.status === 'healthy' ? 1
         : info.status === 'warning' ? 0.5
-        : info.status === 'unknown' ? -1
+        : info.status === 'idle' || info.status === 'unknown' ? -1
         : 0;
       lines.push(`stream_health_status{stream="${name}"} ${statusValue}`);
     }

@@ -26,7 +26,7 @@ import http from 'http';
 import express from 'express';
 import { SimpleCircuitBreaker } from '@arbitrage/core/circuit-breaker';
 import { findKSmallest } from '@arbitrage/core/data-structures';
-import { getStreamHealthMonitor, CpuUsageTracker, getLatencyTracker } from '@arbitrage/core/monitoring';
+import { getStreamHealthMonitor, CpuUsageTracker } from '@arbitrage/core/monitoring';
 import {
   RedisClient,
   getRedisClient,
@@ -41,12 +41,11 @@ import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ServiceStateManager, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
-import type { ServiceHealth, ArbitrageOpportunity, PipelineTimestamps } from '@arbitrage/types';
+import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { RedisStreams, ConsumerGroups } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
 import { safeParseInt, safeParseFloat, getStreamForChain, validateRouteSymmetry, FEATURE_FLAGS } from '@arbitrage/config';
 import { getCexPriceFeedService, resetCexPriceFeedService } from '@arbitrage/core/feeds';
-import { serializeOpportunityForStream } from './utils/stream-serialization';
 
 // Import extracted API modules
 // FIX: Import Logger and Alert from consolidated api/types (single source of truth)
@@ -1484,7 +1483,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const health: ServiceHealth = {
       name: serviceName,
       status: validStatus,
-      uptime: getNonNegativeNumber(typedData, 'uptime', 0),
+      // M-05 FIX: Partition services send 'uptimeSeconds' (from PartitionHealth type),
+      // cross-chain-detector sends 'uptime'. Check both field names.
+      uptime: getNonNegativeNumber(typedData, 'uptime', 0) || getNonNegativeNumber(typedData, 'uptimeSeconds', 0),
       memoryUsage: getNonNegativeNumber(typedData, 'memoryUsage', 0),
       cpuUsage: getNonNegativeNumber(typedData, 'cpuUsage', 0),
       lastHeartbeat: getNumber(typedData, 'timestamp', Date.now()),
@@ -1542,131 +1543,30 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // automatically include traceId/spanId — no manual passing needed.
     return withLogContext(traceCtx, async () => {
 
-    // R2: Delegate to opportunity router
-    if (this.opportunityRouter) {
-      // P2 FIX #19: Use getIsLeader() to always read canonical leadership state
-      // OP-3 FIX: Pass trace context for propagation to execution engine
-      const processed = await this.opportunityRouter.processOpportunity(data, this.getIsLeader(), traceCtx);
-      if (processed) {
-        // Update local metrics from router
-        this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
-        this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
-        this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
-        // P0 FIX #3: Only reset errors when opportunity is successfully processed.
-        // Previously called on every message (including duplicates and rejects),
-        // which masked legitimate stream consumer errors by resetting the counter.
-        this.streamConsumerManager?.resetErrors();
-      }
-      // P1-7 FIX: Always sync dropped opportunities (not just when processed)
-      this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
-      // SM-001 FIX: Sync per-reason forwarding metrics for /stats observability
-      this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
-      // Phase 1 Admission Control: Sync admission metrics for Prometheus/health
-      this.systemMetrics.admissionMetrics = this.opportunityRouter.getAdmissionMetrics();
-
-      // Consumer lag detection: if too many consecutive opportunities expired,
-      // skip the consumer backlog by resetting the group position to '$' (latest).
-      // This breaks the death spiral where stale messages waste processing time,
-      // causing even more messages to expire and the backlog to grow indefinitely.
-      // RT-005 FIX: Lowered threshold from 50 to 10 to skip stale backlogs faster.
-      // At 130+ opps/s, 50 consecutive expired = ~0.4s of stale processing. By the
-      // time skip fires, hundreds more stale messages have arrived. A threshold of 10
-      // detects lag within ~0.08s, reducing wasted processing by 5x.
-      // RT-002 FIX: Threshold is now configurable via consecutiveExpiredThreshold
-      const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
-      if (consecutiveExpired >= this.consecutiveExpiredThreshold && this.streamsClient) {
-        this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
-          consecutiveExpired,
-          threshold: this.consecutiveExpiredThreshold,
-          stream: RedisStreams.OPPORTUNITIES,
-        });
-        try {
-          await this.streamsClient.createConsumerGroup({
-            streamName: RedisStreams.OPPORTUNITIES,
-            groupName: this.config.consumerGroup,
-            consumerName: this.config.consumerId,
-            startId: '$',
-            resetToStartIdOnExistingGroup: true,
-          });
-          // Reset counter after successful skip to prevent infinite SETID loop.
-          // Without this, the counter stays at 800+ and every subsequent message
-          // triggers another redundant SETID call.
-          this.opportunityRouter.resetConsecutiveExpired();
-        } catch (error) {
-          this.logger.error('Failed to reset opportunity consumer group position', {
-            error: getErrorMessage(error),
-          });
-        }
-      }
-
-      return;
-    }
-
-    // Fallback for tests without opportunity router
-    if (!hasRequiredString(data, 'id')) {
-      this.logger.debug('Skipping opportunity message - missing or invalid id', {
-        messageId: message.id
-      });
-      return;
-    }
-
-    const opportunityId = getString(data, 'id');
-    const opportunityTimestamp = getNumber(data, 'timestamp', Date.now());
-
-    const existing = this.opportunities.get(opportunityId);
-    if (existing && Math.abs((existing.timestamp ?? 0) - opportunityTimestamp) < 5000) {
-      this.logger.debug('Duplicate opportunity detected, skipping', {
-        id: opportunityId,
-        existingTimestamp: existing.timestamp,
-        newTimestamp: opportunityTimestamp
-      });
-      // P0 FIX #3: Do not reset errors on duplicate/rejected messages
-      return;
-    }
-
-    const profitPercentage = getOptionalNumber(data, 'profitPercentage');
-    if (profitPercentage !== undefined) {
-      if (profitPercentage < -100 || profitPercentage > 10000) {
-        this.logger.warn('Invalid profit percentage, rejecting opportunity', {
-          id: opportunityId,
-          profitPercentage,
-          reason: profitPercentage < -100 ? 'below_minimum' : 'above_maximum'
-        });
-        // P0 FIX #3: Do not reset errors on duplicate/rejected messages
-        return;
-      }
-    }
-
-    const opportunity: ArbitrageOpportunity = {
-      id: opportunityId,
-      confidence: getNumber(data, 'confidence', 0),
-      timestamp: opportunityTimestamp,
-      chain: getOptionalString(data, 'chain'),
-      buyDex: getOptionalString(data, 'buyDex'),
-      sellDex: getOptionalString(data, 'sellDex'),
-      profitPercentage,
-      expiresAt: getOptionalNumber(data, 'expiresAt'),
-      status: getOptionalString(data, 'status') as ArbitrageOpportunity['status'] | undefined
-    };
-
-    this.opportunities.set(opportunity.id, opportunity);
-    this.systemMetrics.totalOpportunities++;
-    this.systemMetrics.pendingOpportunities = this.opportunities.size;
-
-    this.logger.info('Opportunity detected', {
-      id: opportunity.id,
-      chain: opportunity.chain,
-      profitPercentage: opportunity.profitPercentage,
-      buyDex: opportunity.buyDex,
-      sellDex: opportunity.sellDex
-    });
+    // REF-01 FIX: Removed ~70-line fallback path that duplicated OpportunityRouter logic.
+    // OpportunityRouter is always initialized before stream consumers are registered.
+    if (!this.opportunityRouter) return;
 
     // P2 FIX #19: Use getIsLeader() to always read canonical leadership state
-    if (this.getIsLeader() && (opportunity.status === 'pending' || opportunity.status === undefined)) {
-      await this.forwardToExecutionEngine(opportunity);
+    // OP-3 FIX: Pass trace context for propagation to execution engine
+    const processed = await this.opportunityRouter.processOpportunity(data, this.getIsLeader(), traceCtx);
+    if (processed) {
+      // Update local metrics from router
+      this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
+      this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
+      this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
+      // P0 FIX #3: Only reset errors when opportunity is successfully processed.
+      this.streamConsumerManager?.resetErrors();
     }
+    // P1-7 FIX: Always sync dropped opportunities (not just when processed)
+    this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
+    // SM-001 FIX: Sync per-reason forwarding metrics for /stats observability
+    this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
+    // Phase 1 Admission Control: Sync admission metrics for Prometheus/health
+    this.systemMetrics.admissionMetrics = this.opportunityRouter.getAdmissionMetrics();
 
-    this.streamConsumerManager?.resetErrors();
+    // REF-02 FIX: Extracted consumer lag detection to shared method
+    await this.skipStaleOpportunityBacklogIfNeeded();
 
     }); // end withLogContext
   }
@@ -1732,30 +1632,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.streamConsumerManager?.resetErrors();
     }
 
-    // Consumer lag detection: if too many consecutive expired, skip stale backlog
-    // RT-002 FIX: Threshold is now configurable via consecutiveExpiredThreshold
-    const consecutiveExpired = router.getConsecutiveExpired();
-    if (consecutiveExpired >= this.consecutiveExpiredThreshold && this.streamsClient) {
-      this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
-        consecutiveExpired,
-        threshold: this.consecutiveExpiredThreshold,
-        stream: RedisStreams.OPPORTUNITIES,
-      });
-      try {
-        await this.streamsClient.createConsumerGroup({
-          streamName: RedisStreams.OPPORTUNITIES,
-          groupName: this.config.consumerGroup,
-          consumerName: this.config.consumerId,
-          startId: '$',
-          resetToStartIdOnExistingGroup: true,
-        });
-        router.resetConsecutiveExpired();
-      } catch (error) {
-        this.logger.error('Failed to reset opportunity consumer group position', {
-          error: getErrorMessage(error),
-        });
-      }
-    }
+    // REF-02 FIX: Extracted consumer lag detection to shared method
+    await this.skipStaleOpportunityBacklogIfNeeded();
 
     return processedIds;
 
@@ -1767,52 +1645,47 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * R2: Delegates to OpportunityRouter for cleanup.
    */
   private cleanupExpiredOpportunities(): void {
-    // R2: Delegate to opportunity router
-    if (this.opportunityRouter) {
-      this.opportunityRouter.cleanupExpiredOpportunities();
-      this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
-      return;
-    }
+    // REF-04 FIX: OpportunityRouter is always initialized before cleanup runs.
+    // Removed ~40-line fallback that duplicated OpportunityRouter.cleanupExpiredOpportunities().
+    if (!this.opportunityRouter) return;
+    this.opportunityRouter.cleanupExpiredOpportunities();
+    this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
+  }
 
-    // Fallback for tests without opportunity router
-    const now = Date.now();
-    const toDelete: string[] = [];
-    const initialSize = this.opportunities.size;
+  /**
+   * REF-02 FIX: Extracted consumer lag detection shared by single-message and batch handlers.
+   *
+   * If too many consecutive opportunities expired, skip the consumer backlog by
+   * resetting the group position to '$' (latest). This breaks the death spiral where
+   * stale messages waste processing time, causing even more messages to expire.
+   *
+   * RT-005 FIX: Threshold lowered from 50 to 10 (detects lag within ~0.08s at 130+ opps/s).
+   * RT-002 FIX: Threshold is configurable via consecutiveExpiredThreshold.
+   */
+  private async skipStaleOpportunityBacklogIfNeeded(): Promise<void> {
+    if (!this.opportunityRouter || !this.streamsClient) return;
 
-    for (const [id, opp] of this.opportunities) {
-      if (opp.expiresAt && opp.expiresAt < now) {
-        toDelete.push(id);
-        continue;
-      }
-      if (opp.timestamp && (now - opp.timestamp) > this.OPPORTUNITY_TTL_MS) {
-        toDelete.push(id);
-      }
-    }
+    const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
+    if (consecutiveExpired < this.consecutiveExpiredThreshold) return;
 
-    for (const id of toDelete) {
-      this.opportunities.delete(id);
-    }
-
-    if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
-      const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
-      const oldestK = findKSmallest(
-        this.opportunities.entries(),
-        removeCount,
-        ([, a], [, b]) => (a.timestamp ?? 0) - (b.timestamp ?? 0)
-      );
-      for (const [id] of oldestK) {
-        this.opportunities.delete(id);
-      }
-    }
-
-    this.systemMetrics.pendingOpportunities = this.opportunities.size;
-
-    const removed = initialSize - this.opportunities.size;
-    if (removed > 0) {
-      this.logger.debug('Opportunity cleanup completed', {
-        removed,
-        remaining: this.opportunities.size,
-        expiredCount: toDelete.length
+    this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
+      consecutiveExpired,
+      threshold: this.consecutiveExpiredThreshold,
+      stream: RedisStreams.OPPORTUNITIES,
+    });
+    try {
+      await this.streamsClient.createConsumerGroup({
+        streamName: RedisStreams.OPPORTUNITIES,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '$',
+        resetToStartIdOnExistingGroup: true,
+      });
+      // Reset counter after successful skip to prevent infinite SETID loop.
+      this.opportunityRouter.resetConsecutiveExpired();
+    } catch (error) {
+      this.logger.error('Failed to reset opportunity consumer group position', {
+        error: getErrorMessage(error),
       });
     }
   }
@@ -2391,180 +2264,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private trackActivePair(pairKey: string, chain: string, dex: string): void {
     this.activePairsTracker!.trackPair(pairKey, chain, dex);
     this.systemMetrics.activePairsTracked = this.activePairsTracker!.size;
-  }
-
-  /**
-   * FIX P2: Check if execution circuit breaker is open.
-   * If open, check if reset timeout has passed (half-open state).
-   * R7 Consolidation: Now delegates to SimpleCircuitBreaker.isCurrentlyOpen()
-   */
-  private isExecutionCircuitOpen(): boolean {
-    return this.executionCircuitBreaker.isCurrentlyOpen();
-  }
-
-  /**
-   * FIX P2: Record execution forwarding failure.
-   * R7 Consolidation: Now delegates to SimpleCircuitBreaker.recordFailure()
-   */
-  private recordExecutionFailure(): void {
-    // recordFailure() returns true if this failure just opened the circuit
-    const justOpened = this.executionCircuitBreaker.recordFailure();
-    const status = this.executionCircuitBreaker.getStatus();
-
-    // FM-001 FIX: Persist CB state to Redis for crash-restart resilience
-    this.persistCircuitBreakerState();
-
-    if (justOpened) {
-      this.logger.warn('Execution circuit breaker opened', {
-        failures: status.failures,
-        resetTimeoutMs: status.resetTimeoutMs
-      });
-
-      // Send alert about circuit breaker opening
-      this.sendAlert({
-        type: 'EXECUTION_CIRCUIT_OPEN',
-        message: `Execution forwarding circuit breaker opened after ${status.failures} failures`,
-        severity: 'high',
-        data: { failures: status.failures },
-        timestamp: Date.now()
-      });
-    }
-  }
-
-  /**
-   * FIX P2: Record execution forwarding success.
-   * R7 Consolidation: Now delegates to SimpleCircuitBreaker.recordSuccess()
-   */
-  private recordExecutionSuccess(): void {
-    // recordSuccess() returns true if the circuit was open and just closed
-    const justRecovered = this.executionCircuitBreaker.recordSuccess();
-
-    if (justRecovered) {
-      this.logger.info('Execution circuit breaker closed - recovered');
-      // FM-001 FIX: Persist recovered state to Redis
-      this.persistCircuitBreakerState();
-    }
-  }
-
-  /** FM-001 FIX: Persist circuit breaker state to Redis for crash-restart resilience.
-   * Fire-and-forget — CB state persistence is non-critical. */
-  private persistCircuitBreakerState(): void {
-    if (!this.redis) return;
-    const status = this.executionCircuitBreaker.getStatus();
-    // TTL = 5 minutes — stale CB state older than this is irrelevant after a long restart
-    // RedisClient.set() auto-serializes with JSON.stringify and uses SETEX when ttl is provided
-    this.redis.set(
-      'coordinator:cb:execution',
-      { failures: status.failures, isOpen: status.isOpen, lastFailure: status.lastFailure },
-      300,
-    ).catch((error: Error) => {
-      // M-10 FIX: Log persist failure for debugging (was silent catch)
-      this.logger.debug('Failed to persist CB state to Redis', { error: error.message });
-    });
-  }
-
-  /**
-   * Forward a pending opportunity to the execution engine via Redis Streams.
-   * FIX: Implemented actual stream publishing (was TODO stub).
-   * FIX P2: Added circuit breaker to prevent hammering failed streams.
-   *
-   * Only the leader coordinator should call this method to prevent
-   * duplicate execution attempts.
-   */
-  private async forwardToExecutionEngine(opportunity: ArbitrageOpportunity): Promise<void> {
-    if (!this.streamsClient) {
-      // P1-7 FIX: Track dropped opportunity
-      this.systemMetrics.opportunitiesDropped++;
-      this.logger.warn('Cannot forward opportunity - streams client not initialized', {
-        id: opportunity.id,
-        totalDropped: this.systemMetrics.opportunitiesDropped
-      });
-      return;
-    }
-
-    // FIX P2: Check circuit breaker before attempting to forward
-    if (this.isExecutionCircuitOpen()) {
-      // P1-7 FIX: Track dropped opportunity due to circuit breaker
-      this.systemMetrics.opportunitiesDropped++;
-      this.logger.debug('Execution circuit open, skipping opportunity forwarding', {
-        id: opportunity.id,
-        failures: this.executionCircuitBreaker.getFailures(),
-        totalDropped: this.systemMetrics.opportunitiesDropped
-      });
-      return;
-    }
-
-    // P1 Fix: End-to-end backpressure — skip forwarding when execution stream is
-    // near MAXLEN capacity. Dropping newest opportunities is safer than having MAXLEN
-    // trim oldest (potentially in-progress) messages from the stream.
-    // RT-002 FIX: Threshold is now configurable via executionStreamBackpressureRatio
-    if (this.cachedExecutionStreamDepthRatio > this.executionStreamBackpressureRatio) {
-      this.systemMetrics.opportunitiesDropped++;
-      this.logger.warn('Execution stream backpressure — skipping forwarding', {
-        id: opportunity.id,
-        depthRatio: this.cachedExecutionStreamDepthRatio,
-        threshold: this.executionStreamBackpressureRatio,
-        totalDropped: this.systemMetrics.opportunitiesDropped,
-        action: 'Execution engine may be overloaded — check consumer health',
-      });
-      return;
-    }
-
-    try {
-      // Phase 0 instrumentation: stamp coordinator timestamp before serialization
-      const timestamps = opportunity.pipelineTimestamps ?? {};
-      timestamps.coordinatorAt = Date.now();
-      opportunity.pipelineTimestamps = timestamps;
-
-      // RT-035 FIX: Feed pipeline timestamps to coordinator's LatencyTracker
-      getLatencyTracker().recordFromTimestamps(timestamps as PipelineTimestamps);
-
-      // Publish to execution-requests stream for the execution engine to consume
-      // FIX #12: Use shared serialization utility (single source of truth)
-      // @see OP-6: Use xaddWithLimit to prevent unbounded stream growth
-      await this.streamsClient.xaddWithLimit(
-        RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
-        serializeOpportunityForStream(opportunity, this.config.leaderElection.instanceId)
-      );
-
-      // FIX P2: Record success to close circuit breaker if it was half-open
-      this.recordExecutionSuccess();
-
-      this.logger.info('Forwarded opportunity to execution engine', {
-        id: opportunity.id,
-        chain: opportunity.chain,
-        profitPercentage: opportunity.profitPercentage
-      });
-
-      // Update metrics
-      this.systemMetrics.totalExecutions++;
-
-    } catch (error) {
-      // FIX P2: Record failure for circuit breaker
-      this.recordExecutionFailure();
-
-      // P1-7 FIX: Track dropped opportunity on error
-      this.systemMetrics.opportunitiesDropped++;
-
-      this.logger.error('Failed to forward opportunity to execution engine', {
-        id: opportunity.id,
-        error: (error as Error).message,
-        circuitFailures: this.executionCircuitBreaker.getFailures(),
-        totalDropped: this.systemMetrics.opportunitiesDropped
-      });
-
-      // Send alert for execution forwarding failures (only if circuit not already open)
-      // Use getStatus().isOpen to check raw open state (not affected by half-open logic)
-      if (!this.executionCircuitBreaker.getStatus().isOpen) {
-        this.sendAlert({
-          type: 'EXECUTION_FORWARD_FAILED',
-          message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
-          severity: 'high',
-          data: { opportunityId: opportunity.id, chain: opportunity.chain, totalDropped: this.systemMetrics.opportunitiesDropped },
-          timestamp: Date.now()
-        });
-      }
-    }
   }
 
   // ===========================================================================

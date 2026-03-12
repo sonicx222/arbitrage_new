@@ -331,11 +331,16 @@ export class HierarchicalCache {
 
     // PHASE1-TASK30: Initialize PriceMatrix if enabled
     if (this.usePriceMatrix && this.config.l1Enabled) {
+      // M-04 FIX: Cap maxPairs at 100K to prevent massive over-allocation.
+      // On a 64MB L1 (dev default), uncapped = 4.19M pairs (~370MB SharedArrayBuffer).
+      // 100K pairs covers all 15 chains × ~6000 pairs/chain with headroom.
+      // Production can raise via CACHE_L1_SIZE_MB env var.
+      const rawMaxPairs = Math.floor(this.config.l1Size * 1024 * 1024 / 16);
+      const maxPairs = Math.min(rawMaxPairs, 100_000);
       const priceMatrixConfig: Partial<PriceMatrixConfig> = {
-        // Calculate max pairs based on L1 size (16 bytes per entry in PriceMatrix with sequence counter)
-        maxPairs: Math.floor(this.config.l1Size * 1024 * 1024 / 16),
+        maxPairs,
         // Reserve 10% for dynamic pairs
-        reserveSlots: Math.floor(this.config.l1Size * 1024 * 1024 / 16 * 0.1),
+        reserveSlots: Math.floor(maxPairs * 0.1),
         strictMode: false,
         enableAtomics: true
       };

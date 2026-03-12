@@ -12,6 +12,7 @@
 
 import fsPromises from 'fs/promises';
 import pathModule from 'path';
+import { tmpdir } from 'os';
 import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity, type PipelineTimestamps } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
@@ -896,7 +897,9 @@ export class OpportunityRouter {
     // Phase 1 Admission Control: Replaces pure TTL sort with profit-weighted scoring.
     // Score = expectedProfit × confidence × (1 / max(ttlRemainingMs, 100)) × cexAlignmentFactor.
     // This naturally prioritizes urgent high-profit opportunities aligned with CEX prices.
-    const candidates = Array.from(freshest.values());
+    // PERF-H-01 FIX: Avoid Array.from() allocation on hot path — push directly
+    const candidates: ParsedOpp[] = [];
+    for (const v of freshest.values()) candidates.push(v);
 
     // ADR-036: CEX alignment scoring — resolve CEX feed + address map once per batch
     // (cexEnabled already resolved at batch entry for health check)
@@ -1259,7 +1262,12 @@ export class OpportunityRouter {
   ): Promise<void> {
     try {
       const date = new Date().toISOString().split('T')[0];
-      const dir = pathModule.resolve('data');
+      // M-10 FIX: Use temp dir in test/development to avoid polluting project data/ dir
+      const nodeEnv = process.env.NODE_ENV;
+      const baseDir = nodeEnv === 'test' || nodeEnv === 'development'
+        ? pathModule.join(tmpdir(), 'arbitrage-dlq')
+        : pathModule.resolve('data');
+      const dir = baseDir;
       await fsPromises.mkdir(dir, { recursive: true });
       const filePath = pathModule.join(dir, `dlq-forwarding-fallback-${date}.jsonl`);
 

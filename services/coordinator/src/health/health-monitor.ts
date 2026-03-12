@@ -543,9 +543,16 @@ export class HealthMonitor {
     const totalServices = Math.max(serviceHealth.size, 1);
     // MED-5: Round to 1 decimal. MED-6: Use operational services only so that
     // a coordinator-only startup shows 0% (consistent with READ_ONLY degradation).
-    const systemHealth = Math.round(
+    let systemHealth = Math.round(
       (operationalActive / Math.max(operationalTotal, 1)) * 100 * 10
     ) / 10;
+    // M-03 FIX: During startup grace period, scale health by registration completeness
+    // to prevent 100% with only 1/1 operational services. Uses minServicesForGracePeriodAlert
+    // (default: 3) as the expected minimum operational service count.
+    if (this.isInGracePeriod() && operationalTotal < this.config.minServicesForGracePeriodAlert) {
+      const registrationFactor = operationalTotal / this.config.minServicesForGracePeriodAlert;
+      systemHealth = Math.round(systemHealth * registrationFactor * 10) / 10;
+    }
     const avgMemory = totalMemory / totalServices;
     const avgLatency = totalLatency / totalServices;
 
