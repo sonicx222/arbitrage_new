@@ -40,6 +40,10 @@ export type {
   CexNormalizerConfig,
 } from './cex-price-normalizer';
 
+// CEX Feed Health State Machine (ADR-036 Resilience)
+export { CexFeedHealthStatus, CexFeedHealthTracker } from './cex-feed-health';
+export type { CexFeedHealthSnapshot } from './cex-feed-health';
+
 // CEX Price Feed Service (ADR-036)
 export {
   CexPriceFeedService,

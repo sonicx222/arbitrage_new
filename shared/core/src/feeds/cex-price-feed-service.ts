@@ -19,6 +19,8 @@ import { createLogger } from '../logger';
 import { getErrorMessage } from '../resilience/error-handling';
 import { BinanceWebSocketClient } from './binance-ws-client';
 import type { BinanceTradeEvent } from './binance-ws-client';
+import { CexFeedHealthTracker, CexFeedHealthStatus } from './cex-feed-health';
+import type { CexFeedHealthSnapshot } from './cex-feed-health';
 import { CexPriceNormalizer } from './cex-price-normalizer';
 import type { CexNormalizerConfig } from './cex-price-normalizer';
 import { CexDexSpreadCalculator } from '../analytics/cex-dex-spread';
@@ -50,6 +52,10 @@ export interface CexPriceFeedConfig {
    * @default false
    */
   simulateCexPrices?: boolean;
+  /** Override max reconnect attempts (default: 10) */
+  maxReconnectAttempts?: number;
+  /** Override last-resort reconnect interval in ms (default: 300000 = 5min, 0 = disable) */
+  lastResortIntervalMs?: number;
 }
 
 // =============================================================================
@@ -74,6 +80,8 @@ export interface CexFeedStats {
   simulationMode: boolean;
   /** Number of active spread alerts exceeding threshold */
   activeAlertCount: number;
+  /** Health status of the CEX feed connection */
+  healthStatus: CexFeedHealthStatus;
 }
 
 // =============================================================================
@@ -95,6 +103,8 @@ export class CexPriceFeedService extends EventEmitter {
   private spreadCalculator: CexDexSpreadCalculator;
   private config: CexPriceFeedConfig;
   private running = false;
+
+  private healthTracker = new CexFeedHealthTracker();
 
   // Task 5.1: Internal counters
   private _cexPriceUpdates = 0;
@@ -144,6 +154,7 @@ export class CexPriceFeedService extends EventEmitter {
     this.running = true;
 
     if (this.config.skipExternalConnection) {
+      this.healthTracker.setPassiveMode();
       logger.info('CexPriceFeedService started in passive mode (no external connection)');
       return;
     }
@@ -152,7 +163,10 @@ export class CexPriceFeedService extends EventEmitter {
     const symbols = this.normalizer.getSupportedSymbols();
     const streams = symbols.map(s => `${s.toLowerCase()}@trade`);
 
-    this.wsClient = new BinanceWebSocketClient({ streams });
+    this.wsClient = new BinanceWebSocketClient({
+      streams,
+      ...(this.config.maxReconnectAttempts !== undefined && { maxReconnectAttempts: this.config.maxReconnectAttempts }),
+    });
 
     // Wire trade events through normalizer into spread calculator
     this.wsClient.on('trade', (trade: BinanceTradeEvent) => {
@@ -168,21 +182,27 @@ export class CexPriceFeedService extends EventEmitter {
       }
     });
 
-    // Forward connection events + track reconnections
+    // Forward connection events + track reconnections + health state
     this.wsClient.on('connected', () => {
+      this.healthTracker.onConnected();
       logger.info('Binance WS connected');
       this.emit('connected');
     });
     this.wsClient.on('disconnected', () => {
+      this.healthTracker.onDisconnected();
       logger.warn('Binance WS disconnected');
       this.emit('disconnected');
     });
+    // NOTE: 'reconnecting' is not emitted by BinanceWebSocketClient — this handler
+    // exists but never fires. Kept for forward-compat if emit is added later.
     this.wsClient.on('reconnecting', () => {
       this._wsReconnections++;
       logger.info('Binance WS reconnecting', { reconnections: this._wsReconnections });
     });
     this.wsClient.on('maxReconnectFailed', (attempts: number) => {
+      this.healthTracker.onMaxReconnectFailed();
       logger.error('Binance WS exhausted all reconnect attempts, running degraded', { attempts });
+      this.emit('maxReconnectFailed', attempts);
     });
 
     try {
@@ -294,7 +314,13 @@ export class CexPriceFeedService extends EventEmitter {
       running: this.running,
       simulationMode: this.config.simulateCexPrices ?? false,
       activeAlertCount: this.spreadCalculator.getActiveAlerts().length,
+      healthStatus: this.healthTracker.getStatus(),
     };
+  }
+
+  /** Get health snapshot for monitoring integration. */
+  getHealthSnapshot(): CexFeedHealthSnapshot {
+    return this.healthTracker.getSnapshot();
   }
 }
 

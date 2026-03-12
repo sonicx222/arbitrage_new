@@ -180,6 +180,11 @@ export interface CexSpreadData {
     spreadPct: number;
     timestamp: number;
   }>;
+  healthSnapshot?: {
+    status: string;
+    disconnectedSince: number | null;
+    isDegraded: boolean;
+  };
 }
 
 // Mirrors shared/types ArbitrageOpportunity (subset for dashboard display)

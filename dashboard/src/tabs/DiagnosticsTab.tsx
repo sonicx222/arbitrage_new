@@ -273,8 +273,29 @@ function CexSpreadSection({ data }: { data: CexSpreadData }) {
       {/* Stats summary */}
       <div className="grid grid-cols-4 gap-3 mb-3 text-xs">
         <StatRow label="Status" value={
-          <StatusBadge status={data.stats.running ? (data.stats.wsConnected ? 'healthy' : 'warning') : 'unknown'}
-            label={data.stats.running ? (data.stats.simulationMode ? 'Simulation' : data.stats.wsConnected ? 'Connected' : 'Disconnected') : 'Stopped'} />
+          <>
+            <StatusBadge
+              status={
+                data.healthSnapshot?.isDegraded ? 'error' :
+                data.stats.running ? (data.stats.wsConnected ? 'healthy' : 'warning') : 'unknown'
+              }
+              label={
+                data.healthSnapshot?.isDegraded
+                  ? `Degraded ${data.healthSnapshot.disconnectedSince
+                      ? `(${Math.round((Date.now() - data.healthSnapshot.disconnectedSince) / 60000)}m)`
+                      : ''}`
+                  : data.stats.running
+                    ? (data.stats.simulationMode ? 'Simulation' : data.stats.wsConnected ? 'Connected' : 'Disconnected')
+                    : 'Stopped'
+              }
+            />
+            {data.healthSnapshot?.isDegraded && (
+              <p className="text-xs text-red-400 mt-1">
+                CEX validation inactive. Scoring uses neutral alignment (1.0).
+                Check Binance WS connectivity or NODE_TLS_REJECT_UNAUTHORIZED setting.
+              </p>
+            )}
+          </>
         } />
         <StatRow label="CEX Updates" value={<span className="font-mono">{formatNumber(data.stats.cexPriceUpdatesTotal)}</span>} />
         <StatRow label="DEX Updates" value={<span className="font-mono">{formatNumber(data.stats.dexPriceUpdatesTotal)}</span>} />

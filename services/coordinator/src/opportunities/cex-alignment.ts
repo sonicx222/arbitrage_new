@@ -91,3 +91,33 @@ export function computeCexAlignment(
 
   return NEUTRAL_FACTOR;
 }
+
+// =============================================================================
+// Degraded Mode Adaptive Threshold
+// =============================================================================
+
+const DEFAULT_DEGRADED_MULTIPLIER = 1.2;
+const MIN_DEGRADED_MULTIPLIER = 1.0;
+const MAX_DEGRADED_MULTIPLIER = 3.0;
+
+/**
+ * Get the profit threshold multiplier for CEX-degraded mode.
+ *
+ * When CEX feed is degraded, the system loses its ability to penalize
+ * opportunities that contradict the CEX-DEX spread. To compensate, we raise
+ * the minimum profit threshold by this multiplier.
+ *
+ * @param isDegraded - Whether the CEX feed is in DEGRADED state
+ * @returns Multiplier to apply to minProfitPercentage (1.0 = no change)
+ */
+export function getCexDegradedProfitMultiplier(isDegraded: boolean): number {
+  if (!isDegraded) return 1.0;
+
+  const envVal = process.env.CEX_DEGRADED_PROFIT_MULTIPLIER;
+  if (envVal === undefined) return DEFAULT_DEGRADED_MULTIPLIER;
+
+  const parsed = parseFloat(envVal);
+  if (isNaN(parsed)) return DEFAULT_DEGRADED_MULTIPLIER;
+
+  return Math.max(MIN_DEGRADED_MULTIPLIER, Math.min(MAX_DEGRADED_MULTIPLIER, parsed));
+}

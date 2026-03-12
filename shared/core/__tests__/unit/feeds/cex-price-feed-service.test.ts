@@ -65,6 +65,7 @@ import {
 } from '../../../src/feeds/cex-price-feed-service';
 import type { CexPriceFeedConfig } from '../../../src/feeds/cex-price-feed-service';
 import type { SpreadAlert } from '../../../src/analytics/cex-dex-spread';
+import { CexFeedHealthStatus } from '../../../src/feeds/cex-feed-health';
 
 // =============================================================================
 // Tests
@@ -239,7 +240,7 @@ describe('CexPriceFeedService', () => {
         expect(alert.cexPrice).toBe(3500);
         expect(alert.dexPrice).toBe(3520);
         expect(Math.abs(alert.spreadPct)).toBeGreaterThan(0.1);
-        lowThresholdService.stop().then(done);
+        lowThresholdService.stop().then(() => done());
       });
 
       // 3520 vs 3500 = 0.57% spread, above 0.1% threshold
@@ -390,6 +391,77 @@ describe('CexPriceFeedService', () => {
       for (const s of spreads) {
         expect(Math.abs(s)).toBeLessThan(0.3);
       }
+    });
+  });
+
+  // ===========================================================================
+  // Health Tracking
+  // ===========================================================================
+
+  describe('health tracking', () => {
+    /** Helper to get the most recently created mock WS instance */
+    function getLatestMockWsInstance(): ReturnType<typeof MockBinanceWsClient> {
+      const results = (MockBinanceWsClient as jest.Mock).mock.results;
+      return results[results.length - 1].value;
+    }
+
+    it('should report PASSIVE status when skipExternalConnection is true', async () => {
+      await service.start();
+      const snap = service.getHealthSnapshot();
+      expect(snap.status).toBe(CexFeedHealthStatus.PASSIVE);
+      expect(snap.isDegraded).toBe(false);
+    });
+
+    it('should include health status in getStats()', async () => {
+      await service.start();
+      const stats = service.getStats();
+      expect(stats.healthStatus).toBe(CexFeedHealthStatus.PASSIVE);
+    });
+
+    it('should report CONNECTED when live WS connects', async () => {
+      const liveService = new CexPriceFeedService();
+      mockConnect.mockResolvedValueOnce(undefined);
+      mockIsConnected.mockReturnValue(true);
+      await liveService.start();
+
+      // Simulate the 'connected' event from wsClient
+      const wsInstance = getLatestMockWsInstance();
+      wsInstance.emit('connected');
+
+      const snap = liveService.getHealthSnapshot();
+      expect(snap.status).toBe(CexFeedHealthStatus.CONNECTED);
+      await liveService.stop();
+    });
+
+    it('should report RECONNECTING after WS disconnects', async () => {
+      const liveService = new CexPriceFeedService();
+      mockConnect.mockResolvedValueOnce(undefined);
+      await liveService.start();
+
+      const wsInstance = getLatestMockWsInstance();
+      wsInstance.emit('connected');
+      wsInstance.emit('disconnected');
+
+      const snap = liveService.getHealthSnapshot();
+      expect(snap.status).toBe(CexFeedHealthStatus.RECONNECTING);
+      await liveService.stop();
+    });
+
+    it('should report DEGRADED after maxReconnectFailed', async () => {
+      const liveService = new CexPriceFeedService();
+      mockConnect.mockResolvedValueOnce(undefined);
+      await liveService.start();
+
+      const wsInstance = getLatestMockWsInstance();
+      wsInstance.emit('connected');
+      wsInstance.emit('disconnected');
+      wsInstance.emit('maxReconnectFailed', 10);
+
+      const snap = liveService.getHealthSnapshot();
+      expect(snap.status).toBe(CexFeedHealthStatus.DEGRADED);
+      expect(snap.isDegraded).toBe(true);
+      expect(snap.disconnectedSince).not.toBeNull();
+      await liveService.stop();
     });
   });
 });

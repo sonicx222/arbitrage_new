@@ -8,7 +8,7 @@
  * @see ADR-036: CEX Price Signals
  */
 
-import { computeCexAlignment } from '../../../src/opportunities/cex-alignment';
+import { computeCexAlignment, getCexDegradedProfitMultiplier } from '../../../src/opportunities/cex-alignment';
 import type { CexPriceFeedService } from '@arbitrage/core/feeds';
 
 // =============================================================================
@@ -222,5 +222,42 @@ describe('computeCexAlignment', () => {
       expect(contradicted).toBeLessThan(neutral);
       expect(contradicted).toBeCloseTo(0.0008, 6);
     });
+  });
+});
+
+describe('getCexDegradedProfitMultiplier', () => {
+  const originalEnv = process.env;
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('should return 1.0 when CEX feed is not degraded', () => {
+    expect(getCexDegradedProfitMultiplier(false)).toBe(1.0);
+  });
+
+  it('should return default 1.2 when CEX feed is degraded and no env override', () => {
+    delete process.env.CEX_DEGRADED_PROFIT_MULTIPLIER;
+    expect(getCexDegradedProfitMultiplier(true)).toBe(1.2);
+  });
+
+  it('should respect CEX_DEGRADED_PROFIT_MULTIPLIER env var', () => {
+    process.env = { ...process.env, CEX_DEGRADED_PROFIT_MULTIPLIER: '1.5' };
+    expect(getCexDegradedProfitMultiplier(true)).toBe(1.5);
+  });
+
+  it('should clamp to 1.0 minimum', () => {
+    process.env = { ...process.env, CEX_DEGRADED_PROFIT_MULTIPLIER: '0.5' };
+    expect(getCexDegradedProfitMultiplier(true)).toBe(1.0);
+  });
+
+  it('should clamp to 3.0 maximum', () => {
+    process.env = { ...process.env, CEX_DEGRADED_PROFIT_MULTIPLIER: '10' };
+    expect(getCexDegradedProfitMultiplier(true)).toBe(3.0);
+  });
+
+  it('should ignore invalid env var and use default', () => {
+    process.env = { ...process.env, CEX_DEGRADED_PROFIT_MULTIPLIER: 'not_a_number' };
+    expect(getCexDegradedProfitMultiplier(true)).toBe(1.2);
   });
 });
