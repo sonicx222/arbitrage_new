@@ -566,6 +566,29 @@ export function testWithdrawETH(config: AdminTestConfig): void {
         contract.connect(user).withdrawETH(user.address, ethers.parseEther('1'))
       ).to.be.revertedWith('Ownable: caller is not the owner');
     });
+
+    it('should succeed with gas-heavy recipient at default limit, fail at 2300 (L-02)', async () => {
+      const { contract, owner } = await getFixture();
+
+      await owner.sendTransaction({
+        to: await contract.getAddress(),
+        value: ethers.parseEther('2'),
+      });
+
+      // Deploy a contract whose receive() does SSTORE (requires >2300 gas)
+      const GasHeavy = await ethers.getContractFactory('MockGasHeavyReceiver');
+      const receiver = await GasHeavy.deploy();
+
+      // Default gas limit (50000) should succeed
+      await contract.connect(owner).withdrawETH(await receiver.getAddress(), ethers.parseEther('1'));
+      expect(await receiver.receiveCount()).to.equal(1);
+
+      // Set gas limit to 2300 (minimum) — receiver needs >2300 for SSTORE, so it should fail
+      await contract.connect(owner).setWithdrawGasLimit(2300);
+      await expect(
+        contract.connect(owner).withdrawETH(await receiver.getAddress(), ethers.parseEther('1'))
+      ).to.be.revertedWithCustomError(contract, 'ETHTransferFailed');
+    });
   });
 }
 

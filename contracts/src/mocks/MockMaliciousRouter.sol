@@ -214,8 +214,8 @@ contract MockMaliciousRouter is IDexRouter {
         return amounts;
     }
 
-    function factory() external view returns (address) {
-        return address(this);
+    function factory() external pure returns (address) {
+        return address(0);
     }
 
     function WETH() external pure returns (address) {

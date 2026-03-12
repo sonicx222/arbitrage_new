@@ -55,6 +55,9 @@ contract MockDexRouter is IDexRouter {
     /// @dev M-05: Fee in basis points deducted from output (0 = no fee, 30 = 0.3%)
     uint256 public feeBps;
 
+    /// @dev L-12: When true, getAmountsOut returns a single-element array to test short-array guard
+    bool public returnShortArray;
+
     /// @dev H-03: AMM constant-product curve mode
     bool public ammMode;
 
@@ -66,6 +69,11 @@ contract MockDexRouter is IDexRouter {
 
     function setAllowZeroOutput(bool _allow) external {
         allowZeroOutput = _allow;
+    }
+
+    /// @notice L-12: Make getAmountsOut return a 1-element array (tests short-array guard)
+    function setReturnShortArray(bool _enabled) external {
+        returnShortArray = _enabled;
     }
 
     /// @notice M-05: Set fee in basis points (e.g., 30 = 0.3%)
@@ -210,6 +218,13 @@ contract MockDexRouter is IDexRouter {
         returns (uint256[] memory amounts)
     {
         require(path.length >= 2, "Invalid path");
+
+        // L-12: Return a 1-element array to simulate a buggy router
+        if (returnShortArray) {
+            amounts = new uint256[](1);
+            amounts[0] = amountIn;
+            return amounts;
+        }
 
         amounts = new uint256[](path.length);
         amounts[0] = amountIn;

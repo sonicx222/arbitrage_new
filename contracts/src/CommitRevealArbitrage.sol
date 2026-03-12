@@ -292,10 +292,12 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      *
      * Requirements:
      * - Contract not paused
-     * - No commitments already exist
+     * - Array length <= MAX_BATCH_COMMITS (20)
      *
+     * @dev Existing hashes are silently skipped (not reverted) to allow partial
+     *      success — callers receive `successCount` to know how many were new.
      * @param commitmentHashes Array of commitment hashes
-     * @return successCount Number of successfully committed hashes
+     * @return successCount Number of successfully committed hashes (skipped duplicates excluded)
      */
     function batchCommit(bytes32[] calldata commitmentHashes) external nonReentrant whenNotPaused returns (uint256 successCount) {
         uint256 len = commitmentHashes.length;

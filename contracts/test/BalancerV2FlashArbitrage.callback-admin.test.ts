@@ -540,6 +540,41 @@ describe('BalancerV2FlashArbitrage Callback & Admin', () => {
 
         expect(result.expectedProfit).to.equal(0);
       });
+
+      it('should return zero when router getAmountsOut returns short array (L-12)', async () => {
+        const { arbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
+
+        await arbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+        await dexRouter1.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), RATE_USDC_TO_WETH_2PCT_PROFIT);
+
+        // Enable short array mode — getAmountsOut returns 1-element array instead of 2
+        await dexRouter1.setReturnShortArray(true);
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 0,
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 0,
+          },
+        ];
+
+        // _simulateSwapPath should detect amounts.length < path.length and return 0
+        const result = await arbitrage.calculateExpectedProfit(
+          await weth.getAddress(),
+          ethers.parseEther('10'),
+          swapPath
+        );
+
+        expect(result.expectedProfit).to.equal(0);
+      });
     });
   });
 

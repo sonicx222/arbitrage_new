@@ -579,6 +579,9 @@ export function testProfitValidation(config: ProfitValidationTestConfig): void {
       ];
       const deadline = await getDeadline();
 
+      // minProfit: 0n means "caller imposes no additional minimum beyond the contract's
+      // own minimumProfit". The contract enforces max(minProfit, minimumProfit), so the
+      // contract-level minimumProfit (10 ETH here) is the effective threshold.
       await expect(
         triggerArbitrage(contract, owner, {
           asset: assetAddress,
