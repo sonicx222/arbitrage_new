@@ -470,8 +470,9 @@ describe('Partition Service Utilities', () => {
       const warnLogs = logger.getLogs('warn');
       const failoverLog = warnLogs.find(log => log.msg.includes('Failover'));
       // LOG-OPT Fix 2: partition in bindings, event data in meta
+      // SA-020 FIX: event is wrapped in { event } instead of spread to avoid hot-path allocation
       expect(failoverLog?.bindings).toMatchObject({ partition: 'test-partition' });
-      expect(failoverLog?.meta).toMatchObject({ type: 'primary_down' });
+      expect(failoverLog?.meta).toMatchObject({ event: { type: 'primary_down' } });
     });
 
     it('should register statusChange event handler', () => {

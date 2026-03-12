@@ -309,6 +309,18 @@ export function validateMessageStructure(
     return { valid: false, code: ValidationErrorCode.ZERO_AMOUNT };
   }
 
+  // SA-019 FIX: Validate optional string fields when present (chain, buyDex, sellDex)
+  // These fields are optional in ArbitrageOpportunity but must be strings if provided.
+  if (data.chain !== undefined && typeof data.chain !== 'string') {
+    return { valid: false, code: ValidationErrorCode.MISSING_ID, details: 'chain must be a string' };
+  }
+  if (data.buyDex !== undefined && typeof data.buyDex !== 'string') {
+    return { valid: false, code: ValidationErrorCode.MISSING_ID, details: 'buyDex must be a string' };
+  }
+  if (data.sellDex !== undefined && typeof data.sellDex !== 'string') {
+    return { valid: false, code: ValidationErrorCode.MISSING_ID, details: 'sellDex must be a string' };
+  }
+
   // Validate cross-chain specific fields
   if (data.type === 'cross-chain') {
     const crossChainValidation = validateCrossChainFields(data);

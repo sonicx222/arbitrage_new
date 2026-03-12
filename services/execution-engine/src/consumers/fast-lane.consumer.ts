@@ -19,6 +19,7 @@ import { RedisStreamsClient, ConsumerGroupConfig, StreamConsumer } from '@arbitr
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ARBITRAGE_CONFIG, FEATURE_FLAGS } from '@arbitrage/config';
 import { recordStreamTransitTime } from '../services/prometheus-metrics';
+import { ConsumerGroups } from '@arbitrage/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   Logger,
@@ -99,8 +100,8 @@ export class FastLaneConsumer {
 
     this.consumerGroup = {
       streamName: RedisStreamsClient.STREAMS.FAST_LANE,
-      // P1 Fix CA-005: Standardize on 'execution-engine-group' to match opportunity consumer
-      groupName: 'execution-engine-group',
+      // P1 Fix CA-005: Standardize on ConsumerGroups.EXECUTION_ENGINE to match opportunity consumer
+      groupName: ConsumerGroups.EXECUTION_ENGINE,
       consumerName: this.instanceId,
       startId: '$',
     };

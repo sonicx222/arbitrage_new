@@ -111,7 +111,16 @@ services:
   # Partitioned Chain Detectors (ADR-003)
   # P2-25: All services use HEALTH_CHECK_PORT=3001 internally because each
   # container has its own network namespace — no port conflicts. External
-  # access uses unique host-mapped ports (3011, 3012, 3013, 3014).
+  # access uses unique host-mapped ports.
+  #
+  # Canonical port mapping (service-ports.json → Docker):
+  #   P1 asia-fast   : canonical 3001 → container 3001, host 3011
+  #   P2 l2-turbo    : canonical 3002 → container 3001, host 3012
+  #   P3 high-value  : canonical 3003 → container 3001, host 3013
+  #   P4 solana      : canonical 3004 → container 3001, host 3014
+  #   EE engine      : canonical 3005 → container 3001, host 3015
+  #   CC detector    : canonical 3006 → container 3001, host 3016
+  #   Coordinator    : canonical 3000 → container 3000, host 3000
   # =============================================================================
 
   # Partition: asia-fast (BSC + Polygon + Avalanche + Fantom)

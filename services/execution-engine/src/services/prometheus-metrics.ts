@@ -28,6 +28,7 @@
 import { PrometheusMetricsCollector } from '@arbitrage/metrics';
 import { PrometheusExporter, ExportFormat } from '@arbitrage/metrics';
 import { MetricType } from '@arbitrage/metrics';
+import { RedisStreams } from '@arbitrage/types';
 
 // ---------------------------------------------------------------------------
 // Singleton collector and exporter
@@ -372,7 +373,7 @@ export function initializeBIHistograms(chains: string[]): void {
   collector.recordHistogram('opportunity_age_at_execution_ms', 0, { chain: seedChain });
   collector.recordHistogram('profit_per_execution', 0, { chain: seedChain, strategy: 'seed' });
   collector.recordHistogram('gas_cost_per_execution', 0, { chain: seedChain });
-  collector.recordHistogram('stream_message_transit_ms', 0, { stream: 'stream:execution-requests' });
+  collector.recordHistogram('stream_message_transit_ms', 0, { stream: RedisStreams.EXECUTION_REQUESTS });
 }
 
 /**

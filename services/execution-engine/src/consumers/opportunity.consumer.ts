@@ -35,6 +35,7 @@ import {
 // LOG-OPT Task 4: ALS trace context wiring for automatic log correlation
 import { withLogContext } from '@arbitrage/core/logging';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
+import { ConsumerGroups } from '@arbitrage/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   Logger,
@@ -184,7 +185,7 @@ export class OpportunityConsumer {
     // @see ARCHITECTURE_V2.md Section 5.4 - Broker Pattern
     this.consumerGroup = {
       streamName: config.streamName ?? RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
-      groupName: 'execution-engine-group',
+      groupName: ConsumerGroups.EXECUTION_ENGINE,
       consumerName: this.instanceId,
       startId: '$',
     };

@@ -42,7 +42,7 @@ import { ServiceStateManager, createServiceState } from '@arbitrage/core/service
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
-import { RedisStreams } from '@arbitrage/types';
+import { RedisStreams, ConsumerGroups } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
 import { safeParseInt, safeParseFloat, getStreamForChain, validateRouteSymmetry, FEATURE_FLAGS } from '@arbitrage/config';
 import { getCexPriceFeedService, resetCexPriceFeedService } from '@arbitrage/core/feeds';
@@ -1230,14 +1230,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
         try {
           await this.streamsClient.createConsumerGroup({
             streamName,
-            groupName: 'execution-engine-group',
+            groupName: ConsumerGroups.EXECUTION_ENGINE,
             consumerName: 'ee-init', // Required by type but unused by XGROUP CREATE
             startId: '$',
             resetToStartIdOnExistingGroup: true,
           });
           this.logger.info('Chain-group consumer group ready', {
             stream: streamName,
-            group: 'execution-engine-group',
+            group: ConsumerGroups.EXECUTION_ENGINE,
           });
         } catch (error) {
           this.logger.warn('Failed to create chain-group consumer group', {

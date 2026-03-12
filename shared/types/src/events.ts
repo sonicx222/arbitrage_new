@@ -75,6 +75,22 @@ export const RedisStreams = {
 export type RedisStreamName = typeof RedisStreams[keyof typeof RedisStreams];
 
 // ============================================================================
+// Consumer Group Names (ADR-002)
+// ============================================================================
+/**
+ * Shared consumer group name constants to prevent string literal drift.
+ * Each service uses exactly one consumer group name across all its stream subscriptions.
+ */
+export const ConsumerGroups = {
+  EXECUTION_ENGINE: 'execution-engine-group',
+  CROSS_CHAIN_DETECTOR: 'cross-chain-detector-group',
+  COORDINATOR: 'coordinator-group',
+  MEMPOOL_DETECTOR: 'mempool-detector-group',
+  ORDERFLOW_PIPELINE: 'orderflow-pipeline',
+  SELF_HEALING: 'self-healing-manager',
+} as const;
+
+// ============================================================================
 // Event Types
 // ============================================================================
 export const EventTypes = {

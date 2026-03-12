@@ -198,7 +198,7 @@ export function setupDetectorEventHandlers(
   };
 
   const failoverEventHandler = (event: unknown) => {
-    pLog.warn('Failover event received', { ...event as object });
+    pLog.warn('Failover event received', { event });
   };
 
   // Register all handlers

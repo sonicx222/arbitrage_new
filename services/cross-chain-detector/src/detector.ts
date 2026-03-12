@@ -329,11 +329,14 @@ export class CrossChainDetectorService {
       transitionTimeoutMs: 30000
     });
 
+    // SA-005 FIX: Single constant for consumer group name (was duplicated 3x)
+    const CONSUMER_GROUP = 'cross-chain-detector-group';
+
     // Define consumer groups for streams we need to consume
     this.consumerGroups = [
       {
         streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        groupName: 'cross-chain-detector-group',
+        groupName: CONSUMER_GROUP,
         consumerName: this.instanceId,
         // P3 FIX: Use '0' to bootstrap from existing price data on first startup.
         // With '$', the detector waits 60-147s for new price updates from partitions
@@ -346,14 +349,14 @@ export class CrossChainDetectorService {
       },
       {
         streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
-        groupName: 'cross-chain-detector-group',
+        groupName: CONSUMER_GROUP,
         consumerName: this.instanceId,
         startId: '$'
       },
       // Task 1.3.3: Pending opportunities from mempool detection
       {
         streamName: RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES,
-        groupName: 'cross-chain-detector-group',
+        groupName: CONSUMER_GROUP,
         consumerName: this.instanceId,
         startId: '$'
       }
