@@ -6,7 +6,6 @@ import { EmptyState } from '../components/EmptyState';
 import { ServiceCard } from '../components/ServiceCard';
 import { LiveFeed } from '../components/LiveFeed';
 import { SectionHeader } from '../components/SectionHeader';
-import { StatRow } from '../components/StatRow';
 import { formatUsd, formatPct, formatNumber, calcSuccessRate, thresholdColor } from '../lib/format';
 
 function fmtMs(n: number): string {
@@ -82,71 +81,48 @@ export function OverviewTab() {
           {serviceList.length === 0 && <EmptyState message="No services reporting yet" />}
         </div>
 
-        {/* Pipeline Health */}
+        {/* Pipeline Health Summary — details in Risk and Streams tabs */}
         <div className="card">
           <SectionHeader mb="mb-3">Pipeline Health</SectionHeader>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            {/* Backpressure */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
-              <span className="text-gray-400">Backpressure</span>
+              <span className="text-gray-500">Backpressure</span>
               {metrics.backpressure ? (
-                <div className="mt-1">
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 bg-gray-800 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full ${metrics.backpressure.active ? 'bg-accent-red' : 'bg-accent-green'}`}
-                        style={{ width: `${Math.min(metrics.backpressure.executionStreamDepthRatio * 100, 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-gray-500 w-10 text-right">{formatPct(metrics.backpressure.executionStreamDepthRatio * 100)}</span>
-                  </div>
-                  <span className={`text-[10px] ${metrics.backpressure.active ? 'text-accent-red' : 'text-accent-green'}`}>
-                    {metrics.backpressure.active ? 'ACTIVE' : 'INACTIVE'}
-                  </span>
+                <div className={`mt-1 text-sm font-bold ${metrics.backpressure.active ? 'text-accent-red' : 'text-accent-green'}`}>
+                  {metrics.backpressure.active ? 'ACTIVE' : 'OK'}
+                  <span className="text-gray-500 font-normal text-[10px] ml-1">({formatPct(metrics.backpressure.executionStreamDepthRatio * 100)})</span>
                 </div>
-              ) : <EmptyState message="No data" className="mt-1" />}
+              ) : <span className="text-gray-600 mt-1 block">-</span>}
+              <a href="#risk" className="text-[10px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
             </div>
-
-            {/* Admission */}
             <div>
-              <span className="text-gray-400">Admission Control</span>
+              <span className="text-gray-500">Admission</span>
               {metrics.admissionMetrics ? (
-                <div className="mt-1 space-y-0.5">
-                  <StatRow label="Admitted" value={formatNumber(metrics.admissionMetrics.admitted)} color="text-accent-green" />
-                  <StatRow label="Shed" value={formatNumber(metrics.admissionMetrics.shed)} color="text-accent-red" />
-                  <StatRow label="Avg Score (admitted)" value={Number.isFinite(metrics.admissionMetrics.avgScoreAdmitted) ? metrics.admissionMetrics.avgScoreAdmitted.toFixed(2) : '-'} />
-                  <StatRow label="Avg Score (shed)" value={Number.isFinite(metrics.admissionMetrics.avgScoreShed) ? metrics.admissionMetrics.avgScoreShed.toFixed(2) : '-'} />
+                <div className="mt-1 text-sm font-bold">
+                  <span className="text-accent-green">{formatNumber(metrics.admissionMetrics.admitted)}</span>
+                  <span className="text-gray-600 font-normal"> / </span>
+                  <span className="text-accent-red">{formatNumber(metrics.admissionMetrics.shed)}</span>
                 </div>
-              ) : <EmptyState message="No data" className="mt-1" />}
+              ) : <span className="text-gray-600 mt-1 block">-</span>}
+              <a href="#risk" className="text-[10px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
             </div>
-
-            {/* DLQ */}
             <div>
-              <span className="text-gray-400">Dead Letter Queue</span>
+              <span className="text-gray-500">DLQ Total</span>
               {metrics.dlqMetrics ? (
-                <div className="mt-1 space-y-0.5">
-                  <StatRow label="Total" value={metrics.dlqMetrics.total} />
-                  <StatRow label="Expired" value={metrics.dlqMetrics.expired} />
-                  <StatRow label="Validation" value={metrics.dlqMetrics.validation} />
-                  <StatRow label="Transient" value={metrics.dlqMetrics.transient} />
-                  <StatRow label="Unknown" value={metrics.dlqMetrics.unknown} />
+                <div className={`mt-1 text-sm font-bold ${metrics.dlqMetrics.total > 0 ? 'text-accent-yellow' : 'text-gray-400'}`}>
+                  {formatNumber(metrics.dlqMetrics.total)}
                 </div>
-              ) : <EmptyState message="No data" className="mt-1" />}
+              ) : <span className="text-gray-600 mt-1 block">-</span>}
+              <a href="#streams" className="text-[10px] text-gray-600 hover:text-gray-400">Streams tab &rarr;</a>
             </div>
-
-            {/* Forwarding */}
             <div>
-              <span className="text-gray-400">Forwarding Rejections</span>
+              <span className="text-gray-500">Fwd Rejections</span>
               {metrics.forwardingMetrics ? (
-                <div className="mt-1 space-y-0.5">
-                  <StatRow label="Expired" value={metrics.forwardingMetrics.expired} />
-                  <StatRow label="Duplicate" value={metrics.forwardingMetrics.duplicate} />
-                  <StatRow label="Profit Rejected" value={metrics.forwardingMetrics.profitRejected} />
-                  <StatRow label="Chain Rejected" value={metrics.forwardingMetrics.chainRejected} />
-                  <StatRow label="Circuit Open" value={metrics.forwardingMetrics.circuitOpen} />
-                  <StatRow label="Not Leader" value={metrics.forwardingMetrics.notLeader} />
+                <div className="mt-1 text-sm font-bold text-gray-400">
+                  {formatNumber(Object.values(metrics.forwardingMetrics).reduce((s, v) => s + v, 0))}
                 </div>
-              ) : <EmptyState message="No data" className="mt-1" />}
+              ) : <span className="text-gray-600 mt-1 block">-</span>}
+              <a href="#risk" className="text-[10px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
             </div>
           </div>
         </div>

@@ -147,7 +147,7 @@ describe('validatePayload', () => {
     it('accepts valid diagnostics payload', () => {
       expect(validatePayload('diagnostics', {
         pipeline: { e2e: { p50: 1, p95: 2, p99: 3, count: 10 } },
-        runtime: { eventLoop: { min: 0, max: 1, mean: 0.5, p99: 1 } },
+        runtime: { eventLoop: { min: 0, max: 1, mean: 0.5, p99: 1 }, memory: { heapUsedMB: 100, heapTotalMB: 200, rssMB: 300, externalMB: 10 } },
         providers: { rpcByChain: {}, totalRpcErrors: 0 },
         timestamp: 1710000000000,
       })).toBe(true);

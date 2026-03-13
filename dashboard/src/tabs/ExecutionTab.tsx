@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { KpiGrid } from '../components/KpiGrid';
@@ -26,13 +26,27 @@ export function ExecutionTab() {
   const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
   const failedExecutions = metrics.totalExecutions - metrics.successfulExecutions;
 
-  const executions = useMemo(
+  const [search, setSearch] = useState('');
+
+  const allExecutions = useMemo(
     () => feed.filter((item): item is ExecutionFeedItem => item.kind === 'execution').slice(0, 50),
     [feed],
   );
 
+  const executions = useMemo(() => {
+    if (!search) return allExecutions;
+    const q = search.toLowerCase();
+    return allExecutions.filter((item) => {
+      const d = item.data;
+      return d.chain.toLowerCase().includes(q)
+        || d.dex.toLowerCase().includes(q)
+        || (d.success ? 'success' : 'failed').includes(q)
+        || (d.transactionHash?.toLowerCase().includes(q));
+    });
+  }, [allExecutions, search]);
+
   const exportRows = useMemo(
-    () => executions.map((item) => {
+    () => allExecutions.map((item) => {
       const e = item.data;
       return [
         new Date(e.timestamp).toISOString(),
@@ -47,7 +61,7 @@ export function ExecutionTab() {
         e.error ?? '',
       ];
     }),
-    [executions],
+    [allExecutions],
   );
 
   return (
@@ -87,8 +101,15 @@ export function ExecutionTab() {
 
       {/* Recent Executions Table */}
       <div className="card">
-        <div className="flex items-center justify-between mb-2">
-          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider">Recent Executions ({executions.length})</h4>
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider shrink-0">Recent Executions ({executions.length})</h4>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by chain, dex, status..."
+            className="flex-1 max-w-[200px] px-2 py-1 rounded bg-surface-lighter border border-gray-800 text-xs text-gray-300 placeholder:text-gray-600 focus:outline-none focus:border-gray-600"
+          />
           <ExportCsvButton
             headers={EXEC_CSV_HEADERS}
             rows={exportRows}

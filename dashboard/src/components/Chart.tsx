@@ -6,6 +6,7 @@
  */
 
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { CHART } from '../lib/theme';
 
 interface ChartProps {
   data: Array<Record<string, string | number | undefined>>;
@@ -20,8 +21,6 @@ interface ChartProps {
 }
 
 const MARGIN = { top: 8, right: 12, bottom: 24, left: 44 };
-const GRID_COLOR = '#27272a';
-const LABEL_COLOR = '#8a8a94';
 
 export function Chart({
   data,
@@ -173,7 +172,7 @@ export function Chart({
             y1={toY(t)}
             x2={width - MARGIN.right}
             y2={toY(t)}
-            stroke={GRID_COLOR}
+            stroke={CHART.grid}
             strokeDasharray="3 3"
           />
         ))}
@@ -181,6 +180,8 @@ export function Chart({
         {areaPath && <path d={areaPath} fill={color} fillOpacity={0.1} />}
         {/* Line */}
         {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} />}
+        {/* Single data point dot */}
+        {data.length === 1 && <circle cx={toX(0)} cy={toY(values[0])} r={3} fill={color} />}
         {/* Y axis labels */}
         {yTicks.map((t, i) => (
           <text
@@ -189,7 +190,7 @@ export function Chart({
             y={toY(t)}
             textAnchor="end"
             dominantBaseline="middle"
-            fill={LABEL_COLOR}
+            fill={CHART.tick}
             fontSize={9}
             fontFamily="var(--font-mono), monospace"
           >
@@ -203,7 +204,7 @@ export function Chart({
             x={x}
             y={height - 4}
             textAnchor="middle"
-            fill={LABEL_COLOR}
+            fill={CHART.tick}
             fontSize={9}
             fontFamily="var(--font-mono), monospace"
           >

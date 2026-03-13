@@ -126,7 +126,7 @@ function tabFromHash(): Tab {
   return 'Overview';
 }
 
-const STALE_THRESHOLD_MS = 10_000;
+const STALE_THRESHOLD_MS = 15_000;
 
 function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
   const { status, lastEventTime } = useConnection();
@@ -220,6 +220,23 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
   const [tab, setTab] = useState<Tab>(tabFromHash);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const { metrics } = useMetrics();
+  const { circuitBreaker } = useServices();
+  const { feed } = useFeed();
+
+  // P1-14: Compute tab notification badges for active issues
+  const tabBadges = useMemo(() => {
+    const badges: Partial<Record<Tab, boolean>> = {};
+    if (circuitBreaker?.state === 'OPEN') badges.Execution = true;
+    let failStreak = 0;
+    for (const item of feed) {
+      if (item.kind === 'execution' && !item.data.success) failStreak++;
+      else break;
+    }
+    if (failStreak >= 3) badges.Execution = true;
+    const hasCritical = feed.some(f => f.kind === 'alert' && f.data.severity === 'critical');
+    if (hasCritical) badges.Risk = true;
+    return badges;
+  }, [circuitBreaker, feed]);
 
   // E-03: Sync tab state with URL hash
   const changeTab = useCallback((t: Tab) => {
@@ -245,6 +262,9 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
 
   return (
     <div className="min-h-screen flex flex-col">
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:px-3 focus:py-1.5 focus:rounded-lg focus:bg-accent-green focus:text-gray-950 focus:text-xs focus:font-medium">
+        Skip to content
+      </a>
       <LiveAnnouncer />
       <header className="sticky top-0 z-30 px-3 sm:px-5 py-2.5 flex items-center justify-between border-b border-gray-800 bg-[var(--header-bg)] gap-2">
         <div className="flex items-center gap-4">
@@ -282,6 +302,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
                 <path strokeLinecap="round" strokeLinejoin="round" d={t.icon} />
               </svg>
               <span className="hidden lg:inline">{t.id}</span>
+              {tabBadges[t.id] && <span className="w-1.5 h-1.5 rounded-full bg-accent-red shrink-0" />}
             </button>
           ))}
         </nav>
@@ -296,7 +317,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
           <span className="hidden sm:inline">Logout</span>
         </button>
       </header>
-      <main className="flex-1 p-3 sm:p-5 overflow-auto" role="tabpanel" id={`tabpanel-${tab}`} aria-label={tab}>
+      <main id="main" className="flex-1 p-3 sm:p-5 overflow-auto" role="tabpanel" aria-label={tab}>
         {tab === 'Overview' && <TabErrorBoundary tab="Overview"><OverviewTab /></TabErrorBoundary>}
         {tab === 'Execution' && <TabErrorBoundary tab="Execution"><ExecutionTab /></TabErrorBoundary>}
         {tab === 'Opportunities' && <TabErrorBoundary tab="Opportunities"><OpportunitiesTab /></TabErrorBoundary>}

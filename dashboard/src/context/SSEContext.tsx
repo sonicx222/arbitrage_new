@@ -36,7 +36,7 @@ type SSEAction =
   | { type: 'reset'; payload?: undefined };
 
 const MAX_FEED = 50;
-const MAX_CHART_POINTS = 360; // 12 min at 2s SSE interval
+const MAX_CHART_POINTS = 1800; // ~1 hour at 2s SSE interval
 
 const CHART_STORAGE_KEY = 'sse_chartData';
 const LAG_STORAGE_KEY = 'sse_lagData';
@@ -76,7 +76,6 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
           ...state.chartData.slice(-MAX_CHART_POINTS),
           { time: now, latency: action.payload.averageLatency, successRate, profit: action.payload.totalProfit },
         ];
-        saveSessionArray(CHART_STORAGE_KEY, chartData);
       }
       return { ...state, metrics: action.payload, chartData, lastEventTime };
     }
@@ -96,7 +95,6 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
           ...state.lagData.slice(-MAX_CHART_POINTS),
           { time: now, pending: totalPending },
         ];
-        saveSessionArray(LAG_STORAGE_KEY, lagData);
       }
       return { ...state, streams: action.payload, lagData, lastEventTime };
     }
@@ -220,7 +218,10 @@ export function validatePayload(event: string, data: unknown): boolean {
     case 'alert':
       return typeof data.type === 'string' && typeof data.timestamp === 'number';
     case 'diagnostics':
-      return isObj(data.pipeline) && isObj(data.runtime) && isObj(data.providers) && typeof data.timestamp === 'number';
+      return isObj(data.pipeline) && isObj(data.runtime) && isObj(data.providers) && typeof data.timestamp === 'number'
+        && isObj((data.pipeline as Record<string, unknown>).e2e)
+        && isObj((data.runtime as Record<string, unknown>).eventLoop)
+        && isObj((data.runtime as Record<string, unknown>).memory);
     case 'cex-spread':
       return isObj(data.stats) && Array.isArray(data.alerts)
         && typeof (data.stats as Record<string, unknown>).running === 'boolean';
@@ -331,6 +332,20 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     prevStatusRef.current = status;
     return () => controller.abort();
   }, [status, token]);
+
+  // P1-17 FIX: Debounce sessionStorage writes. Save chart/lag data every 10s
+  // instead of on every SSE event (~30 writes/min → ~6/min).
+  const chartDataRef = useRef(state.chartData);
+  const lagDataRef = useRef(state.lagData);
+  chartDataRef.current = state.chartData;
+  lagDataRef.current = state.lagData;
+  useEffect(() => {
+    const id = setInterval(() => {
+      saveSessionArray(CHART_STORAGE_KEY, chartDataRef.current);
+      saveSessionArray(LAG_STORAGE_KEY, lagDataRef.current);
+    }, 10_000);
+    return () => clearInterval(id);
+  }, []);
 
   // H-01 FIX: Memoize each domain slice independently. A 'services' event creates
   // a new servicesValue but metricsValue/feedValue/streamsValue stay the same reference,
