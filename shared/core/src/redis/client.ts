@@ -64,6 +64,9 @@ const REDIS_DEFAULTS = {
  */
 const REDIS_OPERATION_TIMEOUT_MS = SYSTEM_CONSTANTS?.timeouts?.redisOperation ?? 5000;
 
+// SA-042: Module-level logger for functions outside RedisClient class (e.g., resetRedisInstance)
+const moduleLogger = createLogger('redis-client-module');
+
 function withRedisTimeout<T>(promise: Promise<T>, timeoutMs: number = REDIS_OPERATION_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -1555,16 +1558,16 @@ export async function resetRedisInstance(): Promise<void> {
   if (redisInstancePromise && !redisInstance) {
     try {
       await redisInstancePromise;
-    } catch {
-      // Ignore init errors - we're resetting anyway
+    } catch (error) {
+      moduleLogger.debug('Init error during reset — safe to ignore', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
   if (redisInstance) {
     try {
       await redisInstance.disconnect();
-    } catch {
-      // Best effort cleanup - log but don't throw
+    } catch (error) {
+      moduleLogger.debug('Disconnect error during reset — best effort cleanup', { error: error instanceof Error ? error.message : String(error) });
     }
   }
   redisInstance = null;

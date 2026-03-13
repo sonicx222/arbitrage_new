@@ -875,8 +875,8 @@ export class PendingStateSimulator {
       try {
         const [reserve0, reserve1] = await this.anvilManager.getPoolReserves(pool);
         reserves.set(pool, [reserve0, reserve1]);
-      } catch {
-        // Skip pools that fail to query (may not be V2-style pairs)
+      } catch (error) {
+        this.logger.debug('Pool reserve query failed', { pool, error: getErrorMessage(error) });
       }
     });
 
@@ -1119,8 +1119,8 @@ export class PendingStateSimulator {
           // The actual output is whichever is non-zero
           actualAmountOut = amount0Out > 0n ? amount0Out : amount1Out;
           break;
-        } catch {
-          // Failed to parse, continue looking
+        } catch (error) {
+          this.logger.debug('V2 Swap event parse failed', { error: getErrorMessage(error) });
         }
       } else if (topic0 === V3_SWAP_TOPIC) {
         // Parse V3 Swap event
@@ -1136,8 +1136,8 @@ export class PendingStateSimulator {
           // User receives the negative amount (tokens leaving pool)
           actualAmountOut = amount0 < 0n ? -amount0 : (amount1 < 0n ? -amount1 : undefined);
           break;
-        } catch {
-          // Failed to parse, continue looking
+        } catch (error) {
+          this.logger.debug('V3 Swap event parse failed', { error: getErrorMessage(error) });
         }
       }
     }

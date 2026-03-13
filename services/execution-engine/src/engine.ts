@@ -1095,8 +1095,8 @@ export class ExecutionEngineService {
       // RT-016 FIX: Stop GasPriceCache refresh timers
       try {
         await getGasPriceCache().stop();
-      } catch {
-        // Non-critical — cache may not have been started
+      } catch (error) {
+        this.logger.debug('GasPriceCache stop failed (non-critical)', { error: getErrorMessage(error) });
       }
       resetGasPriceCache();
 

@@ -345,14 +345,15 @@ describe('SSE Routes', () => {
 
       handler(req, res);
 
-      // Should have sent 3 initial events
-      expect(res.write).toHaveBeenCalledTimes(3);
+      // Should have sent 4 initial events (metrics, services, circuit-breaker, cex-spread)
+      expect(res.write).toHaveBeenCalledTimes(4);
 
       // Verify SSE format: "id: N\nevent: type\ndata: json\n\n"
       const events = res.writtenData;
       expect(events[0]).toMatch(/^id: 1\nevent: metrics\ndata: /);
       expect(events[1]).toMatch(/^id: 2\nevent: services\ndata: /);
       expect(events[2]).toMatch(/^id: 3\nevent: circuit-breaker\ndata: /);
+      expect(events[3]).toMatch(/^id: 4\nevent: cex-spread\ndata: /);
 
       // Verify data is valid JSON
       const metricsData = JSON.parse(events[0].split('data: ')[1].trim());
@@ -398,15 +399,15 @@ describe('SSE Routes', () => {
 
       handler(req, res);
 
-      // 3 initial events sent
-      expect(res.write).toHaveBeenCalledTimes(3);
+      // 4 initial events sent (metrics, services, circuit-breaker, cex-spread)
+      expect(res.write).toHaveBeenCalledTimes(4);
 
       // Push a real-time event through the subscription
       capturedListener!('execution-result', { opportunityId: 'opp-1', success: true });
 
-      expect(res.write).toHaveBeenCalledTimes(4);
-      expect(res.writtenData[3]).toContain('event: execution-result');
-      expect(res.writtenData[3]).toContain('"opportunityId":"opp-1"');
+      expect(res.write).toHaveBeenCalledTimes(5);
+      expect(res.writtenData[4]).toContain('event: execution-result');
+      expect(res.writtenData[4]).toContain('"opportunityId":"opp-1"');
 
       // Cleanup
       req.emit('close');
@@ -428,7 +429,7 @@ describe('SSE Routes', () => {
       const res = createMockRes();
 
       handler(req, res);
-      const initialWrites = res.write.mock.calls.length; // 3 initial
+      const initialWrites = res.write.mock.calls.length; // 4 initial (metrics, services, cb, cex-spread)
 
       // At 5s, metrics + services + circuit-breaker intervals all fire
       jest.advanceTimersByTime(5000);
@@ -640,7 +641,7 @@ describe('SSE Routes', () => {
         .filter((d: string) => d.startsWith('id: '))
         .map((d: string) => parseInt(d.match(/^id: (\d+)/)![1], 10));
 
-      expect(ids).toEqual([1, 2, 3]);
+      expect(ids).toEqual([1, 2, 3, 4]);
       // Verify monotonically increasing
       for (let i = 1; i < ids.length; i++) {
         expect(ids[i]).toBeGreaterThan(ids[i - 1]);

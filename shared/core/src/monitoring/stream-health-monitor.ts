@@ -567,8 +567,8 @@ export class StreamHealthMonitor {
       for (const group of groups) {
         consumerCount += group.consumers;
       }
-    } catch {
-      // Stream may not have groups yet — leave consumerCount as 0
+    } catch (error) {
+      this.logger.debug(`Failed to get consumer count for ${streamName}`, { error: error instanceof Error ? error.message : String(error) });
     }
 
     // SC-L-003 FIX: Calculate oldest message age from first entry's ID
@@ -582,8 +582,8 @@ export class StreamHealthMonitor {
           oldestMessageAge = Math.max(0, now - tsMs);
         }
       }
-    } catch {
-      // Stream may not exist yet — leave oldestMessageAge as 0
+    } catch (error) {
+      this.logger.debug(`Failed to get oldest message age for ${streamName}`, { error: error instanceof Error ? error.message : String(error) });
     }
 
     return {

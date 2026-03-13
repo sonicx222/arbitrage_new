@@ -925,8 +925,8 @@ export class ChainDetectorInstance extends EventEmitter {
       for (const adapter of chainAdapters) {
         await registry.unregister(adapter.name, adapter.chain);
       }
-    } catch {
-      // Adapter cleanup failure is non-fatal during shutdown
+    } catch (error) {
+      this.logger.debug('Adapter cleanup failed during shutdown', { chain: this.chainId, error: getErrorMessage(error) });
     }
 
     // Clear pairs and caches

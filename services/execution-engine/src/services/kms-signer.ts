@@ -543,8 +543,8 @@ export class KmsSigner extends ethers.AbstractSigner {
           this._logger.debug('KMS sign completed', { chain: this.chainName, latencyMs: signLatencyMs });
           return { r, s, v };
         }
-      } catch {
-        // Try next v value
+      } catch (error) {
+        this._logger.debug('KMS v-value recovery attempt failed', { v, error: error instanceof Error ? error.message : String(error) });
       }
     }
 

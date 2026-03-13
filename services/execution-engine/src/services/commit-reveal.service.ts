@@ -1022,8 +1022,10 @@ export class CommitRevealService {
           if (parsed && parsed.name === 'Revealed') {
             return BigInt(parsed.args[3]); // profit is 4th argument (index 3)
           }
-        } catch {
-          // Not a Revealed event, continue
+        } catch (error) {
+          if (!(error instanceof TypeError)) {
+            this.logger.debug('Unexpected error parsing log as Revealed event', { error: error instanceof Error ? error.message : String(error) });
+          }
         }
       }
 

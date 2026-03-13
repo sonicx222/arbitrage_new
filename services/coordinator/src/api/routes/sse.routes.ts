@@ -132,22 +132,25 @@ function startTimerPool(state: CoordinatorStateProvider): void {
     }
   }, SSE_INTERVAL_DIAGNOSTICS));
 
-  // ADR-036: CEX-DEX spread data (only when feature is enabled)
-  if (FEATURE_FLAGS.useCexPriceSignals) {
-    timers.push(setInterval(() => {
-      if (clients.size === 0) return;
-      try {
-        const cexFeed = getCexPriceFeedService();
-        broadcast('cex-spread', JSON.stringify({
-          stats: cexFeed.getStats(),
-          alerts: cexFeed.getActiveAlerts(),
-          healthSnapshot: cexFeed.getHealthSnapshot(),
-        }));
-      } catch {
-        // CEX feed not initialized — skip
-      }
-    }, SSE_INTERVAL_CEX_SPREAD));
-  }
+  // ADR-036: CEX-DEX spread data — always emit so dashboard knows feature state
+  timers.push(setInterval(() => {
+    if (clients.size === 0) return;
+    if (!FEATURE_FLAGS.useCexPriceSignals) {
+      broadcast('cex-spread', JSON.stringify({ enabled: false }));
+      return;
+    }
+    try {
+      const cexFeed = getCexPriceFeedService();
+      broadcast('cex-spread', JSON.stringify({
+        enabled: true,
+        stats: cexFeed.getStats(),
+        alerts: cexFeed.getActiveAlerts(),
+        healthSnapshot: cexFeed.getHealthSnapshot(),
+      }));
+    } catch {
+      // CEX feed not initialized — skip
+    }
+  }, SSE_INTERVAL_CEX_SPREAD));
 
   timers.push(setInterval(() => {
     for (const client of clients) {
@@ -231,11 +234,14 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     sendToClient(client, 'services', Object.fromEntries(state.getServiceHealthMap()));
     sendToClient(client, 'circuit-breaker', state.getCircuitBreakerSnapshot());
 
-    // ADR-036: Send initial CEX spread data if enabled
-    if (FEATURE_FLAGS.useCexPriceSignals) {
+    // ADR-036: Send initial CEX spread data (always emit so dashboard knows feature state)
+    if (!FEATURE_FLAGS.useCexPriceSignals) {
+      sendToClient(client, 'cex-spread', { enabled: false });
+    } else {
       try {
         const cexFeed = getCexPriceFeedService();
         sendToClient(client, 'cex-spread', {
+          enabled: true,
           stats: cexFeed.getStats(),
           alerts: cexFeed.getActiveAlerts(),
           healthSnapshot: cexFeed.getHealthSnapshot(),

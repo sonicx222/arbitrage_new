@@ -1470,8 +1470,8 @@ export abstract class BaseExecutionStrategy {
           const operationType = opportunity.type ?? 'simple';
           const estimate = getGasPriceCache().estimateGasCostUsd(chain, gasUnits, operationType);
           estimatedGasCostUsd = estimate.costUsd;
-        } catch {
-          // Non-critical — gas cache may not have data yet
+        } catch (error) {
+          this.logger.debug('Gas cost estimation failed', { chain, error: getErrorMessage(error) });
         }
       }
     }
@@ -1479,8 +1479,8 @@ export abstract class BaseExecutionStrategy {
       try {
         const operationType = opportunity.type ?? 'simple';
         getGasPriceCache().recordGasCalibration(chain, operationType, estimatedGasCostUsd, gasCostUsd);
-      } catch {
-        // Non-critical — don't let calibration failure break profit calculation
+      } catch (error) {
+        this.logger.debug('Gas calibration recording failed', { chain, error: getErrorMessage(error) });
       }
     }
 

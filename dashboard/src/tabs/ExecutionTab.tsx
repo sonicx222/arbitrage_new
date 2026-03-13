@@ -13,7 +13,7 @@ import type { FeedItem } from '../lib/types';
 
 type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
 
-const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'MEV Protected', 'Error'];
+const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'Error'];
 
 const CHART_RANGES = [
   { label: '5m', points: 150 },
@@ -99,7 +99,6 @@ export function ExecutionTab() {
         e.gasCost ?? '',
         e.latencyMs ?? '',
         e.transactionHash ?? '',
-        e.usedMevProtection ? 'yes' : 'no',
         e.error ?? '',
       ];
     }),

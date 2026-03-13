@@ -210,6 +210,7 @@ export class DlqConsumer {
 
       for (const message of messages) {
         const dlqMessage = message.data as unknown as DlqMessage;
+        if (typeof dlqMessage.timestamp === 'string') dlqMessage.timestamp = Number(dlqMessage.timestamp);
 
         // Extract error type from error message (e.g., "[VAL_MISSING_ID]" or "[ERR_NO_CHAIN]")
         const errorType = this.extractErrorType(dlqMessage.error);
@@ -319,6 +320,7 @@ export class DlqConsumer {
       if (retryableCandidates.length >= this.maxAutoReplaysPerScan) break;
 
       const dlqMessage = message.data as unknown as DlqMessage;
+      if (typeof dlqMessage.timestamp === 'string') dlqMessage.timestamp = Number(dlqMessage.timestamp);
 
       // Skip already-replayed messages (would create loop)
       if (this.recentlyReplayed.has(message.id)) continue;
@@ -467,6 +469,7 @@ export class DlqConsumer {
       }
 
       const dlqMessage = targetMessage.data as unknown as DlqMessage;
+      if (typeof dlqMessage.timestamp === 'string') dlqMessage.timestamp = Number(dlqMessage.timestamp);
 
       // Verify original payload is available for replay
       if (!dlqMessage.originalPayload) {

@@ -802,8 +802,8 @@ export class ExpertSelfHealingManager {
         if (health && health.status === 'healthy') {
           return true;
         }
-      } catch (error) {
-        // Continue waiting
+      } catch {
+        // Continue waiting — health check polling expected to fail intermittently
       }
 
       await new Promise(resolve => setTimeout(resolve, 1000));

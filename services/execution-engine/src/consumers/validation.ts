@@ -383,12 +383,12 @@ export function validateMessageStructure(
   restoreFloat(data, 'confidence', 0);
   restoreFloat(data, 'expectedProfit', 0);
   restoreFloat(data, 'estimatedProfit', 0);
-  restoreFloat(data, 'buyPrice', 0);
-  restoreFloat(data, 'sellPrice', 0);
   restoreInt(data, 'blockNumber', 0);
   // SA-3N-001: timestamp/expiresAt remain strings after deserialization
   restoreTimestamp(data, 'timestamp', Date.now());
   restoreTimestamp(data, 'expiresAt', 0);
+  // SA-016: forwardedAt serialized as Date.now().toString() in stream-serialization.ts
+  restoreTimestamp(data, 'forwardedAt', 0);
 
   return {
     valid: true,

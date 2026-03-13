@@ -703,8 +703,6 @@ describe('validateMessageStructure — numeric field deserialization from Redis 
         confidence: 'NaN',
         expectedProfit: 'undefined',
         estimatedProfit: '',
-        buyPrice: 'corrupted',
-        sellPrice: 'Infinity',
       })
     );
     expect(result.valid).toBe(true);
@@ -713,8 +711,7 @@ describe('validateMessageStructure — numeric field deserialization from Redis 
       expect(result.opportunity.confidence).toBe(0);
       expect(result.opportunity.expectedProfit).toBe(0);
       expect(result.opportunity.estimatedProfit).toBe(0);
-      expect(result.opportunity.buyPrice).toBe(0);
-      expect(result.opportunity.sellPrice).toBe(0);
+      // buyPrice/sellPrice not restored — no matching serialization path
     }
   });
 

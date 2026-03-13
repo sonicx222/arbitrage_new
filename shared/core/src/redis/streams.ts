@@ -362,9 +362,10 @@ export class StreamBatcher<T = Record<string, unknown>> {
     if (this.flushLock) {
       try {
         await this.flushLock;
-      } catch {
+      } catch (error) {
         // Flush failure is handled inside flush() — it re-queues messages.
         // We just need to wait for it to finish so the queue is up-to-date.
+        this.logger.debug('Flush-lock await failed during destroy (handled internally)', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -1394,9 +1395,11 @@ export class RedisStreamsClient {
                 group.name = value as string;
                 break;
               case 'consumers':
+                // eslint-disable-next-line no-restricted-syntax -- Number() may return NaN; ?? doesn't handle NaN
                 group.consumers = Number(value) || 0;
                 break;
               case 'pending':
+                // eslint-disable-next-line no-restricted-syntax -- Number() may return NaN; ?? doesn't handle NaN
                 group.pending = Number(value) || 0;
                 break;
               case 'last-delivered-id':

@@ -160,6 +160,7 @@ export class Http2SessionPool {
       let status = 0;
 
       stream.on('response', (headers) => {
+        // eslint-disable-next-line no-restricted-syntax -- Number() may return NaN; ?? doesn't handle NaN
         status = Number(headers[http2.constants.HTTP2_HEADER_STATUS]) || 0;
       });
 

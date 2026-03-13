@@ -248,8 +248,8 @@ function startRedisHealthMonitor(
           updateGasPrice(chain, data.gasPriceGwei);
         }
       }
-    } catch {
-      // Non-critical — gas cache may not be started yet
+    } catch (error) {
+      logger.debug('Gas cache metric push failed (non-critical)', { error: getErrorMessage(error) });
     }
   }, 10_000);
   // Initial check

@@ -2,8 +2,21 @@
 
 ## Dependencies
 
+Redis CLI: Use the Node.js replacement at `scripts/monitoring/redis-cli.cjs` (ioredis-based,
+cross-platform). Falls back to native `redis-cli` if available. All `redis-cli` commands in
+Phases 2-5 should be executed as: `node scripts/monitoring/redis-cli.cjs <command> [args...]`
+
+For `--scan`: `node scripts/monitoring/redis-cli.cjs --scan --pattern "stream:*"`
+
 ```bash
-command -v redis-cli >/dev/null 2>&1 || { echo "CRITICAL: redis-cli required but not found on PATH"; exit 1; }
+if [ -f "./scripts/monitoring/redis-cli.cjs" ]; then
+  echo "Redis CLI: Node.js replacement (scripts/monitoring/redis-cli.cjs)"
+elif command -v redis-cli >/dev/null 2>&1; then
+  echo "Redis CLI: native redis-cli"
+else
+  echo "WARNING: No Redis CLI available. Install redis-cli or ensure scripts/monitoring/redis-cli.cjs exists."
+  echo "Phases 2-5 (which require Redis inspection) may fail."
+fi
 ```
 
 ## Session Workspace

@@ -77,7 +77,6 @@ export interface ExecutionResult {
   chain: string;
   dex: string;
   latencyMs?: number;
-  usedMevProtection?: boolean;
 }
 
 export type AlertSeverity = 'low' | 'warning' | 'high' | 'critical';

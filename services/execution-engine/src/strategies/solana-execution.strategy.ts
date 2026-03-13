@@ -493,8 +493,8 @@ export class SolanaExecutionStrategy implements ExecutionStrategy {
             errorCode: 'ERR_TX_EXPIRED',
           };
         }
-      } catch {
-        // Block height check failed — don't abort, rely on timeout
+      } catch (error) {
+        this.logger.warn('Solana block height check failed — relying on timeout', { error: getErrorMessage(error) });
       }
 
       await this.sleep(confirmationPollIntervalMs);

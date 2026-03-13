@@ -112,7 +112,11 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 
 ## Dependencies
 
-- `redis-cli` must be on PATH (checked in preflight)
+- **Redis CLI**: Use `node scripts/monitoring/redis-cli.cjs` (ioredis-based, cross-platform).
+  All `redis-cli` commands in phase modules should be executed as:
+  `node scripts/monitoring/redis-cli.cjs <command> [args...]`
+  Falls back to native `redis-cli` if available, but the Node.js version is preferred.
+  The `--pipe-mode` flag is not supported; use sequential commands instead.
 - `node` for JSON parsing (replaces `jq` — not available on all platforms)
 - No `bc` or GNU `timeout` required (Windows Git Bash compatible)
 
