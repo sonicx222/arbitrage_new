@@ -154,10 +154,10 @@ Chain Detectors → SwapEventFilter → stream:swap-events → Coordinator
 Each service uses a dedicated consumer group to isolate message processing:
 
 ### Coordinator Consumer Groups
-- **Streams**: `stream:opportunities`, `stream:swap-events`, `stream:whale-alerts`, `stream:volume-aggregates`, `stream:health`, `stream:price-updates`
+- **Streams** (10): `stream:opportunities`, `stream:swap-events`, `stream:whale-alerts`, `stream:volume-aggregates`, `stream:health`, `stream:price-updates`, `stream:execution-results`, `stream:dead-letter-queue`, `stream:forwarding-dlq`, `stream:service-degradation`
 - **Group**: `coordinator-group` (shared across coordinator instances)
 - **startId**: `$` (only new messages — no backlog replay on restart)
-- **Purpose**: Deduplicates opportunities across multiple coordinator instances via Redis consumer group semantics
+- **Purpose**: Deduplicates opportunities across multiple coordinator instances via Redis consumer group semantics. Execution results, DLQs, and degradation streams provide feedback loops for alerting and metrics.
 
 ### Execution Engine Consumer Group
 - **Stream**: `stream:execution-requests`

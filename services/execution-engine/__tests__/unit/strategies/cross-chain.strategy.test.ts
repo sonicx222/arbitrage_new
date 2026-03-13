@@ -58,9 +58,17 @@ const createMockBridgeRouter = (overrides: {
 } = {}) => {
   const defaultQuote = {
     valid: true,
-    estimatedOutput: BigInt('1000000000'),
+    protocol: 'stargate' as const,
+    sourceChain: 'ethereum',
+    destChain: 'arbitrum',
+    token: 'USDC',
+    amountIn: '1000000000', // 1000 USDC (6 decimals)
+    amountOut: '999400000', // After 0.06% bridge fee (Stargate 6 bps)
+    bridgeFee: '600000', // 0.06% protocol fee in bridged token
+    estimatedOutput: BigInt('999400000'),
     gasFee: BigInt('1000000000000000'), // 0.001 ETH (native wei)
     totalFee: BigInt('1000000000000000'), // Same as gasFee (native wei only)
+    estimatedTimeSeconds: 120,
     expiresAt: Date.now() + 60000,
   };
 
@@ -523,9 +531,17 @@ describe('CrossChainStrategy - Bridge Execution', () => {
       isRouteSupported: jest.fn().mockReturnValue(true),
       quote: jest.fn().mockResolvedValue({
         valid: true,
-        estimatedOutput: BigInt('1000000000'),
+        protocol: 'stargate',
+        sourceChain: 'ethereum',
+        destChain: 'arbitrum',
+        token: 'USDC',
+        amountIn: '1000000000',
+        amountOut: '999400000',
+        bridgeFee: '600000',
+        estimatedOutput: BigInt('999400000'),
         gasFee: BigInt('1000000000000000'),
         totalFee: BigInt('1000000000000000'),
+        estimatedTimeSeconds: 120,
         expiresAt: Date.now() + 60000,
       }),
       execute: jest.fn().mockResolvedValue({
@@ -560,9 +576,17 @@ describe('CrossChainStrategy - Bridge Execution', () => {
       isRouteSupported: jest.fn().mockReturnValue(true),
       quote: jest.fn().mockResolvedValue({
         valid: true,
-        estimatedOutput: BigInt('1000000000'),
+        protocol: 'stargate',
+        sourceChain: 'ethereum',
+        destChain: 'arbitrum',
+        token: 'USDC',
+        amountIn: '1000000000',
+        amountOut: '999400000',
+        bridgeFee: '600000',
+        estimatedOutput: BigInt('999400000'),
         gasFee: BigInt('1000000000000000'),
         totalFee: BigInt('1000000000000000'),
+        estimatedTimeSeconds: 120,
         expiresAt: Date.now() + 60000,
       }),
       execute: jest.fn().mockResolvedValue({

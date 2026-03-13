@@ -124,6 +124,24 @@ Solana wallets must be provided via `SOLANA_PRIVATE_KEY`.
 
 See `services/execution-engine/src/services/hd-wallet-manager.ts` for implementation details.
 
+#### KMS Signing (Production Recommended)
+
+For production deployments with real funds, use cloud KMS (Key Management Service) instead of
+plaintext private keys. KMS signers keep the private key in a hardware security module (HSM) —
+the key never leaves the secure enclave, eliminating exposure in process memory or crash dumps.
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `FEATURE_KMS_SIGNING` | Enable KMS signers (`true` to enable) | No |
+| `KMS_KEY_ID` | Default KMS key ID for all chains | No |
+| `KMS_KEY_ID_{CHAIN}` | Per-chain KMS key ID (e.g., `KMS_KEY_ID_ETHEREUM`) | No |
+
+**Priority order:** KMS signers are created alongside wallet signers. `getEffectiveSigner(chain)`
+prefers the wallet signer if available, falling back to the KMS signer. For production, omit
+`PRIVATE_KEY` and `WALLET_MNEMONIC` and configure only KMS keys.
+
+See `services/execution-engine/src/services/kms-signer.ts` and `provider.service.ts` for implementation.
+
 ### Optional Variables
 
 | Variable | Description | Default |

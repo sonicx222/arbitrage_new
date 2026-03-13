@@ -701,6 +701,44 @@ describe('ChainDetectorInstance - WebSocket & Subscription Management', () => {
       }).not.toThrow();
     });
 
+    it('should handle malformed message with null params', () => {
+      const instance = createInstance();
+      (instance as any).isRunning = true;
+      (instance as any).isStopping = false;
+
+      // Malformed: method present but params is null
+      expect(() => {
+        (instance as any).handleWebSocketMessage({
+          method: 'eth_subscription',
+          params: null,
+        });
+      }).not.toThrow();
+    });
+
+    it('should handle malformed message with missing result in params', () => {
+      const instance = createInstance();
+      (instance as any).isRunning = true;
+      (instance as any).isStopping = false;
+
+      // Malformed: params present but result is undefined
+      expect(() => {
+        (instance as any).handleWebSocketMessage({
+          method: 'eth_subscription',
+          params: {},
+        });
+      }).not.toThrow();
+    });
+
+    it('should handle completely empty message', () => {
+      const instance = createInstance();
+      (instance as any).isRunning = true;
+      (instance as any).isStopping = false;
+
+      expect(() => {
+        (instance as any).handleWebSocketMessage({});
+      }).not.toThrow();
+    });
+
     it('should route factory events when factory mode is enabled', () => {
       const instance = createInstance();
       (instance as any).isRunning = true;

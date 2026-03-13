@@ -382,6 +382,56 @@ describe('GasPriceOptimizer', () => {
     });
   });
 
+  // =========================================================================
+  // EIP-1559 fee data priority chain
+  // =========================================================================
+
+  describe('EIP-1559 fee data handling', () => {
+    it('should prefer maxFeePerGas over gasPrice (EIP-1559 chain)', async () => {
+      const maxFee = ethers.parseUnits('30', 'gwei');
+      const legacyPrice = ethers.parseUnits('25', 'gwei');
+
+      const mockProvider = {
+        getFeeData: jest.fn<() => Promise<any>>().mockResolvedValue({
+          maxFeePerGas: maxFee,
+          maxPriorityFeePerGas: ethers.parseUnits('2', 'gwei'),
+          gasPrice: legacyPrice,
+        }),
+      } as unknown as ethers.JsonRpcProvider;
+
+      const price = await optimizer.getOptimalGasPrice('ethereum', mockProvider, gasBaselines);
+      expect(price).toBe(maxFee); // maxFeePerGas takes priority
+    });
+
+    it('should fall back to gasPrice when maxFeePerGas is null (legacy chain)', async () => {
+      const legacyPrice = ethers.parseUnits('5', 'gwei');
+
+      const mockProvider = {
+        getFeeData: jest.fn<() => Promise<any>>().mockResolvedValue({
+          maxFeePerGas: null,
+          maxPriorityFeePerGas: null,
+          gasPrice: legacyPrice,
+        }),
+      } as unknown as ethers.JsonRpcProvider;
+
+      const price = await optimizer.getOptimalGasPrice('bsc', mockProvider, gasBaselines);
+      expect(price).toBe(legacyPrice);
+    });
+
+    it('should fall back to configured fallback when both fee fields are null', async () => {
+      const mockProvider = {
+        getFeeData: jest.fn<() => Promise<any>>().mockResolvedValue({
+          maxFeePerGas: null,
+          maxPriorityFeePerGas: null,
+          gasPrice: null,
+        }),
+      } as unknown as ethers.JsonRpcProvider;
+
+      const price = await optimizer.getOptimalGasPrice('ethereum', mockProvider, gasBaselines);
+      expect(price).toBe(getFallbackGasPrice('ethereum'));
+    });
+  });
+
   describe('resetMedianCache', () => {
     it('should clear median cache and EMA baselines', () => {
       optimizer.updateGasBaseline('ethereum', ethers.parseUnits('50', 'gwei'), gasBaselines);

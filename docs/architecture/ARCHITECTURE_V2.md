@@ -124,6 +124,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 │ ││ Partition 2  ││ │                │ │                │ │ Account Subs  │ │      ││
 │ ││ARB/OP/Base   ││ │                │ │                │ │ Helius RPC    │ │      ││
 │ ││Scroll/Blast  ││ │                │ │                │ │                │ │      ││
+│ ││Mantle/Mode   ││ │                │ │                │ │                │ │      ││
 │ ││ Fly.io SG    ││ │                │ │                │ │                │ │      ││
 │ │└──────────────┘│ │                │ │                │ │                │ │      ││
 │ └────────────────┘ └────────────────┘ └────────────────┘ └────────────────┘ └──────┘│
@@ -728,7 +729,7 @@ streams instead of the single `stream:execution-requests`:
 | Group | Stream | Chains | MAXLEN |
 |-------|--------|--------|--------|
 | fast | `stream:exec-requests-fast` | BSC, Polygon, Avalanche, Fantom | 25,000 |
-| l2 | `stream:exec-requests-l2` | Arbitrum, Optimism, Base, Scroll, Blast | 25,000 |
+| l2 | `stream:exec-requests-l2` | Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode | 25,000 |
 | premium | `stream:exec-requests-premium` | Ethereum, zkSync, Linea | 25,000 |
 | solana | `stream:exec-requests-solana` | Solana | 10,000 |
 
@@ -1085,7 +1086,7 @@ All original phases are complete. Current state as of March 2026:
 | Phase 1 | 7 | 25 | 60 | Complete |
 | Phase 2 | 9 + Solana | 52 | 125 | Complete |
 | Phase 3 | 11 | 54 | 143 | Complete |
-| Phase 4 (Emerging L2) | +4 (Blast, Scroll, Mantle, Mode) | +14 | 112 | 2 operational, 2 stubs |
+| Phase 4 (Emerging L2) | +4 (Blast, Scroll, Mantle, Mode) | +14 | 112 | 4 operational (RPC-validated 2026-03-08) |
 | **Current** | **15** | **78** | **112** | **14 EVM + Solana** |
 
 ---

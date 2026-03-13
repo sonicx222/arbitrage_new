@@ -653,4 +653,71 @@ describe('Execution Flow Unit Tests', () => {
       expect(receivedData.id).toBe('coord-test-1');
     });
   });
+
+  // ==========================================================================
+  // Redis Connection Failure Scenarios (MF-H-02)
+  // ==========================================================================
+  describe('Redis Connection Failure Scenarios', () => {
+    it('should handle ECONNREFUSED on xadd', async () => {
+      const connError = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+      (connError as any).code = 'ECONNREFUSED';
+      mockRedisInstance.xadd.mockRejectedValueOnce(connError);
+
+      await expect(
+        mockRedisInstance.xadd('stream:execution-results', '*', 'data', '{}')
+      ).rejects.toThrow('ECONNREFUSED');
+    });
+
+    it('should handle Redis timeout on xreadgroup', async () => {
+      const timeoutError = new Error('Command timed out');
+      (timeoutError as any).code = 'ETIMEDOUT';
+      mockRedisInstance.xreadgroup.mockRejectedValueOnce(timeoutError);
+
+      await expect(
+        mockRedisInstance.xreadgroup(
+          'GROUP', 'ee-group', 'consumer-1',
+          'COUNT', '10',
+          'STREAMS', 'stream:opportunities', '>'
+        )
+      ).rejects.toThrow('timed out');
+    });
+
+    it('should handle Redis OOM on xadd', async () => {
+      const oomError = new Error('OOM command not allowed when used memory > maxmemory');
+      mockRedisInstance.xadd.mockRejectedValueOnce(oomError);
+
+      await expect(
+        mockRedisInstance.xadd('stream:health', '*', 'data', '{}')
+      ).rejects.toThrow('OOM');
+    });
+
+    it('should recover after transient connection failure', async () => {
+      // First call fails
+      const connError = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+      (connError as any).code = 'ECONNREFUSED';
+      mockRedisInstance.xadd.mockRejectedValueOnce(connError);
+
+      await expect(
+        mockRedisInstance.xadd('stream:execution-results', '*', 'data', '{}')
+      ).rejects.toThrow('ECONNREFUSED');
+
+      // Second call succeeds (mock reverts to default implementation)
+      reapplyRedisMockImplementations();
+      const messageId = await mockRedisInstance.xadd(
+        'stream:execution-results', '*', 'data', JSON.stringify({ id: 'recovery-1' })
+      );
+      expect(messageId).toBeDefined();
+      expect(mockStreams.get('stream:execution-results')?.length).toBe(1);
+    });
+
+    it('should handle partial ACK failure (xack rejects)', async () => {
+      mockRedisInstance.xack.mockRejectedValueOnce(
+        new Error('NOSCRIPT No matching script')
+      );
+
+      await expect(
+        mockRedisInstance.xack('stream:opportunities', 'ee-group', '1234-0')
+      ).rejects.toThrow('NOSCRIPT');
+    });
+  });
 });
