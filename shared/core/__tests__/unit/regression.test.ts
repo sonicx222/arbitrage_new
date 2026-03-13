@@ -917,10 +917,10 @@ describe('P1-3: Stream MAXLEN Support', () => {
     const STREAM_MAX_LENGTHS: Record<string, number> = {
       'stream:price-updates': 100000,
       'stream:swap-events': 50000,
-      'stream:opportunities': 50000,
+      'stream:opportunities': 200000,
       'stream:whale-alerts': 5000,
       'stream:volume-aggregates': 10000,
-      'stream:health': 1000
+      'stream:health': 5000
     };
 
     // All streams should have defined limits

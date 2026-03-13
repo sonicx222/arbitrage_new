@@ -1230,7 +1230,9 @@ export class RedisStreamsClient {
     }
 
     const length = await this.xlen(streamName);
-    const lagRatio = length / maxLen;
+    // L-05 FIX: Treat streams with ≤1 entry as empty (ratio 0).
+    // A single init/seed message produces 0.00001 ratio which misleadingly suggests load.
+    const lagRatio = length <= 1 ? 0 : length / maxLen;
 
     // P0 Fix ES-006: Check consumer group pending count for accurate lag measurement
     let pendingCount = 0;

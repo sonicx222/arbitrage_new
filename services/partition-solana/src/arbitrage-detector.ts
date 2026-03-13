@@ -261,12 +261,13 @@ export class SolanaArbitrageDetector extends EventEmitter {
 
     this.streamsClient = deps?.streamsClient;
 
-    this.logger.info('SolanaArbitrageDetector initialized', {
+    // L-06 FIX: Note that streams client is injected later via setStreamsClient(),
+    // so hasStreamsClient: false at init is expected, not a problem.
+    this.logger.info('SolanaArbitrageDetector initialized (streams client attached later via setStreamsClient)', {
       chainId: this.config.chainId,
       minProfitThreshold: this.config.minProfitThreshold,
       crossChainEnabled: this.config.crossChainEnabled,
       triangularEnabled: this.config.triangularEnabled,
-      hasStreamsClient: !!this.streamsClient,
     });
   }
 

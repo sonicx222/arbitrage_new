@@ -501,8 +501,9 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
     throw new Error(msg);
   }
   if (!isProductionEnv && isPublicBind && !authToken) {
-    // P0-2 FIX: Clarified log text — "will bind" not "bound" (binding hasn't happened yet)
-    logger.warn('Health server will bind to all interfaces without auth token (non-production)', {
+    // L-01 FIX: Downgrade from warn to debug — this fires on every partition startup
+    // in dev and is expected behavior. Operators know to set auth for production.
+    logger.debug('Health server will bind to all interfaces without auth token (non-production)', {
       bindAddress,
       hint: 'Set HEALTH_AUTH_TOKEN or HEALTH_BIND_ADDRESS=127.0.0.1 for production',
     });

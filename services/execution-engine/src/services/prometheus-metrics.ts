@@ -366,25 +366,25 @@ export function initializeGasPriceGauges(chains: string[]): void {
  * @param chains - List of chain identifiers to seed
  */
 export function initializeBIHistograms(chains: string[]): void {
-  // Seed each histogram with the first configured chain so at least one
-  // label combination exists. The 0-value observations are harmless — real
-  // execution data will quickly dominate the distribution.
-  const seedChain = chains[0] ?? 'unknown';
-  collector.recordHistogram('opportunity_age_at_execution_ms', 0, { chain: seedChain });
-  collector.recordHistogram('profit_per_execution', 0, { chain: seedChain, strategy: 'seed' });
-  collector.recordHistogram('gas_cost_per_execution', 0, { chain: seedChain });
-  collector.recordHistogram('stream_message_transit_ms', 0, { stream: RedisStreams.EXECUTION_REQUESTS });
+  // L-08 FIX: Seed ALL configured chains so Prometheus/Grafana dashboards show
+  // every chain at startup, not just the first one. Without this, chains are
+  // invisible until their first execution attempt.
+  if (chains.length === 0) return;
 
-  // RT-027 FIX: Seed BI counters so they appear in /metrics output with value 0.
-  // Prometheus counters only appear in getSnapshot() after at least one increment.
-  // Without seeding, monitoring's metrics completeness check (3AI) flags
-  // arbitrage_executions_total and related counters as missing.
-  collector.incrementCounter('executions_total', { chain: seedChain, strategy: 'seed' }, 0);
-  collector.incrementCounter('execution_attempts_total', { chain: seedChain, strategy: 'seed' }, 0);
-  collector.incrementCounter('execution_success_total', { chain: seedChain, strategy: 'seed' }, 0);
-  collector.incrementCounter('execution_failure_total', { chain: seedChain, strategy: 'seed', reason: 'seed' }, 0);
-  collector.incrementCounter('opportunity_outcome_total', { chain: seedChain, outcome: 'seed' }, 0);
-  collector.incrementCounter('profit_estimation_bias_total', { chain: seedChain, strategy: 'seed', direction: 'accurate' }, 0);
+  for (const chain of chains) {
+    collector.recordHistogram('opportunity_age_at_execution_ms', 0, { chain });
+    collector.recordHistogram('profit_per_execution', 0, { chain, strategy: 'seed' });
+    collector.recordHistogram('gas_cost_per_execution', 0, { chain });
+    collector.incrementCounter('executions_total', { chain, strategy: 'seed' }, 0);
+    collector.incrementCounter('execution_attempts_total', { chain, strategy: 'seed' }, 0);
+    collector.incrementCounter('execution_success_total', { chain, strategy: 'seed' }, 0);
+    collector.incrementCounter('execution_failure_total', { chain, strategy: 'seed', reason: 'seed' }, 0);
+    collector.incrementCounter('opportunity_outcome_total', { chain, outcome: 'seed' }, 0);
+    collector.incrementCounter('profit_estimation_bias_total', { chain, strategy: 'seed', direction: 'accurate' }, 0);
+  }
+
+  // Stream transit histogram is not per-chain — seed once
+  collector.recordHistogram('stream_message_transit_ms', 0, { stream: RedisStreams.EXECUTION_REQUESTS });
 }
 
 /**

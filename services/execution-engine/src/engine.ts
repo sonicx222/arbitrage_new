@@ -468,7 +468,8 @@ export class ExecutionEngineService {
 
   async start(): Promise<void> {
     const result = await this.stateManager.executeStart(async () => {
-      this.logger.info('Starting Execution Engine Service', {
+      // L-02 FIX: Distinct message from index.ts startup log to avoid "Starting" appearing twice
+      this.logger.info('Execution engine instance initializing', {
         instanceId: this.instanceId,
         queueConfig: this.queueConfig,
         simulationMode: this.isSimulationMode

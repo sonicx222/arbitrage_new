@@ -323,7 +323,7 @@ describe('RedisStreamsClient - Basic Operations', () => {
       expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.OPPORTUNITIES]).toBe(200000);
       expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.WHALE_ALERTS]).toBe(5000);
       expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]).toBe(10000);
-      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.HEALTH]).toBe(1000);
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.HEALTH]).toBe(5000);
     });
 
     it('should use approximate MAXLEN for better performance', async () => {
