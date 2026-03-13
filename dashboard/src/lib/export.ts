@@ -3,8 +3,13 @@
 
 function escapeCsvValue(val: unknown): string {
   if (val == null) return '';
-  const str = String(val);
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+  let str = String(val);
+  // P2-19: Prevent CSV formula injection — prefix dangerous leading chars with a tab
+  const first = str.charAt(0);
+  if (first === '=' || first === '+' || first === '-' || first === '@') {
+    str = '\t' + str;
+  }
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\t')) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;

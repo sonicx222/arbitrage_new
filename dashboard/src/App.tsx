@@ -249,6 +249,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
               aria-selected={tab === t.id}
               aria-controls={`tabpanel-${t.id}`}
               onClick={() => changeTab(t.id)}
+              title={t.id}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 tab === t.id ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300'
               }`}
@@ -298,6 +299,7 @@ export default function App() {
 
   const handleLogout = useCallback(() => {
     removeItem('dashboard_token');
+    removeItem('dashboard_token_ts');
     removeItem('cb_api_key');
     setAuthed(false);
   }, []);
@@ -312,6 +314,20 @@ export default function App() {
   const handleReconnect = useCallback(() => {
     setSSEKey((k) => k + 1);
   }, []);
+
+  // P2-20: Client-side token expiry — auto-logout after 24 hours.
+  useEffect(() => {
+    const TOKEN_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
+    const checkExpiry = () => {
+      const ts = getItem('dashboard_token_ts');
+      if (ts && Date.now() - Number(ts) > TOKEN_MAX_AGE_MS) {
+        handleLogout();
+      }
+    };
+    checkExpiry();
+    const id = setInterval(checkExpiry, 60_000); // check every minute
+    return () => clearInterval(id);
+  }, [handleLogout]);
 
   // L-07 FIX: Cross-tab auth sync. When another tab removes the token from
   // localStorage, this tab detects it via the storage event and logs out.

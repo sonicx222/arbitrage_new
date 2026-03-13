@@ -15,13 +15,63 @@ type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
 
 const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'MEV Protected', 'Error'];
 
+const CHART_RANGES = [
+  { label: '5m', points: 150 },
+  { label: '15m', points: 450 },
+  { label: '30m', points: 900 },
+  { label: '1h', points: 1800 },
+] as const;
+
 export function ExecutionTab() {
   const { metrics, chartData } = useMetrics();
   const { feed } = useFeed();
   const [search, setSearch] = useState('');
+  const [chartRange, setChartRange] = useState(3); // default: 1h (all data)
 
   const allExecutions = useMemo(
     () => feed.filter((item): item is ExecutionFeedItem => item.kind === 'execution').slice(0, 50),
+    [feed],
+  );
+
+  // P2-23: Gas cost analysis derived from recent executions
+  const gasStats = useMemo(() => {
+    let totalGas = 0;
+    let gasCount = 0;
+    let totalProfit = 0;
+    const byChain: Record<string, { gas: number; count: number }> = {};
+    for (const item of allExecutions) {
+      const { gasCost, actualProfit, chain } = item.data;
+      if (gasCost != null && Number.isFinite(gasCost)) {
+        totalGas += gasCost;
+        gasCount++;
+        const key = chain.toLowerCase();
+        const entry = byChain[key] ?? (byChain[key] = { gas: 0, count: 0 });
+        entry.gas += gasCost;
+        entry.count++;
+      }
+      if (actualProfit != null && Number.isFinite(actualProfit)) totalProfit += actualProfit;
+    }
+    const avgGas = gasCount > 0 ? totalGas / gasCount : 0;
+    const gasRatio = totalProfit > 0 ? (totalGas / totalProfit) * 100 : 0;
+    return { totalGas, avgGas, gasRatio, gasCount, byChain };
+  }, [allExecutions]);
+
+  // P2-25: Date range filter for chart data
+  const visibleChartData = useMemo(
+    () => chartData.slice(-CHART_RANGES[chartRange].points),
+    [chartData, chartRange],
+  );
+
+  // P2-24: CB trip history from alert feed
+  type AlertFeedItem = Extract<FeedItem, { kind: 'alert' }>;
+  const cbHistory = useMemo(
+    () => feed
+      .filter((item): item is AlertFeedItem => item.kind === 'alert' && (
+        item.data.type === 'circuit_breaker_open' || item.data.type === 'circuit_breaker_closed'
+        || item.data.type === 'circuit_breaker_half_open'
+        || (item.data.message?.toLowerCase().includes('circuit breaker') ?? false)
+      ))
+      .slice(0, 10),
     [feed],
   );
 
@@ -74,10 +124,26 @@ export function ExecutionTab() {
         <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
       </KpiGrid>
 
+      {/* Chart Range Selector */}
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] text-gray-500 mr-1">Range:</span>
+        {CHART_RANGES.map((r, i) => (
+          <button
+            key={r.label}
+            onClick={() => setChartRange(i)}
+            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+              chartRange === i ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]'
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
       {/* P&L Chart */}
       <div className="card">
         <SectionHeader>Cumulative P&L ($)</SectionHeader>
-        <Chart data={chartData} dataKey="profit" height={200} color={CHART.line2} fill
+        <Chart data={visibleChartData} dataKey="profit" height={200} color={CHART.line2} fill
           ariaLabel="Cumulative profit and loss over time" formatValue={(v) => `$${v.toFixed(2)}`} />
       </div>
 
@@ -85,18 +151,76 @@ export function ExecutionTab() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="card">
           <SectionHeader>Avg Latency (ms)</SectionHeader>
-          <Chart data={chartData} dataKey="latency" height={180} color={CHART.line1}
+          <Chart data={visibleChartData} dataKey="latency" height={180} color={CHART.line1}
             ariaLabel="Average execution latency over time" formatValue={(v) => `${v.toFixed(0)}ms`} />
         </div>
         <div className="card">
           <SectionHeader>Success Rate (%)</SectionHeader>
-          <Chart data={chartData} dataKey="successRate" height={180} color={CHART.line2}
+          <Chart data={visibleChartData} dataKey="successRate" height={180} color={CHART.line2}
             yDomain={[0, 100]} ariaLabel="Execution success rate over time" formatValue={(v) => `${v.toFixed(1)}%`} />
         </div>
       </div>
 
+      {/* Gas Cost Analysis */}
+      {gasStats.gasCount > 0 && (
+        <div className="card">
+          <SectionHeader mb="mb-3">Gas Cost Analysis</SectionHeader>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <div>
+              <span className="text-[10px] text-gray-500 block">Total Gas</span>
+              <span className="text-sm font-bold font-mono">{formatUsd(gasStats.totalGas)}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-500 block">Avg / Exec</span>
+              <span className="text-sm font-bold font-mono">{formatUsd(gasStats.avgGas)}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-500 block">Gas / Profit</span>
+              <span className={`text-sm font-bold font-mono ${gasStats.gasRatio > 50 ? 'text-accent-red' : gasStats.gasRatio > 25 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                {formatPct(gasStats.gasRatio)}
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-500 block">Executions</span>
+              <span className="text-sm font-bold font-mono">{gasStats.gasCount}</span>
+            </div>
+          </div>
+          {Object.keys(gasStats.byChain).length > 1 && (
+            <div>
+              <span className="text-[10px] text-gray-500 block mb-1">Per-Chain Gas</span>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(gasStats.byChain)
+                  .sort(([, a], [, b]) => b.gas - a.gas)
+                  .map(([chain, data]) => (
+                    <span key={chain} className="text-[10px] px-2 py-1 rounded bg-[var(--badge-bg)] text-gray-400">
+                      <span className="uppercase text-gray-300">{chain}</span>{' '}
+                      {formatUsd(data.gas)} ({data.count})
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Circuit Breaker */}
       <CircuitBreakerGrid />
+
+      {/* CB Trip History */}
+      {cbHistory.length > 0 && (
+        <div className="card">
+          <SectionHeader mb="mb-2">Circuit Breaker History</SectionHeader>
+          <div className="space-y-1 text-xs font-mono">
+            {cbHistory.map((item) => (
+              <div key={item.id} className="flex gap-2 py-1 border-b border-gray-800/50">
+                <span className="text-gray-600 shrink-0">{formatTime(item.data.timestamp)}</span>
+                <span className="text-accent-yellow">{'\u26A0'}</span>
+                <span className="text-gray-400">{item.data.message ?? item.data.type}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Executions Table */}
       <div className="card">

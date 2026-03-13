@@ -33,6 +33,7 @@ export function LoginScreen({ onLogin }: Props) {
       return;
     }
     setItem('dashboard_token', token);
+    setItem('dashboard_token_ts', String(Date.now()));
     if (cbKey) setItem('cb_api_key', cbKey);
     setLoading(false);
     onLogin();

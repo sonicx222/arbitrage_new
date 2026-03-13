@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --font-display: 'Manrope';
-  --font-body: 'Manrope';
-  --font-mono: 'JetBrains Mono';
+  --font-display: 'Manrope Variable', 'Manrope';
+  --font-body: 'Manrope Variable', 'Manrope';
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono';
 
   --surface: 9 9 11;
   --surface-light: 24 24 27;
