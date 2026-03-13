@@ -383,4 +383,89 @@ describe('TradeLogger', () => {
       expect(tradeLogger.isEnabled()).toBe(true);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle management (via LogFileManager)
+  // ---------------------------------------------------------------------------
+
+  describe('lifecycle management', () => {
+    it('should accept retentionDays and maxTotalSizeMB config', () => {
+      const tradeLogger = new TradeLogger({
+        outputDir: testDir,
+        enabled: true,
+        retentionDays: 7,
+        maxTotalSizeMB: 50,
+      }, logger);
+
+      expect(tradeLogger.isEnabled()).toBe(true);
+    });
+
+    it('should compress old files via compressOldLogs()', async () => {
+      const tradeLogger = new TradeLogger({
+        outputDir: testDir,
+        enabled: true,
+        compressAfterDays: 1,
+      }, logger);
+
+      const oldDate = new Date();
+      oldDate.setDate(oldDate.getDate() - 3);
+      const dateStr = oldDate.toISOString().slice(0, 10);
+      await fsp.mkdir(testDir, { recursive: true });
+      await fsp.writeFile(path.join(testDir, `trades-${dateStr}.jsonl`), 'data\n');
+
+      const compressed = await tradeLogger.compressOldLogs();
+      expect(compressed).toBe(1);
+      const files = await fsp.readdir(testDir);
+      expect(files).toContain(`trades-${dateStr}.jsonl.gz`);
+    });
+
+    it('should purge expired files via purgeExpiredLogs()', async () => {
+      const tradeLogger = new TradeLogger({
+        outputDir: testDir,
+        enabled: true,
+        retentionDays: 14,
+      }, logger);
+
+      const oldDate = new Date();
+      oldDate.setDate(oldDate.getDate() - 20);
+      const dateStr = oldDate.toISOString().slice(0, 10);
+      await fsp.mkdir(testDir, { recursive: true });
+      await fsp.writeFile(path.join(testDir, `trades-${dateStr}.jsonl.gz`), 'old');
+
+      const result = await tradeLogger.purgeExpiredLogs();
+      expect(result.purged).toBe(1);
+      expect(await fsp.readdir(testDir)).toHaveLength(0);
+    });
+
+    it('should start and stop periodic maintenance', async () => {
+      const tradeLogger = new TradeLogger({
+        outputDir: testDir,
+        enabled: true,
+        compressAfterDays: 1,
+      }, logger);
+
+      const dateStr = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+      await fsp.mkdir(testDir, { recursive: true });
+      await fsp.writeFile(path.join(testDir, `trades-${dateStr}.jsonl`), 'data\n');
+
+      tradeLogger.startMaintenance(50);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      tradeLogger.stopMaintenance();
+
+      const files = await fsp.readdir(testDir);
+      expect(files).toContain(`trades-${dateStr}.jsonl.gz`);
+    });
+
+    it('close() should stop maintenance', async () => {
+      const tradeLogger = new TradeLogger({
+        outputDir: testDir,
+        enabled: true,
+      }, logger);
+
+      tradeLogger.startMaintenance(60000);
+      await tradeLogger.close();
+
+      expect(logger.getLogs('error')).toHaveLength(0);
+    });
+  });
 });
