@@ -393,4 +393,41 @@ export class LogFileManager {
       totalSizeBytes: stats.totalSizeBytes,
     };
   }
+
+  // ===========================================================================
+  // Periodic Scheduling
+  // ===========================================================================
+
+  /**
+   * Start periodic background maintenance.
+   * Timer is unref'd so it doesn't prevent process exit.
+   * Safe to call multiple times (stops existing timer first).
+   */
+  startPeriodicMaintenance(intervalMs: number = DEFAULT_MAINTENANCE_INTERVAL_MS): void {
+    this.stopPeriodicMaintenance();
+
+    this.maintenanceTimer = setInterval(() => {
+      this.runMaintenance().catch((err) => {
+        this.logger.warn('Periodic log maintenance failed', {
+          dir: this.dir,
+          error: getErrorMessage(err),
+        });
+      });
+    }, intervalMs);
+
+    // Unref so the timer doesn't prevent process exit
+    if (this.maintenanceTimer && typeof this.maintenanceTimer === 'object' && 'unref' in this.maintenanceTimer) {
+      this.maintenanceTimer.unref();
+    }
+  }
+
+  /**
+   * Stop periodic maintenance. Safe to call even if not started.
+   */
+  stopPeriodicMaintenance(): void {
+    if (this.maintenanceTimer !== null) {
+      clearInterval(this.maintenanceTimer);
+      this.maintenanceTimer = null;
+    }
+  }
 }

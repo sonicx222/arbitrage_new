@@ -381,4 +381,53 @@ describe('LogFileManager', () => {
       expect(files).toHaveLength(2); // today.jsonl + old.jsonl.gz
     });
   });
+
+  describe('periodic maintenance', () => {
+    it('should run maintenance on the timer interval', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        retentionDays: 14,
+        compressAfterDays: 1,
+        logger,
+      });
+
+      // Create a file that will be compressed by maintenance
+      await createFile(testDir, `trades-${makeDateStr(3)}.jsonl`, 'data');
+
+      // Start with a very short interval for testing
+      mgr.startPeriodicMaintenance(50);
+
+      // Wait for the timer to fire
+      await new Promise(resolve => setTimeout(resolve, 120));
+
+      mgr.stopPeriodicMaintenance();
+
+      const files = await fsp.readdir(testDir);
+      expect(files).toContain(`trades-${makeDateStr(3)}.jsonl.gz`);
+    });
+
+    it('should be safe to call stop without start', () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        logger,
+      });
+
+      // Should not throw
+      mgr.stopPeriodicMaintenance();
+    });
+
+    it('should be safe to call start twice', () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        logger,
+      });
+
+      mgr.startPeriodicMaintenance(60000);
+      mgr.startPeriodicMaintenance(60000); // Should not create duplicate timers
+      mgr.stopPeriodicMaintenance();
+    });
+  });
 });
