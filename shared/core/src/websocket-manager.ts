@@ -140,6 +140,10 @@ export class WebSocketManager {
   private isReconnecting = false;
   // P2-FIX: Track if manager has been explicitly disconnected
   private isDisconnected = false;
+  // FIX-3: True during initial connect() inline fallback loop.
+  // Prevents close events from triggering scheduleReconnection() while
+  // connect() is iterating through fallback URLs.
+  private isInitialConnecting = false;
   // P1-FIX: Connection mutex to prevent TOCTOU race condition
   private connectMutex: Promise<void> | null = null;
 
@@ -437,11 +441,62 @@ export class WebSocketManager {
     // P2-FIX: Clear disconnected flag when explicitly connecting
     this.isDisconnected = false;
 
-    const connectionPromise = new Promise<void>((resolve, reject) => {
+    // FIX-3: Try primary URL first, then inline fallbacks before rejecting.
+    // Previously, connect() only tried the current URL and rejected on failure.
+    // The scheduleReconnection() fallback rotation ran in the background but the
+    // connect() Promise had already rejected, causing the chain to be marked failed.
+    // Now we try all available URLs inline so the initial connect() succeeds if
+    // ANY provider is reachable.
+
+    let lastError: unknown;
+    const totalUrls = this.rotationStrategy.getTotalUrls();
+
+    // Reset to first URL for initial connection attempts
+    this.rotationStrategy.resetToFirstUrl();
+    this.isInitialConnecting = true;
+
+    try {
+      for (let attempt = 0; attempt < totalUrls; attempt++) {
+        try {
+          await this.connectToCurrentUrl();
+          // Success — clear mutex
+          this.connectMutex = null;
+          resolveMutex!();
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < totalUrls - 1) {
+            this.logger.warn('WebSocket connection failed, trying next URL', {
+              chainId: this.chainId,
+              attempt: attempt + 1,
+              totalUrls,
+              url: maskUrlApiKeys(this.getCurrentUrl()),
+              error: getErrorMessage(error),
+            });
+            this.rotationStrategy.switchToNextUrl();
+          }
+        }
+      }
+    } finally {
+      this.isInitialConnecting = false;
+    }
+
+    // All URLs exhausted — reject with last error
+    this.isConnecting = false;
+    this.connectMutex = null;
+    resolveMutex!();
+    throw lastError ?? new Error('All WebSocket URLs exhausted');
+  }
+
+  /**
+   * FIX-3: Connect to the current URL (extracted from connect() for inline fallback retry).
+   * Sets up all event handlers (open, message, error, close) for the WebSocket.
+   */
+  private connectToCurrentUrl(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       try {
         const currentUrl = this.getCurrentUrl();
-        const connectionStartTime = Date.now(); // S3.3: Track connection time for health scoring
-        // FIX 2.1 + P1-6: Mask API keys using shared utility
+        const connectionStartTime = Date.now();
         const maskedUrl = maskUrlApiKeys(currentUrl);
         this.logger.info(`Connecting to WebSocket: ${maskedUrl}${this.rotationStrategy.getCurrentUrlIndex() > 0 ? ' (fallback)' : ''}`);
 
@@ -460,9 +515,13 @@ export class WebSocketManager {
           this.logger.info('WebSocket connected', { url: maskedUrl, chainId: this.chainId, connectionTime });
           this.isConnecting = false;
           this.isConnected = true;
+          // FIX-3: Clear inline-fallback guard immediately on successful open so
+          // that any subsequent close event triggers scheduleReconnection().
+          // The finally block in connect() also clears this, but microtask timing
+          // means a close event can fire between resolve() and finally.
+          this.isInitialConnecting = false;
           this.reconnectAttempts = 0;
-          this.recoveryCycles = 0; // P3 Fix F-6: Reset recovery cycles on successful connection
-          // HIGH-3: Reset error rate-limit state so the next error cycle logs immediately
+          this.recoveryCycles = 0;
           this.lastReconnectErrorLoggedAt = 0;
           this.suppressedReconnectErrors = 0;
 
@@ -476,7 +535,6 @@ export class WebSocketManager {
           this.startHeartbeat();
 
           // W2-M12 FIX: Use validated resubscription with per-subscription confirmation.
-          // Basic resubscribe() silently loses subscriptions on rate-limit/error.
           this.resubscribeWithValidation().catch(error => {
             this.logger.error('Subscription recovery failed after reconnection', {
               chainId: this.chainId,
@@ -485,7 +543,6 @@ export class WebSocketManager {
           });
 
           // C3 FIX: Proactively detect data gaps after reconnection
-          // This triggers 'dataGap' events that DataGapBackfiller can consume
           this.detectDataGaps().catch(error => {
             this.logger.debug('Post-reconnection gap detection failed (best-effort)', {
               chainId: this.chainId,
@@ -506,9 +563,7 @@ export class WebSocketManager {
         this.ws.on('error', (error) => {
           this.clearConnectionTimeout();
           this.isConnecting = false;
-          // HIGH-3: Rate-limit error logs. First failure: full detail.
-          // Subsequent failures within 60s: suppressed (count only).
-          // At interval expiry: summary + full detail of next failure.
+          // HIGH-3: Rate-limit error logs
           const nowErr = Date.now();
           const firstError = this.lastReconnectErrorLoggedAt === 0;
           const intervalExpired = (nowErr - this.lastReconnectErrorLoggedAt) >= WebSocketManager.RECONNECT_ERROR_LOG_INTERVAL_MS;
@@ -525,9 +580,7 @@ export class WebSocketManager {
             this.suppressedReconnectErrors++;
           }
 
-          // E1-FIX: TLS certificate errors are non-retryable — the cert won't change.
-          // Immediately exhaust reconnect attempts so scheduleReconnection() takes the
-          // "max attempts reached" path on the next call, skipping 30-40s of futile retries.
+          // E1-FIX: TLS certificate errors are non-retryable
           if (this.isTlsCertificateError(error)) {
             const tlsCode = (error as NodeJS.ErrnoException).code ?? 'TLS_ERROR';
             this.logger.warn('TLS certificate error — fast-failing reconnection (non-retryable)', {
@@ -539,7 +592,6 @@ export class WebSocketManager {
 
           // CQ8-ALT: Classify error and apply appropriate handling
           if (this.rotationStrategy.isAuthError(error)) {
-            // Auth failures (401/403) are deterministic — quarantine and skip immediately
             this.rotationStrategy.handleAuthFailure(currentUrl);
             this.rotationStrategy.getHealthScorer().recordFailure(currentUrl, this.chainId, 'auth_failure');
           } else if (this.rotationStrategy.isRateLimitError(error)) {
@@ -549,14 +601,9 @@ export class WebSocketManager {
             this.rotationStrategy.getHealthScorer().recordFailure(currentUrl, this.chainId, 'connection_error');
           }
 
-          // Notify error handlers
-          this.errorHandlers.forEach(handler => {
-            try {
-              handler(error as Error);
-            } catch (handlerError) {
-              this.logger.error('Error in error handler', { handlerError });
-            }
-          });
+          // FIX-3: During inline fallback loop, do NOT notify error handlers —
+          // the next iteration will try another URL. Error handlers are only
+          // notified after all URLs are exhausted (from scheduleReconnection).
           reject(error);
         });
 
@@ -572,7 +619,6 @@ export class WebSocketManager {
 
           // CQ8-ALT: Classify close event — auth failure, rate limit, or generic drop
           if (this.rotationStrategy.isAuthError({ code, message: reasonStr })) {
-            // Auth failures (401/403) from WebSocket handshake rejection
             this.rotationStrategy.handleAuthFailure(currentUrl);
             this.rotationStrategy.getHealthScorer().recordFailure(currentUrl, this.chainId, 'auth_failure');
           } else if (code === 1008 || code === 1013 ||
@@ -587,8 +633,11 @@ export class WebSocketManager {
           // Notify connection handlers
           this.connectionHandlers.forEach(handler => handler(false));
 
-          // Attempt reconnection if not manually closed
-          if (code !== 1000) {
+          // Attempt reconnection if not manually closed.
+          // FIX-3: During initial connect() inline fallback loop, close events from
+          // failed URLs are expected — connect() will try the next URL itself.
+          // Only schedule background reconnection for post-connection drops.
+          if (code !== 1000 && !this.isInitialConnecting) {
             this.scheduleReconnection();
           }
         });
@@ -599,14 +648,6 @@ export class WebSocketManager {
         reject(error);
       }
     });
-
-    // P1-FIX: Wrap promise to clear mutex when done (success or failure)
-    try {
-      await connectionPromise;
-    } finally {
-      this.connectMutex = null;
-      resolveMutex!();
-    }
   }
 
   disconnect(): void {

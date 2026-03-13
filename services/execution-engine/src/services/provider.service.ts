@@ -19,6 +19,7 @@ import { ethers } from 'ethers';
 import { CHAINS, FEATURE_FLAGS } from '@arbitrage/config';
 import { clearIntervalSafe } from '@arbitrage/core/async';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { maskUrlApiKeys } from '@arbitrage/core';
 import {
   BatchProvider,
   createBatchProvider,
@@ -244,54 +245,31 @@ export class ProviderServiceImpl implements IProviderService {
   /**
    * Validate provider connectivity before starting.
    * Ensures RPC endpoints are actually reachable.
+   *
+   * FIX-1: Parallelized — all chains checked concurrently instead of sequentially.
+   * Previous: 15 chains × 5s timeout = 75s worst case (exceeded 30s state transition timeout).
+   * Now: max(5s per chain) = 5s worst case.
+   *
+   * FIX-2: Fallback rotation — when primary RPC fails, tries rpcFallbackUrls before
+   * marking chain unhealthy. Previously only chainConfig.rpcUrl was tried.
    */
   async validateConnectivity(): Promise<void> {
     const healthyProviders: string[] = [];
     const unhealthyProviders: string[] = [];
 
-    for (const [chainName, provider] of this.providers) {
-      try {
-        // Quick connectivity check - get block number
-        // P1 FIX: Use cancellable timeout to prevent timer leak on success
-        const { promise: connectivityTimeout, cancel: cancelConnectivity } = createCancellableTimeout(
-          PROVIDER_CONNECTIVITY_TIMEOUT_MS, 'Connectivity check timeout'
-        );
-        try {
-          await Promise.race([provider.getBlockNumber(), connectivityTimeout]);
-        } finally {
-          cancelConnectivity();
-        }
+    // FIX-1: Run all chain connectivity checks in parallel
+    const results = await Promise.all(
+      Array.from(this.providers.entries()).map(async ([chainName, provider]) => {
+        const result = await this.validateChainConnectivity(chainName, provider);
+        return { chainName, ...result };
+      })
+    );
 
-        // Mark as healthy - Fix 10.2: Use helper to update cache
-        this.updateProviderHealth(chainName, {
-          healthy: true,
-          lastCheck: Date.now(),
-          consecutiveFailures: 0
-        });
+    for (const { chainName, healthy } of results) {
+      if (healthy) {
         healthyProviders.push(chainName);
-
-        this.logger.debug('Provider connectivity verified', { chainName });
-      } catch (error) {
-        // Mark as unhealthy - Fix 10.2: Use helper to update cache
-        const health = this.providerHealth.get(chainName) || {
-          healthy: false,
-          lastCheck: 0,
-          consecutiveFailures: 0
-        };
-        this.updateProviderHealth(chainName, {
-          ...health,
-          healthy: false,
-          lastCheck: Date.now(),
-          consecutiveFailures: health.consecutiveFailures + 1,
-          lastError: getErrorMessage(error)
-        });
+      } else {
         unhealthyProviders.push(chainName);
-        this.stats.providerHealthCheckFailures++;
-
-        this.logger.warn('Provider connectivity failed', {
-          chainName,
-          error: getErrorMessage(error)
-        });
       }
     }
 
@@ -305,6 +283,109 @@ export class ProviderServiceImpl implements IProviderService {
     // Don't fail startup if some providers are unhealthy - they may recover
     if (healthyProviders.length === 0 && this.providers.size > 0) {
       this.logger.warn('No providers are currently healthy - service may be limited');
+    }
+  }
+
+  /**
+   * FIX-2: Validate connectivity for a single chain with fallback rotation.
+   * Tries the primary RPC URL first, then iterates through rpcFallbackUrls.
+   * On first successful fallback, replaces the primary provider.
+   */
+  private async validateChainConnectivity(
+    chainName: string,
+    primaryProvider: ethers.JsonRpcProvider,
+  ): Promise<{ healthy: boolean }> {
+    const chainConfig = CHAINS[chainName];
+
+    // Try primary provider first
+    if (await this.tryProviderConnectivity(chainName, primaryProvider)) {
+      return { healthy: true };
+    }
+
+    // FIX-2: Primary failed — try fallback RPC URLs
+    const fallbackUrls = chainConfig?.rpcFallbackUrls;
+    if (!fallbackUrls || fallbackUrls.length === 0) {
+      return { healthy: false };
+    }
+
+    for (const fallbackUrl of fallbackUrls) {
+      try {
+        const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+        const fallbackProvider = this.enableHttp2
+          ? createHttp2Provider(fallbackUrl, true, chainConfig.id)
+          : new ethers.JsonRpcProvider(fallbackUrl, network, { staticNetwork: !!network });
+
+        if (await this.tryProviderConnectivity(chainName, fallbackProvider)) {
+          // Replace primary with working fallback
+          this.providers.set(chainName, fallbackProvider);
+
+          // Recreate BatchProvider if batching is enabled
+          if (this.enableBatching) {
+            const oldBatch = this.batchProviders.get(chainName);
+            if (oldBatch) await oldBatch.shutdown().catch(() => {});
+            this.batchProviders.set(chainName, createBatchProvider(fallbackProvider, this.batchConfig));
+          }
+
+          this.logger.info('Switched to fallback RPC provider', {
+            chainName,
+            fallbackUrl: maskUrlApiKeys(fallbackUrl),
+          });
+          return { healthy: true };
+        }
+      } catch {
+        // Fallback URL also failed, try next
+      }
+    }
+
+    this.logger.warn('All RPC URLs failed for chain', {
+      chainName,
+      triedUrls: 1 + fallbackUrls.length,
+    });
+    return { healthy: false };
+  }
+
+  /**
+   * Try connecting to a provider with timeout. Updates health state.
+   * Returns true if successful, false if failed.
+   */
+  private async tryProviderConnectivity(
+    chainName: string,
+    provider: ethers.JsonRpcProvider,
+  ): Promise<boolean> {
+    try {
+      const { promise: timeout, cancel } = createCancellableTimeout(
+        PROVIDER_CONNECTIVITY_TIMEOUT_MS, 'Connectivity check timeout'
+      );
+      try {
+        await Promise.race([provider.getBlockNumber(), timeout]);
+      } finally {
+        cancel();
+      }
+
+      this.updateProviderHealth(chainName, {
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0
+      });
+      this.logger.debug('Provider connectivity verified', { chainName });
+      return true;
+    } catch (error) {
+      const health = this.providerHealth.get(chainName) ?? {
+        healthy: false, lastCheck: 0, consecutiveFailures: 0
+      };
+      this.updateProviderHealth(chainName, {
+        ...health,
+        healthy: false,
+        lastCheck: Date.now(),
+        consecutiveFailures: health.consecutiveFailures + 1,
+        lastError: getErrorMessage(error)
+      });
+      this.stats.providerHealthCheckFailures++;
+      this.logger.warn('Provider connectivity failed', {
+        chainName,
+        error: getErrorMessage(error)
+      });
+      return false;
     }
   }
 
@@ -431,89 +512,103 @@ export class ProviderServiceImpl implements IProviderService {
 
   /**
    * Attempt to reconnect a failed provider.
+   *
+   * FIX-2: Now tries rpcFallbackUrls when the primary URL fails, instead of
+   * retrying the same broken URL every health check cycle.
    */
   private async attemptProviderReconnection(chainName: string): Promise<void> {
     const chainConfig = CHAINS[chainName];
     if (!chainConfig) return;
 
-    try {
-      this.logger.info('Attempting provider reconnection', { chainName });
+    this.logger.info('Attempting provider reconnection', { chainName });
 
-      // Create new provider instance (with HTTP/2 if enabled)
-      const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
-      const newProvider = this.enableHttp2
-        ? createHttp2Provider(chainConfig.rpcUrl, true, chainConfig.id)
-        : new ethers.JsonRpcProvider(chainConfig.rpcUrl, network, { staticNetwork: !!network });
+    // Build list of URLs to try: primary first, then fallbacks
+    const urlsToTry = [chainConfig.rpcUrl, ...(chainConfig.rpcFallbackUrls ?? [])];
 
-      // Verify connectivity
-      // P1 FIX: Use cancellable timeout to prevent timer leak on success
-      const { promise: reconnectTimeout, cancel: cancelReconnect } = createCancellableTimeout(
-        PROVIDER_RECONNECTION_TIMEOUT_MS, 'Reconnection timeout'
-      );
+    for (const rpcUrl of urlsToTry) {
       try {
-        await Promise.race([newProvider.getBlockNumber(), reconnectTimeout]);
-      } finally {
-        cancelReconnect();
-      }
+        const network = chainConfig.id ? ethers.Network.from(chainConfig.id) : undefined;
+        const newProvider = this.enableHttp2
+          ? createHttp2Provider(rpcUrl, true, chainConfig.id)
+          : new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: !!network });
 
-      // Replace old provider
-      this.providers.set(chainName, newProvider);
-
-      // Phase 3: Recreate BatchProvider if batching is enabled
-      if (this.enableBatching) {
-        // Shutdown old batch provider if exists
-        const oldBatchProvider = this.batchProviders.get(chainName);
-        if (oldBatchProvider) {
-          await oldBatchProvider.shutdown();
+        // Verify connectivity
+        const { promise: reconnectTimeout, cancel: cancelReconnect } = createCancellableTimeout(
+          PROVIDER_RECONNECTION_TIMEOUT_MS, 'Reconnection timeout'
+        );
+        try {
+          await Promise.race([newProvider.getBlockNumber(), reconnectTimeout]);
+        } finally {
+          cancelReconnect();
         }
-        // Create new batch provider with new provider
-        const newBatchProvider = createBatchProvider(newProvider, this.batchConfig);
-        this.batchProviders.set(chainName, newBatchProvider);
-      }
 
-      // Fix 10.2: Use helper to update cache
-      this.updateProviderHealth(chainName, {
-        healthy: true,
-        lastCheck: Date.now(),
-        consecutiveFailures: 0
-      });
-      this.stats.providerReconnections++;
+        // Success — replace old provider
+        this.providers.set(chainName, newProvider);
 
-      // Update wallet if exists (reconnect with new provider)
-      const existingWallet = this.wallets.get(chainName);
-      if (existingWallet) {
-        // Fix #9: Use cached private key instead of re-reading process.env.
-        // Keys are cached in initializeWallets() for both per-chain and HD-derived wallets.
-        const cachedKey = this.chainPrivateKeys.get(chainName);
-        let reconnectedWallet: ethers.Wallet;
-        if (cachedKey) {
-          // Recreate wallet from cached private key with new provider
-          reconnectedWallet = new ethers.Wallet(cachedKey, newProvider);
-        } else {
-          // Fallback: reconnect existing wallet to new provider
-          // Fix 12: Removed redundant cast — Wallet.connect() returns Wallet in ethers v6
-          reconnectedWallet = existingWallet.connect(newProvider);
+        // Recreate BatchProvider if batching is enabled
+        if (this.enableBatching) {
+          const oldBatchProvider = this.batchProviders.get(chainName);
+          if (oldBatchProvider) {
+            await oldBatchProvider.shutdown();
+          }
+          this.batchProviders.set(chainName, createBatchProvider(newProvider, this.batchConfig));
         }
-        this.wallets.set(chainName, reconnectedWallet);
 
-        // Re-register wallet with NonceManager after provider reconnection
-        if (this.nonceManager) {
-          await this.nonceManager.resetChain(chainName);
-          this.nonceManager.registerWallet(chainName, reconnectedWallet);
+        this.updateProviderHealth(chainName, {
+          healthy: true,
+          lastCheck: Date.now(),
+          consecutiveFailures: 0
+        });
+        this.stats.providerReconnections++;
+
+        // Update wallet if exists (reconnect with new provider)
+        await this.reconnectWallet(chainName, newProvider);
+
+        // Notify engine to clear stale state (e.g., gas baselines)
+        if (this.onProviderReconnectCallback) {
+          this.onProviderReconnectCallback(chainName);
         }
-      }
 
-      // Notify engine to clear stale state (e.g., gas baselines)
-      if (this.onProviderReconnectCallback) {
-        this.onProviderReconnectCallback(chainName);
+        const isFallback = rpcUrl !== chainConfig.rpcUrl;
+        this.logger.info('Provider reconnection successful', {
+          chainName,
+          ...(isFallback ? { fallbackUrl: maskUrlApiKeys(rpcUrl) } : {}),
+        });
+        return; // Stop trying — we found a working URL
+      } catch (error) {
+        this.logger.debug('Provider reconnection URL failed', {
+          chainName,
+          url: maskUrlApiKeys(rpcUrl),
+          error: getErrorMessage(error),
+        });
       }
+    }
 
-      this.logger.info('Provider reconnection successful', { chainName });
-    } catch (error) {
-      this.logger.error('Provider reconnection failed', {
-        chainName,
-        error: getErrorMessage(error)
-      });
+    // All URLs exhausted
+    this.logger.error('Provider reconnection failed — all URLs exhausted', {
+      chainName,
+      triedUrls: urlsToTry.length,
+    });
+  }
+
+  /**
+   * Reconnect wallet to a new provider after successful provider reconnection.
+   */
+  private async reconnectWallet(chainName: string, newProvider: ethers.JsonRpcProvider): Promise<void> {
+    const existingWallet = this.wallets.get(chainName);
+    if (!existingWallet) return;
+
+    // Fix #9: Use cached private key instead of re-reading process.env
+    const cachedKey = this.chainPrivateKeys.get(chainName);
+    const reconnectedWallet = cachedKey
+      ? new ethers.Wallet(cachedKey, newProvider)
+      : existingWallet.connect(newProvider);
+
+    this.wallets.set(chainName, reconnectedWallet);
+
+    if (this.nonceManager) {
+      await this.nonceManager.resetChain(chainName);
+      this.nonceManager.registerWallet(chainName, reconnectedWallet);
     }
   }
 
