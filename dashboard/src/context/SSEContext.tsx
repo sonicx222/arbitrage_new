@@ -1,8 +1,9 @@
-import { createContext, useContext, useReducer, useCallback, useRef, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useCallback, useRef, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSSE, type SSEStatus } from '../hooks/useSSE';
 import { formatTime, calcSuccessRate } from '../lib/format';
 import { getItem } from '../lib/storage';
 import { sendNotification, startTitleFlash, stopTitleFlash } from '../lib/notifications';
+import { FAILURE_STREAK_THRESHOLD } from '../lib/feed-utils';
 import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint, DiagnosticsSnapshot, CexSpreadData } from '../lib/types';
 
 // ---------------------------------------------------------------------------
@@ -149,7 +150,7 @@ interface FeedCtxValue { feed: FeedItem[] }
 interface StreamsCtxValue { streams: StreamHealth | null; lagData: LagPoint[] }
 interface DiagnosticsCtxValue { diagnostics: DiagnosticsSnapshot | null }
 interface CexSpreadCtxValue { cexSpread: CexSpreadData | null }
-interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null }
+interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null; droppedEvents: number }
 
 const MetricsCtx = createContext<MetricsCtxValue>({ metrics: null, chartData: [] });
 const ServicesCtx = createContext<ServicesCtxValue>({ services: {}, circuitBreaker: null });
@@ -157,7 +158,7 @@ const FeedCtx = createContext<FeedCtxValue>({ feed: [] });
 const StreamsCtx = createContext<StreamsCtxValue>({ streams: null, lagData: [] });
 const DiagnosticsCtx = createContext<DiagnosticsCtxValue>({ diagnostics: null });
 const CexSpreadCtx = createContext<CexSpreadCtxValue>({ cexSpread: null });
-const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null });
+const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null, droppedEvents: 0 });
 
 /** Metrics + chart data. Re-renders only on 'metrics' SSE events. */
 export function useMetrics() { return useContext(MetricsCtx); }
@@ -183,8 +184,8 @@ export function useSSEData() {
   const { streams, lagData } = useStreams();
   const { diagnostics } = useDiagnostics();
   const { cexSpread } = useCexSpread();
-  const { status, lastEventTime } = useConnection();
-  return { metrics, chartData, services, circuitBreaker, feed, streams, lagData, diagnostics, cexSpread, status, lastEventTime, nextFeedId: 0 };
+  const { status, lastEventTime, droppedEvents } = useConnection();
+  return { metrics, chartData, services, circuitBreaker, feed, streams, lagData, diagnostics, cexSpread, status, lastEventTime, droppedEvents, nextFeedId: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,12 +253,18 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   // is already stored in localStorage (same XSS exposure surface).
   const url = `/api/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 
+  // P3-12: Track dropped SSE events (validation failures)
+  const droppedEventsRef = useRef(0);
+  const [droppedEvents, setDroppedEvents] = useState(0);
+
   // E-04: Track consecutive execution failures for streak notification
   const failStreakRef = useRef(0);
 
   const onEvent = useCallback((event: string, data: unknown) => {
     if (!validatePayload(event, data)) {
       console.warn(`[SSE] Skipping malformed ${event} payload`, data);
+      droppedEventsRef.current++;
+      setDroppedEvents(droppedEventsRef.current);
       return;
     }
     dispatch({ type: event, payload: data } as SSEAction);
@@ -279,7 +286,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
       const exec = data as { success: boolean };
       if (!exec.success) {
         failStreakRef.current++;
-        if (failStreakRef.current >= 3) {
+        if (failStreakRef.current >= FAILURE_STREAK_THRESHOLD) {
           sendNotification('Execution Failures', `${failStreakRef.current} consecutive failures detected.`);
           startTitleFlash('\u26A0 Failures \u2014 Arbitrage');
         }
@@ -387,8 +394,8 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     [state.cexSpread],
   );
   const connectionValue = useMemo<ConnectionCtxValue>(
-    () => ({ status, lastEventTime: state.lastEventTime }),
-    [status, state.lastEventTime],
+    () => ({ status, lastEventTime: state.lastEventTime, droppedEvents }),
+    [status, state.lastEventTime, droppedEvents],
   );
 
   return (

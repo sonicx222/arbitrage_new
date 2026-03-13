@@ -91,8 +91,13 @@ export function Chart<T>({
     yMin = 0;
     yMax = 1;
   } else {
-    yMin = Math.min(0, ...values);
-    yMax = Math.max(...values);
+    yMin = 0;
+    yMax = values[0];
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (v < yMin) yMin = v;
+      if (v > yMax) yMax = v;
+    }
   }
   if (yMax <= yMin) yMax = yMin + 1;
   const yRange = yMax - yMin;
@@ -102,13 +107,15 @@ export function Chart<T>({
   const toY = (v: number) =>
     MARGIN.top + chartH - ((v - yMin) / yRange) * chartH;
 
-  // Build SVG path
+  // Build SVG path (array-join for single allocation)
   let linePath = '';
   if (visData.length > 0 && chartW > 0) {
-    linePath = `M${toX(0).toFixed(1)},${toY(values[0]).toFixed(1)}`;
+    const parts = new Array<string>(visData.length);
+    parts[0] = `M${toX(0).toFixed(1)},${toY(values[0]).toFixed(1)}`;
     for (let i = 1; i < visData.length; i++) {
-      linePath += `L${toX(i).toFixed(1)},${toY(values[i]).toFixed(1)}`;
+      parts[i] = `L${toX(i).toFixed(1)},${toY(values[i]).toFixed(1)}`;
     }
+    linePath = parts.join('');
   }
 
   let areaPath = '';

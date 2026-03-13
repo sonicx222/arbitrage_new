@@ -42,14 +42,21 @@ export function DataTable<T>({ columns, data, keyExtractor, maxHeight = '16rem',
         <th
           key={i}
           scope="col"
-          className={`${ALIGN[col.align ?? 'left']} py-1 px-2${col.onHeaderClick ? ' cursor-pointer hover:text-gray-300 select-none focus:outline-none focus:text-gray-200' : ''}`}
-          onClick={col.onHeaderClick}
-          onKeyDown={col.onHeaderClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); col.onHeaderClick!(); } } : undefined}
-          role={col.onHeaderClick ? 'button' : undefined}
-          tabIndex={col.onHeaderClick ? 0 : undefined}
+          className={`${ALIGN[col.align ?? 'left']} py-1 px-2`}
           aria-sort={col.sortDirection}
         >
-          {col.header}{col.headerSuffix || (col.onHeaderClick && !col.sortDirection ? ' \u21C5' : '')}
+          {col.onHeaderClick ? (
+            <button
+              type="button"
+              className="w-full text-inherit cursor-pointer hover:text-gray-300 select-none focus:outline-none focus:text-gray-200 bg-transparent border-none p-0 font-inherit text-left"
+              onClick={col.onHeaderClick}
+              onKeyDown={(e) => { if (e.key === ' ') { e.preventDefault(); col.onHeaderClick!(); } }}
+            >
+              {col.header}{col.headerSuffix || (!col.sortDirection ? ' \u21C5' : '')}
+            </button>
+          ) : (
+            <>{col.header}{col.headerSuffix ?? ''}</>
+          )}
         </th>
       ))}
     </tr>

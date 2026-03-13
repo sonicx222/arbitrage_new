@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useServices, useFeed } from '../context/SSEContext';
+import { countFailureStreak, FAILURE_STREAK_THRESHOLD } from '../lib/feed-utils';
 
 export function LiveAnnouncer() {
   const { circuitBreaker } = useServices();
@@ -21,13 +22,8 @@ export function LiveAnnouncer() {
       if (newest.kind === 'alert' && newest.data.severity === 'critical') {
         setMsg(`Critical alert: ${newest.data.message ?? newest.data.type}`);
       } else if (newest.kind === 'execution') {
-        // Count consecutive failures
-        let streak = 0;
-        for (const item of feed) {
-          if (item.kind === 'execution' && !item.data.success) streak++;
-          else break;
-        }
-        if (streak >= 3) setMsg(`${streak} consecutive execution failures`);
+        const streak = countFailureStreak(feed);
+        if (streak >= FAILURE_STREAK_THRESHOLD) setMsg(`${streak} consecutive execution failures`);
       }
     }
     prevFeedLen.current = feed.length;

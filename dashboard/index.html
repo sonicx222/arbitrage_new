@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arbitrage Dashboard</title>
+    <!--
+      CSP: connect-src 'self' requires dashboard + SSE API on same origin.
+      Current architecture: coordinator serves both static files and /api/events SSE.
+      For cross-origin deployment (CDN, Cloudflare Pages), either:
+        1. Set connect-src to the coordinator's origin (e.g. connect-src 'self' https://api.example.com)
+        2. Move CSP to a server-side Content-Security-Policy header for per-env configurability
+    -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'" />
   </head>
   <body>

@@ -51,23 +51,26 @@ describe('DataTable', () => {
       { header: 'Value', render: (r) => <>{r.value}</> },
     ];
 
-    it('adds role="button" and tabIndex to sortable headers', () => {
+    it('renders a <button> inside sortable <th> preserving header semantics', () => {
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      const nameHeader = screen.getByRole('button', { name: /Name/ });
-      expect(nameHeader).toHaveAttribute('tabindex', '0');
+      const btn = screen.getByRole('button', { name: /Name/ });
+      expect(btn.tagName).toBe('BUTTON');
+      // Button should be inside a <th> (column header semantics preserved)
+      expect(btn.closest('th')).not.toBeNull();
     });
 
-    it('does NOT add role="button" to non-sortable headers', () => {
+    it('does NOT render a button for non-sortable headers', () => {
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
       const valueHeader = screen.getByText('Value');
-      expect(valueHeader).not.toHaveAttribute('role');
-      expect(valueHeader).not.toHaveAttribute('tabindex');
+      expect(valueHeader.closest('th')).not.toBeNull();
+      expect(valueHeader.querySelector('button')).toBeNull();
     });
 
-    it('fires onHeaderClick on Enter key', () => {
+    it('fires onHeaderClick on Enter key (native button behavior)', () => {
       onClick.mockClear();
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      fireEvent.keyDown(screen.getByRole('button', { name: /Name/ }), { key: 'Enter' });
+      // Native <button> converts Enter keypress to click; simulate with fireEvent.click
+      fireEvent.click(screen.getByRole('button', { name: /Name/ }));
       expect(onClick).toHaveBeenCalledOnce();
     });
 
@@ -103,20 +106,22 @@ describe('DataTable', () => {
   // aria-sort (M-1)
   // ---------------------------------------------------------------------------
   describe('aria-sort', () => {
-    it('sets aria-sort from sortDirection prop', () => {
+    it('sets aria-sort from sortDirection prop on the <th>', () => {
       const columns: Column<Row>[] = [
         { header: 'Name', onHeaderClick: vi.fn(), sortDirection: 'ascending', render: (r) => <>{r.name}</> },
       ];
       render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
-      expect(screen.getByText('Name')).toHaveAttribute('aria-sort', 'ascending');
+      const th = screen.getByRole('button', { name: /Name/ }).closest('th')!;
+      expect(th).toHaveAttribute('aria-sort', 'ascending');
     });
 
-    it('sets aria-sort to descending', () => {
+    it('sets aria-sort to descending on the <th>', () => {
       const columns: Column<Row>[] = [
         { header: 'Name', onHeaderClick: vi.fn(), sortDirection: 'descending', render: (r) => <>{r.name}</> },
       ];
       render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
-      expect(screen.getByText('Name')).toHaveAttribute('aria-sort', 'descending');
+      const th = screen.getByRole('button', { name: /Name/ }).closest('th')!;
+      expect(th).toHaveAttribute('aria-sort', 'descending');
     });
 
     it('does NOT set aria-sort when sortDirection is undefined', () => {

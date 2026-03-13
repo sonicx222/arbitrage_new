@@ -4,6 +4,7 @@ import { getItem, removeItem } from './lib/storage';
 import { setOnUnauthorized } from './hooks/useApi';
 import { useHotkeys } from './hooks/useHotkeys';
 import { thresholdColor } from './lib/format';
+import { countFailureStreak, FAILURE_STREAK_THRESHOLD } from './lib/feed-utils';
 import { LiveAnnouncer } from './components/LiveAnnouncer';
 import { LoginScreen } from './components/LoginScreen';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
@@ -183,12 +184,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
   const tabBadges = useMemo(() => {
     const badges: Partial<Record<Tab, boolean>> = {};
     if (circuitBreaker?.state === 'OPEN') badges.Execution = true;
-    let failStreak = 0;
-    for (const item of feed) {
-      if (item.kind === 'execution' && !item.data.success) failStreak++;
-      else break;
-    }
-    if (failStreak >= 3) badges.Execution = true;
+    if (countFailureStreak(feed) >= FAILURE_STREAK_THRESHOLD) badges.Execution = true;
     const hasCritical = feed.some(f => f.kind === 'alert' && f.data.severity === 'critical');
     if (hasCritical) badges.Risk = true;
     return badges;

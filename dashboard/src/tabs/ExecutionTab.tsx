@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { KpiGrid } from '../components/KpiGrid';
@@ -26,6 +26,7 @@ export function ExecutionTab() {
   const { metrics, chartData } = useMetrics();
   const { feed } = useFeed();
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [chartRange, setChartRange] = useState(3); // default: 1h (all data)
 
   const allExecutions = useMemo(
@@ -76,8 +77,8 @@ export function ExecutionTab() {
   );
 
   const executions = useMemo(() => {
-    if (!search) return allExecutions;
-    const q = search.toLowerCase();
+    if (!deferredSearch) return allExecutions;
+    const q = deferredSearch.toLowerCase();
     return allExecutions.filter((item) => {
       const d = item.data;
       return d.chain.toLowerCase().includes(q)
@@ -85,7 +86,7 @@ export function ExecutionTab() {
         || (d.success ? 'success' : 'failed').includes(q)
         || (d.transactionHash?.toLowerCase().includes(q));
     });
-  }, [allExecutions, search]);
+  }, [allExecutions, deferredSearch]);
 
   const exportRows = useMemo(
     () => allExecutions.map((item) => {
