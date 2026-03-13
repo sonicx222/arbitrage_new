@@ -74,8 +74,6 @@ export interface TradeLogEntry {
   route?: string[];
   /** Slippage tolerance used (decimal, e.g., 0.05 = 5%) */
   slippage?: number;
-  /** Execution strategy used (e.g., 'intra-chain', 'flash-loan', 'cross-chain') */
-  strategyUsed?: string;
   /** Number of retry attempts before success/failure */
   retryCount?: number;
   /** Block number at which the opportunity was detected or executed */
@@ -384,7 +382,6 @@ export class TradeLogger {
       traceId,
       route: opportunity?.path,
       slippage,
-      strategyUsed: opportunity?.type,
       retryCount,
       blockNumber: opportunity?.blockNumber,
       sellChain: opportunity?.sellChain,
