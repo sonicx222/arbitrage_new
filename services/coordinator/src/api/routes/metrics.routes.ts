@@ -103,8 +103,8 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
     readAuth as unknown as RequestHandler,
     apiAuthorize('alerts', 'read') as unknown as RequestHandler,
     ((req: Request, res: Response) => {
-      // H-06 FIX: Support ?deduplicate=true to collapse repeated alerts
-      const deduplicate = req.query.deduplicate === 'true';
+      // E-03: Deduplicate by default — ?deduplicate=false to see raw history
+      const deduplicate = req.query.deduplicate !== 'false';
       res.json(state.getAlertHistory(100, deduplicate));
     }) as RequestHandler
   );

@@ -186,6 +186,15 @@ export class Http2SessionPool {
       throw new Error(`HTTP/2 circuit breaker open for ${origin} (${cb.consecutiveFailures} consecutive failures)`);
     }
 
+    // M-08 FIX: Log when CB transitions from open to half-open (cooldown expired, retrying)
+    if (cb && cb.openUntil > 0 && cb.openUntil <= Date.now()) {
+      logger.info('HTTP/2 circuit breaker half-open — attempting reconnection', {
+        origin,
+        previousFailures: cb.consecutiveFailures,
+        openCount: cb.openCount,
+      });
+    }
+
     const existing = this.sessions.get(origin);
     if (existing && !existing.session.closed && !existing.session.destroyed) {
       // F3-FIX: Reset circuit breaker (including openCount) on successful session reuse

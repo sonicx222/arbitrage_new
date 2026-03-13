@@ -634,6 +634,12 @@ export class ExecutionEngineService {
       // Task 2.3: Validate trade log directory is writable at startup
       if (this.tradeLogger) {
         await this.tradeLogger.validateLogDir();
+        // L-04 FIX: Compress old trade log files on startup to reclaim disk space
+        this.tradeLogger.compressOldLogs().catch((err: unknown) => {
+          this.logger.warn('Trade log compression failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
 
       // Batch 6: Initialize R2 uploader for trade log durability

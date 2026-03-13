@@ -17,7 +17,10 @@
  */
 
 import * as fsp from 'fs/promises';
+import * as fs from 'fs';
 import * as path from 'path';
+import { createGzip } from 'zlib';
+import { pipeline } from 'stream/promises';
 import type { ServiceLogger } from '../logging/types';
 import type { ExecutionResult } from '@arbitrage/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -97,6 +100,8 @@ export interface TradeLoggerConfig {
   outputDir: string;
   /** Whether trade logging is enabled (default: true) */
   enabled: boolean;
+  /** L-04 FIX: Compress .jsonl files older than this many days (default: 3, 0 to disable) */
+  compressAfterDays: number;
 }
 
 // =============================================================================
@@ -106,6 +111,7 @@ export interface TradeLoggerConfig {
 const DEFAULT_CONFIG: TradeLoggerConfig = {
   outputDir: './data/trades',
   enabled: true,
+  compressAfterDays: 3,
 };
 
 // =============================================================================
@@ -273,6 +279,88 @@ export class TradeLogger {
       this.logger.error(msg);
       throw new Error(msg);
     }
+  }
+
+  /**
+   * L-04 FIX: Compress old trade log files (.jsonl → .jsonl.gz) to reclaim disk space.
+   *
+   * Scans the output directory for .jsonl files whose date (from filename) is older
+   * than `compressAfterDays`. Each eligible file is gzip-compressed in a streaming
+   * fashion (low memory) and the original deleted on success.
+   *
+   * Safe to call on startup or periodically. Skips files that are already compressed
+   * (.jsonl.gz) and today's file.
+   *
+   * @returns Number of files compressed
+   */
+  async compressOldLogs(): Promise<number> {
+    if (!this.config.enabled || this.config.compressAfterDays <= 0) return 0;
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - this.config.compressAfterDays);
+    cutoff.setHours(0, 0, 0, 0);
+
+    let compressed = 0;
+    try {
+      const files = await fsp.readdir(this.config.outputDir);
+      for (const file of files) {
+        if (!file.endsWith('.jsonl') || !file.startsWith('trades-')) continue;
+
+        // Extract date from filename: trades-YYYY-MM-DD.jsonl
+        const dateMatch = file.match(/^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/);
+        if (!dateMatch) continue;
+
+        const fileDate = new Date(dateMatch[1] + 'T00:00:00');
+        if (isNaN(fileDate.getTime()) || fileDate >= cutoff) continue;
+
+        const srcPath = path.join(this.config.outputDir, file);
+        const gzPath = srcPath + '.gz';
+
+        try {
+          // Skip if .gz already exists
+          try {
+            await fsp.access(gzPath);
+            // .gz exists — delete stale uncompressed file
+            await fsp.unlink(srcPath);
+            compressed++;
+            continue;
+          } catch {
+            // .gz doesn't exist — compress
+          }
+
+          await pipeline(
+            fs.createReadStream(srcPath),
+            createGzip({ level: 6 }),
+            fs.createWriteStream(gzPath),
+          );
+          await fsp.unlink(srcPath);
+          compressed++;
+        } catch (err) {
+          this.logger.warn('Failed to compress trade log file', {
+            file,
+            error: getErrorMessage(err),
+          });
+          // Clean up partial .gz on failure
+          try { await fsp.unlink(gzPath); } catch { /* ignore */ }
+        }
+      }
+
+      if (compressed > 0) {
+        this.logger.info('Compressed old trade log files', {
+          compressed,
+          cutoffDate: cutoff.toISOString().split('T')[0],
+        });
+      }
+    } catch (err) {
+      // Directory may not exist yet — that's fine
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger.warn('Failed to scan trade log directory for compression', {
+          error: getErrorMessage(err),
+        });
+      }
+    }
+
+    return compressed;
   }
 
   // ===========================================================================

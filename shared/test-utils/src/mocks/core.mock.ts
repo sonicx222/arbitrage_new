@@ -190,6 +190,9 @@ export function createCoreMockModule(overrides: Record<string, unknown> = {}): R
     TradeLogger: jest.fn().mockImplementation(() => ({
       logTrade: jest.fn(),
       close: jest.fn(),
+      validateLogDir: jest.fn().mockResolvedValue(undefined),
+      compressOldLogs: jest.fn().mockResolvedValue(0),
+      getWriteHealth: jest.fn().mockReturnValue({ writeSuccessCount: 0, writeFailureCount: 0, lastWriteError: null, lastSuccessfulWriteMs: 0 }),
     })),
     getNonceManager: jest.fn(() => ({
       acquireNonce: jest.fn<() => Promise<number>>().mockResolvedValue(0),

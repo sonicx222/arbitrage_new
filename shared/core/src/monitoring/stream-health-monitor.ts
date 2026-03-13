@@ -363,14 +363,19 @@ export class StreamHealthMonitor {
       const result = results[i];
 
       if (result.status === 'rejected') {
-        this.logger.warn(`Failed to get health for stream: ${streamName}`, { error: result.reason });
+        // E-04: Distinguish "stream doesn't exist yet" (idle) from real Redis errors (unknown)
+        const errMsg = String(result.reason?.message ?? result.reason ?? '');
+        const isStreamNotFound = errMsg.includes('no such key') || errMsg.includes('NOGROUP');
+        if (!isStreamNotFound) {
+          this.logger.warn(`Failed to get health for stream: ${streamName}`, { error: result.reason });
+        }
         streams[streamName] = {
           name: streamName,
           length: 0,
           pendingCount: 0,
           consumerGroups: 0,
           lastGeneratedId: '',
-          status: 'unknown'
+          status: isStreamNotFound ? 'idle' : 'unknown'
         };
         continue;
       }

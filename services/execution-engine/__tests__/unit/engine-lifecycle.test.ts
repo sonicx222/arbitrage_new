@@ -252,6 +252,7 @@ jest.mock('@arbitrage/core', () => {
         log: jest.fn(),
         close: jest.fn<any>(() => Promise.resolve(undefined)),
         validateLogDir: jest.fn<any>(() => Promise.resolve(undefined)),
+        compressOldLogs: jest.fn<any>(() => Promise.resolve(0)),
       };
     },
   };

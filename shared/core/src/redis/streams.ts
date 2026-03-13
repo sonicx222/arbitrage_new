@@ -394,6 +394,44 @@ export class StreamBatcher<T = Record<string, unknown>> {
 }
 
 // =============================================================================
+// E-02: Stream MAXLEN env-var override support
+// =============================================================================
+
+/**
+ * Convert a stream name to its env-var override suffix.
+ * "stream:health" → "HEALTH", "stream:execution-requests" → "EXECUTION_REQUESTS"
+ */
+export function streamNameToEnvSuffix(streamName: string): string {
+  return streamName
+    .replace(/^stream:/, '')
+    .toUpperCase()
+    .replace(/-/g, '_');
+}
+
+/**
+ * Apply env-var overrides to stream MAXLEN defaults.
+ * Env var format: STREAM_MAXLEN_<SUFFIX>=<number>
+ * Example: STREAM_MAXLEN_HEALTH=10000 overrides stream:health
+ */
+export function applyMaxLenOverrides(defaults: Record<string, number>): Record<string, number> {
+  const result = { ...defaults };
+
+  for (const [streamName] of Object.entries(defaults)) {
+    const suffix = streamNameToEnvSuffix(streamName);
+    const envVar = `STREAM_MAXLEN_${suffix}`;
+    const envValue = process.env[envVar];
+    if (envValue !== undefined) {
+      const parsed = parseInt(envValue, 10);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        result[streamName] = parsed;
+      }
+    }
+  }
+
+  return result;
+}
+
+// =============================================================================
 // Redis Streams Client
 // =============================================================================
 
@@ -428,13 +466,16 @@ export class RedisStreamsClient {
    * P1-3 fix: Recommended MAXLEN values to prevent unbounded stream growth.
    * These are approximate (~) limits for performance.
    *
+   * E-02: Values can be overridden via env vars: STREAM_MAXLEN_<SUFFIX>=<number>
+   * Example: STREAM_MAXLEN_HEALTH=10000 overrides stream:health
+   *
    * P0 Fix: WARNING — approximate MAXLEN trimming can silently discard unread messages
    * when a consumer lags behind the configured limit. If a consumer group falls behind
    * by more than MAXLEN entries, older unprocessed messages will be permanently lost.
    * Use checkStreamLag() to monitor consumer lag against these limits and alert
    * when lag exceeds 80% of MAXLEN for a given stream.
    */
-  static readonly STREAM_MAX_LENGTHS: Record<string, number> = {
+  static readonly STREAM_MAX_LENGTH_DEFAULTS: Record<string, number> = {
     [RedisStreamsClient.STREAMS.PRICE_UPDATES]: 100000,    // High volume, keep more history
     [RedisStreamsClient.STREAMS.SWAP_EVENTS]: 50000,       // Medium volume
     [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 200000,    // RT-007→ST-002 FIX: Reduced from 500K to 200K — at 130 opps/s, 200K gives ~25 min buffer; 500K consumed 348MB (68% of 512MB Redis)
@@ -472,6 +513,11 @@ export class RedisStreamsClient {
     // P2 Fix CA-002: Service degradation/recovery events
     [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: 5000,      // Degradation + recovery events
   };
+
+  /** E-02: Effective MAXLEN = defaults + env-var overrides (STREAM_MAXLEN_<SUFFIX>=<number>) */
+  static readonly STREAM_MAX_LENGTHS: Record<string, number> = applyMaxLenOverrides(
+    RedisStreamsClient.STREAM_MAX_LENGTH_DEFAULTS
+  );
 
   /** OPT-006: Pre-cached MAXLEN string representations to avoid .toString() on every xadd */
   private static readonly STREAM_MAX_LENGTH_STRINGS: Record<string, string> = Object.fromEntries(
