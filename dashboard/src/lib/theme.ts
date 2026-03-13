@@ -4,6 +4,8 @@ export const CHART = {
   line1: '#d4a574',
   line2: '#22c55e',
   area1: '#d4a574',
+  crosshair: '#3f3f46',
+  dotStroke: '#09090b',
 };
 
 // L-12 FIX: Consistent error truncation length across dashboard.

@@ -340,11 +340,17 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   chartDataRef.current = state.chartData;
   lagDataRef.current = state.lagData;
   useEffect(() => {
-    const id = setInterval(() => {
+    const flush = () => {
       saveSessionArray(CHART_STORAGE_KEY, chartDataRef.current);
       saveSessionArray(LAG_STORAGE_KEY, lagDataRef.current);
-    }, 10_000);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(flush, 10_000);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('beforeunload', flush);
+      flush();
+    };
   }, []);
 
   // H-01 FIX: Memoize each domain slice independently. A 'services' event creates

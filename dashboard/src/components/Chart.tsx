@@ -220,10 +220,10 @@ export function Chart<T>({
               y1={MARGIN.top}
               x2={hoverPoint.x}
               y2={MARGIN.top + chartH}
-              stroke="#3f3f46"
+              stroke={CHART.crosshair}
               strokeDasharray="2 2"
             />
-            <circle cx={hoverPoint.x} cy={hoverPoint.y} r={3.5} fill={color} stroke="#09090b" strokeWidth={1.5} />
+            <circle cx={hoverPoint.x} cy={hoverPoint.y} r={3.5} fill={color} stroke={CHART.dotStroke} strokeWidth={1.5} />
           </>
         )}
       </svg>

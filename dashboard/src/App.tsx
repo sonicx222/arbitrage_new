@@ -257,7 +257,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
                 <path strokeLinecap="round" strokeLinejoin="round" d={t.icon} />
               </svg>
               <span className="hidden lg:inline">{t.id}</span>
-              {tabBadges[t.id] && <span className="w-1.5 h-1.5 rounded-full bg-accent-red shrink-0" />}
+              {tabBadges[t.id] && <span className="w-1.5 h-1.5 rounded-full bg-accent-red shrink-0" role="img" aria-label="Has active issues" />}
             </button>
           ))}
         </nav>
@@ -272,7 +272,7 @@ function Dashboard({ onLogout, onReconnect }: { onLogout: () => void; onReconnec
           <span className="hidden sm:inline">Logout</span>
         </button>
       </header>
-      <main id="main" className="flex-1 p-3 sm:p-5 overflow-auto" role="tabpanel" aria-label={tab}>
+      <main id="main" tabIndex={-1} className="flex-1 p-3 sm:p-5 overflow-auto" role="tabpanel" aria-label={tab}>
         {tab === 'Overview' && <TabErrorBoundary tab="Overview"><OverviewTab /></TabErrorBoundary>}
         {tab === 'Execution' && <TabErrorBoundary tab="Execution"><ExecutionTab /></TabErrorBoundary>}
         {tab === 'Opportunities' && <TabErrorBoundary tab="Opportunities"><OpportunitiesTab /></TabErrorBoundary>}

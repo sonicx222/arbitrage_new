@@ -48,10 +48,10 @@ function makeAlert(severity: 'critical' | 'high', message: string, id = 'a1'): F
 // Tests
 // ---------------------------------------------------------------------------
 describe('LiveAnnouncer', () => {
-  it('renders with role="status" and aria-live="assertive"', () => {
+  it('renders with role="status" and aria-live="polite"', () => {
     render(<LiveAnnouncer />);
     const el = screen.getByRole('status');
-    expect(el).toHaveAttribute('aria-live', 'assertive');
+    expect(el).toHaveAttribute('aria-live', 'polite');
     expect(el).toHaveAttribute('aria-atomic', 'true');
   });
 

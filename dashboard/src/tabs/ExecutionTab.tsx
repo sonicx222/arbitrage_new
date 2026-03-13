@@ -18,14 +18,6 @@ const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas C
 export function ExecutionTab() {
   const { metrics, chartData } = useMetrics();
   const { feed } = useFeed();
-
-  if (!metrics) {
-    return <div className="text-gray-500 text-xs">Waiting for execution data...</div>;
-  }
-
-  const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
-  const failedExecutions = metrics.totalExecutions - metrics.successfulExecutions;
-
   const [search, setSearch] = useState('');
 
   const allExecutions = useMemo(
@@ -63,6 +55,13 @@ export function ExecutionTab() {
     }),
     [allExecutions],
   );
+
+  if (!metrics) {
+    return <div className="text-gray-500 text-xs">Waiting for execution data...</div>;
+  }
+
+  const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
+  const failedExecutions = metrics.totalExecutions - metrics.successfulExecutions;
 
   return (
     <div className="space-y-4 overflow-auto">

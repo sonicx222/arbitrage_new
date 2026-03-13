@@ -19,13 +19,13 @@ export function OverviewTab() {
   const { feed } = useFeed();
   const { diagnostics } = useDiagnostics();
 
+  const serviceList = useMemo(() => Object.values(services), [services]);
+
   if (!metrics) {
     return <div className="text-gray-500 text-xs">Waiting for data...</div>;
   }
 
   const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
-
-  const serviceList = useMemo(() => Object.values(services), [services]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 h-full">
