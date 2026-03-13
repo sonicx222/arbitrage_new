@@ -225,4 +225,172 @@ export class LogFileManager {
 
     return compressed;
   }
+
+  // ===========================================================================
+  // Compress (size-based)
+  // ===========================================================================
+
+  /**
+   * Compress oldest uncompressed .jsonl files when total directory size
+   * exceeds maxTotalSizeMB. Skips today's file (it's actively written).
+   */
+  async compressIfOversized(): Promise<number> {
+    if (this.maxTotalSizeMB <= 0) return 0;
+
+    const thresholdBytes = this.maxTotalSizeMB * 1024 * 1024;
+
+    let files: string[];
+    try {
+      files = await fsp.readdir(this.dir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw err;
+    }
+
+    // Calculate total size
+    let totalSize = 0;
+    const uncompressedFiles: { file: string; date: string; size: number }[] = [];
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    for (const file of files) {
+      const filePath = path.join(this.dir, file);
+      try {
+        const stat = await fsp.stat(filePath);
+        totalSize += stat.size;
+
+        // Collect uncompressed candidates (not today's file, not .gz)
+        if (!file.endsWith('.gz')) {
+          const match = file.match(this.filePattern);
+          if (match && match[1] !== todayStr) {
+            uncompressedFiles.push({ file, date: match[1], size: stat.size });
+          }
+        }
+      } catch {
+        // Skip files we can't stat
+      }
+    }
+
+    if (totalSize <= thresholdBytes) return 0;
+
+    // Sort by date ascending (oldest first)
+    uncompressedFiles.sort((a, b) => a.date.localeCompare(b.date));
+
+    let compressed = 0;
+    for (const { file } of uncompressedFiles) {
+      if (totalSize <= thresholdBytes) break;
+
+      const srcPath = path.join(this.dir, file);
+      const gzPath = srcPath + '.gz';
+
+      try {
+        const srcStat = await fsp.stat(srcPath);
+        await pipeline(
+          fs.createReadStream(srcPath),
+          createGzip({ level: 6 }),
+          fs.createWriteStream(gzPath),
+        );
+        const gzStat = await fsp.stat(gzPath);
+        await fsp.unlink(srcPath);
+        totalSize -= (srcStat.size - gzStat.size);
+        compressed++;
+      } catch (err) {
+        this.logger.warn('Failed to size-compress log file', {
+          file,
+          error: getErrorMessage(err),
+        });
+        try { await fsp.unlink(gzPath); } catch { /* ignore */ }
+      }
+    }
+
+    if (compressed > 0) {
+      this.logger.info('Size-triggered log compression', {
+        dir: this.dir,
+        compressed,
+        thresholdMB: this.maxTotalSizeMB,
+        remainingSizeBytes: totalSize,
+      });
+    }
+
+    return compressed;
+  }
+
+  // ===========================================================================
+  // Stats
+  // ===========================================================================
+
+  /**
+   * Get directory statistics for health checks and monitoring.
+   */
+  async getStats(): Promise<DirectoryStats> {
+    const result: DirectoryStats = {
+      totalSizeBytes: 0,
+      fileCount: 0,
+      oldestFileDate: null,
+      newestFileDate: null,
+      compressedCount: 0,
+      uncompressedCount: 0,
+    };
+
+    let files: string[];
+    try {
+      files = await fsp.readdir(this.dir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return result;
+      throw err;
+    }
+
+    for (const file of files) {
+      const baseName = file.endsWith('.gz') ? file.slice(0, -3) : file;
+      const match = baseName.match(this.filePattern);
+      if (!match) continue;
+
+      const dateStr = match[1];
+      const filePath = path.join(this.dir, file);
+
+      try {
+        const stat = await fsp.stat(filePath);
+        result.totalSizeBytes += stat.size;
+        result.fileCount++;
+
+        if (file.endsWith('.gz')) {
+          result.compressedCount++;
+        } else {
+          result.uncompressedCount++;
+        }
+
+        if (!result.oldestFileDate || dateStr < result.oldestFileDate) {
+          result.oldestFileDate = dateStr;
+        }
+        if (!result.newestFileDate || dateStr > result.newestFileDate) {
+          result.newestFileDate = dateStr;
+        }
+      } catch {
+        // Skip files we can't stat
+      }
+    }
+
+    return result;
+  }
+
+  // ===========================================================================
+  // Maintenance (combined)
+  // ===========================================================================
+
+  /**
+   * Run full maintenance cycle: purge -> age-compress -> size-compress.
+   * Purge runs first to free the most space before compression decisions.
+   */
+  async runMaintenance(): Promise<MaintenanceResult> {
+    const { purged } = await this.purgeExpiredFiles();
+    const compressed = await this.compressOldFiles();
+    const sizeCompressed = await this.compressIfOversized();
+    const stats = await this.getStats();
+
+    return {
+      purged,
+      compressed,
+      sizeCompressed,
+      totalSizeBytes: stats.totalSizeBytes,
+    };
+  }
 }

@@ -253,4 +253,132 @@ describe('LogFileManager', () => {
       expect(Buffer.concat(chunks).toString('utf8')).toBe(content);
     });
   });
+
+  describe('compressIfOversized()', () => {
+    it('should compress oldest uncompressed files when total size exceeds threshold', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        maxTotalSizeMB: 0.001, // ~1KB threshold for testing
+        compressAfterDays: 999, // Don't age-compress — isolate size trigger
+        logger,
+      });
+
+      const old = makeDateStr(5);
+      const recent = makeDateStr(1);
+      await createFile(testDir, `trades-${old}.jsonl`, 'x'.repeat(600));
+      await createFile(testDir, `trades-${recent}.jsonl`, 'y'.repeat(600));
+
+      const compressed = await mgr.compressIfOversized();
+
+      expect(compressed).toBeGreaterThanOrEqual(1);
+      const files = await fsp.readdir(testDir);
+      expect(files).toContain(`trades-${old}.jsonl.gz`);
+    });
+
+    it('should not compress when under threshold', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        maxTotalSizeMB: 100,
+        logger,
+      });
+
+      await createFile(testDir, `trades-${makeDateStr(3)}.jsonl`, 'small');
+
+      const compressed = await mgr.compressIfOversized();
+      expect(compressed).toBe(0);
+    });
+
+    it('should not compress today\'s file even when oversized', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        maxTotalSizeMB: 0.0001, // tiny threshold
+        logger,
+      });
+
+      const today = makeDateStr(0);
+      await createFile(testDir, `trades-${today}.jsonl`, 'x'.repeat(1000));
+
+      const compressed = await mgr.compressIfOversized();
+      expect(compressed).toBe(0);
+    });
+
+    it('should be disabled when maxTotalSizeMB is 0', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        maxTotalSizeMB: 0,
+        logger,
+      });
+
+      await createFile(testDir, `trades-${makeDateStr(3)}.jsonl`, 'x'.repeat(10000));
+
+      const compressed = await mgr.compressIfOversized();
+      expect(compressed).toBe(0);
+    });
+  });
+
+  describe('getStats()', () => {
+    it('should return correct directory stats', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        logger,
+      });
+
+      await createFile(testDir, `trades-${makeDateStr(10)}.jsonl.gz`, 'compressed');
+      await createFile(testDir, `trades-${makeDateStr(3)}.jsonl`, 'uncompressed');
+      await createFile(testDir, `trades-${makeDateStr(1)}.jsonl`, 'recent');
+
+      const stats = await mgr.getStats();
+
+      expect(stats.fileCount).toBe(3);
+      expect(stats.compressedCount).toBe(1);
+      expect(stats.uncompressedCount).toBe(2);
+      expect(stats.totalSizeBytes).toBeGreaterThan(0);
+      expect(stats.oldestFileDate).toBe(makeDateStr(10));
+      expect(stats.newestFileDate).toBe(makeDateStr(1));
+    });
+
+    it('should handle empty directory', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        logger,
+      });
+
+      const stats = await mgr.getStats();
+      expect(stats.fileCount).toBe(0);
+      expect(stats.oldestFileDate).toBeNull();
+    });
+  });
+
+  describe('runMaintenance()', () => {
+    it('should run purge then compress in order', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        retentionDays: 14,
+        compressAfterDays: 1,
+        maxTotalSizeMB: 0, // disable size-based
+        logger,
+      });
+
+      // Expired file (should be purged)
+      await createFile(testDir, `trades-${makeDateStr(20)}.jsonl.gz`, 'expired');
+      // Old file (should be compressed)
+      await createFile(testDir, `trades-${makeDateStr(3)}.jsonl`, 'old-data');
+      // Today's file (should be untouched)
+      await createFile(testDir, `trades-${makeDateStr(0)}.jsonl`, 'today');
+
+      const result = await mgr.runMaintenance();
+
+      expect(result.purged).toBe(1);
+      expect(result.compressed).toBe(1);
+      const files = await fsp.readdir(testDir);
+      expect(files).toHaveLength(2); // today.jsonl + old.jsonl.gz
+    });
+  });
 });
