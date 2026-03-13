@@ -74,7 +74,7 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
         const successRate = calcSuccessRate(action.payload.totalExecutions, action.payload.successfulExecutions);
         chartData = [
           ...state.chartData.slice(-MAX_CHART_POINTS),
-          { time: now, latency: action.payload.averageLatency, successRate },
+          { time: now, latency: action.payload.averageLatency, successRate, profit: action.payload.totalProfit },
         ];
         saveSessionArray(CHART_STORAGE_KEY, chartData);
       }

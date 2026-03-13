@@ -1,6 +1,6 @@
 export const CHART = {
   grid: '#27272a',
-  tick: '#71717a',
+  tick: '#8a8a94',
   tooltipBg: '#27272a',
   tooltipBorder: '#3f3f46',
   tooltipText: '#fafafa',
@@ -8,20 +8,6 @@ export const CHART = {
   line2: '#22c55e',
   area1: '#d4a574',
 };
-
-// L-11 FIX: Pre-allocated tooltip style object — avoids recreating inline objects
-// on every render, which causes Recharts to diff new references unnecessarily.
-export const TOOLTIP_STYLE: React.CSSProperties = {
-  background: CHART.tooltipBg,
-  border: `1px solid ${CHART.tooltipBorder}`,
-  fontSize: 11,
-  color: CHART.tooltipText,
-};
-
-// Pre-allocated Recharts axis/grid props — avoids recreating inline objects
-// on every render (same rationale as TOOLTIP_STYLE above).
-export const AXIS_TICK = { fontSize: 9, fill: CHART.tick } as const;
-export const GRID_PROPS = { strokeDasharray: '3 3' as const, stroke: CHART.grid };
 
 // L-12 FIX: Consistent error truncation length across dashboard.
 export const MAX_ERROR_DISPLAY = 30;

@@ -1,15 +1,15 @@
 import { useMemo } from 'react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useStreams, useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
+import { Chart } from '../components/Chart';
 import { DataTable, type Column } from '../components/DataTable';
 import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatNumber } from '../lib/format';
-import { CHART, TOOLTIP_STYLE, AXIS_TICK, GRID_PROPS } from '../lib/theme';
+import { CHART } from '../lib/theme';
 import type { StreamHealth } from '../lib/types';
 
 interface RedisStats {
@@ -71,15 +71,8 @@ export function StreamsTab() {
       {/* Consumer Lag Chart */}
       <div className="card">
         <SectionHeader>Total Pending Messages</SectionHeader>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={lagData}>
-            <CartesianGrid {...GRID_PROPS} />
-            <XAxis dataKey="time" tick={AXIS_TICK} />
-            <YAxis tick={AXIS_TICK} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} />
-            <Area type="monotone" dataKey="pending" stroke={CHART.area1} fill={CHART.area1} fillOpacity={0.1} />
-          </AreaChart>
-        </ResponsiveContainer>
+        <Chart data={lagData} dataKey="pending" height={200} color={CHART.area1} fill
+          ariaLabel="Total pending messages across all streams over time" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

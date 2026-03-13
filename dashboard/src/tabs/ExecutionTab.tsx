@@ -1,14 +1,14 @@
 import { useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useMetrics, useFeed } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { KpiGrid } from '../components/KpiGrid';
+import { Chart } from '../components/Chart';
 import { CircuitBreakerGrid } from '../components/CircuitBreakerGrid';
 import { DataTable } from '../components/DataTable';
 import { SectionHeader } from '../components/SectionHeader';
 import { ExportCsvButton } from '../components/ExportCsvButton';
 import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate, thresholdColor } from '../lib/format';
-import { CHART, TOOLTIP_STYLE, AXIS_TICK, GRID_PROPS, MAX_ERROR_DISPLAY, EXPLORER_URLS } from '../lib/theme';
+import { CHART, MAX_ERROR_DISPLAY, EXPLORER_URLS } from '../lib/theme';
 import type { FeedItem } from '../lib/types';
 
 type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
@@ -61,31 +61,24 @@ export function ExecutionTab() {
         <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
       </KpiGrid>
 
+      {/* P&L Chart */}
+      <div className="card">
+        <SectionHeader>Cumulative P&L ($)</SectionHeader>
+        <Chart data={chartData} dataKey="profit" height={200} color={CHART.line2} fill
+          ariaLabel="Cumulative profit and loss over time" formatValue={(v) => `$${v.toFixed(2)}`} />
+      </div>
+
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="card">
           <SectionHeader>Avg Latency (ms)</SectionHeader>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={chartData}>
-              <CartesianGrid {...GRID_PROPS} />
-              <XAxis dataKey="time" tick={AXIS_TICK} />
-              <YAxis tick={AXIS_TICK} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Line type="monotone" dataKey="latency" stroke={CHART.line1} dot={false} strokeWidth={1.5} />
-            </LineChart>
-          </ResponsiveContainer>
+          <Chart data={chartData} dataKey="latency" height={180} color={CHART.line1}
+            ariaLabel="Average execution latency over time" formatValue={(v) => `${v.toFixed(0)}ms`} />
         </div>
         <div className="card">
           <SectionHeader>Success Rate (%)</SectionHeader>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={chartData}>
-              <CartesianGrid {...GRID_PROPS} />
-              <XAxis dataKey="time" tick={AXIS_TICK} />
-              <YAxis tick={AXIS_TICK} domain={[0, 100]} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Line type="monotone" dataKey="successRate" stroke={CHART.line2} dot={false} strokeWidth={1.5} />
-            </LineChart>
-          </ResponsiveContainer>
+          <Chart data={chartData} dataKey="successRate" height={180} color={CHART.line2}
+            yDomain={[0, 100]} ariaLabel="Execution success rate over time" formatValue={(v) => `${v.toFixed(1)}%`} />
         </div>
       </div>
 
