@@ -46,7 +46,7 @@ export const CircuitBreakerGrid = memo(function CircuitBreakerGrid() {
         >
           Force Close
         </button>
-        {actionMsg && <span className={`text-[10px] ml-2 ${actionMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{actionMsg}</span>}
+        {actionMsg && <span className={`text-[11px] ml-2 ${actionMsg.startsWith('Done') ? 'text-accent-green' : 'text-accent-red'}`}>{actionMsg}</span>}
       </div>
 
       <ConfirmModal

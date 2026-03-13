@@ -6,7 +6,7 @@ interface Props {
   mb?: 'mb-2' | 'mb-3';
 }
 
-const BASE = 'text-[10px] text-gray-500 uppercase tracking-wider';
+const BASE = 'text-[11px] text-gray-500 uppercase tracking-wider';
 
 export function SectionHeader({ children, mb = 'mb-2' }: Props) {
   return <h3 className={`${BASE} ${mb}`}>{children}</h3>;

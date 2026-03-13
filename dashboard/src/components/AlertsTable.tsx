@@ -36,7 +36,7 @@ export const AlertsTable = memo(function AlertsTable() {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[10px] text-gray-500 uppercase tracking-wider">
+        <h3 className="text-[11px] text-gray-500 uppercase tracking-wider">
           Alerts ({alerts.length})
           {actionMsg && <span className="text-accent-red ml-2">{actionMsg}</span>}
         </h3>
@@ -52,7 +52,7 @@ export const AlertsTable = memo(function AlertsTable() {
         columns={[
           { header: 'Time', render: (alert) => <span className="text-gray-500">{formatTime(alert.timestamp)}</span> },
           { header: 'Severity', render: (alert) => (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
               alert.severity === 'critical' ? 'bg-accent-red/20 text-accent-red' :
               alert.severity === 'high' || alert.severity === 'warning' ? 'bg-accent-yellow/20 text-accent-yellow' :
               'bg-gray-700 text-gray-400'
@@ -69,7 +69,7 @@ export const AlertsTable = memo(function AlertsTable() {
                   onError: (err) => { showError(`Ack failed: ${err.message}`); },
                 });
               }}
-              className="px-2 py-0.5 text-[10px] rounded bg-gray-700 text-gray-400 hover:text-gray-200"
+              className="px-2 py-0.5 text-[11px] rounded bg-gray-700 text-gray-400 hover:text-gray-200"
             >
               Ack
             </button>

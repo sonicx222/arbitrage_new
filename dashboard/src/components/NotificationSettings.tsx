@@ -40,7 +40,7 @@ export const NotificationSettings = memo(function NotificationSettings() {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs text-gray-300">Browser Notifications</div>
-          <div className="text-[10px] text-gray-500 mt-0.5">
+          <div className="text-[11px] text-gray-500 mt-0.5">
             Get notified for circuit breaker opens, critical alerts, and execution failure streaks
           </div>
         </div>
@@ -64,17 +64,17 @@ export const NotificationSettings = memo(function NotificationSettings() {
         </button>
       </div>
       {!available && (
-        <div className="text-[10px] text-gray-600 mt-2">
+        <div className="text-[11px] text-gray-600 mt-2">
           Notifications API not available in this browser. Title flashing will still work.
         </div>
       )}
       {available && permission === 'denied' && (
-        <div className="text-[10px] text-accent-yellow mt-2">
+        <div className="text-[11px] text-accent-yellow mt-2">
           Notifications blocked by browser. Allow notifications in browser settings to enable.
         </div>
       )}
       {enabled && permission === 'granted' && (
-        <div className="text-[10px] text-accent-green mt-2">
+        <div className="text-[11px] text-accent-green mt-2">
           Active — you will be notified when the tab is backgrounded.
         </div>
       )}

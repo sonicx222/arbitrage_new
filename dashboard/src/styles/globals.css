@@ -49,9 +49,7 @@ body {
     backdrop-filter: blur(12px);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  .card:hover {
-    border-color: rgba(212, 167, 116, 0.18);
-  }
+  /* Card hover reserved for interactive cards (e.g., ChainCard with onClick). */
   .status-healthy { @apply text-accent-green; }
   .status-degraded { @apply text-accent-yellow; }
   .status-unhealthy { @apply text-accent-red; }
@@ -62,7 +60,7 @@ table { font-family: var(--font-mono), ui-monospace, monospace; }
 th {
   font-family: var(--font-body), system-ui, sans-serif;
   @apply font-semibold tracking-wider uppercase;
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
 }
 
 /* Glass header */

@@ -36,21 +36,21 @@ export const ShortcutsOverlay = memo(function ShortcutsOverlay({ open, onClose }
       <div className="card w-72 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-bold text-gray-300">Keyboard Shortcuts</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">&times;</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-gray-500 rounded" aria-label="Close">&times;</button>
         </div>
         <table className="w-full text-xs">
           <tbody>
             {SHORTCUTS.map(([key, desc]) => (
               <tr key={key} className="border-b border-gray-800/50">
                 <td className="py-1.5 pr-4">
-                  <kbd className="px-1.5 py-0.5 rounded bg-surface-lighter text-gray-300 font-mono text-[10px]">{key}</kbd>
+                  <kbd className="px-1.5 py-0.5 rounded bg-surface-lighter text-gray-300 font-mono text-[11px]">{key}</kbd>
                 </td>
                 <td className="py-1.5 text-gray-500">{desc}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="mt-3 text-[10px] text-gray-600">Shortcuts are disabled when typing in inputs.</div>
+        <div className="mt-3 text-[11px] text-gray-600">Shortcuts are disabled when typing in inputs.</div>
       </div>
     </div>
   );

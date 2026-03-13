@@ -29,12 +29,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     // M-08 FIX: Report errors externally so operators see production crashes
     // without needing browser console access.
     try {
+      // Strip file paths from stack traces to avoid exposing internal structure
+      const sanitize = (s?: string) => s?.replace(/https?:\/\/[^\s)]+/g, '[redacted]').slice(0, 500);
       navigator.sendBeacon('/api/client-error', JSON.stringify({
         message: error.message,
-        stack: error.stack?.slice(0, 1000),
-        componentStack: info.componentStack?.slice(0, 500),
+        stack: sanitize(error.stack),
+        componentStack: sanitize(info.componentStack ?? undefined),
         timestamp: Date.now(),
-        url: window.location.href,
       }));
     } catch { /* sendBeacon may not be available in all environments */ }
   }
@@ -162,7 +163,7 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
       {status === 'disconnected' && onReconnect && (
         <button
           onClick={onReconnect}
-          className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent-red/15 text-accent-red hover:bg-accent-red/25 transition-colors"
+          className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-accent-red/15 text-accent-red hover:bg-accent-red/25 transition-colors"
         >
           Reconnect
         </button>

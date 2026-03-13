@@ -23,14 +23,19 @@ interface RedisStats {
   dailyLimitPercent?: number;
 }
 
+function validateRedisStats(data: unknown): RedisStats | null {
+  if (data == null || typeof data !== 'object' || Array.isArray(data)) return null;
+  return data as RedisStats;
+}
+
 export function StreamsTab() {
   const { streams, lagData } = useStreams();
   const { metrics } = useMetrics();
 
   // Redis stats (one-off fetch, refresh every 30s)
-  const { data: redisStats } = useQuery<RedisStats>({
+  const { data: redisStats, isLoading: redisLoading } = useQuery<RedisStats | null>({
     queryKey: ['redis-stats'],
-    queryFn: () => fetchJson('/api/redis/stats'),
+    queryFn: async () => validateRedisStats(await fetchJson('/api/redis/stats')),
     refetchInterval: 30000,
     staleTime: 15000,
     retry: 1,
@@ -84,7 +89,7 @@ export function StreamsTab() {
               {Object.entries(metrics.dlqMetrics).map(([key, val]) => (
                 <div key={key}>
                   <div className={`text-lg font-bold ${val > 0 ? 'text-accent-yellow' : 'text-gray-400'}`}>{val}</div>
-                  <div className="text-[10px] text-gray-500 capitalize">{key}</div>
+                  <div className="text-[11px] text-gray-500 capitalize">{key}</div>
                 </div>
               ))}
             </div>
@@ -116,7 +121,7 @@ export function StreamsTab() {
               )}
             </div>
           ) : (
-            <EmptyState message="Loading Redis stats..." />
+            <EmptyState message={redisLoading ? "Loading Redis stats..." : "No Redis data"} />
           )}
         </div>
       </div>

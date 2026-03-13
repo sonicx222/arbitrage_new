@@ -48,19 +48,19 @@ function PipelineSection({ pipeline }: { pipeline: DiagnosticsSnapshot['pipeline
       {/* E2E summary */}
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div>
-          <div className="text-[10px] text-gray-500">E2E p50</div>
+          <div className="text-[11px] text-gray-500">E2E p50</div>
           <div className={`text-lg font-bold font-mono ${latencyColor(pipeline.e2e.p50, 30, 50)}`}>
             {fmtMs(pipeline.e2e.p50)}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-gray-500">E2E p95</div>
+          <div className="text-[11px] text-gray-500">E2E p95</div>
           <div className={`text-lg font-bold font-mono ${latencyColor(pipeline.e2e.p95, 50, 100)}`}>
             {fmtMs(pipeline.e2e.p95)}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-gray-500">E2E p99</div>
+          <div className="text-[11px] text-gray-500">E2E p99</div>
           <div className={`text-lg font-bold font-mono ${latencyColor(pipeline.e2e.p99, 100, 200)}`}>
             {fmtMs(pipeline.e2e.p99)}
           </div>
@@ -101,7 +101,7 @@ function RuntimeSection({ runtime }: { runtime: DiagnosticsSnapshot['runtime'] }
       <div className="space-y-3">
         {/* Event Loop */}
         <div>
-          <div className="text-[10px] text-gray-500 mb-1">Event Loop Delay</div>
+          <div className="text-[11px] text-gray-500 mb-1">Event Loop Delay</div>
           <div className="grid grid-cols-4 gap-2 text-xs">
             <StatRow label="Min" value={<span className="font-mono">{fmtMs(runtime.eventLoop.min)}</span>} />
             <StatRow label="Mean" value={<span className="font-mono">{fmtMs(runtime.eventLoop.mean)}</span>} />
@@ -111,7 +111,7 @@ function RuntimeSection({ runtime }: { runtime: DiagnosticsSnapshot['runtime'] }
         </div>
         {/* Memory */}
         <div>
-          <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+          <div className="flex justify-between text-[11px] text-gray-500 mb-1">
             <span>Heap Memory</span>
             <span>{runtime.memory.heapUsedMB.toFixed(0)}MB / {runtime.memory.heapTotalMB.toFixed(0)}MB ({memPct.toFixed(0)}%)</span>
           </div>
@@ -123,7 +123,7 @@ function RuntimeSection({ runtime }: { runtime: DiagnosticsSnapshot['runtime'] }
         </div>
         {/* GC */}
         <div>
-          <div className="text-[10px] text-gray-500 mb-1">Garbage Collection</div>
+          <div className="text-[11px] text-gray-500 mb-1">Garbage Collection</div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <StatRow label="Total Pause" value={<span className="font-mono">{fmtMs(runtime.gc.totalPauseMs)}</span>} />
             <StatRow label="Events" value={formatNumber(runtime.gc.count)} />
@@ -159,18 +159,18 @@ function ProvidersSection({ providers }: { providers: DiagnosticsSnapshot['provi
       {/* Summary */}
       <div className="flex gap-4 mb-3">
         <div>
-          <div className="text-[10px] text-gray-500">Total RPC Errors</div>
+          <div className="text-[11px] text-gray-500">Total RPC Errors</div>
           <div className={`text-lg font-bold ${providers.totalRpcErrors > 0 ? 'text-accent-red' : 'text-gray-400'}`}>
             {formatNumber(providers.totalRpcErrors)}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-gray-500">Chains Tracked</div>
+          <div className="text-[11px] text-gray-500">Chains Tracked</div>
           <div className="text-lg font-bold">{chainEntries.length}</div>
         </div>
         {Object.keys(providers.reconnections).length > 0 && (
           <div>
-            <div className="text-[10px] text-gray-500">Reconnections</div>
+            <div className="text-[11px] text-gray-500">Reconnections</div>
             <div className="text-lg font-bold text-accent-yellow">
               {Object.values(providers.reconnections).reduce((s, r) => s + r.count, 0)}
             </div>
@@ -194,7 +194,7 @@ function ProvidersSection({ providers }: { providers: DiagnosticsSnapshot['provi
       {/* Per-method table (collapsed) */}
       {methodEntries.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] text-gray-500 mb-1">By Method</div>
+          <div className="text-[11px] text-gray-500 mb-1">By Method</div>
           <DataTable<[string, { p50: number; p95: number; totalCalls: number }]>
             columns={[
               { header: 'Method', render: ([name]) => <span className="font-mono text-gray-300">{name}</span> },
@@ -212,7 +212,7 @@ function ProvidersSection({ providers }: { providers: DiagnosticsSnapshot['provi
       {/* WebSocket message throughput */}
       {wsEntries.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] text-gray-500 mb-1">WebSocket Messages (cumulative)</div>
+          <div className="text-[11px] text-gray-500 mb-1">WebSocket Messages (cumulative)</div>
           <DataTable<[string, number]>
             columns={[
               { header: 'Chain:Event', render: ([key]) => <span className="font-mono text-gray-300">{key}</span> },
@@ -380,7 +380,7 @@ export function DiagnosticsTab() {
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
-              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
                 section === s.id ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]'
               }`}
             >
@@ -388,7 +388,7 @@ export function DiagnosticsTab() {
             </button>
           ))}
         </div>
-        <div className="text-[10px] text-gray-500">
+        <div className="text-[11px] text-gray-500">
           <span>Last: {new Date(diagnostics.timestamp).toLocaleTimeString()}</span>
           <span className="ml-2">Refresh: 10s</span>
         </div>

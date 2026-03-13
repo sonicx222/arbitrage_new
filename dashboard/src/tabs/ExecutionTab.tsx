@@ -126,12 +126,12 @@ export function ExecutionTab() {
 
       {/* Chart Range Selector */}
       <div className="flex items-center gap-1">
-        <span className="text-[10px] text-gray-500 mr-1">Range:</span>
+        <span className="text-[11px] text-gray-500 mr-1">Range:</span>
         {CHART_RANGES.map((r, i) => (
           <button
             key={r.label}
             onClick={() => setChartRange(i)}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
               chartRange === i ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]'
             }`}
           >
@@ -167,32 +167,32 @@ export function ExecutionTab() {
           <SectionHeader mb="mb-3">Gas Cost Analysis</SectionHeader>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
             <div>
-              <span className="text-[10px] text-gray-500 block">Total Gas</span>
+              <span className="text-[11px] text-gray-500 block">Total Gas</span>
               <span className="text-sm font-bold font-mono">{formatUsd(gasStats.totalGas)}</span>
             </div>
             <div>
-              <span className="text-[10px] text-gray-500 block">Avg / Exec</span>
+              <span className="text-[11px] text-gray-500 block">Avg / Exec</span>
               <span className="text-sm font-bold font-mono">{formatUsd(gasStats.avgGas)}</span>
             </div>
             <div>
-              <span className="text-[10px] text-gray-500 block">Gas / Profit</span>
+              <span className="text-[11px] text-gray-500 block">Gas / Profit</span>
               <span className={`text-sm font-bold font-mono ${gasStats.gasRatio > 50 ? 'text-accent-red' : gasStats.gasRatio > 25 ? 'text-accent-yellow' : 'text-accent-green'}`}>
                 {formatPct(gasStats.gasRatio)}
               </span>
             </div>
             <div>
-              <span className="text-[10px] text-gray-500 block">Executions</span>
+              <span className="text-[11px] text-gray-500 block">Executions</span>
               <span className="text-sm font-bold font-mono">{gasStats.gasCount}</span>
             </div>
           </div>
           {Object.keys(gasStats.byChain).length > 1 && (
             <div>
-              <span className="text-[10px] text-gray-500 block mb-1">Per-Chain Gas</span>
+              <span className="text-[11px] text-gray-500 block mb-1">Per-Chain Gas</span>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(gasStats.byChain)
                   .sort(([, a], [, b]) => b.gas - a.gas)
                   .map(([chain, data]) => (
-                    <span key={chain} className="text-[10px] px-2 py-1 rounded bg-[var(--badge-bg)] text-gray-400">
+                    <span key={chain} className="text-[11px] px-2 py-1 rounded bg-[var(--badge-bg)] text-gray-400">
                       <span className="uppercase text-gray-300">{chain}</span>{' '}
                       {formatUsd(data.gas)} ({data.count})
                     </span>
@@ -225,7 +225,7 @@ export function ExecutionTab() {
       {/* Recent Executions Table */}
       <div className="card">
         <div className="flex items-center justify-between mb-2 gap-2">
-          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider shrink-0">Recent Executions ({executions.length})</h4>
+          <h4 className="text-[11px] text-gray-500 uppercase tracking-wider shrink-0">Recent Executions ({executions.length})</h4>
           <input
             type="text"
             value={search}

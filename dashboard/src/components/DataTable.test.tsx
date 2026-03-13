@@ -53,8 +53,7 @@ describe('DataTable', () => {
 
     it('adds role="button" and tabIndex to sortable headers', () => {
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      const nameHeader = screen.getByText('Name');
-      expect(nameHeader).toHaveAttribute('role', 'button');
+      const nameHeader = screen.getByRole('button', { name: /Name/ });
       expect(nameHeader).toHaveAttribute('tabindex', '0');
     });
 
@@ -68,14 +67,15 @@ describe('DataTable', () => {
     it('fires onHeaderClick on Enter key', () => {
       onClick.mockClear();
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      fireEvent.keyDown(screen.getByText('Name'), { key: 'Enter' });
+      fireEvent.keyDown(screen.getByRole('button', { name: /Name/ }), { key: 'Enter' });
       expect(onClick).toHaveBeenCalledOnce();
     });
 
     it('fires onHeaderClick on Space key', () => {
       onClick.mockClear();
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      const ev = fireEvent.keyDown(screen.getByText('Name'), { key: ' ' });
+      const el = screen.getByRole('button', { name: /Name/ });
+      const ev = fireEvent.keyDown(el, { key: ' ' });
       expect(onClick).toHaveBeenCalledOnce();
       // Space should be prevented to avoid page scroll
       // fireEvent returns false when preventDefault was called
@@ -85,15 +85,16 @@ describe('DataTable', () => {
     it('does NOT fire onHeaderClick on other keys', () => {
       onClick.mockClear();
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      fireEvent.keyDown(screen.getByText('Name'), { key: 'Tab' });
-      fireEvent.keyDown(screen.getByText('Name'), { key: 'a' });
+      const el = screen.getByRole('button', { name: /Name/ });
+      fireEvent.keyDown(el, { key: 'Tab' });
+      fireEvent.keyDown(el, { key: 'a' });
       expect(onClick).not.toHaveBeenCalled();
     });
 
     it('fires onHeaderClick on mouse click', () => {
       onClick.mockClear();
       render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
-      fireEvent.click(screen.getByText('Name'));
+      fireEvent.click(screen.getByRole('button', { name: /Name/ }));
       expect(onClick).toHaveBeenCalledOnce();
     });
   });
@@ -123,7 +124,7 @@ describe('DataTable', () => {
         { header: 'Name', onHeaderClick: vi.fn(), render: (r) => <>{r.name}</> },
       ];
       render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
-      expect(screen.getByText('Name')).not.toHaveAttribute('aria-sort');
+      expect(screen.getByRole('button', { name: /Name/ })).not.toHaveAttribute('aria-sort');
     });
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 interface Props {
   open: boolean;
@@ -12,6 +12,7 @@ interface Props {
 }
 
 export function ConfirmModal({ open, title, children, onConfirm, onCancel, loading, confirmLabel = 'Confirm', danger }: Props) {
+  const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -63,7 +64,7 @@ export function ConfirmModal({ open, title, children, onConfirm, onCancel, loadi
       style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease-out' }}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="confirm-modal-title"
+      aria-labelledby={titleId}
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div
@@ -72,7 +73,7 @@ export function ConfirmModal({ open, title, children, onConfirm, onCancel, loadi
         style={{ animation: 'slideUp 0.2s ease-out' }}
         tabIndex={-1}
       >
-        <h3 id="confirm-modal-title" className="font-display font-bold text-sm mb-3">{title}</h3>
+        <h3 id={titleId} className="font-display font-bold text-sm mb-3">{title}</h3>
         {children && <div className="text-xs text-gray-400 mb-4">{children}</div>}
         <div className="flex justify-end gap-2">
           <button

@@ -41,7 +41,7 @@ export const ChainCard = memo(function ChainCard({ chain, status = 'unknown', pa
       </div>
       {stats && stats.total > 0 && (
         <>
-          <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-gray-500">
+          <div className="mt-1.5 grid grid-cols-3 gap-1 text-[11px] text-gray-500">
             <div>
               <span className="block text-gray-600">Rate</span>
               <span className={thresholdColor(Number(successRate), 80, 50)}>
@@ -59,7 +59,7 @@ export const ChainCard = memo(function ChainCard({ chain, status = 'unknown', pa
               <span className="text-gray-400">{stats.totalGasCost > 0 ? formatUsd(stats.totalGasCost) : '—'}</span>
             </div>
           </div>
-          <div className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-gray-500">
+          <div className="mt-1 grid grid-cols-3 gap-1 text-[11px] text-gray-500">
             <div>
               <span className="block text-gray-600">Latency</span>
               <span className="text-gray-400">{avgLatency ? `${avgLatency}ms` : '—'}</span>

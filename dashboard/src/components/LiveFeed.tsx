@@ -10,8 +10,8 @@ export const LiveFeed = memo(function LiveFeed({ items }: Props) {
   return (
     <div className="card flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Live Activity</h4>
-        <span className="text-[10px] font-mono text-gray-600">{items.length} events</span>
+        <h4 className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Live Activity</h4>
+        <span className="text-[11px] font-mono text-gray-600">{items.length} events</span>
       </div>
       <div className="flex-1 overflow-y-auto space-y-0.5 text-xs font-mono">
         {items.length === 0 && (
@@ -34,7 +34,7 @@ export const LiveFeed = memo(function LiveFeed({ items }: Props) {
                 <span className="text-gray-300 uppercase shrink-0">{item.data.chain}</span>
                 <span className="text-gray-500 shrink-0">{item.data.dex}</span>
                 {item.data.success && item.data.actualProfit != null ? (
-                  <span className="ml-auto shrink-0">{formatUsd(item.data.actualProfit)}</span>
+                  <span className={`ml-auto shrink-0 ${item.data.actualProfit > 0 ? 'text-accent-green' : item.data.actualProfit < 0 ? 'text-accent-red' : ''}`}>{formatUsd(item.data.actualProfit)}</span>
                 ) : item.data.error ? (
                   <span className="ml-auto text-accent-red line-clamp-2 text-right" title={item.data.error}>
                     {item.data.error}

@@ -41,6 +41,7 @@ export function DataTable<T>({ columns, data, keyExtractor, maxHeight = '16rem',
       {columns.map((col, i) => (
         <th
           key={i}
+          scope="col"
           className={`${ALIGN[col.align ?? 'left']} py-1 px-2${col.onHeaderClick ? ' cursor-pointer hover:text-gray-300 select-none focus:outline-none focus:text-gray-200' : ''}`}
           onClick={col.onHeaderClick}
           onKeyDown={col.onHeaderClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); col.onHeaderClick!(); } } : undefined}
@@ -48,7 +49,7 @@ export function DataTable<T>({ columns, data, keyExtractor, maxHeight = '16rem',
           tabIndex={col.onHeaderClick ? 0 : undefined}
           aria-sort={col.sortDirection}
         >
-          {col.header}{col.headerSuffix ?? ''}
+          {col.header}{col.headerSuffix || (col.onHeaderClick && !col.sortDirection ? ' \u21C5' : '')}
         </th>
       ))}
     </tr>

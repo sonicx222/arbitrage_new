@@ -32,14 +32,22 @@ interface EEHealthResponse {
   successRate?: string;
 }
 
+function validateEEHealth(data: unknown): EEHealthResponse | null {
+  if (data == null || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  // At minimum, riskState should be a string if present
+  if (d.riskState !== undefined && typeof d.riskState !== 'string') return null;
+  return d as EEHealthResponse;
+}
+
 export function RiskTab() {
   const { metrics } = useMetrics();
 
   // Fetch EE health on tab mount for risk state
   // In dev, Vite proxies /ee/* to EE port 3005. In prod, coordinator proxies.
-  const { data: eeHealth, isLoading: eeLoading, isError: eeUnreachable } = useQuery<EEHealthResponse>({
+  const { data: eeHealth, isLoading: eeLoading, isError: eeUnreachable } = useQuery<EEHealthResponse | null>({
     queryKey: ['ee-health'],
-    queryFn: () => fetchJson('/ee/health'),
+    queryFn: async () => validateEEHealth(await fetchJson('/ee/health')),
     refetchInterval: 10000,
     staleTime: 5000,
     retry: 1,
@@ -58,7 +66,7 @@ export function RiskTab() {
           </div>
         )}
         {eeUnreachable && (
-          <div className="mb-2 px-2 py-1 bg-accent-red/10 border border-accent-red/30 rounded text-[10px] text-accent-red">
+          <div className="mb-2 px-2 py-1 bg-accent-red/10 border border-accent-red/30 rounded text-[11px] text-accent-red">
             Execution Engine unreachable — check if the service is running
           </div>
         )}
@@ -77,7 +85,7 @@ export function RiskTab() {
           ))}
         </div>
         {eeHealth && (
-          <div className="flex gap-4 text-[10px] text-gray-500">
+          <div className="flex gap-4 text-[11px] text-gray-500">
             <span>Simulation: {eeHealth.simulationMode ? 'ON' : 'OFF'}</span>
             <span>Providers: {eeHealth.healthyProviders ?? '?'}</span>
             <span>Queue: {eeHealth.queueSize ?? 0}</span>
@@ -95,18 +103,18 @@ export function RiskTab() {
             <div className="space-y-3">
               <div className="flex gap-4">
                 <div className="flex-1">
-                  <div className="text-[10px] text-gray-500">Admitted</div>
+                  <div className="text-[11px] text-gray-500">Admitted</div>
                   <div className="text-lg font-bold text-accent-green">{formatNumber(metrics.admissionMetrics.admitted)}</div>
                 </div>
                 <div className="flex-1">
-                  <div className="text-[10px] text-gray-500">Shed</div>
+                  <div className="text-[11px] text-gray-500">Shed</div>
                   <div className="text-lg font-bold text-accent-red">{formatNumber(metrics.admissionMetrics.shed)}</div>
                 </div>
               </div>
               {/* Admission ratio bar */}
               {(metrics.admissionMetrics.admitted + metrics.admissionMetrics.shed) > 0 && (
                 <div>
-                  <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                  <div className="flex justify-between text-[11px] text-gray-500 mb-1">
                     <span>Admission Rate</span>
                     <span>{formatPct(metrics.admissionMetrics.admitted / (metrics.admissionMetrics.admitted + metrics.admissionMetrics.shed) * 100)}</span>
                   </div>
@@ -157,7 +165,7 @@ export function RiskTab() {
                 <span className="text-sm font-bold">
                   {formatPct(metrics.backpressure.executionStreamDepthRatio * 100)}
                 </span>
-                <span className={`text-[10px] px-2 py-0.5 rounded ${
+                <span className={`text-[11px] px-2 py-0.5 rounded ${
                   metrics.backpressure.active
                     ? 'bg-accent-red/20 text-accent-red'
                     : 'bg-accent-green/20 text-accent-green'

@@ -6,15 +6,24 @@ interface Props {
   onLogin: () => void;
 }
 
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 30_000;
+
 export function LoginScreen({ onLogin }: Props) {
   const [token, setToken] = useState('');
   const [cbKey, setCbKey] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState(0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    if (Date.now() < lockedUntil) {
+      setError(`Too many attempts. Try again in ${Math.ceil((lockedUntil - Date.now()) / 1000)}s`);
+      return;
+    }
     setError('');
     setLoading(true);
     try {
@@ -23,7 +32,15 @@ export function LoginScreen({ onLogin }: Props) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        setError(res.status === 401 || res.status === 403 ? 'Invalid token' : `Server error (${res.status})`);
+        const next = attempts + 1;
+        setAttempts(next);
+        if (next >= MAX_ATTEMPTS) {
+          setLockedUntil(Date.now() + LOCKOUT_MS);
+          setAttempts(0);
+          setError(`Too many attempts. Locked for ${LOCKOUT_MS / 1000}s`);
+        } else {
+          setError(res.status === 401 || res.status === 403 ? 'Invalid token' : `Server error (${res.status})`);
+        }
         setLoading(false);
         return;
       }
@@ -96,7 +113,7 @@ export function LoginScreen({ onLogin }: Props) {
             ) : 'Connect'}
           </button>
         </div>
-        <p className="text-[10px] text-gray-600 text-center mt-4">Token is stored in localStorage for SSE auth</p>
+        <p className="text-[11px] text-gray-600 text-center mt-4">Token is stored in localStorage for SSE auth</p>
       </form>
     </div>
   );

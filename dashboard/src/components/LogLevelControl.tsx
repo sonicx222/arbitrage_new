@@ -56,7 +56,7 @@ export const LogLevelControl = memo(function LogLevelControl() {
           </button>
         ))}
       </div>
-      {actionMsg && <div className="text-[10px] text-accent-blue">{actionMsg}</div>}
+      {actionMsg && <div className="text-[11px] text-accent-blue">{actionMsg}</div>}
     </div>
   );
 });

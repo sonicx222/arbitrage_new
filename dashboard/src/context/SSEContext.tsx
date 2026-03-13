@@ -212,9 +212,15 @@ export function validatePayload(event: string, data: unknown): boolean {
     case 'execution-result':
       return typeof data.success === 'boolean' && typeof data.chain === 'string' && (data.chain as string).length > 0;
     case 'circuit-breaker':
-      return typeof data.state === 'string';
+      return typeof data.state === 'string'
+        && (data.state === 'CLOSED' || data.state === 'OPEN' || data.state === 'HALF_OPEN');
     case 'streams':
-      return Object.values(data).every((v) => isObj(v) && typeof (v as Record<string, unknown>).length === 'number');
+      return Object.values(data).every((v) => {
+        if (!isObj(v)) return false;
+        const s = v as Record<string, unknown>;
+        return typeof s.length === 'number' && typeof s.pending === 'number'
+          && typeof s.consumerGroups === 'number' && typeof s.status === 'string';
+      });
     case 'alert':
       return typeof data.type === 'string' && typeof data.timestamp === 'number';
     case 'diagnostics':

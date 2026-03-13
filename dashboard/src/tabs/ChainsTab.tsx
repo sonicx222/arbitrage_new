@@ -63,11 +63,11 @@ export function ChainsTab() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
               <div className="flex items-center gap-3">
                 <StatusBadge status={partitionStatus} label={partition.name} />
-                <span className="text-[10px] text-gray-500">{partition.region}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-400">{partition.chains.length} chains</span>
+                <span className="text-[11px] text-gray-500">{partition.region}</span>
+                <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-400">{partition.chains.length} chains</span>
               </div>
               {svc && (
-                <div className="flex gap-3 text-[10px] text-gray-500">
+                <div className="flex gap-3 text-[11px] text-gray-500">
                   <span>Uptime: {formatDuration(svc.uptime)}</span>
                   <span>Mem: {formatMemory(svc.memoryUsage)}</span>
                   <span>CPU: {formatCpu(svc.cpuUsage)}%</span>
@@ -95,7 +95,7 @@ export function ChainsTab() {
               <div className="flex items-center justify-between">
                 <StatusBadge status={svc?.status ?? 'unknown'} label={name} />
                 {svc && (
-                  <div className="flex gap-3 text-[10px] text-gray-500">
+                  <div className="flex gap-3 text-[11px] text-gray-500">
                     <span>{formatDuration(svc.uptime)}</span>
                     <span>{formatMemory(svc.memoryUsage)}</span>
                   </div>

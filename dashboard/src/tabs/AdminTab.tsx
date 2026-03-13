@@ -84,7 +84,7 @@ export function AdminTab() {
               <button
                 onClick={() => setRestartTarget(svc.name)}
                 disabled={!isLeader}
-                className="px-2 py-0.5 text-[10px] rounded bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="px-2 py-0.5 text-[11px] rounded bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 Restart
               </button>

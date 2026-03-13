@@ -44,25 +44,25 @@ export function OverviewTab() {
         {diagnostics && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="card flex flex-col gap-0.5 py-2">
-              <span className="text-[10px] text-gray-500">E2E Latency p95</span>
+              <span className="text-[11px] text-gray-500">E2E Latency p95</span>
               <span className={`text-sm font-bold font-mono ${diagnostics.pipeline.e2e.p95 >= 50 ? 'text-accent-red' : diagnostics.pipeline.e2e.p95 >= 30 ? 'text-accent-yellow' : 'text-accent-green'}`}>
                 {fmtMs(diagnostics.pipeline.e2e.p95)}
               </span>
             </div>
             <div className="card flex flex-col gap-0.5 py-2">
-              <span className="text-[10px] text-gray-500">Event Loop p99</span>
+              <span className="text-[11px] text-gray-500">Event Loop p99</span>
               <span className={`text-sm font-bold font-mono ${diagnostics.runtime.eventLoop.p99 >= 100 ? 'text-accent-red' : diagnostics.runtime.eventLoop.p99 >= 20 ? 'text-accent-yellow' : ''}`}>
                 {fmtMs(diagnostics.runtime.eventLoop.p99)}
               </span>
             </div>
             <div className="card flex flex-col gap-0.5 py-2">
-              <span className="text-[10px] text-gray-500">Heap Used</span>
+              <span className="text-[11px] text-gray-500">Heap Used</span>
               <span className="text-sm font-bold font-mono">
                 {diagnostics.runtime.memory.heapUsedMB.toFixed(0)}MB
               </span>
             </div>
             <div className="card flex flex-col gap-0.5 py-2">
-              <span className="text-[10px] text-gray-500">RPC Errors</span>
+              <span className="text-[11px] text-gray-500">RPC Errors</span>
               <span className={`text-sm font-bold font-mono ${diagnostics.providers.totalRpcErrors > 0 ? 'text-accent-red' : ''}`}>
                 {formatNumber(diagnostics.providers.totalRpcErrors)}
               </span>
@@ -90,10 +90,10 @@ export function OverviewTab() {
               {metrics.backpressure ? (
                 <div className={`mt-1 text-sm font-bold ${metrics.backpressure.active ? 'text-accent-red' : 'text-accent-green'}`}>
                   {metrics.backpressure.active ? 'ACTIVE' : 'OK'}
-                  <span className="text-gray-500 font-normal text-[10px] ml-1">({formatPct(metrics.backpressure.executionStreamDepthRatio * 100)})</span>
+                  <span className="text-gray-500 font-normal text-[11px] ml-1">({formatPct(metrics.backpressure.executionStreamDepthRatio * 100)})</span>
                 </div>
               ) : <span className="text-gray-600 mt-1 block">-</span>}
-              <a href="#risk" className="text-[10px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
+              <a href="#risk" className="text-[11px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
             </div>
             <div>
               <span className="text-gray-500">Admission</span>
@@ -104,7 +104,7 @@ export function OverviewTab() {
                   <span className="text-accent-red">{formatNumber(metrics.admissionMetrics.shed)}</span>
                 </div>
               ) : <span className="text-gray-600 mt-1 block">-</span>}
-              <a href="#risk" className="text-[10px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
+              <a href="#risk" className="text-[11px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
             </div>
             <div>
               <span className="text-gray-500">DLQ Total</span>
@@ -113,7 +113,7 @@ export function OverviewTab() {
                   {formatNumber(metrics.dlqMetrics.total)}
                 </div>
               ) : <span className="text-gray-600 mt-1 block">-</span>}
-              <a href="#streams" className="text-[10px] text-gray-600 hover:text-gray-400">Streams tab &rarr;</a>
+              <a href="#streams" className="text-[11px] text-gray-600 hover:text-gray-400">Streams tab &rarr;</a>
             </div>
             <div>
               <span className="text-gray-500">Fwd Rejections</span>
@@ -122,7 +122,7 @@ export function OverviewTab() {
                   {formatNumber(Object.values(metrics.forwardingMetrics).reduce((s, v) => s + v, 0))}
                 </div>
               ) : <span className="text-gray-600 mt-1 block">-</span>}
-              <a href="#risk" className="text-[10px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
+              <a href="#risk" className="text-[11px] text-gray-600 hover:text-gray-400">Risk tab &rarr;</a>
             </div>
           </div>
         </div>

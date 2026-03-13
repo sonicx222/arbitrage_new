@@ -26,7 +26,7 @@ export const StatusBadge = memo(function StatusBadge({ status, label }: Props) {
         )}
         <span className={`relative inline-flex rounded-full h-2 w-2 ${statusDot(status)}`} />
       </span>
-      <span className={`text-[10px] leading-none ${statusColor(status)}`} aria-hidden="true">{statusSymbol(status)}</span>
+      <span className={`text-[11px] leading-none ${statusColor(status)}`} aria-hidden="true">{statusSymbol(status)}</span>
       {label
         ? <span className="text-xs font-medium">{label}</span>
         : <span className="sr-only">{status}</span>}

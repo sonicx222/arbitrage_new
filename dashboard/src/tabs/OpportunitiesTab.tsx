@@ -135,7 +135,7 @@ export function OpportunitiesTab() {
     return (
       <div className="card max-w-md mx-auto mt-12 text-center space-y-2">
         <div className="text-accent-red text-xs font-medium">Failed to load opportunities</div>
-        <p className="text-gray-500 text-[10px]">Check that the coordinator is running and the API is reachable.</p>
+        <p className="text-gray-500 text-[11px]">Check that the coordinator is running and the API is reachable.</p>
       </div>
     );
   }
@@ -180,7 +180,7 @@ export function OpportunitiesTab() {
                 <button
                   key={chain}
                   onClick={() => setChainFilter(chainFilter === chain ? 'all' : chain)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
                     chainFilter === chain
                       ? 'bg-accent-green/15 text-accent-green ring-1 ring-accent-green/30'
                       : 'bg-[var(--badge-bg)] text-gray-400 hover:text-gray-200'
@@ -196,7 +196,7 @@ export function OpportunitiesTab() {
           {chainFilter !== 'all' && (
             <button
               onClick={() => setChainFilter('all')}
-              className="px-2.5 py-1.5 rounded-lg text-[10px] font-medium text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]"
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]"
             >
               Clear filter
             </button>
@@ -207,7 +207,7 @@ export function OpportunitiesTab() {
       {/* Opportunities Table */}
       <div className="card">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[10px] text-gray-500 uppercase tracking-wider">
+          <h3 className="text-[11px] text-gray-500 uppercase tracking-wider">
             Opportunities ({filtered.length}{chainFilter !== 'all' ? ` on ${chainFilter}` : ''})
           </h3>
           <ExportCsvButton
@@ -239,7 +239,7 @@ export function OpportunitiesTab() {
                 );
               } },
             { header: 'Type', render: (opp) => (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--badge-bg)] text-gray-400">{opp.type ?? 'simple'}</span>
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--badge-bg)] text-gray-400">{opp.type ?? 'simple'}</span>
             ) },
             { header: 'Route', render: (opp) => (
               <span className="text-gray-400">

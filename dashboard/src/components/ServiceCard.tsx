@@ -14,12 +14,12 @@ export const ServiceCard = memo(function ServiceCard({ service }: Props) {
       <div className="flex items-center justify-between">
         <StatusBadge status={service.status} label={service.name} />
       </div>
-      <div className="flex gap-3 text-[10px] text-gray-500">
+      <div className="flex gap-3 text-[11px] text-gray-500">
         <span>{formatMemory(service.memoryUsage)}</span>
         <span>{formatCpu(service.cpuUsage)}%</span>
       </div>
       {service.error && (
-        <div className="text-[10px] text-accent-red truncate" title={service.error}>
+        <div className="text-[11px] text-accent-red truncate" title={service.error}>
           {service.error}
         </div>
       )}
