@@ -274,6 +274,28 @@ describe('R2Uploader', () => {
       const warnings = mockLogger.calls.filter(c => c.level === 'warn');
       expect(warnings.some(w => w.msg.includes('Failed to upload previous day logs'))).toBe(true);
     });
+
+    it('should fall back to .jsonl.gz when .jsonl not found', async () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yyyy = yesterday.getFullYear();
+      const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+      const dd = String(yesterday.getDate()).padStart(2, '0');
+      const gzFilename = `trades-${yyyy}-${mm}-${dd}.jsonl.gz`;
+
+      await fsp.writeFile(path.join(testDir, gzFilename), 'gz-content', 'utf8');
+
+      globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+
+      const config = createMockConfig();
+      const uploader = new R2Uploader(config, mockLogger);
+
+      await uploader.uploadPreviousDayLogs(testDir);
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      const fetchCall = (globalThis.fetch as jest.Mock).mock.calls[0];
+      expect(fetchCall[0]).toContain(gzFilename);
+    });
   });
 
   // ---------------------------------------------------------------------------

@@ -203,6 +203,7 @@ export class R2Uploader {
 
       // Read file contents for upload (JSONL files are typically small enough)
       const body = await readFile(localPath);
+      const isGz = localPath.endsWith('.gz');
 
       // Build request
       const now = new Date();
@@ -219,7 +220,7 @@ export class R2Uploader {
         'x-amz-content-sha256': payloadHash,
         'x-amz-date': amzDate,
         'content-length': String(body.length),
-        'content-type': 'application/x-ndjson',
+        'content-type': isGz ? 'application/gzip' : 'application/x-ndjson',
       };
 
       const authorization = signRequest(
@@ -295,9 +296,15 @@ export class R2Uploader {
       const dd = String(yesterday.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
       const pattern = `trades-${dateStr}.jsonl`;
+      const gzPattern = `trades-${dateStr}.jsonl.gz`;
 
       const files = await readdir(tradeLogDir);
-      const matchingFiles = files.filter(f => f === pattern);
+      let matchingFiles = files.filter(f => f === pattern);
+
+      // C-1 FIX: Fall back to .jsonl.gz when .jsonl not found (post-compression)
+      if (matchingFiles.length === 0) {
+        matchingFiles = files.filter(f => f === gzPattern);
+      }
 
       if (matchingFiles.length === 0) {
         this.logger.info('No trade logs found for previous day', { date: dateStr, dir: tradeLogDir });
@@ -337,9 +344,15 @@ export class R2Uploader {
       const dd = String(date.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
       const pattern = `trades-${dateStr}.jsonl`;
+      const gzPattern = `trades-${dateStr}.jsonl.gz`;
 
       const files = await readdir(tradeLogDir);
-      const matchingFiles = files.filter(f => f === pattern);
+      let matchingFiles = files.filter(f => f === pattern);
+
+      // C-1 FIX: Fall back to .jsonl.gz
+      if (matchingFiles.length === 0) {
+        matchingFiles = files.filter(f => f === gzPattern);
+      }
 
       for (const file of matchingFiles) {
         const localPath = join(tradeLogDir, file);
