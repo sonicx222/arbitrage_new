@@ -1,0 +1,140 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { DataTable, type Column } from './DataTable';
+
+interface Row { id: string; name: string; value: number }
+
+const ROWS: Row[] = [
+  { id: '1', name: 'Alice', value: 10 },
+  { id: '2', name: 'Bob', value: 20 },
+];
+
+const BASE_COLUMNS: Column<Row>[] = [
+  { header: 'Name', render: (r) => <>{r.name}</> },
+  { header: 'Value', align: 'right', render: (r) => <>{r.value}</> },
+];
+
+// ---------------------------------------------------------------------------
+// Basic rendering
+// ---------------------------------------------------------------------------
+describe('DataTable', () => {
+  it('renders column headers', () => {
+    render(<DataTable columns={BASE_COLUMNS} data={ROWS} keyExtractor={(r) => r.id} />);
+    expect(screen.getByText('Name')).toBeInTheDocument();
+    expect(screen.getByText('Value')).toBeInTheDocument();
+  });
+
+  it('renders data rows', () => {
+    render(<DataTable columns={BASE_COLUMNS} data={ROWS} keyExtractor={(r) => r.id} />);
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+  });
+
+  it('shows empty message when data is empty', () => {
+    render(<DataTable columns={BASE_COLUMNS} data={[]} keyExtractor={(r) => r.id} emptyMessage="Nothing here" />);
+    expect(screen.getByText('Nothing here')).toBeInTheDocument();
+  });
+
+  it('shows default empty message', () => {
+    render(<DataTable columns={BASE_COLUMNS} data={[]} keyExtractor={(r) => r.id} />);
+    expect(screen.getByText('No data')).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Keyboard accessibility (P0-5)
+  // ---------------------------------------------------------------------------
+  describe('sortable header accessibility', () => {
+    const onClick = vi.fn();
+
+    const sortableColumns: Column<Row>[] = [
+      { header: 'Name', onHeaderClick: onClick, render: (r) => <>{r.name}</> },
+      { header: 'Value', render: (r) => <>{r.value}</> },
+    ];
+
+    it('adds role="button" and tabIndex to sortable headers', () => {
+      render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
+      const nameHeader = screen.getByText('Name');
+      expect(nameHeader).toHaveAttribute('role', 'button');
+      expect(nameHeader).toHaveAttribute('tabindex', '0');
+    });
+
+    it('does NOT add role="button" to non-sortable headers', () => {
+      render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
+      const valueHeader = screen.getByText('Value');
+      expect(valueHeader).not.toHaveAttribute('role');
+      expect(valueHeader).not.toHaveAttribute('tabindex');
+    });
+
+    it('fires onHeaderClick on Enter key', () => {
+      onClick.mockClear();
+      render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
+      fireEvent.keyDown(screen.getByText('Name'), { key: 'Enter' });
+      expect(onClick).toHaveBeenCalledOnce();
+    });
+
+    it('fires onHeaderClick on Space key', () => {
+      onClick.mockClear();
+      render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
+      const ev = fireEvent.keyDown(screen.getByText('Name'), { key: ' ' });
+      expect(onClick).toHaveBeenCalledOnce();
+      // Space should be prevented to avoid page scroll
+      // fireEvent returns false when preventDefault was called
+      expect(ev).toBe(false);
+    });
+
+    it('does NOT fire onHeaderClick on other keys', () => {
+      onClick.mockClear();
+      render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
+      fireEvent.keyDown(screen.getByText('Name'), { key: 'Tab' });
+      fireEvent.keyDown(screen.getByText('Name'), { key: 'a' });
+      expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it('fires onHeaderClick on mouse click', () => {
+      onClick.mockClear();
+      render(<DataTable columns={sortableColumns} data={ROWS} keyExtractor={(r) => r.id} />);
+      fireEvent.click(screen.getByText('Name'));
+      expect(onClick).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // aria-sort (M-1)
+  // ---------------------------------------------------------------------------
+  describe('aria-sort', () => {
+    it('sets aria-sort from sortDirection prop', () => {
+      const columns: Column<Row>[] = [
+        { header: 'Name', onHeaderClick: vi.fn(), sortDirection: 'ascending', render: (r) => <>{r.name}</> },
+      ];
+      render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
+      expect(screen.getByText('Name')).toHaveAttribute('aria-sort', 'ascending');
+    });
+
+    it('sets aria-sort to descending', () => {
+      const columns: Column<Row>[] = [
+        { header: 'Name', onHeaderClick: vi.fn(), sortDirection: 'descending', render: (r) => <>{r.name}</> },
+      ];
+      render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
+      expect(screen.getByText('Name')).toHaveAttribute('aria-sort', 'descending');
+    });
+
+    it('does NOT set aria-sort when sortDirection is undefined', () => {
+      const columns: Column<Row>[] = [
+        { header: 'Name', onHeaderClick: vi.fn(), render: (r) => <>{r.name}</> },
+      ];
+      render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
+      expect(screen.getByText('Name')).not.toHaveAttribute('aria-sort');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // headerSuffix
+  // ---------------------------------------------------------------------------
+  it('renders headerSuffix alongside header text', () => {
+    const columns: Column<Row>[] = [
+      { header: 'Name', headerSuffix: ' \u25B2', render: (r) => <>{r.name}</> },
+    ];
+    render(<DataTable columns={columns} data={ROWS} keyExtractor={(r) => r.id} />);
+    expect(screen.getByText(/Name.*\u25B2/)).toBeInTheDocument();
+  });
+});

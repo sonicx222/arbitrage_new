@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect, useMemo, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
+import { useState, useCallback, useEffect, useMemo, Component, type ReactNode, type ErrorInfo } from 'react';
 import { SSEProvider, useConnection, useMetrics, useServices, useFeed } from './context/SSEContext';
 import { getItem, removeItem } from './lib/storage';
 import { setOnUnauthorized } from './hooks/useApi';
 import { useHotkeys } from './hooks/useHotkeys';
 import { thresholdColor } from './lib/format';
+import { LiveAnnouncer } from './components/LiveAnnouncer';
 import { LoginScreen } from './components/LoginScreen';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { OverviewTab } from './tabs/OverviewTab';
@@ -166,52 +167,6 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
           Reconnect
         </button>
       )}
-    </div>
-  );
-}
-
-function LiveAnnouncer() {
-  const { circuitBreaker } = useServices();
-  const { feed } = useFeed();
-  const [msg, setMsg] = useState('');
-  const prevCB = useRef<string | undefined>();
-  const prevFeedLen = useRef(0);
-
-  useEffect(() => {
-    if (circuitBreaker && prevCB.current !== undefined && circuitBreaker.state !== prevCB.current) {
-      setMsg(`Circuit breaker changed to ${circuitBreaker.state}`);
-    }
-    prevCB.current = circuitBreaker?.state;
-  }, [circuitBreaker]);
-
-  useEffect(() => {
-    if (feed.length > prevFeedLen.current) {
-      const newest = feed[0];
-      if (newest.kind === 'alert' && newest.data.severity === 'critical') {
-        setMsg(`Critical alert: ${newest.data.message ?? newest.data.type}`);
-      } else if (newest.kind === 'execution') {
-        // Count consecutive failures
-        let streak = 0;
-        for (const item of feed) {
-          if (item.kind === 'execution' && !item.data.success) streak++;
-          else break;
-        }
-        if (streak >= 3) setMsg(`${streak} consecutive execution failures`);
-      }
-    }
-    prevFeedLen.current = feed.length;
-  }, [feed]);
-
-  // Auto-clear after 5 seconds
-  useEffect(() => {
-    if (!msg) return;
-    const id = setTimeout(() => setMsg(''), 5000);
-    return () => clearTimeout(id);
-  }, [msg]);
-
-  return (
-    <div className="sr-only" role="status" aria-live="assertive" aria-atomic="true">
-      {msg}
     </div>
   );
 }
