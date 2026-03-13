@@ -99,7 +99,7 @@ export const chainOpportunityTimeoutMs: Record<string, number> = {
   // Alt-L1 chains
   avalanche: 4000,   // 2s blocks
   fantom: 2000,      // 1s blocks
-  polygon: 6000,     // 2s blocks, but higher variance
+  polygon: 8000,     // 2s blocks nominal, but 2-10s variance during congestion
   // Non-EVM
   solana: 1000,      // ~400ms blocks — extremely fast
 };

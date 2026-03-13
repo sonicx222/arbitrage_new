@@ -33,10 +33,10 @@ services:
     volumes:
       - redis_data:/data
     # P2-19 FIX: Use noeviction (matches production) so dev catches memory issues early.
-    # allkeys-lru silently evicts stream data, masking memory problems.
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    # P3-33 FIX: Add auth to match production and catch auth-related code path bugs early.
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction --requirepass ${REDIS_PASSWORD:-localdev}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-localdev}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -59,7 +59,7 @@ services:
       - INSTANCE_ID=p1-local
       - REGION_ID=local-p1
       - HEALTH_CHECK_PORT=3001
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
       # RPC URLs from .env file
       - BSC_RPC_URL=${BSC_RPC_URL}
@@ -97,7 +97,7 @@ services:
       - REGION_ID=local-p2
       # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
       - HEALTH_CHECK_PORT=3002
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
       - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL}
       - ARBITRUM_WS_URL=${ARBITRUM_WS_URL}
@@ -139,7 +139,7 @@ services:
       - REGION_ID=local-p3
       # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
       - HEALTH_CHECK_PORT=3003
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
       - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
       - ETHEREUM_WS_URL=${ETHEREUM_WS_URL}
@@ -173,7 +173,7 @@ services:
       - REGION_ID=local-p4
       # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
       - HEALTH_CHECK_PORT=3004
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
       # RPC URLs from .env file
       - SOLANA_RPC_URL=${SOLANA_RPC_URL}
@@ -201,7 +201,7 @@ services:
       - INSTANCE_ID=cross-chain-local
       # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
       - HEALTH_CHECK_PORT=3006
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
     ports:
       - "3006:3006"
@@ -234,7 +234,7 @@ services:
       - INSTANCE_ID=execution-local
       # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
       - HEALTH_CHECK_PORT=3005
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
       # Private keys (from .env - leave empty for dry-run mode)
       - ETHEREUM_PRIVATE_KEY=${ETHEREUM_PRIVATE_KEY:-}
@@ -271,7 +271,7 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-localdev}@redis:6379
       - LOG_LEVEL=info
       # P1 Fix CA-013: Partition endpoints now use per-service ports matching HEALTH_CHECK_PORT
       - PARTITION_P1_URL=http://partition-asia-fast:3001
@@ -304,7 +304,7 @@ services:
     image: rediscommander/redis-commander:latest
     container_name: arb-redis-ui
     environment:
-      - REDIS_HOSTS=local:redis:6379
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-localdev}
     ports:
       - "8081:8081"
     depends_on:

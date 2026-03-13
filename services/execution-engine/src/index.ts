@@ -253,7 +253,10 @@ function startRedisHealthMonitor(
     }
   }, 10_000);
   // Initial check
-  engine.isRedisHealthy().then(healthy => { cachedRedisHealthy = healthy; }).catch(() => { cachedRedisHealthy = false; });
+  engine.isRedisHealthy().then(healthy => { cachedRedisHealthy = healthy; }).catch((err) => {
+    cachedRedisHealthy = false;
+    logger.warn('Initial Redis health check failed', { error: getErrorMessage(err) });
+  });
 }
 
 function createHealthServer(engine: ExecutionEngineService): Server {

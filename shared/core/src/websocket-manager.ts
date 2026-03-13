@@ -1597,6 +1597,12 @@ export class WebSocketManager {
           maxRecoveryCycles: WebSocketManager.MAX_RECOVERY_CYCLES,
           lifeSupportDelayMs,
         });
+        // P3-31: Emit event so partition runner / health checks can surface life-support state
+        this.emit('lifeSupport', {
+          chainId: this.chainId,
+          recoveryCycles: this.recoveryCycles,
+          intervalMs: lifeSupportDelayMs,
+        });
         this.recoveryTimer = setTimeout(() => {
           this.recoveryTimer = null;
           if (this.isDisconnected) return;

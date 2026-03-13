@@ -86,6 +86,10 @@ export interface TradeLogEntry {
   gasPriceGwei?: number;
   /** P2 Fix O-6: Detection timestamp from pipeline for detection-to-execution latency measurement */
   detectionTimestamp?: number;
+  /** P3-26: Flash loan provider used (e.g., 'aave-v3', 'balancer', 'syncswap') for provider-specific failure analysis */
+  flashLoanProvider?: string;
+  /** P3-26: Whether V3 adapter was used for swap routing */
+  usedV3Adapter?: boolean;
 }
 
 /**
