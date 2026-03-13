@@ -61,6 +61,9 @@ export interface OpportunityPublisherStats {
 // =============================================================================
 
 export class OpportunityPublisher {
+  /** Maximum fallback file size per day (100MB) — matches DLQ fallback pattern */
+  private static readonly MAX_FALLBACK_FILE_BYTES = 100 * 1024 * 1024;
+
   private readonly logger: ILogger;
   private readonly streamsClient: RedisStreamsClient;
   private readonly partitionId: string;
@@ -252,10 +255,22 @@ export class OpportunityPublisher {
 
     const line = JSON.stringify(record) + '\n';
 
-    // Fire-and-forget: mkdir + append. If this also fails, log and move on —
+    // Fire-and-forget: mkdir + stat-check + append. If this also fails, log and move on —
     // we've exhausted all fallback paths.
     fsp.mkdir(dir, { recursive: true })
-      .then(() => fsp.appendFile(filePath, line, 'utf8'))
+      .then(() => fsp.stat(filePath).catch(() => null))
+      .then((fileStat) => {
+        if (fileStat && fileStat.size >= OpportunityPublisher.MAX_FALLBACK_FILE_BYTES) {
+          this.logger.warn('Lost opportunity fallback file size limit reached', {
+            filePath,
+            sizeBytes: fileStat.size,
+            limitBytes: OpportunityPublisher.MAX_FALLBACK_FILE_BYTES,
+            opportunityId: opportunity.id,
+          });
+          return;
+        }
+        return fsp.appendFile(filePath, line, 'utf8');
+      })
       .then(() => {
         this.logger.info('Lost opportunity written to local JSONL fallback', {
           opportunityId: opportunity.id,
