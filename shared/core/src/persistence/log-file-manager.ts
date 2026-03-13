@@ -146,4 +146,83 @@ export class LogFileManager {
 
     return { purged, freedBytes };
   }
+
+  // ===========================================================================
+  // Compress (age-based)
+  // ===========================================================================
+
+  /**
+   * Compress .jsonl files older than compressAfterDays to .jsonl.gz.
+   * If a .gz already exists for a .jsonl file, deletes the stale .jsonl.
+   * Skips files whose date >= cutoff (including today's file).
+   */
+  async compressOldFiles(): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - this.compressAfterDays);
+    cutoff.setHours(23, 59, 59, 999);
+
+    let compressed = 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    let files: string[];
+    try {
+      files = await fsp.readdir(this.dir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw err;
+    }
+
+    for (const file of files) {
+      // Only process uncompressed files matching the pattern
+      if (file.endsWith('.gz')) continue;
+      const match = file.match(this.filePattern);
+      if (!match) continue;
+
+      const dateStr = match[1];
+      // Never compress today's file — it's actively being written
+      if (dateStr === todayStr) continue;
+      const fileDate = new Date(dateStr + 'T00:00:00');
+      if (isNaN(fileDate.getTime()) || fileDate >= cutoff) continue;
+
+      const srcPath = path.join(this.dir, file);
+      const gzPath = srcPath + '.gz';
+
+      try {
+        // If .gz already exists, just delete the stale original
+        try {
+          await fsp.access(gzPath);
+          await fsp.unlink(srcPath);
+          compressed++;
+          continue;
+        } catch {
+          // .gz doesn't exist — proceed to compress
+        }
+
+        await pipeline(
+          fs.createReadStream(srcPath),
+          createGzip({ level: 6 }),
+          fs.createWriteStream(gzPath),
+        );
+        await fsp.unlink(srcPath);
+        compressed++;
+      } catch (err) {
+        this.logger.warn('Failed to compress log file', {
+          file,
+          error: getErrorMessage(err),
+        });
+        // Clean up partial .gz on failure
+        try { await fsp.unlink(gzPath); } catch { /* ignore */ }
+      }
+    }
+
+    if (compressed > 0) {
+      this.logger.info('Compressed old log files', {
+        dir: this.dir,
+        compressed,
+        cutoffDate: cutoff.toISOString().split('T')[0],
+      });
+    }
+
+    return compressed;
+  }
 }

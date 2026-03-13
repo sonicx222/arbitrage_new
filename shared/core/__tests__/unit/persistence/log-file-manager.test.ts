@@ -138,4 +138,119 @@ describe('LogFileManager', () => {
       expect(await fsp.readdir(testDir)).toHaveLength(1);
     });
   });
+
+  describe('compressOldFiles()', () => {
+    it('should compress .jsonl files older than compressAfterDays', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        compressAfterDays: 1,
+        logger,
+      });
+
+      const oldDate = makeDateStr(3);
+      await createFile(testDir, `trades-${oldDate}.jsonl`, 'x'.repeat(1000));
+
+      const compressed = await mgr.compressOldFiles();
+
+      expect(compressed).toBe(1);
+      const files = await fsp.readdir(testDir);
+      expect(files).toEqual([`trades-${oldDate}.jsonl.gz`]);
+    });
+
+    it('should not compress today\'s file', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        compressAfterDays: 0,
+        logger,
+      });
+
+      const today = makeDateStr(0);
+      await createFile(testDir, `trades-${today}.jsonl`, 'today-data');
+
+      const compressed = await mgr.compressOldFiles();
+
+      expect(compressed).toBe(0);
+      const files = await fsp.readdir(testDir);
+      expect(files).toEqual([`trades-${today}.jsonl`]);
+    });
+
+    it('should delete stale .jsonl when .gz already exists', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        compressAfterDays: 1,
+        logger,
+      });
+
+      const oldDate = makeDateStr(5);
+      await createFile(testDir, `trades-${oldDate}.jsonl`, 'stale-original');
+      await createFile(testDir, `trades-${oldDate}.jsonl.gz`, 'already-compressed');
+
+      const compressed = await mgr.compressOldFiles();
+
+      expect(compressed).toBe(1);
+      const files = await fsp.readdir(testDir);
+      expect(files).toEqual([`trades-${oldDate}.jsonl.gz`]);
+    });
+
+    it('should skip already-compressed files', async () => {
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        compressAfterDays: 1,
+        logger,
+      });
+
+      const oldDate = makeDateStr(5);
+      await createFile(testDir, `trades-${oldDate}.jsonl.gz`, 'only-gz');
+
+      const compressed = await mgr.compressOldFiles();
+      expect(compressed).toBe(0);
+    });
+
+    it('should handle non-existent directory gracefully', async () => {
+      const mgr = new LogFileManager({
+        dir: path.join(testDir, 'nope'),
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        compressAfterDays: 1,
+        logger,
+      });
+
+      const compressed = await mgr.compressOldFiles();
+      expect(compressed).toBe(0);
+    });
+
+    it('should produce valid gzip output', async () => {
+      const { createGunzip } = await import('zlib');
+      const { pipeline: pipelinePromise } = await import('stream/promises');
+      const { Writable } = await import('stream');
+
+      const mgr = new LogFileManager({
+        dir: testDir,
+        filePattern: /^trades-(\d{4}-\d{2}-\d{2})\.jsonl$/,
+        compressAfterDays: 1,
+        logger,
+      });
+
+      const oldDate = makeDateStr(3);
+      const content = '{"line":1}\n{"line":2}\n';
+      await createFile(testDir, `trades-${oldDate}.jsonl`, content);
+
+      await mgr.compressOldFiles();
+
+      // Decompress and verify
+      const gzPath = path.join(testDir, `trades-${oldDate}.jsonl.gz`);
+      const chunks: Buffer[] = [];
+      await pipelinePromise(
+        fs.createReadStream(gzPath),
+        createGunzip(),
+        new Writable({
+          write(chunk, _enc, cb) { chunks.push(chunk as Buffer); cb(); },
+        }),
+      );
+      expect(Buffer.concat(chunks).toString('utf8')).toBe(content);
+    });
+  });
 });
