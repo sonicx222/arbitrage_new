@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import type { FeedItem } from '../lib/types';
 import { formatTime, formatUsd } from '../lib/format';
-import { MAX_ERROR_DISPLAY } from '../lib/theme';
 
 interface Props {
   items: FeedItem[];
@@ -28,24 +27,31 @@ export const LiveFeed = memo(function LiveFeed({ items }: Props) {
               {formatTime(item.data.timestamp)}
             </span>
             {item.kind === 'execution' ? (
-              <>
-                <span className={item.data.success ? 'text-accent-green' : 'text-accent-red'}>
+              <div className="flex gap-2 min-w-0 flex-1">
+                <span className={`shrink-0 ${item.data.success ? 'text-accent-green' : 'text-accent-red'}`}>
                   {item.data.success ? '\u2713' : '\u2717'}
                 </span>
-                <span className="text-gray-300 uppercase">{item.data.chain}</span>
-                <span className="text-gray-500">{item.data.dex}</span>
-                <span className="ml-auto">
-                  {item.data.success && item.data.actualProfit != null
-                    ? formatUsd(item.data.actualProfit)
-                    : item.data.error?.slice(0, MAX_ERROR_DISPLAY)}
-                </span>
-              </>
+                <span className="text-gray-300 uppercase shrink-0">{item.data.chain}</span>
+                <span className="text-gray-500 shrink-0">{item.data.dex}</span>
+                {item.data.success && item.data.actualProfit != null ? (
+                  <span className="ml-auto shrink-0">{formatUsd(item.data.actualProfit)}</span>
+                ) : item.data.error ? (
+                  <span className="ml-auto text-accent-red line-clamp-2 text-right" title={item.data.error}>
+                    {item.data.error}
+                  </span>
+                ) : null}
+              </div>
             ) : (
-              <>
-                <span className="text-accent-yellow">{'\u26A0'}</span>
-                <span className="text-gray-300">{item.data.service}</span>
-                <span className="text-gray-500 truncate">{item.data.message ?? item.data.type}</span>
-              </>
+              <div className="flex gap-2 min-w-0 flex-1">
+                <span className="text-accent-yellow shrink-0">{'\u26A0'}</span>
+                <span className="text-gray-300 shrink-0">{item.data.service}</span>
+                <span
+                  className="text-gray-500 line-clamp-2 break-words"
+                  title={item.data.message ?? item.data.type}
+                >
+                  {item.data.message ?? item.data.type}
+                </span>
+              </div>
             )}
           </div>
         ))}
