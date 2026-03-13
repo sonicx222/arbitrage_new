@@ -757,4 +757,4 @@ Redis Streams use approximate MAXLEN trimming to prevent unbounded growth. These
 - [Local Development](local-development.md) - Development setup
 - [Deployment Guide](deployment.md) - Production deployment
 - [Secrets Management](security/SECRETS_MANAGEMENT.md) - Security practices
-- [Free Tiers](Free_Tiers.md) - Provider limits
+- [Free Tiers](guides/Free_Tiers.md) - Provider limits

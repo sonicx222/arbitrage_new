@@ -34,7 +34,7 @@ For detailed technical information, refer to the `docs/` folder:
 ### Testing & Quality
 - [**Test Architecture**](docs/architecture/TEST_ARCHITECTURE.md): Testing strategy and patterns
 - [**Manual Test Steps**](docs/MANUAL_TESTSTEPS.md): Manual testing procedures
-- [**Integration Migration Guide**](docs/testing/integration-migration-guide.md): Test consolidation guide
+- [**Integration Migration Guide**](docs/guides/integration-migration-guide.md): Test consolidation guide
 
 ### Operations & Security
 - [**Monitoring Setup**](docs/operations/MONITORING_SETUP.md): Prometheus, Grafana, alerting
@@ -48,7 +48,7 @@ For detailed technical information, refer to the `docs/` folder:
 
 ### Reports & Research
 - [**Profitability Audit**](docs/reports/PROFITABILITY_AUDIT_CONSOLIDATED_2026-03-08.md): Strategy economics and trade analysis
-- [**Research Evaluation**](docs/research/CONSOLIDATED_RESEARCH_EVALUATION.md): Enhancement research findings
+- [**Research Evaluation**](docs/architecture/CONSOLIDATED_RESEARCH_EVALUATION.md): Enhancement research findings
 - [**Security Review**](contracts/docs/SECURITY_REVIEW.md): Contract security audit findings
 
 ---

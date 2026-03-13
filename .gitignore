@@ -180,9 +180,12 @@ full_codebase.txt
 # Git worktrees
 .worktrees/
 
-# Runtime-generated data (DLQ fallbacks, trade logs)
-data/*.jsonl
-data/trades/*.jsonl
+# Runtime-generated data (DLQ fallbacks, trade logs, lost opportunities)
+data/
+services/*/data/
+
+# Empty model placeholder directory
+models/
 
 # Autopilot session workspace (runtime artifacts)
 autopilot-session/
@@ -198,22 +201,8 @@ services/coordinator/public/
 dashboard/dist/
 dashboard/node_modules/
 
-# =============================================================================
-# Monitor Session Runtime Data (keep tooling scripts, ignore state)
-# =============================================================================
-monitor-session/SERVICES_PID
-monitor-session/SESSION_ID
-monitor-session/current.sha
-monitor-session/last-run.sha
-monitor-session/changed-files.txt
-monitor-session/start-time.txt
-monitor-session/services.pid
-monitor-session/*.json
-monitor-session/history/
-monitor-session/streams/
-monitor-session/config/
-monitor-session/findings/
-monitor-session/logs/
+# Monitor session runtime data (entirely ephemeral, regenerated per session)
+monitor-session/
 
 # =============================================================================
 # Claude Code local settings (machine-specific)

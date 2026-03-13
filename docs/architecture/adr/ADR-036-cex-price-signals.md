@@ -1,7 +1,7 @@
 # ADR-036: CEX Price Signal Integration
 
 ## Status
-**Accepted** — Fully implemented 2026-03-11. See `docs/plans/2026-03-11-cex-price-signal-integration.md`.
+**Accepted** — Fully implemented 2026-03-11. See `docs/superpowers/plans/2026-03-11-cex-price-signal-integration.md`.
 
 ## Date
 2026-02-24
@@ -118,7 +118,7 @@ When CEX feed is DEGRADED, `getCexDegradedProfitMultiplier()` raises the minimum
 - `services/coordinator/src/opportunities/opportunity-scoring.ts` — Score × cexAlignmentFactor
 - `services/coordinator/src/api/routes/sse.routes.ts` — `cex-spread` SSE event
 - `dashboard/src/tabs/DiagnosticsTab.tsx` — CexSpreadSection UI
-- `docs/plans/2026-03-11-cex-price-signal-integration.md` — Implementation plan
+- `docs/superpowers/plans/2026-03-11-cex-price-signal-integration.md` — Implementation plan
 - [Binance WebSocket API](https://binance-docs.github.io/apidocs/spot/en/#websocket-market-streams)
 - [ADR-005: Hierarchical Caching Strategy](./ADR-005-hierarchical-cache.md) — Price data caching
 - [ADR-033: Stale Price Window Protection](./ADR-033-stale-price-window.md) — Staleness handling

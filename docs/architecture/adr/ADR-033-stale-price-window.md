@@ -154,7 +154,7 @@ The 5s default in `getPriceWithFreshnessCheck()` is **intentional** — it serve
 
 ## References
 
-- [STALE_PRICE_WINDOW.md](../../STALE_PRICE_WINDOW.md) — Detailed behavior documentation
+- [STALE_PRICE_WINDOW.md](../STALE_PRICE_WINDOW.md) — Detailed behavior documentation
 - [ADR-010: WebSocket Connection Resilience](./ADR-010-websocket-resilience.md) — Connection-level staleness (distinct concept)
 - [ADR-014: Modular Detector Components](./ADR-014-modular-detector-components.md) — Detector architecture context
 - [ADR-005: Hierarchical Caching Strategy](./ADR-005-hierarchical-cache.md) — Cache TTL context

@@ -620,7 +620,7 @@ The hard rejection runs **before** any confidence calculation, ensuring that wha
 
 > **Note**: This is distinct from **connection-level** staleness detection in [ADR-010](./adr/ADR-010-websocket-resilience.md), which detects when WebSocket connections have stopped delivering messages.
 
-**See**: [STALE_PRICE_WINDOW.md](../STALE_PRICE_WINDOW.md) for full implementation details, penalty schedules, and tuning guidance. [ADR-033](./adr/ADR-033-stale-price-window.md) for the architectural decision record.
+**See**: [STALE_PRICE_WINDOW.md](./STALE_PRICE_WINDOW.md) for full implementation details, penalty schedules, and tuning guidance. [ADR-033](./adr/ADR-033-stale-price-window.md) for the architectural decision record.
 
 ### 5.4 Message Channels (Redis Streams)
 
