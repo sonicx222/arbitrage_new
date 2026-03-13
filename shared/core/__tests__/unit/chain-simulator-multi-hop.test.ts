@@ -223,8 +223,8 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       const opp = quadrilateral[0];
       // Profit should still be positive after all fees
       expect(opp.profitPercentage).toBeGreaterThan(0);
-      // Gas cost should be higher for 4-hop
-      expect(opp.expectedGasCost).toBeGreaterThan(10);
+      // Gas cost should be positive (ADR-040: real gas models yield lower per-hop costs)
+      expect(opp.expectedGasCost).toBeGreaterThan(0);
     });
   });
 

@@ -1394,10 +1394,10 @@ export class RedisStreamsClient {
                 group.name = value as string;
                 break;
               case 'consumers':
-                group.consumers = Number(value) ?? 0;
+                group.consumers = Number(value) || 0;
                 break;
               case 'pending':
-                group.pending = Number(value) ?? 0;
+                group.pending = Number(value) || 0;
                 break;
               case 'last-delivered-id':
                 group.lastDeliveredId = value as string;

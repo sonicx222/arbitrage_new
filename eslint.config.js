@@ -22,7 +22,11 @@ export default [
       'eslint.config.js',
       // Ignore compiled JS files in src directories (build artifacts)
       'shared/**/src/**/*.js',
-      'services/**/src/**/*.js'
+      'services/**/src/**/*.js',
+      // Ignore dashboard build output served by coordinator
+      'services/coordinator/public/**',
+      // Ignore dashboard config (ESM .js parsed as CommonJS)
+      'dashboard/**'
     ]
   },
   // Base JS config

@@ -137,10 +137,11 @@ describe('Worker SharedArrayBuffer Integration', () => {
       const buffer = cache.getSharedBuffer();
       expect(buffer).not.toBeNull();
 
-      // PriceMatrix allocates based on l1Size
-      // Should be in reasonable range (allows some overhead for metadata)
-      expect(buffer!.byteLength).toBeLessThanOrEqual(80 * 1024 * 1024); // Allow up to 80MB
-      expect(buffer!.byteLength).toBeGreaterThan(50 * 1024 * 1024); // At least 50MB
+      // M-04 FIX: maxPairs capped at 100K (+ 10% reserve = 110K slots)
+      // Each slot: 16 bytes (8 Float64 + 4 Int32 timestamp + 4 Int32 sequence)
+      // Expected: 110,000 * 16 = 1,760,000 bytes
+      expect(buffer!.byteLength).toBeLessThanOrEqual(2 * 1024 * 1024); // ≤ 2MB
+      expect(buffer!.byteLength).toBeGreaterThan(1 * 1024 * 1024); // > 1MB
     });
 
     it('should have reasonable buffer size for 1MB cache', () => {

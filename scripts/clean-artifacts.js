@@ -45,10 +45,10 @@ function getDirSize(dir) {
       if (entry.isDirectory()) {
         size += getDirSize(fullPath);
       } else {
-        try { size += fs.statSync(fullPath).size; } catch {}
+        try { size += fs.statSync(fullPath).size; } catch { /* stat may fail on broken symlinks */ }
       }
     }
-  } catch {}
+  } catch { /* dir may not exist or be unreadable */ }
   return size;
 }
 

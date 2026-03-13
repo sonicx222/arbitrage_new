@@ -27,7 +27,6 @@ jest.mock('@arbitrage/core/redis', () => ({
   }),
 }));
 
-// eslint-disable-next-line import/first
 import {
   SimulationWorker,
   type SimulationWorkerConfig,
