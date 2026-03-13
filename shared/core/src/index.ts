@@ -80,7 +80,6 @@ export type { RedisClientDeps, RedisConstructor, RedisCommandStats } from './red
 export {
   RedisStreamsClient,
   StreamBatcher,
-  StreamConsumer,
   getRedisStreamsClient,
   resetRedisStreamsInstance,
   unwrapBatchMessages
@@ -96,11 +95,12 @@ export type {
   PendingInfo,
   BatcherConfig,
   BatcherStats,
-  StreamConsumerConfig,
-  StreamConsumerStats,
   RedisStreamsConstructor,
   RedisStreamsClientDeps
 } from './redis/streams';
+
+export { StreamConsumer } from './redis/stream-consumer';
+export type { StreamConsumerConfig, StreamConsumerStats } from './redis/stream-consumer';
 
 // =============================================================================
 // 1.2 Logging Infrastructure (ADR-015: Pino Logger Migration)

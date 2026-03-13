@@ -20,39 +20,9 @@ import { generateTraceId, generateSpanId } from '../tracing/trace-context';
 import { parseEnvIntSafe, parseEnvFloatSafe } from '../utils/env-utils';
 import type { PartitionDetectorInterface } from './config';
 import { shutdownPartitionService } from './health-server';
-
-// =============================================================================
-// Prometheus Counters (RT-007: partition metric schema compliance)
-// =============================================================================
-
-/**
- * Cumulative count of price update events received on the hot path.
- * Exposed via /metrics as `price_updates_total`.
- * Module-level (not per-handler) so it survives handler reinstantiation.
- */
-let _priceUpdatesTotal = 0;
-
-/** Returns the cumulative price_updates_total counter value. */
-export function getPriceUpdatesTotal(): number {
-  return _priceUpdatesTotal;
-}
-
-/**
- * M-01 FIX: Cumulative count of opportunity publish drops due to concurrency limit.
- * Exposed via /metrics as `opportunity_publish_drops_total`.
- * Module-level (not per-handler) so it survives handler reinstantiation.
- */
-let _publishDropsTotal = 0;
-
-/** Increment the publish drop counter. */
-export function incrementPublishDrops(): void {
-  _publishDropsTotal++;
-}
-
-/** Returns the cumulative publish drop counter value. */
-export function getPublishDropsTotal(): number {
-  return _publishDropsTotal;
-}
+import { incrementPriceUpdates, incrementPublishDrops } from './metrics';
+// Re-export for backward compatibility (consumers may import from handlers)
+export { getPriceUpdatesTotal, getPublishDropsTotal, incrementPublishDrops } from './metrics';
 
 // =============================================================================
 // Event Handlers (P16 Refactor)
@@ -104,7 +74,7 @@ export function setupDetectorEventHandlers(
   // FIX #9: Store handler references for cleanup (same pattern as setupProcessHandlers)
   const priceUpdateHandler = (update: { chain: string; dex: string; price: number }) => {
     // RT-007: Increment cumulative counter (O(1), no allocation — hot-path safe)
-    _priceUpdatesTotal++;
+    incrementPriceUpdates();
     // LOG-OPT Fix 4: Only log if debug enabled AND sampler allows it
     if ((pLog.isLevelEnabled?.('debug') ?? false) && sampler.shouldLog('price-update')) {
       pLog.debug('Price update', {

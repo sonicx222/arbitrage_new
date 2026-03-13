@@ -17,38 +17,37 @@
  * @module warming/container
  */
 
-import {
-  // Infrastructure implementations
-  CorrelationAnalyzer,
-  getCorrelationAnalyzer,
-  CorrelationTrackerImpl,
-  HierarchicalCache,
-  HierarchicalCacheWarmer,
-  // Strategies
-  TopNStrategy,
-  ThresholdStrategy,
-  AdaptiveStrategy,
-  TimeBasedStrategy,
+// Infrastructure implementations
+import { CorrelationAnalyzer, getCorrelationAnalyzer } from '../../caching/correlation-analyzer';
+import { HierarchicalCache } from '../../caching/hierarchical-cache';
+import { CorrelationTrackerImpl } from '../infrastructure/correlation-tracker.impl';
+import { HierarchicalCacheWarmer } from '../infrastructure/hierarchical-cache-warmer.impl';
+// Strategies
+import { TopNStrategy } from '../application/strategies/top-n-strategy';
+import { ThresholdStrategy } from '../application/strategies/threshold-strategy';
+import { AdaptiveStrategy } from '../application/strategies/adaptive-strategy';
+import { TimeBasedStrategy } from '../application/strategies/time-based-strategy';
+// Domain interfaces & config types
+import type { ICorrelationTracker } from '../domain/correlation-tracker.interface';
+import type { ICacheWarmer, WarmingConfig } from '../domain/cache-warmer.interface';
+import type {
   IWarmingStrategy,
-  // Metrics
-  PrometheusMetricsCollector,
-  PrometheusExporter,
-  IMetricsCollector,
-  IMetricsExporter,
-  // Domain interfaces
-  ICorrelationTracker,
-  ICacheWarmer,
-  // Configuration types
   TopNStrategyConfig,
   ThresholdStrategyConfig,
   AdaptiveStrategyConfig,
   TimeBasedStrategyConfig,
-  WarmingConfig,
+} from '../domain/warming-strategy.interface';
+// Metrics (from @arbitrage/metrics — not re-exported via core index to avoid cycle)
+import {
+  PrometheusMetricsCollector,
+  PrometheusExporter,
+  ExportFormat,
+} from '@arbitrage/metrics';
+import type {
+  IMetricsCollector,
+  IMetricsExporter,
   ExportConfig,
-} from '../../';
-
-// Import ExportFormat from @arbitrage/metrics (extracted package)
-import { ExportFormat } from '@arbitrage/metrics';
+} from '@arbitrage/metrics';
 
 /**
  * Warming strategy type

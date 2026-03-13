@@ -1851,12 +1851,9 @@ export class RedisStreamsClient {
 
 // =============================================================================
 // P2-1 FIX: Reusable Stream Consumer
-// Reduces code duplication in services consuming from Redis Streams
+// StreamConsumer extracted to ./stream-consumer.ts for modularity.
+// Re-exported via redis/index.ts barrel (not here, to avoid circular dep).
 // =============================================================================
-
-// StreamConsumer extracted to ./stream-consumer.ts for modularity
-export { StreamConsumer } from './stream-consumer';
-export type { StreamConsumerLogger, StreamConsumerConfig, StreamConsumerStats } from './stream-consumer';
 
 // =============================================================================
 // Batch Unwrap Helper
