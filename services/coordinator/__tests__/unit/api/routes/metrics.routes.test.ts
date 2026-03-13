@@ -272,6 +272,21 @@ describe('Metrics Routes', () => {
       expect(res.body.length).toBe(2);
       expect(res.body[0].type).toBe('SERVICE_UNHEALTHY');
     });
+
+    it('E-03: should deduplicate alerts by default', async () => {
+      const app = createTestApp(mockState);
+      await supertest(app).get('/api/alerts');
+
+      // Default call should pass deduplicate=true
+      expect(mockState.getAlertHistory).toHaveBeenCalledWith(100, true);
+    });
+
+    it('E-03: should allow disabling dedup with ?deduplicate=false', async () => {
+      const app = createTestApp(mockState);
+      await supertest(app).get('/api/alerts?deduplicate=false');
+
+      expect(mockState.getAlertHistory).toHaveBeenCalledWith(100, false);
+    });
   });
 
   // ===========================================================================

@@ -14,7 +14,7 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { RedisStreamsClient } from '@arbitrage/core/redis';
+import { RedisStreamsClient, streamNameToEnvSuffix, applyMaxLenOverrides } from '@arbitrage/core/redis';
 import type { StreamMessage, RedisStreamsConstructor } from '@arbitrage/core/redis';
 import { createMockRedisConstructor } from './test-helpers';
 
@@ -338,6 +338,73 @@ describe('RedisStreamsClient - Basic Operations', () => {
         '*',
         'data', expect.any(String)
       );
+    });
+  });
+
+  // ===========================================================================
+  // E-02: Stream MAXLEN env-var overrides
+  // ===========================================================================
+
+  describe('E-02: Stream MAXLEN env-var overrides', () => {
+    it('should convert stream names to env suffixes correctly', () => {
+      expect(streamNameToEnvSuffix('stream:health')).toBe('HEALTH');
+      expect(streamNameToEnvSuffix('stream:execution-requests')).toBe('EXECUTION_REQUESTS');
+      expect(streamNameToEnvSuffix('stream:price-updates')).toBe('PRICE_UPDATES');
+      expect(streamNameToEnvSuffix('stream:exec-requests-fast')).toBe('EXEC_REQUESTS_FAST');
+      expect(streamNameToEnvSuffix('stream:dead-letter-queue')).toBe('DEAD_LETTER_QUEUE');
+    });
+
+    it('should return defaults when no env vars are set', () => {
+      const defaults = { 'stream:health': 5000, 'stream:execution-requests': 100000 };
+      const result = applyMaxLenOverrides(defaults);
+      expect(result['stream:health']).toBe(5000);
+      expect(result['stream:execution-requests']).toBe(100000);
+    });
+
+    it('should apply env-var overrides when set', () => {
+      const originalEnv = process.env.STREAM_MAXLEN_HEALTH;
+      try {
+        process.env.STREAM_MAXLEN_HEALTH = '10000';
+        const defaults = { 'stream:health': 5000 };
+        const result = applyMaxLenOverrides(defaults);
+        expect(result['stream:health']).toBe(10000);
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.STREAM_MAXLEN_HEALTH;
+        } else {
+          process.env.STREAM_MAXLEN_HEALTH = originalEnv;
+        }
+      }
+    });
+
+    it('should ignore invalid env-var values (non-integer, zero, negative)', () => {
+      const originalEnv = process.env.STREAM_MAXLEN_HEALTH;
+      try {
+        const defaults = { 'stream:health': 5000 };
+
+        process.env.STREAM_MAXLEN_HEALTH = 'abc';
+        expect(applyMaxLenOverrides(defaults)['stream:health']).toBe(5000);
+
+        process.env.STREAM_MAXLEN_HEALTH = '0';
+        expect(applyMaxLenOverrides(defaults)['stream:health']).toBe(5000);
+
+        process.env.STREAM_MAXLEN_HEALTH = '-100';
+        expect(applyMaxLenOverrides(defaults)['stream:health']).toBe(5000);
+
+        process.env.STREAM_MAXLEN_HEALTH = '';
+        expect(applyMaxLenOverrides(defaults)['stream:health']).toBe(5000);
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.STREAM_MAXLEN_HEALTH;
+        } else {
+          process.env.STREAM_MAXLEN_HEALTH = originalEnv;
+        }
+      }
+    });
+
+    it('should expose defaults via STREAM_MAX_LENGTH_DEFAULTS', () => {
+      expect(RedisStreamsClient.STREAM_MAX_LENGTH_DEFAULTS).toBeDefined();
+      expect(RedisStreamsClient.STREAM_MAX_LENGTH_DEFAULTS[RedisStreamsClient.STREAMS.HEALTH]).toBe(5000);
     });
   });
 

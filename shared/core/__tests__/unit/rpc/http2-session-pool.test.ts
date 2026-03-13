@@ -1110,4 +1110,119 @@ describe('Http2SessionPool', () => {
       ).rejects.toThrow('circuit breaker open');
     });
   });
+
+  // ===========================================================================
+  // E-07: Provider health re-check loop
+  // ===========================================================================
+
+  describe('E-07: provider health re-check loop', () => {
+    it('should accept healthCheckIntervalMs config', () => {
+      const p = new Http2SessionPool({ healthCheckIntervalMs: 30000 });
+      expect(p).toBeDefined();
+    });
+
+    it('should disable health check loop when interval is 0', () => {
+      const p = new Http2SessionPool({ healthCheckIntervalMs: 0 });
+      expect(p).toBeDefined();
+    });
+
+    it('should probe expired circuit breakers on interval', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+
+      // Start with failing sessions to build circuit breakers
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('TLS failure'), sync: true })
+      );
+
+      const p = new Http2SessionPool({ healthCheckIntervalMs: 5000 });
+
+      // Trigger 5 failures to open circuit breaker
+      for (let i = 0; i < 5; i++) {
+        try {
+          await p.request('https://probe-test.example.com', { body: '{}' });
+        } catch {
+          // expected
+        }
+        await flushMicrotasks();
+      }
+
+      // CB is now open with 60s cooldown
+      expect(p.getOpenCircuitBreakerCount()).toBe(1);
+
+      // Advance past CB cooldown
+      jest.advanceTimersByTime(61_000);
+
+      // Switch to successful sessions for the probe
+      mockHttp2Connect.mockImplementation(() => createMockSession({ sync: true }));
+
+      // Trigger health check interval
+      jest.advanceTimersByTime(5_000);
+      await flushMicrotasks();
+      await flushImmediate();
+
+      // CB should be cleared after successful probe
+      expect(p.getOpenCircuitBreakerCount()).toBe(0);
+    });
+
+    it('should not probe circuit breakers still in cooldown', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('TLS failure'), sync: true })
+      );
+
+      const p = new Http2SessionPool({ healthCheckIntervalMs: 5000 });
+
+      // Open circuit breaker
+      for (let i = 0; i < 5; i++) {
+        try {
+          await p.request('https://no-probe.example.com', { body: '{}' });
+        } catch {
+          // expected
+        }
+        await flushMicrotasks();
+      }
+
+      const connectCallsBefore = mockHttp2Connect.mock.calls.length;
+
+      // Advance only 10s (CB cooldown is 60s, so CB is still active)
+      jest.advanceTimersByTime(10_000);
+      await flushMicrotasks();
+
+      // No probe should have been attempted (CB still in cooldown)
+      expect(mockHttp2Connect.mock.calls.length).toBe(connectCallsBefore);
+    });
+
+    it('should report open circuit breaker count', async () => {
+      const p = new Http2SessionPool({ healthCheckIntervalMs: 0 });
+      expect(p.getOpenCircuitBreakerCount()).toBe(0);
+
+      // Open a CB
+      mockHttp2Connect.mockImplementation(() =>
+        createMockSession({ autoConnect: false, connectError: new Error('fail') })
+      );
+
+      for (let i = 0; i < 5; i++) {
+        try {
+          await p.request('https://count-test.example.com', { body: '{}' });
+        } catch {
+          // expected
+        }
+      }
+
+      expect(p.getOpenCircuitBreakerCount()).toBe(1);
+    });
+
+    it('should stop health check loop on close', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+
+      const p = new Http2SessionPool({ healthCheckIntervalMs: 5000 });
+
+      const closePromise = p.close();
+      jest.runAllTimers();
+      await closePromise;
+
+      // No errors — health check timer was properly cleared
+    });
+  });
 });

@@ -528,6 +528,76 @@ describe('StreamHealthMonitor Alert Deduplication', () => {
   });
 });
 
+describe('E-04: Stream status vocabulary for non-existent streams', () => {
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let testMonitor: StreamHealthMonitor;
+
+  beforeEach(() => {
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    testMonitor = new StreamHealthMonitor({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+    });
+  });
+
+  afterEach(async () => {
+    await testMonitor.stop();
+  });
+
+  it('should report idle (not unknown) when stream does not exist yet', async () => {
+    // Simulate Redis "ERR no such key" for a stream that hasn't been created
+    mockStreamsClient.xlen.mockRejectedValue(new Error('ERR no such key'));
+    mockStreamsClient.xinfo.mockRejectedValue(new Error('ERR no such key'));
+    mockStreamsClient.xpending.mockRejectedValue(new Error('ERR no such key'));
+
+    const health = await testMonitor.checkStreamHealth();
+
+    // All streams should be 'idle' since they don't exist, not 'unknown'
+    for (const streamInfo of Object.values(health.streams)) {
+      expect(streamInfo.status).toBe('idle');
+    }
+  });
+
+  it('should report idle when consumer group does not exist (NOGROUP)', async () => {
+    mockStreamsClient.xlen.mockRejectedValue(new Error('NOGROUP No such consumer group'));
+    mockStreamsClient.xinfo.mockRejectedValue(new Error('NOGROUP No such consumer group'));
+    mockStreamsClient.xpending.mockRejectedValue(new Error('NOGROUP No such consumer group'));
+
+    const health = await testMonitor.checkStreamHealth();
+
+    for (const streamInfo of Object.values(health.streams)) {
+      expect(streamInfo.status).toBe('idle');
+    }
+  });
+
+  it('should report unknown for real Redis errors (not stream-not-found)', async () => {
+    mockStreamsClient.xlen.mockRejectedValue(new Error('LOADING Redis is loading the dataset'));
+    mockStreamsClient.xinfo.mockRejectedValue(new Error('LOADING Redis is loading the dataset'));
+    mockStreamsClient.xpending.mockRejectedValue(new Error('LOADING Redis is loading the dataset'));
+
+    const health = await testMonitor.checkStreamHealth();
+
+    for (const streamInfo of Object.values(health.streams)) {
+      expect(streamInfo.status).toBe('unknown');
+    }
+    // Should log warnings for real errors
+    expect(mockLogger.warn).toHaveBeenCalled();
+  });
+
+  it('should not log warnings for stream-not-found errors', async () => {
+    mockStreamsClient.xlen.mockRejectedValue(new Error('ERR no such key'));
+    mockStreamsClient.xinfo.mockRejectedValue(new Error('ERR no such key'));
+    mockStreamsClient.xpending.mockRejectedValue(new Error('ERR no such key'));
+
+    await testMonitor.checkStreamHealth();
+
+    // Should NOT log warnings for non-existent streams (they're expected during startup)
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+});
+
 describe('StreamHealthStatus Types', () => {
   it('should have correct status types', () => {
     const statuses: StreamHealthStatus[] = ['healthy', 'warning', 'critical', 'idle', 'unknown'];

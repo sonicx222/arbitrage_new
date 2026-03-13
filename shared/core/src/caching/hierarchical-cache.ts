@@ -56,6 +56,11 @@ const isFlyIo = (): boolean => IS_FLY_IO;
 const _envL1 = parseInt(process.env.CACHE_L1_SIZE_MB ?? '', 10);
 const ENV_L1_SIZE_MB = Number.isInteger(_envL1) && _envL1 > 0 ? _envL1 : null;
 
+// E-06: Per-partition PriceMatrix sizing override.
+// Set PRICE_MATRIX_MAX_PAIRS=1024 for Solana, 50000 for high-value, etc.
+const _envMaxPairs = parseInt(process.env.PRICE_MATRIX_MAX_PAIRS ?? '', 10);
+const ENV_PRICE_MATRIX_MAX_PAIRS = Number.isInteger(_envMaxPairs) && _envMaxPairs > 0 ? _envMaxPairs : null;
+
 /**
  * Cache default configuration values.
  * These can be overridden via the CacheConfig parameter in constructor.
@@ -331,12 +336,13 @@ export class HierarchicalCache {
 
     // PHASE1-TASK30: Initialize PriceMatrix if enabled
     if (this.usePriceMatrix && this.config.l1Enabled) {
-      // M-04 FIX: Cap maxPairs at 100K to prevent massive over-allocation.
-      // On a 64MB L1 (dev default), uncapped = 4.19M pairs (~370MB SharedArrayBuffer).
-      // 100K pairs covers all 15 chains × ~6000 pairs/chain with headroom.
-      // Production can raise via CACHE_L1_SIZE_MB env var.
+      // E-06: PRICE_MATRIX_MAX_PAIRS env var overrides L1-derived cap for per-partition sizing.
+      // Recommended per-partition values (set in dev:all:sim or per-service command):
+      //   Solana (0 EVM pairs): 1024 | High-value (3 chains, ~420 pairs): 50000
+      //   L2-turbo (7 chains, ~1400 pairs): 200000 | Asia-fast (4 chains, ~1100 pairs): 150000
+      // M-04 FIX: Default cap at 100K to prevent massive over-allocation.
       const rawMaxPairs = Math.floor(this.config.l1Size * 1024 * 1024 / 16);
-      const maxPairs = Math.min(rawMaxPairs, 100_000);
+      const maxPairs = ENV_PRICE_MATRIX_MAX_PAIRS ?? Math.min(rawMaxPairs, 100_000);
       const priceMatrixConfig: Partial<PriceMatrixConfig> = {
         maxPairs,
         // Reserve 10% for dynamic pairs

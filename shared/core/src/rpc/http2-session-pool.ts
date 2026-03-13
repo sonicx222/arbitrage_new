@@ -41,6 +41,8 @@ export interface Http2SessionPoolConfig {
   maxConcurrentStreams?: number;
   /** Enable ping keep-alive (ms interval, 0 to disable). Default: 30000 */
   pingIntervalMs?: number;
+  /** E-07: Interval for probing failed providers (ms, 0 to disable). Default: 60000 */
+  healthCheckIntervalMs?: number;
 }
 
 interface SessionEntry {
@@ -80,6 +82,8 @@ export class Http2SessionPool {
   private static readonly CB_MAX_COOLDOWN_MS = 900_000;
   /** Suppress repeated error logs — only log once per 30s per origin */
   private static readonly ERROR_LOG_INTERVAL_MS = 30_000;
+  /** E-07: Timer for periodic provider health re-check */
+  private healthCheckTimer: NodeJS.Timeout | null = null;
 
   constructor(config?: Http2SessionPoolConfig) {
     this.config = {
@@ -87,7 +91,13 @@ export class Http2SessionPool {
       connectTimeoutMs: config?.connectTimeoutMs ?? 10000,
       maxConcurrentStreams: config?.maxConcurrentStreams ?? 100,
       pingIntervalMs: config?.pingIntervalMs ?? 30000,
+      healthCheckIntervalMs: config?.healthCheckIntervalMs ?? 60000,
     };
+
+    // E-07: Start periodic health re-check for failed providers
+    if (this.config.healthCheckIntervalMs > 0) {
+      this.startHealthCheckLoop();
+    }
   }
 
   /**
@@ -407,10 +417,112 @@ export class Http2SessionPool {
   }
 
   /**
+   * E-07: Start periodic health re-check loop.
+   * Probes origins with expired circuit breakers to auto-recover from transient failures.
+   */
+  private startHealthCheckLoop(): void {
+    this.healthCheckTimer = setInterval(() => {
+      if (this.closed) {
+        if (this.healthCheckTimer) {
+          clearInterval(this.healthCheckTimer);
+          this.healthCheckTimer = null;
+        }
+        return;
+      }
+      this.probeExpiredCircuitBreakers();
+    }, this.config.healthCheckIntervalMs);
+
+    // Don't prevent process exit
+    if (this.healthCheckTimer.unref) this.healthCheckTimer.unref();
+  }
+
+  /**
+   * E-07: Probe all circuit breakers whose cooldown has expired.
+   * Attempts a brief HTTP/2 connection to each origin. On success, clears the CB.
+   * On failure, the CB remains (recordConnectionFailure updates it).
+   */
+  private probeExpiredCircuitBreakers(): void {
+    const now = Date.now();
+
+    for (const [origin, cb] of this.circuitBreakers) {
+      // Only probe expired CBs (half-open state)
+      if (cb.openUntil > now || cb.openUntil === 0) continue;
+
+      // Don't probe if we already have an active session for this origin
+      const existing = this.sessions.get(origin);
+      if (existing && !existing.session.closed && !existing.session.destroyed) {
+        // Session is alive — CB should have been cleared already
+        this.circuitBreakers.delete(origin);
+        continue;
+      }
+
+      logger.info('E-07: Probing failed provider for recovery', {
+        origin,
+        consecutiveFailures: cb.consecutiveFailures,
+        openCount: cb.openCount,
+      });
+
+      this.probeOrigin(origin);
+    }
+  }
+
+  /**
+   * E-07: Attempt a probe connection to an origin.
+   * If successful, clears the circuit breaker. If failed, records the failure.
+   */
+  private probeOrigin(origin: string): void {
+    const probeTimeout = setTimeout(() => {
+      this.recordConnectionFailure(origin, 'health check probe timeout');
+    }, this.config.connectTimeoutMs);
+
+    const session = http2.connect(origin, {
+      settings: { maxConcurrentStreams: 1 },
+    });
+
+    session.on('connect', () => {
+      clearTimeout(probeTimeout);
+      this.circuitBreakers.delete(origin);
+
+      logger.info('E-07: Provider recovered — circuit breaker cleared', { origin });
+
+      // Close the probe session — normal requests will create a fresh one
+      session.close();
+    });
+
+    session.on('error', (err) => {
+      clearTimeout(probeTimeout);
+      this.recordConnectionFailure(origin, err.message);
+
+      // Clean up the probe session
+      if (!session.destroyed) {
+        session.destroy();
+      }
+    });
+  }
+
+  /**
+   * Get the number of open circuit breakers (for monitoring).
+   */
+  getOpenCircuitBreakerCount(): number {
+    const now = Date.now();
+    let count = 0;
+    for (const cb of this.circuitBreakers.values()) {
+      if (cb.openUntil > now) count++;
+    }
+    return count;
+  }
+
+  /**
    * Close all sessions and clean up.
    */
   async close(): Promise<void> {
     this.closed = true;
+
+    // E-07: Stop health check timer
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
 
     const closePromises: Promise<void>[] = [];
 
