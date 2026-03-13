@@ -6,7 +6,7 @@
  *
  * Chain groups mirror the existing detector partitions (ADR-003):
  *   - fast    ↔ asia-fast    (bsc, polygon, avalanche, fantom)
- *   - l2      ↔ l2-turbo     (arbitrum, optimism, base, scroll, blast)
+ *   - l2      ↔ l2-turbo     (arbitrum, optimism, base, scroll, blast, mantle, mode)
  *   - premium ↔ high-value   (ethereum, zksync, linea)
  *   - solana  ↔ solana-native (solana)
  *

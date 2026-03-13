@@ -702,6 +702,7 @@ export async function approveRouters(
     try {
       console.log(`  Sending approval: ${router}`);
       const tx = await contract.addApprovedRouter(router);
+      console.log(`  tx.hash: ${tx.hash}`);
       pendingTxs.push({ router, txPromise: tx.wait() });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1258,7 +1259,7 @@ export async function smokeTestFlashLoanContract(
         console.log(`   minimumProfit: ${ethers.formatEther(profit)} ETH`);
         return true;
       },
-      critical: false, // Non-critical: testnets may intentionally use 0
+      critical: true, // Mainnet deployments must have non-zero minimumProfit to prevent griefing
     }
   );
 
@@ -1607,6 +1608,7 @@ export async function deployContractPipeline(
     if (minimumProfit > 0n) {
       console.log(`  Setting minimum profit: ${ethers.formatEther(minimumProfit)} Native Token`);
       const tx = await contract.setMinimumProfit(minimumProfit);
+      console.log(`  tx.hash: ${tx.hash}`);
       await tx.wait();
       console.log('  Minimum profit set');
     }

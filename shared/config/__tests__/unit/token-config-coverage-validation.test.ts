@@ -60,7 +60,8 @@ describe('S2.2.4 Token Coverage Verification', () => {
       // Phase 0 Item 2: Expanded Ethereum LSTs (eETH, rsETH, pufETH added to existing wstETH, rETH, cbETH, sfrxETH) → Total 117
       // Emerging L2s (RPC-verified 2026-02-26): Blast 5, Scroll 7, Mantle 3, Mode 4 → Total 136
       // Arbitrum: Added rsETH → Total 137
-      expect(totalTokens).toBe(137);
+      // Mantle: Added WETH (0xdEAddEaD...1111) → Total 138
+      expect(totalTokens).toBe(138);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -98,7 +99,7 @@ describe('S2.2.4 Token Coverage Verification', () => {
       // Emerging L2s (RPC-verified 2026-02-26)
       blast: 5,   // WETH, USDB, BLAST, WBTC, MIM
       scroll: 7,  // WETH, USDC, USDT, DAI, WBTC, wstETH, SCR
-      mantle: 3,  // WMNT, USDC, USDT
+      mantle: 4,  // WMNT, WETH, USDC, USDT
       mode: 4,    // WETH, USDC, USDT, MODE
       solana: 15
     };

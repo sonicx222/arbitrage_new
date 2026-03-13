@@ -204,12 +204,11 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 59144,
     },
-    // Ethereum mainnet — high gas costs, enable only after L2 success
-    // ethereum: {
-    //   url: process.env.ETHEREUM_RPC_URL || '',
-    //   accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-    //   chainId: 1,
-    // },
+    ethereum: {
+      url: process.env.ETHEREUM_RPC_URL ?? '',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 1,
+    },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS === 'true',

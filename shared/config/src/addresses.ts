@@ -609,6 +609,7 @@ export const DEX_ROUTERS: Readonly<Record<string, Record<string, string>>> = {
   avalanche: {
     trader_joe: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
     pangolin: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
+    sushiswap: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
   },
   optimism: {
     velodrome: '0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858',

@@ -6,7 +6,7 @@
  * - TOKEN_METADATA: Chain-specific token addresses for USD estimation
  *
  * Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
- * Total: 135 tokens across 15 chains
+ * Total: 138 tokens across 15 chains
  *
  * @see S3.1.2: New chain tokens
  * @see S3.2.1: Avalanche token expansion
@@ -16,7 +16,7 @@
 import { Token } from '../../../types';
 
 // =============================================================================
-// TOKEN CONFIGURATIONS - 135 Tokens
+// TOKEN CONFIGURATIONS - 138 Tokens
 // Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
 // =============================================================================
 export const CORE_TOKENS: Record<string, Token[]> = {
@@ -221,10 +221,11 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     // Chain governance
     { address: '0xd29687c813D741E2F938F4aC377128810E217b1b', symbol: 'SCR', decimals: 18, chainId: 534352 },
   ],
-  // Mantle: 3 tokens
+  // Mantle: 4 tokens
   mantle: [
     // Anchor tokens
     { address: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', symbol: 'WMNT', decimals: 18, chainId: 5000 },
+    { address: '0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111', symbol: 'WETH', decimals: 18, chainId: 5000 },
     { address: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', symbol: 'USDC', decimals: 6, chainId: 5000 },
     { address: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', symbol: 'USDT', decimals: 6, chainId: 5000 },
   ],
@@ -611,7 +612,7 @@ export const TOKEN_METADATA: Record<string, {
     ]
   },
   mantle: {
-    weth: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT (no bridged WETH standard)
+    weth: '0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111', // Bridged WETH on Mantle
     nativeWrapper: '0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8', // WMNT
     stablecoins: [
       { address: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', symbol: 'USDC', decimals: 6 },

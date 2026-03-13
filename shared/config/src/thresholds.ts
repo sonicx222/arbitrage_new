@@ -112,7 +112,8 @@ export const chainOpportunityTimeoutMs: Record<string, number> = {
  * @returns Timeout in milliseconds
  */
 export function getOpportunityTimeoutMs(chainId: string): number {
-  return chainOpportunityTimeoutMs[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.opportunityTimeoutMs;
+  const key = chainId.toLowerCase();
+  return chainOpportunityTimeoutMs[key] ?? ARBITRAGE_CONFIG.opportunityTimeoutMs;
 }
 
 // =============================================================================
@@ -164,7 +165,8 @@ export const chainEstimatedGasCostUsd: Record<string, number> = {
  * @returns Estimated gas cost in USD
  */
 export function getEstimatedGasCostUsd(chainId: string): number {
-  return chainEstimatedGasCostUsd[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.estimatedGasCost;
+  const key = chainId.toLowerCase();
+  return chainEstimatedGasCostUsd[key] ?? ARBITRAGE_CONFIG.estimatedGasCost;
 }
 
 // =============================================================================
@@ -203,7 +205,8 @@ export const chainSlippageTolerance: Record<string, number> = {
  * @returns Slippage tolerance as decimal (e.g., 0.01 = 1%)
  */
 export function getSlippageTolerance(chainId: string): number {
-  return chainSlippageTolerance[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.slippageTolerance;
+  const key = chainId.toLowerCase();
+  return chainSlippageTolerance[key] ?? ARBITRAGE_CONFIG.slippageTolerance;
 }
 
 // =============================================================================
@@ -254,7 +257,8 @@ export const chainGasSpikeMultiplier: Record<string, number> = {
  * @returns Spike multiplier (e.g., 5.0 means abort if gas > 5x baseline)
  */
 export function getGasSpikeMultiplier(chainId: string): number {
-  return chainGasSpikeMultiplier[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.gasPriceSpikeMultiplier;
+  const key = chainId.toLowerCase();
+  return chainGasSpikeMultiplier[key] ?? ARBITRAGE_CONFIG.gasPriceSpikeMultiplier;
 }
 
 // =============================================================================
@@ -307,7 +311,8 @@ const DEFAULT_CONFIDENCE_MAX_AGE_MS = 10000;
  * @returns Maximum price data age in milliseconds
  */
 export function getConfidenceMaxAgeMs(chainId: string): number {
-  return chainConfidenceMaxAgeMs[chainId.toLowerCase()] ?? DEFAULT_CONFIDENCE_MAX_AGE_MS;
+  const key = chainId.toLowerCase();
+  return chainConfidenceMaxAgeMs[key] ?? DEFAULT_CONFIDENCE_MAX_AGE_MS;
 }
 
 // =============================================================================
@@ -326,6 +331,7 @@ export function getConfidenceMaxAgeMs(chainId: string): number {
  */
 export function getMinProfitThreshold(chainId: string): number {
   const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits;
+  const key = chainId.toLowerCase();
   // Use ?? instead of || to correctly handle 0 min profit
-  return chainMinProfits[chainId.toLowerCase()] ?? ARBITRAGE_CONFIG.minProfitPercentage;
+  return chainMinProfits[key] ?? ARBITRAGE_CONFIG.minProfitPercentage;
 }

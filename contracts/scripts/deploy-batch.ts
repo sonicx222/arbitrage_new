@@ -84,6 +84,7 @@ const DEPLOYMENT_MANIFEST: DeploymentEntry[] = [
       'arbitrumSepolia',
       'arbitrum', 'base',
       'bsc',
+      'linea', 'ethereum', 'zksync',
     ],
   },
   {

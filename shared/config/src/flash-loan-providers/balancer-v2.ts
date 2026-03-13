@@ -16,9 +16,10 @@ export const BALANCER_V2_PROVIDER: FlashLoanProviderDescriptor = {
   protocol: 'balancer_v2',
   feeBps: 0,
   addresses: BALANCER_V2_VAULTS,
-  chains: ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'fantom', 'mode'],
+  chains: ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'fantom'],
   status: 'deferred',
-  deferredReason: 'BalancerV2FlashArbitrage.sol not yet deployed broadly (currently fantom; mode pending deployment)',
+  deferredReason: 'BalancerV2FlashArbitrage.sol not yet deployed broadly (currently fantom only)',
   // chains lists chains where the Balancer V2 Vault exists on-chain.
   // Flash loans are only usable where BalancerV2FlashArbitrage.sol is deployed (fantom only).
+  // Mode removed: no Balancer V2 Vault deployed on Mode.
 };
