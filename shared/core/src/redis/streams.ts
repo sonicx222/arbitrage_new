@@ -1174,11 +1174,13 @@ export class RedisStreamsClient {
       const result = await this.client.set(key, value, 'EX', ttlSec, 'NX');
       return result === 'OK';
     } catch (error) {
+      this.dedupFailOpenTotal++;
       // DI-H-002 FIX: Explicit warn about fail-open consequence
       this.logger.warn('SET NX failed — dedup fail-open, duplicate execution possible', {
         key,
         error: getErrorMessage(error),
         consequence: 'in-memory dedup still active; flash loan atomicity prevents fund loss',
+        dedupFailOpenTotal: this.dedupFailOpenTotal,
       });
       // Fail open: allow execution if Redis is unavailable (in-memory dedup still active)
       return true;
@@ -1231,6 +1233,14 @@ export class RedisStreamsClient {
    * @returns Object with stream length, maxLen, lag metrics, backpressure signal, and critical flag
    */
   private lagCriticalTotal = 0;
+
+  /** P2-13 FIX: Count of dedup fail-open events (setNx Redis errors). Use for Prometheus export. */
+  private dedupFailOpenTotal = 0;
+
+  /** Number of times setNx failed and fell through to fail-open. Use for Prometheus export. */
+  getDedupFailOpenTotal(): number {
+    return this.dedupFailOpenTotal;
+  }
 
   /** H-01 FIX: Per-stream lag metrics for Prometheus export and producer throttling. */
   private readonly streamLagMetrics = new Map<string, {

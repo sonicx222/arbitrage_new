@@ -97,6 +97,17 @@ export class OpportunityPublisher {
    * @returns true if published successfully, false otherwise
    */
   async publish(opportunity: ArbitrageOpportunity, parentTraceContext?: TraceContext): Promise<boolean> {
+    // P2-14 FIX: Lightweight publish-side validation — catch opportunities with no ID before they
+    // enter the stream (downstream EE consumer does full validation with type/tokenIn/tokenOut checks).
+    if (!opportunity.id) {
+      this.stats.failed++;
+      this.logger.error('Opportunity missing id, skipping publish', {
+        chain: opportunity.chain,
+        type: opportunity.type,
+      });
+      return false;
+    }
+
     const sourceName = `${this.sourcePrefix}-${this.partitionId}`;
     // P2 Fix ES-007: Use parent context if provided for end-to-end tracing
     const traceCtx = parentTraceContext ?? createTraceContext(sourceName);

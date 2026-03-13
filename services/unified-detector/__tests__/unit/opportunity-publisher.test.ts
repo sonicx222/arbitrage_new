@@ -339,13 +339,13 @@ describe('OpportunityPublisher', () => {
   // ===========================================================================
 
   describe('edge cases', () => {
-    it('should handle empty opportunity id', async () => {
+    it('should reject empty opportunity id', async () => {
       const opportunity = createSampleOpportunity({ id: '' });
 
       const result = await publisher.publish(opportunity);
 
-      expect(result).toBe(true);
-      // The publisher doesn't validate - that's the coordinator's job
+      expect(result).toBe(false);
+      expect(publisher.getStats().failed).toBe(1);
     });
 
     it('should handle opportunity with special characters in id', async () => {

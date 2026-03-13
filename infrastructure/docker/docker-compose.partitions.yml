@@ -7,7 +7,7 @@
 # Architecture (Production-style ports):
 #   - Coordinator:     Dashboard & orchestration           (Port 3000)
 #   - P1 Asia-Fast:    BSC, Polygon, Avalanche, Fantom     (Port 3001)
-#   - P2 L2-Turbo:     Arbitrum, Optimism, Base            (Port 3002)
+#   - P2 L2-Turbo:     Arbitrum, Optimism, Base, Scroll, Blast, Mantle, Mode (Port 3002)
 #   - P3 High-Value:   Ethereum, zkSync, Linea             (Port 3003)
 #   - P4 Solana:       Solana (non-EVM)                    (Port 3004)
 #   - Cross-Chain:     Cross-chain arbitrage detection     (Port 3006)
@@ -32,7 +32,9 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    # P2-19 FIX: Use noeviction (matches production) so dev catches memory issues early.
+    # allkeys-lru silently evicts stream data, masking memory problems.
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -89,7 +91,8 @@ services:
     environment:
       - NODE_ENV=development
       - PARTITION_ID=l2-turbo
-      - PARTITION_CHAINS=arbitrum,optimism,base
+      # P2-18 FIX: Added scroll,blast,mantle,mode to match Fly.io config and SUPPORTED_EXECUTION_CHAINS
+      - PARTITION_CHAINS=arbitrum,optimism,base,scroll,blast,mantle,mode
       - INSTANCE_ID=p2-local
       - REGION_ID=local-p2
       # P1 Fix CA-013: Match HEALTH_CHECK_PORT to documented service port
@@ -102,6 +105,14 @@ services:
       - OPTIMISM_WS_URL=${OPTIMISM_WS_URL}
       - BASE_RPC_URL=${BASE_RPC_URL}
       - BASE_WS_URL=${BASE_WS_URL}
+      - SCROLL_RPC_URL=${SCROLL_RPC_URL:-}
+      - SCROLL_WS_URL=${SCROLL_WS_URL:-}
+      - BLAST_RPC_URL=${BLAST_RPC_URL:-}
+      - BLAST_WS_URL=${BLAST_WS_URL:-}
+      - MANTLE_RPC_URL=${MANTLE_RPC_URL:-}
+      - MANTLE_WS_URL=${MANTLE_WS_URL:-}
+      - MODE_RPC_URL=${MODE_RPC_URL:-}
+      - MODE_WS_URL=${MODE_WS_URL:-}
     ports:
       - "3002:3002"
     depends_on:

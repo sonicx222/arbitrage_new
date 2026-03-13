@@ -162,6 +162,7 @@ describe('createPartitionHealthServer', () => {
     authToken?: string;
     healthCacheTtlMs?: number;
     config?: Partial<PartitionServiceConfig>;
+    redisPingFn?: () => Promise<boolean>;
   } = {}): Promise<number> {
     const detector = options.detector ?? createMockDetector();
     const logger = createMockLogger();
@@ -175,6 +176,7 @@ describe('createPartitionHealthServer', () => {
       authToken: options.authToken,
       bindAddress: '127.0.0.1',
       healthCacheTtlMs: options.healthCacheTtlMs,
+      redisPingFn: options.redisPingFn ?? (async () => true),
     });
 
     // Wait for the server to start listening
@@ -292,7 +294,7 @@ describe('createPartitionHealthServer', () => {
   // ---------------------------------------------------------------------------
 
   describe('GET /ready', () => {
-    it('should return 200 when running', async () => {
+    it('should return 200 when running and Redis is healthy', async () => {
       const detector = createMockDetector({ running: true });
       port = await startServer({ detector });
 
@@ -301,6 +303,8 @@ describe('createPartitionHealthServer', () => {
 
       expect(res.statusCode).toBe(200);
       expect(body.ready).toBe(true);
+      expect(body.detectorReady).toBe(true);
+      expect(body.redisReady).toBe(true);
       expect(body.chains).toEqual(['bsc', 'polygon']);
     });
 
@@ -313,6 +317,23 @@ describe('createPartitionHealthServer', () => {
 
       expect(res.statusCode).toBe(503);
       expect(body.ready).toBe(false);
+      expect(body.detectorReady).toBe(false);
+    });
+
+    it('should return 503 when Redis is down', async () => {
+      const detector = createMockDetector({ running: true });
+      port = await startServer({
+        detector,
+        redisPingFn: async () => { throw new Error('Connection refused'); },
+      });
+
+      const res = await request(port, '/ready');
+      const body = JSON.parse(res.body);
+
+      expect(res.statusCode).toBe(503);
+      expect(body.ready).toBe(false);
+      expect(body.detectorReady).toBe(true);
+      expect(body.redisReady).toBe(false);
     });
   });
 

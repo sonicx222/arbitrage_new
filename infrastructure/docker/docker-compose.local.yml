@@ -24,7 +24,8 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-localdev} --bind 0.0.0.0
+    # P2-19 FIX: Use noeviction (matches production) so dev catches memory issues early.
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction --requirepass ${REDIS_PASSWORD:-localdev} --bind 0.0.0.0
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-localdev}", "--no-auth-warning", "ping"]
       interval: 5s

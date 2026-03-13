@@ -71,6 +71,13 @@ export interface HealthServerOptions {
    * @default 1000
    */
   healthCacheTtlMs?: number;
+
+  /**
+   * Optional Redis ping function for /ready endpoint.
+   * When provided, /ready checks Redis connectivity via this function.
+   * Defaults to using getRedisStreamsClient().ping().
+   */
+  redisPingFn?: () => Promise<boolean>;
 }
 
 export interface PartitionDetectorInterface extends EventEmitter {

@@ -371,6 +371,54 @@ export function getFinalityBlocks(chainId: string): number {
 }
 
 // =============================================================================
+// CHAIN-SPECIFIC SWAP DEADLINE (P2-09)
+// L2s have sub-second blocks — a 300s deadline is 1200 blocks on Arbitrum,
+// excessively generous and increases MEV exposure window.
+// =============================================================================
+
+/**
+ * Per-chain swap deadline in seconds.
+ * Shorter deadlines on fast L2s reduce MEV exposure.
+ * Flash loan transactions are atomic (same block) so deadline is less critical,
+ * but non-flash-loan intra-chain swaps benefit from tighter windows.
+ *
+ * @see base.strategy.ts getSwapDeadline() — consumer of these thresholds
+ */
+export const chainSwapDeadlineSeconds: Record<string, number> = {
+  // L1 chains — slower blocks, longer deadlines
+  ethereum: 300,     // 12s blocks — 25 blocks
+  bsc: 120,          // 3s blocks — 40 blocks
+  polygon: 120,      // 2s blocks — 60 blocks
+  avalanche: 60,     // 2s blocks — 30 blocks (sub-second finality)
+  fantom: 60,        // 1s blocks — 60 blocks (instant finality)
+  // L2 chains — fast blocks, tighter deadlines to reduce MEV window
+  arbitrum: 30,      // 0.25s blocks — 120 blocks
+  optimism: 60,      // 2s blocks — 30 blocks
+  base: 60,          // 2s blocks — 30 blocks
+  zksync: 60,        // ~1s blocks — 60 blocks
+  linea: 60,         // ~2s blocks — 30 blocks
+  blast: 60,         // 2s blocks — 30 blocks
+  scroll: 60,        // 3s blocks — 20 blocks
+  mantle: 60,        // 2s blocks — 30 blocks
+  mode: 60,          // 2s blocks — 30 blocks
+  // Solana: Not applicable (uses slot-based expiry, not Unix deadline)
+};
+
+/** Default swap deadline for chains not in the map */
+const DEFAULT_SWAP_DEADLINE_SECONDS = 300;
+
+/**
+ * Get swap deadline in seconds for a specific chain.
+ *
+ * @param chainId - Chain identifier (case-insensitive)
+ * @returns Swap deadline in seconds
+ */
+export function getSwapDeadlineSeconds(chainId: string): number {
+  const key = chainId.toLowerCase();
+  return chainSwapDeadlineSeconds[key] ?? DEFAULT_SWAP_DEADLINE_SECONDS;
+}
+
+// =============================================================================
 // PROFIT THRESHOLD UTILITIES
 // Single source of truth for chain-specific profit thresholds
 // =============================================================================

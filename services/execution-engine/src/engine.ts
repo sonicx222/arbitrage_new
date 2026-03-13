@@ -963,8 +963,14 @@ export class ExecutionEngineService {
             );
             cursor = nextCursor;
             for (const key of keys) {
-              await this.redis.expire(key, ttlSeconds);
-              extended++;
+              try {
+                await this.redis.expire(key, ttlSeconds);
+                extended++;
+              } catch (keyErr) {
+                this.logger.warn('Failed to extend TTL for bridge recovery key', {
+                  key, error: getErrorMessage(keyErr),
+                });
+              }
             }
           } while (cursor !== '0');
           if (extended > 0) {

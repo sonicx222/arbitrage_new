@@ -24,7 +24,7 @@
  */
 
 import { ethers } from 'ethers';
-import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice } from '@arbitrage/config';
+import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains, getNativeTokenPrice, getSwapDeadlineSeconds } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core/logging';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { isTestnetExecutionMode } from '@arbitrage/core/simulation';
@@ -182,11 +182,16 @@ const VALIDATED_SWAP_DEADLINE_SECONDS = Number.isNaN(SWAP_DEADLINE_SECONDS) || S
 
 /**
  * Returns a Unix timestamp deadline for swap transactions.
- * Uses the validated SWAP_DEADLINE_SECONDS (default 300s / 5 minutes).
- * Centralizes deadline computation to avoid hardcoded magic numbers across strategies.
+ * P2-09 FIX: When chain is provided, uses per-chain deadline from thresholds.ts.
+ * Falls back to env-configured SWAP_DEADLINE_SECONDS (default 300s) for backward compat.
+ *
+ * @param chain - Optional chain name for chain-aware deadline
  */
-export function getSwapDeadline(): number {
-  return Math.floor(Date.now() / 1000) + VALIDATED_SWAP_DEADLINE_SECONDS;
+export function getSwapDeadline(chain?: string): number {
+  const deadline = chain
+    ? getSwapDeadlineSeconds(chain)
+    : VALIDATED_SWAP_DEADLINE_SECONDS;
+  return Math.floor(Date.now() / 1000) + deadline;
 }
 
 /**
@@ -1470,6 +1475,11 @@ export abstract class BaseExecutionStrategy {
           const operationType = opportunity.type ?? 'simple';
           const estimate = getGasPriceCache().estimateGasCostUsd(chain, gasUnits, operationType);
           estimatedGasCostUsd = estimate.costUsd;
+          if (estimate.usesFallback) {
+            this.logger.warn('Gas estimate uses fallback price — profit calculation may be inaccurate', {
+              chain, gasUnits, costUsd: estimate.costUsd,
+            });
+          }
         } catch (error) {
           this.logger.debug('Gas cost estimation failed', { chain, error: getErrorMessage(error) });
         }

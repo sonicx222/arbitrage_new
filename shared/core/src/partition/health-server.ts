@@ -19,6 +19,7 @@ import { setLogLevel, getOtelTransport } from '../logging/pino-logger';
 import type { LogLevel } from '../logging/types';
 import type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './config';
 import { getPriceUpdatesTotal, getPublishDropsTotal } from './metrics';
+import { getRedisStreamsClient } from '../redis';
 
 // =============================================================================
 // Health Check Cache (PERF-FIX)
@@ -353,11 +354,25 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
       // Previously /ready had no timeout wrapper (unlike /health and /stats),
       // causing Kubernetes readiness probes to fail during initial burst.
       withResponseTimeout(res, config.serviceName, async () => {
-        const ready = detector.isRunning();
+        const detectorReady = detector.isRunning();
+        let redisReady = false;
+        try {
+          if (options.redisPingFn) {
+            redisReady = await options.redisPingFn();
+          } else {
+            const streams = await getRedisStreamsClient();
+            redisReady = await streams.ping();
+          }
+        } catch {
+          // Redis unavailable — not ready
+        }
+        const ready = detectorReady && redisReady;
         res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           service: config.serviceName,
           ready,
+          detectorReady,
+          redisReady,
           chains: detector.getChains()
         }));
       }, logger);
