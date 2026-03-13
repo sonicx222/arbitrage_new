@@ -428,16 +428,17 @@ export class ExecutionEngineService {
     // O-6: Initialize persistent trade logger with lifecycle management
     const tradeLogEnabled = process.env.TRADE_LOG_ENABLED !== 'false';
     const tradeLogDir = process.env.TRADE_LOG_DIR ?? './data/trades';
-    const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS ?? '', 10);
-    const maxTotalSizeMB = parseInt(process.env.LOG_MAX_TOTAL_SIZE_MB ?? '', 10);
-    const compressAfterDays = parseInt(process.env.LOG_COMPRESS_AFTER_DAYS ?? '', 10);
+    // SA-004 FIX: Use parseEnvIntSafe instead of raw parseInt with deferred NaN guard
+    const retentionDays = parseEnvIntSafe('LOG_RETENTION_DAYS', 14, 1);
+    const maxTotalSizeMB = parseEnvIntSafe('LOG_MAX_TOTAL_SIZE_MB', 100, 1);
+    const compressAfterDays = parseEnvIntSafe('LOG_COMPRESS_AFTER_DAYS', 1, 1);
     this.tradeLogger = new TradeLogger(
       {
         enabled: config.tradeLoggerConfig?.enabled ?? tradeLogEnabled,
         outputDir: config.tradeLoggerConfig?.outputDir ?? tradeLogDir,
-        ...(Number.isFinite(retentionDays) ? { retentionDays } : {}),
-        ...(Number.isFinite(maxTotalSizeMB) ? { maxTotalSizeMB } : {}),
-        ...(Number.isFinite(compressAfterDays) ? { compressAfterDays } : {}),
+        retentionDays,
+        maxTotalSizeMB,
+        compressAfterDays,
       },
       this.logger,
     );
@@ -646,8 +647,9 @@ export class ExecutionEngineService {
             error: err instanceof Error ? err.message : String(err),
           });
         });
-        const maintenanceHours = parseInt(process.env.LOG_MAINTENANCE_INTERVAL_HOURS ?? '', 10);
-        const maintenanceMs = Number.isFinite(maintenanceHours)
+        // SA-005 FIX: Use parseEnvIntSafe instead of raw parseInt with deferred NaN guard
+        const maintenanceHours = parseEnvIntSafe('LOG_MAINTENANCE_INTERVAL_HOURS', 0, 0);
+        const maintenanceMs = maintenanceHours > 0
           ? maintenanceHours * 60 * 60 * 1000
           : undefined; // Uses LogFileManager's 6h default
         this.tradeLogger.startMaintenance(maintenanceMs);

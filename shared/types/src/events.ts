@@ -85,6 +85,7 @@ export const ConsumerGroups = {
   EXECUTION_ENGINE: 'execution-engine-group',
   CROSS_CHAIN_DETECTOR: 'cross-chain-detector-group',
   COORDINATOR: 'coordinator-group',
+  /** Currently unused — mempool-detector is producer-only. Reserved for future consumer feature. */
   MEMPOOL_DETECTOR: 'mempool-detector-group',
   ORDERFLOW_PIPELINE: 'orderflow-pipeline',
   SELF_HEALING: 'self-healing-manager',

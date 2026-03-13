@@ -73,7 +73,8 @@ export const MEMPOOL_CONFIG = {
   streams: {
     /** Stream name for pending opportunities */
     pendingOpportunities: process.env.MEMPOOL_PENDING_STREAM ?? RedisStreams.PENDING_OPPORTUNITIES,
-    /** Consumer group name */
+    /** Consumer group name (currently unused — mempool-detector is producer-only;
+     *  reserved for future consumer functionality). */
     // SA-1B-002 FIX: Use ?? to preserve empty string as valid consumer group name
     consumerGroup: process.env.MEMPOOL_CONSUMER_GROUP ?? 'mempool-detector-group',
     /** Maximum stream length (approximate) */

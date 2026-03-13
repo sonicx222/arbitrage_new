@@ -18,6 +18,7 @@ import { RedisStreamsClient, getRedisStreamsClient } from '../redis/streams';
 import { ReserveCache, getReserveCache } from '../caching/reserve-cache';
 import type { Logger } from '../logger';
 import type { StreamMessage, ConsumerGroupConfig } from '../redis/streams';
+import { ConsumerGroups } from '@arbitrage/types';
 import type { PendingOpportunity, PendingSwapIntent } from '@arbitrage/types';
 import { getErrorMessage } from '../resilience/error-handling';
 import { parseEnvIntSafe } from '../utils/env-utils';
@@ -77,8 +78,8 @@ const ORDERFLOW_BATCH_SIZE = parseEnvIntSafe('ORDERFLOW_BATCH_SIZE', 50, 1);
 /** Stream name for pending opportunities — uses canonical constant. */
 const PENDING_OPPORTUNITIES_STREAM = RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES;
 
-/** Consumer group name. */
-const CONSUMER_GROUP = 'orderflow-pipeline';
+/** SA-008 FIX: Use ConsumerGroups enum from @arbitrage/types (was hardcoded string). */
+const CONSUMER_GROUP = ConsumerGroups.ORDERFLOW_PIPELINE;
 
 // =============================================================================
 // Types

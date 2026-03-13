@@ -33,6 +33,7 @@
  * @see ADR-007: Failover Strategy
  */
 
+import { ConsumerGroups } from '@arbitrage/types';
 import { getPriceOracle, PriceOracle } from '@arbitrage/core/analytics';
 import { OperationGuard, clearIntervalSafe, clearTimeoutSafe } from '@arbitrage/core/async';
 import {
@@ -328,8 +329,8 @@ export class CrossChainDetectorService {
       transitionTimeoutMs: 30000
     });
 
-    // SA-005 FIX: Single constant for consumer group name (was duplicated 3x)
-    const CONSUMER_GROUP = 'cross-chain-detector-group';
+    // SA-007 FIX: Use ConsumerGroups enum from @arbitrage/types (was hardcoded string)
+    const CONSUMER_GROUP = ConsumerGroups.CROSS_CHAIN_DETECTOR;
 
     // Define consumer groups for streams we need to consume
     this.consumerGroups = [

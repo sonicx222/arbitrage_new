@@ -437,7 +437,10 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
           }
         })
       );
-      predictionResults.push(...chunkResults);
+      // SA-006 FIX: Avoid spread in loop per ADR-022 (allocates spread-arg list per iteration)
+      for (const result of chunkResults) {
+        predictionResults.push(result);
+      }
     }
 
     // Batch-write all results synchronously after Promise.all completes

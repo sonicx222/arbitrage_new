@@ -22,7 +22,7 @@ import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getEnhancedHealthMonitor } from '../monitoring/enhanced-health-monitor';
 import { getErrorRecoveryOrchestrator } from './error-recovery';
-import { RedisStreams } from '@arbitrage/types';
+import { RedisStreams, ConsumerGroups } from '@arbitrage/types';
 
 const logger = createLogger('expert-self-healing-manager');
 
@@ -35,8 +35,8 @@ const SYSTEM_STREAMS = {
   SCALING: RedisStreams.SYSTEM_SCALING,
 } as const;
 
-// P0-10 FIX: Consumer group configuration for self-healing manager
-const CONSUMER_GROUP_NAME = 'self-healing-manager';
+// SA-009 FIX: Use ConsumerGroups enum from @arbitrage/types (was hardcoded string)
+const CONSUMER_GROUP_NAME = ConsumerGroups.SELF_HEALING;
 const CONSUMER_NAME = `shm-${process.pid || 'default'}`;
 
 /**
