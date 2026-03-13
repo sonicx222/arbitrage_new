@@ -21,6 +21,10 @@ interface ChartProps<T> {
   formatValue?: (v: number) => string;
 }
 
+// Zoom constants
+const MIN_ZOOM_POINTS = 10; // Minimum visible data points when zoomed in
+const ZOOM_FACTOR = 0.15;   // Fraction of range to zoom per wheel tick
+
 const MARGIN = { top: 8, right: 12, bottom: 24, left: 44 };
 
 export function Chart<T>({
@@ -40,6 +44,17 @@ export function Chart<T>({
   const [width, setWidth] = useState(0);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
+  // Zoom state: visible range as indices into data array
+  const [zoomStart, setZoomStart] = useState(0);
+  const [zoomEnd, setZoomEnd] = useState(0);
+  const isZoomed = data.length > 0 && (zoomStart > 0 || zoomEnd < data.length);
+
+  // Reset zoom when data length changes significantly (new data stream)
+  useEffect(() => {
+    setZoomStart(0);
+    setZoomEnd(data.length);
+  }, [data.length]);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -55,9 +70,14 @@ export function Chart<T>({
   const chartW = Math.max(width - MARGIN.left - MARGIN.right, 0);
   const chartH = Math.max(height - MARGIN.top - MARGIN.bottom, 0);
 
-  // Extract numeric values
+  // Zoom: slice visible data
+  const visStart = Math.max(0, Math.min(zoomStart, data.length));
+  const visEnd = Math.max(visStart, Math.min(zoomEnd, data.length));
+  const visData = data.slice(visStart, visEnd);
+
+  // Extract numeric values from visible data
   const values: number[] = [];
-  for (const d of data) {
+  for (const d of visData) {
     const v = val(d, dataKey);
     values.push(typeof v === 'number' && Number.isFinite(v) ? v : 0);
   }
@@ -78,15 +98,15 @@ export function Chart<T>({
   const yRange = yMax - yMin;
 
   const toX = (i: number) =>
-    MARGIN.left + (data.length <= 1 ? chartW / 2 : (i / (data.length - 1)) * chartW);
+    MARGIN.left + (visData.length <= 1 ? chartW / 2 : (i / (visData.length - 1)) * chartW);
   const toY = (v: number) =>
     MARGIN.top + chartH - ((v - yMin) / yRange) * chartH;
 
   // Build SVG path
   let linePath = '';
-  if (data.length > 0 && chartW > 0) {
+  if (visData.length > 0 && chartW > 0) {
     linePath = `M${toX(0).toFixed(1)},${toY(values[0]).toFixed(1)}`;
-    for (let i = 1; i < data.length; i++) {
+    for (let i = 1; i < visData.length; i++) {
       linePath += `L${toX(i).toFixed(1)},${toY(values[i]).toFixed(1)}`;
     }
   }
@@ -94,7 +114,7 @@ export function Chart<T>({
   let areaPath = '';
   if (fill && linePath) {
     const baseline = toY(yMin);
-    areaPath = `${linePath}L${toX(data.length - 1).toFixed(1)},${baseline.toFixed(1)}L${toX(0).toFixed(1)},${baseline.toFixed(1)}Z`;
+    areaPath = `${linePath}L${toX(visData.length - 1).toFixed(1)},${baseline.toFixed(1)}L${toX(0).toFixed(1)},${baseline.toFixed(1)}Z`;
   }
 
   // Y axis ticks
@@ -105,12 +125,12 @@ export function Chart<T>({
   }
 
   // X axis labels (~6 evenly spaced)
-  const xCount = Math.min(6, data.length);
+  const xCount = Math.min(6, visData.length);
   const xLabels: { x: number; label: string }[] = [];
-  if (data.length > 1 && xCount > 1) {
+  if (visData.length > 1 && xCount > 1) {
     for (let i = 0; i < xCount; i++) {
-      const idx = Math.round((i / (xCount - 1)) * (data.length - 1));
-      xLabels.push({ x: toX(idx), label: String(val(data[idx], xKey) ?? '') });
+      const idx = Math.round((i / (xCount - 1)) * (visData.length - 1));
+      xLabels.push({ x: toX(idx), label: String(val(visData[idx], xKey) ?? '') });
     }
   }
 
@@ -125,23 +145,52 @@ export function Chart<T>({
   // Mouse interaction
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (data.length === 0 || chartW <= 0) return;
+      if (visData.length === 0 || chartW <= 0) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left - MARGIN.left;
-      setHoverIdx(Math.max(0, Math.min(data.length - 1, Math.round((x / chartW) * (data.length - 1)))));
+      setHoverIdx(Math.max(0, Math.min(visData.length - 1, Math.round((x / chartW) * (visData.length - 1)))));
     },
-    [data.length, chartW],
+    [visData.length, chartW],
   );
   const handleMouseLeave = useCallback(() => setHoverIdx(null), []);
 
+  // Mouse wheel zoom
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (data.length <= MIN_ZOOM_POINTS) return;
+      e.preventDefault();
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - MARGIN.left;
+      const curRange = visEnd - visStart;
+      // Fraction of visible range where the mouse is (0..1)
+      const anchor = chartW > 0 ? Math.max(0, Math.min(1, mouseX / chartW)) : 0.5;
+
+      const delta = e.deltaY > 0 ? ZOOM_FACTOR : -ZOOM_FACTOR; // positive = zoom out
+      const newRange = Math.max(MIN_ZOOM_POINTS, Math.min(data.length, Math.round(curRange * (1 + delta))));
+
+      // Keep the anchor point stable
+      let newStart = Math.round(visStart + (curRange - newRange) * anchor);
+      newStart = Math.max(0, Math.min(data.length - newRange, newStart));
+      setZoomStart(newStart);
+      setZoomEnd(newStart + newRange);
+    },
+    [data.length, visStart, visEnd, chartW],
+  );
+
+  const resetZoom = useCallback(() => {
+    setZoomStart(0);
+    setZoomEnd(data.length);
+  }, [data.length]);
+
   // Hover indicator data
   const hoverPoint =
-    hoverIdx !== null && data[hoverIdx]
+    hoverIdx !== null && visData[hoverIdx]
       ? {
           x: toX(hoverIdx),
           y: toY(values[hoverIdx]),
           value: values[hoverIdx],
-          label: String(val(data[hoverIdx], xKey) ?? ''),
+          label: String(val(visData[hoverIdx], xKey) ?? ''),
         }
       : null;
 
@@ -163,6 +212,7 @@ export function Chart<T>({
       style={{ width: '100%', height, position: 'relative' }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onWheel={handleWheel}
       role="img"
       aria-label={ariaLabel}
     >
@@ -184,7 +234,7 @@ export function Chart<T>({
         {/* Line */}
         {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray={dashed ? '6 3' : undefined} />}
         {/* Single data point dot */}
-        {data.length === 1 && <circle cx={toX(0)} cy={toY(values[0])} r={3} fill={color} />}
+        {visData.length === 1 && <circle cx={toX(0)} cy={toY(values[0])} r={3} fill={color} />}
         {/* Y axis labels */}
         {yTicks.map((t, i) => (
           <text
@@ -238,6 +288,16 @@ export function Chart<T>({
           <span className="text-gray-400">{hoverPoint.label}</span>{' '}
           <span className="font-mono text-gray-100">{fmtVal(hoverPoint.value)}</span>
         </div>
+      )}
+      {/* Zoom reset button */}
+      {isZoomed && (
+        <button
+          onClick={resetZoom}
+          className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800/80 text-gray-400 hover:text-gray-200 border border-gray-700 transition-colors"
+          aria-label="Reset chart zoom"
+        >
+          Reset zoom
+        </button>
       )}
     </div>
   );

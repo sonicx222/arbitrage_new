@@ -41,4 +41,13 @@ describe('toCsv', () => {
     const csv = toCsv(['Time', 'Chain', 'Profit'], [['12:00:00', 'ethereum', 1.23]]);
     expect(csv).toBe('Time,Chain,Profit\n12:00:00,ethereum,1.23');
   });
+
+  it('prevents CSV formula injection by prefixing dangerous chars with tab', () => {
+    const csv = toCsv(['Msg'], [['=cmd|/C calc|'], ['+1'], ['-1'], ['@SUM(A1:A2)']]);
+    // Tab-prefixed values containing tab must be quoted
+    expect(csv).toContain('"\t=cmd|/C calc|"');
+    expect(csv).toContain('"\t+1"');
+    expect(csv).toContain('"\t-1"');
+    expect(csv).toContain('"\t@SUM(A1:A2)"');
+  });
 });

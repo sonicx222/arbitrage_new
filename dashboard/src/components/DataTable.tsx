@@ -57,7 +57,7 @@ export function DataTable<T>({ columns, data, keyExtractor, maxHeight = '16rem',
 
   if (!shouldVirtualize) {
     return (
-      <div ref={scrollRef} className="overflow-auto" style={{ maxHeight }}>
+      <div ref={scrollRef} className="overflow-auto focus:outline-none focus:ring-1 focus:ring-gray-700 rounded" style={{ maxHeight }} tabIndex={0} role="region" aria-label="Scrollable data table">
         <table className="w-full text-xs">
           <thead>{headerRow}</thead>
           <tbody>
@@ -84,7 +84,7 @@ export function DataTable<T>({ columns, data, keyExtractor, maxHeight = '16rem',
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div ref={scrollRef} className="overflow-auto" style={{ maxHeight }}>
+    <div ref={scrollRef} className="overflow-auto focus:outline-none focus:ring-1 focus:ring-gray-700 rounded" style={{ maxHeight }} tabIndex={0} role="region" aria-label="Scrollable data table">
       <table className="w-full text-xs">
         <thead className="sticky top-0 z-10 bg-surface">{headerRow}</thead>
         <tbody>
