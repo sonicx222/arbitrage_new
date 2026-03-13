@@ -8,9 +8,9 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { CHART } from '../lib/theme';
 
-interface ChartProps {
-  data: Array<Record<string, string | number | undefined>>;
-  dataKey: string;
+interface ChartProps<T> {
+  data: T[];
+  dataKey: string & keyof T;
   xKey?: string;
   height?: number;
   color?: string;
@@ -22,7 +22,7 @@ interface ChartProps {
 
 const MARGIN = { top: 8, right: 12, bottom: 24, left: 44 };
 
-export function Chart({
+export function Chart<T>({
   data,
   dataKey,
   xKey = 'time',
@@ -32,7 +32,8 @@ export function Chart({
   yDomain,
   ariaLabel,
   formatValue,
-}: ChartProps) {
+}: ChartProps<T>) {
+  const val = (d: T, key: string) => (d as Record<string, unknown>)[key];
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -55,7 +56,7 @@ export function Chart({
   // Extract numeric values
   const values: number[] = [];
   for (const d of data) {
-    const v = d[dataKey];
+    const v = val(d, dataKey);
     values.push(typeof v === 'number' && Number.isFinite(v) ? v : 0);
   }
 
@@ -107,7 +108,7 @@ export function Chart({
   if (data.length > 1 && xCount > 1) {
     for (let i = 0; i < xCount; i++) {
       const idx = Math.round((i / (xCount - 1)) * (data.length - 1));
-      xLabels.push({ x: toX(idx), label: String(data[idx][xKey] ?? '') });
+      xLabels.push({ x: toX(idx), label: String(val(data[idx], xKey) ?? '') });
     }
   }
 
@@ -138,7 +139,7 @@ export function Chart({
           x: toX(hoverIdx),
           y: toY(values[hoverIdx]),
           value: values[hoverIdx],
-          label: String(data[hoverIdx][xKey] ?? ''),
+          label: String(val(data[hoverIdx], xKey) ?? ''),
         }
       : null;
 

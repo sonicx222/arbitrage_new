@@ -211,12 +211,14 @@ export function OpportunitiesTab() {
         <DataTable<Opportunity>
           columns={[
             { header: 'Time', onHeaderClick: () => handleSort('timestamp'), headerSuffix: sortIcon('timestamp'),
+              sortDirection: sortField === 'timestamp' ? (sortAsc ? 'ascending' : 'descending') : undefined,
               render: (opp) => <span className="text-gray-500">{formatTime(opp.timestamp)}</span> },
             { header: 'Status', render: (opp) => {
               const statusMap: Record<string, string> = { pending: 'healthy', executing: 'degraded', completed: 'healthy', failed: 'unhealthy', expired: 'unknown' };
               return <StatusBadge status={statusMap[opp.status ?? 'pending'] ?? 'unknown'} label={opp.status ?? 'pending'} />;
             } },
             { header: 'Chain', onHeaderClick: () => handleSort('chain'), headerSuffix: sortIcon('chain'),
+              sortDirection: sortField === 'chain' ? (sortAsc ? 'ascending' : 'descending') : undefined,
               render: (opp) => {
                 const chainColor = CHAIN_COLORS[(opp.chain ?? '').toLowerCase()];
                 return (
@@ -235,6 +237,7 @@ export function OpportunitiesTab() {
               </span>
             ) },
             { header: 'Est. Profit', align: 'right', onHeaderClick: () => handleSort('profit'), headerSuffix: sortIcon('profit'),
+              sortDirection: sortField === 'profit' ? (sortAsc ? 'ascending' : 'descending') : undefined,
               render: (opp) => {
                 const profit = opp.estimatedProfit ?? opp.expectedProfit;
                 return profit != null ? <span className="text-accent-green">{formatUsd(profit)}</span> : <>-</>;
@@ -248,6 +251,7 @@ export function OpportunitiesTab() {
                 : <>-</>
             ) },
             { header: 'Conf.', align: 'right', onHeaderClick: () => handleSort('confidence'), headerSuffix: sortIcon('confidence'),
+              sortDirection: sortField === 'confidence' ? (sortAsc ? 'ascending' : 'descending') : undefined,
               render: (opp) => (
                 <span className={`tabular-nums ${
                   thresholdColor(opp.confidence, 0.8, 0.5)

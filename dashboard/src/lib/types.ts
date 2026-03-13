@@ -115,7 +115,6 @@ export type FeedItem =
 
 // Chart data points for SSE-driven time series
 export interface ChartPoint {
-  [key: string]: string | number | undefined;
   time: string;
   latency?: number;
   successRate?: number;
@@ -123,7 +122,6 @@ export interface ChartPoint {
 }
 
 export interface LagPoint {
-  [key: string]: string | number | undefined;
   time: string;
   pending: number;
 }

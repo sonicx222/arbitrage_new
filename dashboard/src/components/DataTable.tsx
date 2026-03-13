@@ -6,6 +6,7 @@ export interface Column<T> {
   render: (item: T) => ReactNode;
   onHeaderClick?: () => void;
   headerSuffix?: string;
+  sortDirection?: 'ascending' | 'descending';
 }
 
 interface Props<T> {
@@ -32,7 +33,7 @@ export function DataTable<T>({ columns, data, keyExtractor, maxHeight = '16rem',
                 onKeyDown={col.onHeaderClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); col.onHeaderClick!(); } } : undefined}
                 role={col.onHeaderClick ? 'button' : undefined}
                 tabIndex={col.onHeaderClick ? 0 : undefined}
-                aria-sort={col.headerSuffix?.includes('\u25B2') ? 'ascending' : col.headerSuffix?.includes('\u25BC') ? 'descending' : undefined}
+                aria-sort={col.sortDirection}
               >
                 {col.header}{col.headerSuffix ?? ''}
               </th>
