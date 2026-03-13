@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { StatusBadge } from './StatusBadge';
 import { CHAIN_COLORS } from '../lib/theme';
-import { formatTime, thresholdColor } from '../lib/format';
+import { formatTime, formatUsd, thresholdColor } from '../lib/format';
 
 export interface ChainStats {
   total: number;
@@ -9,6 +9,8 @@ export interface ChainStats {
   lastExecTime: number;
   totalLatency: number;
   latencyCount: number;
+  totalProfit: number;
+  totalGasCost: number;
 }
 
 interface Props {
@@ -38,22 +40,40 @@ export const ChainCard = memo(function ChainCard({ chain, status = 'unknown', pa
         <StatusBadge status={status} />
       </div>
       {stats && stats.total > 0 && (
-        <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-gray-500">
-          <div>
-            <span className="block text-gray-600">Rate</span>
-            <span className={thresholdColor(Number(successRate), 80, 50)}>
-              {successRate}%
-            </span>
+        <>
+          <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-gray-500">
+            <div>
+              <span className="block text-gray-600">Rate</span>
+              <span className={thresholdColor(Number(successRate), 80, 50)}>
+                {successRate}%
+              </span>
+            </div>
+            <div>
+              <span className="block text-gray-600">Profit</span>
+              <span className={stats.totalProfit > 0 ? 'text-accent-green' : stats.totalProfit < 0 ? 'text-accent-red' : 'text-gray-400'}>
+                {formatUsd(stats.totalProfit)}
+              </span>
+            </div>
+            <div>
+              <span className="block text-gray-600">Gas</span>
+              <span className="text-gray-400">{stats.totalGasCost > 0 ? formatUsd(stats.totalGasCost) : '—'}</span>
+            </div>
           </div>
-          <div>
-            <span className="block text-gray-600">Latency</span>
-            <span className="text-gray-400">{avgLatency ? `${avgLatency}ms` : '—'}</span>
+          <div className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-gray-500">
+            <div>
+              <span className="block text-gray-600">Latency</span>
+              <span className="text-gray-400">{avgLatency ? `${avgLatency}ms` : '—'}</span>
+            </div>
+            <div>
+              <span className="block text-gray-600">Execs</span>
+              <span className="text-gray-400">{stats.total}</span>
+            </div>
+            <div>
+              <span className="block text-gray-600">Last</span>
+              <span className="text-gray-400">{formatTime(stats.lastExecTime)}</span>
+            </div>
           </div>
-          <div>
-            <span className="block text-gray-600">Last</span>
-            <span className="text-gray-400">{formatTime(stats.lastExecTime)}</span>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );

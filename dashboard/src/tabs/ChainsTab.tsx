@@ -30,11 +30,11 @@ export function ChainsTab() {
     const stats: Record<string, ChainStats> = {};
     for (const item of feed) {
       if (item.kind !== 'execution') continue;
-      const { chain, success, latencyMs, timestamp } = item.data;
+      const { chain, success, latencyMs, timestamp, actualProfit, gasCost } = item.data;
       const key = chain.toLowerCase();
       let entry = stats[key];
       if (!entry) {
-        entry = { total: 0, successes: 0, lastExecTime: 0, totalLatency: 0, latencyCount: 0 };
+        entry = { total: 0, successes: 0, lastExecTime: 0, totalLatency: 0, latencyCount: 0, totalProfit: 0, totalGasCost: 0 };
         stats[key] = entry;
       }
       entry.total++;
@@ -44,6 +44,8 @@ export function ChainsTab() {
         entry.totalLatency += latencyMs;
         entry.latencyCount++;
       }
+      if (actualProfit != null && Number.isFinite(actualProfit)) entry.totalProfit += actualProfit;
+      if (gasCost != null && Number.isFinite(gasCost)) entry.totalGasCost += gasCost;
     }
     return stats;
   }, [feed]);
