@@ -647,12 +647,14 @@ export class OpportunityConsumer {
       // When Redis MAXLEN trims the stream, un-ACKed PEL entries become orphans that
       // can never be processed or reclaimed. ACKing immediately is safe because the
       // message is being discarded anyway (queue is full).
+      // P1-DLQ FIX: Write to DLQ before ACK so dropped opportunities are auditable/replayable.
+      await this.moveToDeadLetterQueue(message, new Error('ERR_BACKPRESSURE: queue full, opportunity discarded'));
       await this.ackMessage(message.id);
       // H-03 FIX: Release Redis dedup key on backpressure so opportunity can be retried
       this.streamsClient.deleteKey(redisKey).catch((err) => {
         this.logger.debug('Failed to delete dedup key on backpressure', { redisKey, error: getErrorMessage(err) });
       });
-      this.logger.debug('Backpressure: message ACKed and discarded', {
+      this.logger.debug('Backpressure: message sent to DLQ and ACKed', {
         messageId: message.id,
         opportunityId: opportunity.id,
         queueSize: this.queueService.size(),

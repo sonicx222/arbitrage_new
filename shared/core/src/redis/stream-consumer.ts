@@ -89,6 +89,8 @@ export interface StreamConsumerStats {
   isRunning: boolean;
   /** Whether consumption is paused due to backpressure */
   isPaused: boolean;
+  /** P1-NOGROUP FIX: Number of consumer group recreations (each = PEL data loss event) */
+  groupRecreationCount?: number;
 }
 
 // =============================================================================
@@ -149,12 +151,15 @@ export class StreamConsumer {
   private static readonly KNOWN_SCHEMA_VERSION = '1';
   /** P0 Fix ES-003: Counter for periodic pending message cleanup */
   private pollCycleCount = 0;
+  /** P1-NOGROUP FIX: Count of consumer group recreations (PEL data loss events) */
+  private groupRecreationCount = 0;
   private stats: StreamConsumerStats = {
     messagesProcessed: 0,
     messagesFailed: 0,
     lastProcessedAt: null,
     isRunning: false,
-    isPaused: false
+    isPaused: false,
+    groupRecreationCount: 0
   };
 
   constructor(client: RedisStreamsClient, config: StreamConsumerConfig) {
@@ -473,11 +478,18 @@ export class StreamConsumer {
       } else if (errorMessage.includes('NOGROUP') || errorMessage.includes('no such key')) {
         // Consumer group was lost — e.g. Redis/Memurai restarted and dropped all group
         // state. Recreate it so the next poll succeeds instead of staying broken forever.
+        // P1-NOGROUP FIX: This recreates with startId '$', which means ALL pending
+        // messages in the old PEL are permanently lost. Log at warn level with
+        // counter for Prometheus alerting on repeated group losses.
         try {
           await this.client.createConsumerGroup(this.config.config);
-          this.config.logger?.warn?.('Consumer group recreated after Redis restart', {
+          this.groupRecreationCount++;
+          this.stats.groupRecreationCount = this.groupRecreationCount;
+          this.config.logger?.warn?.('Consumer group recreated after Redis restart — pending messages lost', {
             stream: this.config.config.streamName,
             group: this.config.config.groupName,
+            groupRecreationCount: this.groupRecreationCount,
+            impact: 'All unacknowledged messages in PEL are permanently lost. New messages from $ onward will be consumed.',
           });
           pollSucceeded = true; // treat as recoverable — no backoff
           this.consecutiveErrors = 0;

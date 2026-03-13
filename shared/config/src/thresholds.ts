@@ -316,6 +316,61 @@ export function getConfidenceMaxAgeMs(chainId: string): number {
 }
 
 // =============================================================================
+// CHAIN-SPECIFIC FINALITY BLOCKS
+// Number of block confirmations required before considering a transaction final.
+// Critical for cross-chain arbitrage: source chain tx must be final before
+// the bridge can safely release funds on the destination chain.
+// =============================================================================
+
+/**
+ * Per-chain finality block counts.
+ * Values represent the number of block confirmations needed for practical finality.
+ *
+ * Ethereum: 2 epochs (~12.8 min) for Casper finality, but 12-15 blocks is standard for most bridges.
+ * L2 rollups: Sequencer-confirmed in 1 block, but L1 finality takes longer (challenge period).
+ *   For arbitrage purposes, sequencer confirmation (1 block) is sufficient since we trust the sequencer.
+ * Solana: Optimistic confirmation at 2/3 validators (~32 slot confirmations).
+ *
+ * @see cross-chain.strategy.ts — consumer of these thresholds for bridge wait decisions
+ */
+export const chainFinalityBlocks: Record<string, number> = {
+  // L1 chains — slow finality
+  ethereum: 15,     // ~3 min at 12s blocks; Casper finality is 2 epochs but 15 blocks is standard bridge threshold
+  bsc: 15,          // ~45s at 3s blocks; PoSA finality
+  polygon: 128,     // ~4.3 min at 2s blocks; Heimdall checkpoint finality
+  avalanche: 1,     // Sub-second finality (Snowman consensus)
+  fantom: 1,        // Instant finality (Lachesis aBFT consensus)
+  // L2 rollups — sequencer-confirmed fast, L1 finality slow
+  // For arbitrage: use sequencer confirmation (1 block) since we trust the L2 sequencer
+  arbitrum: 1,      // Sequencer confirmation immediate; L1 finality ~7 days (fraud proof)
+  optimism: 1,      // Sequencer confirmation immediate; L1 finality ~7 days (fault proof)
+  base: 1,          // Sequencer confirmation immediate (OP-stack)
+  zksync: 1,        // Sequencer confirmation; L1 finality via ZK proof (~1-3 hours)
+  linea: 1,         // Sequencer confirmation; L1 finality via ZK proof
+  blast: 1,         // OP-stack L2
+  scroll: 1,        // zkRollup L2
+  mantle: 1,        // Modular L2 (EigenDA)
+  mode: 1,          // OP-stack L2
+  // Non-EVM
+  solana: 32,       // ~12.8s at 400ms slots; optimistic confirmation
+};
+
+/** Default finality blocks for chains not in the map */
+const DEFAULT_FINALITY_BLOCKS = 15;
+
+/**
+ * Get finality block count for a specific chain.
+ * Uses chainFinalityBlocks with fallback to DEFAULT_FINALITY_BLOCKS.
+ *
+ * @param chainId - Chain identifier (case-insensitive)
+ * @returns Number of blocks to wait for finality
+ */
+export function getFinalityBlocks(chainId: string): number {
+  const key = chainId.toLowerCase();
+  return chainFinalityBlocks[key] ?? DEFAULT_FINALITY_BLOCKS;
+}
+
+// =============================================================================
 // PROFIT THRESHOLD UTILITIES
 // Single source of truth for chain-specific profit thresholds
 // =============================================================================

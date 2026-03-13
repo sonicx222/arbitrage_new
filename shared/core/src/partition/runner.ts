@@ -562,6 +562,46 @@ export function createPartitionEntry(
         partitionId,
         error: (error as Error).message,
       });
+
+      // P1-RECONNECT FIX: Periodically retry Redis connection instead of giving up forever.
+      // Without this, a transient Redis outage at startup permanently disables publishing.
+      const REDIS_RETRY_INTERVAL_MS = parseInt(process.env.REDIS_RETRY_INTERVAL_MS ?? '30000', 10);
+      const retryTimer = setInterval(async () => {
+        try {
+          const streamsClient = await getRedisStreamsClient();
+          const publisher = new OpportunityPublisher({
+            logger,
+            streamsClient,
+            partitionId,
+            sourcePrefix: 'partition',
+          });
+
+          detector.on('opportunity', (opp: Record<string, unknown> & { id: string }) => {
+            if (inFlightPublishes >= MAX_CONCURRENT_PUBLISHES) {
+              incrementPublishDrops();
+              return;
+            }
+            inFlightPublishes++;
+            publisher.publish(opp as unknown as import('@arbitrage/types').ArbitrageOpportunity)
+              .catch((err) => {
+                logger.error('Failed to publish opportunity', {
+                  opportunityId: opp.id,
+                  error: (err as Error).message,
+                });
+              })
+              .finally(() => {
+                inFlightPublishes--;
+              });
+          });
+
+          clearInterval(retryTimer);
+          logger.info('OpportunityPublisher auto-wired after Redis reconnect', { partitionId });
+        } catch {
+          logger.debug('Redis reconnect attempt failed, will retry', { partitionId });
+        }
+      }, REDIS_RETRY_INTERVAL_MS);
+      // Don't prevent process exit
+      retryTimer.unref();
     }
 
     // Call user-provided onStarted hook if present

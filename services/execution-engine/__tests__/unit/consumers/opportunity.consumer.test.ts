@@ -223,10 +223,12 @@ describe('OpportunityConsumer - Backpressure', () => {
 
     // SM-003 FIX: Backpressure-rejected messages are ACKed to prevent zombie PEL entries.
     // When MAXLEN trims the stream data, un-ACKed PEL entries become orphans.
+    // P1-DLQ FIX: Message is also written to DLQ before ACK for auditability.
+    expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
     expect(mockStreamsClient.xack).toHaveBeenCalled();
     expect(consumer.getPendingCount()).toBe(0);
     expect(mockLogger.debug).toHaveBeenCalledWith(
-      'Backpressure: message ACKed and discarded',
+      'Backpressure: message sent to DLQ and ACKed',
       expect.objectContaining({
         messageId: 'msg-backpressure',
         opportunityId: opportunity.id,

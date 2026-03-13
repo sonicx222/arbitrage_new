@@ -863,6 +863,17 @@ export class RedisStreamsClient {
         });
       }
     }
+
+    // P1-BP FIX: Warn when stream is critically lagged (>90% of MAXLEN).
+    // New XADD writes will cause MAXLEN trimming of unread messages.
+    // We still write (dropping would lose data too), but log for alerting.
+    if (this.isStreamCritical(streamName)) {
+      this.logger.warn('Writing to critically lagged stream — MAXLEN trim may discard unread messages', {
+        streamName,
+        maxLen,
+      });
+    }
+
     return this.xadd(streamName, message, '*', {
       ...options,
       maxLen,

@@ -76,6 +76,55 @@ const BRIDGE_ROUTE_ESTIMATES: Record<string, { latency: number; cost: number }> 
   'base-arbitrum-connext': { latency: 60, cost: 0.0003 },
   'base-optimism-connext': { latency: 60, cost: 0.0003 },
 
+  // P1-BRIDGE FIX: Emerging L2 routes (Blast, Scroll, Mantle, Mode)
+  // These chains are in SUPPORTED_EXECUTION_CHAINS and DEX_FACTORY_REGISTRY
+  // but were missing bridge route estimates, causing DEFAULT_BRIDGE_ESTIMATE (300s, 0.0015 ETH)
+  // to be used — a 2-5x overestimate that suppresses cross-chain opportunities.
+
+  // Stargate routes for emerging L2s
+  'ethereum-blast-stargate': { latency: 180, cost: 0.001 },
+  'ethereum-scroll-stargate': { latency: 180, cost: 0.001 },
+  'ethereum-mantle-stargate': { latency: 180, cost: 0.001 },
+  'ethereum-mode-stargate': { latency: 180, cost: 0.001 },
+  'blast-ethereum-stargate': { latency: 180, cost: 0.0005 },
+  'scroll-ethereum-stargate': { latency: 180, cost: 0.0005 },
+  'mantle-ethereum-stargate': { latency: 180, cost: 0.0005 },
+  'mode-ethereum-stargate': { latency: 180, cost: 0.0005 },
+
+  // Across Protocol routes for emerging L2s (faster relayer model)
+  'ethereum-blast-across': { latency: 120, cost: 0.002 },
+  'ethereum-scroll-across': { latency: 120, cost: 0.002 },
+  'ethereum-mantle-across': { latency: 120, cost: 0.002 },
+  'ethereum-mode-across': { latency: 120, cost: 0.002 },
+  'blast-ethereum-across': { latency: 120, cost: 0.001 },
+  'scroll-ethereum-across': { latency: 120, cost: 0.001 },
+  'mantle-ethereum-across': { latency: 120, cost: 0.001 },
+  'mode-ethereum-across': { latency: 120, cost: 0.001 },
+
+  // L2-to-L2 routes for emerging chains (via Stargate/Across)
+  'arbitrum-blast-stargate': { latency: 90, cost: 0.0003 },
+  'arbitrum-scroll-stargate': { latency: 90, cost: 0.0003 },
+  'arbitrum-mantle-stargate': { latency: 90, cost: 0.0003 },
+  'arbitrum-mode-stargate': { latency: 90, cost: 0.0003 },
+  'blast-arbitrum-stargate': { latency: 90, cost: 0.0003 },
+  'scroll-arbitrum-stargate': { latency: 90, cost: 0.0003 },
+  'mantle-arbitrum-stargate': { latency: 90, cost: 0.0003 },
+  'mode-arbitrum-stargate': { latency: 90, cost: 0.0003 },
+  'base-blast-stargate': { latency: 90, cost: 0.0003 },
+  'base-scroll-stargate': { latency: 90, cost: 0.0003 },
+  'base-mantle-stargate': { latency: 90, cost: 0.0003 },
+  'base-mode-stargate': { latency: 90, cost: 0.0003 },
+  'blast-base-stargate': { latency: 90, cost: 0.0003 },
+  'scroll-base-stargate': { latency: 90, cost: 0.0003 },
+  'mantle-base-stargate': { latency: 90, cost: 0.0003 },
+  'mode-base-stargate': { latency: 90, cost: 0.0003 },
+
+  // Native bridges for emerging L2s (L2→L1 slow — fraud/validity proof windows)
+  'blast-ethereum-native': { latency: 604800, cost: 0.005 },    // OP-stack: 7-day fraud proof
+  'scroll-ethereum-native': { latency: 14400, cost: 0.005 },    // zkRollup: ~4 hours for ZK proof
+  'mantle-ethereum-native': { latency: 604800, cost: 0.005 },   // 7-day challenge period
+  'mode-ethereum-native': { latency: 604800, cost: 0.005 },     // OP-stack: 7-day fraud proof
+
   // Phase 3: Hyperlane routes (permissionless interoperability)
   // Hyperlane offers customizable security with ISM (Interchain Security Module)
   // Latency: 100-200s typical, Cost: ~0.05% fee
