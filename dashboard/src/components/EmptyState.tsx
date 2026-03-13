@@ -4,5 +4,5 @@ interface Props {
 }
 
 export function EmptyState({ message, className = 'text-xs' }: Props) {
-  return <div className={`text-gray-600 ${className}`}>{message}</div>;
+  return <div className={`text-gray-600 ${className}`} role="status">{message}</div>;
 }

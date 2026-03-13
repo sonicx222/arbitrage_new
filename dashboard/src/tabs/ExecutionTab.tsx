@@ -107,7 +107,7 @@ export function ExecutionTab() {
   );
 
   if (!metrics) {
-    return <div className="text-gray-500 text-xs">Waiting for execution data...</div>;
+    return <div className="text-gray-500 text-xs" role="status">Waiting for execution data...</div>;
   }
 
   const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
@@ -156,7 +156,7 @@ export function ExecutionTab() {
         </div>
         <div className="card">
           <SectionHeader>Success Rate (%)</SectionHeader>
-          <Chart data={visibleChartData} dataKey="successRate" height={180} color={CHART.line2}
+          <Chart data={visibleChartData} dataKey="successRate" height={180} color={CHART.line2} dashed
             yDomain={[0, 100]} ariaLabel="Execution success rate over time" formatValue={(v) => `${v.toFixed(1)}%`} />
         </div>
       </div>

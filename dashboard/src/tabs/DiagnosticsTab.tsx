@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useDiagnostics, useCexSpread } from '../context/SSEContext';
 import { DataTable } from '../components/DataTable';
 import { EmptyState } from '../components/EmptyState';
@@ -345,9 +345,21 @@ function CexSpreadSection({ data }: { data: CexSpreadData }) {
 // Main Tab
 // ---------------------------------------------------------------------------
 
+type DiagSection = 'all' | 'pipeline' | 'runtime' | 'providers' | 'cex' | 'streams';
+
+const DIAG_SECTIONS: { id: DiagSection; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'pipeline', label: 'Pipeline' },
+  { id: 'runtime', label: 'Runtime' },
+  { id: 'providers', label: 'Providers' },
+  { id: 'cex', label: 'CEX-DEX' },
+  { id: 'streams', label: 'Streams' },
+];
+
 export function DiagnosticsTab() {
   const { diagnostics } = useDiagnostics();
   const { cexSpread } = useCexSpread();
+  const [section, setSection] = useState<DiagSection>('all');
 
   if (!diagnostics) {
     return (
@@ -357,28 +369,47 @@ export function DiagnosticsTab() {
     );
   }
 
+  const showAll = section === 'all';
+
   return (
     <div className="space-y-4 overflow-auto">
-      {/* Timestamp header */}
-      <div className="flex items-center justify-between text-[10px] text-gray-500">
-        <span>Last snapshot: {new Date(diagnostics.timestamp).toLocaleTimeString()}</span>
-        <span>Refresh: 10s</span>
+      {/* Timestamp header + section nav */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          {DIAG_SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSection(s.id)}
+              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-colors ${
+                section === s.id ? 'bg-accent-green/15 text-accent-green' : 'text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <div className="text-[10px] text-gray-500">
+          <span>Last: {new Date(diagnostics.timestamp).toLocaleTimeString()}</span>
+          <span className="ml-2">Refresh: 10s</span>
+        </div>
       </div>
 
       {/* Pipeline + Runtime side by side on large screens */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <PipelineSection pipeline={diagnostics.pipeline} />
-        <RuntimeSection runtime={diagnostics.runtime} />
-      </div>
+      {(showAll || section === 'pipeline' || section === 'runtime') && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {(showAll || section === 'pipeline') && <PipelineSection pipeline={diagnostics.pipeline} />}
+          {(showAll || section === 'runtime') && <RuntimeSection runtime={diagnostics.runtime} />}
+        </div>
+      )}
 
       {/* Providers full width */}
-      <ProvidersSection providers={diagnostics.providers} />
+      {(showAll || section === 'providers') && <ProvidersSection providers={diagnostics.providers} />}
 
       {/* CEX-DEX Spread (only shown when data available) */}
-      {cexSpread && <CexSpreadSection data={cexSpread} />}
+      {(showAll || section === 'cex') && cexSpread && <CexSpreadSection data={cexSpread} />}
 
       {/* Stream diagnostics */}
-      {diagnostics.streams && <StreamDiagSection streams={diagnostics.streams} />}
+      {(showAll || section === 'streams') && diagnostics.streams && <StreamDiagSection streams={diagnostics.streams} />}
     </div>
   );
 }

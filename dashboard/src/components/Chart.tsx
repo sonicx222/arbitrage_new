@@ -15,6 +15,7 @@ interface ChartProps<T> {
   height?: number;
   color?: string;
   fill?: boolean;
+  dashed?: boolean;
   yDomain?: [number, number];
   ariaLabel?: string;
   formatValue?: (v: number) => string;
@@ -29,6 +30,7 @@ export function Chart<T>({
   height = 180,
   color = '#d4a574',
   fill = false,
+  dashed = false,
   yDomain,
   ariaLabel,
   formatValue,
@@ -180,7 +182,7 @@ export function Chart<T>({
         {/* Area fill */}
         {areaPath && <path d={areaPath} fill={color} fillOpacity={0.1} />}
         {/* Line */}
-        {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} />}
+        {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray={dashed ? '6 3' : undefined} />}
         {/* Single data point dot */}
         {data.length === 1 && <circle cx={toX(0)} cy={toY(values[0])} r={3} fill={color} />}
         {/* Y axis labels */}

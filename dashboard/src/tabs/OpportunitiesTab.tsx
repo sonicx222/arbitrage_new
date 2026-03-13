@@ -6,11 +6,23 @@ import { KpiGrid } from '../components/KpiGrid';
 import { DataTable } from '../components/DataTable';
 import { ExportCsvButton } from '../components/ExportCsvButton';
 import { SectionHeader } from '../components/SectionHeader';
-import { Spinner } from '../components/Spinner';
+import { KpiSkeleton, TableSkeleton } from '../components/Skeleton';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatTime, formatUsd, formatNumber, formatPct, thresholdColor } from '../lib/format';
 import { CHAIN_COLORS } from '../lib/theme';
 import type { Opportunity } from '../lib/types';
+
+/** Runtime validation: filter to items with required Opportunity fields. */
+function validateOpportunities(data: unknown): Opportunity[] {
+  if (!Array.isArray(data)) return [];
+  return data.filter((o): o is Opportunity =>
+    o != null &&
+    typeof o === 'object' &&
+    typeof (o as Opportunity).id === 'string' &&
+    typeof (o as Opportunity).confidence === 'number' &&
+    typeof (o as Opportunity).timestamp === 'number',
+  );
+}
 
 type SortField = 'timestamp' | 'chain' | 'profit' | 'confidence';
 
@@ -23,7 +35,7 @@ export function OpportunitiesTab() {
 
   const { data: opportunities = [], isLoading, isError } = useQuery<Opportunity[]>({
     queryKey: ['opportunities'],
-    queryFn: () => fetchJson('/api/opportunities'),
+    queryFn: async () => validateOpportunities(await fetchJson('/api/opportunities')),
     refetchInterval: 10000,
     staleTime: 5000,
     retry: 1,
@@ -112,11 +124,9 @@ export function OpportunitiesTab() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-40">
-        <div className="flex items-center gap-3 text-gray-500 text-xs">
-          <Spinner />
-          Loading opportunities...
-        </div>
+      <div className="space-y-4">
+        <KpiSkeleton />
+        <TableSkeleton rows={6} cols={5} />
       </div>
     );
   }

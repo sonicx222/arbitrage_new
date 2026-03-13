@@ -22,7 +22,7 @@ export function OverviewTab() {
   const serviceList = useMemo(() => Object.values(services), [services]);
 
   if (!metrics) {
-    return <div className="text-gray-500 text-xs">Waiting for data...</div>;
+    return <div className="text-gray-500 text-xs" role="status">Waiting for data...</div>;
   }
 
   const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);

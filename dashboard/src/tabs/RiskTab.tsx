@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMetrics } from '../context/SSEContext';
 import { fetchJson } from '../hooks/useApi';
 import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { formatPct, formatNumber } from '../lib/format';
@@ -36,7 +37,7 @@ export function RiskTab() {
 
   // Fetch EE health on tab mount for risk state
   // In dev, Vite proxies /ee/* to EE port 3005. In prod, coordinator proxies.
-  const { data: eeHealth, isError: eeUnreachable } = useQuery<EEHealthResponse>({
+  const { data: eeHealth, isLoading: eeLoading, isError: eeUnreachable } = useQuery<EEHealthResponse>({
     queryKey: ['ee-health'],
     queryFn: () => fetchJson('/ee/health'),
     refetchInterval: 10000,
@@ -51,6 +52,11 @@ export function RiskTab() {
       {/* Risk State Machine */}
       <div className="card">
         <SectionHeader mb="mb-3">Risk Circuit Breaker</SectionHeader>
+        {eeLoading && (
+          <div className="flex gap-2 mb-3">
+            {RISK_STATES.map((s) => <Skeleton key={s} className="h-10 w-24" />)}
+          </div>
+        )}
         {eeUnreachable && (
           <div className="mb-2 px-2 py-1 bg-accent-red/10 border border-accent-red/30 rounded text-[10px] text-accent-red">
             Execution Engine unreachable — check if the service is running
