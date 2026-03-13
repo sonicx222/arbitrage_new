@@ -1518,9 +1518,13 @@ export class CrossChainDetectorService {
 
     // P0 FIX: Include gas costs and swap fees in net profit calculation
     // Gas costs: source chain swap + dest chain swap, converted to per-token units
+    // CC-H-01 FIX: Use per-chain gas costs instead of global $15 fallback.
+    // L2 gas is 150-500x cheaper than mainnet — global value blocked all L2 cross-chain opps.
     const tradeTokens = this.bridgeCostEstimator!.extractTokenAmount(lowestPrice.update);
+    const sourceGasCostUsd = getEstimatedGasCostUsd(lowestPrice.chain);
+    const destGasCostUsd = getEstimatedGasCostUsd(highestPrice.chain);
     const gasCostPerToken = tradeTokens > 0
-      ? (ARBITRAGE_CONFIG.estimatedGasCost * 2) / tradeTokens
+      ? (sourceGasCostUsd + destGasCostUsd) / tradeTokens
       : 0;
     // Swap fees: buy on source + sell on dest (per-token cost from price * fee rate)
     const swapFeePerToken = ARBITRAGE_CONFIG.feePercentage * (lowestPrice.price + highestPrice.price);
