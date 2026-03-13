@@ -79,7 +79,7 @@ The report will contain only Phase 1 findings with a `[QUICK]` annotation.
 5. Read and execute `monitoring/04-runtime.md`
    - 43 checks across 9 subsections (3A-3AS)
    - Uses endpoint cache (O-01, TTL from config.json.cacheTtlSec) and Redis batching (O-02)
-   - Retry wrapper (O-03) for transient curl/redis-cli failures
+   - Retry wrapper (O-03) for transient curl/Redis CLI failures
    - Placeholder metrics get fast-path INFO (no curl needed)
    - Findings → `./monitor-session/findings/runtime.jsonl`
 

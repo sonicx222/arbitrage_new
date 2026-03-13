@@ -7,7 +7,12 @@
 [PHASE 4/5] Pipeline Smoke Test — starting (14 steps)
 ```
 
-**Retry:** curl and redis-cli commands use the retry wrapper (O-03).
+**Redis CLI:** All Redis commands use the Node.js replacement script:
+```bash
+REDIS_CLI="node scripts/monitoring/redis-cli.cjs"
+```
+
+**Retry:** curl and `$REDIS_CLI` commands use the retry wrapper (O-03).
 **Error context:** Include `"relatedFindings"` when smoke test failures correlate with
 Phase 3 findings (e.g., DLQ growth → link to RT-NNN DLQ root cause finding).
 
@@ -28,7 +33,7 @@ for stream in stream:price-updates stream:opportunities \
   stream:exec-requests-premium stream:exec-requests-solana \
   stream:fast-lane stream:dead-letter-queue stream:forwarding-dlq \
   stream:volume-aggregates stream:swap-events; do
-  LEN=$(redis-cli XLEN $stream)
+  LEN=$($REDIS_CLI XLEN $stream)
   echo "$stream: $LEN" >> ./monitor-session/streams/smoke-baseline.txt
   echo "$stream: $LEN"
 done
@@ -60,10 +65,10 @@ Poll 4 critical streams every `config.json`.smokeTestPollIntervalSec for up to
 for i in 1 2 3 4 5 6; do
   sleep 10
   echo "=== Poll $i ($(($i * 10))s) ==="
-  redis-cli XLEN stream:price-updates
-  redis-cli XLEN stream:opportunities
-  redis-cli XLEN stream:execution-requests
-  redis-cli XLEN stream:execution-results
+  $REDIS_CLI XLEN stream:price-updates
+  $REDIS_CLI XLEN stream:opportunities
+  $REDIS_CLI XLEN stream:execution-requests
+  $REDIS_CLI XLEN stream:execution-results
 done
 ```
 
@@ -91,8 +96,8 @@ done
 
 `[SIM]` Secondary pipeline streams (added by simulation Batch 3):
 ```bash
-redis-cli XLEN stream:volume-aggregates
-redis-cli XLEN stream:swap-events
+$REDIS_CLI XLEN stream:volume-aggregates
+$REDIS_CLI XLEN stream:swap-events
 ```
 - `stream:volume-aggregates` not growing after 30s in SIM → M:PIPELINE_FLOW (SwapEventFilter not wired)
 - `stream:swap-events` not growing after 30s in SIM → M:PIPELINE_FLOW (simulation swap publishing broken)
@@ -124,13 +129,13 @@ If endpoints return 401/403, record I:PIPELINE_FLOW (auth working) and skip data
 If `stream:execution-results` has entries:
 
 ```bash
-redis-cli XREVRANGE stream:execution-results + - COUNT 1
+$REDIS_CLI XREVRANGE stream:execution-results + - COUNT 1
 ```
 
 Extract `_trace_traceId` field. If found, search upstream:
 ```bash
-redis-cli XREVRANGE stream:opportunities + - COUNT 50
-redis-cli XREVRANGE stream:execution-requests + - COUNT 50
+$REDIS_CLI XREVRANGE stream:opportunities + - COUNT 50
+$REDIS_CLI XREVRANGE stream:execution-requests + - COUNT 50
 # Search output for matching _trace_traceId
 ```
 
@@ -144,8 +149,8 @@ Expected: `opportunities(traceId:X) → execution-requests(traceId:X) → execut
 ## Step 4E — DLQ growth check
 
 ```bash
-redis-cli XLEN stream:dead-letter-queue
-redis-cli XLEN stream:forwarding-dlq
+$REDIS_CLI XLEN stream:dead-letter-queue
+$REDIS_CLI XLEN stream:forwarding-dlq
 ```
 
 Compare against Step 4A baseline.
@@ -211,7 +216,7 @@ Re-check drawdown circuit breaker state (same fields as Check 3E).
 curl -sf --max-time 10 http://localhost:3000/api/health | node -e "
   const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
   console.log('backpressure:', d.backpressure, 'queueDepth:', d.executionQueueDepth)"
-EXEC_LEN=$(redis-cli XLEN stream:execution-requests)
+EXEC_LEN=$($REDIS_CLI XLEN stream:execution-requests)
 echo "execution-requests length: $EXEC_LEN"
 ```
 
@@ -246,9 +251,9 @@ If `/health` lacks `eventsProcessed`, fall back to `/stats` per-chain counts.
 ## Step 4J — Fast-lane stream validation
 
 ```bash
-FAST_LEN=$(redis-cli XLEN stream:fast-lane 2>/dev/null || echo "0")
+FAST_LEN=$($REDIS_CLI XLEN stream:fast-lane 2>/dev/null || echo "0")
 echo "stream:fast-lane length: $FAST_LEN"
-redis-cli XINFO GROUPS stream:fast-lane 2>/dev/null
+$REDIS_CLI XINFO GROUPS stream:fast-lane 2>/dev/null
 ```
 
 Compare FAST_LEN to Step 4A baseline.
@@ -297,8 +302,8 @@ Compare against Phase 3 values (Checks 3O, 3Q).
 Compare `stream:volume-aggregates` and `stream:swap-events` against Step 4A baseline.
 
 ```bash
-VOL_LEN=$(redis-cli XLEN stream:volume-aggregates 2>/dev/null || echo "0")
-SWAP_LEN=$(redis-cli XLEN stream:swap-events 2>/dev/null || echo "0")
+VOL_LEN=$($REDIS_CLI XLEN stream:volume-aggregates 2>/dev/null || echo "0")
+SWAP_LEN=$($REDIS_CLI XLEN stream:swap-events 2>/dev/null || echo "0")
 echo "stream:volume-aggregates: $VOL_LEN (baseline: $(grep volume-aggregates ./monitor-session/streams/smoke-baseline.txt | awk '{print $2}'))"
 echo "stream:swap-events: $SWAP_LEN (baseline: $(grep swap-events ./monitor-session/streams/smoke-baseline.txt | awk '{print $2}'))"
 ```
@@ -341,7 +346,7 @@ grep -c 'spread_alert\|updateDexPrice\|simulateCexPrices' \
 3. Verify opportunity scoring applies `cexAlignmentFactor`:
 ```bash
 # Check recent opportunities for CEX alignment
-redis-cli XREVRANGE stream:opportunities + - COUNT 5 2>/dev/null | \
+$REDIS_CLI XREVRANGE stream:opportunities + - COUNT 5 2>/dev/null | \
   grep -c 'cexAlignment' || echo 0
 ```
 

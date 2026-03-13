@@ -7,6 +7,13 @@
 [PHASE 2/5] Startup & Readiness — starting (5 steps)
 ```
 
+**Redis CLI:** All Redis commands use the Node.js replacement script:
+```bash
+REDIS_CLI="node scripts/monitoring/redis-cli.cjs"
+# Usage: $REDIS_CLI <command> [args...]
+# Scan:  $REDIS_CLI --scan --pattern "stream:*"
+```
+
 **Retry:** Redis commands in this phase use the retry wrapper (O-03 from config.json.retry).
 Redis LOADING during startup is expected — retry handles it transparently.
 
@@ -22,7 +29,7 @@ Record findings to `./monitor-session/findings/startup.jsonl`:
 ```bash
 npm run dev:redis:memory &
 sleep 3
-redis-cli PING
+$REDIS_CLI PING
 ```
 
 - PING fails → C:REDIS_FAILED — skip to Phase 5 (nothing works without Redis)
@@ -30,7 +37,7 @@ redis-cli PING
 
 Verify stream command support:
 ```bash
-redis-cli COMMAND INFO XADD XREAD XREADGROUP XPENDING XINFO XACK XLEN XCLAIM
+$REDIS_CLI COMMAND INFO XADD XREAD XREADGROUP XPENDING XINFO XACK XLEN XCLAIM
 ```
 
 - Any stream command unsupported → C:REDIS_FAILED (version mismatch)
@@ -40,8 +47,8 @@ redis-cli COMMAND INFO XADD XREAD XREADGROUP XPENDING XINFO XACK XLEN XCLAIM
 ## Step 2A.5 — Redis Security (was Check 1W)
 
 ```bash
-redis-cli CONFIG GET requirepass
-redis-cli CONFIG GET bind
+$REDIS_CLI CONFIG GET requirepass
+$REDIS_CLI CONFIG GET bind
 ```
 
 Flags:
@@ -107,16 +114,16 @@ expected delay as failure — only flag if exceeds mode-specific timeout.
 ## Step 2D — Capture baseline stream state
 
 ```bash
-redis-cli --scan --pattern 'stream:*' > ./monitor-session/streams/discovered.txt
+$REDIS_CLI --scan --pattern 'stream:*' > ./monitor-session/streams/discovered.txt
 
 for stream in $(cat ./monitor-session/streams/discovered.txt); do
   echo "=== $stream ===" >> ./monitor-session/streams/baseline.txt
-  redis-cli XINFO STREAM $stream >> ./monitor-session/streams/baseline.txt
-  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/baseline.txt
-  redis-cli XLEN $stream >> ./monitor-session/streams/baseline.txt
+  $REDIS_CLI XINFO STREAM $stream >> ./monitor-session/streams/baseline.txt
+  $REDIS_CLI XINFO GROUPS $stream >> ./monitor-session/streams/baseline.txt
+  $REDIS_CLI XLEN $stream >> ./monitor-session/streams/baseline.txt
 done
 
-redis-cli INFO memory > ./monitor-session/streams/redis-memory-baseline.txt
+$REDIS_CLI INFO memory > ./monitor-session/streams/redis-memory-baseline.txt
 ```
 
 Compare discovered streams against `inventory.json`.streams:

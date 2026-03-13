@@ -1,10 +1,18 @@
 # Phase 3 -- Runtime Validation (43 checks)
 
-All services must be running. Uses curl, redis-cli, jq.
+All services must be running. Uses curl, `$REDIS_CLI`, node (for JSON parsing).
 9 subsections, 43 checks (3A-3AS, excluding 3AL and 3AM -- reclassified to Phase 1).
 
 ```
 [PHASE 3/5] Runtime Validation — starting (43 checks)
+```
+
+**Redis CLI:** All Redis commands use the Node.js replacement script:
+```bash
+REDIS_CLI="node scripts/monitoring/redis-cli.cjs"
+# Usage: $REDIS_CLI <command> [args...]
+# Scan:  $REDIS_CLI --scan --pattern "stream:*"
+# Note:  --pipe-mode is NOT supported; use sequential commands instead.
 ```
 
 ## References
@@ -60,7 +68,7 @@ finding fields, include these when applicable:
 **quickFix examples:**
 - Service unreachable: `"quickFix": "npm run dev:status && npm run dev:all"`
 - Redis not connected: `"quickFix": "npm run dev:redis:memory"`
-- DLQ growing: `"quickFix": "redis-cli DEL stream:dead-letter-queue"`
+- DLQ growing: `"quickFix": "node scripts/monitoring/redis-cli.cjs DEL stream:dead-letter-queue"`
 - High RSS: `"quickFix": "Restart services: npm run dev:stop && npm run dev:all"`
 
 ## Finding Format
@@ -85,7 +93,7 @@ Category values: `SERVICE_HEALTH`, `LEADER_ELECTION`, `HEALTH_SCHEMA`, `CIRCUIT_
 Transient failures (Redis LOADING, connection refused on slow startup) should not produce
 false findings. Use a retry wrapper per `config.json`.retry settings.
 
-**Retry logic** (apply to all curl and redis-cli commands in this phase):
+**Retry logic** (apply to all curl and `$REDIS_CLI` commands in this phase):
 - Up to `retry.maxAttempts` (3) attempts per command
 - Wait `retry.delayMs` (1000ms) between attempts
 - Only retry if stderr matches any pattern in `retry.retryablePatterns`:
@@ -135,27 +143,20 @@ A sequential loop of N streams × 3 commands = 3N round-trips; pipelining reduce
 
 ```bash
 STREAMS=$(cat ./monitor-session/streams/discovered.txt)
-# Build pipeline commands
-PIPE_CMDS=""
+# Sequential stream info fetch (--pipe-mode not supported by Node.js redis-cli replacement)
 for stream in $STREAMS; do
-  PIPE_CMDS="${PIPE_CMDS}XINFO STREAM ${stream}\nXINFO GROUPS ${stream}\nXLEN ${stream}\n"
-done
-# Execute as single pipeline (stdin mode)
-echo -e "$PIPE_CMDS" | redis-cli --pipe-mode 2>/dev/null || {
-  # Fallback to sequential if pipeline fails (older redis-cli)
-  for stream in $STREAMS; do
-    echo "=== $stream ==="
-    redis-cli XINFO STREAM $stream 2>&1
-    redis-cli XINFO GROUPS $stream 2>&1
-    redis-cli XLEN $stream 2>&1
-  done
-} > ./monitor-session/config/cache/stream-inventory.txt
+  echo "=== $stream ==="
+  $REDIS_CLI XINFO STREAM $stream 2>&1
+  $REDIS_CLI XINFO GROUPS $stream 2>&1
+  $REDIS_CLI XLEN $stream 2>&1
+done > ./monitor-session/config/cache/stream-inventory.txt
 ```
 
 Also batch-fetch all XPENDING in one pass (used by checks 3J, 3L):
 ```bash
 for stream in $STREAMS; do
-  redis-cli XPENDING $stream $(redis-cli XINFO GROUPS $stream 2>/dev/null | grep -oP '(?<=name\s)\S+' | head -1) - + 10 2>/dev/null
+  GROUP=$($REDIS_CLI XINFO GROUPS $stream 2>/dev/null | grep -oP '(?<=name\s)\S+' | head -1)
+  $REDIS_CLI XPENDING $stream $GROUP - + 10 2>/dev/null
 done > ./monitor-session/config/cache/stream-pending.txt
 ```
 
@@ -195,8 +196,8 @@ Flags:
 
 ```bash
 cat ./monitor-session/config/cache/leader.json | jq .
-redis-cli GET coordinator:leader:lock
-redis-cli TTL coordinator:leader:lock
+$REDIS_CLI GET coordinator:leader:lock
+$REDIS_CLI TTL coordinator:leader:lock
 ```
 
 Flags:
@@ -300,7 +301,7 @@ If metric exists:
 
 If metric does NOT exist, also manually check for flapping:
 ```bash
-redis-cli XREVRANGE stream:circuit-breaker + - COUNT 20
+$REDIS_CLI XREVRANGE stream:circuit-breaker + - COUNT 20
 ```
 - >5 entries with alternating states within 60s -> H:CB_FLAPPING
 
@@ -329,9 +330,9 @@ If metric does NOT exist -> I:BACKPRESSURE (placeholder not implemented)
 ### 3H -- DLQ Status
 
 ```bash
-redis-cli XLEN stream:dead-letter-queue
-redis-cli XLEN stream:forwarding-dlq
-redis-cli XLEN stream:dlq-alerts
+$REDIS_CLI XLEN stream:dead-letter-queue
+$REDIS_CLI XLEN stream:forwarding-dlq
+$REDIS_CLI XLEN stream:dlq-alerts
 ```
 
 Flags:
@@ -340,8 +341,8 @@ Flags:
 
 If DLQ has entries:
 ```bash
-redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 5
-redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 5
+$REDIS_CLI XREVRANGE stream:dead-letter-queue + - COUNT 5
+$REDIS_CLI XREVRANGE stream:forwarding-dlq + - COUNT 5
 ```
 
 ---
@@ -373,7 +374,7 @@ Read from cached `stream-inventory.txt` (O-02 preamble). For each stream in
 
 **Part 2: Per-group pending** -- For each (stream, group) pair:
 ```bash
-redis-cli XPENDING <stream> <group>
+$REDIS_CLI XPENDING <stream> <group>
 ```
 
 **Part 3: Cross-reference expected owners** (from `inventory.json`.consumerGroups):
@@ -390,21 +391,21 @@ redis-cli XPENDING <stream> <group>
 
 Also check ALL critical pairs:
 ```bash
-redis-cli XPENDING stream:price-updates coordinator-group
-redis-cli XPENDING stream:price-updates cross-chain-detector-group
-redis-cli XPENDING stream:opportunities coordinator-group
-redis-cli XPENDING stream:whale-alerts coordinator-group
-redis-cli XPENDING stream:whale-alerts cross-chain-detector-group
-redis-cli XPENDING stream:execution-requests execution-engine-group
-redis-cli XPENDING stream:execution-results coordinator-group
-redis-cli XPENDING stream:health coordinator-group
-redis-cli XPENDING stream:dead-letter-queue coordinator-group
-redis-cli XPENDING stream:forwarding-dlq coordinator-group
-redis-cli XPENDING stream:fast-lane execution-engine-group
-redis-cli XPENDING stream:swap-events coordinator-group
-redis-cli XPENDING stream:volume-aggregates coordinator-group
-redis-cli XPENDING stream:pending-opportunities cross-chain-detector-group
-redis-cli XPENDING stream:pending-opportunities orderflow-pipeline
+$REDIS_CLI XPENDING stream:price-updates coordinator-group
+$REDIS_CLI XPENDING stream:price-updates cross-chain-detector-group
+$REDIS_CLI XPENDING stream:opportunities coordinator-group
+$REDIS_CLI XPENDING stream:whale-alerts coordinator-group
+$REDIS_CLI XPENDING stream:whale-alerts cross-chain-detector-group
+$REDIS_CLI XPENDING stream:execution-requests execution-engine-group
+$REDIS_CLI XPENDING stream:execution-results coordinator-group
+$REDIS_CLI XPENDING stream:health coordinator-group
+$REDIS_CLI XPENDING stream:dead-letter-queue coordinator-group
+$REDIS_CLI XPENDING stream:forwarding-dlq coordinator-group
+$REDIS_CLI XPENDING stream:fast-lane execution-engine-group
+$REDIS_CLI XPENDING stream:swap-events coordinator-group
+$REDIS_CLI XPENDING stream:volume-aggregates coordinator-group
+$REDIS_CLI XPENDING stream:pending-opportunities cross-chain-detector-group
+$REDIS_CLI XPENDING stream:pending-opportunities orderflow-pipeline
 ```
 
 Thresholds (from `config.json`):
@@ -422,8 +423,8 @@ Thresholds (from `config.json`):
 **Prerequisite:** Only run if Check 3H found DLQ length > 0.
 
 ```bash
-redis-cli XREVRANGE stream:dead-letter-queue + - COUNT 50
-redis-cli XREVRANGE stream:forwarding-dlq + - COUNT 20
+$REDIS_CLI XREVRANGE stream:dead-letter-queue + - COUNT 50
+$REDIS_CLI XREVRANGE stream:forwarding-dlq + - COUNT 20
 ```
 
 For each entry extract: `reason`/`error`, `originalStream`, `service`, `timestamp`.
@@ -498,7 +499,7 @@ If metric does NOT exist -- manual approximation using `inventory.json` MAXLENs:
 # For each stream in inventory.json that has a maxlen value:
 cat ./monitor-session/config/inventory.json | jq -r '.streams[] | select(.maxlen != null) | "\(.name):\(.maxlen)"' | while IFS=: read -r _ name maxlen; do
   STREAM="stream:$name"
-  XLEN=$(redis-cli XLEN "$STREAM" 2>/dev/null || echo 0)
+  XLEN=$($REDIS_CLI XLEN "$STREAM" 2>/dev/null || echo 0)
   RATIO=$(awk "BEGIN {printf \"%.2f\", $XLEN * 100 / $maxlen}" 2>/dev/null || echo "N/A")
   echo "$STREAM: $XLEN / $maxlen ($RATIO%)"
 done
@@ -586,7 +587,7 @@ cat ./monitor-session/config/cache/diagnostics.json | jq '.runtime.memory'
 
 Also Redis memory:
 ```bash
-redis-cli INFO memory
+$REDIS_CLI INFO memory
 # Parse: used_memory_human, used_memory_peak_human, maxmemory
 ```
 

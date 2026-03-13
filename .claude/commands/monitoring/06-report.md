@@ -6,6 +6,11 @@
 [PHASE 5/5] Shutdown & Report — starting (6 steps)
 ```
 
+**Redis CLI:** All Redis commands use the Node.js replacement script:
+```bash
+REDIS_CLI="node scripts/monitoring/redis-cli.cjs"
+```
+
 Record findings to `./monitor-session/findings/report.jsonl` (if any new findings).
 
 ---
@@ -15,12 +20,12 @@ Record findings to `./monitor-session/findings/report.jsonl` (if any new finding
 ```bash
 for stream in $(cat ./monitor-session/streams/discovered.txt 2>/dev/null); do
   echo "=== FINAL: $stream ===" >> ./monitor-session/streams/final-state.txt
-  redis-cli XINFO STREAM $stream >> ./monitor-session/streams/final-state.txt
-  redis-cli XINFO GROUPS $stream >> ./monitor-session/streams/final-state.txt
-  redis-cli XLEN $stream >> ./monitor-session/streams/final-state.txt
+  $REDIS_CLI XINFO STREAM $stream >> ./monitor-session/streams/final-state.txt
+  $REDIS_CLI XINFO GROUPS $stream >> ./monitor-session/streams/final-state.txt
+  $REDIS_CLI XLEN $stream >> ./monitor-session/streams/final-state.txt
 done
 
-redis-cli INFO memory > ./monitor-session/streams/redis-memory-final.txt
+$REDIS_CLI INFO memory > ./monitor-session/streams/redis-memory-final.txt
 ```
 
 ---
@@ -39,7 +44,7 @@ tasklist | grep -i node | grep -v grep || echo "Clean shutdown — no node proce
 ## Step 5C — Stop Redis
 
 ```bash
-redis-cli SHUTDOWN NOSAVE 2>/dev/null || echo "Redis already stopped"
+$REDIS_CLI SHUTDOWN NOSAVE 2>/dev/null || echo "Redis already stopped"
 ```
 
 ---
