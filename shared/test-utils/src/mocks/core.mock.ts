@@ -190,9 +190,21 @@ export function createCoreMockModule(overrides: Record<string, unknown> = {}): R
     TradeLogger: jest.fn().mockImplementation(() => ({
       logTrade: jest.fn(),
       close: jest.fn(),
-      validateLogDir: jest.fn().mockResolvedValue(undefined),
-      compressOldLogs: jest.fn().mockResolvedValue(0),
+      validateLogDir: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      compressOldLogs: jest.fn<() => Promise<number>>().mockResolvedValue(0),
+      purgeExpiredLogs: jest.fn<() => Promise<{ purged: number; freedBytes: number }>>().mockResolvedValue({ purged: 0, freedBytes: 0 }),
+      startMaintenance: jest.fn(),
+      stopMaintenance: jest.fn(),
       getWriteHealth: jest.fn().mockReturnValue({ writeSuccessCount: 0, writeFailureCount: 0, lastWriteError: null, lastSuccessfulWriteMs: 0 }),
+    })),
+    LogFileManager: jest.fn().mockImplementation(() => ({
+      purgeExpiredFiles: jest.fn<() => Promise<{ purged: number; freedBytes: number }>>().mockResolvedValue({ purged: 0, freedBytes: 0 }),
+      compressOldFiles: jest.fn<() => Promise<number>>().mockResolvedValue(0),
+      compressIfOversized: jest.fn<() => Promise<number>>().mockResolvedValue(0),
+      runMaintenance: jest.fn<() => Promise<Record<string, number>>>().mockResolvedValue({ purged: 0, compressed: 0, sizeCompressed: 0, totalSizeBytes: 0 }),
+      getStats: jest.fn<() => Promise<Record<string, unknown>>>().mockResolvedValue({ totalSizeBytes: 0, fileCount: 0, oldestFileDate: null, newestFileDate: null, compressedCount: 0, uncompressedCount: 0 }),
+      startPeriodicMaintenance: jest.fn(),
+      stopPeriodicMaintenance: jest.fn(),
     })),
     getNonceManager: jest.fn(() => ({
       acquireNonce: jest.fn<() => Promise<number>>().mockResolvedValue(0),

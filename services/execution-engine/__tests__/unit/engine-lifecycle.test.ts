@@ -253,6 +253,9 @@ jest.mock('@arbitrage/core', () => {
         close: jest.fn<any>(() => Promise.resolve(undefined)),
         validateLogDir: jest.fn<any>(() => Promise.resolve(undefined)),
         compressOldLogs: jest.fn<any>(() => Promise.resolve(0)),
+        purgeExpiredLogs: jest.fn<any>(() => Promise.resolve({ purged: 0, freedBytes: 0 })),
+        startMaintenance: jest.fn(),
+        stopMaintenance: jest.fn(),
       };
     },
   };

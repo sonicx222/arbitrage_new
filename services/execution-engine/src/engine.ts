@@ -425,13 +425,19 @@ export class ExecutionEngineService {
     // P1 FIX: Initialize lock conflict tracker with injected logger
     this.lockConflictTracker = new LockConflictTracker({ logger: this.logger });
 
-    // O-6: Initialize persistent trade logger
+    // O-6: Initialize persistent trade logger with lifecycle management
     const tradeLogEnabled = process.env.TRADE_LOG_ENABLED !== 'false';
     const tradeLogDir = process.env.TRADE_LOG_DIR ?? './data/trades';
+    const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS ?? '', 10);
+    const maxTotalSizeMB = parseInt(process.env.LOG_MAX_TOTAL_SIZE_MB ?? '', 10);
+    const compressAfterDays = parseInt(process.env.LOG_COMPRESS_AFTER_DAYS ?? '', 10);
     this.tradeLogger = new TradeLogger(
       {
         enabled: config.tradeLoggerConfig?.enabled ?? tradeLogEnabled,
         outputDir: config.tradeLoggerConfig?.outputDir ?? tradeLogDir,
+        ...(Number.isFinite(retentionDays) ? { retentionDays } : {}),
+        ...(Number.isFinite(maxTotalSizeMB) ? { maxTotalSizeMB } : {}),
+        ...(Number.isFinite(compressAfterDays) ? { compressAfterDays } : {}),
       },
       this.logger,
     );
@@ -631,15 +637,20 @@ export class ExecutionEngineService {
       });
       this.cbManager.initialize();
 
-      // Task 2.3: Validate trade log directory is writable at startup
+      // Task 2.3: Validate trade log directory and start lifecycle maintenance
       if (this.tradeLogger) {
         await this.tradeLogger.validateLogDir();
-        // L-04 FIX: Compress old trade log files on startup to reclaim disk space
+        // Run initial compression then start periodic maintenance timer
         this.tradeLogger.compressOldLogs().catch((err: unknown) => {
           this.logger.warn('Trade log compression failed', {
             error: err instanceof Error ? err.message : String(err),
           });
         });
+        const maintenanceHours = parseInt(process.env.LOG_MAINTENANCE_INTERVAL_HOURS ?? '', 10);
+        const maintenanceMs = Number.isFinite(maintenanceHours)
+          ? maintenanceHours * 60 * 60 * 1000
+          : undefined; // Uses LogFileManager's 6h default
+        this.tradeLogger.startMaintenance(maintenanceMs);
       }
 
       // Batch 6: Initialize R2 uploader for trade log durability

@@ -1983,6 +1983,9 @@ export type {
 export { TradeLogger } from './persistence/trade-logger';
 export type { TradeLogEntry, TradeLoggerConfig } from './persistence/trade-logger';
 
+export { LogFileManager } from './persistence/log-file-manager';
+export type { LogFileManagerConfig, MaintenanceResult, DirectoryStats } from './persistence/log-file-manager';
+
 export { R2Uploader, getSignatureKey, signRequest } from './persistence/r2-uploader';
 export type { R2UploaderConfig, R2UploaderLogger } from './persistence/r2-uploader';
 
