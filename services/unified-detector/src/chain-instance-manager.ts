@@ -193,21 +193,40 @@ export function createChainInstanceManager(
    * Forwards events to the manager's emitter.
    */
   function setupChainEventHandlers(chainId: string, instance: ChainDetectorInstance): void {
+    // RESILIENCE FIX: Wrap each event handler in try/catch to prevent errors
+    // in one chain's event processing from propagating to other chains or
+    // crashing the partition process via uncaughtException.
     instance.on('priceUpdate', (update) => {
-      emitter.emit('priceUpdate', update);
+      try {
+        emitter.emit('priceUpdate', update);
+      } catch (err) {
+        logger.error('Error in priceUpdate handler', { chainId, error: (err as Error).message });
+      }
     });
 
     instance.on('opportunity', (opp) => {
-      emitter.emit('opportunity', opp);
+      try {
+        emitter.emit('opportunity', opp);
+      } catch (err) {
+        logger.error('Error in opportunity handler', { chainId, error: (err as Error).message });
+      }
     });
 
     instance.on('error', (error) => {
-      handleChainError(chainId, error);
+      try {
+        handleChainError(chainId, error);
+      } catch (err) {
+        logger.error('Error in chain error handler', { chainId, error: (err as Error).message });
+      }
     });
 
     instance.on('statusChange', (status) => {
-      logger.info(`Chain ${chainId} status changed to ${status}`);
-      emitter.emit('statusChange', { chainId, status });
+      try {
+        logger.info(`Chain ${chainId} status changed to ${status}`);
+        emitter.emit('statusChange', { chainId, status });
+      } catch (err) {
+        logger.error('Error in statusChange handler', { chainId, error: (err as Error).message });
+      }
     });
   }
 

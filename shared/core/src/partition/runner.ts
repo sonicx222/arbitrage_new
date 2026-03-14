@@ -265,8 +265,21 @@ export function createPartitionServiceRunner(
         await onStartupError(err);
       }
 
-      // Exit process
-      process.exit(1);
+      // RESILIENCE FIX: Only exit if the detector has zero healthy chains.
+      // If some chains started but the final setup step failed, the partition
+      // can still operate in degraded mode rather than killing all chains.
+      const healthyChains = detector.getHealthyChains?.() ?? [];
+      if (healthyChains.length > 0) {
+        logger.warn('Partition startup partially failed but has healthy chains, continuing in degraded mode', {
+          healthyChains: healthyChains.length,
+          error: err.message,
+        });
+      } else {
+        logger.error('Partition startup failed with zero healthy chains, exiting', {
+          error: err.message,
+        });
+        process.exit(1);
+      }
     }
   }
 
@@ -321,7 +334,16 @@ export function runPartitionService(
       } catch (logError) {
         process.stderr.write(`FATAL: ${error}\nLOG ERROR: ${logError}\n`);
       }
-      process.exit(1);
+      // RESILIENCE FIX: Check if the detector has any healthy chains before exiting.
+      // A partial startup (some chains up, some down) is better than killing everything.
+      const healthyChains = runner.detector.getHealthyChains?.() ?? [];
+      if (healthyChains.length > 0) {
+        (options.logger ?? console).warn?.('Partition start() rejected but has healthy chains, continuing in degraded mode', {
+          healthyChains: healthyChains.length,
+        });
+      } else {
+        process.exit(1);
+      }
     });
   }
 
@@ -565,7 +587,15 @@ export function createPartitionEntry(
       // P1-RECONNECT FIX: Periodically retry Redis connection instead of giving up forever.
       // Without this, a transient Redis outage at startup permanently disables publishing.
       const REDIS_RETRY_INTERVAL_MS = parseEnvIntSafe('REDIS_RETRY_INTERVAL_MS', 30000, 1000);
+      let opportunityListenerWired = false;
       const retryTimer = setInterval(async () => {
+        // RESILIENCE FIX: Guard against duplicate listener registration.
+        // Without this check, every successful reconnect adds another 'opportunity'
+        // listener, causing duplicate publishes that multiply with each reconnect.
+        if (opportunityListenerWired) {
+          clearInterval(retryTimer);
+          return;
+        }
         try {
           const streamsClient = await getRedisStreamsClient();
           const publisher = new OpportunityPublisher({
@@ -593,6 +623,7 @@ export function createPartitionEntry(
               });
           });
 
+          opportunityListenerWired = true;
           clearInterval(retryTimer);
           logger.info('OpportunityPublisher auto-wired after Redis reconnect', { partitionId });
         } catch {

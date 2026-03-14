@@ -117,6 +117,14 @@ export class CexPriceFeedService extends EventEmitter {
     this.setMaxListeners(20);
     this.config = config ?? {};
 
+    // RESILIENCE FIX: Register default 'error' listener to prevent uncaughtException.
+    // Without this, if any code path emits 'error' on this EventEmitter and no
+    // listener is registered, Node.js throws the error as uncaughtException,
+    // crashing the entire process.
+    this.on('error', (err: Error) => {
+      logger.error('CexPriceFeedService error event', { error: err.message, stack: err.stack });
+    });
+
     this.normalizer = new CexPriceNormalizer(config?.normalizerConfig);
 
     const spreadConfig: Partial<CexDexSpreadConfig> = {};

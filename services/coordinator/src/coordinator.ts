@@ -583,7 +583,25 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       await this.initializeRedisClients();
       this.initializeOpportunityRouter();
-      await this.initializeCexFeed();
+
+      // RESILIENCE FIX: CEX feed failure should not abort coordinator startup.
+      // The CEX feed is an enhancement (ADR-036) — the coordinator can operate
+      // without it, just without CEX-DEX spread validation in scoring.
+      try {
+        await this.initializeCexFeed();
+      } catch (error) {
+        this.logger.warn('CEX feed initialization failed, continuing without CEX-DEX spread analysis', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.sendAlert({
+          type: 'CEX_FEED_INIT_FAILED',
+          message: 'CEX price feed failed to initialize. Coordinator operating without CEX-DEX spread validation.',
+          severity: 'high',
+          data: { error: error instanceof Error ? error.message : String(error) },
+          timestamp: Date.now(),
+        });
+      }
+
       await this.initializeStreamInfrastructure();
       await this.initializeLeadershipElection();
 
