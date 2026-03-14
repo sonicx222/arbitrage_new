@@ -396,7 +396,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     });
 
     // Generate unique instance ID for leader election
-    const instanceId = `coordinator-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
+    const instanceId = `coordinator-${process.env.HOSTNAME || 'local'}-${process.pid}-${Date.now()}`;
 
     // P3-001 STANDARD: Nullish Coalescing Usage Convention
     // - Use `??` for numbers/booleans where 0/false are valid (e.g., config values, counters)
