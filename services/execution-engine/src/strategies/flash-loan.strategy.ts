@@ -43,7 +43,6 @@ import {
   ARBITRAGE_CONFIG,
   FLASH_LOAN_PROVIDERS,
   DEXES,
-  getNativeTokenPrice,
   getTokenDecimals,
   // Fix 1.1 & 9.2: Import centralized constants and ABI
   getAaveV3FeeBpsBigInt,
@@ -642,9 +641,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // Estimate gas using the prepared transaction (must wait for flashLoanTx)
       const estimatedGas = await this.estimateGasFromTransaction(flashLoanTx, chain, ctx);
 
-      // Issue 6.2 Fix: Use getNativeTokenPrice() for accurate ETH/native token price
-      // The previous code incorrectly used opportunity.buyPrice (token price, not ETH)
-      const nativeTokenPriceUsd = getNativeTokenPrice(chain, { suppressWarning: true });
+      // Issue 6.2 Fix: Use validated native token price for accurate ETH/native token price
+      const nativeTokenPriceUsd = this.getValidatedNativeTokenPrice(chain);
 
       // D3: Log warnings if on-chain profit diverges from expected
       this.verifyOnChainProfitDivergence(opportunity, onChainProfit, nativeTokenPriceUsd);
@@ -1188,7 +1186,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         ]);
 
         const estimatedGas = await this.estimateGasFromTransaction(flashLoanTx, chain, ctx);
-        const nativeTokenPriceUsd = getNativeTokenPrice(chain, { suppressWarning: true });
+        const nativeTokenPriceUsd = this.getValidatedNativeTokenPrice(chain);
 
         this.verifyOnChainProfitDivergence(opportunity, onChainProfit, nativeTokenPriceUsd);
 
