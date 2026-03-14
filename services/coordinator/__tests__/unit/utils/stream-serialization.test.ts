@@ -7,11 +7,13 @@
  * @see services/coordinator/src/utils/stream-serialization.ts
  * @see Fix #12 in .agent-reports/services-deep-analysis.md
  */
-import { serializeOpportunityForStream } from '../../../src/utils/stream-serialization';
+import { serializeOpportunityForStream, resetWarnedMissingFields } from '../../../src/utils/stream-serialization';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { TraceContext } from '@arbitrage/core/tracing';
 
 describe('serializeOpportunityForStream', () => {
+  // FIX #10: Reset module-level warned-fields Set to prevent state leak between tests
+  beforeEach(() => resetWarnedMissingFields());
   // F1 FIX: Updated to include expectedProfit, estimatedProfit, gasEstimate
   // which are now serialized for execution engine validation (business rules + cost calc).
   const EXPECTED_FIELDS = [

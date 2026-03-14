@@ -39,6 +39,11 @@ const logger = createLogger('stream-serialization');
 // P3-004: Track malformed opportunities to avoid log spam (once per missing field combo)
 const _warnedMissingFields = new Set<string>();
 
+/** FIX #10: Reset warned-fields set for test isolation (avoids state leak between tests). */
+export function resetWarnedMissingFields(): void {
+  _warnedMissingFields.clear();
+}
+
 export function serializeOpportunityForStream(
   opportunity: ArbitrageOpportunity,
   instanceId: string,
