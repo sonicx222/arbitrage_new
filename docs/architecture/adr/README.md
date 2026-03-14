@@ -56,6 +56,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-040](./ADR-040-real-time-native-token-pricing.md) | Real-Time Native Token Pricing and Gas Cost Calibration | Accepted | 2026-03-06 | 90% |
 | [ADR-041](./ADR-041-blockchain-config-architecture-refactor.md) | Blockchain Configuration Architecture Refactor | Accepted | 2026-03-06 | 92% |
 | [ADR-042](./ADR-042-testnet-execution-mode.md) | Testnet Execution Mode | Accepted | 2026-03-08 | 90% |
+| [ADR-043](./ADR-043-bulkhead-isolation-health-watchdog.md) | Bulkhead Isolation & Health Watchdog for Service Resilience | Accepted | 2026-03-14 | 92% |
 
 ## Decision Summary
 
