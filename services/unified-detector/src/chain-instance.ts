@@ -402,10 +402,10 @@ export class ChainDetectorInstance extends EventEmitter {
   private priceUpdateBatcher: StreamBatcher<PriceUpdate> | null = null;
   // FIX M2+M12: Track batcher drops for backpressure visibility
   private batcherDropCount: number = 0;
-  // LP-03 FIX: Mutable cached object to avoid per-event allocation in hot path.
-  // Fields updated in-place by getPipelineTimestamps(). Safe because emitPriceUpdate
-  // is synchronous and the object is consumed before the next call.
-  private readonly cachedPipelineTimestamps: PipelineTimestamps = { wsReceivedAt: 0, publishedAt: 0 };
+  // LP-03 REVISED: Inline object creation per-event. The original mutable-cache optimization
+  // was unsafe because the batcher holds references for up to 10ms — during which the next
+  // event mutates the shared object, corrupting pipelineTimestamps for all queued messages.
+  // The per-event allocation cost (~1000 objects/sec) is negligible vs batcher queue overhead.
 
   constructor(config: ChainInstanceConfig) {
     super();
@@ -2044,11 +2044,9 @@ export class ChainDetectorInstance extends EventEmitter {
   // @see Hot-Path Analysis in refactoring analysis report
   // ===========================================================================
 
-  /** LP-03 FIX: Return mutable cached pipelineTimestamps, updated in-place to avoid allocation. */
+  /** Return fresh pipelineTimestamps object per call — safe for batcher queuing. */
   private getPipelineTimestamps(now: number): PipelineTimestamps {
-    this.cachedPipelineTimestamps.wsReceivedAt = this.lastWsReceivedAt;
-    this.cachedPipelineTimestamps.publishedAt = now;
-    return this.cachedPipelineTimestamps;
+    return { wsReceivedAt: this.lastWsReceivedAt, publishedAt: now };
   }
 
   private emitPriceUpdate(pair: ExtendedPair, now: number = Date.now()): void {
@@ -2626,7 +2624,7 @@ export class ChainDetectorInstance extends EventEmitter {
   private getTokenSymbol(address: string): string {
     // PERF-OPT: O(1) lookup instead of O(N) array.find()
     const token = this.tokensByAddress.get(address.toLowerCase());
-    return token?.symbol || address.slice(0, 8);
+    return token?.symbol ?? address.slice(0, 8);
   }
 
   // P0-2 FIX: Removed private validateFee() - now uses centralized version from ./types

@@ -791,6 +791,59 @@ describe('BloXrouteFeed', () => {
   });
 
   // ===========================================================================
+  // MAX_MESSAGE_SIZE Guard (P2-7 Regression Test)
+  // ===========================================================================
+
+  describe('oversized message guard', () => {
+    it('should drop messages exceeding MAX_MESSAGE_SIZE (1 MB)', async () => {
+      const feed = createBloXrouteFeed({
+        config,
+        logger: logger as unknown as Logger,
+      });
+
+      const pendingTxHandler = jest.fn();
+      feed.on('pendingTx', pendingTxHandler);
+
+      const connectPromise = feed.connect();
+      jest.advanceTimersByTime(100);
+      await connectPromise;
+
+      const initialHealth = feed.getHealth();
+      const initialMessages = initialHealth.messagesReceived;
+
+      // Create a message just over 1 MB
+      const oversizedMessage = 'x'.repeat(1_048_577);
+      feed.handleMessage(oversizedMessage);
+
+      // Message count should increment (it's counted before size check)
+      // but no pendingTx event should be emitted
+      expect(pendingTxHandler).not.toHaveBeenCalled();
+      expect(logger.hasLogMatching('warn', /oversized/i)).toBe(true);
+    });
+
+    it('should process messages under MAX_MESSAGE_SIZE normally', async () => {
+      const feed = createBloXrouteFeed({
+        config,
+        logger: logger as unknown as Logger,
+      });
+
+      const connectPromise = feed.connect();
+      jest.advanceTimersByTime(100);
+      await connectPromise;
+
+      // A normal-sized valid message should be processed
+      const txMessage = createMockPendingTxMessage('0xnormal');
+      const normalMessage = JSON.stringify(txMessage);
+      expect(normalMessage.length).toBeLessThan(1_048_576);
+
+      feed.handleMessage(normalMessage);
+
+      // Should NOT log oversized warning
+      expect(logger.hasLogMatching('warn', /oversized/i)).toBe(false);
+    });
+  });
+
+  // ===========================================================================
   // Race Condition Tests (Fix 5.1, 5.2, 5.3)
   // ===========================================================================
 

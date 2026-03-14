@@ -240,6 +240,8 @@ export class CrossChainDetectorService {
   private readonly whaleGuard = new OperationGuard('whale-detection', { cooldownMs: 1000 });
 
   // FIX #5: Rate limiting for updateBridgeData() to prevent abuse
+  // P1-3 FIX: Cap at 1000 route keys to prevent unbounded memory growth via crafted routes.
+  private static readonly MAX_BRIDGE_ROUTES = 1000;
   private bridgeDataRateLimit: Map<string, number[]> = new Map();
 
   // FIX #5: Circuit breaker for detection loop errors
@@ -1698,7 +1700,14 @@ export class CrossChainDetectorService {
     if (timestamps) {
       // Prune timestamps outside the window
       timestamps = timestamps.filter(t => now - t < windowMs);
-      this.bridgeDataRateLimit.set(routeKey, timestamps);
+      // P1-3 FIX: Evict empty entries to prevent stale route key accumulation
+      if (timestamps.length === 0) {
+        this.bridgeDataRateLimit.delete(routeKey);
+        timestamps = [];
+        this.bridgeDataRateLimit.set(routeKey, timestamps);
+      } else {
+        this.bridgeDataRateLimit.set(routeKey, timestamps);
+      }
 
       if (timestamps.length >= maxUpdatesPerWindow) {
         this.logger.warn('Rate limited updateBridgeData', {
@@ -1708,6 +1717,15 @@ export class CrossChainDetectorService {
         return;
       }
     } else {
+      // P1-3 FIX: Reject new route keys when cap exceeded to prevent DoS via crafted routes
+      if (this.bridgeDataRateLimit.size >= CrossChainDetectorService.MAX_BRIDGE_ROUTES) {
+        this.logger.warn('Bridge route limit reached, rejecting new route', {
+          routeKey,
+          currentRoutes: this.bridgeDataRateLimit.size,
+          maxRoutes: CrossChainDetectorService.MAX_BRIDGE_ROUTES,
+        });
+        return;
+      }
       timestamps = [];
       this.bridgeDataRateLimit.set(routeKey, timestamps);
     }

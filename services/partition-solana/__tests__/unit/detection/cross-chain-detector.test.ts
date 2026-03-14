@@ -16,7 +16,8 @@ import {
   getDefaultCrossChainCosts,
   CrossChainDetectorConfig,
 } from '../../../src/detection/cross-chain-detector';
-import { EVM_GAS_COSTS_USD, getEvmGasCostUsd } from '../../../src/detection/base';
+import { getEvmGasCostUsd } from '../../../src/detection/base';
+import { getEstimatedGasCostUsd } from '@arbitrage/config';
 import type { VersionedPoolStore } from '../../../src/pool/versioned-pool-store';
 import type { OpportunityFactory } from '../../../src/opportunity-factory';
 import type {
@@ -243,13 +244,13 @@ describe('estimateCrossChainGasCostPercent', () => {
   });
 
   it('should use per-chain gas cost when evmChain is provided', () => {
-    // Arbitrum gas is ~$0.10 vs default $15
+    // Arbitrum gas is ~$0.30 (incl. L1 data fees) vs default $2
     const arbitrumResult = estimateCrossChainGasCostPercent(defaultConfig, 'arbitrum');
     const defaultResult = estimateCrossChainGasCostPercent(defaultConfig);
 
-    // (0.10 + 0.01) / 1000 = 0.00011 vs (15 + 0.01) / 1000 = 0.01501
+    // (0.30 + 0.01) / 1000 = 0.00031 vs (2 + 0.01) / 1000 = 0.00201
     expect(arbitrumResult).toBeLessThan(defaultResult);
-    expect(arbitrumResult).toBeCloseTo(0.00011, 4);
+    expect(arbitrumResult).toBeCloseTo(0.00031, 4);
   });
 
   it('should fall back to config default for unknown chains', () => {
@@ -268,29 +269,39 @@ describe('estimateCrossChainGasCostPercent', () => {
 });
 
 describe('getEvmGasCostUsd', () => {
-  it('should return chain-specific gas cost', () => {
-    expect(getEvmGasCostUsd('arbitrum', 15)).toBe(0.10);
-    expect(getEvmGasCostUsd('base', 15)).toBe(0.05);
+  it('should return chain-specific gas cost from centralized config', () => {
+    // P1-4 FIX: Values now come from centralized getEstimatedGasCostUsd() in @arbitrage/config
+    // which includes L1 data posting fees for rollup chains.
+    expect(getEvmGasCostUsd('arbitrum', 15)).toBe(0.30);
+    expect(getEvmGasCostUsd('base', 15)).toBe(0.15);
     expect(getEvmGasCostUsd('ethereum', 15)).toBe(15);
   });
 
-  it('should return default for unknown chain', () => {
-    expect(getEvmGasCostUsd('unknown', 99)).toBe(99);
+  it('should return caller default for unknown chain when lower than Ethereum fallback', () => {
+    // Unknown chain gets centralized fallback ($15). When caller's default is < $15
+    // (typical for L2 callers), the caller's value is used instead.
+    expect(getEvmGasCostUsd('unknown', 2)).toBe(2);
   });
 
-  it('should cover all supported chains', () => {
-    const expectedChains = ['ethereum', 'arbitrum', 'base', 'optimism', 'linea', 'zksync', 'polygon', 'bsc', 'avalanche', 'fantom'];
+  it('should return Ethereum fallback for unknown chain when default is >= $15', () => {
+    // When caller's default is >= $15, the centralized Ethereum fallback is used
+    expect(getEvmGasCostUsd('unknown', 99)).toBe(15);
+  });
+
+  it('should cover all supported chains via centralized config', () => {
+    const expectedChains = ['arbitrum', 'base', 'optimism', 'linea', 'zksync', 'polygon', 'bsc', 'avalanche', 'fantom'];
     for (const chain of expectedChains) {
-      expect(EVM_GAS_COSTS_USD[chain]).toBeDefined();
-      expect(typeof EVM_GAS_COSTS_USD[chain]).toBe('number');
+      const cost = getEstimatedGasCostUsd(chain);
+      expect(typeof cost).toBe('number');
+      expect(cost).toBeGreaterThan(0);
     }
   });
 
   it('should have L2 costs lower than Ethereum mainnet', () => {
     const l2Chains = ['arbitrum', 'base', 'optimism', 'linea', 'zksync'];
-    const ethCost = EVM_GAS_COSTS_USD['ethereum'];
+    const ethCost = getEstimatedGasCostUsd('ethereum');
     for (const chain of l2Chains) {
-      expect(EVM_GAS_COSTS_USD[chain]).toBeLessThan(ethCost);
+      expect(getEstimatedGasCostUsd(chain)).toBeLessThan(ethCost);
     }
   });
 });

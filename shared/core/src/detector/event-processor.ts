@@ -237,7 +237,7 @@ export function buildSwapEvent(
     amount1Out: swapData.amount1Out,
     to: swapData.recipient,
     blockNumber,
-    transactionHash: log.transactionHash || '0x0',
+    transactionHash: log.transactionHash ?? '0x0',
     timestamp: Date.now(),
     dex: pair.dex,
     chain,

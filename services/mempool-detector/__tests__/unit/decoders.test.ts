@@ -39,7 +39,7 @@ const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 /**
  * DAI address on Ethereum mainnet.
  */
-const DAI = '0x6B175474E89094C44Da98b954EeadCDeBc5C5e818';
+const DAI = '0x6B175474E89094C44Da98b954EeadCDeBc5C5e81';
 
 /**
  * USDT address on Ethereum mainnet.
@@ -1248,6 +1248,139 @@ describe('OneInchDecoder', () => {
 
     it('should support Arbitrum', () => {
       expect(decoder.supportedChains).toContain(42161);
+    });
+  });
+});
+
+// =============================================================================
+// 1INCH DECODER - REAL MAINNET FIXTURE TESTS (P1-5)
+// =============================================================================
+
+import {
+  REAL_1INCH_SWAP,
+  REAL_1INCH_UNOSWAP,
+  MAINNET_TOKENS,
+  MAINNET_ROUTERS,
+  stripMetadata,
+} from '../fixtures/mainnet-transactions';
+
+describe('OneInchDecoder - Real Mainnet Fixtures', () => {
+  let decoder: OneInchDecoder;
+  let logger: RecordingLogger;
+
+  beforeEach(() => {
+    logger = new RecordingLogger();
+    logger.clear();
+    decoder = new OneInchDecoder(logger as unknown as Logger);
+  });
+
+  describe('REAL_1INCH_SWAP (swap selector 0x12aa3caf)', () => {
+    // The fixture's hand-crafted calldata uses incorrect ABI layout (offsets
+    // instead of inline static fields), so we generate proper calldata from
+    // the fixture's metadata values using ethers.Interface — same approach as
+    // the existing swap test at line ~1176.
+    let properCalldata: string;
+
+    beforeEach(() => {
+      const { Interface } = require('ethers');
+      const iface = new Interface([
+        `function swap(
+          address executor,
+          (address srcToken, address dstToken, address payable srcReceiver,
+           address payable dstReceiver, uint256 amount, uint256 minReturnAmount,
+           uint256 flags) desc,
+          bytes permit, bytes data
+        ) returns (uint256, uint256)`
+      ]);
+      properCalldata = iface.encodeFunctionData('swap', [
+        '0x1136b25047e142fa3018184793aec68fbb173ce4',
+        {
+          srcToken: MAINNET_TOKENS.WETH,
+          dstToken: MAINNET_TOKENS.USDC,
+          srcReceiver: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
+          dstReceiver: REAL_1INCH_SWAP.from,
+          amount: BigInt(REAL_1INCH_SWAP._metadata.expectedAmountIn!),
+          minReturnAmount: BigInt('2000000000'), // ~2000 USDC
+          flags: BigInt(4),
+        },
+        '0x',
+        '0x',
+      ]);
+    });
+
+    it('should recognize real 1inch swap transaction', () => {
+      const tx = stripMetadata(REAL_1INCH_SWAP);
+      expect(decoder.canDecode(tx)).toBe(true);
+    });
+
+    it('should decode 1inch swap with correct tokens', () => {
+      const tx = createMockTx({
+        input: properCalldata,
+        to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
+        chainId: 1,
+      });
+
+      const result = decoder.decode(tx);
+
+      expect(result).not.toBeNull();
+      expect(result!.type).toBe('1inch');
+      expect(result!.tokenIn.toLowerCase()).toBe(MAINNET_TOKENS.WETH.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(MAINNET_TOKENS.USDC.toLowerCase());
+    });
+
+    it('should decode 1inch swap with correct amounts', () => {
+      const tx = createMockTx({
+        input: properCalldata,
+        to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
+        chainId: 1,
+      });
+
+      const result = decoder.decode(tx);
+
+      expect(result).not.toBeNull();
+      expect(result!.amountIn).toBe(BigInt(REAL_1INCH_SWAP._metadata.expectedAmountIn!));
+      expect(result!.expectedAmountOut).toBeGreaterThan(BigInt(0));
+    });
+
+    it('should set path to [tokenIn, tokenOut]', () => {
+      const tx = createMockTx({
+        input: properCalldata,
+        to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
+        chainId: 1,
+      });
+
+      const result = decoder.decode(tx);
+
+      expect(result).not.toBeNull();
+      expect(result!.path.length).toBe(2);
+      expect(result!.path[0].toLowerCase()).toBe(MAINNET_TOKENS.WETH.toLowerCase());
+      expect(result!.path[1].toLowerCase()).toBe(MAINNET_TOKENS.USDC.toLowerCase());
+    });
+  });
+
+  describe('REAL_1INCH_UNOSWAP (unoswap selector 0x0502b1c5)', () => {
+    it('should recognize real 1inch unoswap transaction', () => {
+      const tx = stripMetadata(REAL_1INCH_UNOSWAP);
+      expect(decoder.canDecode(tx)).toBe(true);
+    });
+
+    it('should decode real 1inch unoswap with correct srcToken and amount', () => {
+      const tx = stripMetadata(REAL_1INCH_UNOSWAP);
+      const result = decoder.decode(tx);
+
+      expect(result).not.toBeNull();
+      expect(result!.type).toBe('1inch');
+      expect(result!.tokenIn.toLowerCase()).toBe(MAINNET_TOKENS.USDC.toLowerCase());
+      // 500 USDC = 500_000_000 (6 decimals)
+      expect(result!.amountIn).toBe(BigInt(REAL_1INCH_UNOSWAP._metadata.expectedAmountIn!));
+    });
+
+    it('should have a non-zero expectedAmountOut', () => {
+      const tx = stripMetadata(REAL_1INCH_UNOSWAP);
+      const result = decoder.decode(tx);
+
+      expect(result).not.toBeNull();
+      expect(result!.expectedAmountOut).toBeGreaterThan(BigInt(0));
     });
   });
 });
