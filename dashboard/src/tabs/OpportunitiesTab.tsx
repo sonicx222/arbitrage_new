@@ -31,7 +31,8 @@ const OPP_CSV_HEADERS = ['Time', 'Chain', 'Type', 'Buy DEX', 'Sell DEX', 'Est. P
 export function OpportunitiesTab() {
   const [sortField, setSortField] = useState<SortField>('timestamp');
   const [sortAsc, setSortAsc] = useState(false);
-  const [chainFilter, setChainFilter] = useState<string>('all');
+  // D-3: Multi-select chain filter (empty set = all chains)
+  const [selectedChains, setSelectedChains] = useState<Set<string>>(new Set());
 
   const { data: opportunities = [], isLoading, isError } = useQuery<Opportunity[]>({
     queryKey: ['opportunities'],
@@ -50,7 +51,7 @@ export function OpportunitiesTab() {
   }, [opportunities]);
 
   const filtered = useMemo(() => {
-    let list = chainFilter === 'all' ? opportunities : opportunities.filter((o) => o.chain === chainFilter);
+    let list = selectedChains.size === 0 ? opportunities : opportunities.filter((o) => o.chain != null && selectedChains.has(o.chain));
     list = [...list].sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
@@ -62,7 +63,7 @@ export function OpportunitiesTab() {
       return sortAsc ? cmp : -cmp;
     });
     return list;
-  }, [opportunities, chainFilter, sortField, sortAsc]);
+  }, [opportunities, selectedChains, sortField, sortAsc]);
 
   const stats = useMemo(() => {
     const byChain: Record<string, number> = {};
@@ -179,12 +180,17 @@ export function OpportunitiesTab() {
               return (
                 <button
                   key={chain}
-                  onClick={() => setChainFilter(chainFilter === chain ? 'all' : chain)}
+                  onClick={() => setSelectedChains((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(chain)) next.delete(chain); else next.add(chain);
+                    return next;
+                  })}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
-                    chainFilter === chain
+                    selectedChains.has(chain)
                       ? 'bg-accent-green/15 text-accent-green ring-1 ring-accent-green/30'
                       : 'bg-[var(--badge-bg)] text-gray-400 hover:text-gray-200'
                   }`}
+                  aria-pressed={selectedChains.has(chain)}
                 >
                   {color && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />}
                   <span className="uppercase">{chain}</span>
@@ -193,12 +199,12 @@ export function OpportunitiesTab() {
                 </button>
               );
             })}
-          {chainFilter !== 'all' && (
+          {selectedChains.size > 0 && (
             <button
-              onClick={() => setChainFilter('all')}
+              onClick={() => setSelectedChains(new Set())}
               className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]"
             >
-              Clear filter
+              Clear ({selectedChains.size})
             </button>
           )}
         </div>
@@ -208,7 +214,7 @@ export function OpportunitiesTab() {
       <div className="card">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[11px] text-gray-500 uppercase tracking-wider">
-            Opportunities ({filtered.length}{chainFilter !== 'all' ? ` on ${chainFilter}` : ''})
+            Opportunities ({filtered.length}{selectedChains.size > 0 ? ` on ${selectedChains.size} chain${selectedChains.size > 1 ? 's' : ''}` : ''})
           </h3>
           <ExportCsvButton
             headers={OPP_CSV_HEADERS}
@@ -273,7 +279,7 @@ export function OpportunitiesTab() {
           data={filtered}
           keyExtractor={(opp) => opp.id}
           maxHeight="480px"
-          emptyMessage={opportunities.length === 0 ? 'No opportunities detected yet' : `No opportunities on ${chainFilter}`}
+          emptyMessage={opportunities.length === 0 ? 'No opportunities detected yet' : 'No opportunities matching selected chains'}
         />
       </div>
     </div>

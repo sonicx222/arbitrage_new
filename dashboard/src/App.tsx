@@ -132,7 +132,7 @@ function tabFromHash(): Tab {
 const STALE_THRESHOLD_MS = 15_000;
 
 function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
-  const { status, lastEventTime } = useConnection();
+  const { status, lastEventTime, paused, togglePause } = useConnection();
   const [isStale, setIsStale] = useState(false);
 
   useEffect(() => {
@@ -150,8 +150,8 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
 
   const color = status !== 'connected'
     ? (status === 'connecting' ? 'bg-accent-yellow' : 'bg-accent-red')
-    : isStale ? 'bg-accent-yellow' : 'bg-accent-green';
-  const label = status !== 'connected' ? status : isStale ? 'stale' : 'live';
+    : paused ? 'bg-accent-yellow' : isStale ? 'bg-accent-yellow' : 'bg-accent-green';
+  const label = status !== 'connected' ? status : paused ? 'paused' : isStale ? 'stale' : 'live';
 
   return (
     <div
@@ -167,6 +167,19 @@ function ConnectionIndicator({ onReconnect }: { onReconnect?: () => void }) {
           className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-accent-red/15 text-accent-red hover:bg-accent-red/25 transition-colors"
         >
           Reconnect
+        </button>
+      )}
+      {/* D-2: Pause/resume auto-refresh — SSE stays connected, dispatching paused */}
+      {status === 'connected' && (
+        <button
+          onClick={togglePause}
+          className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors ${
+            paused ? 'bg-accent-green/15 text-accent-green hover:bg-accent-green/25' : 'text-gray-500 hover:text-gray-300'
+          }`}
+          aria-label={paused ? 'Resume auto-refresh' : 'Pause auto-refresh'}
+          title={paused ? 'Resume' : 'Pause'}
+        >
+          {paused ? '\u25B6' : '\u23F8'}
         </button>
       )}
     </div>

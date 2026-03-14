@@ -167,13 +167,13 @@ Misaligned configs that silently degrade functionality.
 
 These can be implemented without backend changes using existing SSE data.
 
-| ID | Source | Description | Files |
-|----|--------|-------------|-------|
-| D-1 | Dashboard | Fullscreen chart mode | `dashboard/src/components/Chart.tsx` |
-| D-2 | Dashboard | Auto-refresh pause button | `dashboard/src/contexts/ConnectionContext.tsx` |
-| D-3 | Dashboard | Multi-select chain filter | `dashboard/src/components/` |
-| D-4 | Dashboard | Slippage tracking display (expected vs actual from execution results) | `dashboard/src/tabs/ExecutionTab.tsx` |
-| D-5 | Dashboard | False positive rate (opportunities detected vs executed successfully) | `dashboard/src/tabs/OverviewTab.tsx` |
+| ID | Source | Description | Status |
+|----|--------|-------------|--------|
+| ~~D-1~~ | Dashboard | Fullscreen chart mode | **IMPLEMENTED** (portal-based fullscreen with Escape key, expand/collapse button) |
+| ~~D-2~~ | Dashboard | Auto-refresh pause button | **IMPLEMENTED** (pause/resume in header, SSE stays connected, dispatching paused) |
+| ~~D-3~~ | Dashboard | Multi-select chain filter | **IMPLEMENTED** (toggle buttons in OpportunitiesTab + ExecutionTab, aria-pressed) |
+| D-4 | Dashboard | Slippage tracking display (expected vs actual from execution results) | **DEFERRED** (needs backend `expectedSlippage`/`actualSlippage` fields in ExecutionResult) |
+| ~~D-5~~ | Dashboard | False positive rate (opportunities detected vs executed successfully) | **IMPLEMENTED** (Conversion KPI card: successfulExecutions / totalOpportunities) |
 
 ---
 

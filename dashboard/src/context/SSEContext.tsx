@@ -150,7 +150,7 @@ interface FeedCtxValue { feed: FeedItem[] }
 interface StreamsCtxValue { streams: StreamHealth | null; lagData: LagPoint[] }
 interface DiagnosticsCtxValue { diagnostics: DiagnosticsSnapshot | null }
 interface CexSpreadCtxValue { cexSpread: CexSpreadData | null }
-interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null; droppedEvents: number }
+interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null; droppedEvents: number; paused: boolean; togglePause: () => void }
 
 const MetricsCtx = createContext<MetricsCtxValue>({ metrics: null, chartData: [] });
 const ServicesCtx = createContext<ServicesCtxValue>({ services: {}, circuitBreaker: null });
@@ -158,7 +158,7 @@ const FeedCtx = createContext<FeedCtxValue>({ feed: [] });
 const StreamsCtx = createContext<StreamsCtxValue>({ streams: null, lagData: [] });
 const DiagnosticsCtx = createContext<DiagnosticsCtxValue>({ diagnostics: null });
 const CexSpreadCtx = createContext<CexSpreadCtxValue>({ cexSpread: null });
-const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null, droppedEvents: 0 });
+const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null, droppedEvents: 0, paused: false, togglePause: () => {} });
 
 /** Metrics + chart data. Re-renders only on 'metrics' SSE events. */
 export function useMetrics() { return useContext(MetricsCtx); }
@@ -257,10 +257,18 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   const droppedEventsRef = useRef(0);
   const [droppedEvents, setDroppedEvents] = useState(0);
 
+  // D-2: Pause auto-refresh — SSE stays connected but events are not dispatched
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const togglePause = useCallback(() => setPaused((p) => !p), []);
+
   // E-04: Track consecutive execution failures for streak notification
   const failStreakRef = useRef(0);
 
   const onEvent = useCallback((event: string, data: unknown) => {
+    // D-2: When paused, skip dispatching but still validate (keep connection alive)
+    if (pausedRef.current) return;
     if (!validatePayload(event, data)) {
       console.warn(`[SSE] Skipping malformed ${event} payload`, data);
       droppedEventsRef.current++;
@@ -394,8 +402,8 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     [state.cexSpread],
   );
   const connectionValue = useMemo<ConnectionCtxValue>(
-    () => ({ status, lastEventTime: state.lastEventTime, droppedEvents }),
-    [status, state.lastEventTime, droppedEvents],
+    () => ({ status, lastEventTime: state.lastEventTime, droppedEvents, paused, togglePause }),
+    [status, state.lastEventTime, droppedEvents, paused, togglePause],
   );
 
   return (

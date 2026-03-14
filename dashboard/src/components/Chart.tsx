@@ -7,6 +7,7 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { CHART } from '../lib/theme';
+import { createPortal } from 'react-dom';
 
 interface ChartProps<T> {
   data: T[];
@@ -43,6 +44,7 @@ export function Chart<T>({
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   // Zoom state: visible range as indices into data array
   const [zoomStart, setZoomStart] = useState(0);
@@ -67,8 +69,9 @@ export function Chart<T>({
     return () => obs.disconnect();
   }, []);
 
+  const effectiveHeight = fullscreen ? window.innerHeight - 48 : height;
   const chartW = Math.max(width - MARGIN.left - MARGIN.right, 0);
-  const chartH = Math.max(height - MARGIN.top - MARGIN.bottom, 0);
+  const chartH = Math.max(effectiveHeight - MARGIN.top - MARGIN.bottom, 0);
 
   // Zoom: slice visible data
   const visStart = Math.max(0, Math.min(zoomStart, data.length));
@@ -208,22 +211,30 @@ export function Chart<T>({
       ? hoverPoint.x - TIP_W - 4
       : hoverPoint.x + 12
     : 0;
-  const tipTop = hoverPoint ? Math.max(4, Math.min(hoverPoint.y - 14, height - 28)) : 0;
+  const tipTop = hoverPoint ? Math.max(4, Math.min(hoverPoint.y - 14, effectiveHeight - 28)) : 0;
+
+  // D-1: Escape key closes fullscreen
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreen]);
 
   // Waiting for width measurement
   if (width === 0) return <div ref={containerRef} style={{ width: '100%', height }} />;
 
-  return (
+  const chart = (
     <div
-      ref={containerRef}
-      style={{ width: '100%', height, position: 'relative' }}
+      ref={fullscreen ? undefined : containerRef}
+      style={{ width: '100%', height: effectiveHeight, position: 'relative' }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onWheel={handleWheel}
       role="img"
       aria-label={ariaLabel}
     >
-      <svg width={width} height={height} className="select-none">
+      <svg width={width} height={effectiveHeight} className="select-none">
         {/* Grid lines */}
         {yTicks.map((t, i) => (
           <line
@@ -262,7 +273,7 @@ export function Chart<T>({
           <text
             key={i}
             x={x}
-            y={height - 4}
+            y={effectiveHeight - 4}
             textAnchor="middle"
             fill={CHART.tick}
             fontSize={9}
@@ -296,16 +307,42 @@ export function Chart<T>({
           <span className="font-mono text-gray-100">{fmtVal(hoverPoint.value)}</span>
         </div>
       )}
-      {/* Zoom reset button */}
-      {isZoomed && (
+      {/* Chart controls (top-right) */}
+      <div className="absolute top-1 right-1 flex gap-1">
+        {isZoomed && (
+          <button
+            onClick={resetZoom}
+            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800/80 text-gray-400 hover:text-gray-200 border border-gray-700 transition-colors"
+            aria-label="Reset chart zoom"
+          >
+            Reset zoom
+          </button>
+        )}
         <button
-          onClick={resetZoom}
-          className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800/80 text-gray-400 hover:text-gray-200 border border-gray-700 transition-colors"
-          aria-label="Reset chart zoom"
+          onClick={() => setFullscreen((f) => !f)}
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800/80 text-gray-400 hover:text-gray-200 border border-gray-700 transition-colors"
+          aria-label={fullscreen ? 'Exit fullscreen chart' : 'Fullscreen chart'}
+          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
         >
-          Reset zoom
+          {fullscreen ? '\u2716' : '\u26F6'}
         </button>
-      )}
+      </div>
     </div>
   );
+
+  if (fullscreen) {
+    return createPortal(
+      <div
+        ref={containerRef}
+        className="fixed inset-0 z-50 bg-surface flex flex-col"
+        style={{ padding: '24px 16px 16px' }}
+      >
+        {ariaLabel && <div className="text-xs text-gray-500 mb-1 px-1">{ariaLabel}</div>}
+        {chart}
+      </div>,
+      document.body,
+    );
+  }
+
+  return chart;
 }

@@ -8,7 +8,7 @@ import { DataTable } from '../components/DataTable';
 import { SectionHeader } from '../components/SectionHeader';
 import { ExportCsvButton } from '../components/ExportCsvButton';
 import { formatUsd, formatPct, formatNumber, formatTime, calcSuccessRate, thresholdColor } from '../lib/format';
-import { CHART, MAX_ERROR_DISPLAY, EXPLORER_URLS } from '../lib/theme';
+import { CHART, MAX_ERROR_DISPLAY, EXPLORER_URLS, CHAIN_COLORS } from '../lib/theme';
 import type { FeedItem } from '../lib/types';
 
 type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
@@ -28,6 +28,8 @@ export function ExecutionTab() {
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [chartRange, setChartRange] = useState(3); // default: 1h (all data)
+  // D-3: Multi-select chain filter for executions
+  const [selectedChains, setSelectedChains] = useState<Set<string>>(new Set());
 
   const allExecutions = useMemo(
     () => feed.filter((item): item is ExecutionFeedItem => item.kind === 'execution').slice(0, 50),
@@ -76,17 +78,30 @@ export function ExecutionTab() {
     [feed],
   );
 
+  // D-3: Unique chains from executions for filter buttons
+  const execChains = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of allExecutions) set.add(item.data.chain.toLowerCase());
+    return Array.from(set).sort();
+  }, [allExecutions]);
+
   const executions = useMemo(() => {
-    if (!deferredSearch) return allExecutions;
-    const q = deferredSearch.toLowerCase();
-    return allExecutions.filter((item) => {
-      const d = item.data;
-      return d.chain.toLowerCase().includes(q)
-        || d.dex.toLowerCase().includes(q)
-        || (d.success ? 'success' : 'failed').includes(q)
-        || (d.transactionHash?.toLowerCase().includes(q));
-    });
-  }, [allExecutions, deferredSearch]);
+    let list = allExecutions;
+    if (selectedChains.size > 0) {
+      list = list.filter((item) => selectedChains.has(item.data.chain.toLowerCase()));
+    }
+    if (deferredSearch) {
+      const q = deferredSearch.toLowerCase();
+      list = list.filter((item) => {
+        const d = item.data;
+        return d.chain.toLowerCase().includes(q)
+          || d.dex.toLowerCase().includes(q)
+          || (d.success ? 'success' : 'failed').includes(q)
+          || (d.transactionHash?.toLowerCase().includes(q));
+      });
+    }
+    return list;
+  }, [allExecutions, selectedChains, deferredSearch]);
 
   const exportRows = useMemo(
     () => allExecutions.map((item) => {
@@ -219,6 +234,43 @@ export function ExecutionTab() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* D-3: Chain filter for executions */}
+      {execChains.length > 1 && (
+        <div className="flex gap-1 flex-wrap items-center">
+          <span className="text-[11px] text-gray-500 mr-1">Chains:</span>
+          {execChains.map((chain) => {
+            const color = CHAIN_COLORS[chain];
+            return (
+              <button
+                key={chain}
+                onClick={() => setSelectedChains((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(chain)) next.delete(chain); else next.add(chain);
+                  return next;
+                })}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                  selectedChains.has(chain)
+                    ? 'bg-accent-green/15 text-accent-green ring-1 ring-accent-green/30'
+                    : 'text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]'
+                }`}
+                aria-pressed={selectedChains.has(chain)}
+              >
+                {color && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />}
+                <span className="uppercase">{chain}</span>
+              </button>
+            );
+          })}
+          {selectedChains.size > 0 && (
+            <button
+              onClick={() => setSelectedChains(new Set())}
+              className="px-2 py-0.5 rounded text-[11px] text-gray-500 hover:text-gray-300 bg-[var(--badge-bg)]"
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
 

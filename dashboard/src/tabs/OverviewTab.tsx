@@ -26,6 +26,10 @@ export function OverviewTab() {
   }
 
   const successRate = calcSuccessRate(metrics.totalExecutions, metrics.successfulExecutions);
+  // D-5: False positive rate — opportunities detected vs successfully executed
+  const conversionRate = metrics.totalOpportunities > 0
+    ? (metrics.successfulExecutions / metrics.totalOpportunities) * 100
+    : 0;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 h-full">
@@ -38,6 +42,7 @@ export function OverviewTab() {
           <KpiCard label="Opportunities" value={formatNumber(metrics.totalOpportunities)} sub={`${formatNumber(metrics.opportunitiesDropped)} dropped`} />
           <KpiCard label="Executions" value={formatNumber(metrics.totalExecutions)} sub={`${formatPct(successRate)} success`} />
           <KpiCard label="Total Profit" value={formatUsd(metrics.totalProfit)} color="text-accent-green" />
+          <KpiCard label="Conversion" value={formatPct(conversionRate)} color={thresholdColor(conversionRate, 5, 1)} sub="opps \u2192 success" />
         </KpiGrid>
 
         {/* Diagnostics Mini-Panel */}
