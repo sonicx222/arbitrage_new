@@ -72,8 +72,11 @@ jest.mock('@arbitrage/core', () => ({
       SWAP_EVENTS: 'stream:swap-events',
       VOLUME_AGGREGATES: 'stream:volume-aggregates',
       PRICE_UPDATES: 'stream:price-updates',
-      // FIX: Added EXECUTION_REQUESTS for coordinator → execution engine flow
-      EXECUTION_REQUESTS: 'stream:execution-requests'
+      EXECUTION_REQUESTS: 'stream:execution-requests',
+      EXECUTION_RESULTS: 'stream:execution-results',
+      DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
+      FORWARDING_DLQ: 'stream:forwarding-dlq',
+      SERVICE_DEGRADATION: 'stream:service-degradation',
     }
   })),
   RedisStreamsClient: {
@@ -84,8 +87,11 @@ jest.mock('@arbitrage/core', () => ({
       SWAP_EVENTS: 'stream:swap-events',
       VOLUME_AGGREGATES: 'stream:volume-aggregates',
       PRICE_UPDATES: 'stream:price-updates',
-      // FIX: Added EXECUTION_REQUESTS for coordinator → execution engine flow
-      EXECUTION_REQUESTS: 'stream:execution-requests'
+      EXECUTION_REQUESTS: 'stream:execution-requests',
+      EXECUTION_RESULTS: 'stream:execution-results',
+      DEAD_LETTER_QUEUE: 'stream:dead-letter-queue',
+      FORWARDING_DLQ: 'stream:forwarding-dlq',
+      SERVICE_DEGRADATION: 'stream:service-degradation',
     }
   },
   createServiceState: jest.fn(() => {
