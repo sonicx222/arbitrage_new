@@ -688,10 +688,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const minProfitPercentage = minProfitPct !== undefined ? parseFloat(minProfitPct) : undefined;
     // Phase 2 (ADR-038): Enable chain-group routing when COORDINATOR_CHAIN_GROUP_ROUTING=true.
     const chainGroupRoutingEnabled = process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true';
+    // ADR-037: Use dedicated streams client for forwarding writes to isolate
+    // opportunity XADD from the shared connection used by other consumers.
     this.opportunityRouter = new OpportunityRouter(
       this.logger,
       this.executionCircuitBreaker,
-      this.streamsClient,
+      this.opportunityStreamsClient ?? this.streamsClient,
       {
         maxOpportunities: this.MAX_OPPORTUNITIES,
         opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
