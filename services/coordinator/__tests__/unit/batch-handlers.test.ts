@@ -135,6 +135,8 @@ jest.mock('@arbitrage/core/redis', () => ({
   RedisStreamsClient: { STREAMS: STREAMS_MAP },
   StreamConsumer: function() { return { start: noop, stop: noopAsync, getStats: () => ({ messagesProcessed: 0, messagesFailed: 0, isRunning: false, isPaused: false }), pause: noop, resume: noop }; },
   unwrapBatchMessages: (data: Record<string, unknown>) => [data],
+  buildConsumerGroups: (streams: { stream: string; fromBeginning?: boolean }[], groupName: string, consumerName: string) =>
+    streams.map((s) => ({ streamName: s.stream, groupName, consumerName, startId: s.fromBeginning ? '0' : '$', resetToStartIdOnExistingGroup: !s.fromBeginning })),
 }));
 
 jest.mock('@arbitrage/core/resilience', () => ({ getErrorMessage: (e: unknown) => String(e) }));

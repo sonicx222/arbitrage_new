@@ -36,6 +36,7 @@ import {
   ConsumerGroupConfig,
   StreamConsumer,
   unwrapBatchMessages,
+  buildConsumerGroups,
 } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { ServiceStateManager, createServiceState } from '@arbitrage/core/service-lifecycle';
@@ -74,7 +75,18 @@ import {
 } from './utils';
 
 // R2: Import extracted subsystem modules
-import { StreamConsumerManager } from './streaming';
+import {
+  StreamConsumerManager,
+  handleWhaleAlertMessage,
+  handleSwapEventMessage,
+  handleVolumeAggregateMessage,
+  handlePriceUpdateMessage,
+  processPriceUpdateItems,
+  handleServiceDegradationMessage,
+  handleDlqMessage,
+  classifyDlqError,
+} from './streaming';
+import type { StreamHandlerDeps } from './streaming';
 import { HealthMonitor, DegradationLevel } from './health';
 import { OpportunityRouter } from './opportunities';
 // P1-8 FIX: Import LeadershipElectionService to replace inline leadership code
@@ -239,31 +251,10 @@ interface StreamMessageData {
 // FIX: Alert type is now imported from ./api (consolidated single source of truth)
 // The imported Alert uses Record<string, unknown> for data field for flexibility
 
-// =============================================================================
-// DLQ Error Classification
-// =============================================================================
-
-/**
- * M-09 FIX: Classify DLQ error codes into categories using structured matching.
- * Extracted from handleDlqMessage to eliminate duplicate string-matching logic.
- *
- * Convention: [VAL_*] = permanent validation errors, [ERR_*] = transient/retryable.
- * Returns the category key that maps directly to dlqMetrics counters.
- */
-export type DlqClassification = 'expired' | 'validation' | 'transient' | 'unknown';
-
-export function classifyDlqError(errorCode: string): DlqClassification {
-  if (errorCode.includes('EXPIRED') || errorCode.includes('TTL') || errorCode.includes('STALE')) {
-    return 'expired';
-  }
-  if (errorCode.startsWith('[VAL_') || errorCode.includes('VALIDATION') || errorCode.includes('INVALID')) {
-    return 'validation';
-  }
-  if (errorCode.startsWith('[ERR_') || errorCode.includes('TIMEOUT') || errorCode.includes('RETRY')) {
-    return 'transient';
-  }
-  return 'unknown';
-}
+// DLQ Error Classification: re-exported from streaming/stream-handlers.ts
+// for backward compatibility with existing test imports
+export { classifyDlqError } from './streaming';
+export type { DlqClassification } from './streaming';
 
 // =============================================================================
 // Coordinator Service
@@ -533,7 +524,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     //
     // DLQ streams use fromBeginning (startId '0', no group reset) because dead-letter
     // messages should never be skipped — they need human/automated triage.
-    const streamDefs: Array<{ stream: string; fromBeginning?: boolean }> = [
+    this.consumerGroups = buildConsumerGroups([
       { stream: RedisStreamsClient.STREAMS.HEALTH },
       { stream: RedisStreamsClient.STREAMS.OPPORTUNITIES },
       { stream: RedisStreamsClient.STREAMS.WHALE_ALERTS },
@@ -544,14 +535,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       { stream: RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE, fromBeginning: true },
       { stream: RedisStreamsClient.STREAMS.FORWARDING_DLQ, fromBeginning: true },
       { stream: RedisStreamsClient.STREAMS.SERVICE_DEGRADATION },
-    ];
-    this.consumerGroups = streamDefs.map(({ stream, fromBeginning }) => ({
-      streamName: stream,
-      groupName: this.config.consumerGroup,
-      consumerName: this.config.consumerId,
-      startId: fromBeginning ? '0' : '$',
-      resetToStartIdOnExistingGroup: !fromBeginning,
-    }));
+    ], this.config.consumerGroup, this.config.consumerId);
 
     // REFACTORED: Use extracted middleware and routes from api/ folder
     configureMiddleware(this.app, this.logger);
@@ -704,6 +688,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
         ...(minProfitPercentage !== undefined && Number.isFinite(minProfitPercentage)
           ? { minProfitPercentage }
           : {}),
+        // M-12 FIX: Configurable admission backpressure depth tiers
+        ...(process.env.ADMISSION_DEPTH_TIERS ? {
+          admissionDepthTiers: process.env.ADMISSION_DEPTH_TIERS.split(',').map(Number) as [number, number, number],
+        } : {}),
       },
       (alert) => this.sendAlert({
         type: alert.type,
@@ -715,7 +703,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // T2-3 FIX: Persist CB state to Redis on open/close transitions.
       (status) => {
         this.redis?.set('coordinator:cb:execution', status, 300)
-          .catch(() => { /* best-effort persist */ });
+          .catch((e) => { this.logger.debug('CB state persist failed (best-effort)', { error: (e as Error).message }); });
       }
     );
   }
@@ -800,6 +788,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.warn('Redis Streams reconnected — recreating consumer groups', {
         groups: this.consumerGroups.length,
         instanceId: this.config.leaderElection.instanceId,
+      });
+      // M-05 FIX: Alert on Redis reconnection so operators know there was a connectivity loss.
+      // This fires ONLY on reconnections (not initial connection), indicating Redis was temporarily down.
+      this.sendAlert({
+        type: 'REDIS_RECONNECTED',
+        message: 'Redis Streams reconnected after connectivity loss — consumer groups recreated',
+        severity: 'warning',
+        data: { groups: this.consumerGroups.length },
+        timestamp: Date.now(),
       });
       await this.createConsumerGroups();
     });
@@ -893,6 +890,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       onLeadershipChange: (isLeader: boolean) => {
         this.isLeader = isLeader;
         this.logger.info('Leadership status changed', { isLeader });
+        // L-11 FIX: Push leadership change as real-time SSE event (was delayed up to 5s via metrics push)
+        this.emitSSE('leadership', { isLeader, instanceId: this.config.leaderElection.instanceId, timestamp: Date.now() });
       },
     });
 
@@ -1233,24 +1232,33 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private async startStreamConsumers(): Promise<void> {
     if (!this.streamsClient || !this.streamConsumerManager) return;
 
+    // Shared deps for extracted stream handlers (streaming/stream-handlers.ts)
+    const handlerDeps: StreamHandlerDeps = {
+      logger: this.logger,
+      systemMetrics: this.systemMetrics,
+      sendAlert: (alert) => this.sendAlert(alert),
+      trackActivePair: (pairKey, chain, dex) => this.trackActivePair(pairKey, chain, dex),
+    };
+    const traceUtils = { extractContext, createChildContext, createTraceContext, withLogContext };
+    const unwrapBatch = (data: Record<string, unknown>) =>
+      unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
+
     // Raw handler map for each stream (will be wrapped by streamConsumerManager)
     const rawHandlers: Record<string, (msg: StreamMessage) => Promise<void>> = {
       [RedisStreamsClient.STREAMS.HEALTH]: (msg) => this.handleHealthMessage(msg),
       [RedisStreamsClient.STREAMS.OPPORTUNITIES]: (msg) => this.handleOpportunityMessage(msg),
-      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg),
-      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => this.handleSwapEventMessage(msg),
-      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg),
-      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => this.handlePriceUpdateMessage(msg),
+      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => handleWhaleAlertMessage(msg, handlerDeps),
+      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => handleSwapEventMessage(msg, handlerDeps),
+      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => handleVolumeAggregateMessage(msg, handlerDeps),
+      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => handlePriceUpdateMessage(msg, handlerDeps, unwrapBatch),
       // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
       [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: (msg) => this.handleExecutionResultMessage(msg),
       // RT-007 FIX: Register DLQ consumer so the consumer group has active consumers.
-      // Without this, the consumer group exists but consumers=0, meaning DLQ entries
-      // accumulate without being processed or acknowledged.
-      [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: (msg) => this.handleDlqMessage(msg),
+      [RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE]: (msg) => handleDlqMessage(msg, handlerDeps, traceUtils),
       // P1 Fix DF-004: Reuse DLQ handler for forwarding DLQ — same logging/monitoring.
-      [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: (msg) => this.handleDlqMessage(msg),
+      [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: (msg) => handleDlqMessage(msg, handlerDeps, traceUtils),
       // C-02 FIX: Handle service degradation/recovery events from graceful-degradation-manager.
-      [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: (msg) => this.handleServiceDegradationMessage(msg),
+      [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: (msg) => handleServiceDegradationMessage(msg, handlerDeps),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -1596,10 +1604,17 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const consecutiveExpired = this.opportunityRouter.getConsecutiveExpired();
     if (consecutiveExpired < this.consecutiveExpiredThreshold) return;
 
+    // M-03 FIX: Log estimated messages being skipped for audit trail
+    let estimatedSkipped: number | undefined;
+    try {
+      const streamLen = await this.streamsClient.xlen(RedisStreams.OPPORTUNITIES);
+      estimatedSkipped = streamLen; // All pending messages in stream will be skipped
+    } catch { /* best-effort */ }
     this.logger.warn('Consumer lag threshold exceeded — skipping stale opportunity backlog', {
       consecutiveExpired,
       threshold: this.consecutiveExpiredThreshold,
       stream: RedisStreams.OPPORTUNITIES,
+      estimatedSkippedMessages: estimatedSkipped,
     });
     try {
       await this.streamsClient.createConsumerGroup({
@@ -1645,43 +1660,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     });
   }
 
-  // P2 FIX: Use StreamMessage type instead of any
-  private async handleWhaleAlertMessage(message: StreamMessage): Promise<void> {
-    const data = message.data as Record<string, unknown>;
-    if (!data) return;
-
-    this.systemMetrics.whaleAlerts++;
-
-    // FIX: Use type guard utilities for consistency with other handlers
-    const rawAlert = unwrapMessageData(data);
-    const usdValue = getNonNegativeNumber(rawAlert, 'usdValue', 0);
-    const direction = getString(rawAlert, 'direction', 'unknown');
-    const chain = getString(rawAlert, 'chain', 'unknown');
-    const address = getOptionalString(rawAlert, 'address');
-    const dex = getOptionalString(rawAlert, 'dex');
-    const impact = getOptionalString(rawAlert, 'impact');
-
-    this.logger.warn('Whale alert received', {
-      address,
-      usdValue,
-      direction,
-      chain,
-      dex,
-      impact
-    });
-
-    // Send alert notification
-    this.sendAlert({
-      type: 'WHALE_TRANSACTION',
-      message: `Whale ${direction} detected: $${usdValue.toLocaleString()} on ${chain}`,
-      severity: usdValue > 100000 ? 'critical' : 'high',
-      data: rawAlert,
-      timestamp: Date.now()
-    });
-
-    // P2-5: Do not reset stream errors from whale alerts.
-    // Only the opportunity handler (primary data path) should reset errors.
-  }
+  // handleWhaleAlertMessage: extracted to streaming/stream-handlers.ts
 
   // P1-2: Active pairs tracking extracted to ActivePairsTracker class
   // Provides TTL-based cleanup and emergency eviction with hysteresis
@@ -1692,162 +1671,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     return this.activePairsTracker;
   }
 
-  /**
-   * Handle swap event messages from stream:swap-events.
-   * Tracks swap activity for analytics and market monitoring.
-   *
-   * Note: Raw swap events are filtered by SwapEventFilter in detectors before publishing.
-   * Only significant swaps (>$10 USD, deduplicated) reach this handler.
-   */
-  private async handleSwapEventMessage(message: StreamMessage): Promise<void> {
-    const data = message.data as Record<string, unknown>;
-    if (!data) return;
+  // handleSwapEventMessage: extracted to streaming/stream-handlers.ts
 
-    // FIX: Use unwrapMessageData utility for wrapped MessageEvent handling
-    const rawEvent = unwrapMessageData(data);
-    const pairAddress = getString(rawEvent, 'pairAddress', '');
-    const chain = getString(rawEvent, 'chain', 'unknown');
-    const dex = getString(rawEvent, 'dex', 'unknown');
-    // FIX: Use getNonNegativeNumber to guard against malformed negative values
-    const usdValue = getNonNegativeNumber(rawEvent, 'usdValue', 0);
+  // handleVolumeAggregateMessage: extracted to streaming/stream-handlers.ts
 
-    if (!pairAddress) {
-      this.logger.debug('Skipping swap event - missing pairAddress', { messageId: message.id });
-      return;
-    }
-
-    // Update metrics
-    this.systemMetrics.totalSwapEvents++;
-    // P2 FIX #15: Guard against precision loss at Number.MAX_SAFE_INTEGER.
-    // At realistic volumes (<$1B/day), this takes ~24,000 years to hit.
-    // Cap at MAX_SAFE_INTEGER to prevent silent precision degradation.
-    if (this.systemMetrics.totalVolumeUsd < Number.MAX_SAFE_INTEGER - usdValue) {
-      this.systemMetrics.totalVolumeUsd += usdValue;
-    }
-
-    // P3-005 FIX: Track active pairs with size limit enforcement
-    this.trackActivePair(pairAddress, chain, dex);
-
-    // Log significant swaps (whales are handled separately, this is for analytics)
-    if (usdValue >= 10000) {
-      this.logger.debug('Large swap event received', {
-        pairAddress,
-        chain,
-        dex,
-        usdValue,
-        txHash: rawEvent.transactionHash
-      });
-    }
-
-    // P2-5: Do not reset stream errors from swap events.
-    // Only the opportunity handler (primary data path) should reset errors.
-  }
-
-  /**
-   * Handle volume aggregate messages from stream:volume-aggregates.
-   * Processes 5-second aggregated volume data per pair for market monitoring.
-   *
-   * VolumeAggregate provides:
-   * - swapCount: Number of swaps in window
-   * - totalUsdVolume: Total USD value traded
-   * - minPrice, maxPrice, avgPrice: Price statistics
-   * - windowStartMs, windowEndMs: Time window boundaries
-   */
-  private async handleVolumeAggregateMessage(message: StreamMessage): Promise<void> {
-    const data = message.data as Record<string, unknown>;
-    if (!data) return;
-
-    // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
-    const rawAggregate = unwrapMessageData(data);
-    const pairAddress = getString(rawAggregate, 'pairAddress', '');
-    const chain = getString(rawAggregate, 'chain', 'unknown');
-    const dex = getString(rawAggregate, 'dex', 'unknown');
-    const swapCount = getNonNegativeNumber(rawAggregate, 'swapCount', 0);
-    const totalUsdVolume = getNonNegativeNumber(rawAggregate, 'totalUsdVolume', 0);
-
-    if (!pairAddress) {
-      this.logger.debug('Skipping volume aggregate - missing pairAddress', { messageId: message.id });
-      return;
-    }
-
-    // Update metrics - always track aggregates, even if swapCount is 0
-    // (swapCount=0 aggregates indicate monitored but quiet pairs)
-    this.systemMetrics.volumeAggregatesProcessed++;
-
-    // P3-005 FIX: Track active pairs with size limit enforcement
-    this.trackActivePair(pairAddress, chain, dex);
-
-    // Skip detailed logging for empty windows (no swaps in this 5s period)
-    if (swapCount === 0) {
-      return;
-    }
-
-    // Log high-volume periods (potential trading opportunities)
-    if (totalUsdVolume >= 50000) {
-      this.logger.info('High volume aggregate detected', {
-        pairAddress,
-        chain,
-        dex,
-        swapCount,
-        totalUsdVolume,
-        avgPrice: rawAggregate.avgPrice
-      });
-    }
-
-    // P2-5: Do not reset stream errors from volume aggregates.
-    // Only the opportunity handler (primary data path) should reset errors.
-  }
-
-  /**
-   * Handle price update messages from the price-updates stream (RedisStreams.PRICE_UPDATES).
-   * S3.3.5 FIX: Coordinator now consumes price updates for monitoring.
-   *
-   * Price updates contain:
-   * - chain: Source blockchain (e.g., 'solana', 'ethereum')
-   * - dex: DEX name (e.g., 'raydium', 'orca')
-   * - pairKey: Trading pair identifier
-   * - price: Current price
-   * - timestamp: Update timestamp
-   */
-  private async handlePriceUpdateMessage(message: StreamMessage): Promise<void> {
-    const data = message.data as Record<string, unknown>;
-    if (!data) return;
-
-    // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
-    // For non-batched messages, returns single-element array (backward compatible)
-    const items = unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
-
-    let validCount = 0;
-    for (const item of items) {
-      // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
-      const rawUpdate = unwrapMessageData(item);
-      const chain = getString(rawUpdate, 'chain', 'unknown');
-      const dex = getString(rawUpdate, 'dex', 'unknown');
-      const pairKey = getString(rawUpdate, 'pairKey', '');
-
-      if (!pairKey) {
-        this.logger.debug('Skipping price update - missing pairKey', { messageId: message.id });
-        continue;
-      }
-
-      validCount++;
-      // Update metrics
-      this.systemMetrics.priceUpdatesReceived++;
-
-      // P3-005 FIX: Track active pairs with size limit enforcement
-      this.trackActivePair(pairKey, chain, dex);
-    }
-
-    if (validCount === 0 && items.length > 0) {
-      this.logger.debug('All items in batch filtered out (missing pairKey)', {
-        messageId: message.id,
-        batchSize: items.length,
-      });
-    }
-
-    // P2-5: Do not reset stream errors from price updates.
-    // Only the opportunity handler (primary data path) should reset errors.
-  }
+  // handlePriceUpdateMessage: extracted to streaming/stream-handlers.ts
 
   /**
    * RT-001 FIX: Batch handler for the price-updates stream.
@@ -1865,6 +1693,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // to opportunity detection helps debug stale price issues.
     const batchTrace = createFastTraceContext('coordinator');
 
+    const handlerDeps: StreamHandlerDeps = {
+      logger: this.logger,
+      systemMetrics: this.systemMetrics,
+      sendAlert: (alert) => this.sendAlert(alert),
+      trackActivePair: (pairKey, chain, dex) => this.trackActivePair(pairKey, chain, dex),
+    };
+
     await withLogContext({ traceId: batchTrace.traceId, spanId: batchTrace.spanId }, async () => {
       for (const msg of messages) {
         const data = msg.data as Record<string, unknown>;
@@ -1873,21 +1708,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           continue;
         }
 
-        // Unwrap batch envelopes from StreamBatcher (ADR-002 batching)
         const items = unwrapBatchMessages<Record<string, unknown>>(data, this.logger);
-
-        for (const item of items) {
-          const rawUpdate = unwrapMessageData(item);
-          const chain = getString(rawUpdate, 'chain', 'unknown');
-          const dex = getString(rawUpdate, 'dex', 'unknown');
-          const pairKey = getString(rawUpdate, 'pairKey', '');
-
-          if (!pairKey) continue;
-
-          this.systemMetrics.priceUpdatesReceived++;
-          this.trackActivePair(pairKey, chain, dex);
-        }
-
+        processPriceUpdateItems(items, handlerDeps);
         processedIds.push(msg.id);
       }
     });
@@ -2072,88 +1894,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }); // end withLogContext
   }
 
-  /**
-   * C-02 FIX: Handle service degradation/recovery events from graceful-degradation-manager.
-   * Previously this stream had producers but zero consumer groups — events were lost.
-   */
-  private async handleServiceDegradationMessage(message: StreamMessage): Promise<void> {
-    const data = message.data as Record<string, unknown>;
-    if (!data) return;
-
-    const rawData = unwrapMessageData(data);
-    const service = getString(rawData, 'service', 'unknown');
-    const event = getString(rawData, 'event', 'unknown');
-    const reason = getString(rawData, 'reason', '');
-
-    if (event === 'degraded') {
-      this.logger.warn('Service degradation reported', { service, reason, messageId: message.id });
-      this.sendAlert({
-        type: 'SERVICE_DEGRADED',
-        message: `Service ${service} entered degraded state: ${reason}`,
-        severity: 'high',
-        service,
-        data: rawData,
-        timestamp: Date.now(),
-      });
-    } else if (event === 'recovered') {
-      this.logger.info('Service recovery reported', { service, messageId: message.id });
-      this.sendAlert({
-        type: 'SERVICE_RECOVERED',
-        message: `Service ${service} recovered from degraded state`,
-        severity: 'low',
-        service,
-        data: rawData,
-        timestamp: Date.now(),
-      });
-    } else {
-      this.logger.debug('Service degradation event', { service, event, messageId: message.id });
-    }
-  }
-
-  /**
-   * RT-007 FIX: Handle dead-letter queue messages.
-   * Classifies errors by type (expired, validation, transient) and maintains
-   * counters exposed via systemMetrics for monitoring dashboards.
-   *
-   * M-09 FIX: Classification extracted to `classifyDlqError()` to avoid
-   * duplicate string-matching logic (was in both counter increment and log).
-   */
-  private async handleDlqMessage(message: StreamMessage): Promise<void> {
-    const data = message.data as Record<string, unknown>;
-    if (!data) return;
-
-    const rawData = unwrapMessageData(data);
-
-    // H-03 FIX: Extract trace context from DLQ entries for correlation.
-    // DLQ messages carry _trace_* fields from the original message.
-    const parentTrace = extractContext(rawData);
-    const trace = parentTrace
-      ? createChildContext(parentTrace, 'coordinator')
-      : createTraceContext('coordinator');
-
-    await withLogContext({ traceId: trace.traceId, spanId: trace.spanId }, async () => {
-      const originalStream = getString(rawData, '_dlq_originalStream', 'unknown');
-      const errorCode = getString(rawData, '_dlq_errorCode', 'unknown');
-      const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
-
-      // M-09 FIX: Structured DLQ classification (was duplicated string matching).
-      const classification = classifyDlqError(errorCode);
-      const dlq = this.systemMetrics.dlqMetrics!;
-      dlq.total++;
-      dlq[classification]++;
-
-      this.logger.warn('DLQ entry classified', {
-        messageId: message.id,
-        originalStream,
-        errorCode,
-        opportunityId,
-        type: getString(rawData, 'type', 'unknown'),
-        chain: getString(rawData, 'chain', 'unknown'),
-        classification,
-        dlqTotals: { ...dlq },
-      });
-    });
-  }
+  // handleServiceDegradationMessage: extracted to streaming/stream-handlers.ts
+  // handleDlqMessage: extracted to streaming/stream-handlers.ts
 
   /**
    * P1-2: Delegates to ActivePairsTracker.cleanup().
@@ -2253,10 +1995,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
             // SM-009 FIX: Expose backpressure state in systemMetrics so health/metrics
             // endpoints report it. Without this, operators can't see stream saturation.
+            const wasActive = this.systemMetrics.backpressure?.active ?? false;
+            const isActive = lag.lagRatio > this.executionStreamBackpressureRatio;
             this.systemMetrics.backpressure = {
               executionStreamDepthRatio: lag.lagRatio,
-              active: lag.lagRatio > this.executionStreamBackpressureRatio,
+              active: isActive,
             };
+            // M-07 FIX: Alert when backpressure activates so operators know
+            // opportunities are being shed. Uses sendAlert with cooldown.
+            if (isActive && !wasActive) {
+              this.sendAlert({
+                type: 'BACKPRESSURE_ACTIVATED',
+                message: `Execution stream backpressure activated (depth ratio: ${lag.lagRatio.toFixed(2)}, threshold: ${this.executionStreamBackpressureRatio})`,
+                severity: 'warning',
+                data: { depthRatio: lag.lagRatio, threshold: this.executionStreamBackpressureRatio },
+                timestamp: Date.now(),
+              });
+            }
           }
 
           // Report own health to stream (for other services to consume).
@@ -2421,6 +2176,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // Update pending opportunities count (from either opportunity router or local map)
     this.systemMetrics.pendingOpportunities = this.opportunityRouter?.getPendingCount() ?? 0;
+
+    // M-10 FIX: Expose notification dropped alerts for Prometheus
+    if (this.alertNotifier) {
+      this.systemMetrics.notificationDroppedAlerts = this.alertNotifier.getDroppedAlerts();
+    }
 
     // FIX: Evaluate degradation level after updating metrics (ADR-007)
     this.evaluateDegradationLevel();
@@ -2690,8 +2450,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
     for (const listener of this.sseListeners) {
       try {
         listener(event, data);
-      } catch {
-        // Individual listener failure shouldn't affect others
+      } catch (e) {
+        // L-16 FIX: Log SSE listener errors at debug level for diagnostics
+        // (e.g., res.write() on a closed connection)
+        this.logger.debug('SSE listener error (non-fatal)', { event, error: (e as Error).message });
       }
     }
   }
@@ -2700,6 +2462,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * Get execution circuit breaker state snapshot for SSE push.
    * Maps SimpleCircuitBreakerStatus to the dashboard's expected format.
    */
+
+  /** M-06 FIX: Expose active stream consumer count for readiness probe */
+  getActiveStreamConsumerCount(): number {
+    return this.streamConsumers.length;
+  }
+
   getCircuitBreakerSnapshot(): {
     state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
     consecutiveFailures: number;

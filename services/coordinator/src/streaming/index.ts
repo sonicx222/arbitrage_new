@@ -29,3 +29,21 @@ export type {
   StreamAlert,
   StreamConsumerManagerConfig,
 } from './stream-consumer-manager';
+
+// Stream handlers (extracted from coordinator.ts)
+export {
+  handleWhaleAlertMessage,
+  handleSwapEventMessage,
+  handleVolumeAggregateMessage,
+  handlePriceUpdateMessage,
+  processPriceUpdateItems,
+  handleServiceDegradationMessage,
+  handleDlqMessage,
+  classifyDlqError,
+} from './stream-handlers';
+export type {
+  StreamHandlerDeps,
+  StreamHandlerLogger,
+  StreamAlert as HandlerAlert,
+  DlqClassification,
+} from './stream-handlers';

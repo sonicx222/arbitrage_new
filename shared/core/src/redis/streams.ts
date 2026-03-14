@@ -74,6 +74,40 @@ export interface ConsumerGroupConfig {
   resetToStartIdOnExistingGroup?: boolean;
 }
 
+/**
+ * Declarative stream definition for buildConsumerGroups().
+ */
+export interface StreamGroupDef {
+  /** Redis stream name (e.g. RedisStreamsClient.STREAMS.HEALTH) */
+  stream: string;
+  /**
+   * If true: startId='0' (read from beginning), don't reset position on restart.
+   * If false/omitted: startId='$' (new messages only), reset to '$' on restart
+   * to skip stale backlog (P1-3 design: stale opportunities are dangerous).
+   */
+  fromBeginning?: boolean;
+}
+
+/**
+ * Build ConsumerGroupConfig[] from a declarative stream list.
+ *
+ * Standardizes the startId / resetToStartIdOnExistingGroup mapping that was
+ * previously duplicated across coordinator and cross-chain-detector.
+ */
+export function buildConsumerGroups(
+  streams: StreamGroupDef[],
+  groupName: string,
+  consumerName: string,
+): ConsumerGroupConfig[] {
+  return streams.map(({ stream, fromBeginning }) => ({
+    streamName: stream,
+    groupName,
+    consumerName,
+    startId: fromBeginning ? '0' : '$',
+    resetToStartIdOnExistingGroup: !fromBeginning,
+  }));
+}
+
 export interface XReadOptions {
   count?: number;
   block?: number; // Milliseconds to block, 0 = forever
