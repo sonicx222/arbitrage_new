@@ -112,7 +112,10 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
     const isRunning = state.getIsRunning();
     const systemHealth = state.getSystemMetrics().systemHealth;
     const redisOk = await state.checkRedisConnectivity();
-    const isReady = isRunning && systemHealth > 0 && redisOk;
+    // M-06 FIX: Include stream consumer health in readiness probe
+    const streamConsumers = state.getActiveStreamConsumerCount();
+    const consumersOk = streamConsumers > 0;
+    const isReady = isRunning && systemHealth > 0 && redisOk && consumersOk;
 
     const statusCode = isReady ? 200 : 503;
     res.status(statusCode).json({
@@ -120,6 +123,8 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
       isRunning,
       systemHealth,
       redisConnected: redisOk,
+      streamConsumers,
+      consumersOk,
       timestamp: Date.now(),
     });
   }) as RequestHandler);

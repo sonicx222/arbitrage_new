@@ -74,6 +74,7 @@ function createBatchEntry(overrides: Record<string, unknown> = {}) {
       status: 'pending',
       tokenIn: '0xToken1',
       tokenOut: '0xToken2',
+      gasCost: 0, // Explicit zero: admission control tests don't test gas estimation
       ...overrides,
     },
   };

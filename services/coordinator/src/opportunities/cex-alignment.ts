@@ -24,17 +24,29 @@
 import type { CexPriceFeedService } from '@arbitrage/core/feeds';
 
 // =============================================================================
-// Constants
+// Constants (M-09 FIX: configurable via env vars for tuning without redeploy)
 // =============================================================================
 
+/** Parse a float env var with bounds and default. */
+function parseEnvFloat(key: string, defaultValue: number, min?: number, max?: number): number {
+  const raw = process.env[key];
+  if (raw === undefined) return defaultValue;
+  const parsed = parseFloat(raw);
+  if (isNaN(parsed)) return defaultValue;
+  let value = parsed;
+  if (min !== undefined) value = Math.max(min, value);
+  if (max !== undefined) value = Math.min(max, value);
+  return value;
+}
+
 /** Spread noise band (%). Spreads within this range are considered neutral. */
-const NOISE_BAND_PCT = 0.1;
+const NOISE_BAND_PCT = parseEnvFloat('CEX_NOISE_BAND_PCT', 0.1, 0, 5);
 
 /** Boost factor when DEX arb direction aligns with CEX-DEX spread. */
-const ALIGNED_FACTOR = 1.15;
+const ALIGNED_FACTOR = parseEnvFloat('CEX_ALIGNED_FACTOR', 1.15, 1, 2);
 
 /** Penalty factor when DEX arb direction contradicts CEX-DEX spread. */
-const CONTRADICTED_FACTOR = 0.8;
+const CONTRADICTED_FACTOR = parseEnvFloat('CEX_CONTRADICTED_FACTOR', 0.8, 0.1, 1);
 
 /** Neutral factor (no CEX data or within noise band). */
 const NEUTRAL_FACTOR = 1.0;

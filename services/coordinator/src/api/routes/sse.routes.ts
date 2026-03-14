@@ -226,6 +226,10 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     };
     clients.add(client);
 
+    // L-14 FIX: Log SSE connection events for debugging connection lifecycle
+    const clientCount = clients.size;
+    state.getLogger().info('SSE client connected', { clientCount });
+
     // Start shared timers on first connection
     startTimerPool(state);
 
@@ -260,6 +264,8 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
     req.on('close', () => {
       client.unsubscribe();
       clients.delete(client);
+      // L-14 FIX: Log SSE disconnection
+      state.getLogger().info('SSE client disconnected', { clientCount: clients.size });
       // Stop shared timers when last client disconnects
       if (clients.size === 0) {
         stopTimerPool();

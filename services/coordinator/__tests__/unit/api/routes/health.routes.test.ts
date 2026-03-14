@@ -91,6 +91,7 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
     })),
     getAlertHistory: jest.fn(() => []),
     checkRedisConnectivity: jest.fn(async () => true),
+    getActiveStreamConsumerCount: jest.fn(() => 3),
     ...overrides,
   };
 }

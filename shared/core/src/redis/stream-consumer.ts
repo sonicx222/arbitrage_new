@@ -494,6 +494,15 @@ export class StreamConsumer {
         // messages in the old PEL are permanently lost. Log at warn level with
         // counter for Prometheus alerting on repeated group losses.
         try {
+          // M-02 FIX: Log stream length before recreation for PEL size audit trail
+          try {
+            const streamLen = await this.client.xlen(this.config.config.streamName);
+            this.config.logger?.warn?.('Stream length at group recreation', {
+              stream: this.config.config.streamName,
+              group: this.config.config.groupName,
+              streamLength: streamLen,
+            });
+          } catch { /* xlen failure is non-fatal */ }
           await this.client.createConsumerGroup(this.config.config);
           this.groupRecreationCount++;
           this.stats.groupRecreationCount = this.groupRecreationCount;

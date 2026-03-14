@@ -13,6 +13,7 @@ import { findKLargest } from '@arbitrage/core/data-structures';
 import { getStreamHealthMonitor, getRuntimeMonitor, getProviderLatencyTracker, getDiagnosticsCollector } from '@arbitrage/core/monitoring';
 import { getRedisClient } from '@arbitrage/core/redis';
 import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
+import { getActiveSSEConnections } from './sse.routes';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -205,7 +206,9 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
               setTimeout(() => reject(new Error('Stream health timeout')), streamHealthTimeoutMs)
             ),
           ]);
-        } catch {
+        } catch (streamErr) {
+          // L-15 FIX: Log stream health timeout for debugging
+          state.getLogger().warn('Stream health metrics timed out', { error: (streamErr as Error).message });
           streamMetrics = '# stream_health_monitor timed out\n';
         }
         const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
@@ -242,6 +245,15 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
           '# HELP pipeline_events_total Total pipeline events processed by coordinator',
           '# TYPE pipeline_events_total counter',
           `pipeline_events_total ${sys.totalOpportunities + sys.totalExecutions}`,
+          '# HELP arbitrage_alert_notifications_dropped_total Alert notifications dropped (notifier failures)',
+          '# TYPE arbitrage_alert_notifications_dropped_total counter',
+          `arbitrage_alert_notifications_dropped_total ${sys.notificationDroppedAlerts ?? 0}`,
+          '# HELP arbitrage_sse_connections_active Current active SSE connections',
+          '# TYPE arbitrage_sse_connections_active gauge',
+          `arbitrage_sse_connections_active ${getActiveSSEConnections()}`,
+          '# HELP arbitrage_coordinator_is_leader Whether this coordinator instance is the leader',
+          '# TYPE arbitrage_coordinator_is_leader gauge',
+          `arbitrage_coordinator_is_leader ${state.getIsLeader() ? 1 : 0}`,
           '',
         ].join('\n');
         const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();

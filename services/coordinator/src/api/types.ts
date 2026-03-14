@@ -95,6 +95,8 @@ export interface SystemMetrics {
     avgScoreAdmitted: number;
     avgScoreShed: number;
   };
+  // M-10 FIX: Track dropped alert notifications for monitoring
+  notificationDroppedAlerts?: number;
 }
 
 // =============================================================================
@@ -159,6 +161,9 @@ export interface CoordinatorStateProvider {
    * Returns true if Redis responds to PING within timeout.
    */
   checkRedisConnectivity(): Promise<boolean>;
+
+  /** M-06 FIX: Get count of active stream consumers for readiness probe */
+  getActiveStreamConsumerCount(): number;
 
   /** Get execution circuit breaker status for SSE push */
   getCircuitBreakerSnapshot(): {

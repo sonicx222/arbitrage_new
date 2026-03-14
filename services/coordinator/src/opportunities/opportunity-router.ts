@@ -18,7 +18,7 @@ import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
 import { getCexPriceFeedService } from '@arbitrage/core/feeds';
 import { getLatencyTracker } from '@arbitrage/core/monitoring';
-import { FEATURE_FLAGS, CORE_TOKENS } from '@arbitrage/config';
+import { FEATURE_FLAGS, CORE_TOKENS, getEstimatedGasCostUsd } from '@arbitrage/config';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
 import { scoreOpportunity } from './opportunity-scoring';
 import { computeCexAlignment, getCexDegradedProfitMultiplier } from './cex-alignment';
@@ -110,7 +110,7 @@ export interface CircuitBreaker {
  * Alert callback for opportunity events
  */
 export interface OpportunityAlert {
-  type: 'EXECUTION_CIRCUIT_OPEN' | 'EXECUTION_FORWARD_FAILED';
+  type: 'EXECUTION_CIRCUIT_OPEN' | 'EXECUTION_FORWARD_FAILED' | 'ADMISSION_SHEDDING_ACTIVE';
   message: string;
   severity: 'warning' | 'high' | 'critical';
   data: Record<string, unknown>;
@@ -201,6 +201,12 @@ export interface OpportunityRouterConfig {
    * @see docs/reports/EXECUTION_BOTTLENECK_RESEARCH_2026-03-06.md — Phase 2
    */
   chainGroupStreamResolver?: (chainId: string) => string;
+  /**
+   * M-12 FIX: Configurable admission depth tier thresholds.
+   * Three values [light, medium, full] defining stream depth ratios at which
+   * admission budget reduces. Default: [0.3, 0.5, 0.7].
+   */
+  admissionDepthTiers?: [number, number, number];
 }
 
 /**
@@ -267,6 +273,8 @@ const DEFAULT_CONFIG: ResolvedRouterConfig = {
   startupGracePeriodMs: 15000,
   // RT-005 FIX: Default 1x (no change). Set via SIMULATION_OPPORTUNITY_TTL_MULTIPLIER env var.
   simulationTtlMultiplier: 1,
+  // M-12 FIX: Configurable admission depth tier thresholds
+  admissionDepthTiers: [0.3, 0.5, 0.7] as [number, number, number],
   // Phase 2 (ADR-038): undefined = legacy single-stream mode (backward compatible)
   chainGroupStreamResolver: undefined,
 };
@@ -483,11 +491,12 @@ export class OpportunityRouter {
       return maxPerBatch;
     }
 
-    // Dynamic budget based on stream depth
+    // M-12 FIX: Dynamic budget based on configurable stream depth tiers
     const depth = this._executionStreamDepthRatio;
-    if (depth <= 0.3) return candidateCount; // Unlimited
-    if (depth <= 0.5) return Math.max(1, Math.ceil(candidateCount * 0.75));
-    if (depth <= 0.7) return Math.max(1, Math.ceil(candidateCount * 0.25));
+    const [light, medium, full] = this.config.admissionDepthTiers;
+    if (depth <= light) return candidateCount; // Unlimited
+    if (depth <= medium) return Math.max(1, Math.ceil(candidateCount * 0.75));
+    if (depth <= full) return Math.max(1, Math.ceil(candidateCount * 0.25));
     return 0; // Full backpressure
   }
 
@@ -935,8 +944,9 @@ export class OpportunityRouter {
         expectedProfit: parseNumericField(opp.data.expectedProfit),
         confidence: parseNumericField(opp.data.confidence),
         expiresAt: opp.expiresAt,
-        // M-01 FIX: Pass gas cost for chain-aware scoring
-        estimatedGasCostUsd: parseNumericField(opp.data.gasCost),
+        // H-02 FIX: Gas cost fallback — if detector did not populate gasCost,
+        // use per-chain estimated gas cost to prevent zero-gas scoring bias
+        estimatedGasCostUsd: parseNumericField(opp.data.gasCost) ?? (opp.chain ? getEstimatedGasCostUsd(opp.chain) : undefined),
         // ADR-036: CEX alignment factor (1.15=aligned, 0.8=contradicted, 1.0=neutral/no data)
         cexAlignmentFactor,
       }, now);
@@ -966,6 +976,14 @@ export class OpportunityRouter {
         streamDepthRatio: this._executionStreamDepthRatio,
         minAdmittedScore: admitted.length > 0 ? admitted[admitted.length - 1]._score : 0,
         maxShedScore: admissionBudget < scored.length ? scored[admissionBudget]._score : 0,
+      });
+      // H-01 FIX: Emit alert when admission control is actively shedding
+      this.onAlert?.({
+        type: 'ADMISSION_SHEDDING_ACTIVE',
+        message: 'Admission control shedding: ' + shedCount + ' of ' + scored.length + ' opportunities shed (depth=' + this._executionStreamDepthRatio.toFixed(2) + ')',
+        severity: 'warning',
+        data: { admitted: admitted.length, shed: shedCount, streamDepthRatio: this._executionStreamDepthRatio },
+        timestamp: Date.now(),
       });
     }
     if (admitted.length > 0) {
