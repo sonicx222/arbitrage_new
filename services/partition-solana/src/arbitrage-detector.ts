@@ -766,6 +766,13 @@ export class SolanaArbitrageDetector extends EventEmitter {
   }
 
   async publishOpportunity(opportunity: SolanaArbitrageOpportunity): Promise<void> {
+    // RT-AGT-003 FIX: Record pipeline latency unconditionally, before Redis guards.
+    // Previously this was after streamsClient/isDisabled checks, so latency was never
+    // recorded when Redis was unavailable — causing events_processed_total=0.
+    if (opportunity.pipelineTimestamps) {
+      getLatencyTracker().recordFromTimestamps(opportunity.pipelineTimestamps);
+    }
+
     if (!this.streamsClient) {
       this.logger.debug('No streams client, skipping opportunity publish', {
         opportunityId: opportunity.id,
@@ -804,11 +811,6 @@ export class SolanaArbitrageDetector extends EventEmitter {
       source: 'solana-arbitrage-detector',
     };
     const data = propagateContext(baseData, traceCtx) as Record<string, string>;
-
-    // P2 OPT: Record pipeline latency for observability parity with EVM partitions
-    if (opportunity.pipelineTimestamps) {
-      getLatencyTracker().recordFromTimestamps(opportunity.pipelineTimestamps);
-    }
 
     for (let attempt = 1; attempt <= REDIS_RETRY.MAX_ATTEMPTS; attempt++) {
       try {

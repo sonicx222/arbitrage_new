@@ -106,6 +106,37 @@ function createStatsCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
 }
 
 // =============================================================================
+// Readiness Cache (ST-003/ST-004 FIX)
+// =============================================================================
+
+/**
+ * Cache for /ready responses. On CPU-heavy partitions (P1: 4 chains/360 pools,
+ * P2: 7 L2 chains), simulation work saturates the event loop so heavily that
+ * even the 3s withResponseTimeout can't fire. By caching the readiness result,
+ * repeated probes return synchronously without awaiting Redis ping.
+ */
+function createReadinessCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
+  let cache: { data: string; statusCode: number; timestamp: number } | null = null;
+
+  return {
+    get(): { data: string; statusCode: number } | null {
+      if (!cache) return null;
+      if (Date.now() - cache.timestamp > ttlMs) {
+        cache = null;
+        return null;
+      }
+      return { data: cache.data, statusCode: cache.statusCode };
+    },
+    set(data: string, statusCode: number): void {
+      cache = { data, statusCode, timestamp: Date.now() };
+    },
+    clear(): void {
+      cache = null;
+    }
+  };
+}
+
+// =============================================================================
 // Response timeout helper (P3-FIX)
 // =============================================================================
 
@@ -210,6 +241,11 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   // on P1/P2 (high-volume partitions with 1000+ pairs). getStats() iterates all chain
   // instances and pairs synchronously, blocking the event loop when WebSocket events flood it.
   const statsCache = createStatsCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
+
+  // ST-003/ST-004 FIX: Cache /ready responses to avoid async Redis ping on every probe.
+  // On P1/P2, CPU-heavy simulation blocks the event loop so much that even the 3s
+  // response timeout fires before the async handler can complete.
+  const readinessCache = createReadinessCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // LOG-OPT Task 8: Log level hot-reload — accepts PUT /log-level, all other
@@ -349,6 +385,15 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         res.end(body);
       }, logger);
     } else if (req.url === '/ready') {
+      // ST-003/ST-004 FIX: Return cached readiness if fresh. On P1/P2, CPU-heavy simulation
+      // saturates the event loop so the async Redis ping can't complete within the 3s timeout.
+      // Caching avoids the async path entirely on repeated probes.
+      const cachedReady = readinessCache.get();
+      if (cachedReady) {
+        res.writeHead(cachedReady.statusCode, { 'Content-Type': 'application/json' });
+        res.end(cachedReady.data);
+        return;
+      }
       // ST-001 FIX: Wrap /ready with response timeout to prevent indefinite hang when
       // event loop is blocked by CPU-bound path finding during startup.
       // Previously /ready had no timeout wrapper (unlike /health and /stats),
@@ -367,14 +412,17 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           // Redis unavailable — not ready
         }
         const ready = detectorReady && redisReady;
-        res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
+        const statusCode = ready ? 200 : 503;
+        const body = JSON.stringify({
           service: config.serviceName,
           ready,
           detectorReady,
           redisReady,
           chains: detector.getChains()
-        }));
+        });
+        readinessCache.set(body, statusCode);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(body);
       }, logger);
     } else if (req.url === '/metrics') {
       // W2-H7: Prometheus metrics endpoint for scraping
