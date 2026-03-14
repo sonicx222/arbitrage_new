@@ -976,9 +976,9 @@ describe('CrossChainStrategy - Bridge Recovery', () => {
       .mockResolvedValueOnce(state1)
       .mockResolvedValueOnce(state2);
 
-    // Mock the private recoverSingleBridge to simulate partial success
+    // Mock the private recoverSingleBridge on the bridgeRecovery service to simulate partial success
     // The first call succeeds, the second fails
-    jest.spyOn(strategy as any, 'recoverSingleBridge')
+    jest.spyOn((strategy as any).bridgeRecovery as any, 'recoverSingleBridge')
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
 

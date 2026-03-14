@@ -608,6 +608,34 @@ export abstract class BaseExecutionStrategy {
     return this.gasPriceOptimizer.getGasBaseline(chain, ctx.gasBaselines);
   }
 
+  /**
+   * Get native token price for a chain with validation and safe fallback.
+   * Consolidates repeated getNativeTokenPrice + isFinite guard pattern.
+   *
+   * @param chain - Chain name
+   * @param logContext - If provided, logs a warning when falling back
+   * @returns Validated price in USD (falls back to $1000 as last resort)
+   */
+  protected getValidatedNativeTokenPrice(
+    chain: string,
+    logContext?: { opportunityId: string; label?: string },
+  ): number {
+    const LAST_RESORT_PRICE_USD = 1000;
+    const price = getNativeTokenPrice(chain, { suppressWarning: true });
+    if (Number.isFinite(price) && price > 0) {
+      return price;
+    }
+    if (logContext) {
+      this.logger.warn('Invalid native token price, using fallback', {
+        chain,
+        ...logContext,
+        originalPrice: price,
+        fallbackPrice: LAST_RESORT_PRICE_USD,
+      });
+    }
+    return LAST_RESORT_PRICE_USD;
+  }
+
   // ===========================================================================
   // MEV Protection (R4: Delegates to MevProtectionService)
   // ===========================================================================

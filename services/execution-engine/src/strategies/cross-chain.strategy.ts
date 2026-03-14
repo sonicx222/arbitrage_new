@@ -33,51 +33,22 @@
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG, getNativeTokenPrice, getTokenDecimals } from '@arbitrage/config';
 import { getDefaultPrice } from '@arbitrage/core/analytics';
-import { BRIDGE_DEFAULTS } from '@arbitrage/core/bridge-router';
 import { getErrorMessage } from '@arbitrage/core/resilience';
-import {
-  hmacSign,
-  hmacVerify,
-  getHmacSigningKey,
-  isSignedEnvelope,
-} from '@arbitrage/core/utils';
-import type { BridgeStatusResult } from '@arbitrage/core/bridge-router';
-import type { SignedEnvelope } from '@arbitrage/core/utils';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { StrategyContext, ExecutionResult, Logger, BridgePollingResult, BridgeRecoveryState } from '../types';
+import type { StrategyContext, ExecutionResult, Logger, BridgeRecoveryState } from '../types';
 import {
   createErrorResult,
   createSuccessResult,
   ExecutionErrorCode,
   formatExecutionError,
-  BRIDGE_RECOVERY_KEY_PREFIX,
-  BRIDGE_RECOVERY_MAX_AGE_MS,
-  getBridgeRecoveryMaxAge,
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
+import { pollBridgeCompletion } from './bridge-poll-manager';
+import { BridgeRecoveryService } from './bridge-recovery-service';
 // Phase 5.2: Flash loan support for destination chain
 import type { FlashLoanProviderFactory } from './flash-loan-providers/provider-factory';
 // Fix 7.2: Import FlashLoanStrategy for destination chain flash loan execution
 import { FlashLoanStrategy } from './flash-loan.strategy';
-
-/**
- * FIX 10.4: Pre-computed bridge polling backoff schedule (performance optimization)
- *
- * Eliminates per-iteration calculations for polling interval.
- * Schedule defines polling intervals based on elapsed time.
- *
- * Format: [afterMs, intervalMs]
- * - afterMs: Apply this interval after X milliseconds have elapsed
- * - intervalMs: Poll every X milliseconds
- *
- * Schedule is checked in order, first match wins.
- */
-const BRIDGE_POLL_BACKOFF_SCHEDULE = [
-  { afterMs: 120000, intervalMs: 20000 },  // After 2min: poll every 20s
-  { afterMs: 60000, intervalMs: 15000 },   // After 1min: poll every 15s
-  { afterMs: 30000, intervalMs: 10000 },   // After 30s: poll every 10s
-  { afterMs: 0, intervalMs: 5000 },        // First 30s: poll every 5s
-] as const;
 
 /**
  * Fix W2-6: Per-route bridge circuit breaker configuration.
@@ -102,6 +73,52 @@ type CrossChainBridgeQuote = Awaited<ReturnType<CrossChainBridgeRouter['quote']>
 /** D3: Bridge execute result type derived from CrossChainBridgeRouter.execute() return. */
 type CrossChainBridgeExecResult = Awaited<ReturnType<CrossChainBridgeRouter['execute']>>;
 
+/** CQ-5: Parameter object for executeBridgeAndPollCompletion (11 params → 1). */
+interface BridgeExecutionParams {
+  opportunity: ArbitrageOpportunity;
+  bridgeRouter: CrossChainBridgeRouter;
+  bridgeQuote: CrossChainBridgeQuote;
+  bridgeToken: string;
+  sourceChain: string;
+  destChain: string;
+  sourceWallet: ethers.Wallet;
+  sourceProvider: ethers.JsonRpcProvider;
+  bridgeNonce: number | undefined;
+  expectedProfit: number;
+  ctx: StrategyContext;
+}
+
+/** CQ-5: Parameter object for executeDirectDexSell (10 params → 1). */
+interface DirectDexSellParams {
+  opportunity: ArbitrageOpportunity;
+  sellOpportunity: ArbitrageOpportunity;
+  bridgeToken: string;
+  sellAmount: string;
+  destChain: string;
+  destWallet: ethers.Wallet;
+  destValidation: { valid: true; wallet: ethers.Wallet; provider: ethers.JsonRpcProvider };
+  sellNonce: number | undefined;
+  bridgeResult: { sourceTxHash?: string; gasUsed?: bigint };
+  ctx: StrategyContext;
+}
+
+/** CQ-5: Parameter object for calculateCrossChainResults (13 params → 1). */
+interface CrossChainResultParams {
+  opportunity: ArbitrageOpportunity;
+  sourceChain: string;
+  destChain: string;
+  startTime: number;
+  expectedProfit: number;
+  bridgeFeeEth: number;
+  bridgeFeeUsd: number;
+  bridgeResult: { sourceTxHash?: string; gasUsed?: bigint };
+  sellReceipt: ethers.TransactionReceipt | null;
+  sellTxHash: string | undefined;
+  usedDestFlashLoan: boolean;
+  usedMevProtection: boolean;
+  ctx: StrategyContext;
+}
+
 export class CrossChainStrategy extends BaseExecutionStrategy {
   // Phase 5.2: Optional flash loan provider factory for destination chain flash loans
   private readonly flashLoanProviderFactory?: FlashLoanProviderFactory;
@@ -110,6 +127,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
   // Fix W2-6: Per-route bridge circuit breaker
   private readonly bridgeRouteBreakers = new Map<string, BridgeRouteCircuitBreaker>();
+
+  // CQ-8: Extracted bridge recovery logic
+  private readonly bridgeRecovery: BridgeRecoveryService;
 
   /**
    * Create a CrossChainStrategy instance.
@@ -127,6 +147,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     super(logger);
     this.flashLoanProviderFactory = flashLoanProviderFactory;
     this.flashLoanStrategy = flashLoanStrategy;
+    this.bridgeRecovery = new BridgeRecoveryService(logger, {
+      prepareDexSwapTransaction: (opp, chain, ctx) => this.prepareDexSwapTransaction(opp, chain, ctx),
+      estimateTradeSizeUsd: (amount, token, chain) => this.estimateTradeSizeUsd(amount, token, chain),
+    });
   }
 
   /**
@@ -419,7 +443,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // D3: Pre-flight simulation for source chain buy transaction
-      const sourceSimError = await this.simulateSourceBuy(opportunity, sourceChain!, ctx);
+      const sourceSimError = await this.simulateSwapStep(opportunity, sourceChain!, 'source buy', sourceChain!, ctx);
       if (sourceSimError) {
         return sourceSimError;
       }
@@ -479,19 +503,25 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // D3: Pre-flight simulation for destination sell transaction
-      const destSimError = await this.simulateDestinationSell(
-        opportunity, sourceChain!, destChain!, bridgeNonce, ctx
+      const destSimError = await this.simulateSwapStep(
+        opportunity, destChain!, 'destination sell', sourceChain!, ctx,
+        () => {
+          if (ctx.nonceManager && bridgeNonce !== undefined) {
+            ctx.nonceManager.failTransaction(sourceChain!, bridgeNonce, 'Simulation predicted revert on destination');
+          }
+        },
       );
       if (destSimError) {
         return destSimError;
       }
 
       // D3: Execute bridge, poll completion, persist recovery state
-      const bridgeExecResult = await this.executeBridgeAndPollCompletion(
+      const bridgeExecResult = await this.executeBridgeAndPollCompletion({
         opportunity, bridgeRouter, bridgeQuote, bridgeToken,
-        sourceChain!, destChain!, sourceWallet, sourceProvider,
-        bridgeNonce, expectedProfit, ctx
-      );
+        sourceChain: sourceChain!, destChain: destChain!,
+        sourceWallet, sourceProvider,
+        bridgeNonce, expectedProfit, ctx,
+      });
       if (bridgeExecResult.error) {
         return bridgeExecResult.error;
       }
@@ -600,11 +630,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           // Skip to final calculations (Step 6)
           // We still need to calculate final profit including bridge costs
           const sourceGasPrice = await this.getOptimalGasPrice(sourceChain!, ctx);
-          let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain!, { suppressWarning: true });
-          const DEFAULT_NATIVE_TOKEN_PRICE_USD = 2000;
-          if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
-            sourceNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
-          }
+          const sourceNativeTokenPriceUsd = this.getValidatedNativeTokenPrice(sourceChain!);
           const bridgeGasCostNative = bridgeResult.gasUsed
             ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
             : 0;
@@ -644,10 +670,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // CQ3: Standard DEX swap path delegated to private method
-      const dexSellResult = await this.executeDirectDexSell(
+      const dexSellResult = await this.executeDirectDexSell({
         opportunity, sellOpportunity, bridgeToken, sellAmount,
-        destChain!, destWallet, destValidation, sellNonce, bridgeResult, ctx
-      );
+        destChain: destChain!, destWallet, destValidation, sellNonce, bridgeResult, ctx,
+      });
 
       if (dexSellResult.errorResult) {
         return dexSellResult.errorResult;
@@ -658,11 +684,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       usedMevProtection = dexSellResult.usedMevProtection;
 
       // CQ3: Final profit calculation delegated to private method
-      return await this.calculateCrossChainResults(
-        opportunity, sourceChain!, destChain!, startTime, expectedProfit,
-        bridgeFeeEth, bridgeFeeUsd, bridgeResult, sellReceipt, sellTxHash,
-        usedDestFlashLoan, usedMevProtection, ctx
-      );
+      return await this.calculateCrossChainResults({
+        opportunity, sourceChain: sourceChain!, destChain: destChain!,
+        startTime, expectedProfit, bridgeFeeEth, bridgeFeeUsd,
+        bridgeResult, sellReceipt, sellTxHash,
+        usedDestFlashLoan, usedMevProtection, ctx,
+      });
 
     } catch (error) {
       // Release bridge nonce on unexpected failure to prevent nonce leaks
@@ -825,48 +852,52 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
   }
 
   /**
-   * D3: Pre-flight simulation for source chain buy transaction.
+   * D3: Pre-flight simulation for a single swap step (source buy or destination sell).
    *
-   * Simulates the buy transaction BEFORE bridge quote to catch issues early,
-   * preventing wasted bridge API quota on opportunities that would fail.
+   * Simulates the transaction to catch issues early, preventing wasted bridge
+   * API quota on opportunities that would fail.
    *
-   * Returns an error result if simulation predicts revert, null otherwise.
-   * Simulation preparation failures are logged and swallowed.
+   * @param stepLabel - Human-readable label for logs ("source buy" or "destination sell")
+   * @param errorChain - Chain reported in the error result
+   * @param onRevert - Optional callback invoked when simulation predicts revert (e.g. nonce cleanup)
+   * @returns Error result if simulation predicts revert, null otherwise.
    */
-  private async simulateSourceBuy(
+  private async simulateSwapStep(
     opportunity: ArbitrageOpportunity,
-    sourceChain: string,
+    chain: string,
+    stepLabel: string,
+    errorChain: string,
     ctx: StrategyContext,
+    onRevert?: () => void,
   ): Promise<ExecutionResult | null> {
-    const sourceWalletForSim = ctx.wallets.get(sourceChain);
-    if (sourceWalletForSim && ctx.providers.get(sourceChain)) {
+    const wallet = ctx.wallets.get(chain);
+    if (wallet && ctx.providers.get(chain)) {
       try {
-        // Prepare buy transaction for simulation
-        const buySimTx = await this.prepareDexSwapTransaction(opportunity, sourceChain, ctx);
-        buySimTx.from = await sourceWalletForSim.getAddress();
+        const simTx = await this.prepareDexSwapTransaction(opportunity, chain, ctx);
+        simTx.from = await wallet.getAddress();
 
-        const buySimResult = await this.performSimulation(opportunity, buySimTx, sourceChain, ctx);
+        const simResult = await this.performSimulation(opportunity, simTx, chain, ctx);
 
-        if (buySimResult?.wouldRevert) {
+        if (simResult?.wouldRevert) {
           ctx.stats.simulationPredictedReverts++;
+          onRevert?.();
 
-          this.logger.warn('Aborting cross-chain execution: source buy simulation predicted revert', {
+          this.logger.warn(`Aborting cross-chain execution: ${stepLabel} simulation predicted revert`, {
             opportunityId: opportunity.id,
-            revertReason: buySimResult.revertReason,
-            simulationLatencyMs: buySimResult.latencyMs,
-            provider: buySimResult.provider,
-            sourceChain,
+            revertReason: simResult.revertReason,
+            simulationLatencyMs: simResult.latencyMs,
+            provider: simResult.provider,
+            chain,
           });
 
           return BaseExecutionStrategy.createOpportunityError(
             opportunity,
-            formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `source buy simulation predicted revert - ${buySimResult.revertReason || 'unknown reason'}`),
-            sourceChain
+            formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `${stepLabel} simulation predicted revert - ${simResult.revertReason || 'unknown reason'}`),
+            errorChain,
           );
         }
       } catch (simError) {
-        // Log but continue - simulation preparation failure shouldn't block execution
-        this.logger.debug('Could not prepare source buy for simulation, proceeding', {
+        this.logger.debug(`Could not prepare ${stepLabel} for simulation, proceeding`, {
           opportunityId: opportunity.id,
           error: getErrorMessage(simError),
         });
@@ -926,12 +957,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     // Fix 9.3: Use extracted bridge profitability helper
     // Validate profit still viable after bridge fees
     // P1-002 FIX: Use chain-native token price, not ETH price for all chains.
-    // getDefaultPrice('ETH') overestimated bridge gas costs ~4000x on BSC/Polygon/Avalanche/Fantom.
-    const DEFAULT_BRIDGE_NATIVE_TOKEN_PRICE_USD = 2000;
-    let nativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
-    if (!Number.isFinite(nativeTokenPriceUsd) || nativeTokenPriceUsd <= 0) {
-      nativeTokenPriceUsd = DEFAULT_BRIDGE_NATIVE_TOKEN_PRICE_USD;
-    }
+    const nativeTokenPriceUsd = this.getValidatedNativeTokenPrice(sourceChain);
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
 
@@ -1018,64 +1044,6 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
   }
 
   /**
-   * D3: Pre-flight simulation for destination sell transaction.
-   *
-   * Simulates the sell transaction on the destination chain to catch potential
-   * issues early. Bridge transaction simulation is skipped because the bridge
-   * router internally builds the transaction during execute().
-   *
-   * Returns an error result if simulation predicts revert, null otherwise.
-   * Simulation preparation failures are logged and swallowed.
-   */
-  private async simulateDestinationSell(
-    opportunity: ArbitrageOpportunity,
-    sourceChain: string,
-    destChain: string,
-    bridgeNonce: number | undefined,
-    ctx: StrategyContext,
-  ): Promise<ExecutionResult | null> {
-    const destWalletForSim = ctx.wallets.get(destChain);
-    if (destWalletForSim && ctx.providers.get(destChain)) {
-      // Prepare sell transaction for simulation (using proper DEX swap, not flash loan)
-      try {
-        const sellSimTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
-        sellSimTx.from = await destWalletForSim.getAddress();
-
-        const simulationResult = await this.performSimulation(opportunity, sellSimTx, destChain, ctx);
-
-        if (simulationResult?.wouldRevert) {
-          ctx.stats.simulationPredictedReverts++;
-
-          if (ctx.nonceManager && bridgeNonce !== undefined) {
-            ctx.nonceManager.failTransaction(sourceChain, bridgeNonce, 'Simulation predicted revert on destination');
-          }
-
-          this.logger.warn('Aborting cross-chain execution: destination sell simulation predicted revert', {
-            opportunityId: opportunity.id,
-            revertReason: simulationResult.revertReason,
-            simulationLatencyMs: simulationResult.latencyMs,
-            provider: simulationResult.provider,
-            destChain,
-          });
-
-          return BaseExecutionStrategy.createOpportunityError(
-            opportunity,
-            formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`),
-            sourceChain
-          );
-        }
-      } catch (simError) {
-        // Log but continue - simulation preparation failure shouldn't block execution
-        this.logger.debug('Could not prepare destination sell for simulation, proceeding', {
-          opportunityId: opportunity.id,
-          error: getErrorMessage(simError),
-        });
-      }
-    }
-    return null;
-  }
-
-  /**
    * D3: Execute bridge transaction, poll for completion, and persist recovery state.
    *
    * Handles: bridge execution with timeout, nonce confirmation/failure,
@@ -1084,22 +1052,15 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
    *
    * Returns the bridge result and received amount on success, or an error result.
    */
-  private async executeBridgeAndPollCompletion(
-    opportunity: ArbitrageOpportunity,
-    bridgeRouter: CrossChainBridgeRouter,
-    bridgeQuote: CrossChainBridgeQuote,
-    bridgeToken: string,
-    sourceChain: string,
-    destChain: string,
-    sourceWallet: ethers.Wallet,
-    sourceProvider: ethers.JsonRpcProvider,
-    bridgeNonce: number | undefined,
-    expectedProfit: number,
-    ctx: StrategyContext,
-  ): Promise<
+  private async executeBridgeAndPollCompletion(params: BridgeExecutionParams): Promise<
     | { bridgeResult: CrossChainBridgeExecResult; bridgedAmountReceived: string; error?: undefined }
     | { error: ExecutionResult; bridgeResult?: undefined; bridgedAmountReceived?: undefined }
   > {
+    const {
+      opportunity, bridgeRouter, bridgeQuote, bridgeToken,
+      sourceChain, destChain, sourceWallet, sourceProvider,
+      bridgeNonce, expectedProfit, ctx,
+    } = params;
     // Task 4.2: Audit log — capture source chain balance BEFORE bridge
     const sourceBalanceBefore = await this.queryNativeBalance(sourceChain, ctx);
     this.logCrossChainAudit('PRE_BRIDGE', opportunity.id, {
@@ -1184,13 +1145,14 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     // Step 4: Wait for bridge completion
     // Refactor 9.3: Extracted polling logic to separate method for readability
     const bridgeId = bridgeResult.bridgeId!;
-    const pollingResult = await this.pollBridgeCompletion(
+    const pollingResult = await pollBridgeCompletion(
       bridgeRouter,
       bridgeId,
       opportunity.id,
       sourceChain,
       bridgeResult.sourceTxHash || '',
-      ctx
+      ctx,
+      this.logger,
     );
 
     if (!pollingResult.completed) {
@@ -1254,7 +1216,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     // the BridgeRecoveryManager can detect and attempt recovery on restart.
     // @see docs/reports/SOLANA_BRIDGE_DEEP_ANALYSIS_2026-02-20.md P1 #1
     if (ctx.redis) {
-      await this.persistBridgeRecoveryState({
+      await this.bridgeRecovery.persistState({
         bridgeId,
         opportunityId: opportunity.id,
         sourceChain,
@@ -1289,23 +1251,16 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
    * No new try-catch blocks are added here; the caller's try-catch handles errors.
    * The sell transaction's try-catch is preserved as it was (for nonce cleanup).
    */
-  private async executeDirectDexSell(
-    opportunity: ArbitrageOpportunity,
-    sellOpportunity: ArbitrageOpportunity,
-    bridgeToken: string,
-    sellAmount: string,
-    destChain: string,
-    destWallet: ethers.Wallet,
-    destValidation: { valid: true; wallet: ethers.Wallet; provider: ethers.JsonRpcProvider },
-    sellNonce: number | undefined,
-    bridgeResult: { sourceTxHash?: string; gasUsed?: bigint },
-    ctx: StrategyContext,
-  ): Promise<{
+  private async executeDirectDexSell(params: DirectDexSellParams): Promise<{
     sellReceipt: ethers.TransactionReceipt | null;
     sellTxHash: string | undefined;
     usedMevProtection: boolean;
     errorResult?: ExecutionResult;
   }> {
+    const {
+      opportunity, sellOpportunity, bridgeToken, sellAmount,
+      destChain, destWallet, destValidation, sellNonce, bridgeResult, ctx,
+    } = params;
     let sellReceipt: ethers.TransactionReceipt | null = null;
     let sellTxHash: string | undefined;
     let usedMevProtection = false;
@@ -1497,52 +1452,19 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
    * Extracted from execute() to reduce method length.
    * No new try-catch — caller's catch block handles errors.
    */
-  private async calculateCrossChainResults(
-    opportunity: ArbitrageOpportunity,
-    sourceChain: string,
-    destChain: string,
-    startTime: number,
-    expectedProfit: number,
-    bridgeFeeEth: number,
-    bridgeFeeUsd: number,
-    bridgeResult: { sourceTxHash?: string; gasUsed?: bigint },
-    sellReceipt: ethers.TransactionReceipt | null,
-    sellTxHash: string | undefined,
-    usedDestFlashLoan: boolean,
-    usedMevProtection: boolean,
-    ctx: StrategyContext,
-  ): Promise<ExecutionResult> {
+  private async calculateCrossChainResults(params: CrossChainResultParams): Promise<ExecutionResult> {
+    const {
+      opportunity, sourceChain, destChain, startTime, expectedProfit,
+      bridgeFeeEth, bridgeFeeUsd, bridgeResult, sellReceipt, sellTxHash,
+      usedDestFlashLoan, usedMevProtection, ctx,
+    } = params;
     const executionTimeMs = Date.now() - startTime;
 
     const sourceGasPrice = await this.getOptimalGasPrice(sourceChain, ctx);
     const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
 
-    let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
-    let destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
-
-    // P3-001 FIX: Use per-chain fallback prices instead of global $2000.
-    // getNativeTokenPrice() already has per-chain data (BSC=$650, Polygon=$0.50, etc.)
-    // with a built-in fallback of $1000 for unknown chains. The $2000 global fallback
-    // was wildly incorrect for non-ETH chains (4000x overestimate on Polygon).
-    const LAST_RESORT_PRICE_USD = 1000; // Only if getNativeTokenPrice itself fails
-    if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
-      this.logger.warn('Invalid source chain native token price, using fallback', {
-        opportunityId: opportunity.id,
-        sourceChain,
-        originalPrice: sourceNativeTokenPriceUsd,
-        fallbackPrice: LAST_RESORT_PRICE_USD,
-      });
-      sourceNativeTokenPriceUsd = LAST_RESORT_PRICE_USD;
-    }
-    if (!Number.isFinite(destNativeTokenPriceUsd) || destNativeTokenPriceUsd <= 0) {
-      this.logger.warn('Invalid dest chain native token price, using fallback', {
-        opportunityId: opportunity.id,
-        destChain,
-        originalPrice: destNativeTokenPriceUsd,
-        fallbackPrice: LAST_RESORT_PRICE_USD,
-      });
-      destNativeTokenPriceUsd = LAST_RESORT_PRICE_USD;
-    }
+    const sourceNativeTokenPriceUsd = this.getValidatedNativeTokenPrice(sourceChain, { opportunityId: opportunity.id, label: 'source' });
+    const destNativeTokenPriceUsd = this.getValidatedNativeTokenPrice(destChain, { opportunityId: opportunity.id, label: 'dest' });
 
     const bridgeGasCostNative = bridgeResult.gasUsed
       ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
@@ -1609,651 +1531,34 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
   }
 
   // ===========================================================================
-  // Bridge Polling (Refactor 9.3)
+  // CQ-8: Bridge Recovery & Polling — delegated to extracted modules
+  // @see bridge-poll-manager.ts, bridge-recovery-service.ts
   // ===========================================================================
 
-  /**
-   * Refactor 9.3: Poll bridge for completion status.
-   *
-   * Extracted from execute() to improve readability and testability.
-   * This method handles the polling loop with:
-   * - Timeout detection (time-based and iteration-based)
-   * - Status transition logging
-   * - Exponential backoff for long-running bridges
-   * - Shutdown detection
-   *
-   * ## Fix 5.1: Bridge Recovery Considerations
-   *
-   * **IMPORTANT**: If shutdown occurs during bridge polling, funds may be stuck:
-   * - Source chain: Transaction already confirmed (funds sent to bridge)
-   * - Bridge: Tokens in transit (processing)
-   * - Destination: No action taken yet
-   *
-   * To recover interrupted bridges, on restart the engine should:
-   * 1. Query Redis for pending bridge transactions (stored in BridgeRecoveryState)
-   * 2. Check bridge status via bridgeRouter.getStatus(bridgeId)
-   * 3. If completed: Execute the sell side using stored opportunity data
-   * 4. If failed/refunded: Log and mark as resolved
-   * 5. If still pending: Resume polling
-   *
-   * The following state should be persisted before bridge execution:
-   * - opportunityId, bridgeId, sourceTxHash, sourceChain, destChain
-   * - bridgeToken, bridgeAmount, sellDex, expectedProfit
-   * - timestamp when bridge was initiated
-   *
-   * FIX 3.1: Bridge recovery implemented.
-   * - Store BridgeRecoveryState in Redis before bridge initiation
-   * - On engine restart, query pending bridges and resume polling
-   * - Implemented timeout handling for bridges that exceed max wait time
-   * @see persistBridgeRecoveryState, recoverPendingBridges, BridgeRecoveryState
-   *
-   * @param bridgeRouter - Bridge router instance
-   * @param bridgeId - Bridge transaction ID
-   * @param opportunityId - Opportunity ID for logging
-   * @param sourceChain - Source chain for error results
-   * @param sourceTxHash - Source transaction hash
-   * @param ctx - Strategy context (for shutdown detection)
-   * @returns Polling result with completion status or error
-   */
-  protected async pollBridgeCompletion(
-    bridgeRouter: NonNullable<ReturnType<NonNullable<StrategyContext['bridgeRouterFactory']>['getRouter']>>,
-    bridgeId: string,
-    opportunityId: string,
-    sourceChain: string,
-    sourceTxHash: string,
-    ctx: StrategyContext
-  ): Promise<BridgePollingResult> {
-    const maxWaitTime = BRIDGE_DEFAULTS.maxBridgeWaitMs;
-    const pollInterval = BRIDGE_DEFAULTS.statusPollIntervalMs;
-    const bridgeStartTime = Date.now();
-
-    // Fix 4.3: Calculate maximum iterations based on wait time and minimum poll interval
-    const minPollInterval = Math.min(pollInterval, 5000);
-    const maxIterations = Math.ceil(maxWaitTime / minPollInterval) + 10;
-    let iterationCount = 0;
-
-    let lastSeenStatus = 'pending';
-
-    // Race 5.3 Fix: Pre-compute deadline
-    const pollDeadline = bridgeStartTime + maxWaitTime;
-
-    while (iterationCount < maxIterations) {
-      iterationCount++;
-
-      // Race 5.3 Fix: Check time FIRST
-      const now = Date.now();
-      if (now >= pollDeadline) {
-        break;
-      }
-
-      // Check for shutdown
-      if (!ctx.stateManager.isRunning()) {
-        this.logger.warn('Bridge polling interrupted by shutdown', {
-          opportunityId,
-          bridgeId,
-        });
-        return {
-          completed: false,
-          error: {
-            code: ExecutionErrorCode.SHUTDOWN,
-            message: 'Polling interrupted by shutdown',
-            sourceTxHash,
-          },
-        };
-      }
-
-      // Bug 4.2 Fix: Wrap getStatus() in try/catch to handle RPC/network errors
-      // Without this, an exception would cause the entire cross-chain execution to fail
-      // without proper error handling or nonce cleanup
-      let bridgeStatus: BridgeStatusResult;
-      try {
-        bridgeStatus = await bridgeRouter.getStatus(bridgeId);
-      } catch (statusError) {
-        // Log the error and continue polling - transient network errors shouldn't abort
-        this.logger.warn('Bridge status check failed, will retry', {
-          opportunityId,
-          bridgeId,
-          iterationCount,
-          error: getErrorMessage(statusError),
-        });
-        // Wait before retry to avoid hammering the API
-        await new Promise(resolve => setTimeout(resolve, Math.min(pollInterval, 5000)));
-        continue;
-      }
-
-      // Fix 3.2: Check for shutdown AFTER async operation completes
-      // The shutdown may have occurred during the getStatus() network call.
-      // Without this check, we would continue processing a stale result
-      // while the service is partially torn down.
-      if (!ctx.stateManager.isRunning()) {
-        this.logger.warn('Bridge polling interrupted by shutdown after status fetch', {
-          opportunityId,
-          bridgeId,
-          lastStatus: bridgeStatus.status,
-        });
-        return {
-          completed: false,
-          error: {
-            code: ExecutionErrorCode.SHUTDOWN,
-            message: 'Polling interrupted by shutdown after status fetch',
-            sourceTxHash,
-          },
-        };
-      }
-
-      // Log status transitions
-      if (bridgeStatus.status !== lastSeenStatus) {
-        this.logger.debug('Bridge status changed', {
-          opportunityId,
-          bridgeId,
-          previousStatus: lastSeenStatus,
-          newStatus: bridgeStatus.status,
-          elapsedMs: Date.now() - bridgeStartTime,
-        });
-        lastSeenStatus = bridgeStatus.status;
-      }
-
-      if (bridgeStatus.status === 'completed') {
-        this.logger.info('Bridge completed', {
-          opportunityId,
-          bridgeId,
-          destTxHash: bridgeStatus.destTxHash,
-          amountReceived: bridgeStatus.amountReceived,
-        });
-        return {
-          completed: true,
-          amountReceived: bridgeStatus.amountReceived,
-          destTxHash: bridgeStatus.destTxHash,
-        };
-      }
-
-      if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
-        return {
-          completed: false,
-          error: {
-            code: ExecutionErrorCode.BRIDGE_FAILED,
-            message: bridgeStatus.error || bridgeStatus.status,
-            sourceTxHash,
-          },
-        };
-      }
-
-      // Race 5.3 Fix: Check time again AFTER status fetch
-      const nowAfterFetch = Date.now();
-      if (nowAfterFetch >= pollDeadline) {
-        break;
-      }
-
-      // FIX 10.4: Use pre-computed backoff schedule (eliminates per-iteration calculations)
-      const elapsedMs = nowAfterFetch - bridgeStartTime;
-      let dynamicPollInterval = pollInterval; // Default fallback
-
-      // Find matching schedule entry (pre-computed, no calculations needed)
-      for (const { afterMs, intervalMs } of BRIDGE_POLL_BACKOFF_SCHEDULE) {
-        if (elapsedMs >= afterMs) {
-          dynamicPollInterval = intervalMs;
-          break;
-        }
-      }
-
-      // Don't wait longer than remaining time
-      const remainingTime = pollDeadline - nowAfterFetch;
-      const effectivePollInterval = Math.min(dynamicPollInterval, remainingTime);
-
-      await new Promise(resolve => setTimeout(resolve, effectivePollInterval));
-    }
-
-    // Timeout
-    const timedOutByTime = Date.now() - bridgeStartTime >= maxWaitTime;
-    const timedOutByIterations = iterationCount >= maxIterations;
-
-    this.logger.warn('Bridge timeout - funds may still be in transit', {
-      opportunityId,
-      bridgeId,
-      elapsedMs: Date.now() - bridgeStartTime,
-      iterationCount,
-      maxIterations,
-      timedOutByTime,
-      timedOutByIterations,
-      lastStatus: lastSeenStatus,
-    });
-
-    return {
-      completed: false,
-      error: {
-        code: ExecutionErrorCode.BRIDGE_TIMEOUT,
-        message: `timeout after ${iterationCount} polls - transaction may still complete`,
-        sourceTxHash,
-      },
-    };
-  }
-
-  // ==========================================================================
-  // FIX 3.1: Bridge Recovery Implementation
-  // ==========================================================================
-
-  /**
-   * Persist bridge recovery state to Redis before bridge execution.
-   *
-   * This enables recovery if shutdown occurs during bridge polling.
-   * The state is stored in Redis with a protocol-aware TTL.
-   * Native rollup bridges get 8 days (7-day challenge + buffer).
-   *
-   * @param state - Bridge recovery state to persist
-   * @param redis - Redis client for persistence
-   * @see docs/reports/EXTENDED_DEEP_ANALYSIS_2026-02-23.md P0-3
-   */
+  /** Public API preserved for tests and BridgeRecoveryManager. */
   async persistBridgeRecoveryState(
     state: BridgeRecoveryState,
-    redis: import('@arbitrage/core').RedisClient
+    redis: import('@arbitrage/core').RedisClient,
   ): Promise<void> {
-    const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${state.bridgeId}`;
-    // P0-3: Use protocol-aware TTL instead of global constant
-    const ttlSeconds = Math.floor(getBridgeRecoveryMaxAge(state.bridgeProtocol) / 1000);
-
-    try {
-      // Fix #4: HMAC-sign recovery state to prevent tampering
-      // P3-27: Include Redis key as HMAC context to prevent cross-key replay
-      const signedEnvelope = hmacSign(state, getHmacSigningKey(), key);
-      await redis.set(key, signedEnvelope, ttlSeconds);
-      this.logger.debug('Persisted bridge recovery state', {
-        bridgeId: state.bridgeId,
-        opportunityId: state.opportunityId,
-        sourceChain: state.sourceChain,
-        destChain: state.destChain,
-        signed: !!signedEnvelope.sig,
-      });
-    } catch (error) {
-      // Log but don't fail - recovery is best-effort
-      this.logger.warn('Failed to persist bridge recovery state', {
-        bridgeId: state.bridgeId,
-        error: getErrorMessage(error),
-      });
-    }
+    return this.bridgeRecovery.persistState(state, redis);
   }
 
-  /**
-   * Update bridge recovery status in Redis.
-   *
-   * Called when bridge completes (to mark as recovered) or fails (to mark as failed).
-   *
-   * @param bridgeId - Bridge transaction ID
-   * @param status - New status
-   * @param redis - Redis client
-   * @param errorMessage - Optional error message for failed status
-   */
+  /** Public API preserved for tests and BridgeRecoveryManager. */
   async updateBridgeRecoveryStatus(
     bridgeId: string,
     status: BridgeRecoveryState['status'],
     redis: import('@arbitrage/core').RedisClient,
-    errorMessage?: string
+    errorMessage?: string,
   ): Promise<void> {
-    const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${bridgeId}`;
-
-    try {
-      // Fix #4: Read and verify HMAC-signed envelope
-      const signingKey = getHmacSigningKey();
-      const raw = await redis.get(key);
-      if (!raw || typeof raw !== 'object') {
-        if (raw !== null) {
-          this.logger.warn('Corrupt bridge recovery state, deleting key', {
-            bridgeId,
-            key,
-          });
-          await redis.del(key);
-        }
-        return;
-      }
-
-      // Handle both signed envelopes and legacy unsigned data
-      let state: BridgeRecoveryState;
-      if (isSignedEnvelope(raw)) {
-        // P3-27: Include Redis key as HMAC context to prevent cross-key replay
-        let verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey, key);
-        if (!verified) {
-          // Migration: try without context for pre-P3-27 signed data
-          verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
-        }
-        if (!verified) {
-          this.logger.error('Bridge recovery state HMAC verification failed - possible tampering', {
-            bridgeId,
-            key,
-          });
-          return;
-        }
-        state = verified;
-      } else {
-        // Legacy unsigned data — accept but log warning
-        state = raw as BridgeRecoveryState;
-        if (signingKey) {
-          this.logger.warn('Unsigned bridge recovery state found with signing enabled', {
-            bridgeId,
-          });
-        }
-      }
-
-      state.status = status;
-      state.lastCheckAt = Date.now();
-      if (errorMessage) {
-        state.errorMessage = errorMessage;
-      }
-
-      // Fix #4: Re-sign updated state
-      // P3-27: Include Redis key as HMAC context
-      const signedEnvelope = hmacSign(state, signingKey, key);
-
-      // P0-3: Use protocol-aware TTL for tracking purposes
-      const ttlSeconds = Math.floor(getBridgeRecoveryMaxAge(state.bridgeProtocol) / 1000);
-      await redis.set(key, signedEnvelope, ttlSeconds);
-
-      // If recovered or failed, we can delete the key (cleanup)
-      if (status === 'recovered' || status === 'failed') {
-        // Short TTL for post-processing analysis, then auto-cleanup
-        await redis.set(key, signedEnvelope, 3600); // 1 hour
-      }
-
-      this.logger.debug('Updated bridge recovery status', {
-        bridgeId,
-        status,
-        errorMessage,
-        signed: !!signedEnvelope.sig,
-      });
-    } catch (error) {
-      this.logger.warn('Failed to update bridge recovery status', {
-        bridgeId,
-        status,
-        error: getErrorMessage(error),
-      });
-    }
+    return this.bridgeRecovery.updateStatus(bridgeId, status, redis, errorMessage);
   }
 
-  /**
-   * Recover pending bridges on engine restart.
-   *
-   * Scans Redis for pending bridge states and resumes polling/execution.
-   * This is called from ExecutionEngineService.start() to handle
-   * bridges that were interrupted by shutdown.
-   *
-   * @param ctx - Strategy context with bridge router factory and other deps
-   * @param redis - Redis client for state retrieval
-   * @returns Number of bridges recovered
-   */
+  /** Public API preserved for tests and BridgeRecoveryManager. */
   async recoverPendingBridges(
     ctx: StrategyContext,
-    redis: import('@arbitrage/core').RedisClient
+    redis: import('@arbitrage/core').RedisClient,
   ): Promise<number> {
-    let recoveredCount = 0;
-
-    try {
-      // Scan for pending bridge recovery keys using iterative scan
-      // Cap at 10,000 keys to prevent unbounded memory growth in degraded states
-      const MAX_RECOVERY_KEYS = 10_000;
-      const keys: string[] = [];
-      let cursor = '0';
-      do {
-        const [nextCursor, foundKeys] = await redis.scan(
-          cursor,
-          'MATCH',
-          `${BRIDGE_RECOVERY_KEY_PREFIX}*`,
-          'COUNT',
-          100
-        );
-        cursor = nextCursor;
-        // SA-107 FIX: Exclude corrupt dead-letter keys (bridge:recovery:corrupt:*)
-        // that match the bridge:recovery:* SCAN pattern
-        const validKeys = foundKeys.filter((k: string) => !k.includes(':corrupt:'));
-        keys.push(...validKeys);
-        if (keys.length >= MAX_RECOVERY_KEYS) {
-          this.logger.warn('Bridge recovery key scan hit limit, processing partial set', {
-            limit: MAX_RECOVERY_KEYS,
-            keysFound: keys.length,
-          });
-          break;
-        }
-      } while (cursor !== '0');
-
-      if (keys.length === 0) {
-        this.logger.debug('No pending bridges to recover');
-        return 0;
-      }
-
-      this.logger.info('Found pending bridges for recovery', { count: keys.length });
-
-      // M4 gap: Get HMAC signing key before the loop — consistent with updateBridgeRecoveryStatus
-      const signingKey = getHmacSigningKey();
-
-      for (const key of keys) {
-        try {
-          // FIX P0-1: redis.get() already returns parsed object — no JSON.parse needed
-          // @see FIX P0-1 in docs/reports/EXECUTION_ENGINE_DEEP_ANALYSIS_2026-02-20.md
-          const raw = await redis.get(key);
-          if (!raw) continue;
-
-          if (typeof raw !== 'object') {
-            // Corrupt data in Redis - clean up and continue
-            this.logger.warn('Corrupt bridge recovery state during scan, deleting key', {
-              key,
-            });
-            await redis.del(key);
-            continue;
-          }
-
-          // HMAC verification — consistent with updateBridgeRecoveryStatus and BridgeRecoveryManager
-          let state: BridgeRecoveryState;
-          if (isSignedEnvelope(raw)) {
-            // P3-27: Include Redis key as HMAC context to prevent cross-key replay
-            let verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey, key);
-            if (!verified) {
-              // Migration: try without context for pre-P3-27 signed data
-              verified = hmacVerify<BridgeRecoveryState>(raw as SignedEnvelope<BridgeRecoveryState>, signingKey);
-            }
-            if (!verified) {
-              this.logger.error('Bridge recovery state HMAC verification failed during recovery scan', { key });
-              continue;
-            }
-            state = verified;
-          } else if (signingKey) {
-            this.logger.warn('Unsigned bridge recovery state rejected during recovery scan — HMAC signing enabled', { key });
-            continue;
-          } else {
-            state = raw as BridgeRecoveryState;
-          }
-
-          // Skip already recovered/failed bridges
-          if (state.status === 'recovered' || state.status === 'failed') {
-            continue;
-          }
-
-          // P0-3: Check if bridge is too old using protocol-aware max age
-          const protocolMaxAge = getBridgeRecoveryMaxAge(state.bridgeProtocol);
-          if (Date.now() - state.initiatedAt > protocolMaxAge) {
-            this.logger.warn('Bridge recovery state expired', {
-              bridgeId: state.bridgeId,
-              bridgeProtocol: state.bridgeProtocol,
-              initiatedAt: state.initiatedAt,
-              ageMs: Date.now() - state.initiatedAt,
-              maxAgeMs: protocolMaxAge,
-            });
-            await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'Recovery state expired');
-            continue;
-          }
-
-          // Attempt recovery
-          const recovered = await this.recoverSingleBridge(state, ctx, redis);
-          if (recovered) {
-            recoveredCount++;
-          }
-        } catch (error) {
-          this.logger.error('Error recovering bridge', {
-            key,
-            error: getErrorMessage(error),
-          });
-        }
-      }
-
-      this.logger.info('Bridge recovery completed', {
-        total: keys.length,
-        recovered: recoveredCount,
-      });
-
-      return recoveredCount;
-    } catch (error) {
-      this.logger.error('Bridge recovery scan failed', {
-        error: getErrorMessage(error),
-      });
-      return recoveredCount;
-    }
+    return this.bridgeRecovery.recoverPendingBridges(ctx, redis);
   }
 
-  /**
-   * Recover a single pending bridge.
-   *
-   * Checks bridge status and completes the sell if needed.
-   */
-  private async recoverSingleBridge(
-    state: BridgeRecoveryState,
-    ctx: StrategyContext,
-    redis: import('@arbitrage/core').RedisClient
-  ): Promise<boolean> {
-    this.logger.info('Attempting bridge recovery', {
-      bridgeId: state.bridgeId,
-      opportunityId: state.opportunityId,
-      sourceChain: state.sourceChain,
-      destChain: state.destChain,
-      initiatedAt: state.initiatedAt,
-    });
-
-    // Get bridge router
-    if (!ctx.bridgeRouterFactory) {
-      this.logger.warn('Cannot recover bridge - no bridge router factory');
-      await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'No bridge router factory');
-      return false;
-    }
-
-    // Estimate trade size from bridge amount (bridgeAmount is in bridgeToken units)
-    const recoveryTradeSizeUsd = this.estimateTradeSizeUsd(
-      state.bridgeAmount, state.bridgeToken, state.sourceChain
-    );
-    const bridgeRouter = ctx.bridgeRouterFactory.findSupportedRouter(
-      state.sourceChain,
-      state.destChain,
-      state.bridgeToken,
-      recoveryTradeSizeUsd
-    );
-
-    if (!bridgeRouter) {
-      this.logger.warn('Cannot recover bridge - no suitable router', {
-        bridgeId: state.bridgeId,
-      });
-      await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'No suitable bridge router');
-      return false;
-    }
-
-    try {
-      // Check current bridge status
-      const bridgeStatus: BridgeStatusResult = await bridgeRouter.getStatus(state.bridgeId);
-
-      if (bridgeStatus.status === 'completed') {
-        // Bridge completed - execute sell
-        this.logger.info('Recovered bridge is completed, executing sell', {
-          bridgeId: state.bridgeId,
-          amountReceived: bridgeStatus.amountReceived,
-        });
-
-        // Reconstruct opportunity for sell execution
-        const sellOpportunity: ArbitrageOpportunity = {
-          id: `${state.opportunityId}-recovery`,
-          type: 'cross-chain',
-          tokenIn: state.bridgeToken,
-          tokenOut: state.tokenIn, // Reverse for sell
-          amountIn: bridgeStatus.amountReceived || state.bridgeAmount,
-          expectedProfit: state.expectedProfit,
-          confidence: 0.5, // Lower confidence for recovery
-          timestamp: Date.now(),
-          buyChain: state.destChain,
-          sellChain: state.destChain,
-          buyDex: state.sellDex,
-          sellDex: state.sellDex,
-          expiresAt: Date.now() + 60000, // 1 minute to execute
-        };
-
-        // Execute sell on destination chain
-        const destWallet = ctx.wallets.get(state.destChain);
-        const destProvider = ctx.providers.get(state.destChain);
-
-        if (!destWallet || !destProvider) {
-          this.logger.warn('Cannot execute recovered sell - no wallet/provider', {
-            bridgeId: state.bridgeId,
-            destChain: state.destChain,
-          });
-          await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'No wallet/provider for destination');
-          return false;
-        }
-
-        // Prepare and execute sell transaction
-        const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, state.destChain, ctx);
-
-        const feeData = await destProvider.getFeeData();
-        const gasOverrides: Record<string, bigint> = {};
-        if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
-          gasOverrides.maxFeePerGas = feeData.maxFeePerGas;
-          gasOverrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
-        } else if (feeData.gasPrice != null) {
-          gasOverrides.gasPrice = feeData.gasPrice;
-        }
-
-        const signedTx = await destWallet.sendTransaction({
-          ...sellTx,
-          ...gasOverrides,
-        });
-
-        const receipt = await signedTx.wait();
-
-        if (receipt && receipt.status === 1) {
-          this.logger.info('Recovery sell succeeded', {
-            bridgeId: state.bridgeId,
-            sellTxHash: receipt.hash,
-          });
-          await this.updateBridgeRecoveryStatus(state.bridgeId, 'recovered', redis);
-          return true;
-        } else {
-          this.logger.error('Recovery sell failed', {
-            bridgeId: state.bridgeId,
-            sellTxHash: receipt?.hash,
-          });
-          await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'Sell transaction reverted');
-          return false;
-        }
-      } else if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
-        this.logger.info('Recovered bridge failed/refunded', {
-          bridgeId: state.bridgeId,
-          status: bridgeStatus.status,
-          error: bridgeStatus.error,
-        });
-        await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, bridgeStatus.error || bridgeStatus.status);
-        return false;
-      } else {
-        // Still pending/bridging - update status and leave for next recovery attempt
-        this.logger.info('Recovered bridge still in progress', {
-          bridgeId: state.bridgeId,
-          status: bridgeStatus.status,
-        });
-        await this.updateBridgeRecoveryStatus(
-          state.bridgeId,
-          bridgeStatus.status === 'bridging' ? 'bridging' : 'pending',
-          redis
-        );
-        return false; // Will be retried on next recovery cycle
-      }
-    } catch (error) {
-      this.logger.error('Bridge recovery failed', {
-        bridgeId: state.bridgeId,
-        error: getErrorMessage(error),
-      });
-      await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, getErrorMessage(error));
-      return false;
-    }
-  }
 }
-
-// Refactor 9.3: BridgePollingResult moved to ../types.ts for reusability
