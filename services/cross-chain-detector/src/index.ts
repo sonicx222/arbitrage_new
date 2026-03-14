@@ -126,6 +126,3 @@ async function main() {
 
 runServiceMain({ main, serviceName: 'Cross-Chain Detector Service', logger });
 
-// Module exports — separated into exports.ts to prevent auto-execution on import.
-// @see exports.ts for the full list of exports
-export * from './exports';

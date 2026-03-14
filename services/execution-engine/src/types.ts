@@ -13,9 +13,9 @@
  * - extractErrorCode: Error code extraction helper
  * - BaseHealth: Base health interface for consistency
  *
- * The local `const enum ExecutionErrorCode` is INTENTIONALLY kept here (not imported)
- * because it uses `const enum` for hot-path optimization (zero runtime overhead).
- * The shared version uses a regular `enum` which has runtime overhead.
+ * The local `ExecutionErrorCode` enum is INTENTIONALLY kept here (not imported)
+ * because the shared version in @arbitrage/types may diverge.
+ * Both use regular enums (the const enum comment was stale — PA-3 fix).
  *
  * @see shared/types/execution.ts - Shared types (regular enum)
  * @see shared/types/common.ts - Common utility types
