@@ -419,7 +419,12 @@ export class ExecutionPipeline {
         });
         return;
       } else if (lockResult.reason === 'redis_error') {
-        this.deps.logger.error('Opportunity skipped - Redis unavailable', {
+        // P1-6 FIX: Intentionally NO XACK here — at-least-once delivery.
+        // When Redis is unavailable, we cannot execute. The message stays pending
+        // in the consumer group and will be re-delivered via XPENDING/XCLAIM
+        // after Redis recovers. ACKing here would lose the opportunity permanently.
+        this.deps.stats.redisLockErrors++;
+        this.deps.logger.error('Opportunity skipped - Redis unavailable (will retry on recovery)', {
           opportunityId: opportunity.id,
           traceId,
           error: lockResult.error?.message,

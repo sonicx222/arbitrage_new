@@ -427,6 +427,8 @@ export interface ExecutionStats {
   queueRejects: number;
   /** Executions skipped due to another instance holding the lock */
   lockConflicts: number;
+  /** P1-6 FIX: Lock acquisition failures due to Redis unavailability (no ACK — retried on recovery) */
+  redisLockErrors: number;
   /** Stale locks force-released due to crashed lock holder detection */
   staleLockRecoveries: number;
   /** Executions that timed out */
@@ -479,6 +481,7 @@ export function createInitialStats(): ExecutionStats {
     failedExecutions: 0,
     queueRejects: 0,
     lockConflicts: 0,
+    redisLockErrors: 0,
     staleLockRecoveries: 0,
     executionTimeouts: 0,
     validationErrors: 0,

@@ -71,6 +71,7 @@ const createMockDeps = (overrides = {}): PipelineDeps => ({
     successfulExecutions: 0,
     failedExecutions: 0,
     lockConflicts: 0,
+    redisLockErrors: 0,
     staleLockRecoveries: 0,
     executionTimeouts: 0,
     circuitBreakerBlocks: 0,
@@ -520,15 +521,17 @@ describe('ExecutionPipeline', () => {
       pipeline.processQueueItems();
       await flushMultiple();
 
+      // P1-6 FIX: Updated message to clarify retry-on-recovery semantics
       expect(deps.logger.error).toHaveBeenCalledWith(
-        'Opportunity skipped - Redis unavailable',
+        'Opportunity skipped - Redis unavailable (will retry on recovery)',
         expect.objectContaining({
           opportunityId: 'opp-1',
           error: 'Connection refused',
         })
       );
-      // Should NOT ack — returns before the ack at the end
+      // P1-6: Intentionally NO ack — at-least-once delivery; message retried on recovery
       expect(deps.opportunityConsumer.ackMessageAfterExecution).not.toHaveBeenCalled();
+      expect(deps.stats.redisLockErrors).toBe(1);
     });
 
     it('should handle execution_error — logs and acks', async () => {

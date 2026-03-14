@@ -110,6 +110,33 @@ describe('StreamRateLimiter', () => {
         expect(limiter.checkRateLimit('stream-a')).toBe(true);
       }
     });
+
+    // P1-4 FIX: Regression test for continuous refill
+    it('should refill tokens proportionally for sub-period intervals', () => {
+      // Regression: old code required a full refillMs to elapse before adding ANY tokens.
+      // At 999ms into a 1000ms window, requests were rejected despite being 99.9% through.
+      const config: Partial<RateLimiterConfig> = { maxTokens: 100, tokensPerMessage: 1, refillMs: 1000 };
+      limiter = new StreamRateLimiter(config);
+
+      // Consume all tokens
+      for (let i = 0; i < 100; i++) {
+        limiter.checkRateLimit('stream-a');
+      }
+      expect(limiter.checkRateLimit('stream-a')).toBe(false);
+
+      // Advance time by half the refill period (500ms of a 1000ms window)
+      const now = Date.now();
+      jest.spyOn(Date, 'now').mockReturnValue(now + 500);
+
+      // Should have ~50 tokens refilled (50% of period = 50% of maxTokens)
+      expect(limiter.checkRateLimit('stream-a')).toBe(true);
+      // Verify approximately 50 tokens were added (allow for the one just consumed)
+      const remaining = limiter.getTokenCount('stream-a');
+      expect(remaining).toBeGreaterThan(40);
+      expect(remaining).toBeLessThan(55);
+
+      jest.restoreAllMocks();
+    });
   });
 
   describe('getTokenCount', () => {

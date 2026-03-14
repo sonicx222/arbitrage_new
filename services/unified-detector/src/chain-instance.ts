@@ -1713,12 +1713,15 @@ export class ChainDetectorInstance extends EventEmitter {
         ? this.whaleAlertPublisher.estimateSwapUsdValue(pairInfo, amount0In, amount1In, amount0Out, amount1Out)
         : 0;
 
+      // P1-7 FIX: Compute parseInt once instead of twice (hot-path optimization).
+      // handleSwapEvent fires for every DEX swap — eliminating redundant parsing.
+      const parsedBlockNumber = parseInt(log.blockNumber, 16);
       const swapEvent: SwapEvent = {
         chain: this.chainId,
         dex: pair.dex,
         pairAddress: pairAddress,
         // FIX H-001: Validate blockNumber to prevent NaN from malformed RPC data
-        blockNumber: Number.isFinite(parseInt(log.blockNumber, 16)) ? parseInt(log.blockNumber, 16) : 0,
+        blockNumber: Number.isFinite(parsedBlockNumber) ? parsedBlockNumber : 0,
         transactionHash: log.transactionHash || '',
         timestamp: now,
         sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '',

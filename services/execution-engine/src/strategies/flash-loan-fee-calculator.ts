@@ -37,6 +37,17 @@ export interface ProfitabilityParams {
   /** Price of native token in USD (e.g., ETH for Ethereum, BNB for BSC, AVAX for Avalanche) */
   nativeTokenPriceUsd: number;
   userCapitalWei?: bigint;
+  /**
+   * P0-1 FIX: Decimals of the borrowed token (default: 18).
+   * Critical for non-18-decimal tokens: USDC=6, USDT=6, WBTC=8.
+   * Without this, ethers.formatEther() underestimates fees by 10^(18-decimals).
+   */
+  tokenDecimals?: number;
+  /**
+   * P0-1 FIX: Price of the borrowed token in USD (default: nativeTokenPriceUsd).
+   * Required when flash-loaning non-native tokens (e.g., USDC at ~$1, not ETH at ~$2000).
+   */
+  borrowedTokenPriceUsd?: number;
 }
 
 /**
@@ -160,14 +171,19 @@ export class FlashLoanFeeCalculator {
       chain,
       nativeTokenPriceUsd,
       userCapitalWei,
+      tokenDecimals = 18,
+      borrowedTokenPriceUsd,
     } = params;
 
-    // Calculate flash loan fee in wei, then USD
+    // P0-1 FIX: Use token-specific decimals instead of assuming 18.
+    // For USDC (6 decimals), formatEther() was underestimating fees by 10^12.
     const flashLoanFeeWei = this.calculateFlashLoanFee(flashLoanAmountWei, chain);
-    const flashLoanFeeEth = parseFloat(ethers.formatEther(flashLoanFeeWei));
-    const flashLoanFeeUsd = flashLoanFeeEth * nativeTokenPriceUsd;
+    const flashLoanFeeHuman = parseFloat(ethers.formatUnits(flashLoanFeeWei, tokenDecimals));
+    // P0-1 FIX: Use borrowed token price, not native token price.
+    // For USDC flash loans, fee should be priced at ~$1/USDC, not $2000/ETH.
+    const flashLoanFeeUsd = flashLoanFeeHuman * (borrowedTokenPriceUsd ?? nativeTokenPriceUsd);
 
-    // Calculate gas cost in USD
+    // Gas cost is always in native token units (18 decimals)
     const gasCostWei = estimatedGasUnits * gasPriceWei;
     const gasCostEth = parseFloat(ethers.formatEther(gasCostWei));
     const gasCostUsd = gasCostEth * nativeTokenPriceUsd;

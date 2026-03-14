@@ -71,14 +71,14 @@ export class StreamRateLimiter {
       this.limiters.set(streamName, limiter);
     }
 
-    // Refill tokens based on elapsed time (proportional refill, not multiplicative)
+    // P1-4 FIX: Continuous proportional refill (removed >= refillMs gate).
+    // Old behavior: tokens only refilled after a full period elapsed.
+    // At 999ms into a 1000ms window with 0 tokens, requests were rejected
+    // despite being 99.9% through the refill period.
+    // New behavior: tokens accumulate proportionally on every check.
     const elapsed = now - limiter.lastRefill;
-    if (elapsed >= this.config.refillMs) {
-      // Calculate how many tokens to add based on elapsed time
-      // Rate: maxTokens per refillMs
-      const tokensToAdd = Math.floor(
-        (elapsed / this.config.refillMs) * this.config.maxTokens
-      );
+    if (elapsed > 0) {
+      const tokensToAdd = (elapsed / this.config.refillMs) * this.config.maxTokens;
       limiter.tokens = Math.min(
         this.config.maxTokens,
         limiter.tokens + tokensToAdd

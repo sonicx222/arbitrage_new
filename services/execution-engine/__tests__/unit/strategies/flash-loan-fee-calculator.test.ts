@@ -204,6 +204,82 @@ describe('FlashLoanFeeCalculator', () => {
 
       expect(analysis.gasCostUsd).toBe(0);
     });
+
+    // P0-1 FIX: Regression tests for non-18-decimal tokens
+    describe('token decimal handling (P0-1)', () => {
+      it('should correctly calculate fee for USDC (6 decimals) flash loan', () => {
+        // 10,000 USDC = 10_000_000_000 in 6-decimal units
+        const usdcAmount = BigInt(10_000) * BigInt(10 ** 6);
+        const params: ProfitabilityParams = {
+          expectedProfitUsd: 100,
+          flashLoanAmountWei: usdcAmount,
+          estimatedGasUnits: 300000n,
+          gasPriceWei: ethers.parseUnits('30', 'gwei'),
+          chain: 'ethereum',
+          nativeTokenPriceUsd: 2000,
+          tokenDecimals: 6,
+          borrowedTokenPriceUsd: 1, // USDC ~= $1
+        };
+
+        const analysis = calculator.analyzeProfitability(params);
+
+        // 10,000 USDC * 5 bps = 5 USDC = $5 fee
+        expect(analysis.flashLoanFeeUsd).toBeCloseTo(5, 0);
+        // Gas: 300000 * 30 gwei = 0.009 ETH = $18
+        expect(analysis.gasCostUsd).toBeCloseTo(18, 0);
+      });
+
+      it('should correctly calculate fee for WBTC (8 decimals) flash loan', () => {
+        // 1 WBTC = 100_000_000 in 8-decimal units
+        const wbtcAmount = BigInt(1) * BigInt(10 ** 8);
+        const params: ProfitabilityParams = {
+          expectedProfitUsd: 500,
+          flashLoanAmountWei: wbtcAmount,
+          estimatedGasUnits: 300000n,
+          gasPriceWei: ethers.parseUnits('30', 'gwei'),
+          chain: 'ethereum',
+          nativeTokenPriceUsd: 2000,
+          tokenDecimals: 8,
+          borrowedTokenPriceUsd: 60000, // BTC ~= $60,000
+        };
+
+        const analysis = calculator.analyzeProfitability(params);
+
+        // 1 WBTC * 5 bps = 0.0005 WBTC * $60,000 = $30 fee
+        expect(analysis.flashLoanFeeUsd).toBeCloseTo(30, 0);
+      });
+
+      it('should default to 18 decimals and native token price when not specified', () => {
+        // Backwards compatibility: existing callers without tokenDecimals/borrowedTokenPriceUsd
+        const analysis = calculator.analyzeProfitability(baseParams);
+
+        // Same as before: 10 ETH * 5 bps = 0.005 ETH * $2000 = $10
+        expect(analysis.flashLoanFeeUsd).toBeCloseTo(10, 0);
+      });
+
+      it('should reject unprofitable USDC flash loan that old code would have allowed', () => {
+        // This is the core regression: with formatEther, USDC fee was underestimated
+        // by ~10^12, making this appear profitable when it is not.
+        const usdcAmount = BigInt(100_000) * BigInt(10 ** 6); // 100,000 USDC
+        const params: ProfitabilityParams = {
+          expectedProfitUsd: 3, // Very small profit
+          flashLoanAmountWei: usdcAmount,
+          estimatedGasUnits: 300000n,
+          gasPriceWei: ethers.parseUnits('30', 'gwei'),
+          chain: 'ethereum',
+          nativeTokenPriceUsd: 2000,
+          tokenDecimals: 6,
+          borrowedTokenPriceUsd: 1,
+        };
+
+        const analysis = calculator.analyzeProfitability(params);
+
+        // 100,000 USDC * 5 bps = 50 USDC = $50 fee + $18 gas = $68 total
+        // $3 profit - $68 costs = -$65 net => NOT profitable
+        expect(analysis.isProfitable).toBe(false);
+        expect(analysis.recommendation).toBe('skip');
+      });
+    });
   });
 
   describe('getConfig', () => {

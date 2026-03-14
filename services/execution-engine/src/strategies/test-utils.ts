@@ -208,6 +208,7 @@ export function createMockStats(): ExecutionStats {
     failedExecutions: 0,
     queueRejects: 0,
     lockConflicts: 0,
+    redisLockErrors: 0,
     staleLockRecoveries: 0,
     executionTimeouts: 0,
     validationErrors: 0,
