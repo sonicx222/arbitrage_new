@@ -53,6 +53,21 @@ function parseBooleanField(value: unknown): boolean | undefined {
   return undefined;
 }
 
+const PIPELINE_TS_FIELDS = [
+  'wsReceivedAt', 'publishedAt', 'consumedAt',
+  'detectedAt', 'coordinatorAt', 'executionReceivedAt',
+] as const;
+
+function extractPipelineTimestamps(parsed: Record<string, unknown>): PipelineTimestamps {
+  const pts: PipelineTimestamps = {};
+  for (const field of PIPELINE_TS_FIELDS) {
+    if (typeof parsed[field] === 'number') {
+      pts[field] = parsed[field] as number;
+    }
+  }
+  return pts;
+}
+
 // =============================================================================
 // CEX Token Address Resolution (ADR-036)
 // =============================================================================
@@ -667,26 +682,10 @@ export class OpportunityRouter {
     // via serializeOpportunityForStream which JSON.stringifies nested objects).
     const rawTs = data.pipelineTimestamps;
     if (rawTs && typeof rawTs === 'object') {
-      const parsed = rawTs as Record<string, unknown>;
-      const pts: PipelineTimestamps = {};
-      if (typeof parsed.wsReceivedAt === 'number') pts.wsReceivedAt = parsed.wsReceivedAt;
-      if (typeof parsed.publishedAt === 'number') pts.publishedAt = parsed.publishedAt;
-      if (typeof parsed.consumedAt === 'number') pts.consumedAt = parsed.consumedAt;
-      if (typeof parsed.detectedAt === 'number') pts.detectedAt = parsed.detectedAt;
-      if (typeof parsed.coordinatorAt === 'number') pts.coordinatorAt = parsed.coordinatorAt;
-      if (typeof parsed.executionReceivedAt === 'number') pts.executionReceivedAt = parsed.executionReceivedAt;
-      opportunity.pipelineTimestamps = pts;
+      opportunity.pipelineTimestamps = extractPipelineTimestamps(rawTs as Record<string, unknown>);
     } else if (typeof rawTs === 'string') {
       try {
-        const parsed = JSON.parse(rawTs) as Record<string, unknown>;
-        const pts: PipelineTimestamps = {};
-        if (typeof parsed.wsReceivedAt === 'number') pts.wsReceivedAt = parsed.wsReceivedAt;
-        if (typeof parsed.publishedAt === 'number') pts.publishedAt = parsed.publishedAt;
-        if (typeof parsed.consumedAt === 'number') pts.consumedAt = parsed.consumedAt;
-        if (typeof parsed.detectedAt === 'number') pts.detectedAt = parsed.detectedAt;
-        if (typeof parsed.coordinatorAt === 'number') pts.coordinatorAt = parsed.coordinatorAt;
-        if (typeof parsed.executionReceivedAt === 'number') pts.executionReceivedAt = parsed.executionReceivedAt;
-        opportunity.pipelineTimestamps = pts;
+        opportunity.pipelineTimestamps = extractPipelineTimestamps(JSON.parse(rawTs) as Record<string, unknown>);
       } catch {
         this.logger.debug('Failed to parse pipelineTimestamps JSON', { rawTs: String(rawTs).substring(0, 100) });
       }
