@@ -128,40 +128,40 @@ Misaligned configs that silently degrade functionality.
 
 ### Tier 6: Architecture / Refactoring (4 items)
 
-| ID | Source | Description | Files |
-|----|--------|-------------|-------|
-| T6-1 | Services ARCH-M-02 | Extract `UnifiedChainDetector` from service into `shared/core` (service-to-service import dep) | `services/unified-detector/src/` → `shared/core/` |
-| T6-2 | Services ARCH-M-04 | Monolith allocates SharedArrayBuffer for partitions but workers don't consume it | `services/monolith/src/index.ts:265` |
-| T6-3 | ExtSvc #15 | Manual numeric field restoration in deserialization — fragile, adding fields requires dual update | `shared/core/src/redis/` |
-| T6-4 | CC M-15 | Batch deployment script has no cross-deployment nonce management | `contracts/scripts/deploy-batch.ts:254-279` |
+| ID | Source | Description | Status |
+|----|--------|-------------|--------|
+| T6-1 | Services ARCH-M-02 | Extract `UnifiedChainDetector` from service into `shared/core` (service-to-service import dep) | **DEFERRED** (high effort — ~2000+ lines; current `@arbitrage/unified-detector` package import works) |
+| T6-2 | Services ARCH-M-04 | Monolith allocates SharedArrayBuffer for partitions but workers don't consume it | **DEFERRED** (monolith is optional Oracle Cloud ARM mode, not standard dev workflow) |
+| ~~T6-3~~ | ExtSvc #15 | Manual numeric field restoration in deserialization — fragile, adding fields requires dual update | **NON-ISSUE** (`restoreFloat`/`restoreInt`/`restoreTimestamp` helpers in validation.ts are clean 1-line-per-field additions) |
+| ~~T6-4~~ | CC M-15 | Batch deployment script has no cross-deployment nonce management | **NON-ISSUE** (`execSync` sequential execution prevents nonce collisions; ethers manages per-tx nonce) |
 
 ### Tier 7: Test Quality (6 items)
 
-| ID | Source | Description | Files |
-|----|--------|-------------|-------|
-| T7-1 | Dashboard | No smoke render tests for Tab components + no SSE→reducer integration test | `dashboard/src/` |
-| T7-2 | Services MF-M-02 | Polygon CORE_TOKENS mocked as empty — skips pair initialization in test | `**/chain-instance-websocket.test.ts:162` |
-| T7-3 | Services MF-M-05 | Nonce mock always returns 42 — race conditions untested | `**/cross-chain.strategy.test.ts:115` |
-| T7-4 | Services MF-M-07 | Batch handler uses plain `noop` not `jest.fn()` — loses assertion power | `**/batch-handlers.test.ts:35` |
-| T7-5 | CC M-08 | Schema validators skip in test mode — regressions only surface in staging | `shared/config/src/schemas/index.ts:463-506` |
-| T7-6 | CC M-30 | Deploy script tx hash logging missing for `approveRouters()` / `setMinimumProfit()` | `contracts/scripts/deployment-utils.ts:704-705` |
+| ID | Source | Description | Status |
+|----|--------|-------------|--------|
+| T7-1 | Dashboard | No smoke render tests for Tab components + no SSE→reducer integration test | **DEFERRED** (coverage gap — 210 tests exist, Tab render tests are incremental) |
+| ~~T7-2~~ | Services MF-M-02 | Polygon CORE_TOKENS mocked as empty — skips pair initialization in test | **NON-ISSUE** (intentional — exercises "no tokens for chain" edge case; no polygon pair test exists) |
+| T7-3 | Services MF-M-05 | Nonce mock always returns 42 — race conditions untested | **DEFERRED** (needs integration test infrastructure for real nonce management) |
+| ~~T7-4~~ | Services MF-M-07 | Batch handler uses plain `noop` not `jest.fn()` — loses assertion power | **NON-ISSUE** (design choice — plain functions survive `resetMocks: true`; test has zero call assertions) |
+| ~~T7-5~~ | CC M-08 | Schema validators skip in test mode — regressions only surface in staging | **NON-ISSUE** (design decision — test fixtures use mock configs; validators run in staging/production) |
+| ~~T7-6~~ | CC M-30 | Deploy script tx hash logging missing for `approveRouters()` / `setMinimumProfit()` | **ALREADY FIXED** (`tx.hash` logged at lines 705 and 1618) |
 
 ### Tier 8: Low-Priority Polish (12 items)
 
-| ID | Source | Description | Files |
-|----|--------|-------------|-------|
-| T8-1 | RT H-02 | 3 `console.warn` lines in feature-flags.ts missing emoji prefix | `shared/config/src/feature-flags.ts:764,805,819` |
-| T8-2 | RT M-10 | StreamConsumerManager DLQ writes to `data/` in all environments | `services/coordinator/src/streaming/stream-consumer-manager.ts:554` |
-| T8-3 | Services BUG-P2-1 | `extractTokenFromPair` splits by `_` — could mismatch | `detector.ts:1640` |
-| T8-4 | Services BUG-P2-2 | `getCexPriceFeedService()` called without options on startup race | `opportunity-router.ts:786` |
-| T8-5 | Services BUG-P3-2 | Detection path doesn't set `tradeSizeUsd` on opportunities | `detector.ts:1593` |
-| T8-6 | ExtSvc #25 | EE swallows Redis health check error silently | `services/execution-engine/src/index.ts:256` |
-| T8-7 | ExtSvc #26 | TradeLogEntry missing `flashLoanProvider` + `usedV3Adapter` fields | `shared/core/src/persistence/trade-logger.ts:36-89` |
-| T8-8 | ExtSvc #31 | WebSocket life-support mode has no alert escalation | `shared/core/src/ws/websocket-manager.ts:1591-1607` |
-| T8-9 | ExtSvc #33 | Dev Redis has no auth — masks auth bugs | `infrastructure/docker/docker-compose.partitions.yml:35` |
-| T8-10 | ExtSvc #35 | Polygon opportunity timeout 6s may be too tight (variance 2-10s) | `shared/config/src/thresholds.ts` |
-| T8-11 | CC L-09 | `toLowerCase()` creates new string on every hot-path call in 6 threshold getters | threshold getter functions |
-| T8-12 | CC L-10 | CORE_TOKENS header comment says 135, actual 137 | `shared/config/src/tokens/index.ts` |
+| ID | Source | Description | Status |
+|----|--------|-------------|--------|
+| ~~T8-1~~ | RT H-02 | 3 `console.warn` lines in feature-flags.ts missing emoji prefix | **FIXED** (added `⚠️` prefix to lines 764, 805, 819) |
+| T8-2 | RT M-10 | StreamConsumerManager DLQ writes to `data/` in all environments | Open (low risk — fallback-only path when Redis DLQ also fails) |
+| ~~T8-3~~ | Services BUG-P2-1 | `extractTokenFromPair` splits by `_` — could mismatch | **NON-ISSUE** (already handles both 3-part and 4-part formats with normalization + fallback) |
+| T8-4 | Services BUG-P2-2 | `getCexPriceFeedService()` called without options on startup race | Open (startup ordering — low impact in simulation mode) |
+| T8-5 | Services BUG-P3-2 | Detection path doesn't set `tradeSizeUsd` on opportunities | Open (cross-chain detector field gap — moderate effort) |
+| ~~T8-6~~ | ExtSvc #25 | EE swallows Redis health check error silently | **ALREADY FIXED** (`logger.warn` at index.ts:258) |
+| ~~T8-7~~ | ExtSvc #26 | TradeLogEntry missing `flashLoanProvider` + `usedV3Adapter` fields | **ALREADY FIXED** (fields added at trade-logger.ts:90-92) |
+| T8-8 | ExtSvc #31 | WebSocket life-support mode has no alert escalation | Open (needs alert integration in WS manager) |
+| T8-9 | ExtSvc #33 | Dev Redis has no auth — masks auth bugs | Open (infrastructure change — dev docker-compose) |
+| ~~T8-10~~ | ExtSvc #35 | Polygon opportunity timeout 6s may be too tight (variance 2-10s) | **ALREADY FIXED** (polygon timeout is 8000ms in thresholds.ts:102) |
+| T8-11 | CC L-09 | `toLowerCase()` creates new string on every hot-path call in 6 threshold getters | Open (micro-optimization — chain IDs already lowercase in practice) |
+| ~~T8-12~~ | CC L-10 | CORE_TOKENS header comment says 135, actual 137 | **ALREADY FIXED** (header says 138, actual count is 138) |
 
 ### Dashboard Feature Enhancements (5 items, frontend-only)
 

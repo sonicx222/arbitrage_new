@@ -761,7 +761,7 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       if (logger) {
         logger.warn(msg);
       } else {
-        console.warn(`WARNING: ${msg}`);
+        console.warn(`\u26A0\uFE0F  WARNING: ${msg}`);
       }
     }
   }
@@ -802,7 +802,7 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
     const msg =
       'FEATURE_MEV_SHARE_BACKRUN is enabled but FEATURE_MEV_SHARE is not. ' +
       'Backrun strategy requires MEV-Share rebate mode. Enable FEATURE_MEV_SHARE=true or disable FEATURE_MEV_SHARE_BACKRUN.';
-    if (logger) { logger.warn(msg); } else { console.warn(`WARNING: ${msg}`); }
+    if (logger) { logger.warn(msg); } else { console.warn(`\u26A0\uFE0F  WARNING: ${msg}`); }
   }
   if (FEATURE_FLAGS.useMevShareBackrun) {
     const msg = 'MEV-Share Backrun event processing enabled - SSE event stream will be consumed';
@@ -816,7 +816,7 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
     if (logger) { logger.info(msg); } else { console.info(`✅ ${msg}`); }
     if (process.env.SIMULATION_MODE === 'true') {
       const warnMsg = 'CEX Price Signals + SIMULATION_MODE: Binance WS connection will be skipped; synthetic CEX prices generated from DEX data';
-      if (logger) { logger.warn(warnMsg); } else { console.warn(`WARNING: ${warnMsg}`); }
+      if (logger) { logger.warn(warnMsg); } else { console.warn(`\u26A0\uFE0F  WARNING: ${warnMsg}`); }
     }
   }
 }
