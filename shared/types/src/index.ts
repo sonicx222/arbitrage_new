@@ -277,6 +277,8 @@ export interface ArbitrageOpportunity {
    * 0-1 range: higher = more profitable relative to gas cost. Used for ordering.
    */
   preSimulationScore?: number;
+  /** ADR-036: CEX alignment factor from coordinator scoring (1.15=aligned, 0.8=contradicted, 1.0=neutral) */
+  cexAlignmentFactor?: number;
   /**
    * P0 Fix #2: MEV-Share backrun target metadata.
    * Present when type === 'backrun'. Contains the target transaction

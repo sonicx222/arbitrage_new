@@ -211,7 +211,10 @@ export class CexPriceFeedService extends EventEmitter {
         streams: streams.length,
       });
     } catch (error) {
-      logger.error('Failed to connect Binance WS, service running in degraded mode', {
+      // ST-003 FIX: Warn instead of error — initial WS failure is expected on
+      // corporate networks blocking stream.binance.com. The WS client auto-reconnects
+      // in the background; ERROR level is reserved for unrecoverable failures.
+      logger.warn('Failed to connect Binance WS, service running in degraded mode', {
         error: getErrorMessage(error),
       });
       // Don't throw — the WS client has auto-reconnect built in

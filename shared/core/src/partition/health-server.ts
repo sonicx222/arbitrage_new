@@ -106,6 +106,37 @@ function createStatsCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
 }
 
 // =============================================================================
+// Metrics Cache (ST-006 FIX)
+// =============================================================================
+
+/**
+ * Cache for /metrics Prometheus responses. On P2 (l2-turbo, 7 chains), event
+ * loop saturation causes the async metrics handler to stall past the 5s
+ * server.requestTimeout, returning 000 (connection reset) to curl. Caching
+ * allows synchronous return from cache while background refresh runs.
+ */
+function createMetricsCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
+  let cache: { data: string; timestamp: number } | null = null;
+
+  return {
+    get(): string | null {
+      if (!cache) return null;
+      if (Date.now() - cache.timestamp > ttlMs) {
+        cache = null;
+        return null;
+      }
+      return cache.data;
+    },
+    set(data: string): void {
+      cache = { data, timestamp: Date.now() };
+    },
+    clear(): void {
+      cache = null;
+    }
+  };
+}
+
+// =============================================================================
 // Readiness Cache (ST-003/ST-004 FIX)
 // =============================================================================
 
@@ -246,6 +277,11 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
   // On P1/P2, CPU-heavy simulation blocks the event loop so much that even the 3s
   // response timeout fires before the async handler can complete.
   const readinessCache = createReadinessCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
+
+  // ST-006 FIX: Cache /metrics responses. On P2 (7 L2 chains), event loop saturation
+  // causes the async /metrics handler to stall past the 5s requestTimeout, producing
+  // 000 (connection reset). Cache returns synchronously; background refresh updates.
+  const metricsCache = createMetricsCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // LOG-OPT Task 8: Log level hot-reload — accepts PUT /log-level, all other
@@ -426,6 +462,15 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
       }, logger);
     } else if (req.url === '/metrics') {
       // W2-H7: Prometheus metrics endpoint for scraping
+      // ST-006 FIX: Return cached metrics synchronously when event loop is saturated.
+      // On P2 (l2-turbo, 7 chains), the async handler stalls past the 5s requestTimeout,
+      // causing curl to see 000 (connection reset). Cache allows instant response.
+      const cachedMetrics = metricsCache.get();
+      if (cachedMetrics) {
+        res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+        res.end(cachedMetrics);
+        return;
+      }
       // RT-030 FIX: Do NOT use withResponseTimeout here. The old RT-042 fix wrapped
       // /metrics with a 3s timeout that sent 504 on expiry. On high-volume partitions
       // (P1), the async stream metrics Redis call starved under event loop saturation,
@@ -532,6 +577,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
 
           const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
           const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics + otelBlock;
+          metricsCache.set(body);
           res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
           res.end(body);
         } catch (metricsErr) {

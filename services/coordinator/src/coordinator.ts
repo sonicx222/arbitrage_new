@@ -852,6 +852,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_REQUESTS);
       streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_RESULTS);
       streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE);
+      // RT-016 FIX: Monitor all active/on-demand streams discovered by monitoring
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.FAST_LANE);
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.FORWARDING_DLQ);
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES);
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.SERVICE_DEGRADATION);
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.SYSTEM_FAILOVER);
     }
 
     if (streamHealthMonitor.onAlert) {

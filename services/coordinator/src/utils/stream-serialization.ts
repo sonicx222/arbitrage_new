@@ -110,6 +110,10 @@ export function serializeOpportunityForStream(
   if (opportunity.pipelineTimestamps) {
     result.pipelineTimestamps = JSON.stringify(opportunity.pipelineTimestamps);
   }
+  // SM-012 FIX: Serialize CEX alignment factor for downstream visibility
+  if (opportunity.cexAlignmentFactor != null && isFinite(opportunity.cexAlignmentFactor)) {
+    result.cexAlignmentFactor = opportunity.cexAlignmentFactor.toString();
+  }
 
   // OP-3 FIX: Inject trace context fields for cross-service correlation.
   // Uses _trace_ prefix per shared/core/src/tracing/trace-context.ts convention.

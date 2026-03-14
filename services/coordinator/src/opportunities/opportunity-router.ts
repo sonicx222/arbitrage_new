@@ -673,6 +673,8 @@ export class OpportunityRouter {
       useFlashLoan: parseBooleanField(data.useFlashLoan),
       buyPair: typeof data.buyPair === 'string' ? data.buyPair : undefined,
       sellPair: typeof data.sellPair === 'string' ? data.sellPair : undefined,
+      // SM-012 FIX: Carry CEX alignment factor through to execution stream
+      cexAlignmentFactor: parseNumericField(data.cexAlignmentFactor),
     };
 
     // SM-013 FIX: Carry pipelineTimestamps forward from the upstream detector.
@@ -949,6 +951,11 @@ export class OpportunityRouter {
         // ADR-036: CEX alignment factor (1.15=aligned, 0.8=contradicted, 1.0=neutral/no data)
         cexAlignmentFactor,
       }, now);
+      // SM-012 FIX: Attach cexAlignmentFactor to data so it flows through serialization
+      // to execution-requests stream. EE and monitoring can then see the CEX signal.
+      if (cexAlignmentFactor !== undefined) {
+        opp.data.cexAlignmentFactor = cexAlignmentFactor;
+      }
     }
     // Safe cast: all candidates now have _score set by the loop above
     const scored = candidates as ScoredOpp[];

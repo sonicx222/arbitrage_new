@@ -36,10 +36,10 @@ export const RedisStreams = {
 
   // Phase 2: Per-chain-group execution streams (ADR-038)
   // Each stream is consumed by exactly one EE group (EXECUTION_CHAIN_GROUP env var).
-  EXEC_REQUESTS_FAST:    'stream:exec-requests-fast',    // [ACTIVE] Group: bsc,polygon,avalanche,fantom
-  EXEC_REQUESTS_L2:      'stream:exec-requests-l2',      // [ACTIVE] Group: arbitrum,optimism,base,scroll,blast
-  EXEC_REQUESTS_PREMIUM: 'stream:exec-requests-premium', // [ACTIVE] Group: ethereum,zksync,linea
-  EXEC_REQUESTS_SOLANA:  'stream:exec-requests-solana',  // [ACTIVE] Group: solana
+  EXEC_REQUESTS_FAST:    'stream:exec-requests-fast',    // [ACTIVE when COORDINATOR_CHAIN_GROUP_ROUTING=true] Group: bsc,polygon,avalanche,fantom
+  EXEC_REQUESTS_L2:      'stream:exec-requests-l2',      // [ACTIVE when COORDINATOR_CHAIN_GROUP_ROUTING=true] Group: arbitrum,optimism,base,scroll,blast
+  EXEC_REQUESTS_PREMIUM: 'stream:exec-requests-premium', // [ACTIVE when COORDINATOR_CHAIN_GROUP_ROUTING=true] Group: ethereum,zksync,linea
+  EXEC_REQUESTS_SOLANA:  'stream:exec-requests-solana',  // [ACTIVE when COORDINATOR_CHAIN_GROUP_ROUTING=true] Group: solana
 
   // Phase 3: Async pipeline split (ADR-039)
   // SimulationWorker pre-validates opps and publishes scored results here.
