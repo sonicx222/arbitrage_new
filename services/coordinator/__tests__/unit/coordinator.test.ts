@@ -271,6 +271,66 @@ describe('CoordinatorService Class', () => {
       expect(metrics.pendingOpportunities).toBe(0);
     });
   });
+
+  describe('processOneExecutionResult', () => {
+    it('should increment successfulExecutions and totalProfit on success', () => {
+      const rawResult = { actualProfit: 0.05, gasCost: 0.01, dex: 'uniswap' };
+      const profit = (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+
+      expect(profit).toBe(0.05);
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.successfulExecutions).toBe(1);
+      expect(metrics.totalProfit).toBe(0.05);
+    });
+
+    it('should not increment success metrics on failure', () => {
+      const rawResult = { actualProfit: 0, gasCost: 0.01, error: 'revert' };
+      const profit = (coordinator as any).processOneExecutionResult(rawResult, false, 'opp-2', 'bsc');
+
+      expect(profit).toBe(0);
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.successfulExecutions).toBe(0);
+      expect(metrics.totalProfit).toBe(0);
+    });
+
+    it('should not add zero profit to totalProfit even on success', () => {
+      const rawResult = { actualProfit: 0, gasCost: 0.01 };
+      (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-3', 'arbitrum');
+
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.successfulExecutions).toBe(1);
+      expect(metrics.totalProfit).toBe(0);
+    });
+
+    it('should emit execution-result SSE event with correct fields', () => {
+      const sseEvents: { event: string; data: any }[] = [];
+      coordinator.subscribeSSE((event, data) => sseEvents.push({ event, data }));
+
+      const rawResult = {
+        actualProfit: 0.1,
+        gasCost: 0.02,
+        gasUsed: 250000,
+        dex: 'sushiswap',
+        transactionHash: '0xabc',
+        latencyMs: 45,
+        timestamp: 1000,
+      };
+      (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-4', 'polygon');
+
+      expect(sseEvents).toHaveLength(1);
+      expect(sseEvents[0].event).toBe('execution-result');
+      expect(sseEvents[0].data).toMatchObject({
+        opportunityId: 'opp-4',
+        success: true,
+        chain: 'polygon',
+        dex: 'sushiswap',
+        actualProfit: 0.1,
+        gasCost: 0.02,
+        gasUsed: 250000,
+        transactionHash: '0xabc',
+      });
+    });
+  });
 });
 
 // =============================================================================
