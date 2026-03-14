@@ -21,6 +21,7 @@ import { EventEmitter } from 'events';
 import { RedisStreamsClient } from '@arbitrage/core/redis';
 import { GracefulDegradationManager, DegradationLevel } from '@arbitrage/core/resilience';
 import { PerformanceLogger } from '@arbitrage/core';
+import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 
 import { CHAINS } from '@arbitrage/config';
 
@@ -89,6 +90,15 @@ export interface StartResult {
   failedChains: string[];
 }
 
+/** Per-chain health summary for monitoring */
+export interface ChainHealthSummary {
+  chainId: string;
+  status: ChainStats['status'];
+  restartAttempts: number;
+  lastRestartAttempt: number | null;
+  isDegraded: boolean;
+}
+
 /** Public interface for ChainInstanceManager */
 export interface ChainInstanceManager extends EventEmitter {
   /** Start all configured chain instances */
@@ -108,6 +118,9 @@ export interface ChainInstanceManager extends EventEmitter {
 
   /** Get a specific chain instance */
   getChainInstance(chainId: string): ChainDetectorInstance | undefined;
+
+  /** Get per-chain health summary for monitoring */
+  getChainHealthSummary(): ChainHealthSummary[];
 }
 
 // =============================================================================
@@ -139,6 +152,23 @@ export function createChainInstanceManager(
   const chainInstances = new Map<string, ChainDetectorInstance>();
 
   // ===========================================================================
+  // Health Watchdog State
+  // ===========================================================================
+
+  /** Per-chain restart tracking for the health watchdog */
+  const chainRestartAttempts = new Map<string, number>();
+  const chainLastRestartAttempt = new Map<string, number>();
+  const chainDegradedState = new Set<string>();
+
+  /** Health watchdog timer — periodically checks and restarts dead chains */
+  let watchdogTimer: NodeJS.Timeout | null = null;
+
+  // Watchdog configuration (configurable via env vars)
+  const WATCHDOG_INTERVAL_MS = parseEnvIntSafe('CHAIN_WATCHDOG_INTERVAL_MS', 30000, 5000);
+  const WATCHDOG_MAX_RESTARTS = parseEnvIntSafe('CHAIN_WATCHDOG_MAX_RESTARTS', 5, 1);
+  const WATCHDOG_COOLDOWN_MS = parseEnvIntSafe('CHAIN_WATCHDOG_COOLDOWN_MS', 120000, 10000);
+
+  // ===========================================================================
   // Private Methods
   // ===========================================================================
 
@@ -148,6 +178,9 @@ export function createChainInstanceManager(
    */
   function handleChainError(chainId: string, error: Error): void {
     logger.error(`Chain error: ${chainId}`, { error: error.message });
+
+    // Track degraded state for watchdog and health summary
+    chainDegradedState.add(chainId);
 
     // Trigger degradation if manager is configured
     if (degradationManager) {
@@ -224,6 +257,22 @@ export function createChainInstanceManager(
       try {
         logger.info(`Chain ${chainId} status changed to ${status}`);
         emitter.emit('statusChange', { chainId, status });
+
+        // RESILIENCE FIX (Task 7): When a chain recovers to 'connected',
+        // clear its degradation state and reset restart counter.
+        if (status === 'connected' && chainDegradedState.has(chainId)) {
+          chainDegradedState.delete(chainId);
+          chainRestartAttempts.set(chainId, 0);
+          logger.info('Chain recovered from degradation', { chainId });
+
+          if (degradationManager) {
+            degradationManager.forceRecovery(`unified-detector-${partitionId}`).catch((err) => {
+              logger.debug('Degradation recovery notification failed', { chainId, error: (err as Error).message });
+            });
+          }
+
+          emitter.emit('chainRecovered', { chainId });
+        }
       } catch (err) {
         logger.error('Error in statusChange handler', { chainId, error: (err as Error).message });
       }
@@ -313,6 +362,12 @@ export function createChainInstanceManager(
       chains: startedChains,
     });
 
+    // RESILIENCE FIX (Task 6): Start health watchdog after chains are initialized.
+    // The watchdog will periodically check dead chains and attempt restarts.
+    if (startedChains.length > 0 || failedChains.length > 0) {
+      startHealthWatchdog();
+    }
+
     return {
       success: startedChains.length > 0,
       chainsStarted: startedChains.length,
@@ -328,6 +383,10 @@ export function createChainInstanceManager(
    * FIX I2: Renamed from stopAll() for consistency with other modules.
    */
   async function stop(): Promise<void> {
+    // RESILIENCE FIX: Stop watchdog before stopping chains to prevent
+    // restart attempts during shutdown.
+    stopHealthWatchdog();
+
     const stopPromises: Promise<void>[] = [];
 
     // Take snapshot to avoid iterator issues during modification
@@ -419,6 +478,136 @@ export function createChainInstanceManager(
     return chainInstances.get(chainId);
   }
 
+  /**
+   * RESILIENCE FIX (Task 7): Get per-chain health summary for monitoring.
+   * Returns status, restart attempts, and degradation state for each chain.
+   */
+  function getChainHealthSummary(): ChainHealthSummary[] {
+    const summary: ChainHealthSummary[] = [];
+    for (const [chainId, instance] of chainInstances) {
+      const stats = instance.getStats();
+      summary.push({
+        chainId,
+        status: stats.status,
+        restartAttempts: chainRestartAttempts.get(chainId) ?? 0,
+        lastRestartAttempt: chainLastRestartAttempt.get(chainId) ?? null,
+        isDegraded: chainDegradedState.has(chainId),
+      });
+    }
+    return summary;
+  }
+
+  // ===========================================================================
+  // Health Watchdog (Task 6)
+  // ===========================================================================
+
+  /**
+   * RESILIENCE FIX (Task 6): Health watchdog that periodically checks chain
+   * instances and attempts to restart dead ones.
+   *
+   * - Runs every CHAIN_WATCHDOG_INTERVAL_MS (default 30s)
+   * - Only restarts chains in 'error' or 'disconnected' status
+   * - Per-chain max restart limit (CHAIN_WATCHDOG_MAX_RESTARTS, default 5)
+   * - Cooldown between restarts (CHAIN_WATCHDOG_COOLDOWN_MS, default 120s)
+   * - Emits 'chainRestarted' or 'chainRestartFailed' events
+   */
+  async function runWatchdogCheck(): Promise<void> {
+    for (const [chainId, instance] of chainInstances) {
+      const stats = instance.getStats();
+
+      // Only attempt restart for chains in error or disconnected state
+      if (stats.status !== 'error' && stats.status !== 'disconnected') {
+        continue;
+      }
+
+      // Check restart limit
+      const attempts = chainRestartAttempts.get(chainId) ?? 0;
+      if (attempts >= WATCHDOG_MAX_RESTARTS) {
+        // Already logged at max — don't spam
+        continue;
+      }
+
+      // Check cooldown
+      const lastAttempt = chainLastRestartAttempt.get(chainId) ?? 0;
+      const now = Date.now();
+      if (now - lastAttempt < WATCHDOG_COOLDOWN_MS) {
+        continue;
+      }
+
+      // Attempt restart
+      const newAttempts = attempts + 1;
+      chainRestartAttempts.set(chainId, newAttempts);
+      chainLastRestartAttempt.set(chainId, now);
+
+      logger.info('Health watchdog attempting chain restart', {
+        chainId,
+        attempt: newAttempts,
+        maxAttempts: WATCHDOG_MAX_RESTARTS,
+        previousStatus: stats.status,
+      });
+
+      try {
+        // Stop first (cleans up WS, timers, etc.)
+        await instance.stop();
+        // Re-start (acquires new WS connection)
+        await instance.start();
+
+        if (instance.isConnected()) {
+          logger.info('Health watchdog successfully restarted chain', { chainId, attempt: newAttempts });
+          emitter.emit('chainRestarted', { chainId, attempt: newAttempts });
+        } else {
+          logger.warn('Health watchdog restarted chain but not connected', { chainId, attempt: newAttempts });
+          emitter.emit('chainRestartFailed', { chainId, attempt: newAttempts, reason: 'not_connected' });
+        }
+      } catch (err) {
+        logger.error('Health watchdog failed to restart chain', {
+          chainId,
+          attempt: newAttempts,
+          error: (err as Error).message,
+        });
+        emitter.emit('chainRestartFailed', { chainId, attempt: newAttempts, reason: (err as Error).message });
+
+        if (newAttempts >= WATCHDOG_MAX_RESTARTS) {
+          logger.error('Health watchdog exhausted restart attempts for chain', {
+            chainId,
+            maxAttempts: WATCHDOG_MAX_RESTARTS,
+          });
+          emitter.emit('chainRestartExhausted', { chainId, attempts: newAttempts });
+        }
+      }
+    }
+  }
+
+  /**
+   * Start the health watchdog timer.
+   * Called automatically after startAll() completes.
+   */
+  function startHealthWatchdog(): void {
+    if (watchdogTimer) return;
+    watchdogTimer = setInterval(() => {
+      runWatchdogCheck().catch((err) => {
+        logger.error('Health watchdog check failed', { error: (err as Error).message });
+      });
+    }, WATCHDOG_INTERVAL_MS);
+    watchdogTimer.unref(); // Don't prevent process exit
+    logger.info('Health watchdog started', {
+      intervalMs: WATCHDOG_INTERVAL_MS,
+      maxRestarts: WATCHDOG_MAX_RESTARTS,
+      cooldownMs: WATCHDOG_COOLDOWN_MS,
+    });
+  }
+
+  /**
+   * Stop the health watchdog timer.
+   * Called automatically during stop().
+   */
+  function stopHealthWatchdog(): void {
+    if (watchdogTimer) {
+      clearInterval(watchdogTimer);
+      watchdogTimer = null;
+    }
+  }
+
   // ===========================================================================
   // Attach Methods to Emitter
   // ===========================================================================
@@ -429,6 +618,7 @@ export function createChainInstanceManager(
   emitter.getStats = getStats;
   emitter.getChains = getChains;
   emitter.getChainInstance = getChainInstance;
+  emitter.getChainHealthSummary = getChainHealthSummary;
 
   return emitter;
 }

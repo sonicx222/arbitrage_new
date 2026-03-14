@@ -243,7 +243,12 @@ export function setupProcessHandlers(
   // rejections become uncaught exceptions before this handler fires, so the uncaughtHandler
   // handles them immediately. This threshold serves as defense-in-depth for non-Docker
   // environments (local dev, tests, direct node execution).
-  const REJECTION_THRESHOLD = 5;
+  //
+  // RESILIENCE FIX: Raised default from 5 to 15 and made configurable.
+  // With Phase 1 error boundaries in ChainInstanceManager, most WS errors
+  // are now caught before becoming unhandled rejections. A threshold of 5
+  // was too aggressive — a single flaky chain could exhaust it in seconds.
+  const REJECTION_THRESHOLD = parseEnvIntSafe('UNHANDLED_REJECTION_THRESHOLD', 15, 1);
   const REJECTION_WINDOW_MS = 60_000;
   const rejectionTimestamps: number[] = [];
 
