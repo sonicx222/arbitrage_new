@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useServices, useFeed } from '../context/SSEContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { ChainCard } from '../components/ChainCard';
@@ -25,22 +25,39 @@ export function ChainsTab() {
   const { services } = useServices();
   const { feed } = useFeed();
 
-  // E-06: Derive per-chain metrics from recent execution feed
+  // E-06: Derive per-chain metrics from execution feed.
   // Sanity cap: reject per-execution values above $100k (likely bad data from
   // mispriced DEX oracles on newer L2s like Linea/Mode/Scroll)
   const PROFIT_SANITY_CAP = 100_000;
   const GAS_SANITY_CAP = 10_000;
 
+  // FIX: Accumulate chain stats incrementally instead of re-deriving from the
+  // 50-item feed sliding window. Previously, when a chain's execution events
+  // scrolled out of the window (or on SSE reconnect reset), its card would
+  // collapse — then re-expand when new events arrived, causing visible flicker.
+  // Now stats persist for the session; only a full feed reset (reconnect) clears them.
+  const chainStatsRef = useRef<Record<string, ChainStats>>({});
+  const processedIdsRef = useRef(new Set<string>());
+
   const chainStats = useMemo(() => {
-    const stats: Record<string, ChainStats> = {};
+    // Feed cleared (SSE reconnect): reset accumulated stats
+    if (feed.length === 0) {
+      chainStatsRef.current = {};
+      processedIdsRef.current = new Set();
+      return {};
+    }
+
     for (const item of feed) {
       if (item.kind !== 'execution') continue;
+      if (processedIdsRef.current.has(item.id)) continue;
+      processedIdsRef.current.add(item.id);
+
       const { chain, success, latencyMs, timestamp, actualProfit, gasCost } = item.data;
       const key = chain.toLowerCase();
-      let entry = stats[key];
+      let entry = chainStatsRef.current[key];
       if (!entry) {
         entry = { total: 0, successes: 0, lastExecTime: 0, totalLatency: 0, latencyCount: 0, totalProfit: 0, totalGasCost: 0 };
-        stats[key] = entry;
+        chainStatsRef.current[key] = entry;
       }
       entry.total++;
       if (success) entry.successes++;
@@ -56,7 +73,9 @@ export function ChainsTab() {
         entry.totalGasCost += gasCost;
       }
     }
-    return stats;
+
+    // Shallow copy so React detects the change
+    return { ...chainStatsRef.current };
   }, [feed]);
 
   return (
