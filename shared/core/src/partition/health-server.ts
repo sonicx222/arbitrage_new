@@ -378,111 +378,122 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
       }, logger);
     } else if (req.url === '/metrics') {
       // W2-H7: Prometheus metrics endpoint for scraping
-      // RT-042 FIX: Wrap with response timeout to prevent indefinite hang on P1/P2
-      // where event loop saturation from high WebSocket throughput causes async
-      // Redis calls in getPrometheusMetrics() to starve. Previously /metrics was
-      // the only endpoint without withResponseTimeout, causing 0-byte responses.
-      withResponseTimeout(res, config.serviceName, async () => {
-        // Collect sync metrics first (no Redis dependency) — these always succeed
-        const latencyMetrics = getLatencyTracker().getMetrics();
-        const latencyLines: string[] = [];
-        latencyLines.push('# HELP pipeline_latency_p50_ms Pipeline latency 50th percentile in ms');
-        latencyLines.push('# TYPE pipeline_latency_p50_ms gauge');
-        latencyLines.push(`pipeline_latency_p50_ms ${latencyMetrics.e2e.p50}`);
-        latencyLines.push('# HELP pipeline_latency_p95_ms Pipeline latency 95th percentile in ms');
-        latencyLines.push('# TYPE pipeline_latency_p95_ms gauge');
-        latencyLines.push(`pipeline_latency_p95_ms ${latencyMetrics.e2e.p95}`);
-        latencyLines.push('# HELP pipeline_latency_p99_ms Pipeline latency 99th percentile in ms');
-        latencyLines.push('# TYPE pipeline_latency_p99_ms gauge');
-        latencyLines.push(`pipeline_latency_p99_ms ${latencyMetrics.e2e.p99}`);
-        latencyLines.push('# HELP pipeline_events_total Total pipeline events tracked');
-        latencyLines.push('# TYPE pipeline_events_total counter');
-        latencyLines.push(`pipeline_events_total ${latencyMetrics.e2e.totalRecorded}`);
-        // RT-007: Standard schema aliases expected by monitoring validation
-        latencyLines.push('# HELP events_processed_total Total events processed by this partition');
-        latencyLines.push('# TYPE events_processed_total counter');
-        latencyLines.push(`events_processed_total ${latencyMetrics.e2e.totalRecorded}`);
-        latencyLines.push('# HELP price_updates_total Total price update events received');
-        latencyLines.push('# TYPE price_updates_total counter');
-        latencyLines.push(`price_updates_total ${getPriceUpdatesTotal()}`);
-        // M-01 FIX: Publish drop counter for monitoring backpressure
-        latencyLines.push('# HELP opportunity_publish_drops_total Opportunities dropped due to concurrent publish limit');
-        latencyLines.push('# TYPE opportunity_publish_drops_total counter');
-        latencyLines.push(`opportunity_publish_drops_total ${getPublishDropsTotal()}`);
-
-        // P2-005 FIX: WebSocket health gauges per chain — exposes connection status
-        // as Prometheus metrics for per-chain alerting (e.g., chain disconnected > 5min).
-        // Previously only visible via /stats JSON, not scrapable by Prometheus.
-        const wsLines: string[] = [];
+      // RT-030 FIX: Do NOT use withResponseTimeout here. The old RT-042 fix wrapped
+      // /metrics with a 3s timeout that sent 504 on expiry. On high-volume partitions
+      // (P1), the async stream metrics Redis call starved under event loop saturation,
+      // triggering the 504. Since curl -sf discards non-2xx bodies, monitoring saw
+      // 0 bytes — losing ALL metrics including the sync ones that were already computed.
+      // Fix: rely on the inner 2s Promise.race for stream metrics (the only async part).
+      // All other metrics are sync and complete in microseconds.
+      (async () => {
         try {
-          const stats = detector.getStats();
-          if (stats.chainStats.size > 0) {
-            wsLines.push('# HELP websocket_connections_active WebSocket connection active (1=connected, 0=not)');
-            wsLines.push('# TYPE websocket_connections_active gauge');
-            wsLines.push('# HELP websocket_chain_status Chain connection status (0=disconnected, 1=connecting, 2=connected, 3=error)');
-            wsLines.push('# TYPE websocket_chain_status gauge');
-            for (const [chainId, rawStats] of stats.chainStats) {
-              const chainStats = rawStats as { status?: string };
-              const status = chainStats.status ?? 'disconnected';
-              const active = status === 'connected' ? 1 : 0;
-              const statusCode = status === 'disconnected' ? 0
-                : status === 'connecting' ? 1
-                : status === 'connected' ? 2
-                : 3; // error
-              wsLines.push(`websocket_connections_active{chain="${chainId}"} ${active}`);
-              wsLines.push(`websocket_chain_status{chain="${chainId}"} ${statusCode}`);
+          // Collect sync metrics first (no Redis dependency) — these always succeed
+          const latencyMetrics = getLatencyTracker().getMetrics();
+          const latencyLines: string[] = [];
+          latencyLines.push('# HELP pipeline_latency_p50_ms Pipeline latency 50th percentile in ms');
+          latencyLines.push('# TYPE pipeline_latency_p50_ms gauge');
+          latencyLines.push(`pipeline_latency_p50_ms ${latencyMetrics.e2e.p50}`);
+          latencyLines.push('# HELP pipeline_latency_p95_ms Pipeline latency 95th percentile in ms');
+          latencyLines.push('# TYPE pipeline_latency_p95_ms gauge');
+          latencyLines.push(`pipeline_latency_p95_ms ${latencyMetrics.e2e.p95}`);
+          latencyLines.push('# HELP pipeline_latency_p99_ms Pipeline latency 99th percentile in ms');
+          latencyLines.push('# TYPE pipeline_latency_p99_ms gauge');
+          latencyLines.push(`pipeline_latency_p99_ms ${latencyMetrics.e2e.p99}`);
+          latencyLines.push('# HELP pipeline_events_total Total pipeline events tracked');
+          latencyLines.push('# TYPE pipeline_events_total counter');
+          latencyLines.push(`pipeline_events_total ${latencyMetrics.e2e.totalRecorded}`);
+          // RT-007: Standard schema aliases expected by monitoring validation
+          latencyLines.push('# HELP events_processed_total Total events processed by this partition');
+          latencyLines.push('# TYPE events_processed_total counter');
+          latencyLines.push(`events_processed_total ${latencyMetrics.e2e.totalRecorded}`);
+          latencyLines.push('# HELP price_updates_total Total price update events received');
+          latencyLines.push('# TYPE price_updates_total counter');
+          latencyLines.push(`price_updates_total ${getPriceUpdatesTotal()}`);
+          // M-01 FIX: Publish drop counter for monitoring backpressure
+          latencyLines.push('# HELP opportunity_publish_drops_total Opportunities dropped due to concurrent publish limit');
+          latencyLines.push('# TYPE opportunity_publish_drops_total counter');
+          latencyLines.push(`opportunity_publish_drops_total ${getPublishDropsTotal()}`);
+
+          // P2-005 FIX: WebSocket health gauges per chain — exposes connection status
+          // as Prometheus metrics for per-chain alerting (e.g., chain disconnected > 5min).
+          // Previously only visible via /stats JSON, not scrapable by Prometheus.
+          const wsLines: string[] = [];
+          try {
+            const stats = detector.getStats();
+            if (stats.chainStats.size > 0) {
+              wsLines.push('# HELP websocket_connections_active WebSocket connection active (1=connected, 0=not)');
+              wsLines.push('# TYPE websocket_connections_active gauge');
+              wsLines.push('# HELP websocket_chain_status Chain connection status (0=disconnected, 1=connecting, 2=connected, 3=error)');
+              wsLines.push('# TYPE websocket_chain_status gauge');
+              for (const [chainId, rawStats] of stats.chainStats) {
+                const chainStats = rawStats as { status?: string };
+                const status = chainStats.status ?? 'disconnected';
+                const active = status === 'connected' ? 1 : 0;
+                const statusCode = status === 'disconnected' ? 0
+                  : status === 'connecting' ? 1
+                  : status === 'connected' ? 2
+                  : 3; // error
+                wsLines.push(`websocket_connections_active{chain="${chainId}"} ${active}`);
+                wsLines.push(`websocket_chain_status{chain="${chainId}"} ${statusCode}`);
+              }
             }
+          } catch (wsErr) {
+            // SA-013 FIX: Log at debug instead of silently swallowing
+            logger.debug('WebSocket stats unavailable for /metrics', {
+              error: (wsErr as Error).message,
+            });
           }
-        } catch (wsErr) {
-          // SA-013 FIX: Log at debug instead of silently swallowing
-          logger.debug('WebSocket stats unavailable for /metrics', {
-            error: (wsErr as Error).message,
-          });
+
+          // Phase 1 Enhanced Monitoring: Runtime health metrics (event loop, GC, memory)
+          const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
+
+          // Phase 2 Enhanced Monitoring: Provider/RPC quality metrics (C1, C2, C3, C4)
+          const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
+
+          // M-10 FIX: Expose OTEL transport drop/export counts for monitoring
+          const otelLines: string[] = [];
+          const otelTransport = getOtelTransport();
+          if (otelTransport) {
+            otelLines.push('# HELP otel_logs_exported_total OTEL log records successfully exported');
+            otelLines.push('# TYPE otel_logs_exported_total counter');
+            otelLines.push(`otel_logs_exported_total ${otelTransport.exportCount}`);
+            otelLines.push('# HELP otel_logs_dropped_total OTEL log records dropped due to export errors');
+            otelLines.push('# TYPE otel_logs_dropped_total counter');
+            otelLines.push(`otel_logs_dropped_total ${otelTransport.dropCount}`);
+          }
+          const otelBlock = otelLines.length > 0 ? otelLines.join('\n') + '\n' : '';
+
+          // RT-042 FIX: Stream metrics are async (Redis-dependent). On high-throughput
+          // partitions (P1/P2), Redis calls can starve under event loop saturation.
+          // Race with a 2s timeout so sync metrics still get returned.
+          let streamMetrics = '';
+          try {
+            const streamMonitor = getStreamHealthMonitor();
+            streamMetrics = await Promise.race([
+              streamMonitor.getPrometheusMetrics(),
+              new Promise<string>((resolve) =>
+                setTimeout(() => resolve('# stream metrics unavailable (timeout)\n'), 2000)
+              ),
+            ]);
+          } catch (streamErr) {
+            logger.warn('Stream metrics collection failed in /metrics handler', {
+              error: (streamErr as Error).message,
+            });
+            streamMetrics = '# stream metrics unavailable (error)\n';
+          }
+
+          const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
+          const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics + otelBlock;
+          res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+          res.end(body);
+        } catch (metricsErr) {
+          logger.error('Metrics handler error', { error: (metricsErr as Error).message });
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('# metrics collection error\n');
+          }
         }
-
-        // Phase 1 Enhanced Monitoring: Runtime health metrics (event loop, GC, memory)
-        const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
-
-        // Phase 2 Enhanced Monitoring: Provider/RPC quality metrics (C1, C2, C3, C4)
-        const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
-
-        // M-10 FIX: Expose OTEL transport drop/export counts for monitoring
-        const otelLines: string[] = [];
-        const otelTransport = getOtelTransport();
-        if (otelTransport) {
-          otelLines.push('# HELP otel_logs_exported_total OTEL log records successfully exported');
-          otelLines.push('# TYPE otel_logs_exported_total counter');
-          otelLines.push(`otel_logs_exported_total ${otelTransport.exportCount}`);
-          otelLines.push('# HELP otel_logs_dropped_total OTEL log records dropped due to export errors');
-          otelLines.push('# TYPE otel_logs_dropped_total counter');
-          otelLines.push(`otel_logs_dropped_total ${otelTransport.dropCount}`);
-        }
-        const otelBlock = otelLines.length > 0 ? otelLines.join('\n') + '\n' : '';
-
-        // RT-042 FIX: Stream metrics are async (Redis-dependent). On high-throughput
-        // partitions (P1/P2), Redis calls can starve under event loop saturation.
-        // Race with a 2s timeout so sync metrics still get returned.
-        let streamMetrics = '';
-        try {
-          const streamMonitor = getStreamHealthMonitor();
-          streamMetrics = await Promise.race([
-            streamMonitor.getPrometheusMetrics(),
-            new Promise<string>((resolve) =>
-              setTimeout(() => resolve('# stream metrics unavailable (timeout)\n'), 2000)
-            ),
-          ]);
-        } catch (streamErr) {
-          logger.warn('Stream metrics collection failed in /metrics handler', {
-            error: (streamErr as Error).message,
-          });
-          streamMetrics = '# stream metrics unavailable (error)\n';
-        }
-
-        const wsBlock = wsLines.length > 0 ? wsLines.join('\n') + '\n' : '';
-        const body = streamMetrics + '\n' + latencyLines.join('\n') + '\n' + wsBlock + runtimeMetrics + providerMetrics + otelBlock;
-        res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
-        res.end(body);
-      }, logger);
+      })();
     } else if (req.url === '/') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
