@@ -12,6 +12,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import type { MinimalLogger } from '../types';
+import { RedisRateLimitStore } from './redis-rate-limit-store';
 
 /**
  * Configure all middleware on an Express application.
@@ -58,17 +59,29 @@ export function configureMiddleware(app: Application, logger: MinimalLogger): vo
   // NOTE: express.static('public') removed - no static files are served (API-only service)
 
   // OP-23 FIX: Configurable rate limits via env vars (previously hardcoded)
-  // NOTE: Uses in-memory store (express-rate-limit default). Suitable for single-instance
-  // deployment. For multi-instance, replace with rate-limit-redis or similar Redis-backed store.
   // FIX SA-010: Use parseEnvIntSafe instead of raw parseInt
   const rateLimitWindowMs = parseEnvIntSafe('API_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000, 1000);
   const rateLimitMax = parseEnvIntSafe('API_RATE_LIMIT_MAX', 100, 1);
+
+  // FIX #3: Use Redis-backed store for multi-instance rate limiting.
+  // Opt-in via RATE_LIMIT_STORE=redis (requires REDIS_URL).
+  // Falls back to in-memory store (single-instance only) when not configured.
+  const useRedisStore = process.env.RATE_LIMIT_STORE === 'redis' && process.env.REDIS_URL;
+  const store = useRedisStore
+    ? new RedisRateLimitStore(process.env.REDIS_URL!, 'coordinator:rl:')
+    : undefined; // undefined = express-rate-limit default MemoryStore
+
+  if (!useRedisStore && process.env.NODE_ENV === 'production') {
+    logger.warn('Rate limiter using in-memory store. Set RATE_LIMIT_STORE=redis for multi-instance deployment.');
+  }
+
   const limiter = rateLimit({
     windowMs: rateLimitWindowMs,
     max: rateLimitMax,
     message: { error: 'Too many requests', retryAfter: Math.ceil(rateLimitWindowMs / 1000) },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    ...(store ? { store } : {}),
   });
   app.use(limiter);
 
