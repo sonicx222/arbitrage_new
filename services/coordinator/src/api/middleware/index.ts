@@ -119,7 +119,7 @@ function createRequestLogger(logger: MinimalLogger) {
       const duration = Date.now() - start;
       logger.info('API Request', {
         method: req.method,
-        url: req.url,
+        url: req.url.split('?')[0],
         status: res.statusCode,
         duration,
         ip: clientIP

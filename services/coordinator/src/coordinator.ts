@@ -1411,7 +1411,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       status: validStatus,
       // M-05 FIX: Partition services send 'uptimeSeconds' (from PartitionHealth type),
       // cross-chain-detector sends 'uptime'. Check both field names.
-      uptime: getNonNegativeNumber(typedData, 'uptime', 0) || getNonNegativeNumber(typedData, 'uptimeSeconds', 0),
+      uptime: getNonNegativeNumber(typedData, 'uptime', 0) ?? getNonNegativeNumber(typedData, 'uptimeSeconds', 0),
       memoryUsage: getNonNegativeNumber(typedData, 'memoryUsage', 0),
       cpuUsage: getNonNegativeNumber(typedData, 'cpuUsage', 0),
       lastHeartbeat: getNumber(typedData, 'timestamp', Date.now()),
@@ -1864,7 +1864,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // H-03 FIX: Add trace context for price-update pipeline correlation.
     // Price updates feed into detection — tracing from price update through
     // to opportunity detection helps debug stale price issues.
-    const batchTrace = createTraceContext('coordinator');
+    const batchTrace = createFastTraceContext('coordinator');
 
     await withLogContext({ traceId: batchTrace.traceId, spanId: batchTrace.spanId }, async () => {
       for (const msg of messages) {
