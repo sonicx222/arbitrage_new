@@ -27,6 +27,7 @@ import {
 import { createPartitionHealthServer, closeServerWithTimeout } from './health-server';
 import { setupDetectorEventHandlers, setupProcessHandlers, incrementPublishDrops } from './handlers';
 import { getRuntimeMonitor } from '../monitoring/runtime-monitor';
+import { parseEnvIntSafe } from '../utils/env-utils';
 import type { ProcessHandlerCleanup } from './handlers';
 import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './router';
 // F4 FIX: Import Redis + OpportunityPublisher for auto-wiring in dev mode
@@ -512,9 +513,7 @@ export function createPartitionEntry(
   // P2-2 FIX: Increased from 10 to 100 and made configurable. The old limit of 10
   // was far too low for the detection rate (~18k opportunities per 10min), causing
   // 26.4% of opportunities to be silently dropped. Now consistent with unified-detector.
-  const MAX_CONCURRENT_PUBLISHES = parseInt(
-    process.env.MAX_CONCURRENT_PUBLISHES ?? '100', 10
-  );
+  const MAX_CONCURRENT_PUBLISHES = parseEnvIntSafe('MAX_CONCURRENT_PUBLISHES', 100, 1);
   let inFlightPublishes = 0;
 
   const composedOnStarted = async (detector: PartitionDetectorInterface, startupDurationMs: number): Promise<void> => {
@@ -565,7 +564,7 @@ export function createPartitionEntry(
 
       // P1-RECONNECT FIX: Periodically retry Redis connection instead of giving up forever.
       // Without this, a transient Redis outage at startup permanently disables publishing.
-      const REDIS_RETRY_INTERVAL_MS = parseInt(process.env.REDIS_RETRY_INTERVAL_MS ?? '30000', 10);
+      const REDIS_RETRY_INTERVAL_MS = parseEnvIntSafe('REDIS_RETRY_INTERVAL_MS', 30000, 1000);
       const retryTimer = setInterval(async () => {
         try {
           const streamsClient = await getRedisStreamsClient();

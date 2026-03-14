@@ -110,6 +110,7 @@ async function main() {
     setupServiceShutdown({
       logger,
       serviceName: 'Cross-Chain Detector',
+      shutdownTimeoutMs: 20000, // SA-1R-001: detector.stop() needs 2×8s = 16s for sequential Redis disconnects
       onShutdown: async () => {
         await detector.stop();
         await closeHealthServer(healthServer);
